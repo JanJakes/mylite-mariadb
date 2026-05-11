@@ -60,6 +60,14 @@ struct Mylite_catalog_header
   uint64_t payload_checksum;
 };
 
+struct Mylite_page_header
+{
+  uint32_t type;
+  uint64_t page_id;
+  uint64_t next_page_id;
+  uint32_t payload_length;
+};
+
 static handler *mylite_create_handler(handlerton *hton, TABLE_SHARE *table,
                                       MEM_ROOT *mem_root);
 static int mylite_discover_table(handlerton *hton, THD *thd,
@@ -197,6 +205,15 @@ static bool mylite_write_catalog_payload(int fd, const std::string &content,
                                          uint64_t *payload_checksum);
 static bool mylite_write_catalog_header(int fd,
                                         const Mylite_catalog_header &header);
+static bool mylite_read_page(int fd, uint64_t page_id,
+                             std::vector<uchar> *page,
+                             Mylite_page_header *header);
+static bool mylite_write_page(int fd, uint32_t type, uint64_t page_id,
+                              uint64_t next_page_id, const uchar *payload,
+                              size_t payload_length);
+static bool mylite_page_offset_is_valid(uint64_t offset);
+static uint64_t mylite_page_offset(uint64_t page_id);
+static uint64_t mylite_align_to_page(uint64_t offset);
 static std::string mylite_hex_encode(const uchar *data, size_t length);
 static bool mylite_hex_decode(const std::string &hex,
                               std::vector<uchar> *result);
@@ -223,13 +240,23 @@ static const char mylite_seed_sql[]=
 static const char mylite_catalog_magic[]= "MYLITE CATALOG 1";
 static const uchar mylite_catalog_file_magic[16]= {
   'M', 'Y', 'L', 'I', 'T', 'E', 'F', 'M',
-  'T', 'C', 'A', 'T', '1', '\0', '\0', '\0'
+  'T', 'P', 'A', 'G', 'E', '2', '\0', '\0'
 };
-static const uint32_t mylite_catalog_format_version= 1;
+static const uchar mylite_page_magic[16]= {
+  'M', 'Y', 'L', 'I', 'T', 'E', 'P', 'A',
+  'G', 'E', 'S', 'T', 'O', 'R', 'E', '\0'
+};
+static const uint32_t mylite_catalog_format_version= 2;
+static const uint32_t mylite_page_format_version= 1;
+static const uint32_t mylite_page_type_catalog_payload= 1;
 static const uint32_t mylite_catalog_page_size= 4096;
 static const uint64_t mylite_catalog_payload_start=
   static_cast<uint64_t>(mylite_catalog_page_size) * 2;
 static const size_t mylite_catalog_header_checksum_offset= 56;
+static const size_t mylite_page_payload_offset= 64;
+static const size_t mylite_page_checksum_offset= 56;
+static const size_t mylite_page_payload_capacity=
+  mylite_catalog_page_size - mylite_page_payload_offset;
 static const uint64_t mylite_fnv1a_offset_basis= 14695981039346656037ULL;
 static const uint64_t mylite_fnv1a_prime= 1099511628211ULL;
 static std::mutex mylite_catalog_mutex;
@@ -2168,10 +2195,10 @@ static bool mylite_read_catalog_header(int fd, size_t slot, off_t file_size,
 
   const uint64_t file_size_u= static_cast<uint64_t>(file_size);
   if (header->generation == 0 ||
-      header->payload_offset < mylite_catalog_payload_start ||
+      !mylite_page_offset_is_valid(header->payload_offset) ||
       header->payload_length == 0 ||
       header->payload_offset > file_size_u ||
-      header->payload_length > file_size_u - header->payload_offset)
+      header->payload_offset + mylite_catalog_page_size > file_size_u)
     return false;
 
   return true;
@@ -2184,10 +2211,51 @@ static bool mylite_read_catalog_payload(int fd,
   if (header.payload_length > content->max_size())
     return false;
 
-  content->assign(static_cast<size_t>(header.payload_length), '\0');
-  if (!mylite_read_all_at(fd,
-                          reinterpret_cast<uchar *>(&(*content)[0]),
-                          content->length(), header.payload_offset))
+  content->clear();
+  content->reserve(static_cast<size_t>(header.payload_length));
+
+  uint64_t page_id= header.payload_offset / mylite_catalog_page_size;
+  uint64_t remaining= header.payload_length;
+  const uint64_t max_pages=
+    (header.payload_length + mylite_page_payload_capacity - 1) /
+    mylite_page_payload_capacity;
+  for (uint64_t page_count= 0; remaining > 0; ++page_count)
+  {
+    if (page_count >= max_pages || page_id < 2)
+      return false;
+
+    std::vector<uchar> page;
+    Mylite_page_header page_header;
+    if (!mylite_read_page(fd, page_id, &page, &page_header))
+      return false;
+    if (page_header.type != mylite_page_type_catalog_payload)
+      return false;
+
+    const uint32_t expected_payload_length=
+      static_cast<uint32_t>(
+        remaining < mylite_page_payload_capacity
+          ? remaining
+          : mylite_page_payload_capacity);
+    if (page_header.payload_length != expected_payload_length)
+      return false;
+
+    content->append(
+      reinterpret_cast<const char *>(page.data() + mylite_page_payload_offset),
+      page_header.payload_length);
+    remaining-= page_header.payload_length;
+
+    if (remaining == 0)
+    {
+      if (page_header.next_page_id != 0)
+        return false;
+      break;
+    }
+    if (page_header.next_page_id != page_id + 1)
+      return false;
+    page_id= page_header.next_page_id;
+  }
+
+  if (content->length() != header.payload_length)
     return false;
 
   return mylite_checksum(
@@ -2203,15 +2271,34 @@ static bool mylite_write_catalog_payload(int fd, const std::string &content,
   if (file_end < 0)
     return false;
 
-  *payload_offset= static_cast<uint64_t>(file_end);
+  *payload_offset= mylite_align_to_page(static_cast<uint64_t>(file_end));
   if (*payload_offset < mylite_catalog_payload_start)
     *payload_offset= mylite_catalog_payload_start;
   *payload_checksum= mylite_checksum(
     reinterpret_cast<const uchar *>(content.data()), content.length());
 
-  return mylite_write_all_at(
-    fd, reinterpret_cast<const uchar *>(content.data()), content.length(),
-    *payload_offset);
+  uint64_t page_id= *payload_offset / mylite_catalog_page_size;
+  size_t written= 0;
+  while (written < content.length())
+  {
+    const size_t remaining= content.length() - written;
+    const size_t chunk= remaining < mylite_page_payload_capacity
+      ? remaining
+      : mylite_page_payload_capacity;
+    const uint64_t next_page_id= written + chunk < content.length()
+      ? page_id + 1
+      : 0;
+
+    if (!mylite_write_page(
+          fd, mylite_page_type_catalog_payload, page_id, next_page_id,
+          reinterpret_cast<const uchar *>(content.data() + written), chunk))
+      return false;
+
+    written+= chunk;
+    ++page_id;
+  }
+
+  return true;
 }
 
 static bool mylite_write_catalog_header(int fd,
@@ -2233,6 +2320,86 @@ static bool mylite_write_catalog_header(int fd,
   return mylite_write_all_at(
     fd, page.data(), page.size(),
     static_cast<uint64_t>(header.slot) * mylite_catalog_page_size);
+}
+
+static bool mylite_read_page(int fd, uint64_t page_id,
+                             std::vector<uchar> *page,
+                             Mylite_page_header *header)
+{
+  if (page_id < 2)
+    return false;
+
+  page->assign(mylite_catalog_page_size, 0);
+  if (!mylite_read_all_at(fd, page->data(), page->size(),
+                          mylite_page_offset(page_id)))
+    return false;
+
+  if (std::memcmp(page->data(), mylite_page_magic,
+                  sizeof(mylite_page_magic)) != 0)
+    return false;
+  if (mylite_read_le32(page->data() + 16) != mylite_page_format_version)
+    return false;
+
+  const uint64_t stored_page_checksum=
+    mylite_read_le64(page->data() + mylite_page_checksum_offset);
+  mylite_store_le64(page->data() + mylite_page_checksum_offset, 0);
+  if (mylite_checksum(page->data(), page->size()) != stored_page_checksum)
+    return false;
+
+  header->type= mylite_read_le32(page->data() + 20);
+  header->page_id= mylite_read_le64(page->data() + 24);
+  header->next_page_id= mylite_read_le64(page->data() + 32);
+  header->payload_length= mylite_read_le32(page->data() + 40);
+  if (header->page_id != page_id ||
+      header->payload_length == 0 ||
+      header->payload_length > mylite_page_payload_capacity)
+    return false;
+
+  return true;
+}
+
+static bool mylite_write_page(int fd, uint32_t type, uint64_t page_id,
+                              uint64_t next_page_id, const uchar *payload,
+                              size_t payload_length)
+{
+  if (page_id < 2 || payload_length == 0 ||
+      payload_length > mylite_page_payload_capacity)
+    return false;
+
+  std::vector<uchar> page(mylite_catalog_page_size, 0);
+  std::memcpy(page.data(), mylite_page_magic, sizeof(mylite_page_magic));
+  mylite_store_le32(page.data() + 16, mylite_page_format_version);
+  mylite_store_le32(page.data() + 20, type);
+  mylite_store_le64(page.data() + 24, page_id);
+  mylite_store_le64(page.data() + 32, next_page_id);
+  mylite_store_le32(page.data() + 40,
+                    static_cast<uint32_t>(payload_length));
+  std::memcpy(page.data() + mylite_page_payload_offset, payload,
+              payload_length);
+  mylite_store_le64(page.data() + mylite_page_checksum_offset, 0);
+  mylite_store_le64(page.data() + mylite_page_checksum_offset,
+                    mylite_checksum(page.data(), page.size()));
+
+  return mylite_write_all_at(fd, page.data(), page.size(),
+                             mylite_page_offset(page_id));
+}
+
+static bool mylite_page_offset_is_valid(uint64_t offset)
+{
+  return offset >= mylite_catalog_payload_start &&
+         offset % mylite_catalog_page_size == 0;
+}
+
+static uint64_t mylite_page_offset(uint64_t page_id)
+{
+  return page_id * mylite_catalog_page_size;
+}
+
+static uint64_t mylite_align_to_page(uint64_t offset)
+{
+  const uint64_t remainder= offset % mylite_catalog_page_size;
+  return remainder == 0 ? offset : offset + mylite_catalog_page_size -
+                                   remainder;
 }
 
 static std::string mylite_hex_encode(const uchar *data, size_t length)

@@ -35,11 +35,13 @@ serve basic ordered index access, and persist table-local autoincrement state
 in the `.mylite` payload. A grouped compatibility harness now runs the
 embedded lifecycle, `libmylite` lifecycle, storage/recovery smokes, a
 MariaDB-reference comparison for the supported subset, and a MyLite runtime
-sidecar scan.
+sidecar scan. The primary file format now stores catalog payload generations in
+typed 4096-byte page chains under a v2 two-header publication format instead of
+raw arbitrary-length blobs.
 
-The active implementation step is `pager-page-store`, which should start
-turning the raw append-only catalog payload into a reusable page-store layer for
-future row and index pages.
+The next implementation step is `row-page-storage`, which should start moving
+simple row images out of the logical catalog payload and into typed row pages
+managed by the page-store layer.
 
 ## Implementation plan
 
@@ -59,7 +61,8 @@ future row and index pages.
 | 11 | `row-index-storage` | Done | Implement the first durable heap row storage and core table-scan read/write/update/delete handler methods. |
 | 12 | `index-autoincrement-storage` | Done | Add enforced key metadata, basic index access, and durable autoincrement state. |
 | 13 | `compatibility-test-harness` | Done | Run embedded lifecycle, unexpected-sidecar detection, crash/reopen, and MariaDB comparison tests in repeatable groups. |
-| 14 | `pager-page-store` | In progress | Add the first reusable MyLite page-store layer for catalog payloads, row pages, future index pages, and free-space tracking. |
+| 14 | `pager-page-store` | Done | Add the first reusable MyLite page-store layer for catalog payloads, row pages, future index pages, and free-space tracking. |
+| 15 | `row-page-storage` | Planned | Move simple row images from the logical catalog payload into typed row pages addressed through table catalog roots. |
 
 ## Size and profile direction
 

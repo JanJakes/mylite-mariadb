@@ -182,6 +182,13 @@ cursors from persisted row images in memory. This proves MariaDB's indexed
 handler path and uniqueness enforcement, but it is still not the final B-tree
 storage architecture.
 
+The current primary file format stores catalog payload generations in typed
+4096-byte page chains. The two fixed header slots still publish the active
+catalog generation, but the header now points at the first catalog payload page
+rather than a raw text blob offset. This is the first reusable page-store layer;
+rows and indexes still need dedicated page formats before the raw-record bridge
+can be retired.
+
 ## Schemas
 
 MariaDB's `database.table` model should map to namespaces inside the catalog:

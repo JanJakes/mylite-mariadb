@@ -237,6 +237,74 @@ The compatibility harness should continue to verify:
   catalog temporary sidecars are introduced.
 - Binary and file-size changes are recorded.
 
+## Implementation Result
+
+The `.mylite` file now uses the v2 page-store-backed catalog format:
+
+- header magic: `MYLITEFMTPAGE2`,
+- page magic at the first catalog payload page: `MYLITEPAGESTORE`,
+- two fixed 4096-byte publication headers remain at offsets 0 and 4096,
+- catalog payload roots are page-aligned at page id 2 or later,
+- each catalog payload page stores type, page id, next page id, used payload
+  bytes, and a page checksum,
+- catalog reads validate header checksums, page checksums, page type, page id,
+  sequential next-page links, logical payload length, and logical payload
+  checksum before parsing.
+
+Allocation remains append-only. The logical catalog serializer and parser are
+unchanged, so table definitions, raw row images, key bridge behavior, and
+autoincrement records still live inside the logical catalog payload. This slice
+only changes the physical page substrate.
+
+Verification passed:
+
+```sh
+MYLITE_BUILD_JOBS=8 tools/run-storage-engine-smoke.sh
+MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_BUILD_JOBS=8 tools/run-embedded-bootstrap-smoke.sh
+bash -n tools/run-compatibility-test-harness.sh tools/run-storage-engine-smoke.sh tools/run-libmylite-open-close-smoke.sh tools/run-embedded-bootstrap-smoke.sh tools/build-mariadb-minsize.sh
+git diff --check
+```
+
+Observed reports after implementation:
+
+- `mylite-catalog-read-report.txt`: `status=0`, `persisted_count=2`,
+  `persisted_notes=seven,eight`,
+  `persisted_autoincrement_ids=1,5,6,7`, no `.frm` artifacts, no catalog
+  sidecars.
+- `mylite-catalog-recovery-read-report.txt`: `status=0`,
+  `persisted_count=2`, `persisted_notes=seven,eight`,
+  `persisted_autoincrement_ids=1,5,6`, `recovery_marker=absent`, no `.frm`
+  artifacts, no catalog sidecars.
+- `mylite-compatibility-harness-report.txt`: all groups `status=0`,
+  including `mariadb_comparison` and `sidecar_scan`; `unexpected_sidecars=none`.
+
+Observed file-format bytes:
+
+```text
+offset 0:    4d 59 4c 49 54 45 46 4d 54 50 41 47 45 32 00 00
+offset 8192: 4d 59 4c 49 54 45 50 41 47 45 53 54 4f 52 45 00
+```
+
+Observed artifacts after this slice:
+
+- `build/mariadb-minsize/libmysqld/libmariadbd.a`: 44,315,704 bytes.
+- `build/mariadb-minsize/mylite/libmylite.a`: 29,698 bytes.
+- `build/mariadb-minsize/mylite/mylite-compatibility-smoke`: 22,693,096
+  bytes.
+- `build/mariadb-minsize/mylite/mylite-storage-engine-smoke`: 22,692,560
+  bytes.
+- `build/mariadb-minsize/mylite/mylite-open-close-smoke`: 22,693,992 bytes.
+- `build/mariadb-minsize/mylite/mylite-embedded-bootstrap-smoke`: 22,692,360
+  bytes.
+- `build/mariadb-minsize/mylite-compatibility-mylite/catalog.mylite`: 102,400
+  bytes.
+- `build/mariadb-minsize/mylite-catalog-persistence/catalog.mylite`: 65,536
+  bytes.
+- `build/mariadb-minsize/mylite-catalog-recovery/catalog.mylite`: 57,344
+  bytes.
+
 ## Risks And Unresolved Questions
 
 - This does not reduce write amplification yet; it creates the page substrate
