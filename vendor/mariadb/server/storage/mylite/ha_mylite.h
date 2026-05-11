@@ -40,7 +40,7 @@ public:
   ulonglong table_flags() const override
   {
     return HA_BINLOG_STMT_CAPABLE | HA_REC_NOT_IN_SEQ |
-           HA_CAN_INDEX_BLOBS |
+           HA_NULL_IN_KEY | HA_CAN_INDEX_BLOBS |
            HA_STATS_RECORDS_IS_EXACT;
   }
 

@@ -53,9 +53,11 @@ loaded roots when they match open MariaDB key metadata.
 Large non-BLOB fixed MariaDB record images now split across row overflow segment
 pages inside the primary file, and non-key BLOB/TEXT row payloads now use the
 same row and overflow page storage without persisting MariaDB row-buffer
-pointers. Non-null BLOB/TEXT prefix keys now use MariaDB key-image bytes in
-durable `INDEXPAGE` payloads, with stored rows decoded before key-image
-generation so cleared native BLOB pointer bytes are never read.
+pointers. Non-null BLOB/TEXT prefix keys and nullable key parts now use MariaDB
+key-image bytes in durable `INDEXPAGE` payloads, with stored rows decoded
+before key-image generation so cleared native BLOB pointer bytes are never
+read. Nullable unique keys follow MariaDB's multiple-NULL behavior while still
+rejecting duplicate all-non-NULL key tuples.
 Persistent free-page ranges now let later row, index, and catalog page-chain
 rewrites reuse complete obsolete ranges from accepted prior generations instead
 of always allocating at EOF. Allocator metadata now lives in dedicated type-4
@@ -129,7 +131,7 @@ documented read-write create combination.
 | 34 | `libmylite-readonly-open` | Done | Enforce `MYLITE_OPEN_READONLY` through runtime startup, storage-engine locking, and public read-only diagnostics. |
 | 35 | `libmylite-exclusive-open` | Done | Support `MYLITE_OPEN_EXCLUSIVE` for create-or-fail primary-file opens. |
 | 36 | `blob-text-key-storage` | Done | Support non-null BLOB/TEXT prefix key parts in the current row and index storage bridge. |
-| 37 | `nullable-key-storage` | In progress | Support nullable key parts, including MariaDB-style unique-key NULL semantics, in the current row and index storage bridge. |
+| 37 | `nullable-key-storage` | Done | Support nullable key parts, including MariaDB-style unique-key NULL semantics, in the current row and index storage bridge. |
 
 ## Size and profile direction
 

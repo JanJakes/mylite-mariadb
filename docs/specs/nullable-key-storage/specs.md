@@ -136,6 +136,8 @@ MariaDB-derived source files.
   - replace the nullable-key rejection with supported nullable key coverage,
   - create a table with nullable non-unique and unique keys,
   - insert multiple rows with `NULL` in a unique key and verify they succeed,
+  - verify composite unique keys allow duplicate tuples when either key part is
+    `NULL`,
   - reject duplicate non-NULL unique key values,
   - verify forced nullable-key reads for `IS NULL` and non-NULL equality,
   - verify update/delete maintain nullable index entries,
@@ -176,4 +178,50 @@ MariaDB-derived source files.
 
 ## Implementation Result
 
-Pending.
+Implemented.
+
+- `ha_mylite::table_flags()` now advertises `HA_NULL_IN_KEY`.
+- MyLite no longer rejects `HA_NULL_PART_KEY` or nullable key fields in the
+  supported BTREE/undefined key-shape validator.
+- Unique-key enforcement skips duplicate checks for a unique key when any user
+  key part is NULL in the candidate record. Stored rows with NULL in the same
+  unique key are skipped before key-image comparison.
+- Durable index payloads continue using MariaDB key-image bytes; no file-format
+  version bump was needed.
+- Storage smoke now covers nullable secondary indexes, nullable unique keys,
+  composite unique keys with leading and trailing NULL parts, nullable
+  BLOB/TEXT prefix indexes, duplicate all-non-NULL rejection, update/delete
+  index maintenance, unsupported reverse/GEOMETRY coverage, and fresh-process
+  reopen reads through nullable indexes.
+
+Verification on 2026-05-11:
+
+- `MYLITE_BUILD_JOBS=8 tools/run-storage-engine-smoke.sh`
+- `MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh`
+- `MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh`
+- `MYLITE_BUILD_JOBS=8 tools/run-embedded-bootstrap-smoke.sh`
+- `bash -n tools/run-compatibility-test-harness.sh tools/run-storage-engine-smoke.sh tools/run-libmylite-open-close-smoke.sh tools/run-embedded-bootstrap-smoke.sh tools/build-mariadb-minsize.sh`
+- `git diff --check`
+
+Observed report evidence:
+
+- `nullable_key_null_ids=1,2`
+- `nullable_key_lookup_id=4`
+- `nullable_key_duplicate=rejected`
+- `nullable_key_updated_null_ids=1,2,4`
+- `nullable_key_deleted_count=2`
+- `nullable_composite_key_head_null_ids=1,2`
+- `nullable_composite_key_tail_null_ids=3,4`
+- `nullable_composite_key_duplicate=rejected`
+- `nullable_blob_key_null_ids=1,2`
+- `nullable_blob_key_lookup_id=3`
+- `nullable_blob_key_duplicate=rejected`
+- `persisted_nullable_key_null_ids=1,2`
+- `persisted_nullable_key_lookup_id=4`
+
+Measured `MinSizeRel` artifacts after the storage-smoke build:
+
+- `build/mariadb-minsize/mylite/libmylite.a`: 87,206 bytes.
+- `build/mariadb-minsize/libmysqld/libmariadbd.a`: 44,417,706 bytes.
+- `build/mariadb-minsize/libmysqld/libmariadbd.a`: 571 archive objects.
+- Dynamic plugin artifacts: none.

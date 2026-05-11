@@ -41,7 +41,6 @@ struct SmokeResult
   std::string row_notes;
   std::string row_updated_note;
   std::string row_deleted_count;
-  std::string unsupported_key;
   std::string unsupported_autoincrement;
   std::string large_row_value;
   std::string large_row_updated_length;
@@ -55,6 +54,17 @@ struct SmokeResult
   std::string blob_text_key_duplicate;
   std::string blob_text_key_updated_id;
   std::string blob_text_key_deleted_count;
+  std::string nullable_key_null_ids;
+  std::string nullable_key_lookup_id;
+  std::string nullable_key_duplicate;
+  std::string nullable_key_updated_null_ids;
+  std::string nullable_key_deleted_count;
+  std::string nullable_composite_key_head_null_ids;
+  std::string nullable_composite_key_tail_null_ids;
+  std::string nullable_composite_key_duplicate;
+  std::string nullable_blob_key_null_ids;
+  std::string nullable_blob_key_lookup_id;
+  std::string nullable_blob_key_duplicate;
   std::string unsupported_geometry;
   std::string key_lookup_note;
   std::string key_order_ids;
@@ -79,6 +89,8 @@ struct SmokeResult
   std::string persisted_blob_text_rollback;
   std::string persisted_blob_text_key_lookup_id;
   std::string persisted_blob_text_key_order_ids;
+  std::string persisted_nullable_key_null_ids;
+  std::string persisted_nullable_key_lookup_id;
   std::string recovery_marker;
   std::string recovery_reclaim;
   std::string transaction_rollback_rows;
@@ -868,18 +880,208 @@ static bool exercise_dml(MYSQL *mysql, SmokeResult *result)
   if (!execute_statement(mysql, "DROP TABLE mylite.blob_text_key_rows",
                          "DROP BLOB/TEXT key table", result))
     return false;
+
+  if (!execute_statement(mysql,
+                         "CREATE TABLE mylite.nullable_key_rows "
+                         "(id INT NOT NULL, note VARCHAR(12), "
+                         "code VARCHAR(12), PRIMARY KEY(id), "
+                         "KEY note_key(note), UNIQUE KEY code_unique(code)) "
+                         "ENGINE=MYLITE",
+                         "CREATE nullable key table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.nullable_key_rows VALUES "
+                         "(1, NULL, NULL), (2, NULL, NULL), "
+                         "(3, 'alpha', 'alpha'), (4, 'beta', 'beta')",
+                         "INSERT nullable key rows", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY id SEPARATOR ',') "
+                          "FROM mylite.nullable_key_rows "
+                          "FORCE INDEX(note_key) WHERE note IS NULL",
+                          "nullable key null ids",
+                          &result->nullable_key_null_ids, result))
+    return false;
+  if (result->nullable_key_null_ids != "1,2")
+  {
+    result->message= "nullable key NULL lookup returned an unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT id FROM mylite.nullable_key_rows "
+                          "FORCE INDEX(note_key) WHERE note = 'beta'",
+                          "nullable key lookup",
+                          &result->nullable_key_lookup_id, result))
+    return false;
+  if (result->nullable_key_lookup_id != "4")
+  {
+    result->message= "nullable key lookup returned an unexpected value";
+    return false;
+  }
+  if (!execute_statement_expect_error(mysql,
+                                      "INSERT INTO mylite.nullable_key_rows "
+                                      "VALUES (5, 'gamma', 'alpha')",
+                                      "duplicate nullable unique key",
+                                      &result->nullable_key_duplicate,
+                                      result))
+    return false;
+  if (!execute_statement(mysql,
+                         "UPDATE mylite.nullable_key_rows "
+                         "SET note = NULL, code = 'gamma' WHERE id = 4",
+                         "UPDATE nullable key row", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY id SEPARATOR ',') "
+                          "FROM mylite.nullable_key_rows "
+                          "FORCE INDEX(note_key) WHERE note IS NULL",
+                          "updated nullable key null ids",
+                          &result->nullable_key_updated_null_ids, result))
+    return false;
+  if (result->nullable_key_updated_null_ids != "1,2,4")
+  {
+    result->message= "nullable key update returned an unexpected value";
+    return false;
+  }
+  if (!execute_statement(mysql,
+                         "DELETE FROM mylite.nullable_key_rows WHERE id = 1",
+                         "DELETE nullable key row", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT COUNT(*) "
+                          "FROM mylite.nullable_key_rows "
+                          "FORCE INDEX(note_key) WHERE note IS NULL",
+                          "deleted nullable key count",
+                          &result->nullable_key_deleted_count, result))
+    return false;
+  if (result->nullable_key_deleted_count != "2")
+  {
+    result->message= "nullable key delete returned an unexpected value";
+    return false;
+  }
+  if (!execute_statement(mysql, "DROP TABLE mylite.nullable_key_rows",
+                         "DROP nullable key table", result))
+    return false;
+
+  if (!execute_statement(mysql,
+                         "CREATE TABLE "
+                         "mylite.nullable_composite_key_rows "
+                         "(id INT NOT NULL, left_note VARCHAR(12), "
+                         "right_note VARCHAR(12), PRIMARY KEY(id), "
+                         "UNIQUE KEY note_pair(left_note, right_note)) "
+                         "ENGINE=MYLITE",
+                         "CREATE nullable composite key table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO "
+                         "mylite.nullable_composite_key_rows VALUES "
+                         "(1, NULL, 'same'), (2, NULL, 'same'), "
+                         "(3, 'same', NULL), (4, 'same', NULL), "
+                         "(5, 'left', 'right')",
+                         "INSERT nullable composite key rows", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY id SEPARATOR ',') "
+                          "FROM mylite.nullable_composite_key_rows "
+                          "FORCE INDEX(note_pair) "
+                          "WHERE left_note IS NULL AND right_note = 'same'",
+                          "nullable composite key head NULL ids",
+                          &result->nullable_composite_key_head_null_ids,
+                          result))
+    return false;
+  if (result->nullable_composite_key_head_null_ids != "1,2")
+  {
+    result->message= "nullable composite key head NULL lookup returned an "
+                     "unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY id SEPARATOR ',') "
+                          "FROM mylite.nullable_composite_key_rows "
+                          "FORCE INDEX(note_pair) "
+                          "WHERE left_note = 'same' AND right_note IS NULL",
+                          "nullable composite key tail NULL ids",
+                          &result->nullable_composite_key_tail_null_ids,
+                          result))
+    return false;
+  if (result->nullable_composite_key_tail_null_ids != "3,4")
+  {
+    result->message= "nullable composite key tail NULL lookup returned an "
+                     "unexpected value";
+    return false;
+  }
+  if (!execute_statement_expect_error(
+        mysql,
+        "INSERT INTO mylite.nullable_composite_key_rows "
+        "VALUES (6, 'left', 'right')",
+        "duplicate nullable composite key",
+        &result->nullable_composite_key_duplicate,
+        result))
+    return false;
+  if (!execute_statement(mysql,
+                         "DROP TABLE mylite.nullable_composite_key_rows",
+                         "DROP nullable composite key table", result))
+    return false;
+
+  if (!execute_statement(mysql,
+                         "CREATE TABLE mylite.nullable_blob_key_rows "
+                         "(id INT NOT NULL, note TEXT, payload BLOB, "
+                         "PRIMARY KEY(id), KEY note_prefix(note(6)), "
+                         "UNIQUE KEY payload_prefix(payload(4))) "
+                         "ENGINE=MYLITE",
+                         "CREATE nullable BLOB/TEXT key table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.nullable_blob_key_rows VALUES "
+                         "(1, NULL, NULL), (2, NULL, NULL), "
+                         "(3, 'theta-row', 'zz11-first'), "
+                         "(4, 'kappa-row', 'yy22-second')",
+                         "INSERT nullable BLOB/TEXT key rows", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY id SEPARATOR ',') "
+                          "FROM mylite.nullable_blob_key_rows "
+                          "FORCE INDEX(note_prefix) WHERE note IS NULL",
+                          "nullable BLOB/TEXT key null ids",
+                          &result->nullable_blob_key_null_ids, result))
+    return false;
+  if (result->nullable_blob_key_null_ids != "1,2")
+  {
+    result->message= "nullable BLOB/TEXT key NULL lookup returned an "
+                     "unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT id FROM mylite.nullable_blob_key_rows "
+                          "FORCE INDEX(note_prefix) "
+                          "WHERE note = 'theta-row'",
+                          "nullable BLOB/TEXT key lookup",
+                          &result->nullable_blob_key_lookup_id, result))
+    return false;
+  if (result->nullable_blob_key_lookup_id != "3")
+  {
+    result->message= "nullable BLOB/TEXT key lookup returned an "
+                     "unexpected value";
+    return false;
+  }
+  if (!execute_statement_expect_error(mysql,
+                                      "INSERT INTO "
+                                      "mylite.nullable_blob_key_rows "
+                                      "VALUES "
+                                      "(5, 'omega-row', 'zz11-dupe')",
+                                      "duplicate nullable BLOB/TEXT key",
+                                      &result->nullable_blob_key_duplicate,
+                                      result))
+    return false;
+  if (!execute_statement(mysql,
+                         "DROP TABLE mylite.nullable_blob_key_rows",
+                         "DROP nullable BLOB/TEXT key table", result))
+    return false;
   if (!execute_statement_expect_error(mysql,
                                       "CREATE TABLE mylite.unsupported_geometry "
                                       "(id INT NOT NULL, location GEOMETRY NOT NULL) "
                                       "ENGINE=MYLITE",
                                       "unsupported GEOMETRY table",
                                       &result->unsupported_geometry, result))
-    return false;
-  if (!execute_statement_expect_error(mysql,
-                                      "CREATE TABLE mylite.unsupported_key "
-                                      "(id INT, KEY(id)) ENGINE=MYLITE",
-                                      "unsupported keyed table",
-                                      &result->unsupported_key, result))
     return false;
   if (!execute_statement_expect_error(mysql,
                                       "CREATE TABLE "
@@ -1359,6 +1561,50 @@ static bool exercise_persistence_write(MYSQL *mysql, SmokeResult *result)
     return false;
   }
 
+  if (!execute_statement(mysql,
+                         "CREATE TABLE mylite.persisted_nullable_keyed "
+                         "(id INT NOT NULL, note VARCHAR(12), "
+                         "code VARCHAR(12), PRIMARY KEY(id), "
+                         "KEY note_key(note), UNIQUE KEY code_unique(code)) "
+                         "ENGINE=MYLITE",
+                         "CREATE persisted nullable keyed table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.persisted_nullable_keyed "
+                         "VALUES "
+                         "(1, NULL, NULL), (2, NULL, NULL), "
+                         "(3, 'alpha', 'alpha'), (4, 'beta', 'beta')",
+                         "INSERT persisted nullable keyed rows", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY id SEPARATOR ',') "
+                          "FROM mylite.persisted_nullable_keyed "
+                          "FORCE INDEX(note_key) WHERE note IS NULL",
+                          "persisted write nullable key null ids",
+                          &result->persisted_nullable_key_null_ids,
+                          result))
+    return false;
+  if (result->persisted_nullable_key_null_ids != "1,2")
+  {
+    result->message= "persisted write nullable key NULL lookup returned an "
+                     "unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT id "
+                          "FROM mylite.persisted_nullable_keyed "
+                          "FORCE INDEX(note_key) WHERE note = 'beta'",
+                          "persisted write nullable key lookup",
+                          &result->persisted_nullable_key_lookup_id,
+                          result))
+    return false;
+  if (result->persisted_nullable_key_lookup_id != "4")
+  {
+    result->message= "persisted write nullable key lookup returned an "
+                     "unexpected value";
+    return false;
+  }
+
   return true;
 }
 
@@ -1588,6 +1834,40 @@ static bool exercise_persistence_read(MYSQL *mysql, SmokeResult *result)
   if (result->persisted_blob_text_key_order_ids != "1,2,3")
   {
     result->message= "persisted read BLOB/TEXT key order returned an "
+                     "unexpected value";
+    return false;
+  }
+
+  if (!verify_table_present(mysql,
+                            "SHOW TABLES FROM mylite "
+                            "LIKE 'persisted_nullable_keyed'",
+                            "persisted nullable keyed table", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY id SEPARATOR ',') "
+                          "FROM mylite.persisted_nullable_keyed "
+                          "FORCE INDEX(note_key) WHERE note IS NULL",
+                          "persisted read nullable key null ids",
+                          &result->persisted_nullable_key_null_ids,
+                          result))
+    return false;
+  if (result->persisted_nullable_key_null_ids != "1,2")
+  {
+    result->message= "persisted read nullable key NULL lookup returned an "
+                     "unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT id "
+                          "FROM mylite.persisted_nullable_keyed "
+                          "FORCE INDEX(note_key) WHERE note = 'beta'",
+                          "persisted read nullable key lookup",
+                          &result->persisted_nullable_key_lookup_id,
+                          result))
+    return false;
+  if (result->persisted_nullable_key_lookup_id != "4")
+  {
+    result->message= "persisted read nullable key lookup returned an "
                      "unexpected value";
     return false;
   }
@@ -2263,8 +2543,6 @@ static void write_report(const SmokeOptions &options,
     report << "row_updated_note=" << result.row_updated_note << "\n";
   if (!result.row_deleted_count.empty())
     report << "row_deleted_count=" << result.row_deleted_count << "\n";
-  if (!result.unsupported_key.empty())
-    report << "unsupported_key=" << result.unsupported_key << "\n";
   if (!result.unsupported_autoincrement.empty())
     report << "unsupported_autoincrement="
            << result.unsupported_autoincrement << "\n";
@@ -2300,6 +2578,39 @@ static void write_report(const SmokeOptions &options,
   if (!result.blob_text_key_deleted_count.empty())
     report << "blob_text_key_deleted_count="
            << result.blob_text_key_deleted_count << "\n";
+  if (!result.nullable_key_null_ids.empty())
+    report << "nullable_key_null_ids="
+           << result.nullable_key_null_ids << "\n";
+  if (!result.nullable_key_lookup_id.empty())
+    report << "nullable_key_lookup_id="
+           << result.nullable_key_lookup_id << "\n";
+  if (!result.nullable_key_duplicate.empty())
+    report << "nullable_key_duplicate="
+           << result.nullable_key_duplicate << "\n";
+  if (!result.nullable_key_updated_null_ids.empty())
+    report << "nullable_key_updated_null_ids="
+           << result.nullable_key_updated_null_ids << "\n";
+  if (!result.nullable_key_deleted_count.empty())
+    report << "nullable_key_deleted_count="
+           << result.nullable_key_deleted_count << "\n";
+  if (!result.nullable_composite_key_head_null_ids.empty())
+    report << "nullable_composite_key_head_null_ids="
+           << result.nullable_composite_key_head_null_ids << "\n";
+  if (!result.nullable_composite_key_tail_null_ids.empty())
+    report << "nullable_composite_key_tail_null_ids="
+           << result.nullable_composite_key_tail_null_ids << "\n";
+  if (!result.nullable_composite_key_duplicate.empty())
+    report << "nullable_composite_key_duplicate="
+           << result.nullable_composite_key_duplicate << "\n";
+  if (!result.nullable_blob_key_null_ids.empty())
+    report << "nullable_blob_key_null_ids="
+           << result.nullable_blob_key_null_ids << "\n";
+  if (!result.nullable_blob_key_lookup_id.empty())
+    report << "nullable_blob_key_lookup_id="
+           << result.nullable_blob_key_lookup_id << "\n";
+  if (!result.nullable_blob_key_duplicate.empty())
+    report << "nullable_blob_key_duplicate="
+           << result.nullable_blob_key_duplicate << "\n";
   if (!result.unsupported_geometry.empty())
     report << "unsupported_geometry=" << result.unsupported_geometry << "\n";
   if (!result.key_lookup_note.empty())
@@ -2362,6 +2673,12 @@ static void write_report(const SmokeOptions &options,
   if (!result.persisted_blob_text_key_order_ids.empty())
     report << "persisted_blob_text_key_order_ids="
            << result.persisted_blob_text_key_order_ids << "\n";
+  if (!result.persisted_nullable_key_null_ids.empty())
+    report << "persisted_nullable_key_null_ids="
+           << result.persisted_nullable_key_null_ids << "\n";
+  if (!result.persisted_nullable_key_lookup_id.empty())
+    report << "persisted_nullable_key_lookup_id="
+           << result.persisted_nullable_key_lookup_id << "\n";
   if (!result.recovery_marker.empty())
     report << "recovery_marker=" << result.recovery_marker << "\n";
   if (!result.recovery_reclaim.empty())

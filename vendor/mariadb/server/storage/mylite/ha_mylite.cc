@@ -213,6 +213,8 @@ static uint64_t mylite_initial_auto_increment_next(
 static int mylite_check_unique_constraints_locked(
     Mylite_table_definition *definition, TABLE *table, const uchar *record,
     uint64_t ignored_rowid, uint *duplicate_key);
+static bool mylite_key_has_null_part(TABLE *table, uint key_index,
+                                     const uchar *record);
 static bool mylite_refresh_index_roots_locked(
     Mylite_table_definition *definition, TABLE *table);
 static bool mylite_index_root_matches_table_locked(
@@ -1966,7 +1968,7 @@ static bool mylite_key_supports_storage(const KEY &key)
   if (key.algorithm != HA_KEY_ALG_UNDEF && key.algorithm != HA_KEY_ALG_BTREE)
     return false;
   if (key.flags & (HA_FULLTEXT_legacy | HA_SPATIAL_legacy |
-                   HA_NULL_PART_KEY | HA_GENERATED_KEY))
+                   HA_GENERATED_KEY))
     return false;
 
   KEY_PART_INFO *key_part= key.key_part;
@@ -1982,7 +1984,6 @@ static bool mylite_key_supports_storage(const KEY &key)
 static bool mylite_key_part_supports_storage(const KEY_PART_INFO &key_part)
 {
   return key_part.field &&
-         !key_part.field->real_maybe_null() &&
          !(key_part.key_part_flag & HA_REVERSE_SORT);
 }
 
@@ -2011,6 +2012,8 @@ static int mylite_check_unique_constraints_locked(
     KEY *key_info= table->key_info + key_index;
     if (!(key_info->flags & HA_NOSAME))
       continue;
+    if (mylite_key_has_null_part(table, key_index, record))
+      continue;
 
     std::vector<uchar> candidate_key;
     int error= mylite_make_key_image(table, key_index, record, &candidate_key);
@@ -2023,6 +2026,8 @@ static int mylite_check_unique_constraints_locked(
         continue;
       if (row.record.size() < table->s->reclength)
         return HA_ERR_CRASHED;
+      if (mylite_key_has_null_part(table, key_index, row.record.data()))
+        continue;
 
       std::vector<uchar> stored_key;
       error= mylite_make_key_image_from_row(table, key_index, row,
@@ -2038,6 +2043,24 @@ static int mylite_check_unique_constraints_locked(
     }
   }
   return 0;
+}
+
+static bool mylite_key_has_null_part(TABLE *table, uint key_index,
+                                     const uchar *record)
+{
+  if (!table || !table->s || key_index >= table->s->keys || !record)
+    return false;
+
+  KEY *key_info= table->key_info + key_index;
+  KEY_PART_INFO *key_part= key_info->key_part;
+  KEY_PART_INFO *key_part_end= key_part + key_info->user_defined_key_parts;
+  for (; key_part < key_part_end; ++key_part)
+  {
+    if (key_part->null_bit &&
+        (record[key_part->null_offset] & key_part->null_bit))
+      return true;
+  }
+  return false;
 }
 
 static bool mylite_refresh_index_roots_locked(

@@ -179,12 +179,12 @@ persistence, and row-page recovery fallback, but it is still a temporary
 raw-record bridge. Page reuse, typed column encoding, transaction recovery, and
 durable B-tree index pages are still needed.
 
-The current bridge layer accepts supported non-null BTREE/undefined keys and
+The current bridge layer accepts supported BTREE/undefined keys and
 autoincrement columns. It stores autoincrement counters in catalog payload
 records and now stores durable primary and secondary key-entry streams in typed
 index payload pages addressed by catalog `INDEXPAGE` roots. This proves
-MariaDB's indexed handler path and uniqueness enforcement, but it is still not
-the final B-tree storage architecture.
+MariaDB's indexed handler path, nullable key-image ordering, and uniqueness
+enforcement, but it is still not the final B-tree storage architecture.
 
 The current primary file format stores catalog payload generations, allocator
 metadata, row payloads, and index payloads in typed 4096-byte page chains. The
@@ -251,14 +251,15 @@ bridge. Non-key BLOB/TEXT columns now use the same row and overflow page
 storage: MyLite stores a fixed record prefix with native BLOB pointer bytes
 cleared, appends BLOB/TEXT payload bytes in MariaDB `TABLE_SHARE::blob_field`
 order, and reconstructs `Field_blob` pointers into handler-owned read buffers
-on table scan, position read, and index read paths. Non-null BLOB/TEXT prefix
-key parts are supported through MariaDB key-image bytes in existing
-`INDEXPAGE` payloads. MyLite builds key images from incoming MariaDB records
-directly, but decodes stored MyLite rows into temporary MariaDB record buffers
-first so key generation never reads cleared native BLOB pointer bytes. Nullable
-key parts, reverse-sort parts, fulltext indexes, spatial indexes, and GEOMETRY
-columns remain unsupported for now because their semantics need separate
-design.
+on table scan, position read, and index read paths. BLOB/TEXT prefix key parts
+and nullable key parts are supported through MariaDB key-image bytes in
+existing `INDEXPAGE` payloads. MyLite builds key images from incoming MariaDB
+records directly, but decodes stored MyLite rows into temporary MariaDB record
+buffers first so key generation never reads cleared native BLOB pointer bytes.
+Nullable unique keys allow multiple rows when any user key part is NULL and
+still reject duplicate all-non-NULL key tuples. Reverse-sort parts, fulltext
+indexes, spatial indexes, and GEOMETRY columns remain unsupported for now
+because their semantics need separate design.
 
 Current row payload pages are variable-sized slot and overflow pages. Runtime
 free-page accounting tracks their actual page-chain length in memory instead
