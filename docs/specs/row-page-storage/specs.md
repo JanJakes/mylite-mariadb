@@ -240,6 +240,85 @@ The compatibility harness should continue to verify:
   catalog temporary sidecars are introduced.
 - Binary and file-size changes are recorded.
 
+## Implementation Result
+
+The `.mylite` v2 page-store format now has a `row_payload` page type:
+
+- catalog payload pages keep page type `1`,
+- row payload pages use page type `2`,
+- each frm-backed table now serializes a `ROWPAGE` catalog record,
+- new catalog writes no longer emit live row images as catalog `ROW` records,
+- empty tables publish a zero row root,
+- non-empty tables publish a page-aligned row payload root offset, logical
+  payload length, and payload checksum,
+- row payloads start with `MYLITE ROWS 1` and contain table-local `ROW` records
+  with row id and raw MariaDB record image,
+- legacy catalog `ROW` records still parse for pre-release development files.
+
+The catalog page helpers are now generic typed page-chain helpers. Catalog load
+evaluates header generations newest to oldest and only publishes a temporary
+catalog after both its catalog payload and every referenced row payload chain
+validate. The recovery smoke corrupts the first page appended by the latest
+generation; because row pages are written before the catalog payload, this now
+exercises row-payload corruption fallback and still recovers the previous
+generation.
+
+The storage smoke also checks the physical row-page shape after fresh-process
+reopen. Observed row-page report:
+
+```text
+status=0
+catalog_row_records=0
+rowpage_records=2
+row_payloads=mylite.persisted,mylite.persisted_auto
+row_payload_page_type=2
+```
+
+Verification passed:
+
+```sh
+MYLITE_BUILD_JOBS=8 tools/run-storage-engine-smoke.sh
+MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_BUILD_JOBS=8 tools/run-embedded-bootstrap-smoke.sh
+bash -n tools/run-compatibility-test-harness.sh tools/run-storage-engine-smoke.sh tools/run-libmylite-open-close-smoke.sh tools/run-embedded-bootstrap-smoke.sh tools/build-mariadb-minsize.sh
+git diff --check
+```
+
+Observed reports after implementation:
+
+- `mylite-catalog-read-report.txt`: `status=0`, `persisted_count=2`,
+  `persisted_notes=seven,eight`,
+  `persisted_autoincrement_ids=1,5,6,7`, no `.frm` artifacts, no catalog
+  sidecars.
+- `mylite-catalog-recovery-read-report.txt`: `status=0`,
+  `persisted_count=2`, `persisted_notes=seven,eight`,
+  `persisted_autoincrement_ids=1,5,6`, `recovery_marker=absent`, no `.frm`
+  artifacts, no catalog sidecars.
+- `mylite-compatibility-harness-report.txt`: all groups `status=0`,
+  including `mariadb_comparison` and `sidecar_scan`;
+  `unexpected_sidecars=none`.
+- `libmylite-open-close-report.txt`: `status=0`.
+- `mylite-embedded-bootstrap-report.txt`: `status=0`.
+
+Observed artifacts after this slice:
+
+- `build/mariadb-minsize/libmysqld/libmariadbd.a`: 44,329,272 bytes.
+- `build/mariadb-minsize/mylite/libmylite.a`: 29,698 bytes.
+- `build/mariadb-minsize/mylite/mylite-compatibility-smoke`: 22,695,440
+  bytes.
+- `build/mariadb-minsize/mylite/mylite-storage-engine-smoke`: 22,694,624
+  bytes.
+- `build/mariadb-minsize/mylite/mylite-open-close-smoke`: 22,695,752 bytes.
+- `build/mariadb-minsize/mylite/mylite-embedded-bootstrap-smoke`: 22,694,144
+  bytes.
+- `build/mariadb-minsize/mylite-compatibility-mylite/catalog.mylite`: 167,936
+  bytes.
+- `build/mariadb-minsize/mylite-catalog-persistence/catalog.mylite`: 118,784
+  bytes.
+- `build/mariadb-minsize/mylite-catalog-recovery/catalog.mylite`: 110,592
+  bytes.
+
 ## Risks And Unresolved Questions
 
 - Row payloads are still table-sized logical streams, so write amplification is

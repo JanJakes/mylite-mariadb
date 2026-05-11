@@ -81,6 +81,9 @@ run_inside_container() {
     "${abs_build_dir}/mylite-catalog-read-output.log" \
     "${catalog_file}" \
     "read" || status=1
+  verify_row_page_storage \
+    "${catalog_file}" \
+    "${abs_build_dir}/mylite-catalog-read-report.txt" || status=1
 
   local recovery_root="${abs_build_dir}/mylite-catalog-recovery"
   local recovery_file="${recovery_root}/catalog.mylite"
@@ -96,8 +99,8 @@ run_inside_container() {
     "${recovery_file}" \
     "recovery-base" || status=1
 
-  local recovery_payload_offset
-  recovery_payload_offset="$(stat -c %s "${recovery_file}")"
+  local recovery_corrupt_offset
+  recovery_corrupt_offset="$(stat -c %s "${recovery_file}")"
 
   run_smoke_phase \
     "${smoke}" \
@@ -108,7 +111,7 @@ run_inside_container() {
     "${recovery_file}" \
     "recovery-latest" || status=1
 
-  corrupt_latest_catalog_payload "${recovery_file}" "${recovery_payload_offset}" || status=1
+  corrupt_latest_generation_page "${recovery_file}" "${recovery_corrupt_offset}" || status=1
 
   run_smoke_phase \
     "${smoke}" \
@@ -170,20 +173,160 @@ run_smoke_phase() {
   return "${status}"
 }
 
-corrupt_latest_catalog_payload() {
+corrupt_latest_generation_page() {
   local catalog_file="$1"
-  local payload_offset="$2"
+  local corrupt_offset="$2"
 
   if [[ ! -f "${catalog_file}" ]]; then
     printf "Catalog recovery file does not exist: %s\n" "${catalog_file}" >&2
     return 1
   fi
-  if [[ -z "${payload_offset}" || "${payload_offset}" -lt 8192 ]]; then
-    printf "Invalid catalog payload offset: %s\n" "${payload_offset}" >&2
+  if [[ -z "${corrupt_offset}" || "${corrupt_offset}" -lt 8192 ]]; then
+    printf "Invalid catalog generation corruption offset: %s\n" "${corrupt_offset}" >&2
     return 1
   fi
 
-  printf '\0' | dd of="${catalog_file}" bs=1 seek="${payload_offset}" count=1 conv=notrunc status=none
+  printf '\0' | dd of="${catalog_file}" bs=1 seek="${corrupt_offset}" count=1 conv=notrunc status=none
+}
+
+verify_row_page_storage() {
+  local catalog_file="$1"
+  local report="$2"
+
+  if [[ ! -f "${catalog_file}" ]]; then
+    printf "Catalog file does not exist: %s\n" "${catalog_file}" >&2
+    return 1
+  fi
+
+  python3 - "${catalog_file}" "${report}" <<'PY'
+import struct
+import sys
+from pathlib import Path
+
+catalog_file = Path(sys.argv[1])
+report = Path(sys.argv[2])
+data = catalog_file.read_bytes()
+page_size = 4096
+page_payload_offset = 64
+page_payload_capacity = page_size - page_payload_offset
+
+def fail(message):
+    with report.open("a") as out:
+        out.write("\n## Row Page Storage\n\n")
+        out.write(f"status=1\nmessage={message}\n")
+    raise SystemExit(1)
+
+def read_u32(page, offset):
+    return struct.unpack_from("<I", page, offset)[0]
+
+def read_u64(page, offset):
+    return struct.unpack_from("<Q", page, offset)[0]
+
+headers = []
+for slot in (0, 1):
+    start = slot * page_size
+    page = data[start:start + page_size]
+    if len(page) != page_size:
+        continue
+    if page[:16] != b"MYLITEFMTPAGE2\0\0":
+        continue
+    if read_u32(page, 16) != 2 or read_u32(page, 20) != page_size:
+        continue
+    generation = read_u64(page, 24)
+    if generation == 0:
+        continue
+    headers.append((generation, slot, read_u64(page, 32), read_u64(page, 40)))
+
+if not headers:
+    fail("no valid header slots")
+
+headers.sort(reverse=True)
+
+def read_chain(root_offset, length, expected_type):
+    if root_offset < page_size * 2 or root_offset % page_size != 0:
+        fail("invalid page-chain root offset")
+    if length == 0:
+        fail("empty page chain")
+
+    page_id = root_offset // page_size
+    remaining = length
+    payload = bytearray()
+    page_types = []
+    while remaining > 0:
+        start = page_id * page_size
+        page = data[start:start + page_size]
+        if len(page) != page_size:
+            fail("short page-chain read")
+        if page[:16] != b"MYLITEPAGESTORE\0":
+            fail("invalid page magic")
+        page_type = read_u32(page, 20)
+        stored_page_id = read_u64(page, 24)
+        next_page_id = read_u64(page, 32)
+        used = read_u32(page, 40)
+        if page_type != expected_type:
+            fail("unexpected page type")
+        if stored_page_id != page_id:
+            fail("unexpected page id")
+        expected_used = min(remaining, page_payload_capacity)
+        if used != expected_used:
+            fail("unexpected page payload length")
+        page_types.append(page_type)
+        payload.extend(page[page_payload_offset:page_payload_offset + used])
+        remaining -= used
+        if remaining == 0:
+            if next_page_id != 0:
+                fail("nonzero terminal next page")
+            break
+        if next_page_id != page_id + 1:
+            fail("nonsequential next page")
+        page_id = next_page_id
+    return bytes(payload), page_types
+
+catalog_payload, catalog_page_types = read_chain(headers[0][2], headers[0][3], 1)
+try:
+    catalog_lines = catalog_payload.decode("ascii").splitlines()
+except UnicodeDecodeError:
+    fail("catalog payload is not ascii")
+
+catalog_row_records = [line for line in catalog_lines if line.startswith("ROW\t")]
+rowpage_records = [line for line in catalog_lines if line.startswith("ROWPAGE\t")]
+if catalog_row_records:
+    fail("catalog still contains ROW records")
+if not rowpage_records:
+    fail("catalog has no ROWPAGE records")
+
+row_payloads = []
+for line in rowpage_records:
+    parts = line.split("\t")
+    if len(parts) != 6:
+        fail("invalid ROWPAGE record")
+    root_offset = int(parts[3])
+    length = int(parts[4])
+    if root_offset == 0 and length == 0:
+        continue
+    payload, page_types = read_chain(root_offset, length, 2)
+    if not payload.startswith(b"MYLITE ROWS 1\n"):
+        fail("invalid row payload magic")
+    if b"\nROW\t" not in payload:
+        fail("row payload has no row records")
+    row_payloads.append(
+        f"{bytes.fromhex(parts[1]).decode('ascii')}."
+        f"{bytes.fromhex(parts[2]).decode('ascii')}"
+    )
+
+if not row_payloads:
+    fail("no nonempty row payload chains")
+
+with report.open("a") as out:
+    out.write("\n## Row Page Storage\n\n")
+    out.write("status=0\n")
+    out.write(f"latest_generation={headers[0][0]}\n")
+    out.write(f"catalog_page_types={','.join(map(str, catalog_page_types))}\n")
+    out.write(f"catalog_row_records={len(catalog_row_records)}\n")
+    out.write(f"rowpage_records={len(rowpage_records)}\n")
+    out.write(f"row_payloads={','.join(row_payloads)}\n")
+    out.write("row_payload_page_type=2\n")
+PY
 }
 
 append_observed_files() {

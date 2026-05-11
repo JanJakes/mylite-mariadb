@@ -169,25 +169,28 @@ inactive header. This protects table-definition catalog publication from a
 corrupted latest payload, but it is not yet a row-storage pager or full
 transaction recovery system.
 
-The first row-storage proof also stores simple keyless, non-BLOB row images in
-that catalog payload with hidden 64-bit row ids. This validates MariaDB handler
-read/write/update/delete integration and fresh-process persistence, but it is a
-temporary bridge. Real row and index pages still need a pager, free-space
-management, transaction recovery, autoincrement metadata, and key enforcement.
+The first row-storage proof stores simple non-BLOB row images with hidden
+64-bit row ids. It now writes those row images into typed per-table row payload
+page chains addressed by catalog `ROWPAGE` roots, rather than as `ROW` records
+inside the logical catalog payload. This validates MariaDB handler
+read/write/update/delete integration, fresh-process persistence, and row-page
+recovery fallback, but it is still a temporary raw-record bridge. Real row
+slots, page-local free-space management, transaction recovery, and durable
+index pages are still needed.
 
 The current bridge layer accepts supported non-null BTREE/undefined keys and
 autoincrement columns without adding durable index sidecars. It stores
 autoincrement counters in catalog payload records and rebuilds ordered index
-cursors from persisted row images in memory. This proves MariaDB's indexed
-handler path and uniqueness enforcement, but it is still not the final B-tree
-storage architecture.
+cursors from row payload pages in memory. This proves MariaDB's indexed handler
+path and uniqueness enforcement, but it is still not the final B-tree storage
+architecture.
 
-The current primary file format stores catalog payload generations in typed
-4096-byte page chains. The two fixed header slots still publish the active
-catalog generation, but the header now points at the first catalog payload page
-rather than a raw text blob offset. This is the first reusable page-store layer;
-rows and indexes still need dedicated page formats before the raw-record bridge
-can be retired.
+The current primary file format stores catalog payload generations and simple
+row payloads in typed 4096-byte page chains. The two fixed header slots still
+publish the active catalog generation, and the catalog generation points to
+table row roots. The page store has catalog and row page types; indexes,
+free-space tracking, and transaction/recovery pages still need dedicated
+formats before the raw-record bridge can be retired.
 
 ## Schemas
 

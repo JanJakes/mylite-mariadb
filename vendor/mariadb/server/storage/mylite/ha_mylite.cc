@@ -42,6 +42,10 @@ struct Mylite_table_definition
   std::vector<uchar> frm_image;
   uint64_t next_rowid;
   uint64_t auto_increment_next;
+  uint64_t rows_payload_offset;
+  uint64_t rows_payload_length;
+  uint64_t rows_payload_checksum;
+  bool rows_payload_ref_seen;
   std::vector<Mylite_row> rows;
 };
 
@@ -172,15 +176,28 @@ static bool mylite_parse_table_path(const char *path, std::string *db,
 static bool mylite_ensure_catalog_loaded_locked();
 static void mylite_clear_frm_definitions_locked();
 static bool mylite_load_catalog_locked();
+static bool mylite_load_catalog_generation_locked(
+    int fd, const Mylite_catalog_header &header,
+    std::vector<Mylite_table_definition> *loaded);
+static bool mylite_load_row_payloads_locked(
+    int fd, std::vector<Mylite_table_definition> *catalog);
+static bool mylite_parse_rows_payload_locked(
+    const std::string &content, Mylite_table_definition *definition);
 static int mylite_flush_catalog_locked();
 static bool mylite_write_catalog_locked();
+static bool mylite_write_row_payloads_locked(int fd);
+static std::string mylite_serialize_rows_payload_locked(
+    const Mylite_table_definition &definition);
 static std::string mylite_serialize_catalog_locked();
-static bool mylite_parse_catalog_payload_locked(const std::string &content);
+static bool mylite_parse_catalog_payload_locked(
+    const std::string &content, std::vector<Mylite_table_definition> *loaded);
 static bool mylite_parse_table_payload_record_locked(
     const std::string &line, std::vector<Mylite_table_definition> *loaded);
 static bool mylite_parse_next_rowid_payload_record_locked(
     const std::string &line, std::vector<Mylite_table_definition> *loaded);
 static bool mylite_parse_autoincrement_payload_record_locked(
+    const std::string &line, std::vector<Mylite_table_definition> *loaded);
+static bool mylite_parse_rowpage_payload_record_locked(
     const std::string &line, std::vector<Mylite_table_definition> *loaded);
 static bool mylite_parse_row_payload_record_locked(
     const std::string &line, std::vector<Mylite_table_definition> *loaded);
@@ -203,6 +220,15 @@ static bool mylite_read_catalog_payload(int fd,
 static bool mylite_write_catalog_payload(int fd, const std::string &content,
                                          uint64_t *payload_offset,
                                          uint64_t *payload_checksum);
+static bool mylite_read_page_chain(int fd, uint32_t page_type,
+                                   uint64_t payload_offset,
+                                   uint64_t payload_length,
+                                   uint64_t payload_checksum,
+                                   std::string *content);
+static bool mylite_write_page_chain(int fd, uint32_t page_type,
+                                    const std::string &content,
+                                    uint64_t *payload_offset,
+                                    uint64_t *payload_checksum);
 static bool mylite_write_catalog_header(int fd,
                                         const Mylite_catalog_header &header);
 static bool mylite_read_page(int fd, uint64_t page_id,
@@ -238,6 +264,7 @@ static const char mylite_seed_table[]= "probe";
 static const char mylite_seed_sql[]=
   "CREATE TABLE probe (id INT) ENGINE=MYLITE";
 static const char mylite_catalog_magic[]= "MYLITE CATALOG 1";
+static const char mylite_rows_payload_magic[]= "MYLITE ROWS 1";
 static const uchar mylite_catalog_file_magic[16]= {
   'M', 'Y', 'L', 'I', 'T', 'E', 'F', 'M',
   'T', 'P', 'A', 'G', 'E', '2', '\0', '\0'
@@ -249,6 +276,7 @@ static const uchar mylite_page_magic[16]= {
 static const uint32_t mylite_catalog_format_version= 2;
 static const uint32_t mylite_page_format_version= 1;
 static const uint32_t mylite_page_type_catalog_payload= 1;
+static const uint32_t mylite_page_type_row_payload= 2;
 static const uint32_t mylite_catalog_page_size= 4096;
 static const uint64_t mylite_catalog_payload_start=
   static_cast<uint64_t>(mylite_catalog_page_size) * 2;
@@ -264,7 +292,7 @@ static bool mylite_catalog_loaded= false;
 static bool mylite_catalog_load_failed= false;
 static std::vector<Mylite_table_definition> mylite_catalog= {
   { mylite_seed_db, mylite_seed_table, mylite_seed_sql, std::vector<uchar>(),
-    1, 0, std::vector<Mylite_row>() }
+    1, 0, 0, 0, 0, false, std::vector<Mylite_row>() }
 };
 
 static MYSQL_SYSVAR_STR(
@@ -797,6 +825,10 @@ static int mylite_store_table_definition(const char *path, const TABLE *table,
   definition.next_rowid= 1;
   definition.auto_increment_next=
     mylite_initial_auto_increment_next(table, create_info);
+  definition.rows_payload_offset= 0;
+  definition.rows_payload_length= 0;
+  definition.rows_payload_checksum= 0;
+  definition.rows_payload_ref_seen= false;
   mylite_catalog.push_back(definition);
   const int error= mylite_flush_catalog_locked();
   if (error)
@@ -1599,8 +1631,6 @@ static bool mylite_load_catalog_locked()
 
   bool ok= true;
   struct stat st;
-  Mylite_catalog_header header= { 0, 0, 0, 0, 0 };
-  std::string content;
   if (fstat(fd, &st) != 0)
   {
     mylite_log_catalog_error("stat", mylite_catalog_file);
@@ -1610,17 +1640,38 @@ static bool mylite_load_catalog_locked()
   if (st.st_size == 0)
     goto done;
 
-  if (!mylite_find_latest_catalog_header(fd, st.st_size, &header))
   {
-    sql_print_error("MyLite: no valid catalog header in %s",
-                    mylite_catalog_file);
-    ok= false;
-    goto done;
-  }
+    std::vector<Mylite_catalog_header> headers;
+    for (size_t slot= 0; slot < 2; ++slot)
+    {
+      Mylite_catalog_header header= { 0, 0, 0, 0, 0 };
+      if (mylite_read_catalog_header(fd, slot, st.st_size, &header))
+        headers.push_back(header);
+    }
+    std::sort(headers.begin(), headers.end(),
+              [](const Mylite_catalog_header &left,
+                 const Mylite_catalog_header &right) {
+                return left.generation > right.generation;
+              });
 
-  if (!mylite_read_catalog_payload(fd, header, &content) ||
-      !mylite_parse_catalog_payload_locked(content))
-    ok= false;
+    bool found= false;
+    for (const Mylite_catalog_header &header : headers)
+    {
+      std::vector<Mylite_table_definition> loaded;
+      if (!mylite_load_catalog_generation_locked(fd, header, &loaded))
+        continue;
+
+      mylite_catalog.swap(loaded);
+      found= true;
+      break;
+    }
+    if (!found)
+    {
+      sql_print_error("MyLite: no valid catalog generation in %s",
+                      mylite_catalog_file);
+      ok= false;
+    }
+  }
 
 done:
   if (close(fd) != 0)
@@ -1629,6 +1680,110 @@ done:
     ok= false;
   }
   return ok;
+}
+
+static bool mylite_load_catalog_generation_locked(
+    int fd, const Mylite_catalog_header &header,
+    std::vector<Mylite_table_definition> *loaded)
+{
+  std::string content;
+  return mylite_read_catalog_payload(fd, header, &content) &&
+         mylite_parse_catalog_payload_locked(content, loaded) &&
+         mylite_load_row_payloads_locked(fd, loaded);
+}
+
+static bool mylite_load_row_payloads_locked(
+    int fd, std::vector<Mylite_table_definition> *catalog)
+{
+  for (Mylite_table_definition &definition : *catalog)
+  {
+    if (definition.rows_payload_length == 0)
+    {
+      if (definition.rows_payload_offset != 0 ||
+          definition.rows_payload_checksum != 0)
+        return false;
+      continue;
+    }
+
+    if (!definition.rows.empty())
+      return false;
+
+    std::string content;
+    if (!mylite_read_page_chain(
+          fd, mylite_page_type_row_payload, definition.rows_payload_offset,
+          definition.rows_payload_length, definition.rows_payload_checksum,
+          &content) ||
+        !mylite_parse_rows_payload_locked(content, &definition))
+      return false;
+  }
+
+  return true;
+}
+
+static bool mylite_parse_rows_payload_locked(
+    const std::string &content, Mylite_table_definition *definition)
+{
+  std::istringstream input(content);
+  std::string line;
+  if (!std::getline(input, line) || line != mylite_rows_payload_magic)
+  {
+    sql_print_error("MyLite: invalid row payload in %s",
+                    mylite_catalog_file);
+    return false;
+  }
+
+  bool found_row= false;
+  while (std::getline(input, line))
+  {
+    if (line.empty())
+      continue;
+
+    const std::string::size_type first= line.find('\t');
+    const std::string::size_type second= first == std::string::npos
+      ? std::string::npos
+      : line.find('\t', first + 1);
+
+    if (first == std::string::npos || second == std::string::npos ||
+        line.substr(0, first) != "ROW")
+    {
+      sql_print_error("MyLite: invalid row payload record in %s",
+                      mylite_catalog_file);
+      return false;
+    }
+
+    Mylite_row row;
+    if (!mylite_parse_decimal_uint64(
+          line.substr(first + 1, second - first - 1), &row.rowid) ||
+        !mylite_hex_decode(line.substr(second + 1), &row.record) ||
+        row.rowid == 0 || row.record.empty() ||
+        mylite_find_row_locked(definition, row.rowid))
+    {
+      sql_print_error("MyLite: invalid row payload encoding in %s",
+                      mylite_catalog_file);
+      return false;
+    }
+
+    row.deleted= false;
+    if (row.rowid == ~static_cast<uint64_t>(0))
+    {
+      sql_print_error("MyLite: row payload id is exhausted in %s",
+                      mylite_catalog_file);
+      return false;
+    }
+    if (row.rowid >= definition->next_rowid)
+      definition->next_rowid= row.rowid + 1;
+    definition->rows.push_back(row);
+    found_row= true;
+  }
+
+  if (!found_row)
+  {
+    sql_print_error("MyLite: empty row payload in %s",
+                    mylite_catalog_file);
+    return false;
+  }
+
+  return true;
 }
 
 static int mylite_flush_catalog_locked()
@@ -1642,7 +1797,7 @@ static int mylite_flush_catalog_locked()
 static bool mylite_write_catalog_locked()
 {
   const std::string catalog_path(mylite_catalog_file);
-  const std::string content= mylite_serialize_catalog_locked();
+  std::string content;
 
   const int fd= open(catalog_path.c_str(),
                      O_RDWR | O_CREAT | O_CLOEXEC, 0666);
@@ -1682,6 +1837,14 @@ static bool mylite_write_catalog_locked()
     goto done;
   }
 
+  if (!mylite_write_row_payloads_locked(fd))
+  {
+    mylite_log_catalog_error("write", catalog_path);
+    ok= false;
+    goto done;
+  }
+
+  content= mylite_serialize_catalog_locked();
   if (!mylite_write_catalog_payload(fd, content, &payload_offset,
                                     &payload_checksum))
   {
@@ -1721,6 +1884,70 @@ done:
     ok= false;
   }
   return ok;
+}
+
+static bool mylite_write_row_payloads_locked(int fd)
+{
+  for (Mylite_table_definition &definition : mylite_catalog)
+  {
+    if (definition.frm_image.empty())
+      continue;
+
+    bool has_rows= false;
+    for (const Mylite_row &row : definition.rows)
+    {
+      if (!row.deleted)
+      {
+        has_rows= true;
+        break;
+      }
+    }
+
+    if (!has_rows)
+    {
+      definition.rows_payload_offset= 0;
+      definition.rows_payload_length= 0;
+      definition.rows_payload_checksum= 0;
+      definition.rows_payload_ref_seen= false;
+      continue;
+    }
+
+    uint64_t payload_offset= 0;
+    uint64_t payload_checksum= 0;
+    const std::string content= mylite_serialize_rows_payload_locked(definition);
+    if (!mylite_write_page_chain(fd, mylite_page_type_row_payload, content,
+                                 &payload_offset, &payload_checksum))
+      return false;
+
+    definition.rows_payload_offset= payload_offset;
+    definition.rows_payload_length= content.length();
+    definition.rows_payload_checksum= payload_checksum;
+    definition.rows_payload_ref_seen= true;
+  }
+
+  return true;
+}
+
+static std::string mylite_serialize_rows_payload_locked(
+    const Mylite_table_definition &definition)
+{
+  std::string content;
+  content.append(mylite_rows_payload_magic);
+  content.push_back('\n');
+
+  for (const Mylite_row &row : definition.rows)
+  {
+    if (row.deleted)
+      continue;
+
+    content.append("ROW\t");
+    content.append(mylite_format_decimal_uint64(row.rowid));
+    content.push_back('\t');
+    content.append(mylite_hex_encode(row.record.data(), row.record.size()));
+    content.push_back('\n');
+  }
+
+  return content;
 }
 
 static std::string mylite_serialize_catalog_locked()
@@ -1772,32 +1999,31 @@ static std::string mylite_serialize_catalog_locked()
       definition.auto_increment_next));
     content.push_back('\n');
 
-    for (const Mylite_row &row : definition.rows)
-    {
-      if (row.deleted)
-        continue;
-
-      content.append("ROW\t");
-      content.append(mylite_hex_encode(
-        reinterpret_cast<const uchar *>(definition.db.data()),
-        definition.db.length()));
-      content.push_back('\t');
-      content.append(mylite_hex_encode(
-        reinterpret_cast<const uchar *>(definition.table_name.data()),
-        definition.table_name.length()));
-      content.push_back('\t');
-      content.append(mylite_format_decimal_uint64(row.rowid));
-      content.push_back('\t');
-      content.append(mylite_hex_encode(row.record.data(),
-                                       row.record.size()));
-      content.push_back('\n');
-    }
+    content.append("ROWPAGE\t");
+    content.append(mylite_hex_encode(
+      reinterpret_cast<const uchar *>(definition.db.data()),
+      definition.db.length()));
+    content.push_back('\t');
+    content.append(mylite_hex_encode(
+      reinterpret_cast<const uchar *>(definition.table_name.data()),
+      definition.table_name.length()));
+    content.push_back('\t');
+    content.append(mylite_format_decimal_uint64(
+      definition.rows_payload_offset));
+    content.push_back('\t');
+    content.append(mylite_format_decimal_uint64(
+      definition.rows_payload_length));
+    content.push_back('\t');
+    content.append(mylite_format_decimal_uint64(
+      definition.rows_payload_checksum));
+    content.push_back('\n');
   }
 
   return content;
 }
 
-static bool mylite_parse_catalog_payload_locked(const std::string &content)
+static bool mylite_parse_catalog_payload_locked(
+    const std::string &content, std::vector<Mylite_table_definition> *loaded)
 {
   std::istringstream input(content);
   std::string line;
@@ -1808,11 +2034,11 @@ static bool mylite_parse_catalog_payload_locked(const std::string &content)
     return false;
   }
 
-  std::vector<Mylite_table_definition> loaded;
+  loaded->clear();
   for (const Mylite_table_definition &definition : mylite_catalog)
   {
     if (!definition.seed_sql.empty())
-      loaded.push_back(definition);
+      loaded->push_back(definition);
   }
 
   while (std::getline(input, line))
@@ -1822,25 +2048,31 @@ static bool mylite_parse_catalog_payload_locked(const std::string &content)
 
     if (line.compare(0, 6, "TABLE\t") == 0)
     {
-      if (!mylite_parse_table_payload_record_locked(line, &loaded))
+      if (!mylite_parse_table_payload_record_locked(line, loaded))
         return false;
       continue;
     }
     if (line.compare(0, 10, "NEXTROWID\t") == 0)
     {
-      if (!mylite_parse_next_rowid_payload_record_locked(line, &loaded))
+      if (!mylite_parse_next_rowid_payload_record_locked(line, loaded))
         return false;
       continue;
     }
     if (line.compare(0, 8, "AUTOINC\t") == 0)
     {
-      if (!mylite_parse_autoincrement_payload_record_locked(line, &loaded))
+      if (!mylite_parse_autoincrement_payload_record_locked(line, loaded))
+        return false;
+      continue;
+    }
+    if (line.compare(0, 8, "ROWPAGE\t") == 0)
+    {
+      if (!mylite_parse_rowpage_payload_record_locked(line, loaded))
         return false;
       continue;
     }
     if (line.compare(0, 4, "ROW\t") == 0)
     {
-      if (!mylite_parse_row_payload_record_locked(line, &loaded))
+      if (!mylite_parse_row_payload_record_locked(line, loaded))
         return false;
       continue;
     }
@@ -1850,7 +2082,6 @@ static bool mylite_parse_catalog_payload_locked(const std::string &content)
     return false;
   }
 
-  mylite_catalog.swap(loaded);
   return true;
 }
 
@@ -1895,6 +2126,10 @@ static bool mylite_parse_table_payload_record_locked(
     reinterpret_cast<const char *>(table_bytes.data()), table_bytes.size());
   definition.next_rowid= 1;
   definition.auto_increment_next= 0;
+  definition.rows_payload_offset= 0;
+  definition.rows_payload_length= 0;
+  definition.rows_payload_checksum= 0;
+  definition.rows_payload_ref_seen= false;
   if (mylite_catalog_contains_definition(*loaded, definition.db,
                                          definition.table_name))
   {
@@ -2007,6 +2242,90 @@ static bool mylite_parse_autoincrement_payload_record_locked(
   }
 
   definition->auto_increment_next= auto_increment_next;
+  return true;
+}
+
+static bool mylite_parse_rowpage_payload_record_locked(
+    const std::string &line, std::vector<Mylite_table_definition> *loaded)
+{
+  const std::string::size_type first= line.find('\t');
+  const std::string::size_type second= first == std::string::npos
+    ? std::string::npos
+    : line.find('\t', first + 1);
+  const std::string::size_type third= second == std::string::npos
+    ? std::string::npos
+    : line.find('\t', second + 1);
+  const std::string::size_type fourth= third == std::string::npos
+    ? std::string::npos
+    : line.find('\t', third + 1);
+  const std::string::size_type fifth= fourth == std::string::npos
+    ? std::string::npos
+    : line.find('\t', fourth + 1);
+
+  if (first == std::string::npos || second == std::string::npos ||
+      third == std::string::npos || fourth == std::string::npos ||
+      fifth == std::string::npos || line.substr(0, first) != "ROWPAGE")
+  {
+    sql_print_error("MyLite: invalid catalog row page record in %s",
+                    mylite_catalog_file);
+    return false;
+  }
+
+  std::vector<uchar> db_bytes;
+  std::vector<uchar> table_bytes;
+  uint64_t payload_offset= 0;
+  uint64_t payload_length= 0;
+  uint64_t payload_checksum= 0;
+  if (!mylite_hex_decode(line.substr(first + 1, second - first - 1),
+                         &db_bytes) ||
+      !mylite_hex_decode(line.substr(second + 1, third - second - 1),
+                         &table_bytes) ||
+      !mylite_parse_decimal_uint64(
+        line.substr(third + 1, fourth - third - 1), &payload_offset) ||
+      !mylite_parse_decimal_uint64(
+        line.substr(fourth + 1, fifth - fourth - 1), &payload_length) ||
+      !mylite_parse_decimal_uint64(line.substr(fifth + 1),
+                                   &payload_checksum) ||
+      db_bytes.empty() || table_bytes.empty())
+  {
+    sql_print_error("MyLite: invalid catalog row page encoding in %s",
+                    mylite_catalog_file);
+    return false;
+  }
+
+  const std::string db(reinterpret_cast<const char *>(db_bytes.data()),
+                       db_bytes.size());
+  const std::string table_name(
+    reinterpret_cast<const char *>(table_bytes.data()), table_bytes.size());
+  Mylite_table_definition *definition=
+    mylite_find_table_definition_in_catalog(loaded, db, table_name);
+  if (!definition || definition->rows_payload_ref_seen)
+  {
+    sql_print_error("MyLite: invalid catalog row page owner in %s",
+                    mylite_catalog_file);
+    return false;
+  }
+
+  if (payload_length == 0)
+  {
+    if (payload_offset != 0 || payload_checksum != 0)
+    {
+      sql_print_error("MyLite: invalid empty row page in %s",
+                      mylite_catalog_file);
+      return false;
+    }
+  }
+  else if (!mylite_page_offset_is_valid(payload_offset))
+  {
+    sql_print_error("MyLite: invalid row page offset in %s",
+                    mylite_catalog_file);
+    return false;
+  }
+
+  definition->rows_payload_offset= payload_offset;
+  definition->rows_payload_length= payload_length;
+  definition->rows_payload_checksum= payload_checksum;
+  definition->rows_payload_ref_seen= true;
   return true;
 }
 
@@ -2208,16 +2527,38 @@ static bool mylite_read_catalog_payload(int fd,
                                         const Mylite_catalog_header &header,
                                         std::string *content)
 {
-  if (header.payload_length > content->max_size())
+  return mylite_read_page_chain(fd, mylite_page_type_catalog_payload,
+                                header.payload_offset,
+                                header.payload_length,
+                                header.payload_checksum, content);
+}
+
+static bool mylite_write_catalog_payload(int fd, const std::string &content,
+                                         uint64_t *payload_offset,
+                                         uint64_t *payload_checksum)
+{
+  return mylite_write_page_chain(fd, mylite_page_type_catalog_payload,
+                                 content, payload_offset,
+                                 payload_checksum);
+}
+
+static bool mylite_read_page_chain(int fd, uint32_t page_type,
+                                   uint64_t payload_offset,
+                                   uint64_t payload_length,
+                                   uint64_t payload_checksum,
+                                   std::string *content)
+{
+  if (!mylite_page_offset_is_valid(payload_offset) ||
+      payload_length == 0 || payload_length > content->max_size())
     return false;
 
   content->clear();
-  content->reserve(static_cast<size_t>(header.payload_length));
+  content->reserve(static_cast<size_t>(payload_length));
 
-  uint64_t page_id= header.payload_offset / mylite_catalog_page_size;
-  uint64_t remaining= header.payload_length;
+  uint64_t page_id= payload_offset / mylite_catalog_page_size;
+  uint64_t remaining= payload_length;
   const uint64_t max_pages=
-    (header.payload_length + mylite_page_payload_capacity - 1) /
+    (payload_length + mylite_page_payload_capacity - 1) /
     mylite_page_payload_capacity;
   for (uint64_t page_count= 0; remaining > 0; ++page_count)
   {
@@ -2228,7 +2569,7 @@ static bool mylite_read_catalog_payload(int fd,
     Mylite_page_header page_header;
     if (!mylite_read_page(fd, page_id, &page, &page_header))
       return false;
-    if (page_header.type != mylite_page_type_catalog_payload)
+    if (page_header.type != page_type)
       return false;
 
     const uint32_t expected_payload_length=
@@ -2255,20 +2596,21 @@ static bool mylite_read_catalog_payload(int fd,
     page_id= page_header.next_page_id;
   }
 
-  if (content->length() != header.payload_length)
+  if (content->length() != payload_length)
     return false;
 
   return mylite_checksum(
            reinterpret_cast<const uchar *>(content->data()),
-           content->length()) == header.payload_checksum;
+           content->length()) == payload_checksum;
 }
 
-static bool mylite_write_catalog_payload(int fd, const std::string &content,
-                                         uint64_t *payload_offset,
-                                         uint64_t *payload_checksum)
+static bool mylite_write_page_chain(int fd, uint32_t page_type,
+                                    const std::string &content,
+                                    uint64_t *payload_offset,
+                                    uint64_t *payload_checksum)
 {
   const off_t file_end= lseek(fd, 0, SEEK_END);
-  if (file_end < 0)
+  if (file_end < 0 || content.empty())
     return false;
 
   *payload_offset= mylite_align_to_page(static_cast<uint64_t>(file_end));
@@ -2290,7 +2632,7 @@ static bool mylite_write_catalog_payload(int fd, const std::string &content,
       : 0;
 
     if (!mylite_write_page(
-          fd, mylite_page_type_catalog_payload, page_id, next_page_id,
+          fd, page_type, page_id, next_page_id,
           reinterpret_cast<const uchar *>(content.data() + written), chunk))
       return false;
 
