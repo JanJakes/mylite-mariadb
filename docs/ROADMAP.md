@@ -38,12 +38,13 @@ comparison for the supported subset, and a MyLite runtime sidecar scan. The
 primary file format now stores catalog payload generations in typed 4096-byte
 page chains under a v2 two-header publication format instead of raw
 arbitrary-length blobs, and simple row images now live in typed per-table row
-payload page chains addressed through catalog `ROWPAGE` roots.
+payload page chains addressed through catalog `ROWPAGE` roots. New row payload
+writes use binary page-local row slot directories instead of text row streams,
+with oversized fixed row images rejected explicitly until overflow pages are
+designed.
 
-The active implementation step is `row-slot-storage`, which should keep
-reducing the raw-record bridge by replacing table-sized row payload streams
-with page-local row records, slot directories, and first free-space accounting
-before durable index pages are added.
+The next implementation step should add durable index page roots instead of
+rebuilding ordered index cursors only from row images in memory.
 
 ## Implementation plan
 
@@ -65,7 +66,8 @@ before durable index pages are added.
 | 13 | `compatibility-test-harness` | Done | Run embedded lifecycle, unexpected-sidecar detection, crash/reopen, and MariaDB comparison tests in repeatable groups. |
 | 14 | `pager-page-store` | Done | Add the first reusable MyLite page-store layer for catalog payloads, row pages, future index pages, and free-space tracking. |
 | 15 | `row-page-storage` | Done | Move simple row images from the logical catalog payload into typed row pages addressed through table catalog roots. |
-| 16 | `row-slot-storage` | In progress | Replace table-sized row payload streams with page-local row records, slot directories, and first free-space accounting. |
+| 16 | `row-slot-storage` | Done | Replace table-sized row payload streams with page-local row records, slot directories, and first free-space accounting. |
+| 17 | `index-page-storage` | Planned | Add durable primary/secondary index page roots for supported keys instead of rebuilding all index cursors from rows. |
 
 ## Size and profile direction
 

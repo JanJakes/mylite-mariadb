@@ -213,6 +213,85 @@ The compatibility harness should continue to verify:
   catalog temporary sidecars are introduced.
 - Binary and file-size changes are recorded.
 
+## Implementation Result
+
+New row payload writes now use binary row-slot pages inside page-store page type
+`2`:
+
+- row slot magic: `MYLITEROWSLOT2`,
+- row slot format version: `2`,
+- row slot header size: 32 bytes,
+- row slot entry size: 16 bytes,
+- maximum fixed record image without overflow pages: 3984 bytes,
+- each slot stores row id, record offset, and record length,
+- record bytes are packed contiguously after the slot directory,
+- legacy `MYLITE ROWS 1` text payloads still load.
+
+The row payload loader now detects the first row payload page format and either
+uses the legacy text parser or validates the binary row-slot chain. Row-slot
+validation checks magic, version, row count, slot directory offset, sequential
+record offsets, record bounds, nonzero row ids, duplicate row ids, and the
+logical payload checksum from the catalog `ROWPAGE` root.
+
+The storage smoke now verifies both the new physical format and the explicit
+large-row rejection. Observed report values:
+
+```text
+unsupported_large_row=rejected
+catalog_row_records=0
+rowpage_records=3
+row_payloads=mylite.persisted,mylite.persisted_auto,mylite.persisted_wide
+row_payload_page_counts=mylite.persisted:1,mylite.persisted_auto:1,mylite.persisted_wide:6
+row_payload_magic=MYLITEROWSLOT2
+row_payload_page_type=2
+```
+
+Verification passed:
+
+```sh
+MYLITE_BUILD_JOBS=8 tools/run-storage-engine-smoke.sh
+MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_BUILD_JOBS=8 tools/run-embedded-bootstrap-smoke.sh
+bash -n tools/run-compatibility-test-harness.sh tools/run-storage-engine-smoke.sh tools/run-libmylite-open-close-smoke.sh tools/run-embedded-bootstrap-smoke.sh tools/build-mariadb-minsize.sh
+git diff --check
+```
+
+Observed reports after implementation:
+
+- `mylite-storage-engine-report.txt`: `status=0`,
+  `unsupported_large_row=rejected`.
+- `mylite-catalog-read-report.txt`: `status=0`, `persisted_count=2`,
+  `persisted_notes=seven,eight`,
+  `persisted_autoincrement_ids=1,5,6,7`, `persisted_wide_count=6`.
+- `mylite-catalog-recovery-read-report.txt`: `status=0`,
+  `persisted_count=2`, `persisted_notes=seven,eight`,
+  `persisted_autoincrement_ids=1,5,6`, `persisted_wide_count=6`,
+  `recovery_marker=absent`.
+- `mylite-compatibility-harness-report.txt`: all groups `status=0`,
+  including `mariadb_comparison` and `sidecar_scan`;
+  `unexpected_sidecars=none`.
+- `libmylite-open-close-report.txt`: `status=0`.
+- `mylite-embedded-bootstrap-report.txt`: `status=0`.
+
+Observed artifacts after this slice:
+
+- `build/mariadb-minsize/libmysqld/libmariadbd.a`: 44,337,954 bytes.
+- `build/mariadb-minsize/mylite/libmylite.a`: 29,698 bytes.
+- `build/mariadb-minsize/mylite/mylite-compatibility-smoke`: 22,696,256
+  bytes.
+- `build/mariadb-minsize/mylite/mylite-storage-engine-smoke`: 22,695,648
+  bytes.
+- `build/mariadb-minsize/mylite/mylite-open-close-smoke`: 22,696,984 bytes.
+- `build/mariadb-minsize/mylite/mylite-embedded-bootstrap-smoke`: 22,695,376
+  bytes.
+- `build/mariadb-minsize/mylite-compatibility-mylite/catalog.mylite`: 167,936
+  bytes.
+- `build/mariadb-minsize/mylite-catalog-persistence/catalog.mylite`: 413,696
+  bytes.
+- `build/mariadb-minsize/mylite-catalog-recovery/catalog.mylite`: 372,736
+  bytes.
+
 ## Risks And Unresolved Questions
 
 - Tables still rewrite all live rows on every mutation.

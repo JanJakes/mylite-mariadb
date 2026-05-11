@@ -242,7 +242,7 @@ if not headers:
 
 headers.sort(reverse=True)
 
-def read_chain(root_offset, length, expected_type):
+def read_chain(root_offset, length, expected_type, exact_payload_lengths):
     if root_offset < page_size * 2 or root_offset % page_size != 0:
         fail("invalid page-chain root offset")
     if length == 0:
@@ -267,8 +267,11 @@ def read_chain(root_offset, length, expected_type):
             fail("unexpected page type")
         if stored_page_id != page_id:
             fail("unexpected page id")
-        expected_used = min(remaining, page_payload_capacity)
-        if used != expected_used:
+        if exact_payload_lengths:
+            expected_used = min(remaining, page_payload_capacity)
+            if used != expected_used:
+                fail("unexpected page payload length")
+        elif used == 0 or used > remaining:
             fail("unexpected page payload length")
         page_types.append(page_type)
         payload.extend(page[page_payload_offset:page_payload_offset + used])
@@ -282,7 +285,9 @@ def read_chain(root_offset, length, expected_type):
         page_id = next_page_id
     return bytes(payload), page_types
 
-catalog_payload, catalog_page_types = read_chain(headers[0][2], headers[0][3], 1)
+catalog_payload, catalog_page_types = read_chain(
+    headers[0][2], headers[0][3], 1, True
+)
 try:
     catalog_lines = catalog_payload.decode("ascii").splitlines()
 except UnicodeDecodeError:
@@ -296,6 +301,7 @@ if not rowpage_records:
     fail("catalog has no ROWPAGE records")
 
 row_payloads = []
+row_payload_page_counts = []
 for line in rowpage_records:
     parts = line.split("\t")
     if len(parts) != 6:
@@ -304,15 +310,22 @@ for line in rowpage_records:
     length = int(parts[4])
     if root_offset == 0 and length == 0:
         continue
-    payload, page_types = read_chain(root_offset, length, 2)
-    if not payload.startswith(b"MYLITE ROWS 1\n"):
-        fail("invalid row payload magic")
-    if b"\nROW\t" not in payload:
-        fail("row payload has no row records")
-    row_payloads.append(
+    payload, page_types = read_chain(root_offset, length, 2, False)
+    if not payload.startswith(b"MYLITEROWSLOT2\0\0"):
+        fail("invalid row slot payload magic")
+    if read_u32(payload, 16) != 2:
+        fail("invalid row slot format version")
+    row_count = read_u32(payload, 20)
+    if row_count == 0:
+        fail("row slot payload has no row records")
+    row_payload = (
         f"{bytes.fromhex(parts[1]).decode('ascii')}."
         f"{bytes.fromhex(parts[2]).decode('ascii')}"
     )
+    if row_payload == "mylite.persisted_wide" and len(page_types) < 2:
+        fail("wide row payload did not span pages")
+    row_payloads.append(row_payload)
+    row_payload_page_counts.append(f"{row_payload}:{len(page_types)}")
 
 if not row_payloads:
     fail("no nonempty row payload chains")
@@ -325,6 +338,8 @@ with report.open("a") as out:
     out.write(f"catalog_row_records={len(catalog_row_records)}\n")
     out.write(f"rowpage_records={len(rowpage_records)}\n")
     out.write(f"row_payloads={','.join(row_payloads)}\n")
+    out.write(f"row_payload_page_counts={','.join(row_payload_page_counts)}\n")
+    out.write("row_payload_magic=MYLITEROWSLOT2\n")
     out.write("row_payload_page_type=2\n")
 PY
 }

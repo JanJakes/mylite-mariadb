@@ -172,10 +172,11 @@ transaction recovery system.
 The first row-storage proof stores simple non-BLOB row images with hidden
 64-bit row ids. It now writes those row images into typed per-table row payload
 page chains addressed by catalog `ROWPAGE` roots, rather than as `ROW` records
-inside the logical catalog payload. This validates MariaDB handler
-read/write/update/delete integration, fresh-process persistence, and row-page
-recovery fallback, but it is still a temporary raw-record bridge. Real row
-slots, page-local free-space management, transaction recovery, and durable
+inside the logical catalog payload. New writes use page-local binary row slot
+directories and packed record bytes inside row payload pages. This validates
+MariaDB handler read/write/update/delete integration, fresh-process
+persistence, and row-page recovery fallback, but it is still a temporary
+raw-record bridge. Page reuse, overflow rows, transaction recovery, and durable
 index pages are still needed.
 
 The current bridge layer accepts supported non-null BTREE/undefined keys and
@@ -191,6 +192,10 @@ publish the active catalog generation, and the catalog generation points to
 table row roots. The page store has catalog and row page types; indexes,
 free-space tracking, and transaction/recovery pages still need dedicated
 formats before the raw-record bridge can be retired.
+
+Until overflow pages exist, supported fixed MariaDB record images must fit in a
+single row slot page. With the current page size this means a maximum fixed
+record image of 3984 bytes. Larger non-BLOB tables are rejected explicitly.
 
 ## Schemas
 

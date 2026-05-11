@@ -43,6 +43,7 @@ struct SmokeResult
   std::string unsupported_blob;
   std::string unsupported_key;
   std::string unsupported_autoincrement;
+  std::string unsupported_large_row;
   std::string key_lookup_note;
   std::string key_order_ids;
   std::string duplicate_key;
@@ -53,6 +54,7 @@ struct SmokeResult
   std::string persisted_column;
   std::string persisted_notes;
   std::string persisted_autoincrement_ids;
+  std::string persisted_wide_count;
   std::string recovery_marker;
 };
 
@@ -583,6 +585,14 @@ static bool exercise_dml(MYSQL *mysql, SmokeResult *result)
         "unsupported autoincrement table", &result->unsupported_autoincrement,
         result))
     return false;
+  if (!execute_statement_expect_error(mysql,
+                                      "CREATE TABLE mylite.unsupported_large_row "
+                                      "(note VARCHAR(5000) NOT NULL) "
+                                      "ENGINE=MYLITE",
+                                      "unsupported large row table",
+                                      &result->unsupported_large_row,
+                                      result))
+    return false;
 
   return true;
 }
@@ -807,6 +817,33 @@ static bool exercise_persistence_write(MYSQL *mysql, SmokeResult *result)
     return false;
   }
 
+  if (!execute_statement(mysql,
+                         "CREATE TABLE mylite.persisted_wide "
+                         "(id INT, note VARCHAR(900) NOT NULL) "
+                         "ENGINE=MYLITE",
+                         "CREATE persisted wide table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.persisted_wide VALUES "
+                         "(1, REPEAT('a', 900)), "
+                         "(2, REPEAT('b', 900)), "
+                         "(3, REPEAT('c', 900)), "
+                         "(4, REPEAT('d', 900)), "
+                         "(5, REPEAT('e', 900)), "
+                         "(6, REPEAT('f', 900))",
+                         "INSERT persisted wide rows", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT COUNT(*) FROM mylite.persisted_wide",
+                          "persisted write wide count",
+                          &result->persisted_wide_count, result))
+    return false;
+  if (result->persisted_wide_count != "6")
+  {
+    result->message= "persisted write wide count returned an unexpected value";
+    return false;
+  }
+
   return true;
 }
 
@@ -876,6 +913,21 @@ static bool exercise_persistence_read(MYSQL *mysql, SmokeResult *result)
   {
     result->message= "persisted read autoincrement ids returned an "
                      "unexpected value";
+    return false;
+  }
+
+  if (!verify_table_present(mysql,
+                            "SHOW TABLES FROM mylite LIKE 'persisted_wide'",
+                            "persisted wide table", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT COUNT(*) FROM mylite.persisted_wide",
+                          "persisted read wide count",
+                          &result->persisted_wide_count, result))
+    return false;
+  if (result->persisted_wide_count != "6")
+  {
+    result->message= "persisted read wide count returned an unexpected value";
     return false;
   }
 
@@ -1108,6 +1160,9 @@ static void write_report(const SmokeOptions &options,
   if (!result.unsupported_autoincrement.empty())
     report << "unsupported_autoincrement="
            << result.unsupported_autoincrement << "\n";
+  if (!result.unsupported_large_row.empty())
+    report << "unsupported_large_row="
+           << result.unsupported_large_row << "\n";
   if (!result.key_lookup_note.empty())
     report << "key_lookup_note=" << result.key_lookup_note << "\n";
   if (!result.key_order_ids.empty())
@@ -1130,6 +1185,8 @@ static void write_report(const SmokeOptions &options,
   if (!result.persisted_autoincrement_ids.empty())
     report << "persisted_autoincrement_ids="
            << result.persisted_autoincrement_ids << "\n";
+  if (!result.persisted_wide_count.empty())
+    report << "persisted_wide_count=" << result.persisted_wide_count << "\n";
   if (!result.recovery_marker.empty())
     report << "recovery_marker=" << result.recovery_marker << "\n";
 }
