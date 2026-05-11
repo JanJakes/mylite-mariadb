@@ -80,6 +80,7 @@ next durable write.
 | 19 | `free-list-page-reuse` | Done | Persist and validate free page ranges, then reuse complete obsolete row and index page chains from accepted prior generations. |
 | 20 | `orphan-page-reclaim` | Done | Reclaim complete unreferenced pages left by rejected or unpublished generations after recovery accepts a safe catalog generation. |
 | 21 | `allocator-page-store` | Done | Store free-page ranges in a dedicated allocator page chain so catalog payload chains can reuse accepted free ranges. |
+| 22 | `transaction-boundary-semantics` | In progress | Make MyLite's current non-transactional rollback boundary explicit in engine flags, tests, and docs before real journal/WAL work. |
 
 ## Size and profile direction
 
