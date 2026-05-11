@@ -137,19 +137,20 @@ Return values:
 - `MYLITE_DONE` when execution is complete,
 - another code on error.
 
-The first implementation supports no-parameter statements. `mylite_step()`
-executes lazily on the first call, buffers result sets, and keeps column values
-valid until the next `mylite_step()`, `mylite_reset()`, or
-`mylite_finalize()`. `sql_len == 0` uses `strlen(sql)` for C-string
-convenience, and `tail`, when supplied, points to the end of the prepared SQL
-on success. Statements containing parameter markers return `MYLITE_MISUSE`
-until binding APIs are implemented.
+The first implementation executes lazily on the first `mylite_step()`, buffers
+result sets, and keeps column values valid until the next `mylite_step()`,
+`mylite_reset()`, or `mylite_finalize()`. `sql_len == 0` uses `strlen(sql)` for
+C-string convenience, and `tail`, when supplied, points to the end of the
+prepared SQL on success.
 
 Bind indexes are 1-based, matching SQLite's convention for parameter slots.
 
 ## Bindings
 
 ```c
+#define MYLITE_STATIC ((void (*)(void *))0)
+#define MYLITE_TRANSIENT ((void (*)(void *))-1)
+
 int mylite_bind_null(mylite_stmt *stmt, unsigned index);
 int mylite_bind_int64(mylite_stmt *stmt, unsigned index, long long value);
 int mylite_bind_uint64(mylite_stmt *stmt, unsigned index, unsigned long long value);
@@ -172,11 +173,19 @@ MariaDB supports richer types than SQLite. Later APIs should add typed date,
 time, decimal, JSON, and geometry bindings instead of forcing everything through
 text.
 
-The destructor callback follows SQLite's ownership shape: MyLite either
-borrows the input until statement reset/finalize, copies it immediately, or
-calls the provided destructor after it no longer needs the value. The final API
-should define `MYLITE_STATIC` and `MYLITE_TRANSIENT` constants instead of
-requiring users to write sentinel function pointers directly.
+The first implementation copies text and BLOB input immediately into
+`mylite_stmt` storage, including embedded NUL bytes. `MYLITE_STATIC` and
+`MYLITE_TRANSIENT` are accepted as ownership sentinels but both result in an
+immediate MyLite-owned copy in this implementation. A custom destructor is
+called after a successful copy because MyLite no longer needs the caller's
+input object. If validation or allocation fails, ownership remains with the
+caller and the destructor is not called.
+
+A NULL text or BLOB pointer binds SQL NULL. Binding is allowed before the first
+`mylite_step()` and after `mylite_reset()`. `mylite_reset()` preserves existing
+bindings so a statement can be re-executed without rebinding every parameter.
+Changing bindings after a statement has been stepped requires
+`mylite_reset()` first.
 
 ## Memory ownership
 

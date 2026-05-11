@@ -67,6 +67,9 @@ typedef enum mylite_result {
 #define MYLITE_OPEN_EXCLUSIVE  0x00000008u
 #define MYLITE_OPEN_URI        0x00000010u
 
+#define MYLITE_STATIC ((void (*)(void *))0)
+#define MYLITE_TRANSIENT ((void (*)(void *))-1)
+
 MYLITE_API int mylite_open(const char *filename, mylite_db **out_db);
 MYLITE_API int mylite_open_v2(
     const char *filename,
@@ -96,6 +99,32 @@ MYLITE_API int mylite_prepare(
 MYLITE_API int mylite_step(mylite_stmt *stmt);
 MYLITE_API int mylite_reset(mylite_stmt *stmt);
 MYLITE_API int mylite_finalize(mylite_stmt *stmt);
+
+MYLITE_API int mylite_bind_null(mylite_stmt *stmt, unsigned index);
+MYLITE_API int mylite_bind_int64(
+    mylite_stmt *stmt,
+    unsigned index,
+    long long value);
+MYLITE_API int mylite_bind_uint64(
+    mylite_stmt *stmt,
+    unsigned index,
+    unsigned long long value);
+MYLITE_API int mylite_bind_double(
+    mylite_stmt *stmt,
+    unsigned index,
+    double value);
+MYLITE_API int mylite_bind_text(
+    mylite_stmt *stmt,
+    unsigned index,
+    const char *value,
+    size_t value_len,
+    void (*destructor)(void *));
+MYLITE_API int mylite_bind_blob(
+    mylite_stmt *stmt,
+    unsigned index,
+    const void *value,
+    size_t value_len,
+    void (*destructor)(void *));
 
 MYLITE_API unsigned mylite_column_count(mylite_stmt *stmt);
 MYLITE_API const char *mylite_column_name(mylite_stmt *stmt, unsigned column);

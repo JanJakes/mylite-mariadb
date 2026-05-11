@@ -42,6 +42,28 @@ struct mylite_db
   unsigned open_statements= 0;
 };
 
+enum PreparedParameterKind
+{
+  PARAMETER_UNBOUND,
+  PARAMETER_NULL,
+  PARAMETER_INT64,
+  PARAMETER_UINT64,
+  PARAMETER_DOUBLE,
+  PARAMETER_TEXT,
+  PARAMETER_BLOB
+};
+
+struct PreparedParameter
+{
+  PreparedParameterKind kind= PARAMETER_UNBOUND;
+  my_bool is_null= 0;
+  long long int64_value= 0;
+  unsigned long long uint64_value= 0;
+  double double_value= 0.0;
+  std::vector<char> bytes;
+  unsigned long length= 0;
+};
+
 struct mylite_stmt
 {
   mylite_db *db= nullptr;
@@ -49,6 +71,8 @@ struct mylite_stmt
   MYSQL_RES *metadata= nullptr;
   std::vector<std::string> column_names;
   std::vector<int> column_types;
+  std::vector<PreparedParameter> parameters;
+  std::vector<MYSQL_BIND> param_binds;
   std::vector<MYSQL_BIND> result_binds;
   std::vector<std::vector<char>> column_buffers;
   std::vector<unsigned long> column_lengths;
@@ -102,9 +126,16 @@ int connect_handle(mylite_db *db);
 int execute_result_callback(mylite_db *db, MYSQL_RES *result,
                             mylite_exec_callback callback, void *ctx);
 int execute_prepared_statement(mylite_stmt *stmt);
+int bind_prepared_parameters(mylite_stmt *stmt);
 int bind_prepared_result(mylite_stmt *stmt);
 int fetch_prepared_row(mylite_stmt *stmt);
 int fetch_truncated_columns(mylite_stmt *stmt);
+int bind_prepared_bytes(mylite_stmt *stmt, unsigned index,
+                        PreparedParameterKind kind, const void *value,
+                        size_t value_len, void (*destructor)(void *));
+int get_bind_parameter(mylite_stmt *stmt, unsigned index,
+                       PreparedParameter **param);
+bool custom_bind_destructor(void (*destructor)(void *));
 void reset_prepared_result_state(mylite_stmt *stmt);
 void free_statement_metadata(mylite_stmt *stmt);
 int set_error_from_stmt(mylite_stmt *stmt);
@@ -328,13 +359,6 @@ extern "C" int mylite_prepare(mylite_db *db, const char *sql,
     return rc;
   }
 
-  if (mysql_stmt_param_count(mysql_stmt) != 0)
-  {
-    mysql_stmt_close(mysql_stmt);
-    return set_error(db, MYLITE_MISUSE, 0, "HY000",
-                     "parameter binding is not implemented");
-  }
-
   mylite_stmt *stmt= new (std::nothrow) mylite_stmt;
   if (!stmt)
   {
@@ -375,6 +399,29 @@ extern "C" int mylite_prepare(mylite_db *db, const char *sql,
       delete stmt;
       return set_error(db, MYLITE_NOMEM, 0, "HY001", "out of memory");
     }
+  }
+
+  const unsigned long param_count= mysql_stmt_param_count(mysql_stmt);
+  if (param_count > UINT_MAX)
+  {
+    free_statement_metadata(stmt);
+    mysql_stmt_close(mysql_stmt);
+    delete stmt;
+    return set_error(db, MYLITE_MISUSE, 0, "HY000",
+                     "prepared statement has too many parameters");
+  }
+
+  try
+  {
+    stmt->parameters.assign(static_cast<size_t>(param_count),
+                            PreparedParameter());
+  }
+  catch (const std::bad_alloc &)
+  {
+    free_statement_metadata(stmt);
+    mysql_stmt_close(mysql_stmt);
+    delete stmt;
+    return set_error(db, MYLITE_NOMEM, 0, "HY001", "out of memory");
   }
 
   ++db->open_statements;
@@ -426,6 +473,97 @@ extern "C" int mylite_finalize(mylite_stmt *stmt)
   if (db)
     clear_error(db);
   return close_error ? MYLITE_ERROR : MYLITE_OK;
+}
+
+extern "C" int mylite_bind_null(mylite_stmt *stmt, unsigned index)
+{
+  PreparedParameter *param= nullptr;
+  const int rc= get_bind_parameter(stmt, index, &param);
+  if (rc != MYLITE_OK)
+    return rc;
+
+  param->kind= PARAMETER_NULL;
+  param->is_null= 1;
+  param->int64_value= 0;
+  param->uint64_value= 0;
+  param->double_value= 0.0;
+  param->bytes.clear();
+  param->length= 0;
+  clear_error(stmt->db);
+  return MYLITE_OK;
+}
+
+extern "C" int mylite_bind_int64(mylite_stmt *stmt, unsigned index,
+                                  long long value)
+{
+  PreparedParameter *param= nullptr;
+  const int rc= get_bind_parameter(stmt, index, &param);
+  if (rc != MYLITE_OK)
+    return rc;
+
+  param->kind= PARAMETER_INT64;
+  param->is_null= 0;
+  param->int64_value= value;
+  param->uint64_value= 0;
+  param->double_value= 0.0;
+  param->bytes.clear();
+  param->length= 0;
+  clear_error(stmt->db);
+  return MYLITE_OK;
+}
+
+extern "C" int mylite_bind_uint64(mylite_stmt *stmt, unsigned index,
+                                   unsigned long long value)
+{
+  PreparedParameter *param= nullptr;
+  const int rc= get_bind_parameter(stmt, index, &param);
+  if (rc != MYLITE_OK)
+    return rc;
+
+  param->kind= PARAMETER_UINT64;
+  param->is_null= 0;
+  param->int64_value= 0;
+  param->uint64_value= value;
+  param->double_value= 0.0;
+  param->bytes.clear();
+  param->length= 0;
+  clear_error(stmt->db);
+  return MYLITE_OK;
+}
+
+extern "C" int mylite_bind_double(mylite_stmt *stmt, unsigned index,
+                                   double value)
+{
+  PreparedParameter *param= nullptr;
+  const int rc= get_bind_parameter(stmt, index, &param);
+  if (rc != MYLITE_OK)
+    return rc;
+
+  param->kind= PARAMETER_DOUBLE;
+  param->is_null= 0;
+  param->int64_value= 0;
+  param->uint64_value= 0;
+  param->double_value= value;
+  param->bytes.clear();
+  param->length= 0;
+  clear_error(stmt->db);
+  return MYLITE_OK;
+}
+
+extern "C" int mylite_bind_text(mylite_stmt *stmt, unsigned index,
+                                 const char *value, size_t value_len,
+                                 void (*destructor)(void *))
+{
+  return bind_prepared_bytes(stmt, index, PARAMETER_TEXT, value, value_len,
+                             destructor);
+}
+
+extern "C" int mylite_bind_blob(mylite_stmt *stmt, unsigned index,
+                                 const void *value, size_t value_len,
+                                 void (*destructor)(void *))
+{
+  return bind_prepared_bytes(stmt, index, PARAMETER_BLOB, value, value_len,
+                             destructor);
 }
 
 extern "C" unsigned mylite_column_count(mylite_stmt *stmt)
@@ -807,6 +945,10 @@ int execute_prepared_statement(mylite_stmt *stmt)
   mylite_db *db= stmt->db;
   clear_error(db);
 
+  const int param_bind_result= bind_prepared_parameters(stmt);
+  if (param_bind_result != MYLITE_OK)
+    return param_bind_result;
+
   my_bool update_max_length= 1;
   if (mysql_stmt_attr_set(stmt->stmt, STMT_ATTR_UPDATE_MAX_LENGTH,
                           &update_max_length) != 0)
@@ -829,6 +971,71 @@ int execute_prepared_statement(mylite_stmt *stmt)
   if (bind_result != MYLITE_OK)
     return bind_result;
   return fetch_prepared_row(stmt);
+}
+
+int bind_prepared_parameters(mylite_stmt *stmt)
+{
+  const size_t param_count= stmt->parameters.size();
+  if (param_count == 0)
+    return MYLITE_OK;
+
+  try
+  {
+    stmt->param_binds.assign(param_count, MYSQL_BIND());
+  }
+  catch (const std::bad_alloc &)
+  {
+    return set_error(stmt->db, MYLITE_NOMEM, 0, "HY001", "out of memory");
+  }
+
+  for (size_t i= 0; i < param_count; ++i)
+  {
+    PreparedParameter &param= stmt->parameters[i];
+    if (param.kind == PARAMETER_UNBOUND)
+      return set_error(stmt->db, MYLITE_MISUSE, 0, "HY000",
+                       "not all parameters are bound");
+
+    MYSQL_BIND &bind= stmt->param_binds[i];
+    switch (param.kind) {
+    case PARAMETER_NULL:
+      bind.buffer_type= MYSQL_TYPE_NULL;
+      break;
+    case PARAMETER_INT64:
+      bind.buffer_type= MYSQL_TYPE_LONGLONG;
+      bind.buffer= &param.int64_value;
+      break;
+    case PARAMETER_UINT64:
+      bind.buffer_type= MYSQL_TYPE_LONGLONG;
+      bind.buffer= &param.uint64_value;
+      bind.is_unsigned= 1;
+      break;
+    case PARAMETER_DOUBLE:
+      bind.buffer_type= MYSQL_TYPE_DOUBLE;
+      bind.buffer= &param.double_value;
+      break;
+    case PARAMETER_TEXT:
+      bind.buffer_type= MYSQL_TYPE_STRING;
+      bind.buffer= param.bytes.data();
+      bind.buffer_length= param.length;
+      bind.length= &param.length;
+      bind.is_null= &param.is_null;
+      break;
+    case PARAMETER_BLOB:
+      bind.buffer_type= MYSQL_TYPE_BLOB;
+      bind.buffer= param.bytes.data();
+      bind.buffer_length= param.length;
+      bind.length= &param.length;
+      bind.is_null= &param.is_null;
+      break;
+    case PARAMETER_UNBOUND:
+      return set_error(stmt->db, MYLITE_MISUSE, 0, "HY000",
+                       "not all parameters are bound");
+    }
+  }
+
+  if (mysql_stmt_bind_param(stmt->stmt, stmt->param_binds.data()) != 0)
+    return set_error_from_stmt(stmt);
+  return MYLITE_OK;
 }
 
 int bind_prepared_result(mylite_stmt *stmt)
@@ -977,8 +1184,76 @@ int fetch_truncated_columns(mylite_stmt *stmt)
   return MYLITE_OK;
 }
 
+int bind_prepared_bytes(mylite_stmt *stmt, unsigned index,
+                        PreparedParameterKind kind, const void *value,
+                        size_t value_len, void (*destructor)(void *))
+{
+  PreparedParameter *param= nullptr;
+  const int rc= get_bind_parameter(stmt, index, &param);
+  if (rc != MYLITE_OK)
+    return rc;
+
+  if (!value)
+    return mylite_bind_null(stmt, index);
+
+  if (value_len > ULONG_MAX)
+    return set_error(stmt->db, MYLITE_MISUSE, 0, "HY000",
+                     "bound value is too large");
+
+  std::vector<char> bytes;
+  try
+  {
+    const char *begin= static_cast<const char *>(value);
+    bytes.assign(begin, begin + value_len);
+    if (bytes.empty())
+      bytes.push_back('\0');
+  }
+  catch (const std::bad_alloc &)
+  {
+    return set_error(stmt->db, MYLITE_NOMEM, 0, "HY001", "out of memory");
+  }
+
+  param->kind= kind;
+  param->is_null= 0;
+  param->int64_value= 0;
+  param->uint64_value= 0;
+  param->double_value= 0.0;
+  param->bytes.swap(bytes);
+  param->length= static_cast<unsigned long>(value_len);
+  clear_error(stmt->db);
+
+  if (custom_bind_destructor(destructor))
+    destructor(const_cast<void *>(value));
+  return MYLITE_OK;
+}
+
+int get_bind_parameter(mylite_stmt *stmt, unsigned index,
+                       PreparedParameter **param)
+{
+  if (param)
+    *param= nullptr;
+  if (!stmt || !stmt->stmt || !stmt->db)
+    return MYLITE_MISUSE;
+  if (stmt->executed)
+    return set_error(stmt->db, MYLITE_MISUSE, 0, "HY000",
+                     "statement must be reset before rebinding parameters");
+  if (index == 0 || index > stmt->parameters.size())
+    return set_error(stmt->db, MYLITE_MISUSE, 0, "HY000",
+                     "parameter index is out of range");
+
+  if (param)
+    *param= &stmt->parameters[index - 1];
+  return MYLITE_OK;
+}
+
+bool custom_bind_destructor(void (*destructor)(void *))
+{
+  return destructor && destructor != MYLITE_TRANSIENT;
+}
+
 void reset_prepared_result_state(mylite_stmt *stmt)
 {
+  stmt->param_binds.clear();
   stmt->result_binds.clear();
   stmt->column_buffers.clear();
   stmt->column_lengths.clear();

@@ -45,12 +45,17 @@ struct SmokeResult
   std::string exec_duplicate_key_message;
   std::string exec_reopen_rows;
   std::string statement_effects;
-  std::string prepared_param_message;
+  std::string prepared_unbound_message;
+  std::string prepared_invalid_bind_message;
+  std::string prepared_rebind_message;
   std::string prepared_columns;
   std::string prepared_types;
   std::string prepared_rows;
   std::string prepared_reset_row;
   std::string prepared_dml_rows;
+  std::string prepared_bound_rows;
+  std::string prepared_bound_reset_rows;
+  std::string prepared_bind_destructor_count;
   std::string prepared_close_busy_message;
   std::vector<CaseResult> cases;
 };
@@ -61,6 +66,8 @@ struct ExecCapture
   std::vector<std::string> rows;
   int abort_after= 0;
 };
+
+static int bind_destructor_calls= 0;
 
 static bool parse_options(int argc, char **argv, SmokeOptions *options,
                           std::string *error);
@@ -102,10 +109,12 @@ static void append_statement_effect(SmokeResult *result, const char *label,
                                     const std::string &value);
 static std::string statement_effect_summary(mylite_db *db);
 static std::string prepared_row_summary(mylite_stmt *stmt);
+static std::string prepared_bound_row_summary(mylite_stmt *stmt);
 static std::string prepared_type_summary(mylite_stmt *stmt);
 static std::string hex_bytes(const void *data, size_t length);
 static int capture_exec_row(void *ctx, int column_count, char **values,
                             char **column_names);
+static void count_bind_destructor(void *ptr);
 static bool record_result(SmokeResult *result, const char *label, int expected,
                           int actual, mylite_db *db);
 static std::string join_strings(const std::vector<std::string> &values,
@@ -638,11 +647,50 @@ static bool check_prepared_statement_api(const SmokeOptions &options,
       ok;
 
   rc= mylite_prepare(db, "SELECT ?", 0, &stmt, &tail);
-  result->prepared_param_message= mylite_errmsg(db);
-  ok= record_result(result, "prepare_parameter_marker", MYLITE_MISUSE, rc,
+  ok= record_result(result, "prepare_parameter_marker", MYLITE_OK, rc,
                     db) && ok;
-  if (result->prepared_param_message != "parameter binding is not implemented")
-    ok= false;
+  if (stmt)
+  {
+    rc= mylite_step(stmt);
+    result->prepared_unbound_message= mylite_errmsg(db);
+    ok= record_result(result, "prepared_unbound_step", MYLITE_MISUSE, rc,
+                      db) && ok;
+    if (result->prepared_unbound_message != "not all parameters are bound")
+      ok= false;
+
+    rc= mylite_bind_int64(stmt, 2, 42);
+    result->prepared_invalid_bind_message= mylite_errmsg(db);
+    ok= record_result(result, "prepared_invalid_bind_index", MYLITE_MISUSE,
+                      rc, db) && ok;
+    if (result->prepared_invalid_bind_message !=
+        "parameter index is out of range")
+      ok= false;
+
+    rc= mylite_bind_int64(stmt, 1, 42);
+    ok= record_result(result, "prepared_bind_marker", MYLITE_OK, rc,
+                      db) && ok;
+    rc= mylite_step(stmt);
+    ok= record_result(result, "prepared_bound_marker_row", MYLITE_ROW, rc,
+                      db) && ok;
+    if (rc == MYLITE_ROW && mylite_column_int64(stmt, 0) != 42)
+      ok= false;
+    rc= mylite_step(stmt);
+    ok= record_result(result, "prepared_bound_marker_done", MYLITE_DONE,
+                      rc, db) && ok;
+
+    rc= mylite_bind_int64(stmt, 1, 43);
+    result->prepared_rebind_message= mylite_errmsg(db);
+    ok= record_result(result, "prepared_rebind_without_reset",
+                      MYLITE_MISUSE, rc, db) && ok;
+    if (result->prepared_rebind_message !=
+        "statement must be reset before rebinding parameters")
+      ok= false;
+
+    rc= mylite_finalize(stmt);
+    stmt= nullptr;
+    ok= record_result(result, "prepared_finalize_marker", MYLITE_OK, rc,
+                      db) && ok;
+  }
 
   ok= exec_statement(db, "DROP TABLE IF EXISTS mylite.prepared_rows",
                      "prepared_drop_existing", result) && ok;
@@ -735,6 +783,193 @@ static bool check_prepared_statement_api(const SmokeOptions &options,
   if (result->prepared_dml_rows != "1:one,2:NULL,3:three")
     ok= false;
 
+  ok= exec_statement(db, "DROP TABLE IF EXISTS mylite.prepared_bind_rows",
+                     "prepared_bind_drop_existing", result) && ok;
+  ok= exec_statement(db,
+                     "CREATE TABLE mylite.prepared_bind_rows "
+                     "(id INT NOT NULL, signed_value BIGINT, "
+                     "unsigned_value BIGINT UNSIGNED, amount DOUBLE, "
+                     "note VARCHAR(40), payload BLOB, PRIMARY KEY(id)) "
+                     "ENGINE=MYLITE",
+                     "prepared_bind_create_table", result) && ok;
+
+  rc= mylite_prepare(db,
+                     "INSERT INTO mylite.prepared_bind_rows "
+                     "(id, signed_value, unsigned_value, amount, note, "
+                     "payload) VALUES (?, ?, ?, ?, ?, ?)",
+                     0, &stmt, &tail);
+  ok= record_result(result, "prepare_bound_insert", MYLITE_OK, rc, db) &&
+      ok;
+  if (stmt)
+  {
+    const char payload_one[]= { 'a', '\0', 'b' };
+    ok= record_result(result, "bind_row1_id", MYLITE_OK,
+                      mylite_bind_int64(stmt, 1, 1), db) && ok;
+    ok= record_result(result, "bind_row1_signed", MYLITE_OK,
+                      mylite_bind_int64(stmt, 2, -1234567890123LL),
+                      db) && ok;
+    ok= record_result(result, "bind_row1_unsigned", MYLITE_OK,
+                      mylite_bind_uint64(stmt, 3, 9223372036854775810ULL),
+                      db) && ok;
+    ok= record_result(result, "bind_row1_double", MYLITE_OK,
+                      mylite_bind_double(stmt, 4, 3.5), db) && ok;
+    ok= record_result(result, "bind_row1_text", MYLITE_OK,
+                      mylite_bind_text(stmt, 5, "hello", 5,
+                                       MYLITE_TRANSIENT),
+                      db) && ok;
+    ok= record_result(result, "bind_row1_blob", MYLITE_OK,
+                      mylite_bind_blob(stmt, 6, payload_one,
+                                       sizeof(payload_one),
+                                       MYLITE_TRANSIENT),
+                      db) && ok;
+    rc= mylite_step(stmt);
+    ok= record_result(result, "prepared_bound_insert_row1", MYLITE_DONE,
+                      rc, db) && ok;
+
+    rc= mylite_reset(stmt);
+    ok= record_result(result, "prepared_bound_reset_row2", MYLITE_OK, rc,
+                      db) && ok;
+    ok= record_result(result, "bind_row2_id", MYLITE_OK,
+                      mylite_bind_int64(stmt, 1, 2), db) && ok;
+    ok= record_result(result, "bind_row2_signed_null", MYLITE_OK,
+                      mylite_bind_null(stmt, 2), db) && ok;
+    ok= record_result(result, "bind_row2_unsigned", MYLITE_OK,
+                      mylite_bind_uint64(stmt, 3, 7), db) && ok;
+    ok= record_result(result, "bind_row2_double", MYLITE_OK,
+                      mylite_bind_double(stmt, 4, -2.25), db) && ok;
+    ok= record_result(result, "bind_row2_text_null", MYLITE_OK,
+                      mylite_bind_text(stmt, 5, nullptr, 0,
+                                       MYLITE_STATIC),
+                      db) && ok;
+    ok= record_result(result, "bind_row2_blob_null", MYLITE_OK,
+                      mylite_bind_blob(stmt, 6, nullptr, 0,
+                                       MYLITE_STATIC),
+                      db) && ok;
+    rc= mylite_step(stmt);
+    ok= record_result(result, "prepared_bound_insert_row2", MYLITE_DONE,
+                      rc, db) && ok;
+
+    bind_destructor_calls= 0;
+    rc= mylite_reset(stmt);
+    ok= record_result(result, "prepared_bound_reset_row3", MYLITE_OK, rc,
+                      db) && ok;
+    const char payload_three[]= { 'z' };
+    char custom_note[]= "custom";
+    ok= record_result(result, "bind_row3_id", MYLITE_OK,
+                      mylite_bind_int64(stmt, 1, 3), db) && ok;
+    ok= record_result(result, "bind_row3_signed", MYLITE_OK,
+                      mylite_bind_int64(stmt, 2, 0), db) && ok;
+    ok= record_result(result, "bind_row3_unsigned", MYLITE_OK,
+                      mylite_bind_uint64(stmt, 3, 0), db) && ok;
+    ok= record_result(result, "bind_row3_double", MYLITE_OK,
+                      mylite_bind_double(stmt, 4, 0.25), db) && ok;
+    ok= record_result(result, "bind_row3_text_destructor", MYLITE_OK,
+                      mylite_bind_text(stmt, 5, custom_note,
+                                       std::strlen(custom_note),
+                                       count_bind_destructor),
+                      db) && ok;
+    ok= record_result(result, "bind_row3_blob", MYLITE_OK,
+                      mylite_bind_blob(stmt, 6, payload_three,
+                                       sizeof(payload_three),
+                                       MYLITE_STATIC),
+                      db) && ok;
+    result->prepared_bind_destructor_count=
+      std::to_string(bind_destructor_calls);
+    if (bind_destructor_calls != 1)
+      ok= false;
+    rc= mylite_step(stmt);
+    ok= record_result(result, "prepared_bound_insert_row3", MYLITE_DONE,
+                      rc, db) && ok;
+
+    rc= mylite_finalize(stmt);
+    stmt= nullptr;
+    ok= record_result(result, "prepared_finalize_bound_insert", MYLITE_OK,
+                      rc, db) && ok;
+  }
+
+  rc= mylite_prepare(db,
+                     "SELECT id, signed_value, unsigned_value, amount, "
+                     "note, payload FROM mylite.prepared_bind_rows "
+                     "ORDER BY id",
+                     0, &stmt, &tail);
+  ok= record_result(result, "prepare_bound_select", MYLITE_OK, rc, db) &&
+      ok;
+  if (stmt)
+  {
+    std::vector<std::string> rows;
+    while ((rc= mylite_step(stmt)) == MYLITE_ROW)
+      rows.push_back(prepared_bound_row_summary(stmt));
+    ok= record_result(result, "prepared_bound_select_done", MYLITE_DONE,
+                      rc, db) && ok;
+    result->prepared_bound_rows= join_strings(rows, ",");
+    if (result->prepared_bound_rows !=
+        "1:-1234567890123:9223372036854775810:3.500000:hello:610062,"
+        "2:NULL:7:-2.250000:NULL:NULL,"
+        "3:0:0:0.250000:custom:7a")
+      ok= false;
+
+    rc= mylite_finalize(stmt);
+    stmt= nullptr;
+    ok= record_result(result, "prepared_finalize_bound_select", MYLITE_OK,
+                      rc, db) && ok;
+  }
+
+  rc= mylite_prepare(db,
+                     "SELECT id FROM mylite.prepared_bind_rows "
+                     "WHERE id = ?",
+                     0, &stmt, &tail);
+  ok= record_result(result, "prepare_bound_reset_select", MYLITE_OK, rc,
+                    db) && ok;
+  if (stmt)
+  {
+    std::vector<std::string> reset_rows;
+    ok= record_result(result, "bind_reset_id_1", MYLITE_OK,
+                      mylite_bind_int64(stmt, 1, 1), db) && ok;
+    rc= mylite_step(stmt);
+    ok= record_result(result, "prepared_bound_reset_first_row",
+                      MYLITE_ROW, rc, db) && ok;
+    if (rc == MYLITE_ROW)
+      reset_rows.push_back(std::to_string(mylite_column_int64(stmt, 0)));
+    rc= mylite_step(stmt);
+    ok= record_result(result, "prepared_bound_reset_first_done",
+                      MYLITE_DONE, rc, db) && ok;
+
+    rc= mylite_reset(stmt);
+    ok= record_result(result, "prepared_bound_reset_preserve", MYLITE_OK,
+                      rc, db) && ok;
+    rc= mylite_step(stmt);
+    ok= record_result(result, "prepared_bound_reset_preserved_row",
+                      MYLITE_ROW, rc, db) && ok;
+    if (rc == MYLITE_ROW)
+      reset_rows.push_back(std::to_string(mylite_column_int64(stmt, 0)));
+    rc= mylite_step(stmt);
+    ok= record_result(result, "prepared_bound_reset_preserved_done",
+                      MYLITE_DONE, rc, db) && ok;
+
+    rc= mylite_reset(stmt);
+    ok= record_result(result, "prepared_bound_reset_rebind", MYLITE_OK,
+                      rc, db) && ok;
+    ok= record_result(result, "bind_reset_id_2", MYLITE_OK,
+                      mylite_bind_int64(stmt, 1, 2), db) && ok;
+    rc= mylite_step(stmt);
+    ok= record_result(result, "prepared_bound_reset_rebound_row",
+                      MYLITE_ROW, rc, db) && ok;
+    if (rc == MYLITE_ROW)
+      reset_rows.push_back(std::to_string(mylite_column_int64(stmt, 0)));
+    rc= mylite_step(stmt);
+    ok= record_result(result, "prepared_bound_reset_rebound_done",
+                      MYLITE_DONE, rc, db) && ok;
+
+    result->prepared_bound_reset_rows= join_strings(reset_rows, ",");
+    if (result->prepared_bound_reset_rows != "1,1,2")
+      ok= false;
+
+    rc= mylite_finalize(stmt);
+    stmt= nullptr;
+    ok= record_result(result, "prepared_finalize_bound_reset", MYLITE_OK,
+                      rc, db) && ok;
+  }
+
   rc= mylite_prepare(db, "SELECT 1", 0, &stmt, &tail);
   ok= record_result(result, "prepare_close_busy_select", MYLITE_OK, rc,
                     db) && ok;
@@ -801,6 +1036,26 @@ static std::string prepared_row_summary(mylite_stmt *stmt)
           "NULL");
 }
 
+static std::string prepared_bound_row_summary(mylite_stmt *stmt)
+{
+  const char *note= mylite_column_text(stmt, 4);
+  const void *payload= mylite_column_blob(stmt, 5);
+  const std::string signed_value=
+    mylite_column_type(stmt, 1) == MYLITE_NULL ?
+    "NULL" : std::to_string(mylite_column_int64(stmt, 1));
+  const std::string unsigned_value=
+    mylite_column_type(stmt, 2) == MYLITE_NULL ?
+    "NULL" : std::to_string(mylite_column_uint64(stmt, 2));
+  const std::string double_value=
+    mylite_column_type(stmt, 3) == MYLITE_NULL ?
+    "NULL" : std::to_string(mylite_column_double(stmt, 3));
+  return std::to_string(mylite_column_int64(stmt, 0)) + ":" +
+         signed_value + ":" + unsigned_value + ":" + double_value + ":" +
+         (note ? note : "NULL") + ":" +
+         (payload ? hex_bytes(payload, mylite_column_bytes(stmt, 5)) :
+          "NULL");
+}
+
 static std::string prepared_type_summary(mylite_stmt *stmt)
 {
   std::vector<std::string> types;
@@ -821,6 +1076,12 @@ static std::string hex_bytes(const void *data, size_t length)
     result.push_back(digits[bytes[i] & 0x0f]);
   }
   return result;
+}
+
+static void count_bind_destructor(void *ptr)
+{
+  if (ptr)
+    ++bind_destructor_calls;
 }
 
 static int capture_exec_row(void *ctx, int column_count, char **values,
@@ -928,8 +1189,14 @@ static void write_report(const SmokeOptions &options,
     report << "exec_reopen_rows=" << result.exec_reopen_rows << "\n";
   if (!result.statement_effects.empty())
     report << "statement_effects=" << result.statement_effects << "\n";
-  if (!result.prepared_param_message.empty())
-    report << "prepared_param_message=" << result.prepared_param_message
+  if (!result.prepared_unbound_message.empty())
+    report << "prepared_unbound_message=" << result.prepared_unbound_message
+           << "\n";
+  if (!result.prepared_invalid_bind_message.empty())
+    report << "prepared_invalid_bind_message="
+           << result.prepared_invalid_bind_message << "\n";
+  if (!result.prepared_rebind_message.empty())
+    report << "prepared_rebind_message=" << result.prepared_rebind_message
            << "\n";
   if (!result.prepared_columns.empty())
     report << "prepared_columns=" << result.prepared_columns << "\n";
@@ -941,6 +1208,14 @@ static void write_report(const SmokeOptions &options,
     report << "prepared_reset_row=" << result.prepared_reset_row << "\n";
   if (!result.prepared_dml_rows.empty())
     report << "prepared_dml_rows=" << result.prepared_dml_rows << "\n";
+  if (!result.prepared_bound_rows.empty())
+    report << "prepared_bound_rows=" << result.prepared_bound_rows << "\n";
+  if (!result.prepared_bound_reset_rows.empty())
+    report << "prepared_bound_reset_rows="
+           << result.prepared_bound_reset_rows << "\n";
+  if (!result.prepared_bind_destructor_count.empty())
+    report << "prepared_bind_destructor_count="
+           << result.prepared_bind_destructor_count << "\n";
   if (!result.prepared_close_busy_message.empty())
     report << "prepared_close_busy_message="
            << result.prepared_close_busy_message << "\n";

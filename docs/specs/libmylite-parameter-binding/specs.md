@@ -189,8 +189,15 @@ helpers, and additional smoke coverage. The MariaDB embedded archive already
 contains prepared-statement binding code, so `libmariadbd.a` object count is
 not expected to change.
 
-The post-implementation `MinSizeRel` artifact sizes will be recorded in this
-spec after verification.
+The post-implementation `MinSizeRel` build records:
+
+| Artifact | Size |
+| --- | ---: |
+| `build/mariadb-minsize/mylite/libmylite.a` | 80,838 bytes |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 44,415,256 bytes |
+
+The build report still records 571 `libmariadbd.a` archive objects and no
+dynamic plugin artifacts.
 
 ## License, Trademark, And Dependency Impact
 
@@ -244,4 +251,15 @@ The `libmylite` smoke should verify:
 
 ## Implementation Result
 
-Pending.
+Implemented in `libmylite` with MyLite-owned parameter storage. Prepared SQL
+with marker slots now returns a statement handle, all slots must be bound
+before execution, and `mylite_reset()` preserves bindings for repeated
+execution. Text and BLOB inputs are copied immediately into the statement,
+embedded NUL bytes are preserved, NULL input pointers bind SQL NULL, and a
+custom destructor is called after a successful copy.
+
+The `libmylite` smoke now verifies unbound parameter diagnostics, invalid
+indexes, reset-before-rebind enforcement, bound INSERT rows with signed,
+unsigned, double, text, BLOB, and NULL values, binary BLOB result bytes,
+binding preservation across reset, reset-and-rebind behavior, custom
+destructor invocation, and close-busy protection with active statements.
