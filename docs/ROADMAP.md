@@ -116,6 +116,7 @@ a lock timeout instead of misleading index corruption.
 | 31 | `libmylite-prepared-statements` | Done | Add the first public no-parameter prepared statement lifecycle and column accessors. |
 | 32 | `libmylite-parameter-binding` | Done | Add the first public prepared-statement parameter binding API for NULL, numeric, text, and BLOB values. |
 | 33 | `libmylite-warning-enumeration` | Done | Add structured warning, note, and error-condition retrieval through the public `libmylite` handle. |
+| 34 | `libmylite-readonly-open` | In progress | Enforce `MYLITE_OPEN_READONLY` through runtime startup, storage-engine locking, and public read-only diagnostics. |
 
 ## Size and profile direction
 
