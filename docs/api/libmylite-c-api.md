@@ -97,6 +97,11 @@ an incompatible read/write mode returns `MYLITE_BUSY`. MariaDB errno and
 SQLSTATE details are preserved; some read-only handler failures still surface
 as MariaDB SQLSTATE `HY000` with read-only errno/message details.
 
+`MYLITE_OPEN_EXCLUSIVE` is supported only with
+`MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE`. It makes the primary-file
+preflight fail with `MYLITE_CANTOPEN` if the path already exists. It is a
+create-or-fail path rule, not a locking or multi-process concurrency promise.
+
 ## Direct execution
 
 ```c

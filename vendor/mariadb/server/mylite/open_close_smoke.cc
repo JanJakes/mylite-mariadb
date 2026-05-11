@@ -65,6 +65,7 @@ struct SmokeResult
   std::string readonly_create_message;
   std::string readonly_prepare_message;
   std::string readonly_file;
+  std::string exclusive_existing_message;
   std::string prepared_unbound_message;
   std::string prepared_invalid_bind_message;
   std::string prepared_rebind_message;
@@ -96,6 +97,8 @@ static int run_default_smoke(const SmokeOptions &options,
                              SmokeResult *result);
 static int run_readonly_smoke(const SmokeOptions &options,
                               SmokeResult *result);
+static int run_exclusive_smoke(const SmokeOptions &options,
+                               SmokeResult *result);
 static bool check_close_null(SmokeResult *result);
 static bool check_null_out_db(const SmokeOptions &options, SmokeResult *result);
 static bool check_null_filename(SmokeResult *result);
@@ -126,6 +129,8 @@ static bool check_prepared_statement_api(const SmokeOptions &options,
                                          SmokeResult *result);
 static bool check_readonly_existing_database(const SmokeOptions &options,
                                              SmokeResult *result);
+static bool check_exclusive_open(const SmokeOptions &options,
+                                 SmokeResult *result);
 static bool exec_statement(mylite_db *db, const char *sql, const char *label,
                            SmokeResult *result);
 static bool exec_query_capture(mylite_db *db, const char *sql,
@@ -194,7 +199,8 @@ static bool parse_options(int argc, char **argv, SmokeOptions *options,
   if (!require_option(options->database, "--database", error) ||
       !require_option(options->report, "--report", error))
     return false;
-  if (options->mode != "default" && options->mode != "readonly")
+  if (options->mode != "default" && options->mode != "readonly" &&
+      options->mode != "exclusive")
   {
     *error= "unsupported mode: " + options->mode;
     return false;
@@ -206,6 +212,8 @@ static int run_smoke(const SmokeOptions &options, SmokeResult *result)
 {
   if (options.mode == "readonly")
     return run_readonly_smoke(options, result);
+  if (options.mode == "exclusive")
+    return run_exclusive_smoke(options, result);
   return run_default_smoke(options, result);
 }
 
@@ -283,6 +291,25 @@ static int run_readonly_smoke(const SmokeOptions &options, SmokeResult *result)
   if (!ok)
   {
     result->message= "read-only smoke failed";
+    return result->status;
+  }
+
+  result->phase= "complete";
+  result->status= 0;
+  result->message= "ok";
+  return result->status;
+}
+
+static int run_exclusive_smoke(const SmokeOptions &options, SmokeResult *result)
+{
+  bool ok= true;
+
+  result->phase= "exclusive_open";
+  ok= check_exclusive_open(options, result) && ok;
+
+  if (!ok)
+  {
+    result->message= "exclusive smoke failed";
     return result->status;
   }
 
@@ -1240,6 +1267,59 @@ static bool check_readonly_existing_database(const SmokeOptions &options,
   return ok;
 }
 
+static bool check_exclusive_open(const SmokeOptions &options,
+                                 SmokeResult *result)
+{
+  bool ok= true;
+  unlink(options.database.c_str());
+
+  mylite_db *db= nullptr;
+  int rc= mylite_open_v2(options.database.c_str(), &db,
+                         MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE |
+                           MYLITE_OPEN_EXCLUSIVE,
+                         nullptr);
+  ok= record_result(result, "exclusive_create_open", MYLITE_OK, rc, db) &&
+      ok;
+  if (db)
+  {
+    rc= mylite_close(db);
+    ok= record_result(result, "exclusive_create_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+  if (access(options.database.c_str(), F_OK) != 0)
+    ok= false;
+
+  db= nullptr;
+  rc= mylite_open_v2(options.database.c_str(), &db,
+                     MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE |
+                       MYLITE_OPEN_EXCLUSIVE,
+                     nullptr);
+  result->exclusive_existing_message= db ? mylite_errmsg(db) : "";
+  ok= record_result(result, "exclusive_existing_rejected", MYLITE_CANTOPEN,
+                    rc, db) && ok;
+  if (result->exclusive_existing_message.empty())
+    ok= false;
+  mylite_close(db);
+
+  db= nullptr;
+  rc= mylite_open_v2(options.database.c_str(), &db,
+                     MYLITE_OPEN_READWRITE | MYLITE_OPEN_EXCLUSIVE,
+                     nullptr);
+  ok= record_result(result, "exclusive_without_create", MYLITE_MISUSE, rc,
+                    db) && ok;
+  mylite_close(db);
+
+  db= nullptr;
+  rc= mylite_open_v2(options.database.c_str(), &db,
+                     MYLITE_OPEN_READONLY | MYLITE_OPEN_EXCLUSIVE,
+                     nullptr);
+  ok= record_result(result, "exclusive_readonly", MYLITE_MISUSE, rc,
+                    db) && ok;
+  mylite_close(db);
+
+  return ok;
+}
+
 static bool exec_statement(mylite_db *db, const char *sql, const char *label,
                            SmokeResult *result)
 {
@@ -1496,6 +1576,9 @@ static void write_report(const SmokeOptions &options,
            << "\n";
   if (!result.readonly_file.empty())
     report << "readonly_file=" << result.readonly_file << "\n";
+  if (!result.exclusive_existing_message.empty())
+    report << "exclusive_existing_message="
+           << result.exclusive_existing_message << "\n";
   if (!result.prepared_unbound_message.empty())
     report << "prepared_unbound_message=" << result.prepared_unbound_message
            << "\n";

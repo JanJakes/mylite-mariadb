@@ -796,11 +796,12 @@ bool validate_open_inputs(const char *filename, unsigned flags,
   const bool readonly= (flags & MYLITE_OPEN_READONLY) != 0;
   const bool readwrite= (flags & MYLITE_OPEN_READWRITE) != 0;
   const bool create= (flags & MYLITE_OPEN_CREATE) != 0;
+  const bool exclusive= (flags & MYLITE_OPEN_EXCLUSIVE) != 0;
   const unsigned supported= MYLITE_OPEN_READONLY | MYLITE_OPEN_READWRITE |
-                            MYLITE_OPEN_CREATE;
+                            MYLITE_OPEN_CREATE | MYLITE_OPEN_EXCLUSIVE;
 
   if ((flags & ~supported) != 0 || readonly == readwrite ||
-      (readonly && create))
+      (readonly && create) || (exclusive && (!readwrite || !create)))
   {
     set_error(db, MYLITE_MISUSE, 0, "HY000", "unsupported open flags");
     return false;
@@ -836,12 +837,15 @@ bool prepare_primary_file(const std::string &path, unsigned flags,
 {
   const bool readonly= (flags & MYLITE_OPEN_READONLY) != 0;
   const bool create= (flags & MYLITE_OPEN_CREATE) != 0;
+  const bool exclusive= (flags & MYLITE_OPEN_EXCLUSIVE) != 0;
   if (create && !ensure_directory(parent_path(path), message))
     return false;
 
   int open_flags= readonly ? O_RDONLY : O_RDWR;
   if (create)
     open_flags|= O_CREAT;
+  if (exclusive)
+    open_flags|= O_EXCL;
   open_flags|= O_CLOEXEC;
 
   const int fd= open(path.c_str(), open_flags, 0666);

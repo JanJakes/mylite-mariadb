@@ -150,4 +150,22 @@ No new dependency. All changes remain in existing GPL-2.0-only MyLite source.
 
 ## Implementation Result
 
-Pending.
+Implemented in `libmylite` open flag validation and primary-file preflight.
+`MYLITE_OPEN_EXCLUSIVE` is now accepted only with read-write create, adds
+`O_EXCL` to the primary-file `open()` call, succeeds for a missing path, and
+returns `MYLITE_CANTOPEN` with handle-owned diagnostics for an existing path.
+Invalid exclusive combinations return `MYLITE_MISUSE`.
+
+The `libmylite` smoke now runs a fresh-process `--mode=exclusive` pass before
+the default and read-only passes. The exclusive report verifies missing-path
+create, existing-path rejection, and invalid flag rejection.
+
+The post-implementation `MinSizeRel` build records:
+
+| Artifact | Size |
+| --- | ---: |
+| `build/mariadb-minsize/mylite/libmylite.a` | 87,206 bytes |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 44,415,928 bytes |
+
+The build report still records 571 `libmariadbd.a` archive objects and no
+dynamic plugin artifacts.
