@@ -108,6 +108,7 @@ a lock timeout instead of misleading index corruption.
 | 27 | `statement-error-rollback` | Done | Prove failed multi-row DML statements restore MyLite's pre-statement snapshot in autocommit and explicit transaction modes. |
 | 28 | `blob-text-row-storage` | Done | Store non-key BLOB/TEXT row payloads inside existing row and overflow pages without persisting native row-buffer pointers. |
 | 29 | `libmylite-exec` | Done | Add the first public SQL execution convenience API over the opened embedded MyLite handle. |
+| 30 | `libmylite-statement-effects` | In progress | Expose affected rows, generated insert ids, and warning counts through the public `libmylite` handle. |
 
 ## Size and profile direction
 
