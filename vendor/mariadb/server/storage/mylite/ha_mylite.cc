@@ -5,6 +5,7 @@
    the Free Software Foundation; version 2 of the License. */
 
 #include <my_global.h>
+#include <my_sys.h>
 #include <mysql/plugin.h>
 #include "ha_mylite.h"
 #include "key.h"
@@ -218,6 +219,8 @@ static bool mylite_parse_table_path(const char *path, std::string *db,
 static bool mylite_ensure_catalog_loaded_locked();
 static void mylite_clear_frm_definitions_locked();
 static bool mylite_load_catalog_locked();
+static bool mylite_ensure_catalog_file_locked();
+static void mylite_release_catalog_file_locked();
 static bool mylite_load_catalog_generation_locked(
     int fd, const Mylite_catalog_header &header,
     std::vector<Mylite_table_definition> *loaded,
@@ -464,6 +467,8 @@ static std::mutex mylite_catalog_mutex;
 static bool mylite_catalog_loaded= false;
 static bool mylite_catalog_load_failed= false;
 static bool mylite_loaded_catalog_header_valid= false;
+static int mylite_catalog_fd= -1;
+static std::string mylite_catalog_locked_path;
 static Mylite_catalog_header mylite_loaded_catalog_header=
   { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 static std::vector<Mylite_free_page_range> mylite_free_page_ranges;
@@ -1942,6 +1947,9 @@ static bool mylite_ensure_catalog_loaded_locked()
   if (!mylite_catalog_file || !mylite_catalog_file[0])
     return true;
 
+  if (!mylite_ensure_catalog_file_locked())
+    return false;
+
   mylite_catalog_load_failed= !mylite_load_catalog_locked();
   return !mylite_catalog_load_failed;
 }
@@ -1958,6 +1966,46 @@ static void mylite_clear_frm_definitions_locked()
   }
 }
 
+static bool mylite_ensure_catalog_file_locked()
+{
+  const std::string path(mylite_catalog_file ? mylite_catalog_file : "");
+  if (path.empty())
+    return true;
+
+  if (mylite_catalog_fd >= 0)
+  {
+    if (mylite_catalog_locked_path == path)
+      return true;
+
+    sql_print_error("MyLite: catalog path changed from %s to %s",
+                    mylite_catalog_locked_path.c_str(), path.c_str());
+    return false;
+  }
+
+  const int fd= open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0666);
+  if (fd < 0)
+  {
+    mylite_log_catalog_error("open", path);
+    return false;
+  }
+
+  if (my_lock(fd, F_WRLCK, 0, F_TO_EOF,
+              MYF(MY_FORCE_LOCK | MY_NO_WAIT)) != 0)
+  {
+    const int saved_errno= my_errno > 0 ? my_errno :
+                           errno > 0 ? errno : EAGAIN;
+    sql_print_error("MyLite: catalog lock failed for %s: %s",
+                    path.c_str(), strerror(saved_errno));
+    if (close(fd) != 0)
+      mylite_log_catalog_error("close", path);
+    return false;
+  }
+
+  mylite_catalog_fd= fd;
+  mylite_catalog_locked_path= path;
+  return true;
+}
+
 static bool mylite_load_catalog_locked()
 {
   mylite_clear_frm_definitions_locked();
@@ -1966,12 +2014,11 @@ static bool mylite_load_catalog_locked()
   mylite_loaded_catalog_header_valid= false;
   mylite_loaded_catalog_header= { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 
-  const int fd= open(mylite_catalog_file, O_RDONLY | O_CLOEXEC);
+  const int fd= mylite_catalog_fd;
   if (fd < 0)
   {
-    if (errno == ENOENT)
-      return true;
-    mylite_log_catalog_error("open", mylite_catalog_file);
+    sql_print_error("MyLite: catalog file is not locked for %s",
+                    mylite_catalog_file);
     return false;
   }
 
@@ -2026,11 +2073,6 @@ static bool mylite_load_catalog_locked()
   }
 
 done:
-  if (close(fd) != 0)
-  {
-    mylite_log_catalog_error("close", mylite_catalog_file);
-    ok= false;
-  }
   return ok;
 }
 
@@ -2527,15 +2569,11 @@ static bool mylite_write_catalog_locked()
   const std::string catalog_path(mylite_catalog_file);
   std::string content;
 
-  const int fd= open(catalog_path.c_str(),
-                     O_RDWR | O_CREAT | O_CLOEXEC, 0666);
-  if (fd < 0)
-  {
-    mylite_log_catalog_error("open", catalog_path);
+  if (!mylite_ensure_catalog_file_locked())
     return false;
-  }
 
   bool ok= true;
+  const int fd= mylite_catalog_fd;
   struct stat st;
   Mylite_catalog_header latest= { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
   Mylite_catalog_header next= { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
@@ -2679,12 +2717,6 @@ static bool mylite_write_catalog_locked()
 
 done:
   bool restore_free_ranges= !ok;
-  if (close(fd) != 0)
-  {
-    mylite_log_catalog_error("close", catalog_path);
-    ok= false;
-    restore_free_ranges= true;
-  }
   if (restore_free_ranges)
     mylite_free_page_ranges= free_ranges_before;
   else if (has_published_header)
@@ -4529,7 +4561,30 @@ static int mylite_deinit_func(void *)
   mylite_loaded_catalog_header= { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
   mylite_free_page_ranges.clear();
   mylite_pending_free_page_ranges.clear();
+  mylite_release_catalog_file_locked();
   return 0;
+}
+
+static void mylite_release_catalog_file_locked()
+{
+  if (mylite_catalog_fd < 0)
+    return;
+
+  const int fd= mylite_catalog_fd;
+  const std::string path= mylite_catalog_locked_path;
+  mylite_catalog_fd= -1;
+  mylite_catalog_locked_path.clear();
+
+  if (my_lock(fd, F_UNLCK, 0, F_TO_EOF,
+              MYF(MY_FORCE_LOCK | MY_NO_WAIT)) != 0)
+  {
+    const int saved_errno= my_errno > 0 ? my_errno :
+                           errno > 0 ? errno : EAGAIN;
+    sql_print_error("MyLite: catalog unlock failed for %s: %s",
+                    path.c_str(), strerror(saved_errno));
+  }
+  if (close(fd) != 0)
+    mylite_log_catalog_error("close", path);
 }
 
 struct st_mysql_storage_engine mylite_storage_engine=

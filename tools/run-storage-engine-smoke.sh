@@ -108,6 +108,54 @@ run_inside_container() {
     "${transaction_file}" \
     "transaction-read" || status=1
 
+  local lock_root="${abs_build_dir}/mylite-primary-file-locking"
+  local lock_file="${lock_root}/catalog.mylite"
+  local lock_ready="${lock_root}/catalog.lock.ready"
+  rm -rf "${lock_root}"
+  mkdir -p "${lock_root}"
+
+  local lock_pid=""
+  start_external_catalog_lock "${lock_file}" "${lock_ready}" &
+  lock_pid=$!
+
+  if wait_for_file "${lock_ready}" 50; then
+    if run_smoke_phase \
+        "${smoke}" \
+        "${abs_build_dir}/sql/share" \
+        "${lock_root}/conflict" \
+        "${abs_build_dir}/mylite-primary-file-lock-conflict-report.txt" \
+        "${abs_build_dir}/mylite-primary-file-lock-conflict-output.log" \
+        "${lock_file}" \
+        "write"; then
+      printf "Storage smoke unexpectedly succeeded while catalog was externally locked: %s\n" \
+        "${lock_file}" >&2
+      status=1
+    elif ! verify_lock_conflict_report \
+        "${abs_build_dir}/mylite-primary-file-lock-conflict-report.txt" \
+        "${abs_build_dir}/mylite-primary-file-lock-conflict-output.log"; then
+      status=1
+    fi
+  else
+    printf "External catalog lock helper did not become ready: %s\n" \
+      "${lock_file}" >&2
+    status=1
+  fi
+
+  if [[ -n "${lock_pid}" ]]; then
+    kill "${lock_pid}" 2>/dev/null || true
+    wait "${lock_pid}" 2>/dev/null || true
+    lock_pid=""
+  fi
+
+  run_smoke_phase \
+    "${smoke}" \
+    "${abs_build_dir}/sql/share" \
+    "${lock_root}/write-after-release" \
+    "${abs_build_dir}/mylite-primary-file-lock-release-report.txt" \
+    "${abs_build_dir}/mylite-primary-file-lock-release-output.log" \
+    "${lock_file}" \
+    "write" || status=1
+
   local legacy_root="${abs_build_dir}/mylite-catalog-legacy-v2"
   local legacy_file="${legacy_root}/catalog.mylite"
   rm -rf "${legacy_root}"
@@ -200,6 +248,8 @@ run_inside_container() {
   printf "Catalog read smoke report: %s\n" "${abs_build_dir}/mylite-catalog-read-report.txt"
   printf "Transaction boundary write smoke report: %s\n" "${abs_build_dir}/mylite-transaction-boundary-write-report.txt"
   printf "Transaction boundary read smoke report: %s\n" "${abs_build_dir}/mylite-transaction-boundary-read-report.txt"
+  printf "Primary file lock conflict smoke report: %s\n" "${abs_build_dir}/mylite-primary-file-lock-conflict-report.txt"
+  printf "Primary file lock release smoke report: %s\n" "${abs_build_dir}/mylite-primary-file-lock-release-report.txt"
   printf "Legacy v2 catalog fixture report: %s\n" "${abs_build_dir}/mylite-catalog-legacy-v2-fixture-report.txt"
   printf "Legacy v2 catalog write smoke report: %s\n" "${abs_build_dir}/mylite-catalog-legacy-v2-write-report.txt"
   printf "Legacy v2 catalog read smoke report: %s\n" "${abs_build_dir}/mylite-catalog-legacy-v2-read-report.txt"
@@ -207,6 +257,99 @@ run_inside_container() {
   printf "Catalog recovery latest smoke report: %s\n" "${abs_build_dir}/mylite-catalog-recovery-latest-report.txt"
   printf "Catalog recovery read smoke report: %s\n" "${abs_build_dir}/mylite-catalog-recovery-read-report.txt"
   return "${status}"
+}
+
+start_external_catalog_lock() {
+  local catalog_file="$1"
+  local ready_file="$2"
+
+  exec python3 - "${catalog_file}" "${ready_file}" <<'PY'
+import fcntl
+import os
+import signal
+import sys
+import time
+from pathlib import Path
+
+catalog_file = Path(sys.argv[1])
+ready_file = Path(sys.argv[2])
+catalog_file.parent.mkdir(parents=True, exist_ok=True)
+ready_file.parent.mkdir(parents=True, exist_ok=True)
+
+stop = False
+
+
+def handle_signal(signum, frame):
+    global stop
+    stop = True
+
+
+signal.signal(signal.SIGTERM, handle_signal)
+signal.signal(signal.SIGINT, handle_signal)
+
+fd = os.open(str(catalog_file), os.O_RDWR | os.O_CREAT, 0o666)
+try:
+    fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    ready_file.write_text(f"{os.getpid()}\n")
+    while not stop:
+        time.sleep(0.1)
+finally:
+    try:
+        fcntl.lockf(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+    try:
+        ready_file.unlink()
+    except FileNotFoundError:
+        pass
+PY
+}
+
+wait_for_file() {
+  local path="$1"
+  local attempts="$2"
+
+  for ((i = 0; i < attempts; ++i)); do
+    if [[ -f "${path}" ]]; then
+      return 0
+    fi
+    sleep 0.1
+  done
+
+  return 1
+}
+
+verify_lock_conflict_report() {
+  local report="$1"
+  local smoke_log="$2"
+
+  python3 - "${report}" "${smoke_log}" <<'PY'
+import sys
+from pathlib import Path
+
+report = Path(sys.argv[1])
+smoke_log = Path(sys.argv[2])
+
+
+def fail(message):
+    print(message, file=sys.stderr)
+    raise SystemExit(1)
+
+
+if not report.exists():
+    fail(f"primary file lock conflict report does not exist: {report}")
+
+report_text = report.read_text(errors="replace")
+log_text = smoke_log.read_text(errors="replace") if smoke_log.exists() else ""
+combined = report_text + "\n" + log_text
+
+if "status=1\n" not in report_text:
+    fail("primary file lock conflict smoke did not fail")
+if "MyLite: catalog lock failed" not in combined:
+    fail("primary file lock conflict smoke did not report a catalog lock failure")
+if "Catalog Sidecars\n\nnone\n" not in report_text:
+    fail("primary file lock conflict smoke created a catalog sidecar")
+PY
 }
 
 verify_legacy_v2_catalog_fixture() {

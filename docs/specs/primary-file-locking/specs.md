@@ -154,14 +154,37 @@ mutates in-memory state.
 
 ## Binary-Size Impact
 
-Expected binary-size impact is small first-party code for descriptor lifetime
-and one smoke test path. No new dependency is allowed. Record measured
-artifacts after implementation.
+The implementation adds a small first-party descriptor lifetime path and a
+storage smoke conflict test. It adds no dependency. Measured artifacts after
+implementation:
+
+- `libmariadbd.a`: 44,393,530 bytes.
+- `libmylite.a`: 29,698 bytes.
+- `mylite-storage-engine-smoke`: 22,769,864 bytes.
+- `mylite-compatibility-smoke`: 22,770,152 bytes.
+- `mylite-open-close-smoke`: 22,705,168 bytes.
+- `mylite-embedded-bootstrap-smoke`: 22,703,552 bytes.
 
 ## License, Trademark, And Dependency Impact
 
 No new dependency. The implementation should use MariaDB's existing GPLv2
 `my_lock()` abstraction.
+
+## Implementation Result
+
+The implemented storage-engine path retains one locked descriptor per
+configured catalog path in `ha_mylite.cc`. `mylite_ensure_catalog_loaded_locked()`
+acquires the lock before loading or creating a catalog, `mylite_load_catalog_locked()`
+and `mylite_write_catalog_locked()` use that retained descriptor for I/O, and
+`mylite_deinit_func()` unlocks and closes it during storage-engine teardown.
+Transient lock/open failures do not mark the catalog permanently invalid, so a
+later operation in the same process can retry acquisition after the lock holder
+exits.
+
+The storage smoke now starts a helper process that holds a POSIX advisory lock
+on the same `.mylite` file, verifies that MyLite fails with
+`MyLite: catalog lock failed`, releases the helper lock, and verifies a normal
+write phase succeeds against the same file.
 
 ## Test And Verification Plan
 

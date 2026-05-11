@@ -214,6 +214,15 @@ architecture. A later journal/WAL slice must add undo/redo state, transaction
 hooks, savepoint behavior, and recovery rules before MyLite can claim SQL
 rollback semantics.
 
+Configured primary files are currently single-process owned. MyLite opens the
+primary `.mylite` file with a retained descriptor, takes a nonblocking
+exclusive advisory lock through MariaDB's `my_lock()` with `MY_FORCE_LOCK`, and
+keeps that descriptor for the storage-engine lifetime. Catalog load and write
+I/O use the retained descriptor so POSIX record locks are not lost by closing a
+second descriptor for the same file. A second process or external
+advisory-lock holder fails explicitly until the lock is released. This adds no
+lock sidecar and does not claim cross-process reader/writer concurrency.
+
 Supported fixed MariaDB record images larger than one row slot page now split
 across `MYLITEROWOVF3` segment payloads inside row page type `2`. This lifts the
 one-page row-size limit for non-BLOB rows while preserving the raw fixed-record

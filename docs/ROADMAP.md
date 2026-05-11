@@ -56,7 +56,10 @@ next durable write. MyLite tables are currently explicit non-transactional,
 no-rollback MariaDB tables: storage smokes verify that MyLite DML inside
 `START TRANSACTION` survives `ROLLBACK` with MariaDB warning `1196` and
 persists across fresh-process reopen. Real SQL rollback semantics remain future
-journal/WAL work.
+journal/WAL work. Configured primary files are now single-process owned with
+an exclusive advisory lock held on the `.mylite` file for the MyLite
+storage-engine lifetime; another process or external advisory-lock holder
+causes an explicit catalog operation failure until that lock is released.
 
 ## Implementation plan
 
@@ -85,7 +88,7 @@ journal/WAL work.
 | 20 | `orphan-page-reclaim` | Done | Reclaim complete unreferenced pages left by rejected or unpublished generations after recovery accepts a safe catalog generation. |
 | 21 | `allocator-page-store` | Done | Store free-page ranges in a dedicated allocator page chain so catalog payload chains can reuse accepted free ranges. |
 | 22 | `transaction-boundary-semantics` | Done | Make MyLite's current non-transactional rollback boundary explicit in engine flags, tests, and docs before real journal/WAL work. |
-| 23 | `primary-file-locking` | In progress | Hold an exclusive advisory lock on the primary `.mylite` file so concurrent processes fail explicitly before cross-process concurrency exists. |
+| 23 | `primary-file-locking` | Done | Hold an exclusive advisory lock on the primary `.mylite` file so concurrent processes fail explicitly before cross-process concurrency exists. |
 
 ## Size and profile direction
 
