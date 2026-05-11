@@ -66,7 +66,7 @@ rebuilding ordered index cursors only from row images in memory.
 | 13 | `compatibility-test-harness` | Done | Run embedded lifecycle, unexpected-sidecar detection, crash/reopen, and MariaDB comparison tests in repeatable groups. |
 | 14 | `pager-page-store` | Done | Add the first reusable MyLite page-store layer for catalog payloads, row pages, future index pages, and free-space tracking. |
 | 15 | `row-page-storage` | Done | Move simple row images from the logical catalog payload into typed row pages addressed through table catalog roots. |
-| 16 | `row-slot-storage` | Done | Replace table-sized row payload streams with page-local row records, slot directories, and first free-space accounting. |
+| 16 | `row-slot-storage` | Done | Replace table-sized row payload streams with page-local row records and slot directories. |
 | 17 | `index-page-storage` | Planned | Add durable primary/secondary index page roots for supported keys instead of rebuilding all index cursors from rows. |
 
 ## Size and profile direction
