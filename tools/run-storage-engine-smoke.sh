@@ -85,6 +85,43 @@ run_inside_container() {
     "${catalog_file}" \
     "${abs_build_dir}/mylite-catalog-read-report.txt" || status=1
 
+  local legacy_root="${abs_build_dir}/mylite-catalog-legacy-v2"
+  local legacy_file="${legacy_root}/catalog.mylite"
+  rm -rf "${legacy_root}"
+  mkdir -p "${legacy_root}"
+
+  if write_legacy_v2_catalog_fixture "${legacy_file}"; then
+    verify_legacy_v2_catalog_fixture \
+      "${legacy_file}" \
+      "${abs_build_dir}/mylite-catalog-legacy-v2-fixture-report.txt" || status=1
+
+    run_smoke_phase \
+      "${smoke}" \
+      "${abs_build_dir}/sql/share" \
+      "${legacy_root}/write" \
+      "${abs_build_dir}/mylite-catalog-legacy-v2-write-report.txt" \
+      "${abs_build_dir}/mylite-catalog-legacy-v2-write-output.log" \
+      "${legacy_file}" \
+      "write" || status=1
+    verify_legacy_v2_catalog_rewrite \
+      "${legacy_file}" \
+      "${abs_build_dir}/mylite-catalog-legacy-v2-write-report.txt" || status=1
+
+    run_smoke_phase \
+      "${smoke}" \
+      "${abs_build_dir}/sql/share" \
+      "${legacy_root}/read" \
+      "${abs_build_dir}/mylite-catalog-legacy-v2-read-report.txt" \
+      "${abs_build_dir}/mylite-catalog-legacy-v2-read-output.log" \
+      "${legacy_file}" \
+      "read" || status=1
+    verify_row_page_storage \
+      "${legacy_file}" \
+      "${abs_build_dir}/mylite-catalog-legacy-v2-read-report.txt" || status=1
+  else
+    status=1
+  fi
+
   local recovery_root="${abs_build_dir}/mylite-catalog-recovery"
   local recovery_file="${recovery_root}/catalog.mylite"
   rm -rf "${recovery_root}"
@@ -138,10 +175,132 @@ run_inside_container() {
   printf "Storage engine smoke report: %s\n" "${report}"
   printf "Catalog write smoke report: %s\n" "${abs_build_dir}/mylite-catalog-write-report.txt"
   printf "Catalog read smoke report: %s\n" "${abs_build_dir}/mylite-catalog-read-report.txt"
+  printf "Legacy v2 catalog fixture report: %s\n" "${abs_build_dir}/mylite-catalog-legacy-v2-fixture-report.txt"
+  printf "Legacy v2 catalog write smoke report: %s\n" "${abs_build_dir}/mylite-catalog-legacy-v2-write-report.txt"
+  printf "Legacy v2 catalog read smoke report: %s\n" "${abs_build_dir}/mylite-catalog-legacy-v2-read-report.txt"
   printf "Catalog recovery base smoke report: %s\n" "${abs_build_dir}/mylite-catalog-recovery-base-report.txt"
   printf "Catalog recovery latest smoke report: %s\n" "${abs_build_dir}/mylite-catalog-recovery-latest-report.txt"
   printf "Catalog recovery read smoke report: %s\n" "${abs_build_dir}/mylite-catalog-recovery-read-report.txt"
   return "${status}"
+}
+
+verify_legacy_v2_catalog_fixture() {
+  local catalog_file="$1"
+  local report="$2"
+
+  if [[ ! -f "${catalog_file}" ]]; then
+    printf "Legacy v2 catalog fixture does not exist: %s\n" "${catalog_file}" >&2
+    return 1
+  fi
+
+  python3 - "${catalog_file}" "${report}" <<'PY'
+import struct
+import sys
+from pathlib import Path
+
+catalog_file = Path(sys.argv[1])
+report = Path(sys.argv[2])
+data = catalog_file.read_bytes()
+page_size = 4096
+header_checksum_offset = 56
+page_checksum_offset = 56
+page_payload_offset = 64
+fnv_offset_basis = 14695981039346656037
+fnv_prime = 1099511628211
+
+
+def fail(message):
+    print(message, file=sys.stderr)
+    sys.exit(1)
+
+
+def checksum(payload):
+    result = fnv_offset_basis
+    for byte in payload:
+        result ^= byte
+        result = (result * fnv_prime) & 0xffffffffffffffff
+    return result
+
+
+def read_u32(payload, offset):
+    return struct.unpack_from("<I", payload, offset)[0]
+
+
+def read_u64(payload, offset):
+    return struct.unpack_from("<Q", payload, offset)[0]
+
+
+def read_chain(root_offset, length, expected_type):
+    page_id = root_offset // page_size
+    remaining = length
+    payload = bytearray()
+    while remaining > 0:
+        offset = page_id * page_size
+        page = bytearray(data[offset:offset + page_size])
+        if len(page) != page_size:
+            fail("short legacy fixture page chain")
+        if page[0:16] != b"MYLITEPAGESTORE\0":
+            fail("invalid legacy fixture page magic")
+        stored_page_checksum = read_u64(page, page_checksum_offset)
+        struct.pack_into("<Q", page, page_checksum_offset, 0)
+        if checksum(page) != stored_page_checksum:
+            fail("invalid legacy fixture page checksum")
+        if read_u32(page, 16) != 1 or read_u32(page, 20) != expected_type:
+            fail("invalid legacy fixture page header")
+        payload_length = read_u32(page, 40)
+        expected_length = min(remaining, page_size - page_payload_offset)
+        if payload_length != expected_length:
+            fail("invalid legacy fixture payload length")
+        payload.extend(page[page_payload_offset:page_payload_offset + payload_length])
+        remaining -= payload_length
+        next_page_id = read_u64(page, 32)
+        if remaining == 0:
+            if next_page_id != 0:
+                fail("unexpected legacy fixture trailing page")
+            break
+        page_id = next_page_id
+    return bytes(payload)
+
+
+header = bytearray(data[0:page_size])
+if len(header) != page_size:
+    fail("short legacy fixture header")
+if header[0:16] != b"MYLITEFMTPAGE2\0\0":
+    fail("invalid legacy fixture header magic")
+if read_u32(header, 16) != 2 or read_u32(header, 20) != page_size:
+    fail("legacy fixture header is not v2")
+stored_header_checksum = read_u64(header, header_checksum_offset)
+struct.pack_into("<Q", header, header_checksum_offset, 0)
+if checksum(header) != stored_header_checksum:
+    fail("invalid legacy fixture header checksum")
+
+generation = read_u64(header, 24)
+payload_offset = read_u64(header, 32)
+payload_length = read_u64(header, 40)
+payload_checksum = read_u64(header, 48)
+if generation != 1:
+    fail("unexpected legacy fixture generation")
+
+catalog_payload = read_chain(payload_offset, payload_length, 1)
+if checksum(catalog_payload) != payload_checksum:
+    fail("invalid legacy fixture catalog checksum")
+try:
+    catalog_lines = catalog_payload.decode("ascii").splitlines()
+except UnicodeDecodeError:
+    fail("legacy fixture catalog payload is not ascii")
+freepage_records = [
+    line for line in catalog_lines if line.startswith("FREEPAGE\t")
+]
+if not freepage_records:
+    fail("legacy fixture catalog has no FREEPAGE records")
+
+with report.open("w") as out:
+    out.write("# MyLite Legacy V2 Catalog Fixture Report\n\n")
+    out.write("status=0\n")
+    out.write("format_version=2\n")
+    out.write(f"generation={generation}\n")
+    out.write(f"catalog_freepage_records={len(freepage_records)}\n")
+PY
 }
 
 run_smoke_phase() {
@@ -221,7 +380,8 @@ for slot in (0, 1):
         continue
     if page[:16] != b"MYLITEFMTPAGE2\0\0":
         continue
-    if read_u32(page, 16) != 2 or read_u32(page, 20) != page_size:
+    format_version = read_u32(page, 16)
+    if format_version not in (2, 3) or read_u32(page, 20) != page_size:
         continue
     generation = read_u64(page, 24)
     payload_offset = read_u64(page, 32)
@@ -256,6 +416,247 @@ corrupt_latest_generation_page() {
   fi
 
   printf '\0' | dd of="${catalog_file}" bs=1 seek="${corrupt_offset}" count=1 conv=notrunc status=none
+}
+
+write_legacy_v2_catalog_fixture() {
+  local catalog_file="$1"
+
+  python3 - "${catalog_file}" <<'PY'
+import struct
+import sys
+from pathlib import Path
+
+catalog_file = Path(sys.argv[1])
+page_size = 4096
+payload_offset = page_size * 2
+header_checksum_offset = 56
+page_checksum_offset = 56
+page_payload_offset = 64
+fnv_offset_basis = 14695981039346656037
+fnv_prime = 1099511628211
+
+
+def checksum(data):
+    result = fnv_offset_basis
+    for byte in data:
+        result ^= byte
+        result = (result * fnv_prime) & 0xffffffffffffffff
+    return result
+
+
+def store_u32(data, offset, value):
+    struct.pack_into("<I", data, offset, value)
+
+
+def store_u64(data, offset, value):
+    struct.pack_into("<Q", data, offset, value)
+
+
+payload = b"MYLITE CATALOG 1\nFREEPAGE\t3\t1\n"
+data = bytearray(page_size * 4)
+
+page = bytearray(page_size)
+page[0:16] = b"MYLITEPAGESTORE\0"
+store_u32(page, 16, 1)
+store_u32(page, 20, 1)
+store_u64(page, 24, 2)
+store_u64(page, 32, 0)
+store_u32(page, 40, len(payload))
+page[page_payload_offset:page_payload_offset + len(payload)] = payload
+store_u64(page, page_checksum_offset, 0)
+store_u64(page, page_checksum_offset, checksum(page))
+data[payload_offset:payload_offset + page_size] = page
+
+header = bytearray(page_size)
+header[0:16] = b"MYLITEFMTPAGE2\0\0"
+store_u32(header, 16, 2)
+store_u32(header, 20, page_size)
+store_u64(header, 24, 1)
+store_u64(header, 32, payload_offset)
+store_u64(header, 40, len(payload))
+store_u64(header, 48, checksum(payload))
+store_u64(header, header_checksum_offset, 0)
+store_u64(header, header_checksum_offset, checksum(header))
+data[0:page_size] = header
+
+catalog_file.parent.mkdir(parents=True, exist_ok=True)
+catalog_file.write_bytes(data)
+PY
+}
+
+verify_legacy_v2_catalog_rewrite() {
+  local catalog_file="$1"
+  local report="$2"
+
+  if [[ ! -f "${catalog_file}" ]]; then
+    printf "Legacy v2 catalog file does not exist: %s\n" "${catalog_file}" >&2
+    return 1
+  fi
+
+  python3 - "${catalog_file}" "${report}" <<'PY'
+import struct
+import sys
+from pathlib import Path
+
+catalog_file = Path(sys.argv[1])
+report = Path(sys.argv[2])
+data = catalog_file.read_bytes()
+page_size = 4096
+header_checksum_offset = 56
+page_checksum_offset = 56
+page_payload_offset = 64
+fnv_offset_basis = 14695981039346656037
+fnv_prime = 1099511628211
+
+
+def fail(message):
+    print(message, file=sys.stderr)
+    sys.exit(1)
+
+
+def checksum(payload):
+    result = fnv_offset_basis
+    for byte in payload:
+        result ^= byte
+        result = (result * fnv_prime) & 0xffffffffffffffff
+    return result
+
+
+def read_u32(payload, offset):
+    return struct.unpack_from("<I", payload, offset)[0]
+
+
+def read_u64(payload, offset):
+    return struct.unpack_from("<Q", payload, offset)[0]
+
+
+def page_range(root_offset, length):
+    return (
+        root_offset // page_size,
+        (length + page_size - page_payload_offset - 1)
+        // (page_size - page_payload_offset)
+    )
+
+
+def read_chain(root_offset, length, expected_type):
+    if root_offset % page_size != 0 or root_offset < page_size * 2:
+        fail("invalid chain root offset")
+    if length == 0:
+        fail("invalid chain length")
+
+    page_id = root_offset // page_size
+    remaining = length
+    payload = bytearray()
+    page_types = []
+    while remaining > 0:
+        offset = page_id * page_size
+        page = bytearray(data[offset:offset + page_size])
+        if len(page) != page_size:
+            fail("short page chain read")
+        if page[0:16] != b"MYLITEPAGESTORE\0":
+            fail("invalid page magic")
+        stored_page_checksum = read_u64(page, page_checksum_offset)
+        struct.pack_into("<Q", page, page_checksum_offset, 0)
+        if checksum(page) != stored_page_checksum:
+            fail("invalid page checksum")
+        if read_u32(page, 16) != 1:
+            fail("invalid page format version")
+        page_type = read_u32(page, 20)
+        if page_type != expected_type:
+            fail("unexpected page type")
+        if read_u64(page, 24) != page_id:
+            fail("unexpected page id")
+        payload_length = read_u32(page, 40)
+        expected_length = min(remaining, page_size - page_payload_offset)
+        if payload_length != expected_length:
+            fail("unexpected page payload length")
+        payload.extend(page[page_payload_offset:page_payload_offset + payload_length])
+        page_types.append(page_type)
+        remaining -= payload_length
+        next_page_id = read_u64(page, 32)
+        if remaining == 0:
+            if next_page_id != 0:
+                fail("unexpected trailing page")
+            break
+        if next_page_id != page_id + 1:
+            fail("unexpected next page")
+        page_id = next_page_id
+    return bytes(payload), page_types
+
+
+headers = []
+for slot in (0, 1):
+    offset = slot * page_size
+    page = bytearray(data[offset:offset + page_size])
+    if len(page) != page_size:
+        continue
+    if page[0:16] != b"MYLITEFMTPAGE2\0\0":
+        continue
+    format_version = read_u32(page, 16)
+    if format_version not in (2, 3) or read_u32(page, 20) != page_size:
+        continue
+    stored_header_checksum = read_u64(page, header_checksum_offset)
+    struct.pack_into("<Q", page, header_checksum_offset, 0)
+    if checksum(page) != stored_header_checksum:
+        continue
+    generation = read_u64(page, 24)
+    if generation == 0:
+        continue
+    free_offset = read_u64(page, 64) if format_version == 3 else 0
+    free_length = read_u64(page, 72) if format_version == 3 else 0
+    headers.append((
+        generation, slot, format_version, read_u64(page, 32),
+        read_u64(page, 40), free_offset, free_length
+    ))
+
+if not headers:
+    fail("no valid catalog headers after legacy v2 rewrite")
+
+headers.sort(reverse=True)
+header_formats = sorted({header[2] for header in headers})
+if headers[0][2] != 3:
+    fail("legacy v2 catalog was not rewritten to v3")
+
+catalog_payload, _ = read_chain(headers[0][3], headers[0][4], 1)
+try:
+    catalog_lines = catalog_payload.decode("ascii").splitlines()
+except UnicodeDecodeError:
+    fail("catalog payload is not ascii after legacy rewrite")
+catalog_freepage_records = [
+    line for line in catalog_lines if line.startswith("FREEPAGE\t")
+]
+if catalog_freepage_records:
+    fail("rewritten v3 catalog still contains FREEPAGE records")
+
+free_payload, free_page_types = read_chain(headers[0][5], headers[0][6], 4)
+try:
+    free_lines = free_payload.decode("ascii").splitlines()
+except UnicodeDecodeError:
+    fail("free page payload is not ascii after legacy rewrite")
+if not free_lines or free_lines[0] != "MYLITE FREE LIST 1":
+    fail("rewritten v3 free page payload magic is invalid")
+freepage_records = [
+    line for line in free_lines if line.startswith("FREEPAGE\t")
+]
+if not freepage_records:
+    fail("rewritten v3 free page payload has no FREEPAGE records")
+
+with report.open("a") as out:
+    latest_catalog_range = page_range(headers[0][3], headers[0][4])
+    out.write("\n## Legacy V2 Catalog Rewrite\n\n")
+    out.write("status=0\n")
+    out.write(
+        f"header_formats_after_rewrite={','.join(map(str, header_formats))}\n"
+    )
+    out.write(f"latest_format_version={headers[0][2]}\n")
+    out.write(
+        f"latest_catalog_range={latest_catalog_range[0]}:"
+        f"{latest_catalog_range[1]}\n"
+    )
+    out.write(f"catalog_freepage_records={len(catalog_freepage_records)}\n")
+    out.write(f"freepage_records={len(freepage_records)}\n")
+    out.write(f"free_payload_page_types={','.join(map(str, free_page_types))}\n")
+PY
 }
 
 verify_row_page_storage() {
@@ -299,12 +700,18 @@ for slot in (0, 1):
         continue
     if page[:16] != b"MYLITEFMTPAGE2\0\0":
         continue
-    if read_u32(page, 16) != 2 or read_u32(page, 20) != page_size:
+    format_version = read_u32(page, 16)
+    if format_version not in (2, 3) or read_u32(page, 20) != page_size:
         continue
     generation = read_u64(page, 24)
     if generation == 0:
         continue
-    headers.append((generation, slot, read_u64(page, 32), read_u64(page, 40)))
+    free_offset = read_u64(page, 64) if format_version == 3 else 0
+    free_length = read_u64(page, 72) if format_version == 3 else 0
+    headers.append((
+        generation, slot, format_version, read_u64(page, 32),
+        read_u64(page, 40), free_offset, free_length
+    ))
 
 if not headers:
     fail("no valid header slots")
@@ -399,15 +806,18 @@ def read_chain(root_offset, length, expected_type, exact_payload_lengths):
     return bytes(payload), page_types, page_payloads
 
 catalog_payload, catalog_page_types, _ = read_chain(
-    headers[0][2], headers[0][3], 1, True
+    headers[0][3], headers[0][4], 1, True
 )
 try:
     catalog_lines = catalog_payload.decode("ascii").splitlines()
 except UnicodeDecodeError:
     fail("catalog payload is not ascii")
 
+catalog_format_version = headers[0][2]
 catalog_row_records = [line for line in catalog_lines if line.startswith("ROW\t")]
-freepage_records = [line for line in catalog_lines if line.startswith("FREEPAGE\t")]
+catalog_freepage_records = [
+    line for line in catalog_lines if line.startswith("FREEPAGE\t")
+]
 rowpage_records = [line for line in catalog_lines if line.startswith("ROWPAGE\t")]
 indexpage_records = [line for line in catalog_lines if line.startswith("INDEXPAGE\t")]
 if catalog_row_records:
@@ -416,11 +826,32 @@ if not rowpage_records:
     fail("catalog has no ROWPAGE records")
 if not indexpage_records:
     fail("catalog has no INDEXPAGE records")
+if catalog_format_version == 3:
+    if catalog_freepage_records:
+        fail("v3 catalog still contains FREEPAGE records")
+    free_payload, free_page_types, _ = read_chain(
+        headers[0][5], headers[0][6], 4, True
+    )
+    try:
+        free_lines = free_payload.decode("ascii").splitlines()
+    except UnicodeDecodeError:
+        fail("free page payload is not ascii")
+    if not free_lines or free_lines[0] != "MYLITE FREE LIST 1":
+        fail("invalid free page payload magic")
+    freepage_records = [
+        line for line in free_lines if line.startswith("FREEPAGE\t")
+    ]
+else:
+    free_lines = catalog_lines
+    free_page_types = []
+    freepage_records = catalog_freepage_records
 if not freepage_records:
-    fail("catalog has no FREEPAGE records")
+    fail("free page payload has no FREEPAGE records")
 
-free_ranges = parse_freepage_records(catalog_lines)
-live_ranges = [page_range(headers[0][2], headers[0][3])]
+free_ranges = parse_freepage_records(free_lines)
+live_ranges = [page_range(headers[0][3], headers[0][4])]
+if catalog_format_version == 3:
+    live_ranges.append(page_range(headers[0][5], headers[0][6]))
 
 row_payloads = []
 row_payload_page_counts = []
@@ -534,32 +965,51 @@ for free_range in free_ranges:
             fail("FREEPAGE range overlaps latest live payload")
 
 reused_ranges = []
+catalog_reused_ranges = []
 if len(headers) > 1:
-    previous_payload, _, _ = read_chain(headers[1][2], headers[1][3], 1, True)
-    try:
-        previous_lines = previous_payload.decode("ascii").splitlines()
-    except UnicodeDecodeError:
-        fail("previous catalog payload is not ascii")
+    if headers[1][2] == 3:
+        previous_payload, _, _ = read_chain(headers[1][5], headers[1][6], 4, True)
+        try:
+            previous_lines = previous_payload.decode("ascii").splitlines()
+        except UnicodeDecodeError:
+            fail("previous free page payload is not ascii")
+        if not previous_lines or previous_lines[0] != "MYLITE FREE LIST 1":
+            fail("previous free page payload magic is invalid")
+    else:
+        previous_payload, _, _ = read_chain(headers[1][3], headers[1][4], 1, True)
+        try:
+            previous_lines = previous_payload.decode("ascii").splitlines()
+        except UnicodeDecodeError:
+            fail("previous catalog payload is not ascii")
     previous_free_ranges = parse_freepage_records(previous_lines)
+    catalog_range = page_range(headers[0][3], headers[0][4])
     for live_range in live_ranges:
         for previous_free_range in previous_free_ranges:
             if range_contains(previous_free_range, live_range):
                 reused_ranges.append(f"{live_range[0]}:{live_range[1]}")
+                if live_range == catalog_range:
+                    catalog_reused_ranges.append(f"{live_range[0]}:{live_range[1]}")
                 break
 if not reused_ranges:
     fail("no latest live payload reused a previous FREEPAGE range")
+if not catalog_reused_ranges:
+    fail("no latest catalog payload reused a previous FREEPAGE range")
 
 with report.open("a") as out:
     out.write("\n## Row And Index Page Storage\n\n")
     out.write("status=0\n")
     out.write(f"latest_generation={headers[0][0]}\n")
+    out.write(f"catalog_format_version={catalog_format_version}\n")
     out.write(f"catalog_page_types={','.join(map(str, catalog_page_types))}\n")
+    out.write(f"free_payload_page_types={','.join(map(str, free_page_types))}\n")
     out.write(f"catalog_row_records={len(catalog_row_records)}\n")
+    out.write(f"catalog_freepage_records={len(catalog_freepage_records)}\n")
     out.write(f"freepage_records={len(freepage_records)}\n")
     out.write(
         f"freepage_pages={sum(count for _, count in free_ranges)}\n"
     )
     out.write(f"reused_page_ranges={','.join(reused_ranges)}\n")
+    out.write(f"catalog_reused_page_ranges={','.join(catalog_reused_ranges)}\n")
     out.write(f"rowpage_records={len(rowpage_records)}\n")
     out.write(f"indexpage_records={len(indexpage_records)}\n")
     out.write(f"row_payloads={','.join(row_payloads)}\n")
@@ -573,6 +1023,8 @@ with report.open("a") as out:
     out.write(f"index_payload_page_counts={','.join(index_payload_page_counts)}\n")
     out.write("index_payload_magic=MYLITEINDEXPG1\n")
     out.write("index_payload_page_type=3\n")
+    out.write("free_payload_magic=MYLITE FREE LIST 1\n")
+    out.write("free_payload_page_type=4\n")
 PY
 }
 
@@ -724,25 +1176,44 @@ for slot in (0, 1):
         continue
     if page[:16] != b"MYLITEFMTPAGE2\0\0":
         continue
-    if read_u32(page, 16) != 2 or read_u32(page, 20) != page_size:
+    format_version = read_u32(page, 16)
+    if format_version not in (2, 3) or read_u32(page, 20) != page_size:
         continue
     generation = read_u64(page, 24)
     if generation == 0:
         continue
-    headers.append((generation, slot, read_u64(page, 32), read_u64(page, 40)))
+    free_offset = read_u64(page, 64) if format_version == 3 else 0
+    free_length = read_u64(page, 72) if format_version == 3 else 0
+    headers.append((
+        generation, slot, format_version, read_u64(page, 32),
+        read_u64(page, 40), free_offset, free_length
+    ))
 
 if not headers:
     fail("no valid header slots")
 
 headers.sort(reverse=True)
-catalog_payload = read_chain(headers[0][2], headers[0][3], 1)
+catalog_payload = read_chain(headers[0][3], headers[0][4], 1)
 try:
     catalog_lines = catalog_payload.decode("ascii").splitlines()
 except UnicodeDecodeError:
     fail("catalog payload is not ascii")
 
-free_ranges = parse_freepage_records(catalog_lines)
-live_ranges = [page_range(headers[0][2], headers[0][3])]
+if headers[0][2] == 3:
+    free_payload = read_chain(headers[0][5], headers[0][6], 4)
+    try:
+        free_lines = free_payload.decode("ascii").splitlines()
+    except UnicodeDecodeError:
+        fail("free page payload is not ascii")
+    if not free_lines or free_lines[0] != "MYLITE FREE LIST 1":
+        fail("invalid free page payload magic")
+else:
+    free_lines = catalog_lines
+
+free_ranges = parse_freepage_records(free_lines)
+live_ranges = [page_range(headers[0][3], headers[0][4])]
+if headers[0][2] == 3:
+    live_ranges.append(page_range(headers[0][5], headers[0][6]))
 reclaimed_range = None
 
 for line in catalog_lines:

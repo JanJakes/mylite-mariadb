@@ -186,23 +186,24 @@ index payload pages addressed by catalog `INDEXPAGE` roots. This proves
 MariaDB's indexed handler path and uniqueness enforcement, but it is still not
 the final B-tree storage architecture.
 
-The current primary file format stores catalog payload generations, row
-payloads, and index payloads in typed 4096-byte page chains. The two fixed
-header slots still publish the active catalog generation, and the catalog
+The current primary file format stores catalog payload generations, allocator
+metadata, row payloads, and index payloads in typed 4096-byte page chains. The
+two fixed header slots now publish v3 catalog generations with both a logical
+catalog payload root and a dedicated allocator payload root. The catalog
 generation points to table row and index roots. The page store has catalog,
-row, and index page types. The catalog now also stores `FREEPAGE` records for
-complete obsolete page ranges from accepted prior generations. Row and index
-page-chain writers can reuse those consecutive ranges; catalog payloads remain
-append-only until the free-space map is no longer self-described inside the
-logical catalog payload. Loading an accepted generation also scans complete
-pages and merges pages not protected by the accepted catalog, row roots, index
-roots, or existing `FREEPAGE` ranges into the in-memory free list. Those orphan
-pages, including pages left by a rejected newer generation, are published as
-normal `FREEPAGE` records on the next successful write. Transaction/recovery
-pages still need dedicated formats before the raw-record bridge can be retired.
-The next allocator step is to move those free ranges out of the logical catalog
-payload and into a dedicated allocator page chain, which removes the current
-self-reference that keeps catalog payload chains append-only.
+row, index, and allocator page types. New v3 catalog payloads no longer contain
+`FREEPAGE` records; free ranges are serialized in allocator payload pages with
+magic `MYLITE FREE LIST 1`. Row, index, and catalog page-chain writers can
+reuse complete obsolete ranges from accepted prior generations, while the
+allocator payload itself remains append-only for now to avoid self-reference.
+Loading still accepts pre-release v2 catalog generations with catalog-embedded
+`FREEPAGE` records, then rewrites through the v3 path on the next durable
+write. Loading an accepted generation also scans complete pages and merges
+pages not protected by the accepted catalog, allocator payload, row roots,
+index roots, or existing free ranges into the in-memory free list. Those orphan
+pages, including pages left by a rejected newer generation, are published in
+the allocator payload on the next successful write. Transaction/recovery pages
+still need dedicated formats before the raw-record bridge can be retired.
 
 Supported fixed MariaDB record images larger than one row slot page now split
 across `MYLITEROWOVF3` segment payloads inside row page type `2`. This lifts the

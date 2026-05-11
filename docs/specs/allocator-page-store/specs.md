@@ -203,7 +203,19 @@ New writes may publish v3 headers and stop writing catalog `FREEPAGE` records.
 
 Expected impact is small first-party code for header v2/v3 handling,
 allocator-payload serialization/parsing, and physical smoke assertions. No new
-dependency is allowed. Record measured artifacts after implementation.
+dependency is allowed.
+
+Measured after implementation with `MYLITE_BUILD_JOBS=8` and the
+Docker-based `mariadb-minsize` profile:
+
+| Artifact | Size |
+| --- | ---: |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 44,391,138 bytes |
+| `build/mariadb-minsize/mylite/libmylite.a` | 29,698 bytes |
+| `build/mariadb-minsize/mylite/mylite-storage-engine-smoke` | 22,703,560 bytes |
+| `build/mariadb-minsize/mylite/mylite-compatibility-smoke` | 22,704,248 bytes |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 22,770,928 bytes |
+| `build/mariadb-minsize/mylite/mylite-embedded-bootstrap-smoke` | 22,703,384 bytes |
 
 ## License, Trademark, And Dependency Impact
 
@@ -255,6 +267,27 @@ The storage smoke should verify:
   `libmylite` lifecycle smokes pass.
 - No persistent `.frm`, engine sidecars, dynamic plugin artifacts, or catalog
   temporary sidecars are introduced.
+
+## Implementation Result
+
+Implemented in `vendor/mariadb/server/storage/mylite/ha_mylite.cc` and
+`tools/run-storage-engine-smoke.sh`.
+
+- Header readers accept v2 and v3; new writes publish v3 headers with
+  allocator payload root fields at bytes `64..87`.
+- Page type `4` stores allocator payloads with magic `MYLITE FREE LIST 1`.
+- New catalog payloads serialize no `FREEPAGE` records.
+- The catalog payload writer now allocates from accepted free ranges; the
+  allocator payload writer remains append-only.
+- Accepted v2 catalog payload `FREEPAGE` records still load and are rewritten
+  through the v3 path.
+- Storage smoke evidence from the implemented run:
+  `catalog_format_version=3`, `free_payload_page_types=4`,
+  `catalog_freepage_records=0`,
+  `catalog_reused_page_ranges=64:14`,
+  `free_payload_magic=MYLITE FREE LIST 1`, legacy fixture
+  `format_version=2`, legacy rewrite `latest_format_version=3`, and recovery
+  reclaim `reclaimed_page_ranges=138:1`.
 
 ## Risks And Unresolved Questions
 
