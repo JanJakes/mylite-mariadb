@@ -214,6 +214,16 @@ architecture. A later journal/WAL slice must add undo/redo state, transaction
 hooks, savepoint behavior, and recovery rules before MyLite can claim SQL
 rollback semantics.
 
+The first planned rollback step is deferred transaction publication for the
+current in-memory storage bridge. MyLite should register with MariaDB's
+transaction manager, capture in-memory catalog and allocator snapshots before
+the first supported DML mutation, defer durable `.mylite` header publication
+until commit, and restore the snapshots on rollback. This gives atomic commit
+and rollback for the current whole-generation storage model without adding a
+journal companion file yet. It is not the final pager design: page-level
+undo/redo, savepoints, MVCC, and useful concurrent writer behavior still need
+dedicated formats and tests before the bridge can be retired.
+
 Configured primary files are currently single-process owned. MyLite opens the
 primary `.mylite` file with a retained descriptor, takes a nonblocking
 exclusive advisory lock through MariaDB's `my_lock()` with `MY_FORCE_LOCK`, and
