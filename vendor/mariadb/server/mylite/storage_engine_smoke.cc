@@ -88,6 +88,8 @@ struct SmokeResult
   std::string unsupported_index_alter_hash;
   std::string unsupported_index_alter_reverse;
   std::string unsupported_index_alter_rows;
+  std::string unsupported_temporary_table;
+  std::string temporary_base_rows;
   std::string key_lookup_note;
   std::string key_order_ids;
   std::string duplicate_key;
@@ -1519,6 +1521,44 @@ static bool exercise_dml(MYSQL *mysql, SmokeResult *result)
                          "DROP TABLE "
                          "mylite.unsupported_index_alter_base",
                          "DROP unsupported index ALTER base table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "CREATE TABLE mylite.temporary_base "
+                         "(id INT NOT NULL, note VARCHAR(12) NOT NULL, "
+                         "PRIMARY KEY(id)) ENGINE=MYLITE",
+                         "CREATE temporary rejection base table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.temporary_base VALUES "
+                         "(1, 'durable')",
+                         "INSERT temporary rejection base row", result))
+    return false;
+  if (!execute_statement_expect_error(
+        mysql,
+        "CREATE TEMPORARY TABLE mylite.unsupported_temporary "
+        "(id INT NOT NULL, PRIMARY KEY(id)) ENGINE=MYLITE",
+        "unsupported temporary table",
+        &result->unsupported_temporary_table, result))
+    return false;
+  if (!verify_table_absent(mysql,
+                           "SHOW TABLES FROM mylite "
+                           "LIKE 'unsupported_temporary'",
+                           "unsupported temporary table", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(CONCAT(id, ':', note) "
+                          "ORDER BY id SEPARATOR ',') "
+                          "FROM mylite.temporary_base",
+                          "temporary rejection base rows",
+                          &result->temporary_base_rows, result))
+    return false;
+  if (result->temporary_base_rows != "1:durable")
+  {
+    result->message= "temporary rejection base rows changed";
+    return false;
+  }
+  if (!execute_statement(mysql, "DROP TABLE mylite.temporary_base",
+                         "DROP temporary rejection base table", result))
     return false;
   if (!execute_statement_expect_error(
         mysql,
@@ -3350,6 +3390,12 @@ static void write_report(const SmokeOptions &options,
   if (!result.unsupported_index_alter_rows.empty())
     report << "unsupported_index_alter_rows="
            << result.unsupported_index_alter_rows << "\n";
+  if (!result.unsupported_temporary_table.empty())
+    report << "unsupported_temporary_table="
+           << result.unsupported_temporary_table << "\n";
+  if (!result.temporary_base_rows.empty())
+    report << "temporary_base_rows="
+           << result.temporary_base_rows << "\n";
   if (!result.key_lookup_note.empty())
     report << "key_lookup_note=" << result.key_lookup_note << "\n";
   if (!result.key_order_ids.empty())

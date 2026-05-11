@@ -161,7 +161,7 @@ documented read-write create combination.
 | 42 | `schema-object-ddl-rejection` | Done | Reject persistent schema-object DDL that still depends on view, trigger, routine, package, or event metadata outside the MyLite catalog. |
 | 43 | `unsupported-index-ddl-rejection` | Done | Prove FULLTEXT, SPATIAL, HASH, and descending indexes fail explicitly without storing unsupported MyLite table definitions. |
 | 44 | `unsupported-index-alter-rejection` | Done | Prove failed unsupported-index copy ALTER statements leave existing MyLite rows and table definitions intact. |
-| 45 | `temporary-table-rejection` | In progress | Prove `CREATE TEMPORARY TABLE ... ENGINE=MYLITE` fails without creating durable MyLite catalog entries. |
+| 45 | `temporary-table-rejection` | Done | Prove `CREATE TEMPORARY TABLE ... ENGINE=MYLITE` fails without creating durable MyLite catalog entries. |
 
 ## Size and profile direction
 

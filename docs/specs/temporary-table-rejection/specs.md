@@ -119,4 +119,32 @@ No new dependency or licensing change.
 
 ## Implementation Result
 
-Pending.
+Implemented in `vendor/mariadb/server/mylite/storage_engine_smoke.cc`.
+
+The storage smoke now creates a durable `mylite.temporary_base` table, inserts
+one row, verifies `CREATE TEMPORARY TABLE ... ENGINE=MYLITE` is rejected,
+verifies `unsupported_temporary` is absent from `SHOW TABLES`, verifies the
+durable base row still reads as `1:durable`, and drops the base table.
+
+Verification on 2026-05-11:
+
+- `git diff --check`
+- `bash -n tools/run-storage-engine-smoke.sh
+  tools/run-compatibility-test-harness.sh`
+- `MYLITE_BUILD_JOBS=8 tools/run-storage-engine-smoke.sh`
+- `MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh`
+
+Observed report fields:
+
+- `build/mariadb-minsize/mylite-storage-engine-report.txt`:
+  `status=0`, `unsupported_temporary_table=rejected`,
+  `temporary_base_rows=1:durable`.
+- `build/mariadb-minsize/mylite-compatibility-harness-report.txt`:
+  all groups reported `status=0`.
+
+Post-implementation `MinSizeRel` artifact observations:
+
+- `build/mariadb-minsize/libmysqld/libmariadbd.a`: 44,413,682 bytes,
+  571 objects.
+- `build/mariadb-minsize/mylite/mylite-storage-engine-smoke`: 22,839,352
+  bytes.
