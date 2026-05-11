@@ -171,6 +171,15 @@ That smoke builds the initial static `libmylite` wrapper, opens and closes a
 placeholder `.mylite` path, verifies handle-owned diagnostics, and records the
 current temporary runtime side effects.
 
+The first static MyLite storage-engine registration smoke can be run with:
+
+```sh
+tools/run-storage-engine-smoke.sh
+```
+
+That smoke verifies that MariaDB's embedded plugin registry sees the built-in
+`MYLITE` storage engine. It does not run user DDL yet.
+
 Current design documents:
 
 - [Roadmap](docs/ROADMAP.md) tracks the ordered engineering slices and current

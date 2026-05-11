@@ -172,6 +172,41 @@ No new dependency. New MyLite storage-engine files use GPL-2.0-only licensing.
 - MyLite-owned code stays isolated to the new storage subdirectory and smoke
   support.
 
+## Implementation Result
+
+The static `MYLITE` engine is built into the minimal embedded profile and the
+storage-engine smoke passes:
+
+```sh
+MYLITE_BUILD_JOBS=8 tools/run-storage-engine-smoke.sh
+```
+
+The smoke verifies this row from `information_schema.ENGINES`:
+
+- `ENGINE=MYLITE`
+- `SUPPORT=YES`
+
+Regression smokes also pass:
+
+```sh
+MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_BUILD_JOBS=8 tools/run-embedded-bootstrap-smoke.sh
+```
+
+Observed artifacts after this slice:
+
+- `build/mariadb-minsize/libmysqld/libmariadbd.a`: 44,226,010 bytes.
+- `build/mariadb-minsize/mylite/libmylite.a`: 29,530 bytes.
+- `build/mariadb-minsize/mylite/mylite-storage-engine-smoke`: 22,678,888
+  bytes.
+- `build/mariadb-minsize/mylite/mylite-open-close-smoke`: 22,615,824 bytes.
+- `build/mariadb-minsize/mylite/mylite-embedded-bootstrap-smoke`: 22,679,440
+  bytes.
+- Embedded built-in plugin evidence includes `builtin_maria_mylite_plugin`.
+- Dynamic plugin artifacts: none.
+- Runtime side effects remain the existing Aria logs and `mysql.servers`
+  startup diagnostic.
+
 ## Risks And Unresolved Questions
 
 - Static plugin registration can perturb built-in plugin ordering or binary

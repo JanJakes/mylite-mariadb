@@ -16,16 +16,19 @@ INCLUDE_DIRECTORIES(
 
 ADD_DEFINITIONS(-DEMBEDDED_LIBRARY -UMYSQL_CLIENT)
 
-ADD_LIBRARY(mylite STATIC
+ADD_LIBRARY(libmylite STATIC
   mylite.cc
 )
-TARGET_INCLUDE_DIRECTORIES(mylite PUBLIC
+TARGET_INCLUDE_DIRECTORIES(libmylite PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
-TARGET_COMPILE_DEFINITIONS(mylite PRIVATE
+TARGET_COMPILE_DEFINITIONS(libmylite PRIVATE
   MYLITE_DEFAULT_LC_MESSAGES_DIR="${CMAKE_BINARY_DIR}/sql/share"
 )
-TARGET_LINK_LIBRARIES(mylite mysqlserver tpool)
+SET_TARGET_PROPERTIES(libmylite PROPERTIES
+  OUTPUT_NAME mylite
+)
+TARGET_LINK_LIBRARIES(libmylite mysqlserver tpool)
 
 MYSQL_ADD_EXECUTABLE(mylite-embedded-bootstrap-smoke
   bootstrap_smoke.cc
@@ -37,11 +40,19 @@ MYSQL_ADD_EXECUTABLE(mylite-open-close-smoke
   open_close_smoke.cc
   COMPONENT Test
 )
-TARGET_LINK_LIBRARIES(mylite-open-close-smoke mylite)
+TARGET_LINK_LIBRARIES(mylite-open-close-smoke libmylite)
+
+MYSQL_ADD_EXECUTABLE(mylite-storage-engine-smoke
+  storage_engine_smoke.cc
+  COMPONENT Test
+)
+TARGET_LINK_LIBRARIES(mylite-storage-engine-smoke mysqlserver tpool)
 
 IF(UNIX)
   SET_TARGET_PROPERTIES(mylite-embedded-bootstrap-smoke PROPERTIES
     ENABLE_EXPORTS TRUE)
   SET_TARGET_PROPERTIES(mylite-open-close-smoke PROPERTIES
+    ENABLE_EXPORTS TRUE)
+  SET_TARGET_PROPERTIES(mylite-storage-engine-smoke PROPERTIES
     ENABLE_EXPORTS TRUE)
 ENDIF()
