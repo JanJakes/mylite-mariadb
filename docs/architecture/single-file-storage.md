@@ -200,6 +200,9 @@ roots, or existing `FREEPAGE` ranges into the in-memory free list. Those orphan
 pages, including pages left by a rejected newer generation, are published as
 normal `FREEPAGE` records on the next successful write. Transaction/recovery
 pages still need dedicated formats before the raw-record bridge can be retired.
+The next allocator step is to move those free ranges out of the logical catalog
+payload and into a dedicated allocator page chain, which removes the current
+self-reference that keeps catalog payload chains append-only.
 
 Supported fixed MariaDB record images larger than one row slot page now split
 across `MYLITEROWOVF3` segment payloads inside row page type `2`. This lifts the

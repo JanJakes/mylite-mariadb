@@ -52,7 +52,9 @@ always allocating at EOF. Catalog payload chains remain append-only until the
 free-space map is no longer self-described inside the logical catalog payload.
 Accepted-generation load now also reclaims complete unreferenced pages left by
 unpublished or rejected generations and publishes them as `FREEPAGE` records on
-the next durable write.
+the next durable write. The next storage slice is moving allocator metadata out
+of the logical catalog payload so catalog payload chains can reuse accepted
+free ranges without self-describing their own allocation state.
 
 ## Implementation plan
 
@@ -79,6 +81,7 @@ the next durable write.
 | 18 | `row-overflow-storage` | Done | Add overflow row payload segments so large non-BLOB fixed row images can span row pages. |
 | 19 | `free-list-page-reuse` | Done | Persist and validate free page ranges, then reuse complete obsolete row and index page chains from accepted prior generations. |
 | 20 | `orphan-page-reclaim` | Done | Reclaim complete unreferenced pages left by rejected or unpublished generations after recovery accepts a safe catalog generation. |
+| 21 | `allocator-page-store` | In progress | Store free-page ranges in a dedicated allocator page chain so catalog payload chains can reuse accepted free ranges. |
 
 ## Size and profile direction
 
