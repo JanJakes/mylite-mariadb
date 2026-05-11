@@ -30,7 +30,7 @@ copy `ALTER`, `RENAME`, and `DROP` lifecycle without leaving durable `.frm`
 table-definition files, and persist frm-backed table definitions in the primary
 `.mylite` file across fresh embedded processes.
 
-The next implementation step is `file-format-recovery`, which should replace
+The active implementation step is `file-format-recovery`, which should replace
 the v0 text/hex catalog rewrite with a real durable file header, catalog
 layout, update protocol, and crash recovery story.
 
@@ -48,7 +48,7 @@ layout, update protocol, and crash recovery story.
 | 7 | `mylite-engine-discovery` | Done | Reopen table definitions from the MyLite catalog through MariaDB table-discovery APIs. |
 | 8 | `ddl-metadata-routing` | Done | Prove `CREATE`, `ALTER`, `DROP`, and `RENAME` do not leave durable `.frm` table-definition sidecars. |
 | 9 | `single-file-catalog` | Done | Store initial frm-backed table definitions inside the `.mylite` file. |
-| 10 | `file-format-recovery` | Planned | Define and implement the first durable file header, page layout, journal or WAL lifecycle, transaction metadata, and crash recovery guarantees. |
+| 10 | `file-format-recovery` | In progress | Define and implement the first durable file header, page layout, catalog update protocol, and initial catalog recovery guarantees. |
 | 11 | `row-index-storage` | Planned | Implement row storage, index access, autoincrement state, and core read/write handler methods. |
 | 12 | `compatibility-test-harness` | Planned | Run embedded lifecycle, unexpected-sidecar detection, crash/reopen, and MariaDB comparison tests in repeatable groups. |
 
