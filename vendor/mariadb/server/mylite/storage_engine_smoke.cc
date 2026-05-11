@@ -73,6 +73,10 @@ struct SmokeResult
   std::string unsupported_foreign_key_create;
   std::string unsupported_foreign_key_alter;
   std::string foreign_key_parent_count;
+  std::string unsupported_generated_virtual;
+  std::string unsupported_generated_stored;
+  std::string unsupported_generated_alter;
+  std::string generated_base_count;
   std::string unsupported_geometry;
   std::string key_lookup_note;
   std::string key_order_ids;
@@ -1235,6 +1239,66 @@ static bool exercise_dml(MYSQL *mysql, SmokeResult *result)
   }
   if (!execute_statement(mysql, "DROP TABLE mylite.foreign_key_parent",
                          "DROP foreign key parent table", result))
+    return false;
+  if (!execute_statement_expect_error(
+        mysql,
+        "CREATE TABLE mylite.unsupported_generated_virtual "
+        "(id INT NOT NULL, doubled INT GENERATED ALWAYS AS (id * 2) "
+        "VIRTUAL) ENGINE=MYLITE",
+        "unsupported virtual generated column",
+        &result->unsupported_generated_virtual,
+        result))
+    return false;
+  if (!verify_table_absent(mysql,
+                           "SHOW TABLES FROM mylite "
+                           "LIKE 'unsupported_generated_virtual'",
+                           "unsupported virtual generated table", result))
+    return false;
+  if (!execute_statement_expect_error(
+        mysql,
+        "CREATE TABLE mylite.unsupported_generated_stored "
+        "(id INT NOT NULL, doubled INT GENERATED ALWAYS AS (id * 2) "
+        "STORED) ENGINE=MYLITE",
+        "unsupported stored generated column",
+        &result->unsupported_generated_stored,
+        result))
+    return false;
+  if (!verify_table_absent(mysql,
+                           "SHOW TABLES FROM mylite "
+                           "LIKE 'unsupported_generated_stored'",
+                           "unsupported stored generated table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "CREATE TABLE mylite.generated_base "
+                         "(id INT NOT NULL, value INT NOT NULL, "
+                         "PRIMARY KEY(id)) ENGINE=MYLITE",
+                         "CREATE generated column base table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.generated_base VALUES (1, 2)",
+                         "INSERT generated column base row", result))
+    return false;
+  if (!execute_statement_expect_error(
+        mysql,
+        "ALTER TABLE mylite.generated_base "
+        "ADD COLUMN doubled INT GENERATED ALWAYS AS (value * 2) "
+        "VIRTUAL, ALGORITHM=COPY",
+        "unsupported generated column alter",
+        &result->unsupported_generated_alter,
+        result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT COUNT(*) FROM mylite.generated_base",
+                          "generated column base count",
+                          &result->generated_base_count, result))
+    return false;
+  if (result->generated_base_count != "1")
+  {
+    result->message= "generated column base count returned an unexpected value";
+    return false;
+  }
+  if (!execute_statement(mysql, "DROP TABLE mylite.generated_base",
+                         "DROP generated column base table", result))
     return false;
   if (!execute_statement_expect_error(mysql,
                                       "CREATE TABLE mylite.unsupported_geometry "
@@ -2976,6 +3040,18 @@ static void write_report(const SmokeOptions &options,
   if (!result.foreign_key_parent_count.empty())
     report << "foreign_key_parent_count="
            << result.foreign_key_parent_count << "\n";
+  if (!result.unsupported_generated_virtual.empty())
+    report << "unsupported_generated_virtual="
+           << result.unsupported_generated_virtual << "\n";
+  if (!result.unsupported_generated_stored.empty())
+    report << "unsupported_generated_stored="
+           << result.unsupported_generated_stored << "\n";
+  if (!result.unsupported_generated_alter.empty())
+    report << "unsupported_generated_alter="
+           << result.unsupported_generated_alter << "\n";
+  if (!result.generated_base_count.empty())
+    report << "generated_base_count="
+           << result.generated_base_count << "\n";
   if (!result.unsupported_geometry.empty())
     report << "unsupported_geometry=" << result.unsupported_geometry << "\n";
   if (!result.key_lookup_note.empty())

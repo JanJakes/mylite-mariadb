@@ -143,4 +143,35 @@ MariaDB-derived source files.
 
 ## Implementation Result
 
-Pending.
+Implemented.
+
+- MyLite row-shape validation now rejects any field whose `Field::vcol_info`
+  is set before storing a table definition.
+- The existing `HA_GENERATED_KEY` key-shape rejection remains in place for
+  generated-column indexes.
+- Storage smoke now rejects virtual generated-column CREATE, stored
+  generated-column CREATE, and generated-column ALTER, and verifies the base
+  table remains readable after the failed ALTER.
+
+Verification on 2026-05-11:
+
+- `MYLITE_BUILD_JOBS=8 tools/run-storage-engine-smoke.sh`
+- `MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh`
+- `MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh`
+- `MYLITE_BUILD_JOBS=8 tools/run-embedded-bootstrap-smoke.sh`
+- `bash -n tools/run-compatibility-test-harness.sh tools/run-storage-engine-smoke.sh tools/run-libmylite-open-close-smoke.sh tools/run-embedded-bootstrap-smoke.sh tools/build-mariadb-minsize.sh`
+- `git diff --check`
+
+Observed report evidence:
+
+- `unsupported_generated_virtual=rejected`
+- `unsupported_generated_stored=rejected`
+- `unsupported_generated_alter=rejected`
+- `generated_base_count=1`
+
+Measured `MinSizeRel` artifacts after the storage-smoke build:
+
+- `build/mariadb-minsize/mylite/libmylite.a`: 87,206 bytes.
+- `build/mariadb-minsize/libmysqld/libmariadbd.a`: 44,417,786 bytes.
+- `build/mariadb-minsize/libmysqld/libmariadbd.a`: 571 archive objects.
+- Dynamic plugin artifacts: none.

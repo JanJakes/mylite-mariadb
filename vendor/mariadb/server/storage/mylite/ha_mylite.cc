@@ -205,6 +205,7 @@ static int mylite_decode_record(TABLE *table, const Mylite_row &row,
 static bool mylite_create_info_has_foreign_key(
     const HA_CREATE_INFO *create_info);
 static bool mylite_table_supports_row_storage(const TABLE *table);
+static bool mylite_table_has_generated_columns(const TABLE *table);
 static bool mylite_table_supports_blob_storage(const TABLE *table);
 static bool mylite_table_supports_key_storage(const TABLE *table);
 static bool mylite_key_supports_storage(const KEY &key);
@@ -1947,7 +1948,25 @@ static bool mylite_create_info_has_foreign_key(
 
 static bool mylite_table_supports_row_storage(const TABLE *table)
 {
-  return mylite_table_supports_blob_storage(table);
+  return !mylite_table_has_generated_columns(table) &&
+         mylite_table_supports_blob_storage(table);
+}
+
+static bool mylite_table_has_generated_columns(const TABLE *table)
+{
+  if (!table)
+    return false;
+
+  Field **field= table->field;
+  if (!field)
+    return false;
+
+  for (; *field; ++field)
+  {
+    if ((*field)->vcol_info)
+      return true;
+  }
+  return false;
 }
 
 static bool mylite_table_supports_blob_storage(const TABLE *table)

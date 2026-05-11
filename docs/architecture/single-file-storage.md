@@ -269,7 +269,10 @@ still reject duplicate all-non-NULL key tuples. Reverse-sort parts, fulltext
 indexes, spatial indexes, and GEOMETRY columns remain unsupported for now
 because their semantics need separate design. Foreign-key DDL is rejected
 explicitly until MyLite has FK catalog metadata, referential checks, cascade
-actions, FK-aware locking, and DDL recovery behavior.
+actions, FK-aware locking, and DDL recovery behavior. Generated-column DDL is
+also rejected explicitly until expression metadata, virtual/stored
+materialization, generated-column indexes, SQL-mode dependencies, and ALTER
+recomputation are designed.
 
 Current row payload pages are variable-sized slot and overflow pages. Runtime
 free-page accounting tracks their actual page-chain length in memory instead
