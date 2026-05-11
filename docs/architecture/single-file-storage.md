@@ -251,11 +251,19 @@ bridge. Non-key BLOB/TEXT columns now use the same row and overflow page
 storage: MyLite stores a fixed record prefix with native BLOB pointer bytes
 cleared, appends BLOB/TEXT payload bytes in MariaDB `TABLE_SHARE::blob_field`
 order, and reconstructs `Field_blob` pointers into handler-owned read buffers
-on table scan, position read, and index read paths. BLOB/TEXT key parts remain
-unsupported because key image generation and prefix semantics need a separate
-design. GEOMETRY columns also remain unsupported for now because MariaDB models
-them as a `Field_blob` subclass but their spatial semantics are outside this
-slice.
+on table scan, position read, and index read paths. Non-null BLOB/TEXT prefix
+key parts are supported through MariaDB key-image bytes in existing
+`INDEXPAGE` payloads. MyLite builds key images from incoming MariaDB records
+directly, but decodes stored MyLite rows into temporary MariaDB record buffers
+first so key generation never reads cleared native BLOB pointer bytes. Nullable
+key parts, reverse-sort parts, fulltext indexes, spatial indexes, and GEOMETRY
+columns remain unsupported for now because their semantics need separate
+design.
+
+Current row payload pages are variable-sized slot and overflow pages. Runtime
+free-page accounting tracks their actual page-chain length in memory instead
+of deriving it from logical payload bytes; this keeps accepted catalog
+generations recoverable after a later generation is rejected or corrupted.
 
 ## Schemas
 

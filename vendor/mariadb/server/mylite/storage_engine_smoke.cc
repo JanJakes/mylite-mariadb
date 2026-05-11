@@ -41,7 +41,6 @@ struct SmokeResult
   std::string row_notes;
   std::string row_updated_note;
   std::string row_deleted_count;
-  std::string unsupported_blob;
   std::string unsupported_key;
   std::string unsupported_autoincrement;
   std::string large_row_value;
@@ -51,11 +50,17 @@ struct SmokeResult
   std::string blob_text_edges;
   std::string blob_text_updated;
   std::string blob_text_deleted_count;
+  std::string blob_text_key_lookup_id;
+  std::string blob_text_key_order_ids;
+  std::string blob_text_key_duplicate;
+  std::string blob_text_key_updated_id;
+  std::string blob_text_key_deleted_count;
   std::string unsupported_geometry;
   std::string key_lookup_note;
   std::string key_order_ids;
   std::string duplicate_key;
   std::string update_duplicate_key;
+  std::string unsupported_reverse_key;
   std::string autoincrement_ids;
   std::string explicit_autoincrement_ids;
   std::string persisted_count;
@@ -72,6 +77,8 @@ struct SmokeResult
   std::string persisted_blob_text_lengths;
   std::string persisted_blob_text_edges;
   std::string persisted_blob_text_rollback;
+  std::string persisted_blob_text_key_lookup_id;
+  std::string persisted_blob_text_key_order_ids;
   std::string recovery_marker;
   std::string recovery_reclaim;
   std::string transaction_rollback_rows;
@@ -775,12 +782,91 @@ static bool exercise_dml(MYSQL *mysql, SmokeResult *result)
   if (!execute_statement(mysql, "DROP TABLE mylite.blob_text_rows",
                          "DROP BLOB/TEXT row table", result))
     return false;
+
+  if (!execute_statement(mysql,
+                         "CREATE TABLE mylite.blob_text_key_rows "
+                         "(id INT NOT NULL, note TEXT NOT NULL, "
+                         "payload BLOB NOT NULL, PRIMARY KEY(id), "
+                         "KEY note_prefix(note(6)), "
+                         "UNIQUE KEY payload_prefix(payload(4))) "
+                         "ENGINE=MYLITE",
+                         "CREATE BLOB/TEXT key table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.blob_text_key_rows VALUES "
+                         "(1, 'alpha-row', 'aa11-first'), "
+                         "(2, 'beta-row', 'bb22-second'), "
+                         "(3, 'gamma-row', 'cc33-third')",
+                         "INSERT BLOB/TEXT key rows", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT id FROM mylite.blob_text_key_rows "
+                          "FORCE INDEX(note_prefix) WHERE note = 'beta-row'",
+                          "BLOB/TEXT key lookup",
+                          &result->blob_text_key_lookup_id, result))
+    return false;
+  if (result->blob_text_key_lookup_id != "2")
+  {
+    result->message= "BLOB/TEXT key lookup returned an unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY note "
+                          "SEPARATOR ',') "
+                          "FROM mylite.blob_text_key_rows "
+                          "FORCE INDEX(note_prefix)",
+                          "BLOB/TEXT key order",
+                          &result->blob_text_key_order_ids, result))
+    return false;
+  if (result->blob_text_key_order_ids != "1,2,3")
+  {
+    result->message= "BLOB/TEXT key order returned an unexpected value";
+    return false;
+  }
   if (!execute_statement_expect_error(mysql,
-                                      "CREATE TABLE mylite.unsupported_blob "
-                                      "(note TEXT NOT NULL, KEY(note(4))) "
-                                      "ENGINE=MYLITE",
-                                      "unsupported BLOB/TEXT key table",
-                                      &result->unsupported_blob, result))
+                                      "INSERT INTO mylite.blob_text_key_rows "
+                                      "VALUES (4, 'delta-row', 'aa11-dupe')",
+                                      "duplicate BLOB/TEXT key",
+                                      &result->blob_text_key_duplicate,
+                                      result))
+    return false;
+  if (!execute_statement(mysql,
+                         "UPDATE mylite.blob_text_key_rows "
+                         "SET note = 'delta-row', payload = 'dd44-third' "
+                         "WHERE id = 3",
+                         "UPDATE BLOB/TEXT key row", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT id FROM mylite.blob_text_key_rows "
+                          "FORCE INDEX(note_prefix) "
+                          "WHERE note = 'delta-row'",
+                          "updated BLOB/TEXT key lookup",
+                          &result->blob_text_key_updated_id, result))
+    return false;
+  if (result->blob_text_key_updated_id != "3")
+  {
+    result->message= "BLOB/TEXT key update returned an unexpected value";
+    return false;
+  }
+  if (!execute_statement(mysql,
+                         "DELETE FROM mylite.blob_text_key_rows WHERE id = 1",
+                         "DELETE BLOB/TEXT key row", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT COUNT(*) "
+                          "FROM mylite.blob_text_key_rows "
+                          "FORCE INDEX(note_prefix) "
+                          "WHERE note = 'alpha-row'",
+                          "deleted BLOB/TEXT key count",
+                          &result->blob_text_key_deleted_count, result))
+    return false;
+  if (result->blob_text_key_deleted_count != "0")
+  {
+    result->message= "BLOB/TEXT key delete returned an unexpected value";
+    return false;
+  }
+  if (!execute_statement(mysql, "DROP TABLE mylite.blob_text_key_rows",
+                         "DROP BLOB/TEXT key table", result))
     return false;
   if (!execute_statement_expect_error(mysql,
                                       "CREATE TABLE mylite.unsupported_geometry "
@@ -794,6 +880,17 @@ static bool exercise_dml(MYSQL *mysql, SmokeResult *result)
                                       "(id INT, KEY(id)) ENGINE=MYLITE",
                                       "unsupported keyed table",
                                       &result->unsupported_key, result))
+    return false;
+  if (!execute_statement_expect_error(mysql,
+                                      "CREATE TABLE "
+                                      "mylite.unsupported_reverse_key "
+                                      "(id INT NOT NULL, "
+                                      "note VARCHAR(12) NOT NULL, "
+                                      "KEY note_key(note DESC)) "
+                                      "ENGINE=MYLITE",
+                                      "unsupported reverse key table",
+                                      &result->unsupported_reverse_key,
+                                      result))
     return false;
   if (!execute_statement_expect_error(
         mysql,
@@ -1214,6 +1311,54 @@ static bool exercise_persistence_write(MYSQL *mysql, SmokeResult *result)
     return false;
   }
 
+  if (!execute_statement(mysql,
+                         "CREATE TABLE mylite.persisted_blob_text_keyed "
+                         "(id INT NOT NULL, note TEXT NOT NULL, "
+                         "payload BLOB NOT NULL, PRIMARY KEY(id), "
+                         "KEY note_prefix(note(6)), "
+                         "UNIQUE KEY payload_prefix(payload(4))) "
+                         "ENGINE=MYLITE",
+                         "CREATE persisted BLOB/TEXT key table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.persisted_blob_text_keyed "
+                         "VALUES "
+                         "(1, 'alpha-persist', 'aa11-persist'), "
+                         "(2, 'beta-persist', 'bb22-persist'), "
+                         "(3, 'gamma-persist', 'cc33-persist')",
+                         "INSERT persisted BLOB/TEXT key rows", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT id "
+                          "FROM mylite.persisted_blob_text_keyed "
+                          "FORCE INDEX(note_prefix) "
+                          "WHERE note = 'beta-persist'",
+                          "persisted write BLOB/TEXT key lookup",
+                          &result->persisted_blob_text_key_lookup_id,
+                          result))
+    return false;
+  if (result->persisted_blob_text_key_lookup_id != "2")
+  {
+    result->message= "persisted write BLOB/TEXT key lookup returned an "
+                     "unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY note "
+                          "SEPARATOR ',') "
+                          "FROM mylite.persisted_blob_text_keyed "
+                          "FORCE INDEX(note_prefix)",
+                          "persisted write BLOB/TEXT key order",
+                          &result->persisted_blob_text_key_order_ids,
+                          result))
+    return false;
+  if (result->persisted_blob_text_key_order_ids != "1,2,3")
+  {
+    result->message= "persisted write BLOB/TEXT key order returned an "
+                     "unexpected value";
+    return false;
+  }
+
   return true;
 }
 
@@ -1407,6 +1552,42 @@ static bool exercise_persistence_read(MYSQL *mysql, SmokeResult *result)
   if (result->persisted_blob_text_edges != "x:a,z:w")
   {
     result->message= "persisted read BLOB/TEXT edges returned an "
+                     "unexpected value";
+    return false;
+  }
+
+  if (!verify_table_present(mysql,
+                            "SHOW TABLES FROM mylite "
+                            "LIKE 'persisted_blob_text_keyed'",
+                            "persisted BLOB/TEXT key table", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT id "
+                          "FROM mylite.persisted_blob_text_keyed "
+                          "FORCE INDEX(note_prefix) "
+                          "WHERE note = 'beta-persist'",
+                          "persisted read BLOB/TEXT key lookup",
+                          &result->persisted_blob_text_key_lookup_id,
+                          result))
+    return false;
+  if (result->persisted_blob_text_key_lookup_id != "2")
+  {
+    result->message= "persisted read BLOB/TEXT key lookup returned an "
+                     "unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY note "
+                          "SEPARATOR ',') "
+                          "FROM mylite.persisted_blob_text_keyed "
+                          "FORCE INDEX(note_prefix)",
+                          "persisted read BLOB/TEXT key order",
+                          &result->persisted_blob_text_key_order_ids,
+                          result))
+    return false;
+  if (result->persisted_blob_text_key_order_ids != "1,2,3")
+  {
+    result->message= "persisted read BLOB/TEXT key order returned an "
                      "unexpected value";
     return false;
   }
@@ -2082,8 +2263,6 @@ static void write_report(const SmokeOptions &options,
     report << "row_updated_note=" << result.row_updated_note << "\n";
   if (!result.row_deleted_count.empty())
     report << "row_deleted_count=" << result.row_deleted_count << "\n";
-  if (!result.unsupported_blob.empty())
-    report << "unsupported_blob=" << result.unsupported_blob << "\n";
   if (!result.unsupported_key.empty())
     report << "unsupported_key=" << result.unsupported_key << "\n";
   if (!result.unsupported_autoincrement.empty())
@@ -2106,6 +2285,21 @@ static void write_report(const SmokeOptions &options,
   if (!result.blob_text_deleted_count.empty())
     report << "blob_text_deleted_count="
            << result.blob_text_deleted_count << "\n";
+  if (!result.blob_text_key_lookup_id.empty())
+    report << "blob_text_key_lookup_id="
+           << result.blob_text_key_lookup_id << "\n";
+  if (!result.blob_text_key_order_ids.empty())
+    report << "blob_text_key_order_ids="
+           << result.blob_text_key_order_ids << "\n";
+  if (!result.blob_text_key_duplicate.empty())
+    report << "blob_text_key_duplicate="
+           << result.blob_text_key_duplicate << "\n";
+  if (!result.blob_text_key_updated_id.empty())
+    report << "blob_text_key_updated_id="
+           << result.blob_text_key_updated_id << "\n";
+  if (!result.blob_text_key_deleted_count.empty())
+    report << "blob_text_key_deleted_count="
+           << result.blob_text_key_deleted_count << "\n";
   if (!result.unsupported_geometry.empty())
     report << "unsupported_geometry=" << result.unsupported_geometry << "\n";
   if (!result.key_lookup_note.empty())
@@ -2116,6 +2310,9 @@ static void write_report(const SmokeOptions &options,
     report << "duplicate_key=" << result.duplicate_key << "\n";
   if (!result.update_duplicate_key.empty())
     report << "update_duplicate_key=" << result.update_duplicate_key << "\n";
+  if (!result.unsupported_reverse_key.empty())
+    report << "unsupported_reverse_key="
+           << result.unsupported_reverse_key << "\n";
   if (!result.autoincrement_ids.empty())
     report << "autoincrement_ids=" << result.autoincrement_ids << "\n";
   if (!result.explicit_autoincrement_ids.empty())
@@ -2159,6 +2356,12 @@ static void write_report(const SmokeOptions &options,
   if (!result.persisted_blob_text_rollback.empty())
     report << "persisted_blob_text_rollback="
            << result.persisted_blob_text_rollback << "\n";
+  if (!result.persisted_blob_text_key_lookup_id.empty())
+    report << "persisted_blob_text_key_lookup_id="
+           << result.persisted_blob_text_key_lookup_id << "\n";
+  if (!result.persisted_blob_text_key_order_ids.empty())
+    report << "persisted_blob_text_key_order_ids="
+           << result.persisted_blob_text_key_order_ids << "\n";
   if (!result.recovery_marker.empty())
     report << "recovery_marker=" << result.recovery_marker << "\n";
   if (!result.recovery_reclaim.empty())

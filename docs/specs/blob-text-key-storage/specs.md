@@ -178,4 +178,38 @@ MariaDB-derived source files.
 
 ## Implementation Result
 
-Pending.
+Implemented.
+
+- MyLite now advertises MariaDB BLOB index support through
+  `HA_CAN_INDEX_BLOBS`, while its own table/key checks still reject nullable,
+  reverse-sort, fulltext, spatial, generated, and GEOMETRY-backed shapes.
+- Stored-row key image generation now decodes `Mylite_row` records into a
+  temporary MariaDB record buffer before calling `key_copy()`, so BLOB/TEXT
+  prefix keys are built from valid `Field_blob` pointers instead of cleared
+  durable pointer bytes.
+- Unique enforcement and durable index root rebuilds use the stored-row decode
+  path; incoming candidate rows continue to use the native MariaDB row buffer.
+- Storage smoke coverage now creates non-null `TEXT` and `BLOB` prefix keys,
+  verifies forced index reads, unique prefix rejection, update/delete index
+  maintenance, fresh-process reopen through the persisted prefix index, and
+  explicit reverse-sort key rejection.
+- Recovery verification exposed and fixed a row-page accounting bug: row
+  payload chains use variable-sized slot/overflow pages, so MyLite now tracks
+  their actual page count in memory for free-range protection instead of
+  deriving page count from logical payload byte length.
+
+Verified with:
+
+- `MYLITE_BUILD_JOBS=8 tools/run-storage-engine-smoke.sh`
+- `MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh`
+- `MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh`
+- `MYLITE_BUILD_JOBS=8 tools/run-embedded-bootstrap-smoke.sh`
+- `bash -n tools/run-compatibility-test-harness.sh tools/run-storage-engine-smoke.sh tools/run-libmylite-open-close-smoke.sh tools/run-embedded-bootstrap-smoke.sh tools/build-mariadb-minsize.sh`
+- `git diff --check`
+
+Measured `MinSizeRel` artifacts after verification:
+
+- `build/mariadb-minsize/mylite/libmylite.a`: 87,206 bytes.
+- `build/mariadb-minsize/libmysqld/libmariadbd.a`: 44,417,466 bytes.
+- `libmariadbd.a` object count: 571.
+- Dynamic plugin artifacts: none.

@@ -53,14 +53,19 @@ loaded roots when they match open MariaDB key metadata.
 Large non-BLOB fixed MariaDB record images now split across row overflow segment
 pages inside the primary file, and non-key BLOB/TEXT row payloads now use the
 same row and overflow page storage without persisting MariaDB row-buffer
-pointers.
+pointers. Non-null BLOB/TEXT prefix keys now use MariaDB key-image bytes in
+durable `INDEXPAGE` payloads, with stored rows decoded before key-image
+generation so cleared native BLOB pointer bytes are never read.
 Persistent free-page ranges now let later row, index, and catalog page-chain
 rewrites reuse complete obsolete ranges from accepted prior generations instead
 of always allocating at EOF. Allocator metadata now lives in dedicated type-4
 page chains instead of logical catalog `FREEPAGE` records. Accepted-generation
 load now also reclaims complete unreferenced pages left by unpublished or
 rejected generations and publishes them through the allocator payload on the
-next durable write. Supported MyLite row DML now registers with MariaDB's
+next successful write. Row payload free-range accounting tracks actual
+variable-sized row page-chain lengths so recovery fallback generations remain
+loadable after later rejected writes.
+Supported MyLite row DML now registers with MariaDB's
 transaction manager, defers durable `.mylite` generation publication until
 commit, restores in-memory catalog and allocator snapshots on rollback, and
 persists committed state across fresh-process reopen. MyLite savepoints are
@@ -123,7 +128,7 @@ documented read-write create combination.
 | 33 | `libmylite-warning-enumeration` | Done | Add structured warning, note, and error-condition retrieval through the public `libmylite` handle. |
 | 34 | `libmylite-readonly-open` | Done | Enforce `MYLITE_OPEN_READONLY` through runtime startup, storage-engine locking, and public read-only diagnostics. |
 | 35 | `libmylite-exclusive-open` | Done | Support `MYLITE_OPEN_EXCLUSIVE` for create-or-fail primary-file opens. |
-| 36 | `blob-text-key-storage` | In progress | Support non-null BLOB/TEXT prefix key parts in the current row and index storage bridge. |
+| 36 | `blob-text-key-storage` | Done | Support non-null BLOB/TEXT prefix key parts in the current row and index storage bridge. |
 
 ## Size and profile direction
 

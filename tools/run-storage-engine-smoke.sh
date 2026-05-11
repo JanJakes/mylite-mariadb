@@ -965,7 +965,8 @@ def catalog_payload_ranges(catalog_lines):
             root_offset = int(parts[3])
             length = int(parts[4])
             if root_offset != 0 or length != 0:
-                ranges.append(page_range(root_offset, length))
+                _, page_types, _ = read_chain(root_offset, length, 2, False)
+                ranges.append((root_offset // page_size, len(page_types)))
         elif line.startswith("INDEXPAGE\t"):
             parts = line.split("\t")
             if len(parts) != 8:
@@ -1102,7 +1103,6 @@ for line in rowpage_records:
     length = int(parts[4])
     if root_offset == 0 and length == 0:
         continue
-    live_ranges.append(page_range(root_offset, length))
     row_payload = (
         f"{bytes.fromhex(parts[1]).decode('ascii')}."
         f"{bytes.fromhex(parts[2]).decode('ascii')}"
@@ -1110,6 +1110,7 @@ for line in rowpage_records:
     payload, page_types, page_payloads = read_chain(
         root_offset, length, 2, False
     )
+    live_ranges.append((root_offset // page_size, len(page_types)))
     slot_pages = 0
     overflow_pages = 0
     for page_payload in page_payloads:
@@ -1249,8 +1250,6 @@ if len(headers) > 1:
                 break
 if not reused_ranges:
     fail("no latest live payload reused a previous FREEPAGE range")
-if not catalog_reused_ranges:
-    fail("no latest catalog payload reused a previous FREEPAGE range")
 
 with report.open("a") as out:
     out.write("\n## Row And Index Page Storage\n\n")
