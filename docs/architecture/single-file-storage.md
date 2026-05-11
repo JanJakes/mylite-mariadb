@@ -221,6 +221,12 @@ page-level undo/redo, savepoints, XA, transactional DDL, MVCC, and useful
 concurrent writer behavior still need dedicated formats and tests before the
 bridge can be retired.
 
+The first savepoint design should reuse the same in-memory transaction context:
+MariaDB savepoint storage holds a small MyLite savepoint ID, while the actual
+catalog and allocator snapshots stay in the THD-owned MyLite transaction
+context. This keeps savepoints file-format neutral for the current bridge and
+defers page-level savepoint undo until the pager design exists.
+
 Configured primary files are currently single-process owned. MyLite opens the
 primary `.mylite` file with a retained descriptor, takes a nonblocking
 exclusive advisory lock through MariaDB's `my_lock()` with `MY_FORCE_LOCK`, and
