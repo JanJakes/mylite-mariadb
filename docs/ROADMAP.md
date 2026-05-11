@@ -115,6 +115,7 @@ a lock timeout instead of misleading index corruption.
 | 30 | `libmylite-statement-effects` | Done | Expose affected rows, generated insert ids, and warning counts through the public `libmylite` handle. |
 | 31 | `libmylite-prepared-statements` | Done | Add the first public no-parameter prepared statement lifecycle and column accessors. |
 | 32 | `libmylite-parameter-binding` | Done | Add the first public prepared-statement parameter binding API for NULL, numeric, text, and BLOB values. |
+| 33 | `libmylite-warning-enumeration` | In progress | Add structured warning, note, and error-condition retrieval through the public `libmylite` handle. |
 
 ## Size and profile direction
 
