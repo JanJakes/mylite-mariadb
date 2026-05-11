@@ -280,6 +280,14 @@ the current storage smoke proves invalid INSERT and UPDATE statements fail
 without mutating valid rows. MyLite does not own a separate CHECK expression
 evaluator.
 
+Views, triggers, stored routines, packages, and events remain unsupported
+persistent schema objects. MariaDB's current paths store view `.frm` images,
+trigger `.TRG`/`.TRN` files, and routine/event rows in `mysql.*` system tables
+outside the MyLite table catalog. Until MyLite has a catalog representation,
+dependency tracking, invalidation, and recovery behavior for those objects,
+embedded MyLite rejects their persistent DDL explicitly rather than allowing
+datadir sidecars or hidden system-table writes.
+
 Current row payload pages are variable-sized slot and overflow pages. Runtime
 free-page accounting tracks their actual page-chain length in memory instead
 of deriving it from logical payload bytes; this keeps accepted catalog

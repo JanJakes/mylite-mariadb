@@ -68,6 +68,10 @@ CHECK constraints are supported for MyLite tables through inherited MariaDB
 SQL-layer semantics; the current smoke proves invalid INSERT and UPDATE
 statements are rejected, valid rows remain unchanged, and CHECK metadata
 survives fresh-process reopen through the persisted table-definition image.
+Persistent schema-object DDL for views, triggers, stored routines, packages,
+and events is being made explicit as unsupported until those object definitions
+can live in the MyLite catalog without durable MariaDB datadir sidecars or
+hidden `mysql.*` system table writes.
 Persistent free-page ranges now let later row, index, and catalog page-chain
 rewrites reuse complete obsolete ranges from accepted prior generations instead
 of always allocating at EOF. Allocator metadata now lives in dedicated type-4
@@ -146,6 +150,7 @@ documented read-write create combination.
 | 39 | `foreign-key-rejection` | Done | Reject MyLite foreign-key DDL explicitly until FK catalog, enforcement, locking, and cascade semantics are designed. |
 | 40 | `generated-column-rejection` | Done | Reject MyLite generated-column DDL explicitly until expression storage, materialization, indexes, and ALTER recomputation are designed. |
 | 41 | `check-constraint-enforcement` | Done | Prove CHECK constraints are enforced and persisted for supported MyLite tables through inherited MariaDB semantics. |
+| 42 | `schema-object-ddl-rejection` | In progress | Reject persistent schema-object DDL that still depends on view, trigger, routine, package, or event metadata outside the MyLite catalog. |
 
 ## Size and profile direction
 
