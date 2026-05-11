@@ -275,15 +275,57 @@ for covered DML.
 
 ## Binary-Size Impact
 
-Expected binary-size impact is small: one transaction context type, two
-handlerton callbacks, registration code, and smoke coverage. No dependency or
-new compiled MariaDB subsystem should be added. Measured artifact sizes should
-be recorded after implementation.
+The implementation adds one transaction context type, two handlerton callbacks,
+registration code, and smoke coverage. It adds no dependency or new compiled
+MariaDB subsystem. Measured after implementation with `MYLITE_BUILD_JOBS=8`
+and the Docker-based `mariadb-minsize` profile:
+
+| Artifact | Size |
+| --- | ---: |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 44,401,294 bytes |
+| `build/mariadb-minsize/mylite/libmylite.a` | 29,698 bytes |
+| `build/mariadb-minsize/mylite/mylite-storage-engine-smoke` | 22,770,984 bytes |
+| `build/mariadb-minsize/mylite/mylite-compatibility-smoke` | 22,771,472 bytes |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 22,706,664 bytes |
+| `build/mariadb-minsize/mylite/mylite-embedded-bootstrap-smoke` | 22,770,512 bytes |
 
 ## License, Trademark, And Dependency Impact
 
 No new dependencies, license changes, or trademark changes. The implementation
 stays inside existing GPL-2.0-only MariaDB-derived handler code.
+
+## Implementation Result
+
+Implemented in `vendor/mariadb/server/storage/mylite/ha_mylite.cc`,
+`vendor/mariadb/server/storage/mylite/ha_mylite.h`,
+`vendor/mariadb/server/mylite/storage_engine_smoke.cc`, and architecture and
+roadmap docs.
+
+- MyLite no longer advertises `HA_NO_TRANSACTIONS` or `HTON_NO_ROLLBACK` for
+  the covered row-DML path.
+- The handlerton now installs `commit` and `rollback` callbacks.
+- `external_lock()` registers statement participation and registers normal
+  transaction participation for write locks inside explicit transactions.
+- DML mutation paths also register write participation defensively before
+  taking a mutation snapshot.
+- DML captures statement and normal-transaction snapshots of `mylite_catalog`
+  and `mylite_pending_free_page_ranges`, defers publication while dirty
+  transaction context exists, publishes on commit, and restores snapshots on
+  rollback.
+- A single dirty writer THD owns the process-global in-memory catalog until
+  commit or rollback; another THD attempting MyLite access receives a lock
+  timeout.
+- DDL catalog operations keep immediate durable generation publication and are
+  not made transactional by this slice.
+
+Observed storage-smoke transaction report:
+
+- engine metadata: `transactions=YES`,
+- rollback state: `transaction_rollback_rows=1:one,2:two`,
+- commit state: `transaction_rows=2:dos,3:three`,
+- rollback warnings: `transaction_rollback_warnings=none`,
+- fresh-process reopen state: `transaction_rows=2:dos,3:three`,
+- catalog sidecars: none.
 
 ## Test And Verification Plan
 

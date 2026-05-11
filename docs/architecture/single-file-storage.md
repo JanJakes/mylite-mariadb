@@ -205,24 +205,21 @@ pages, including pages left by a rejected newer generation, are published in
 the allocator payload on the next successful write. Transaction/recovery pages
 still need dedicated formats before the raw-record bridge can be retired.
 
-MyLite tables are currently explicit non-transactional/no-rollback MariaDB
-tables. The engine advertises `HA_NO_TRANSACTIONS` and `HTON_NO_ROLLBACK`, and
-the storage smoke verifies that MyLite DML inside `START TRANSACTION` survives
-`ROLLBACK` with MariaDB warning `1196`, then persists across a fresh embedded
-process reopen. This is a documented boundary, not the target transaction
-architecture. A later journal/WAL slice must add undo/redo state, transaction
-hooks, savepoint behavior, and recovery rules before MyLite can claim SQL
-rollback semantics.
+Supported MyLite row DML now participates in MariaDB transactions. The engine
+registers statement and write-transaction participation through
+`external_lock()` and DML mutation paths, captures in-memory catalog and
+allocator snapshots before the first supported row mutation, defers durable
+`.mylite` header publication until commit, and restores snapshots on rollback.
+The storage smoke verifies that rolled-back DML returns to the baseline row
+state with no warning `1196`, and that committed DML survives fresh-process
+reopen.
 
-The first planned rollback step is deferred transaction publication for the
-current in-memory storage bridge. MyLite should register with MariaDB's
-transaction manager, capture in-memory catalog and allocator snapshots before
-the first supported DML mutation, defer durable `.mylite` header publication
-until commit, and restore the snapshots on rollback. This gives atomic commit
-and rollback for the current whole-generation storage model without adding a
-journal companion file yet. It is not the final pager design: page-level
-undo/redo, savepoints, MVCC, and useful concurrent writer behavior still need
-dedicated formats and tests before the bridge can be retired.
+This is still a bridge over the current whole-generation, in-memory row/index
+storage model. It gives atomic commit and rollback for the supported DML subset
+without adding a journal companion file yet. It is not the final pager design:
+page-level undo/redo, savepoints, XA, transactional DDL, MVCC, and useful
+concurrent writer behavior still need dedicated formats and tests before the
+bridge can be retired.
 
 Configured primary files are currently single-process owned. MyLite opens the
 primary `.mylite` file with a retained descriptor, takes a nonblocking

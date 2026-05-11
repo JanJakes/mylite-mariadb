@@ -69,7 +69,7 @@ run_inside_container() {
     "${abs_build_dir}" \
     "${report}" \
     "storage_single_file" \
-    "${abs_build_dir}/mylite-storage-engine-report.txt ${abs_build_dir}/mylite-catalog-write-report.txt ${abs_build_dir}/mylite-catalog-read-report.txt ${abs_build_dir}/mylite-catalog-recovery-base-report.txt ${abs_build_dir}/mylite-catalog-recovery-latest-report.txt ${abs_build_dir}/mylite-catalog-recovery-read-report.txt" \
+    "${abs_build_dir}/mylite-storage-engine-report.txt ${abs_build_dir}/mylite-catalog-write-report.txt ${abs_build_dir}/mylite-catalog-read-report.txt ${abs_build_dir}/mylite-transaction-boundary-write-report.txt ${abs_build_dir}/mylite-transaction-boundary-read-report.txt ${abs_build_dir}/mylite-catalog-recovery-base-report.txt ${abs_build_dir}/mylite-catalog-recovery-latest-report.txt ${abs_build_dir}/mylite-catalog-recovery-read-report.txt" \
     /work/tools/run-storage-engine-smoke.sh --inside-container || status=1
   run_comparison_group "${abs_build_dir}" "${report}" || status=1
   run_sidecar_group "${abs_build_dir}" "${report}" || status=1
@@ -223,6 +223,8 @@ run_sidecar_group() {
   scan_runtime_sidecars "${abs_build_dir}/mylite-storage-engine" \
     "${unexpected}" "${known}"
   scan_runtime_sidecars "${abs_build_dir}/mylite-catalog-persistence" \
+    "${unexpected}" "${known}"
+  scan_runtime_sidecars "${abs_build_dir}/mylite-transaction-boundary" \
     "${unexpected}" "${known}"
   scan_runtime_sidecars "${abs_build_dir}/mylite-catalog-recovery" \
     "${unexpected}" "${known}"

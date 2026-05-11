@@ -30,6 +30,7 @@ struct SmokeResult
   std::string message;
   std::string engine;
   std::string support;
+  std::string transactions;
   std::string discovered_table;
   std::string count;
   std::string created_count;
@@ -65,6 +66,7 @@ struct SmokeResult
   std::string persisted_wide_count;
   std::string recovery_marker;
   std::string recovery_reclaim;
+  std::string transaction_rollback_rows;
   std::string transaction_rows;
   std::string transaction_rollback_warnings;
 };
@@ -351,7 +353,7 @@ done:
 static bool fetch_mylite_engine(MYSQL *mysql, SmokeResult *result)
 {
   const char query[]=
-    "SELECT ENGINE, SUPPORT FROM information_schema.ENGINES "
+    "SELECT ENGINE, SUPPORT, TRANSACTIONS FROM information_schema.ENGINES "
     "WHERE ENGINE = 'MYLITE'";
 
   if (mysql_query(mysql, query))
@@ -371,14 +373,19 @@ static bool fetch_mylite_engine(MYSQL *mysql, SmokeResult *result)
 
   bool ok= false;
   MYSQL_ROW row= mysql_fetch_row(res);
-  if (mysql_num_fields(res) != 2)
+  if (mysql_num_fields(res) != 3)
     result->message= "engine query returned an unexpected column count";
-  else if (!row || !row[0] || !row[1])
+  else if (!row || !row[0] || !row[1] || !row[2])
     result->message= "MYLITE engine was not registered";
   else if (std::strcmp(row[0], "MYLITE") != 0)
   {
     result->engine= row[0];
     result->message= "engine query returned an unexpected engine";
+  }
+  else if (std::strcmp(row[2], "YES") != 0)
+  {
+    result->transactions= row[2];
+    result->message= "MYLITE engine did not report transaction support";
   }
   else if (mysql_fetch_row(res) != nullptr)
     result->message= "engine query returned more than one row";
@@ -386,6 +393,7 @@ static bool fetch_mylite_engine(MYSQL *mysql, SmokeResult *result)
   {
     result->engine= row[0];
     result->support= row[1];
+    result->transactions= row[2];
     ok= true;
   }
 
@@ -1300,9 +1308,7 @@ static bool exercise_transaction_boundary_write(MYSQL *mysql,
   if (!fetch_warning_summary(mysql, "ROLLBACK warnings",
                              &result->transaction_rollback_warnings, result))
     return false;
-  if (result->transaction_rollback_warnings !=
-      "Warning:1196:Some non-transactional changed tables couldn't be "
-      "rolled back")
+  if (result->transaction_rollback_warnings != "none")
   {
     result->message= "ROLLBACK warning returned an unexpected value";
     return false;
@@ -1313,11 +1319,47 @@ static bool exercise_transaction_boundary_write(MYSQL *mysql,
         "SELECT GROUP_CONCAT(CONCAT(id, ':', note) "
         "ORDER BY id SEPARATOR ',') "
         "FROM mylite.transaction_boundary",
-        "transaction boundary rows", &result->transaction_rows, result))
+        "transaction boundary rollback rows",
+        &result->transaction_rollback_rows, result))
     return false;
-  if (result->transaction_rows != "2:deux,3:three")
+  if (result->transaction_rollback_rows != "1:one,2:two")
   {
-    result->message= "transaction boundary rows were rolled back";
+    result->message= "transaction boundary rows were not rolled back";
+    return false;
+  }
+
+  if (!execute_statement(mysql, "START TRANSACTION",
+                         "START transaction boundary commit", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.transaction_boundary VALUES "
+                         "(3, 'three')",
+                         "INSERT transaction boundary commit row", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "UPDATE mylite.transaction_boundary "
+                         "SET note = 'dos' WHERE id = 2",
+                         "UPDATE transaction boundary commit row", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "DELETE FROM mylite.transaction_boundary "
+                         "WHERE id = 1",
+                         "DELETE transaction boundary commit row", result))
+    return false;
+  if (!execute_statement(mysql, "COMMIT",
+                         "COMMIT transaction boundary transaction", result))
+    return false;
+  if (!fetch_single_value(
+        mysql,
+        "SELECT GROUP_CONCAT(CONCAT(id, ':', note) "
+        "ORDER BY id SEPARATOR ',') "
+        "FROM mylite.transaction_boundary",
+        "transaction boundary commit rows", &result->transaction_rows,
+        result))
+    return false;
+  if (result->transaction_rows != "2:dos,3:three")
+  {
+    result->message= "transaction boundary rows did not commit";
     return false;
   }
 
@@ -1346,7 +1388,7 @@ static bool exercise_transaction_boundary_read(MYSQL *mysql,
         "transaction boundary persisted rows", &result->transaction_rows,
         result))
     return false;
-  if (result->transaction_rows != "2:deux,3:three")
+  if (result->transaction_rows != "2:dos,3:three")
   {
     result->message= "transaction boundary rows did not persist";
     return false;
@@ -1604,6 +1646,8 @@ static void write_report(const SmokeOptions &options,
     report << "engine=" << result.engine << "\n";
   if (!result.support.empty())
     report << "support=" << result.support << "\n";
+  if (!result.transactions.empty())
+    report << "transactions=" << result.transactions << "\n";
   if (!result.discovered_table.empty())
     report << "discovered_table=" << result.discovered_table << "\n";
   if (!result.count.empty())
@@ -1685,6 +1729,9 @@ static void write_report(const SmokeOptions &options,
     report << "recovery_marker=" << result.recovery_marker << "\n";
   if (!result.recovery_reclaim.empty())
     report << "recovery_reclaim=" << result.recovery_reclaim << "\n";
+  if (!result.transaction_rollback_rows.empty())
+    report << "transaction_rollback_rows="
+           << result.transaction_rollback_rows << "\n";
   if (!result.transaction_rows.empty())
     report << "transaction_rows=" << result.transaction_rows << "\n";
   if (!result.transaction_rollback_warnings.empty())

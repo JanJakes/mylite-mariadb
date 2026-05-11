@@ -18,6 +18,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <mutex>
+#include <new>
 #include <sstream>
 #include <string>
 #include <sys/stat.h>
@@ -81,6 +82,20 @@ struct Mylite_table_definition
   std::vector<Mylite_index_root> index_roots;
 };
 
+struct Mylite_transaction_snapshot
+{
+  bool active;
+  std::vector<Mylite_table_definition> catalog;
+  std::vector<Mylite_free_page_range> pending_free_page_ranges;
+};
+
+struct Mylite_transaction_context
+{
+  bool dirty;
+  Mylite_transaction_snapshot statement;
+  Mylite_transaction_snapshot transaction;
+};
+
 struct Mylite_catalog_header
 {
   size_t slot;
@@ -104,6 +119,8 @@ struct Mylite_page_header
 
 static handler *mylite_create_handler(handlerton *hton, TABLE_SHARE *table,
                                       MEM_ROOT *mem_root);
+static int mylite_commit(THD *thd, bool all);
+static int mylite_rollback(THD *thd, bool all);
 static int mylite_discover_table(handlerton *hton, THD *thd,
                                  TABLE_SHARE *share);
 static int mylite_discover_table_names(handlerton *hton,
@@ -122,16 +139,17 @@ static int mylite_remove_table_definition(const char *path);
 static int mylite_rename_table_definition(const char *from, const char *to);
 static int mylite_store_row(const char *db, size_t db_length,
                             const char *table_name,
-                            size_t table_name_length, TABLE *table,
-                            const uchar *record, uint *duplicate_key);
+                            size_t table_name_length, THD *thd,
+                            TABLE *table, const uchar *record,
+                            uint *duplicate_key);
 static int mylite_update_row(const char *db, size_t db_length,
                              const char *table_name, size_t table_name_length,
-                             TABLE *table, uint64_t rowid,
+                             THD *thd, TABLE *table, uint64_t rowid,
                              const uchar *record, uint *duplicate_key);
 static int mylite_delete_row(const char *db, size_t db_length,
                              const char *table_name,
-                             size_t table_name_length, TABLE *table,
-                             uint64_t rowid);
+                             size_t table_name_length, THD *thd,
+                             TABLE *table, uint64_t rowid);
 static int mylite_read_row(const char *db, size_t db_length,
                            const char *table_name, size_t table_name_length,
                            const TABLE *table, size_t *scan_index,
@@ -153,7 +171,7 @@ static size_t mylite_count_rows(const char *db, size_t db_length,
                                 size_t table_name_length);
 static bool mylite_reserve_auto_increment(
     const char *db, size_t db_length, const char *table_name,
-    size_t table_name_length, const TABLE *table, ulonglong offset,
+    size_t table_name_length, THD *thd, const TABLE *table, ulonglong offset,
     ulonglong increment, ulonglong nb_desired_values, ulonglong *first_value,
     ulonglong *nb_reserved_values);
 static int mylite_reset_auto_increment_value(const char *db, size_t db_length,
@@ -217,6 +235,20 @@ static Mylite_table_definition *mylite_find_table_definition_locked(
 static bool mylite_parse_table_path(const char *path, std::string *db,
                                     std::string *table_name);
 static bool mylite_ensure_catalog_loaded_locked();
+static int mylite_register_transaction(THD *thd, bool write);
+static int mylite_prepare_dml_mutation_locked(THD *thd);
+static int mylite_check_transaction_access_locked(THD *thd);
+static int mylite_flush_catalog_for_thd_locked(THD *thd);
+static Mylite_transaction_context *mylite_get_transaction_context(
+    THD *thd, bool create);
+static void mylite_clear_transaction_context_locked(
+    THD *thd, Mylite_transaction_context *context);
+static bool mylite_capture_snapshot_locked(
+    Mylite_transaction_snapshot *snapshot);
+static void mylite_restore_snapshot_locked(
+    const Mylite_transaction_snapshot &snapshot);
+static void mylite_clear_snapshot(Mylite_transaction_snapshot *snapshot);
+static bool mylite_thd_in_explicit_transaction(THD *thd);
 static void mylite_clear_catalog_error();
 static void mylite_set_catalog_error(int error);
 static void mylite_set_catalog_errno_error();
@@ -473,6 +505,7 @@ static bool mylite_catalog_load_failed= false;
 static bool mylite_loaded_catalog_header_valid= false;
 static int mylite_catalog_fd= -1;
 static thread_local int mylite_catalog_last_error= 0;
+static THD *mylite_dirty_writer_thd= nullptr;
 static std::string mylite_catalog_locked_path;
 static Mylite_catalog_header mylite_loaded_catalog_header=
   { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
@@ -508,8 +541,9 @@ static int mylite_init_func(void *p)
 
   mylite_hton= static_cast<handlerton *>(p);
   mylite_hton->create= mylite_create_handler;
-  mylite_hton->flags= HTON_NO_PARTITION | HTON_TEMPORARY_NOT_SUPPORTED |
-                      HTON_NO_ROLLBACK;
+  mylite_hton->commit= mylite_commit;
+  mylite_hton->rollback= mylite_rollback;
+  mylite_hton->flags= HTON_NO_PARTITION | HTON_TEMPORARY_NOT_SUPPORTED;
   mylite_hton->tablefile_extensions= ha_mylite_exts;
   mylite_hton->discover_table= mylite_discover_table;
   mylite_hton->discover_table_names= mylite_discover_table_names;
@@ -522,6 +556,62 @@ static handler *mylite_create_handler(handlerton *hton, TABLE_SHARE *table,
                                       MEM_ROOT *mem_root)
 {
   return new (mem_root) ha_mylite(hton, table);
+}
+
+static int mylite_commit(THD *thd, bool all)
+{
+  DBUG_ENTER("mylite_commit");
+  std::lock_guard<std::mutex> guard(mylite_catalog_mutex);
+  Mylite_transaction_context *context=
+    mylite_get_transaction_context(thd, false);
+  if (!context)
+    DBUG_RETURN(0);
+
+  if (!context->dirty)
+  {
+    mylite_clear_transaction_context_locked(thd, context);
+    DBUG_RETURN(0);
+  }
+
+  if (!all && mylite_thd_in_explicit_transaction(thd))
+  {
+    mylite_clear_snapshot(&context->statement);
+    DBUG_RETURN(0);
+  }
+
+  const int error= mylite_flush_catalog_locked();
+  if (error)
+    DBUG_RETURN(error);
+
+  mylite_clear_transaction_context_locked(thd, context);
+  DBUG_RETURN(0);
+}
+
+static int mylite_rollback(THD *thd, bool all)
+{
+  DBUG_ENTER("mylite_rollback");
+  std::lock_guard<std::mutex> guard(mylite_catalog_mutex);
+  Mylite_transaction_context *context=
+    mylite_get_transaction_context(thd, false);
+  if (!context)
+    DBUG_RETURN(0);
+
+  if (all)
+  {
+    if (context->transaction.active)
+      mylite_restore_snapshot_locked(context->transaction);
+    else if (context->statement.active)
+      mylite_restore_snapshot_locked(context->statement);
+    mylite_clear_transaction_context_locked(thd, context);
+    DBUG_RETURN(0);
+  }
+
+  if (context->statement.active)
+    mylite_restore_snapshot_locked(context->statement);
+  mylite_clear_snapshot(&context->statement);
+  if (!mylite_thd_in_explicit_transaction(thd))
+    mylite_clear_transaction_context_locked(thd, context);
+  DBUG_RETURN(0);
 }
 
 static int mylite_discover_table(handlerton *, THD *thd, TABLE_SHARE *share)
@@ -677,8 +767,8 @@ int ha_mylite::write_row(const uchar *buf)
   uint duplicate_key= static_cast<uint>(-1);
   const int error= mylite_store_row(db_name.c_str(), db_name.length(),
                                     opened_table_name.c_str(),
-                                    opened_table_name.length(), table, buf,
-                                    &duplicate_key);
+                                    opened_table_name.length(), ha_thd(),
+                                    table, buf, &duplicate_key);
   if (error == HA_ERR_FOUND_DUPP_KEY)
   {
     errkey= duplicate_key;
@@ -695,8 +785,8 @@ int ha_mylite::update_row(const uchar *, const uchar *new_data)
   uint duplicate_key= static_cast<uint>(-1);
   const int error= mylite_update_row(db_name.c_str(), db_name.length(),
                                      opened_table_name.c_str(),
-                                     opened_table_name.length(), table,
-                                     current_rowid, new_data,
+                                     opened_table_name.length(), ha_thd(),
+                                     table, current_rowid, new_data,
                                      &duplicate_key);
   if (error == HA_ERR_FOUND_DUPP_KEY)
   {
@@ -712,8 +802,8 @@ int ha_mylite::delete_row(const uchar *)
   DBUG_ENTER("ha_mylite::delete_row");
   const int error= mylite_delete_row(db_name.c_str(), db_name.length(),
                                      opened_table_name.c_str(),
-                                     opened_table_name.length(), table,
-                                     current_rowid);
+                                     opened_table_name.length(), ha_thd(),
+                                     table, current_rowid);
   index_cursor_rowids.clear();
   DBUG_RETURN(error);
 }
@@ -909,7 +999,7 @@ void ha_mylite::get_auto_increment(ulonglong offset, ulonglong increment,
   DBUG_ENTER("ha_mylite::get_auto_increment");
   if (!mylite_reserve_auto_increment(
         db_name.c_str(), db_name.length(), opened_table_name.c_str(),
-        opened_table_name.length(), table, offset, increment,
+        opened_table_name.length(), ha_thd(), table, offset, increment,
         nb_desired_values, first_value, nb_reserved_values))
   {
     *first_value= ULONGLONG_MAX;
@@ -939,9 +1029,18 @@ void ha_mylite::update_create_info(HA_CREATE_INFO *create_info)
   DBUG_VOID_RETURN;
 }
 
-int ha_mylite::external_lock(THD *, int)
+int ha_mylite::external_lock(THD *thd, int lock_type)
 {
   DBUG_ENTER("ha_mylite::external_lock");
+  if (lock_type != F_UNLCK)
+  {
+    const int error= mylite_register_transaction(thd, lock_type == F_WRLCK);
+    if (error)
+      DBUG_RETURN(error);
+
+    std::lock_guard<std::mutex> guard(mylite_catalog_mutex);
+    DBUG_RETURN(mylite_check_transaction_access_locked(thd));
+  }
   DBUG_RETURN(0);
 }
 
@@ -1099,8 +1198,9 @@ static int mylite_rename_table_definition(const char *from, const char *to)
 
 static int mylite_store_row(const char *db, size_t db_length,
                             const char *table_name,
-                            size_t table_name_length, TABLE *table,
-                            const uchar *record, uint *duplicate_key)
+                            size_t table_name_length, THD *thd,
+                            TABLE *table, const uchar *record,
+                            uint *duplicate_key)
 {
   if (!record || !mylite_table_supports_row_storage(table) ||
       !mylite_table_supports_key_storage(table))
@@ -1123,6 +1223,10 @@ static int mylite_store_row(const char *db, size_t db_length,
                                            duplicate_key);
   if (unique_error)
     return unique_error;
+
+  int error= mylite_prepare_dml_mutation_locked(thd);
+  if (error)
+    return error;
 
   const std::vector<Mylite_table_definition> before= mylite_catalog;
   const std::vector<Mylite_free_page_range> pending_before=
@@ -1148,7 +1252,7 @@ static int mylite_store_row(const char *db, size_t db_length,
     return HA_ERR_CRASHED;
   }
 
-  const int error= mylite_flush_catalog_locked();
+  error= mylite_flush_catalog_for_thd_locked(thd);
   if (error)
   {
     mylite_catalog= before;
@@ -1159,8 +1263,8 @@ static int mylite_store_row(const char *db, size_t db_length,
 
 static int mylite_update_row(const char *db, size_t db_length,
                              const char *table_name,
-                             size_t table_name_length, TABLE *table,
-                             uint64_t rowid, const uchar *record,
+                             size_t table_name_length, THD *thd,
+                             TABLE *table, uint64_t rowid, const uchar *record,
                              uint *duplicate_key)
 {
   if (!record || rowid == 0 || !mylite_table_supports_row_storage(table) ||
@@ -1187,6 +1291,10 @@ static int mylite_update_row(const char *db, size_t db_length,
   if (unique_error)
     return unique_error;
 
+  int error= mylite_prepare_dml_mutation_locked(thd);
+  if (error)
+    return error;
+
   const std::vector<Mylite_table_definition> before= mylite_catalog;
   const std::vector<Mylite_free_page_range> pending_before=
     mylite_pending_free_page_ranges;
@@ -1205,7 +1313,7 @@ static int mylite_update_row(const char *db, size_t db_length,
     mylite_pending_free_page_ranges= pending_before;
     return HA_ERR_CRASHED;
   }
-  const int error= mylite_flush_catalog_locked();
+  error= mylite_flush_catalog_for_thd_locked(thd);
   if (error)
   {
     mylite_catalog= before;
@@ -1216,8 +1324,8 @@ static int mylite_update_row(const char *db, size_t db_length,
 
 static int mylite_delete_row(const char *db, size_t db_length,
                              const char *table_name,
-                             size_t table_name_length, TABLE *table,
-                             uint64_t rowid)
+                             size_t table_name_length, THD *thd,
+                             TABLE *table, uint64_t rowid)
 {
   if (rowid == 0)
     return HA_ERR_KEY_NOT_FOUND;
@@ -1238,6 +1346,10 @@ static int mylite_delete_row(const char *db, size_t db_length,
   if (!row)
     return HA_ERR_KEY_NOT_FOUND;
 
+  int error= mylite_prepare_dml_mutation_locked(thd);
+  if (error)
+    return error;
+
   const std::vector<Mylite_table_definition> before= mylite_catalog;
   const std::vector<Mylite_free_page_range> pending_before=
     mylite_pending_free_page_ranges;
@@ -1251,7 +1363,7 @@ static int mylite_delete_row(const char *db, size_t db_length,
     mylite_pending_free_page_ranges= pending_before;
     return HA_ERR_CRASHED;
   }
-  const int error= mylite_flush_catalog_locked();
+  error= mylite_flush_catalog_for_thd_locked(thd);
   if (error)
   {
     mylite_catalog= before;
@@ -1429,7 +1541,7 @@ static size_t mylite_count_rows(const char *db, size_t db_length,
 
 static bool mylite_reserve_auto_increment(
     const char *db, size_t db_length, const char *table_name,
-    size_t table_name_length, const TABLE *table, ulonglong offset,
+    size_t table_name_length, THD *thd, const TABLE *table, ulonglong offset,
     ulonglong increment, ulonglong nb_desired_values, ulonglong *first_value,
     ulonglong *nb_reserved_values)
 {
@@ -1467,9 +1579,12 @@ static bool mylite_reserve_auto_increment(
       return false;
   }
 
+  if (mylite_prepare_dml_mutation_locked(thd))
+    return false;
+
   const std::vector<Mylite_table_definition> before= mylite_catalog;
   definition->auto_increment_next= next;
-  const int error= mylite_flush_catalog_locked();
+  const int error= mylite_flush_catalog_for_thd_locked(thd);
   if (error)
   {
     mylite_catalog= before;
@@ -1968,6 +2083,139 @@ static bool mylite_ensure_catalog_loaded_locked()
     mylite_set_catalog_error(HA_ERR_CRASHED);
   mylite_catalog_loaded= true;
   return !mylite_catalog_load_failed;
+}
+
+static int mylite_register_transaction(THD *thd, bool write)
+{
+  if (!thd || !mylite_hton)
+    return HA_ERR_INTERNAL_ERROR;
+
+  trans_register_ha(thd, false, mylite_hton, 0);
+  if (write && mylite_thd_in_explicit_transaction(thd))
+    trans_register_ha(thd, true, mylite_hton, 0);
+  return 0;
+}
+
+static int mylite_prepare_dml_mutation_locked(THD *thd)
+{
+  if (!mylite_ensure_catalog_loaded_locked())
+    return mylite_catalog_error_code();
+
+  int error= mylite_register_transaction(thd, true);
+  if (error)
+    return error;
+
+  error= mylite_check_transaction_access_locked(thd);
+  if (error)
+    return error;
+
+  Mylite_transaction_context *context=
+    mylite_get_transaction_context(thd, true);
+  if (!context)
+    return HA_ERR_OUT_OF_MEM;
+
+  if (!context->statement.active &&
+      !mylite_capture_snapshot_locked(&context->statement))
+  {
+    mylite_clear_transaction_context_locked(thd, context);
+    return HA_ERR_OUT_OF_MEM;
+  }
+
+  if (mylite_thd_in_explicit_transaction(thd) &&
+      !context->transaction.active &&
+      !mylite_capture_snapshot_locked(&context->transaction))
+  {
+    mylite_clear_transaction_context_locked(thd, context);
+    return HA_ERR_OUT_OF_MEM;
+  }
+
+  context->dirty= true;
+  mylite_dirty_writer_thd= thd;
+  return 0;
+}
+
+static int mylite_check_transaction_access_locked(THD *thd)
+{
+  if (!mylite_dirty_writer_thd || mylite_dirty_writer_thd == thd)
+    return 0;
+  return HA_ERR_LOCK_WAIT_TIMEOUT;
+}
+
+static int mylite_flush_catalog_for_thd_locked(THD *thd)
+{
+  Mylite_transaction_context *context=
+    mylite_get_transaction_context(thd, false);
+  if (context && context->dirty)
+    return 0;
+  return mylite_flush_catalog_locked();
+}
+
+static Mylite_transaction_context *mylite_get_transaction_context(
+    THD *thd, bool create)
+{
+  if (!thd || !mylite_hton)
+    return nullptr;
+
+  Mylite_transaction_context *context=
+    static_cast<Mylite_transaction_context *>(
+      thd_get_ha_data(thd, mylite_hton));
+  if (context || !create)
+    return context;
+
+  context= new (std::nothrow) Mylite_transaction_context();
+  if (!context)
+    return nullptr;
+  thd_set_ha_data(thd, mylite_hton, context);
+  return context;
+}
+
+static void mylite_clear_transaction_context_locked(
+    THD *thd, Mylite_transaction_context *context)
+{
+  if (mylite_dirty_writer_thd == thd)
+    mylite_dirty_writer_thd= nullptr;
+  mylite_clear_snapshot(&context->statement);
+  mylite_clear_snapshot(&context->transaction);
+  thd_set_ha_data(thd, mylite_hton, nullptr);
+  delete context;
+}
+
+static bool mylite_capture_snapshot_locked(
+    Mylite_transaction_snapshot *snapshot)
+{
+  try
+  {
+    snapshot->catalog= mylite_catalog;
+    snapshot->pending_free_page_ranges= mylite_pending_free_page_ranges;
+    snapshot->active= true;
+  }
+  catch (const std::bad_alloc &)
+  {
+    mylite_clear_snapshot(snapshot);
+    return false;
+  }
+  return true;
+}
+
+static void mylite_restore_snapshot_locked(
+    const Mylite_transaction_snapshot &snapshot)
+{
+  if (!snapshot.active)
+    return;
+  mylite_catalog= snapshot.catalog;
+  mylite_pending_free_page_ranges= snapshot.pending_free_page_ranges;
+}
+
+static void mylite_clear_snapshot(Mylite_transaction_snapshot *snapshot)
+{
+  snapshot->active= false;
+  snapshot->catalog.clear();
+  snapshot->pending_free_page_ranges.clear();
+}
+
+static bool mylite_thd_in_explicit_transaction(THD *thd)
+{
+  return thd && thd_test_options(thd, OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN);
 }
 
 static void mylite_clear_catalog_error()
@@ -4607,6 +4855,7 @@ static int mylite_deinit_func(void *)
   mylite_loaded_catalog_header= { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
   mylite_free_page_ranges.clear();
   mylite_pending_free_page_ranges.clear();
+  mylite_dirty_writer_thd= nullptr;
   mylite_release_catalog_file_locked();
   return 0;
 }

@@ -39,8 +39,8 @@ public:
 
   ulonglong table_flags() const override
   {
-    return HA_BINLOG_STMT_CAPABLE | HA_NO_TRANSACTIONS |
-           HA_REC_NOT_IN_SEQ | HA_STATS_RECORDS_IS_EXACT;
+    return HA_BINLOG_STMT_CAPABLE | HA_REC_NOT_IN_SEQ |
+           HA_STATS_RECORDS_IS_EXACT;
   }
 
   ulong index_flags(uint, uint, bool) const override
