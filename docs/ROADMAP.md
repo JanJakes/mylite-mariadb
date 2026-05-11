@@ -171,6 +171,7 @@ documented read-write create combination.
 | 45 | `temporary-table-rejection` | Done | Prove `CREATE TEMPORARY TABLE ... ENGINE=MYLITE` fails without creating durable MyLite catalog entries. |
 | 46 | `standalone-index-ddl-lifecycle` | Done | Prove standalone `CREATE INDEX` and `DROP INDEX` preserve MyLite rows, catalog metadata, and durable index roots. |
 | 47 | `truncate-table-lifecycle` | Done | Implement handler-based `TRUNCATE TABLE` for supported MyLite tables, clearing rows and indexes while resetting autoincrement state. |
+| 48 | `schema-namespace-catalog` | In progress | Persist MyLite schema names in the catalog and route schema namespace operations without datadir directories. |
 
 ## Size and profile direction
 
