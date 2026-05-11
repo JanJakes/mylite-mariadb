@@ -202,6 +202,8 @@ static int mylite_encode_record(TABLE *table, const uchar *record,
 static int mylite_decode_record(TABLE *table, const Mylite_row &row,
                                 uchar *record,
                                 std::vector<uchar> *blob_buffer);
+static bool mylite_create_info_has_foreign_key(
+    const HA_CREATE_INFO *create_info);
 static bool mylite_table_supports_row_storage(const TABLE *table);
 static bool mylite_table_supports_blob_storage(const TABLE *table);
 static bool mylite_table_supports_key_storage(const TABLE *table);
@@ -871,6 +873,8 @@ int ha_mylite::create(const char *name, TABLE *table_arg,
   DBUG_ENTER("ha_mylite::create");
   if (mylite_catalog_read_only())
     DBUG_RETURN(HA_ERR_TABLE_READONLY);
+  if (mylite_create_info_has_foreign_key(create_info))
+    DBUG_RETURN(HA_ERR_UNSUPPORTED);
   if (!mylite_table_supports_row_storage(table_arg) ||
       !mylite_table_supports_key_storage(table_arg))
     DBUG_RETURN(HA_ERR_UNSUPPORTED);
@@ -1919,6 +1923,26 @@ static int mylite_decode_record(TABLE *table, const Mylite_row &row,
   }
 
   return 0;
+}
+
+static bool mylite_create_info_has_foreign_key(
+    const HA_CREATE_INFO *create_info)
+{
+  if (!create_info || !create_info->alter_info)
+    return false;
+
+  Alter_info *alter_info= create_info->alter_info;
+  if (alter_info->flags & ALTER_ADD_FOREIGN_KEY)
+    return true;
+
+  List_iterator<Key> key_iterator(alter_info->key_list);
+  Key *key;
+  while ((key= key_iterator++))
+  {
+    if (key->type == Key::FOREIGN_KEY)
+      return true;
+  }
+  return false;
 }
 
 static bool mylite_table_supports_row_storage(const TABLE *table)

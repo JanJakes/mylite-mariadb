@@ -267,7 +267,9 @@ buffers first so key generation never reads cleared native BLOB pointer bytes.
 Nullable unique keys allow multiple rows when any user key part is NULL and
 still reject duplicate all-non-NULL key tuples. Reverse-sort parts, fulltext
 indexes, spatial indexes, and GEOMETRY columns remain unsupported for now
-because their semantics need separate design.
+because their semantics need separate design. Foreign-key DDL is rejected
+explicitly until MyLite has FK catalog metadata, referential checks, cascade
+actions, FK-aware locking, and DDL recovery behavior.
 
 Current row payload pages are variable-sized slot and overflow pages. Runtime
 free-page accounting tracks their actual page-chain length in memory instead
@@ -413,5 +415,5 @@ file. Migration should be logical:
 - Can all persistent system tables move to the MyLite engine without hidden
   Aria dependencies?
 - What minimum collation set is acceptable for a small default build?
-- How should foreign keys, generated columns, fulltext indexes, and spatial
-  indexes be phased into the MyLite engine?
+- How should generated columns, fulltext indexes, spatial indexes, and foreign
+  keys be phased into the MyLite engine?

@@ -60,6 +60,8 @@ key-image bytes in durable `INDEXPAGE` payloads, with stored rows decoded
 before key-image generation so cleared native BLOB pointer bytes are never
 read. Nullable unique keys follow MariaDB's multiple-NULL behavior while still
 rejecting duplicate all-non-NULL key tuples.
+Foreign-key DDL is now rejected explicitly for MyLite tables until FK catalog,
+referential checks, locking, and cascade semantics are designed.
 Persistent free-page ranges now let later row, index, and catalog page-chain
 rewrites reuse complete obsolete ranges from accepted prior generations instead
 of always allocating at EOF. Allocator metadata now lives in dedicated type-4
@@ -135,7 +137,7 @@ documented read-write create combination.
 | 36 | `blob-text-key-storage` | Done | Support non-null BLOB/TEXT prefix key parts in the current row and index storage bridge. |
 | 37 | `nullable-key-storage` | Done | Support nullable key parts, including MariaDB-style unique-key NULL semantics, in the current row and index storage bridge. |
 | 38 | `copy-alter-row-preservation` | Done | Prove populated copy ALTER preserves supported MyLite rows, indexes, BLOB/TEXT payloads, nullable keys, and autoincrement state. |
-| 39 | `foreign-key-rejection` | In progress | Reject MyLite foreign-key DDL explicitly until FK catalog, enforcement, locking, and cascade semantics are designed. |
+| 39 | `foreign-key-rejection` | Done | Reject MyLite foreign-key DDL explicitly until FK catalog, enforcement, locking, and cascade semantics are designed. |
 
 ## Size and profile direction
 

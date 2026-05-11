@@ -70,6 +70,9 @@ struct SmokeResult
   std::string nullable_blob_key_null_ids;
   std::string nullable_blob_key_lookup_id;
   std::string nullable_blob_key_duplicate;
+  std::string unsupported_foreign_key_create;
+  std::string unsupported_foreign_key_alter;
+  std::string foreign_key_parent_count;
   std::string unsupported_geometry;
   std::string key_lookup_note;
   std::string key_order_ids;
@@ -1184,6 +1187,54 @@ static bool exercise_dml(MYSQL *mysql, SmokeResult *result)
   if (!execute_statement(mysql,
                          "DROP TABLE mylite.nullable_blob_key_rows",
                          "DROP nullable BLOB/TEXT key table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "CREATE TABLE mylite.foreign_key_parent "
+                         "(id INT NOT NULL, PRIMARY KEY(id)) ENGINE=MYLITE",
+                         "CREATE foreign key parent table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.foreign_key_parent VALUES (1)",
+                         "INSERT foreign key parent row", result))
+    return false;
+  if (!execute_statement_expect_error(
+        mysql,
+        "CREATE TABLE mylite.unsupported_foreign_child "
+        "(id INT NOT NULL, parent_id INT NOT NULL, PRIMARY KEY(id), "
+        "KEY parent_key(parent_id), "
+        "CONSTRAINT parent_fk FOREIGN KEY(parent_id) "
+        "REFERENCES mylite.foreign_key_parent(id)) ENGINE=MYLITE",
+        "unsupported foreign key create",
+        &result->unsupported_foreign_key_create,
+        result))
+    return false;
+  if (!verify_table_absent(mysql,
+                           "SHOW TABLES FROM mylite "
+                           "LIKE 'unsupported_foreign_child'",
+                           "unsupported foreign key child", result))
+    return false;
+  if (!execute_statement_expect_error(
+        mysql,
+        "ALTER TABLE mylite.foreign_key_parent "
+        "ADD CONSTRAINT self_fk FOREIGN KEY(id) "
+        "REFERENCES mylite.foreign_key_parent(id), ALGORITHM=COPY",
+        "unsupported foreign key alter",
+        &result->unsupported_foreign_key_alter,
+        result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT COUNT(*) "
+                          "FROM mylite.foreign_key_parent",
+                          "foreign key parent count",
+                          &result->foreign_key_parent_count, result))
+    return false;
+  if (result->foreign_key_parent_count != "1")
+  {
+    result->message= "foreign key parent count returned an unexpected value";
+    return false;
+  }
+  if (!execute_statement(mysql, "DROP TABLE mylite.foreign_key_parent",
+                         "DROP foreign key parent table", result))
     return false;
   if (!execute_statement_expect_error(mysql,
                                       "CREATE TABLE mylite.unsupported_geometry "
@@ -2916,6 +2967,15 @@ static void write_report(const SmokeOptions &options,
   if (!result.nullable_blob_key_duplicate.empty())
     report << "nullable_blob_key_duplicate="
            << result.nullable_blob_key_duplicate << "\n";
+  if (!result.unsupported_foreign_key_create.empty())
+    report << "unsupported_foreign_key_create="
+           << result.unsupported_foreign_key_create << "\n";
+  if (!result.unsupported_foreign_key_alter.empty())
+    report << "unsupported_foreign_key_alter="
+           << result.unsupported_foreign_key_alter << "\n";
+  if (!result.foreign_key_parent_count.empty())
+    report << "foreign_key_parent_count="
+           << result.foreign_key_parent_count << "\n";
   if (!result.unsupported_geometry.empty())
     report << "unsupported_geometry=" << result.unsupported_geometry << "\n";
   if (!result.key_lookup_note.empty())

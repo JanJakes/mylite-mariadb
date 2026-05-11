@@ -140,4 +140,34 @@ MariaDB-derived source files.
 
 ## Implementation Result
 
-Pending.
+Implemented.
+
+- `ha_mylite::create()` now rejects any pending CREATE/ALTER whose
+  `HA_CREATE_INFO::alter_info` indicates `ALTER_ADD_FOREIGN_KEY`.
+- The helper also inspects `alter_info->key_list` for `Key::FOREIGN_KEY` as a
+  defensive fallback if a future MariaDB path does not leave the flag set.
+- Storage smoke now rejects both `CREATE TABLE ... FOREIGN KEY ... ENGINE=MYLITE`
+  and `ALTER TABLE ... ADD FOREIGN KEY` while proving the referenced MyLite
+  parent table remains readable and the failed child table is absent.
+
+Verification on 2026-05-11:
+
+- `MYLITE_BUILD_JOBS=8 tools/run-storage-engine-smoke.sh`
+- `MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh`
+- `MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh`
+- `MYLITE_BUILD_JOBS=8 tools/run-embedded-bootstrap-smoke.sh`
+- `bash -n tools/run-compatibility-test-harness.sh tools/run-storage-engine-smoke.sh tools/run-libmylite-open-close-smoke.sh tools/run-embedded-bootstrap-smoke.sh tools/build-mariadb-minsize.sh`
+- `git diff --check`
+
+Observed report evidence:
+
+- `unsupported_foreign_key_create=rejected`
+- `unsupported_foreign_key_alter=rejected`
+- `foreign_key_parent_count=1`
+
+Measured `MinSizeRel` artifacts after the storage-smoke build:
+
+- `build/mariadb-minsize/mylite/libmylite.a`: 87,206 bytes.
+- `build/mariadb-minsize/libmysqld/libmariadbd.a`: 44,417,754 bytes.
+- `build/mariadb-minsize/libmysqld/libmariadbd.a`: 571 archive objects.
+- Dynamic plugin artifacts: none.
