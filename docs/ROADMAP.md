@@ -141,6 +141,7 @@ documented read-write create combination.
 | 38 | `copy-alter-row-preservation` | Done | Prove populated copy ALTER preserves supported MyLite rows, indexes, BLOB/TEXT payloads, nullable keys, and autoincrement state. |
 | 39 | `foreign-key-rejection` | Done | Reject MyLite foreign-key DDL explicitly until FK catalog, enforcement, locking, and cascade semantics are designed. |
 | 40 | `generated-column-rejection` | Done | Reject MyLite generated-column DDL explicitly until expression storage, materialization, indexes, and ALTER recomputation are designed. |
+| 41 | `check-constraint-enforcement` | In progress | Prove CHECK constraints are enforced and persisted for supported MyLite tables through inherited MariaDB semantics. |
 
 ## Size and profile direction
 
