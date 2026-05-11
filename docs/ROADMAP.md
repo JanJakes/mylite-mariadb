@@ -89,6 +89,7 @@ causes an explicit catalog operation failure until that lock is released.
 | 21 | `allocator-page-store` | Done | Store free-page ranges in a dedicated allocator page chain so catalog payload chains can reuse accepted free ranges. |
 | 22 | `transaction-boundary-semantics` | Done | Make MyLite's current non-transactional rollback boundary explicit in engine flags, tests, and docs before real journal/WAL work. |
 | 23 | `primary-file-locking` | Done | Hold an exclusive advisory lock on the primary `.mylite` file so concurrent processes fail explicitly before cross-process concurrency exists. |
+| 24 | `catalog-error-diagnostics` | In progress | Return accurate MariaDB handler diagnostics for MyLite catalog lock, open, load, and write failures instead of misleading generic corruption errors. |
 
 ## Size and profile direction
 
