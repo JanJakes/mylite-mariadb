@@ -11,9 +11,10 @@ also read the relevant design documents:
 
 - [docs/architecture/engineering-standards.md](docs/architecture/engineering-standards.md)
 - [docs/architecture/pre-implementation-checklist.md](docs/architecture/pre-implementation-checklist.md)
-- [docs/architecture/single-file-storage.md](docs/architecture/single-file-storage.md)
+- [docs/architecture/mariadb-foundation.md](docs/architecture/mariadb-foundation.md)
+- [docs/architecture/storage.md](docs/architecture/storage.md)
 - [docs/api/libmylite-c-api.md](docs/api/libmylite-c-api.md)
-- [docs/research/mariadb-source-analysis.md](docs/research/mariadb-source-analysis.md)
+- [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)
 - [docs/ROADMAP.md](docs/ROADMAP.md)
 
 ## Project goals

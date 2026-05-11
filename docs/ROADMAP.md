@@ -1,52 +1,47 @@
-# MyLite roadmap
+# MyLite Roadmap
 
-This roadmap orders the first engineering slices and tracks implementation
-progress. It is intentionally higher-level than the slice specs in
-`docs/specs/`: each slice still needs its own source-linked design before code
-lands.
+This roadmap orders the first engineering slices. It tracks product work at a
+higher level than per-slice specs.
 
-## Status key
+## Status Key
 
-- `Done`: accepted and represented in the repository.
-- `Planned`: expected work, but not started.
-- `In progress`: active implementation or research.
-- `Blocked`: waiting on a named prerequisite or decision.
+- ✅&nbsp;Done: accepted and represented in the repository.
+- ⚪&nbsp;Planned: expected work, but not started.
+- 🟡&nbsp;In&nbsp;progress: active implementation or research.
+- ❌&nbsp;Blocked: waiting on a named prerequisite or decision.
 
-## Current state
+## Current Direction
 
-MyLite currently has project documentation, source analysis, architecture
-direction, API sketches, and workflow guidance. It has not imported MariaDB
-source or implemented `libmylite` yet.
+MyLite starts from MariaDB 11.8 LTS and exposes an embedded `libmylite` API over
+one primary `.mylite` file. Durable application state lives in MyLite storage,
+not in a MariaDB datadir or existing engine sidecars.
 
-The next implementation step is `upstream-11-8-import`, followed by a
-reproducible embedded build baseline. Those two slices establish the source
-tree, build environment, and measurable binary-size starting point before
-larger MyLite changes begin.
-
-## Implementation plan
+## Implementation Plan
 
 | Order | Slice | Status | Purpose |
 | --- | --- | --- | --- |
-| 0 | Project foundation | Done | Define the product goal, GPL baseline, architecture direction, workflow, and initial research. |
-| 1 | `upstream-11-8-import` | Planned | Import a pinned MariaDB 11.8 LTS source tag mechanically and record upstream refs. |
-| 2 | `build-profile-minsize` | Planned | Produce a reproducible embedded build, record artifact size, and document which server-only or rare optional components are omitted by default. |
-| 3 | `embedded-bootstrap` | Planned | Start an in-process MariaDB-derived runtime under MyLite-owned defaults without exposing daemon administration as the library model. |
-| 4 | `unsupported-server-surface` | Planned | Make daemon-only and unsupported features fail explicitly instead of leaking partial server behavior. |
-| 5 | `libmylite-open-close` | Planned | Add the first public C API for opening and closing a `.mylite` file with handle-owned diagnostics. |
-| 6 | `storage-engine-skeleton` | Planned | Add a static MyLite storage engine with enough handler shape for controlled smoke tests. |
-| 7 | `mylite-engine-discovery` | Planned | Reopen table definitions from the MyLite catalog through MariaDB table-discovery APIs. |
-| 8 | `ddl-metadata-routing` | Planned | Prove `CREATE`, `ALTER`, `DROP`, and `RENAME` do not leave durable `.frm` or schema-directory sidecars. |
-| 9 | `single-file-catalog` | Planned | Store schema, table definitions, engine metadata, and catalog versioning inside the `.mylite` file. |
-| 10 | `file-format-recovery` | Planned | Define and implement the first durable file header, page layout, journal or WAL lifecycle, transaction metadata, and crash recovery guarantees. |
-| 11 | `row-index-storage` | Planned | Implement row storage, index access, autoincrement state, and core read/write handler methods. |
-| 12 | `compatibility-test-harness` | Planned | Run embedded lifecycle, unexpected-sidecar detection, crash/reopen, and MariaDB comparison tests in repeatable groups. |
+| 0 | Project foundation | ✅&nbsp;Done | Define the product goal, GPL baseline, architecture direction, workflow, and initial MariaDB research. |
+| 1 | Import MariaDB 11.8.6 | ⚪&nbsp;Planned | Import `mariadb-11.8.6` mechanically and record upstream refs. |
+| 2 | Minimal embedded build | ⚪&nbsp;Planned | Produce a reproducible embedded build and record baseline artifact size and enabled components. |
+| 3 | Embedded bootstrap | ⚪&nbsp;Planned | Start the MariaDB-derived runtime under MyLite-owned defaults and reject daemon-only startup surfaces. |
+| 4 | Public open/close API | ⚪&nbsp;Planned | Add `libmylite` database handles, diagnostics, open flags, and close behavior. |
+| 5 | SQL execution API | ⚪&nbsp;Planned | Add direct execution, prepared statements, bindings, columns, warnings, affected rows, and insert ids. |
+| 6 | Storage engine skeleton | ⚪&nbsp;Planned | Register a static MyLite storage engine with controlled handler smoke coverage. |
+| 7 | Metadata discovery and DDL routing | ⚪&nbsp;Planned | Store MariaDB table definitions in the catalog and route `CREATE`, `ALTER`, `DROP`, and `RENAME` without durable metadata sidecars. |
+| 8 | File format and catalog | ⚪&nbsp;Planned | Define the `.mylite` header, catalog pages, schema namespaces, table roots, and format-version policy. |
+| 9 | Row and index storage | ⚪&nbsp;Planned | Implement table scans, row DML, primary/secondary indexes, uniqueness, autoincrement, BLOB/TEXT overflow, and copy `ALTER` rebuilds. |
+| 10 | Transactions and recovery | ⚪&nbsp;Planned | Add atomic publication, rollback, savepoints, crash recovery, checksums, and companion-file lifecycle tests. |
+| 11 | Locking and concurrency | ⚪&nbsp;Planned | Add safe file locks, multiple-reader behavior, and a storage design that preserves concurrent writer goals. |
+| 12 | Compatibility harness | ⚪&nbsp;Planned | Run embedded lifecycle, sidecar detection, MariaDB comparison, crash/reopen, and application-query coverage in repeatable groups. |
+| 13 | Engine routing and application schemas | ⚪&nbsp;Planned | Route common `ENGINE=` clauses to MyLite and test representative application schemas, including WordPress-shaped DDL. |
+| 14 | Server-surface policy | ⚪&nbsp;Planned | Explicitly reject or replace users/auth, replication/binlog, dynamic plugins, events, performance schema, and external durable engines. |
+| 15 | Size profile hardening | ⚪&nbsp;Planned | Trim daemon-only and low-value optional components after the embedded runtime and storage shape are measurable. |
 
-## Size and profile direction
+## Size And Profile Direction
 
 MyLite should be smaller than a full MariaDB server distribution, but size is a
-measured engineering constraint, not a slogan. The default embedded profile
-should omit running-server-specific services and low-value optional components
-that do not fit a local file-owned library, including:
+measured engineering constraint. The default embedded profile omits runtime
+surface that does not fit a local file-owned library:
 
 - network listener and server account administration,
 - replication, binlog, relay log, and Galera/wsrep,
@@ -54,23 +49,5 @@ that do not fit a local file-owned library, including:
 - performance schema and server audit plugins,
 - rarely used optional engines or plugins unless a slice justifies them.
 
-The `build-profile-minsize` slice should establish the first baseline size and
-the exact component list. Later slices should record meaningful size changes
-when they add or remove runtime surface.
-
-## Research still needed
-
-The existing research is enough to start implementation, but several decisions
-need focused slice-level research before code is written:
-
-- exact MariaDB 11.8 tag selection immediately before import,
-- reproducible Linux build environment and macOS secondary build notes,
-- DDL metadata routing through `CREATE`, `ALTER`, `DROP`, and `RENAME`,
-- pager, B-tree, transaction, and crash recovery design,
-- journal or WAL placement, companion-file lifecycle, and write concurrency
-  target,
-- minimal system schema policy and replacement for server-only tables,
-- first compatibility test subset and unexpected-sidecar detector.
-
-These should be answered inside the relevant slice specs, not as detached
-general research.
+The minimal embedded build establishes the first baseline. Later slices record
+meaningful size changes when they add or remove runtime surface.

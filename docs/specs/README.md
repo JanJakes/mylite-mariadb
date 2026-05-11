@@ -1,54 +1,12 @@
-# Engineering slice specifications
+# Engineering Slice Specs
 
-Substantial MyLite work starts with an engineering slice specification under
-this directory. Start with the
-[pre-implementation checklist](../architecture/pre-implementation-checklist.md),
+Use a spec when a roadmap slice needs source-linked design before code. Start
+with the [pre-implementation checklist](../architecture/pre-implementation-checklist.md),
 then write the slice spec at:
-
-Each slice should use a lower-case, hyphenated directory name:
 
 ```text
 docs/specs/<slice-slug>/specs.md
 ```
-
-Useful slice examples:
-
-- `upstream-11-8-import`
-- `embedded-bootstrap`
-- `libmylite-open-close`
-- `storage-engine-skeleton`
-- `mylite-engine-discovery`
-- `application-engine-routing`
-- `ddl-metadata-routing`
-- `single-file-catalog`
-- `storage-engine-compatibility-matrix`
-- `compatibility-test-harness`
-- `build-profile-minsize`
-- `unsupported-server-surface`
-
-Each `specs.md` should capture:
-
-- the problem being solved,
-- scope and non-goals,
-- MariaDB base version and source references,
-- relevant official MariaDB documentation,
-- MySQL/MariaDB compatibility impact,
-- affected runtime, storage, build, or API layers,
-- proposed design,
-- single-file and embedded-lifecycle implications,
-- storage-engine routing impact when relevant,
-- wire-protocol or integration-package impact when relevant,
-- binary-size implications when relevant,
-- test and verification plan,
-- acceptance criteria,
-- risks and unresolved questions.
-
-Specs should be specific enough that implementation and review can verify the
-work without rediscovering the design from scratch.
-
-Update architecture docs and compatibility matrices when a slice changes a
-supported behavior claim, storage-engine routing, protocol behavior,
-unsupported surface, or file-lifecycle guarantee.
 
 Keep specs short enough to review and specific enough to implement without
 rediscovering the design.
