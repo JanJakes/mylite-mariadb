@@ -210,6 +210,62 @@ target and scripts must avoid implying MariaDB or MySQL affiliation.
 - Run `bash -n` for shell scripts.
 - Run `git diff --check`.
 
+## Implementation Result
+
+The slice added a MyLite-owned embedded smoke module under
+`vendor/mariadb/server/mylite/` and wires it into embedded builds with a narrow
+`ADD_SUBDIRECTORY(mylite)` fork delta in `vendor/mariadb/server/CMakeLists.txt`.
+The smoke target links `mysqlserver` plus `tpool`, which is required by this
+static minimal profile because `libmariadbd.a` does not merge `libtpool.a`.
+
+The repeatable wrapper is:
+
+```sh
+MYLITE_BUILD_JOBS=8 tools/run-embedded-bootstrap-smoke.sh
+```
+
+The successful run produced:
+
+- report: `build/mariadb-minsize/mylite-embedded-bootstrap-report.txt`
+- smoke executable: `build/mariadb-minsize/mylite/mylite-embedded-bootstrap-smoke`
+- smoke executable size: 22,609,880 bytes
+- `libmariadbd.a` size unchanged: 44,134,820 bytes
+- SQL result: `SELECT 1` returned one row with value `1`
+- dynamic plugin artifacts: none
+
+The controlled startup arguments used absolute paths under `/work` inside the
+container:
+
+- `--no-defaults`
+- `--datadir=/work/build/mariadb-minsize/mylite-embedded-bootstrap/datadir`
+- `--tmpdir=/work/build/mariadb-minsize/mylite-embedded-bootstrap/tmp`
+- `--lc-messages-dir=/work/build/mariadb-minsize/sql/share`
+- `--skip-grant-tables`
+- `--skip-networking`
+- `--skip-name-resolve`
+- `--skip-external-locking`
+- `--skip-slave-start`
+- `--log-output=NONE`
+- `--pid-file=/work/build/mariadb-minsize/mylite-embedded-bootstrap/mariadb.pid`
+- `--socket=/work/build/mariadb-minsize/mylite-embedded-bootstrap/mariadb.sock`
+
+Observed runtime files under the smoke runtime directory:
+
+- `datadir/aria_log.00000001` (16,384 bytes)
+- `datadir/aria_log_control` (52 bytes)
+
+MariaDB also emitted this startup diagnostic while still completing the smoke
+successfully:
+
+```text
+Got ERROR: "Can't open and lock privilege tables: Table 'mysql.servers' doesn't exist" errno: 2000
+```
+
+That diagnostic comes from upstream server-table initialization and is evidence
+for the later unsupported-server-surface and bootstrap-cleanup work. This slice
+records it rather than creating normal MariaDB system tables as a product
+decision.
+
 ## Acceptance Criteria
 
 - A MyLite-owned embedded bootstrap smoke target exists and builds in the

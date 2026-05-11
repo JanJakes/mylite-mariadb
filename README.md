@@ -149,8 +149,16 @@ tools/build-mariadb-minsize.sh
 
 That command builds `build/mariadb-minsize/libmysqld/libmariadbd.a` and writes
 `build/mariadb-minsize/mylite-build-report.txt` with toolchain, size, and
-static plugin evidence. Implementation work should keep MyLite changes narrow
-and separate from upstream source imports.
+static plugin evidence. The current embedded bootstrap smoke can be run with:
+
+```sh
+tools/run-embedded-bootstrap-smoke.sh
+```
+
+That smoke starts MariaDB's embedded runtime in-process with controlled
+temporary paths, runs `SELECT 1`, shuts the runtime down, and records observed
+startup side effects. Implementation work should keep MyLite changes narrow and
+separate from upstream source imports.
 
 Current design documents:
 
