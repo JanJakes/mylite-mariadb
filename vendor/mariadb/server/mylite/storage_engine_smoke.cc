@@ -43,9 +43,16 @@ struct SmokeResult
   std::string unsupported_blob;
   std::string unsupported_key;
   std::string unsupported_autoincrement;
+  std::string key_lookup_note;
+  std::string key_order_ids;
+  std::string duplicate_key;
+  std::string update_duplicate_key;
+  std::string autoincrement_ids;
+  std::string explicit_autoincrement_ids;
   std::string persisted_count;
   std::string persisted_column;
   std::string persisted_notes;
+  std::string persisted_autoincrement_ids;
   std::string recovery_marker;
 };
 
@@ -60,6 +67,7 @@ static bool fetch_discovered_table(MYSQL *mysql, SmokeResult *result);
 static bool fetch_probe_count(MYSQL *mysql, SmokeResult *result);
 static bool exercise_ddl(MYSQL *mysql, SmokeResult *result);
 static bool exercise_dml(MYSQL *mysql, SmokeResult *result);
+static bool exercise_index_dml(MYSQL *mysql, SmokeResult *result);
 static bool exercise_persistence_write(MYSQL *mysql, SmokeResult *result);
 static bool exercise_persistence_read(MYSQL *mysql, SmokeResult *result);
 static bool exercise_recovery_latest(MYSQL *mysql, SmokeResult *result);
@@ -269,6 +277,9 @@ static int run_smoke(const SmokeOptions &options,
       goto done;
     result->phase= "dml_lifecycle";
     if (!exercise_dml(mysql, result))
+      goto done;
+    result->phase= "index_lifecycle";
+    if (!exercise_index_dml(mysql, result))
       goto done;
   }
 
@@ -567,12 +578,148 @@ static bool exercise_dml(MYSQL *mysql, SmokeResult *result)
   if (!execute_statement_expect_error(
         mysql,
         "CREATE TABLE mylite.unsupported_autoincrement "
-        "(id INT NOT NULL AUTO_INCREMENT, PRIMARY KEY(id)) ENGINE=MYLITE",
+        "(tenant INT NOT NULL, id INT NOT NULL AUTO_INCREMENT, "
+        "PRIMARY KEY(tenant, id)) ENGINE=MYLITE",
         "unsupported autoincrement table", &result->unsupported_autoincrement,
         result))
     return false;
 
   return true;
+}
+
+static bool exercise_index_dml(MYSQL *mysql, SmokeResult *result)
+{
+  if (!execute_statement(mysql,
+                         "CREATE TABLE mylite.keyed "
+                         "(id INT NOT NULL, note VARCHAR(12) NOT NULL, "
+                         "PRIMARY KEY(id), KEY note_key(note)) "
+                         "ENGINE=MYLITE",
+                         "CREATE keyed table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.keyed VALUES "
+                         "(2, 'two'), (1, 'one'), (3, 'three')",
+                         "INSERT keyed rows", result))
+    return false;
+
+  if (!fetch_single_value(mysql,
+                          "SELECT note FROM mylite.keyed FORCE INDEX(PRIMARY) "
+                          "WHERE id = 2",
+                          "key lookup note", &result->key_lookup_note,
+                          result))
+    return false;
+  if (result->key_lookup_note != "two")
+  {
+    result->message= "key lookup returned an unexpected value";
+    return false;
+  }
+
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY id SEPARATOR ',') "
+                          "FROM mylite.keyed FORCE INDEX(PRIMARY)",
+                          "key order ids", &result->key_order_ids, result))
+    return false;
+  if (result->key_order_ids != "1,2,3")
+  {
+    result->message= "key order returned an unexpected value";
+    return false;
+  }
+
+  if (!execute_statement_expect_error(mysql,
+                                      "INSERT INTO mylite.keyed VALUES "
+                                      "(2, 'duplicate')",
+                                      "duplicate primary key",
+                                      &result->duplicate_key, result))
+    return false;
+  if (!execute_statement_expect_error(mysql,
+                                      "UPDATE mylite.keyed SET id = 1 "
+                                      "WHERE id = 3",
+                                      "duplicate primary key update",
+                                      &result->update_duplicate_key, result))
+    return false;
+
+  if (!execute_statement(mysql, "DROP TABLE mylite.keyed",
+                         "DROP keyed table", result))
+    return false;
+
+  if (!execute_statement(mysql,
+                         "CREATE TABLE mylite.auto_rows "
+                         "(id INT NOT NULL AUTO_INCREMENT, "
+                         "note VARCHAR(12) NOT NULL, PRIMARY KEY(id)) "
+                         "ENGINE=MYLITE",
+                         "CREATE autoincrement table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.auto_rows (note) VALUES "
+                         "('one'), ('two')",
+                         "INSERT generated autoincrement rows", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.auto_rows (id, note) VALUES "
+                         "(10, 'ten')",
+                         "INSERT explicit autoincrement row", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.auto_rows (note) VALUES "
+                         "('eleven')",
+                         "INSERT next autoincrement row", result))
+    return false;
+  if (!execute_statement(mysql, "DELETE FROM mylite.auto_rows WHERE id = 11",
+                         "DELETE generated autoincrement row", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.auto_rows (note) VALUES "
+                         "('twelve')",
+                         "INSERT post-delete autoincrement row", result))
+    return false;
+
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY id SEPARATOR ',') "
+                          "FROM mylite.auto_rows",
+                          "autoincrement ids", &result->autoincrement_ids,
+                          result))
+    return false;
+  if (result->autoincrement_ids != "1,2,10,12")
+  {
+    result->message= "autoincrement ids returned an unexpected value";
+    return false;
+  }
+
+  if (!execute_statement(mysql, "DROP TABLE mylite.auto_rows",
+                         "DROP autoincrement table", result))
+    return false;
+
+  if (!execute_statement(mysql,
+                         "CREATE TABLE mylite.auto_explicit "
+                         "(id INT NOT NULL AUTO_INCREMENT, "
+                         "note VARCHAR(12) NOT NULL, PRIMARY KEY(id)) "
+                         "ENGINE=MYLITE",
+                         "CREATE explicit autoincrement table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.auto_explicit (id, note) VALUES "
+                         "(20, 'twenty')",
+                         "INSERT first explicit autoincrement row", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.auto_explicit (note) VALUES "
+                         "('twentyone')",
+                         "INSERT generated after explicit row", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY id SEPARATOR ',') "
+                          "FROM mylite.auto_explicit",
+                          "explicit autoincrement ids",
+                          &result->explicit_autoincrement_ids, result))
+    return false;
+  if (result->explicit_autoincrement_ids != "20,21")
+  {
+    result->message= "explicit autoincrement ids returned an unexpected value";
+    return false;
+  }
+
+  return execute_statement(mysql, "DROP TABLE mylite.auto_explicit",
+                           "DROP explicit autoincrement table", result);
 }
 
 static bool exercise_persistence_write(MYSQL *mysql, SmokeResult *result)
@@ -624,6 +771,42 @@ static bool exercise_persistence_write(MYSQL *mysql, SmokeResult *result)
     return false;
   }
 
+  if (!execute_statement(mysql,
+                         "CREATE TABLE mylite.persisted_auto "
+                         "(id INT NOT NULL AUTO_INCREMENT, "
+                         "note VARCHAR(12) NOT NULL, PRIMARY KEY(id)) "
+                         "ENGINE=MYLITE",
+                         "CREATE persisted autoincrement table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.persisted_auto (note) VALUES "
+                         "('one')",
+                         "INSERT persisted generated row", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.persisted_auto (id, note) VALUES "
+                         "(5, 'five')",
+                         "INSERT persisted explicit row", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.persisted_auto (note) VALUES "
+                         "('six')",
+                         "INSERT persisted next row", result))
+    return false;
+
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY id SEPARATOR ',') "
+                          "FROM mylite.persisted_auto",
+                          "persisted write autoincrement ids",
+                          &result->persisted_autoincrement_ids, result))
+    return false;
+  if (result->persisted_autoincrement_ids != "1,5,6")
+  {
+    result->message= "persisted write autoincrement ids returned an "
+                     "unexpected value";
+    return false;
+  }
+
   return true;
 }
 
@@ -668,6 +851,31 @@ static bool exercise_persistence_read(MYSQL *mysql, SmokeResult *result)
   if (result->persisted_notes != "seven,eight")
   {
     result->message= "persisted read notes returned an unexpected value";
+    return false;
+  }
+
+  if (!verify_table_present(mysql,
+                            "SHOW TABLES FROM mylite LIKE 'persisted_auto'",
+                            "persisted autoincrement table", result))
+    return false;
+  const bool append_autoincrement= result->phase == "persistence_read";
+  if (append_autoincrement &&
+      !execute_statement(mysql,
+                         "INSERT INTO mylite.persisted_auto (note) VALUES "
+                         "('seven')",
+                         "INSERT reopened autoincrement row", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY id SEPARATOR ',') "
+                          "FROM mylite.persisted_auto",
+                          "persisted read autoincrement ids",
+                          &result->persisted_autoincrement_ids, result))
+    return false;
+  const std::string expected_ids= append_autoincrement ? "1,5,6,7" : "1,5,6";
+  if (result->persisted_autoincrement_ids != expected_ids)
+  {
+    result->message= "persisted read autoincrement ids returned an "
+                     "unexpected value";
     return false;
   }
 
@@ -900,12 +1108,28 @@ static void write_report(const SmokeOptions &options,
   if (!result.unsupported_autoincrement.empty())
     report << "unsupported_autoincrement="
            << result.unsupported_autoincrement << "\n";
+  if (!result.key_lookup_note.empty())
+    report << "key_lookup_note=" << result.key_lookup_note << "\n";
+  if (!result.key_order_ids.empty())
+    report << "key_order_ids=" << result.key_order_ids << "\n";
+  if (!result.duplicate_key.empty())
+    report << "duplicate_key=" << result.duplicate_key << "\n";
+  if (!result.update_duplicate_key.empty())
+    report << "update_duplicate_key=" << result.update_duplicate_key << "\n";
+  if (!result.autoincrement_ids.empty())
+    report << "autoincrement_ids=" << result.autoincrement_ids << "\n";
+  if (!result.explicit_autoincrement_ids.empty())
+    report << "explicit_autoincrement_ids="
+           << result.explicit_autoincrement_ids << "\n";
   if (!result.persisted_count.empty())
     report << "persisted_count=" << result.persisted_count << "\n";
   if (!result.persisted_column.empty())
     report << "persisted_column=" << result.persisted_column << "\n";
   if (!result.persisted_notes.empty())
     report << "persisted_notes=" << result.persisted_notes << "\n";
+  if (!result.persisted_autoincrement_ids.empty())
+    report << "persisted_autoincrement_ids="
+           << result.persisted_autoincrement_ids << "\n";
   if (!result.recovery_marker.empty())
     report << "recovery_marker=" << result.recovery_marker << "\n";
 }

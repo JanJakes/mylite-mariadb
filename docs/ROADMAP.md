@@ -30,10 +30,13 @@ copy `ALTER`, `RENAME`, and `DROP` lifecycle without leaving durable `.frm`
 table-definition files, persist frm-backed table definitions in the primary
 `.mylite` file across fresh embedded processes, and recover the previous valid
 catalog generation when the latest append-only catalog payload is corrupted.
+It can store simple non-BLOB rows, enforce supported primary and unique keys,
+serve basic ordered index access, and persist table-local autoincrement state
+in the `.mylite` payload.
 
-The active implementation step is `index-autoincrement-storage`, which should
-replace the current keyless heap proof with enforced key metadata, basic index
-access, and durable autoincrement state.
+The next implementation step is `compatibility-test-harness`, which should turn
+the accumulated smoke coverage into clearer repeatable groups and add MariaDB
+comparison coverage for the supported embedded subset.
 
 ## Implementation plan
 
@@ -51,7 +54,7 @@ access, and durable autoincrement state.
 | 9 | `single-file-catalog` | Done | Store initial frm-backed table definitions inside the `.mylite` file. |
 | 10 | `file-format-recovery` | Done | Define and implement the first durable file header, page layout, catalog update protocol, and initial catalog recovery guarantees. |
 | 11 | `row-index-storage` | Done | Implement the first durable heap row storage and core table-scan read/write/update/delete handler methods. |
-| 12 | `index-autoincrement-storage` | In progress | Add enforced key metadata, basic index access, and durable autoincrement state. |
+| 12 | `index-autoincrement-storage` | Done | Add enforced key metadata, basic index access, and durable autoincrement state. |
 | 13 | `compatibility-test-harness` | Planned | Run embedded lifecycle, unexpected-sidecar detection, crash/reopen, and MariaDB comparison tests in repeatable groups. |
 
 ## Size and profile direction

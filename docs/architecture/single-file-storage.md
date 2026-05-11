@@ -175,6 +175,13 @@ read/write/update/delete integration and fresh-process persistence, but it is a
 temporary bridge. Real row and index pages still need a pager, free-space
 management, transaction recovery, autoincrement metadata, and key enforcement.
 
+The current bridge layer accepts supported non-null BTREE/undefined keys and
+autoincrement columns without adding durable index sidecars. It stores
+autoincrement counters in catalog payload records and rebuilds ordered index
+cursors from persisted row images in memory. This proves MariaDB's indexed
+handler path and uniqueness enforcement, but it is still not the final B-tree
+storage architecture.
+
 ## Schemas
 
 MariaDB's `database.table` model should map to namespaces inside the catalog:

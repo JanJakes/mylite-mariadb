@@ -235,9 +235,9 @@ The public `libmylite` C API is unchanged.
 
 The catalog payload gains a new textual `AUTOINC` record. The outer v1 header,
 payload checksum, and two-slot publication protocol remain unchanged. Since the
-file format is pre-release, the parser can require `AUTOINC` for newly written
-payloads while still deriving a safe value from rows if older local payloads
-lack it.
+file format is pre-release, newly written payloads emit `AUTOINC` records for
+every table while older local payloads without an `AUTOINC` record reopen with
+the unsupported-table sentinel value until rewritten.
 
 ## Binary-Size Impact
 
@@ -274,6 +274,7 @@ Extend storage-engine smoke to cover:
 - Ordered key scan returns rows in key order.
 - Autoincrement insert, explicit high value, subsequent generated value, delete,
   and fresh-process reopen preserve the next generated value.
+- Explicit-first autoincrement insert advances the next generated value.
 - Unsupported nullable key, BLOB/TEXT key, reverse key, and non-leading
   autoincrement shapes are rejected explicitly.
 - No persistent `.frm` or engine sidecars are introduced.
@@ -290,6 +291,63 @@ Extend storage-engine smoke to cover:
 - Existing keyless row persistence and recovery smokes still pass.
 - `libmylite` open/close and embedded bootstrap smokes still pass.
 - Binary size changes are recorded.
+
+## Implementation Result
+
+MyLite now accepts supported non-null BTREE/undefined keys and autoincrement
+tables in the raw-record bridge storage. The implementation adds:
+
+- `AUTOINC` catalog payload records,
+- handler index cursor methods over sorted in-memory key images,
+- unique-key checks for insert and update,
+- lazy autoincrement counter initialization for MariaDB-created table metadata,
+- durable autoincrement reservation and explicit-value advancement,
+- exact `records_in_range()` counts for supported key ranges,
+- explicit rejection for the unsupported key and autoincrement shapes covered
+  by the smoke.
+
+Indexes are not persisted as separate pages. The handler rebuilds key images
+from durable row records with MariaDB's `key_copy()` and compares them with
+`key_tuple_cmp()`. This keeps the slice correct and bounded while leaving the
+real pager/B-tree design for a later storage slice.
+
+Verification passed:
+
+```sh
+MYLITE_BUILD_JOBS=8 tools/run-storage-engine-smoke.sh
+MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_BUILD_JOBS=8 tools/run-embedded-bootstrap-smoke.sh
+bash -n tools/run-storage-engine-smoke.sh tools/run-libmylite-open-close-smoke.sh tools/run-embedded-bootstrap-smoke.sh tools/build-mariadb-minsize.sh
+git diff --check
+```
+
+Observed reports after implementation:
+
+- `mylite-storage-engine-report.txt`: `key_lookup_note=two`,
+  `key_order_ids=1,2,3`, `duplicate_key=rejected`,
+  `update_duplicate_key=rejected`, `autoincrement_ids=1,2,10,12`,
+  `explicit_autoincrement_ids=20,21`, no `.frm` artifacts.
+- `mylite-catalog-read-report.txt`: `persisted_count=2`,
+  `persisted_notes=seven,eight`,
+  `persisted_autoincrement_ids=1,5,6,7`, no `.frm` artifacts, no catalog
+  sidecars.
+- `mylite-catalog-recovery-read-report.txt`: `persisted_count=2`,
+  `persisted_notes=seven,eight`, `persisted_autoincrement_ids=1,5,6`,
+  `recovery_marker=absent`, no `.frm` artifacts, no catalog sidecars.
+
+Observed artifacts after this slice:
+
+- `build/mariadb-minsize/libmysqld/libmariadbd.a`: 44,313,538 bytes.
+- `build/mariadb-minsize/mylite/libmylite.a`: 29,698 bytes.
+- `build/mariadb-minsize/mylite/mylite-storage-engine-smoke`: 22,692,464
+  bytes.
+- `build/mariadb-minsize/mylite/mylite-open-close-smoke`: 22,693,600 bytes.
+- `build/mariadb-minsize/mylite/mylite-embedded-bootstrap-smoke`: 22,691,592
+  bytes.
+- `build/mariadb-minsize/mylite-catalog-persistence/catalog.mylite`: 43,120
+  bytes.
+- `build/mariadb-minsize/mylite-catalog-recovery/catalog.mylite`: 39,938
+  bytes.
 
 ## Risks And Unresolved Questions
 
