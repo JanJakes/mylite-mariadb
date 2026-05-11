@@ -25,18 +25,17 @@ native storage files inside that directory.
 | 2 | Minimal embedded build | ⚪&nbsp;Planned | Produce a reproducible embedded build and record baseline artifact size and enabled components. |
 | 3 | Embedded bootstrap | ⚪&nbsp;Planned | Start the MariaDB-derived runtime under MyLite-owned defaults and reject daemon-only startup surfaces. |
 | 4 | Public open/close API | ⚪&nbsp;Planned | Add `libmylite` database handles, diagnostics, open flags, and close behavior. |
-| 5 | Direct SQL execution | ⚪&nbsp;Planned | Add one-shot SQL execution so embedded storage smoke tests can run SQL. |
-| 6 | Native storage baseline | ⚪&nbsp;Planned | Configure MariaDB native storage under the MyLite database directory and prove controlled DDL/DML persistence across reopen. |
-| 7 | Metadata and DDL lifecycle | ⚪&nbsp;Planned | Keep controlled `CREATE`, `ALTER`, `DROP`, and `RENAME` metadata and engine files inside the MyLite database directory. |
-| 8 | Directory lifecycle policy | ⚪&nbsp;Planned | Define database-directory layout, initialization markers, existing-directory policy, cleanup rules, and version policy. |
-| 9 | Native table operations | ⚪&nbsp;Planned | Validate representative row, index, constraint, and copy-alter behavior through native engines. |
-| 10 | Transactions and recovery | ⚪&nbsp;Planned | Cover transaction commit, rollback, savepoints, clean reopen, crash recovery, and representative engine companions. |
-| 11 | Locking and concurrency | ⚪&nbsp;Planned | Prove directory locking and document planned multiple-reader and concurrent-writer modes. |
-| 12 | Compatibility harness | ⚪&nbsp;Planned | Run embedded lifecycle, directory-boundary detection, MariaDB-reference, crash/reopen, application-query, and query-surface coverage in repeatable CTest label groups. |
-| 13 | Prepared SQL API | ⚪&nbsp;Planned | Add reusable prepared statements, parameter bindings, typed column access, warning lookup, binary-safe values, reset/finalize behavior, and close-time statement lifetime enforcement. |
-| 14 | Engine support and application schemas | ⚪&nbsp;Planned | Test supported explicit `ENGINE=` clauses, default-engine resolution, MEMORY reopen semantics, and representative application-shaped DDL. |
-| 15 | Server-surface policy | ⚪&nbsp;Planned | Explicitly reject users/auth, replication/binlog, dynamic plugins, events, and server-owned metadata surfaces. |
-| 16 | Size profile hardening | ⚪&nbsp;Planned | Trim daemon-only and low-value optional components after the embedded runtime and storage shape are measurable. |
+| 5 | SQL execution API | ⚪&nbsp;Planned | Add direct execution, prepared statements, bindings, columns, warnings, affected rows, and insert ids. |
+| 6 | Native storage baseline | ⚪&nbsp;Planned | Configure MariaDB native storage engines inside the MyLite database directory and add controlled smoke coverage. |
+| 7 | Metadata and DDL lifecycle | ⚪&nbsp;Planned | Keep `CREATE`, `ALTER`, `DROP`, and `RENAME` metadata and engine files inside the MyLite database directory. |
+| 8 | Directory lifecycle policy | ⚪&nbsp;Planned | Define database-directory layout, initialization markers, schema namespaces, cleanup rules, and version policy. |
+| 9 | Native table operations | ⚪&nbsp;Planned | Validate table scans, row DML, primary/secondary indexes, uniqueness, autoincrement, BLOB/TEXT overflow, and copy `ALTER` rebuilds through native engines. |
+| 10 | Transactions and recovery | ⚪&nbsp;Planned | Validate native engine atomicity, rollback, savepoints, crash recovery, checksums where available, and lifecycle tests for engine companions. |
+| 11 | Locking and concurrency | ⚪&nbsp;Planned | Validate safe directory locking, multiple-reader behavior, and MariaDB native storage-engine writer guarantees. |
+| 12 | Compatibility harness | ⚪&nbsp;Planned | Run embedded lifecycle, directory-boundary detection, MariaDB comparison, crash/reopen, and application-query coverage in repeatable groups. |
+| 13 | Engine support and application schemas | ⚪&nbsp;Planned | Test common `ENGINE=` clauses with supported MariaDB native engines and representative application schemas, including WordPress-shaped DDL. |
+| 14 | Server-surface policy | ⚪&nbsp;Planned | Explicitly reject or replace users/auth, replication/binlog, dynamic plugins, events, performance schema, and durable files outside the MyLite database directory. |
+| 15 | Size profile hardening | ⚪&nbsp;Planned | Trim daemon-only and low-value optional components after the embedded runtime and storage shape are measurable. |
 
 ## Size And Profile Direction
 

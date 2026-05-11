@@ -6,6 +6,8 @@ maintainable as a focused MariaDB fork.
 ## Source Authority
 
 - Target base: MariaDB 11.8 LTS.
+- Initial import ref: `mariadb-11.8.6`
+  (`9bfea48ce1214cc4470f6f6f8a4e30352cef84e7`).
 - Use MariaDB source and official MariaDB documentation as the implementation
   authority.
 - Use MySQL behavior as compatibility evidence for drop-in application behavior,
@@ -14,7 +16,7 @@ maintainable as a focused MariaDB fork.
 
 ## Fork Discipline
 
-- Keep MariaDB-derived files close to upstream.
+- Keep upstream-derived files close to upstream.
 - Keep mechanical upstream imports separate from MyLite changes.
 - Prefer narrow patches over broad rewrites.
 - Preserve upstream style in MariaDB-derived files.
@@ -73,7 +75,6 @@ maintainable as a focused MariaDB fork.
   objects.
 - Session state, diagnostics, warnings, SQL mode, default schema, and temporary
   state belong to handles or explicit contexts.
-
 - Public APIs validate required pointer arguments.
 - Invalid public API usage returns a misuse-style result, not an assertion.
 - Allocation failure returns a distinct no-memory result.
@@ -101,12 +102,12 @@ maintainable as a focused MariaDB fork.
 - Use the pre-implementation checklist before starting substantial code slices.
 - Use slice specs for substantial implementation work that needs source-linked
   design before code.
-- Prefer concise source-linked notes over broad prose that cannot be verified.
+- Prefer concise source-linked notes over broad prose.
 
 ## Commits
 
 - Keep commits atomic and reviewable.
 - Use concise imperative present-tense subjects.
 - Include upstream refs, source links, or rationale in the body when useful.
-- Keep upstream import/rebase commits separate from MyLite patches.
+- Keep upstream import/rebase commits separate from MyLite patch commits.
 - Do not add generated assistant or co-author footers.

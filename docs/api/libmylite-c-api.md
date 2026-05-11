@@ -1,0 +1,327 @@
+# libmylite C API
+
+`libmylite` is the primary embedded API. It follows SQLite's handle ownership
+style while preserving MariaDB SQL behavior, diagnostics, warnings, affected
+rows, insert ids, and richer data types.
+
+## Principles
+
+- Open a database by directory path.
+- Own all handles explicitly.
+- Do not require a daemon, socket, server account, password handshake, or
+  network connection for local embedded use.
+- Keep MariaDB internals private.
+- Expose stable MyLite result codes and MariaDB-compatible diagnostics.
+- Make prepared statements reusable and binary safe.
+- Keep raw `MYSQL *` access out of the core lifetime model.
+
+## Handles
+
+```c
+typedef struct mylite_db mylite_db;
+typedef struct mylite_stmt mylite_stmt;
+```
+
+`mylite_db` owns one logical embedded MariaDB connection to one MyLite database
+directory. Multiple handles for the same directory coordinate through a shared
+directory runtime.
+
+`mylite_stmt` owns one prepared statement.
+
+## Result Codes
+
+Primary result codes stay small and stable. MariaDB errno and SQLSTATE remain
+available through diagnostics APIs.
+
+```c
+typedef enum mylite_result {
+  MYLITE_OK = 0,
+  MYLITE_ERROR = 1,
+  MYLITE_BUSY = 5,
+  MYLITE_NOMEM = 7,
+  MYLITE_READONLY = 8,
+  MYLITE_IOERR = 10,
+  MYLITE_CORRUPT = 11,
+  MYLITE_NOTFOUND = 12,
+  MYLITE_FULL = 13,
+  MYLITE_CONSTRAINT = 19,
+  MYLITE_MISUSE = 21,
+  MYLITE_ROW = 100,
+  MYLITE_DONE = 101
+} mylite_result;
+```
+
+## Opening And Closing
+
+```c
+typedef struct mylite_open_config {
+  size_t size;
+  int profile;
+  unsigned busy_timeout_ms;
+  int durability;
+  const char *temp_directory;
+} mylite_open_config;
+
+int mylite_open(
+    const char *path,
+    mylite_db **out_db,
+    unsigned flags,
+    const mylite_open_config *config);
+int mylite_close(mylite_db *db);
+```
+
+Flags:
+
+```c
+#define MYLITE_OPEN_READONLY   0x00000001u
+#define MYLITE_OPEN_READWRITE  0x00000002u
+#define MYLITE_OPEN_CREATE     0x00000004u
+#define MYLITE_OPEN_EXCLUSIVE  0x00000008u
+#define MYLITE_OPEN_URI        0x00000010u
+```
+
+Profiles:
+
+```c
+#define MYLITE_PROFILE_DEFAULT 0
+#define MYLITE_PROFILE_STRICT  1
+#define MYLITE_PROFILE_COMPAT  2
+```
+
+`mylite_open()` takes explicit open flags and an optional configuration pointer.
+Pass `MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE` with `NULL` configuration for
+the default read/write-create behavior.
+`mylite_open_config.size` makes the struct growable without breaking ABI.
+
+`mylite_close()` returns `MYLITE_BUSY` when statements or dependent resources
+still exist. Deferred close can be added separately if a real use case appears.
+
+## Direct Execution
+
+```c
+typedef int (*mylite_exec_callback)(
+    void *ctx,
+    int column_count,
+    char **values,
+    char **column_names);
+
+int mylite_exec(
+    mylite_db *db,
+    const char *sql,
+    mylite_exec_callback callback,
+    void *ctx,
+    char **errmsg);
+```
+
+`mylite_exec()` is a convenience API for one-shot SQL. Result values are textual
+like SQLite's `sqlite3_exec()` callback; production code that needs repeated
+execution or binary-safe values uses prepared statements.
+
+If `errmsg` is non-NULL and an error string is returned, the caller releases it
+with `mylite_free()`.
+
+## Prepared Statements
+
+```c
+int mylite_prepare(
+    mylite_db *db,
+    const char *sql,
+    size_t sql_len,
+    mylite_stmt **out_stmt,
+    const char **tail);
+
+int mylite_step(mylite_stmt *stmt);
+int mylite_reset(mylite_stmt *stmt);
+int mylite_finalize(mylite_stmt *stmt);
+```
+
+Return values:
+
+- `MYLITE_ROW`: a row is available.
+- `MYLITE_DONE`: execution is complete.
+- Any other result code: execution failed.
+
+```c
+#define MYLITE_NUL_TERMINATED ((size_t)-1)
+```
+
+`sql_len == MYLITE_NUL_TERMINATED` means `sql` is NUL-terminated. `tail`, when
+non-NULL, receives the first uncompiled byte.
+
+## Bindings
+
+Bind indexes are 1-based.
+
+```c
+typedef void (*mylite_destructor)(void *);
+
+#define MYLITE_STATIC    ((mylite_destructor)0)
+#define MYLITE_TRANSIENT ((mylite_destructor)(-1))
+
+unsigned mylite_bind_parameter_count(mylite_stmt *stmt);
+int mylite_clear_bindings(mylite_stmt *stmt);
+
+int mylite_bind_null(mylite_stmt *stmt, unsigned index);
+int mylite_bind_int64(mylite_stmt *stmt, unsigned index, long long value);
+int mylite_bind_uint64(mylite_stmt *stmt, unsigned index, unsigned long long value);
+int mylite_bind_double(mylite_stmt *stmt, unsigned index, double value);
+int mylite_bind_text(
+    mylite_stmt *stmt,
+    unsigned index,
+    const char *value,
+    size_t value_len,
+    mylite_destructor destructor);
+int mylite_bind_blob(
+    mylite_stmt *stmt,
+    unsigned index,
+    const void *value,
+    size_t value_len,
+    mylite_destructor destructor);
+```
+
+`MYLITE_STATIC` borrows bytes until the statement is reset, rebound, or
+finalized. `MYLITE_TRANSIENT` copies bytes before the call returns. A custom
+destructor is called after MyLite no longer needs the input.
+
+Typed date, time, decimal, JSON, and geometry bindings can be added without
+forcing those values through text.
+
+## Columns
+
+```c
+typedef enum mylite_value_type {
+  MYLITE_TYPE_NULL = 0,
+  MYLITE_TYPE_INT64 = 1,
+  MYLITE_TYPE_UINT64 = 2,
+  MYLITE_TYPE_DOUBLE = 3,
+  MYLITE_TYPE_TEXT = 4,
+  MYLITE_TYPE_BLOB = 5
+} mylite_value_type;
+
+unsigned mylite_column_count(mylite_stmt *stmt);
+const char *mylite_column_name(mylite_stmt *stmt, unsigned column);
+mylite_value_type mylite_column_type(mylite_stmt *stmt, unsigned column);
+
+long long mylite_column_int64(mylite_stmt *stmt, unsigned column);
+unsigned long long mylite_column_uint64(mylite_stmt *stmt, unsigned column);
+double mylite_column_double(mylite_stmt *stmt, unsigned column);
+const char *mylite_column_text(mylite_stmt *stmt, unsigned column);
+const void *mylite_column_blob(mylite_stmt *stmt, unsigned column);
+size_t mylite_column_bytes(mylite_stmt *stmt, unsigned column);
+```
+
+Column indexes are 0-based. Column values are valid until the next
+`mylite_step()`, `mylite_reset()`, or `mylite_finalize()` on that statement.
+
+MariaDB exposes richer type metadata than this primary value classification.
+Later metadata APIs should expose original MariaDB field type, charset,
+collation, signedness, precision, scale, schema, table, and original column
+name where applications need them.
+
+## Diagnostics And Warnings
+
+```c
+typedef enum mylite_warning_level {
+  MYLITE_WARNING_NOTE = 1,
+  MYLITE_WARNING_WARNING = 2,
+  MYLITE_WARNING_ERROR = 3
+} mylite_warning_level;
+
+int mylite_errcode(mylite_db *db);
+int mylite_extended_errcode(mylite_db *db);
+unsigned mylite_mariadb_errno(mylite_db *db);
+const char *mylite_sqlstate(mylite_db *db);
+const char *mylite_errmsg(mylite_db *db);
+unsigned mylite_warning_count(mylite_db *db);
+int mylite_warning(
+    mylite_db *db,
+    unsigned index,
+    mylite_warning_level *level,
+    unsigned *code,
+    const char **message);
+```
+
+`mylite_errcode()` is the stable MyLite classification. MariaDB errno and
+SQLSTATE remain available for callers that need server-compatible diagnostics.
+
+`mylite_warning()` uses a zero-based index. It returns `MYLITE_NOTFOUND` when
+the requested warning is not stored.
+
+## Statement Effects
+
+```c
+long long mylite_changes(mylite_db *db);
+unsigned long long mylite_last_insert_id(mylite_db *db);
+```
+
+These are part of observable MariaDB application behavior. Exposing them through
+MyLite avoids forcing callers into raw MariaDB handles.
+
+## Memory Ownership
+
+```c
+void mylite_free(void *ptr);
+```
+
+Heap memory returned by MyLite is released with `mylite_free()`. Text returned
+from handle or statement accessors remains owned by that handle or statement
+unless the API explicitly says otherwise.
+
+## Configuration
+
+```c
+int mylite_busy_timeout(mylite_db *db, unsigned milliseconds);
+int mylite_set_durability(mylite_db *db, int durability);
+int mylite_limit(mylite_db *db, int limit_id, long long value);
+```
+
+Durability modes:
+
+```c
+#define MYLITE_DURABILITY_FULL   2
+#define MYLITE_DURABILITY_NORMAL 1
+#define MYLITE_DURABILITY_OFF    0
+```
+
+The public API exposes MyLite concepts, not raw `my.cnf` option names.
+
+## Threading
+
+- A `mylite_db` handle is not used concurrently unless configured for
+  serialized mode.
+- Different handles may be used on different threads.
+- Handles opened on the same directory coordinate through the shared directory
+  runtime.
+- Cross-process and multi-writer behavior require storage locking and recovery
+  tests before they are exposed as supported modes.
+
+SQLite-style threading modes can be added when backed by tests.
+
+## Server Features Outside The Core API
+
+The core directory-owned API rejects or omits server-owned features that do not
+fit the embedded library model:
+
+- network users and authentication,
+- replication and binlog,
+- Galera/wsrep,
+- dynamic plugin installation,
+- durable storage outside the MyLite database directory,
+- server audit plugins,
+- network-protocol `LOAD DATA LOCAL`,
+- event scheduler,
+- performance schema.
+
+When a rejected feature reaches the SQL layer, it should fail with stable
+MyLite result codes and MariaDB diagnostics where possible.
+
+## Compatibility Adapter
+
+A later adapter can expose the MariaDB C API:
+
+```c
+MYSQL *mylite_mysql_handle(mylite_db *db);
+```
+
+That adapter is for existing code. It does not define the primary lifetime,
+configuration, file ownership, or storage semantics.
