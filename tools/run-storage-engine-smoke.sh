@@ -212,7 +212,7 @@ page_payload_capacity = page_size - page_payload_offset
 
 def fail(message):
     with report.open("a") as out:
-        out.write("\n## Row Page Storage\n\n")
+        out.write("\n## Row And Index Page Storage\n\n")
         out.write(f"status=1\nmessage={message}\n")
     raise SystemExit(1)
 
@@ -295,10 +295,13 @@ except UnicodeDecodeError:
 
 catalog_row_records = [line for line in catalog_lines if line.startswith("ROW\t")]
 rowpage_records = [line for line in catalog_lines if line.startswith("ROWPAGE\t")]
+indexpage_records = [line for line in catalog_lines if line.startswith("INDEXPAGE\t")]
 if catalog_row_records:
     fail("catalog still contains ROW records")
 if not rowpage_records:
     fail("catalog has no ROWPAGE records")
+if not indexpage_records:
+    fail("catalog has no INDEXPAGE records")
 
 row_payloads = []
 row_payload_page_counts = []
@@ -330,17 +333,61 @@ for line in rowpage_records:
 if not row_payloads:
     fail("no nonempty row payload chains")
 
+index_payloads = []
+index_payload_page_counts = []
+for line in indexpage_records:
+    parts = line.split("\t")
+    if len(parts) != 8:
+        fail("invalid INDEXPAGE record")
+    owner = (
+        f"{bytes.fromhex(parts[1]).decode('ascii')}."
+        f"{bytes.fromhex(parts[2]).decode('ascii')}"
+    )
+    key_index = int(parts[3])
+    key_length = int(parts[4])
+    root_offset = int(parts[5])
+    length = int(parts[6])
+    payload, page_types = read_chain(root_offset, length, 3, True)
+    if len(payload) < 36:
+        fail("short index payload")
+    if not payload.startswith(b"MYLITEINDEXPG1\0\0"):
+        fail("invalid index payload magic")
+    if read_u32(payload, 16) != 1:
+        fail("invalid index payload format version")
+    if read_u32(payload, 20) != key_index:
+        fail("index payload key index mismatch")
+    if read_u32(payload, 24) != key_length:
+        fail("index payload key length mismatch")
+    entry_count = read_u64(payload, 28)
+    if entry_count == 0:
+        fail("index payload has no entries")
+    if len(payload) != 36 + entry_count * (8 + key_length):
+        fail("invalid index payload length")
+    index_payload = f"{owner}:{key_index}"
+    index_payloads.append(index_payload)
+    index_payload_page_counts.append(f"{index_payload}:{len(page_types)}")
+
+if "mylite.persisted_keyed:0" not in index_payloads:
+    fail("persisted keyed primary index payload missing")
+if "mylite.persisted_keyed:1" not in index_payloads:
+    fail("persisted keyed secondary index payload missing")
+
 with report.open("a") as out:
-    out.write("\n## Row Page Storage\n\n")
+    out.write("\n## Row And Index Page Storage\n\n")
     out.write("status=0\n")
     out.write(f"latest_generation={headers[0][0]}\n")
     out.write(f"catalog_page_types={','.join(map(str, catalog_page_types))}\n")
     out.write(f"catalog_row_records={len(catalog_row_records)}\n")
     out.write(f"rowpage_records={len(rowpage_records)}\n")
+    out.write(f"indexpage_records={len(indexpage_records)}\n")
     out.write(f"row_payloads={','.join(row_payloads)}\n")
     out.write(f"row_payload_page_counts={','.join(row_payload_page_counts)}\n")
     out.write("row_payload_magic=MYLITEROWSLOT2\n")
     out.write("row_payload_page_type=2\n")
+    out.write(f"index_payloads={','.join(index_payloads)}\n")
+    out.write(f"index_payload_page_counts={','.join(index_payload_page_counts)}\n")
+    out.write("index_payload_magic=MYLITEINDEXPG1\n")
+    out.write("index_payload_page_type=3\n")
 PY
 }
 

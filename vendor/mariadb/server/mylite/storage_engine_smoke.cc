@@ -54,6 +54,10 @@ struct SmokeResult
   std::string persisted_column;
   std::string persisted_notes;
   std::string persisted_autoincrement_ids;
+  std::string persisted_key_lookup_note;
+  std::string persisted_key_order_ids;
+  std::string persisted_note_lookup_id;
+  std::string persisted_note_order_ids;
   std::string persisted_wide_count;
   std::string recovery_marker;
 };
@@ -818,6 +822,63 @@ static bool exercise_persistence_write(MYSQL *mysql, SmokeResult *result)
   }
 
   if (!execute_statement(mysql,
+                         "CREATE TABLE mylite.persisted_keyed "
+                         "(id INT NOT NULL, note VARCHAR(12) NOT NULL, "
+                         "PRIMARY KEY(id), KEY note_key(note)) "
+                         "ENGINE=MYLITE",
+                         "CREATE persisted keyed table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.persisted_keyed VALUES "
+                         "(2, 'two'), (1, 'one'), (3, 'three')",
+                         "INSERT persisted keyed rows", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT note FROM mylite.persisted_keyed "
+                          "FORCE INDEX(PRIMARY) WHERE id = 2",
+                          "persisted write key lookup note",
+                          &result->persisted_key_lookup_note, result))
+    return false;
+  if (result->persisted_key_lookup_note != "two")
+  {
+    result->message= "persisted write key lookup returned an unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY id SEPARATOR ',') "
+                          "FROM mylite.persisted_keyed FORCE INDEX(PRIMARY)",
+                          "persisted write key order ids",
+                          &result->persisted_key_order_ids, result))
+    return false;
+  if (result->persisted_key_order_ids != "1,2,3")
+  {
+    result->message= "persisted write key order returned an unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT id FROM mylite.persisted_keyed "
+                          "FORCE INDEX(note_key) WHERE note = 'three'",
+                          "persisted write note lookup id",
+                          &result->persisted_note_lookup_id, result))
+    return false;
+  if (result->persisted_note_lookup_id != "3")
+  {
+    result->message= "persisted write note lookup returned an unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY note SEPARATOR ',') "
+                          "FROM mylite.persisted_keyed FORCE INDEX(note_key)",
+                          "persisted write note order ids",
+                          &result->persisted_note_order_ids, result))
+    return false;
+  if (result->persisted_note_order_ids != "1,3,2")
+  {
+    result->message= "persisted write note order returned an unexpected value";
+    return false;
+  }
+
+  if (!execute_statement(mysql,
                          "CREATE TABLE mylite.persisted_wide "
                          "(id INT, note VARCHAR(900) NOT NULL) "
                          "ENGINE=MYLITE",
@@ -913,6 +974,55 @@ static bool exercise_persistence_read(MYSQL *mysql, SmokeResult *result)
   {
     result->message= "persisted read autoincrement ids returned an "
                      "unexpected value";
+    return false;
+  }
+
+  if (!verify_table_present(mysql,
+                            "SHOW TABLES FROM mylite LIKE 'persisted_keyed'",
+                            "persisted keyed table", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT note FROM mylite.persisted_keyed "
+                          "FORCE INDEX(PRIMARY) WHERE id = 2",
+                          "persisted read key lookup note",
+                          &result->persisted_key_lookup_note, result))
+    return false;
+  if (result->persisted_key_lookup_note != "two")
+  {
+    result->message= "persisted read key lookup returned an unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY id SEPARATOR ',') "
+                          "FROM mylite.persisted_keyed FORCE INDEX(PRIMARY)",
+                          "persisted read key order ids",
+                          &result->persisted_key_order_ids, result))
+    return false;
+  if (result->persisted_key_order_ids != "1,2,3")
+  {
+    result->message= "persisted read key order returned an unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT id FROM mylite.persisted_keyed "
+                          "FORCE INDEX(note_key) WHERE note = 'three'",
+                          "persisted read note lookup id",
+                          &result->persisted_note_lookup_id, result))
+    return false;
+  if (result->persisted_note_lookup_id != "3")
+  {
+    result->message= "persisted read note lookup returned an unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY note SEPARATOR ',') "
+                          "FROM mylite.persisted_keyed FORCE INDEX(note_key)",
+                          "persisted read note order ids",
+                          &result->persisted_note_order_ids, result))
+    return false;
+  if (result->persisted_note_order_ids != "1,3,2")
+  {
+    result->message= "persisted read note order returned an unexpected value";
     return false;
   }
 
@@ -1185,6 +1295,18 @@ static void write_report(const SmokeOptions &options,
   if (!result.persisted_autoincrement_ids.empty())
     report << "persisted_autoincrement_ids="
            << result.persisted_autoincrement_ids << "\n";
+  if (!result.persisted_key_lookup_note.empty())
+    report << "persisted_key_lookup_note="
+           << result.persisted_key_lookup_note << "\n";
+  if (!result.persisted_key_order_ids.empty())
+    report << "persisted_key_order_ids="
+           << result.persisted_key_order_ids << "\n";
+  if (!result.persisted_note_lookup_id.empty())
+    report << "persisted_note_lookup_id="
+           << result.persisted_note_lookup_id << "\n";
+  if (!result.persisted_note_order_ids.empty())
+    report << "persisted_note_order_ids="
+           << result.persisted_note_order_ids << "\n";
   if (!result.persisted_wide_count.empty())
     report << "persisted_wide_count=" << result.persisted_wide_count << "\n";
   if (!result.recovery_marker.empty())

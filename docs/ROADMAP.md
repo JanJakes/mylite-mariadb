@@ -41,11 +41,9 @@ arbitrary-length blobs, and simple row images now live in typed per-table row
 payload page chains addressed through catalog `ROWPAGE` roots. New row payload
 writes use binary page-local row slot directories instead of text row streams,
 with oversized fixed row images rejected explicitly until overflow pages are
-designed.
-
-The active implementation step is `index-page-storage`, which should add
-durable index page roots instead of rebuilding ordered index cursors only from
-row images in memory.
+designed. Supported primary and secondary key indexes now publish durable
+`INDEXPAGE` roots to typed index payload pages and handler index reads use those
+loaded roots when they match open MariaDB key metadata.
 
 ## Implementation plan
 
@@ -68,7 +66,7 @@ row images in memory.
 | 14 | `pager-page-store` | Done | Add the first reusable MyLite page-store layer for catalog payloads, row pages, future index pages, and free-space tracking. |
 | 15 | `row-page-storage` | Done | Move simple row images from the logical catalog payload into typed row pages addressed through table catalog roots. |
 | 16 | `row-slot-storage` | Done | Replace table-sized row payload streams with page-local row records and slot directories. |
-| 17 | `index-page-storage` | In progress | Add durable primary/secondary index page roots for supported keys instead of rebuilding all index cursors from rows. |
+| 17 | `index-page-storage` | Done | Add durable primary/secondary index page roots for supported keys instead of rebuilding all index cursors from rows. |
 
 ## Size and profile direction
 

@@ -34,6 +34,23 @@ struct Mylite_row
   std::vector<uchar> record;
 };
 
+struct Mylite_index_entry
+{
+  uint64_t rowid;
+  std::vector<uchar> key;
+};
+
+struct Mylite_index_root
+{
+  uint32_t key_index;
+  uint32_t key_length;
+  uint64_t payload_offset;
+  uint64_t payload_length;
+  uint64_t payload_checksum;
+  bool payload_ref_seen;
+  std::vector<Mylite_index_entry> entries;
+};
+
 struct Mylite_table_definition
 {
   std::string db;
@@ -47,12 +64,7 @@ struct Mylite_table_definition
   uint64_t rows_payload_checksum;
   bool rows_payload_ref_seen;
   std::vector<Mylite_row> rows;
-};
-
-struct Mylite_index_entry
-{
-  uint64_t rowid;
-  std::vector<uchar> key;
+  std::vector<Mylite_index_root> index_roots;
 };
 
 struct Mylite_catalog_header
@@ -100,7 +112,8 @@ static int mylite_update_row(const char *db, size_t db_length,
                              const uchar *record, uint *duplicate_key);
 static int mylite_delete_row(const char *db, size_t db_length,
                              const char *table_name,
-                             size_t table_name_length, uint64_t rowid);
+                             size_t table_name_length, TABLE *table,
+                             uint64_t rowid);
 static int mylite_read_row(const char *db, size_t db_length,
                            const char *table_name, size_t table_name_length,
                            const TABLE *table, size_t *scan_index,
@@ -143,6 +156,18 @@ static uint64_t mylite_initial_auto_increment_next(
 static int mylite_check_unique_constraints_locked(
     Mylite_table_definition *definition, TABLE *table, const uchar *record,
     uint64_t ignored_rowid, uint *duplicate_key);
+static bool mylite_refresh_index_roots_locked(
+    Mylite_table_definition *definition, TABLE *table);
+static bool mylite_index_root_matches_table_locked(
+    Mylite_table_definition *definition, const Mylite_index_root &root,
+    TABLE *table, uint key_index);
+static int mylite_build_index_entries_from_rows_locked(
+    Mylite_table_definition *definition, TABLE *table, uint key_index,
+    std::vector<Mylite_index_entry> *entries);
+static Mylite_index_root *mylite_find_index_root_locked(
+    Mylite_table_definition *definition, uint32_t key_index);
+static const Mylite_index_root *mylite_find_index_root_locked(
+    const Mylite_table_definition *definition, uint32_t key_index);
 static bool mylite_make_key_image(TABLE *table, uint key_index,
                                   const uchar *record,
                                   std::vector<uchar> *key_image);
@@ -190,6 +215,11 @@ static bool mylite_parse_row_slot_pages_locked(
 static bool mylite_parse_row_slot_page_payload_locked(
     const uchar *payload, size_t payload_length,
     Mylite_table_definition *definition);
+static bool mylite_load_index_payloads_locked(
+    int fd, std::vector<Mylite_table_definition> *catalog);
+static bool mylite_parse_index_payload_locked(
+    const std::string &content, Mylite_table_definition *definition,
+    Mylite_index_root *root);
 static int mylite_flush_catalog_locked();
 static bool mylite_write_catalog_locked();
 static bool mylite_write_row_payloads_locked(int fd);
@@ -205,6 +235,9 @@ static void mylite_append_row_slot_page_payload(
     const std::vector<const Mylite_row *> &rows,
     std::vector<std::vector<uchar>> *page_payloads,
     std::string *logical_payload);
+static bool mylite_write_index_payloads_locked(int fd);
+static std::string mylite_serialize_index_payload_locked(
+    const Mylite_index_root &root);
 static std::string mylite_serialize_catalog_locked();
 static bool mylite_parse_catalog_payload_locked(
     const std::string &content, std::vector<Mylite_table_definition> *loaded);
@@ -215,6 +248,8 @@ static bool mylite_parse_next_rowid_payload_record_locked(
 static bool mylite_parse_autoincrement_payload_record_locked(
     const std::string &line, std::vector<Mylite_table_definition> *loaded);
 static bool mylite_parse_rowpage_payload_record_locked(
+    const std::string &line, std::vector<Mylite_table_definition> *loaded);
+static bool mylite_parse_indexpage_payload_record_locked(
     const std::string &line, std::vector<Mylite_table_definition> *loaded);
 static bool mylite_parse_row_payload_record_locked(
     const std::string &line, std::vector<Mylite_table_definition> *loaded);
@@ -286,6 +321,10 @@ static const uchar mylite_row_slot_magic[16]= {
   'M', 'Y', 'L', 'I', 'T', 'E', 'R', 'O',
   'W', 'S', 'L', 'O', 'T', '2', '\0', '\0'
 };
+static const uchar mylite_index_payload_magic[16]= {
+  'M', 'Y', 'L', 'I', 'T', 'E', 'I', 'N',
+  'D', 'E', 'X', 'P', 'G', '1', '\0', '\0'
+};
 static const uchar mylite_catalog_file_magic[16]= {
   'M', 'Y', 'L', 'I', 'T', 'E', 'F', 'M',
   'T', 'P', 'A', 'G', 'E', '2', '\0', '\0'
@@ -298,6 +337,7 @@ static const uint32_t mylite_catalog_format_version= 2;
 static const uint32_t mylite_page_format_version= 1;
 static const uint32_t mylite_page_type_catalog_payload= 1;
 static const uint32_t mylite_page_type_row_payload= 2;
+static const uint32_t mylite_page_type_index_payload= 3;
 static const uint32_t mylite_catalog_page_size= 4096;
 static const uint64_t mylite_catalog_payload_start=
   static_cast<uint64_t>(mylite_catalog_page_size) * 2;
@@ -312,6 +352,8 @@ static const size_t mylite_row_slot_entry_size= 16;
 static const size_t mylite_row_slot_max_record_length=
   mylite_page_payload_capacity - mylite_row_slot_header_size -
   mylite_row_slot_entry_size;
+static const uint32_t mylite_index_payload_format_version= 1;
+static const size_t mylite_index_payload_header_size= 36;
 static const uint64_t mylite_fnv1a_offset_basis= 14695981039346656037ULL;
 static const uint64_t mylite_fnv1a_prime= 1099511628211ULL;
 static std::mutex mylite_catalog_mutex;
@@ -319,7 +361,8 @@ static bool mylite_catalog_loaded= false;
 static bool mylite_catalog_load_failed= false;
 static std::vector<Mylite_table_definition> mylite_catalog= {
   { mylite_seed_db, mylite_seed_table, mylite_seed_sql, std::vector<uchar>(),
-    1, 0, 0, 0, 0, false, std::vector<Mylite_row>() }
+    1, 0, 0, 0, 0, false, std::vector<Mylite_row>(),
+    std::vector<Mylite_index_root>() }
 };
 
 static MYSQL_SYSVAR_STR(
@@ -549,7 +592,7 @@ int ha_mylite::delete_row(const uchar *)
   DBUG_ENTER("ha_mylite::delete_row");
   const int error= mylite_delete_row(db_name.c_str(), db_name.length(),
                                      opened_table_name.c_str(),
-                                     opened_table_name.length(),
+                                     opened_table_name.length(), table,
                                      current_rowid);
   index_cursor_rowids.clear();
   DBUG_RETURN(error);
@@ -962,6 +1005,11 @@ static int mylite_store_row(const char *db, size_t db_length,
   row.deleted= false;
   row.record.assign(record, record + table->s->reclength);
   definition->rows.push_back(row);
+  if (!mylite_refresh_index_roots_locked(definition, table))
+  {
+    mylite_catalog= before;
+    return HA_ERR_CRASHED;
+  }
 
   const int error= mylite_flush_catalog_locked();
   if (error)
@@ -1003,6 +1051,11 @@ static int mylite_update_row(const char *db, size_t db_length,
   if (!mylite_advance_auto_increment_locked(definition, table, record))
     return HA_ERR_RECORD_FILE_FULL;
   row->record.assign(record, record + table->s->reclength);
+  if (!mylite_refresh_index_roots_locked(definition, table))
+  {
+    mylite_catalog= before;
+    return HA_ERR_CRASHED;
+  }
   const int error= mylite_flush_catalog_locked();
   if (error)
     mylite_catalog= before;
@@ -1011,10 +1064,13 @@ static int mylite_update_row(const char *db, size_t db_length,
 
 static int mylite_delete_row(const char *db, size_t db_length,
                              const char *table_name,
-                             size_t table_name_length, uint64_t rowid)
+                             size_t table_name_length, TABLE *table,
+                             uint64_t rowid)
 {
   if (rowid == 0)
     return HA_ERR_KEY_NOT_FOUND;
+  if (!mylite_table_supports_key_storage(table))
+    return HA_ERR_UNSUPPORTED;
 
   std::lock_guard<std::mutex> guard(mylite_catalog_mutex);
   if (!mylite_ensure_catalog_loaded_locked())
@@ -1032,6 +1088,11 @@ static int mylite_delete_row(const char *db, size_t db_length,
 
   const std::vector<Mylite_table_definition> before= mylite_catalog;
   row->deleted= true;
+  if (!mylite_refresh_index_roots_locked(definition, table))
+  {
+    mylite_catalog= before;
+    return HA_ERR_CRASHED;
+  }
   const int error= mylite_flush_catalog_locked();
   if (error)
     mylite_catalog= before;
@@ -1112,6 +1173,25 @@ static int mylite_build_index_entries(
   if (!definition)
     return HA_ERR_NO_SUCH_TABLE;
 
+  const Mylite_index_root *root=
+    mylite_find_index_root_locked(definition, key_index);
+  if (root && root->key_length == table->key_info[key_index].key_length)
+  {
+    if (!mylite_index_root_matches_table_locked(definition, *root, table,
+                                                key_index))
+      return HA_ERR_CRASHED;
+    *entries= root->entries;
+    return 0;
+  }
+
+  return mylite_build_index_entries_from_rows_locked(definition, table,
+                                                    key_index, entries);
+}
+
+static int mylite_build_index_entries_from_rows_locked(
+    Mylite_table_definition *definition, TABLE *table, uint key_index,
+    std::vector<Mylite_index_entry> *entries)
+{
   entries->clear();
   for (const Mylite_row &row : definition->rows)
   {
@@ -1385,6 +1465,90 @@ static int mylite_check_unique_constraints_locked(
     }
   }
   return 0;
+}
+
+static bool mylite_refresh_index_roots_locked(
+    Mylite_table_definition *definition, TABLE *table)
+{
+  if (!table || !table->s)
+    return false;
+
+  definition->index_roots.clear();
+  for (uint key_index= 0; key_index < table->s->keys; ++key_index)
+  {
+    if (!mylite_key_supports_storage(table->key_info[key_index]))
+      return false;
+
+    Mylite_index_root root;
+    root.key_index= key_index;
+    root.key_length= table->key_info[key_index].key_length;
+    root.payload_offset= 0;
+    root.payload_length= 0;
+    root.payload_checksum= 0;
+    root.payload_ref_seen= false;
+    const int error=
+      mylite_build_index_entries_from_rows_locked(definition, table,
+                                                  key_index, &root.entries);
+    if (error)
+      return false;
+    if (!root.entries.empty())
+      definition->index_roots.push_back(root);
+  }
+
+  return true;
+}
+
+static bool mylite_index_root_matches_table_locked(
+    Mylite_table_definition *definition, const Mylite_index_root &root,
+    TABLE *table, uint key_index)
+{
+  if (!table || !table->s || key_index >= table->s->keys ||
+      root.key_index != key_index ||
+      root.key_length != table->key_info[key_index].key_length)
+    return false;
+
+  KEY *key_info= table->key_info + key_index;
+  const Mylite_index_entry *previous= nullptr;
+  for (const Mylite_index_entry &entry : root.entries)
+  {
+    if (entry.rowid == 0 || entry.key.size() != root.key_length ||
+        !mylite_find_row_locked(definition, entry.rowid))
+      return false;
+
+    if (previous)
+    {
+      const int cmp= key_tuple_cmp(key_info->key_part,
+                                   previous->key.data(), entry.key.data(),
+                                   key_info->key_length);
+      if (cmp > 0 || (cmp == 0 && previous->rowid >= entry.rowid))
+        return false;
+    }
+    previous= &entry;
+  }
+
+  return true;
+}
+
+static Mylite_index_root *mylite_find_index_root_locked(
+    Mylite_table_definition *definition, uint32_t key_index)
+{
+  for (Mylite_index_root &root : definition->index_roots)
+  {
+    if (root.key_index == key_index)
+      return &root;
+  }
+  return nullptr;
+}
+
+static const Mylite_index_root *mylite_find_index_root_locked(
+    const Mylite_table_definition *definition, uint32_t key_index)
+{
+  for (const Mylite_index_root &root : definition->index_roots)
+  {
+    if (root.key_index == key_index)
+      return &root;
+  }
+  return nullptr;
 }
 
 static bool mylite_make_key_image(TABLE *table, uint key_index,
@@ -1717,7 +1881,8 @@ static bool mylite_load_catalog_generation_locked(
   std::string content;
   return mylite_read_catalog_payload(fd, header, &content) &&
          mylite_parse_catalog_payload_locked(content, loaded) &&
-         mylite_load_row_payloads_locked(fd, loaded);
+         mylite_load_row_payloads_locked(fd, loaded) &&
+         mylite_load_index_payloads_locked(fd, loaded);
 }
 
 static bool mylite_load_row_payloads_locked(
@@ -1970,6 +2135,83 @@ static bool mylite_parse_row_slot_page_payload_locked(
   return true;
 }
 
+static bool mylite_load_index_payloads_locked(
+    int fd, std::vector<Mylite_table_definition> *catalog)
+{
+  for (Mylite_table_definition &definition : *catalog)
+  {
+    for (Mylite_index_root &root : definition.index_roots)
+    {
+      if (root.payload_length == 0 ||
+          !mylite_page_offset_is_valid(root.payload_offset) ||
+          root.key_length == 0)
+        return false;
+
+      std::string content;
+      if (!mylite_read_page_chain(fd, mylite_page_type_index_payload,
+                                  root.payload_offset, root.payload_length,
+                                  root.payload_checksum, &content) ||
+          !mylite_parse_index_payload_locked(content, &definition, &root))
+        return false;
+    }
+  }
+
+  return true;
+}
+
+static bool mylite_parse_index_payload_locked(
+    const std::string &content, Mylite_table_definition *definition,
+    Mylite_index_root *root)
+{
+  if (content.length() < mylite_index_payload_header_size ||
+      std::memcmp(content.data(), mylite_index_payload_magic,
+                  sizeof(mylite_index_payload_magic)) != 0)
+    return false;
+
+  const uchar *data= reinterpret_cast<const uchar *>(content.data());
+  const uint32_t format_version= mylite_read_le32(data + 16);
+  const uint32_t key_index= mylite_read_le32(data + 20);
+  const uint32_t key_length= mylite_read_le32(data + 24);
+  const uint64_t entry_count= mylite_read_le64(data + 28);
+  if (format_version != mylite_index_payload_format_version ||
+      key_index != root->key_index || key_length != root->key_length ||
+      key_length == 0)
+    return false;
+
+  const uint64_t entry_length= 8 + static_cast<uint64_t>(key_length);
+  if (entry_count >
+        (content.length() - mylite_index_payload_header_size) /
+          entry_length)
+    return false;
+  if (mylite_index_payload_header_size + entry_count * entry_length !=
+      content.length())
+    return false;
+
+  root->entries.clear();
+  root->entries.reserve(static_cast<size_t>(entry_count));
+  size_t offset= mylite_index_payload_header_size;
+  for (uint64_t i= 0; i < entry_count; ++i)
+  {
+    Mylite_index_entry entry;
+    entry.rowid= mylite_read_le64(data + offset);
+    if (entry.rowid == 0 ||
+        !mylite_find_row_locked(definition, entry.rowid))
+      return false;
+    for (const Mylite_index_entry &loaded : root->entries)
+    {
+      if (loaded.rowid == entry.rowid)
+        return false;
+    }
+
+    offset+= 8;
+    entry.key.assign(data + offset, data + offset + key_length);
+    offset+= key_length;
+    root->entries.push_back(entry);
+  }
+
+  return !root->entries.empty();
+}
+
 static int mylite_flush_catalog_locked()
 {
   if (!mylite_catalog_file || !mylite_catalog_file[0])
@@ -2022,6 +2264,13 @@ static bool mylite_write_catalog_locked()
   }
 
   if (!mylite_write_row_payloads_locked(fd))
+  {
+    mylite_log_catalog_error("write", catalog_path);
+    ok= false;
+    goto done;
+  }
+
+  if (!mylite_write_index_payloads_locked(fd))
   {
     mylite_log_catalog_error("write", catalog_path);
     ok= false;
@@ -2240,6 +2489,82 @@ static void mylite_append_row_slot_page_payload(
   page_payloads->push_back(payload);
 }
 
+static bool mylite_write_index_payloads_locked(int fd)
+{
+  for (Mylite_table_definition &definition : mylite_catalog)
+  {
+    if (definition.frm_image.empty())
+      continue;
+
+    for (Mylite_index_root &root : definition.index_roots)
+    {
+      if (root.entries.empty())
+      {
+        root.payload_offset= 0;
+        root.payload_length= 0;
+        root.payload_checksum= 0;
+        root.payload_ref_seen= false;
+        continue;
+      }
+
+      if (root.key_length == 0)
+        return false;
+      const size_t entry_length= 8 + static_cast<size_t>(root.key_length);
+      if (root.entries.size() >
+            (static_cast<size_t>(-1) - mylite_index_payload_header_size) /
+              entry_length)
+        return false;
+      for (const Mylite_index_entry &entry : root.entries)
+      {
+        if (entry.rowid == 0 || entry.key.size() != root.key_length)
+          return false;
+      }
+
+      const std::string content= mylite_serialize_index_payload_locked(root);
+      uint64_t payload_offset= 0;
+      uint64_t payload_checksum= 0;
+      if (!mylite_write_page_chain(fd, mylite_page_type_index_payload,
+                                   content, &payload_offset,
+                                   &payload_checksum))
+        return false;
+      root.payload_offset= payload_offset;
+      root.payload_length= content.length();
+      root.payload_checksum= payload_checksum;
+      root.payload_ref_seen= true;
+    }
+  }
+
+  return true;
+}
+
+static std::string mylite_serialize_index_payload_locked(
+    const Mylite_index_root &root)
+{
+  const size_t entry_length= 8 + static_cast<size_t>(root.key_length);
+  std::vector<uchar> payload(
+    mylite_index_payload_header_size + root.entries.size() * entry_length, 0);
+  std::memcpy(payload.data(), mylite_index_payload_magic,
+              sizeof(mylite_index_payload_magic));
+  mylite_store_le32(payload.data() + 16,
+                    mylite_index_payload_format_version);
+  mylite_store_le32(payload.data() + 20, root.key_index);
+  mylite_store_le32(payload.data() + 24, root.key_length);
+  mylite_store_le64(payload.data() + 28, root.entries.size());
+
+  size_t offset= mylite_index_payload_header_size;
+  for (const Mylite_index_entry &entry : root.entries)
+  {
+    mylite_store_le64(payload.data() + offset, entry.rowid);
+    offset+= 8;
+    std::memcpy(payload.data() + offset, entry.key.data(),
+                entry.key.size());
+    offset+= entry.key.size();
+  }
+
+  return std::string(reinterpret_cast<const char *>(payload.data()),
+                     payload.size());
+}
+
 static std::string mylite_serialize_catalog_locked()
 {
   std::string content;
@@ -2307,6 +2632,32 @@ static std::string mylite_serialize_catalog_locked()
     content.append(mylite_format_decimal_uint64(
       definition.rows_payload_checksum));
     content.push_back('\n');
+
+    for (const Mylite_index_root &root : definition.index_roots)
+    {
+      if (root.entries.empty() || root.payload_length == 0)
+        continue;
+
+      content.append("INDEXPAGE\t");
+      content.append(mylite_hex_encode(
+        reinterpret_cast<const uchar *>(definition.db.data()),
+        definition.db.length()));
+      content.push_back('\t');
+      content.append(mylite_hex_encode(
+        reinterpret_cast<const uchar *>(definition.table_name.data()),
+        definition.table_name.length()));
+      content.push_back('\t');
+      content.append(mylite_format_decimal_uint64(root.key_index));
+      content.push_back('\t');
+      content.append(mylite_format_decimal_uint64(root.key_length));
+      content.push_back('\t');
+      content.append(mylite_format_decimal_uint64(root.payload_offset));
+      content.push_back('\t');
+      content.append(mylite_format_decimal_uint64(root.payload_length));
+      content.push_back('\t');
+      content.append(mylite_format_decimal_uint64(root.payload_checksum));
+      content.push_back('\n');
+    }
   }
 
   return content;
@@ -2357,6 +2708,12 @@ static bool mylite_parse_catalog_payload_locked(
     if (line.compare(0, 8, "ROWPAGE\t") == 0)
     {
       if (!mylite_parse_rowpage_payload_record_locked(line, loaded))
+        return false;
+      continue;
+    }
+    if (line.compare(0, 10, "INDEXPAGE\t") == 0)
+    {
+      if (!mylite_parse_indexpage_payload_record_locked(line, loaded))
         return false;
       continue;
     }
@@ -2616,6 +2973,97 @@ static bool mylite_parse_rowpage_payload_record_locked(
   definition->rows_payload_length= payload_length;
   definition->rows_payload_checksum= payload_checksum;
   definition->rows_payload_ref_seen= true;
+  return true;
+}
+
+static bool mylite_parse_indexpage_payload_record_locked(
+    const std::string &line, std::vector<Mylite_table_definition> *loaded)
+{
+  const std::string::size_type first= line.find('\t');
+  const std::string::size_type second= first == std::string::npos
+    ? std::string::npos
+    : line.find('\t', first + 1);
+  const std::string::size_type third= second == std::string::npos
+    ? std::string::npos
+    : line.find('\t', second + 1);
+  const std::string::size_type fourth= third == std::string::npos
+    ? std::string::npos
+    : line.find('\t', third + 1);
+  const std::string::size_type fifth= fourth == std::string::npos
+    ? std::string::npos
+    : line.find('\t', fourth + 1);
+  const std::string::size_type sixth= fifth == std::string::npos
+    ? std::string::npos
+    : line.find('\t', fifth + 1);
+  const std::string::size_type seventh= sixth == std::string::npos
+    ? std::string::npos
+    : line.find('\t', sixth + 1);
+
+  if (first == std::string::npos || second == std::string::npos ||
+      third == std::string::npos || fourth == std::string::npos ||
+      fifth == std::string::npos || sixth == std::string::npos ||
+      seventh == std::string::npos ||
+      line.substr(0, first) != "INDEXPAGE")
+  {
+    sql_print_error("MyLite: invalid catalog index page record in %s",
+                    mylite_catalog_file);
+    return false;
+  }
+
+  std::vector<uchar> db_bytes;
+  std::vector<uchar> table_bytes;
+  uint64_t key_index= 0;
+  uint64_t key_length= 0;
+  uint64_t payload_offset= 0;
+  uint64_t payload_length= 0;
+  uint64_t payload_checksum= 0;
+  if (!mylite_hex_decode(line.substr(first + 1, second - first - 1),
+                         &db_bytes) ||
+      !mylite_hex_decode(line.substr(second + 1, third - second - 1),
+                         &table_bytes) ||
+      !mylite_parse_decimal_uint64(
+        line.substr(third + 1, fourth - third - 1), &key_index) ||
+      !mylite_parse_decimal_uint64(
+        line.substr(fourth + 1, fifth - fourth - 1), &key_length) ||
+      !mylite_parse_decimal_uint64(
+        line.substr(fifth + 1, sixth - fifth - 1), &payload_offset) ||
+      !mylite_parse_decimal_uint64(
+        line.substr(sixth + 1, seventh - sixth - 1), &payload_length) ||
+      !mylite_parse_decimal_uint64(line.substr(seventh + 1),
+                                   &payload_checksum) ||
+      db_bytes.empty() || table_bytes.empty() || key_length == 0 ||
+      key_index > static_cast<uint64_t>(~static_cast<uint32_t>(0)) ||
+      key_length > static_cast<uint64_t>(~static_cast<uint32_t>(0)) ||
+      payload_length == 0 || !mylite_page_offset_is_valid(payload_offset))
+  {
+    sql_print_error("MyLite: invalid catalog index page encoding in %s",
+                    mylite_catalog_file);
+    return false;
+  }
+
+  const std::string db(reinterpret_cast<const char *>(db_bytes.data()),
+                       db_bytes.size());
+  const std::string table_name(
+    reinterpret_cast<const char *>(table_bytes.data()), table_bytes.size());
+  Mylite_table_definition *definition=
+    mylite_find_table_definition_in_catalog(loaded, db, table_name);
+  if (!definition ||
+      mylite_find_index_root_locked(
+        definition, static_cast<uint32_t>(key_index)))
+  {
+    sql_print_error("MyLite: invalid catalog index page owner in %s",
+                    mylite_catalog_file);
+    return false;
+  }
+
+  Mylite_index_root root;
+  root.key_index= static_cast<uint32_t>(key_index);
+  root.key_length= static_cast<uint32_t>(key_length);
+  root.payload_offset= payload_offset;
+  root.payload_length= payload_length;
+  root.payload_checksum= payload_checksum;
+  root.payload_ref_seen= true;
+  definition->index_roots.push_back(root);
   return true;
 }
 

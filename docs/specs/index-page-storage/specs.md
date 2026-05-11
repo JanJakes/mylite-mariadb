@@ -123,13 +123,15 @@ During catalog load:
 1. parse catalog metadata and row roots,
 2. load row payloads,
 3. load index payloads,
-4. validate key index ordinals, key lengths, sorted order, duplicate root
-   records, and rowid ownership against loaded rows,
+4. validate key index ordinals, key lengths, duplicate root records, payload
+   checksums, page type, and rowid ownership against loaded rows,
 5. accept the generation only after all referenced payloads validate.
 
 During handler index reads, `mylite_build_index_entries()` should use a loaded
 durable index root only when the requested key ordinal and key length match the
-open `TABLE`. Otherwise it should rebuild from rows as the current legacy path.
+open `TABLE`, and should validate MariaDB `key_tuple_cmp()` sorted order there
+because catalog-only load code does not have an open `TABLE`. Otherwise it
+should rebuild from rows as the current legacy path.
 
 ## Affected Subsystems
 
@@ -147,9 +149,21 @@ acceptable until free-list and compaction work exists.
 
 ## Binary-Size Impact
 
-Expected impact is first-party code for index payload serialization, parser
-validation, catalog `INDEXPAGE` records, and smoke assertions. No new
-dependency is allowed. Record measured artifacts after implementation.
+The implemented slice adds first-party code for index payload serialization,
+parser validation, catalog `INDEXPAGE` records, handler-time root validation,
+and smoke assertions. It adds no dependency.
+
+Measured after `MYLITE_BUILD_JOBS=8 tools/run-storage-engine-smoke.sh`:
+
+- `build/mariadb-minsize/libmysqld/libmariadbd.a`: 44,359,978 bytes
+- `build/mariadb-minsize/mylite/libmylite.a`: 29,698 bytes
+- `build/mariadb-minsize/mylite/mylite-compatibility-smoke`: 22,765,040 bytes
+- `build/mariadb-minsize/mylite/mylite-storage-engine-smoke`: 22,698,408 bytes
+- `build/mariadb-minsize/mylite/mylite-open-close-smoke`: 22,700,328 bytes
+- `build/mariadb-minsize/mylite/mylite-embedded-bootstrap-smoke`: 22,698,248 bytes
+
+The persisted catalog inspected by storage smoke was 733,184 bytes after the
+fresh-process read phase.
 
 ## Test And Verification Plan
 
@@ -174,6 +188,16 @@ The storage smoke should verify:
 - no `.frm` artifacts,
 - no catalog temporary sidecars.
 
+Observed storage smoke evidence:
+
+- `catalog_row_records=0`
+- `rowpage_records=4`
+- `indexpage_records=3`
+- `row_payloads=mylite.persisted,mylite.persisted_auto,mylite.persisted_keyed,mylite.persisted_wide`
+- `index_payloads=mylite.persisted_auto:0,mylite.persisted_keyed:0,mylite.persisted_keyed:1`
+- `index_payload_magic=MYLITEINDEXPG1`
+- `index_payload_page_type=3`
+
 The compatibility harness should continue to verify:
 
 - MariaDB reference fingerprints match MyLite fingerprints for the supported
@@ -183,8 +207,10 @@ The compatibility harness should continue to verify:
 ## Acceptance Criteria
 
 - New writes for touched keyed tables publish durable `INDEXPAGE` roots.
-- Loaded index payloads validate sorted order, key length, row ownership, and
-  payload checksum before a catalog generation is accepted.
+- Loaded index payloads validate key length, duplicate roots, row ownership,
+  payload checksum, and page type before a catalog generation is accepted.
+- Handler index reads validate durable root sorted order with the open
+  MariaDB `TABLE` metadata before using loaded entries.
 - `mylite_build_index_entries()` uses durable index entries when they match the
   open table key metadata, with row rebuild as legacy fallback.
 - Existing storage, recovery, compatibility, embedded lifecycle, and
