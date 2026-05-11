@@ -63,12 +63,13 @@ page-level undo/redo, MVCC, and useful concurrent writer behavior remain
 deferred. The storage smoke now also proves statement-level rollback on
 multi-row duplicate-key insert errors in both autocommit and explicit
 transaction modes, so partial statement changes do not leak through the current
-transaction bridge. Configured primary files are now single-process owned with
-an exclusive advisory lock held on the `.mylite` file for the MyLite
-storage-engine lifetime; another process or external advisory-lock holder
-causes an explicit catalog operation failure until that lock is released, and
-the SQL-facing handler diagnostic now reports a lock timeout instead of
-misleading index corruption.
+transaction bridge. The next active slice is adding non-key BLOB/TEXT row
+payload support inside existing row and overflow pages. Configured primary
+files are now single-process owned with an exclusive advisory lock held on the
+`.mylite` file for the MyLite storage-engine lifetime; another process or
+external advisory-lock holder causes an explicit catalog operation failure
+until that lock is released, and the SQL-facing handler diagnostic now reports
+a lock timeout instead of misleading index corruption.
 
 ## Implementation plan
 
@@ -102,6 +103,7 @@ misleading index corruption.
 | 25 | `deferred-transaction-publication` | Done | Register MyLite as a MariaDB transaction participant for supported DML and defer `.mylite` generation publication until commit, restoring in-memory snapshots on rollback. |
 | 26 | `transaction-savepoint-snapshots` | Done | Add MyLite savepoint hooks backed by transaction-context snapshots for the supported row-DML subset. |
 | 27 | `statement-error-rollback` | Done | Prove failed multi-row DML statements restore MyLite's pre-statement snapshot in autocommit and explicit transaction modes. |
+| 28 | `blob-text-row-storage` | In progress | Store non-key BLOB/TEXT row payloads inside existing row and overflow pages without persisting native row-buffer pointers. |
 
 ## Size and profile direction
 
