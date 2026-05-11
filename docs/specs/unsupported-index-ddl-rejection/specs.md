@@ -128,4 +128,44 @@ No new dependency or licensing change.
 
 ## Implementation Result
 
-Pending.
+Implemented as storage-smoke coverage. No handler code change was needed:
+`mylite_table_supports_key_storage()` already rejects unsupported key
+algorithms and flags before table-definition persistence.
+
+The storage smoke now rejects and verifies table absence for:
+
+- `FULLTEXT KEY` on a `TEXT` column,
+- `SPATIAL KEY` on a `GEOMETRY` column,
+- `KEY ... USING HASH`,
+- descending key parts.
+
+Report evidence from `MYLITE_BUILD_JOBS=8 tools/run-storage-engine-smoke.sh`:
+
+- `build/mariadb-minsize/mylite-storage-engine-report.txt`:
+  - `status=0`
+  - `message=ok`
+  - `unsupported_fulltext_key=rejected`
+  - `unsupported_spatial_key=rejected`
+  - `unsupported_hash_key=rejected`
+  - `unsupported_reverse_key=rejected`
+- `build/mariadb-minsize/mylite-catalog-read-report.txt`:
+  - `status=0`
+  - `row_payloads` does not include the rejected unsupported-index tables.
+  - `index_payloads` does not include the rejected unsupported-index tables.
+
+Verification run:
+
+- `git diff --check`
+- `bash -n tools/run-storage-engine-smoke.sh
+  tools/run-compatibility-test-harness.sh`
+- `MYLITE_BUILD_JOBS=8 tools/run-storage-engine-smoke.sh`
+- `MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh`
+
+Measured `MinSizeRel` artifacts from
+`build/mariadb-minsize/mylite-build-report.txt` and `ls -l`:
+
+- `build/mariadb-minsize/libmysqld/libmariadbd.a`: 44,413,682 bytes,
+  571 objects.
+- `build/mariadb-minsize/mylite/mylite-storage-engine-smoke`: 22,839,088
+  bytes.
+- `build/mariadb-minsize/mylite/libmylite.a`: 87,206 bytes.

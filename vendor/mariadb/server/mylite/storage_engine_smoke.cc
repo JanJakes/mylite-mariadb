@@ -81,6 +81,9 @@ struct SmokeResult
   std::string check_constraint_update;
   std::string check_constraint_rows;
   std::string unsupported_geometry;
+  std::string unsupported_fulltext_key;
+  std::string unsupported_spatial_key;
+  std::string unsupported_hash_key;
   std::string key_lookup_note;
   std::string key_order_ids;
   std::string duplicate_key;
@@ -1357,6 +1360,50 @@ static bool exercise_dml(MYSQL *mysql, SmokeResult *result)
                                       "unsupported GEOMETRY table",
                                       &result->unsupported_geometry, result))
     return false;
+  if (!verify_table_absent(mysql,
+                           "SHOW TABLES FROM mylite "
+                           "LIKE 'unsupported_geometry'",
+                           "unsupported GEOMETRY table", result))
+    return false;
+  if (!execute_statement_expect_error(
+        mysql,
+        "CREATE TABLE mylite.unsupported_fulltext_key "
+        "(id INT NOT NULL, body TEXT NOT NULL, "
+        "FULLTEXT KEY body_ft(body)) ENGINE=MYLITE",
+        "unsupported FULLTEXT key table",
+        &result->unsupported_fulltext_key, result))
+    return false;
+  if (!verify_table_absent(mysql,
+                           "SHOW TABLES FROM mylite "
+                           "LIKE 'unsupported_fulltext_key'",
+                           "unsupported FULLTEXT key table", result))
+    return false;
+  if (!execute_statement_expect_error(
+        mysql,
+        "CREATE TABLE mylite.unsupported_spatial_key "
+        "(id INT NOT NULL, location GEOMETRY NOT NULL, "
+        "SPATIAL KEY location_sp(location)) ENGINE=MYLITE",
+        "unsupported SPATIAL key table",
+        &result->unsupported_spatial_key, result))
+    return false;
+  if (!verify_table_absent(mysql,
+                           "SHOW TABLES FROM mylite "
+                           "LIKE 'unsupported_spatial_key'",
+                           "unsupported SPATIAL key table", result))
+    return false;
+  if (!execute_statement_expect_error(
+        mysql,
+        "CREATE TABLE mylite.unsupported_hash_key "
+        "(id INT NOT NULL, note VARCHAR(12) NOT NULL, "
+        "KEY note_key(note) USING HASH) ENGINE=MYLITE",
+        "unsupported HASH key table",
+        &result->unsupported_hash_key, result))
+    return false;
+  if (!verify_table_absent(mysql,
+                           "SHOW TABLES FROM mylite "
+                           "LIKE 'unsupported_hash_key'",
+                           "unsupported HASH key table", result))
+    return false;
   if (!execute_statement_expect_error(mysql,
                                       "CREATE TABLE "
                                       "mylite.unsupported_reverse_key "
@@ -1367,6 +1414,11 @@ static bool exercise_dml(MYSQL *mysql, SmokeResult *result)
                                       "unsupported reverse key table",
                                       &result->unsupported_reverse_key,
                                       result))
+    return false;
+  if (!verify_table_absent(mysql,
+                           "SHOW TABLES FROM mylite "
+                           "LIKE 'unsupported_reverse_key'",
+                           "unsupported reverse key table", result))
     return false;
   if (!execute_statement_expect_error(
         mysql,
@@ -3177,6 +3229,15 @@ static void write_report(const SmokeOptions &options,
            << result.check_constraint_rows << "\n";
   if (!result.unsupported_geometry.empty())
     report << "unsupported_geometry=" << result.unsupported_geometry << "\n";
+  if (!result.unsupported_fulltext_key.empty())
+    report << "unsupported_fulltext_key="
+           << result.unsupported_fulltext_key << "\n";
+  if (!result.unsupported_spatial_key.empty())
+    report << "unsupported_spatial_key="
+           << result.unsupported_spatial_key << "\n";
+  if (!result.unsupported_hash_key.empty())
+    report << "unsupported_hash_key="
+           << result.unsupported_hash_key << "\n";
   if (!result.key_lookup_note.empty())
     report << "key_lookup_note=" << result.key_lookup_note << "\n";
   if (!result.key_order_ids.empty())
