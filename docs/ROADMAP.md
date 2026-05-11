@@ -138,6 +138,7 @@ documented read-write create combination.
 | 37 | `nullable-key-storage` | Done | Support nullable key parts, including MariaDB-style unique-key NULL semantics, in the current row and index storage bridge. |
 | 38 | `copy-alter-row-preservation` | Done | Prove populated copy ALTER preserves supported MyLite rows, indexes, BLOB/TEXT payloads, nullable keys, and autoincrement state. |
 | 39 | `foreign-key-rejection` | Done | Reject MyLite foreign-key DDL explicitly until FK catalog, enforcement, locking, and cascade semantics are designed. |
+| 40 | `generated-column-rejection` | In progress | Reject MyLite generated-column DDL explicitly until expression storage, materialization, indexes, and ALTER recomputation are designed. |
 
 ## Size and profile direction
 
