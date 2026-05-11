@@ -144,11 +144,15 @@ keep upstream imports mechanical, and keep MyLite changes narrow.
 
 Current design documents:
 
+- [Roadmap](docs/ROADMAP.md) tracks the ordered engineering slices and current
+  progress.
 - [MariaDB source analysis](docs/research/mariadb-source-analysis.md) records
   the initial source-level findings.
 - [Single-file storage design](docs/architecture/single-file-storage.md)
   describes the target storage architecture.
 - [libmylite C API](docs/api/libmylite-c-api.md) sketches the first public API.
+- [Engineering standards](docs/architecture/engineering-standards.md) defines
+  the project rules for fork hygiene, API design, tests, and documentation.
 
 ## References
 
