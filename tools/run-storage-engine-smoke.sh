@@ -82,9 +82,49 @@ run_inside_container() {
     "${catalog_file}" \
     "read" || status=1
 
+  local recovery_root="${abs_build_dir}/mylite-catalog-recovery"
+  local recovery_file="${recovery_root}/catalog.mylite"
+  rm -rf "${recovery_root}"
+  mkdir -p "${recovery_root}"
+
+  run_smoke_phase \
+    "${smoke}" \
+    "${abs_build_dir}/sql/share" \
+    "${recovery_root}/base" \
+    "${abs_build_dir}/mylite-catalog-recovery-base-report.txt" \
+    "${abs_build_dir}/mylite-catalog-recovery-base-output.log" \
+    "${recovery_file}" \
+    "recovery-base" || status=1
+
+  local recovery_payload_offset
+  recovery_payload_offset="$(stat -c %s "${recovery_file}")"
+
+  run_smoke_phase \
+    "${smoke}" \
+    "${abs_build_dir}/sql/share" \
+    "${recovery_root}/latest" \
+    "${abs_build_dir}/mylite-catalog-recovery-latest-report.txt" \
+    "${abs_build_dir}/mylite-catalog-recovery-latest-output.log" \
+    "${recovery_file}" \
+    "recovery-latest" || status=1
+
+  corrupt_latest_catalog_payload "${recovery_file}" "${recovery_payload_offset}" || status=1
+
+  run_smoke_phase \
+    "${smoke}" \
+    "${abs_build_dir}/sql/share" \
+    "${recovery_root}/read" \
+    "${abs_build_dir}/mylite-catalog-recovery-read-report.txt" \
+    "${abs_build_dir}/mylite-catalog-recovery-read-output.log" \
+    "${recovery_file}" \
+    "recovery-read" || status=1
+
   printf "Storage engine smoke report: %s\n" "${report}"
   printf "Catalog write smoke report: %s\n" "${abs_build_dir}/mylite-catalog-write-report.txt"
   printf "Catalog read smoke report: %s\n" "${abs_build_dir}/mylite-catalog-read-report.txt"
+  printf "Catalog recovery base smoke report: %s\n" "${abs_build_dir}/mylite-catalog-recovery-base-report.txt"
+  printf "Catalog recovery latest smoke report: %s\n" "${abs_build_dir}/mylite-catalog-recovery-latest-report.txt"
+  printf "Catalog recovery read smoke report: %s\n" "${abs_build_dir}/mylite-catalog-recovery-read-report.txt"
   return "${status}"
 }
 
@@ -120,10 +160,30 @@ run_smoke_phase() {
   "${smoke}" "${args[@]}" > "${smoke_log}" 2>&1 || status=$?
 
   append_observed_files "${runtime_dir}" "${report}" "${smoke_log}"
+  append_catalog_files "${catalog_file}" "${report}"
+  if [[ -n "${catalog_file}" && -e "${catalog_file}.tmp" ]]; then
+    status=1
+  fi
   if has_frm_artifacts "${runtime_dir}"; then
     status=1
   fi
   return "${status}"
+}
+
+corrupt_latest_catalog_payload() {
+  local catalog_file="$1"
+  local payload_offset="$2"
+
+  if [[ ! -f "${catalog_file}" ]]; then
+    printf "Catalog recovery file does not exist: %s\n" "${catalog_file}" >&2
+    return 1
+  fi
+  if [[ -z "${payload_offset}" || "${payload_offset}" -lt 8192 ]]; then
+    printf "Invalid catalog payload offset: %s\n" "${payload_offset}" >&2
+    return 1
+  fi
+
+  printf '\0' | dd of="${catalog_file}" bs=1 seek="${payload_offset}" count=1 conv=notrunc status=none
 }
 
 append_observed_files() {
@@ -159,6 +219,31 @@ append_observed_files() {
     printf "\n## FRM Artifacts\n\n"
     if has_frm_artifacts "${runtime_dir}"; then
       find "${runtime_dir}" -type f -name "*.frm" -printf "%P\n" | sort
+    else
+      printf "none\n"
+    fi
+  } >> "${report}"
+}
+
+append_catalog_files() {
+  local catalog_file="$1"
+  local report="$2"
+
+  if [[ -z "${catalog_file}" ]]; then
+    return
+  fi
+
+  {
+    printf "\n## Catalog File\n\n"
+    if [[ -f "${catalog_file}" ]]; then
+      printf "%s\t%s bytes\n" "$(basename "${catalog_file}")" "$(stat -c %s "${catalog_file}")"
+    else
+      printf "none\n"
+    fi
+
+    printf "\n## Catalog Sidecars\n\n"
+    if [[ -e "${catalog_file}.tmp" ]]; then
+      printf "%s\n" "$(basename "${catalog_file}.tmp")"
     else
       printf "none\n"
     fi

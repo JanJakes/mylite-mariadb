@@ -220,6 +220,72 @@ surface changes.
 - Catalog writes do not create a persistent `<catalog-file>.tmp` sidecar.
 - No `.frm` or dynamic plugin artifacts are introduced by the storage smoke.
 
+## Implementation Result
+
+The MyLite storage engine now writes catalog metadata through a v1 primary-file
+layout:
+
+- header slot 0 at offset 0,
+- header slot 1 at offset 4096,
+- append-only catalog payload blobs beginning at offset 8192.
+
+Each header records the format version, page size, generation, payload offset,
+payload length, payload checksum, and header checksum. Catalog loading validates
+both headers independently, validates the referenced payload bytes, and chooses
+the highest valid generation. Catalog writes append a new payload, `fsync()` it,
+then publish the inactive header with the next generation and `fsync()` again.
+
+The payload remains the existing logical text/hex catalog for frm-backed table
+definitions. This keeps DDL metadata routing and MariaDB discovery behavior
+unchanged while making catalog publication recoverable.
+
+The storage-engine smoke now runs recovery phases:
+
+- `recovery-base` publishes a valid catalog containing `mylite.persisted`,
+- `recovery-latest` publishes a later generation containing
+  `mylite.recovery_marker`,
+- the wrapper corrupts the latest payload at its append offset,
+- `recovery-read` starts a fresh embedded process and verifies
+  `mylite.persisted` remains readable while `mylite.recovery_marker` is absent.
+
+Verification passed:
+
+```sh
+MYLITE_BUILD_JOBS=8 tools/run-storage-engine-smoke.sh
+MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_BUILD_JOBS=8 tools/run-embedded-bootstrap-smoke.sh
+bash -n tools/run-storage-engine-smoke.sh tools/run-libmylite-open-close-smoke.sh tools/run-embedded-bootstrap-smoke.sh tools/build-mariadb-minsize.sh
+git diff --check
+```
+
+The first attempted concurrent run of the open/close and embedded smokes raced
+inside CMake regeneration of the shared build directory. Rerunning the smokes
+serially passed; this was a test-invocation race, not a MyLite runtime failure.
+
+Observed reports after implementation:
+
+- `mylite-catalog-read-report.txt`: `status=0`, `persisted_count=0`,
+  `persisted_column=note`, no `.frm` artifacts, no catalog sidecars.
+- `mylite-catalog-recovery-latest-report.txt`: `status=0`,
+  `recovery_marker=present`, no `.frm` artifacts, no catalog sidecars.
+- `mylite-catalog-recovery-read-report.txt`: `status=0`,
+  `persisted_count=0`, `persisted_column=note`, `recovery_marker=absent`, no
+  `.frm` artifacts, no catalog sidecars.
+
+Observed artifacts after this slice:
+
+- `build/mariadb-minsize/libmysqld/libmariadbd.a`: 44,273,304 bytes.
+- `build/mariadb-minsize/mylite/libmylite.a`: 29,698 bytes.
+- `build/mariadb-minsize/mylite/mylite-storage-engine-smoke`: 22,686,240
+  bytes.
+- `build/mariadb-minsize/mylite/mylite-open-close-smoke`: 22,688,088 bytes.
+- `build/mariadb-minsize/mylite/mylite-embedded-bootstrap-smoke`: 22,686,000
+  bytes.
+- `build/mariadb-minsize/mylite-catalog-persistence/catalog.mylite`: 9,256
+  bytes.
+- `build/mariadb-minsize/mylite-catalog-recovery/catalog.mylite`: 11,237
+  bytes.
+
 ## Risks And Unresolved Questions
 
 - This is catalog recovery only; row data and indexes still do not exist.

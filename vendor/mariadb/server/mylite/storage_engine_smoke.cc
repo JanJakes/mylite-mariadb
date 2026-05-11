@@ -38,6 +38,7 @@ struct SmokeResult
   std::string dropped_table;
   std::string persisted_count;
   std::string persisted_column;
+  std::string recovery_marker;
 };
 
 static bool parse_options(int argc, char **argv, SmokeOptions *options,
@@ -52,6 +53,8 @@ static bool fetch_probe_count(MYSQL *mysql, SmokeResult *result);
 static bool exercise_ddl(MYSQL *mysql, SmokeResult *result);
 static bool exercise_persistence_write(MYSQL *mysql, SmokeResult *result);
 static bool exercise_persistence_read(MYSQL *mysql, SmokeResult *result);
+static bool exercise_recovery_latest(MYSQL *mysql, SmokeResult *result);
+static bool exercise_recovery_read(MYSQL *mysql, SmokeResult *result);
 static bool execute_statement(MYSQL *mysql, const char *statement,
                               const char *label, SmokeResult *result);
 static bool fetch_single_value(MYSQL *mysql, const char *query,
@@ -61,6 +64,7 @@ static bool verify_table_present(MYSQL *mysql, const char *query,
                                  const char *label, SmokeResult *result);
 static bool verify_table_absent(MYSQL *mysql, const char *query,
                                 const char *label, SmokeResult *result);
+static bool phase_loads_existing_catalog(const std::string &phase);
 static void write_report(const SmokeOptions &options,
                          const std::vector<std::string> &server_args,
                          const SmokeResult &result);
@@ -114,7 +118,10 @@ static bool parse_options(int argc, char **argv, SmokeOptions *options,
 
   if (options->persistence_phase != "none" &&
       options->persistence_phase != "write" &&
-      options->persistence_phase != "read")
+      options->persistence_phase != "read" &&
+      options->persistence_phase != "recovery-base" &&
+      options->persistence_phase != "recovery-latest" &&
+      options->persistence_phase != "recovery-read")
   {
     *error= "unsupported persistence phase";
     return false;
@@ -201,7 +208,7 @@ static int run_smoke(const SmokeOptions &options,
   if (!fetch_mylite_engine(mysql, result))
     goto done;
 
-  if (options.persistence_phase != "read")
+  if (!phase_loads_existing_catalog(options.persistence_phase))
   {
     result->phase= "table_names";
     if (!fetch_discovered_table(mysql, result))
@@ -216,6 +223,24 @@ static int run_smoke(const SmokeOptions &options,
   {
     result->phase= "persistence_write";
     if (!exercise_persistence_write(mysql, result))
+      goto done;
+  }
+  else if (options.persistence_phase == "recovery-base")
+  {
+    result->phase= "recovery_base";
+    if (!exercise_persistence_write(mysql, result))
+      goto done;
+  }
+  else if (options.persistence_phase == "recovery-latest")
+  {
+    result->phase= "recovery_latest";
+    if (!exercise_recovery_latest(mysql, result))
+      goto done;
+  }
+  else if (options.persistence_phase == "recovery-read")
+  {
+    result->phase= "recovery_read";
+    if (!exercise_recovery_read(mysql, result))
       goto done;
   }
   else if (options.persistence_phase == "read")
@@ -509,6 +534,44 @@ static bool exercise_persistence_read(MYSQL *mysql, SmokeResult *result)
   return true;
 }
 
+static bool exercise_recovery_latest(MYSQL *mysql, SmokeResult *result)
+{
+  if (!exercise_persistence_read(mysql, result))
+    return false;
+
+  if (!execute_statement(mysql,
+                         "CREATE TABLE mylite.recovery_marker "
+                         "(id INT) ENGINE=MYLITE",
+                         "CREATE recovery marker", result))
+    return false;
+  if (!execute_statement(mysql, "FLUSH TABLES",
+                         "FLUSH TABLES after recovery marker CREATE",
+                         result))
+    return false;
+
+  if (!verify_table_present(mysql,
+                            "SHOW TABLES FROM mylite "
+                            "LIKE 'recovery_marker'",
+                            "recovery marker", result))
+    return false;
+  result->recovery_marker= "present";
+  return true;
+}
+
+static bool exercise_recovery_read(MYSQL *mysql, SmokeResult *result)
+{
+  if (!exercise_persistence_read(mysql, result))
+    return false;
+
+  if (!verify_table_absent(mysql,
+                           "SHOW TABLES FROM mylite "
+                           "LIKE 'recovery_marker'",
+                           "recovery marker", result))
+    return false;
+  result->recovery_marker= "absent";
+  return true;
+}
+
 static bool execute_statement(MYSQL *mysql, const char *statement,
                               const char *label, SmokeResult *result)
 {
@@ -614,6 +677,13 @@ static bool verify_table_absent(MYSQL *mysql, const char *query,
   return ok;
 }
 
+static bool phase_loads_existing_catalog(const std::string &phase)
+{
+  return phase == "read" ||
+         phase == "recovery-latest" ||
+         phase == "recovery-read";
+}
+
 static void write_report(const SmokeOptions &options,
                          const std::vector<std::string> &server_args,
                          const SmokeResult &result)
@@ -664,6 +734,8 @@ static void write_report(const SmokeOptions &options,
     report << "persisted_count=" << result.persisted_count << "\n";
   if (!result.persisted_column.empty())
     report << "persisted_column=" << result.persisted_column << "\n";
+  if (!result.recovery_marker.empty())
+    report << "recovery_marker=" << result.recovery_marker << "\n";
 }
 
 static bool option_value(const char *arg, const char *name, std::string *value)

@@ -27,12 +27,13 @@ diagnostics for one initialized database path per process, and the first
 static `MYLITE` storage-engine skeleton is registered in the embedded profile.
 The engine can discover the seed table `mylite.probe`, run a bounded `CREATE`,
 copy `ALTER`, `RENAME`, and `DROP` lifecycle without leaving durable `.frm`
-table-definition files, and persist frm-backed table definitions in the primary
-`.mylite` file across fresh embedded processes.
+table-definition files, persist frm-backed table definitions in the primary
+`.mylite` file across fresh embedded processes, and recover the previous valid
+catalog generation when the latest append-only catalog payload is corrupted.
 
-The active implementation step is `file-format-recovery`, which should replace
-the v0 text/hex catalog rewrite with a real durable file header, catalog
-layout, update protocol, and crash recovery story.
+The next implementation step is `row-index-storage`, which should add the first
+real row storage, index metadata/access, and autoincrement state behind the
+existing MyLite handler skeleton.
 
 ## Implementation plan
 
@@ -48,7 +49,7 @@ layout, update protocol, and crash recovery story.
 | 7 | `mylite-engine-discovery` | Done | Reopen table definitions from the MyLite catalog through MariaDB table-discovery APIs. |
 | 8 | `ddl-metadata-routing` | Done | Prove `CREATE`, `ALTER`, `DROP`, and `RENAME` do not leave durable `.frm` table-definition sidecars. |
 | 9 | `single-file-catalog` | Done | Store initial frm-backed table definitions inside the `.mylite` file. |
-| 10 | `file-format-recovery` | In progress | Define and implement the first durable file header, page layout, catalog update protocol, and initial catalog recovery guarantees. |
+| 10 | `file-format-recovery` | Done | Define and implement the first durable file header, page layout, catalog update protocol, and initial catalog recovery guarantees. |
 | 11 | `row-index-storage` | Planned | Implement row storage, index access, autoincrement state, and core read/write handler methods. |
 | 12 | `compatibility-test-harness` | Planned | Run embedded lifecycle, unexpected-sidecar detection, crash/reopen, and MariaDB comparison tests in repeatable groups. |
 

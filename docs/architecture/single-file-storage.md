@@ -160,6 +160,15 @@ the server a table definition changed unexpectedly.
 Later, table definitions can be normalized into a MyLite catalog format or
 stored as SQL text, but storing the exact MariaDB image is the safer first step.
 
+The first implemented catalog file format uses two fixed 4096-byte header slots
+at offsets 0 and 4096, with append-only catalog payload blobs starting at offset
+8192. Each header names a catalog payload by offset, length, generation, and
+checksum. Loading chooses the newest valid header whose payload checksum
+matches; writing appends the payload first, flushes it, then publishes the
+inactive header. This protects table-definition catalog publication from a
+corrupted latest payload, but it is not yet a row-storage pager or full
+transaction recovery system.
+
 ## Schemas
 
 MariaDB's `database.table` model should map to namespaces inside the catalog:
