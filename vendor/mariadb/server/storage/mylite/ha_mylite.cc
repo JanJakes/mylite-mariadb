@@ -163,6 +163,10 @@ static int mylite_delete_row(const char *db, size_t db_length,
                              const char *table_name,
                              size_t table_name_length, THD *thd,
                              TABLE *table, uint64_t rowid);
+static int mylite_delete_all_rows(const char *db, size_t db_length,
+                                  const char *table_name,
+                                  size_t table_name_length, THD *thd,
+                                  TABLE *table, bool reset_auto_increment);
 static int mylite_read_row(const char *db, size_t db_length,
                            const char *table_name, size_t table_name_length,
                            TABLE *table, size_t *scan_index, uint64_t *rowid,
@@ -951,6 +955,30 @@ int ha_mylite::delete_row(const uchar *)
   DBUG_RETURN(error);
 }
 
+int ha_mylite::delete_all_rows()
+{
+  DBUG_ENTER("ha_mylite::delete_all_rows");
+  if (mylite_catalog_read_only())
+    DBUG_RETURN(HA_ERR_TABLE_READONLY);
+  const int error= mylite_delete_all_rows(
+    db_name.c_str(), db_name.length(), opened_table_name.c_str(),
+    opened_table_name.length(), ha_thd(), table, false);
+  index_cursor_rowids.clear();
+  DBUG_RETURN(error);
+}
+
+int ha_mylite::truncate()
+{
+  DBUG_ENTER("ha_mylite::truncate");
+  if (mylite_catalog_read_only())
+    DBUG_RETURN(HA_ERR_TABLE_READONLY);
+  const int error= mylite_delete_all_rows(
+    db_name.c_str(), db_name.length(), opened_table_name.c_str(),
+    opened_table_name.length(), ha_thd(), table, true);
+  index_cursor_rowids.clear();
+  DBUG_RETURN(error);
+}
+
 int ha_mylite::index_read_map(uchar *buf, const uchar *key,
                               key_part_map keypart_map,
                               enum ha_rkey_function find_flag)
@@ -1529,6 +1557,60 @@ static int mylite_delete_row(const char *db, size_t db_length,
     mylite_pending_free_page_ranges= pending_before;
     return HA_ERR_CRASHED;
   }
+  error= mylite_flush_catalog_for_thd_locked(thd);
+  if (error)
+  {
+    mylite_catalog= before;
+    mylite_pending_free_page_ranges= pending_before;
+  }
+  return error;
+}
+
+static int mylite_delete_all_rows(const char *db, size_t db_length,
+                                  const char *table_name,
+                                  size_t table_name_length, THD *thd,
+                                  TABLE *table, bool reset_auto_increment)
+{
+  if (!mylite_table_supports_row_storage(table) ||
+      !mylite_table_supports_key_storage(table))
+    return HA_ERR_UNSUPPORTED;
+
+  std::lock_guard<std::mutex> guard(mylite_catalog_mutex);
+  if (!mylite_ensure_catalog_loaded_locked())
+    return mylite_catalog_error_code();
+
+  Mylite_table_definition *definition=
+    mylite_find_table_definition_locked(db, db_length, table_name,
+                                        table_name_length);
+  if (!definition)
+    return HA_ERR_NO_SUCH_TABLE;
+
+  int error= mylite_prepare_dml_mutation_locked(thd);
+  if (error)
+    return error;
+
+  const std::vector<Mylite_table_definition> before= mylite_catalog;
+  const std::vector<Mylite_free_page_range> pending_before=
+    mylite_pending_free_page_ranges;
+  if (!mylite_collect_index_payload_ranges_locked(
+        *definition, &mylite_pending_free_page_ranges))
+  {
+    mylite_pending_free_page_ranges= pending_before;
+    return HA_ERR_CRASHED;
+  }
+
+  definition->rows.clear();
+  definition->next_rowid= 1;
+  if (reset_auto_increment && definition->auto_increment_next != 0)
+    definition->auto_increment_next= 1;
+
+  if (!mylite_refresh_index_roots_locked(definition, table))
+  {
+    mylite_catalog= before;
+    mylite_pending_free_page_ranges= pending_before;
+    return HA_ERR_CRASHED;
+  }
+
   error= mylite_flush_catalog_for_thd_locked(thd);
   if (error)
   {

@@ -79,14 +79,12 @@ This slice will:
 Keep MyLite on MariaDB's handler-based truncate path. Because the MyLite
 handlerton does not advertise `HTON_CAN_RECREATE`, `Sql_cmd_truncate_table`
 opens the table with an exclusive lock and calls `handler::ha_truncate()`.
-The base handler then calls virtual `truncate()`, whose inherited default
-performs:
+Override `ha_mylite::truncate()` directly so row clearing and autoincrement
+reset publish as one MyLite catalog mutation. Also implement
+`ha_mylite::delete_all_rows()` for bulk-delete paths that must clear rows
+without resetting the user-visible autoincrement counter.
 
-1. `delete_all_rows()`;
-2. `reset_auto_increment(0)`.
-
-Implement `ha_mylite::delete_all_rows()` and a MyLite-owned helper that mirrors
-the existing row mutation shape:
+Use a MyLite-owned helper that mirrors the existing row mutation shape:
 
 1. reject read-only catalogs with `HA_ERR_TABLE_READONLY`;
 2. validate the table shape with MyLite's supported key-storage predicate;
@@ -95,14 +93,14 @@ the existing row mutation shape:
    bridge captures statement and transaction snapshots;
 5. snapshot catalog and pending allocator state for rollback on local errors;
 6. collect old index payload ranges for free-page reuse;
-7. clear the table rows vector and reset `next_rowid` to `1`;
-8. rebuild index roots, yielding no durable roots for an empty table;
-9. publish through `mylite_flush_catalog_for_thd_locked(thd)`.
+7. clear the table rows vector and reset the internal `next_rowid` to `1`;
+8. when called from `truncate()`, reset `auto_increment_next` to `1` for
+   autoincrement tables;
+9. rebuild index roots, yielding no durable roots for an empty table;
+10. publish through `mylite_flush_catalog_for_thd_locked(thd)`.
 
-Do not reset `auto_increment_next` in `delete_all_rows()`. MariaDB's inherited
-`handler::truncate()` calls `reset_auto_increment(0)` after row deletion; the
-existing MyLite reset helper maps `0` to the next generated value `1` for
-autoincrement tables and leaves non-autoincrement tables unchanged.
+`delete_all_rows()` uses the same helper with autoincrement reset disabled, so
+`DELETE FROM table`-style bulk deletion does not gain truncate semantics.
 
 If testing shows MariaDB's implicit-commit behavior does not call the current
 transaction hooks in the expected order, fix the root transaction/publication
@@ -164,6 +162,8 @@ No new dependency, license change, or trademark change.
   - insert new rows without explicit ids,
   - verify generated ids restart at `1`,
   - verify forced secondary-index lookup and ordering work after truncate.
+  - run `TRUNCATE TABLE` inside explicit transaction syntax and verify a
+    following `ROLLBACK` does not undo truncate's implicit-commit effect.
 - Extend persistence write/read coverage:
   - create and truncate `mylite.persisted_truncate`,
   - insert post-truncate rows,
@@ -191,9 +191,61 @@ No new dependency, license change, or trademark change.
 
 ## Risks And Unresolved Questions
 
-- The implementation relies on MariaDB's inherited handler truncate call order:
-  `delete_all_rows()` followed by `reset_auto_increment(0)`.
+- The implementation relies on MariaDB continuing to route MyLite through
+  handler-based truncate while `HTON_CAN_RECREATE` remains unset.
 - The current catalog generation publication model gives all-or-previous
   generation behavior, not a full DDL recovery protocol.
 - Clearing rows currently rewrites whole row and index payload chains. A later
   B-tree or page-level storage design should make truncate cheaper.
+
+## Implementation Result
+
+Implemented in `vendor/mariadb/server/storage/mylite/ha_mylite.cc`,
+`vendor/mariadb/server/storage/mylite/ha_mylite.h`, and
+`vendor/mariadb/server/mylite/storage_engine_smoke.cc`.
+
+The implementation overrides `ha_mylite::truncate()` and
+`ha_mylite::delete_all_rows()`. Both route through a shared MyLite helper that
+clears rows, resets the internal row id, rebuilds empty index roots, and
+publishes through the existing transaction-aware catalog path. `truncate()`
+also resets table-local autoincrement state to `1`; `delete_all_rows()` leaves
+autoincrement state unchanged for bulk-delete semantics.
+
+Verification on 2026-05-11:
+
+- `git diff --check`
+- `bash -n tools/run-storage-engine-smoke.sh
+  tools/run-compatibility-test-harness.sh`
+- `MYLITE_BUILD_JOBS=8 tools/run-storage-engine-smoke.sh`
+- `MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh`
+
+Observed report fields:
+
+- `build/mariadb-minsize/mylite-storage-engine-report.txt`:
+  `status=0`, `truncate_count=0`, `truncate_autoincrement_ids=1,2`,
+  `truncate_key_lookup_id=2`, `truncate_key_order_ids=1,2`,
+  `truncate_transaction_rows=1:after`.
+- `build/mariadb-minsize/mylite-catalog-write-report.txt`:
+  `status=0`, `persisted_truncate_count=2`,
+  `persisted_truncate_autoincrement_ids=1,2`,
+  `persisted_truncate_key_lookup_id=2`,
+  `persisted_truncate_key_order_ids=1,2`.
+- `build/mariadb-minsize/mylite-catalog-read-report.txt`:
+  `status=0`, `persisted_truncate_count=2`,
+  `persisted_truncate_autoincrement_ids=1,2`,
+  `persisted_truncate_key_lookup_id=2`,
+  `persisted_truncate_key_order_ids=1,2`,
+  `row_payloads` includes `mylite.persisted_truncate`, and
+  `index_payloads` includes `mylite.persisted_truncate:0` and
+  `mylite.persisted_truncate:1`.
+- `build/mariadb-minsize/mylite-compatibility-harness-report.txt`: all groups
+  reported `status=0`, including `sidecar_scan` with
+  `unexpected_sidecars=none`.
+
+Post-implementation `MinSizeRel` artifact observations:
+
+- `build/mariadb-minsize/libmysqld/libmariadbd.a`: 44,414,670 bytes.
+- `build/mariadb-minsize/mylite/libmylite.a`: 87,206 bytes.
+- `build/mariadb-minsize/mylite/mylite-storage-engine-smoke`: 22,839,088
+  bytes.
+- `build/mariadb-minsize/mylite/mylite-compatibility-smoke`: 22,773,336 bytes.

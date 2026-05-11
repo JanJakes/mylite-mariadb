@@ -93,6 +93,8 @@ public:
   int write_row(const uchar *buf) override;
   int update_row(const uchar *old_data, const uchar *new_data) override;
   int delete_row(const uchar *buf) override;
+  int delete_all_rows() override;
+  int truncate() override;
   int index_read_map(uchar *buf, const uchar *key, key_part_map keypart_map,
                      enum ha_rkey_function find_flag) override;
   int index_next(uchar *buf) override;

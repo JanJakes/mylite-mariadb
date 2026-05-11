@@ -83,9 +83,10 @@ session lifetime, spill storage, cleanup, and read-only behavior are designed.
 Standalone supported index DDL now proves `CREATE INDEX` and `DROP INDEX`
 preserve rows, persist the final table definition, and avoid durable `.frm`
 sidecars after MariaDB's in-place ALTER probe falls back to copy ALTER.
-`TRUNCATE TABLE` lifecycle work is in progress for supported MyLite tables,
-using MariaDB's handler truncate path to clear rows and indexes inside the
-primary `.mylite` file without recreating table definitions.
+`TRUNCATE TABLE` now uses MariaDB's handler truncate path for supported MyLite
+tables, clearing rows and durable index roots inside the primary `.mylite`
+file, resetting autoincrement state, preserving the table definition, and
+surviving fresh-process reopen.
 Persistent free-page ranges now let later row, index, and catalog page-chain
 rewrites reuse complete obsolete ranges from accepted prior generations instead
 of always allocating at EOF. Allocator metadata now lives in dedicated type-4
@@ -169,7 +170,7 @@ documented read-write create combination.
 | 44 | `unsupported-index-alter-rejection` | Done | Prove failed unsupported-index copy ALTER statements leave existing MyLite rows and table definitions intact. |
 | 45 | `temporary-table-rejection` | Done | Prove `CREATE TEMPORARY TABLE ... ENGINE=MYLITE` fails without creating durable MyLite catalog entries. |
 | 46 | `standalone-index-ddl-lifecycle` | Done | Prove standalone `CREATE INDEX` and `DROP INDEX` preserve MyLite rows, catalog metadata, and durable index roots. |
-| 47 | `truncate-table-lifecycle` | In progress | Implement handler-based `TRUNCATE TABLE` for supported MyLite tables, clearing rows and indexes while resetting autoincrement state. |
+| 47 | `truncate-table-lifecycle` | Done | Implement handler-based `TRUNCATE TABLE` for supported MyLite tables, clearing rows and indexes while resetting autoincrement state. |
 
 ## Size and profile direction
 

@@ -97,6 +97,11 @@ struct SmokeResult
   std::string index_ddl_order_ids;
   std::string index_ddl_dropped_count;
   std::string index_ddl_rows;
+  std::string truncate_count;
+  std::string truncate_autoincrement_ids;
+  std::string truncate_key_lookup_id;
+  std::string truncate_key_order_ids;
+  std::string truncate_transaction_rows;
   std::string duplicate_key;
   std::string update_duplicate_key;
   std::string unsupported_reverse_key;
@@ -115,6 +120,10 @@ struct SmokeResult
   std::string persisted_index_ddl_recreated_count;
   std::string persisted_index_ddl_lookup_id;
   std::string persisted_index_ddl_order_ids;
+  std::string persisted_truncate_count;
+  std::string persisted_truncate_autoincrement_ids;
+  std::string persisted_truncate_key_lookup_id;
+  std::string persisted_truncate_key_order_ids;
   std::string persisted_large_lengths;
   std::string persisted_large_edges;
   std::string persisted_wide_count;
@@ -1725,6 +1734,124 @@ static bool exercise_index_dml(MYSQL *mysql, SmokeResult *result)
     return false;
 
   if (!execute_statement(mysql,
+                         "CREATE TABLE mylite.truncate_rows "
+                         "(id INT NOT NULL AUTO_INCREMENT, "
+                         "note VARCHAR(12) NOT NULL, PRIMARY KEY(id), "
+                         "KEY note_key(note)) ENGINE=MYLITE",
+                         "CREATE truncate table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.truncate_rows (note) VALUES "
+                         "('before1'), ('before2'), ('before3')",
+                         "INSERT truncate baseline rows", result))
+    return false;
+  if (!execute_statement(mysql, "TRUNCATE TABLE mylite.truncate_rows",
+                         "TRUNCATE table", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT COUNT(*) FROM mylite.truncate_rows",
+                          "truncate count", &result->truncate_count,
+                          result))
+    return false;
+  if (result->truncate_count != "0")
+  {
+    result->message= "truncate count returned an unexpected value";
+    return false;
+  }
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.truncate_rows (note) VALUES "
+                         "('after1'), ('after2')",
+                         "INSERT truncate post rows", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY id SEPARATOR ',') "
+                          "FROM mylite.truncate_rows",
+                          "truncate autoincrement ids",
+                          &result->truncate_autoincrement_ids, result))
+    return false;
+  if (result->truncate_autoincrement_ids != "1,2")
+  {
+    result->message= "truncate autoincrement ids returned an unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT id FROM mylite.truncate_rows "
+                          "FORCE INDEX(note_key) WHERE note = 'after2'",
+                          "truncate key lookup",
+                          &result->truncate_key_lookup_id, result))
+    return false;
+  if (result->truncate_key_lookup_id != "2")
+  {
+    result->message= "truncate key lookup returned an unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY note "
+                          "SEPARATOR ',') FROM mylite.truncate_rows "
+                          "FORCE INDEX(note_key)",
+                          "truncate key order",
+                          &result->truncate_key_order_ids, result))
+    return false;
+  if (result->truncate_key_order_ids != "1,2")
+  {
+    result->message= "truncate key order returned an unexpected value";
+    return false;
+  }
+  if (!execute_statement(mysql, "DROP TABLE mylite.truncate_rows",
+                         "DROP truncate table", result))
+    return false;
+
+  if (!execute_statement(mysql,
+                         "CREATE TABLE mylite.truncate_transaction "
+                         "(id INT NOT NULL AUTO_INCREMENT, "
+                         "note VARCHAR(12) NOT NULL, PRIMARY KEY(id), "
+                         "KEY note_key(note)) ENGINE=MYLITE",
+                         "CREATE truncate transaction table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.truncate_transaction (note) "
+                         "VALUES ('base')",
+                         "INSERT truncate transaction baseline", result))
+    return false;
+  if (!execute_statement(mysql, "START TRANSACTION",
+                         "START truncate transaction", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.truncate_transaction (note) "
+                         "VALUES ('tx')",
+                         "INSERT truncate transaction row", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "TRUNCATE TABLE mylite.truncate_transaction",
+                         "TRUNCATE transaction table", result))
+    return false;
+  if (!execute_statement(mysql, "ROLLBACK",
+                         "ROLLBACK after truncate", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.truncate_transaction (note) "
+                         "VALUES ('after')",
+                         "INSERT after truncate rollback", result))
+    return false;
+  if (!fetch_single_value(
+        mysql,
+        "SELECT GROUP_CONCAT(CONCAT(id, ':', note) "
+        "ORDER BY id SEPARATOR ',') "
+        "FROM mylite.truncate_transaction",
+        "truncate transaction rows", &result->truncate_transaction_rows,
+        result))
+    return false;
+  if (result->truncate_transaction_rows != "1:after")
+  {
+    result->message= "truncate transaction rows returned an unexpected value";
+    return false;
+  }
+  if (!execute_statement(mysql,
+                         "DROP TABLE mylite.truncate_transaction",
+                         "DROP truncate transaction table", result))
+    return false;
+
+  if (!execute_statement(mysql,
                          "CREATE TABLE mylite.auto_rows "
                          "(id INT NOT NULL AUTO_INCREMENT, "
                          "note VARCHAR(12) NOT NULL, PRIMARY KEY(id)) "
@@ -2039,6 +2166,82 @@ static bool exercise_persistence_write(MYSQL *mysql, SmokeResult *result)
   if (result->persisted_index_ddl_order_ids != "1,3,2")
   {
     result->message= "persisted standalone index order returned an "
+                     "unexpected value";
+    return false;
+  }
+
+  if (!execute_statement(mysql,
+                         "CREATE TABLE mylite.persisted_truncate "
+                         "(id INT NOT NULL AUTO_INCREMENT, "
+                         "note VARCHAR(12) NOT NULL, PRIMARY KEY(id), "
+                         "KEY note_key(note)) ENGINE=MYLITE",
+                         "CREATE persisted truncate table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.persisted_truncate (note) "
+                         "VALUES ('before1'), ('before2'), ('before3')",
+                         "INSERT persisted truncate baseline rows", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "TRUNCATE TABLE mylite.persisted_truncate",
+                         "TRUNCATE persisted table", result))
+    return false;
+  if (!execute_statement(mysql,
+                         "INSERT INTO mylite.persisted_truncate (note) "
+                         "VALUES ('after1'), ('after2')",
+                         "INSERT persisted truncate post rows", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT COUNT(*) "
+                          "FROM mylite.persisted_truncate",
+                          "persisted write truncate count",
+                          &result->persisted_truncate_count, result))
+    return false;
+  if (result->persisted_truncate_count != "2")
+  {
+    result->message= "persisted write truncate count returned an "
+                     "unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY id "
+                          "SEPARATOR ',') "
+                          "FROM mylite.persisted_truncate",
+                          "persisted write truncate autoincrement ids",
+                          &result->persisted_truncate_autoincrement_ids,
+                          result))
+    return false;
+  if (result->persisted_truncate_autoincrement_ids != "1,2")
+  {
+    result->message= "persisted write truncate autoincrement ids returned "
+                     "an unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT id FROM mylite.persisted_truncate "
+                          "FORCE INDEX(note_key) WHERE note = 'after2'",
+                          "persisted write truncate key lookup",
+                          &result->persisted_truncate_key_lookup_id,
+                          result))
+    return false;
+  if (result->persisted_truncate_key_lookup_id != "2")
+  {
+    result->message= "persisted write truncate key lookup returned an "
+                     "unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY note "
+                          "SEPARATOR ',') "
+                          "FROM mylite.persisted_truncate "
+                          "FORCE INDEX(note_key)",
+                          "persisted write truncate key order",
+                          &result->persisted_truncate_key_order_ids,
+                          result))
+    return false;
+  if (result->persisted_truncate_key_order_ids != "1,2")
+  {
+    result->message= "persisted write truncate key order returned an "
                      "unexpected value";
     return false;
   }
@@ -2585,6 +2788,66 @@ static bool exercise_persistence_read(MYSQL *mysql, SmokeResult *result)
   if (result->persisted_index_ddl_order_ids != "1,3,2")
   {
     result->message= "persisted read standalone index order returned an "
+                     "unexpected value";
+    return false;
+  }
+
+  if (!verify_table_present(mysql,
+                            "SHOW TABLES FROM mylite "
+                            "LIKE 'persisted_truncate'",
+                            "persisted truncate table", result))
+    return false;
+  if (!fetch_single_value(mysql,
+                          "SELECT COUNT(*) "
+                          "FROM mylite.persisted_truncate",
+                          "persisted read truncate count",
+                          &result->persisted_truncate_count, result))
+    return false;
+  if (result->persisted_truncate_count != "2")
+  {
+    result->message= "persisted read truncate count returned an "
+                     "unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY id "
+                          "SEPARATOR ',') "
+                          "FROM mylite.persisted_truncate",
+                          "persisted read truncate autoincrement ids",
+                          &result->persisted_truncate_autoincrement_ids,
+                          result))
+    return false;
+  if (result->persisted_truncate_autoincrement_ids != "1,2")
+  {
+    result->message= "persisted read truncate autoincrement ids returned "
+                     "an unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT id FROM mylite.persisted_truncate "
+                          "FORCE INDEX(note_key) WHERE note = 'after2'",
+                          "persisted read truncate key lookup",
+                          &result->persisted_truncate_key_lookup_id,
+                          result))
+    return false;
+  if (result->persisted_truncate_key_lookup_id != "2")
+  {
+    result->message= "persisted read truncate key lookup returned an "
+                     "unexpected value";
+    return false;
+  }
+  if (!fetch_single_value(mysql,
+                          "SELECT GROUP_CONCAT(id ORDER BY note "
+                          "SEPARATOR ',') "
+                          "FROM mylite.persisted_truncate "
+                          "FORCE INDEX(note_key)",
+                          "persisted read truncate key order",
+                          &result->persisted_truncate_key_order_ids,
+                          result))
+    return false;
+  if (result->persisted_truncate_key_order_ids != "1,2")
+  {
+    result->message= "persisted read truncate key order returned an "
                      "unexpected value";
     return false;
   }
@@ -3669,6 +3932,20 @@ static void write_report(const SmokeOptions &options,
            << result.index_ddl_dropped_count << "\n";
   if (!result.index_ddl_rows.empty())
     report << "index_ddl_rows=" << result.index_ddl_rows << "\n";
+  if (!result.truncate_count.empty())
+    report << "truncate_count=" << result.truncate_count << "\n";
+  if (!result.truncate_autoincrement_ids.empty())
+    report << "truncate_autoincrement_ids="
+           << result.truncate_autoincrement_ids << "\n";
+  if (!result.truncate_key_lookup_id.empty())
+    report << "truncate_key_lookup_id="
+           << result.truncate_key_lookup_id << "\n";
+  if (!result.truncate_key_order_ids.empty())
+    report << "truncate_key_order_ids="
+           << result.truncate_key_order_ids << "\n";
+  if (!result.truncate_transaction_rows.empty())
+    report << "truncate_transaction_rows="
+           << result.truncate_transaction_rows << "\n";
   if (!result.duplicate_key.empty())
     report << "duplicate_key=" << result.duplicate_key << "\n";
   if (!result.update_duplicate_key.empty())
@@ -3717,6 +3994,18 @@ static void write_report(const SmokeOptions &options,
   if (!result.persisted_index_ddl_order_ids.empty())
     report << "persisted_index_ddl_order_ids="
            << result.persisted_index_ddl_order_ids << "\n";
+  if (!result.persisted_truncate_count.empty())
+    report << "persisted_truncate_count="
+           << result.persisted_truncate_count << "\n";
+  if (!result.persisted_truncate_autoincrement_ids.empty())
+    report << "persisted_truncate_autoincrement_ids="
+           << result.persisted_truncate_autoincrement_ids << "\n";
+  if (!result.persisted_truncate_key_lookup_id.empty())
+    report << "persisted_truncate_key_lookup_id="
+           << result.persisted_truncate_key_lookup_id << "\n";
+  if (!result.persisted_truncate_key_order_ids.empty())
+    report << "persisted_truncate_key_order_ids="
+           << result.persisted_truncate_key_order_ids << "\n";
   if (!result.persisted_large_lengths.empty())
     report << "persisted_large_lengths="
            << result.persisted_large_lengths << "\n";

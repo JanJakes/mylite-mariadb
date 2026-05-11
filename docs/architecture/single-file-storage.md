@@ -165,6 +165,10 @@ The storage smoke verifies that path preserves rows, updates persisted table
 definitions, publishes the final durable index-root state across reopen, and
 does not leave `.frm` sidecars when the in-place ALTER probe falls back to copy
 ALTER.
+`TRUNCATE TABLE` uses MariaDB's handler truncate path for MyLite rather than
+table recreation. The storage engine clears row payload roots, clears durable
+index roots, resets table-local autoincrement state, and keeps the existing
+table definition image in the primary `.mylite` file.
 
 The catalog must also store or derive the table definition version used to
 detect stale cached definitions. MariaDB's discovery documentation describes
