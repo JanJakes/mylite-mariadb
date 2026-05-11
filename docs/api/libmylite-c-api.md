@@ -226,22 +226,18 @@ Column values are valid until the next `mylite_step()`,
 ## Errors
 
 ```c
+typedef enum mylite_warning_level {
+  MYLITE_WARNING_NOTE = 1,
+  MYLITE_WARNING_WARNING = 2,
+  MYLITE_WARNING_ERROR = 3
+} mylite_warning_level;
+
 int mylite_errcode(mylite_db *db);
 int mylite_extended_errcode(mylite_db *db);
 unsigned mylite_mariadb_errno(mylite_db *db);
 const char *mylite_sqlstate(mylite_db *db);
 const char *mylite_errmsg(mylite_db *db);
 unsigned mylite_warning_count(mylite_db *db);
-```
-
-MariaDB warnings matter. The API should expose them, not collapse everything
-into a single success/error bit. `mylite_errcode()` is the stable MyLite
-classification, while MariaDB errno and SQLSTATE remain available for callers
-that need server-compatible diagnostics.
-
-Later:
-
-```c
 int mylite_warning(
     mylite_db *db,
     unsigned index,
@@ -249,6 +245,20 @@ int mylite_warning(
     unsigned *code,
     const char **message);
 ```
+
+MariaDB warnings matter. The API should expose them, not collapse everything
+into a single success/error bit. `mylite_errcode()` is the stable MyLite
+classification, while MariaDB errno and SQLSTATE remain available for callers
+that need server-compatible diagnostics.
+
+`mylite_warning()` retrieves one stored diagnostic condition by zero-based
+index without requiring callers to run `SHOW WARNINGS` themselves. `level`
+receives a `mylite_warning_level`, `code` receives the MariaDB condition code,
+and `message` receives a database-handle-owned string valid until the next
+`mylite_warning()` call or handle close. It returns `MYLITE_NOTFOUND` when the
+requested condition was not stored in MariaDB's diagnostics area. This can
+happen even when `mylite_warning_count()` is larger, because MariaDB can count
+more warnings than it stores when `@@max_error_count` is low.
 
 ## Statement effects
 
@@ -266,8 +276,7 @@ and also implements `mylite_warning_count()` from the diagnostics section above.
 `mylite_changes()` returns `-1` when MariaDB reports its standard not-applicable
 or failed-statement sentinel. `mylite_last_insert_id()` and
 `mylite_warning_count()` return zero for a null or inactive handle. Warning
-details are still retrieved with SQL such as `SHOW WARNINGS`; structured
-warning enumeration remains future work.
+details are available through `mylite_warning()`.
 
 ## Configuration
 

@@ -6,8 +6,6 @@
 
 #include "mylite.h"
 
-#include <mysql.h>
-
 #include <cerrno>
 #include <climits>
 #include <cstdlib>
@@ -19,6 +17,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <vector>
+
+#include <mysql.h>
 
 #ifndef O_CLOEXEC
 #define O_CLOEXEC 0
@@ -38,6 +38,7 @@ struct mylite_db
   unsigned mariadb_errno= 0;
   std::string sqlstate= "00000";
   std::string errmsg= "not an error";
+  std::string warning_message;
   bool runtime_ref= false;
   unsigned open_statements= 0;
 };
@@ -62,6 +63,15 @@ struct PreparedParameter
   double double_value= 0.0;
   std::vector<char> bytes;
   unsigned long length= 0;
+};
+
+struct MysqlEffectSnapshot
+{
+  my_ulonglong affected_rows= 0;
+  my_ulonglong insert_id= 0;
+  unsigned field_count= 0;
+  unsigned server_status= 0;
+  unsigned warning_count= 0;
 };
 
 struct mylite_stmt
@@ -145,6 +155,9 @@ int return_error_with_message(mylite_db *db, char **errmsg);
 int return_standalone_error(int code, const char *message, char **errmsg);
 char *duplicate_message(const std::string &message);
 int classify_mariadb_error(const char *sqlstate);
+MysqlEffectSnapshot snapshot_mysql_effects(MYSQL *mysql);
+void restore_mysql_effects(MYSQL *mysql, const MysqlEffectSnapshot &snapshot);
+unsigned map_warning_level_name(const char *level, size_t length);
 bool valid_column(const mylite_stmt *stmt, unsigned column);
 int map_column_type(const MYSQL_FIELD &field);
 enum_field_types bind_buffer_type(int column_type);
@@ -319,6 +332,85 @@ extern "C" unsigned long long mylite_last_insert_id(mylite_db *db)
 extern "C" unsigned mylite_warning_count(mylite_db *db)
 {
   return db && db->mysql ? mysql_warning_count(db->mysql) : 0;
+}
+
+extern "C" int mylite_warning(mylite_db *db, unsigned index,
+                              unsigned *level, unsigned *code,
+                              const char **message)
+{
+  if (level)
+    *level= 0;
+  if (code)
+    *code= 0;
+  if (message)
+    *message= nullptr;
+
+  if (!db)
+    return MYLITE_MISUSE;
+  if (!level || !code || !message)
+    return set_error(db, MYLITE_MISUSE, 0, "HY000",
+                     "warning output pointers are required");
+  if (!db->mysql)
+    return set_error(db, MYLITE_MISUSE, 0, "HY000",
+                     "database handle is not open");
+
+  const MysqlEffectSnapshot snapshot= snapshot_mysql_effects(db->mysql);
+  const std::string query= "SHOW WARNINGS LIMIT " + std::to_string(index) +
+                           ", 1";
+  if (mysql_real_query(db->mysql, query.c_str(),
+                       static_cast<unsigned long>(query.length())) != 0)
+  {
+    const int rc= set_error_from_mysql(db);
+    restore_mysql_effects(db->mysql, snapshot);
+    return rc;
+  }
+
+  MYSQL_RES *result= mysql_store_result(db->mysql);
+  if (!result)
+  {
+    const int rc= mysql_errno(db->mysql) != 0 ?
+      set_error_from_mysql(db) :
+      set_error(db, MYLITE_ERROR, 0, "HY000", "mysql_store_result failed");
+    restore_mysql_effects(db->mysql, snapshot);
+    return rc;
+  }
+
+  MYSQL_ROW row= mysql_fetch_row(result);
+  if (!row)
+  {
+    mysql_free_result(result);
+    restore_mysql_effects(db->mysql, snapshot);
+    return set_error(db, MYLITE_NOTFOUND, 0, "02000",
+                     "warning index is out of range");
+  }
+
+  unsigned long *lengths= mysql_fetch_lengths(result);
+  const unsigned long level_length= lengths && row[0] ?
+    lengths[0] : (row[0] ? std::strlen(row[0]) : 0);
+  const unsigned long message_length= lengths && row[2] ?
+    lengths[2] : (row[2] ? std::strlen(row[2]) : 0);
+
+  try
+  {
+    db->warning_message.assign(row[2] ? row[2] : "",
+                               static_cast<size_t>(message_length));
+  }
+  catch (const std::bad_alloc &)
+  {
+    mysql_free_result(result);
+    restore_mysql_effects(db->mysql, snapshot);
+    return set_error(db, MYLITE_NOMEM, 0, "HY001", "out of memory");
+  }
+
+  *level= map_warning_level_name(row[0], static_cast<size_t>(level_length));
+  *code= row[1] ? static_cast<unsigned>(std::strtoul(row[1], nullptr, 10)) :
+    0;
+  *message= db->warning_message.c_str();
+
+  mysql_free_result(result);
+  restore_mysql_effects(db->mysql, snapshot);
+  clear_error(db);
+  return MYLITE_OK;
 }
 
 extern "C" int mylite_prepare(mylite_db *db, const char *sql,
@@ -1342,6 +1434,37 @@ int classify_mariadb_error(const char *sqlstate)
   if (sqlstate && sqlstate[0] == '2' && sqlstate[1] == '3')
     return MYLITE_CONSTRAINT;
   return MYLITE_ERROR;
+}
+
+MysqlEffectSnapshot snapshot_mysql_effects(MYSQL *mysql)
+{
+  MysqlEffectSnapshot snapshot;
+  snapshot.affected_rows= mysql->affected_rows;
+  snapshot.insert_id= mysql->insert_id;
+  snapshot.field_count= mysql->field_count;
+  snapshot.server_status= mysql->server_status;
+  snapshot.warning_count= mysql->warning_count;
+  return snapshot;
+}
+
+void restore_mysql_effects(MYSQL *mysql, const MysqlEffectSnapshot &snapshot)
+{
+  mysql->affected_rows= snapshot.affected_rows;
+  mysql->insert_id= snapshot.insert_id;
+  mysql->field_count= snapshot.field_count;
+  mysql->server_status= snapshot.server_status;
+  mysql->warning_count= snapshot.warning_count;
+}
+
+unsigned map_warning_level_name(const char *level, size_t length)
+{
+  if (level && length == 4 && std::strncmp(level, "Note", length) == 0)
+    return MYLITE_WARNING_NOTE;
+  if (level && length == 7 && std::strncmp(level, "Warning", length) == 0)
+    return MYLITE_WARNING_WARNING;
+  if (level && length == 5 && std::strncmp(level, "Error", length) == 0)
+    return MYLITE_WARNING_ERROR;
+  return 0;
 }
 
 bool valid_column(const mylite_stmt *stmt, unsigned column)

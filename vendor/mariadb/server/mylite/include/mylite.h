@@ -44,6 +44,12 @@ typedef enum mylite_column_kind {
   MYLITE_NULL = 5
 } mylite_column_kind;
 
+typedef enum mylite_warning_level {
+  MYLITE_WARNING_NOTE = 1,
+  MYLITE_WARNING_WARNING = 2,
+  MYLITE_WARNING_ERROR = 3
+} mylite_warning_level;
+
 typedef enum mylite_result {
   MYLITE_OK = 0,
   MYLITE_ERROR = 1,
@@ -89,6 +95,12 @@ MYLITE_API void mylite_free(void *ptr);
 MYLITE_API long long mylite_changes(mylite_db *db);
 MYLITE_API unsigned long long mylite_last_insert_id(mylite_db *db);
 MYLITE_API unsigned mylite_warning_count(mylite_db *db);
+MYLITE_API int mylite_warning(
+    mylite_db *db,
+    unsigned index,
+    unsigned *level,
+    unsigned *code,
+    const char **message);
 
 MYLITE_API int mylite_prepare(
     mylite_db *db,

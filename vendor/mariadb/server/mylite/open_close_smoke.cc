@@ -45,6 +45,11 @@ struct SmokeResult
   std::string exec_duplicate_key_message;
   std::string exec_reopen_rows;
   std::string statement_effects;
+  std::string warning_misuse_message;
+  std::string warning_first;
+  std::string warning_notfound_message;
+  std::string warning_error;
+  std::string warning_effects;
   std::string prepared_unbound_message;
   std::string prepared_invalid_bind_message;
   std::string prepared_rebind_message;
@@ -108,6 +113,8 @@ static bool exec_query_capture(mylite_db *db, const char *sql,
 static void append_statement_effect(SmokeResult *result, const char *label,
                                     const std::string &value);
 static std::string statement_effect_summary(mylite_db *db);
+static std::string warning_summary(unsigned level, unsigned code,
+                                   const char *message);
 static std::string prepared_row_summary(mylite_stmt *stmt);
 static std::string prepared_bound_row_summary(mylite_stmt *stmt);
 static std::string prepared_type_summary(mylite_stmt *stmt);
@@ -391,6 +398,16 @@ static bool check_exec_misuse(const SmokeOptions &options,
   if (result->exec_null_db_message != "bad database handle")
     ok= false;
 
+  unsigned warning_level= 99;
+  unsigned warning_code= 99;
+  const char *warning_message= "not cleared";
+  rc= mylite_warning(nullptr, 0, &warning_level, &warning_code,
+                     &warning_message);
+  ok= record_result(result, "warning_null_db", MYLITE_MISUSE, rc,
+                    nullptr) && ok;
+  if (warning_level != 0 || warning_code != 0 || warning_message != nullptr)
+    ok= false;
+
   mylite_db *db= nullptr;
   rc= mylite_open(options.database.c_str(), &db);
   ok= record_result(result, "exec_misuse_open", MYLITE_OK, rc, db) && ok;
@@ -399,6 +416,13 @@ static bool check_exec_misuse(const SmokeOptions &options,
     rc= mylite_exec(db, nullptr, nullptr, nullptr, nullptr);
     ok= record_result(result, "exec_null_sql", MYLITE_MISUSE, rc, db) &&
         ok;
+    rc= mylite_warning(db, 0, nullptr, &warning_code, &warning_message);
+    result->warning_misuse_message= mylite_errmsg(db);
+    ok= record_result(result, "warning_missing_output", MYLITE_MISUSE, rc,
+                      db) && ok;
+    if (result->warning_misuse_message !=
+        "warning output pointers are required")
+      ok= false;
     rc= mylite_close(db);
     ok= record_result(result, "exec_misuse_close", MYLITE_OK, rc,
                       nullptr) && ok;
@@ -590,6 +614,37 @@ static bool check_statement_effects(const SmokeOptions &options,
     if (warning_effects != "0:0:1")
       ok= false;
 
+    unsigned warning_level= 0;
+    unsigned warning_code= 0;
+    const char *warning_message= nullptr;
+    const std::string effects_before_warning_lookup=
+      statement_effect_summary(db);
+    rc= mylite_warning(db, 0, &warning_level, &warning_code,
+                       &warning_message);
+    const std::string effects_after_warning_lookup=
+      statement_effect_summary(db);
+    result->warning_first= warning_summary(warning_level, warning_code,
+                                           warning_message);
+    result->warning_effects= effects_before_warning_lookup + "->" +
+                             effects_after_warning_lookup;
+    ok= record_result(result, "effects_warning_lookup", MYLITE_OK, rc,
+                      db) && ok;
+    if (warning_level != MYLITE_WARNING_WARNING || warning_code != 1062 ||
+        !warning_message ||
+        std::strstr(warning_message, "Duplicate entry '1'") == nullptr ||
+        effects_before_warning_lookup != effects_after_warning_lookup)
+      ok= false;
+
+    rc= mylite_warning(db, 1, &warning_level, &warning_code,
+                       &warning_message);
+    result->warning_notfound_message= mylite_errmsg(db);
+    ok= record_result(result, "effects_warning_notfound", MYLITE_NOTFOUND,
+                      rc, db) && ok;
+    if (warning_level != 0 || warning_code != 0 ||
+        warning_message != nullptr ||
+        result->warning_notfound_message != "warning index is out of range")
+      ok= false;
+
     ok= exec_statement(db,
                        "DELETE FROM mylite.effects_rows WHERE id = 2",
                        "effects_delete", result) && ok;
@@ -613,6 +668,18 @@ static bool check_statement_effects(const SmokeOptions &options,
                       rc, db) && ok;
     if (duplicate_changes != -1 || duplicate_errno != 1062 ||
         duplicate_sqlstate != "23000")
+      ok= false;
+
+    rc= mylite_warning(db, 0, &warning_level, &warning_code,
+                       &warning_message);
+    result->warning_error= warning_summary(warning_level, warning_code,
+                                           warning_message);
+    ok= record_result(result, "effects_duplicate_warning_lookup",
+                      MYLITE_OK, rc, db) && ok;
+    if (warning_level != MYLITE_WARNING_ERROR || warning_code != 1062 ||
+        !warning_message ||
+        std::strstr(warning_message, "Duplicate entry '1'") == nullptr ||
+        mylite_changes(db) != duplicate_changes)
       ok= false;
 
     rc= mylite_close(db);
@@ -1026,6 +1093,13 @@ static std::string statement_effect_summary(mylite_db *db)
          std::to_string(mylite_warning_count(db));
 }
 
+static std::string warning_summary(unsigned level, unsigned code,
+                                   const char *message)
+{
+  return std::to_string(level) + ":" + std::to_string(code) + ":" +
+         (message ? message : "NULL");
+}
+
 static std::string prepared_row_summary(mylite_stmt *stmt)
 {
   const char *note= mylite_column_text(stmt, 1);
@@ -1189,6 +1263,18 @@ static void write_report(const SmokeOptions &options,
     report << "exec_reopen_rows=" << result.exec_reopen_rows << "\n";
   if (!result.statement_effects.empty())
     report << "statement_effects=" << result.statement_effects << "\n";
+  if (!result.warning_misuse_message.empty())
+    report << "warning_misuse_message=" << result.warning_misuse_message
+           << "\n";
+  if (!result.warning_first.empty())
+    report << "warning_first=" << result.warning_first << "\n";
+  if (!result.warning_notfound_message.empty())
+    report << "warning_notfound_message=" << result.warning_notfound_message
+           << "\n";
+  if (!result.warning_error.empty())
+    report << "warning_error=" << result.warning_error << "\n";
+  if (!result.warning_effects.empty())
+    report << "warning_effects=" << result.warning_effects << "\n";
   if (!result.prepared_unbound_message.empty())
     report << "prepared_unbound_message=" << result.prepared_unbound_message
            << "\n";

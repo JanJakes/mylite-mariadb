@@ -7,8 +7,9 @@ there is still no public MyLite API for retrieving the warning, note, or error
 records themselves. Applications can run `SHOW WARNINGS`, but that exposes SQL
 plumbing to API users and risks changing handle state through an extra query.
 
-This slice adds a small structured warning enumeration API that reads the
-embedded MariaDB diagnostics area directly from the open handle.
+This slice adds a small structured warning enumeration API over MariaDB's
+documented `SHOW WARNINGS` surface while preserving the public MyLite
+last-statement side-effect accessors.
 
 ## MariaDB Base And Source References
 
@@ -21,22 +22,21 @@ embedded MariaDB diagnostics area directly from the open handle.
   - <https://mariadb.com/kb/en/show-warnings/> documents `SHOW WARNINGS` as
     the SQL surface for current-session error, warning, and note messages,
     including `LIMIT` offsets and the effect of `@@max_error_count`.
-- `vendor/mariadb/server/include/mysql.h` stores the embedded server thread in
-  `MYSQL::thd` and exposes `MYSQL::warning_count`.
+- `vendor/mariadb/server/include/mysql.h` exposes `MYSQL::affected_rows`,
+  `MYSQL::insert_id`, `MYSQL::field_count`, `MYSQL::server_status`, and
+  `MYSQL::warning_count`, which are the observable fields that should not be
+  left describing the internal warning lookup.
 - `vendor/mariadb/server/libmysqld/libmysql.c` implements
   `mysql_warning_count()` as a read of `mysql->warning_count`.
 - `vendor/mariadb/server/libmysqld/lib_sql.cc` copies warning counts from
   `THD::get_stmt_da()->current_statement_warn_count()` and embedded result
   metadata into the public `MYSQL` handle.
-- `vendor/mariadb/server/sql/sql_error.h` defines `Diagnostics_area`,
-  `Warning_info`, `Sql_condition`, `Diagnostics_area::sql_conditions()`,
-  `Diagnostics_area::cond_count()`, `Sql_condition::get_level()`,
-  `Sql_condition::get_sql_errno()`, and
-  `Sql_condition::get_message_text()`.
-- `vendor/mariadb/server/sql/sql_admin.cc` uses
-  `Diagnostics_area::sql_conditions()` to emit condition level and message
-  rows for administrative statement results, which confirms the iterator is the
-  server-side source behind warning-style output.
+- `vendor/mariadb/server/sql/sql_error.h` defines the diagnostics storage that
+  backs `SHOW WARNINGS`, including condition count caveats when
+  `@@max_error_count` limits stored entries.
+- `vendor/mariadb/server/sql/sql_admin.cc` uses the diagnostics iterator to
+  emit condition level and message rows for administrative statement results,
+  confirming the server-side source behind warning-style output.
 
 ## Scope
 
@@ -51,9 +51,9 @@ This slice will:
   pointers,
 - keep returned message text owned by the database handle and valid until the
   next `mylite_warning()` call or handle close,
-- avoid running SQL internally so `mylite_changes()`,
-  `mylite_last_insert_id()`, and `mylite_warning_count()` continue to describe
-  the user's last statement rather than the warning retrieval call,
+- run `SHOW WARNINGS LIMIT <index>, 1` internally and restore the public
+  `MYSQL` side-effect fields that currently back `mylite_changes()`,
+  `mylite_last_insert_id()`, and `mylite_warning_count()`,
 - extend the `libmylite` smoke with warning, note/error where practical,
   out-of-range, null/misuse, and last-statement-effect preservation coverage.
 
@@ -89,20 +89,23 @@ MYLITE_API int mylite_warning(
     const char **message);
 ```
 
-`mylite_warning()` validates all output pointers, clears them before returning,
-and reads `static_cast<THD *>(db->mysql->thd)->get_stmt_da()`. It advances the
-`Diagnostics_area::sql_conditions()` iterator to the requested zero-based
-condition. On success it maps MariaDB levels to MyLite level constants, copies
-the condition message into handle-owned scratch storage, writes the MariaDB
-error code, and returns `MYLITE_OK`.
+`mylite_warning()` validates all output pointers and clears them before
+returning. It snapshots `MYSQL::affected_rows`, `MYSQL::insert_id`,
+`MYSQL::field_count`, `MYSQL::server_status`, and `MYSQL::warning_count`, runs
+`SHOW WARNINGS LIMIT <index>, 1`, reads the single result row, copies the
+message into handle-owned scratch storage, maps the level string to MyLite
+level constants, writes the MariaDB error code, frees the result, restores the
+snapshotted fields, and returns `MYLITE_OK`.
 
-If `index >= Diagnostics_area::cond_count()`, the function returns
-`MYLITE_NOTFOUND` with a handle diagnostic. This is intentionally based on
-stored condition count, not `mysql_warning_count()`, because MariaDB can count
-more warnings than it stores when `@@max_error_count` is low.
+If `SHOW WARNINGS` returns no row, the function returns `MYLITE_NOTFOUND` with
+a handle diagnostic. This is intentionally based on stored condition rows, not
+only `mysql_warning_count()`, because MariaDB can count more warnings than it
+stores when `@@max_error_count` is low.
 
-The implementation will include server headers only inside the MyLite-owned
-library module. The public header remains independent of MariaDB headers.
+The implementation deliberately avoids including `sql_class.h` in
+`libmylite`: that header expects MariaDB's `MYSQL_SERVER` compilation context,
+while the MyLite C API wrapper is built as a smaller embedded-library target.
+The public header remains independent of MariaDB headers.
 
 ## Affected Subsystems
 
@@ -131,8 +134,15 @@ Expected `libmylite.a` growth is small: a level mapper, handle-owned warning
 message storage, and smoke coverage. `libmariadbd.a` already contains the
 diagnostics machinery.
 
-The post-implementation `MinSizeRel` artifact sizes will be recorded in this
-spec after verification.
+The post-implementation `MinSizeRel` build records:
+
+| Artifact | Size |
+| --- | ---: |
+| `build/mariadb-minsize/mylite/libmylite.a` | 86,094 bytes |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 44,415,256 bytes |
+
+The build report still records 571 `libmariadbd.a` archive objects and no
+dynamic plugin artifacts.
 
 ## License, Trademark, And Dependency Impact
 
@@ -171,7 +181,7 @@ The `libmylite` smoke should verify:
 ## Acceptance Criteria
 
 - Public callers can retrieve stored diagnostic level, code, and message
-  entries without running `SHOW WARNINGS`.
+  entries without writing their own `SHOW WARNINGS` SQL.
 - The public API hides MariaDB internals and keeps message lifetime tied to the
   database handle.
 - Out-of-range and misuse behavior is stable and documented.
@@ -181,4 +191,13 @@ The `libmylite` smoke should verify:
 
 ## Implementation Result
 
-Pending.
+Implemented in `libmylite` as a handle-local warning lookup API. The public
+function validates outputs, runs `SHOW WARNINGS LIMIT <index>, 1`, copies the
+returned message into `mylite_db`, maps the level string to
+`mylite_warning_level`, restores the snapshotted public `MYSQL` statement
+fields, and returns `MYLITE_NOTFOUND` for missing stored conditions.
+
+The `libmylite` smoke now verifies null and missing-output misuse, warning
+details for `INSERT IGNORE`, error-condition details for a duplicate-key
+failure, out-of-range lookup diagnostics, and preservation of the statement
+effect summary for the warning lookup path.
