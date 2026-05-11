@@ -174,4 +174,51 @@ No new dependency or licensing change.
 
 ## Implementation Result
 
-Pending.
+Implemented in `mysql_execute_command()` for embedded builds only. The slice
+adds early `ER_OPTION_PREVENTS_STATEMENT` returns before MariaDB can enter the
+view, trigger, stored routine, package, or event metadata paths. `DROP EVENT`
+is rejected outside the event-scheduler conditional so the current embedded
+build cannot fall through to a successful no-op.
+
+The embedded bootstrap smoke now verifies explicit rejections for:
+
+- `CREATE VIEW`
+- `ALTER VIEW`
+- `DROP VIEW`
+- `CREATE TRIGGER`
+- `DROP TRIGGER`
+- `CREATE PROCEDURE`
+- `ALTER PROCEDURE`
+- `DROP PROCEDURE`
+- `CREATE FUNCTION` as a stored function
+- `DROP FUNCTION`
+- `CREATE EVENT`
+- `ALTER EVENT`
+- `DROP EVENT`
+
+Report evidence from
+`MYLITE_BUILD_JOBS=8 tools/run-embedded-bootstrap-smoke.sh`:
+
+- `build/mariadb-minsize/mylite-embedded-bootstrap-report.txt`:
+  - `status=0`
+  - `message=ok`
+  - each schema-object label returned `errno=1290`
+  - each schema-object label returned SQLSTATE `HY000`
+
+Verification run:
+
+- `git diff --check`
+- `bash -n tools/run-embedded-bootstrap-smoke.sh
+  tools/run-compatibility-test-harness.sh tools/run-storage-engine-smoke.sh
+  tools/run-libmylite-open-close-smoke.sh`
+- `MYLITE_BUILD_JOBS=8 tools/run-embedded-bootstrap-smoke.sh`
+- `MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh`
+
+Measured `MinSizeRel` artifacts from
+`build/mariadb-minsize/mylite-build-report.txt` and `ls -l`:
+
+- `build/mariadb-minsize/libmysqld/libmariadbd.a`: 44,413,682 bytes,
+  571 objects.
+- `build/mariadb-minsize/mylite/mylite-embedded-bootstrap-smoke`: 22,706,920
+  bytes.
+- `build/mariadb-minsize/mylite/libmylite.a`: 87,206 bytes.

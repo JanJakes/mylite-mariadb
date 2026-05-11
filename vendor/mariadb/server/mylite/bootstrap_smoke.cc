@@ -257,6 +257,61 @@ static bool check_unsupported_statements(MYSQL *mysql, SmokeResult *result)
     {
       "drop_server",
       "DROP SERVER mylite_unsupported"
+    },
+    {
+      "create_view",
+      "CREATE VIEW mysql.mylite_unsupported_view AS SELECT 1 AS id"
+    },
+    {
+      "alter_view",
+      "ALTER VIEW mysql.mylite_unsupported_view AS SELECT 2 AS id"
+    },
+    {
+      "drop_view",
+      "DROP VIEW mysql.mylite_unsupported_view"
+    },
+    {
+      "create_trigger",
+      "CREATE TRIGGER mysql.mylite_unsupported_trigger "
+      "BEFORE INSERT ON mysql.mylite_unsupported_table "
+      "FOR EACH ROW SET @mylite_unsupported = 1"
+    },
+    {
+      "drop_trigger",
+      "DROP TRIGGER mysql.mylite_unsupported_trigger"
+    },
+    {
+      "create_procedure",
+      "CREATE PROCEDURE mysql.mylite_unsupported_proc() BEGIN SELECT 1; END"
+    },
+    {
+      "alter_procedure",
+      "ALTER PROCEDURE mysql.mylite_unsupported_proc COMMENT 'unsupported'"
+    },
+    {
+      "drop_procedure",
+      "DROP PROCEDURE mysql.mylite_unsupported_proc"
+    },
+    {
+      "create_stored_function",
+      "CREATE FUNCTION mysql.mylite_unsupported_func() RETURNS INT RETURN 1"
+    },
+    {
+      "drop_stored_function",
+      "DROP FUNCTION mysql.mylite_unsupported_func"
+    },
+    {
+      "create_event",
+      "CREATE EVENT mysql.mylite_unsupported_event "
+      "ON SCHEDULE EVERY 1 DAY DO SELECT 1"
+    },
+    {
+      "alter_event",
+      "ALTER EVENT mysql.mylite_unsupported_event DISABLE"
+    },
+    {
+      "drop_event",
+      "DROP EVENT mysql.mylite_unsupported_event"
     }
   };
 

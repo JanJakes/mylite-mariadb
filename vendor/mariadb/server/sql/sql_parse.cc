@@ -5179,6 +5179,10 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
     break;
   case SQLCOM_CREATE_EVENT:
   case SQLCOM_ALTER_EVENT:
+#ifdef EMBEDDED_LIBRARY
+    my_error(ER_OPTION_PREVENTS_STATEMENT, MYF(0), "embedded");
+    break;
+#endif
   #ifdef HAVE_EVENT_SCHEDULER
   do
   {
@@ -5225,14 +5229,21 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
     res= Events::show_create_event(thd, &lex->spname->m_db,
                                    &lex->spname->m_name);
     break;
+  #ifndef EMBEDDED_LIBRARY
   case SQLCOM_DROP_EVENT:
     if (!(res= Events::drop_event(thd,
                                   &lex->spname->m_db, &lex->spname->m_name,
                                   lex->if_exists())))
       my_ok(thd);
     break;
+  #endif
 #else
     my_error(ER_NOT_SUPPORTED_YET,MYF(0),"embedded server");
+    break;
+#endif
+#ifdef EMBEDDED_LIBRARY
+  case SQLCOM_DROP_EVENT:
+    my_error(ER_OPTION_PREVENTS_STATEMENT, MYF(0), "embedded");
     break;
 #endif
   case SQLCOM_CREATE_FUNCTION:                  // UDF function
@@ -5660,9 +5671,13 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
   case SQLCOM_CREATE_PACKAGE:
   case SQLCOM_CREATE_PACKAGE_BODY:
   {
+#ifdef EMBEDDED_LIBRARY
+    my_error(ER_OPTION_PREVENTS_STATEMENT, MYF(0), "embedded");
+#else
     if (mysql_create_routine(thd, lex))
       goto error;
     my_ok(thd);
+#endif
     break; /* break super switch */
   } /* end case group bracket */
   case SQLCOM_COMPOUND:
@@ -5681,19 +5696,27 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
 
   case SQLCOM_ALTER_PROCEDURE:
   case SQLCOM_ALTER_FUNCTION:
+#ifdef EMBEDDED_LIBRARY
+    my_error(ER_OPTION_PREVENTS_STATEMENT, MYF(0), "embedded");
+#else
     if (thd->variables.option_bits & OPTION_IF_EXISTS)
       lex->create_info.set(DDL_options_st::OPT_IF_EXISTS);
     if (alter_routine(thd, lex))
       goto error;
+#endif
     break;
   case SQLCOM_DROP_PROCEDURE:
   case SQLCOM_DROP_FUNCTION:
   case SQLCOM_DROP_PACKAGE:
   case SQLCOM_DROP_PACKAGE_BODY:
+#ifdef EMBEDDED_LIBRARY
+    my_error(ER_OPTION_PREVENTS_STATEMENT, MYF(0), "embedded");
+#else
     if (thd->variables.option_bits & OPTION_IF_EXISTS)
       lex->create_info.set(DDL_options_st::OPT_IF_EXISTS);
     if (drop_routine(thd, lex))
       goto error;
+#endif
     break;
   case SQLCOM_SHOW_CREATE_PROC:
   case SQLCOM_SHOW_CREATE_FUNC:
@@ -5719,15 +5742,22 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
     }
   case SQLCOM_CREATE_VIEW:
     {
+#ifdef EMBEDDED_LIBRARY
+      my_error(ER_OPTION_PREVENTS_STATEMENT, MYF(0), "embedded");
+#else
       /*
         Note: SQLCOM_CREATE_VIEW also handles 'ALTER VIEW' commands
         as specified through the thd->lex->create_view->mode flag.
       */
       res= mysql_create_view(thd, first_table, thd->lex->create_view->mode);
+#endif
       break;
     }
   case SQLCOM_DROP_VIEW:
     {
+#ifdef EMBEDDED_LIBRARY
+      my_error(ER_OPTION_PREVENTS_STATEMENT, MYF(0), "embedded");
+#else
       if (check_table_access(thd, DROP_ACL, all_tables, FALSE, UINT_MAX, FALSE))
         goto error;
 
@@ -5738,22 +5768,31 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
 
       /* Conditionally writes to binlog. */
       res= mysql_drop_view(thd, first_table, thd->lex->drop_mode);
+#endif
       break;
     }
   case SQLCOM_CREATE_TRIGGER:
   {
+#ifdef EMBEDDED_LIBRARY
+    my_error(ER_OPTION_PREVENTS_STATEMENT, MYF(0), "embedded");
+#else
     /* Conditionally writes to binlog. */
     res= mysql_create_or_drop_trigger(thd, all_tables, 1);
+#endif
 
     break;
   }
   case SQLCOM_DROP_TRIGGER:
   {
+#ifdef EMBEDDED_LIBRARY
+    my_error(ER_OPTION_PREVENTS_STATEMENT, MYF(0), "embedded");
+#else
     if (thd->variables.option_bits & OPTION_IF_EXISTS)
       lex->create_info.set(DDL_options_st::OPT_IF_EXISTS);
 
     /* Conditionally writes to binlog. */
     res= mysql_create_or_drop_trigger(thd, all_tables, 0);
+#endif
     break;
   }
   case SQLCOM_XA_START:
