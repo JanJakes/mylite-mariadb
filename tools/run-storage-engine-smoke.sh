@@ -126,7 +126,7 @@ run_inside_container() {
         "${abs_build_dir}/mylite-primary-file-lock-conflict-report.txt" \
         "${abs_build_dir}/mylite-primary-file-lock-conflict-output.log" \
         "${lock_file}" \
-        "write"; then
+        "lock-conflict"; then
       printf "Storage smoke unexpectedly succeeded while catalog was externally locked: %s\n" \
         "${lock_file}" >&2
       status=1
@@ -347,6 +347,10 @@ if "status=1\n" not in report_text:
     fail("primary file lock conflict smoke did not fail")
 if "MyLite: catalog lock failed" not in combined:
     fail("primary file lock conflict smoke did not report a catalog lock failure")
+if "errno: 146" not in combined and "Lock timed out" not in combined:
+    fail("primary file lock conflict smoke did not report a lock/busy error")
+if "Index is corrupted" in combined:
+    fail("primary file lock conflict smoke reported index corruption")
 if "Catalog Sidecars\n\nnone\n" not in report_text:
     fail("primary file lock conflict smoke created a catalog sidecar")
 PY

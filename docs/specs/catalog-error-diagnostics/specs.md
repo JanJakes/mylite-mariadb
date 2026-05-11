@@ -105,14 +105,36 @@ diagnostic improvement only.
 
 ## Binary-Size Impact
 
-Expected impact is a small amount of first-party handler code and a few smoke
-assertions. No new dependency is allowed. Record measured artifacts after
-implementation.
+The implementation adds a small first-party handler error mapping path and one
+storage-smoke conflict phase. It adds no dependency. Measured artifacts after
+implementation:
+
+- `libmariadbd.a`: 44,395,386 bytes.
+- `libmylite.a`: 29,698 bytes.
+- `mylite-storage-engine-smoke`: 22,769,960 bytes.
+- `mylite-compatibility-smoke`: 22,704,712 bytes.
+- `mylite-open-close-smoke`: 22,705,360 bytes.
+- `mylite-embedded-bootstrap-smoke`: 22,703,744 bytes.
 
 ## License, Trademark, And Dependency Impact
 
 No new dependency. The implementation stays inside existing GPL-2.0-only
 MariaDB-derived handler code.
+
+## Implementation Result
+
+`ha_mylite.cc` now records a thread-local catalog handler error while loading
+or writing the catalog. Advisory-lock conflicts map to
+`HA_ERR_LOCK_WAIT_TIMEOUT`; errno-backed catalog open, stat, write, fsync, and
+close failures preserve their errno-derived handler diagnostics; invalid
+catalog contents still use corruption-style handler errors.
+
+The storage smoke now has a `lock-conflict` phase that bypasses seed-table
+discovery and exercises the catalog-mutating `CREATE TABLE` path directly while
+an external helper holds the primary file lock. The report now shows
+`errno: 146 "Lock timed out; Retry transaction"` and still records the MyLite
+catalog lock log line. The smoke asserts that the old `Index is corrupted`
+surface does not reappear.
 
 ## Test And Verification Plan
 

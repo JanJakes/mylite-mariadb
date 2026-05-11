@@ -217,6 +217,10 @@ static Mylite_table_definition *mylite_find_table_definition_locked(
 static bool mylite_parse_table_path(const char *path, std::string *db,
                                     std::string *table_name);
 static bool mylite_ensure_catalog_loaded_locked();
+static void mylite_clear_catalog_error();
+static void mylite_set_catalog_error(int error);
+static void mylite_set_catalog_errno_error();
+static int mylite_catalog_error_code();
 static void mylite_clear_frm_definitions_locked();
 static bool mylite_load_catalog_locked();
 static bool mylite_ensure_catalog_file_locked();
@@ -468,6 +472,7 @@ static bool mylite_catalog_loaded= false;
 static bool mylite_catalog_load_failed= false;
 static bool mylite_loaded_catalog_header_valid= false;
 static int mylite_catalog_fd= -1;
+static thread_local int mylite_catalog_last_error= 0;
 static std::string mylite_catalog_locked_path;
 static Mylite_catalog_header mylite_loaded_catalog_header=
   { 0, 0, 0, 0, 0, 0, 0, 0, 0 };
@@ -993,7 +998,7 @@ static int mylite_store_table_definition(const char *path, const TABLE *table,
 
   std::lock_guard<std::mutex> guard(mylite_catalog_mutex);
   if (!mylite_ensure_catalog_loaded_locked())
-    return HA_ERR_CRASHED;
+    return mylite_catalog_error_code();
 
   if (mylite_find_table_definition_locked(db.c_str(), db.length(),
                                           table_name.c_str(),
@@ -1030,7 +1035,7 @@ static int mylite_remove_table_definition(const char *path)
 
   std::lock_guard<std::mutex> guard(mylite_catalog_mutex);
   if (!mylite_ensure_catalog_loaded_locked())
-    return HA_ERR_CRASHED;
+    return mylite_catalog_error_code();
 
   for (std::vector<Mylite_table_definition>::iterator it=
          mylite_catalog.begin(); it != mylite_catalog.end(); ++it)
@@ -1070,7 +1075,7 @@ static int mylite_rename_table_definition(const char *from, const char *to)
 
   std::lock_guard<std::mutex> guard(mylite_catalog_mutex);
   if (!mylite_ensure_catalog_loaded_locked())
-    return HA_ERR_CRASHED;
+    return mylite_catalog_error_code();
 
   if (mylite_find_table_definition_locked(to_db.c_str(), to_db.length(),
                                           to_table.c_str(), to_table.length()))
@@ -1103,7 +1108,7 @@ static int mylite_store_row(const char *db, size_t db_length,
 
   std::lock_guard<std::mutex> guard(mylite_catalog_mutex);
   if (!mylite_ensure_catalog_loaded_locked())
-    return HA_ERR_CRASHED;
+    return mylite_catalog_error_code();
 
   Mylite_table_definition *definition=
     mylite_find_table_definition_locked(db, db_length, table_name,
@@ -1164,7 +1169,7 @@ static int mylite_update_row(const char *db, size_t db_length,
 
   std::lock_guard<std::mutex> guard(mylite_catalog_mutex);
   if (!mylite_ensure_catalog_loaded_locked())
-    return HA_ERR_CRASHED;
+    return mylite_catalog_error_code();
 
   Mylite_table_definition *definition=
     mylite_find_table_definition_locked(db, db_length, table_name,
@@ -1221,7 +1226,7 @@ static int mylite_delete_row(const char *db, size_t db_length,
 
   std::lock_guard<std::mutex> guard(mylite_catalog_mutex);
   if (!mylite_ensure_catalog_loaded_locked())
-    return HA_ERR_CRASHED;
+    return mylite_catalog_error_code();
 
   Mylite_table_definition *definition=
     mylite_find_table_definition_locked(db, db_length, table_name,
@@ -1262,7 +1267,7 @@ static int mylite_read_row(const char *db, size_t db_length,
 {
   std::lock_guard<std::mutex> guard(mylite_catalog_mutex);
   if (!mylite_ensure_catalog_loaded_locked())
-    return HA_ERR_CRASHED;
+    return mylite_catalog_error_code();
 
   Mylite_table_definition *definition=
     mylite_find_table_definition_locked(db, db_length, table_name,
@@ -1292,7 +1297,7 @@ static int mylite_read_row_by_id(const char *db, size_t db_length,
 {
   std::lock_guard<std::mutex> guard(mylite_catalog_mutex);
   if (!mylite_ensure_catalog_loaded_locked())
-    return HA_ERR_CRASHED;
+    return mylite_catalog_error_code();
 
   Mylite_table_definition *definition=
     mylite_find_table_definition_locked(db, db_length, table_name,
@@ -1321,7 +1326,7 @@ static int mylite_build_index_entries(
 
   std::lock_guard<std::mutex> guard(mylite_catalog_mutex);
   if (!mylite_ensure_catalog_loaded_locked())
-    return HA_ERR_CRASHED;
+    return mylite_catalog_error_code();
 
   Mylite_table_definition *definition=
     mylite_find_table_definition_locked(db, db_length, table_name,
@@ -1483,7 +1488,7 @@ static int mylite_reset_auto_increment_value(const char *db, size_t db_length,
 {
   std::lock_guard<std::mutex> guard(mylite_catalog_mutex);
   if (!mylite_ensure_catalog_loaded_locked())
-    return HA_ERR_CRASHED;
+    return mylite_catalog_error_code();
 
   Mylite_table_definition *definition=
     mylite_find_table_definition_locked(db, db_length, table_name,
@@ -1941,17 +1946,49 @@ static bool mylite_parse_table_path(const char *path, std::string *db,
 static bool mylite_ensure_catalog_loaded_locked()
 {
   if (mylite_catalog_loaded)
+  {
+    if (mylite_catalog_load_failed)
+      mylite_set_catalog_error(HA_ERR_CRASHED);
     return !mylite_catalog_load_failed;
+  }
 
-  mylite_catalog_loaded= true;
+  mylite_clear_catalog_error();
+
   if (!mylite_catalog_file || !mylite_catalog_file[0])
+  {
+    mylite_catalog_loaded= true;
     return true;
+  }
 
   if (!mylite_ensure_catalog_file_locked())
     return false;
 
   mylite_catalog_load_failed= !mylite_load_catalog_locked();
+  if (mylite_catalog_load_failed && !mylite_catalog_last_error)
+    mylite_set_catalog_error(HA_ERR_CRASHED);
+  mylite_catalog_loaded= true;
   return !mylite_catalog_load_failed;
+}
+
+static void mylite_clear_catalog_error()
+{
+  mylite_catalog_last_error= 0;
+}
+
+static void mylite_set_catalog_error(int error)
+{
+  mylite_catalog_last_error= error > 0 ? error : HA_ERR_INTERNAL_ERROR;
+}
+
+static void mylite_set_catalog_errno_error()
+{
+  mylite_set_catalog_error(errno > 0 ? errno : HA_ERR_INTERNAL_ERROR);
+}
+
+static int mylite_catalog_error_code()
+{
+  return mylite_catalog_last_error ? mylite_catalog_last_error :
+                                    HA_ERR_CRASHED;
 }
 
 static void mylite_clear_frm_definitions_locked()
@@ -1979,12 +2016,14 @@ static bool mylite_ensure_catalog_file_locked()
 
     sql_print_error("MyLite: catalog path changed from %s to %s",
                     mylite_catalog_locked_path.c_str(), path.c_str());
+    mylite_set_catalog_error(HA_ERR_INTERNAL_ERROR);
     return false;
   }
 
   const int fd= open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0666);
   if (fd < 0)
   {
+    mylite_set_catalog_errno_error();
     mylite_log_catalog_error("open", path);
     return false;
   }
@@ -1994,6 +2033,8 @@ static bool mylite_ensure_catalog_file_locked()
   {
     const int saved_errno= my_errno > 0 ? my_errno :
                            errno > 0 ? errno : EAGAIN;
+    mylite_set_catalog_error(saved_errno == EAGAIN ?
+                             HA_ERR_LOCK_WAIT_TIMEOUT : saved_errno);
     sql_print_error("MyLite: catalog lock failed for %s: %s",
                     path.c_str(), strerror(saved_errno));
     if (close(fd) != 0)
@@ -2017,6 +2058,7 @@ static bool mylite_load_catalog_locked()
   const int fd= mylite_catalog_fd;
   if (fd < 0)
   {
+    mylite_set_catalog_error(HA_ERR_INTERNAL_ERROR);
     sql_print_error("MyLite: catalog file is not locked for %s",
                     mylite_catalog_file);
     return false;
@@ -2026,6 +2068,7 @@ static bool mylite_load_catalog_locked()
   struct stat st;
   if (fstat(fd, &st) != 0)
   {
+    mylite_set_catalog_errno_error();
     mylite_log_catalog_error("stat", mylite_catalog_file);
     ok= false;
     goto done;
@@ -2066,6 +2109,7 @@ static bool mylite_load_catalog_locked()
     }
     if (!found)
     {
+      mylite_set_catalog_error(HA_ERR_CRASHED);
       sql_print_error("MyLite: no valid catalog generation in %s",
                       mylite_catalog_file);
       ok= false;
@@ -2561,7 +2605,7 @@ static int mylite_flush_catalog_locked()
   if (!mylite_catalog_file || !mylite_catalog_file[0])
     return 0;
 
-  return mylite_write_catalog_locked() ? 0 : HA_ERR_CRASHED;
+  return mylite_write_catalog_locked() ? 0 : mylite_catalog_error_code();
 }
 
 static bool mylite_write_catalog_locked()
@@ -2569,6 +2613,7 @@ static bool mylite_write_catalog_locked()
   const std::string catalog_path(mylite_catalog_file);
   std::string content;
 
+  mylite_clear_catalog_error();
   if (!mylite_ensure_catalog_file_locked())
     return false;
 
@@ -4547,6 +4592,7 @@ static uint64_t mylite_checksum(const uchar *data, size_t length)
 static void mylite_log_catalog_error(const char *operation,
                                      const std::string &path)
 {
+  mylite_set_catalog_errno_error();
   sql_print_error("MyLite: catalog %s failed for %s: %s", operation,
                   path.c_str(), strerror(errno));
 }

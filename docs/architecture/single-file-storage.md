@@ -222,6 +222,10 @@ I/O use the retained descriptor so POSIX record locks are not lost by closing a
 second descriptor for the same file. A second process or external
 advisory-lock holder fails explicitly until the lock is released. This adds no
 lock sidecar and does not claim cross-process reader/writer concurrency.
+Catalog lock/open/write failures are mapped to existing MariaDB handler
+diagnostics where possible; advisory-lock conflicts now surface as lock
+timeouts instead of generic index corruption, while invalid on-disk catalog
+contents remain corruption failures.
 
 Supported fixed MariaDB record images larger than one row slot page now split
 across `MYLITEROWOVF3` segment payloads inside row page type `2`. This lifts the

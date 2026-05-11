@@ -166,7 +166,8 @@ static bool parse_options(int argc, char **argv, SmokeOptions *options,
       options->persistence_phase != "recovery-latest" &&
       options->persistence_phase != "recovery-read" &&
       options->persistence_phase != "transaction-write" &&
-      options->persistence_phase != "transaction-read")
+      options->persistence_phase != "transaction-read" &&
+      options->persistence_phase != "lock-conflict")
   {
     *error= "unsupported persistence phase";
     return false;
@@ -222,6 +223,8 @@ static int run_smoke(const SmokeOptions &options,
 
   bool server_started= false;
   MYSQL *mysql= nullptr;
+  const bool lock_conflict_phase=
+    options.persistence_phase == "lock-conflict";
 
   result->phase= "mysql_server_init";
   if (mysql_server_init(static_cast<int>(server_argv.size()),
@@ -253,18 +256,32 @@ static int run_smoke(const SmokeOptions &options,
   if (!fetch_mylite_engine(mysql, result))
     goto done;
 
-  if (!phase_loads_existing_catalog(options.persistence_phase))
+  if (!lock_conflict_phase &&
+      !phase_loads_existing_catalog(options.persistence_phase))
   {
     result->phase= "table_names";
     if (!fetch_discovered_table(mysql, result))
       goto done;
   }
 
-  result->phase= "table_scan";
-  if (!fetch_probe_count(mysql, result))
-    goto done;
+  if (!lock_conflict_phase)
+  {
+    result->phase= "table_scan";
+    if (!fetch_probe_count(mysql, result))
+      goto done;
+  }
 
-  if (options.persistence_phase == "write")
+  if (lock_conflict_phase)
+  {
+    result->phase= "lock_conflict_write";
+    if (execute_statement(mysql,
+                          "CREATE TABLE mylite.lock_conflict "
+                          "(id INT) ENGINE=MYLITE",
+                          "lock conflict CREATE", result))
+      result->message= "lock conflict CREATE unexpectedly succeeded";
+    goto done;
+  }
+  else if (options.persistence_phase == "write")
   {
     result->phase= "persistence_write";
     if (!exercise_persistence_write(mysql, result))
