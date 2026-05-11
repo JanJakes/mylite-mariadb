@@ -161,6 +161,16 @@ unsupported server surfaces, shuts the runtime down, and records observed
 startup side effects. Implementation work should keep MyLite changes narrow and
 separate from upstream source imports.
 
+The first `libmylite` open/close lifecycle smoke can be run with:
+
+```sh
+tools/run-libmylite-open-close-smoke.sh
+```
+
+That smoke builds the initial static `libmylite` wrapper, opens and closes a
+placeholder `.mylite` path, verifies handle-owned diagnostics, and records the
+current temporary runtime side effects.
+
 Current design documents:
 
 - [Roadmap](docs/ROADMAP.md) tracks the ordered engineering slices and current

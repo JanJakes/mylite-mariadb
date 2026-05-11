@@ -40,6 +40,7 @@ typedef enum mylite_result {
   MYLITE_CORRUPT = 11,
   MYLITE_NOTFOUND = 12,
   MYLITE_FULL = 13,
+  MYLITE_CANTOPEN = 14,
   MYLITE_CONSTRAINT = 19,
   MYLITE_MISUSE = 21,
   MYLITE_ROW = 100,
@@ -80,6 +81,12 @@ Suggested flags:
 `mylite_close()` should return `MYLITE_BUSY` if statements or other
 resources still depend on the handle. A later `mylite_close_v2()` can offer
 deferred-close semantics if there is a real need.
+
+The first implementation is intentionally narrower than the final API shape:
+it supports one initialized database path per process because MariaDB's
+embedded server bootstrap is process-global and does not safely restart inside
+one process after `mysql_server_end()`. `mylite_close()` releases the handle's
+embedded connection; the process-scoped runtime is kept until process exit.
 
 ## Direct execution
 

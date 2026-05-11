@@ -83,6 +83,12 @@ and known risks.
   verifies explicit rejections for the first unsupported server surfaces, shuts
   down, and records observed files under
   `build/mariadb-minsize/mylite-embedded-bootstrap-report.txt`.
+- Open/close lifecycle smoke added:
+  `tools/run-libmylite-open-close-smoke.sh`.
+- The first `libmylite` implementation keeps MariaDB's embedded runtime
+  process-scoped after first initialization because repeated
+  `mysql_server_init()` after `mysql_server_end()` currently crashes in
+  inherited MariaDB startup code.
 - Identify MariaDB tests that can run against embedded mode early.
 - Add file-system checks that distinguish expected MyLite companion files from
   unexpected MariaDB datadir, schema, engine, or log sidecars.

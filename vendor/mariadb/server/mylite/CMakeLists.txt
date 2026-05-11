@@ -8,6 +8,7 @@ INCLUDE_DIRECTORIES(
   ${CMAKE_SOURCE_DIR}/include
   ${CMAKE_BINARY_DIR}/include
   ${CMAKE_SOURCE_DIR}/libmysqld
+  ${CMAKE_SOURCE_DIR}/mylite/include
   ${CMAKE_SOURCE_DIR}/sql
   ${CMAKE_BINARY_DIR}/sql
   ${PCRE_INCLUDE_DIRS}
@@ -15,13 +16,32 @@ INCLUDE_DIRECTORIES(
 
 ADD_DEFINITIONS(-DEMBEDDED_LIBRARY -UMYSQL_CLIENT)
 
+ADD_LIBRARY(mylite STATIC
+  mylite.cc
+)
+TARGET_INCLUDE_DIRECTORIES(mylite PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+TARGET_COMPILE_DEFINITIONS(mylite PRIVATE
+  MYLITE_DEFAULT_LC_MESSAGES_DIR="${CMAKE_BINARY_DIR}/sql/share"
+)
+TARGET_LINK_LIBRARIES(mylite mysqlserver tpool)
+
 MYSQL_ADD_EXECUTABLE(mylite-embedded-bootstrap-smoke
   bootstrap_smoke.cc
   COMPONENT Test
 )
 TARGET_LINK_LIBRARIES(mylite-embedded-bootstrap-smoke mysqlserver tpool)
 
+MYSQL_ADD_EXECUTABLE(mylite-open-close-smoke
+  open_close_smoke.cc
+  COMPONENT Test
+)
+TARGET_LINK_LIBRARIES(mylite-open-close-smoke mylite)
+
 IF(UNIX)
   SET_TARGET_PROPERTIES(mylite-embedded-bootstrap-smoke PROPERTIES
+    ENABLE_EXPORTS TRUE)
+  SET_TARGET_PROPERTIES(mylite-open-close-smoke PROPERTIES
     ENABLE_EXPORTS TRUE)
 ENDIF()

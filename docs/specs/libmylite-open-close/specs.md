@@ -118,9 +118,15 @@ For the current compatibility baseline, opening should:
 
 Because `mysql_server_init()` is process-global, this slice should allow
 multiple open handles only for the same database path. A second open for a
-different path while the embedded runtime is active should return `MYLITE_BUSY`
-with handle-owned diagnostics. When the final handle closes, `mylite_close()`
-should close the MariaDB connection and call `mysql_server_end()`.
+different path after the embedded runtime has been initialized should return
+`MYLITE_BUSY` with handle-owned diagnostics.
+
+Implementation found that calling `mysql_server_end()` and then
+`mysql_server_init()` again in the same process segfaults in MariaDB's
+`init_common_variables()` path. The first API therefore keeps the embedded
+runtime process-scoped after the first successful initialization, while
+`mylite_close()` releases the handle's `MYSQL` connection. The process-scoped
+runtime is ended through an `atexit()` hook.
 
 The temporary runtime directory is a bootstrap compatibility artifact, not the
 target single-file storage design. The smoke report must record it explicitly.
@@ -153,7 +159,8 @@ The lifecycle invariant for this slice is:
 - successful `mylite_open()` owns one `MYSQL` connection and one runtime
   reference,
 - `mylite_close()` releases that connection,
-- the last close ends the embedded MariaDB runtime,
+- the embedded MariaDB runtime remains process-scoped after the first
+  successful initialization and is ended at process exit,
 - failed opens return a handle where possible so diagnostics remain
   handle-owned,
 - `mylite_close(NULL)` is tolerated.
@@ -207,15 +214,52 @@ MariaDB-derived repository.
 - Open failures return handle-owned diagnostics when `out_db` is valid.
 - The implementation documents and reports current temporary runtime side
   effects without claiming final single-file storage.
+- The implementation documents the process-scoped runtime constraint observed
+  during repeated embedded initialization.
 - The existing embedded bootstrap smoke still passes.
 - The upstream MariaDB source delta remains absent or narrow; MyLite-owned code
   lives under the MyLite module.
 
+## Implementation Result
+
+The first `libmylite` target builds as a static library and the open/close smoke
+passes:
+
+```sh
+MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+```
+
+The smoke verifies:
+
+- `mylite_close(NULL)`,
+- invalid `out_db`,
+- missing filename with handle-owned diagnostics,
+- read-only missing file diagnostics,
+- unsupported profile diagnostics,
+- unsupported flag diagnostics,
+- default open/close,
+- repeated open/close in one process,
+- two simultaneous handles for the same path,
+- `MYLITE_BUSY` for a different path after runtime initialization.
+
+Observed artifacts:
+
+- `build/mariadb-minsize/libmysqld/libmariadbd.a`: 44,133,780 bytes.
+- `build/mariadb-minsize/mylite/libmylite.a`: 29,530 bytes.
+- `build/mariadb-minsize/mylite/mylite-open-close-smoke`: 22,613,144 bytes.
+- Primary placeholder file: `open-close.mylite`, 0 bytes.
+- Temporary compatibility files:
+  `open-close.mylite.mylite-runtime/datadir/aria_log.00000001` and
+  `open-close.mylite.mylite-runtime/datadir/aria_log_control`.
+- Dynamic plugin artifacts: none.
+- The pre-existing `mysql.servers` startup diagnostic remains.
+
 ## Risks And Unresolved Questions
 
-- Repeated `mysql_server_init()` and `mysql_server_end()` in one process may
-  expose inherited embedded-server global-state bugs. If found, this slice must
-  document and test the narrowest safe lifecycle rule instead of hiding it.
+- Repeated `mysql_server_init()` after `mysql_server_end()` in one process
+  currently segfaults inside inherited MariaDB startup code. This slice avoids
+  restart by keeping the embedded runtime process-scoped; a later bootstrap
+  cleanup slice can decide whether a narrower upstream fix is worth carrying.
 - The derived runtime directory is a temporary compatibility artifact. Later
   storage work must replace it with real MyLite file ownership.
 - Path identity is initially conservative. Symlink and case-folding behavior can
