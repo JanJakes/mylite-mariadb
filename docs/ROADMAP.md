@@ -31,7 +31,7 @@ MariaDB-derived embedded runtime under MyLite-owned defaults before the public
 | 0 | Project foundation | Done | Define the product goal, GPL baseline, architecture direction, workflow, and initial research. |
 | 1 | `upstream-11-8-import` | Done | Import a pinned MariaDB 11.8 LTS source tag mechanically and record upstream refs. |
 | 2 | `build-profile-minsize` | Done | Produce a reproducible embedded build, record artifact size, and document which server-only or rare optional components are omitted by default. |
-| 3 | `embedded-bootstrap` | Planned | Start an in-process MariaDB-derived runtime under MyLite-owned defaults without exposing daemon administration as the library model. |
+| 3 | `embedded-bootstrap` | In progress | Start an in-process MariaDB-derived runtime under MyLite-owned defaults without exposing daemon administration as the library model. |
 | 4 | `unsupported-server-surface` | Planned | Make daemon-only and unsupported features fail explicitly instead of leaking partial server behavior. |
 | 5 | `libmylite-open-close` | Planned | Add the first public C API for opening and closing a `.mylite` file with handle-owned diagnostics. |
 | 6 | `storage-engine-skeleton` | Planned | Add a static MyLite storage engine with enough handler shape for controlled smoke tests. |
