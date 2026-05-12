@@ -51,6 +51,8 @@ struct SmokeResult
   std::string exec_null_db_message;
   std::string exec_scalar_columns;
   std::string exec_scalar_rows;
+  std::string exec_collation_rows;
+  std::string exec_uca_collation_message;
   std::string exec_oracle_mode_message;
   std::string exec_oracle_function_standard_rows;
   std::string exec_oracle_function_message;
@@ -149,6 +151,8 @@ static bool check_exec_misuse(const SmokeOptions &options,
                               SmokeResult *result);
 static bool check_exec_scalar(const SmokeOptions &options,
                               SmokeResult *result);
+static bool check_collation_profile(const SmokeOptions &options,
+                                    SmokeResult *result);
 static bool check_oracle_mode_unsupported(const SmokeOptions &options,
                                           SmokeResult *result);
 static bool check_oracle_functions_unsupported(const SmokeOptions &options,
@@ -321,6 +325,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "exec_scalar";
   ok= check_exec_scalar(options, result) && ok;
+
+  result->phase= "collation_profile";
+  ok= check_collation_profile(options, result) && ok;
 
   result->phase= "oracle_mode_unsupported";
   ok= check_oracle_mode_unsupported(options, result) && ok;
@@ -680,6 +687,58 @@ static bool check_exec_scalar(const SmokeOptions &options,
 
     rc= mylite_close(db);
     ok= record_result(result, "exec_scalar_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+  return ok;
+}
+
+static bool check_collation_profile(const SmokeOptions &options,
+                                    SmokeResult *result)
+{
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "collation_profile_open", MYLITE_OK, rc, db);
+  if (db)
+  {
+    ExecCapture capture;
+#ifdef MYLITE_DISABLE_UCA_COLLATIONS
+    ok= exec_query_capture(
+          db,
+          "SELECT @@collation_server, "
+          "_utf8mb4'a' COLLATE utf8mb4_general_ci = _utf8mb4'a'",
+          "collation_profile_select", &capture, result) && ok;
+    result->exec_collation_rows= join_strings(capture.rows, ",");
+    if (result->exec_collation_rows != "utf8mb4_general_ci:1")
+      ok= false;
+
+    char *errmsg= nullptr;
+    rc= mylite_exec(db,
+                    "SELECT _utf8mb4'a' COLLATE utf8mb4_uca1400_ai_ci",
+                    nullptr, nullptr, &errmsg);
+    if (errmsg)
+    {
+      result->exec_uca_collation_message= errmsg;
+      mylite_free(errmsg);
+    }
+    ok= record_result(result, "collation_uca1400_select", MYLITE_ERROR, rc,
+                      db) && ok;
+    if (mylite_mariadb_errno(db) != ER_UNKNOWN_COLLATION ||
+        result->exec_uca_collation_message.find("utf8mb4_uca1400_ai_ci") ==
+          std::string::npos)
+      ok= false;
+#else
+    ok= exec_query_capture(
+          db,
+          "SELECT @@collation_server, "
+          "_utf8mb4'a' COLLATE utf8mb4_uca1400_ai_ci = _utf8mb4'a'",
+          "collation_profile_select", &capture, result) && ok;
+    result->exec_collation_rows= join_strings(capture.rows, ",");
+    if (result->exec_collation_rows != "utf8mb4_uca1400_ai_ci:1")
+      ok= false;
+#endif
+
+    rc= mylite_close(db);
+    ok= record_result(result, "collation_profile_close", MYLITE_OK, rc,
                       nullptr) && ok;
   }
   return ok;
@@ -2421,6 +2480,11 @@ static void write_report(const SmokeOptions &options,
     report << "exec_scalar_columns=" << result.exec_scalar_columns << "\n";
   if (!result.exec_scalar_rows.empty())
     report << "exec_scalar_rows=" << result.exec_scalar_rows << "\n";
+  if (!result.exec_collation_rows.empty())
+    report << "exec_collation_rows=" << result.exec_collation_rows << "\n";
+  if (!result.exec_uca_collation_message.empty())
+    report << "exec_uca_collation_message="
+           << result.exec_uca_collation_message << "\n";
   if (!result.exec_oracle_mode_message.empty())
     report << "exec_oracle_mode_message="
            << result.exec_oracle_mode_message << "\n";

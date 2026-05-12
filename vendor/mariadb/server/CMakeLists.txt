@@ -150,6 +150,12 @@ INCLUDE(cpack_source_ignore_files)
 INCLUDE(install_layout)
 INCLUDE(submodules)
 
+OPTION(MYLITE_DISABLE_UCA_COLLATIONS
+  "Disable UCA collations in the MyLite minsize profile" OFF)
+IF(MYLITE_DISABLE_UCA_COLLATIONS)
+  ADD_DEFINITIONS(-DMYLITE_DISABLE_UCA_COLLATIONS)
+ENDIF()
+
 # Add macros
 INCLUDE(character_sets)
 INCLUDE(cpu_info)
@@ -538,7 +544,10 @@ ADD_SUBDIRECTORY(support-files)
 ADD_SUBDIRECTORY(extra/aws_sdk)
 
 IF(NOT CMAKE_CROSSCOMPILING OR DEFINED CMAKE_CROSSCOMPILING_EMULATOR)
-  SET(EXPORTED comp_err comp_sql factorial uca-dump)
+  SET(EXPORTED comp_err comp_sql factorial)
+  IF(NOT MYLITE_DISABLE_UCA_COLLATIONS)
+    SET(EXPORTED ${EXPORTED} uca-dump)
+  ENDIF()
   IF(NOT WITHOUT_SERVER)
     SET(EXPORTED ${EXPORTED} gen_lex_hash gen_lex_token)
   ENDIF()

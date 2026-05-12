@@ -486,6 +486,7 @@ my_bool init_compiled_charsets(myf flags __attribute__((unused)))
   my_charset_loader_init_mysys(&loader);
   loader.add_collation= add_compiled_collation;
 
+#ifdef HAVE_UCA_COLLATIONS
   if (my_uca1400_collation_definitions_add(&loader))
     return TRUE;
 
@@ -494,6 +495,7 @@ my_bool init_compiled_charsets(myf flags __attribute__((unused)))
 
   if (mysql_utf8mb4_0900_bin_add(&loader))
     return TRUE;
+#endif
 
   return FALSE;
 }

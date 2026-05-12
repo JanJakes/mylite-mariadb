@@ -39426,4 +39426,58 @@ LEX_CSTRING my_ci_get_collation_name_uca(CHARSET_INFO *cs,
   return cs->coll_name;
 }
 
+#else
+
+const MY_CONTRACTIONS *
+my_charset_get_contractions(CHARSET_INFO *cs, int level)
+{
+  (void) cs;
+  (void) level;
+  return NULL;
+}
+
+
+my_bool
+my_uca_can_be_contraction_head(const MY_CONTRACTIONS *c, my_wc_t wc)
+{
+  (void) c;
+  (void) wc;
+  return FALSE;
+}
+
+
+my_bool
+my_uca_can_be_contraction_tail(const MY_CONTRACTIONS *c, my_wc_t wc)
+{
+  (void) c;
+  (void) wc;
+  return FALSE;
+}
+
+
+const uint16 *
+my_uca_contraction2_weight(const MY_CONTRACTIONS *list, my_wc_t wc1,
+                           my_wc_t wc2)
+{
+  (void) list;
+  (void) wc1;
+  (void) wc2;
+  return NULL;
+}
+
+
+uint my_ci_get_id_uca(CHARSET_INFO *cs, my_collation_id_type_t type)
+{
+  (void) type;
+  return cs->number;
+}
+
+
+LEX_CSTRING my_ci_get_collation_name_uca(CHARSET_INFO *cs,
+                                         my_collation_name_mode_t mode)
+{
+  (void) mode;
+  return cs->coll_name;
+}
+
 #endif /* HAVE_UCA_COLLATIONS */

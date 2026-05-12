@@ -109,10 +109,11 @@ initialization.
 
 ## Binary-Size Impact
 
-Expected archive savings are at least the current sizes of the UCA string
-objects, about 1.69 MiB. Linked savings should be smaller than the archive
-delta because section garbage collection already drops unreferenced pieces, but
-the current linked binary still contains UCA data symbols and should shrink.
+Expected archive savings are at least most of the current sizes of the UCA
+string objects, about 1.69 MiB. Linked savings should be smaller than the
+archive delta because section garbage collection already drops unreferenced
+pieces, but the current linked binary still contains UCA data symbols and
+should shrink.
 
 Measure:
 
@@ -128,6 +129,21 @@ MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-uca-collations \
 Compare the archive and stripped linked smoke against
 `build/mariadb-minsize-server-utility-functions`.
 
+Measured on 2026-05-12:
+
+| Artifact | Before | After | Delta |
+| --- | ---: | ---: | ---: |
+| `libmysqld/libmariadbd.a` | 35,555,602 | 33,777,694 | -1,777,908 |
+| archive object count | 460 | 458 | -2 |
+| `mylite/libmylite.a` | 122,800 | 122,792 | -8 |
+| `storage/mylite/libmylite_embedded.a` | 388,440 | 388,440 | 0 |
+| unstripped `mylite-open-close-smoke` | 10,838,176 | 9,255,608 | -1,582,568 |
+| stripped `mylite-open-close-smoke` | 8,318,304 | 6,765,440 | -1,552,864 |
+| `size` total | 8,612,773 | 7,016,073 | -1,596,700 |
+
+The retained `ctype-uca.c.o` no-UCA helper object is 2,480 bytes in the
+stripped archive. `ctype-uca0900.c.o` and `ctype-uca1400.c.o` are absent.
+
 ## Test Plan
 
 Add open/close smoke coverage for:
@@ -137,6 +153,25 @@ Add open/close smoke coverage for:
 - unsupported `utf8mb4_uca1400_ai_ci` use in the aggressive minsize profile.
 
 Then run the commands listed in the binary-size section and `git diff --check`.
+
+## Verification
+
+Run on 2026-05-12:
+
+```sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-uca-collations \
+  MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-uca-collations \
+  MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-uca-collations \
+  MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+```
+
+All passed. The compatibility sidecar scan reported no unexpected sidecars.
+The linked smoke binary no longer contains `my_uca1400_*`, `my_uca_v1400`, or
+`mysql_0900_mapping` symbols. `build/mariadb-minsize-uca-collations/include/config.h`
+sets `MYSQL_DEFAULT_COLLATION_NAME` to `utf8mb4_general_ci` and leaves
+`HAVE_UCA_COLLATIONS` undefined.
 
 ## Acceptance Criteria
 
