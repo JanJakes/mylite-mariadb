@@ -118,3 +118,23 @@ The linked smoke should not depend on `libssl.so` or `libcrypto.so`.
   surfaces for MyLite's embedded profile.
 - CMake changes in upstream-derived files must stay narrow to keep future
   rebases reviewable.
+
+## Attempt result
+
+Initial implementation proved this is not a narrow CMake-only reduction.
+Accepting `WITH_SSL=OFF` in `cmake/ssl.cmake` allowed configuration to proceed,
+but compilation failed immediately:
+
+- `vendor/mariadb/server/vio/viosocket.c` had an unguarded
+  `SSL_pending(vio->ssl_arg)` path in `vio_pending()`.
+- `vendor/mariadb/server/mysys_ssl/my_sha.inl` and
+  `vendor/mariadb/server/mysys_ssl/my_md5.cc` depend on OpenSSL or WolfSSL
+  digest context types.
+- `vendor/mariadb/server/mysys_ssl/my_crypt.cc` depends on OpenSSL/WolfSSL AES
+  cipher APIs.
+
+So disabling SSL also removes cryptographic primitives that MariaDB's SQL and
+authentication support still compile through `mysys_ssl`. A real no-SSL profile
+would need a separate digest/AES provider strategy or a much deeper removal of
+crypto-using SQL/auth surfaces. That is beyond this attempt and should not be
+treated as a low-risk size win.
