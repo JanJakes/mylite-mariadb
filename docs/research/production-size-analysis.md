@@ -26,10 +26,11 @@ The original comparison baseline was generated at `2026-05-12T00:33:29Z` from
 `vendor/mariadb/server` into `build/mariadb-minsize`. Current measurements
 include the `type-plugin-size-profile`, `charset-small-profile`, and
 `oracle-parser-size-profile`, `static-archive-strip-profile`, and
-`small-builtin-plugin-profile` attempts, which remove the built-in `type_geom`,
-`type_inet`, `type_uuid`, `sequence`, `thread_pool_info`, `user_variables`, and
-`userstat` plugins, set `WITH_EXTRA_CHARSETS=none`, omit the Oracle SQL-mode
-parser, and strip the static archive in the MyLite minsize profile.
+`small-builtin-plugin-profile`, and `xml-function-size-profile` attempts, which
+remove the built-in `type_geom`, `type_inet`, `type_uuid`, `sequence`,
+`thread_pool_info`, `user_variables`, and `userstat` plugins, set
+`WITH_EXTRA_CHARSETS=none`, omit the Oracle SQL-mode parser, omit XML SQL
+functions, and strip the static archive in the MyLite minsize profile.
 
 This project does not yet have a final packaged production artifact such as a
 shared `libmylite.so` bundle. For now, the most useful size signals are:
@@ -45,33 +46,33 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
-| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 34,474,690 | 32.88 | Main embedded MariaDB archive, 491 objects, stripped |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 33,957,690 | 32.38 | Main embedded MariaDB archive, 490 objects, stripped |
 | `build/mariadb-minsize/mylite/libmylite.a` | 93,752 | 0.09 | First-party public wrapper |
 | `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 303,480 | 0.29 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 18,259,560 | 17.41 | Unstripped linked proxy |
-| stripped `mylite-open-close-smoke` copy | 15,849,720 | 15.12 | `strip --strip-unneeded` on copied binary |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 17,973,240 | 17.14 | Unstripped linked proxy |
+| stripped `mylite-open-close-smoke` copy | 15,585,480 | 14.86 | `strip --strip-unneeded` on copied binary |
 
 The linked proxy has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 13,553,243 |
-| data | 2,233,064 |
-| bss | 298,648 |
-| total `size` decimal | 16,084,955 |
+| text | 13,375,251 |
+| data | 2,190,240 |
+| bss | 298,608 |
+| total `size` decimal | 15,864,099 |
 
 Largest linked sections in the open-close proxy:
 
 | Section | Bytes | Interpretation |
 | --- | ---: | --- |
-| `.rela.dyn` | 4,513,584 | Dynamic relocations from the current link shape |
-| `.text` | 3,578,188 | Executable code |
-| `.rodata` | 2,152,705 | Collation tables, parser tables, SQL metadata, constants |
-| `.data.rel.ro` | 1,424,304 | Relocated read-only data |
-| `.dynstr` | 1,240,255 | Dynamic string table |
-| `.eh_frame` | 830,300 | Unwind metadata |
-| `.data` | 775,280 | Writable data |
-| `.dynsym` | 720,600 | Dynamic symbol table |
+| `.rela.dyn` | 4,383,840 | Dynamic relocations from the current link shape |
+| `.text` | 3,545,340 | Executable code |
+| `.rodata` | 2,149,685 | Collation tables, parser tables, SQL metadata, constants |
+| `.data.rel.ro` | 1,381,800 | Relocated read-only data |
+| `.dynstr` | 1,229,480 | Dynamic string table |
+| `.eh_frame` | 821,516 | Unwind metadata |
+| `.data` | 772,168 | Writable data |
+| `.dynsym` | 714,288 | Dynamic symbol table |
 
 If a Linux distribution bundle vendors the current dynamic dependencies, it
 adds about 11,340,944 bytes, or 10.82 MiB, before compression:
@@ -159,6 +160,7 @@ The current built-in plugins are:
 | `oracle-parser-size-profile` after charset | 35,944,110 | -7,461,322 | 15,850,736 | -3,481,168 | Passes current smokes |
 | `static-archive-strip-profile` after Oracle parser | 34,606,670 | -8,798,762 | 15,850,736 | -3,481,168 | Passes current smokes |
 | `small-builtin-plugin-profile` after archive strip | 34,474,690 | -8,930,742 | 15,849,720 | -3,482,184 | Passes current smokes |
+| `xml-function-size-profile` after small built-ins | 33,957,690 | -9,447,742 | 15,585,480 | -3,746,424 | Passes current smokes |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
 | Strip archive with `strip --strip-unneeded` | 41,873,048 | -1,532,384 | n/a | n/a | Higher risk than `strip -g` for static archives |
 | `WITH_EXTRA_CHARSETS=none` before UCA fix | 40,820,782 | -2,584,650 | 16,836,664 | -2,495,240 | Segfaulted in open-close smoke |
@@ -177,8 +179,8 @@ by skipping generated collations whose base compiled charset is absent. The
 profile now passes current smokes while retaining the compiled default
 `utf8mb4_uca1400_ai_ci`.
 
-Stripping the current linked open-close proxy reduces it from 18,259,560 bytes
-to 15,849,720 bytes, saving 2,409,840 bytes, or 2.30 MiB. That remains the
+Stripping the current linked open-close proxy reduces it from 17,973,240 bytes
+to 15,585,480 bytes, saving 2,387,760 bytes, or 2.28 MiB. That remains the
 lowest-risk packaging win for any copied executable or shared-library style
 artifact.
 
@@ -222,6 +224,15 @@ mandatory `sql_sequence` support intact. On top of the static archive strip, it
 reduced the static archive by another 131,980 bytes and the stripped linked
 proxy by another 1,016 bytes.
 
+The `xml-function-size-profile` attempt then omitted `item_xmlfunc.cc` from the
+embedded source list and removed the `EXTRACTVALUE` and `UPDATEXML` native
+function builders in the minsize profile. On top of the small built-in plugin
+profile, it reduced the static archive by another 517,000 bytes and the
+stripped linked proxy by another 264,240 bytes. The linked open-close proxy no
+longer contains `Item_func_xml_extractvalue`, `Item_func_xml_update`, or
+`my_xpath_function` symbols, and the open/close smoke verifies both XML
+functions now fail through MariaDB's unknown-function path.
+
 ## Decision matrix
 
 | Lever | Expected savings | Risk | Worth doing? | Reason |
@@ -234,6 +245,7 @@ proxy by another 1,016 bytes.
 | Make type plugins profile-gated | 3.30 MiB archive, 0.38 MiB stripped linked | Medium/high | Applied as size attempt | Current smokes pass, but `INET`, `UUID`, and spatial plugin surfaces are compatibility tradeoffs |
 | Remove small optional built-ins | 0.13 MiB archive, 0.001 MiB stripped linked | Medium/low | Applied as size attempt | Current smokes pass, but plugin-provided information-schema surfaces are omitted |
 | Remove or profile-gate Oracle SQL parser | 1.35 MiB archive and 0.56 MiB stripped linked beyond charset-small profile | High compatibility | Applied as size attempt | Current smokes pass, but `sql_mode=ORACLE` now fails explicitly in the minsize profile |
+| Remove XML SQL functions | 0.49 MiB archive and 0.25 MiB stripped linked beyond small-builtin profile | Medium compatibility | Applied as size attempt | Current smokes pass, but `EXTRACTVALUE()` and `UPDATEXML()` now fail as unknown functions |
 | Remove server-only SQL subsystems | Potentially large | High | Research later | The big bytes are entangled in `libsql_embedded.a`; needs slice-by-slice fork work |
 | `DISABLE_PSI_*` switches | 0 in this build | Low | No | No measured effect |
 | `-fno-asynchronous-unwind-tables` | 0 in this build | Low | No | Full rebuild produced identical archive and stripped linked sizes |

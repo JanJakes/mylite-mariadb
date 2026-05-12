@@ -153,6 +153,35 @@ stat -c "%s" build/mariadb-minsize/mylite/mylite-open-close-smoke.stripped
 size build/mariadb-minsize/mylite/mylite-open-close-smoke
 ```
 
+## Verification
+
+Run on 2026-05-12:
+
+```sh
+MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+```
+
+All passed. The open/close smoke report recorded:
+
+- `exec_xml_extractvalue_message=FUNCTION EXTRACTVALUE does not exist`,
+- `exec_xml_updatexml_message=FUNCTION UPDATEXML does not exist`.
+
+Measured artifacts:
+
+- `libmariadbd.a`: 33,957,690 bytes,
+- archive objects: 490,
+- `libmylite.a`: 93,752 bytes,
+- `mylite-open-close-smoke`: 17,973,240 bytes,
+- stripped `mylite-open-close-smoke`: 15,585,480 bytes,
+- linked `size` total: 15,864,099 bytes.
+
+Compared with the previous small built-in profile, this saves 517,000 bytes in
+the stripped static archive and 264,240 bytes in the stripped linked proxy. The
+linked smoke binary and static archive no longer expose `Item_func_xml_*` or
+`my_xpath_function` symbols.
+
 ## Acceptance criteria
 
 - The minsize build succeeds with `MYLITE_DISABLE_XML_FUNCTIONS=ON`.
