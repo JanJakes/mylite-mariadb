@@ -126,7 +126,12 @@ public:
 
 #define TC_LOG_PAGE_SIZE   8192
 
-#ifdef HAVE_MMAP
+#if defined(HAVE_MMAP) && \
+    (!defined(MYLITE_DISABLE_TC_LOG_MMAP) || !defined(EMBEDDED_LIBRARY))
+#define MYLITE_HAVE_TC_LOG_MMAP
+#endif
+
+#ifdef MYLITE_HAVE_TC_LOG_MMAP
 class TC_LOG_MMAP: public TC_LOG
 {
   public:                // only to keep Sun Forte on sol9x86 happy
@@ -1495,7 +1500,11 @@ static inline TC_LOG *get_tc_log_implementation()
   if (total_ha_2pc <= 2) // online_alter_tp and MHNSW_Trx::tp
     return &tc_log_dummy;
 #if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+#if defined(MYLITE_DISABLE_TC_LOG_MMAP)
+  return &tc_log_dummy;
+#else
   return &tc_log_mmap;
+#endif
 #else
   if (opt_bin_log)
     return &mysql_bin_log;

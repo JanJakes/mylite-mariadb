@@ -24,6 +24,7 @@ The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 - `MYLITE_DISABLE_JSON_SCHEMA_VALID=ON`
 - `MYLITE_DISABLE_QUERY_CACHE=ON`
 - `MYLITE_DISABLE_BINLOG_REPLICATION=ON`
+- `MYLITE_DISABLE_TC_LOG_MMAP=ON`
 - `MYLITE_DISABLE_RPL_FILTER=ON`
 - `MYLITE_DISABLE_CRYPT_FUNCTION=ON`
 - `MYLITE_DISABLE_DES_FUNCTIONS=ON`
@@ -81,7 +82,8 @@ include the `type-plugin-size-profile`, `charset-small-profile`, and
 `udf-runtime-size-profile`, `window-function-size-profile`, and
 `sql-crypto-function-size-profile`, `server-encryption-size-profile`,
 `openssl-digest-size-profile`, and the deeper
-`no-binlog-core-size-profile` follow-up attempts, which remove the built-in
+`no-binlog-core-size-profile` follow-up attempts, and
+`tc-log-mmap-size-profile`. Together these remove the built-in
 `type_geom`, `type_inet`, `type_uuid`, `sequence`, `thread_pool_info`,
 `user_variables`, `userstat`, `mhnsw`, `csv`, and `myisammrg` plugins, set
 `WITH_EXTRA_CHARSETS=none`, omit the Oracle SQL-mode parser, omit XML, GIS, and
@@ -136,7 +138,9 @@ remaining OpenSSL-backed internal MD5/SHA-1 wrappers in the aggressive embedded
 profile so `libcrypto.so.3` is no longer a linked runtime dependency, and
 deepen the no-binlog core profile by no-oping embedded binlog open/recovery and
 annotated-row helpers while omitting `gtid_index.cc`, `log_event.cc`,
-`rpl_injector.cc`, and `rpl_record.cc`.
+`rpl_injector.cc`, and `rpl_record.cc`, and omit the inherited mmap-backed
+transaction coordinator `tc.log` implementation while keeping inert status
+variables.
 
 `no-myisam-temp-spill-size-profile` was measured separately as an opt-in
 `MYLITE_DISABLE_MYISAM_TEMP_SPILL=ON` experiment. It is not part of the current
@@ -156,38 +160,38 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 ## Current baseline
 
 The current values were measured from
-`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-binlog-gtid-cleanup`.
+`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-tc-log-mmap`.
 Paths below use the default build directory names for readability.
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
-| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 30,703,028 | 29.28 | Main embedded MariaDB archive, 423 objects, stripped; section metadata grows the archive |
-| `build/mariadb-minsize/mylite/libmylite.a` | 122,800 | 0.12 | First-party public wrapper |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 30,685,528 | 29.26 | Main embedded MariaDB archive, 425 objects, stripped; section metadata grows the archive |
+| `build/mariadb-minsize/mylite/libmylite.a` | 122,792 | 0.12 | First-party public wrapper |
 | `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 388,440 | 0.37 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 8,001,824 | 7.63 | Unstripped linked smoke binary, lld RELR, section GC, ICF, reduced unwind tables, no OpenSSL runtime dependency, no retained binlog event reader or GTID-index writer code, no server encryption hooks, no window functions, no UDF runtime, no SQL crypto/password functions, no VIO TLS transport, no `ENCRYPT()`, no legacy DES, no `KDF()`, no zlib compression, and no dynamic plugin loading |
-| stripped `mylite-open-close-smoke` copy | 5,757,656 | 5.49 | `strip --strip-unneeded` on copied binary |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 7,993,536 | 7.62 | Unstripped linked smoke binary, lld RELR, section GC, ICF, reduced unwind tables, no OpenSSL runtime dependency, no retained binlog event reader or GTID-index writer code, no real mmap `tc.log` transaction coordinator, no server encryption hooks, no window functions, no UDF runtime, no SQL crypto/password functions, no VIO TLS transport, no `ENCRYPT()`, no legacy DES, no `KDF()`, no zlib compression, and no dynamic plugin loading |
+| stripped `mylite-open-close-smoke` copy | 5,751,536 | 5.49 | `strip --strip-unneeded` on copied binary |
 
 The linked smoke binary has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 4,538,236 |
-| data | 1,216,104 |
-| bss | 243,953 |
-| total `size` decimal | 5,998,293 |
+| text | 4,532,260 |
+| data | 1,215,952 |
+| bss | 240,881 |
+| total `size` decimal | 5,989,093 |
 
 Largest linked sections in the open-close smoke binary:
 
 | Section | Bytes | Interpretation |
 | --- | ---: | --- |
-| `.text` | 2,805,996 | Executable code |
-| `.data.rel.ro` | 1,003,576 | Relocated read-only data |
-| `.rodata` | 973,259 | Parser tables, SQL metadata, constants, retained Unicode data |
-| `.eh_frame` | 517,468 | Unwind metadata |
-| `.data` | 184,512 | Writable data |
-| `.bss` | 239,897 | Zero-initialized writable data |
-| `.eh_frame_hdr` | 108,684 | Unwind table index |
-| `.rela.dyn` | 46,008 | Remaining unpacked dynamic relocations |
+| `.text` | 2,801,700 | Executable code |
+| `.data.rel.ro` | 1,003,472 | Relocated read-only data |
+| `.rodata` | 972,747 | Parser tables, SQL metadata, constants, retained Unicode data |
+| `.eh_frame` | 516,516 | Unwind metadata |
+| `.data` | 184,520 | Writable data |
+| `.bss` | 238,889 | Zero-initialized writable data |
+| `.eh_frame_hdr` | 108,492 | Unwind table index |
+| `.rela.dyn` | 45,984 | Remaining unpacked dynamic relocations |
 | `.gcc_except_table` | 41,172 | Exception metadata |
 | `.relr.dyn` | 18,424 | Packed relative relocations |
 
@@ -307,6 +311,7 @@ The current built-in plugins are:
 | `server-encryption-size-profile` after SQL crypto | 30,983,136 | -12,422,296 | 5,815,856 | -13,516,048 | Passes current smokes and harness; omits inherited server-side encryption hooks for binlogs and temporary IO caches, but `libcrypto.so.3` remains rooted by auth, digest, table, and startup compatibility helpers |
 | `openssl-digest-size-profile` after server encryption | 30,943,248 | -12,462,184 | 5,816,536 | -13,515,368 | Passes current smokes and harness; replaces retained OpenSSL-backed MD5/SHA-1 wrappers, omits the startup compatibility check, and removes the `libcrypto.so.3` runtime dependency; stripped linked smoke grows by 680 bytes while vendored dependency size drops 4,597,928 bytes |
 | `no-binlog-core-size-profile` follow-up after OpenSSL digest | 30,703,028 | -12,702,404 | 5,757,656 | -13,574,248 | Passes current smokes and harness; no-ops embedded binlog open/recovery and annotated-row helpers, removes `gtid_index.cc`, `log_event.cc`, and `rpl_injector.cc`, and keeps a tiny `str_to_hex()` replacement for SQL string rendering |
+| `tc-log-mmap-size-profile` after no-binlog core follow-up | 30,685,528 | -12,719,904 | 5,751,536 | -13,580,368 | Passes current smokes and harness; omits the inherited mmap-backed `tc.log` transaction coordinator implementation and leaves inert status variables |
 | `no-myisam-temp-spill-size-profile` after no-binlog-core | 32,836,602 | -10,568,830 | 6,437,408 | -12,894,496 | Opt-in experiment only; open/close smoke passes, but storage/catalog harness fails because schema-table queries need disk temp tables |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
 | Strip archive with `strip --strip-unneeded` | 41,873,048 | -1,532,384 | n/a | n/a | Higher risk than `strip -g` for static archives |
@@ -330,7 +335,7 @@ profile now passes current smokes while retaining the compiled default
 `utf8mb4_uca1400_ai_ci`.
 
 Stripping the current linked open-close smoke binary reduces it from
-8,099,344 bytes to 5,815,856 bytes, saving 2,283,488 bytes, or 2.18 MiB. That
+7,993,536 bytes to 5,751,536 bytes, saving 2,242,000 bytes, or 2.14 MiB. That
 remains the lowest-risk packaging win for any copied executable or
 shared-library style artifact.
 
@@ -473,6 +478,14 @@ lists `libcrypto.so.3`. If a package vendors runtime libraries, that removes
 4,597,928 bytes from the current Ubuntu 24.04 ARM64 bundle before compression.
 The new `mylite-digest-smoke` verifies standard MD5/SHA-1 vectors, multi-input
 wrappers, context APIs, and the stubbed startup compatibility check.
+
+The `tc-log-mmap-size-profile` attempt then removed the real
+`TC_LOG_MMAP` implementation from the aggressive embedded profile. On top of
+the deeper no-binlog follow-up, it reduced the static archive by 17,500 bytes
+and the stripped linked smoke by 6,120 bytes. The linked smoke no longer
+defines `TC_LOG_MMAP` methods or its vtable; only the dummy `tc_log_mmap`
+object, `opt_tc_log_size`, and zero-valued `Tc_log_*` status globals remain.
+The compatibility harness reports no unexpected or known inherited sidecars.
 
 The LTO build reduced the stripped linked smoke binary by 1.25 MiB, but the
 static archive became 326.61 MiB and GCC emitted type/ODR mismatch warnings

@@ -10555,6 +10555,7 @@ TC_LOG::run_commit_ordered(THD *thd, bool all)
   }
 }
 
+#ifdef MYLITE_HAVE_TC_LOG_MMAP
 
 int TC_LOG_MMAP::log_and_order(THD *thd, my_xid xid, bool all,
                                bool need_prepare_ordered,
@@ -10665,6 +10666,7 @@ int TC_LOG_MMAP::log_and_order(THD *thd, my_xid xid, bool all,
   return cookie;
 }
 
+#endif
 
 /********* transaction coordinator log for 2pc - mmap() based solution *******/
 
@@ -10705,15 +10707,14 @@ int TC_LOG_MMAP::log_and_order(THD *thd, my_xid xid, bool all,
 */
 
 ulong tc_log_page_waits= 0;
+ulong opt_tc_log_size;
+ulong tc_log_max_pages_used=0, tc_log_page_size=0, tc_log_cur_pages_used=0;
 
-#ifdef HAVE_MMAP
+#ifdef MYLITE_HAVE_TC_LOG_MMAP
 
 #define TC_LOG_HEADER_SIZE (sizeof(tc_log_magic)+1)
 
 static const uchar tc_log_magic[]={(uchar) 254, 0x23, 0x05, 0x74};
-
-ulong opt_tc_log_size;
-ulong tc_log_max_pages_used=0, tc_log_page_size=0, tc_log_cur_pages_used=0;
 
 int TC_LOG_MMAP::open(const char *opt_name)
 {
