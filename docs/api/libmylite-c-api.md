@@ -102,6 +102,15 @@ as MariaDB SQLSTATE `HY000` with read-only errno/message details.
 preflight fail with `MYLITE_CANTOPEN` if the path already exists. It is a
 create-or-fail path rule, not a locking or multi-process concurrency promise.
 
+`MYLITE_OPEN_URI` enables local `file:` URI interpretation. The supported URI
+surface is intentionally narrow: empty or `localhost` authorities, percent-
+decoded local paths, and `mode=ro`, `mode=rw`, or `mode=rwc`. URI mode can
+provide read/write/create flags when they are omitted, but it must agree with
+explicit flags when both are present. Unsupported query parameters, fragments,
+remote authorities, malformed percent escapes, and unsupported modes return
+`MYLITE_MISUSE`. Non-URI strings passed with `MYLITE_OPEN_URI` continue to
+open as ordinary paths.
+
 ## Direct execution
 
 ```c

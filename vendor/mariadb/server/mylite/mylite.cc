@@ -115,6 +115,19 @@ bool runtime_shutdown_registered= false;
 int set_error(mylite_db *db, int code, unsigned mariadb_errno,
               const char *sqlstate, const std::string &message);
 void clear_error(mylite_db *db);
+bool resolve_open_filename_and_flags(const char *filename,
+                                     unsigned input_flags,
+                                     std::string *resolved_filename,
+                                     unsigned *resolved_flags,
+                                     std::string *message);
+bool parse_file_uri(const std::string &uri, unsigned input_flags,
+                    std::string *resolved_filename,
+                    unsigned *resolved_flags, std::string *message);
+bool apply_uri_mode(const std::string &mode, unsigned input_flags,
+                    unsigned *resolved_flags, std::string *message);
+bool uri_percent_decode(const std::string &input, std::string *output,
+                        std::string *message);
+int uri_hex_value(char value);
 bool validate_open_inputs(const char *filename, unsigned flags,
                           const char *profile, mylite_db *db);
 bool make_absolute_path(const char *filename, std::string *path,
@@ -186,14 +199,22 @@ extern "C" int mylite_open_v2(const char *filename, mylite_db **out_db,
     return MYLITE_NOMEM;
   *out_db= db;
 
-  if (!validate_open_inputs(filename, flags, profile, db))
+  std::string resolved_filename;
+  unsigned resolved_flags= flags;
+  std::string path_message;
+  if (!resolve_open_filename_and_flags(filename, flags, &resolved_filename,
+                                       &resolved_flags, &path_message))
+    return set_error(db, MYLITE_MISUSE, 0, "HY000", path_message);
+
+  if (!validate_open_inputs(resolved_filename.c_str(), resolved_flags,
+                            profile, db))
     return db->errcode;
 
-  std::string path_message;
-  if (!make_absolute_path(filename, &db->filename, &path_message))
+  if (!make_absolute_path(resolved_filename.c_str(), &db->filename,
+                          &path_message))
     return set_error(db, MYLITE_CANTOPEN, 0, "HY000", path_message);
   db->runtime_dir= db->filename + ".mylite-runtime";
-  const bool readonly= (flags & MYLITE_OPEN_READONLY) != 0;
+  const bool readonly= (resolved_flags & MYLITE_OPEN_READONLY) != 0;
 
   std::lock_guard<std::mutex> guard(runtime_mutex);
   if (runtime.started && runtime.filename != db->filename)
@@ -209,7 +230,7 @@ extern "C" int mylite_open_v2(const char *filename, mylite_db **out_db,
                      "open mode");
   }
 
-  if (!prepare_primary_file(db->filename, flags, &path_message))
+  if (!prepare_primary_file(db->filename, resolved_flags, &path_message))
     return set_error(db, MYLITE_CANTOPEN, 0, "HY000", path_message);
 
   if (!ensure_runtime_directories(db->runtime_dir, &path_message))
@@ -776,6 +797,203 @@ int set_error(mylite_db *db, int code, unsigned mariadb_errno,
 void clear_error(mylite_db *db)
 {
   set_error(db, MYLITE_OK, 0, "00000", "not an error");
+}
+
+bool resolve_open_filename_and_flags(const char *filename,
+                                     unsigned input_flags,
+                                     std::string *resolved_filename,
+                                     unsigned *resolved_flags,
+                                     std::string *message)
+{
+  *resolved_filename= filename ? filename : "";
+  *resolved_flags= input_flags;
+  if ((input_flags & MYLITE_OPEN_URI) == 0)
+    return true;
+
+  *resolved_flags= input_flags & ~MYLITE_OPEN_URI;
+  if (resolved_filename->compare(0, 5, "file:") != 0)
+    return true;
+
+  return parse_file_uri(*resolved_filename, input_flags, resolved_filename,
+                        resolved_flags, message);
+}
+
+bool parse_file_uri(const std::string &uri, unsigned input_flags,
+                    std::string *resolved_filename,
+                    unsigned *resolved_flags, std::string *message)
+{
+  std::string rest= uri.substr(5);
+  if (rest.find('#') != std::string::npos)
+  {
+    *message= "URI fragments are not supported";
+    return false;
+  }
+
+  std::string query;
+  const std::string::size_type query_pos= rest.find('?');
+  if (query_pos != std::string::npos)
+  {
+    query= rest.substr(query_pos + 1);
+    rest.erase(query_pos);
+  }
+
+  if (rest.compare(0, 2, "//") == 0)
+  {
+    const std::string::size_type path_pos= rest.find('/', 2);
+    std::string authority;
+    if (path_pos == std::string::npos)
+    {
+      authority= rest.substr(2);
+      rest.clear();
+    }
+    else
+    {
+      authority= rest.substr(2, path_pos - 2);
+      rest.erase(0, path_pos);
+    }
+
+    std::string decoded_authority;
+    if (!uri_percent_decode(authority, &decoded_authority, message))
+      return false;
+    if (!decoded_authority.empty() && decoded_authority != "localhost")
+    {
+      *message= "only local file URI authorities are supported";
+      return false;
+    }
+  }
+
+  if (!uri_percent_decode(rest, resolved_filename, message))
+    return false;
+
+  bool mode_seen= false;
+  std::string mode;
+  while (!query.empty())
+  {
+    const std::string::size_type amp= query.find('&');
+    const std::string part= amp == std::string::npos
+      ? query
+      : query.substr(0, amp);
+    if (amp == std::string::npos)
+      query.clear();
+    else
+      query.erase(0, amp + 1);
+    if (part.empty())
+    {
+      *message= "empty URI query parameters are not supported";
+      return false;
+    }
+
+    const std::string::size_type equal= part.find('=');
+    const std::string encoded_name= equal == std::string::npos
+      ? part
+      : part.substr(0, equal);
+    const std::string encoded_value= equal == std::string::npos
+      ? ""
+      : part.substr(equal + 1);
+    std::string name;
+    std::string value;
+    if (!uri_percent_decode(encoded_name, &name, message) ||
+        !uri_percent_decode(encoded_value, &value, message))
+      return false;
+
+    if (name != "mode")
+    {
+      *message= "unsupported URI query parameter: " + name;
+      return false;
+    }
+    if (mode_seen)
+    {
+      *message= "duplicate URI mode parameter";
+      return false;
+    }
+    mode_seen= true;
+    mode= value;
+  }
+
+  if (mode_seen &&
+      !apply_uri_mode(mode, input_flags, resolved_flags, message))
+    return false;
+
+  return true;
+}
+
+bool apply_uri_mode(const std::string &mode, unsigned input_flags,
+                    unsigned *resolved_flags, std::string *message)
+{
+  unsigned mode_flags= 0;
+  if (mode == "ro")
+    mode_flags= MYLITE_OPEN_READONLY;
+  else if (mode == "rw")
+    mode_flags= MYLITE_OPEN_READWRITE;
+  else if (mode == "rwc")
+    mode_flags= MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE;
+  else
+  {
+    *message= "unsupported URI mode: " + mode;
+    return false;
+  }
+
+  const unsigned access_mask= MYLITE_OPEN_READONLY | MYLITE_OPEN_READWRITE |
+                              MYLITE_OPEN_CREATE;
+  const unsigned explicit_flags= input_flags & access_mask;
+  if (explicit_flags == 0)
+  {
+    *resolved_flags= (*resolved_flags & ~access_mask) | mode_flags;
+    return true;
+  }
+
+  if (explicit_flags != mode_flags)
+  {
+    *message= "URI mode does not match explicit open flags";
+    return false;
+  }
+  return true;
+}
+
+bool uri_percent_decode(const std::string &input, std::string *output,
+                        std::string *message)
+{
+  output->clear();
+  for (size_t i= 0; i < input.size(); ++i)
+  {
+    if (input[i] != '%')
+    {
+      output->push_back(input[i]);
+      continue;
+    }
+    if (i + 2 >= input.size())
+    {
+      *message= "malformed URI percent encoding";
+      return false;
+    }
+    const int high= uri_hex_value(input[i + 1]);
+    const int low= uri_hex_value(input[i + 2]);
+    if (high < 0 || low < 0)
+    {
+      *message= "malformed URI percent encoding";
+      return false;
+    }
+    const char decoded= static_cast<char>((high << 4) | low);
+    if (decoded == '\0')
+    {
+      *message= "URI percent-encoded NUL is not supported";
+      return false;
+    }
+    output->push_back(decoded);
+    i+= 2;
+  }
+  return true;
+}
+
+int uri_hex_value(char value)
+{
+  if (value >= '0' && value <= '9')
+    return value - '0';
+  if (value >= 'a' && value <= 'f')
+    return value - 'a' + 10;
+  if (value >= 'A' && value <= 'F')
+    return value - 'A' + 10;
+  return -1;
 }
 
 bool validate_open_inputs(const char *filename, unsigned flags,

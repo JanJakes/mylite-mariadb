@@ -66,6 +66,9 @@ struct SmokeResult
   std::string readonly_prepare_message;
   std::string readonly_file;
   std::string exclusive_existing_message;
+  std::string uri_rows;
+  std::string uri_readonly_rows;
+  std::string uri_readonly_insert_message;
   std::string prepared_unbound_message;
   std::string prepared_invalid_bind_message;
   std::string prepared_rebind_message;
@@ -99,6 +102,9 @@ static int run_readonly_smoke(const SmokeOptions &options,
                               SmokeResult *result);
 static int run_exclusive_smoke(const SmokeOptions &options,
                                SmokeResult *result);
+static int run_uri_smoke(const SmokeOptions &options, SmokeResult *result);
+static int run_uri_readonly_smoke(const SmokeOptions &options,
+                                  SmokeResult *result);
 static bool check_close_null(SmokeResult *result);
 static bool check_null_out_db(const SmokeOptions &options, SmokeResult *result);
 static bool check_null_filename(SmokeResult *result);
@@ -131,6 +137,9 @@ static bool check_readonly_existing_database(const SmokeOptions &options,
                                              SmokeResult *result);
 static bool check_exclusive_open(const SmokeOptions &options,
                                  SmokeResult *result);
+static bool check_uri_open(const SmokeOptions &options, SmokeResult *result);
+static bool check_uri_readonly_open(const SmokeOptions &options,
+                                    SmokeResult *result);
 static bool exec_statement(mylite_db *db, const char *sql, const char *label,
                            SmokeResult *result);
 static bool exec_query_capture(mylite_db *db, const char *sql,
@@ -144,6 +153,9 @@ static std::string warning_summary(unsigned level, unsigned code,
 static std::string prepared_row_summary(mylite_stmt *stmt);
 static std::string prepared_bound_row_summary(mylite_stmt *stmt);
 static std::string prepared_type_summary(mylite_stmt *stmt);
+static std::string file_uri_for_path(const std::string &path,
+                                     const char *query);
+static std::string uri_percent_encode_path(const std::string &path);
 static std::string hex_bytes(const void *data, size_t length);
 static bool snapshot_file(const std::string &path, FileSnapshot *snapshot,
                           std::string *message);
@@ -200,7 +212,8 @@ static bool parse_options(int argc, char **argv, SmokeOptions *options,
       !require_option(options->report, "--report", error))
     return false;
   if (options->mode != "default" && options->mode != "readonly" &&
-      options->mode != "exclusive")
+      options->mode != "exclusive" && options->mode != "uri" &&
+      options->mode != "uri-readonly")
   {
     *error= "unsupported mode: " + options->mode;
     return false;
@@ -214,6 +227,10 @@ static int run_smoke(const SmokeOptions &options, SmokeResult *result)
     return run_readonly_smoke(options, result);
   if (options.mode == "exclusive")
     return run_exclusive_smoke(options, result);
+  if (options.mode == "uri")
+    return run_uri_smoke(options, result);
+  if (options.mode == "uri-readonly")
+    return run_uri_readonly_smoke(options, result);
   return run_default_smoke(options, result);
 }
 
@@ -310,6 +327,45 @@ static int run_exclusive_smoke(const SmokeOptions &options, SmokeResult *result)
   if (!ok)
   {
     result->message= "exclusive smoke failed";
+    return result->status;
+  }
+
+  result->phase= "complete";
+  result->status= 0;
+  result->message= "ok";
+  return result->status;
+}
+
+static int run_uri_smoke(const SmokeOptions &options, SmokeResult *result)
+{
+  bool ok= true;
+
+  result->phase= "uri_open";
+  ok= check_uri_open(options, result) && ok;
+
+  if (!ok)
+  {
+    result->message= "URI smoke failed";
+    return result->status;
+  }
+
+  result->phase= "complete";
+  result->status= 0;
+  result->message= "ok";
+  return result->status;
+}
+
+static int run_uri_readonly_smoke(const SmokeOptions &options,
+                                  SmokeResult *result)
+{
+  bool ok= true;
+
+  result->phase= "uri_readonly_open";
+  ok= check_uri_readonly_open(options, result) && ok;
+
+  if (!ok)
+  {
+    result->message= "URI read-only smoke failed";
     return result->status;
   }
 
@@ -1320,6 +1376,176 @@ static bool check_exclusive_open(const SmokeOptions &options,
   return ok;
 }
 
+static bool check_uri_open(const SmokeOptions &options, SmokeResult *result)
+{
+  unlink(options.database.c_str());
+
+  const std::string create_uri= file_uri_for_path(options.database,
+                                                  "mode=rwc");
+  const std::string readwrite_uri= file_uri_for_path(options.database,
+                                                     "mode=rw");
+  const std::string localhost_uri= "file://localhost" +
+                                   uri_percent_encode_path(options.database) +
+                                   "?mode=rw";
+  const std::string mismatch_uri= file_uri_for_path(options.database,
+                                                    "mode=ro");
+  mylite_db *db= nullptr;
+  int rc= mylite_open_v2("file://remote.example/tmp/remote.mylite", &db,
+                         MYLITE_OPEN_URI | MYLITE_OPEN_READWRITE, nullptr);
+  bool ok= record_result(result, "uri_remote_authority", MYLITE_MISUSE,
+                         rc, db);
+  mylite_close(db);
+
+  db= nullptr;
+  rc= mylite_open_v2("file:/tmp/bad%zz.mylite", &db,
+                     MYLITE_OPEN_URI | MYLITE_OPEN_READWRITE, nullptr);
+  ok= record_result(result, "uri_bad_percent", MYLITE_MISUSE, rc, db) &&
+      ok;
+  mylite_close(db);
+
+  db= nullptr;
+  rc= mylite_open_v2("file:/tmp/unknown.mylite?cache=shared", &db,
+                     MYLITE_OPEN_URI | MYLITE_OPEN_READWRITE, nullptr);
+  ok= record_result(result, "uri_unknown_parameter", MYLITE_MISUSE, rc,
+                    db) && ok;
+  mylite_close(db);
+
+  db= nullptr;
+  rc= mylite_open_v2("file:/tmp/duplicate.mylite?mode=rw&mode=ro", &db,
+                     MYLITE_OPEN_URI, nullptr);
+  ok= record_result(result, "uri_duplicate_mode", MYLITE_MISUSE, rc, db) &&
+      ok;
+  mylite_close(db);
+
+  db= nullptr;
+  rc= mylite_open_v2("file:/tmp/unsupported.mylite?mode=memory", &db,
+                     MYLITE_OPEN_URI, nullptr);
+  ok= record_result(result, "uri_unsupported_mode", MYLITE_MISUSE, rc,
+                    db) && ok;
+  mylite_close(db);
+
+  db= nullptr;
+  rc= mylite_open_v2(mismatch_uri.c_str(), &db,
+                     MYLITE_OPEN_URI | MYLITE_OPEN_READWRITE |
+                       MYLITE_OPEN_CREATE,
+                     nullptr);
+  ok= record_result(result, "uri_mode_flag_mismatch", MYLITE_MISUSE, rc,
+                    db) && ok;
+  mylite_close(db);
+
+  db= nullptr;
+  rc= mylite_open_v2("file:/tmp/fragment.mylite#ignored", &db,
+                     MYLITE_OPEN_URI | MYLITE_OPEN_READWRITE, nullptr);
+  ok= record_result(result, "uri_fragment", MYLITE_MISUSE, rc, db) && ok;
+  mylite_close(db);
+
+  db= nullptr;
+  rc= mylite_open_v2(create_uri.c_str(), &db, MYLITE_OPEN_URI, nullptr);
+  ok= record_result(result, "uri_mode_create_open", MYLITE_OK, rc, db) &&
+      ok;
+  if (!db)
+    return ok;
+
+  ok= exec_statement(db,
+                     "CREATE TABLE mylite.uri_rows "
+                     "(id INT NOT NULL, note VARCHAR(12), PRIMARY KEY(id)) "
+                     "ENGINE=MYLITE",
+                     "uri create table", result) && ok;
+  ok= exec_statement(db,
+                     "INSERT INTO mylite.uri_rows VALUES "
+                     "(1, 'one'), (2, 'two')",
+                     "uri insert rows", result) && ok;
+  ExecCapture capture;
+  ok= exec_query_capture(db,
+                         "SELECT id, note FROM mylite.uri_rows ORDER BY id",
+                         "uri select rows", &capture, result) && ok;
+  result->uri_rows= join_strings(capture.rows, ",");
+  if (result->uri_rows != "1:one,2:two")
+    ok= false;
+  rc= mylite_close(db);
+  ok= record_result(result, "uri_mode_create_close", MYLITE_OK, rc,
+                    nullptr) && ok;
+
+  db= nullptr;
+  rc= mylite_open_v2(readwrite_uri.c_str(), &db, MYLITE_OPEN_URI, nullptr);
+  ok= record_result(result, "uri_mode_readwrite_open", MYLITE_OK, rc, db) &&
+      ok;
+  if (db)
+  {
+    rc= mylite_close(db);
+    ok= record_result(result, "uri_mode_readwrite_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+
+  db= nullptr;
+  rc= mylite_open_v2(localhost_uri.c_str(), &db, MYLITE_OPEN_URI, nullptr);
+  ok= record_result(result, "uri_localhost_open", MYLITE_OK, rc, db) && ok;
+  if (db)
+  {
+    rc= mylite_close(db);
+    ok= record_result(result, "uri_localhost_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+
+  db= nullptr;
+  rc= mylite_open_v2(options.database.c_str(), &db,
+                     MYLITE_OPEN_URI | MYLITE_OPEN_READWRITE |
+                       MYLITE_OPEN_CREATE,
+                     nullptr);
+  ok= record_result(result, "uri_plain_path_open", MYLITE_OK, rc, db) &&
+      ok;
+  if (db)
+  {
+    ExecCapture plain_capture;
+    ok= exec_query_capture(db,
+                           "SELECT id, note FROM mylite.uri_rows ORDER BY id",
+                           "uri plain path rows", &plain_capture, result) &&
+        ok;
+    if (join_strings(plain_capture.rows, ",") != "1:one,2:two")
+      ok= false;
+    rc= mylite_close(db);
+    ok= record_result(result, "uri_plain_path_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+
+  return ok;
+}
+
+static bool check_uri_readonly_open(const SmokeOptions &options,
+                                    SmokeResult *result)
+{
+  const std::string readonly_uri= file_uri_for_path(options.database,
+                                                    "mode=ro");
+  mylite_db *db= nullptr;
+  int rc= mylite_open_v2(readonly_uri.c_str(), &db, MYLITE_OPEN_URI, nullptr);
+  bool ok= record_result(result, "uri_readonly_open", MYLITE_OK, rc, db);
+  if (!db)
+    return ok;
+
+  ExecCapture capture;
+  ok= exec_query_capture(db,
+                         "SELECT id, note FROM mylite.uri_rows ORDER BY id",
+                         "uri readonly rows", &capture, result) && ok;
+  result->uri_readonly_rows= join_strings(capture.rows, ",");
+  if (result->uri_readonly_rows != "1:one,2:two")
+    ok= false;
+
+  rc= mylite_exec(db, "INSERT INTO mylite.uri_rows VALUES (3, 'three')",
+                  nullptr, nullptr, nullptr);
+  result->uri_readonly_insert_message= mylite_errmsg(db);
+  ok= record_result(result, "uri_readonly_insert_rejected",
+                    MYLITE_READONLY, rc, db) && ok;
+  if (mylite_mariadb_errno(db) != 1036 ||
+      result->uri_readonly_insert_message.find("read only") ==
+        std::string::npos)
+    ok= false;
+
+  rc= mylite_close(db);
+  ok= record_result(result, "uri_readonly_close", MYLITE_OK, rc, nullptr) &&
+      ok;
+  return ok;
+}
+
 static bool exec_statement(mylite_db *db, const char *sql, const char *label,
                            SmokeResult *result)
 {
@@ -1395,6 +1621,42 @@ static std::string prepared_type_summary(mylite_stmt *stmt)
   for (unsigned i= 0; i < mylite_column_count(stmt); ++i)
     types.push_back(std::to_string(mylite_column_type(stmt, i)));
   return join_strings(types, ",");
+}
+
+static std::string file_uri_for_path(const std::string &path,
+                                     const char *query)
+{
+  std::string uri= "file:";
+  uri+= uri_percent_encode_path(path);
+  if (query && query[0])
+  {
+    uri+= "?";
+    uri+= query;
+  }
+  return uri;
+}
+
+static std::string uri_percent_encode_path(const std::string &path)
+{
+  const char hex[]= "0123456789ABCDEF";
+  std::string encoded;
+  for (unsigned char value : path)
+  {
+    const bool safe= (value >= 'A' && value <= 'Z') ||
+                     (value >= 'a' && value <= 'z') ||
+                     (value >= '0' && value <= '9') ||
+                     value == '/' || value == '-' || value == '_' ||
+                     value == '.' || value == '~' || value == ':';
+    if (safe)
+    {
+      encoded.push_back(static_cast<char>(value));
+      continue;
+    }
+    encoded.push_back('%');
+    encoded.push_back(hex[value >> 4]);
+    encoded.push_back(hex[value & 0x0f]);
+  }
+  return encoded;
 }
 
 static std::string hex_bytes(const void *data, size_t length)
@@ -1579,6 +1841,13 @@ static void write_report(const SmokeOptions &options,
   if (!result.exclusive_existing_message.empty())
     report << "exclusive_existing_message="
            << result.exclusive_existing_message << "\n";
+  if (!result.uri_rows.empty())
+    report << "uri_rows=" << result.uri_rows << "\n";
+  if (!result.uri_readonly_rows.empty())
+    report << "uri_readonly_rows=" << result.uri_readonly_rows << "\n";
+  if (!result.uri_readonly_insert_message.empty())
+    report << "uri_readonly_insert_message="
+           << result.uri_readonly_insert_message << "\n";
   if (!result.prepared_unbound_message.empty())
     report << "prepared_unbound_message=" << result.prepared_unbound_message
            << "\n";

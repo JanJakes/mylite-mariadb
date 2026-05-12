@@ -47,8 +47,11 @@ run_inside_container() {
   local runtime_dir="${abs_build_dir}/libmylite-open-close"
   local database="${runtime_dir}/open-close.mylite"
   local exclusive_database="${runtime_dir}/exclusive-open.mylite"
+  local uri_database="${runtime_dir}/uri open.mylite"
   local report="${abs_build_dir}/libmylite-open-close-report.txt"
   local exclusive_report="${abs_build_dir}/libmylite-open-close-exclusive-report.txt"
+  local uri_report="${abs_build_dir}/libmylite-open-close-uri-report.txt"
+  local uri_readonly_report="${abs_build_dir}/libmylite-open-close-uri-readonly-report.txt"
   local readonly_report="${abs_build_dir}/libmylite-open-close-readonly-report.txt"
 
   rm -rf "${runtime_dir}"
@@ -57,9 +60,13 @@ run_inside_container() {
   local smoke="${abs_build_dir}/mylite/mylite-open-close-smoke"
   local smoke_log="${abs_build_dir}/libmylite-open-close-output.log"
   local exclusive_log="${abs_build_dir}/libmylite-open-close-exclusive-output.log"
+  local uri_log="${abs_build_dir}/libmylite-open-close-uri-output.log"
+  local uri_readonly_log="${abs_build_dir}/libmylite-open-close-uri-readonly-output.log"
   local readonly_log="${abs_build_dir}/libmylite-open-close-readonly-output.log"
   rm -f "${smoke_log}"
   rm -f "${exclusive_log}"
+  rm -f "${uri_log}"
+  rm -f "${uri_readonly_log}"
   rm -f "${readonly_log}"
 
   local exclusive_status=0
@@ -67,6 +74,18 @@ run_inside_container() {
     "--database=${exclusive_database}" \
     "--mode=exclusive" \
     "--report=${exclusive_report}" > "${exclusive_log}" 2>&1 || exclusive_status=$?
+
+  local uri_status=0
+  "${smoke}" \
+    "--database=${uri_database}" \
+    "--mode=uri" \
+    "--report=${uri_report}" > "${uri_log}" 2>&1 || uri_status=$?
+
+  local uri_readonly_status=0
+  "${smoke}" \
+    "--database=${uri_database}" \
+    "--mode=uri-readonly" \
+    "--report=${uri_readonly_report}" > "${uri_readonly_log}" 2>&1 || uri_readonly_status=$?
 
   local status=0
   "${smoke}" \
@@ -81,14 +100,24 @@ run_inside_container() {
     "--report=${readonly_report}" > "${readonly_log}" 2>&1 || readonly_status=$?
 
   append_observed_files "${runtime_dir}" "${exclusive_report}" "${exclusive_log}"
+  append_observed_files "${runtime_dir}" "${uri_report}" "${uri_log}"
+  append_observed_files "${runtime_dir}" "${uri_readonly_report}" "${uri_readonly_log}"
   append_observed_files "${runtime_dir}" "${report}" "${smoke_log}"
   append_observed_files "${runtime_dir}" "${readonly_report}" "${readonly_log}"
   printf "libmylite exclusive-open smoke report: %s\n" "${exclusive_report}"
+  printf "libmylite URI-open smoke report: %s\n" "${uri_report}"
+  printf "libmylite URI read-only smoke report: %s\n" "${uri_readonly_report}"
   printf "libmylite open/close smoke report: %s\n" "${report}"
   printf "libmylite read-only smoke report: %s\n" "${readonly_report}"
 
   if [[ "${exclusive_status}" -ne 0 ]]; then
     return "${exclusive_status}"
+  fi
+  if [[ "${uri_status}" -ne 0 ]]; then
+    return "${uri_status}"
+  fi
+  if [[ "${uri_readonly_status}" -ne 0 ]]; then
+    return "${uri_readonly_status}"
   fi
   if [[ "${status}" -ne 0 ]]; then
     return "${status}"

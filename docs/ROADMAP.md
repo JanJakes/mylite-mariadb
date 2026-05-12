@@ -29,8 +29,10 @@ through that handle without reaching for `MYSQL *` internals. The API also
 exposes handle-local affected rows, generated insert ids, warning counts, and
 structured warning lookup for the last executed statement, plus the first
 prepared statement lifecycle with binary-safe column bytes and parameter
-binding for NULL, numeric, text, and BLOB values. The first static
-`MYLITE` storage-engine skeleton is registered in the embedded profile.
+binding for NULL, numeric, text, and BLOB values. `mylite_open_v2()` now
+supports local `file:` URI filenames through `MYLITE_OPEN_URI`, including
+`mode=ro`, `mode=rw`, and `mode=rwc`. The first static `MYLITE`
+storage-engine skeleton is registered in the embedded profile.
 The engine can discover user-created catalog-backed table definitions, run a
 bounded `CREATE`, copy `ALTER`, `RENAME`, and `DROP` lifecycle without leaving
 durable `.frm` table-definition files, persist frm-backed table definitions in
@@ -191,7 +193,7 @@ without injecting the old hard-coded `mylite.probe` seed table.
 | 50 | `foreign-server-cache-startup` | Done | Initialize the embedded foreign-server cache without probing missing `mysql.servers` system tables at startup. |
 | 51 | `aria-startup-sidecars` | Done | Omit Aria from the default MyLite embedded profile and remove the remaining inherited Aria log/control sidecar exception. |
 | 52 | `seed-probe-removal` | Done | Remove the hard-coded `mylite.probe` seed table now that user-created catalog tables cover discovery. |
-| 53 | `libmylite-uri-open` | In progress | Support local `file:` URI filenames through the existing public `MYLITE_OPEN_URI` flag. |
+| 53 | `libmylite-uri-open` | Done | Support local `file:` URI filenames through the existing public `MYLITE_OPEN_URI` flag. |
 
 ## Size and profile direction
 

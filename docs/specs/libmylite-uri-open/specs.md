@@ -156,11 +156,14 @@ No new dependency. All changes remain in existing GPL-2.0-only MyLite source.
 
 ## Test And Verification Plan
 
-- Extend `open_close_smoke.cc` with `--mode=uri`.
-- Extend `tools/run-libmylite-open-close-smoke.sh` to run the URI mode in a
-  fresh process.
+- Extend `open_close_smoke.cc` with fresh-process `--mode=uri` and
+  `--mode=uri-readonly` runs.
+- Extend `tools/run-libmylite-open-close-smoke.sh` to run both URI modes.
 - Verify:
-  - `file:` URI with `mode=rwc` creates and opens a relative primary file,
+  - `file:` URI with `mode=rwc` creates and opens a primary file whose path
+    contains percent-encoded bytes,
+  - `mode=rw` opens the URI-created primary file without create,
+  - `file://localhost/...` resolves as a local URI authority,
   - percent-decoded path bytes are honored,
   - `mode=ro` opens an existing primary file read-only,
   - non-URI strings with `MYLITE_OPEN_URI` still open as paths,
@@ -191,3 +194,52 @@ No new dependency. All changes remain in existing GPL-2.0-only MyLite source.
   query parameters so unsupported behavior is explicit.
 - Windows drive-letter URI rules need a later platform-specific pass. The
   current reproducible build and smoke evidence remain Linux-container based.
+
+## Implementation Result
+
+`mylite_open_v2()` now resolves `MYLITE_OPEN_URI` before normal open validation.
+Local `file:` URIs are percent-decoded, empty and `localhost` authorities are
+accepted, `mode=ro|rw|rwc` can supply access flags, and URI mode conflicts with
+explicit flags return `MYLITE_MISUSE`. Unsupported query parameters, duplicate
+mode, unsupported mode values, remote authorities, fragments, and malformed
+percent escapes also return `MYLITE_MISUSE`.
+
+The `libmylite` smoke now runs two URI-specific fresh-process modes:
+
+- `--mode=uri` verifies URI create with a percent-decoded path containing a
+  space, unsupported URI errors, and non-URI strings under `MYLITE_OPEN_URI`.
+- `--mode=uri-readonly` verifies `mode=ro` can read the URI-created database
+  and rejects writes with `MYLITE_READONLY`.
+
+Report evidence:
+
+- `libmylite-open-close-uri-report.txt`: `status=0`,
+  `uri_rows=1:one,2:two`, `mode=rw` and `localhost` URI cases pass, and all
+  URI misuse cases pass.
+- `libmylite-open-close-uri-readonly-report.txt`: `status=0`,
+  `uri_readonly_rows=1:one,2:two`, and
+  `uri_readonly_insert_rejected` returns `MYLITE_READONLY`.
+- `mylite-compatibility-harness-report.txt`: `libmylite_lifecycle` and
+  `sidecar_scan` report `status=0`; sidecar scan reports no unexpected or
+  known inherited sidecars.
+
+Verification completed:
+
+- `bash -n tools/run-libmylite-open-close-smoke.sh
+  tools/run-compatibility-test-harness.sh`.
+- `git diff --check`.
+- `MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh`.
+- `MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh`.
+
+Measured artifacts after implementation:
+
+- `build/mariadb-minsize/libmysqld/libmariadbd.a`: 43,405,432 bytes.
+- `build/mariadb-minsize/mylite/libmylite.a`: 93,752 bytes.
+- `build/mariadb-minsize/storage/mylite/libmylite_embedded.a`: 303,480 bytes.
+- `build/mariadb-minsize/mylite/mylite-open-close-smoke`: 22,325,488 bytes.
+- `build/mariadb-minsize/mylite/mylite-compatibility-smoke`: 22,248,248
+  bytes.
+- `build/mariadb-minsize/mylite/mylite-storage-engine-smoke`: 22,314,136
+  bytes.
+- `build/mariadb-minsize/mylite/mylite-embedded-bootstrap-smoke`: 22,247,368
+  bytes.
