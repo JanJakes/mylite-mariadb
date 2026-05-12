@@ -123,3 +123,31 @@ Also inspect `build/mariadb-minsize/mylite-build-report.txt` and verify that
 - Removing `type_geom` may have wider spatial side effects than its small plugin
   declaration suggests, because generic geometry code also exists in the SQL
   layer.
+
+## Attempt result
+
+The simple profile-gating attempt linked and passed the current MyLite smokes.
+Changing the three plugin declarations from `MANDATORY` to `DEFAULT` and
+passing `PLUGIN_TYPE_GEOM=NO`, `PLUGIN_TYPE_INET=NO`, and
+`PLUGIN_TYPE_UUID=NO` in `tools/build-mariadb-minsize.sh` removed the three
+built-in plugin entries from `build/mariadb-minsize/sql/sql_builtin.cc`.
+
+Measured against the previous production-size baseline:
+
+| Artifact | Before | After | Delta |
+| --- | ---: | ---: | ---: |
+| `libmariadbd.a` | 43,405,432 | 39,941,598 | -3,463,834 |
+| Archive objects | 500 | 494 | -6 |
+| `mylite-open-close-smoke` | 22,325,488 | 21,713,112 | -612,376 |
+| stripped `mylite-open-close-smoke` | 19,331,904 | 18,935,800 | -396,104 |
+
+Verification:
+
+```sh
+MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+```
+
+The dynamic dependency set is unchanged; this reduction affects built-in plugin
+objects, not OpenSSL, zlib, PCRE, or C++ runtime dependencies.

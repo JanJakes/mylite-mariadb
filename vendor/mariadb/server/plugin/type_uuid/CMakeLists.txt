@@ -15,4 +15,4 @@
 
 MYSQL_ADD_PLUGIN(type_uuid
                  plugin.cc item_uuidfunc.cc
-                 MANDATORY RECOMPILE_FOR_EMBEDDED)
+                 DEFAULT RECOMPILE_FOR_EMBEDDED)

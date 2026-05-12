@@ -84,6 +84,9 @@ build_inside_container() {
     -DPLUGIN_AUTH_PAM=NO
     -DPLUGIN_AUTH_PAM_V1=NO
     -DPLUGIN_HASHICORP_KEY_MANAGEMENT=NO
+    -DPLUGIN_TYPE_GEOM=NO
+    -DPLUGIN_TYPE_INET=NO
+    -DPLUGIN_TYPE_UUID=NO
   )
 
   write_cmake_command "${build_dir}" "${source_dir}" "${cmake_args[@]}"

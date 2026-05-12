@@ -15,4 +15,4 @@
 
 MYSQL_ADD_PLUGIN(type_inet
                  plugin.cc item_inetfunc.cc sql_type_inet.cc
-                 MANDATORY RECOMPILE_FOR_EMBEDDED)
+                 DEFAULT RECOMPILE_FOR_EMBEDDED)
