@@ -128,3 +128,43 @@ MariaDB-derived GPL-2.0-only project status.
 - Prepared `HELP` statements also become unsupported; this matches the
   direct-execution behavior and avoids building result metadata from
   `mysql.help_*` tables.
+
+## Implementation Results
+
+Implemented with `MYLITE_DISABLE_HELP_COMMAND=ON`, which removes
+`../sql/sql_help.cc` from `SQL_EMBEDDED_SOURCES` and links
+`mylite_help_command_stub.cc` instead.
+
+Verification:
+
+```sh
+MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+```
+
+Observed behavior:
+
+- `build/mariadb-minsize/mylite-build-report.txt` records
+  `MYLITE_DISABLE_HELP_COMMAND:BOOL=ON`.
+- `build/mariadb-minsize/libmylite-open-close-report.txt` records
+  `exec_help_message=This version of MariaDB doesn't yet support 'HELP command
+  in MyLite minsize profile'`.
+- `libmariadbd.a` now includes only `mylite_help_command_stub.cc.o` for
+  `mysqld_help()` and `mysqld_help_prepare()`. The full `sql_help.cc.o` object
+  and helper symbols such as `search_topics()` and
+  `initialize_tables_for_help_command()` are absent.
+
+Measured size impact compared with the previous profiling-size profile:
+
+| Artifact | Bytes | Delta |
+| --- | ---: | ---: |
+| `libmariadbd.a` | 32,513,192 | -183,200 |
+| `libmylite.a` | 93,752 | 0 |
+| `libmylite_embedded.a` | 303,480 | 0 |
+| `mylite-open-close-smoke` | 15,180,208 | -67,288 |
+| stripped `mylite-open-close-smoke` copy | 12,892,376 | -65,824 |
+
+This is a useful minsize win because it removes a server-installation help-table
+surface from the embedded runtime and reduces both the archive and linked smoke
+artifact.

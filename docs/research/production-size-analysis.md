@@ -28,13 +28,14 @@ include the `type-plugin-size-profile`, `charset-small-profile`, and
 `oracle-parser-size-profile`, `static-archive-strip-profile`, and
 `small-builtin-plugin-profile`, `xml-function-size-profile`, and
 `gis-function-size-profile`, `executable-export-size-profile`,
-`vector-function-size-profile`, and `profiling-size-profile` attempts, which
+`vector-function-size-profile`, `profiling-size-profile`, and
+`help-command-size-profile` attempts, which
 remove the built-in `type_geom`, `type_inet`, `type_uuid`, `sequence`,
 `thread_pool_info`, `user_variables`, `userstat`, and `mhnsw` plugins, set
 `WITH_EXTRA_CHARSETS=none`, omit the Oracle SQL-mode parser, omit XML, GIS, and
-vector SQL functions, disable MariaDB statement profiling, remove full-symbol
-exports from MyLite smoke executables, and strip the static archive in the
-MyLite minsize profile.
+vector SQL functions, disable MariaDB statement profiling, omit the SQL `HELP`
+command implementation, remove full-symbol exports from MyLite smoke
+executables, and strip the static archive in the MyLite minsize profile.
 
 This project does not yet have a final packaged production artifact such as a
 shared `libmylite.so` bundle. For now, the most useful size signals are:
@@ -50,33 +51,33 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
-| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 32,696,392 | 31.18 | Main embedded MariaDB archive, 487 objects, stripped |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 32,513,192 | 31.01 | Main embedded MariaDB archive, 487 objects, stripped |
 | `build/mariadb-minsize/mylite/libmylite.a` | 93,752 | 0.09 | First-party public wrapper |
 | `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 303,480 | 0.29 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 15,247,496 | 14.54 | Unstripped linked smoke binary |
-| stripped `mylite-open-close-smoke` copy | 12,958,200 | 12.36 | `strip --strip-unneeded` on copied binary |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 15,180,208 | 14.48 | Unstripped linked smoke binary |
+| stripped `mylite-open-close-smoke` copy | 12,892,376 | 12.30 | `strip --strip-unneeded` on copied binary |
 
 The linked smoke binary has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 10,809,748 |
-| data | 2,098,968 |
-| bss | 298,056 |
-| total `size` decimal | 13,206,772 |
+| text | 10,787,268 |
+| data | 2,098,664 |
+| bss | 298,040 |
+| total `size` decimal | 13,183,972 |
 
 Largest linked sections in the open-close smoke binary:
 
 | Section | Bytes | Interpretation |
 | --- | ---: | --- |
-| `.rela.dyn` | 4,120,464 | Dynamic relocations from the current link shape |
-| `.text` | 3,479,084 | Executable code |
-| `.rodata` | 2,143,289 | Collation tables, parser tables, SQL metadata, constants |
+| `.rela.dyn` | 4,119,840 | Dynamic relocations from the current link shape |
+| `.text` | 3,459,004 | Executable code |
+| `.rodata` | 2,143,305 | Collation tables, parser tables, SQL metadata, constants |
 | `.data.rel.ro` | 1,298,120 | Relocated read-only data |
-| `.eh_frame` | 796,700 | Unwind metadata |
-| `.data` | 766,328 | Writable data |
-| `.bss` | 298,024 | Zero-initialized writable data |
-| `.eh_frame_hdr` | 181,444 | Unwind table index |
+| `.eh_frame` | 795,428 | Unwind metadata |
+| `.data` | 766,040 | Writable data |
+| `.bss` | 298,008 | Zero-initialized writable data |
+| `.eh_frame_hdr` | 181,260 | Unwind table index |
 
 If a Linux distribution bundle vendors the current dynamic dependencies, it
 adds about 11,340,944 bytes, or 10.82 MiB, before compression:
@@ -168,6 +169,7 @@ The current built-in plugins are:
 | `executable-export-size-profile` after GIS functions | 33,092,908 | -10,312,524 | 12,959,352 | -6,372,552 | Passes current smokes |
 | `vector-function-size-profile` after executable exports | 32,862,726 | -10,542,706 | 12,958,200 | -6,373,704 | Passes current smokes |
 | `profiling-size-profile` after vector functions | 32,696,392 | -10,709,040 | 12,958,200 | -6,373,704 | Passes current smokes |
+| `help-command-size-profile` after profiling | 32,513,192 | -10,892,240 | 12,892,376 | -6,439,528 | Passes current smokes |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
 | Strip archive with `strip --strip-unneeded` | 41,873,048 | -1,532,384 | n/a | n/a | Higher risk than `strip -g` for static archives |
 | `WITH_EXTRA_CHARSETS=none` before UCA fix | 40,820,782 | -2,584,650 | 16,836,664 | -2,495,240 | Segfaulted in open-close smoke |
@@ -187,8 +189,8 @@ profile now passes current smokes while retaining the compiled default
 `utf8mb4_uca1400_ai_ci`.
 
 Stripping the current linked open-close smoke binary reduces it from
-15,247,496 bytes
-to 12,958,200 bytes, saving 2,289,296 bytes, or 2.18 MiB. That remains the
+15,180,208 bytes
+to 12,892,376 bytes, saving 2,287,832 bytes, or 2.18 MiB. That remains the
 lowest-risk packaging win for any copied executable or shared-library style
 artifact.
 
@@ -281,6 +283,15 @@ no longer defines the full `PROFILING`, `QUERY_PROFILE`, or
 `PROF_MEASUREMENT` classes, while retaining small disabled-feature entry points
 for MariaDB's existing SQL and information-schema wiring.
 
+The `help-command-size-profile` attempt then removed `sql_help.cc` from the
+embedded source list and linked a small unsupported-command shim for
+`mysqld_help()` and `mysqld_help_prepare()`. On top of the profiling profile,
+it reduced the static archive by another 183,200 bytes and the stripped linked
+smoke binary by another 65,824 bytes. The archive now contains
+`mylite_help_command_stub.cc.o` instead of the full help-table implementation,
+and the open/close smoke verifies `HELP 'contents'` fails with
+`ER_NOT_SUPPORTED_YET`.
+
 ## Decision matrix
 
 | Lever | Expected savings | Risk | Worth doing? | Reason |
@@ -298,6 +309,7 @@ for MariaDB's existing SQL and information-schema wiring.
 | Remove unnecessary executable symbol exports | 0 archive, 2.06 MiB stripped linked beyond GIS profile | Low/medium | Applied as size attempt | Current smokes pass; this only applies to linked executables that are not dynamic-plugin hosts |
 | Remove vector SQL functions and MHNSW | 0.22 MiB archive, negligible stripped linked beyond executable-export profile | High compatibility | Applied as size attempt | Current smokes pass, but vector functions and MHNSW vector indexes are omitted from the minsize profile |
 | Disable statement profiling | 0.16 MiB archive, no stripped linked change beyond vector-function profile | Low/medium | Applied as size attempt | Current smokes pass; `SHOW PROFILE(S)` now report MariaDB's disabled-feature diagnostic |
+| Remove SQL `HELP` command implementation | 0.17 MiB archive, 0.06 MiB stripped linked beyond profiling profile | Low/medium | Applied as size attempt | Current smokes pass; `HELP` now reports a stable unsupported-command diagnostic |
 | Remove server-only SQL subsystems | Potentially large | High | Research later | The big bytes are entangled in `libsql_embedded.a`; needs slice-by-slice fork work |
 | `DISABLE_PSI_*` switches | 0 in this build | Low | No | No measured effect |
 | `-fno-asynchronous-unwind-tables` | 0 in this build | Low | No | Full rebuild produced identical archive and stripped linked sizes |

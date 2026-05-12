@@ -58,6 +58,7 @@ struct SmokeResult
   std::string exec_vector_fromtext_message;
   std::string exec_vector_distance_message;
   std::string exec_show_profiles_message;
+  std::string exec_help_message;
   std::string exec_callback_abort_message;
   std::string exec_dml_rows;
   std::string exec_duplicate_key_message;
@@ -143,6 +144,8 @@ static bool check_vector_functions_unsupported(const SmokeOptions &options,
                                                SmokeResult *result);
 static bool check_profiling_unsupported(const SmokeOptions &options,
                                         SmokeResult *result);
+static bool check_help_unsupported(const SmokeOptions &options,
+                                   SmokeResult *result);
 static bool check_exec_callback_abort(const SmokeOptions &options,
                                       SmokeResult *result);
 static bool check_exec_dml_persistence(const SmokeOptions &options,
@@ -306,6 +309,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "profiling_unsupported";
   ok= check_profiling_unsupported(options, result) && ok;
+
+  result->phase= "help_unsupported";
+  ok= check_help_unsupported(options, result) && ok;
 
   result->phase= "exec_callback_abort";
   ok= check_exec_callback_abort(options, result) && ok;
@@ -819,6 +825,33 @@ static bool check_profiling_unsupported(const SmokeOptions &options,
     rc= mylite_close(db);
     ok= record_result(result, "profiling_close", MYLITE_OK, rc,
                       nullptr) && ok;
+  }
+  return ok;
+}
+
+static bool check_help_unsupported(const SmokeOptions &options,
+                                   SmokeResult *result)
+{
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "help_open", MYLITE_OK, rc, db);
+  if (db)
+  {
+    char *errmsg= nullptr;
+    rc= mylite_exec(db, "HELP 'contents'", nullptr, nullptr, &errmsg);
+    if (errmsg)
+    {
+      result->exec_help_message= errmsg;
+      mylite_free(errmsg);
+    }
+    ok= record_result(result, "help_contents", MYLITE_ERROR, rc, db) && ok;
+    if (mylite_mariadb_errno(db) != ER_NOT_SUPPORTED_YET ||
+        std::strcmp(mylite_sqlstate(db), "42000") != 0 ||
+        result->exec_help_message.find("HELP command") == std::string::npos)
+      ok= false;
+
+    rc= mylite_close(db);
+    ok= record_result(result, "help_close", MYLITE_OK, rc, nullptr) && ok;
   }
   return ok;
 }
@@ -2044,6 +2077,8 @@ static void write_report(const SmokeOptions &options,
   if (!result.exec_show_profiles_message.empty())
     report << "exec_show_profiles_message="
            << result.exec_show_profiles_message << "\n";
+  if (!result.exec_help_message.empty())
+    report << "exec_help_message=" << result.exec_help_message << "\n";
   if (!result.exec_callback_abort_message.empty())
     report << "exec_callback_abort_message="
            << result.exec_callback_abort_message << "\n";
