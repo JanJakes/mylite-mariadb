@@ -132,3 +132,42 @@ MariaDB-derived GPL-2.0-only project status.
   implementation.
 - Parser syntax remains available, so unsupported `PROCEDURE ANALYSE()`
   statements fail during SELECT procedure setup rather than parse time.
+
+## Implementation Results
+
+Implemented with `MYLITE_DISABLE_PROCEDURE_ANALYSE=ON`, which removes
+`../sql/sql_analyse.cc` from `SQL_EMBEDDED_SOURCES` and links
+`mylite_procedure_analyse_stub.cc` instead.
+
+Verification:
+
+```sh
+MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+```
+
+Observed behavior:
+
+- `build/mariadb-minsize/mylite-build-report.txt` records
+  `MYLITE_DISABLE_PROCEDURE_ANALYSE:BOOL=ON`.
+- `build/mariadb-minsize/libmylite-open-close-report.txt` records
+  `exec_procedure_analyse_message=This version of MariaDB doesn't yet support
+  'PROCEDURE ANALYSE in MyLite minsize profile'`.
+- `libmariadbd.a` now includes only
+  `mylite_procedure_analyse_stub.cc.o` for `proc_analyse_init()`. The full
+  `sql_analyse.cc.o` object is absent.
+
+Measured size impact compared with the previous help-command profile:
+
+| Artifact | Bytes | Delta |
+| --- | ---: | ---: |
+| `libmariadbd.a` | 32,359,184 | -154,008 |
+| `libmylite.a` | 93,752 | 0 |
+| `libmylite_embedded.a` | 303,480 | 0 |
+| `mylite-open-close-smoke` | 15,173,312 | -6,896 |
+| stripped `mylite-open-close-smoke` copy | 12,892,376 | 0 |
+
+This removes the only built-in SELECT procedure implementation from the
+embedded archive. The generic procedure dispatch remains for now because it is
+part of SELECT preparation.
