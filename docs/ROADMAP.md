@@ -126,7 +126,12 @@ reserved so they cannot become ordinary MyLite catalog schemas before
 replacement system surfaces are designed. Embedded startup now initializes the
 foreign-server cache without probing `mysql.servers`, removing the inherited
 missing-table diagnostic from MyLite smoke reports while keeping foreign-server
-SQL explicitly unsupported.
+SQL explicitly unsupported. The default MyLite embedded profile now omits the
+Aria storage engine, disables Aria-backed temporary tables, uses MyISAM as the
+isolated MariaDB comparison reference, and treats any Aria log/control file in
+MyLite runtime directories as an unexpected sidecar. Current bootstrap smokes
+record no observed runtime files, and the grouped sidecar scan reports no known
+inherited sidecars.
 
 ## Implementation plan
 
@@ -183,6 +188,7 @@ SQL explicitly unsupported.
 | 48 | `schema-namespace-catalog` | Done | Persist MyLite schema names in the catalog and route schema namespace operations without datadir directories. |
 | 49 | `system-schema-namespace-policy` | Done | Keep server-owned schema names from becoming ordinary MyLite catalog schemas before replacement system surfaces are designed. |
 | 50 | `foreign-server-cache-startup` | Done | Initialize the embedded foreign-server cache without probing missing `mysql.servers` system tables at startup. |
+| 51 | `aria-startup-sidecars` | Done | Omit Aria from the default MyLite embedded profile and remove the remaining inherited Aria log/control sidecar exception. |
 
 ## Size and profile direction
 
@@ -194,6 +200,7 @@ that do not fit a local file-owned library, including:
 - network listener and server account administration,
 - replication, binlog, relay log, and Galera/wsrep,
 - dynamic plugin loading and external durable storage engines,
+- Aria startup logs and Aria-backed temporary tables in the MyLite runtime,
 - performance schema and server audit plugins,
 - rarely used optional engines or plugins unless a slice justifies them.
 

@@ -74,9 +74,10 @@ claims:
 - Do not claim compatibility for BLOB/TEXT row storage, nullable keys,
   generated columns, foreign keys, views, triggers, routines, transactions, or
   server users.
-- Do not hide existing inherited embedded startup side effects. The harness may
-  classify `aria_log.*` as known current debt, but it must not present those
-  files as final MyLite-owned companions.
+- Do not hide inherited embedded startup side effects. At this slice's
+  original implementation time, the harness could classify `aria_log.*` as
+  known debt, but it could not present those files as final MyLite-owned
+  companions.
 - Do not change the public `libmylite` C API.
 - Do not add a new dependency.
 
@@ -118,7 +119,7 @@ Add `vendor/mariadb/server/mylite/compatibility_smoke.cc` and a
 - write a detailed report,
 - write a compact sorted fingerprint suitable for `diff -u`.
 
-The harness runs the binary twice:
+The harness originally ran the binary twice:
 
 - reference run: `ENGINE=Aria`, in an isolated reference datadir,
 - MyLite run: `ENGINE=MYLITE`, with a catalog file under the MyLite runtime
@@ -128,6 +129,9 @@ Aria is used as the first reference engine because it is already present in the
 current minsize embedded profile and exercises MariaDB's DDL/DML path without
 requiring a daemon. Aria sidecars are acceptable only in the reference runtime;
 the MyLite runtime remains subject to sidecar scanning.
+
+The later `aria-startup-sidecars` slice changed the reference engine to
+`MyISAM` after Aria was removed from the default MyLite embedded profile.
 
 The binary should normalize only behavior that is intended to match. For the
 initial subset, each case emits one stable `label=value` fingerprint line.
@@ -149,10 +153,11 @@ plugin sidecars that are not already documented current embedded startup debt:
 - dynamic plugin artifacts,
 - lingering catalog temporary files.
 
-`aria_log.00000001` and `aria_log_control` remain classified as known inherited
-embedded startup files for now because current bootstrap and open/close smokes
-already produce them. The harness must record them so a later runtime-cleanup or
-minimal-profile slice can remove the exception deliberately.
+`aria_log.00000001` and `aria_log_control` were classified as known inherited
+embedded startup files in this original harness slice because bootstrap and
+open/close smokes produced them at the time. The later
+`aria-startup-sidecars` slice removed that exception; those names are now
+unexpected sidecars in MyLite runtime directories.
 
 ## Affected Subsystems
 
@@ -175,10 +180,12 @@ The harness should make the current distinction explicit:
 
 - MyLite user table definitions, rows, index bridge state, and autoincrement
   counters live in the `.mylite` catalog payload.
-- The embedded MariaDB runtime still emits known Aria startup logs in its
-  temporary datadir; these are not final MyLite-owned companions.
-- Reference Aria comparison runs are isolated from MyLite runtime scans because
-  they intentionally produce MariaDB engine sidecars.
+- At this slice's original implementation time, the embedded MariaDB runtime
+  still emitted known Aria startup logs in its temporary datadir; those were
+  not final MyLite-owned companions. `aria-startup-sidecars` later removed
+  Aria from the MyLite profile.
+- Reference-engine comparison runs are isolated from MyLite runtime scans
+  because they intentionally produce MariaDB engine sidecars.
 
 ## Public API And File-Format Impact
 
@@ -229,23 +236,25 @@ The harness itself should run or reuse:
 - MyLite runtime sidecar scanning fails `.frm`, engine table sidecars, dynamic
   plugin artifacts, catalog temporary sidecars, binlogs, relay logs, and InnoDB
   logs.
-- Known inherited Aria startup logs are reported separately from unexpected
-  sidecars.
+- At this slice's original implementation time, known inherited Aria startup
+  logs were reported separately from unexpected sidecars. Later MyLite profile
+  work removed that exception.
 - Existing individual smoke scripts still pass.
 - Binary sizes and report paths are recorded.
 
 ## Risks And Unresolved Questions
 
-- Aria is not a perfect storage-behavior oracle. It is a practical first
-  embedded reference for supported SQL/handler behavior because it is already in
-  the minsize profile. Later slices can add daemon-backed MariaDB comparison or
-  selected MTR cases.
+- Aria was not a perfect storage-behavior oracle, but it was a practical first
+  embedded reference while it was already in the minsize profile. The later
+  `aria-startup-sidecars` slice switched the reference to MyISAM. Future slices
+  can add daemon-backed MariaDB comparison or selected MTR cases.
 - Some MariaDB test suite cases are explicitly not embedded-safe; importing MTR
   requires a separate slice.
 - Exact optimizer plans are not compared here. Fingerprints compare observable
   results and selected error identities.
-- The sidecar scan intentionally carries a short-lived exception for inherited
-  Aria startup logs. That exception should shrink, not grow.
+- The original sidecar scan intentionally carried a short-lived exception for
+  inherited Aria startup logs. That exception was removed by
+  `aria-startup-sidecars`.
 
 ## Implementation Result
 
@@ -254,14 +263,17 @@ MyLite now has a grouped compatibility harness:
 - `tools/run-compatibility-test-harness.sh` runs the existing lifecycle and
   storage smokes, then runs a new MariaDB-reference comparison and MyLite
   sidecar scan.
-- `mylite-compatibility-smoke` runs the supported scalar, row, key, duplicate,
-  and autoincrement subset against either `ENGINE=Aria` or `ENGINE=MYLITE`.
+- `mylite-compatibility-smoke` originally ran the supported scalar, row, key,
+  duplicate, and autoincrement subset against either `ENGINE=Aria` or
+  `ENGINE=MYLITE`. `aria-startup-sidecars` later switched the reference engine
+  to `MyISAM`.
 - The harness writes detailed reference and MyLite reports plus compact
   fingerprints and fails on `diff -u` mismatches.
 - The sidecar scan fails unexpected MyLite runtime `.frm`, engine, binlog,
   relay-log, InnoDB log, dynamic plugin, and lingering catalog temporary files.
-- Known inherited `aria_log.*` startup files are reported separately from
-  unexpected sidecars.
+- Known inherited `aria_log.*` startup files were originally reported
+  separately from unexpected sidecars. That exception was later removed by
+  `aria-startup-sidecars`.
 
 The comparison exposed a MyLite duplicate-key diagnostic mismatch during
 implementation: MyLite returned SQLSTATE `23000`, but mapped primary-key
@@ -285,7 +297,8 @@ Observed harness groups:
 - `mariadb_comparison`: `status=0`.
 - `sidecar_scan`: `status=0`, `unexpected_sidecars=none`.
 
-Observed comparison fingerprint for both `ENGINE=Aria` and `ENGINE=MYLITE`:
+Observed comparison fingerprint for both `ENGINE=Aria` and `ENGINE=MYLITE` in
+the original harness slice:
 
 ```text
 scalar_add=3

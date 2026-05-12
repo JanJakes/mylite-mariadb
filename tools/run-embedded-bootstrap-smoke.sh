@@ -67,6 +67,9 @@ run_inside_container() {
   if has_mysql_servers_startup_diagnostic "${smoke_log}"; then
     status=1
   fi
+  if has_aria_runtime_sidecars "${runtime_dir}"; then
+    status=1
+  fi
   printf "Bootstrap smoke report: %s\n" "${report}"
   return "${status}"
 }
@@ -89,6 +92,11 @@ append_observed_files() {
       printf "mysql_servers_startup=present\n"
     else
       printf "mysql_servers_startup=absent\n"
+    fi
+    if has_aria_runtime_sidecars "${runtime_dir}"; then
+      printf "aria_startup_sidecars=present\n"
+    else
+      printf "aria_startup_sidecars=absent\n"
     fi
 
     printf "\n## Observed Runtime Files\n\n"
@@ -113,6 +121,13 @@ append_observed_files() {
 has_mysql_servers_startup_diagnostic() {
   local smoke_log="$1"
   grep -q "mysql\\.servers" "${smoke_log}"
+}
+
+has_aria_runtime_sidecars() {
+  local runtime_dir="$1"
+  find "${runtime_dir}" -type f \( -name "aria_log.*" -o -name "aria_log_control" \) \
+    -print -quit \
+    | grep -q .
 }
 
 main "$@"

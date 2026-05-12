@@ -57,54 +57,63 @@ IF(CMAKE_SYSTEM_NAME MATCHES AIX)
   SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-berok")
 ENDIF()
 
-MYSQL_ADD_PLUGIN(aria ${ARIA_SOURCES} STORAGE_ENGINE MANDATORY
-                 LINK_LIBRARIES myisam mysys mysys_ssl
-                 RECOMPILE_FOR_EMBEDDED)
+OPTION(MYLITE_DISABLE_ARIA "Disable Aria in the MyLite embedded profile" OFF)
 
-MYSQL_ADD_EXECUTABLE(aria_ftdump aria_ftdump.c COMPONENT Server)
-TARGET_LINK_LIBRARIES(aria_ftdump aria)
+IF(MYLITE_DISABLE_ARIA)
+  SET(PLUGIN_ARIA "NO" CACHE STRING "How to build plugin ARIA." FORCE)
+  SET(PLUGIN_S3 "NO" CACHE STRING "How to build plugin S3." FORCE)
+  SET(WITH_ARIA_STORAGE_ENGINE OFF CACHE INTERNAL
+      "Link ARIA statically to the server" FORCE)
+  SET(USE_ARIA_FOR_TMP_TABLES OFF CACHE BOOL "Use Aria for temporary tables" FORCE)
+ELSE()
+  MYSQL_ADD_PLUGIN(aria ${ARIA_SOURCES} STORAGE_ENGINE MANDATORY
+                   LINK_LIBRARIES myisam mysys mysys_ssl
+                   RECOMPILE_FOR_EMBEDDED)
 
-MYSQL_ADD_EXECUTABLE(aria_chk aria_chk.c COMPONENT Server)
-TARGET_LINK_LIBRARIES(aria_chk aria)
+  MYSQL_ADD_EXECUTABLE(aria_ftdump aria_ftdump.c COMPONENT Server)
+  TARGET_LINK_LIBRARIES(aria_ftdump aria)
 
-MYSQL_ADD_EXECUTABLE(aria_read_log aria_read_log.c COMPONENT Server)
-TARGET_LINK_LIBRARIES(aria_read_log aria)
+  MYSQL_ADD_EXECUTABLE(aria_chk aria_chk.c COMPONENT Server)
+  TARGET_LINK_LIBRARIES(aria_chk aria)
 
-MYSQL_ADD_EXECUTABLE(aria_dump_log aria_dump_log.c unittest/ma_loghandler_examples.c COMPONENT Server)
-TARGET_LINK_LIBRARIES(aria_dump_log aria)
-SET_TARGET_PROPERTIES(aria_dump_log PROPERTIES COMPILE_FLAGS "-DMARIA_DUMP_LOG")
+  MYSQL_ADD_EXECUTABLE(aria_read_log aria_read_log.c COMPONENT Server)
+  TARGET_LINK_LIBRARIES(aria_read_log aria)
 
-MYSQL_ADD_EXECUTABLE(aria_pack aria_pack.c COMPONENT Server)
-TARGET_LINK_LIBRARIES(aria_pack aria)
+  MYSQL_ADD_EXECUTABLE(aria_dump_log aria_dump_log.c unittest/ma_loghandler_examples.c COMPONENT Server)
+  TARGET_LINK_LIBRARIES(aria_dump_log aria)
+  SET_TARGET_PROPERTIES(aria_dump_log PROPERTIES COMPILE_FLAGS "-DMARIA_DUMP_LOG")
 
-IF(WITH_UNIT_TESTS)
-  ADD_EXECUTABLE(ma_test1 ma_test1.c)
-  TARGET_LINK_LIBRARIES(ma_test1 aria)
+  MYSQL_ADD_EXECUTABLE(aria_pack aria_pack.c COMPONENT Server)
+  TARGET_LINK_LIBRARIES(aria_pack aria)
 
-  ADD_EXECUTABLE(ma_test2 ma_test2.c)
-  TARGET_LINK_LIBRARIES(ma_test2 aria)
+  IF(WITH_UNIT_TESTS)
+    ADD_EXECUTABLE(ma_test1 ma_test1.c)
+    TARGET_LINK_LIBRARIES(ma_test1 aria)
 
-  ADD_EXECUTABLE(ma_test3 ma_test3.c)
-  TARGET_LINK_LIBRARIES(ma_test3 aria)
+    ADD_EXECUTABLE(ma_test2 ma_test2.c)
+    TARGET_LINK_LIBRARIES(ma_test2 aria)
 
-  ADD_EXECUTABLE(ma_rt_test ma_rt_test.c)
-  TARGET_LINK_LIBRARIES(ma_rt_test aria)
+    ADD_EXECUTABLE(ma_test3 ma_test3.c)
+    TARGET_LINK_LIBRARIES(ma_test3 aria)
 
-  ADD_EXECUTABLE(ma_sp_test ma_sp_test.c)
-  TARGET_LINK_LIBRARIES(ma_sp_test aria)
+    ADD_EXECUTABLE(ma_rt_test ma_rt_test.c)
+    TARGET_LINK_LIBRARIES(ma_rt_test aria)
 
-  ADD_EXECUTABLE(test_ma_backup test_ma_backup.c)
-  TARGET_LINK_LIBRARIES(test_ma_backup aria)
+    ADD_EXECUTABLE(ma_sp_test ma_sp_test.c)
+    TARGET_LINK_LIBRARIES(ma_sp_test aria)
 
-  ADD_SUBDIRECTORY(unittest)
+    ADD_EXECUTABLE(test_ma_backup test_ma_backup.c)
+    TARGET_LINK_LIBRARIES(test_ma_backup aria)
 
+    ADD_SUBDIRECTORY(unittest)
+  ENDIF()
+
+  IF (MSVC)
+    SET_TARGET_PROPERTIES(aria_chk aria_pack PROPERTIES LINK_FLAGS "setargv.obj")
+  ENDIF()
+
+  OPTION(USE_ARIA_FOR_TMP_TABLES "Use Aria for temporary tables" ON)
 ENDIF()
-  
-IF (MSVC)
-  SET_TARGET_PROPERTIES(aria_chk aria_pack PROPERTIES LINK_FLAGS "setargv.obj")
-ENDIF()
-
-OPTION(USE_ARIA_FOR_TMP_TABLES "Use Aria for temporary tables" ON)
 
 #
 # S3

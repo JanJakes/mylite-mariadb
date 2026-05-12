@@ -27,10 +27,12 @@ or changes MariaDB source in earnest.
 - Baseline size recorded: 44,134,820 bytes, 570 archive objects.
 - Dynamic plugin artifacts recorded: none.
 - Embedded builtin plugins recorded in
-  `build/mariadb-minsize/mylite-build-report.txt`: Aria, binlog, CSV, HEAP,
-  MyISAM, MyISAMMRG, MHNSW, MySQL password, Online Alter Log, Sequence, SQL
-  Sequence, Thread Pool Info, Type Geom, Type Inet, Type UUID, User Variables,
-  and Userstat.
+  `build/mariadb-minsize/mylite-build-report.txt`: binlog, CSV, HEAP,
+  MyISAM, MyISAMMRG, MHNSW, MyLite, MySQL password, Online Alter Log,
+  Sequence, SQL Sequence, Thread Pool Info, Type Geom, Type Inet, Type UUID,
+  User Variables, and Userstat. The current MyLite profile sets
+  `MYLITE_DISABLE_ARIA=ON`, `PLUGIN_ARIA=NO`, and
+  `USE_ARIA_FOR_TMP_TABLES=OFF`.
 - After `mylite-engine-discovery`, the current embedded artifact is
   44,227,954 bytes and the built-in plugin evidence includes
   `builtin_maria_mylite_plugin`.
@@ -111,8 +113,8 @@ and known risks.
   `tools/run-compatibility-test-harness.sh`.
 - The harness runs embedded lifecycle, `libmylite` lifecycle,
   storage/recovery, MariaDB-reference comparison, and MyLite sidecar scan
-  groups, and records known inherited Aria startup logs separately from
-  unexpected sidecars.
+  groups. The MyLite sidecar scan now treats Aria log/control files as
+  unexpected sidecars and currently reports no known inherited sidecars.
 
 ## File format and storage decisions
 

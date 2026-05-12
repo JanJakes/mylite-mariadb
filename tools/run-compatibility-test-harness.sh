@@ -136,7 +136,7 @@ run_comparison_group() {
     "${abs_build_dir}/sql/share" \
     "${reference_root}" \
     "" \
-    "Aria" \
+    "MyISAM" \
     "${reference_report}" \
     "${reference_fingerprint}" \
     "${reference_log}" || status=1
@@ -282,8 +282,7 @@ scan_runtime_sidecars() {
 }
 
 is_known_inherited_sidecar() {
-  local name="$1"
-  [[ "${name}" == aria_log.* || "${name}" == "aria_log_control" ]]
+  return 1
 }
 
 is_allowed_mylite_primary_file() {
@@ -294,7 +293,7 @@ is_allowed_mylite_primary_file() {
 is_unexpected_sidecar() {
   local name="$1"
   case "${name}" in
-    *.frm|*.ibd|*.MYD|*.MYI|*.MAD|*.MAI|ib_logfile*|*binlog*|*relay-log*|*.so|*.dylib|*.dll|*.mylite.tmp)
+    aria_log.*|aria_log_control|*.frm|*.ibd|*.MYD|*.MYI|*.MAD|*.MAI|ib_logfile*|*binlog*|*relay-log*|*.so|*.dylib|*.dll|*.mylite.tmp)
       return 0
       ;;
     *)

@@ -100,8 +100,9 @@ or `.frm` handling.
 ## Single-File And Embedded-Lifecycle Implications
 
 The change removes one inherited startup attempt to read a missing `mysql.*`
-system table. It does not affect the remaining known Aria startup log files,
-which are still tracked separately as inherited side effects.
+system table. At implementation time, Aria startup log files were still tracked
+separately as inherited side effects; the later `aria-startup-sidecars` slice
+removed those Aria runtime files from the default MyLite profile.
 
 ## Public API Or File-Format Impact
 
@@ -180,5 +181,5 @@ Report evidence:
 - Other `mysql.*` startup probes may still exist. This slice handles the
   diagnostic currently present in every MyLite report, not a full system-table
   replacement.
-- Aria startup logs remain known inherited sidecars and need a separate
-  storage/bootstrap cleanup slice.
+- Aria startup logs were a known inherited sidecar at the time of this slice;
+  `aria-startup-sidecars` later removed them from the default MyLite profile.

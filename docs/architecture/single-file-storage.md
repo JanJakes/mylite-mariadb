@@ -477,8 +477,8 @@ file. Migration should be logical:
 - Which ALTER TABLE operations need native or in-place implementations beyond
   MariaDB's copy-rebuild path?
 - Which MariaDB tests can be made storage-engine-agnostic and run first?
-- Can all persistent system tables move to the MyLite engine without hidden
-  Aria dependencies?
+- Which hidden storage-engine dependencies remain after the default MyLite
+  profile omits Aria?
 - What minimum collation set is acceptable for a small default build?
 - How should generated columns, fulltext indexes, spatial indexes, and foreign
   keys be phased into the MyLite engine?

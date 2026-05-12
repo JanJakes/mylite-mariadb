@@ -23328,6 +23328,8 @@ bool create_internal_tmp_table(TABLE *table, KEY *org_keyinfo,
   MI_KEYDEF keydef;
   MI_UNIQUEDEF uniquedef;
   TABLE_SHARE *share= table->s;
+  KEY *keyinfo= org_keyinfo;
+  uint unique_constraints= 0;
   DBUG_ENTER("create_internal_tmp_table");
 
   if (share->keys)
@@ -23335,11 +23337,11 @@ bool create_internal_tmp_table(TABLE *table, KEY *org_keyinfo,
     bool using_unique_constraint=0;
     HA_KEYSEG *seg= (HA_KEYSEG*) alloc_root(&table->mem_root,
                                             sizeof(*seg) *
-                                            share->user_defined_key_parts);
+                                            keyinfo->user_defined_key_parts);
     if (!seg)
       goto err;
 
-    bzero(seg, sizeof(*seg) * share->user_defined_key_parts);
+    bzero(seg, sizeof(*seg) * keyinfo->user_defined_key_parts);
     /*
        Note that a similar check is performed during
        subquery_types_allow_materialization. See MDEV-7122 for more details as
@@ -23348,17 +23350,19 @@ bool create_internal_tmp_table(TABLE *table, KEY *org_keyinfo,
     */
     if (keyinfo->key_length > table->file->max_key_length() ||
 	keyinfo->user_defined_key_parts > table->file->max_key_parts() ||
-	share->uniques)
+	(keyinfo->flags & HA_UNIQUE_HASH))
     {
       /* Can't create a key; Make a unique constraint instead of a key */
       share->keys=    0;
       share->key_parts= share->ext_key_parts= 0;
-      share->uniques= 1;
+      unique_constraints= 1;
       using_unique_constraint=1;
       bzero((char*) &uniquedef,sizeof(uniquedef));
       uniquedef.keysegs=keyinfo->user_defined_key_parts;
       uniquedef.seg=seg;
       uniquedef.null_are_equal=1;
+      keyinfo->flags|= HA_UNIQUE_HASH;
+      keyinfo->algorithm= HA_KEY_ALG_UNIQUE_HASH;
 
       /* Create extra column for hash value */
       bzero((uchar*) *recinfo,sizeof(**recinfo));
@@ -23426,7 +23430,7 @@ bool create_internal_tmp_table(TABLE *table, KEY *org_keyinfo,
   if (unlikely((error= mi_create(share->path.str, share->keys, &keydef,
 		                 (uint) (*recinfo-start_recinfo),
                                  start_recinfo,
-		                 share->uniques, &uniquedef,
+		                 unique_constraints, &uniquedef,
                                  &create_info,
 		                 HA_CREATE_TMP_TABLE |
                                  HA_CREATE_INTERNAL_TABLE |

@@ -4026,8 +4026,12 @@ public:
   */
   bool has_transactional_option() const
   {
+#ifdef WITH_ARIA_STORAGE_ENGINE
     extern handlerton *maria_hton;
     return partition_ht() == maria_hton || has_transaction_manager();
+#else
+    return has_transaction_manager();
+#endif
   }
 
   /*

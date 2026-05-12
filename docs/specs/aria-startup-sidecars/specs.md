@@ -104,6 +104,8 @@ When the option is off, keep MariaDB's current Aria plugin definition,
 utilities, and `USE_ARIA_FOR_TMP_TABLES` default. When the option is on:
 
 - set `PLUGIN_ARIA=NO` for report/cache clarity,
+- set `PLUGIN_S3=NO`, because the adjacent S3 copy utility links the omitted
+  Aria target and S3 is outside the MyLite embedded profile,
 - force `USE_ARIA_FOR_TMP_TABLES=OFF`,
 - do not define the `aria` storage-engine target,
 - do not define Aria utility executable targets that link against the omitted
@@ -143,7 +145,7 @@ directory.
 - Compatibility harness reference engine and sidecar classifier.
 - Embedded bootstrap and compatibility reports.
 - Roadmap, single-file storage design, and older specs that named Aria logs as
-  current debt.
+  inherited runtime debt.
 
 ## DDL Metadata Routing Impact
 
@@ -187,8 +189,8 @@ files and first-party MyLite scripts/docs.
   tools/run-embedded-bootstrap-smoke.sh tools/run-compatibility-test-harness.sh`.
 - Run `MYLITE_BUILD_JOBS=8 tools/run-embedded-bootstrap-smoke.sh`.
 - Run `MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh`.
-- Verify `mylite-build-report.txt` no longer lists
-  `WITH_ARIA_STORAGE_ENGINE` or `builtin_maria_aria_plugin`.
+- Verify `mylite-build-report.txt` records `WITH_ARIA_STORAGE_ENGINE=OFF` and
+  no longer lists `builtin_maria_aria_plugin`.
 - Verify `mylite-embedded-bootstrap-report.txt` no longer lists
   `aria_log.00000001` or `aria_log_control`.
 - Verify `mylite-compatibility-harness-report.txt` reports
@@ -222,3 +224,64 @@ files and first-party MyLite scripts/docs.
   variables. The first implementation should keep the CMake option scoped to
   the MyLite profile so fallback is clear if verification finds such an
   assumption.
+
+## Implementation Result
+
+The default MyLite minsize profile now passes `MYLITE_DISABLE_ARIA=ON`,
+`PLUGIN_ARIA=NO`, `USE_ARIA_FOR_TMP_TABLES=OFF`, and `PLUGIN_S3=NO`.
+`storage/maria/CMakeLists.txt` keeps MariaDB's default Aria behavior unless
+that MyLite option is enabled; when enabled, it skips the Aria engine and Aria
+utility targets and clears the Aria and S3 cache definitions.
+
+The top-level MariaDB CMake file now clears stale `EMBEDDED_PLUGIN_LIBS` on
+reconfigure, matching the existing static plugin cache reset. It also adds
+Aria utility dependencies to `minbuild` only when the utility targets exist.
+
+Disabling Aria exposed two upstream fallback assumptions:
+
+- The MyISAM internal temporary-table branch in `sql/sql_select.cc` referenced
+  newer Aria-only `TABLE_SHARE` fields and an Aria-scoped `keyinfo` variable.
+  That branch now uses the passed key metadata directly and tracks MyISAM
+  unique constraints locally.
+- `sql/handler.h` and `sql/log.cc` referenced `maria_hton` without
+  `WITH_ARIA_STORAGE_ENGINE` guards. They now keep Aria-specific behavior under
+  the existing storage-engine define and use the generic transaction-manager
+  path otherwise.
+
+The compatibility harness now uses `ENGINE=MyISAM` as its isolated MariaDB
+reference engine. MyLite runtime sidecar scanning now treats
+`aria_log.*` and `aria_log_control` as unexpected sidecars and reports no known
+inherited sidecars.
+
+Verification completed:
+
+- `bash -n tools/build-mariadb-minsize.sh
+  tools/run-embedded-bootstrap-smoke.sh tools/run-compatibility-test-harness.sh`.
+- `git diff --check`.
+- `MYLITE_BUILD_JOBS=8 tools/run-embedded-bootstrap-smoke.sh`.
+- `MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh`.
+
+Report evidence:
+
+- `mylite-build-report.txt`: `MYLITE_DISABLE_ARIA=ON`,
+  `PLUGIN_ARIA=NO`, `USE_ARIA_FOR_TMP_TABLES=OFF`, and
+  `WITH_ARIA_STORAGE_ENGINE=OFF`; no `builtin_maria_aria_plugin` entry.
+- `mylite-embedded-bootstrap-report.txt`: `status=0`,
+  `mysql_servers_startup=absent`, `aria_startup_sidecars=absent`,
+  `Observed Runtime Files=none`, and `Dynamic Plugin Artifacts=none`.
+- `mylite-compatibility-reference-report.txt`: `engine=MyISAM`.
+- `mylite-compatibility-harness-report.txt`: all groups report `status=0`;
+  `sidecar_scan` reports `unexpected_sidecars=none` and
+  `known_inherited_sidecars=none`.
+
+Measured artifacts after implementation:
+
+- `build/mariadb-minsize/libmysqld/libmariadbd.a`: 43,407,882 bytes.
+- `build/mariadb-minsize/mylite/libmylite.a`: 87,206 bytes.
+- `build/mariadb-minsize/storage/mylite/libmylite_embedded.a`: 305,932 bytes.
+- `build/mariadb-minsize/mylite/mylite-embedded-bootstrap-smoke`: 22,247,744
+  bytes.
+- `build/mariadb-minsize/mylite/mylite-compatibility-smoke`: 22,248,816
+  bytes.
+- `build/mariadb-minsize/mylite/mylite-storage-engine-smoke`: 22,314,848
+  bytes.

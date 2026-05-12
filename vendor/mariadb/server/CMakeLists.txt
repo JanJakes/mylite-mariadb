@@ -466,6 +466,7 @@ ENDIF()
 
 
 UNSET (MYSQLD_STATIC_PLUGIN_LIBS CACHE)
+UNSET (EMBEDDED_PLUGIN_LIBS CACHE)
 
 INCLUDE(mariadb_connector_c) # this does ADD_SUBDIRECTORY(libmariadb)
 
@@ -625,9 +626,10 @@ ENDIF()
 IF(NOT WITHOUT_SERVER)
   # Define target for minimal mtr-testable build
   ADD_CUSTOM_TARGET(minbuild)
+  IF(TARGET aria_chk)
+    ADD_DEPENDENCIES(minbuild aria_chk aria_pack)
+  ENDIF()
   ADD_DEPENDENCIES(minbuild
-   aria_chk
-   aria_pack
    mariadb
    mariadb-admin
    mariadb-binlog
