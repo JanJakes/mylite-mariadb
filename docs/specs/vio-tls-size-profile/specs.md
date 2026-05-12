@@ -153,6 +153,47 @@ nm -u build/mariadb-minsize-vio-tls/mylite/mylite-open-close-smoke |
 - Linked runtime and dependency deltas are recorded in
   `docs/research/production-size-analysis.md`.
 
+## Implementation Results
+
+The implementation adds `MYLITE_DISABLE_VIO_SSL=ON` to the aggressive minsize
+profile, omits `viossl.c` and `viosslfactories.c`, links VIO without
+`${SSL_LIBRARIES}`, and links retained crypto helpers against
+`OPENSSL_CRYPTO_LIBRARY` where available.
+
+Final measurements from `build/mariadb-minsize-vio-tls`:
+
+| Artifact | Bytes | Delta from ICF profile |
+| --- | ---: | ---: |
+| `libmysqld/libmariadbd.a` | 32,261,482 | -21,898 |
+| `vio/libvio.a` | 26,706 | n/a |
+| `mylite/mylite-open-close-smoke` | 8,479,248 | -15,112 |
+| stripped `mylite-open-close-smoke` copy | 6,083,040 | -11,528 |
+
+Runtime dependency evidence:
+
+- `ldd build/mariadb-minsize-vio-tls/mylite/mylite-open-close-smoke` no
+  longer lists `libssl.so.3`;
+- `libcrypto.so.3` remains listed;
+- the only OpenSSL-family undefined symbol matched by the SSL scan is
+  `OpenSSL_version`, which is provided by `libcrypto`.
+
+If a Linux package vendors OpenSSL libraries, this also avoids the
+737,192-byte Ubuntu 24.04 ARM64 `libssl.so.3` dependency. It does not avoid
+the 4,597,928-byte `libcrypto.so.3` dependency.
+
+Verified with:
+
+```sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-vio-tls \
+  MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-vio-tls \
+  MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-vio-tls \
+  MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+bash -n tools/build-mariadb-minsize.sh
+git diff --check
+```
+
 ## Risks and Unresolved Questions
 
 - MariaDB's client C API code is shared between embedded and client builds;

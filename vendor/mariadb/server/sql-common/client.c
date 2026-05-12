@@ -724,10 +724,12 @@ void end_server(MYSQL *mysql)
   DBUG_ENTER("end_server");
   if (mysql->net.vio != 0)
   {
+#if defined(HAVE_OPENSSL) && !defined(MYLITE_DISABLE_VIO_SSL)
     struct st_VioSSLFd *ssl_fd= (struct st_VioSSLFd*) mysql->connector_fd;
     if (ssl_fd)
       SSL_CTX_free(ssl_fd->ssl_context);
     my_free(ssl_fd);
+#endif
     mysql->connector_fd = 0;
 
     DBUG_PRINT("info",("Net: %s", vio_description(mysql->net.vio)));
@@ -1582,7 +1584,7 @@ mysql_get_ssl_cipher(MYSQL *mysql __attribute__((unused)))
 
  */
 
-#if defined(HAVE_OPENSSL)
+#if defined(HAVE_OPENSSL) && !defined(MYLITE_DISABLE_VIO_SSL)
 
 #include <openssl/x509v3.h>
 
@@ -1643,7 +1645,7 @@ error:
   DBUG_RETURN(ret_validation);
 }
 
-#endif /* HAVE_OPENSSL */
+#endif /* HAVE_OPENSSL && !MYLITE_DISABLE_VIO_SSL */
 
 
 /*
@@ -2076,14 +2078,14 @@ static int send_client_reply_packet(MCPVIO_EXT *mpvio,
   if (mysql->client_flag & CLIENT_MULTI_STATEMENTS)
     mysql->client_flag|= CLIENT_MULTI_RESULTS;
 
-#ifdef HAVE_OPENSSL
+#if defined(HAVE_OPENSSL) && !defined(MYLITE_DISABLE_VIO_SSL)
   if (mysql->options.ssl_key || mysql->options.ssl_cert ||
       mysql->options.ssl_ca || mysql->options.ssl_capath ||
       mysql->options.ssl_cipher)
     mysql->options.use_ssl = 1;
   if (mysql->options.use_ssl)
     mysql->client_flag|= CLIENT_SSL;
-#endif /* HAVE_OPENSSL */
+#endif /* HAVE_OPENSSL && !MYLITE_DISABLE_VIO_SSL */
 
   if (mpvio->db)
     mysql->client_flag|= CLIENT_CONNECT_WITH_DB;
@@ -2135,7 +2137,7 @@ static int send_client_reply_packet(MCPVIO_EXT *mpvio,
     goto error;
   }
 
-#ifdef HAVE_OPENSSL
+#if defined(HAVE_OPENSSL) && !defined(MYLITE_DISABLE_VIO_SSL)
   if (mysql->client_flag & CLIENT_SSL)
   {
     /* Do the SSL layering. */
@@ -2222,7 +2224,7 @@ static int send_client_reply_packet(MCPVIO_EXT *mpvio,
       }
     }
   }
-#endif /* HAVE_OPENSSL */
+#endif /* HAVE_OPENSSL && !MYLITE_DISABLE_VIO_SSL */
 
   DBUG_PRINT("info",("Server version = '%s'  capabilities: %lu  status: %u  client_flag: %lu",
 		     mysql->server_version, mysql->server_capabilities,
@@ -2625,6 +2627,7 @@ int run_plugin_auth(MYSQL *mysql, char *data, uint data_len,
   if (!mysql->tls_self_signed_error)
     DBUG_RETURN(0);
 
+#if defined(HAVE_OPENSSL) && !defined(MYLITE_DISABLE_VIO_SSL)
   /* Last attempt to validate the cert: compare cert info packet */
   DBUG_ASSERT(mysql->options.use_ssl);
   DBUG_ASSERT(mysql->net.vio->ssl_arg);
@@ -2658,6 +2661,12 @@ int run_plugin_auth(MYSQL *mysql, char *data, uint data_len,
   set_mysql_extended_error(mysql, CR_SSL_CONNECTION_ERROR, unknown_sqlstate,
                     ER(CR_SSL_CONNECTION_ERROR), mysql->tls_self_signed_error);
   DBUG_RETURN(1);
+#else
+  DBUG_ASSERT(!mysql->tls_self_signed_error);
+  set_mysql_extended_error(mysql, CR_SSL_CONNECTION_ERROR, unknown_sqlstate,
+                    ER(CR_SSL_CONNECTION_ERROR), mysql->tls_self_signed_error);
+  DBUG_RETURN(1);
+#endif
 }
 
 

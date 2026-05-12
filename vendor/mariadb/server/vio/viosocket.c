@@ -1191,7 +1191,7 @@ my_bool vio_is_connected(Vio *vio)
       DBUG_RETURN(FALSE);
   }
 
-#ifdef HAVE_OPENSSL
+#if defined(HAVE_OPENSSL) && !defined(MYLITE_DISABLE_VIO_SSL)
   /* There might be buffered data at the SSL layer. */
   if (!bytes && vio->type == VIO_TYPE_SSL)
     bytes= SSL_pending((SSL*) vio->ssl_arg);
@@ -1228,6 +1228,7 @@ ssize_t vio_pending(Vio *vio)
       return -1;
     return bytes;
 
+#if defined(HAVE_OPENSSL) && !defined(MYLITE_DISABLE_VIO_SSL)
   case VIO_TYPE_SSL:
     bytes= (uint) SSL_pending(vio->ssl_arg);
     if (bytes)
@@ -1235,6 +1236,7 @@ ssize_t vio_pending(Vio *vio)
     if (socket_peek_read(vio, &bytes))
       return -1;
     return bytes;
+#endif
 
 #ifdef _WIN32
   case VIO_TYPE_NAMEDPIPE:

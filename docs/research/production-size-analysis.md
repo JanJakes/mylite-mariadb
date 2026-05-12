@@ -27,6 +27,7 @@ The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 - `MYLITE_DISABLE_RPL_FILTER=ON`
 - `MYLITE_DISABLE_REGEX_FUNCTIONS=ON`
 - `MYLITE_DISABLE_SERVER_UTILITY_FUNCTIONS=ON`
+- `MYLITE_DISABLE_VIO_SSL=ON`
 - `MYLITE_DISABLE_GEOMETRY_TYPE=ON`
 - `MYLITE_DISABLE_GENERAL1400_COLLATIONS=ON`
 - `MYLITE_DISABLE_SQL_SEQUENCE=ON`
@@ -62,7 +63,8 @@ include the `type-plugin-size-profile`, `charset-small-profile`, and
 `myisam-fulltext-size-profile`, `myisam-rtree-size-profile`, and
 `spatial-core-size-profile`, `sql-sequence-size-profile`,
 `geometry-type-size-profile`, `general1400-collation-size-profile`,
-`rpl-filter-size-profile`, and `icf-linker-size-profile`
+`rpl-filter-size-profile`, `icf-linker-size-profile`, and
+`vio-tls-size-profile`
 attempts, which remove the built-in
 `type_geom`, `type_inet`, `type_uuid`, `sequence`, `thread_pool_info`,
 `user_variables`, `userstat`, `mhnsw`, `csv`, and `myisammrg` plugins, set
@@ -96,8 +98,9 @@ GEOMETRY type implementation code while keeping minimal generic type metadata
 symbols, omit compiled `general1400_as_ci` collations and unused extended
 Unicode casefold tables while retaining ordinary `general_ci`, replace
 MariaDB's remaining replication filter implementation with a minimal
-permissive minsize stub, fold identical linked code with lld `--icf=all`, and
-strip the static archive in the MyLite minsize profile.
+permissive minsize stub, fold identical linked code with lld `--icf=all`, omit
+VIO TLS transport and the `libssl.so.3` runtime dependency while retaining
+`libcrypto.so.3`, and strip the static archive in the MyLite minsize profile.
 
 `no-myisam-temp-spill-size-profile` was measured separately as an opt-in
 `MYLITE_DISABLE_MYISAM_TEMP_SPILL=ON` experiment. It is not part of the current
@@ -117,48 +120,47 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 ## Current baseline
 
 The current values were measured from
-`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-icf`.
+`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-vio-tls`.
 Paths below use the default build directory names for readability.
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
-| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 32,283,380 | 30.79 | Main embedded MariaDB archive, 437 objects, stripped; section metadata grows the archive |
-| `build/mariadb-minsize/mylite/libmylite.a` | 122,792 | 0.12 | First-party public wrapper |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 32,261,482 | 30.77 | Main embedded MariaDB archive, 436 objects, stripped; section metadata grows the archive |
+| `build/mariadb-minsize/mylite/libmylite.a` | 122,784 | 0.12 | First-party public wrapper |
 | `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 388,440 | 0.37 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 8,494,360 | 8.10 | Unstripped linked smoke binary, lld RELR, section GC, and ICF |
-| stripped `mylite-open-close-smoke` copy | 6,094,568 | 5.81 | `strip --strip-unneeded` on copied binary |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 8,479,248 | 8.09 | Unstripped linked smoke binary, lld RELR, section GC, ICF, and no VIO TLS transport |
+| stripped `mylite-open-close-smoke` copy | 6,083,040 | 5.80 | `strip --strip-unneeded` on copied binary |
 
 The linked smoke binary has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 4,785,706 |
-| data | 1,305,560 |
-| bss | 252,953 |
-| total `size` decimal | 6,344,219 |
+| text | 4,775,060 |
+| data | 1,304,656 |
+| bss | 251,905 |
+| total `size` decimal | 6,331,621 |
 
 Largest linked sections in the open-close smoke binary:
 
 | Section | Bytes | Interpretation |
 | --- | ---: | --- |
-| `.text` | 2,921,196 | Executable code |
-| `.data.rel.ro` | 1,086,120 | Relocated read-only data |
-| `.rodata` | 980,939 | Parser tables, SQL metadata, constants, retained Unicode data |
-| `.eh_frame` | 604,944 | Unwind metadata |
-| `.data` | 188,592 | Writable data |
-| `.bss` | 249,953 | Zero-initialized writable data |
-| `.eh_frame_hdr` | 127,172 | Unwind table index |
-| `.rela.dyn` | 49,776 | Remaining unpacked dynamic relocations |
+| `.text` | 2,917,068 | Executable code |
+| `.data.rel.ro` | 1,086,048 | Relocated read-only data |
+| `.rodata` | 980,427 | Parser tables, SQL metadata, constants, retained Unicode data |
+| `.eh_frame` | 604,276 | Unwind metadata |
+| `.data` | 188,336 | Writable data |
+| `.bss` | 249,937 | Zero-initialized writable data |
+| `.eh_frame_hdr` | 127,044 | Unwind table index |
+| `.rela.dyn` | 49,752 | Remaining unpacked dynamic relocations |
 | `.gcc_except_table` | 42,948 | Exception metadata |
-| `.relr.dyn` | 19,848 | Packed relative relocations |
+| `.relr.dyn` | 19,840 | Packed relative relocations |
 
 If a Linux distribution bundle vendors the current dynamic dependencies, it
-adds about 10,748,616 bytes, or 10.25 MiB, before compression:
+adds about 10,011,424 bytes, or 9.55 MiB, before compression:
 
 | Dependency | Resolved file size |
 | --- | ---: |
 | `libz.so.1.3` | 133,272 |
-| `libssl.so.3` | 737,192 |
 | `libcrypto.so.3` | 4,597,928 |
 | `libcrypt.so.1.1.0` | 198,584 |
 | `libstdc++.so.6.0.33` | 2,633,224 |
@@ -259,6 +261,7 @@ The current built-in plugins are:
 | `general1400-collation-size-profile` after GEOMETRY type | 32,318,588 | -11,086,844 | 6,258,424 | -13,073,480 | Passes current smokes and harness; omits compiled general1400 collations and unused extended Unicode casefold tables |
 | `rpl-filter-size-profile` after general1400 collations | 32,283,380 | -11,122,052 | 6,257,608 | -13,074,296 | Passes current smokes and harness; marginal runtime win, mostly archive cleanup |
 | `icf-linker-size-profile` after RPL filter | 32,283,380 | -11,122,052 | 6,094,568 | -13,237,336 | Passes current smokes and harness; link-only `--icf=all` runtime win with address-identity risk |
+| `vio-tls-size-profile` after ICF | 32,261,482 | -11,143,950 | 6,083,040 | -13,248,864 | Passes current smokes and harness; removes VIO TLS transport and `libssl.so.3` from the linked runtime dependency set |
 | `no-myisam-temp-spill-size-profile` after no-binlog-core | 32,836,602 | -10,568,830 | 6,437,408 | -12,894,496 | Opt-in experiment only; open/close smoke passes, but storage/catalog harness fails because schema-table queries need disk temp tables |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
 | Strip archive with `strip --strip-unneeded` | 41,873,048 | -1,532,384 | n/a | n/a | Higher risk than `strip -g` for static archives |
@@ -282,10 +285,9 @@ profile now passes current smokes while retaining the compiled default
 `utf8mb4_uca1400_ai_ci`.
 
 Stripping the current linked open-close smoke binary reduces it from
-8,494,360 bytes to 6,094,568 bytes, saving 2,399,792 bytes, or 2.29 MiB.
-That remains the
-lowest-risk packaging win for any copied executable or shared-library style
-artifact.
+8,479,248 bytes to 6,083,040 bytes, saving 2,396,208 bytes, or 2.29 MiB. That
+remains the lowest-risk packaging win for any copied executable or
+shared-library style artifact.
 
 The `icf-linker-size-profile` attempt then enabled lld identical code folding
 with `--icf=all`. `--icf=safe` produced no size change in this profile, while
@@ -293,6 +295,14 @@ with `--icf=all`. `--icf=safe` produced no size change in this profile, while
 unchanged because ICF runs only at final link time. Current smokes and harness
 pass, but this remains an aggressive linker setting because code that compares
 function addresses could observe folded functions.
+
+The `vio-tls-size-profile` attempt then removed the VIO TLS transport from the
+aggressive embedded profile while keeping OpenSSL's crypto library for retained
+SQL/auth helpers. On top of the ICF profile, it reduced the static archive by
+21,898 bytes and the stripped linked smoke by 11,528 bytes. It also removes the
+737,192-byte Ubuntu 24.04 ARM64 `libssl.so.3` dependency from packages that
+vendor runtime libraries. `libcrypto.so.3` remains because SQL/auth crypto
+helpers still root it.
 
 The LTO build reduced the stripped linked smoke binary by 1.25 MiB, but the
 static archive became 326.61 MiB and GCC emitted type/ODR mismatch warnings
@@ -645,6 +655,7 @@ MyISAM-compatible storage.
 | Omit GEOMETRY type implementation | 0.35 MiB archive, 0.04 MiB stripped linked beyond SQL sequence | High | Applied as aggressive size attempt | Keeps only minimal generic GEOMETRY metadata symbols; GEOMETRY/SPATIAL DDL still fails without creating a MyLite table |
 | Omit general1400 collations and extended casefold tables | 0.23 MiB archive, 0.21 MiB stripped linked beyond GEOMETRY type | High | Applied as aggressive size attempt | Extends the UCA-disabled profile; ordinary `general_ci` remains, but internal non-ASCII case-insensitive comparison can diverge further from MariaDB 11.8 |
 | Fold identical linked code with lld ICF | 0 archive, 0.16 MiB stripped linked beyond RPL filter | Medium packaging | Applied as aggressive linked-size attempt | Current smokes and harness pass, but `--icf=all` can make distinct functions share an address |
+| Omit VIO TLS transport | 0.02 MiB archive, 0.01 MiB stripped linked, 0.70 MiB vendored dependency beyond ICF | Low/medium embedded compatibility | Applied as aggressive embedded-size attempt | Current smokes and harness pass; network TLS transport is unavailable, which fits the no-network embedded profile |
 | Omit MyISAM temp-spill handler | 0.66 MiB archive, 0.23 MiB stripped linked beyond no-binlog-core | High | No, keep opt-in only | Breaks schema-table metadata and catalog smokes; needs a MyLite-owned disk temporary-table replacement or a compatible memory-only schema-table path |
 | Remove server-only SQL subsystems | Potentially large | High | Research later | The big bytes are entangled in `libsql_embedded.a`; needs slice-by-slice fork work |
 | `DISABLE_PSI_*` switches | 0 in this build | Low | No | No measured effect |
@@ -703,7 +714,10 @@ Take these now:
    aggressive UCA-disabled minsize profile.
 20. Keep lld `--icf=all` only in the aggressive linked-runtime profile unless
    release testing proves no address-identity issues in target integrations.
-21. Keep a stripped linked smoke binary size in the build report so regressions
+21. Keep VIO TLS omitted in the aggressive embedded profile while MyLite has no
+   network listener or remote client login path. This removes `libssl.so.3`
+   from the runtime dependency set without removing retained SQL/auth crypto.
+22. Keep a stripped linked smoke binary size in the build report so regressions
    are visible.
 
 Do not take these now:
@@ -719,9 +733,9 @@ Do not take these now:
 
 Research next if size becomes a release blocker:
 
-1. Split VIO TLS removal from full crypto removal. The current linked runtime
-   still depends on `libssl.so` through MariaDB's VIO SSL transport layer,
-   while `libcrypto.so` is separately rooted by SQL/auth crypto helpers.
+1. Decide whether SQL/auth crypto compatibility is worth the remaining
+   `libcrypto.so.3` dependency. Removing or replacing it is a much larger
+   compatibility decision than the VIO TLS cut.
 2. Investigate a deeper no-binlog core for the embedded profile. The current
    linked smoke still retains `MYSQL_BIN_LOG`, `log_event*`, GTID state,
    `Gtid_index_writer`, and `Rpl_filter` because embedded startup/cleanup,

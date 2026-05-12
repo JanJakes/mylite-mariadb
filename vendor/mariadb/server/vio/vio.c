@@ -131,7 +131,7 @@ static void vio_init(Vio *vio, enum enum_vio_type type,
   }
 #endif
 
-#ifdef HAVE_OPENSSL
+#if defined(HAVE_OPENSSL) && !defined(MYLITE_DISABLE_VIO_SSL)
   if (type == VIO_TYPE_SSL)
   {
     vio->viodelete	=vio_ssl_delete;
@@ -153,7 +153,7 @@ static void vio_init(Vio *vio, enum enum_vio_type type,
     vio->timeout        =vio_socket_timeout;
     DBUG_VOID_RETURN;
   }
-#endif /* HAVE_OPENSSL */
+#endif /* HAVE_OPENSSL && !MYLITE_DISABLE_VIO_SSL */
   vio->viodelete        =vio_delete;
   vio->vioerrno         =vio_errno;
   vio->read=            (flags & VIO_BUFFERED_READ) ? vio_read_buff : vio_read;
@@ -213,7 +213,7 @@ my_bool vio_reset(Vio* vio, enum enum_vio_type type,
   /* Preserve perfschema info for this connection */
   vio->mysql_socket.m_psi= old_vio.mysql_socket.m_psi;
 
-#ifdef HAVE_OPENSSL
+#if defined(HAVE_OPENSSL) && !defined(MYLITE_DISABLE_VIO_SSL)
   vio->ssl_arg= ssl;
 #endif
 
