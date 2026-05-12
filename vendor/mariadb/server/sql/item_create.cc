@@ -406,6 +406,7 @@ protected:
 };
 
 
+#ifndef MYLITE_DISABLE_ZLIB_COMPRESSION
 class Create_func_compress : public Create_func_arg1
 {
 public:
@@ -417,6 +418,7 @@ protected:
   Create_func_compress() = default;
   ~Create_func_compress() override = default;
 };
+#endif
 
 
 class Create_func_concat : public Create_native_func
@@ -2649,6 +2651,7 @@ protected:
 };
 
 
+#ifndef MYLITE_DISABLE_ZLIB_COMPRESSION
 class Create_func_uncompress : public Create_func_arg1
 {
 public:
@@ -2673,6 +2676,7 @@ protected:
   Create_func_uncompressed_length() = default;
   ~Create_func_uncompressed_length() override = default;
 };
+#endif
 
 
 class Create_func_unhex : public Create_func_arg1
@@ -3603,6 +3607,7 @@ Create_func_concat_ws::create_native(THD *thd, const LEX_CSTRING *name,
 }
 
 
+#ifndef MYLITE_DISABLE_ZLIB_COMPRESSION
 Create_func_compress Create_func_compress::s_singleton;
 
 Item*
@@ -3610,6 +3615,7 @@ Create_func_compress::create_1_arg(THD *thd, Item *arg1)
 {
   return new (thd->mem_root) Item_func_compress(thd, arg1);
 }
+#endif
 
 
 Create_func_connection_id Create_func_connection_id::s_singleton;
@@ -6087,6 +6093,7 @@ Create_func_ucase::create_1_arg(THD *thd, Item *arg1)
 }
 
 
+#ifndef MYLITE_DISABLE_ZLIB_COMPRESSION
 Create_func_uncompress Create_func_uncompress::s_singleton;
 
 Item*
@@ -6103,6 +6110,7 @@ Create_func_uncompressed_length::create_1_arg(THD *thd, Item *arg1)
 {
   return new (thd->mem_root) Item_func_uncompressed_length(thd, arg1);
 }
+#endif
 
 
 Create_func_unhex Create_func_unhex::s_singleton;
@@ -6479,7 +6487,9 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("COLUMN_EXISTS") }, BUILDER(Create_func_dyncol_exists)},
   { { STRING_WITH_LEN("COLUMN_LIST") }, BUILDER(Create_func_dyncol_list)},
   { { STRING_WITH_LEN("COLUMN_JSON") }, BUILDER(Create_func_dyncol_json)},
+#ifndef MYLITE_DISABLE_ZLIB_COMPRESSION
   { { STRING_WITH_LEN("COMPRESS") }, BUILDER(Create_func_compress)},
+#endif
   { { STRING_WITH_LEN("CONCAT") }, BUILDER(Create_func_concat)},
 #ifndef MYLITE_DISABLE_ORACLE_FUNCTIONS
   { { STRING_WITH_LEN("CONCAT_OPERATOR_ORACLE") }, BUILDER(Create_func_concat_operator_oracle)},
@@ -6694,8 +6704,10 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("TO_DAYS") }, BUILDER(Create_func_to_days)},
   { { STRING_WITH_LEN("TO_SECONDS") }, BUILDER(Create_func_to_seconds)},
   { { STRING_WITH_LEN("UCASE") }, BUILDER(Create_func_ucase)},
+#ifndef MYLITE_DISABLE_ZLIB_COMPRESSION
   { { STRING_WITH_LEN("UNCOMPRESS") }, BUILDER(Create_func_uncompress)},
   { { STRING_WITH_LEN("UNCOMPRESSED_LENGTH") }, BUILDER(Create_func_uncompressed_length)},
+#endif
   { { STRING_WITH_LEN("UNHEX") }, BUILDER(Create_func_unhex)},
   { { STRING_WITH_LEN("UNIX_TIMESTAMP") }, BUILDER(Create_func_unix_timestamp)},
 #ifndef MYLITE_DISABLE_XML_FUNCTIONS

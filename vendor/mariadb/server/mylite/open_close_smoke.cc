@@ -70,6 +70,10 @@ struct SmokeResult
   std::string exec_server_utility_standard_rows;
   std::string exec_server_utility_messages;
   std::string exec_crypt_function_message;
+  std::string exec_zlib_compression_have_rows;
+  std::string exec_zlib_compression_crc32_rows;
+  std::string exec_zlib_compression_messages;
+  std::string exec_zlib_compressed_column_message;
   std::string exec_query_cache_have_rows;
   std::string exec_query_cache_size_rows;
   std::string exec_query_cache_type_rows;
@@ -181,6 +185,8 @@ static bool check_server_utility_functions_unsupported(
   const SmokeOptions &options, SmokeResult *result);
 static bool check_crypt_function_unsupported(const SmokeOptions &options,
                                              SmokeResult *result);
+static bool check_zlib_compression_unsupported(const SmokeOptions &options,
+                                               SmokeResult *result);
 static bool check_query_cache_unsupported(const SmokeOptions &options,
                                           SmokeResult *result);
 static bool check_profiling_unsupported(const SmokeOptions &options,
@@ -376,6 +382,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "crypt_function_unsupported";
   ok= check_crypt_function_unsupported(options, result) && ok;
+
+  result->phase= "zlib_compression_unsupported";
+  ok= check_zlib_compression_unsupported(options, result) && ok;
 
   result->phase= "query_cache_unsupported";
   ok= check_query_cache_unsupported(options, result) && ok;
@@ -1232,6 +1241,98 @@ static bool check_crypt_function_unsupported(const SmokeOptions &options,
 
     rc= mylite_close(db);
     ok= record_result(result, "crypt_function_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+  return ok;
+}
+
+static bool check_zlib_compression_unsupported(const SmokeOptions &options,
+                                               SmokeResult *result)
+{
+  struct UnsupportedFunction
+  {
+    const char *label;
+    const char *sql;
+    const char *name;
+  };
+
+  static const UnsupportedFunction functions[] = {
+    {"zlib_compress_function", "SELECT COMPRESS('mylite')", "COMPRESS"},
+    {"zlib_uncompress_function", "SELECT UNCOMPRESS('mylite')",
+     "UNCOMPRESS"},
+    {"zlib_uncompressed_length_function",
+     "SELECT UNCOMPRESSED_LENGTH('mylite')", "UNCOMPRESSED_LENGTH"},
+  };
+
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "zlib_compression_open",
+                         MYLITE_OK, rc, db);
+  if (db)
+  {
+    ExecCapture have_capture;
+    ok= exec_query_capture(db, "SHOW VARIABLES LIKE 'have_compress'",
+                           "zlib_have_compress", &have_capture, result) &&
+        ok;
+    result->exec_zlib_compression_have_rows=
+      join_strings(have_capture.rows, ",");
+    if (result->exec_zlib_compression_have_rows != "have_compress:NO")
+      ok= false;
+
+    ExecCapture crc_capture;
+    ok= exec_query_capture(db, "SELECT CRC32('mylite')",
+                           "zlib_crc32_select", &crc_capture, result) && ok;
+    result->exec_zlib_compression_crc32_rows=
+      join_strings(crc_capture.rows, ",");
+    if (result->exec_zlib_compression_crc32_rows != "2971119272")
+      ok= false;
+
+    std::vector<std::string> messages;
+    for (size_t i= 0; i < sizeof(functions) / sizeof(functions[0]); ++i)
+    {
+      char *errmsg= nullptr;
+      rc= mylite_exec(db, functions[i].sql, nullptr, nullptr, &errmsg);
+      std::string message= errmsg ? errmsg : mylite_errmsg(db);
+      if (errmsg)
+        mylite_free(errmsg);
+      messages.push_back(std::string(functions[i].name) + "=" + message);
+
+      ok= record_result(result, functions[i].label, MYLITE_ERROR, rc,
+                        db) && ok;
+      if (mylite_mariadb_errno(db) != ER_SP_DOES_NOT_EXIST ||
+          std::strcmp(mylite_sqlstate(db), "42000") != 0 ||
+          message.find(functions[i].name) == std::string::npos)
+        ok= false;
+    }
+    result->exec_zlib_compression_messages= join_strings(messages, " | ");
+
+    char *errmsg= nullptr;
+    rc= mylite_exec(db,
+                    "CREATE TABLE mylite.compressed_column_unsupported "
+                    "(note VARCHAR(20) COMPRESSED) ENGINE=MYLITE",
+                    nullptr, nullptr, &errmsg);
+    result->exec_zlib_compressed_column_message=
+      errmsg ? errmsg : mylite_errmsg(db);
+    if (errmsg)
+      mylite_free(errmsg);
+    ok= record_result(result, "zlib_compressed_column_create",
+                      MYLITE_ERROR, rc, db) && ok;
+    if (mylite_mariadb_errno(db) != ER_UNKNOWN_COMPRESSION_METHOD ||
+        result->exec_zlib_compressed_column_message.find("zlib") ==
+          std::string::npos)
+      ok= false;
+
+    ExecCapture compressed_table_capture;
+    ok= exec_query_capture(
+          db,
+          "SHOW TABLES FROM mylite LIKE 'compressed_column_unsupported'",
+          "zlib_compressed_column_show", &compressed_table_capture, result) &&
+        ok;
+    if (!compressed_table_capture.rows.empty())
+      ok= false;
+
+    rc= mylite_close(db);
+    ok= record_result(result, "zlib_compression_close", MYLITE_OK, rc,
                       nullptr) && ok;
   }
   return ok;
@@ -2829,6 +2930,18 @@ static void write_report(const SmokeOptions &options,
   if (!result.exec_crypt_function_message.empty())
     report << "exec_crypt_function_message="
            << result.exec_crypt_function_message << "\n";
+  if (!result.exec_zlib_compression_have_rows.empty())
+    report << "exec_zlib_compression_have_rows="
+           << result.exec_zlib_compression_have_rows << "\n";
+  if (!result.exec_zlib_compression_crc32_rows.empty())
+    report << "exec_zlib_compression_crc32_rows="
+           << result.exec_zlib_compression_crc32_rows << "\n";
+  if (!result.exec_zlib_compression_messages.empty())
+    report << "exec_zlib_compression_messages="
+           << result.exec_zlib_compression_messages << "\n";
+  if (!result.exec_zlib_compressed_column_message.empty())
+    report << "exec_zlib_compressed_column_message="
+           << result.exec_zlib_compressed_column_message << "\n";
   if (!result.exec_query_cache_have_rows.empty())
     report << "exec_query_cache_have_rows="
            << result.exec_query_cache_have_rows << "\n";

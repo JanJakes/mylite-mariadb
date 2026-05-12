@@ -1001,6 +1001,7 @@ static Sys_var_struct Sys_collation_server(
        offsetof(CHARSET_INFO, coll_name.str), DEFAULT(&default_charset_info),
        NO_MUTEX_GUARD, IN_BINLOG, ON_CHECK(check_collation_not_null));
 
+#ifndef MYLITE_DISABLE_ZLIB_COMPRESSION
 static Sys_var_uint Sys_column_compression_threshold(
        "column_compression_threshold",
        "Minimum column data length eligible for compression",
@@ -1047,6 +1048,7 @@ static Sys_var_mybool Sys_column_compression_zlib_wrap(
        "verification to detect data corruption",
        SESSION_VAR(column_compression_zlib_wrap), CMD_LINE(OPT_ARG),
        DEFAULT(FALSE));
+#endif
 
 #if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
 static const char *concurrent_insert_names[]= {"NEVER", "AUTO", "ALWAYS", 0};

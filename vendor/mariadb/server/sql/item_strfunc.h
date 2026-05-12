@@ -2322,6 +2322,7 @@ protected:
   { return get_item_copy<Item_func_crc32>(thd, this); }
 };
 
+#ifndef MYLITE_DISABLE_ZLIB_COMPRESSION
 class Item_func_uncompressed_length : public Item_long_func_length
 {
   String value;
@@ -2345,7 +2346,7 @@ protected:
   { return get_item_copy<Item_func_uncompressed_length>(thd, this); }
 };
 
-#ifdef HAVE_COMPRESS
+#if defined(HAVE_COMPRESS) && !defined(MYLITE_DISABLE_ZLIB_COMPRESSION)
 #define ZLIB_DEPENDED_FUNCTION ;
 #else
 #define ZLIB_DEPENDED_FUNCTION { null_value=1; return 0; }
@@ -2397,6 +2398,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_uncompress>(thd, this); }
 };
+#endif
 
 
 class Item_func_dyncol_create: public Item_str_func

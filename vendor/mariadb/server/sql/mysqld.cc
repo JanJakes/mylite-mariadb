@@ -8166,7 +8166,7 @@ static int mysql_init_variables(void)
 #else
   have_crypt=SHOW_OPTION_NO;
 #endif
-#ifdef HAVE_COMPRESS
+#if defined(HAVE_COMPRESS) && !defined(MYLITE_DISABLE_ZLIB_COMPRESSION)
   have_compress= SHOW_OPTION_YES;
 #else
   have_compress= SHOW_OPTION_NO;

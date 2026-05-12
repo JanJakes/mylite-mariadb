@@ -2101,7 +2101,7 @@ static int send_client_reply_packet(MCPVIO_EXT *mpvio,
                        (~(CLIENT_COMPRESS | CLIENT_SSL | CLIENT_PROTOCOL_41) 
                        | mysql->server_capabilities);
 
-#ifndef HAVE_COMPRESS
+#if !defined(HAVE_COMPRESS) || defined(MYLITE_DISABLE_ZLIB_COMPRESSION)
   mysql->client_flag&= ~CLIENT_COMPRESS;
 #endif
 

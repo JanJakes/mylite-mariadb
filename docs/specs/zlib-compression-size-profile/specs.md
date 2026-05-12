@@ -208,6 +208,61 @@ Expected inspection result:
 - `libz.so.1` is absent from linked smoke runtime dependencies.
 - Production-size analysis records size and dependency deltas.
 
+## Implementation results
+
+Implemented with `MYLITE_DISABLE_ZLIB_COMPRESSION=ON` in the aggressive
+minsize profile. The guard removes zlib from the final `mysys` and `libmysqld`
+link sets, disables zlib-backed SQL compression functions, reports
+`have_compress=NO`, rejects compressed-column DDL, compiles packet/binlog
+compression helpers without zlib references, and keeps `CRC32()` working via a
+dependency-free `my_checksum()` fallback when hardware CRC is unavailable.
+
+Final measurements from `build/mariadb-minsize-zlib`:
+
+| Artifact | Bytes | Delta from libcrypt profile |
+| --- | ---: | ---: |
+| `libmysqld/libmariadbd.a` | 32,172,020 | -71,054 |
+| `mylite/mylite-open-close-smoke` | 8,455,992 | -18,536 |
+| stripped `mylite-open-close-smoke` copy | 6,067,344 | -12,832 |
+
+Runtime dependency evidence:
+
+- `ldd build/mariadb-minsize-zlib/mylite/mylite-open-close-smoke` no longer
+  lists `libz.so.1`;
+- `nm -u` shows no remaining undefined zlib symbols;
+- `nm -C` shows no remaining `Item_func_compress`, `Item_func_uncompress`,
+  `Item_func_uncompressed_length`, `Create_func_compress`,
+  `Create_func_uncompress`, or `Create_func_uncompressed_length` symbols in
+  the linked smoke;
+- `libcrypto.so.3` and `libstdc++.so.6` remain listed for retained SQL/auth
+  crypto helpers and MariaDB's C++ SQL layer.
+
+If a Linux package vendors runtime libraries, this avoids the 133,272-byte
+Ubuntu 24.04 ARM64 `libz.so.1.3` dependency.
+
+The open/close smoke verifies:
+
+- `SHOW VARIABLES LIKE 'have_compress'` returns `have_compress:NO`;
+- `CRC32('mylite')` returns `2971119272`;
+- `COMPRESS()`, `UNCOMPRESS()`, and `UNCOMPRESSED_LENGTH()` fail with the
+  unknown-function diagnostic;
+- `CREATE TABLE ... (note VARCHAR(20) COMPRESSED) ENGINE=MYLITE` fails with
+  `Unknown compression method: zlib`;
+- the rejected compressed-column DDL leaves no table behind.
+
+Verified with:
+
+```sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-zlib \
+  MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-zlib \
+  MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-zlib \
+  MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+bash -n tools/build-mariadb-minsize.sh
+git diff --check
+```
+
 ## Risks and unresolved questions
 
 - `my_checksum()` has non-binlog users, including retained MyISAM temporary

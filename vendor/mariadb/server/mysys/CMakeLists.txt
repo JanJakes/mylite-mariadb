@@ -14,6 +14,13 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335 USA
 
+OPTION(MYLITE_DISABLE_ZLIB_COMPRESSION
+  "Disable zlib-backed compression helpers in the embedded minsize profile" OFF)
+
+IF(MYLITE_DISABLE_ZLIB_COMPRESSION)
+  ADD_DEFINITIONS(-DMYLITE_DISABLE_ZLIB_COMPRESSION)
+ENDIF()
+
 INCLUDE_DIRECTORIES(${ZLIB_INCLUDE_DIRS} ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/mysys)
 
 SET(MYSYS_SOURCES  array.c charset-def.c charset.c my_default.c
@@ -171,7 +178,11 @@ ENDIF()
 
 ADD_CONVENIENCE_LIBRARY(mysys ${MYSYS_SOURCES})
 MAYBE_DISABLE_IPO(mysys)
-TARGET_LINK_LIBRARIES(mysys dbug strings ${ZLIB_LIBRARIES}
+SET(MYSYS_LIBS dbug strings)
+IF(NOT MYLITE_DISABLE_ZLIB_COMPRESSION)
+  LIST(APPEND MYSYS_LIBS ${ZLIB_LIBRARIES})
+ENDIF()
+TARGET_LINK_LIBRARIES(mysys ${MYSYS_LIBS}
  ${LIBNSL} ${LIBM} ${LIBRT} ${CMAKE_DL_LIBS} ${LIBSOCKET} ${LIBEXECINFO})
 DTRACE_INSTRUMENT(mysys)
 IF(WIN32)

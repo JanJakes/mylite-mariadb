@@ -4723,6 +4723,7 @@ null:
   return 0;
 }
 
+#ifndef MYLITE_DISABLE_ZLIB_COMPRESSION
 longlong Item_func_uncompressed_length::val_int()
 {
   DBUG_ASSERT(fixed());
@@ -4759,6 +4760,7 @@ longlong Item_func_uncompressed_length::val_int()
   */
   return uint4korr(res->ptr()) & 0x3FFFFFFF;
 }
+#endif
 
 longlong Item_func_crc32::val_int()
 {
@@ -4791,7 +4793,7 @@ longlong Item_func_crc32::val_int()
     (ulonglong{crc_func(uint32_t(crc), res->ptr(), res->length())});
 }
 
-#ifdef HAVE_COMPRESS
+#if defined(HAVE_COMPRESS) && !defined(MYLITE_DISABLE_ZLIB_COMPRESSION)
 #include "zlib.h"
 
 String *Item_func_compress::val_str(String *str)

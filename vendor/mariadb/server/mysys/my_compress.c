@@ -17,11 +17,51 @@
 /* Written by Sinisa Milivojevic <sinisa@mysql.com> */
 
 #include <mysys_priv.h>
-#ifdef HAVE_COMPRESS
+#if defined(HAVE_COMPRESS) || defined(MYLITE_DISABLE_ZLIB_COMPRESSION)
 #include <my_sys.h>
 #ifndef SCO
 #include <m_string.h>
 #endif
+#ifdef MYLITE_DISABLE_ZLIB_COMPRESSION
+
+my_bool my_compress(uchar *packet __attribute__((unused)),
+                    size_t *len __attribute__((unused)), size_t *complen)
+{
+  if (complen)
+    *complen= 0;
+  return 1;
+}
+
+
+int my_compress_buffer(uchar *dest __attribute__((unused)),
+                       size_t *destLen __attribute__((unused)),
+                       const uchar *source __attribute__((unused)),
+                       size_t sourceLen __attribute__((unused)))
+{
+  return 1;
+}
+
+
+uchar *my_compress_alloc(const uchar *packet __attribute__((unused)),
+                         size_t *len __attribute__((unused)),
+                         size_t *complen)
+{
+  if (complen)
+    *complen= 0;
+  return 0;
+}
+
+
+my_bool my_uncompress(uchar *packet __attribute__((unused)), size_t len,
+                      size_t *complen)
+{
+  if (!complen || *complen)
+    return 1;
+  *complen= len;
+  return 0;
+}
+
+#else
 #include <zlib.h>
 
 /*
@@ -183,4 +223,5 @@ my_bool my_uncompress(uchar *packet, size_t len, size_t *complen)
   DBUG_RETURN(0);
 }
 
-#endif /* HAVE_COMPRESS */
+#endif /* MYLITE_DISABLE_ZLIB_COMPRESSION */
+#endif /* HAVE_COMPRESS || MYLITE_DISABLE_ZLIB_COMPRESSION */

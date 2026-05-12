@@ -18,6 +18,7 @@
 #include "sql_string.h"
 #include "sql_class.h"
 #include "field_comp.h"
+#ifndef MYLITE_DISABLE_ZLIB_COMPRESSION
 #include <zlib.h>
 
 
@@ -131,6 +132,7 @@ static int uncompress_zlib(String *to, const uchar *from, uint from_length,
   my_error(ER_ZLIB_Z_DATA_ERROR, MYF(0));
   return 1;
 }
+#endif
 
 
 Compression_method compression_methods[MAX_COMPRESSION_METHODS]=
@@ -143,7 +145,11 @@ Compression_method compression_methods[MAX_COMPRESSION_METHODS]=
   { 0, 0, 0 },
   { 0, 0, 0 },
   { 0, 0, 0 },
+#ifndef MYLITE_DISABLE_ZLIB_COMPRESSION
   { "zlib", compress_zlib, uncompress_zlib },
+#else
+  { 0, 0, 0 },
+#endif
   { 0, 0, 0 },
   { 0, 0, 0 },
   { 0, 0, 0 },

@@ -654,7 +654,7 @@ net_real_write(NET *net,const uchar *packet, size_t len)
     DBUG_RETURN(-1);				/* socket can't be used */
 
   net->reading_or_writing=2;
-#ifdef HAVE_COMPRESS
+#if defined(HAVE_COMPRESS) && !defined(MYLITE_DISABLE_ZLIB_COMPRESSION)
   if (net->compress)
   {
     size_t complen;
@@ -682,7 +682,7 @@ net_real_write(NET *net,const uchar *packet, size_t len)
     len+= header_length;
     packet= b;
   }
-#endif /* HAVE_COMPRESS */
+#endif /* HAVE_COMPRESS && !MYLITE_DISABLE_ZLIB_COMPRESSION */
 
 #ifdef DEBUG_DATA_PACKETS
   DBUG_DUMP("data_written", packet, len);
@@ -726,7 +726,7 @@ net_real_write(NET *net,const uchar *packet, size_t len)
     pos+=length;
     update_statistics(thd_increment_bytes_sent(net->thd, length));
   }
-#ifdef HAVE_COMPRESS
+#if defined(HAVE_COMPRESS) && !defined(MYLITE_DISABLE_ZLIB_COMPRESSION)
   if (net->compress)
     my_free((void*) packet);
 #endif
@@ -928,7 +928,7 @@ retry:
         }
       }
       net->compress_pkt_nr= ++net->pkt_nr;
-#ifdef HAVE_COMPRESS
+#if defined(HAVE_COMPRESS) && !defined(MYLITE_DISABLE_ZLIB_COMPRESSION)
       if (net->compress)
       {
         /*
@@ -1074,7 +1074,7 @@ my_net_read_packet_reallen(NET *net, my_bool read_from_server, ulong* reallen)
   MYSQL_NET_READ_START();
 
   *reallen = 0;
-#ifdef HAVE_COMPRESS
+#if defined(HAVE_COMPRESS) && !defined(MYLITE_DISABLE_ZLIB_COMPRESSION)
   if (!net->compress)
   {
 #endif
@@ -1103,7 +1103,7 @@ my_net_read_packet_reallen(NET *net, my_bool read_from_server, ulong* reallen)
     }
     MYSQL_NET_READ_DONE(0, len);
     return (ulong)len;
-#ifdef HAVE_COMPRESS
+#if defined(HAVE_COMPRESS) && !defined(MYLITE_DISABLE_ZLIB_COMPRESSION)
   }
   else
   {
@@ -1212,7 +1212,7 @@ my_net_read_packet_reallen(NET *net, my_bool read_from_server, ulong* reallen)
     net->save_char= net->read_pos[len];	/* Must be saved */
     net->read_pos[len]=0;		/* Safeguard for mysql_use_result */
   }
-#endif /* HAVE_COMPRESS */
+#endif /* HAVE_COMPRESS && !MYLITE_DISABLE_ZLIB_COMPRESSION */
   MYSQL_NET_READ_DONE(0, len);
   return (ulong)len;
 }

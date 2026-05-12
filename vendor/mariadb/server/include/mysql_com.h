@@ -292,7 +292,7 @@ enum enum_indicator_type
 /* permit sending unit result-set for BULK commands */
 #define MARIADB_CLIENT_BULK_UNIT_RESULTS (1ULL << 37)
 
-#ifdef HAVE_COMPRESS
+#if defined(HAVE_COMPRESS) && !defined(MYLITE_DISABLE_ZLIB_COMPRESSION)
 #define CAN_CLIENT_COMPRESS CLIENT_COMPRESS
 #else
 #define CAN_CLIENT_COMPRESS 0

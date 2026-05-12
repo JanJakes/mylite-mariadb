@@ -60,7 +60,9 @@
 #include "rpl_utility.h"
 #include "rpl_constants.h"
 #include "sql_digest.h"
+#ifndef MYLITE_DISABLE_ZLIB_COMPRESSION
 #include "zlib.h"
+#endif
 
 
 #define log_cs  &my_charset_latin1
