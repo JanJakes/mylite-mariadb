@@ -54,6 +54,7 @@ struct SmokeResult
   std::string exec_oracle_mode_message;
   std::string exec_xml_extractvalue_message;
   std::string exec_xml_updatexml_message;
+  std::string exec_gis_function_message;
   std::string exec_callback_abort_message;
   std::string exec_dml_rows;
   std::string exec_duplicate_key_message;
@@ -132,6 +133,8 @@ static bool check_exec_scalar(const SmokeOptions &options,
 static bool check_oracle_mode_unsupported(const SmokeOptions &options,
                                           SmokeResult *result);
 static bool check_xml_functions_unsupported(const SmokeOptions &options,
+                                            SmokeResult *result);
+static bool check_gis_functions_unsupported(const SmokeOptions &options,
                                             SmokeResult *result);
 static bool check_exec_callback_abort(const SmokeOptions &options,
                                       SmokeResult *result);
@@ -287,6 +290,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "xml_functions_unsupported";
   ok= check_xml_functions_unsupported(options, result) && ok;
+
+  result->phase= "gis_functions_unsupported";
+  ok= check_gis_functions_unsupported(options, result) && ok;
 
   result->phase= "exec_callback_abort";
   ok= check_exec_callback_abort(options, result) && ok;
@@ -691,6 +697,37 @@ static bool check_xml_functions_unsupported(const SmokeOptions &options,
 
     rc= mylite_close(db);
     ok= record_result(result, "xml_function_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+  return ok;
+}
+
+static bool check_gis_functions_unsupported(const SmokeOptions &options,
+                                            SmokeResult *result)
+{
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "gis_function_open", MYLITE_OK, rc, db);
+  if (db)
+  {
+    char *errmsg= nullptr;
+    rc= mylite_exec(db, "SELECT ST_ASTEXT(0x00)", nullptr, nullptr,
+                    &errmsg);
+    if (errmsg)
+    {
+      result->exec_gis_function_message= errmsg;
+      mylite_free(errmsg);
+    }
+    ok= record_result(result, "gis_st_astext_select", MYLITE_ERROR, rc,
+                      db) && ok;
+    if (mylite_mariadb_errno(db) != ER_SP_DOES_NOT_EXIST ||
+        std::strcmp(mylite_sqlstate(db), "42000") != 0 ||
+        result->exec_gis_function_message.find("ST_ASTEXT") ==
+          std::string::npos)
+      ok= false;
+
+    rc= mylite_close(db);
+    ok= record_result(result, "gis_function_close", MYLITE_OK, rc,
                       nullptr) && ok;
   }
   return ok;
@@ -1905,6 +1942,9 @@ static void write_report(const SmokeOptions &options,
   if (!result.exec_xml_updatexml_message.empty())
     report << "exec_xml_updatexml_message="
            << result.exec_xml_updatexml_message << "\n";
+  if (!result.exec_gis_function_message.empty())
+    report << "exec_gis_function_message="
+           << result.exec_gis_function_message << "\n";
   if (!result.exec_callback_abort_message.empty())
     report << "exec_callback_abort_message="
            << result.exec_callback_abort_message << "\n";

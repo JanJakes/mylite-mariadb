@@ -19,6 +19,8 @@ ADD_DEFINITIONS(-DMYSQL_SERVER -DEMBEDDED_LIBRARY
 
 OPTION(MYLITE_DISABLE_ORACLE_PARSER
   "Disable Oracle SQL-mode parser in the embedded library" OFF)
+OPTION(MYLITE_DISABLE_GIS_FUNCTIONS
+  "Disable GIS SQL functions in the embedded library" OFF)
 OPTION(MYLITE_DISABLE_XML_FUNCTIONS
   "Disable XML SQL functions in the embedded library" OFF)
 
@@ -177,6 +179,13 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
 
 IF(MYLITE_DISABLE_ORACLE_PARSER)
   LIST(APPEND SQL_EMBEDDED_SOURCES mylite_oracle_parser_stub.cc)
+ENDIF()
+IF(MYLITE_DISABLE_GIS_FUNCTIONS)
+  LIST(REMOVE_ITEM SQL_EMBEDDED_SOURCES
+    ../sql/item_geofunc.cc
+    ../sql/gcalc_tools.cc
+    ../sql/gcalc_slicescan.cc)
+  LIST(APPEND SQL_EMBEDDED_SOURCES mylite_gis_function_stub.cc)
 ENDIF()
 IF(MYLITE_DISABLE_XML_FUNCTIONS)
   LIST(REMOVE_ITEM SQL_EMBEDDED_SOURCES ../sql/item_xmlfunc.cc)

@@ -68,12 +68,16 @@ When enabled:
 - remove `../sql/item_geofunc.cc`, `../sql/gcalc_tools.cc`, and
   `../sql/gcalc_slicescan.cc` from `SQL_EMBEDDED_SOURCES`,
 - add a small embedded-only stub source that defines an empty
-  `Native_func_registry_array native_func_registry_array_geom`,
+  `Native_func_registry_array native_func_registry_array_geom` and the
+  retained geometry type link shims required by `sql_type_geom.cc` and
+  `spatial.cc`,
 - set `-DMYLITE_DISABLE_GIS_FUNCTIONS=ON` in `tools/build-mariadb-minsize.sh`.
 
 The stub keeps `item_create.cc` unchanged: the normal native-function registry
 still appends the geometry registry, but the registry has zero entries in the
-minsize profile.
+minsize profile. The retained type-constructor shims fail if executed; the
+retained `Gcalc_result_receiver` result-type shim is only for link completeness
+because GIS operations are not registered in this profile.
 
 ## Non-goals
 
@@ -166,6 +170,38 @@ size build/mariadb-minsize/mylite/mylite-open-close-smoke
 - `ST_ASTEXT()` is rejected in the minsize profile.
 - GEOMETRY and SPATIAL DDL rejection tests still pass.
 - Size deltas are recorded in `docs/research/production-size-analysis.md`.
+
+## Verification
+
+Validated on 2026-05-12 with:
+
+```sh
+MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+```
+
+Observed smoke evidence:
+
+- `exec_gis_function_message=FUNCTION ST_ASTEXT does not exist`
+- `unsupported_geometry=rejected`
+- `unsupported_spatial_key=rejected`
+
+Measured artifacts after this slice:
+
+| Artifact | Bytes | Delta from XML profile |
+| --- | ---: | ---: |
+| `libmariadbd.a` | 33,092,908 | -864,782 |
+| archive object count | 488 | -2 |
+| `libmylite.a` | 93,752 | 0 |
+| `libmylite_embedded.a` | 303,480 | 0 |
+| `mylite-open-close-smoke` | 17,424,784 | -548,456 |
+| stripped `mylite-open-close-smoke` copy | 15,122,040 | -463,440 |
+| linked `size` total | 15,373,843 | -490,256 |
+
+Symbol checks on the linked smoke and `libmariadbd.a` found no
+`Item_func_geometry_from_text`, `Create_func_geometry_from_text`, or
+`Gcalc_function` symbols.
 
 ## Risks and unresolved questions
 
