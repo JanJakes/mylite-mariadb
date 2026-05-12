@@ -3976,6 +3976,11 @@ Event_log::write_description_event(enum_binlog_checksum_alg checksum_alg,
 
   if (encrypt)
   {
+#ifdef MYLITE_DISABLE_SERVER_ENCRYPTION
+    sql_print_error("Binary log encryption is disabled in the MyLite "
+                    "minsize profile");
+    return -1;
+#else
     uint key_version= encryption_key_get_latest_version(ENCRYPTION_KEY_SYSTEM_DATA);
     if (key_version == ENCRYPTION_KEY_VERSION_INVALID)
     {
@@ -3996,6 +4001,7 @@ Event_log::write_description_event(enum_binlog_checksum_alg checksum_alg,
       if (crypto.init(sele.crypto_scheme, key_version))
         return -1;
     }
+#endif
   }
   return (longlong)s.data_written;
 }

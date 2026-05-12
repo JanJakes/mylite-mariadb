@@ -69,6 +69,8 @@ struct SmokeResult
   std::string exec_window_aggregate_rows;
   std::string exec_window_function_messages;
   std::string exec_binlog_replication_message;
+  std::string exec_server_encryption_rows;
+  std::string exec_server_encryption_set_messages;
   std::string exec_server_utility_standard_rows;
   std::string exec_server_utility_messages;
   std::string exec_sql_crypto_function_messages;
@@ -189,6 +191,8 @@ static bool check_window_functions_unsupported(const SmokeOptions &options,
                                                SmokeResult *result);
 static bool check_binlog_replication_unsupported(const SmokeOptions &options,
                                                  SmokeResult *result);
+static bool check_server_encryption_profile(const SmokeOptions &options,
+                                            SmokeResult *result);
 static bool check_server_utility_functions_unsupported(
   const SmokeOptions &options, SmokeResult *result);
 static bool check_sql_crypto_functions_unsupported(const SmokeOptions &options,
@@ -395,6 +399,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "binlog_replication_unsupported";
   ok= check_binlog_replication_unsupported(options, result) && ok;
+
+  result->phase= "server_encryption_profile";
+  ok= check_server_encryption_profile(options, result) && ok;
 
   result->phase= "server_utility_functions_unsupported";
   ok= check_server_utility_functions_unsupported(options, result) && ok;
@@ -1223,6 +1230,76 @@ static bool check_binlog_replication_unsupported(const SmokeOptions &options,
 
     rc= mylite_close(db);
     ok= record_result(result, "binlog_replication_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+  return ok;
+}
+
+static bool check_server_encryption_profile(const SmokeOptions &options,
+                                            SmokeResult *result)
+{
+  struct SetAttempt
+  {
+    const char *label;
+    const char *sql;
+    const char *name;
+  };
+
+  static const SetAttempt set_attempts[] = {
+    {"server_encryption_set_binlog", "SET GLOBAL encrypt_binlog=ON",
+     "encrypt_binlog"},
+    {"server_encryption_set_tmp_files", "SET GLOBAL encrypt_tmp_files=ON",
+     "encrypt_tmp_files"},
+    {"server_encryption_set_tmp_disk_tables",
+     "SET GLOBAL encrypt_tmp_disk_tables=ON", "encrypt_tmp_disk_tables"}
+  };
+
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "server_encryption_open", MYLITE_OK, rc, db);
+  if (db)
+  {
+    ExecCapture capture;
+    ok= exec_query_capture(
+          db,
+          "SELECT IF(@@global.encrypt_binlog, '1', '0'), "
+          "IF(@@global.encrypt_tmp_files, '1', '0'), "
+          "IF(@@global.encrypt_tmp_disk_tables, '1', '0')",
+          "server_encryption_disabled", &capture, result) && ok;
+    result->exec_server_encryption_rows= join_strings(capture.rows, ",");
+    if (result->exec_server_encryption_rows != "0:0:0")
+      ok= false;
+
+    std::vector<std::string> messages;
+    for (size_t i= 0; i < sizeof(set_attempts) / sizeof(set_attempts[0]); ++i)
+    {
+      char *errmsg= nullptr;
+      rc= mylite_exec(db, set_attempts[i].sql, nullptr, nullptr, &errmsg);
+      std::string message= errmsg ? errmsg : mylite_errmsg(db);
+      if (errmsg)
+        mylite_free(errmsg);
+      messages.push_back(std::string(set_attempts[i].name) + "=" + message);
+
+      ok= record_result(result, set_attempts[i].label, MYLITE_ERROR, rc,
+                        db) && ok;
+      if (message.find("read only") == std::string::npos &&
+          message.find("read-only") == std::string::npos)
+        ok= false;
+    }
+    result->exec_server_encryption_set_messages= join_strings(messages, " | ");
+
+    ExecCapture after_capture;
+    ok= exec_query_capture(
+          db,
+          "SELECT IF(@@global.encrypt_binlog, '1', '0'), "
+          "IF(@@global.encrypt_tmp_files, '1', '0'), "
+          "IF(@@global.encrypt_tmp_disk_tables, '1', '0')",
+          "server_encryption_still_disabled", &after_capture, result) && ok;
+    if (join_strings(after_capture.rows, ",") != "0:0:0")
+      ok= false;
+
+    rc= mylite_close(db);
+    ok= record_result(result, "server_encryption_close", MYLITE_OK, rc,
                       nullptr) && ok;
   }
   return ok;
@@ -3181,6 +3258,12 @@ static void write_report(const SmokeOptions &options,
   if (!result.exec_binlog_replication_message.empty())
     report << "exec_binlog_replication_message="
            << result.exec_binlog_replication_message << "\n";
+  if (!result.exec_server_encryption_rows.empty())
+    report << "exec_server_encryption_rows="
+           << result.exec_server_encryption_rows << "\n";
+  if (!result.exec_server_encryption_set_messages.empty())
+    report << "exec_server_encryption_set_messages="
+           << result.exec_server_encryption_set_messages << "\n";
   if (!result.exec_server_utility_standard_rows.empty())
     report << "exec_server_utility_standard_rows="
            << result.exec_server_utility_standard_rows << "\n";

@@ -7080,6 +7080,22 @@ static Sys_var_harows Sys_expensive_subquery_limit(
        SESSION_VAR(expensive_subquery_limit), CMD_LINE(REQUIRED_ARG),
        VALID_RANGE(0, HA_POS_ERROR), DEFAULT(100), BLOCK_SIZE(1));
 
+#ifdef MYLITE_DISABLE_SERVER_ENCRYPTION
+static Sys_var_mybool Sys_encrypt_tmp_disk_tables(
+       "encrypt_tmp_disk_tables",
+       "Encrypt temporary on-disk tables (created as part of query execution)",
+       READ_ONLY GLOBAL_VAR(encrypt_tmp_disk_tables), NO_CMD_LINE,
+       DEFAULT(FALSE));
+
+static Sys_var_mybool Sys_encrypt_tmp_files(
+       "encrypt_tmp_files",
+       "Encrypt temporary files (created for filesort, binary log cache, etc)",
+       READ_ONLY GLOBAL_VAR(encrypt_tmp_files), NO_CMD_LINE, DEFAULT(FALSE));
+
+static Sys_var_mybool Sys_binlog_encryption(
+       "encrypt_binlog", "Encrypt binary logs (including relay logs)",
+       READ_ONLY GLOBAL_VAR(encrypt_binlog), NO_CMD_LINE, DEFAULT(FALSE));
+#else
 static Sys_var_mybool Sys_encrypt_tmp_disk_tables(
        "encrypt_tmp_disk_tables",
        "Encrypt temporary on-disk tables (created as part of query execution)",
@@ -7096,6 +7112,7 @@ static Sys_var_mybool Sys_binlog_encryption(
        "encrypt_binlog", "Encrypt binary logs (including relay logs)",
        READ_ONLY GLOBAL_VAR(encrypt_binlog), CMD_LINE(OPT_ARG),
        DEFAULT(FALSE));
+#endif
 
 static const char *binlog_row_image_names[]=
 {
