@@ -2082,6 +2082,7 @@ protected:
 };
 
 
+#ifndef MYLITE_DISABLE_REGEX_FUNCTIONS
 class Create_func_regexp_instr : public Create_func_arg2
 {
 public:
@@ -2146,6 +2147,7 @@ protected:
   Create_func_regexp_substr() = default;
   ~Create_func_regexp_substr() override = default;
 };
+#endif
 
 
 class Create_func_radians : public Create_func_arg1
@@ -5522,6 +5524,7 @@ Create_func_quote::create_1_arg(THD *thd, Item *arg1)
 }
 
 
+#ifndef MYLITE_DISABLE_REGEX_FUNCTIONS
 Create_func_regexp_instr Create_func_regexp_instr::s_singleton;
 
 Item*
@@ -5538,6 +5541,7 @@ Create_func_regexp_substr::create_2_arg(THD *thd, Item *arg1, Item *arg2)
 {
   return new (thd->mem_root) Item_func_regexp_substr(thd, arg1, arg2);
 }
+#endif
 
 
 Create_func_radians Create_func_radians::s_singleton;
@@ -6625,9 +6629,11 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("QUARTER") }, BUILDER(Create_func_quarter)},
   { { STRING_WITH_LEN("QUOTE") }, BUILDER(Create_func_quote)},
   { { STRING_WITH_LEN("RANDOM_BYTES")}, BUILDER(Create_func_random_bytes)},
+#ifndef MYLITE_DISABLE_REGEX_FUNCTIONS
   { { STRING_WITH_LEN("REGEXP_INSTR") }, BUILDER(Create_func_regexp_instr)},
   { { STRING_WITH_LEN("REGEXP_REPLACE") }, BUILDER(Create_func_regexp_replace)},
   { { STRING_WITH_LEN("REGEXP_SUBSTR") }, BUILDER(Create_func_regexp_substr)},
+#endif
   { { STRING_WITH_LEN("RADIANS") }, BUILDER(Create_func_radians)},
   { { STRING_WITH_LEN("RAND") }, BUILDER(Create_func_rand)},
 #ifndef MYLITE_DISABLE_SERVER_UTILITY_FUNCTIONS
@@ -6723,8 +6729,10 @@ const Native_func_registry func_array_oracle_overrides[] =
   { { STRING_WITH_LEN("LENGTH") },  BUILDER(Create_func_char_length)},
   { { STRING_WITH_LEN("LPAD") },    BUILDER(Create_func_lpad_oracle)},
   { { STRING_WITH_LEN("LTRIM") },   BUILDER(Create_func_ltrim_oracle)},
+#ifndef MYLITE_DISABLE_REGEX_FUNCTIONS
   { { STRING_WITH_LEN("REGEXP_REPLACE") },
                                     BUILDER(Create_func_regexp_replace_oracle)},
+#endif
   { { STRING_WITH_LEN("RPAD") },    BUILDER(Create_func_rpad_oracle)},
   { { STRING_WITH_LEN("RTRIM") },   BUILDER(Create_func_rtrim_oracle)}
 };

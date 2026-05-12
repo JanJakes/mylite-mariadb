@@ -36,6 +36,10 @@ Relevant source paths:
   operators directly into `Item_func_regex`.
 - `vendor/mariadb/server/sql/sys_vars.cc` exposes `default_regex_flags` and
   uses PCRE2 constants for that system variable.
+- `vendor/mariadb/server/sql/json_schema.h` declares JSON Schema `pattern` and
+  `patternProperties` helpers backed by `Regexp_processor_pcre`. The current
+  aggressive profile already removes `JSON_SCHEMA_VALID()`, so the regex-free
+  profile can require `MYLITE_DISABLE_JSON_SCHEMA_VALID=ON`.
 
 ## Design
 
@@ -51,6 +55,8 @@ When enabled:
   MariaDB's ordinary unknown-function path;
 - exclude real PCRE-backed `Regexp_processor_pcre` code from the embedded
   object files;
+- require `MYLITE_DISABLE_JSON_SCHEMA_VALID`, and guard retained JSON Schema
+  pattern helper declarations when regex support is disabled;
 - remove `pcre2-8` from the embedded `mysqlserver` merge list when the profile
   is enabled;
 - leave the daemon `sql` target unchanged.
@@ -135,3 +141,39 @@ PCRE2 symbols.
   unavailable, which is slightly odd but smaller than a broader sysvar removal.
 - PCRE2 may still be pulled by another embedded object. The dependency check is
   therefore part of acceptance, not an assumption.
+
+## Attempt Result
+
+Implemented with `MYLITE_DISABLE_REGEX_FUNCTIONS=ON` in the aggressive minsize
+profile.
+
+The first build attempt showed that `json_schema.h` still declares PCRE-backed
+`pattern` and `patternProperties` helper classes through
+`Regexp_processor_pcre`, even after `JSON_SCHEMA_VALID()` itself is omitted.
+The final implementation therefore makes the build relationship explicit:
+`MYLITE_DISABLE_REGEX_FUNCTIONS` requires `MYLITE_DISABLE_JSON_SCHEMA_VALID`.
+
+Verification:
+
+```sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-regex-functions MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-regex-functions MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-regex-functions MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+```
+
+All passed.
+
+Measured impact on top of `uca-collation-size-profile`:
+
+| Artifact | Before | After | Delta |
+| --- | ---: | ---: | ---: |
+| `libmariadbd.a` | 33,777,694 | 33,699,880 | -77,814 |
+| linked `mylite-open-close-smoke` | 9,255,608 | 9,232,176 | -23,432 |
+| stripped linked smoke | 6,765,440 | 6,749,888 | -15,552 |
+| bundled dynamic dependencies | 11,340,944 | 10,748,616 | -592,328 |
+
+The linked smoke no longer depends on `libpcre2-8.so` and has no `pcre2_*` or
+`Regexp_processor_pcre` symbols. It retains a tiny `Item_func_regex`
+unsupported path so the parsed `REGEXP` and `RLIKE` operators fail with
+`ER_NOT_SUPPORTED_YET`, while `REGEXP_INSTR()`, `REGEXP_REPLACE()`, and
+`REGEXP_SUBSTR()` fail through MariaDB's unknown-function path.

@@ -1713,6 +1713,7 @@ err:
 
 
 /*********************************************************************/
+#ifndef MYLITE_DISABLE_REGEX_FUNCTIONS
 bool Item_func_regexp_replace::fix_length_and_dec(THD *thd)
 {
   if (agg_arg_charsets_for_string_result_with_comparison(collation, args, 3))
@@ -1897,6 +1898,7 @@ err:
   null_value= true;
   return (String *) 0;
 }
+#endif
 
 
 /************************************************************************/

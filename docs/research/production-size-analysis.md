@@ -23,6 +23,7 @@ The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 - `MYLITE_DISABLE_ORACLE_FUNCTIONS=ON`
 - `MYLITE_DISABLE_JSON_SCHEMA_VALID=ON`
 - `MYLITE_DISABLE_QUERY_CACHE=ON`
+- `MYLITE_DISABLE_REGEX_FUNCTIONS=ON`
 - `MYLITE_DISABLE_SERVER_UTILITY_FUNCTIONS=ON`
 - `MYLITE_DISABLE_UCA_COLLATIONS=ON`
 - `MYLITE_DISABLE_LEGACY_STORAGE_ENGINES=ON`
@@ -44,7 +45,8 @@ include the `type-plugin-size-profile`, `charset-small-profile`, and
 `relr-linker-size-profile`, `legacy-storage-engine-size-profile`,
 `section-gc-size-profile`, `json-schema-valid-size-profile`,
 `query-cache-size-profile`, `oracle-function-size-profile`,
-`server-utility-function-size-profile`, and `uca-collation-size-profile`
+`server-utility-function-size-profile`, `uca-collation-size-profile`, and
+`regex-function-size-profile`
 attempts, which remove the built-in
 `type_geom`, `type_inet`, `type_uuid`, `sequence`, `thread_pool_info`,
 `user_variables`, `userstat`, `mhnsw`, `csv`, and `myisammrg` plugins, set
@@ -62,8 +64,9 @@ aliases and Oracle schema routing, omit server-utility SQL functions such as
 `BENCHMARK()`, `GET_LOCK()`, `LOAD_FILE()`, replication wait helpers,
 `SLEEP()`, and `UUID_SHORT()`, omit UCA 1400 and UCA 0900 collation support
 while switching the aggressive minsize default collation to
-`utf8mb4_general_ci`, and strip the static archive in the MyLite minsize
-profile.
+`utf8mb4_general_ci`, omit regular expression SQL execution surfaces while
+removing the PCRE2 linked runtime dependency, and strip the static archive in
+the MyLite minsize profile.
 
 This project does not yet have a final packaged production artifact such as a
 shared `libmylite.so` bundle. For now, the most useful size signals are:
@@ -78,46 +81,45 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 ## Current baseline
 
 The current values were measured from a clean
-`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-uca-collations` run.
+`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-regex-functions` run.
 Paths below use the default build directory names for readability.
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
-| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 33,777,694 | 32.21 | Main embedded MariaDB archive, 458 objects, stripped; section metadata grows the archive |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 33,699,880 | 32.14 | Main embedded MariaDB archive, 458 objects, stripped; section metadata grows the archive |
 | `build/mariadb-minsize/mylite/libmylite.a` | 122,792 | 0.12 | First-party public wrapper |
 | `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 388,440 | 0.37 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 9,255,608 | 8.83 | Unstripped linked smoke binary, lld RELR and section GC |
-| stripped `mylite-open-close-smoke` copy | 6,765,440 | 6.45 | `strip --strip-unneeded` on copied binary |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 9,232,176 | 8.80 | Unstripped linked smoke binary, lld RELR and section GC |
+| stripped `mylite-open-close-smoke` copy | 6,749,888 | 6.44 | `strip --strip-unneeded` on copied binary |
 
 The linked smoke binary has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 5,303,000 |
-| data | 1,459,056 |
-| bss | 254,017 |
-| total `size` decimal | 7,016,073 |
+| text | 5,294,905 |
+| data | 1,451,680 |
+| bss | 253,113 |
+| total `size` decimal | 6,999,698 |
 
 Largest linked sections in the open-close smoke binary:
 
 | Section | Bytes | Interpretation |
 | --- | ---: | --- |
-| `.text` | 3,162,148 | Executable code |
-| `.data.rel.ro` | 1,125,656 | Relocated read-only data |
+| `.text` | 3,157,692 | Executable code |
+| `.data.rel.ro` | 1,118,544 | Relocated read-only data |
 | `.rodata` | 1,099,851 | Parser tables, SQL metadata, constants, retained Unicode data |
-| `.eh_frame` | 720,336 | Unwind metadata |
-| `.data` | 301,464 | Writable data |
+| `.eh_frame` | 718,456 | Unwind metadata |
+| `.data` | 301,392 | Writable data |
 | `.bss` | 251,961 | Zero-initialized writable data |
-| `.eh_frame_hdr` | 164,252 | Unwind table index |
-| `.rela.dyn` | 51,336 | Remaining unpacked dynamic relocations |
-| `.relr.dyn` | 20,752 | Packed relative relocations |
+| `.eh_frame_hdr` | 163,836 | Unwind table index |
+| `.rela.dyn` | 50,976 | Remaining unpacked dynamic relocations |
+| `.relr.dyn` | 20,632 | Packed relative relocations |
 
 If a Linux distribution bundle vendors the current dynamic dependencies, it
-adds about 11,340,944 bytes, or 10.82 MiB, before compression:
+adds about 10,748,616 bytes, or 10.25 MiB, before compression:
 
 | Dependency | Resolved file size |
 | --- | ---: |
-| `libpcre2-8.so.0.11.2` | 592,328 |
 | `libz.so.1.3` | 133,272 |
 | `libssl.so.3` | 737,192 |
 | `libcrypto.so.3` | 4,597,928 |
@@ -209,6 +211,7 @@ The current built-in plugins are:
 | `oracle-function-size-profile` after query cache | 35,783,646 | -7,621,786 | 8,355,880 | -10,976,024 | Passes current smokes and harness; Oracle compatibility aliases omitted |
 | `server-utility-function-size-profile` after Oracle aliases | 35,555,602 | -7,849,830 | 8,318,304 | -11,013,600 | Passes current smokes and harness; server utility functions omitted |
 | `uca-collation-size-profile` after server utilities | 33,777,694 | -9,627,738 | 6,765,440 | -12,566,464 | Passes current smokes and harness; UCA collations omitted and default collation is `utf8mb4_general_ci` |
+| `regex-function-size-profile` after UCA collations | 33,699,880 | -9,705,552 | 6,749,888 | -12,582,016 | Passes current smokes and harness; regex surfaces omitted and PCRE2 runtime dependency removed |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
 | Strip archive with `strip --strip-unneeded` | 41,873,048 | -1,532,384 | n/a | n/a | Higher risk than `strip -g` for static archives |
 | `WITH_EXTRA_CHARSETS=none` before UCA fix | 40,820,782 | -2,584,650 | 16,836,664 | -2,495,240 | Segfaulted in open-close smoke |
@@ -228,7 +231,7 @@ profile now passes current smokes while retaining the compiled default
 `utf8mb4_uca1400_ai_ci`.
 
 Stripping the current linked open-close smoke binary reduces it from
-9,255,608 bytes to 6,765,440 bytes, saving 2,490,168 bytes, or 2.37 MiB.
+9,232,176 bytes to 6,749,888 bytes, saving 2,482,288 bytes, or 2.37 MiB.
 That remains the
 lowest-risk packaging win for any copied executable or shared-library style
 artifact.
@@ -422,6 +425,17 @@ the stripped linked smoke by 1,552,864 bytes. The open/close smoke verifies
 `utf8mb4_general_ci` use succeeds, and verifies `utf8mb4_uca1400_ai_ci` fails
 with MariaDB's unknown-collation diagnostic.
 
+The `regex-function-size-profile` attempt then removed PCRE-backed regular
+expression execution from the aggressive minsize profile. It keeps the parsed
+`REGEXP` and `RLIKE` operators as a small unsupported item path, removes
+native builders for `REGEXP_INSTR()`, `REGEXP_REPLACE()`, and
+`REGEXP_SUBSTR()`, and removes `pcre2-8` from the embedded merge list. On top
+of the UCA-collation profile, it reduced the static archive by 77,814 bytes,
+the stripped linked smoke by 15,552 bytes, and the vendored dynamic dependency
+set by 592,328 bytes. The open/close smoke verifies `LIKE` still works,
+`REGEXP` and `RLIKE` fail with `ER_NOT_SUPPORTED_YET`, and the removed regex
+functions fail through MariaDB's unknown-function path.
+
 ## Decision matrix
 
 | Lever | Expected savings | Risk | Worth doing? | Reason |
@@ -449,11 +463,12 @@ with MariaDB's unknown-collation diagnostic.
 | Remove Oracle compatibility aliases | 0.30 MiB archive, 0.03 MiB stripped linked beyond query cache | High compatibility | Applied as size attempt | Current smokes pass; `SQL_MODE=ORACLE` was already unsupported, and Oracle-only aliases now fail as unknown functions |
 | Remove server utility SQL functions | 0.22 MiB archive, 0.04 MiB stripped linked beyond Oracle aliases | Medium compatibility | Applied as size attempt | Current smokes pass; daemon, replication, file-host, lock, benchmark, and delay helpers now fail as unknown functions |
 | Remove UCA collations and use `utf8mb4_general_ci` | 1.70 MiB archive, 1.48 MiB stripped linked beyond server utilities | High compatibility | Applied as aggressive size attempt | Current smokes pass, but MariaDB 11.8's default UCA 1400 collation and MySQL 8.0 UCA 0900 aliases are omitted |
+| Remove regex SQL surfaces and PCRE2 runtime link | 0.07 MiB archive, 0.01 MiB stripped linked, 0.56 MiB vendored dependency beyond UCA profile | High compatibility | Applied as aggressive size attempt | Current smokes pass; `LIKE` remains, but `REGEXP`, `RLIKE`, and `REGEXP_*()` functions are omitted |
 | Remove server-only SQL subsystems | Potentially large | High | Research later | The big bytes are entangled in `libsql_embedded.a`; needs slice-by-slice fork work |
 | `DISABLE_PSI_*` switches | 0 in this build | Low | No | No measured effect |
 | `-fno-asynchronous-unwind-tables` | 0 in this build | Low | No | Full rebuild produced identical archive and stripped linked sizes |
 | LTO | About 1.25 MiB linked, archive much larger | High | No | ODR warnings and huge archives are unacceptable for release |
-| Bundle fewer dynamic libraries | Up to 10.82 MiB if currently vendored | Distribution-dependent | Decide per packaging target | Current static archive does not include these libraries |
+| Bundle fewer dynamic libraries | Up to 10.25 MiB if currently vendored | Distribution-dependent | Decide per packaging target | Current static archive does not include these libraries |
 
 ## Recommendations
 
@@ -481,7 +496,10 @@ Take these now:
 9. Keep the UCA-collation omission only for the most aggressive size profile
    unless product compatibility explicitly accepts `utf8mb4_general_ci` instead
    of MariaDB 11.8's `utf8mb4_uca1400_ai_ci` default.
-10. Keep a stripped linked smoke binary size in the build report so regressions
+10. Keep the regex/PCRE2 omission only for the most aggressive size profile
+   unless product compatibility accepts losing `REGEXP`, `RLIKE`, and
+   `REGEXP_*()` SQL functions.
+11. Keep a stripped linked smoke binary size in the build report so regressions
    are visible.
 
 Do not take these now:
@@ -498,10 +516,13 @@ Research next if size becomes a release blocker:
    The current UCA-free linked binary still contains `my_u1400_casefold_index`
    and `my_u1400tr_casefold_index`, but removing them is another collation
    compatibility decision.
-2. Longer-term SQL-layer pruning of server-only surfaces. This is likely where
+2. Investigate binlog and replication removal for the embedded profile. The
+   current linked smoke still retains `MYSQL_BIN_LOG`, `log_event*`, and
+   `rpl_*` code despite MyLite not exposing replication.
+3. Longer-term SQL-layer pruning of server-only surfaces. This is likely where
    meaningful multi-MiB savings exist, but it should be done as compatibility
    slices, not as broad dead-code removal.
-3. Separate x86-64 size measurements for lld RELR before making architecture
+4. Separate x86-64 size measurements for lld RELR before making architecture
    independent claims.
 
 The best next decisions are deeper SQL-layer reductions as deliberate

@@ -63,6 +63,8 @@ struct SmokeResult
   std::string exec_vector_distance_message;
   std::string exec_json_valid_rows;
   std::string exec_json_schema_valid_message;
+  std::string exec_regex_like_rows;
+  std::string exec_regex_messages;
   std::string exec_server_utility_standard_rows;
   std::string exec_server_utility_messages;
   std::string exec_query_cache_have_rows;
@@ -165,6 +167,8 @@ static bool check_vector_functions_unsupported(const SmokeOptions &options,
                                                SmokeResult *result);
 static bool check_json_schema_valid_unsupported(const SmokeOptions &options,
                                                 SmokeResult *result);
+static bool check_regex_functions_unsupported(const SmokeOptions &options,
+                                              SmokeResult *result);
 static bool check_server_utility_functions_unsupported(
   const SmokeOptions &options, SmokeResult *result);
 static bool check_query_cache_unsupported(const SmokeOptions &options,
@@ -346,6 +350,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "json_schema_valid_unsupported";
   ok= check_json_schema_valid_unsupported(options, result) && ok;
+
+  result->phase= "regex_functions_unsupported";
+  ok= check_regex_functions_unsupported(options, result) && ok;
 
   result->phase= "server_utility_functions_unsupported";
   ok= check_server_utility_functions_unsupported(options, result) && ok;
@@ -981,6 +988,68 @@ static bool check_json_schema_valid_unsupported(const SmokeOptions &options,
 
     rc= mylite_close(db);
     ok= record_result(result, "json_schema_valid_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+  return ok;
+}
+
+static bool check_regex_functions_unsupported(const SmokeOptions &options,
+                                              SmokeResult *result)
+{
+  struct UnsupportedRegex
+  {
+    const char *label;
+    const char *sql;
+    const char *name;
+    unsigned expected_errno;
+  };
+
+  static const UnsupportedRegex statements[] = {
+    {"regex_operator", "SELECT 'abc' REGEXP 'a'", "REGEXP",
+     ER_NOT_SUPPORTED_YET},
+    {"regex_rlike_operator", "SELECT 'abc' RLIKE 'a'", "REGEXP",
+     ER_NOT_SUPPORTED_YET},
+    {"regex_instr_function", "SELECT REGEXP_INSTR('abc','a')",
+     "REGEXP_INSTR", ER_SP_DOES_NOT_EXIST},
+    {"regex_replace_function", "SELECT REGEXP_REPLACE('abc','a','x')",
+     "REGEXP_REPLACE", ER_SP_DOES_NOT_EXIST},
+    {"regex_substr_function", "SELECT REGEXP_SUBSTR('abc','a')",
+     "REGEXP_SUBSTR", ER_SP_DOES_NOT_EXIST},
+  };
+
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "regex_function_open", MYLITE_OK, rc, db);
+  if (db)
+  {
+    ExecCapture like_capture;
+    ok= exec_query_capture(db, "SELECT 'abc' LIKE 'a%'",
+                           "regex_like_select", &like_capture, result) && ok;
+    result->exec_regex_like_rows= join_strings(like_capture.rows, ",");
+    if (result->exec_regex_like_rows != "1")
+      ok= false;
+
+    std::vector<std::string> messages;
+    for (size_t i= 0; i < sizeof(statements) / sizeof(statements[0]); ++i)
+    {
+      char *errmsg= nullptr;
+      rc= mylite_exec(db, statements[i].sql, nullptr, nullptr, &errmsg);
+      std::string message= errmsg ? errmsg : mylite_errmsg(db);
+      if (errmsg)
+        mylite_free(errmsg);
+      messages.push_back(std::string(statements[i].name) + "=" + message);
+
+      ok= record_result(result, statements[i].label, MYLITE_ERROR, rc,
+                        db) && ok;
+      if (mylite_mariadb_errno(db) != statements[i].expected_errno ||
+          std::strcmp(mylite_sqlstate(db), "42000") != 0 ||
+          message.find(statements[i].name) == std::string::npos)
+        ok= false;
+    }
+    result->exec_regex_messages= join_strings(messages, " | ");
+
+    rc= mylite_close(db);
+    ok= record_result(result, "regex_function_close", MYLITE_OK, rc,
                       nullptr) && ok;
   }
   return ok;
@@ -2514,6 +2583,10 @@ static void write_report(const SmokeOptions &options,
   if (!result.exec_json_schema_valid_message.empty())
     report << "exec_json_schema_valid_message="
            << result.exec_json_schema_valid_message << "\n";
+  if (!result.exec_regex_like_rows.empty())
+    report << "exec_regex_like_rows=" << result.exec_regex_like_rows << "\n";
+  if (!result.exec_regex_messages.empty())
+    report << "exec_regex_messages=" << result.exec_regex_messages << "\n";
   if (!result.exec_server_utility_standard_rows.empty())
     report << "exec_server_utility_standard_rows="
            << result.exec_server_utility_standard_rows << "\n";

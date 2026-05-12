@@ -3146,6 +3146,7 @@ protected:
   { return get_item_copy<Item_func_like>(thd, this); }
 };
 
+#ifndef MYLITE_DISABLE_REGEX_FUNCTIONS
 typedef struct pcre2_real_code_8 pcre2_code;
 typedef struct pcre2_real_match_data_8 pcre2_match_data;
 #define PCRE2_SIZE size_t
@@ -3216,15 +3217,19 @@ public:
   CHARSET_INFO * library_charset() const { return m_library_charset; }
   void unset_flag(int flag) { m_library_flags&= ~flag; }
 };
+#endif
 
 
 class Item_func_regex :public Item_bool_func
 {
+#ifndef MYLITE_DISABLE_REGEX_FUNCTIONS
   Regexp_processor_pcre re;
+#endif
   DTCollation cmp_collation;
 public:
   Item_func_regex(THD *thd, Item *a, Item *b): Item_bool_func(thd, a, b)
   {}
+#ifndef MYLITE_DISABLE_REGEX_FUNCTIONS
   void cleanup() override
   {
     DBUG_ENTER("Item_func_regex::cleanup");
@@ -3232,6 +3237,7 @@ public:
     re.cleanup();
     DBUG_VOID_RETURN;
   }
+#endif
   bool val_bool() override;
   bool fix_length_and_dec(THD *thd) override;
   LEX_CSTRING func_name_cstring() const override
@@ -3252,6 +3258,7 @@ protected:
 };
 
 
+#ifndef MYLITE_DISABLE_REGEX_FUNCTIONS
 /*
   In the corner case REGEXP_INSTR could return (2^32 + 1),
   which would not fit into Item_long_func range.
@@ -3288,6 +3295,7 @@ public:
 protected:
   Item *shallow_copy(THD *thd) const override { return nullptr; }
 };
+#endif
 
 
 typedef class Item COND;

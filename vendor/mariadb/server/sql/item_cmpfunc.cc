@@ -29,8 +29,10 @@
 #include "sql_parse.h"                          // check_stack_overrun
 #include "sql_base.h"                  // dynamic_column_error_message
 
+#ifndef MYLITE_DISABLE_REGEX_FUNCTIONS
 #define PCRE2_STATIC 1             /* Important on Windows */
 #include "pcre2.h"                 /* pcre2 header file */
+#endif
 #include "my_json_writer.h"
 
 /*
@@ -6148,6 +6150,7 @@ bool Item_func_like::find_selective_predicates_list_processor(void *arg)
 }
 
 
+#ifndef MYLITE_DISABLE_REGEX_FUNCTIONS
 int Regexp_processor_pcre::default_regex_flags()
 {
   return default_regex_flags_pcre(current_thd);
@@ -6456,6 +6459,24 @@ longlong Item_func_regexp_instr::val_int()
 
   return re.match() ? (longlong) (re.subpattern_start(0) + 1) : 0;
 }
+#else
+bool
+Item_func_regex::fix_length_and_dec(THD *thd)
+{
+  if (Item_bool_func::fix_length_and_dec(thd))
+    return TRUE;
+  my_error(ER_NOT_SUPPORTED_YET, MYF(0), "REGEXP");
+  return TRUE;
+}
+
+
+bool Item_func_regex::val_bool()
+{
+  DBUG_ASSERT(fixed());
+  null_value= true;
+  return false;
+}
+#endif
 
 
 #ifdef LIKE_CMP_TOUPPER

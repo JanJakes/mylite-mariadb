@@ -31,6 +31,8 @@ OPTION(MYLITE_DISABLE_PROCEDURE_ANALYSE
   "Disable the PROCEDURE ANALYSE SELECT procedure in the embedded library" OFF)
 OPTION(MYLITE_DISABLE_QUERY_CACHE
   "Disable the query cache in the embedded library" OFF)
+OPTION(MYLITE_DISABLE_REGEX_FUNCTIONS
+  "Disable regular expression SQL functions in the embedded library" OFF)
 OPTION(MYLITE_DISABLE_SERVER_UTILITY_FUNCTIONS
   "Disable server utility SQL functions in the embedded library" OFF)
 OPTION(MYLITE_DISABLE_VECTOR_FUNCTIONS
@@ -49,6 +51,15 @@ IF(MYLITE_DISABLE_JSON_SCHEMA_VALID)
 ENDIF()
 IF(MYLITE_DISABLE_QUERY_CACHE)
   ADD_DEFINITIONS(-DMYLITE_DISABLE_QUERY_CACHE)
+ENDIF()
+IF(MYLITE_DISABLE_REGEX_FUNCTIONS)
+  ADD_DEFINITIONS(-DMYLITE_DISABLE_REGEX_FUNCTIONS)
+ENDIF()
+IF(MYLITE_DISABLE_REGEX_FUNCTIONS AND NOT MYLITE_DISABLE_JSON_SCHEMA_VALID)
+  MESSAGE(FATAL_ERROR
+    "MYLITE_DISABLE_REGEX_FUNCTIONS requires "
+    "MYLITE_DISABLE_JSON_SCHEMA_VALID because JSON Schema pattern validation "
+    "uses the regular expression engine")
 ENDIF()
 IF(MYLITE_DISABLE_SERVER_UTILITY_FUNCTIONS)
   ADD_DEFINITIONS(-DMYLITE_DISABLE_SERVER_UTILITY_FUNCTIONS)
@@ -246,7 +257,9 @@ ADD_CONVENIENCE_LIBRARY(sql_embedded ${SQL_EMBEDDED_SOURCES})
 DTRACE_INSTRUMENT(sql_embedded)
 ADD_DEPENDENCIES(sql_embedded GenError GenServerSource)
 IF(TARGET pcre2)
-  ADD_DEPENDENCIES(sql_embedded pcre2)
+  IF(NOT MYLITE_DISABLE_REGEX_FUNCTIONS)
+    ADD_DEPENDENCIES(sql_embedded pcre2)
+  ENDIF()
 ENDIF()
 IF(TARGET libfmt)
   ADD_DEPENDENCIES(sql_embedded libfmt)
@@ -267,12 +280,15 @@ ENDIF()
 
 
 SET(LIBS 
-  dbug strings mysys mysys_ssl pcre2-8 vio
+  dbug strings mysys mysys_ssl vio
   ${ZLIB_LIBRARIES} ${SSL_LIBRARIES}
   ${LIBWRAP} ${LIBCRYPT} ${CMAKE_DL_LIBS}
   ${EMBEDDED_PLUGIN_LIBS}
   sql_embedded
 )
+IF(NOT MYLITE_DISABLE_REGEX_FUNCTIONS)
+  LIST(APPEND LIBS pcre2-8)
+ENDIF()
 
 # Some storage engine were compiled for embedded specifically
 # (with corresponding target ${engine}_embedded)

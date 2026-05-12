@@ -571,6 +571,7 @@ protected:
 };
 
 
+#ifndef MYLITE_DISABLE_REGEX_FUNCTIONS
 class Item_func_regexp_replace :public Item_str_func
 {
   Regexp_processor_pcre re;
@@ -657,6 +658,7 @@ public:
 protected:
   Item *shallow_copy(THD *thd) const override { return nullptr; }
 };
+#endif
 
 
 class Item_func_insert :public Item_str_func

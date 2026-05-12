@@ -283,6 +283,7 @@ class Json_schema_min_len : public Json_schema_keyword
                         List<Json_schema_keyword> *all_keywords) override;
 };
 
+#ifndef MYLITE_DISABLE_REGEX_FUNCTIONS
 class Json_schema_pattern : public Json_schema_keyword
 {
   private:
@@ -304,6 +305,7 @@ class Json_schema_pattern : public Json_schema_keyword
     }
     ~Json_schema_pattern() { re.cleanup(); }
 };
+#endif
 
 class Json_schema_max_items : public Json_schema_keyword
 {
@@ -541,6 +543,7 @@ class Json_schema_unevaluated_properties :
                   const uchar *k_end= NULL) override;
 };
 
+#ifndef MYLITE_DISABLE_REGEX_FUNCTIONS
 typedef struct pattern_to_property : public Sql_alloc
 {
   Regexp_processor_pcre re;
@@ -584,6 +587,7 @@ class Json_schema_pattern_properties : public Json_schema_keyword
     bool validate_as_alternate(const json_engine_t *je, const uchar *k_start,
                                const uchar *k_end) override;
 };
+#endif
 
 
 class Json_schema_max_prop : public Json_schema_keyword
