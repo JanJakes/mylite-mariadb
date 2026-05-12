@@ -46,6 +46,23 @@ build_inside_container() {
   local enable_section_gc
   enable_section_gc="${MYLITE_ENABLE_SECTION_GC:-ON}"
 
+  local icf_mode
+  case "${MYLITE_ENABLE_ICF:-all}" in
+    all|ALL|on|ON|1|yes|YES|true|TRUE)
+      icf_mode="all"
+      ;;
+    safe|SAFE)
+      icf_mode="safe"
+      ;;
+    none|NONE|off|OFF|0|no|NO|false|FALSE)
+      icf_mode="none"
+      ;;
+    *)
+      printf "Invalid MYLITE_ENABLE_ICF value: %s\n" "${MYLITE_ENABLE_ICF}" >&2
+      return 1
+      ;;
+  esac
+
   local disable_myisam_temp_spill
   disable_myisam_temp_spill="${MYLITE_DISABLE_MYISAM_TEMP_SPILL:-OFF}"
 
@@ -53,6 +70,9 @@ build_inside_container() {
   minsize_linker_flags="-fuse-ld=lld -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr"
   if [[ "${enable_section_gc}" == "ON" ]]; then
     minsize_linker_flags="${minsize_linker_flags} -Wl,--gc-sections"
+  fi
+  if [[ "${icf_mode}" != "none" ]]; then
+    minsize_linker_flags="${minsize_linker_flags} -Wl,--icf=${icf_mode}"
   fi
 
   local cmake_args=(
@@ -107,6 +127,7 @@ build_inside_container() {
     -DMYLITE_DISABLE_VECTOR_FUNCTIONS=ON
     -DMYLITE_DISABLE_XML_FUNCTIONS=ON
     "-DMYLITE_ENABLE_SECTION_GC=${enable_section_gc}"
+    "-DMYLITE_ENABLE_ICF=${icf_mode}"
     -DUSE_ARIA_FOR_TMP_TABLES=OFF
     -DPLUGIN_ARIA=NO
     -DPLUGIN_INNOBASE=NO

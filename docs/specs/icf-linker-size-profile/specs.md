@@ -152,3 +152,40 @@ grep '^MYLITE_ENABLE_ICF:' build/mariadb-minsize/CMakeCache.txt
 - This does not address the larger remaining embedded-only opportunities:
   VIO TLS, SQL crypto functions, authentication, thread pool, and deeper
   binlog/GTID roots.
+
+## Implementation Results
+
+Implemented by:
+
+- adding `MYLITE_ENABLE_ICF` validation to `tools/build-mariadb-minsize.sh`;
+- defaulting the minsize profile to `-Wl,--icf=all`;
+- preserving `MYLITE_ENABLE_ICF=none` and `MYLITE_ENABLE_ICF=safe` for
+  comparison builds;
+- recording `MYLITE_ENABLE_ICF` in MariaDB's CMake cache.
+
+Verification:
+
+```sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-icf \
+  MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-icf \
+  MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-icf \
+  MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+```
+
+Observed evidence:
+
+- `build/mariadb-minsize-icf/CMakeCache.txt` records
+  `MYLITE_ENABLE_ICF:STRING=all`.
+- Executable, module, and shared linker flags all include `-Wl,--icf=all`.
+- `libmylite-open-close-report.txt` reports `status=0` and `phase=complete`.
+- `mylite-compatibility-harness-report.txt` reports `status=0` for all groups.
+
+Measured artifacts:
+
+| Artifact | Bytes | Delta from RPL filter profile |
+| --- | ---: | ---: |
+| `libmariadbd.a` | 32,283,380 | 0 |
+| `mylite-open-close-smoke` | 8,494,360 | -163,120 |
+| stripped `mylite-open-close-smoke` copy | 6,094,568 | -163,040 |

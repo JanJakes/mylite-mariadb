@@ -523,6 +523,9 @@ OPTION(MYLITE_ENABLE_SECTION_GC
 IF(MYLITE_ENABLE_SECTION_GC)
   ADD_COMPILE_OPTIONS(-ffunction-sections -fdata-sections)
 ENDIF()
+SET(MYLITE_ENABLE_ICF "none" CACHE STRING
+  "Enable lld identical code folding in the MyLite minsize profile")
+SET_PROPERTY(CACHE MYLITE_ENABLE_ICF PROPERTY STRINGS none safe all)
 CONFIGURE_PLUGINS()
 
 ADD_SUBDIRECTORY(include)
