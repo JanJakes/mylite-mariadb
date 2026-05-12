@@ -76,6 +76,8 @@ When enabled:
 - define `MYLITE_DISABLE_VECTOR_FUNCTIONS` for the embedded build,
 - guard vector native-function builder classes and registry entries in
   `item_create.cc`,
+- guard the hardcoded mandatory `mhnsw` entry in generated
+  `sql_builtin.cc.in` for the vector-disabled profile,
 - set `-DMYLITE_DISABLE_VECTOR_FUNCTIONS=ON` and `-DPLUGIN_MHNSW=NO` in
   `tools/build-mariadb-minsize.sh`.
 
@@ -161,6 +163,39 @@ size build/mariadb-minsize/mylite/mylite-open-close-smoke
 - Vector functions are rejected in the minsize profile.
 - Build, open/close smoke, and compatibility harness pass.
 - Size deltas are recorded in `docs/research/production-size-analysis.md`.
+
+## Verification
+
+Validated on 2026-05-12 with:
+
+```sh
+MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+```
+
+Observed smoke evidence:
+
+- `exec_vector_fromtext_message=FUNCTION VEC_FROMTEXT does not exist`
+- `exec_vector_distance_message=FUNCTION VEC_DISTANCE does not exist`
+- `mylite-compatibility-harness-report.txt` reports `status=0` for all groups.
+
+Measured artifacts after this slice:
+
+| Artifact | Bytes | Delta from executable-export profile |
+| --- | ---: | ---: |
+| `libmariadbd.a` | 32,862,726 | -230,182 |
+| archive object count | 487 | -1 |
+| `libmylite.a` | 93,752 | 0 |
+| `libmylite_embedded.a` | 303,480 | 0 |
+| `mylite-open-close-smoke` | 15,248,984 | -13,008 |
+| stripped `mylite-open-close-smoke` copy | 12,958,200 | -1,152 |
+| linked `size` total | 13,199,180 | -50,429 |
+
+Defined built-in plugin symbols in `libmariadbd.a` no longer include
+`builtin_maria_mhnsw_plugin`. Symbol checks on the archive found no
+`Item_func_vec_*`, `Create_func_vec_*`, `FVectorNode`, or `MHNSW_Share`
+symbols.
 
 ## Risks and unresolved questions
 

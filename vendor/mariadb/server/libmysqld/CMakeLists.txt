@@ -21,9 +21,14 @@ OPTION(MYLITE_DISABLE_ORACLE_PARSER
   "Disable Oracle SQL-mode parser in the embedded library" OFF)
 OPTION(MYLITE_DISABLE_GIS_FUNCTIONS
   "Disable GIS SQL functions in the embedded library" OFF)
+OPTION(MYLITE_DISABLE_VECTOR_FUNCTIONS
+  "Disable vector SQL functions in the embedded library" OFF)
 OPTION(MYLITE_DISABLE_XML_FUNCTIONS
   "Disable XML SQL functions in the embedded library" OFF)
 
+IF(MYLITE_DISABLE_VECTOR_FUNCTIONS)
+  ADD_DEFINITIONS(-DMYLITE_DISABLE_VECTOR_FUNCTIONS)
+ENDIF()
 IF(MYLITE_DISABLE_XML_FUNCTIONS)
   ADD_DEFINITIONS(-DMYLITE_DISABLE_XML_FUNCTIONS)
 ENDIF()
@@ -186,6 +191,12 @@ IF(MYLITE_DISABLE_GIS_FUNCTIONS)
     ../sql/gcalc_tools.cc
     ../sql/gcalc_slicescan.cc)
   LIST(APPEND SQL_EMBEDDED_SOURCES mylite_gis_function_stub.cc)
+ENDIF()
+IF(MYLITE_DISABLE_VECTOR_FUNCTIONS)
+  LIST(REMOVE_ITEM SQL_EMBEDDED_SOURCES
+    ../sql/item_vectorfunc.cc
+    ../sql/vector_mhnsw.cc)
+  LIST(APPEND SQL_EMBEDDED_SOURCES mylite_vector_function_stub.cc)
 ENDIF()
 IF(MYLITE_DISABLE_XML_FUNCTIONS)
   LIST(REMOVE_ITEM SQL_EMBEDDED_SOURCES ../sql/item_xmlfunc.cc)

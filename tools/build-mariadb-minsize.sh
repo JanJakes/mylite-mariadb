@@ -66,10 +66,12 @@ build_inside_container() {
     -DMYLITE_DISABLE_ARIA=ON
     -DMYLITE_DISABLE_ORACLE_PARSER=ON
     -DMYLITE_DISABLE_GIS_FUNCTIONS=ON
+    -DMYLITE_DISABLE_VECTOR_FUNCTIONS=ON
     -DMYLITE_DISABLE_XML_FUNCTIONS=ON
     -DUSE_ARIA_FOR_TMP_TABLES=OFF
     -DPLUGIN_ARIA=NO
     -DPLUGIN_INNOBASE=NO
+    -DPLUGIN_MHNSW=NO
     -DPLUGIN_PARTITION=NO
     -DPLUGIN_ARCHIVE=NO
     -DPLUGIN_BLACKHOLE=NO
@@ -189,11 +191,13 @@ write_build_report() {
     printf "\n"
 
     printf "## Embedded Builtin Plugins\n\n"
-    if [[ -f "${build_dir}/sql/sql_builtin.cc" ]]; then
-      grep -Eo "builtin_maria_[A-Za-z0-9_]+_plugin" \
-        "${build_dir}/sql/sql_builtin.cc" | sort -u || true
+    if [[ -f "${artifact}" ]]; then
+      nm -g --defined-only "${artifact}" 2>/dev/null \
+        | grep -Eo "builtin_maria_[A-Za-z0-9_]+_plugin" \
+        | grep -Ev "_sizeof_" \
+        | sort -u || true
     else
-      printf "missing=%s\n" "${build_dir}/sql/sql_builtin.cc"
+      printf "missing=%s\n" "${artifact}"
     fi
   } > "${report}"
 
