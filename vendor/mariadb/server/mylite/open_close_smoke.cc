@@ -71,6 +71,7 @@ struct SmokeResult
   std::string exec_binlog_replication_message;
   std::string exec_server_utility_standard_rows;
   std::string exec_server_utility_messages;
+  std::string exec_sql_crypto_function_messages;
   std::string exec_crypt_function_message;
   std::string exec_des_function_messages;
   std::string exec_kdf_function_message;
@@ -190,6 +191,8 @@ static bool check_binlog_replication_unsupported(const SmokeOptions &options,
                                                  SmokeResult *result);
 static bool check_server_utility_functions_unsupported(
   const SmokeOptions &options, SmokeResult *result);
+static bool check_sql_crypto_functions_unsupported(const SmokeOptions &options,
+                                                   SmokeResult *result);
 static bool check_crypt_function_unsupported(const SmokeOptions &options,
                                              SmokeResult *result);
 static bool check_des_functions_unsupported(const SmokeOptions &options,
@@ -395,6 +398,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "server_utility_functions_unsupported";
   ok= check_server_utility_functions_unsupported(options, result) && ok;
+
+  result->phase= "sql_crypto_functions_unsupported";
+  ok= check_sql_crypto_functions_unsupported(options, result) && ok;
 
   result->phase= "crypt_function_unsupported";
   ok= check_crypt_function_unsupported(options, result) && ok;
@@ -1264,12 +1270,11 @@ static bool check_server_utility_functions_unsupported(
     ExecCapture standard_capture;
     ok= exec_query_capture(
           db,
-          "SELECT LENGTH(HEX(RANDOM_BYTES(4))), LENGTH(VERSION()) > 0, "
-          "CONNECTION_ID() >= 0",
+          "SELECT LENGTH(VERSION()) > 0, CONNECTION_ID() >= 0",
           "server_utility_standard", &standard_capture, result) && ok;
     result->exec_server_utility_standard_rows=
       join_strings(standard_capture.rows, ",");
-    if (result->exec_server_utility_standard_rows != "8:1:1")
+    if (result->exec_server_utility_standard_rows != "1:1")
       ok= false;
 
     std::vector<std::string> messages;
@@ -1294,6 +1299,71 @@ static bool check_server_utility_functions_unsupported(
     rc= mylite_close(db);
     ok= record_result(result, "server_utility_function_close",
                       MYLITE_OK, rc, nullptr) && ok;
+  }
+  return ok;
+}
+
+static bool check_sql_crypto_functions_unsupported(const SmokeOptions &options,
+                                                   SmokeResult *result)
+{
+  struct UnsupportedFunction
+  {
+    const char *label;
+    const char *sql;
+    const char *name;
+    int expected_errno;
+  };
+
+  static const UnsupportedFunction functions[] = {
+    {"sql_crypto_aes_encrypt", "SELECT AES_ENCRYPT('mylite','key')",
+     "AES_ENCRYPT", ER_SP_DOES_NOT_EXIST},
+    {"sql_crypto_aes_decrypt", "SELECT AES_DECRYPT('mylite','key')",
+     "AES_DECRYPT", ER_SP_DOES_NOT_EXIST},
+    {"sql_crypto_md5", "SELECT MD5('mylite')", "MD5",
+     ER_SP_DOES_NOT_EXIST},
+    {"sql_crypto_sha", "SELECT SHA('mylite')", "SHA",
+     ER_SP_DOES_NOT_EXIST},
+    {"sql_crypto_sha1", "SELECT SHA1('mylite')", "SHA1",
+     ER_SP_DOES_NOT_EXIST},
+    {"sql_crypto_sha2", "SELECT SHA2('mylite',256)", "SHA2",
+     ER_SP_DOES_NOT_EXIST},
+    {"sql_crypto_password", "SELECT PASSWORD('mylite')",
+     "OpenSSL-backed SQL crypto", ER_NOT_SUPPORTED_YET},
+    {"sql_crypto_old_password", "SELECT OLD_PASSWORD('mylite')",
+     "OLD_PASSWORD", ER_SP_DOES_NOT_EXIST},
+    {"sql_crypto_random_bytes", "SELECT RANDOM_BYTES(4)",
+     "RANDOM_BYTES", ER_SP_DOES_NOT_EXIST},
+  };
+
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "sql_crypto_function_open", MYLITE_OK,
+                         rc, db);
+  if (db)
+  {
+    std::vector<std::string> messages;
+    for (size_t i= 0; i < sizeof(functions) / sizeof(functions[0]); ++i)
+    {
+      char *errmsg= nullptr;
+      rc= mylite_exec(db, functions[i].sql, nullptr, nullptr, &errmsg);
+      std::string message= errmsg ? errmsg : mylite_errmsg(db);
+      if (errmsg)
+        mylite_free(errmsg);
+      messages.push_back(std::string(functions[i].label) + "=" + message);
+
+      ok= record_result(result, functions[i].label, MYLITE_ERROR, rc,
+                        db) && ok;
+      if (mylite_mariadb_errno(db) != functions[i].expected_errno ||
+          std::strcmp(mylite_sqlstate(db), "42000") != 0 ||
+          message.find(functions[i].name) == std::string::npos)
+        ok= false;
+    }
+    result->exec_sql_crypto_function_messages=
+      join_strings(messages, " | ");
+
+    rc= mylite_close(db);
+    ok= record_result(result, "sql_crypto_function_close", MYLITE_OK, rc,
+                      nullptr) && ok;
   }
   return ok;
 }
@@ -3117,6 +3187,9 @@ static void write_report(const SmokeOptions &options,
   if (!result.exec_server_utility_messages.empty())
     report << "exec_server_utility_messages="
            << result.exec_server_utility_messages << "\n";
+  if (!result.exec_sql_crypto_function_messages.empty())
+    report << "exec_sql_crypto_function_messages="
+           << result.exec_sql_crypto_function_messages << "\n";
   if (!result.exec_crypt_function_message.empty())
     report << "exec_crypt_function_message="
            << result.exec_crypt_function_message << "\n";

@@ -126,6 +126,13 @@ int yylex(void *yylval, void *yythd);
                     "window functions in the MyLite minsize profile"))
 #endif
 
+#ifdef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
+#define mylite_yyabort_sql_crypto_functions()    \
+  my_yyabort_error((ER_NOT_SUPPORTED_YET, MYF(0), \
+                    "OpenSSL-backed SQL crypto functions in the MyLite " \
+                    "minsize profile"))
+#endif
+
 #ifndef DBUG_OFF
 #define YYDEBUG 1
 #else
@@ -10887,11 +10894,15 @@ function_call_conflict:
           }
         | PASSWORD_SYM '(' expr ')'
           {
+#ifdef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
+            mylite_yyabort_sql_crypto_functions();
+#else
             Item* i1;
             i1= new (thd->mem_root) Item_func_password(thd, $3);
             if (unlikely(i1 == NULL))
               MYSQL_YYABORT;
             $$= i1;
+#endif
           }
         | REPEAT_SYM '(' expr ',' expr ')'
           {
@@ -17635,11 +17646,15 @@ text_or_password:
           }
         | OLD_PASSWORD_SYM '(' TEXT_STRING ')'
           {
+#ifdef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
+            mylite_yyabort_sql_crypto_functions();
+#else
             $$= new (thd->mem_root) USER_AUTH();
             $$->pwtext= $3;
             $$->auth_str.str= Item_func_password::alloc(thd,
                                    $3.str, $3.length, Item_func_password::OLD);
             $$->auth_str.length=  SCRAMBLED_PASSWORD_CHAR_LENGTH_323;
+#endif
           }
         ;
 

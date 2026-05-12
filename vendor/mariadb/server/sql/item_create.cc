@@ -141,6 +141,7 @@ protected:
 };
 
 
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 class Create_func_aes_encrypt : public Create_native_func
 {
 public:
@@ -167,6 +168,7 @@ protected:
   Create_func_aes_decrypt() = default;
   ~Create_func_aes_decrypt() override = default;
 };
+#endif
 
 
 #ifndef MYLITE_DISABLE_KDF_FUNCTION
@@ -1629,6 +1631,7 @@ protected:
   ~Create_func_octet_length() override = default;
 };
 
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 class Create_func_old_password : public Create_func_arg1
 {
 public:
@@ -1653,6 +1656,7 @@ protected:
   Create_func_password() = default;
   virtual ~Create_func_password() = default;
 };
+#endif
 
 
 #ifndef DBUG_OFF
@@ -1899,6 +1903,7 @@ protected:
 #endif
 
 
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 class Create_func_md5 : public Create_func_arg1
 {
 public:
@@ -1910,6 +1915,7 @@ protected:
   Create_func_md5() = default;
   ~Create_func_md5() override = default;
 };
+#endif
 
 
 class Create_func_microsecond : public Create_func_arg1
@@ -2185,6 +2191,7 @@ protected:
 };
 
 
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 class Create_func_random_bytes : public Create_func_arg1
 {
 public:
@@ -2196,6 +2203,7 @@ protected:
   Create_func_random_bytes() {}
   virtual ~Create_func_random_bytes() {}
 };
+#endif
 
 
 #ifndef MYLITE_DISABLE_SERVER_UTILITY_FUNCTIONS
@@ -2364,6 +2372,7 @@ protected:
   virtual ~Create_func_sformat() = default;
 };
 
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 class Create_func_sha : public Create_func_arg1
 {
 public:
@@ -2388,6 +2397,7 @@ protected:
   Create_func_sha2() = default;
   ~Create_func_sha2() override = default;
 };
+#endif
 
 
 class Create_func_sign : public Create_func_arg1
@@ -3242,6 +3252,7 @@ Create_func_addmonths::create_2_arg(THD *thd, Item *arg1, Item *arg2)
 }
 
 
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 Create_func_aes_encrypt Create_func_aes_encrypt::s_singleton;
 
 Item*
@@ -3296,6 +3307,7 @@ Create_func_aes_decrypt::create_native(THD *thd, const LEX_CSTRING *name,
   my_error(ER_WRONG_PARAMCOUNT_TO_NATIVE_FCT, MYF(0), name->str);
   return NULL;
 }
+#endif
 
 
 #ifndef MYLITE_DISABLE_KDF_FUNCTION
@@ -5002,6 +5014,7 @@ Create_func_length::create_1_arg(THD *thd, Item *arg1)
   return new (thd->mem_root) Item_func_octet_length(thd, arg1);
 }
 
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 Create_func_old_password Create_func_old_password::s_singleton;
 
 Item*
@@ -5018,6 +5031,7 @@ Create_func_password::create_1_arg(THD *thd, Item *arg1)
 {
   return new (thd->mem_root) Item_func_password(thd, arg1);
 }
+#endif
 
 Create_func_octet_length Create_func_octet_length::s_singleton;
 
@@ -5388,6 +5402,7 @@ Create_func_master_gtid_wait::create_native(THD *thd, const LEX_CSTRING *name,
 #endif
 
 
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 Create_func_md5 Create_func_md5::s_singleton;
 
 Item*
@@ -5395,6 +5410,7 @@ Create_func_md5::create_1_arg(THD *thd, Item *arg1)
 {
   return new (thd->mem_root) Item_func_md5(thd, arg1);
 }
+#endif
 
 Create_func_natural_sort_key Create_func_natural_sort_key::s_singleton;
 
@@ -5622,6 +5638,7 @@ Create_func_rand::create_native(THD *thd, const LEX_CSTRING *name,
 }
 
 
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 Create_func_random_bytes Create_func_random_bytes::s_singleton;
 
 Item *Create_func_random_bytes::create_1_arg(THD *thd, Item *arg1)
@@ -5630,6 +5647,7 @@ Item *Create_func_random_bytes::create_1_arg(THD *thd, Item *arg1)
   thd->lex->uncacheable(UNCACHEABLE_RAND);
   return new (thd->mem_root) Item_func_random_bytes(thd, arg1);
 }
+#endif
 
 
 #ifndef MYLITE_DISABLE_SERVER_UTILITY_FUNCTIONS
@@ -5843,6 +5861,7 @@ Create_func_sformat::create_native(THD *thd, const LEX_CSTRING *name,
 }
 
 
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 Create_func_sha Create_func_sha::s_singleton;
 
 Item*
@@ -5859,6 +5878,7 @@ Create_func_sha2::create_2_arg(THD *thd, Item *arg1, Item *arg2)
 {
   return new (thd->mem_root) Item_func_sha2(thd, arg1, arg2);
 }
+#endif
 
 
 Create_func_sign Create_func_sign::s_singleton;
@@ -6469,8 +6489,10 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("ACOS") }, BUILDER(Create_func_acos)},
   { { STRING_WITH_LEN("ADDTIME") }, BUILDER(Create_func_addtime)},
   { { STRING_WITH_LEN("ADD_MONTHS") }, BUILDER(Create_func_addmonths)},
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
   { { STRING_WITH_LEN("AES_DECRYPT") }, BUILDER(Create_func_aes_decrypt)},
   { { STRING_WITH_LEN("AES_ENCRYPT") }, BUILDER(Create_func_aes_encrypt)},
+#endif
   { { STRING_WITH_LEN("ASIN") }, BUILDER(Create_func_asin)},
   { { STRING_WITH_LEN("ATAN") }, BUILDER(Create_func_atan)},
   { { STRING_WITH_LEN("ATAN2") }, BUILDER(Create_func_atan)},
@@ -6635,7 +6657,9 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("MASTER_GTID_WAIT") }, BUILDER(Create_func_master_gtid_wait)},
   { { STRING_WITH_LEN("MASTER_POS_WAIT") }, BUILDER(Create_func_master_pos_wait)},
 #endif
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
   { { STRING_WITH_LEN("MD5") }, BUILDER(Create_func_md5)},
+#endif
   { { STRING_WITH_LEN("MICROSECOND") }, BUILDER(Create_func_microsecond)},
   { { STRING_WITH_LEN("MOD") }, BUILDER(Create_func_mod)},
   { { STRING_WITH_LEN("MONTHNAME") }, BUILDER(Create_func_monthname)},
@@ -6646,9 +6670,13 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("NULLIF") }, BUILDER(Create_func_nullif)},
   { { STRING_WITH_LEN("OCT") }, BUILDER(Create_func_oct)},
   { { STRING_WITH_LEN("OCTET_LENGTH") }, BUILDER(Create_func_octet_length)},
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
   { { STRING_WITH_LEN("OLD_PASSWORD") }, BUILDER(Create_func_old_password)},
+#endif
   { { STRING_WITH_LEN("ORD") }, BUILDER(Create_func_ord)},
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
   { { STRING_WITH_LEN("PASSWORD") }, BUILDER(Create_func_password)},
+#endif
   { { STRING_WITH_LEN("PERIOD_ADD") }, BUILDER(Create_func_period_add)},
   { { STRING_WITH_LEN("PERIOD_DIFF") }, BUILDER(Create_func_period_diff)},
   { { STRING_WITH_LEN("PI") }, BUILDER(Create_func_pi)},
@@ -6656,7 +6684,9 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("POWER") }, BUILDER(Create_func_pow)},
   { { STRING_WITH_LEN("QUARTER") }, BUILDER(Create_func_quarter)},
   { { STRING_WITH_LEN("QUOTE") }, BUILDER(Create_func_quote)},
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
   { { STRING_WITH_LEN("RANDOM_BYTES")}, BUILDER(Create_func_random_bytes)},
+#endif
 #ifndef MYLITE_DISABLE_REGEX_FUNCTIONS
   { { STRING_WITH_LEN("REGEXP_INSTR") }, BUILDER(Create_func_regexp_instr)},
   { { STRING_WITH_LEN("REGEXP_REPLACE") }, BUILDER(Create_func_regexp_replace)},
@@ -6688,9 +6718,11 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("SFORMAT") }, BUILDER(Create_func_sformat)},
   { { STRING_WITH_LEN("SCHEMA") }, BUILDER(Create_func_database)},
   { { STRING_WITH_LEN("SCHEMAS") }, BUILDER(Create_func_database)},
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
   { { STRING_WITH_LEN("SHA") }, BUILDER(Create_func_sha)},
   { { STRING_WITH_LEN("SHA1") }, BUILDER(Create_func_sha)},
   { { STRING_WITH_LEN("SHA2") }, BUILDER(Create_func_sha2)},
+#endif
   { { STRING_WITH_LEN("SIGN") }, BUILDER(Create_func_sign)},
   { { STRING_WITH_LEN("SIN") }, BUILDER(Create_func_sin)},
 #ifndef MYLITE_DISABLE_SERVER_UTILITY_FUNCTIONS

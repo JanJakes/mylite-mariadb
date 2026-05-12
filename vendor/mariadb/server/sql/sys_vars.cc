@@ -4669,7 +4669,11 @@ static char *ssl_library;
 static Sys_var_charptr Sys_ssl_library(
        "version_ssl_library", "Version of the used SSL library",
        READ_ONLY GLOBAL_VAR(ssl_library), CMD_LINE_HELP_ONLY,
+#ifdef MYLITE_DISABLE_VIO_SSL
+       DEFAULT("disabled in the MyLite minsize profile"));
+#else
        DEFAULT(SSL_LIBRARY));
+#endif
 
 static Sys_var_ulong Sys_net_wait_timeout(
        "wait_timeout",

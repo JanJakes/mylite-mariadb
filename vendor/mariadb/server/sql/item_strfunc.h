@@ -146,6 +146,7 @@ public:
 };
 
 
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 class Item_func_md5 :public Item_str_ascii_checksum_func
 {
 public:
@@ -202,6 +203,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_sha2>(thd, this); }
 };
+#endif
 
 class Item_func_to_base64 :public Item_str_ascii_checksum_func
 {
@@ -241,8 +243,11 @@ protected:
   { return get_item_copy<Item_func_from_base64>(thd, this); }
 };
 
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 #include <my_crypt.h>
+#endif
 
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 class Item_aes_crypt :public Item_str_binary_checksum_func
 {
   void create_key(String *user_key, uchar* key);
@@ -310,6 +315,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_aes_decrypt>(thd, this); }
 };
+#endif
 
 class Item_func_kdf :public Item_str_binary_checksum_func
 {
@@ -473,6 +479,7 @@ protected:
 };
 
 
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 class Item_func_random_bytes : public Item_str_func
 {
 public:
@@ -495,6 +502,7 @@ public:
   }
   static const int MAX_RANDOM_BYTES= 1024;
 };
+#endif
 
 
 class Item_func_reverse :public Item_str_func
@@ -1030,6 +1038,7 @@ protected:
   { return get_item_copy<Item_func_rtrim_oracle>(thd, this); }
 };
 
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 /*
   Item_func_password -- new (4.1.1) PASSWORD() function implementation.
   Returns strcat('*', octet2hex(sha1(sha1(password)))). '*' stands for new
@@ -1074,6 +1083,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_password>(thd, this); }
 };
+#endif
 
 
 

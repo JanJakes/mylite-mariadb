@@ -28,6 +28,7 @@ The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 - `MYLITE_DISABLE_CRYPT_FUNCTION=ON`
 - `MYLITE_DISABLE_DES_FUNCTIONS=ON`
 - `MYLITE_DISABLE_KDF_FUNCTION=ON`
+- `MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS=ON`
 - `MYLITE_DISABLE_ZLIB_COMPRESSION=ON`
 - `MYLITE_DISABLE_REGEX_FUNCTIONS=ON`
 - `MYLITE_DISABLE_SERVER_UTILITY_FUNCTIONS=ON`
@@ -74,8 +75,9 @@ include the `type-plugin-size-profile`, `charset-small-profile`, and
 `vio-tls-size-profile`, `libcrypt-encrypt-size-profile`,
 `zlib-compression-size-profile`,
 `dynamic-plugin-loading-size-profile`, `des-function-size-profile`, and
-`kdf-function-size-profile`, `unwind-table-size-profile`, and
-`udf-runtime-size-profile`, and `window-function-size-profile`
+`kdf-function-size-profile`, `unwind-table-size-profile`,
+`udf-runtime-size-profile`, `window-function-size-profile`, and
+`sql-crypto-function-size-profile`
 attempts, which remove the built-in
 `type_geom`, `type_inet`, `type_uuid`, `sequence`, `thread_pool_info`,
 `user_variables`, `userstat`, `mhnsw`, `csv`, and `myisammrg` plugins, set
@@ -123,7 +125,9 @@ OpenSSL-backed `KDF()` SQL function, and disable nonessential compiler unwind
 tables while retaining C++ exception support, and omit UDF runtime lookup,
 execution, and `mysql.func` dynamic-library loading from the aggressive
 embedded profile, and omit SQL window-function item/execution code from the
-aggressive embedded profile.
+aggressive embedded profile, and omit OpenSSL-backed SQL crypto/password
+functions from the aggressive embedded profile while reporting the SSL library
+as disabled when VIO TLS is disabled.
 
 `no-myisam-temp-spill-size-profile` was measured separately as an opt-in
 `MYLITE_DISABLE_MYISAM_TEMP_SPILL=ON` experiment. It is not part of the current
@@ -143,40 +147,40 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 ## Current baseline
 
 The current values were measured from
-`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-window`.
+`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-sql-crypto`.
 Paths below use the default build directory names for readability.
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
-| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 31,138,612 | 29.70 | Main embedded MariaDB archive, 433 objects, stripped; section metadata grows the archive |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 31,000,638 | 29.56 | Main embedded MariaDB archive, 433 objects, stripped; section metadata grows the archive |
 | `build/mariadb-minsize/mylite/libmylite.a` | 122,792 | 0.12 | First-party public wrapper |
 | `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 388,440 | 0.37 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 8,151,024 | 7.77 | Unstripped linked smoke binary, lld RELR, section GC, ICF, reduced unwind tables, no window functions, no UDF runtime, no VIO TLS transport, no `ENCRYPT()`, no legacy DES, no `KDF()`, no zlib compression, and no dynamic plugin loading |
-| stripped `mylite-open-close-smoke` copy | 5,849,432 | 5.58 | `strip --strip-unneeded` on copied binary |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 8,111,048 | 7.74 | Unstripped linked smoke binary, lld RELR, section GC, ICF, reduced unwind tables, no window functions, no UDF runtime, no SQL crypto/password functions, no VIO TLS transport, no `ENCRYPT()`, no legacy DES, no `KDF()`, no zlib compression, and no dynamic plugin loading |
+| stripped `mylite-open-close-smoke` copy | 5,823,416 | 5.55 | `strip --strip-unneeded` on copied binary |
 
 The linked smoke binary has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 4,610,563 |
-| data | 1,235,480 |
-| bss | 247,889 |
-| total `size` decimal | 6,093,932 |
+| text | 4,599,716 |
+| data | 1,220,408 |
+| bss | 249,105 |
+| total `size` decimal | 6,069,229 |
 
 Largest linked sections in the open-close smoke binary:
 
 | Section | Bytes | Interpretation |
 | --- | ---: | --- |
-| `.text` | 2,853,204 | Executable code |
-| `.data.rel.ro` | 1,021,472 | Relocated read-only data |
-| `.rodata` | 976,843 | Parser tables, SQL metadata, constants, retained Unicode data |
-| `.eh_frame` | 529,612 | Unwind metadata |
-| `.data` | 184,848 | Writable data |
+| `.text` | 2,846,980 | Executable code |
+| `.data.rel.ro` | 1,007,016 | Relocated read-only data |
+| `.rodata` | 977,099 | Parser tables, SQL metadata, constants, retained Unicode data |
+| `.eh_frame` | 527,324 | Unwind metadata |
+| `.data` | 184,624 | Writable data |
 | `.bss` | 245,161 | Zero-initialized writable data |
-| `.eh_frame_hdr` | 111,332 | Unwind table index |
-| `.rela.dyn` | 47,280 | Remaining unpacked dynamic relocations |
-| `.gcc_except_table` | 42,084 | Exception metadata |
-| `.relr.dyn` | 18,728 | Packed relative relocations |
+| `.eh_frame_hdr` | 110,804 | Unwind table index |
+| `.rela.dyn` | 46,824 | Remaining unpacked dynamic relocations |
+| `.gcc_except_table` | 41,912 | Exception metadata |
+| `.relr.dyn` | 18,488 | Packed relative relocations |
 
 If a Linux distribution bundle vendors the current dynamic dependencies, it
 adds about 9,679,568 bytes, or 9.23 MiB, before compression:
@@ -291,6 +295,7 @@ The current built-in plugins are:
 | `unwind-table-size-profile` after KDF | 31,864,556 | -11,540,876 | 5,962,256 | -13,369,648 | Passes current smokes and harness; removes nonessential unwind tables while retaining C++ exception support |
 | `udf-runtime-size-profile` after unwind tables | 31,748,626 | -11,656,806 | 5,926,048 | -13,405,856 | Passes current smokes and harness; omits UDF lookup/execution and removes `sql_udf.cc.o` from the embedded archive |
 | `window-function-size-profile` after UDF runtime | 31,138,612 | -12,266,820 | 5,849,432 | -13,482,472 | Passes current smokes and harness; omits dedicated window-function item/execution objects, with small retained stubs |
+| `sql-crypto-function-size-profile` after window functions | 31,000,638 | -12,404,794 | 5,823,416 | -13,508,488 | Passes current smokes and harness; omits OpenSSL-backed SQL crypto/password functions, but `libcrypto.so.3` remains rooted by auth, digest, table, and binlog/io-cache encryption helpers |
 | `no-myisam-temp-spill-size-profile` after no-binlog-core | 32,836,602 | -10,568,830 | 6,437,408 | -12,894,496 | Opt-in experiment only; open/close smoke passes, but storage/catalog harness fails because schema-table queries need disk temp tables |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
 | Strip archive with `strip --strip-unneeded` | 41,873,048 | -1,532,384 | n/a | n/a | Higher risk than `strip -g` for static archives |
@@ -314,7 +319,7 @@ profile now passes current smokes while retaining the compiled default
 `utf8mb4_uca1400_ai_ci`.
 
 Stripping the current linked open-close smoke binary reduces it from
-8,151,024 bytes to 5,849,432 bytes, saving 2,301,592 bytes, or 2.20 MiB. That
+8,111,048 bytes to 5,823,416 bytes, saving 2,287,632 bytes, or 2.18 MiB. That
 remains the lowest-risk packaging win for any copied executable or
 shared-library style artifact.
 
@@ -417,6 +422,20 @@ retained SELECT-path references that are unreachable after parser rejection.
 The open/close smoke verifies ordinary `COUNT()` and `SUM()` still work while
 `ROW_NUMBER() OVER ()`, `SUM(1) OVER ()`, and a named `WINDOW` clause fail with
 the unsupported-feature diagnostic.
+
+The `sql-crypto-function-size-profile` attempt then removed OpenSSL-backed
+SQL crypto/password function entry points from the aggressive embedded profile:
+`AES_ENCRYPT()`, `AES_DECRYPT()`, `MD5()`, `SHA()`, `SHA1()`, `SHA2()`,
+`PASSWORD()`, `OLD_PASSWORD()`, and `RANDOM_BYTES()`. On top of the
+window-function profile, it reduced the static archive by 137,974 bytes and
+the stripped linked smoke by 26,016 bytes. The open/close smoke verifies each
+removed function fails as an absent or unsupported function, and verifies
+`VERSION()` and `CONNECTION_ID()` still execute. `libcrypto.so.3` remains
+because retained embedded objects still reference `my_sha1` from
+`lib_sql.cc.o`, `client.c.o`, and `password.c.o`, `my_md5` from
+`sql_digest.cc.o` and `table.cc.o`, `my_make_scrambled_password*` from
+`sql_acl.cc.o`, `my_random_bytes` from `log.cc.o` and
+`mf_iocache_encr.cc.o`, and `my_aes_*` from `encryption.cc.o`.
 
 The LTO build reduced the stripped linked smoke binary by 1.25 MiB, but the
 static archive became 326.61 MiB and GCC emitted type/ODR mismatch warnings
@@ -604,8 +623,9 @@ profile. Shared lifecycle helpers such as user-level-lock cleanup,
 MariaDB code still references them. On top of the Oracle-function profile, it
 reduced the static archive by 228,044 bytes and the stripped linked smoke by
 37,576 bytes. The open/close smoke verifies each removed function fails as an
-unknown function and retained functions such as `RANDOM_BYTES()`, `VERSION()`,
-and `CONNECTION_ID()` still execute.
+unknown function and retained utility functions such as `VERSION()` and
+`CONNECTION_ID()` still execute. `RANDOM_BYTES()` is removed separately by the
+later SQL crypto size profile.
 
 The `uca-collation-size-profile` attempt then made `HAVE_UCA_COLLATIONS`
 optional for the aggressive minsize profile, stopped compiling the UCA 0900

@@ -40,10 +40,14 @@
 #include "sql_base.h"
 #include "sql_time.h"
 #include "des_key_file.h"       // st_des_keyschedule, st_des_keyblock
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 #include "password.h"           // my_make_scrambled_password,
                                 // my_make_scrambled_password_323
+#endif
 #include <m_ctype.h>
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 #include <my_md5.h>
+#endif
 C_MODE_START
 #include "../mysys/my_static.h"			// For soundex_map
 C_MODE_END
@@ -170,6 +174,7 @@ longlong Item_str_func::val_int()
 }
 
 
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 String *Item_func_md5::val_str_ascii(String *str)
 {
   DBUG_ASSERT(fixed());
@@ -323,19 +328,26 @@ bool Item_func_sha2::fix_length_and_dec(THD *thd)
   }
   return FALSE;
 }
+#endif
 
 const char *block_encryption_mode_values[]= {
   "aes-128-ecb", "aes-192-ecb", "aes-256-ecb",
   "aes-128-cbc", "aes-192-cbc", "aes-256-cbc",
   "aes-128-ctr", "aes-192-ctr", "aes-256-ctr",
   NullS };
+#if !defined(MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS) || \
+    !defined(MYLITE_DISABLE_KDF_FUNCTION)
 TYPELIB block_encryption_mode_typelib=
         CREATE_TYPELIB_FOR(block_encryption_mode_values);
 static inline uint block_encryption_mode_to_key_length(ulong bem)
 { return (bem % 3 + 2) * 64; }
+#endif
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 static inline my_aes_mode block_encryption_mode_to_aes_mode(ulong bem)
 { return (my_aes_mode)(bem / 3); }
+#endif
 
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 /* Implementation of AES encryption routines */
 int Item_aes_crypt::parse_mode()
 {
@@ -441,6 +453,7 @@ bool Item_func_aes_decrypt::fix_length_and_dec(THD *thd)
   set_maybe_null();
   return FALSE;
 }
+#endif
 
 #ifndef MYLITE_DISABLE_KDF_FUNCTION
 bool Item_func_kdf::fix_length_and_dec(THD *thd)
@@ -1651,6 +1664,7 @@ String *Item_func_sformat::val_str(String *res)
   return null_value ? NULL : res;
 }
 
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 #include"my_global.h"
 #include <openssl/rand.h>
 #include <openssl/err.h>
@@ -1714,6 +1728,7 @@ err:
   null_value= 1;
   return 0;
 }
+#endif
 
 
 /*********************************************************************/
@@ -2654,6 +2669,7 @@ Sql_mode_dependency Item_func_trim::value_depends_on_sql_mode() const
 }
 
 
+#ifndef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 /* Item_func_password */
 
 bool Item_func_password::fix_fields(THD *thd, Item **ref)
@@ -2708,6 +2724,7 @@ char *Item_func_password::alloc(THD *thd, const char *password,
   }
   return buff;
 }
+#endif
 
 
 
