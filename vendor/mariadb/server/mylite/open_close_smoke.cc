@@ -59,6 +59,11 @@ struct SmokeResult
   std::string exec_vector_distance_message;
   std::string exec_json_valid_rows;
   std::string exec_json_schema_valid_message;
+  std::string exec_query_cache_have_rows;
+  std::string exec_query_cache_size_rows;
+  std::string exec_query_cache_type_rows;
+  std::string exec_query_cache_resize_rows;
+  std::string exec_query_cache_select_rows;
   std::string exec_show_profiles_message;
   std::string exec_help_message;
   std::string exec_procedure_analyse_message;
@@ -150,6 +155,8 @@ static bool check_vector_functions_unsupported(const SmokeOptions &options,
                                                SmokeResult *result);
 static bool check_json_schema_valid_unsupported(const SmokeOptions &options,
                                                 SmokeResult *result);
+static bool check_query_cache_unsupported(const SmokeOptions &options,
+                                          SmokeResult *result);
 static bool check_profiling_unsupported(const SmokeOptions &options,
                                         SmokeResult *result);
 static bool check_help_unsupported(const SmokeOptions &options,
@@ -321,6 +328,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "json_schema_valid_unsupported";
   ok= check_json_schema_valid_unsupported(options, result) && ok;
+
+  result->phase= "query_cache_unsupported";
+  ok= check_query_cache_unsupported(options, result) && ok;
 
   result->phase= "profiling_unsupported";
   ok= check_profiling_unsupported(options, result) && ok;
@@ -854,6 +864,64 @@ static bool check_json_schema_valid_unsupported(const SmokeOptions &options,
 
     rc= mylite_close(db);
     ok= record_result(result, "json_schema_valid_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+  return ok;
+}
+
+static bool check_query_cache_unsupported(const SmokeOptions &options,
+                                          SmokeResult *result)
+{
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "query_cache_open", MYLITE_OK, rc, db);
+  if (db)
+  {
+    ExecCapture have_capture;
+    ok= exec_query_capture(db, "SHOW VARIABLES LIKE 'have_query_cache'",
+                           "query_cache_have", &have_capture, result) && ok;
+    result->exec_query_cache_have_rows= join_strings(have_capture.rows, ",");
+    if (result->exec_query_cache_have_rows != "have_query_cache:NO")
+      ok= false;
+
+    ExecCapture size_capture;
+    ok= exec_query_capture(db, "SHOW VARIABLES LIKE 'query_cache_size'",
+                           "query_cache_size", &size_capture, result) && ok;
+    result->exec_query_cache_size_rows= join_strings(size_capture.rows, ",");
+    if (result->exec_query_cache_size_rows != "query_cache_size:0")
+      ok= false;
+
+    ok= exec_statement(db, "SET GLOBAL query_cache_type=ON",
+                       "query_cache_type_on", result) && ok;
+    ExecCapture type_capture;
+    ok= exec_query_capture(db, "SHOW GLOBAL VARIABLES LIKE 'query_cache_type'",
+                           "query_cache_type", &type_capture, result) && ok;
+    result->exec_query_cache_type_rows= join_strings(type_capture.rows, ",");
+    if (result->exec_query_cache_type_rows != "query_cache_type:OFF")
+      ok= false;
+
+    ok= exec_statement(db, "SET GLOBAL query_cache_size=1048576",
+                       "query_cache_resize", result) && ok;
+    ExecCapture resize_capture;
+    ok= exec_query_capture(db, "SHOW VARIABLES LIKE 'query_cache_size'",
+                           "query_cache_resize_size", &resize_capture,
+                           result) && ok;
+    result->exec_query_cache_resize_rows=
+      join_strings(resize_capture.rows, ",");
+    if (result->exec_query_cache_resize_rows != "query_cache_size:0")
+      ok= false;
+
+    ExecCapture select_capture;
+    ok= exec_query_capture(db, "SELECT SQL_CACHE 1 AS one",
+                           "query_cache_select", &select_capture, result) &&
+        ok;
+    result->exec_query_cache_select_rows=
+      join_strings(select_capture.rows, ",");
+    if (result->exec_query_cache_select_rows != "1")
+      ok= false;
+
+    rc= mylite_close(db);
+    ok= record_result(result, "query_cache_close", MYLITE_OK, rc,
                       nullptr) && ok;
   }
   return ok;
@@ -2242,6 +2310,21 @@ static void write_report(const SmokeOptions &options,
   if (!result.exec_json_schema_valid_message.empty())
     report << "exec_json_schema_valid_message="
            << result.exec_json_schema_valid_message << "\n";
+  if (!result.exec_query_cache_have_rows.empty())
+    report << "exec_query_cache_have_rows="
+           << result.exec_query_cache_have_rows << "\n";
+  if (!result.exec_query_cache_size_rows.empty())
+    report << "exec_query_cache_size_rows="
+           << result.exec_query_cache_size_rows << "\n";
+  if (!result.exec_query_cache_type_rows.empty())
+    report << "exec_query_cache_type_rows="
+           << result.exec_query_cache_type_rows << "\n";
+  if (!result.exec_query_cache_resize_rows.empty())
+    report << "exec_query_cache_resize_rows="
+           << result.exec_query_cache_resize_rows << "\n";
+  if (!result.exec_query_cache_select_rows.empty())
+    report << "exec_query_cache_select_rows="
+           << result.exec_query_cache_select_rows << "\n";
   if (!result.exec_show_profiles_message.empty())
     report << "exec_show_profiles_message="
            << result.exec_show_profiles_message << "\n";

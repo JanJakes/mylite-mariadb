@@ -4969,6 +4969,7 @@ static int init_server_components()
 
   query_cache_set_min_res_unit(query_cache_min_res_unit);
   query_cache_result_size_limit(query_cache_limit);
+#ifndef MYLITE_DISABLE_QUERY_CACHE
   /* if we set size of QC non zero in config then probably we want it ON */
   if (query_cache_size != 0 &&
       global_system_variables.query_cache_type == 0 &&
@@ -4976,6 +4977,7 @@ static int init_server_components()
   {
     global_system_variables.query_cache_type= 1;
   }
+#endif
   query_cache_init();
   DBUG_ASSERT(query_cache_size < ULONG_MAX);
   query_cache_resize((ulong)query_cache_size);
@@ -8137,7 +8139,11 @@ static int mysql_init_variables(void)
 #else
   have_dlopen=SHOW_OPTION_NO;
 #endif
+#ifdef MYLITE_DISABLE_QUERY_CACHE
+  have_query_cache=SHOW_OPTION_NO;
+#else
   have_query_cache=SHOW_OPTION_YES;
+#endif
   have_geometry=SHOW_OPTION_YES;
   have_rtree_keys=SHOW_OPTION_YES;
 #ifdef HAVE_CRYPT

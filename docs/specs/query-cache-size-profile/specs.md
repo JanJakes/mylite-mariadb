@@ -168,6 +168,7 @@ Add open/close smoke assertions that:
 - `SHOW VARIABLES LIKE 'have_query_cache'` reports `NO` in the minsize
   profile,
 - `SHOW VARIABLES LIKE 'query_cache_size'` reports `0`,
+- setting `query_cache_type` to `ON` leaves the global type at `OFF`,
 - setting `query_cache_size` to a non-zero value leaves the effective value at
   `0`,
 - ordinary `SELECT` execution still works after the query-cache hooks return
@@ -178,7 +179,6 @@ Measure:
 ```sh
 stat -c "%s" build/mariadb-minsize/libmysqld/libmariadbd.a
 llvm-ar t build/mariadb-minsize/libmysqld/libmariadbd.a | wc -l
-stat -c "%s" build/mariadb-minsize/libmysqld/libmariadbd.a
 stat -c "%s" build/mariadb-minsize/mylite/libmylite.a
 stat -c "%s" build/mariadb-minsize/storage/mylite/libmylite_embedded.a
 stat -c "%s" build/mariadb-minsize/mylite/mylite-open-close-smoke
@@ -196,14 +196,56 @@ llvm-size build/mariadb-minsize/mylite/mylite-open-close-smoke
 - The embedded archive no longer contains `sql_cache.cc.o` or
   `emb_qcache.cc.o`.
 - The linked smoke binary no longer contains the upstream
-  `Query_cache::send_result_to_client`, `Query_cache::store_query`,
-  `Query_cache::init_cache`, or `Querycache_stream` implementation symbols.
+  `Query_cache::init_cache` or `Querycache_stream` implementation symbols,
+  and the retained `Query_cache::send_result_to_client` and
+  `Query_cache::store_query` symbols are tiny disabled-stub definitions.
 - `have_query_cache` reports `NO` in the minsize profile.
+- Attempts to set `query_cache_type=ON` leave the global type at `OFF`.
 - Attempts to set a non-zero `query_cache_size` leave the effective cache size
   at `0`.
 - Ordinary scalar query execution still succeeds.
 - Build, open/close smoke, and compatibility harness pass.
 - Size deltas are recorded in `docs/research/production-size-analysis.md`.
+
+## Verification
+
+Validated on 2026-05-12 with:
+
+```sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-query-cache \
+  MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-query-cache \
+  MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-query-cache \
+  MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+```
+
+Observed smoke evidence:
+
+- `exec_query_cache_have_rows=have_query_cache:NO`
+- `exec_query_cache_size_rows=query_cache_size:0`
+- `exec_query_cache_type_rows=query_cache_type:OFF`
+- `exec_query_cache_resize_rows=query_cache_size:0`
+- `exec_query_cache_select_rows=1`
+- `mylite-compatibility-harness-report.txt` reports `status=0` for all
+  groups and no unexpected sidecars.
+
+Measured artifacts after this slice:
+
+| Artifact | Bytes | Delta from JSON-schema profile |
+| --- | ---: | ---: |
+| `libmariadbd.a` | 36,101,680 | -73,154 |
+| `libmylite.a` | 122,792 | 0 |
+| `libmylite_embedded.a` | 388,440 | 0 |
+| `mylite-open-close-smoke` | 10,950,672 | -33,080 |
+| stripped `mylite-open-close-smoke` copy | 8,390,256 | -23,512 |
+| linked `size` total | 8,687,097 | -20,607 |
+
+The archive no longer contains `sql_cache.cc.o` or `emb_qcache.cc.o`; it keeps
+`mylite_query_cache_stub.cc.o` at 12,552 bytes. The linked smoke binary no
+longer exposes `Query_cache::init_cache` or `Querycache_stream` symbols. The
+remaining `Query_cache::store_query` and `Query_cache::send_result_to_client`
+symbols are 4-byte and 8-byte disabled-stub methods.
 
 ## Risks and unresolved questions
 

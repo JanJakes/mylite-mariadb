@@ -3484,6 +3484,13 @@ static bool check_query_cache_type(sys_var *self, THD *thd, set_var *var)
 
 static bool fix_query_cache_type(sys_var *self, THD *thd, enum_var_type type)
 {
+#ifdef MYLITE_DISABLE_QUERY_CACHE
+  if (type == OPT_GLOBAL)
+    global_system_variables.query_cache_type= 0;
+  query_cache.disable_query_cache(thd);
+  return false;
+#endif
+
   if (type != OPT_GLOBAL)
     return false;
 
