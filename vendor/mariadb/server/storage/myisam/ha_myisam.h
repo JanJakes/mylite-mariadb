@@ -129,8 +129,12 @@ class ha_myisam final : public handler
   bool is_crashed() const override;
   bool auto_repair(int error) const override
   {
+#ifdef MYLITE_DISABLE_MYISAM_ADMIN
+    return false;
+#else
     return (myisam_recover_options != HA_RECOVER_OFF &&
             error == HA_ERR_CRASHED_ON_USAGE);
+#endif
   }
   int optimize(THD* thd, HA_CHECK_OPT* check_opt) override;
   int assign_to_keycache(THD* thd, HA_CHECK_OPT* check_opt) override;

@@ -27,6 +27,10 @@ SET(MYISAM_SOURCES  ft_boolean_search.c ft_nlq_search.c ft_parser.c ft_static.c
 				rt_split.c sort.c sp_key.c mi_extrafunc.h myisamdef.h
 				rt_index.h mi_rkey.c)
 
+IF(MYLITE_DISABLE_MYISAM_ADMIN)
+  LIST(REMOVE_ITEM MYISAM_SOURCES mi_check.c)
+ENDIF()
+
 IF(CMAKE_SYSTEM_NAME MATCHES AIX)
   # Workaround linker bug on AIX
   SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-berok")

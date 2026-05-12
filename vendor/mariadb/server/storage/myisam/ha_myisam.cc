@@ -53,6 +53,7 @@ static MYSQL_SYSVAR_ULONG(data_pointer_size, myisam_data_pointer_size,
   PLUGIN_VAR_RQCMDARG, "Default pointer size to be used for MyISAM tables",
   NULL, NULL, 6, 2, 7, 1);
 
+#ifndef MYLITE_DISABLE_MYISAM_ADMIN
 #define MB (1024*1024)
 static MYSQL_SYSVAR_ULONGLONG(max_sort_file_size, myisam_max_temp_length,
   PLUGIN_VAR_RQCMDARG, "Don't use the fast sort index method to created "
@@ -74,6 +75,7 @@ static MYSQL_THDVAR_ULONGLONG(sort_buffer_size, PLUGIN_VAR_RQCMDARG,
   "The buffer that is allocated when sorting the index when doing "
   "a REPAIR or when creating indexes with CREATE INDEX or ALTER TABLE", NULL, NULL,
   SORT_BUFFER_INIT, MIN_SORT_BUFFER, SIZE_T_MAX/16, 1);
+#endif
 
 static MYSQL_SYSVAR_BOOL(use_mmap, opt_myisam_use_mmap, PLUGIN_VAR_NOCMDARG,
   "Use memory mapping for reading and writing MyISAM tables", NULL, NULL, FALSE);
@@ -83,12 +85,14 @@ static MYSQL_SYSVAR_ULONGLONG(mmap_size, myisam_mmap_size,
   "used for memory mapping of MyISAM tables", NULL, NULL,
   SIZE_T_MAX, MEMMAP_EXTRA_MARGIN, SIZE_T_MAX, 1);
 
+#ifndef MYLITE_DISABLE_MYISAM_ADMIN
 static MYSQL_THDVAR_ENUM(stats_method, PLUGIN_VAR_RQCMDARG,
   "Specifies how MyISAM index statistics collection code should "
   "treat NULLs. Possible values of name are NULLS_UNEQUAL (default "
   "behavior for 4.1 and later), NULLS_EQUAL (emulate 4.0 behavior), "
   "and NULLS_IGNORED", NULL, NULL,
   MI_STATS_METHOD_NULLS_NOT_EQUAL, &myisam_stats_method_typelib);
+#endif
 
 const LEX_CSTRING MI_CHECK_INFO= { STRING_WITH_LEN("info") };
 const LEX_CSTRING MI_CHECK_WARNING= { STRING_WITH_LEN("warning") };
@@ -998,6 +1002,43 @@ int ha_myisam::setup_vcols_for_repair(HA_CHECK *param)
   return 0;
 }
 
+#ifdef MYLITE_DISABLE_MYISAM_ADMIN
+int ha_myisam::check(THD *thd, HA_CHECK_OPT *check_opt)
+{
+  (void)thd;
+  (void)check_opt;
+  return HA_ADMIN_NOT_IMPLEMENTED;
+}
+
+int ha_myisam::analyze(THD *thd, HA_CHECK_OPT *check_opt)
+{
+  (void)thd;
+  (void)check_opt;
+  return HA_ADMIN_NOT_IMPLEMENTED;
+}
+
+int ha_myisam::repair(THD *thd, HA_CHECK_OPT *check_opt)
+{
+  (void)thd;
+  (void)check_opt;
+  return HA_ADMIN_NOT_IMPLEMENTED;
+}
+
+int ha_myisam::optimize(THD *thd, HA_CHECK_OPT *check_opt)
+{
+  (void)thd;
+  (void)check_opt;
+  return HA_ADMIN_NOT_IMPLEMENTED;
+}
+
+int ha_myisam::repair(THD *thd, HA_CHECK &param, bool do_optimize)
+{
+  (void)thd;
+  (void)param;
+  (void)do_optimize;
+  return HA_ADMIN_NOT_IMPLEMENTED;
+}
+#else
 int ha_myisam::check(THD* thd, HA_CHECK_OPT* check_opt)
 {
   if (!file) return HA_ADMIN_INTERNAL_ERROR;
@@ -1437,12 +1478,28 @@ int ha_myisam::repair(THD *thd, HA_CHECK &param, bool do_optimize)
   DBUG_RETURN(error ? HA_ADMIN_FAILED :
 	      !optimize_done ? HA_ADMIN_ALREADY_DONE : HA_ADMIN_OK);
 }
+#endif
 
 
 /*
   Assign table indexes to a specific key cache.
 */
 
+#ifdef MYLITE_DISABLE_MYISAM_ADMIN
+int ha_myisam::assign_to_keycache(THD *thd, HA_CHECK_OPT *check_opt)
+{
+  (void)thd;
+  (void)check_opt;
+  return HA_ADMIN_NOT_IMPLEMENTED;
+}
+
+int ha_myisam::preload_keys(THD *thd, HA_CHECK_OPT *check_opt)
+{
+  (void)thd;
+  (void)check_opt;
+  return HA_ADMIN_NOT_IMPLEMENTED;
+}
+#else
 int ha_myisam::assign_to_keycache(THD* thd, HA_CHECK_OPT *check_opt)
 {
   KEY_CACHE *new_key_cache= check_opt->key_cache;
@@ -1553,6 +1610,7 @@ int ha_myisam::preload_keys(THD* thd, HA_CHECK_OPT *check_opt)
     DBUG_RETURN(error);
   }
 }
+#endif
 
 
 /*
@@ -1643,6 +1701,9 @@ int ha_myisam::enable_indexes(key_map map, bool persist)
   }
   else
   {
+#ifdef MYLITE_DISABLE_MYISAM_ADMIN
+    error= HA_ERR_WRONG_COMMAND;
+#else
     THD *thd= table->in_use;
     int was_error= thd->is_error();
     HA_CHECK *param= thd->alloc<HA_CHECK>(1);
@@ -1702,6 +1763,7 @@ int ha_myisam::enable_indexes(key_map map, bool persist)
     }
     info(HA_STATUS_CONST);
     thd_proc_info(thd, save_proc_info);
+#endif
   }
   DBUG_RETURN(error);
 }
@@ -1758,9 +1820,9 @@ void ha_myisam::start_bulk_insert(ha_rows rows, uint flags)
   if ((!rows || rows > MI_MIN_ROWS_TO_USE_WRITE_CACHE) && !has_long_unique())
     mi_extra(file, HA_EXTRA_WRITE_CACHE, (void*) &size);
 
+#ifndef MYLITE_DISABLE_MYISAM_ADMIN
   can_enable_indexes= mi_is_all_keys_active(file->s->state.key_map,
                                             file->s->base.keys);
-
   /*
     Only disable old index if the table was empty and we are inserting
     a lot of rows.
@@ -1822,6 +1884,15 @@ void ha_myisam::start_bulk_insert(ha_rows rows, uint flags)
                           rows);
     }
   }
+#else
+  can_enable_indexes= 0;
+  if (!file->bulk_insert &&
+      (!rows || rows >= MI_MIN_ROWS_TO_USE_BULK_INSERT))
+  {
+    mi_init_bulk_insert(file, (size_t) thd->variables.bulk_insert_buff_size,
+                        rows);
+  }
+#endif
   can_enable_indexes= index_disabled;
   DBUG_VOID_RETURN;
 }
@@ -1883,6 +1954,10 @@ int ha_myisam::end_bulk_insert()
 
 bool ha_myisam::check_and_repair(THD *thd)
 {
+#ifdef MYLITE_DISABLE_MYISAM_ADMIN
+  (void)thd;
+  return false;
+#else
   int error=0;
   int marked_crashed;
   HA_CHECK_OPT check_opt;
@@ -1926,6 +2001,7 @@ bool ha_myisam::check_and_repair(THD *thd)
   }
   thd->set_query(query_backup);
   DBUG_RETURN(error);
+#endif
 }
 
 bool ha_myisam::is_crashed() const
@@ -2596,10 +2672,14 @@ static int myisam_init(void *p)
   init_myisam_psi_keys();
 
   /* Set global variables based on startup options */
+#ifdef MYLITE_DISABLE_MYISAM_ADMIN
+  myisam_recover_options= HA_RECOVER_OFF;
+#else
   if (myisam_recover_options && myisam_recover_options != HA_RECOVER_OFF)
     ha_open_options|=HA_OPEN_ABORT_IF_CRASHED;
   else
     myisam_recover_options= HA_RECOVER_OFF;
+#endif
 
   myisam_block_size=(uint) 1 << my_bit_log2_uint64(opt_myisam_block_size);
 
@@ -2622,13 +2702,17 @@ static int myisam_init(void *p)
 static struct st_mysql_sys_var* myisam_sysvars[]= {
   MYSQL_SYSVAR(block_size),
   MYSQL_SYSVAR(data_pointer_size),
+#ifndef MYLITE_DISABLE_MYISAM_ADMIN
   MYSQL_SYSVAR(max_sort_file_size),
   MYSQL_SYSVAR(recover_options),
   MYSQL_SYSVAR(repair_threads),
   MYSQL_SYSVAR(sort_buffer_size),
+#endif
   MYSQL_SYSVAR(use_mmap),
   MYSQL_SYSVAR(mmap_size),
+#ifndef MYLITE_DISABLE_MYISAM_ADMIN
   MYSQL_SYSVAR(stats_method),
+#endif
   0
 };
 

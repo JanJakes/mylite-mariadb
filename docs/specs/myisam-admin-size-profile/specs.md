@@ -66,6 +66,20 @@ The static archive should drop roughly 90 KiB if `mi_check.c.o` is omitted.
 The linked runtime impact should be smaller because section GC already keeps
 only the live repair/check symbols from that object.
 
+Measured on top of `no-binlog-core-size-profile`:
+
+| Artifact | Bytes | Delta |
+| --- | ---: | ---: |
+| `libmysqld/libmariadbd.a` | 33,415,532 | -116,606 |
+| archive object count | 451 | -1 |
+| `storage/myisam/libmyisam_embedded.a` | 585,324 | -118,048 |
+| unstripped `mylite-open-close-smoke` | 9,074,056 | -70,984 |
+| stripped `mylite-open-close-smoke` | 6,619,904 | -64,184 |
+
+`mi_check.c.o` is absent from the merged archive. The linked smoke no longer
+contains `mi_repair`, `mi_repair_by_sort`, `mi_repair_parallel`, `chk_key`,
+`chk_data_link`, or `myisamchk_init`.
+
 ## Test and Verification Plan
 
 Run:
@@ -94,6 +108,16 @@ Measure:
 - Disk temporary-table execution still works for schema-table metadata and
   compatibility smokes.
 - Size deltas are recorded in `docs/research/production-size-analysis.md`.
+
+## Verification Result
+
+Passed:
+
+```sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-myisam-admin MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-myisam-admin MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-myisam-admin MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+```
 
 ## Risks
 
