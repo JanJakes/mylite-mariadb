@@ -275,6 +275,15 @@ int table2myisam(TABLE *table_arg, MI_KEYDEF **keydef_out,
   TABLE_SHARE *share= table_arg->s;
   uint options= share->db_options_in_use;
   DBUG_ENTER("table2myisam");
+#ifdef MYLITE_DISABLE_MYISAM_FULLTEXT
+  pos= table_arg->key_info;
+  for (i= 0; i < share->keys; i++, pos++)
+  {
+    if (pos->algorithm == HA_KEY_ALG_FULLTEXT ||
+        (pos->flags & HA_FULLTEXT_legacy))
+      DBUG_RETURN(HA_ERR_UNSUPPORTED);
+  }
+#endif
   if (!(my_multi_malloc(PSI_INSTRUMENT_ME, MYF(MY_WME),
           recinfo_out, (share->fields * 2 + 2) * sizeof(MI_COLUMNDEF),
           keydef_out, share->keys * sizeof(MI_KEYDEF),
@@ -287,8 +296,13 @@ int table2myisam(TABLE *table_arg, MI_KEYDEF **keydef_out,
   pos= table_arg->key_info;
   for (i= 0; i < share->keys; i++, pos++)
   {
-    keydef[i].flag= ((uint16) pos->flags & (HA_NOSAME | HA_FULLTEXT_legacy
-                                            | HA_SPATIAL_legacy));
+#ifdef MYLITE_DISABLE_MYISAM_FULLTEXT
+    keydef[i].flag= ((uint16) pos->flags & (HA_NOSAME |
+                                            HA_SPATIAL_legacy));
+#else
+    keydef[i].flag= ((uint16) pos->flags & (HA_NOSAME | HA_FULLTEXT_legacy |
+                                            HA_SPATIAL_legacy));
+#endif
     keydef[i].key_alg= pos->algorithm == HA_KEY_ALG_UNDEF ? HA_KEY_ALG_BTREE
                                                           : pos->algorithm;
     keydef[i].block_length= pos->block_size;
@@ -725,7 +739,11 @@ static int compute_vcols(MI_INFO *info, uchar *record, int keynum)
 
 ha_myisam::ha_myisam(handlerton *hton, TABLE_SHARE *table_arg)
   :handler(hton, table_arg), file(0),
-  int_table_flags(HA_NULL_IN_KEY | HA_CAN_FULLTEXT | HA_CAN_SQL_HANDLER |
+  int_table_flags(HA_NULL_IN_KEY |
+#ifndef MYLITE_DISABLE_MYISAM_FULLTEXT
+                  HA_CAN_FULLTEXT |
+#endif
+                  HA_CAN_SQL_HANDLER |
                   HA_BINLOG_ROW_CAPABLE | HA_BINLOG_STMT_CAPABLE |
                   HA_CAN_VIRTUAL_COLUMNS | HA_CAN_EXPORT |
                   HA_REQUIRES_KEY_COLUMNS_FOR_DELETE |
@@ -2498,6 +2516,7 @@ ha_rows ha_myisam::records_in_range(uint inx, const key_range *min_key,
 }
 
 
+#ifndef MYLITE_DISABLE_MYISAM_FULLTEXT
 int ha_myisam::ft_read(uchar *buf)
 {
   int error;
@@ -2511,6 +2530,7 @@ int ha_myisam::ft_read(uchar *buf)
   error=ft_handler->please->read_next(ft_handler,(char*) buf);
   return error;
 }
+#endif
 
 enum_alter_inplace_result
 ha_myisam::check_if_supported_inplace_alter(TABLE *new_table,

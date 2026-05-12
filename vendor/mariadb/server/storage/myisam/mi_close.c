@@ -60,7 +60,9 @@ int mi_close(register MI_INFO *info)
   mysql_mutex_unlock(&share->intern_lock);
 
   my_free(mi_get_rec_buff_ptr(info, info->rec_buff));
+#ifndef MYLITE_DISABLE_MYISAM_FULLTEXT
   ftparser_call_deinitializer(info);
+#endif
 
   if (flag)
   {

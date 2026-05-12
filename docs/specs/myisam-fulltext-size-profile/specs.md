@@ -147,6 +147,32 @@ Measure:
   compatibility smokes.
 - Size deltas are recorded in `docs/research/production-size-analysis.md`.
 
+## Verification Result
+
+Passed:
+
+```sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-myisam-fulltext MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-myisam-fulltext MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-myisam-fulltext MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+git diff --check
+bash -n tools/build-mariadb-minsize.sh tools/run-libmylite-open-close-smoke.sh tools/run-compatibility-test-harness.sh
+```
+
+Measured on top of `myisam-admin-size-profile`:
+
+| Artifact | Bytes | Delta |
+| --- | ---: | ---: |
+| `libmysqld/libmariadbd.a` | 33,328,744 | -86,788 |
+| archive object count | 444 | -7 |
+| `storage/myisam/libmyisam_embedded.a` | 500,642 | -84,682 |
+| unstripped `mylite-open-close-smoke` | 9,038,504 | -35,552 |
+| stripped `mylite-open-close-smoke` | 6,589,968 | -29,936 |
+
+`ft_*.c.o` objects are absent from the MyISAM build and merged archive. The
+linked open/close smoke no longer contains live `ft_*`, `_mi_ft_*`, `_ft_*`, or
+`ha_myisam::ft_*` symbols.
+
 ## Risks
 
 - MariaDB full-text SQL-layer code remains compiled. That is acceptable for

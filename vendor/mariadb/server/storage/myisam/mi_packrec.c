@@ -282,8 +282,12 @@ my_bool _mi_read_pack_info(MI_INFO *info, pbool fix_keys)
       keyinfo->keylength+= (uint16) diff_length;
       keyinfo->minlength+= (uint16) diff_length;
       keyinfo->maxlength+= (uint16) diff_length;
+#ifdef MYLITE_DISABLE_MYISAM_FULLTEXT
+      keyinfo->seg[keyinfo->keysegs].length= (uint16) rec_reflength;
+#else
       keyinfo->seg[keyinfo->key_alg == HA_KEY_ALG_FULLTEXT ?
                    FT_SEGS : keyinfo->keysegs].length= (uint16) rec_reflength;
+#endif
     }
     if (share->ft2_keyinfo.seg)
     {

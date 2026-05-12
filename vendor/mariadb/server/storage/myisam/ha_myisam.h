@@ -76,6 +76,7 @@ class ha_myisam final : public handler
   int index_first(uchar * buf) override;
   int index_last(uchar * buf) override;
   int index_next_same(uchar *buf, const uchar *key, uint keylen) override;
+#ifndef MYLITE_DISABLE_MYISAM_FULLTEXT
   int ft_init() override
   {
     if (!ft_handler)
@@ -90,6 +91,7 @@ class ha_myisam final : public handler
                           table->record[0]);
   }
   int ft_read(uchar *buf) override;
+#endif
   int rnd_init(bool scan) override;
   int rnd_next(uchar *buf) override;
   int rnd_pos(uchar * buf, uchar *pos) override;

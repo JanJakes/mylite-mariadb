@@ -1363,7 +1363,8 @@ static Sys_var_ulong Sys_flush_time(
        CMD_LINE(REQUIRED_ARG), VALID_RANGE(0, LONG_TIMEOUT),
        DEFAULT(0), BLOCK_SIZE(1));
 
-#if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
+#if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL) && \
+    !defined(MYLITE_DISABLE_MYISAM_FULLTEXT)
 static bool check_ftb_syntax(sys_var *self, THD *thd, set_var *var)
 {
   return ft_boolean_check_syntax_string((uchar*)

@@ -76,12 +76,14 @@ int mi_delete(MI_INFO *info,const uchar *record)
     if (mi_is_key_active(info->s->state.key_map, i))
     {
       info->s->keyinfo[i].version++;
+#ifndef MYLITE_DISABLE_MYISAM_FULLTEXT
       if (info->s->keyinfo[i].key_alg == HA_KEY_ALG_FULLTEXT )
       {
         if (_mi_ft_del(info,i, old_key,record,info->lastpos))
           goto err;
       }
       else
+#endif
       {
         if (info->s->keyinfo[i].ck_delete(info,i,old_key,
                 _mi_make_key(info,i,old_key,record,info->lastpos)))
@@ -169,8 +171,11 @@ static int _mi_ck_real_delete(register MI_INFO *info, MI_KEYDEF *keyinfo,
     error= -1;
     goto err;
   }
-  if ((error= d_search(info,keyinfo, keyinfo->key_alg == HA_KEY_ALG_FULLTEXT ?
+  if ((error= d_search(info,keyinfo,
+#ifndef MYLITE_DISABLE_MYISAM_FULLTEXT
+                        keyinfo->key_alg == HA_KEY_ALG_FULLTEXT ?
                         SEARCH_FIND | SEARCH_UPDATE | SEARCH_INSERT :
+#endif
                         SEARCH_SAME,
                         key, key_length, old_root, root_buff)) > 0)
   {
@@ -234,6 +239,7 @@ static int d_search(register MI_INFO *info, register MI_KEYDEF *keyinfo,
   }
   nod_flag=mi_test_if_nod(anc_buff);
 
+#ifndef MYLITE_DISABLE_MYISAM_FULLTEXT
   if (!flag && keyinfo->key_alg == HA_KEY_ALG_FULLTEXT)
   {
     uint off;
@@ -303,6 +309,7 @@ static int d_search(register MI_INFO *info, register MI_KEYDEF *keyinfo,
       }
     }
   }
+#endif
   leaf_buff=0;
   if (nod_flag)
   {

@@ -411,6 +411,10 @@ MI_INFO *mi_open(const char *name, int mode, uint open_flags)
 	}
         else if (keyinfo->key_alg == HA_KEY_ALG_FULLTEXT)
 	{
+#ifdef MYLITE_DISABLE_MYISAM_FULLTEXT
+          my_errno=HA_ERR_UNSUPPORTED;
+          goto err;
+#else
           if (!fulltext_keys)
           { /* 4.0 compatibility code, to be removed in 5.0 */
             keyinfo->seg= pos - FT_SEGS;
@@ -446,6 +450,7 @@ MI_INFO *mi_open(const char *name, int mode, uint open_flags)
             setup_key_functions(& share->ft2_keyinfo);
           }
           keyinfo->ftkey_nr= ftkey_nr++;
+#endif
 	}
         setup_key_functions(keyinfo);
         keyinfo->end= pos;
@@ -1174,7 +1179,11 @@ uchar *mi_keydef_read(uchar *ptr, MI_KEYDEF *keydef)
    keydef->block_size_index= keydef->block_length/MI_MIN_KEY_BLOCK_LENGTH-1;
    keydef->underflow_block_length=keydef->block_length/3;
    keydef->version	= 0;			/* Not saved */
+#ifdef MYLITE_DISABLE_MYISAM_FULLTEXT
+   keydef->parser       = 0;
+#else
    keydef->parser       = &ft_default_parser;
+#endif
    keydef->ftkey_nr     = 0;
    return ptr;
 }

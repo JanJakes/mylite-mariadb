@@ -87,6 +87,7 @@ int mi_update(register MI_INFO *info, const uchar *oldrec,
   {
     if (mi_is_key_active(share->state.key_map, i))
     {
+#ifndef MYLITE_DISABLE_MYISAM_FULLTEXT
       if (share->keyinfo[i].key_alg == HA_KEY_ALG_FULLTEXT )
       {
 	if (_mi_ft_cmp(info,i,oldrec, newrec))
@@ -106,6 +107,7 @@ int mi_update(register MI_INFO *info, const uchar *oldrec,
 	}
       }
       else
+#endif
       {
 	uint new_length=_mi_make_key(info,i,new_key,newrec,pos);
 	uint old_length=_mi_make_key(info,i,old_key,oldrec,pos);
@@ -203,6 +205,7 @@ err:
     {
       if (((ulonglong) 1 << i) & changed)
       {
+#ifndef MYLITE_DISABLE_MYISAM_FULLTEXT
 	if (share->keyinfo[i].key_alg == HA_KEY_ALG_FULLTEXT)
 	{
 	  if ((flag++ && _mi_ft_del(info,i, new_key,newrec,pos)) ||
@@ -210,6 +213,7 @@ err:
 	    break;
 	}
 	else
+#endif
 	{
 	  uint new_length=_mi_make_key(info,i,new_key,newrec,pos);
 	  uint old_length= _mi_make_key(info,i,old_key,oldrec,pos);

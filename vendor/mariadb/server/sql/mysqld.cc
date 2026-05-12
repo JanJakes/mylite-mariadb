@@ -5697,7 +5697,8 @@ static int init_server_components()
   prctl(PR_SET_THP_DISABLE, 1, 0, 0, 0);
 #endif
 
-#if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
+#if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL) && \
+    !defined(MYLITE_DISABLE_MYISAM_FULLTEXT)
   ft_init_stopwords();
 #endif
 
@@ -8874,7 +8875,8 @@ static int get_options(int *argc_ptr, char ***argv_ptr)
   if (global_system_variables.low_priority_updates)
     thr_upgraded_concurrent_insert_lock= TL_WRITE_LOW_PRIORITY;
 
-#if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
+#if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL) && \
+    !defined(MYLITE_DISABLE_MYISAM_FULLTEXT)
   if (ft_boolean_check_syntax_string((uchar*) ft_boolean_syntax,
                                      strlen(ft_boolean_syntax),
                                      system_charset_info))

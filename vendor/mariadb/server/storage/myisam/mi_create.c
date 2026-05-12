@@ -296,6 +296,10 @@ int mi_create(const char *name,uint keys,MI_KEYDEF *keydefs,
     }
     else if (keydef->key_alg == HA_KEY_ALG_FULLTEXT)
     {
+#ifdef MYLITE_DISABLE_MYISAM_FULLTEXT
+      my_errno=HA_WRONG_CREATE_OPTION;
+      goto err_no_lock;
+#else
       keydef->flag=HA_FULLTEXT_legacy | HA_PACK_KEY | HA_VAR_LENGTH_KEY;
       options|=HA_OPTION_PACK_KEYS;             /* Using packed keys */
 
@@ -326,6 +330,7 @@ int mi_create(const char *name,uint keys,MI_KEYDEF *keydefs,
       length++;                              /* At least one length byte */
       min_key_length_skip+=HA_FT_MAXBYTELEN;
       real_length_diff=HA_FT_MAXBYTELEN-FT_MAX_WORD_LEN_FOR_SORT;
+#endif
     }
     else
     {

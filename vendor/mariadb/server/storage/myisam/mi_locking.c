@@ -59,7 +59,9 @@ int mi_lock_database(MI_INFO *info, int lock_type)
   {
     switch (lock_type) {
     case F_UNLCK:
+#ifndef MYLITE_DISABLE_MYISAM_FULLTEXT
       ftparser_call_deinitializer(info);
+#endif
       if (info->lock_type == F_RDLCK)
       {
 	count= --share->r_locks;

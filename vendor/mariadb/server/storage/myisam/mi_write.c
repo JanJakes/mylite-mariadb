@@ -110,6 +110,7 @@ int mi_write(MI_INFO *info, const uchar *record)
         mysql_rwlock_wrlock(&share->key_root_lock[i]);
 	share->keyinfo[i].version++;
       }
+#ifndef MYLITE_DISABLE_MYISAM_FULLTEXT
       if (share->keyinfo[i].key_alg == HA_KEY_ALG_FULLTEXT)
       {
         if (_mi_ft_add(info,i, buff, record, filepos))
@@ -121,6 +122,7 @@ int mi_write(MI_INFO *info, const uchar *record)
         }
       }
       else
+#endif
       {
         if (share->keyinfo[i].ck_insert(info,i,buff,
 			_mi_make_key(info,i,buff,record,filepos)))
@@ -197,16 +199,18 @@ err:
                                     is_tree_inited(&info->bulk_insert[i])));
 	if (local_lock_tree)
           mysql_rwlock_wrlock(&share->key_root_lock[i]);
+#ifndef MYLITE_DISABLE_MYISAM_FULLTEXT
 	if (share->keyinfo[i].key_alg == HA_KEY_ALG_FULLTEXT)
         {
           if (_mi_ft_del(info,i, buff,record,filepos))
 	  {
 	    if (local_lock_tree)
               mysql_rwlock_unlock(&share->key_root_lock[i]);
-            break;
+	    break;
 	  }
         }
         else
+#endif
 	{
 	  uint key_length=_mi_make_key(info,i,buff,record,filepos);
 	  if (share->keyinfo[i].ck_delete(info, i, buff, key_length))
@@ -274,15 +278,18 @@ int _mi_ck_write_btree(register MI_INFO *info, uint keynr, uchar *key,
     if (keyinfo->flag & HA_NULL_ARE_EQUAL)
       comp_flag|= SEARCH_NULL_ARE_EQUAL;
   }
+#ifndef MYLITE_DISABLE_MYISAM_FULLTEXT
   else if (keyinfo->key_alg == HA_KEY_ALG_FULLTEXT)
   {
     comp_flag=SEARCH_FIND | SEARCH_UPDATE | SEARCH_INSERT;
   }
+#endif
   else
     comp_flag=SEARCH_SAME;			/* Keys in rec-pos order */
 
   error=_mi_ck_real_write_btree(info, keyinfo, key, key_length,
                                 root, comp_flag);
+#ifndef MYLITE_DISABLE_MYISAM_FULLTEXT
   if (info->ft1_to_ft2)
   {
     if (!error)
@@ -291,6 +298,7 @@ int _mi_ck_write_btree(register MI_INFO *info, uint keynr, uchar *key,
     my_free(info->ft1_to_ft2);
     info->ft1_to_ft2=0;
   }
+#endif
   DBUG_RETURN(error);
 } /* _mi_ck_write_btree */
 
@@ -374,6 +382,7 @@ static int w_search(register MI_INFO *info, register MI_KEYDEF *keyinfo,
     else
       dupp_key_pos= HA_OFFSET_ERROR;
 
+#ifndef MYLITE_DISABLE_MYISAM_FULLTEXT
     if (keyinfo->key_alg == HA_KEY_ALG_FULLTEXT)
     {
       uint off;
@@ -410,6 +419,7 @@ static int w_search(register MI_INFO *info, register MI_KEYDEF *keyinfo,
       }
     }
     else /* not HA_FULLTEXT, normal HA_NOSAME key */
+#endif
     {
       info->dupp_key_pos= dupp_key_pos;
       my_afree((uchar*) temp_buff);
@@ -526,7 +536,11 @@ int _mi_insert(register MI_INFO *info, register MI_KEYDEF *keyinfo,
   if (a_length <= keyinfo->block_length)
   {
     if (keyinfo->block_length - a_length < 32 &&
+#ifndef MYLITE_DISABLE_MYISAM_FULLTEXT
         keyinfo->key_alg == HA_KEY_ALG_FULLTEXT && key_pos == endpos &&
+#else
+        0 &&
+#endif
         info->s->base.key_reflength <= info->s->rec_reflength &&
         info->s->options & (HA_OPTION_PACK_RECORD | HA_OPTION_COMPRESS_RECORD))
     {

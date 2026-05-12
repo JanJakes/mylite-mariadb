@@ -110,7 +110,9 @@ int mi_panic(enum ha_panic_function flag)
   if (flag == HA_PANIC_CLOSE)
   {
     (void) mi_log(0);				/* Close log if neaded */
+#ifndef MYLITE_DISABLE_MYISAM_FULLTEXT
     ft_free_stopwords();
+#endif
   }
   mysql_mutex_unlock(&THR_LOCK_myisam);
   if (!error)

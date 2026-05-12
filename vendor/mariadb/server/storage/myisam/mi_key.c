@@ -58,7 +58,11 @@ uint _mi_make_key(register MI_INFO *info, uint keynr, uchar *key,
   uchar *pos;
   uchar *start;
   reg1 HA_KEYSEG *keyseg;
+#ifdef MYLITE_DISABLE_MYISAM_FULLTEXT
+  my_bool is_ft= 0;
+#else
   my_bool is_ft= info->s->keyinfo[keynr].key_alg == HA_KEY_ALG_FULLTEXT;
+#endif
   DBUG_ENTER("_mi_make_key");
 
   if (info->s->keyinfo[keynr].key_alg == HA_KEY_ALG_RTREE)
@@ -219,7 +223,11 @@ uint _mi_pack_key(register MI_INFO *info, uint keynr, uchar *key, uchar *old,
 {
   uchar *start_key=key;
   HA_KEYSEG *keyseg;
+#ifdef MYLITE_DISABLE_MYISAM_FULLTEXT
+  my_bool is_ft= 0;
+#else
   my_bool is_ft= info->s->keyinfo[keynr].key_alg == HA_KEY_ALG_FULLTEXT;
+#endif
   DBUG_ENTER("_mi_pack_key");
 
   /* "one part" rtree key is 2*SPDIMS part key in MyISAM */
