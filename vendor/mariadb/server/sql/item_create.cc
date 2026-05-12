@@ -792,6 +792,7 @@ protected:
 };
 
 
+#ifndef MYLITE_DISABLE_CRYPT_FUNCTION
 class Create_func_encrypt : public Create_native_func
 {
 public:
@@ -804,6 +805,7 @@ protected:
   Create_func_encrypt() = default;
   ~Create_func_encrypt() override = default;
 };
+#endif
 
 
 class Create_func_exp : public Create_func_arg1
@@ -3920,6 +3922,7 @@ Create_func_encode::create_2_arg(THD *thd, Item *arg1, Item *arg2)
 }
 
 
+#ifndef MYLITE_DISABLE_CRYPT_FUNCTION
 Create_func_encrypt Create_func_encrypt::s_singleton;
 
 Item*
@@ -3956,6 +3959,7 @@ Create_func_encrypt::create_native(THD *thd, const LEX_CSTRING *name,
 
   return func;
 }
+#endif
 
 
 Create_func_exp Create_func_exp::s_singleton;
@@ -6505,7 +6509,9 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("DES_ENCRYPT") }, BUILDER(Create_func_des_encrypt)},
   { { STRING_WITH_LEN("ELT") }, BUILDER(Create_func_elt)},
   { { STRING_WITH_LEN("ENCODE") }, BUILDER(Create_func_encode)},
+#ifndef MYLITE_DISABLE_CRYPT_FUNCTION
   { { STRING_WITH_LEN("ENCRYPT") }, BUILDER(Create_func_encrypt)},
+#endif
   { { STRING_WITH_LEN("EXP") }, BUILDER(Create_func_exp)},
   { { STRING_WITH_LEN("EXPORT_SET") }, BUILDER(Create_func_export_set)},
 #ifndef MYLITE_DISABLE_XML_FUNCTIONS

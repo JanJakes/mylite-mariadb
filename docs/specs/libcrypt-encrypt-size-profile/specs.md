@@ -168,6 +168,50 @@ Expected inspection result:
 - `libcrypt.so.1` is absent from the linked smoke runtime dependencies.
 - Production-size analysis records size and dependency deltas.
 
+## Implementation Results
+
+Implemented with `MYLITE_DISABLE_CRYPT_FUNCTION=ON` in the aggressive minsize
+profile. The guard removes the `ENCRYPT()` native function builder,
+`Item_func_encrypt`, and the final `${LIBCRYPT}` link dependency when the
+function is disabled.
+
+Final measurements from `build/mariadb-minsize-libcrypt`:
+
+| Artifact | Bytes | Delta from VIO TLS profile |
+| --- | ---: | ---: |
+| `libmysqld/libmariadbd.a` | 32,243,074 | -18,408 |
+| `mylite/mylite-open-close-smoke` | 8,474,528 | -4,720 |
+| stripped `mylite-open-close-smoke` copy | 6,080,176 | -2,864 |
+
+Runtime dependency evidence:
+
+- `ldd build/mariadb-minsize-libcrypt/mylite/mylite-open-close-smoke` no
+  longer lists `libcrypt.so.1`;
+- `nm -u` shows no remaining undefined `crypt` symbol;
+- `nm -C` shows no remaining `Item_func_encrypt` or `Create_func_encrypt`
+  symbols in the linked smoke;
+- `libcrypto.so.3` remains listed for retained SQL/auth crypto helpers.
+
+If a Linux package vendors runtime libraries, this avoids the 198,584-byte
+Ubuntu 24.04 ARM64 `libcrypt.so.1.1.0` dependency.
+
+The open/close smoke verifies `ENCRYPT()` now fails with
+`FUNCTION ENCRYPT does not exist`, while retained `RANDOM_BYTES()`,
+`VERSION()`, and `CONNECTION_ID()` still execute.
+
+Verified with:
+
+```sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-libcrypt \
+  MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-libcrypt \
+  MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-libcrypt \
+  MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+bash -n tools/build-mariadb-minsize.sh
+git diff --check
+```
+
 ## Risks And Unresolved Questions
 
 - If another inherited object roots `crypt()` after this guard, `${LIBCRYPT}`

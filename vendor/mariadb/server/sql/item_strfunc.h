@@ -1120,6 +1120,7 @@ protected:
 };
 
 
+#ifndef MYLITE_DISABLE_CRYPT_FUNCTION
 /**
   QQ: Item_func_encrypt should derive from Item_str_ascii_checksum_func.
   However, it should be fixed to handle UCS2, UTF16, UTF32 properly first,
@@ -1165,6 +1166,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_encrypt>(thd, this); }
 };
+#endif
 
 #include "sql_crypt.h"
 

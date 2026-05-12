@@ -2707,6 +2707,7 @@ char *Item_func_password::alloc(THD *thd, const char *password,
 
 
 
+#ifndef MYLITE_DISABLE_CRYPT_FUNCTION
 #define bin_to_ascii(c) ((c)>=38?((c)-38+'a'):(c)>=12?((c)-12+'A'):(c)+'.')
 
 String *Item_func_encrypt::val_str(String *str)
@@ -2753,6 +2754,7 @@ String *Item_func_encrypt::val_str(String *str)
   return 0;
 #endif	/* HAVE_CRYPT */
 }
+#endif
 
 bool Item_func_encode::seed()
 {

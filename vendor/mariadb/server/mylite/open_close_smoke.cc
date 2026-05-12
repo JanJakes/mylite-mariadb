@@ -69,6 +69,7 @@ struct SmokeResult
   std::string exec_binlog_replication_message;
   std::string exec_server_utility_standard_rows;
   std::string exec_server_utility_messages;
+  std::string exec_crypt_function_message;
   std::string exec_query_cache_have_rows;
   std::string exec_query_cache_size_rows;
   std::string exec_query_cache_type_rows;
@@ -178,6 +179,8 @@ static bool check_binlog_replication_unsupported(const SmokeOptions &options,
                                                  SmokeResult *result);
 static bool check_server_utility_functions_unsupported(
   const SmokeOptions &options, SmokeResult *result);
+static bool check_crypt_function_unsupported(const SmokeOptions &options,
+                                             SmokeResult *result);
 static bool check_query_cache_unsupported(const SmokeOptions &options,
                                           SmokeResult *result);
 static bool check_profiling_unsupported(const SmokeOptions &options,
@@ -370,6 +373,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "server_utility_functions_unsupported";
   ok= check_server_utility_functions_unsupported(options, result) && ok;
+
+  result->phase= "crypt_function_unsupported";
+  ok= check_crypt_function_unsupported(options, result) && ok;
 
   result->phase= "query_cache_unsupported";
   ok= check_query_cache_unsupported(options, result) && ok;
@@ -1196,6 +1202,37 @@ static bool check_server_utility_functions_unsupported(
     rc= mylite_close(db);
     ok= record_result(result, "server_utility_function_close",
                       MYLITE_OK, rc, nullptr) && ok;
+  }
+  return ok;
+}
+
+static bool check_crypt_function_unsupported(const SmokeOptions &options,
+                                             SmokeResult *result)
+{
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "crypt_function_open",
+                         MYLITE_OK, rc, db);
+  if (db)
+  {
+    char *errmsg= nullptr;
+    rc= mylite_exec(db, "SELECT ENCRYPT('mylite','aa')", nullptr, nullptr,
+                    &errmsg);
+    result->exec_crypt_function_message= errmsg ? errmsg : mylite_errmsg(db);
+    if (errmsg)
+      mylite_free(errmsg);
+
+    ok= record_result(result, "crypt_function_encrypt", MYLITE_ERROR, rc,
+                      db) && ok;
+    if (mylite_mariadb_errno(db) != ER_SP_DOES_NOT_EXIST ||
+        std::strcmp(mylite_sqlstate(db), "42000") != 0 ||
+        result->exec_crypt_function_message.find("ENCRYPT") ==
+          std::string::npos)
+      ok= false;
+
+    rc= mylite_close(db);
+    ok= record_result(result, "crypt_function_close", MYLITE_OK, rc,
+                      nullptr) && ok;
   }
   return ok;
 }
@@ -2789,6 +2826,9 @@ static void write_report(const SmokeOptions &options,
   if (!result.exec_server_utility_messages.empty())
     report << "exec_server_utility_messages="
            << result.exec_server_utility_messages << "\n";
+  if (!result.exec_crypt_function_message.empty())
+    report << "exec_crypt_function_message="
+           << result.exec_crypt_function_message << "\n";
   if (!result.exec_query_cache_have_rows.empty())
     report << "exec_query_cache_have_rows="
            << result.exec_query_cache_have_rows << "\n";
