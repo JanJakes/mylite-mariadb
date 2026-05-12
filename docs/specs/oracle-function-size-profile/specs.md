@@ -128,7 +128,20 @@ remaining Oracle-only function builders, vtables, item methods, schema object,
 and hash table. The static archive may shrink less because many item classes
 live in large shared SQL translation units.
 
-Record final archive and stripped linked sizes after implementation.
+After implementation, the measured size is:
+
+- `libmariadbd.a`: 35,783,646 bytes,
+- archive objects: 460,
+- `mylite-open-close-smoke`: 10,897,072 bytes,
+- stripped `mylite-open-close-smoke`: 8,355,880 bytes,
+- `size` total: 8,649,945 bytes.
+
+Compared with the query-cache profile, this saves 318,034 bytes from
+`libmariadbd.a` and 34,376 bytes from the stripped linked open-close smoke.
+The linked smoke binary no longer contains the Oracle-specific item vtables or
+native function builders; the remaining Oracle-named linked symbols are
+`oracle_schema_ref` and the inherited `Date_time_format_oracle` helper used by
+date formatting.
 
 ## Test plan
 
@@ -147,6 +160,24 @@ Also inspect:
 llvm-nm -C --size-sort build/mariadb-minsize-oracle-functions/mylite/mylite-open-close-smoke | rg 'Item_func_.*oracle|_ORACLE|_oracle|oracle_'
 llvm-ar t build/mariadb-minsize-oracle-functions/libmysqld/libmariadbd.a | wc -l
 ```
+
+## Verification
+
+Run on 2026-05-12:
+
+```sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-oracle-functions MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-oracle-functions MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-oracle-functions MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+git diff --check
+```
+
+All passed. The open/close smoke recorded:
+
+- `exec_oracle_mode_message=This version of MariaDB doesn't yet support
+  'Oracle SQL mode in the MyLite minsize profile'`
+- `exec_oracle_function_standard_rows=ab:0x:x0:x:x:b:axc:x`
+- `exec_oracle_function_message=FUNCTION DECODE_ORACLE does not exist`
 
 ## Acceptance criteria
 

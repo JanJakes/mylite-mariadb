@@ -822,6 +822,7 @@ null:
 }
 
 
+#ifndef MYLITE_DISABLE_ORACLE_FUNCTIONS
 String *Item_func_concat_operator_oracle::val_str(String *str)
 {
   DBUG_ASSERT(fixed());
@@ -857,6 +858,7 @@ null:
   null_value= true;
   return 0;
 }
+#endif
 
 
 bool Item_func_concat::append_value(THD *thd, String *res, const String *app)

@@ -52,6 +52,8 @@ struct SmokeResult
   std::string exec_scalar_columns;
   std::string exec_scalar_rows;
   std::string exec_oracle_mode_message;
+  std::string exec_oracle_function_standard_rows;
+  std::string exec_oracle_function_message;
   std::string exec_xml_extractvalue_message;
   std::string exec_xml_updatexml_message;
   std::string exec_gis_function_message;
@@ -147,6 +149,8 @@ static bool check_exec_scalar(const SmokeOptions &options,
                               SmokeResult *result);
 static bool check_oracle_mode_unsupported(const SmokeOptions &options,
                                           SmokeResult *result);
+static bool check_oracle_functions_unsupported(const SmokeOptions &options,
+                                               SmokeResult *result);
 static bool check_xml_functions_unsupported(const SmokeOptions &options,
                                             SmokeResult *result);
 static bool check_gis_functions_unsupported(const SmokeOptions &options,
@@ -316,6 +320,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "oracle_mode_unsupported";
   ok= check_oracle_mode_unsupported(options, result) && ok;
+
+  result->phase= "oracle_functions_unsupported";
+  ok= check_oracle_functions_unsupported(options, result) && ok;
 
   result->phase= "xml_functions_unsupported";
   ok= check_xml_functions_unsupported(options, result) && ok;
@@ -699,6 +706,50 @@ static bool check_oracle_mode_unsupported(const SmokeOptions &options,
 
     rc= mylite_close(db);
     ok= record_result(result, "oracle_mode_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+  return ok;
+}
+
+static bool check_oracle_functions_unsupported(const SmokeOptions &options,
+                                               SmokeResult *result)
+{
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "oracle_function_open", MYLITE_OK, rc, db);
+  if (db)
+  {
+    ExecCapture standard_capture;
+    ok= exec_query_capture(
+          db,
+          "SELECT CONCAT('a','b'), LPAD('x',2,'0'), RPAD('x',2,'0'), "
+          "LTRIM(' x'), RTRIM('x '), SUBSTR('abc',2,1), "
+          "REPLACE('abc','b','x'), TRIM(' x ')",
+          "oracle_function_standard", &standard_capture, result) && ok;
+    result->exec_oracle_function_standard_rows=
+      join_strings(standard_capture.rows, ",");
+    if (result->exec_oracle_function_standard_rows !=
+        "ab:0x:x0:x:x:b:axc:x")
+      ok= false;
+
+    char *errmsg= nullptr;
+    rc= mylite_exec(db, "SELECT DECODE_ORACLE(1,1,10)", nullptr,
+                    nullptr, &errmsg);
+    if (errmsg)
+    {
+      result->exec_oracle_function_message= errmsg;
+      mylite_free(errmsg);
+    }
+    ok= record_result(result, "oracle_decode_function_select",
+                      MYLITE_ERROR, rc, db) && ok;
+    if (mylite_mariadb_errno(db) != ER_SP_DOES_NOT_EXIST ||
+        std::strcmp(mylite_sqlstate(db), "42000") != 0 ||
+        result->exec_oracle_function_message.find("DECODE_ORACLE") ==
+          std::string::npos)
+      ok= false;
+
+    rc= mylite_close(db);
+    ok= record_result(result, "oracle_function_close", MYLITE_OK, rc,
                       nullptr) && ok;
   }
   return ok;
@@ -2290,6 +2341,12 @@ static void write_report(const SmokeOptions &options,
   if (!result.exec_oracle_mode_message.empty())
     report << "exec_oracle_mode_message="
            << result.exec_oracle_mode_message << "\n";
+  if (!result.exec_oracle_function_standard_rows.empty())
+    report << "exec_oracle_function_standard_rows="
+           << result.exec_oracle_function_standard_rows << "\n";
+  if (!result.exec_oracle_function_message.empty())
+    report << "exec_oracle_function_message="
+           << result.exec_oracle_function_message << "\n";
   if (!result.exec_xml_extractvalue_message.empty())
     report << "exec_xml_extractvalue_message="
            << result.exec_xml_extractvalue_message << "\n";

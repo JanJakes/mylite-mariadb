@@ -19,6 +19,7 @@ The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 - system `ssl`, `pcre`, `fmt`, and `zlib`
 - `WITH_EXTRA_CHARSETS=none`
 - `MYLITE_DISABLE_ORACLE_PARSER=ON`
+- `MYLITE_DISABLE_ORACLE_FUNCTIONS=ON`
 - `MYLITE_DISABLE_JSON_SCHEMA_VALID=ON`
 - `MYLITE_DISABLE_QUERY_CACHE=ON`
 - `MYLITE_DISABLE_LEGACY_STORAGE_ENGINES=ON`
@@ -38,8 +39,8 @@ include the `type-plugin-size-profile`, `charset-small-profile`, and
 `vector-function-size-profile`, `profiling-size-profile`, and
 `help-command-size-profile`, `procedure-analyse-size-profile`, and
 `relr-linker-size-profile`, `legacy-storage-engine-size-profile`,
-`section-gc-size-profile`, `json-schema-valid-size-profile`, and
-`query-cache-size-profile` attempts, which
+`section-gc-size-profile`, `json-schema-valid-size-profile`,
+`query-cache-size-profile`, and `oracle-function-size-profile` attempts, which
 remove the built-in `type_geom`, `type_inet`, `type_uuid`, `sequence`,
 `thread_pool_info`, `user_variables`, `userstat`, `mhnsw`, `csv`, and
 `myisammrg` plugins, set
@@ -52,8 +53,9 @@ engine non-user-selectable while retaining it for internal disk temporary
 tables, compile minsize objects into per-function/per-data sections and link
 runtime-style artifacts with `--gc-sections`, omit the `JSON_SCHEMA_VALID()`
 validator while retaining ordinary JSON functions, omit MariaDB's query cache
-while reporting `have_query_cache=NO`, and strip the static archive in the
-MyLite minsize profile.
+while reporting `have_query_cache=NO`, omit Oracle compatibility function
+aliases and Oracle schema routing, and strip the static archive in the MyLite
+minsize profile.
 
 This project does not yet have a final packaged production artifact such as a
 shared `libmylite.so` bundle. For now, the most useful size signals are:
@@ -68,39 +70,39 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 ## Current baseline
 
 The current values were measured from a clean
-`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-query-cache` run. Paths below
-use the default build directory names for readability.
+`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-oracle-functions` run. Paths
+below use the default build directory names for readability.
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
-| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 36,101,680 | 34.43 | Main embedded MariaDB archive, 460 objects, stripped; section metadata grows the archive |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 35,783,646 | 34.13 | Main embedded MariaDB archive, 460 objects, stripped; section metadata grows the archive |
 | `build/mariadb-minsize/mylite/libmylite.a` | 122,792 | 0.12 | First-party public wrapper |
 | `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 388,440 | 0.37 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 10,950,672 | 10.44 | Unstripped linked smoke binary, lld RELR and section GC |
-| stripped `mylite-open-close-smoke` copy | 8,390,256 | 8.00 | `strip --strip-unneeded` on copied binary |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 10,897,072 | 10.39 | Unstripped linked smoke binary, lld RELR and section GC |
+| stripped `mylite-open-close-smoke` copy | 8,355,880 | 7.97 | `strip --strip-unneeded` on copied binary |
 
 The linked smoke binary has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 6,421,288 |
-| data | 1,965,600 |
-| bss | 300,209 |
-| total `size` decimal | 8,687,097 |
+| text | 6,407,696 |
+| data | 1,944,808 |
+| bss | 297,441 |
+| total `size` decimal | 8,649,945 |
 
 Largest linked sections in the open-close smoke binary:
 
 | Section | Bytes | Interpretation |
 | --- | ---: | --- |
-| `.text` | 3,215,132 | Executable code |
-| `.rodata` | 2,143,827 | Collation tables, parser tables, SQL metadata, constants |
-| `.data.rel.ro` | 1,172,176 | Relocated read-only data |
-| `.data` | 760,216 | Writable data |
-| `.eh_frame` | 735,116 | Unwind metadata |
-| `.bss` | 296,857 | Zero-initialized writable data |
-| `.eh_frame_hdr` | 167,580 | Unwind table index |
-| `.rela.dyn` | 52,512 | Remaining unpacked dynamic relocations |
-| `.relr.dyn` | 22,232 | Packed relative relocations |
+| `.text` | 3,207,756 | Executable code |
+| `.rodata` | 2,143,443 | Collation tables, parser tables, SQL metadata, constants |
+| `.data.rel.ro` | 1,151,776 | Relocated read-only data |
+| `.data` | 760,112 | Writable data |
+| `.eh_frame` | 731,384 | Unwind metadata |
+| `.bss` | 296,681 | Zero-initialized writable data |
+| `.eh_frame_hdr` | 166,612 | Unwind table index |
+| `.rela.dyn` | 52,008 | Remaining unpacked dynamic relocations |
+| `.relr.dyn` | 21,912 | Packed relative relocations |
 
 If a Linux distribution bundle vendors the current dynamic dependencies, it
 adds about 11,340,944 bytes, or 10.82 MiB, before compression:
@@ -196,6 +198,7 @@ The current built-in plugins are:
 | `section-gc-size-profile` after legacy engines | 36,520,566 | -6,884,866 | 8,458,680 | -10,873,224 | Passes current smokes and harness; linked runtime smaller, static archive larger |
 | `json-schema-valid-size-profile` after section GC | 36,174,834 | -7,230,598 | 8,413,768 | -10,918,136 | Passes current smokes and harness; ordinary JSON functions retained |
 | `query-cache-size-profile` after JSON schema | 36,101,680 | -7,303,752 | 8,390,256 | -10,941,648 | Passes current smokes and harness; query cache reports unavailable |
+| `oracle-function-size-profile` after query cache | 35,783,646 | -7,621,786 | 8,355,880 | -10,976,024 | Passes current smokes and harness; Oracle compatibility aliases omitted |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
 | Strip archive with `strip --strip-unneeded` | 41,873,048 | -1,532,384 | n/a | n/a | Higher risk than `strip -g` for static archives |
 | `WITH_EXTRA_CHARSETS=none` before UCA fix | 40,820,782 | -2,584,650 | 16,836,664 | -2,495,240 | Segfaulted in open-close smoke |
@@ -215,8 +218,8 @@ profile now passes current smokes while retaining the compiled default
 `utf8mb4_uca1400_ai_ci`.
 
 Stripping the current linked open-close smoke binary reduces it from
-10,950,672 bytes
-to 8,390,256 bytes, saving 2,560,416 bytes, or 2.44 MiB. That remains the
+10,897,072 bytes
+to 8,355,880 bytes, saving 2,541,192 bytes, or 2.42 MiB. That remains the
 lowest-risk packaging win for any copied executable or shared-library style
 artifact.
 
@@ -374,6 +377,16 @@ profile, it reduced the static archive by 73,154 bytes and the stripped linked
 smoke by 23,512 bytes while keeping normal `SELECT` execution and
 `SELECT SQL_CACHE` syntax working as no-cache execution.
 
+The `oracle-function-size-profile` attempt then removed Oracle compatibility
+function aliases and the Oracle native function hash from the embedded minsize
+profile, routed parser-side Oracle-only constructs to unsupported diagnostics,
+and stopped registering `oracle_schema` as a distinct built-in schema. On top
+of the query-cache profile, it reduced the static archive by 318,034 bytes and
+the stripped linked smoke by 34,376 bytes. The linked smoke binary no longer
+contains Oracle-specific item vtables or native function builders; the
+remaining Oracle-named linked symbols are `oracle_schema_ref` and the inherited
+`Date_time_format_oracle` helper.
+
 ## Decision matrix
 
 | Lever | Expected savings | Risk | Worth doing? | Reason |
@@ -398,6 +411,7 @@ smoke by 23,512 bytes while keeping normal `SELECT` execution and
 | Section garbage collection after executable-export removal | +4.21 MiB archive, 0.31 MiB stripped linked beyond legacy engines | Medium packaging | Applied as aggressive linked-size attempt | Runtime gets smaller, but archive consumers pay a metadata cost |
 | Remove `JSON_SCHEMA_VALID()` validator | 0.33 MiB archive, 0.04 MiB stripped linked beyond section GC | Medium compatibility | Applied as size attempt | Current smokes pass; ordinary JSON functions remain, but JSON Schema validation is omitted from the minsize profile |
 | Remove query cache | 0.07 MiB archive, 0.02 MiB stripped linked beyond JSON schema | Low/medium compatibility | Applied as size attempt | Current smokes pass; query cache reports unavailable and `SELECT SQL_CACHE` executes without caching |
+| Remove Oracle compatibility aliases | 0.30 MiB archive, 0.03 MiB stripped linked beyond query cache | High compatibility | Applied as size attempt | Current smokes pass; `SQL_MODE=ORACLE` was already unsupported, and Oracle-only aliases now fail as unknown functions |
 | Remove server-only SQL subsystems | Potentially large | High | Research later | The big bytes are entangled in `libsql_embedded.a`; needs slice-by-slice fork work |
 | `DISABLE_PSI_*` switches | 0 in this build | Low | No | No measured effect |
 | `-fno-asynchronous-unwind-tables` | 0 in this build | Low | No | Full rebuild produced identical archive and stripped linked sizes |
@@ -421,7 +435,10 @@ Take these now:
 6. Keep the query-cache omission in the minsize profile. It is server-global
    cache state, reports unavailable through MariaDB's `have_query_cache`
    surface, and has low value in the embedded default.
-7. Keep a stripped linked smoke binary size in the build report so regressions
+7. Keep the Oracle compatibility alias omission in the aggressive minsize
+   profile if MyLite's default does not target Oracle migration workloads.
+   It now follows the already-applied Oracle parser removal.
+8. Keep a stripped linked smoke binary size in the build report so regressions
    are visible.
 
 Do not take these now:

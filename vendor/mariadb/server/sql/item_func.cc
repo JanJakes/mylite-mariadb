@@ -6762,6 +6762,7 @@ longlong Item_func_found_rows::val_int()
 }
 
 
+#ifndef MYLITE_DISABLE_ORACLE_FUNCTIONS
 longlong Item_func_oracle_sql_rowcount::val_int()
 {
   DBUG_ASSERT(fixed());
@@ -6775,6 +6776,7 @@ longlong Item_func_oracle_sql_rowcount::val_int()
   return rows != -1 ? rows :                   // ROW_COUNT()
                       thd->found_rows();       // FOUND_ROWS()
 }
+#endif
 
 
 longlong Item_func_sqlcode::val_int()

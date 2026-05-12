@@ -10097,6 +10097,7 @@ Item *Lex_trim_st::make_item_func_trim_std(THD *thd) const
 }
 
 
+#ifndef MYLITE_DISABLE_ORACLE_FUNCTIONS
 Item *Lex_trim_st::make_item_func_trim_oracle(THD *thd) const
 {
   if (m_remove)
@@ -10122,6 +10123,7 @@ Item *Lex_trim_st::make_item_func_trim_oracle(THD *thd) const
   DBUG_ASSERT(0);
   return NULL;
 }
+#endif
 
 
 Item *LEX::make_item_func_call_generic(THD *thd,

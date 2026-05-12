@@ -19,6 +19,7 @@
 #include "sql_schema.h"
 #include "sql_class.h"
 
+#ifndef MYLITE_DISABLE_ORACLE_FUNCTIONS
 class Schema_oracle: public Schema
 {
 public:
@@ -47,6 +48,7 @@ public:
                               const Lex_substring_spec_st &spec) const override;
   Item *make_item_func_trim(THD *thd, const Lex_trim_st &spec) const override;
 };
+#endif
 
 
 class Schema_maxdb: public Schema
@@ -67,18 +69,26 @@ public:
 
 
 Schema        mariadb_schema(Lex_cstring(STRING_WITH_LEN("mariadb_schema")));
+#ifndef MYLITE_DISABLE_ORACLE_FUNCTIONS
 Schema_oracle oracle_schema(Lex_cstring(STRING_WITH_LEN("oracle_schema")));
+#endif
 Schema_maxdb  maxdb_schema(Lex_cstring(STRING_WITH_LEN("maxdb_schema")));
 
+#ifndef MYLITE_DISABLE_ORACLE_FUNCTIONS
 const Schema &oracle_schema_ref= oracle_schema;
+#else
+const Schema &oracle_schema_ref= mariadb_schema;
+#endif
 
 Schema *Schema::find_by_name(const LEX_CSTRING &name)
 {
   DBUG_ASSERT(name.str);
   if (mariadb_schema.eq_name(name))
     return &mariadb_schema;
+#ifndef MYLITE_DISABLE_ORACLE_FUNCTIONS
   if (oracle_schema.eq_name(name))
     return &oracle_schema;
+#endif
   if (maxdb_schema.eq_name(name))
     return &maxdb_schema;
   return NULL;
@@ -87,8 +97,10 @@ Schema *Schema::find_by_name(const LEX_CSTRING &name)
 
 Schema *Schema::find_implied(THD *thd)
 {
+#ifndef MYLITE_DISABLE_ORACLE_FUNCTIONS
   if (thd->variables.sql_mode & MODE_ORACLE)
     return &oracle_schema;
+#endif
   if (thd->variables.sql_mode & MODE_MAXDB)
     return &maxdb_schema;
   return &mariadb_schema;
@@ -140,6 +152,7 @@ Item *Schema::make_item_func_trim(THD *thd, const Lex_trim_st &spec) const
 }
 
 
+#ifndef MYLITE_DISABLE_ORACLE_FUNCTIONS
 Item *Schema_oracle::make_item_func_replace(THD *thd,
                                             Item *subj,
                                             Item *find,
@@ -166,3 +179,4 @@ Item *Schema_oracle::make_item_func_trim(THD *thd,
 {
   return spec.make_item_func_trim_oracle(thd);
 }
+#endif

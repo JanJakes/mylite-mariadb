@@ -4365,6 +4365,7 @@ protected:
 };
 
 
+#ifndef MYLITE_DISABLE_ORACLE_FUNCTIONS
 class Item_func_oracle_sql_rowcount :public Item_longlong_func
 {
 public:
@@ -4387,6 +4388,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_oracle_sql_rowcount>(thd, this); }
 };
+#endif
 
 
 class Item_func_sqlcode: public Item_long_func

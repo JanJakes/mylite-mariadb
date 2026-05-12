@@ -9924,10 +9924,16 @@ bit_expr:
           }
         | bit_expr ORACLE_CONCAT_SYM bit_expr
           {
+#ifndef MYLITE_DISABLE_ORACLE_FUNCTIONS
             $$= new (thd->mem_root) Item_func_concat_operator_oracle(thd,
                                                                      $1, $3);
             if (unlikely($$ == NULL))
               MYSQL_YYABORT;
+#else
+            my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+                     "Oracle SQL functions in the MyLite minsize profile");
+            MYSQL_YYABORT;
+#endif
           }
         | bit_expr '+' bit_expr %prec '+'
           {
@@ -10532,11 +10538,17 @@ function_call_keyword:
           }
         | SQL_SYM PERCENT_ORACLE_SYM ROWCOUNT_SYM
           {
+#ifndef MYLITE_DISABLE_ORACLE_FUNCTIONS
             $$= new (thd->mem_root) Item_func_oracle_sql_rowcount(thd);
             if (unlikely($$ == NULL))
               MYSQL_YYABORT;
             Lex->set_stmt_unsafe(LEX::BINLOG_STMT_UNSAFE_SYSTEM_FUNCTION);
             Lex->safe_to_cache_query= 0;
+#else
+            my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+                     "Oracle SQL functions in the MyLite minsize profile");
+            MYSQL_YYABORT;
+#endif
           }
         | SESSION_USER_SYM '(' ')'
           {
@@ -10753,8 +10765,14 @@ function_call_nonkeyword:
           }
         | TRIM_ORACLE '(' trim_operands ')'
           {
+#ifndef MYLITE_DISABLE_ORACLE_FUNCTIONS
             if (unlikely(!($$= $3.make_item_func_trim_oracle(thd))))
               MYSQL_YYABORT;
+#else
+            my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+                     "Oracle SQL functions in the MyLite minsize profile");
+            MYSQL_YYABORT;
+#endif
           }
         | UTC_DATE_SYM optional_braces
           {
