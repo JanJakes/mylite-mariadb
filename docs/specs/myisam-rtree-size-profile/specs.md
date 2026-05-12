@@ -140,6 +140,33 @@ Measure:
   compatibility smokes.
 - Size deltas are recorded in `docs/research/production-size-analysis.md`.
 
+## Verification Result
+
+Passed:
+
+```sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-myisam-rtree MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-myisam-rtree MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-myisam-rtree MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+git diff --check
+bash -n tools/build-mariadb-minsize.sh tools/run-libmylite-open-close-smoke.sh tools/run-compatibility-test-harness.sh
+```
+
+Measured on top of `myisam-fulltext-size-profile`:
+
+| Artifact | Bytes | Delta |
+| --- | ---: | ---: |
+| `libmysqld/libmariadbd.a` | 33,284,948 | -43,796 |
+| archive object count | 439 | -5 |
+| `storage/myisam/libmyisam_embedded.a` | 455,404 | -45,238 |
+| unstripped `mylite-open-close-smoke` | 9,015,416 | -23,088 |
+| stripped `mylite-open-close-smoke` | 6,568,840 | -21,128 |
+
+`rt_*.c.o` and `sp_key.c.o` objects are absent from the MyISAM build and
+merged archive. The linked open/close smoke no longer contains live `rtree_*`
+or `sp_make_key` function symbols. The runtime reports
+`have_rtree_keys=NO`.
+
 ## Risks
 
 - A hidden MyISAM temporary-table path should not request RTREE indexes. If it

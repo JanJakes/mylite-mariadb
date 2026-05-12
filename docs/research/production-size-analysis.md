@@ -30,6 +30,7 @@ The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 - `MYLITE_DISABLE_LEGACY_STORAGE_ENGINES=ON`
 - `MYLITE_DISABLE_MYISAM_ADMIN=ON`
 - `MYLITE_DISABLE_MYISAM_FULLTEXT=ON`
+- `MYLITE_DISABLE_MYISAM_RTREE=ON`
 - `MYLITE_DISABLE_MYISAM_TEMP_SPILL=OFF`
 - Aria, InnoDB, partitioning, Performance Schema, RocksDB, Mroonga, Connect,
   Spider, S3, OQGraph, Sphinx, ColumnStore, FederatedX, Blackhole, Archive,
@@ -51,8 +52,8 @@ include the `type-plugin-size-profile`, `charset-small-profile`, and
 `query-cache-size-profile`, `oracle-function-size-profile`,
 `server-utility-function-size-profile`, `uca-collation-size-profile`,
 `regex-function-size-profile`, `binlog-replication-size-profile`, and
-`no-binlog-core-size-profile`, `myisam-admin-size-profile`, and
-`myisam-fulltext-size-profile`
+`no-binlog-core-size-profile`, `myisam-admin-size-profile`,
+`myisam-fulltext-size-profile`, and `myisam-rtree-size-profile`
 attempts, which remove the built-in
 `type_geom`, `type_inet`, `type_uuid`, `sequence`, `thread_pool_info`,
 `user_variables`, `userstat`, `mhnsw`, `csv`, and `myisammrg` plugins, set
@@ -77,8 +78,9 @@ compile remaining embedded binlog transaction, row-event, GTID-state, and
 event-write entry points to no-ops while omitting the now-unreferenced
 `rpl_record.cc` object, omit MyISAM check/repair admin code while retaining
 MyISAM for inherited disk temporary tables, omit MyISAM full-text indexing
-implementation code while keeping ordinary MyISAM temporary-table spill, and
-strip the static archive in the MyLite minsize profile.
+implementation code, omit MyISAM RTREE/spatial-key implementation code while
+reporting `have_rtree_keys=NO`, and strip the static archive in the MyLite
+minsize profile.
 
 `no-myisam-temp-spill-size-profile` was measured separately as an opt-in
 `MYLITE_DISABLE_MYISAM_TEMP_SPILL=ON` experiment. It is not part of the current
@@ -98,38 +100,39 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 ## Current baseline
 
 The current values were measured from
-`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-myisam-fulltext`.
+`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-myisam-rtree`.
 Paths below use the default build directory names for readability.
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
-| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 33,328,744 | 31.78 | Main embedded MariaDB archive, 444 objects, stripped; section metadata grows the archive |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 33,284,948 | 31.74 | Main embedded MariaDB archive, 439 objects, stripped; section metadata grows the archive |
 | `build/mariadb-minsize/mylite/libmylite.a` | 122,792 | 0.12 | First-party public wrapper |
 | `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 388,440 | 0.37 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 9,038,504 | 8.62 | Unstripped linked smoke binary, lld RELR and section GC |
-| stripped `mylite-open-close-smoke` copy | 6,589,968 | 6.28 | `strip --strip-unneeded` on copied binary |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 9,015,416 | 8.60 | Unstripped linked smoke binary, lld RELR and section GC |
+| stripped `mylite-open-close-smoke` copy | 6,568,840 | 6.26 | `strip --strip-unneeded` on copied binary |
 
 The linked smoke binary has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 5,142,418 |
-| data | 1,444,176 |
-| bss | 254,417 |
-| total `size` decimal | 6,841,011 |
+| text | 5,121,330 |
+| data | 1,444,152 |
+| bss | 250,961 |
+| total `size` decimal | 6,816,443 |
 
 Largest linked sections in the open-close smoke binary:
 
 | Section | Bytes | Interpretation |
 | --- | ---: | --- |
-| `.text` | 3,041,756 | Executable code |
+| `.text` | 3,022,516 | Executable code |
 | `.data.rel.ro` | 1,117,120 | Relocated read-only data |
-| `.rodata` | 1,084,875 | Parser tables, SQL metadata, constants, retained Unicode data |
-| `.eh_frame` | 701,508 | Unwind metadata |
+| `.rodata` | 1,084,747 | Parser tables, SQL metadata, constants, retained Unicode data |
+| `.eh_frame` | 700,028 | Unwind metadata |
 | `.data` | 295,728 | Writable data |
-| `.bss` | 250,561 | Zero-initialized writable data |
-| `.eh_frame_hdr` | 160,868 | Unwind table index |
+| `.bss` | 250,553 | Zero-initialized writable data |
+| `.eh_frame_hdr` | 160,628 | Unwind table index |
 | `.rela.dyn` | 50,736 | Remaining unpacked dynamic relocations |
+| `.gcc_except_table` | 43,272 | Exception metadata |
 | `.relr.dyn` | 20,520 | Packed relative relocations |
 
 If a Linux distribution bundle vendors the current dynamic dependencies, it
@@ -233,6 +236,7 @@ The current built-in plugins are:
 | `no-binlog-core-size-profile` after binlog replication | 33,532,138 | -9,873,294 | 6,684,088 | -12,647,816 | Passes current smokes and harness; no-ops core binlog entry points and removes `rpl_record.cc` |
 | `myisam-admin-size-profile` after no-binlog-core | 33,415,532 | -9,989,900 | 6,619,904 | -12,712,000 | Passes current smokes and harness; omits MyISAM check/repair admin code while retaining disk temp tables |
 | `myisam-fulltext-size-profile` after MyISAM admin | 33,328,744 | -10,076,688 | 6,589,968 | -12,741,936 | Passes current smokes and harness; omits MyISAM full-text implementation while retaining disk temp tables |
+| `myisam-rtree-size-profile` after MyISAM full-text | 33,284,948 | -10,120,484 | 6,568,840 | -12,763,064 | Passes current smokes and harness; omits MyISAM RTREE/spatial-key implementation while retaining disk temp tables |
 | `no-myisam-temp-spill-size-profile` after no-binlog-core | 32,836,602 | -10,568,830 | 6,437,408 | -12,894,496 | Opt-in experiment only; open/close smoke passes, but storage/catalog harness fails because schema-table queries need disk temp tables |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
 | Strip archive with `strip --strip-unneeded` | 41,873,048 | -1,532,384 | n/a | n/a | Higher risk than `strip -g` for static archives |
@@ -254,7 +258,7 @@ profile now passes current smokes while retaining the compiled default
 `utf8mb4_uca1400_ai_ci`.
 
 Stripping the current linked open-close smoke binary reduces it from
-9,038,504 bytes to 6,589,968 bytes, saving 2,448,536 bytes, or 2.33 MiB.
+9,015,416 bytes to 6,568,840 bytes, saving 2,446,576 bytes, or 2.33 MiB.
 That remains the
 lowest-risk packaging win for any copied executable or shared-library style
 artifact.
@@ -499,6 +503,16 @@ members or live `ft_*`, `_mi_ft_*`, `_ft_*`, or `ha_myisam::ft_*` symbols.
 The full compatibility harness still passes because ordinary MyISAM disk
 temporary tables use non-full-text keys.
 
+The `myisam-rtree-size-profile` attempt then omitted MyISAM RTREE/spatial-key
+implementation sources, stopped advertising `HA_CAN_RTREEKEYS`, reported
+`have_rtree_keys=NO`, and compiled generic MyISAM read/write/index paths so
+they no longer reference RTREE helpers. On top of the MyISAM-full-text profile,
+it reduced the static archive by another 43,796 bytes and the stripped linked
+smoke by another 21,128 bytes. The linked smoke no longer contains `rt_*.o`,
+`sp_key.c.o`, or live `rtree_*`/`sp_make_key` function symbols. The full
+compatibility harness still passes because ordinary MyISAM disk temporary
+tables use non-RTREE keys.
+
 The `no-myisam-temp-spill-size-profile` experiment then omitted the mandatory
 MyISAM plugin and rejected inherited disk temporary-table spill with
 `ER_NOT_SUPPORTED_YET`. On top of the no-binlog-core profile, it reduced the
@@ -539,6 +553,8 @@ MyISAM-compatible storage.
 | Remove command-level binlog replay and replication glue | 0.02 MiB archive, no linked-runtime win beyond regex profile | Low/medium | Applied as archive cleanup | Embedded mode already blocks `BINLOG`; the real linked binlog roots remain in transaction, row-event, GTID, and sysvar paths |
 | No-op core binlog entry points | 0.14 MiB archive, 0.06 MiB stripped linked beyond command-level binlog removal | Medium | Applied as aggressive size attempt | Current smokes and harness pass; broader event/GTID source removal still needs guarded startup, table-open, and log-helper cleanup |
 | Omit MyISAM check/repair admin code | 0.11 MiB archive, 0.06 MiB stripped linked beyond no-binlog-core | Low/medium | Applied as size attempt | Keeps MyISAM for disk temp tables but removes unreachable admin repair/check paths from the hidden user engine |
+| Omit MyISAM full-text code | 0.08 MiB archive, 0.03 MiB stripped linked beyond MyISAM admin | Low/medium | Applied as size attempt | Keeps MyISAM for disk temp tables but removes unreachable full-text paths from the hidden user engine |
+| Omit MyISAM RTREE/spatial-key code | 0.04 MiB archive, 0.02 MiB stripped linked beyond MyISAM full-text | Low/medium | Applied as size attempt | Keeps MyISAM for disk temp tables but removes unreachable RTREE paths from the hidden user engine |
 | Omit MyISAM temp-spill handler | 0.66 MiB archive, 0.23 MiB stripped linked beyond no-binlog-core | High | No, keep opt-in only | Breaks schema-table metadata and catalog smokes; needs a MyLite-owned disk temporary-table replacement or a compatible memory-only schema-table path |
 | Remove server-only SQL subsystems | Potentially large | High | Research later | The big bytes are entangled in `libsql_embedded.a`; needs slice-by-slice fork work |
 | `DISABLE_PSI_*` switches | 0 in this build | Low | No | No measured effect |
@@ -584,7 +600,9 @@ Take these now:
    MyISAM remains hidden from user engine selection.
 14. Keep the MyISAM full-text omission in the aggressive minsize profile while
    MyLite full-text indexes remain unsupported and MyISAM is internal-only.
-15. Keep a stripped linked smoke binary size in the build report so regressions
+15. Keep the MyISAM RTREE omission in the aggressive minsize profile while
+   MyLite spatial indexes remain unsupported and MyISAM is internal-only.
+16. Keep a stripped linked smoke binary size in the build report so regressions
    are visible.
 
 Do not take these now:

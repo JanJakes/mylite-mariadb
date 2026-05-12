@@ -65,6 +65,7 @@ uint _mi_make_key(register MI_INFO *info, uint keynr, uchar *key,
 #endif
   DBUG_ENTER("_mi_make_key");
 
+#ifndef MYLITE_DISABLE_MYISAM_RTREE
   if (info->s->keyinfo[keynr].key_alg == HA_KEY_ALG_RTREE)
   {
     /*
@@ -72,6 +73,7 @@ uint _mi_make_key(register MI_INFO *info, uint keynr, uchar *key,
     */
     DBUG_RETURN(sp_make_key(info,keynr,key,record,filepos));
   }
+#endif
 
   start=key;
   for (keyseg=info->s->keyinfo[keynr].seg ; keyseg->type ;keyseg++)
@@ -230,9 +232,11 @@ uint _mi_pack_key(register MI_INFO *info, uint keynr, uchar *key, uchar *old,
 #endif
   DBUG_ENTER("_mi_pack_key");
 
+#ifndef MYLITE_DISABLE_MYISAM_RTREE
   /* "one part" rtree key is 2*SPDIMS part key in MyISAM */
   if (info->s->keyinfo[keynr].key_alg == HA_KEY_ALG_RTREE)
     keypart_map= (((key_part_map)1) << (2*SPDIMS)) - 1;
+#endif
 
   /* only key prefixes are supported */
   DBUG_ASSERT(((keypart_map+1) & keypart_map) == 0);

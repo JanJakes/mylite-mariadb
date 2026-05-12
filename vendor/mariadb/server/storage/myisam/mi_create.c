@@ -261,6 +261,10 @@ int mi_create(const char *name,uint keys,MI_KEYDEF *keydefs,
     key_length=pointer;
     if (keydef->key_alg == HA_KEY_ALG_RTREE)
     {
+#ifdef MYLITE_DISABLE_MYISAM_RTREE
+      my_errno=HA_WRONG_CREATE_OPTION;
+      goto err_no_lock;
+#else
       /* BAR TODO to support 3D and more dimensions in the future */
       uint sp_segs=SPDIMS*2;
       keydef->flag=HA_SPATIAL_legacy;
@@ -293,6 +297,7 @@ int mi_create(const char *name,uint keys,MI_KEYDEF *keydefs,
       key_length+=SPLEN*sp_segs;
       length++;                              /* At least one length byte */
       min_key_length_skip+=SPLEN*2*SPDIMS;
+#endif
     }
     else if (keydef->key_alg == HA_KEY_ALG_FULLTEXT)
     {
@@ -721,7 +726,11 @@ int mi_create(const char *name,uint keys,MI_KEYDEF *keydefs,
   DBUG_PRINT("info", ("write key and keyseg definitions"));
   for (i=0 ; i < share.base.keys - uniques; i++)
   {
+#ifdef MYLITE_DISABLE_MYISAM_RTREE
+    uint sp_segs=0;
+#else
     uint sp_segs=keydefs[i].key_alg == HA_KEY_ALG_RTREE ? 2*SPDIMS : 0;
+#endif
 
     if (mi_keydef_write(file, &keydefs[i]))
       goto err;

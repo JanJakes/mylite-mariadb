@@ -8156,7 +8156,11 @@ static int mysql_init_variables(void)
   have_query_cache=SHOW_OPTION_YES;
 #endif
   have_geometry=SHOW_OPTION_YES;
+#ifdef MYLITE_DISABLE_MYISAM_RTREE
+  have_rtree_keys=SHOW_OPTION_NO;
+#else
   have_rtree_keys=SHOW_OPTION_YES;
+#endif
 #ifdef HAVE_CRYPT
   have_crypt=SHOW_OPTION_YES;
 #else

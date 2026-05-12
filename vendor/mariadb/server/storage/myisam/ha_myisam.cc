@@ -275,13 +275,21 @@ int table2myisam(TABLE *table_arg, MI_KEYDEF **keydef_out,
   TABLE_SHARE *share= table_arg->s;
   uint options= share->db_options_in_use;
   DBUG_ENTER("table2myisam");
-#ifdef MYLITE_DISABLE_MYISAM_FULLTEXT
+#if defined(MYLITE_DISABLE_MYISAM_FULLTEXT) || \
+    defined(MYLITE_DISABLE_MYISAM_RTREE)
   pos= table_arg->key_info;
   for (i= 0; i < share->keys; i++, pos++)
   {
+#ifdef MYLITE_DISABLE_MYISAM_FULLTEXT
     if (pos->algorithm == HA_KEY_ALG_FULLTEXT ||
         (pos->flags & HA_FULLTEXT_legacy))
       DBUG_RETURN(HA_ERR_UNSUPPORTED);
+#endif
+#ifdef MYLITE_DISABLE_MYISAM_RTREE
+    if (pos->algorithm == HA_KEY_ALG_RTREE ||
+        (pos->flags & HA_SPATIAL_legacy))
+      DBUG_RETURN(HA_ERR_UNSUPPORTED);
+#endif
   }
 #endif
   if (!(my_multi_malloc(PSI_INSTRUMENT_ME, MYF(MY_WME),
@@ -296,13 +304,14 @@ int table2myisam(TABLE *table_arg, MI_KEYDEF **keydef_out,
   pos= table_arg->key_info;
   for (i= 0; i < share->keys; i++, pos++)
   {
-#ifdef MYLITE_DISABLE_MYISAM_FULLTEXT
-    keydef[i].flag= ((uint16) pos->flags & (HA_NOSAME |
-                                            HA_SPATIAL_legacy));
-#else
-    keydef[i].flag= ((uint16) pos->flags & (HA_NOSAME | HA_FULLTEXT_legacy |
-                                            HA_SPATIAL_legacy));
+    keydef[i].flag= ((uint16) pos->flags & (HA_NOSAME
+#ifndef MYLITE_DISABLE_MYISAM_FULLTEXT
+                                            | HA_FULLTEXT_legacy
 #endif
+#ifndef MYLITE_DISABLE_MYISAM_RTREE
+                                            | HA_SPATIAL_legacy
+#endif
+                                            ));
     keydef[i].key_alg= pos->algorithm == HA_KEY_ALG_UNDEF ? HA_KEY_ALG_BTREE
                                                           : pos->algorithm;
     keydef[i].block_length= pos->block_size;
@@ -531,9 +540,13 @@ int check_definition(MI_KEYDEF *t1_keyinfo, MI_COLUMNDEF *t1_recinfo,
     HA_KEYSEG *t1_keysegs= t1_keyinfo[i].seg;
     HA_KEYSEG *t2_keysegs= t2_keyinfo[i].seg;
     if ((t1_keyinfo[i].key_alg == HA_KEY_ALG_FULLTEXT &&
-         t2_keyinfo[i].key_alg == HA_KEY_ALG_FULLTEXT) ||
+         t2_keyinfo[i].key_alg == HA_KEY_ALG_FULLTEXT)
+#ifndef MYLITE_DISABLE_MYISAM_RTREE
+        ||
         (t1_keyinfo[i].key_alg == HA_KEY_ALG_RTREE &&
-         t2_keyinfo[i].key_alg == HA_KEY_ALG_RTREE))
+         t2_keyinfo[i].key_alg == HA_KEY_ALG_RTREE)
+#endif
+        )
       continue;
     if ((!mysql_40_compat &&
         t1_keyinfo[i].key_alg != t2_keyinfo[i].key_alg) ||
@@ -749,7 +762,10 @@ ha_myisam::ha_myisam(handlerton *hton, TABLE_SHARE *table_arg)
                   HA_REQUIRES_KEY_COLUMNS_FOR_DELETE |
                   HA_DUPLICATE_POS | HA_CAN_INDEX_BLOBS | HA_AUTO_PART_KEY |
                   HA_FILE_BASED | HA_CAN_GEOMETRY | HA_NO_TRANSACTIONS |
-                  HA_CAN_INSERT_DELAYED | HA_CAN_BIT_FIELD | HA_CAN_RTREEKEYS |
+                  HA_CAN_INSERT_DELAYED | HA_CAN_BIT_FIELD |
+#ifndef MYLITE_DISABLE_MYISAM_RTREE
+                  HA_CAN_RTREEKEYS |
+#endif
                   HA_HAS_RECORDS | HA_STATS_RECORDS_IS_EXACT | HA_CAN_REPAIR |
                   HA_CAN_TABLES_WITHOUT_ROLLBACK),
    can_enable_indexes(0)
@@ -778,6 +794,7 @@ ulong ha_myisam::index_flags(uint inx, uint part, bool all_parts) const
   if (table_share->key_info[inx].algorithm == HA_KEY_ALG_FULLTEXT)
     flags= 0;
   else 
+#ifndef MYLITE_DISABLE_MYISAM_RTREE
   if (table_share->key_info[inx].algorithm == HA_KEY_ALG_RTREE)
   {
     /* All GIS scans are non-ROR scans. We also disable IndexConditionPushdown */
@@ -785,6 +802,7 @@ ulong ha_myisam::index_flags(uint inx, uint part, bool all_parts) const
            HA_READ_ORDER | HA_KEYREAD_ONLY | HA_KEY_SCAN_NOT_ROR;
   }
   else 
+#endif
   {
     flags= HA_READ_NEXT | HA_READ_PREV | HA_READ_RANGE |
            HA_READ_ORDER | HA_KEYREAD_ONLY | HA_DO_INDEX_COND_PUSHDOWN |
@@ -1882,8 +1900,11 @@ void ha_myisam::start_bulk_insert(ha_rows rows, uint flags)
         if (!(key->flag & HA_AUTO_KEY) && file->s->base.auto_key != i+1 &&
             ! mi_too_big_key_for_sort(key,rows) &&
             (all_keys || !(key->flag & HA_NOSAME)) &&
-            table->key_info[i].algorithm != HA_KEY_ALG_LONG_HASH &&
-            table->key_info[i].algorithm != HA_KEY_ALG_RTREE)
+            table->key_info[i].algorithm != HA_KEY_ALG_LONG_HASH
+#ifndef MYLITE_DISABLE_MYISAM_RTREE
+            && table->key_info[i].algorithm != HA_KEY_ALG_RTREE
+#endif
+            )
         {
           mi_clear_key_active(share->state.key_map, i);
           index_disabled= 1;

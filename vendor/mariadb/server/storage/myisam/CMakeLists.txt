@@ -42,6 +42,15 @@ IF(MYLITE_DISABLE_MYISAM_FULLTEXT)
     ft_update.c)
 ENDIF()
 
+IF(MYLITE_DISABLE_MYISAM_RTREE)
+  LIST(REMOVE_ITEM MYISAM_SOURCES
+    rt_index.c
+    rt_key.c
+    rt_mbr.c
+    rt_split.c
+    sp_key.c)
+ENDIF()
+
 IF(CMAKE_SYSTEM_NAME MATCHES AIX)
   # Workaround linker bug on AIX
   SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-berok")

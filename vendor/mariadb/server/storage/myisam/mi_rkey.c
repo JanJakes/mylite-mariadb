@@ -81,6 +81,7 @@ int mi_rkey(MI_INFO *info, uchar *buf, int inx, const uchar *key,
     use_key_length=USE_WHOLE_KEY;
 
   switch (info->s->keyinfo[inx].key_alg) {
+#ifndef MYLITE_DISABLE_MYISAM_RTREE
   case HA_KEY_ALG_RTREE:
     if (rtree_find_first(info,inx,key_buff,use_key_length,nextflag) < 0)
     {
@@ -92,6 +93,7 @@ int mi_rkey(MI_INFO *info, uchar *buf, int inx, const uchar *key,
       goto err;
     }
     break;
+#endif
   case HA_KEY_ALG_BTREE:
   default:
     if (!_mi_search(info, keyinfo, key_buff, use_key_length,

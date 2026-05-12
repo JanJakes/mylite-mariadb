@@ -374,7 +374,14 @@ MI_INFO *mi_open(const char *name, int mode, uint open_flags)
         disk_pos=mi_keydef_read(disk_pos, keyinfo);
         disk_pos_assert(disk_pos + keyinfo->keysegs * HA_KEYSEG_SIZE, end_pos);
         if (keyinfo->key_alg == HA_KEY_ALG_RTREE)
+        {
+#ifdef MYLITE_DISABLE_MYISAM_RTREE
+          my_errno=HA_ERR_UNSUPPORTED;
+          goto err;
+#else
           have_rtree=1;
+#endif
+        }
         set_if_smaller(share->blocksize, keyinfo->block_length);
         keyinfo->seg= pos;
         for (j=0 ; j < keyinfo->keysegs; j++,pos++)
@@ -402,6 +409,7 @@ MI_INFO *mi_open(const char *name, int mode, uint open_flags)
 	  else if (pos->type == HA_KEYTYPE_BINARY)
 	    pos->charset= &my_charset_bin;
 	}
+#ifndef MYLITE_DISABLE_MYISAM_RTREE
         if (keyinfo->key_alg == HA_KEY_ALG_RTREE)
 	{
           uint sp_segs= SPDIMS*2;
@@ -410,6 +418,9 @@ MI_INFO *mi_open(const char *name, int mode, uint open_flags)
           keyinfo->keysegs= sp_segs;
 	}
         else if (keyinfo->key_alg == HA_KEY_ALG_FULLTEXT)
+#else
+        if (keyinfo->key_alg == HA_KEY_ALG_FULLTEXT)
+#endif
 	{
 #ifdef MYLITE_DISABLE_MYISAM_FULLTEXT
           my_errno=HA_ERR_UNSUPPORTED;
@@ -613,7 +624,11 @@ MI_INFO *mi_open(const char *name, int mode, uint open_flags)
     if (mi_open_datafile(&info, share))
       goto err;
     errpos=5;
+#ifdef MYLITE_DISABLE_MYISAM_RTREE
+    have_rtree= 0;
+#else
     have_rtree= old_info->rtree_recursion_state != NULL;
+#endif
   }
 
   /* alloc and set up private structure parts */
@@ -863,12 +878,14 @@ void mi_setup_functions(register MYISAM_SHARE *share)
 
 static void setup_key_functions(register MI_KEYDEF *keyinfo)
 {
+#ifndef MYLITE_DISABLE_MYISAM_RTREE
   if (keyinfo->key_alg == HA_KEY_ALG_RTREE)
   {
     keyinfo->ck_insert = rtree_insert;
     keyinfo->ck_delete = rtree_delete;
   }
   else
+#endif
   {
     keyinfo->ck_insert = _mi_ck_write;
     keyinfo->ck_delete = _mi_ck_delete;
