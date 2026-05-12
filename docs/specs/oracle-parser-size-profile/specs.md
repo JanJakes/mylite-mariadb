@@ -81,6 +81,21 @@ The direct raw archive opportunity is the 1,372,688-byte `yy_oracle.cc.o`
 member. Final linked savings may be smaller because the parser shares symbols,
 tables, and relocation shape with the rest of the SQL layer.
 
+After implementation, the measured size is:
+
+- `libmariadbd.a`: 35,944,110 bytes,
+- archive objects: 494,
+- `mylite-open-close-smoke`: 18,576,832 bytes,
+- stripped `mylite-open-close-smoke`: 15,850,736 bytes,
+- `size` total: 16,111,856 bytes.
+
+Compared with the charset-small profile, this saves 1,412,822 bytes from
+`libmariadbd.a` and 589,824 bytes from the stripped linked open-close proxy.
+Compared with the original production-size baseline, the combined
+type-plugin, charset-small, and Oracle-parser profile saves 7,461,322 bytes
+from `libmariadbd.a` and 3,481,168 bytes from the stripped linked open-close
+proxy.
+
 ## Test plan
 
 Run:
@@ -99,6 +114,22 @@ ar t build/mariadb-minsize/libmysqld/libmariadbd.a | grep yy_oracle
 
 The current profile should no longer include `yy_oracle.cc.o`. If a stub object
 is added, it should be small and explicitly named.
+
+## Verification
+
+Run on 2026-05-12:
+
+```sh
+MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+```
+
+All passed. `libmariadbd.a` contains `yy_mariadb.cc.o` and
+`mylite_oracle_parser_stub.cc.o`, and no longer contains `yy_oracle.cc.o`.
+The open/close smoke verifies that `SET sql_mode=ORACLE` followed by parsing a
+statement fails with `ER_NOT_SUPPORTED_YET` and the explicit MyLite minsize
+profile message.
 
 ## Acceptance criteria
 

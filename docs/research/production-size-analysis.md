@@ -15,6 +15,7 @@ The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 - `WITHOUT_DYNAMIC_PLUGINS=ON`
 - system `ssl`, `pcre`, `fmt`, and `zlib`
 - `WITH_EXTRA_CHARSETS=none`
+- `MYLITE_DISABLE_ORACLE_PARSER=ON`
 - Aria, InnoDB, partitioning, Performance Schema, RocksDB, Mroonga, Connect,
   Spider, S3, OQGraph, Sphinx, ColumnStore, FederatedX, Blackhole, Archive,
   feedback, and selected authentication plugins disabled
@@ -23,9 +24,10 @@ The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 
 The original comparison baseline was generated at `2026-05-12T00:33:29Z` from
 `vendor/mariadb/server` into `build/mariadb-minsize`. Current measurements
-include the `type-plugin-size-profile` and `charset-small-profile` attempts,
-which remove the built-in `type_geom`, `type_inet`, and `type_uuid` plugins and
-set `WITH_EXTRA_CHARSETS=none` in the MyLite minsize profile.
+include the `type-plugin-size-profile`, `charset-small-profile`, and
+`oracle-parser-size-profile` attempts, which remove the built-in `type_geom`,
+`type_inet`, and `type_uuid` plugins, set `WITH_EXTRA_CHARSETS=none`, and omit
+the Oracle SQL-mode parser from the MyLite minsize profile.
 
 This project does not yet have a final packaged production artifact such as a
 shared `libmylite.so` bundle. For now, the most useful size signals are:
@@ -41,33 +43,33 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
-| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 37,356,932 | 35.63 | Main embedded MariaDB archive, 494 objects |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 35,944,110 | 34.28 | Main embedded MariaDB archive, 494 objects |
 | `build/mariadb-minsize/mylite/libmylite.a` | 93,752 | 0.09 | First-party public wrapper |
 | `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 303,480 | 0.29 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 19,168,184 | 18.28 | Unstripped linked proxy |
-| stripped `mylite-open-close-smoke` copy | 16,440,560 | 15.68 | `strip --strip-unneeded` on copied binary |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 18,576,832 | 17.72 | Unstripped linked proxy |
+| stripped `mylite-open-close-smoke` copy | 15,850,736 | 15.12 | `strip --strip-unneeded` on copied binary |
 
 The linked proxy has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 14,187,259 |
-| data | 2,236,160 |
-| bss | 304,432 |
-| total `size` decimal | 16,727,851 |
+| text | 13,571,296 |
+| data | 2,236,152 |
+| bss | 304,408 |
+| total `size` decimal | 16,111,856 |
 
 Largest linked sections in the open-close proxy:
 
 | Section | Bytes | Interpretation |
 | --- | ---: | --- |
-| `.rela.dyn` | 4,513,608 | Dynamic relocations from the current link shape |
-| `.text` | 3,673,020 | Executable code |
-| `.rodata` | 2,669,985 | Collation tables, parser tables, SQL metadata, constants |
+| `.rela.dyn` | 4,513,584 | Dynamic relocations from the current link shape |
+| `.text` | 3,578,188 | Executable code |
+| `.rodata` | 2,152,705 | Collation tables, parser tables, SQL metadata, constants |
 | `.data.rel.ro` | 1,424,304 | Relocated read-only data |
-| `.dynstr` | 1,240,435 | Dynamic string table |
-| `.eh_frame` | 831,196 | Unwind metadata |
+| `.dynstr` | 1,240,255 | Dynamic string table |
+| `.eh_frame` | 830,300 | Unwind metadata |
 | `.data` | 775,280 | Writable data |
-| `.dynsym` | 720,672 | Dynamic symbol table |
+| `.dynsym` | 720,600 | Dynamic symbol table |
 
 If a Linux distribution bundle vendors the current dynamic dependencies, it
 adds about 11,340,944 bytes, or 10.82 MiB, before compression:
@@ -90,8 +92,8 @@ distribution formats that bundle runtime libraries.
 ## Where the bytes are
 
 The SQL layer dominates the current static footprint. The component table below
-was captured before the type-plugin and charset-small size profiles were
-applied and explains why those attempts were worth testing.
+was captured before the type-plugin, charset-small, and Oracle-parser size
+profiles were applied and explains why those attempts were worth testing.
 
 | Component archive | Bytes | MiB |
 | --- | ---: | ---: |
@@ -155,6 +157,7 @@ The current built-in plugins are:
 | Baseline | 43,405,432 | 0 | 19,331,904 | 0 | Passes current smokes |
 | `type-plugin-size-profile` | 39,941,598 | -3,463,834 | 18,935,800 | -396,104 | Passes current smokes |
 | `charset-small-profile` after type plugins | 37,356,932 | -6,048,500 | 16,440,560 | -2,891,344 | Passes current smokes |
+| `oracle-parser-size-profile` after charset | 35,944,110 | -7,461,322 | 15,850,736 | -3,481,168 | Passes current smokes |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
 | Strip archive with `strip --strip-unneeded` | 41,873,048 | -1,532,384 | n/a | n/a | Higher risk than `strip -g` for static archives |
 | `WITH_EXTRA_CHARSETS=none` before UCA fix | 40,820,782 | -2,584,650 | 16,836,664 | -2,495,240 | Segfaulted in open-close smoke |
@@ -197,6 +200,13 @@ plugin profile, it reduced the static archive by another 2,584,666 bytes and
 the stripped linked proxy by another 2,495,240 bytes while current MyLite smokes
 still passed.
 
+The `oracle-parser-size-profile` attempt then removed `yy_oracle.cc.o` from the
+embedded archive and linked a 1,664-byte unsupported-mode stub instead. On top
+of the charset-small profile, it reduced the static archive by another
+1,412,822 bytes and the stripped linked proxy by another 589,824 bytes while
+current MyLite smokes still passed. The open/close smoke now verifies that a
+statement parsed after `SET sql_mode=ORACLE` fails with `ER_NOT_SUPPORTED_YET`.
+
 ## Decision matrix
 
 | Lever | Expected savings | Risk | Worth doing? | Reason |
@@ -207,7 +217,7 @@ still passed.
 | `WITH_EXTRA_CHARSETS=complex` | About 0.08 MiB | Low | No | Savings are too small to justify a compatibility profile |
 | `WITH_EXTRA_CHARSETS=none` / `charset-small-profile` | 2.46 MiB archive and 2.38 MiB stripped linked beyond type-plugin profile | High compatibility | Applied as size attempt | Current smokes pass after the UCA 1400 null-base fix, but non-default charsets are omitted |
 | Make type plugins profile-gated | 3.30 MiB archive, 0.38 MiB stripped linked | Medium/high | Applied as size attempt | Current smokes pass, but `INET`, `UUID`, and spatial plugin surfaces are compatibility tradeoffs |
-| Remove or profile-gate Oracle SQL parser | Up to roughly 1.31 MiB raw object input before link effects | High | Research later | Requires a compatibility decision on Oracle mode support |
+| Remove or profile-gate Oracle SQL parser | 1.35 MiB archive and 0.56 MiB stripped linked beyond charset-small profile | High compatibility | Applied as size attempt | Current smokes pass, but `sql_mode=ORACLE` now fails explicitly in the minsize profile |
 | Remove server-only SQL subsystems | Potentially large | High | Research later | The big bytes are entangled in `libsql_embedded.a`; needs slice-by-slice fork work |
 | `DISABLE_PSI_*` switches | 0 in this build | Low | No | No measured effect |
 | section garbage collection | 0 useful savings, archive grows | Low | No | Worsens archive size and does not improve stripped linked size |
@@ -234,13 +244,11 @@ Do not take these now:
 
 Research next if size becomes a release blocker:
 
-1. An `oracle-parser-profile-gating` slice if MyLite decides not to support
-   Oracle SQL mode in the embedded profile.
-2. Longer-term SQL-layer pruning of server-only surfaces. This is likely where
+1. Longer-term SQL-layer pruning of server-only surfaces. This is likely where
    meaningful multi-MiB savings exist, but it should be done as compatibility
    slices, not as broad dead-code removal.
 
 The best near-term decision is to implement packaging stripping and size
-reporting, then treat Oracle-parser and deeper SQL-layer reductions as
-deliberate compatibility work. The current data does not support broad
-compiler/linker tuning as an effective path.
+reporting, then treat deeper SQL-layer reductions as deliberate compatibility
+work. The current data does not support broad compiler/linker tuning as an
+effective path.

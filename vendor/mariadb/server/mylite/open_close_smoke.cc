@@ -5,6 +5,7 @@
    the Free Software Foundation; version 2 of the License. */
 
 #include "mylite.h"
+#include "mysqld_error.h"
 
 #include <cstring>
 #include <ctime>
@@ -50,6 +51,7 @@ struct SmokeResult
   std::string exec_null_db_message;
   std::string exec_scalar_columns;
   std::string exec_scalar_rows;
+  std::string exec_oracle_mode_message;
   std::string exec_callback_abort_message;
   std::string exec_dml_rows;
   std::string exec_duplicate_key_message;
@@ -125,6 +127,8 @@ static bool check_exec_misuse(const SmokeOptions &options,
                               SmokeResult *result);
 static bool check_exec_scalar(const SmokeOptions &options,
                               SmokeResult *result);
+static bool check_oracle_mode_unsupported(const SmokeOptions &options,
+                                          SmokeResult *result);
 static bool check_exec_callback_abort(const SmokeOptions &options,
                                       SmokeResult *result);
 static bool check_exec_dml_persistence(const SmokeOptions &options,
@@ -273,6 +277,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "exec_scalar";
   ok= check_exec_scalar(options, result) && ok;
+
+  result->phase= "oracle_mode_unsupported";
+  ok= check_oracle_mode_unsupported(options, result) && ok;
 
   result->phase= "exec_callback_abort";
   ok= check_exec_callback_abort(options, result) && ok;
@@ -596,6 +603,39 @@ static bool check_exec_scalar(const SmokeOptions &options,
 
     rc= mylite_close(db);
     ok= record_result(result, "exec_scalar_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+  return ok;
+}
+
+static bool check_oracle_mode_unsupported(const SmokeOptions &options,
+                                          SmokeResult *result)
+{
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "oracle_mode_open", MYLITE_OK, rc, db);
+  if (db)
+  {
+    ok= exec_statement(db, "SET sql_mode=ORACLE", "oracle_mode_set",
+                       result) && ok;
+
+    char *errmsg= nullptr;
+    rc= mylite_exec(db, "SELECT 1", nullptr, nullptr, &errmsg);
+    if (errmsg)
+    {
+      result->exec_oracle_mode_message= errmsg;
+      mylite_free(errmsg);
+    }
+    ok= record_result(result, "oracle_mode_select", MYLITE_ERROR, rc,
+                      db) && ok;
+    if (mylite_mariadb_errno(db) != ER_NOT_SUPPORTED_YET ||
+        std::strcmp(mylite_sqlstate(db), "42000") != 0 ||
+        result->exec_oracle_mode_message.find("Oracle SQL mode") ==
+          std::string::npos)
+      ok= false;
+
+    rc= mylite_close(db);
+    ok= record_result(result, "oracle_mode_close", MYLITE_OK, rc,
                       nullptr) && ok;
   }
   return ok;
@@ -1801,6 +1841,9 @@ static void write_report(const SmokeOptions &options,
     report << "exec_scalar_columns=" << result.exec_scalar_columns << "\n";
   if (!result.exec_scalar_rows.empty())
     report << "exec_scalar_rows=" << result.exec_scalar_rows << "\n";
+  if (!result.exec_oracle_mode_message.empty())
+    report << "exec_oracle_mode_message="
+           << result.exec_oracle_mode_message << "\n";
   if (!result.exec_callback_abort_message.empty())
     report << "exec_callback_abort_message="
            << result.exec_callback_abort_message << "\n";
