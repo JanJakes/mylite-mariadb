@@ -72,13 +72,12 @@ MYLITE_DISABLE_JSON_SCHEMA_VALID
 When enabled:
 
 - define `MYLITE_DISABLE_JSON_SCHEMA_VALID` for the embedded library sources,
-- remove `../sql/json_schema.cc` and `../sql/json_schema_helper.cc` from
-  `SQL_EMBEDDED_SOURCES`,
+- remove `../sql/json_schema.cc` from `SQL_EMBEDDED_SOURCES`,
 - guard `Create_func_json_schema_valid`, its singleton, its builder method, and
   the `JSON_SCHEMA_VALID` native function array entry in `item_create.cc`,
 - guard `Item_func_json_schema_valid` declaration and method definitions in
   `item_jsonfunc.h` and `item_jsonfunc.cc`,
-- guard the `json_schema.h` and `json_schema_helper.h` includes that become
+- guard the `json_schema.h` include from `item_jsonfunc.h` that becomes
   unnecessary in the disabled profile,
 - skip `setup_json_schema_keyword_hash()` and
   `cleanup_json_schema_keyword_hash()` in `mysqld.cc`,
@@ -126,11 +125,12 @@ No public `libmylite` API change. No `.mylite` file-format change.
 
 ## Binary-size impact
 
-Expected archive savings are bounded by `json_schema.cc.o`,
-`json_schema_helper.cc.o`, and the linked portions of
-`Item_func_json_schema_valid` and `Create_func_json_schema_valid`. The final
-decision must use production artifact measurements because section GC may
-already drop unrelated `item_jsonfunc.cc` sections.
+Expected archive savings are bounded by `json_schema.cc.o` and the linked
+portions of `Item_func_json_schema_valid` and
+`Create_func_json_schema_valid`. `json_schema_helper.cc` remains because
+retained JSON array-intersection code uses its generic JSON helper functions.
+The final decision must use production artifact measurements because section GC
+may already drop unrelated `item_jsonfunc.cc` sections.
 
 ## License, trademark, and dependency impact
 
@@ -182,6 +182,42 @@ llvm-size build/mariadb-minsize/mylite/mylite-open-close-smoke
 - At least one retained JSON function still succeeds in the open/close smoke.
 - Build, open/close smoke, and compatibility harness pass.
 - Size deltas are recorded in `docs/research/production-size-analysis.md`.
+
+## Verification
+
+Validated on 2026-05-12 with:
+
+```sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-json-schema \
+  MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-json-schema \
+  MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-json-schema \
+  MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+```
+
+Observed smoke evidence:
+
+- `exec_json_valid_rows=1`
+- `exec_json_schema_valid_message=FUNCTION JSON_SCHEMA_VALID does not exist`
+- `mylite-compatibility-harness-report.txt` reports `status=0` for all
+  groups and no unexpected sidecars.
+
+Measured artifacts after this slice:
+
+| Artifact | Bytes | Delta from section-GC profile |
+| --- | ---: | ---: |
+| `libmariadbd.a` | 36,174,834 | -345,732 |
+| `libmylite.a` | 122,792 | 0 |
+| `libmylite_embedded.a` | 388,440 | 0 |
+| `mylite-open-close-smoke` | 10,983,752 | -80,344 |
+| stripped `mylite-open-close-smoke` copy | 8,413,768 | -44,912 |
+| linked `size` total | 8,707,704 | -47,688 |
+
+The archive no longer contains `json_schema.cc.o`; it keeps
+`json_schema_helper.cc.o` because retained JSON functions use shared helper
+code. The linked smoke binary no longer exposes `Item_func_json_schema_valid`,
+`Create_func_json_schema_valid`, or `Json_schema_*` validator symbols.
 
 ## Risks and unresolved questions
 

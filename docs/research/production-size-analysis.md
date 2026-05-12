@@ -19,6 +19,7 @@ The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 - system `ssl`, `pcre`, `fmt`, and `zlib`
 - `WITH_EXTRA_CHARSETS=none`
 - `MYLITE_DISABLE_ORACLE_PARSER=ON`
+- `MYLITE_DISABLE_JSON_SCHEMA_VALID=ON`
 - `MYLITE_DISABLE_LEGACY_STORAGE_ENGINES=ON`
 - Aria, InnoDB, partitioning, Performance Schema, RocksDB, Mroonga, Connect,
   Spider, S3, OQGraph, Sphinx, ColumnStore, FederatedX, Blackhole, Archive,
@@ -35,8 +36,8 @@ include the `type-plugin-size-profile`, `charset-small-profile`, and
 `gis-function-size-profile`, `executable-export-size-profile`,
 `vector-function-size-profile`, `profiling-size-profile`, and
 `help-command-size-profile`, `procedure-analyse-size-profile`, and
-`relr-linker-size-profile`, `legacy-storage-engine-size-profile`, and
-`section-gc-size-profile` attempts,
+`relr-linker-size-profile`, `legacy-storage-engine-size-profile`,
+`section-gc-size-profile`, and `json-schema-valid-size-profile` attempts,
 which
 remove the built-in `type_geom`, `type_inet`, `type_uuid`, `sequence`,
 `thread_pool_info`, `user_variables`, `userstat`, `mhnsw`, `csv`, and
@@ -48,8 +49,9 @@ full-symbol exports from MyLite smoke executables, link runtime-style artifacts
 with lld and compact `DT_RELR` relative relocations, make the inherited MyISAM
 engine non-user-selectable while retaining it for internal disk temporary
 tables, compile minsize objects into per-function/per-data sections and link
-runtime-style artifacts with `--gc-sections`, and strip the static archive in
-the MyLite minsize profile.
+runtime-style artifacts with `--gc-sections`, omit the `JSON_SCHEMA_VALID()`
+validator while retaining ordinary JSON functions, and strip the static archive
+in the MyLite minsize profile.
 
 This project does not yet have a final packaged production artifact such as a
 shared `libmylite.so` bundle. For now, the most useful size signals are:
@@ -64,39 +66,39 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 ## Current baseline
 
 The current values were measured from a clean
-`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-section-gc` run. Paths below
+`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-json-schema` run. Paths below
 use the default build directory names for readability.
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
-| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 36,520,566 | 34.83 | Main embedded MariaDB archive, 462 objects, stripped; section metadata grows the archive |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 36,174,834 | 34.50 | Main embedded MariaDB archive, 461 objects, stripped; section metadata grows the archive |
 | `build/mariadb-minsize/mylite/libmylite.a` | 122,792 | 0.12 | First-party public wrapper |
 | `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 388,440 | 0.37 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 11,064,096 | 10.55 | Unstripped linked smoke binary, lld RELR and section GC |
-| stripped `mylite-open-close-smoke` copy | 8,458,680 | 8.07 | `strip --strip-unneeded` on copied binary |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 10,983,752 | 10.48 | Unstripped linked smoke binary, lld RELR and section GC |
+| stripped `mylite-open-close-smoke` copy | 8,413,768 | 8.02 | `strip --strip-unneeded` on copied binary |
 
 The linked smoke binary has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 6,479,151 |
-| data | 1,976,168 |
-| bss | 300,073 |
-| total `size` decimal | 8,755,392 |
+| text | 6,444,527 |
+| data | 1,965,832 |
+| bss | 297,345 |
+| total `size` decimal | 8,707,704 |
 
 Largest linked sections in the open-close smoke binary:
 
 | Section | Bytes | Interpretation |
 | --- | ---: | --- |
-| `.text` | 3,255,628 | Executable code |
-| `.rodata` | 2,145,107 | Collation tables, parser tables, SQL metadata, constants |
-| `.data.rel.ro` | 1,179,632 | Relocated read-only data |
-| `.data` | 762,808 | Writable data |
-| `.eh_frame` | 746,816 | Unwind metadata |
-| `.bss` | 297,017 | Zero-initialized writable data |
-| `.eh_frame_hdr` | 170,004 | Unwind table index |
-| `.rela.dyn` | 53,664 | Remaining unpacked dynamic relocations |
-| `.relr.dyn` | 22,400 | Packed relative relocations |
+| `.text` | 3,233,724 | Executable code |
+| `.rodata` | 2,143,571 | Collation tables, parser tables, SQL metadata, constants |
+| `.data.rel.ro` | 1,172,176 | Relocated read-only data |
+| `.data` | 760,360 | Writable data |
+| `.eh_frame` | 739,196 | Unwind metadata |
+| `.bss` | 296,881 | Zero-initialized writable data |
+| `.eh_frame_hdr` | 168,292 | Unwind table index |
+| `.rela.dyn` | 52,512 | Remaining unpacked dynamic relocations |
+| `.relr.dyn` | 22,232 | Packed relative relocations |
 
 If a Linux distribution bundle vendors the current dynamic dependencies, it
 adds about 11,340,944 bytes, or 10.82 MiB, before compression:
@@ -190,6 +192,7 @@ The current built-in plugins are:
 | `relr-linker-size-profile` after PROCEDURE ANALYSE | 32,359,184 | -11,046,248 | 8,820,296 | -10,511,608 | Passes current smokes; requires modern glibc loader |
 | `legacy-storage-engine-size-profile` after RELR | 32,107,110 | -11,298,322 | 8,786,856 | -10,545,048 | Passes current smokes and harness; CSV/MRG omitted, MyISAM hidden for internal temp tables |
 | `section-gc-size-profile` after legacy engines | 36,520,566 | -6,884,866 | 8,458,680 | -10,873,224 | Passes current smokes and harness; linked runtime smaller, static archive larger |
+| `json-schema-valid-size-profile` after section GC | 36,174,834 | -7,230,598 | 8,413,768 | -10,918,136 | Passes current smokes and harness; ordinary JSON functions retained |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
 | Strip archive with `strip --strip-unneeded` | 41,873,048 | -1,532,384 | n/a | n/a | Higher risk than `strip -g` for static archives |
 | `WITH_EXTRA_CHARSETS=none` before UCA fix | 40,820,782 | -2,584,650 | 16,836,664 | -2,495,240 | Segfaulted in open-close smoke |
@@ -209,8 +212,8 @@ profile now passes current smokes while retaining the compiled default
 `utf8mb4_uca1400_ai_ci`.
 
 Stripping the current linked open-close smoke binary reduces it from
-11,064,096 bytes
-to 8,458,680 bytes, saving 2,605,416 bytes, or 2.48 MiB. That remains the
+10,983,752 bytes
+to 8,413,768 bytes, saving 2,569,984 bytes, or 2.45 MiB. That remains the
 lowest-risk packaging win for any copied executable or shared-library style
 artifact.
 
@@ -350,6 +353,17 @@ adds object metadata, but it reduced the stripped linked open-close smoke by
 still reports no unexpected sidecars. This is a linked-runtime-size lever, not
 a static-archive-size lever.
 
+The `json-schema-valid-size-profile` attempt then omitted the
+`JSON_SCHEMA_VALID()` native function builder and `json_schema.cc` from the
+embedded source list while keeping ordinary JSON functions and
+`json_schema_helper.cc` for retained JSON array-intersection code. On top of
+the section-GC profile, it reduced the stripped static archive by another
+345,732 bytes and the stripped linked open-close smoke by another 44,912 bytes.
+The open/close smoke verifies `JSON_VALID()` still succeeds while
+`JSON_SCHEMA_VALID()` fails through MariaDB's unknown-function path. The full
+compatibility harness passes and the sidecar scan reports no unexpected
+sidecars.
+
 ## Decision matrix
 
 | Lever | Expected savings | Risk | Worth doing? | Reason |
@@ -372,6 +386,7 @@ a static-archive-size lever.
 | Link runtime artifacts with lld RELR | 0 archive, 3.88 MiB stripped linked beyond procedure-analyse profile | Medium packaging | Applied as size attempt | Current smokes pass; artifacts require modern glibc `DT_RELR` support |
 | Hide legacy durable storage engines | 0.24 MiB archive, 0.03 MiB stripped linked beyond RELR | Medium compatibility | Applied as size attempt | CSV/MRG are omitted; MyISAM stays internal for disk temp tables but user `ENGINE=MyISAM` is rejected |
 | Section garbage collection after executable-export removal | +4.21 MiB archive, 0.31 MiB stripped linked beyond legacy engines | Medium packaging | Applied as aggressive linked-size attempt | Runtime gets smaller, but archive consumers pay a metadata cost |
+| Remove `JSON_SCHEMA_VALID()` validator | 0.33 MiB archive, 0.04 MiB stripped linked beyond section GC | Medium compatibility | Applied as size attempt | Current smokes pass; ordinary JSON functions remain, but JSON Schema validation is omitted from the minsize profile |
 | Remove server-only SQL subsystems | Potentially large | High | Research later | The big bytes are entangled in `libsql_embedded.a`; needs slice-by-slice fork work |
 | `DISABLE_PSI_*` switches | 0 in this build | Low | No | No measured effect |
 | `-fno-asynchronous-unwind-tables` | 0 in this build | Low | No | Full rebuild produced identical archive and stripped linked sizes |
@@ -390,7 +405,9 @@ Take these now:
    baseline for older Linux targets.
 4. Keep section GC for the most aggressive linked-runtime profile while the
    static archive growth remains an explicit tradeoff.
-5. Keep a stripped linked smoke binary size in the build report so regressions
+5. Keep the `JSON_SCHEMA_VALID()` omission in the minsize profile unless JSON
+   Schema `CHECK` constraints become a compatibility target.
+6. Keep a stripped linked smoke binary size in the build report so regressions
    are visible.
 
 Do not take these now:
