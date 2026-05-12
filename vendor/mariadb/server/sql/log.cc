@@ -3793,6 +3793,24 @@ void MYSQL_BIN_LOG::stop_background_thread()
 void MYSQL_BIN_LOG::cleanup()
 {
   DBUG_ENTER("cleanup");
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  if (inited)
+  {
+    inited= 0;
+    mysql_mutex_destroy(&LOCK_log);
+    mysql_mutex_destroy(&LOCK_binlog_end_pos);
+    mysql_mutex_destroy(&LOCK_index);
+    mysql_mutex_destroy(&LOCK_xid_list);
+    mysql_mutex_destroy(&LOCK_binlog_background_thread);
+    mysql_cond_destroy(&COND_relay_log_updated);
+    mysql_cond_destroy(&COND_bin_log_updated);
+    mysql_cond_destroy(&COND_queue_busy);
+    mysql_cond_destroy(&COND_xid_list);
+    mysql_cond_destroy(&COND_binlog_background_thread);
+    mysql_cond_destroy(&COND_binlog_background_thread_end);
+  }
+  DBUG_VOID_RETURN;
+#else
   if (inited)
   {
     xid_count_per_binlog *b;
@@ -3842,6 +3860,7 @@ void MYSQL_BIN_LOG::cleanup()
   if (!is_relay_log)
     rpl_global_gtid_binlog_state.free();
   DBUG_VOID_RETURN;
+#endif
 }
 
 
@@ -4030,6 +4049,9 @@ bool MYSQL_BIN_LOG::open(const char *log_name,
                          bool need_mutex,
                          bool commit_by_rotate)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return 0;
+#else
   xid_count_per_binlog *new_xid_list_entry= NULL, *b;
   DBUG_ENTER("MYSQL_BIN_LOG::open");
 
@@ -4418,6 +4440,7 @@ err:
     delete new_xid_list_entry;
   close(LOG_CLOSE_INDEX);
   DBUG_RETURN(1);
+#endif
 }
 
 
@@ -5884,6 +5907,9 @@ done:
 
 ulonglong MYSQL_BIN_LOG::get_binlog_space_total()
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return 0;
+#else
   ulonglong used_space= 0;
   mysql_mutex_lock(&LOCK_log);
   /* Get position in current log file */
@@ -5893,6 +5919,7 @@ ulonglong MYSQL_BIN_LOG::get_binlog_space_total()
   used_space+= binlog_space_total;
   mysql_mutex_unlock(&LOCK_index);
   return used_space;
+#endif
 }
 
 bool
@@ -6759,6 +6786,9 @@ void THD::binlog_prepare_for_row_logging()
 
 bool THD::binlog_write_annotated_row(bool use_trans_cache)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return false;
+#else
   DBUG_ENTER("THD::binlog_write_annotated_row");
 
   if (!(IF_WSREP(!wsrep_fragments_certified_for_stmt(this), true) &&
@@ -6787,6 +6817,7 @@ bool THD::binlog_write_annotated_row(bool use_trans_cache)
       lex->stmt_accessed_table(LEX::STMT_WRITES_NON_TRANS_TABLE))
     cache_data->set_incident();
   DBUG_RETURN(1);
+#endif
 }
 
 
@@ -7872,6 +7903,9 @@ err:
 void
 MYSQL_BIN_LOG::update_gtid_index(uint32 offset, rpl_gtid gtid)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return;
+#else
   if (!unlikely(gtid_index))
     return;
 
@@ -7891,6 +7925,7 @@ MYSQL_BIN_LOG::update_gtid_index(uint32 offset, rpl_gtid gtid)
                                                   gtid_list, gtid_count))
       my_free(gtid_list);
   }
+#endif
 }
 
 int error_log_print(enum loglevel level, const char *format,

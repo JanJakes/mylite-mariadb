@@ -1494,9 +1494,13 @@ static inline TC_LOG *get_tc_log_implementation()
 {
   if (total_ha_2pc <= 2) // online_alter_tp and MHNSW_Trx::tp
     return &tc_log_dummy;
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return &tc_log_mmap;
+#else
   if (opt_bin_log)
     return &mysql_bin_log;
   return &tc_log_mmap;
+#endif
 }
 
 #ifdef WITH_WSREP

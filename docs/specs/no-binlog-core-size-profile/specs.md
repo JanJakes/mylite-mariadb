@@ -221,6 +221,29 @@ Those roots are larger than the accepted first-pass cut, but they need a
 separate guarded cleanup because they cross embedded startup, table-open, sysvar
 and generic log-helper code rather than only row/statement binlog entry points.
 
+Implemented guarded follow-up measurements after the OpenSSL digest profile:
+
+| Artifact | Bytes |
+| --- | ---: |
+| `libmysqld/libmariadbd.a` | 30,703,028 |
+| stripped `mylite-open-close-smoke` | 5,757,656 |
+
+Compared with `openssl-digest-size-profile`, the follow-up saves 240,220
+archive bytes and 58,880 stripped linked bytes. The successful source-list
+removal now includes `gtid_index.cc`, `log_event.cc`, `rpl_injector.cc`, and
+the earlier `rpl_record.cc`. The implementation keeps `log_event_server.cc`
+because `append_query_string()` is used by ordinary SQL value rendering outside
+binlog execution; the new `mylite_log_event_core_stub.cc` supplies the small
+`str_to_hex()` helper that `append_query_string()` needs without retaining the
+full log-event implementation object.
+
+The linked smoke no longer defines `Gtid_index_writer`, `injector`,
+`Format_description_log_event`, `Binlog_checkpoint_log_event`,
+`Query_log_event`, `Rows_log_event`, or `Log_event_writer` symbols. It still
+retains a smaller `MYSQL_BIN_LOG` shell, `binlog_tp`, and `rpl_binlog_state`
+construct/destruct helpers; replacing those requires a separate transaction-log
+stub design.
+
 ## Test and Verification Plan
 
 Run:

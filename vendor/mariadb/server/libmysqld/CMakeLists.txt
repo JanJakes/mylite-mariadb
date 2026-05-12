@@ -351,7 +351,11 @@ IF(MYLITE_DISABLE_BINLOG_REPLICATION)
 ENDIF()
 IF(MYLITE_DISABLE_BINLOG_CORE)
   LIST(REMOVE_ITEM SQL_EMBEDDED_SOURCES
+    ../sql/gtid_index.cc
+    ../sql/log_event.cc
+    ../sql/rpl_injector.cc
     ../sql/rpl_record.cc)
+  LIST(APPEND SQL_EMBEDDED_SOURCES mylite_log_event_core_stub.cc)
 ENDIF()
 IF(MYLITE_DISABLE_RPL_FILTER)
   LIST(REMOVE_ITEM SQL_EMBEDDED_SOURCES ../sql/rpl_filter.cc)

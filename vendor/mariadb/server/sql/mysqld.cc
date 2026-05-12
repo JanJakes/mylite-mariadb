@@ -1994,9 +1994,13 @@ static void clean_up(bool print_message)
 
   logger.cleanup_base();
 
+#if !defined(MYLITE_DISABLE_BINLOG_CORE) || !defined(EMBEDDED_LIBRARY)
   injector::free_instance();
+#endif
   mysql_bin_log.cleanup();
+#if !defined(MYLITE_DISABLE_BINLOG_CORE) || !defined(EMBEDDED_LIBRARY)
   Gtid_index_writer::gtid_index_cleanup();
+#endif
 
   my_tz_free();
   my_dboptions_cache_free();
@@ -4029,7 +4033,9 @@ static int init_common_variables()
     inited before MY_INIT(). So we do it here.
   */
   mysql_bin_log.init_pthread_objects();
+#if !defined(MYLITE_DISABLE_BINLOG_CORE) || !defined(EMBEDDED_LIBRARY)
   Gtid_index_writer::gtid_index_init();
+#endif
 
 #if LONG_SIZE == 4
   /* TODO: remove this when my_time_t is 64 bit compatible */
@@ -5100,6 +5106,10 @@ static int init_server_components()
     opt_bin_log= opt_bin_log_used= binlog_format_used= 0;
     opt_log_slave_updates= 0;
   }
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  opt_bin_log= opt_bin_log_used= binlog_format_used= 0;
+  opt_log_slave_updates= 0;
+#endif
 
   /* need to configure logging before initializing storage engines */
   if (!opt_bin_log_used && !WSREP_ON)
@@ -7509,10 +7519,14 @@ static int show_binlog_space_total(THD *thd, SHOW_VAR *var, void *buff,
 {
   var->type= SHOW_LONGLONG;
   var->value= buff;
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  *(ulonglong*) buff= 0;
+#else
   if (opt_bin_log && binlog_space_limit)
     *(ulonglong*) buff= mysql_bin_log.get_binlog_space_total();
   else
     *(ulonglong*) buff= 0;
+#endif
   return 0;
 }
 
