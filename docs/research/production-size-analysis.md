@@ -8,9 +8,9 @@ and the measured impact of likely size-reduction levers.
 The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 
 - `CMAKE_BUILD_TYPE=MinSizeRel`
-- `CMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr`
-- `CMAKE_MODULE_LINKER_FLAGS=-fuse-ld=lld -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr`
-- `CMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr`
+- `CMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr -Wl,--gc-sections`
+- `CMAKE_MODULE_LINKER_FLAGS=-fuse-ld=lld -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr -Wl,--gc-sections`
+- `CMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr -Wl,--gc-sections`
 - `BUILD_CONFIG=mysql_release`
 - `FEATURE_SET=small`
 - `WITH_EMBEDDED_SERVER=ON`
@@ -24,6 +24,7 @@ The baseline is the current `tools/build-mariadb-minsize.sh` profile:
   Spider, S3, OQGraph, Sphinx, ColumnStore, FederatedX, Blackhole, Archive,
   feedback, and selected authentication plugins disabled
 - `MYLITE_DISABLE_ARIA=ON`
+- `MYLITE_ENABLE_SECTION_GC=ON`
 - `USE_ARIA_FOR_TMP_TABLES=OFF`
 
 The original comparison baseline was generated at `2026-05-12T00:33:29Z` from
@@ -34,7 +35,8 @@ include the `type-plugin-size-profile`, `charset-small-profile`, and
 `gis-function-size-profile`, `executable-export-size-profile`,
 `vector-function-size-profile`, `profiling-size-profile`, and
 `help-command-size-profile`, `procedure-analyse-size-profile`, and
-`relr-linker-size-profile`, and `legacy-storage-engine-size-profile` attempts,
+`relr-linker-size-profile`, `legacy-storage-engine-size-profile`, and
+`section-gc-size-profile` attempts,
 which
 remove the built-in `type_geom`, `type_inet`, `type_uuid`, `sequence`,
 `thread_pool_info`, `user_variables`, `userstat`, `mhnsw`, `csv`, and
@@ -45,7 +47,9 @@ command implementation, omit the `PROCEDURE ANALYSE()` implementation, remove
 full-symbol exports from MyLite smoke executables, link runtime-style artifacts
 with lld and compact `DT_RELR` relative relocations, make the inherited MyISAM
 engine non-user-selectable while retaining it for internal disk temporary
-tables, and strip the static archive in the MyLite minsize profile.
+tables, compile minsize objects into per-function/per-data sections and link
+runtime-style artifacts with `--gc-sections`, and strip the static archive in
+the MyLite minsize profile.
 
 This project does not yet have a final packaged production artifact such as a
 shared `libmylite.so` bundle. For now, the most useful size signals are:
@@ -60,39 +64,39 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 ## Current baseline
 
 The current values were measured from a clean
-`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-clean` run. Paths below use the
-default build directory names for readability.
+`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-section-gc` run. Paths below
+use the default build directory names for readability.
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
-| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 32,107,110 | 30.62 | Main embedded MariaDB archive, 462 objects, stripped |
-| `build/mariadb-minsize/mylite/libmylite.a` | 94,000 | 0.09 | First-party public wrapper |
-| `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 303,480 | 0.29 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 11,075,376 | 10.56 | Unstripped linked smoke binary, lld RELR |
-| stripped `mylite-open-close-smoke` copy | 8,786,856 | 8.38 | `strip --strip-unneeded` on copied binary |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 36,520,566 | 34.83 | Main embedded MariaDB archive, 462 objects, stripped; section metadata grows the archive |
+| `build/mariadb-minsize/mylite/libmylite.a` | 122,792 | 0.12 | First-party public wrapper |
+| `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 388,440 | 0.37 | MyLite storage-engine component archive |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 11,064,096 | 10.55 | Unstripped linked smoke binary, lld RELR and section GC |
+| stripped `mylite-open-close-smoke` copy | 8,458,680 | 8.07 | `strip --strip-unneeded` on copied binary |
 
 The linked smoke binary has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 6,691,800 |
-| data | 2,091,688 |
-| bss | 298,793 |
-| total `size` decimal | 9,082,281 |
+| text | 6,479,151 |
+| data | 1,976,168 |
+| bss | 300,073 |
+| total `size` decimal | 8,755,392 |
 
 Largest linked sections in the open-close smoke binary:
 
 | Section | Bytes | Interpretation |
 | --- | ---: | --- |
-| `.text` | 3,417,692 | Executable code |
-| `.rodata` | 2,154,551 | Collation tables, parser tables, SQL metadata, constants |
-| `.data.rel.ro` | 1,295,592 | Relocated read-only data |
-| `.eh_frame` | 792,444 | Unwind metadata |
-| `.data` | 766,048 | Writable data |
-| `.bss` | 298,025 | Zero-initialized writable data |
-| `.eh_frame_hdr` | 180,572 | Unwind table index |
-| `.rela.dyn` | 63,408 | Remaining unpacked dynamic relocations |
-| `.relr.dyn` | 24,240 | Packed relative relocations |
+| `.text` | 3,255,628 | Executable code |
+| `.rodata` | 2,145,107 | Collation tables, parser tables, SQL metadata, constants |
+| `.data.rel.ro` | 1,179,632 | Relocated read-only data |
+| `.data` | 762,808 | Writable data |
+| `.eh_frame` | 746,816 | Unwind metadata |
+| `.bss` | 297,017 | Zero-initialized writable data |
+| `.eh_frame_hdr` | 170,004 | Unwind table index |
+| `.rela.dyn` | 53,664 | Remaining unpacked dynamic relocations |
+| `.relr.dyn` | 22,400 | Packed relative relocations |
 
 If a Linux distribution bundle vendors the current dynamic dependencies, it
 adds about 11,340,944 bytes, or 10.82 MiB, before compression:
@@ -185,6 +189,7 @@ The current built-in plugins are:
 | `procedure-analyse-size-profile` after HELP command | 32,359,184 | -11,046,248 | 12,892,376 | -6,439,528 | Passes current smokes |
 | `relr-linker-size-profile` after PROCEDURE ANALYSE | 32,359,184 | -11,046,248 | 8,820,296 | -10,511,608 | Passes current smokes; requires modern glibc loader |
 | `legacy-storage-engine-size-profile` after RELR | 32,107,110 | -11,298,322 | 8,786,856 | -10,545,048 | Passes current smokes and harness; CSV/MRG omitted, MyISAM hidden for internal temp tables |
+| `section-gc-size-profile` after legacy engines | 36,520,566 | -6,884,866 | 8,458,680 | -10,873,224 | Passes current smokes and harness; linked runtime smaller, static archive larger |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
 | Strip archive with `strip --strip-unneeded` | 41,873,048 | -1,532,384 | n/a | n/a | Higher risk than `strip -g` for static archives |
 | `WITH_EXTRA_CHARSETS=none` before UCA fix | 40,820,782 | -2,584,650 | 16,836,664 | -2,495,240 | Segfaulted in open-close smoke |
@@ -193,7 +198,7 @@ The current built-in plugins are:
 | all tested `DISABLE_PSI_*` switches | 43,405,432 | 0 | not retested | n/a | No current size effect |
 | plugin flags for type/user/sequence plugins | 43,296,232 | -109,200 | 19,265,896 | -66,008 | Large type plugins remain built in |
 | `-fno-asynchronous-unwind-tables` | 34,474,690 | 0 from current | 15,849,720 | 0 from current | Reject; current smokes pass but no artifact-size reduction |
-| `-ffunction-sections -fdata-sections` plus `--gc-sections` | 48,305,352 | +4,899,920 | 19,331,816 | -88 | Reject |
+| early `-ffunction-sections -fdata-sections` plus `--gc-sections` before export removal | 48,305,352 | +4,899,920 | 19,331,816 | -88 | Superseded by `section-gc-size-profile` after executable exports were removed |
 | CMake LTO | 342,480,510 | +299,075,078 | 18,016,192 | -1,315,712 | Reject for now due archive bloat and ODR warnings |
 
 The two original `WITH_EXTRA_CHARSETS=none` builds both completed and linked,
@@ -204,8 +209,8 @@ profile now passes current smokes while retaining the compiled default
 `utf8mb4_uca1400_ai_ci`.
 
 Stripping the current linked open-close smoke binary reduces it from
-11,075,376 bytes
-to 8,786,856 bytes, saving 2,288,520 bytes, or 2.18 MiB. That remains the
+11,064,096 bytes
+to 8,458,680 bytes, saving 2,605,416 bytes, or 2.48 MiB. That remains the
 lowest-risk packaging win for any copied executable or shared-library style
 artifact.
 
@@ -336,11 +341,20 @@ bytes. The open/close smoke verifies `ENGINE=CSV`, `ENGINE=MyISAM`, and
 `ENGINE=MRG_MyISAM` all fail through unknown-engine diagnostics, and the full
 compatibility harness passes using `MEMORY` as the MariaDB reference engine.
 
+The `section-gc-size-profile` attempt then revisited function/data sections
+after the executable-export profile stopped exporting the full linked SQL
+symbol set. On top of the legacy storage-engine profile, it grew the stripped
+static `libmariadbd.a` by 4,413,456 bytes because every function/data section
+adds object metadata, but it reduced the stripped linked open-close smoke by
+328,176 bytes. The full compatibility harness still passes and the sidecar scan
+still reports no unexpected sidecars. This is a linked-runtime-size lever, not
+a static-archive-size lever.
+
 ## Decision matrix
 
 | Lever | Expected savings | Risk | Worth doing? | Reason |
 | --- | ---: | --- | --- | --- |
-| Strip copied release binaries | About 2.30 MiB on the current linked smoke binary | Low | Yes | Standard packaging step; does not change source behavior |
+| Strip copied release binaries | About 2.48 MiB on the current linked smoke binary | Low | Yes | Standard packaging step; does not change source behavior |
 | Strip release static archive with `strip --strip-unneeded` | 1.28 MiB beyond Oracle-parser profile | Medium | Applied as size attempt | Current smokes relink and pass; downstream static consumers may still need coverage |
 | Strip release static archive with `strip -g` | About 0.95 MiB on the current archive | Low | Fallback | Less aggressive alternative if `--strip-unneeded` breaks a consumer |
 | `WITH_EXTRA_CHARSETS=complex` | About 0.08 MiB | Low | No | Savings are too small to justify a compatibility profile |
@@ -357,10 +371,10 @@ compatibility harness passes using `MEMORY` as the MariaDB reference engine.
 | Remove `PROCEDURE ANALYSE()` implementation | 0.15 MiB archive, no stripped linked change beyond HELP profile | Low/medium | Applied as size attempt | Current smokes pass; `PROCEDURE ANALYSE()` now reports a stable unsupported-feature diagnostic |
 | Link runtime artifacts with lld RELR | 0 archive, 3.88 MiB stripped linked beyond procedure-analyse profile | Medium packaging | Applied as size attempt | Current smokes pass; artifacts require modern glibc `DT_RELR` support |
 | Hide legacy durable storage engines | 0.24 MiB archive, 0.03 MiB stripped linked beyond RELR | Medium compatibility | Applied as size attempt | CSV/MRG are omitted; MyISAM stays internal for disk temp tables but user `ENGINE=MyISAM` is rejected |
+| Section garbage collection after executable-export removal | +4.21 MiB archive, 0.31 MiB stripped linked beyond legacy engines | Medium packaging | Applied as aggressive linked-size attempt | Runtime gets smaller, but archive consumers pay a metadata cost |
 | Remove server-only SQL subsystems | Potentially large | High | Research later | The big bytes are entangled in `libsql_embedded.a`; needs slice-by-slice fork work |
 | `DISABLE_PSI_*` switches | 0 in this build | Low | No | No measured effect |
 | `-fno-asynchronous-unwind-tables` | 0 in this build | Low | No | Full rebuild produced identical archive and stripped linked sizes |
-| section garbage collection | 0 useful savings, archive grows | Low | No | Worsens archive size and does not improve stripped linked size |
 | LTO | About 1.25 MiB linked, archive much larger | High | No | ODR warnings and huge archives are unacceptable for release |
 | Bundle fewer dynamic libraries | Up to 10.82 MiB if currently vendored | Distribution-dependent | Decide per packaging target | Current static archive does not include these libraries |
 
@@ -374,7 +388,9 @@ Take these now:
 3. Keep the lld RELR profile for aggressive modern-glibc package experiments,
    but re-measure without RELR before choosing a broad binary distribution
    baseline for older Linux targets.
-4. Keep a stripped linked smoke binary size in the build report so regressions
+4. Keep section GC for the most aggressive linked-runtime profile while the
+   static archive growth remains an explicit tradeoff.
+5. Keep a stripped linked smoke binary size in the build report so regressions
    are visible.
 
 Do not take these now:
@@ -383,7 +399,7 @@ Do not take these now:
    archive becomes much larger and the compiler reports ODR-sensitive MariaDB
    type mismatches.
 2. Do not spend time on `WITH_EXTRA_CHARSETS=complex`, PSI switches, or section
-   garbage collection as standalone size work.
+   GC variants as standalone size work.
 
 Research next if size becomes a release blocker:
 
@@ -394,5 +410,6 @@ Research next if size becomes a release blocker:
    independent claims.
 
 The best next decisions are deeper SQL-layer reductions as deliberate
-compatibility work. Apart from RELR packing, the current data does not support
-broad compiler/linker tuning as an effective path.
+compatibility work. Apart from RELR packing and section GC for linked runtime
+artifacts, the current data does not support broad compiler/linker tuning as an
+effective path.

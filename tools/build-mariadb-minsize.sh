@@ -42,8 +42,14 @@ build_inside_container() {
 
   mkdir -p "${build_dir}"
 
+  local enable_section_gc
+  enable_section_gc="${MYLITE_ENABLE_SECTION_GC:-ON}"
+
   local minsize_linker_flags
   minsize_linker_flags="-fuse-ld=lld -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr"
+  if [[ "${enable_section_gc}" == "ON" ]]; then
+    minsize_linker_flags="${minsize_linker_flags} -Wl,--gc-sections"
+  fi
 
   local cmake_args=(
     -G Ninja
@@ -78,6 +84,7 @@ build_inside_container() {
     -DMYLITE_DISABLE_PROCEDURE_ANALYSE=ON
     -DMYLITE_DISABLE_VECTOR_FUNCTIONS=ON
     -DMYLITE_DISABLE_XML_FUNCTIONS=ON
+    "-DMYLITE_ENABLE_SECTION_GC=${enable_section_gc}"
     -DUSE_ARIA_FOR_TMP_TABLES=OFF
     -DPLUGIN_ARIA=NO
     -DPLUGIN_INNOBASE=NO
@@ -184,7 +191,7 @@ write_build_report() {
     printf "\n"
 
     printf "## Build Profile Cache Entries\n\n"
-    grep -E "^(AWS_SDK_EXTERNAL_PROJECT|BUILD_CONFIG|CMAKE_(EXE|MODULE|SHARED)_LINKER_FLAGS|DISABLE_SHARED|ENABLED_PROFILING|FEATURE_SET|MYLITE_DISABLE_[A-Z0-9_]+|PLUGIN_[A-Z0-9_]+|UPDATE_SUBMODULES|USE_ARIA_FOR_TMP_TABLES|WITH_[A-Z0-9_]+|WITHOUT_DYNAMIC_PLUGINS):" \
+    grep -E "^(AWS_SDK_EXTERNAL_PROJECT|BUILD_CONFIG|CMAKE_(EXE|MODULE|SHARED)_LINKER_FLAGS|DISABLE_SHARED|ENABLED_PROFILING|FEATURE_SET|MYLITE_(DISABLE|ENABLE)_[A-Z0-9_]+|PLUGIN_[A-Z0-9_]+|UPDATE_SUBMODULES|USE_ARIA_FOR_TMP_TABLES|WITH_[A-Z0-9_]+|WITHOUT_DYNAMIC_PLUGINS):" \
       "${build_dir}/CMakeCache.txt" | sort
     printf "\n"
 

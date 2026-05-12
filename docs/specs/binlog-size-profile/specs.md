@@ -165,6 +165,16 @@ Archive size may grow because `-ffunction-sections` and `-fdata-sections`
 increase object metadata. The attempt is worth re-measuring only because the
 exported-symbol profile changed since the last rejected section-GC experiment.
 
+Measured implementation result:
+
+```text
+libmariadbd.a: 32,107,110 -> 36,520,566 bytes (+4,413,456)
+stripped mylite-open-close-smoke: 8,786,856 -> 8,458,680 bytes (-328,176)
+```
+
+The attempt is a linked-runtime-size win and a static-archive-size loss. The
+full compatibility harness passed with no unexpected sidecars.
+
 ## License, Trademark, and Dependency Impact
 
 No new dependencies. All affected code remains MariaDB-derived GPL-2.0-only
