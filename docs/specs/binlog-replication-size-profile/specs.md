@@ -76,8 +76,9 @@ and `MYSQL_BIN_LOG` methods. Generic SQL paths still reference those symbols:
 - `libmysqld/lib_sql.cc` allocates `binlog_filter` and `global_rpl_filter`.
 
 `sql_binlog.cc` contains `BINLOG` statement execution and event defragmenting.
-It is not fully guarded by `HAVE_REPLICATION`, so omitting it needs either
-parser-side command removal or a small unsupported-command shim.
+It is not fully guarded by `HAVE_REPLICATION`, but `sql_parse.cc` already
+rejects `SQLCOM_BINLOG_BASE64_EVENT` under `EMBEDDED_LIBRARY`, so the embedded
+minsize profile can omit the replay implementation without a replacement shim.
 
 `rpl_utility_server.cc` contains field-conversion helpers that are referenced
 from retained field/type code even without replication. That file is currently
@@ -125,13 +126,14 @@ First, remove sources whose embedded objects are empty or command-only:
 - `../sql/slave.cc`
 - `../sql/sql_repl.cc`
 - `../sql/repl_failsafe.cc`
-- `../sql/rpl_record.cc`
+- `../sql/rpl_reporting.cc`
 
-Second, test removing `../sql/sql_binlog.cc`. If retained parser or executor
-paths need `binlog_defragment()` or statement entry points, add a small
-`mylite_binlog_replication_stub.cc` that reports
-`ER_NOT_SUPPORTED_YET` for `BINLOG` execution while keeping any required
-helpers no-op or failing explicitly.
+Second, remove `../sql/sql_binlog.cc` if embedded dispatch already rejects
+`SQLCOM_BINLOG_BASE64_EVENT`. In MariaDB 11.8.6,
+`vendor/mariadb/server/sql/sql_parse.cc` reports
+`ER_OPTION_PREVENTS_STATEMENT` for `BINLOG` under `EMBEDDED_LIBRARY`, so the
+full replay implementation should not be needed for MyLite's embedded
+profile.
 
 Third, test removing `../sql/log_event_server.cc`, `../sql/rpl_gtid.cc`, and
 `../sql/gtid_index.cc`. If generic state-variable or binlog-recovery references
@@ -174,16 +176,30 @@ accidental unresolved behavior.
 
 The upper bound from current object files is about 1.40 MiB of archive objects,
 but some files provide retained generic helpers and may not be removable in
-this slice. The expected realistic first-pass reduction is smaller:
+this slice. The measured first-pass reduction is much smaller:
 
-- command-only sources: likely tens of KiB,
-- `sql_binlog.cc`: small archive reduction but useful compatibility cleanup,
-- `log_event_server.cc`, `rpl_gtid.cc`, `gtid_index.cc`: potentially several
-  hundred KiB if no retained references block removal,
+- command-only sources and `sql_binlog.cc`: 23,172 bytes from the stripped
+  archive,
+- `rpl_injector.cc`: kept because `lib_sql.cc` cleanup still references
+  `injector::free_instance()`,
+- `rpl_record.cc`: kept because retained row-binlog helper code still
+  references `pack_row()`,
+- `log_event_server.cc`, `rpl_gtid.cc`, `gtid_index.cc`: retained because
+  `MYSQL_BIN_LOG`, row-event helpers, GTID state, and sysvar-facing code still
+  pull the binlog core into linked runtime artifacts,
 - `log.cc`: larger and deeper; likely a later slice.
 
-Linked stripped binary savings may be lower than archive savings because
-section GC already drops unused functions.
+Linked stripped binary savings are effectively zero for this slice because
+section GC already drops unused command-level functions and the smoke test adds
+one unsupported `BINLOG` assertion.
+
+Measured result on top of `regex-function-size-profile`:
+
+| Artifact | Before | After | Delta |
+| --- | ---: | ---: | ---: |
+| `libmysqld/libmariadbd.a` | 33,699,880 | 33,676,708 | -23,172 |
+| archive object count | 458 | 453 | -5 |
+| stripped `mylite-open-close-smoke` | 6,749,888 | 6,750,400 | +512 |
 
 ## License, Trademark, and Dependency Impact
 
@@ -204,9 +220,7 @@ Add or extend smoke coverage to verify:
 
 - ordinary create/insert/select/transaction paths still work,
 - `BINLOG` fails with a stable unsupported diagnostic,
-- representative replication commands fail explicitly, and
-- the linked smoke binary no longer contains symbols for any removed event or
-  replication implementation classes.
+- the archive no longer contains objects for removed command/replay sources.
 
 Measure:
 
@@ -237,3 +251,38 @@ Measure:
 - `rpl_utility_server.cc` looks replication-specific by name but provides
   retained field-conversion helpers, so removing it may require broader type
   surgery that is not justified without more measurement.
+- `-fno-rtti` is not a viable broad compiler-size lever in the current retained
+  SQL layer because `sql/cset_narrowing.h` and `sql/item_strfunc.h` use
+  `dynamic_cast`.
+
+## Implementation Result
+
+Implemented `MYLITE_DISABLE_BINLOG_REPLICATION` in the embedded source list
+and enabled it from the minsize build script. The option removes:
+
+- `../sql/repl_failsafe.cc`
+- `../sql/rpl_reporting.cc`
+- `../sql/slave.cc`
+- `../sql/sql_binlog.cc`
+- `../sql/sql_repl.cc`
+
+The attempted removal of `rpl_injector.cc` and `rpl_record.cc` was rejected by
+the linker: retained MariaDB cleanup and row helper paths still need
+`injector::free_instance()` and `pack_row()`.
+
+The implementation adds a `BINLOG 'ZmFrZQ=='` smoke assertion. Embedded
+MariaDB already rejects this through `sql_parse.cc` with
+`ER_OPTION_PREVENTS_STATEMENT` and an `"embedded option"` message, so no MyLite
+stub is needed.
+
+Verification passed:
+
+```sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-binlog-replication MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-binlog-replication MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-binlog-replication MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+```
+
+This slice is worth keeping as a small archive cleanup and explicit unsupported
+surface test. It does not replace a deeper no-binlog-core slice if linked
+runtime size remains the priority.

@@ -23,6 +23,7 @@ The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 - `MYLITE_DISABLE_ORACLE_FUNCTIONS=ON`
 - `MYLITE_DISABLE_JSON_SCHEMA_VALID=ON`
 - `MYLITE_DISABLE_QUERY_CACHE=ON`
+- `MYLITE_DISABLE_BINLOG_REPLICATION=ON`
 - `MYLITE_DISABLE_REGEX_FUNCTIONS=ON`
 - `MYLITE_DISABLE_SERVER_UTILITY_FUNCTIONS=ON`
 - `MYLITE_DISABLE_UCA_COLLATIONS=ON`
@@ -46,7 +47,7 @@ include the `type-plugin-size-profile`, `charset-small-profile`, and
 `section-gc-size-profile`, `json-schema-valid-size-profile`,
 `query-cache-size-profile`, `oracle-function-size-profile`,
 `server-utility-function-size-profile`, `uca-collation-size-profile`, and
-`regex-function-size-profile`
+`regex-function-size-profile`, and `binlog-replication-size-profile`
 attempts, which remove the built-in
 `type_geom`, `type_inet`, `type_uuid`, `sequence`, `thread_pool_info`,
 `user_variables`, `userstat`, `mhnsw`, `csv`, and `myisammrg` plugins, set
@@ -65,8 +66,9 @@ aliases and Oracle schema routing, omit server-utility SQL functions such as
 `SLEEP()`, and `UUID_SHORT()`, omit UCA 1400 and UCA 0900 collation support
 while switching the aggressive minsize default collation to
 `utf8mb4_general_ci`, omit regular expression SQL execution surfaces while
-removing the PCRE2 linked runtime dependency, and strip the static archive in
-the MyLite minsize profile.
+removing the PCRE2 linked runtime dependency, omit command-level binlog replay
+and replication sources that are unused or already blocked in embedded mode,
+and strip the static archive in the MyLite minsize profile.
 
 This project does not yet have a final packaged production artifact such as a
 shared `libmylite.so` bundle. For now, the most useful size signals are:
@@ -81,24 +83,24 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 ## Current baseline
 
 The current values were measured from a clean
-`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-regex-functions` run.
+`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-binlog-replication` run.
 Paths below use the default build directory names for readability.
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
-| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 33,699,880 | 32.14 | Main embedded MariaDB archive, 458 objects, stripped; section metadata grows the archive |
-| `build/mariadb-minsize/mylite/libmylite.a` | 122,792 | 0.12 | First-party public wrapper |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 33,676,708 | 32.12 | Main embedded MariaDB archive, 453 objects, stripped; section metadata grows the archive |
+| `build/mariadb-minsize/mylite/libmylite.a` | 122,800 | 0.12 | First-party public wrapper |
 | `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 388,440 | 0.37 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 9,232,176 | 8.80 | Unstripped linked smoke binary, lld RELR and section GC |
-| stripped `mylite-open-close-smoke` copy | 6,749,888 | 6.44 | `strip --strip-unneeded` on copied binary |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 9,232,688 | 8.80 | Unstripped linked smoke binary, lld RELR and section GC |
+| stripped `mylite-open-close-smoke` copy | 6,750,400 | 6.44 | `strip --strip-unneeded` on copied binary |
 
 The linked smoke binary has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 5,294,905 |
+| text | 5,295,417 |
 | data | 1,451,680 |
-| bss | 253,113 |
+| bss | 252,601 |
 | total `size` decimal | 6,999,698 |
 
 Largest linked sections in the open-close smoke binary:
@@ -212,6 +214,7 @@ The current built-in plugins are:
 | `server-utility-function-size-profile` after Oracle aliases | 35,555,602 | -7,849,830 | 8,318,304 | -11,013,600 | Passes current smokes and harness; server utility functions omitted |
 | `uca-collation-size-profile` after server utilities | 33,777,694 | -9,627,738 | 6,765,440 | -12,566,464 | Passes current smokes and harness; UCA collations omitted and default collation is `utf8mb4_general_ci` |
 | `regex-function-size-profile` after UCA collations | 33,699,880 | -9,705,552 | 6,749,888 | -12,582,016 | Passes current smokes and harness; regex surfaces omitted and PCRE2 runtime dependency removed |
+| `binlog-replication-size-profile` after regex functions | 33,676,708 | -9,728,724 | 6,750,400 | -12,581,504 | Passes current smokes and harness; command-level replay/replication sources omitted, linked-runtime delta is smoke-test noise |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
 | Strip archive with `strip --strip-unneeded` | 41,873,048 | -1,532,384 | n/a | n/a | Higher risk than `strip -g` for static archives |
 | `WITH_EXTRA_CHARSETS=none` before UCA fix | 40,820,782 | -2,584,650 | 16,836,664 | -2,495,240 | Segfaulted in open-close smoke |
@@ -220,6 +223,7 @@ The current built-in plugins are:
 | all tested `DISABLE_PSI_*` switches | 43,405,432 | 0 | not retested | n/a | No current size effect |
 | plugin flags for type/user/sequence plugins | 43,296,232 | -109,200 | 19,265,896 | -66,008 | Large type plugins remain built in |
 | `-fno-asynchronous-unwind-tables` | 34,474,690 | 0 from current | 15,849,720 | 0 from current | Reject; current smokes pass but no artifact-size reduction |
+| `-fno-rtti` | n/a | n/a | n/a | n/a | Reject; retained SQL headers use `dynamic_cast`, so the build fails |
 | early `-ffunction-sections -fdata-sections` plus `--gc-sections` before export removal | 48,305,352 | +4,899,920 | 19,331,816 | -88 | Superseded by `section-gc-size-profile` after executable exports were removed |
 | CMake LTO | 342,480,510 | +299,075,078 | 18,016,192 | -1,315,712 | Reject for now due archive bloat and ODR warnings |
 
@@ -231,7 +235,7 @@ profile now passes current smokes while retaining the compiled default
 `utf8mb4_uca1400_ai_ci`.
 
 Stripping the current linked open-close smoke binary reduces it from
-9,232,176 bytes to 6,749,888 bytes, saving 2,482,288 bytes, or 2.37 MiB.
+9,232,688 bytes to 6,750,400 bytes, saving 2,482,288 bytes, or 2.37 MiB.
 That remains the
 lowest-risk packaging win for any copied executable or shared-library style
 artifact.
@@ -436,6 +440,18 @@ set by 592,328 bytes. The open/close smoke verifies `LIKE` still works,
 `REGEXP` and `RLIKE` fail with `ER_NOT_SUPPORTED_YET`, and the removed regex
 functions fail through MariaDB's unknown-function path.
 
+The `binlog-replication-size-profile` attempt then omitted embedded
+command/replay sources for `BINLOG`, replication SQL, slave glue,
+fail-safe replication, and replication reporting. `rpl_injector.cc` and
+`rpl_record.cc` remain because retained cleanup and row-packing paths still
+reference `injector::free_instance()` and `pack_row()`. On top of the regex
+profile, this reduced the stripped static archive by 23,172 bytes, while the
+stripped linked smoke grew by 512 bytes because of the added unsupported
+`BINLOG` smoke assertion. The result confirms that command-level replication
+pruning is an archive cleanup, not the meaningful linked-runtime binlog cut;
+`MYSQL_BIN_LOG`, `Log_event`, row-event helpers, GTID state, and binlog
+transaction participant code remain live.
+
 ## Decision matrix
 
 | Lever | Expected savings | Risk | Worth doing? | Reason |
@@ -464,6 +480,7 @@ functions fail through MariaDB's unknown-function path.
 | Remove server utility SQL functions | 0.22 MiB archive, 0.04 MiB stripped linked beyond Oracle aliases | Medium compatibility | Applied as size attempt | Current smokes pass; daemon, replication, file-host, lock, benchmark, and delay helpers now fail as unknown functions |
 | Remove UCA collations and use `utf8mb4_general_ci` | 1.70 MiB archive, 1.48 MiB stripped linked beyond server utilities | High compatibility | Applied as aggressive size attempt | Current smokes pass, but MariaDB 11.8's default UCA 1400 collation and MySQL 8.0 UCA 0900 aliases are omitted |
 | Remove regex SQL surfaces and PCRE2 runtime link | 0.07 MiB archive, 0.01 MiB stripped linked, 0.56 MiB vendored dependency beyond UCA profile | High compatibility | Applied as aggressive size attempt | Current smokes pass; `LIKE` remains, but `REGEXP`, `RLIKE`, and `REGEXP_*()` functions are omitted |
+| Remove command-level binlog replay and replication glue | 0.02 MiB archive, no linked-runtime win beyond regex profile | Low/medium | Applied as archive cleanup | Embedded mode already blocks `BINLOG`; the real linked binlog roots remain in transaction, row-event, GTID, and sysvar paths |
 | Remove server-only SQL subsystems | Potentially large | High | Research later | The big bytes are entangled in `libsql_embedded.a`; needs slice-by-slice fork work |
 | `DISABLE_PSI_*` switches | 0 in this build | Low | No | No measured effect |
 | `-fno-asynchronous-unwind-tables` | 0 in this build | Low | No | Full rebuild produced identical archive and stripped linked sizes |
@@ -499,7 +516,9 @@ Take these now:
 10. Keep the regex/PCRE2 omission only for the most aggressive size profile
    unless product compatibility accepts losing `REGEXP`, `RLIKE`, and
    `REGEXP_*()` SQL functions.
-11. Keep a stripped linked smoke binary size in the build report so regressions
+11. Keep the command-level binlog/replication source omission as a small archive
+   cleanup, but do not treat it as meaningful runtime-size work.
+12. Keep a stripped linked smoke binary size in the build report so regressions
    are visible.
 
 Do not take these now:
@@ -507,8 +526,8 @@ Do not take these now:
 1. Do not enable LTO for production. The linked binary gets smaller, but the
    archive becomes much larger and the compiler reports ODR-sensitive MariaDB
    type mismatches.
-2. Do not spend time on `WITH_EXTRA_CHARSETS=complex`, PSI switches, or section
-   GC variants as standalone size work.
+2. Do not spend time on `WITH_EXTRA_CHARSETS=complex`, PSI switches, section GC
+   variants, or RTTI flags as standalone size work.
 
 Research next if size becomes a release blocker:
 
@@ -516,9 +535,10 @@ Research next if size becomes a release blocker:
    The current UCA-free linked binary still contains `my_u1400_casefold_index`
    and `my_u1400tr_casefold_index`, but removing them is another collation
    compatibility decision.
-2. Investigate binlog and replication removal for the embedded profile. The
-   current linked smoke still retains `MYSQL_BIN_LOG`, `log_event*`, and
-   `rpl_*` code despite MyLite not exposing replication.
+2. Investigate a deeper no-binlog core for the embedded profile. The current
+   linked smoke still retains `MYSQL_BIN_LOG`, `log_event*`, row-event helpers,
+   GTID state, and binlog transaction code despite MyLite not exposing
+   replication.
 3. Longer-term SQL-layer pruning of server-only surfaces. This is likely where
    meaningful multi-MiB savings exist, but it should be done as compatibility
    slices, not as broad dead-code removal.

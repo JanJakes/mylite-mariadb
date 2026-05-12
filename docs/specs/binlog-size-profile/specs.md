@@ -218,9 +218,11 @@ Verify:
   and event-writing code. Meaningful source-level removal needs a larger
   refactor that splits no-binlog transaction coordination from file-based
   binary logging.
-- MariaDB defines `HAVE_REPLICATION` unconditionally in
-  `vendor/mariadb/server/include/my_global.h`, so treating replication as a
-  build-time feature is not currently a simple cache option.
+- MariaDB's embedded build already avoids defining `HAVE_REPLICATION` through
+  `vendor/mariadb/server/include/my_global.h`, but the embedded source list
+  still compiles binlog, GTID, and command-level replication files. Treating
+  replication as fully absent therefore needs source-list and reference-root
+  work, not just a cache option.
 - Section GC may still fail to save meaningful bytes if references from
   `log.cc`, `handler.cc`, `sql_parse.cc`, and `sys_vars.cc` keep most sections
   live.

@@ -65,6 +65,7 @@ struct SmokeResult
   std::string exec_json_schema_valid_message;
   std::string exec_regex_like_rows;
   std::string exec_regex_messages;
+  std::string exec_binlog_replication_message;
   std::string exec_server_utility_standard_rows;
   std::string exec_server_utility_messages;
   std::string exec_query_cache_have_rows;
@@ -169,6 +170,8 @@ static bool check_json_schema_valid_unsupported(const SmokeOptions &options,
                                                 SmokeResult *result);
 static bool check_regex_functions_unsupported(const SmokeOptions &options,
                                               SmokeResult *result);
+static bool check_binlog_replication_unsupported(const SmokeOptions &options,
+                                                 SmokeResult *result);
 static bool check_server_utility_functions_unsupported(
   const SmokeOptions &options, SmokeResult *result);
 static bool check_query_cache_unsupported(const SmokeOptions &options,
@@ -353,6 +356,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "regex_functions_unsupported";
   ok= check_regex_functions_unsupported(options, result) && ok;
+
+  result->phase= "binlog_replication_unsupported";
+  ok= check_binlog_replication_unsupported(options, result) && ok;
 
   result->phase= "server_utility_functions_unsupported";
   ok= check_server_utility_functions_unsupported(options, result) && ok;
@@ -1050,6 +1056,37 @@ static bool check_regex_functions_unsupported(const SmokeOptions &options,
 
     rc= mylite_close(db);
     ok= record_result(result, "regex_function_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+  return ok;
+}
+
+static bool check_binlog_replication_unsupported(const SmokeOptions &options,
+                                                 SmokeResult *result)
+{
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "binlog_replication_open", MYLITE_OK, rc,
+                         db);
+  if (db)
+  {
+    char *errmsg= nullptr;
+    rc= mylite_exec(db, "BINLOG 'ZmFrZQ=='", nullptr, nullptr, &errmsg);
+    if (errmsg)
+    {
+      result->exec_binlog_replication_message= errmsg;
+      mylite_free(errmsg);
+    }
+    ok= record_result(result, "binlog_statement", MYLITE_ERROR, rc, db) &&
+        ok;
+    if (mylite_mariadb_errno(db) != ER_OPTION_PREVENTS_STATEMENT ||
+        std::strcmp(mylite_sqlstate(db), "HY000") != 0 ||
+        result->exec_binlog_replication_message.find("embedded option") ==
+          std::string::npos)
+      ok= false;
+
+    rc= mylite_close(db);
+    ok= record_result(result, "binlog_replication_close", MYLITE_OK, rc,
                       nullptr) && ok;
   }
   return ok;
@@ -2587,6 +2624,9 @@ static void write_report(const SmokeOptions &options,
     report << "exec_regex_like_rows=" << result.exec_regex_like_rows << "\n";
   if (!result.exec_regex_messages.empty())
     report << "exec_regex_messages=" << result.exec_regex_messages << "\n";
+  if (!result.exec_binlog_replication_message.empty())
+    report << "exec_binlog_replication_message="
+           << result.exec_binlog_replication_message << "\n";
   if (!result.exec_server_utility_standard_rows.empty())
     report << "exec_server_utility_standard_rows="
            << result.exec_server_utility_standard_rows << "\n";
