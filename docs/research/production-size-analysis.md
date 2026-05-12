@@ -26,6 +26,7 @@ The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 - `MYLITE_DISABLE_BINLOG_REPLICATION=ON`
 - `MYLITE_DISABLE_REGEX_FUNCTIONS=ON`
 - `MYLITE_DISABLE_SERVER_UTILITY_FUNCTIONS=ON`
+- `MYLITE_DISABLE_GEOMETRY_TYPE=ON`
 - `MYLITE_DISABLE_SQL_SEQUENCE=ON`
 - `MYLITE_DISABLE_UCA_COLLATIONS=ON`
 - `MYLITE_DISABLE_LEGACY_STORAGE_ENGINES=ON`
@@ -56,7 +57,8 @@ include the `type-plugin-size-profile`, `charset-small-profile`, and
 `regex-function-size-profile`, `binlog-replication-size-profile`, and
 `no-binlog-core-size-profile`, `myisam-admin-size-profile`,
 `myisam-fulltext-size-profile`, `myisam-rtree-size-profile`, and
-`spatial-core-size-profile`, and `sql-sequence-size-profile`
+`spatial-core-size-profile`, `sql-sequence-size-profile`, and
+`geometry-type-size-profile`
 attempts, which remove the built-in
 `type_geom`, `type_inet`, `type_uuid`, `sequence`, `thread_pool_info`,
 `user_variables`, `userstat`, `mhnsw`, `csv`, and `myisammrg` plugins, set
@@ -85,8 +87,9 @@ implementation code, omit MyISAM RTREE/spatial-key implementation code while
 reporting `have_rtree_keys=NO`, omit the retained spatial WKB/WKT
 implementation core while keeping GEOMETRY type parsing and MyLite rejection
 paths, omit the SQL sequence engine implementation while retaining parser
-syntax and explicit unsupported/missing-sequence diagnostics, and strip the
-static archive in the MyLite minsize profile.
+syntax and explicit unsupported/missing-sequence diagnostics, omit retained
+GEOMETRY type implementation code while keeping minimal generic type metadata
+symbols, and strip the static archive in the MyLite minsize profile.
 
 `no-myisam-temp-spill-size-profile` was measured separately as an opt-in
 `MYLITE_DISABLE_MYISAM_TEMP_SPILL=ON` experiment. It is not part of the current
@@ -106,38 +109,38 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 ## Current baseline
 
 The current values were measured from
-`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-sql-sequence`.
+`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-geometry-type`.
 Paths below use the default build directory names for readability.
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
-| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 32,926,698 | 31.40 | Main embedded MariaDB archive, 437 objects, stripped; section metadata grows the archive |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 32,556,980 | 31.05 | Main embedded MariaDB archive, 437 objects, stripped; section metadata grows the archive |
 | `build/mariadb-minsize/mylite/libmylite.a` | 122,792 | 0.12 | First-party public wrapper |
 | `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 388,440 | 0.37 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 8,941,384 | 8.53 | Unstripped linked smoke binary, lld RELR and section GC |
-| stripped `mylite-open-close-smoke` copy | 6,518,592 | 6.22 | `strip --strip-unneeded` on copied binary |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 8,877,136 | 8.47 | Unstripped linked smoke binary, lld RELR and section GC |
+| stripped `mylite-open-close-smoke` copy | 6,473,832 | 6.17 | `strip --strip-unneeded` on copied binary |
 
 The linked smoke binary has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 5,075,006 |
-| data | 1,440,288 |
-| bss | 251,577 |
-| total `size` decimal | 6,766,871 |
+| text | 5,057,638 |
+| data | 1,412,856 |
+| bss | 250,921 |
+| total `size` decimal | 6,721,415 |
 
 Largest linked sections in the open-close smoke binary:
 
 | Section | Bytes | Interpretation |
 | --- | ---: | --- |
-| `.text` | 2,987,644 | Executable code |
-| `.data.rel.ro` | 1,113,472 | Relocated read-only data |
-| `.rodata` | 1,084,107 | Parser tables, SQL metadata, constants, retained Unicode data |
-| `.eh_frame` | 691,340 | Unwind metadata |
-| `.data` | 295,600 | Writable data |
-| `.bss` | 250,201 | Zero-initialized writable data |
-| `.eh_frame_hdr` | 158,812 | Unwind table index |
-| `.rela.dyn` | 50,496 | Remaining unpacked dynamic relocations |
+| `.text` | 2,977,492 | Executable code |
+| `.data.rel.ro` | 1,086,472 | Relocated read-only data |
+| `.rodata` | 1,083,211 | Parser tables, SQL metadata, constants, retained Unicode data |
+| `.eh_frame` | 687,448 | Unwind metadata |
+| `.data` | 295,488 | Writable data |
+| `.bss` | 249,953 | Zero-initialized writable data |
+| `.eh_frame_hdr` | 157,828 | Unwind table index |
+| `.rela.dyn` | 49,776 | Remaining unpacked dynamic relocations |
 | `.gcc_except_table` | 43,276 | Exception metadata |
 | `.relr.dyn` | 20,448 | Packed relative relocations |
 
@@ -244,6 +247,7 @@ The current built-in plugins are:
 | `myisam-rtree-size-profile` after MyISAM full-text | 33,284,948 | -10,120,484 | 6,568,840 | -12,763,064 | Passes current smokes and harness; omits MyISAM RTREE/spatial-key implementation while retaining disk temp tables |
 | `spatial-core-size-profile` after MyISAM RTREE | 33,144,206 | -10,261,226 | 6,532,968 | -12,798,936 | Passes current smokes and harness; omits spatial WKB/WKT core while retaining GEOMETRY parse and rejection paths |
 | `sql-sequence-size-profile` after spatial core | 32,926,698 | -10,478,734 | 6,518,592 | -12,813,312 | Passes current smokes and harness; omits SQL sequence engine implementation while retaining parser syntax |
+| `geometry-type-size-profile` after SQL sequence | 32,556,980 | -10,848,452 | 6,473,832 | -12,858,072 | Passes current smokes and harness; omits GEOMETRY type implementation code while retaining minimal generic metadata symbols |
 | `no-myisam-temp-spill-size-profile` after no-binlog-core | 32,836,602 | -10,568,830 | 6,437,408 | -12,894,496 | Opt-in experiment only; open/close smoke passes, but storage/catalog harness fails because schema-table queries need disk temp tables |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
 | Strip archive with `strip --strip-unneeded` | 41,873,048 | -1,532,384 | n/a | n/a | Higher risk than `strip -g` for static archives |
@@ -265,7 +269,7 @@ profile now passes current smokes while retaining the compiled default
 `utf8mb4_uca1400_ai_ci`.
 
 Stripping the current linked open-close smoke binary reduces it from
-8,941,384 bytes to 6,518,592 bytes, saving 2,422,792 bytes, or 2.31 MiB.
+8,877,136 bytes to 6,473,832 bytes, saving 2,403,304 bytes, or 2.29 MiB.
 That remains the
 lowest-risk packaging win for any copied executable or shared-library style
 artifact.
@@ -541,6 +545,15 @@ smoke by another 14,376 bytes. The linked smoke no longer contains
 `CREATE TABLE ... SEQUENCE=1` is rejected by MyLite, and sequence value
 expressions fail through MariaDB's missing-sequence diagnostics.
 
+The `geometry-type-size-profile` attempt then removed `sql_type_geom.cc` from
+the aggressive embedded source list and linked a minimal stub for the generic
+GEOMETRY type handler and type collection symbols still referenced by retained
+MariaDB metadata paths. On top of the SQL-sequence profile, it reduced the
+static archive by another 369,718 bytes and the stripped linked smoke by
+another 44,760 bytes. The linked smoke no longer contains `sql_type_geom.cc.o`,
+`Field_geom`, or concrete geometry subtype handlers; GEOMETRY/SPATIAL DDL still
+fails without creating a MyLite table.
+
 The `no-myisam-temp-spill-size-profile` experiment then omitted the mandatory
 MyISAM plugin and rejected inherited disk temporary-table spill with
 `ER_NOT_SUPPORTED_YET`. On top of the no-binlog-core profile, it reduced the
@@ -585,6 +598,7 @@ MyISAM-compatible storage.
 | Omit MyISAM RTREE/spatial-key code | 0.04 MiB archive, 0.02 MiB stripped linked beyond MyISAM full-text | Low/medium | Applied as size attempt | Keeps MyISAM for disk temp tables but removes unreachable RTREE paths from the hidden user engine |
 | Omit spatial WKB/WKT core | 0.13 MiB archive, 0.03 MiB stripped linked beyond MyISAM RTREE | Medium | Applied as size attempt | Keeps GEOMETRY parsing and rejection but removes unreachable geometry construction/formatting code from the minsize profile |
 | Omit SQL sequence engine implementation | 0.21 MiB archive, 0.01 MiB stripped linked beyond spatial core | Medium/high | Applied as size attempt | Removes sequence persistence and plugin code, but parser syntax and generic sequence metadata paths remain |
+| Omit GEOMETRY type implementation | 0.35 MiB archive, 0.04 MiB stripped linked beyond SQL sequence | High | Applied as aggressive size attempt | Keeps only minimal generic GEOMETRY metadata symbols; GEOMETRY/SPATIAL DDL still fails without creating a MyLite table |
 | Omit MyISAM temp-spill handler | 0.66 MiB archive, 0.23 MiB stripped linked beyond no-binlog-core | High | No, keep opt-in only | Breaks schema-table metadata and catalog smokes; needs a MyLite-owned disk temporary-table replacement or a compatible memory-only schema-table path |
 | Remove server-only SQL subsystems | Potentially large | High | Research later | The big bytes are entangled in `libsql_embedded.a`; needs slice-by-slice fork work |
 | `DISABLE_PSI_*` switches | 0 in this build | Low | No | No measured effect |
@@ -637,7 +651,9 @@ Take these now:
    unsupported.
 17. Keep the SQL sequence omission in the aggressive minsize profile if MyLite
    does not need MariaDB sequence objects as a compatibility target.
-18. Keep a stripped linked smoke binary size in the build report so regressions
+18. Keep the GEOMETRY type implementation omission in the aggressive minsize
+   profile while MyLite treats GEOMETRY and SPATIAL DDL as unsupported.
+19. Keep a stripped linked smoke binary size in the build report so regressions
    are visible.
 
 Do not take these now:
@@ -661,10 +677,10 @@ Research next if size becomes a release blocker:
    linked smoke still retains `MYSQL_BIN_LOG`, `log_event*`, GTID state,
    `Gtid_index_writer`, and `Rpl_filter` because embedded startup/cleanup,
    table-open filtering, and generic log helpers still root them.
-3. Investigate full GEOMETRY type-handler removal only if the minsize profile
-   can also remove GEOMETRY metadata surfaces cleanly. The current
-   spatial-core profile deliberately keeps GEOMETRY parsing and explicit MyLite
-   DDL rejection.
+3. Investigate whether remaining generic `MYSQL_TYPE_GEOMETRY` metadata
+   branches can be removed cleanly. The current profile still keeps minimal
+   GEOMETRY handler symbols so retained MariaDB type aggregation and metadata
+   paths link.
 4. Longer-term SQL-layer pruning of server-only surfaces. This is likely where
    meaningful multi-MiB savings exist, but it should be done as compatibility
    slices, not as broad dead-code removal.

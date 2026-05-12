@@ -67,10 +67,17 @@ This slice does not change the full MariaDB server target.
 
 ## Binary-Size Impact
 
-Expected static archive savings are bounded by the 431,736-byte
-`sql_type_geom.cc.o` object, minus the replacement stub. Expected linked
-runtime savings are bounded by the object's 66,876 bytes of allocated sections
-before link-layout effects.
+Measured on top of `sql-sequence-size-profile`:
+
+| Artifact | Before | After | Delta |
+| --- | ---: | ---: | ---: |
+| `libmysqld/libmariadbd.a` | 32,926,698 | 32,556,980 | -369,718 |
+| stripped `mylite-open-close-smoke` | 6,518,592 | 6,473,832 | -44,760 |
+
+The full `sql_type_geom.cc.o` member is absent from the archive. The linked
+smoke no longer defines `Field_geom` or concrete geometry subtype handlers,
+but it still keeps the minimal `type_handler_geometry` and
+`type_collection_geometry` symbols needed by generic MariaDB type metadata.
 
 ## DDL Metadata Routing Impact
 
@@ -122,6 +129,22 @@ Measure:
 - Unsupported GEOMETRY and SPATIAL DDL leave no MyLite table behind.
 - No GIS function or spatial-core implementation symbols are reintroduced.
 - Size deltas are recorded in `docs/research/production-size-analysis.md`.
+
+## Verification Result
+
+Passed:
+
+```sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-geometry-type MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-geometry-type MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-geometry-type MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+git diff --check
+bash -n tools/build-mariadb-minsize.sh tools/run-libmylite-open-close-smoke.sh tools/run-compatibility-test-harness.sh
+```
+
+One attempted parallel verification run hit a CMake symlink race while two
+scripts configured the same build tree concurrently; rerunning the smoke serially
+passed.
 
 ## Risks
 
