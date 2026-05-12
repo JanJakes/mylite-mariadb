@@ -24,6 +24,7 @@ The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 - `MYLITE_DISABLE_JSON_SCHEMA_VALID=ON`
 - `MYLITE_DISABLE_QUERY_CACHE=ON`
 - `MYLITE_DISABLE_BINLOG_REPLICATION=ON`
+- `MYLITE_DISABLE_RPL_FILTER=ON`
 - `MYLITE_DISABLE_REGEX_FUNCTIONS=ON`
 - `MYLITE_DISABLE_SERVER_UTILITY_FUNCTIONS=ON`
 - `MYLITE_DISABLE_GEOMETRY_TYPE=ON`
@@ -59,7 +60,8 @@ include the `type-plugin-size-profile`, `charset-small-profile`, and
 `no-binlog-core-size-profile`, `myisam-admin-size-profile`,
 `myisam-fulltext-size-profile`, `myisam-rtree-size-profile`, and
 `spatial-core-size-profile`, `sql-sequence-size-profile`,
-`geometry-type-size-profile`, and `general1400-collation-size-profile`
+`geometry-type-size-profile`, `general1400-collation-size-profile`, and
+`rpl-filter-size-profile`
 attempts, which remove the built-in
 `type_geom`, `type_inet`, `type_uuid`, `sequence`, `thread_pool_info`,
 `user_variables`, `userstat`, `mhnsw`, `csv`, and `myisammrg` plugins, set
@@ -91,8 +93,10 @@ paths, omit the SQL sequence engine implementation while retaining parser
 syntax and explicit unsupported/missing-sequence diagnostics, omit retained
 GEOMETRY type implementation code while keeping minimal generic type metadata
 symbols, omit compiled `general1400_as_ci` collations and unused extended
-Unicode casefold tables while retaining ordinary `general_ci`, and strip the
-static archive in the MyLite minsize profile.
+Unicode casefold tables while retaining ordinary `general_ci`, replace
+MariaDB's remaining replication filter implementation with a minimal
+permissive minsize stub, and strip the static archive in the MyLite minsize
+profile.
 
 `no-myisam-temp-spill-size-profile` was measured separately as an opt-in
 `MYLITE_DISABLE_MYISAM_TEMP_SPILL=ON` experiment. It is not part of the current
@@ -112,25 +116,25 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 ## Current baseline
 
 The current values were measured from
-`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-general1400-collations`.
+`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-rpl-filter`.
 Paths below use the default build directory names for readability.
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
-| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 32,318,588 | 30.82 | Main embedded MariaDB archive, 437 objects, stripped; section metadata grows the archive |
-| `build/mariadb-minsize/mylite/libmylite.a` | 122,800 | 0.12 | First-party public wrapper |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 32,283,380 | 30.79 | Main embedded MariaDB archive, 437 objects, stripped; section metadata grows the archive |
+| `build/mariadb-minsize/mylite/libmylite.a` | 122,792 | 0.12 | First-party public wrapper |
 | `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 388,440 | 0.37 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 8,658,624 | 8.26 | Unstripped linked smoke binary, lld RELR and section GC |
-| stripped `mylite-open-close-smoke` copy | 6,258,424 | 5.97 | `strip --strip-unneeded` on copied binary |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 8,657,480 | 8.26 | Unstripped linked smoke binary, lld RELR and section GC |
+| stripped `mylite-open-close-smoke` copy | 6,257,608 | 5.97 | `strip --strip-unneeded` on copied binary |
 
 The linked smoke binary has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 4,949,502 |
+| text | 4,948,738 |
 | data | 1,305,560 |
-| bss | 252,937 |
-| total `size` decimal | 6,507,999 |
+| bss | 253,753 |
+| total `size` decimal | 6,508,051 |
 
 Largest linked sections in the open-close smoke binary:
 
@@ -252,6 +256,7 @@ The current built-in plugins are:
 | `sql-sequence-size-profile` after spatial core | 32,926,698 | -10,478,734 | 6,518,592 | -12,813,312 | Passes current smokes and harness; omits SQL sequence engine implementation while retaining parser syntax |
 | `geometry-type-size-profile` after SQL sequence | 32,556,980 | -10,848,452 | 6,473,832 | -12,858,072 | Passes current smokes and harness; omits GEOMETRY type implementation code while retaining minimal generic metadata symbols |
 | `general1400-collation-size-profile` after GEOMETRY type | 32,318,588 | -11,086,844 | 6,258,424 | -13,073,480 | Passes current smokes and harness; omits compiled general1400 collations and unused extended Unicode casefold tables |
+| `rpl-filter-size-profile` after general1400 collations | 32,283,380 | -11,122,052 | 6,257,608 | -13,074,296 | Passes current smokes and harness; marginal runtime win, mostly archive cleanup |
 | `no-myisam-temp-spill-size-profile` after no-binlog-core | 32,836,602 | -10,568,830 | 6,437,408 | -12,894,496 | Opt-in experiment only; open/close smoke passes, but storage/catalog harness fails because schema-table queries need disk temp tables |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
 | Strip archive with `strip --strip-unneeded` | 41,873,048 | -1,532,384 | n/a | n/a | Higher risk than `strip -g` for static archives |
@@ -273,7 +278,7 @@ profile now passes current smokes while retaining the compiled default
 `utf8mb4_uca1400_ai_ci`.
 
 Stripping the current linked open-close smoke binary reduces it from
-8,658,624 bytes to 6,258,424 bytes, saving 2,400,200 bytes, or 2.29 MiB.
+8,657,480 bytes to 6,257,608 bytes, saving 2,399,872 bytes, or 2.29 MiB.
 That remains the
 lowest-risk packaging win for any copied executable or shared-library style
 artifact.

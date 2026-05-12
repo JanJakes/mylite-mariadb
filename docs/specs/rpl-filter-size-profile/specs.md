@@ -114,6 +114,18 @@ The direct archive upper bound is about 36 KiB from `rpl_filter.cc.o`, minus
 the tiny replacement stub. The stripped linked runtime may save less because
 section GC already discards many unreferenced `Rpl_filter` methods.
 
+Implemented measurements:
+
+| Artifact | Before | After | Delta |
+| --- | ---: | ---: | ---: |
+| `libmysqld/libmariadbd.a` | 32,318,588 | 32,283,380 | -35,208 |
+| unstripped `mylite-open-close-smoke` | 8,658,624 | 8,657,480 | -1,144 |
+| stripped `mylite-open-close-smoke` | 6,258,424 | 6,257,608 | -816 |
+
+This is not a notable linked-runtime win. It is useful mainly because it
+removes one more replication-specific archive object from the aggressive
+profile with a narrow, passing replacement.
+
 ## License, Trademark, and Dependency Impact
 
 This is GPL-2.0-only MariaDB-derived build-profile work. It adds no dependency
@@ -157,3 +169,18 @@ Measure:
   marginal attempt.
 - Binlog filter system variables are still compiled elsewhere. Removing those
   references is a separate, broader binlog-sysvar slice.
+
+## Implementation Result
+
+Implemented `MYLITE_DISABLE_RPL_FILTER` in the embedded source list. The
+aggressive profile removes `../sql/rpl_filter.cc` and links
+`mylite_rpl_filter_stub.cc`, which defines the retained constructor,
+destructor, and permissive `db_ok()` method.
+
+Verification passed:
+
+```sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-rpl-filter MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-rpl-filter MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-rpl-filter MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+```
