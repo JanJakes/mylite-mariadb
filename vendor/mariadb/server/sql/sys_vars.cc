@@ -1048,11 +1048,13 @@ static Sys_var_mybool Sys_column_compression_zlib_wrap(
        SESSION_VAR(column_compression_zlib_wrap), CMD_LINE(OPT_ARG),
        DEFAULT(FALSE));
 
+#if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
 static const char *concurrent_insert_names[]= {"NEVER", "AUTO", "ALWAYS", 0};
 static Sys_var_enum Sys_concurrent_insert(
        "concurrent_insert", "Use concurrent insert with MyISAM",
        GLOBAL_VAR(myisam_concurrent_insert), CMD_LINE(OPT_ARG),
        concurrent_insert_names, DEFAULT(1));
+#endif
 
 static Sys_var_on_access_global<Sys_var_ulong,
                                 PRIV_SET_SYSTEM_GLOBAL_VAR_CONNECT_TIMEOUT>
@@ -1090,20 +1092,30 @@ export bool fix_delay_key_write(sys_var *self, THD *thd, enum_var_type type)
 {
   switch (delay_key_write_options) {
   case DELAY_KEY_WRITE_NONE:
+#if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
     myisam_delay_key_write=0;
+#endif
     ha_open_options&= ~HA_OPEN_DELAY_KEY_WRITE;
     break;
   case DELAY_KEY_WRITE_ON:
+#if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
     myisam_delay_key_write=1;
+#endif
     ha_open_options&= ~HA_OPEN_DELAY_KEY_WRITE;
     break;
   case DELAY_KEY_WRITE_ALL:
+#if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
     myisam_delay_key_write=1;
+#endif
     ha_open_options|= HA_OPEN_DELAY_KEY_WRITE;
     break;
   }
 #ifdef WITH_ARIA_STORAGE_ENGINE
+#if defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
+  maria_delay_key_write= delay_key_write_options != DELAY_KEY_WRITE_NONE;
+#else
   maria_delay_key_write= myisam_delay_key_write;
+#endif
 #endif
   return false;
 }
@@ -1335,11 +1347,13 @@ Sys_slave_connections_needed_for_purge(
        NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0),
        ON_UPDATE(update_binlog_space_limit));
 
+#if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
 
 static Sys_var_mybool Sys_flush(
        "flush", "Flush MyISAM tables to disk between SQL commands",
        GLOBAL_VAR(myisam_flush),
        CMD_LINE(OPT_ARG), DEFAULT(FALSE));
+#endif
 
 static Sys_var_ulong Sys_flush_time(
        "flush_time",
@@ -1349,6 +1363,7 @@ static Sys_var_ulong Sys_flush_time(
        CMD_LINE(REQUIRED_ARG), VALID_RANGE(0, LONG_TIMEOUT),
        DEFAULT(0), BLOCK_SIZE(1));
 
+#if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
 static bool check_ftb_syntax(sys_var *self, THD *thd, set_var *var)
 {
   return ft_boolean_check_syntax_string((uchar*)
@@ -1398,6 +1413,7 @@ static Sys_var_charptr_fscs Sys_ft_stopword_file(
        "Use stopwords from this file instead of built-in list",
        READ_ONLY GLOBAL_VAR(ft_stopword_file), CMD_LINE(REQUIRED_ARG),
        DEFAULT(0));
+#endif
 
 static Sys_var_mybool Sys_ignore_builtin_innodb(
        "ignore_builtin_innodb",

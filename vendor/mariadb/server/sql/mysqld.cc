@@ -5654,8 +5654,10 @@ static int init_server_components()
     unireg_abort(1);
   ha_signal_ddl_recovery_done();
 
+#if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
   if (opt_myisam_log)
     (void) mi_log(1);
+#endif
 
 #if defined(HAVE_MLOCKALL) && defined(MCL_CURRENT) && !defined(EMBEDDED_LIBRARY)
   if (locked_in_memory)
@@ -5695,7 +5697,9 @@ static int init_server_components()
   prctl(PR_SET_THP_DISABLE, 1, 0, 0, 0);
 #endif
 
+#if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
   ft_init_stopwords();
+#endif
 
   init_max_user_conn();
   init_global_user_stats();
@@ -6827,9 +6831,11 @@ struct my_option my_long_options[]=
    "Path to file used for recovery of DDL statements after a crash",
    &opt_ddl_recovery_file, &opt_ddl_recovery_file, 0, GET_STR,
    REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+#if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
   {"log-isam", OPT_ISAM_LOG, "Log all MyISAM changes to file",
    &myisam_log_filename, &myisam_log_filename, 0, GET_STR,
    OPT_ARG, 0, 0, 0, 0, 0, 0},
+#endif
   {"log-short-format", 0,
    "Don't log extra information to update and slow-query logs",
    &opt_short_log_format, &opt_short_log_format,
@@ -8463,7 +8469,9 @@ mysqld_get_one_option(const struct my_option *opt, const char *argument,
   case (int) OPT_SAFE:
     opt_specialflag|= SPECIAL_SAFE_MODE | SPECIAL_NO_NEW_FUNC;
     SYSVAR_AUTOSIZE(delay_key_write_options, (uint) DELAY_KEY_WRITE_NONE);
+#if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
     myisam_recover_options= HA_RECOVER_DEFAULT;
+#endif
     ha_open_options&= ~(HA_OPEN_DELAY_KEY_WRITE);
     SYSVAR_AUTOSIZE(query_cache_size, 0);
     break;
@@ -8866,6 +8874,7 @@ static int get_options(int *argc_ptr, char ***argv_ptr)
   if (global_system_variables.low_priority_updates)
     thr_upgraded_concurrent_insert_lock= TL_WRITE_LOW_PRIORITY;
 
+#if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
   if (ft_boolean_check_syntax_string((uchar*) ft_boolean_syntax,
                                      strlen(ft_boolean_syntax),
                                      system_charset_info))
@@ -8874,6 +8883,7 @@ static int get_options(int *argc_ptr, char ***argv_ptr)
                     ft_boolean_syntax);
     return 1;
   }
+#endif
 
 #ifndef EMBEDDED_LIBRARY
   if (validate_redirect_url(global_system_variables.redirect_url,
@@ -8891,8 +8901,10 @@ static int get_options(int *argc_ptr, char ***argv_ptr)
   if (opt_skip_show_db)
     opt_specialflag|= SPECIAL_SKIP_SHOW_DB;
 
+#if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
   if (myisam_flush)
     flush_time= 0;
+#endif
 
 #ifdef HAVE_REPLICATION
   if (init_slave_skip_errors(opt_slave_skip_errors))
@@ -8968,7 +8980,10 @@ static int get_options(int *argc_ptr, char ***argv_ptr)
     Set some global variables from the global_system_variables
     In most cases the global variables will not be used
   */
-  my_disable_locking= myisam_single_user= MY_TEST(opt_external_locking == 0);
+  my_disable_locking= MY_TEST(opt_external_locking == 0);
+#if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
+  myisam_single_user= my_disable_locking;
+#endif
   my_default_record_cache_size=global_system_variables.read_buff_size;
 
   /*

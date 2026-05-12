@@ -4888,11 +4888,18 @@ SJ_TMP_TABLE::create_sj_weedout_tmp_table(THD *thd)
   }
 
   uint reclength= field->pack_length();
-  if (using_unique_constraint || thd->variables.tmp_memory_table_size == 0)
+  bool use_disk_engine= using_unique_constraint ||
+    thd->variables.tmp_memory_table_size == 0;
+  if (use_disk_engine)
   { 
+#if defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0), "MyISAM temporary table spill");
+    goto err;
+#else
     share->db_plugin= ha_lock_engine(0, TMP_ENGINE_HTON);
     table->file= get_new_handler(share, &table->mem_root,
                                  share->db_type());
+#endif
   }
   else
   {

@@ -6720,7 +6720,9 @@ int ha_repartition_key_cache(KEY_CACHE *key_cache)
 int ha_change_key_cache(KEY_CACHE *old_key_cache,
 			KEY_CACHE *new_key_cache)
 {
+#if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
   mi_change_key_cache(old_key_cache, new_key_cache);
+#endif
   return 0;
 }
 

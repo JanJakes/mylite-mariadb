@@ -79,6 +79,8 @@ struct SmokeResult
   std::string exec_csv_engine_message;
   std::string exec_myisam_engine_message;
   std::string exec_mrg_myisam_engine_message;
+  std::string exec_memory_temp_rows;
+  std::string exec_disk_temp_message;
   std::string exec_callback_abort_message;
   std::string exec_dml_rows;
   std::string exec_duplicate_key_message;
@@ -184,6 +186,8 @@ static bool check_procedure_analyse_unsupported(const SmokeOptions &options,
                                                 SmokeResult *result);
 static bool check_legacy_storage_engines_unsupported(
   const SmokeOptions &options, SmokeResult *result);
+static bool check_temp_spill_profile(const SmokeOptions &options,
+                                     SmokeResult *result);
 static bool check_exec_callback_abort(const SmokeOptions &options,
                                       SmokeResult *result);
 static bool check_exec_dml_persistence(const SmokeOptions &options,
@@ -377,6 +381,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "legacy_storage_engines_unsupported";
   ok= check_legacy_storage_engines_unsupported(options, result) && ok;
+
+  result->phase= "temp_spill_profile";
+  ok= check_temp_spill_profile(options, result) && ok;
 
   result->phase= "exec_callback_abort";
   ok= check_exec_callback_abort(options, result) && ok;
@@ -1381,6 +1388,64 @@ static bool check_legacy_storage_engines_unsupported(
 
     rc= mylite_close(db);
     ok= record_result(result, "legacy_engines_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+  return ok;
+}
+
+static bool check_temp_spill_profile(const SmokeOptions &options,
+                                     SmokeResult *result)
+{
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "temp_spill_open", MYLITE_OK, rc, db);
+  if (db)
+  {
+    ExecCapture memory_capture;
+    ok= exec_query_capture(
+          db,
+          "SELECT a FROM (SELECT 2 AS a UNION ALL SELECT 1 AS a) AS t "
+          "ORDER BY a",
+          "memory_temp_select", &memory_capture, result) && ok;
+    result->exec_memory_temp_rows= join_strings(memory_capture.rows, ",");
+    if (result->exec_memory_temp_rows != "1,2")
+      ok= false;
+
+    ok= exec_statement(db, "SET SESSION big_tables=1",
+                       "disk_temp_big_tables", result) && ok;
+
+#ifdef MYLITE_DISABLE_MYISAM_TEMP_SPILL
+    char *errmsg= nullptr;
+    rc= mylite_exec(
+          db,
+          "SELECT a FROM (SELECT 2 AS a UNION ALL SELECT 1 AS a) AS t "
+          "ORDER BY a",
+          nullptr, nullptr, &errmsg);
+    if (errmsg)
+    {
+      result->exec_disk_temp_message= errmsg;
+      mylite_free(errmsg);
+    }
+    ok= record_result(result, "disk_temp_select", MYLITE_ERROR, rc, db) && ok;
+    if (mylite_mariadb_errno(db) != ER_NOT_SUPPORTED_YET ||
+        std::strcmp(mylite_sqlstate(db), "42000") != 0 ||
+        result->exec_disk_temp_message.find("MyISAM temporary table spill") ==
+          std::string::npos)
+      ok= false;
+#else
+    ExecCapture disk_capture;
+    ok= exec_query_capture(
+          db,
+          "SELECT a FROM (SELECT 2 AS a UNION ALL SELECT 1 AS a) AS t "
+          "ORDER BY a",
+          "disk_temp_select", &disk_capture, result) && ok;
+    result->exec_disk_temp_message= join_strings(disk_capture.rows, ",");
+    if (result->exec_disk_temp_message != "1,2")
+      ok= false;
+#endif
+
+    rc= mylite_close(db);
+    ok= record_result(result, "temp_spill_close", MYLITE_OK, rc,
                       nullptr) && ok;
   }
   return ok;
@@ -2665,6 +2730,11 @@ static void write_report(const SmokeOptions &options,
   if (!result.exec_mrg_myisam_engine_message.empty())
     report << "exec_mrg_myisam_engine_message="
            << result.exec_mrg_myisam_engine_message << "\n";
+  if (!result.exec_memory_temp_rows.empty())
+    report << "exec_memory_temp_rows=" << result.exec_memory_temp_rows << "\n";
+  if (!result.exec_disk_temp_message.empty())
+    report << "exec_disk_temp_message="
+           << result.exec_disk_temp_message << "\n";
   if (!result.exec_callback_abort_message.empty())
     report << "exec_callback_abort_message="
            << result.exec_callback_abort_message << "\n";

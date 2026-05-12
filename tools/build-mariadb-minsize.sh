@@ -27,6 +27,7 @@ main() {
     --workdir /work \
     --env "MYLITE_MARIADB_BUILD_DIR=${build_dir}" \
     --env "MYLITE_BUILD_JOBS=${MYLITE_BUILD_JOBS:-}" \
+    --env "MYLITE_DISABLE_MYISAM_TEMP_SPILL=${MYLITE_DISABLE_MYISAM_TEMP_SPILL:-OFF}" \
     "${image}" \
     /work/tools/build-mariadb-minsize.sh --inside-container
 }
@@ -44,6 +45,9 @@ build_inside_container() {
 
   local enable_section_gc
   enable_section_gc="${MYLITE_ENABLE_SECTION_GC:-ON}"
+
+  local disable_myisam_temp_spill
+  disable_myisam_temp_spill="${MYLITE_DISABLE_MYISAM_TEMP_SPILL:-OFF}"
 
   local minsize_linker_flags
   minsize_linker_flags="-fuse-ld=lld -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr"
@@ -87,6 +91,7 @@ build_inside_container() {
     -DMYLITE_DISABLE_HELP_COMMAND=ON
     -DMYLITE_DISABLE_JSON_SCHEMA_VALID=ON
     -DMYLITE_DISABLE_LEGACY_STORAGE_ENGINES=ON
+    "-DMYLITE_DISABLE_MYISAM_TEMP_SPILL=${disable_myisam_temp_spill}"
     -DMYLITE_DISABLE_PROCEDURE_ANALYSE=ON
     -DMYLITE_DISABLE_QUERY_CACHE=ON
     -DMYLITE_DISABLE_REGEX_FUNCTIONS=ON

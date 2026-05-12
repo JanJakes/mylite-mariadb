@@ -22258,25 +22258,31 @@ bool Create_tmp_table::choose_engine(THD *thd, TABLE *table,
                                      TMP_TABLE_PARAM *param)
 {
   TABLE_SHARE *share= table->s;
+  bool use_disk_engine= share->blob_fields || m_using_unique_constraint ||
+    (thd->variables.big_tables &&
+     !(m_select_options & SELECT_SMALL_RESULT)) ||
+    (m_select_options & TMP_TABLE_FORCE_MYISAM) ||
+    thd->variables.tmp_memory_table_size == 0;
   DBUG_ENTER("Create_tmp_table::choose_engine");
   /*
     If result table is small; use a heap, otherwise TMP_TABLE_HTON (Aria)
     In the future we should try making storage engine selection more dynamic
   */
 
-  if (share->blob_fields || m_using_unique_constraint ||
-      (thd->variables.big_tables &&
-       !(m_select_options & SELECT_SMALL_RESULT)) ||
-      (m_select_options & TMP_TABLE_FORCE_MYISAM) ||
-      thd->variables.tmp_memory_table_size == 0)
+  if (use_disk_engine)
   {
+#if defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0), "MyISAM temporary table spill");
+    DBUG_RETURN(true);
+#else
     share->db_plugin= ha_lock_engine(0, TMP_ENGINE_HTON);
     table->file= get_new_handler(share, &table->mem_root,
                                  share->db_type());
     if (m_group &&
-	(param->group_parts > table->file->max_key_parts() ||
-	 param->group_length > table->file->max_key_length()))
+		(param->group_parts > table->file->max_key_parts() ||
+		 param->group_length > table->file->max_key_length()))
       m_using_unique_constraint= true;
+#endif
   }
   else
   {
@@ -23319,6 +23325,22 @@ bool create_internal_tmp_table(TABLE *table, KEY *org_keyinfo,
 
 /* Create internal MyISAM temporary table */
 
+#if defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
+bool create_internal_tmp_table(TABLE *table, KEY *org_keyinfo,
+                               TMP_ENGINE_COLUMNDEF *start_recinfo,
+                               TMP_ENGINE_COLUMNDEF **recinfo,
+                               ulonglong options)
+{
+  DBUG_ENTER("create_internal_tmp_table");
+  (void)table;
+  (void)org_keyinfo;
+  (void)start_recinfo;
+  (void)recinfo;
+  (void)options;
+  my_error(ER_NOT_SUPPORTED_YET, MYF(0), "MyISAM temporary table spill");
+  DBUG_RETURN(1);
+}
+#else
 bool create_internal_tmp_table(TABLE *table, KEY *org_keyinfo,
                                TMP_ENGINE_COLUMNDEF *start_recinfo,
                                TMP_ENGINE_COLUMNDEF **recinfo,
@@ -23451,6 +23473,7 @@ bool create_internal_tmp_table(TABLE *table, KEY *org_keyinfo,
  err:
   DBUG_RETURN(1);
 }
+#endif
 
 #endif /* USE_ARIA_FOR_TMP_TABLES */
 
@@ -23490,6 +23513,10 @@ create_internal_tmp_table_from_heap(THD *thd, TABLE *table,
     table->file->print_error(error, MYF(ME_FATAL));
     DBUG_RETURN(1);
   }
+#if defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
+  my_error(ER_NOT_SUPPORTED_YET, MYF(0), "MyISAM temporary table spill");
+  DBUG_RETURN(1);
+#endif
   new_table= *table;
   share= *table->s;
   new_table.s= &share;

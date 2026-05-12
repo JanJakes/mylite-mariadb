@@ -350,8 +350,13 @@ void copy_tmptable_optimizer_costs()
 {
   memcpy(&heap_optimizer_costs, heap_hton->optimizer_costs,
          sizeof(heap_optimizer_costs));
+#ifdef MYLITE_DISABLE_MYISAM_TEMP_SPILL
+  memcpy(&tmp_table_optimizer_costs, heap_hton->optimizer_costs,
+         sizeof(tmp_table_optimizer_costs));
+#else
   memcpy(&tmp_table_optimizer_costs, TMP_ENGINE_HTON->optimizer_costs,
          sizeof(tmp_table_optimizer_costs));
+#endif
 }
 
 
