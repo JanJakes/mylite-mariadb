@@ -2205,18 +2205,16 @@ static bool is_ro_1pc_trans(THD *thd, Ha_trx_info *ha_info, bool all,
   return !rw_trans;
 }
 
-inline Ha_trx_info* get_binlog_hton(Ha_trx_info *ha_info)
-{
-  for (; ha_info; ha_info= ha_info->next())
-    if (ha_info->ht() == &binlog_tp)
-      return ha_info;
-
-  return ha_info;
-}
+#if !defined(MYLITE_DISABLE_BINLOG_CORE) || !defined(EMBEDDED_LIBRARY)
+inline Ha_trx_info* get_binlog_hton(Ha_trx_info *ha_info);
+#endif
 
 static int run_binlog_first(THD *thd, bool all, THD_TRANS *trans,
                             bool is_real_trans, bool is_commit)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return 0;
+#else
   int rc= 0;
   Ha_trx_info *ha_info= trans->ha_list;
 
@@ -2237,7 +2235,19 @@ static int run_binlog_first(THD *thd, bool all, THD_TRANS *trans,
     rc= thd->binlog_flush_pending_rows_event(TRUE);
 
   return rc;
+#endif
 }
+
+#if !defined(MYLITE_DISABLE_BINLOG_CORE) || !defined(EMBEDDED_LIBRARY)
+inline Ha_trx_info* get_binlog_hton(Ha_trx_info *ha_info)
+{
+  for (; ha_info; ha_info= ha_info->next())
+    if (ha_info->ht() == &binlog_tp)
+      return ha_info;
+
+  return ha_info;
+}
+#endif
 
 static int
 commit_one_phase_2(THD *thd, bool all, THD_TRANS *trans, bool is_real_trans)
@@ -2522,10 +2532,12 @@ int ha_commit_or_rollback_by_xid(XID *xid, bool commit)
     When the binlogging service is enabled complete the transaction
     by it first.
   */
+#if !defined(MYLITE_DISABLE_BINLOG_CORE) || !defined(EMBEDDED_LIBRARY)
   if (commit)
     binlog_commit_by_xid(xid);
   else
     binlog_rollback_by_xid(xid);
+#endif
 
   tp_foreach(NULL, commit ? xacommit_handlerton : xarollback_handlerton, &xaop);
 
@@ -7664,6 +7676,7 @@ bool handler::check_table_binlog_row_based_internal()
                     mysql_bin_log.is_open()));
 }
 
+#if !defined(MYLITE_DISABLE_BINLOG_CORE) || !defined(EMBEDDED_LIBRARY)
 static int binlog_log_row_to_binlog(TABLE* table,
                                     const uchar *before_record,
                                     const uchar *after_record,
@@ -7699,6 +7712,7 @@ static int binlog_log_row_to_binlog(TABLE* table,
                        before_record, after_record);
   DBUG_RETURN(error ? HA_ERR_RBR_LOGGING_FAILED : 0);
 }
+#endif
 
 int handler::binlog_log_row(const uchar *before_record,
                             const uchar *after_record,
@@ -7706,6 +7720,9 @@ int handler::binlog_log_row(const uchar *before_record,
 {
   DBUG_ENTER("handler::binlog_log_row");
 
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  DBUG_RETURN(0);
+#else
   int error = 0;
   if (row_logging)
     error= binlog_log_row_to_binlog(table, before_record, after_record,
@@ -7718,6 +7735,7 @@ int handler::binlog_log_row(const uchar *before_record,
 #endif // HAVE_REPLICATION
 
   DBUG_RETURN(error);
+#endif
 }
 
 

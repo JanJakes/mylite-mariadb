@@ -914,6 +914,10 @@ public:
     return this;
   }
 
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  bool is_open() { return false; }
+#endif
+
   int open(const char *opt_name) override;
   void close() override;
   int generate_new_name(char *new_name, const char *log_name,

@@ -118,8 +118,9 @@ Add `MYLITE_DISABLE_BINLOG_CORE` to
 
 First, introduce compile-time no-binlog gates while leaving sources in place:
 
-- In `log.h`, make `MYSQL_LOG::is_open()` return `false` under
-  `MYLITE_DISABLE_BINLOG_CORE` for embedded builds.
+- In `log.h`, make `MYSQL_BIN_LOG::is_open()` hide the inherited
+  `MYSQL_LOG::is_open()` and return `false` under `MYLITE_DISABLE_BINLOG_CORE`
+  for embedded builds.
 - In `sql_builtin.cc.in`, omit `builtin_maria_binlog_plugin` from mandatory
   plugins under the same macro.
 - In `handler.cc`, compile `run_binlog_first()` and recovered-XA binlog calls
@@ -184,6 +185,41 @@ reduction if `Query_log_event`, `Rows_log_event`, `Table_map_log_event`,
 `Gtid_log_event`, and `Gtid_index_writer` drop from the linked smoke binary.
 
 Rejected attempts are still useful if they identify hard source roots.
+
+Implemented first-pass measurements:
+
+| Artifact | Bytes |
+| --- | ---: |
+| `libmysqld/libmariadbd.a` | 33,532,138 |
+| stripped `mylite-open-close-smoke` | 6,683,128 |
+
+Compared with `binlog-replication-size-profile`, the first pass saves 144,570
+archive bytes and 67,272 stripped linked bytes. Most of that linked win comes
+from compiling the binlog transaction, row-event, GTID-state, and event-write
+entry points to no-ops so section GC can discard now-unreachable code.
+
+The only source-list removal accepted in this pass is `rpl_record.cc`
+(`rpl_record.cc.o`, 2,152 bytes in the current object build). Removing it has
+no linked-runtime effect but confirms `pack_row()` is no longer rooted by row
+binlog helpers.
+
+The broader source-list removal attempt for `log_event.cc`,
+`log_event_server.cc`, `rpl_gtid.cc`, `gtid_index.cc`, `rpl_filter.cc`, and
+`rpl_injector.cc` built the archive but failed the final smoke executable link.
+The unresolved roots were:
+
+- `lib_sql.cc` startup and cleanup still call `injector::free_instance()`,
+  `Gtid_index_writer::gtid_index_init()`,
+  `Gtid_index_writer::gtid_index_cleanup()`, and allocate/delete
+  `Rpl_filter`.
+- `table.cc` still calls `binlog_filter->db_ok()` in table-open filtering.
+- `log.cc` still retains `Log_event_writer`, `Format_description_log_event`,
+  `Binlog_checkpoint_log_event`, `MYSQL_BIN_LOG::open()`,
+  `MYSQL_BIN_LOG::do_binlog_recovery()`, and `rpl_binlog_state` roots.
+
+Those roots are larger than the accepted first-pass cut, but they need a
+separate guarded cleanup because they cross embedded startup, table-open, sysvar
+and generic log-helper code rather than only row/statement binlog entry points.
 
 ## Test and Verification Plan
 

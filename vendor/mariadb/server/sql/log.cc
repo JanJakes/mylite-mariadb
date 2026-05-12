@@ -2208,13 +2208,20 @@ inline bool is_preparing_xa(THD *thd)
 
 static int binlog_prepare(THD *thd, bool all)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return 0;
+#else
   /* Do nothing unless the transaction is a user XA. */
   return is_preparing_xa(thd) ? binlog_commit(thd, all, FALSE) : 0;
+#endif
 }
 
 
 int binlog_commit_by_xid(XID *xid)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return 0;
+#else
   int rc= 0;
   THD *thd= current_thd;
 
@@ -2244,11 +2251,15 @@ int binlog_commit_by_xid(XID *xid)
   thd->ha_data[binlog_tp.slot].ha_info[1].reset();
 
   return rc;
+#endif
 }
 
 
 int binlog_rollback_by_xid(XID *xid)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return 0;
+#else
   int rc= 0;
   THD *thd= current_thd;
 
@@ -2274,6 +2285,7 @@ int binlog_rollback_by_xid(XID *xid)
   thd->ha_data[binlog_tp.slot].ha_info[1].reset();
 
   return rc;
+#endif
 }
 
 
@@ -2365,6 +2377,9 @@ static int binlog_commit_flush_xa_prepare(THD *thd, bool all,
 */
 int binlog_commit(THD *thd, bool all, bool ro_1pc)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return 0;
+#else
   int error= 0;
   PSI_stage_info org_stage;
   DBUG_ENTER("binlog_commit");
@@ -2468,6 +2483,7 @@ int binlog_commit(THD *thd, bool all, bool ro_1pc)
 
   THD_STAGE_INFO(thd, org_stage);
   DBUG_RETURN(error);
+#endif
 }
 
 /**
@@ -2482,6 +2498,9 @@ int binlog_commit(THD *thd, bool all, bool ro_1pc)
 */
 int binlog_rollback(THD *thd, bool all)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return 0;
+#else
   DBUG_ENTER("binlog_rollback");
 
   bool is_ending_trans= ending_trans(thd, all);
@@ -2575,6 +2594,7 @@ int binlog_rollback(THD *thd, bool all)
   thd->reset_binlog_for_next_statement();
 
   DBUG_RETURN(error);
+#endif
 }
 
 
@@ -6501,6 +6521,9 @@ static binlog_cache_mngr *binlog_setup_cache_mngr(THD *thd)
 
 binlog_cache_mngr *THD::binlog_setup_trx_data()
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return nullptr;
+#else
   DBUG_ENTER("THD::binlog_setup_trx_data");
   binlog_cache_mngr *cache_mngr=
     (binlog_cache_mngr*) thd_get_ha_data(this, &binlog_tp);
@@ -6513,6 +6536,7 @@ binlog_cache_mngr *THD::binlog_setup_trx_data()
 
 
   DBUG_RETURN(cache_mngr);
+#endif
 }
 
 
@@ -6578,6 +6602,9 @@ void THD::set_binlog_start_alter_seq_no(uint64 s_no)
 void
 THD::binlog_start_trans_and_stmt()
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return;
+#else
   binlog_cache_mngr *cache_mngr= binlog_get_cache_mngr();
   DBUG_ENTER("binlog_start_trans_and_stmt");
   DBUG_PRINT("enter", ("cache_mngr: %p  cache_mngr->trx_cache.get_prev_position(): %lu",
@@ -6659,6 +6686,7 @@ THD::binlog_start_trans_and_stmt()
     ha_data[binlog_tp.slot].ha_info[0].set_trx_read_write();
   }
   DBUG_VOID_RETURN;
+#endif
 }
 
 void THD::binlog_set_stmt_begin() {
@@ -6768,6 +6796,9 @@ bool THD::binlog_write_annotated_row(bool use_trans_cache)
 
 bool THD::binlog_write_table_maps()
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return false;
+#else
   bool binlog_using_only_trans_tables= 1;
   MYSQL_LOCK *locks[2], **locks_end= locks;
   DBUG_ENTER("THD::binlog_write_table_maps");
@@ -6853,6 +6884,7 @@ bool THD::binlog_write_table_maps()
   }
   binlog_table_maps= 1;                         // Table maps written
   DBUG_RETURN(0);
+#endif
 }
 
 
@@ -6872,6 +6904,9 @@ bool THD::binlog_write_table_maps()
 
 bool MYSQL_BIN_LOG::write_table_map(THD *thd, TABLE *table)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return false;
+#else
   int error= 1;
   bool is_transactional= table->file->row_logging_has_trans;
   DBUG_ENTER("THD::binlog_write_table_map");
@@ -6923,6 +6958,7 @@ write_err:
       table->current_lock == F_WRLCK)
     cache_data->set_incident();
   DBUG_RETURN(error);
+#endif
 }
 
 
@@ -7188,6 +7224,9 @@ MYSQL_BIN_LOG::write_gtid_event(THD *thd, bool standalone,
                                 bool commit_by_rotate,
                                 bool has_xid, bool is_ro_1pc)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return false;
+#else
   rpl_gtid gtid;
   uint32 domain_id;
   uint32 local_server_id;
@@ -7262,12 +7301,16 @@ MYSQL_BIN_LOG::write_gtid_event(THD *thd, bool standalone,
   status_var_add(thd->status_var.binlog_bytes_written, gtid_event.data_written);
 
   DBUG_RETURN(false);
+#endif
 }
 
 
 int
 MYSQL_BIN_LOG::write_state_to_file()
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return 0;
+#else
   File file_no;
   IO_CACHE cache;
   char buf[FN_REFLEN];
@@ -7307,6 +7350,7 @@ end:
     mysql_file_close(file_no, MYF(0));
 
   return err;
+#endif
 }
 
 
@@ -7321,6 +7365,9 @@ end:
 int
 MYSQL_BIN_LOG::read_state_from_file()
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return 2;
+#else
   File file_no;
   IO_CACHE cache;
   char buf[FN_REFLEN];
@@ -7367,34 +7414,53 @@ end:
     mysql_file_close(file_no, MYF(0));
 
   return err;
+#endif
 }
 
 
 int
 MYSQL_BIN_LOG::get_most_recent_gtid_list(rpl_gtid **list, uint32 *size)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  *list= nullptr;
+  *size= 0;
+  return 0;
+#else
   return rpl_global_gtid_binlog_state.get_most_recent_gtid_list(list, size);
+#endif
 }
 
 
 bool
 MYSQL_BIN_LOG::append_state_pos(String *str)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return false;
+#else
   return rpl_global_gtid_binlog_state.append_pos(str);
+#endif
 }
 
 
 bool
 MYSQL_BIN_LOG::append_state(String *str)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return false;
+#else
   return rpl_global_gtid_binlog_state.append_state(str);
+#endif
 }
 
 
 bool
 MYSQL_BIN_LOG::is_empty_state()
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return true;
+#else
   return (rpl_global_gtid_binlog_state.count() == 0);
+#endif
 }
 
 
@@ -7402,10 +7468,14 @@ bool
 MYSQL_BIN_LOG::find_in_binlog_state(uint32 domain_id, uint32 server_id_arg,
                                     rpl_gtid *out_gtid)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return false;
+#else
   rpl_gtid *gtid;
   if ((gtid= rpl_global_gtid_binlog_state.find(domain_id, server_id_arg)))
     *out_gtid= *gtid;
   return gtid != NULL;
+#endif
 }
 
 
@@ -7413,6 +7483,9 @@ bool
 MYSQL_BIN_LOG::lookup_domain_in_binlog_state(uint32 domain_id,
                                              rpl_gtid *out_gtid)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return false;
+#else
   rpl_gtid *found_gtid;
 
   if ((found_gtid= rpl_global_gtid_binlog_state.find_most_recent(domain_id)))
@@ -7422,13 +7495,18 @@ MYSQL_BIN_LOG::lookup_domain_in_binlog_state(uint32 domain_id,
   }
 
   return false;
+#endif
 }
 
 
 int
 MYSQL_BIN_LOG::bump_seq_no_counter_if_needed(uint32 domain_id, uint64 seq_no)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return 0;
+#else
   return rpl_global_gtid_binlog_state.bump_seq_no_if_needed(domain_id, seq_no);
+#endif
 }
 
 
@@ -7438,10 +7516,14 @@ MYSQL_BIN_LOG::check_strict_gtid_sequence(uint32 domain_id,
                                           uint64 seq_no,
                                           bool no_error)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return false;
+#else
   return rpl_global_gtid_binlog_state.check_strict_sequence(domain_id,
                                                             server_id_arg,
                                                             seq_no,
                                                             no_error);
+#endif
 }
 
 
@@ -7453,6 +7535,9 @@ MYSQL_BIN_LOG::check_strict_gtid_sequence(uint32 domain_id,
 
 bool MYSQL_BIN_LOG::write(Log_event *event_info, my_bool *with_annotate)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return false;
+#else
   THD *thd= event_info->thd;
   bool error= 1;
   binlog_cache_data *cache_data= 0;
@@ -7774,6 +7859,7 @@ err:
   }
 
   DBUG_RETURN(error);
+#endif
 }
 
 
@@ -8612,6 +8698,9 @@ MYSQL_BIN_LOG::write_transaction_to_binlog(THD *thd,
                                            bool using_trx_cache,
                                            bool is_ro_1pc)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return false;
+#else
   group_commit_entry entry;
   Ha_trx_info *ha_info;
   DBUG_ENTER("MYSQL_BIN_LOG::write_transaction_to_binlog");
@@ -8672,6 +8761,7 @@ MYSQL_BIN_LOG::write_transaction_to_binlog(THD *thd,
     entry.incident_event= NULL;
     DBUG_RETURN(write_transaction_to_binlog_events(&entry));
   }
+#endif
 }
 
 
@@ -9901,6 +9991,9 @@ int MYSQL_BIN_LOG::wait_for_update_binlog_end_pos(THD* thd,
 
 void MYSQL_BIN_LOG::close(uint exiting)
 {					// One can't set log_type here!
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return;
+#else
   bool failed_to_save_state= false;
   DBUG_ENTER("MYSQL_BIN_LOG::close");
   DBUG_PRINT("enter",("exiting: %d", (int) exiting));
@@ -10012,6 +10105,7 @@ void MYSQL_BIN_LOG::close(uint exiting)
   my_free(name);
   name= NULL;
   DBUG_VOID_RETURN;
+#endif
 }
 
 
@@ -11292,6 +11386,9 @@ end:
 }
 int TC_LOG_BINLOG::open(const char *opt_name)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return 0;
+#else
   int      error= 1;
   DBUG_ENTER("TC_LOG_BINLOG::open");
 
@@ -11319,6 +11416,7 @@ int TC_LOG_BINLOG::open(const char *opt_name)
   error= do_binlog_recovery(opt_name, true);
   binlog_state_recover_done= true;
   DBUG_RETURN(error);
+#endif
 }
 
 /** This is called on shutdown, after ha_panic. */
@@ -11335,6 +11433,9 @@ TC_LOG_BINLOG::log_and_order(THD *thd, my_xid xid, bool all,
                              bool need_prepare_ordered __attribute__((unused)),
                              bool need_commit_ordered __attribute__((unused)))
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return BINLOG_COOKIE_DUMMY(false);
+#else
   int err;
   DBUG_ENTER("TC_LOG_BINLOG::log_and_order");
 
@@ -11370,6 +11471,7 @@ TC_LOG_BINLOG::log_and_order(THD *thd, my_xid xid, bool all,
 
   DBUG_RETURN(BINLOG_COOKIE_MAKE(cache_mngr->binlog_id,
                                  cache_mngr->delayed_error));
+#endif
 }
 
 /*
@@ -11523,6 +11625,9 @@ TC_LOG_BINLOG::mark_xid_done(ulong binlog_id, bool write_checkpoint)
 
 int TC_LOG_BINLOG::unlog(ulong cookie, my_xid xid)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return 0;
+#else
   DBUG_ENTER("TC_LOG_BINLOG::unlog");
   if (!xid)
     DBUG_RETURN(0);
@@ -11534,6 +11639,7 @@ int TC_LOG_BINLOG::unlog(ulong cookie, my_xid xid)
     we delay the return of error code to here.
   */
   DBUG_RETURN(BINLOG_COOKIE_GET_ERROR_FLAG(cookie));
+#endif
 }
 
 static bool write_empty_xa_prepare(THD *thd, binlog_cache_mngr *cache_mngr)
@@ -11543,6 +11649,9 @@ static bool write_empty_xa_prepare(THD *thd, binlog_cache_mngr *cache_mngr)
 
 int TC_LOG_BINLOG::unlog_xa_prepare(THD *thd, bool all)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return 0;
+#else
   DBUG_ASSERT(is_preparing_xa(thd));
 
   binlog_cache_mngr *cache_mngr= thd->binlog_setup_trx_data();
@@ -11576,14 +11685,19 @@ int TC_LOG_BINLOG::unlog_xa_prepare(THD *thd, bool all)
   cache_mngr->need_unlog= false;
 
   return unlog(cookie, 1);
+#endif
 }
 
 
 void
 TC_LOG_BINLOG::commit_checkpoint_notify(void *cookie)
 {
+#if defined(MYLITE_DISABLE_BINLOG_CORE) && defined(EMBEDDED_LIBRARY)
+  return;
+#else
   xid_count_per_binlog *entry= static_cast<xid_count_per_binlog *>(cookie);
   queue_binlog_background_checkpoint_notify(entry);
+#endif
 }
 
 /*

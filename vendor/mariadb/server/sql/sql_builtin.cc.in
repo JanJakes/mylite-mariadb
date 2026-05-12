@@ -31,7 +31,9 @@ extern
 #endif
 builtin_maria_plugin 
   @mysql_mandatory_plugins@ @mysql_optional_plugins@
+#ifndef MYLITE_DISABLE_BINLOG_CORE
   builtin_maria_binlog_plugin,
+#endif
 #ifndef MYLITE_DISABLE_VECTOR_FUNCTIONS
   builtin_maria_mhnsw_plugin,
 #endif
@@ -44,7 +46,10 @@ struct st_maria_plugin *mysql_optional_plugins[]=
 
 struct st_maria_plugin *mysql_mandatory_plugins[]=
 {
-  builtin_maria_binlog_plugin, builtin_maria_mysql_password_plugin,
+#ifndef MYLITE_DISABLE_BINLOG_CORE
+  builtin_maria_binlog_plugin,
+#endif
+  builtin_maria_mysql_password_plugin,
 #ifndef MYLITE_DISABLE_VECTOR_FUNCTIONS
   builtin_maria_mhnsw_plugin,
 #endif
