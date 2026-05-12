@@ -311,7 +311,9 @@ my_bool init_compiled_charsets(myf flags __attribute__((unused)))
 #ifdef HAVE_CHARSET_utf8mb3
   add_compiled_collation(&my_charset_utf8mb3_general_ci);
   add_compiled_collation(&my_charset_utf8mb3_general_nopad_ci);
+#ifndef MYLITE_DISABLE_GENERAL1400_COLLATIONS
   add_compiled_collation(&my_charset_utf8mb3_general1400_as_ci);
+#endif
   add_compiled_collation(&my_charset_utf8mb3_bin);
   add_compiled_collation(&my_charset_utf8mb3_nopad_bin);
   add_compiled_collation(&my_charset_utf8mb3_general_mysql500_ci);
@@ -357,7 +359,9 @@ my_bool init_compiled_charsets(myf flags __attribute__((unused)))
   add_compiled_collation(&my_charset_utf8mb4_bin);
   add_compiled_collation(&my_charset_utf8mb4_general_nopad_ci);
   add_compiled_collation(&my_charset_utf8mb4_nopad_bin);
+#ifndef MYLITE_DISABLE_GENERAL1400_COLLATIONS
   add_compiled_collation(&my_charset_utf8mb4_general1400_as_ci);
+#endif
 #ifdef HAVE_UCA_COLLATIONS
   add_compiled_collation(&my_charset_utf8mb4_unicode_ci);
   add_compiled_collation(&my_charset_utf8mb4_german2_uca_ci);

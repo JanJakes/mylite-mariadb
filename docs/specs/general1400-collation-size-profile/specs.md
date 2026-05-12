@@ -22,8 +22,9 @@ tables. Current `build/mariadb-minsize-geometry-type` evidence:
 
 `ctype-unidata.c.o` is currently 267,312 archive bytes. Not all of it is
 removable because ordinary `general_ci` still uses Unicode weight data, but the
-large UCA-style casefold indexes should become dead if the minsize profile no
-longer registers or directly references `general1400_as_ci` collations.
+large UCA-style casefold indexes can become dead if the minsize profile no
+longer registers or directly references `general1400_as_ci` collations and no
+longer exports the unused extended casefold objects.
 
 ## Source Findings
 
@@ -55,6 +56,8 @@ Add a `MYLITE_DISABLE_GENERAL1400_COLLATIONS` aggressive minsize switch that:
   `utf8mb4_general1400_as_ci` collations,
 - routes retained internal minsize comparisons that directly reference
   `my_charset_utf8mb3_general1400_as_ci` to `my_charset_utf8mb3_general_ci`,
+- omits unused UCA 5.2.0, UCA 14.0.0, and Turkish casefold definitions that
+  are otherwise retained by the linked runtime,
   and
 - keeps ordinary `utf8mb3_general_ci`, `utf8mb4_general_ci`, binary collations,
   and existing UCA-disabled unknown-collation behavior.
@@ -94,11 +97,19 @@ No public `libmylite` API change and no `.mylite` file-format change.
 
 ## Binary-Size Impact
 
-Expected linked savings are bounded by the retained casefold tables and
-`general1400` handlers, roughly 0.1-0.2 MiB before link-layout effects.
-Expected archive savings are smaller than the full `ctype-unidata.c.o` member
-because ordinary `general_ci` data must remain, but section GC should remove
-unreferenced per-symbol data from linked runtime artifacts.
+Measured on top of `geometry-type-size-profile`:
+
+| Artifact | Before | After | Delta |
+| --- | ---: | ---: | ---: |
+| `libmysqld/libmariadbd.a` | 32,556,980 | 32,318,588 | -238,392 |
+| stripped `mylite-open-close-smoke` | 6,473,832 | 6,258,424 | -215,408 |
+
+The linked smoke no longer defines `my_charset_utf8mb3_general1400_as_ci`,
+`my_charset_utf8mb4_general1400_as_ci`, `my_casefold_unicode*`,
+`my_casefold_turkish`, `my_u1400*casefold_index`, or
+`my_u520_casefold_index`. Ordinary `my_casefold_default`,
+`my_casefold_mysql500`, and `my_u300_casefold_index` remain for retained
+`general_ci` and `general_mysql500_ci` collations.
 
 ## License, Trademark, And Dependency Impact
 
@@ -121,7 +132,7 @@ Measure:
 - `libmysqld/libmariadbd.a` bytes and object count,
 - stripped `mylite-open-close-smoke` bytes,
 - absence of `my_charset_utf8mb[34]_general1400_as_ci` and
-  `my_u*casefold_index` symbols from the linked smoke when possible, and
+  extended `my_u*casefold_index` symbols from the linked smoke, and
 - retained `utf8mb4_general_ci` success and `utf8mb4_uca1400_ai_ci` rejection
   in the open/close smoke.
 
@@ -133,6 +144,24 @@ Measure:
 - `utf8mb4_uca1400_ai_ci` remains rejected with MariaDB's unknown-collation
   diagnostic.
 - Size deltas are recorded in `docs/research/production-size-analysis.md`.
+
+## Verification Result
+
+Passed:
+
+```sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-general1400-collations MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-general1400-collations MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-general1400-collations MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+git diff --check
+bash -n tools/build-mariadb-minsize.sh tools/run-libmylite-open-close-smoke.sh tools/run-compatibility-test-harness.sh
+```
+
+The open/close smoke verifies:
+
+- `@@collation_server=utf8mb4_general_ci`,
+- `utf8mb4_uca1400_ai_ci` fails as an unknown collation, and
+- `utf8mb4_general1400_as_ci` fails as an unknown collation.
 
 ## Risks
 

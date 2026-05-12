@@ -44,7 +44,7 @@ public:
    using Lex_cstring::Lex_cstring;
    bool streq(const LEX_CSTRING &rhs) const
    {
-     return my_charset_utf8mb3_general1400_as_ci.streq(*this, rhs);
+     return MYLITE_UTF8MB3_INTERNAL_CI.streq(*this, rhs);
    }
    uint find_in_list(const char *str) const
    {

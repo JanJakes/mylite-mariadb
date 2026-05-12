@@ -27,6 +27,7 @@ The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 - `MYLITE_DISABLE_REGEX_FUNCTIONS=ON`
 - `MYLITE_DISABLE_SERVER_UTILITY_FUNCTIONS=ON`
 - `MYLITE_DISABLE_GEOMETRY_TYPE=ON`
+- `MYLITE_DISABLE_GENERAL1400_COLLATIONS=ON`
 - `MYLITE_DISABLE_SQL_SEQUENCE=ON`
 - `MYLITE_DISABLE_UCA_COLLATIONS=ON`
 - `MYLITE_DISABLE_LEGACY_STORAGE_ENGINES=ON`
@@ -57,8 +58,8 @@ include the `type-plugin-size-profile`, `charset-small-profile`, and
 `regex-function-size-profile`, `binlog-replication-size-profile`, and
 `no-binlog-core-size-profile`, `myisam-admin-size-profile`,
 `myisam-fulltext-size-profile`, `myisam-rtree-size-profile`, and
-`spatial-core-size-profile`, `sql-sequence-size-profile`, and
-`geometry-type-size-profile`
+`spatial-core-size-profile`, `sql-sequence-size-profile`,
+`geometry-type-size-profile`, and `general1400-collation-size-profile`
 attempts, which remove the built-in
 `type_geom`, `type_inet`, `type_uuid`, `sequence`, `thread_pool_info`,
 `user_variables`, `userstat`, `mhnsw`, `csv`, and `myisammrg` plugins, set
@@ -89,7 +90,9 @@ implementation core while keeping GEOMETRY type parsing and MyLite rejection
 paths, omit the SQL sequence engine implementation while retaining parser
 syntax and explicit unsupported/missing-sequence diagnostics, omit retained
 GEOMETRY type implementation code while keeping minimal generic type metadata
-symbols, and strip the static archive in the MyLite minsize profile.
+symbols, omit compiled `general1400_as_ci` collations and unused extended
+Unicode casefold tables while retaining ordinary `general_ci`, and strip the
+static archive in the MyLite minsize profile.
 
 `no-myisam-temp-spill-size-profile` was measured separately as an opt-in
 `MYLITE_DISABLE_MYISAM_TEMP_SPILL=ON` experiment. It is not part of the current
@@ -109,37 +112,37 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 ## Current baseline
 
 The current values were measured from
-`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-geometry-type`.
+`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-general1400-collations`.
 Paths below use the default build directory names for readability.
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
-| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 32,556,980 | 31.05 | Main embedded MariaDB archive, 437 objects, stripped; section metadata grows the archive |
-| `build/mariadb-minsize/mylite/libmylite.a` | 122,792 | 0.12 | First-party public wrapper |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 32,318,588 | 30.82 | Main embedded MariaDB archive, 437 objects, stripped; section metadata grows the archive |
+| `build/mariadb-minsize/mylite/libmylite.a` | 122,800 | 0.12 | First-party public wrapper |
 | `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 388,440 | 0.37 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 8,877,136 | 8.47 | Unstripped linked smoke binary, lld RELR and section GC |
-| stripped `mylite-open-close-smoke` copy | 6,473,832 | 6.17 | `strip --strip-unneeded` on copied binary |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 8,658,624 | 8.26 | Unstripped linked smoke binary, lld RELR and section GC |
+| stripped `mylite-open-close-smoke` copy | 6,258,424 | 5.97 | `strip --strip-unneeded` on copied binary |
 
 The linked smoke binary has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 5,057,638 |
-| data | 1,412,856 |
-| bss | 250,921 |
-| total `size` decimal | 6,721,415 |
+| text | 4,949,502 |
+| data | 1,305,560 |
+| bss | 252,937 |
+| total `size` decimal | 6,507,999 |
 
 Largest linked sections in the open-close smoke binary:
 
 | Section | Bytes | Interpretation |
 | --- | ---: | --- |
-| `.text` | 2,977,492 | Executable code |
-| `.data.rel.ro` | 1,086,472 | Relocated read-only data |
-| `.rodata` | 1,083,211 | Parser tables, SQL metadata, constants, retained Unicode data |
-| `.eh_frame` | 687,448 | Unwind metadata |
-| `.data` | 295,488 | Writable data |
+| `.text` | 2,972,740 | Executable code |
+| `.data.rel.ro` | 1,086,120 | Relocated read-only data |
+| `.rodata` | 980,939 | Parser tables, SQL metadata, constants, retained Unicode data |
+| `.eh_frame` | 686,680 | Unwind metadata |
+| `.data` | 188,592 | Writable data |
 | `.bss` | 249,953 | Zero-initialized writable data |
-| `.eh_frame_hdr` | 157,828 | Unwind table index |
+| `.eh_frame_hdr` | 157,660 | Unwind table index |
 | `.rela.dyn` | 49,776 | Remaining unpacked dynamic relocations |
 | `.gcc_except_table` | 43,276 | Exception metadata |
 | `.relr.dyn` | 20,448 | Packed relative relocations |
@@ -248,6 +251,7 @@ The current built-in plugins are:
 | `spatial-core-size-profile` after MyISAM RTREE | 33,144,206 | -10,261,226 | 6,532,968 | -12,798,936 | Passes current smokes and harness; omits spatial WKB/WKT core while retaining GEOMETRY parse and rejection paths |
 | `sql-sequence-size-profile` after spatial core | 32,926,698 | -10,478,734 | 6,518,592 | -12,813,312 | Passes current smokes and harness; omits SQL sequence engine implementation while retaining parser syntax |
 | `geometry-type-size-profile` after SQL sequence | 32,556,980 | -10,848,452 | 6,473,832 | -12,858,072 | Passes current smokes and harness; omits GEOMETRY type implementation code while retaining minimal generic metadata symbols |
+| `general1400-collation-size-profile` after GEOMETRY type | 32,318,588 | -11,086,844 | 6,258,424 | -13,073,480 | Passes current smokes and harness; omits compiled general1400 collations and unused extended Unicode casefold tables |
 | `no-myisam-temp-spill-size-profile` after no-binlog-core | 32,836,602 | -10,568,830 | 6,437,408 | -12,894,496 | Opt-in experiment only; open/close smoke passes, but storage/catalog harness fails because schema-table queries need disk temp tables |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
 | Strip archive with `strip --strip-unneeded` | 41,873,048 | -1,532,384 | n/a | n/a | Higher risk than `strip -g` for static archives |
@@ -269,7 +273,7 @@ profile now passes current smokes while retaining the compiled default
 `utf8mb4_uca1400_ai_ci`.
 
 Stripping the current linked open-close smoke binary reduces it from
-8,877,136 bytes to 6,473,832 bytes, saving 2,403,304 bytes, or 2.29 MiB.
+8,658,624 bytes to 6,258,424 bytes, saving 2,400,200 bytes, or 2.29 MiB.
 That remains the
 lowest-risk packaging win for any copied executable or shared-library style
 artifact.
@@ -554,6 +558,18 @@ another 44,760 bytes. The linked smoke no longer contains `sql_type_geom.cc.o`,
 `Field_geom`, or concrete geometry subtype handlers; GEOMETRY/SPATIAL DDL still
 fails without creating a MyLite table.
 
+The `general1400-collation-size-profile` attempt then stopped registering
+compiled `utf8mb3_general1400_as_ci` and `utf8mb4_general1400_as_ci`
+collations in the aggressive UCA-disabled profile, routed retained internal
+case-insensitive comparisons to `utf8mb3_general_ci`, and omitted unused UCA
+5.2.0, UCA 14.0.0, and Turkish casefold definitions. On top of the GEOMETRY
+type profile, it reduced the static archive by another 238,392 bytes and the
+stripped linked smoke by another 215,408 bytes. The linked smoke no longer
+contains `general1400` collation symbols, `my_casefold_unicode*`,
+`my_casefold_turkish`, `my_u1400*casefold_index`, or
+`my_u520_casefold_index`; the open/close smoke verifies
+`utf8mb4_general1400_as_ci` fails as an unknown collation.
+
 The `no-myisam-temp-spill-size-profile` experiment then omitted the mandatory
 MyISAM plugin and rejected inherited disk temporary-table spill with
 `ER_NOT_SUPPORTED_YET`. On top of the no-binlog-core profile, it reduced the
@@ -599,6 +615,7 @@ MyISAM-compatible storage.
 | Omit spatial WKB/WKT core | 0.13 MiB archive, 0.03 MiB stripped linked beyond MyISAM RTREE | Medium | Applied as size attempt | Keeps GEOMETRY parsing and rejection but removes unreachable geometry construction/formatting code from the minsize profile |
 | Omit SQL sequence engine implementation | 0.21 MiB archive, 0.01 MiB stripped linked beyond spatial core | Medium/high | Applied as size attempt | Removes sequence persistence and plugin code, but parser syntax and generic sequence metadata paths remain |
 | Omit GEOMETRY type implementation | 0.35 MiB archive, 0.04 MiB stripped linked beyond SQL sequence | High | Applied as aggressive size attempt | Keeps only minimal generic GEOMETRY metadata symbols; GEOMETRY/SPATIAL DDL still fails without creating a MyLite table |
+| Omit general1400 collations and extended casefold tables | 0.23 MiB archive, 0.21 MiB stripped linked beyond GEOMETRY type | High | Applied as aggressive size attempt | Extends the UCA-disabled profile; ordinary `general_ci` remains, but internal non-ASCII case-insensitive comparison can diverge further from MariaDB 11.8 |
 | Omit MyISAM temp-spill handler | 0.66 MiB archive, 0.23 MiB stripped linked beyond no-binlog-core | High | No, keep opt-in only | Breaks schema-table metadata and catalog smokes; needs a MyLite-owned disk temporary-table replacement or a compatible memory-only schema-table path |
 | Remove server-only SQL subsystems | Potentially large | High | Research later | The big bytes are entangled in `libsql_embedded.a`; needs slice-by-slice fork work |
 | `DISABLE_PSI_*` switches | 0 in this build | Low | No | No measured effect |
@@ -653,7 +670,9 @@ Take these now:
    does not need MariaDB sequence objects as a compatibility target.
 18. Keep the GEOMETRY type implementation omission in the aggressive minsize
    profile while MyLite treats GEOMETRY and SPATIAL DDL as unsupported.
-19. Keep a stripped linked smoke binary size in the build report so regressions
+19. Keep the `general1400` collation and extended casefold omission only in the
+   aggressive UCA-disabled minsize profile.
+20. Keep a stripped linked smoke binary size in the build report so regressions
    are visible.
 
 Do not take these now:
@@ -669,22 +688,18 @@ Do not take these now:
 
 Research next if size becomes a release blocker:
 
-1. Investigate retained Unicode casefold tables and `general1400` collations.
-   The current UCA-free linked binary still contains `my_u1400_casefold_index`
-   and `my_u1400tr_casefold_index`, but removing them is another collation
-   compatibility decision.
-2. Investigate a deeper no-binlog core for the embedded profile. The current
+1. Investigate a deeper no-binlog core for the embedded profile. The current
    linked smoke still retains `MYSQL_BIN_LOG`, `log_event*`, GTID state,
    `Gtid_index_writer`, and `Rpl_filter` because embedded startup/cleanup,
    table-open filtering, and generic log helpers still root them.
-3. Investigate whether remaining generic `MYSQL_TYPE_GEOMETRY` metadata
+2. Investigate whether remaining generic `MYSQL_TYPE_GEOMETRY` metadata
    branches can be removed cleanly. The current profile still keeps minimal
    GEOMETRY handler symbols so retained MariaDB type aggregation and metadata
    paths link.
-4. Longer-term SQL-layer pruning of server-only surfaces. This is likely where
+3. Longer-term SQL-layer pruning of server-only surfaces. This is likely where
    meaningful multi-MiB savings exist, but it should be done as compatibility
    slices, not as broad dead-code removal.
-5. Separate x86-64 size measurements for lld RELR before making architecture
+4. Separate x86-64 size measurements for lld RELR before making architecture
    independent claims.
 
 The best next decisions are deeper SQL-layer reductions as deliberate

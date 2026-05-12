@@ -29,10 +29,12 @@
 #include "ctype-unicode300-general_ci.h"
 #include "ctype-unicode300-general_mysql500_ci.h"
 #include "ctype-unicode300-casefold.h"
+#ifndef MYLITE_DISABLE_GENERAL1400_COLLATIONS
 #include "ctype-unicode300-casefold-tr.h"
 #include "ctype-unicode520-casefold.h"
 #include "ctype-unicode1400-casefold.h"
 #include "ctype-unicode1400-casefold-tr.h"
+#endif
 
 
 
@@ -52,12 +54,14 @@ MY_CASEFOLD_INFO my_casefold_default=
            0x0130 LATIN CAPITAL LETTER I WITH DOT ABOVE
 */
 
+#ifndef MYLITE_DISABLE_GENERAL1400_COLLATIONS
 MY_CASEFOLD_INFO my_casefold_turkish=
 {
   0xFFFF,
   my_u300tr_casefold_index,
   weight_general_ci_index
 };
+#endif
 
 
 /*
@@ -73,6 +77,7 @@ MY_CASEFOLD_INFO my_casefold_mysql500=
 
 
 
+#ifndef MYLITE_DISABLE_GENERAL1400_COLLATIONS
 MY_CASEFOLD_INFO my_casefold_unicode520=
 {
   0x10FFFF,
@@ -95,3 +100,4 @@ MY_CASEFOLD_INFO my_casefold_unicode1400tr=
   my_u1400tr_casefold_index,
   NULL
 };
+#endif

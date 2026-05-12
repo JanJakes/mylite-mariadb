@@ -4629,7 +4629,7 @@ static ACL_ROLE *find_acl_role(const LEX_CSTRING &role, bool allow_public)
 
   if (!role.length ||
       (!allow_public &&
-       my_charset_utf8mb3_general1400_as_ci.streq(role, public_name)))
+       MYLITE_UTF8MB3_INTERNAL_CI.streq(role, public_name)))
     DBUG_RETURN(NULL);
 
   ACL_ROLE *r= (ACL_ROLE *)my_hash_search(&acl_roles, (uchar *)role.str,

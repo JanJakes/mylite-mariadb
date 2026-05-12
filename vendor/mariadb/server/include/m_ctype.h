@@ -1490,6 +1490,11 @@ extern MYSQL_PLUGIN_IMPORT struct charset_info_st
                                           my_charset_utf8mb3_general1400_as_ci;
 extern MYSQL_PLUGIN_IMPORT struct charset_info_st
                                           my_charset_utf8mb4_general1400_as_ci;
+#ifdef MYLITE_DISABLE_GENERAL1400_COLLATIONS
+#define MYLITE_UTF8MB3_INTERNAL_CI my_charset_utf8mb3_general_ci
+#else
+#define MYLITE_UTF8MB3_INTERNAL_CI my_charset_utf8mb3_general1400_as_ci
+#endif
 
 extern struct charset_info_st my_charset_big5_bin;
 extern struct charset_info_st my_charset_big5_chinese_ci;

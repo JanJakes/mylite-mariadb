@@ -118,12 +118,14 @@ static uint
 my_casefold_multiply_utf8mbx(CHARSET_INFO *cs)
 {
   DBUG_ASSERT(cs->mbminlen == 1 && cs->mbmaxlen >= 3);
+#ifndef MYLITE_DISABLE_GENERAL1400_COLLATIONS
   if (cs->casefold == &my_casefold_unicode520 ||
       cs->casefold == &my_casefold_unicode1400 ||
       cs->casefold == &my_casefold_unicode1400tr)
     return 2;
   if (cs->casefold == &my_casefold_turkish)
     return 2;
+#endif
   if (cs->casefold == &my_casefold_default)
     return 1;
   if (cs->casefold == &my_casefold_mysql500)
@@ -809,6 +811,7 @@ my_wc_weight_utf8mb3_general_mysql500_ci(my_wc_t wc)
 #include "strcoll.inl"
 
 
+#ifndef MYLITE_DISABLE_GENERAL1400_COLLATIONS
 static inline my_wc_t my_general1400_as_ci_char_to_weight(my_wc_t wc)
 {
   my_toupper_unicode(&my_casefold_unicode1400, &wc);
@@ -873,6 +876,7 @@ static MY_COLLATION_HANDLER my_collation_utf8mb3_general1400_as_ci_handler=
   my_ci_get_collation_name_generic,
   my_ci_eq_collation_generic
 };
+#endif
 
 
 /*
@@ -1110,6 +1114,7 @@ struct charset_info_st my_charset_utf8mb3_general_mysql500_ci=
 };
 
 
+#ifndef MYLITE_DISABLE_GENERAL1400_COLLATIONS
 struct charset_info_st my_charset_utf8mb3_general1400_as_ci=
 {
   579,0,0,              /* number       */
@@ -1139,6 +1144,7 @@ struct charset_info_st my_charset_utf8mb3_general1400_as_ci=
   &my_charset_utf8mb3_handler,
   &my_collation_utf8mb3_general1400_as_ci_handler
 };
+#endif
 
 
 struct charset_info_st my_charset_utf8mb3_bin=
@@ -3201,7 +3207,7 @@ static MY_COLLATION_HANDLER my_collation_utf8mb4_nopad_bin_handler =
 };
 
 
-
+#ifndef MYLITE_DISABLE_GENERAL1400_COLLATIONS
 static inline int my_weight_mb4_utf8mb4_general1400_as_ci(uchar b0, uchar b1, uchar b2, uchar b3)
 {
   my_wc_t wc= UTF8MB4_CODE(b0, b1, b2, b3);
@@ -3299,6 +3305,7 @@ static MY_COLLATION_HANDLER my_collation_utf8mb4_general1400_as_ci_handler=
   my_ci_get_collation_name_generic,
   my_ci_eq_collation_generic
 };
+#endif
 
 
 MY_CHARSET_HANDLER my_charset_utf8mb4_handler=
@@ -3476,6 +3483,7 @@ int my_wc_mb_utf8mb4_bmp_only(CHARSET_INFO *cs, my_wc_t wc, uchar *r, uchar *e)
 }
 
 
+#ifndef MYLITE_DISABLE_GENERAL1400_COLLATIONS
 struct charset_info_st my_charset_utf8mb4_general1400_as_ci=
 {
   611,0,0,              /* number       */
@@ -3505,6 +3513,7 @@ struct charset_info_st my_charset_utf8mb4_general1400_as_ci=
   &my_charset_utf8mb4_handler,
   &my_collation_utf8mb4_general1400_as_ci_handler
 };
+#endif
 
 
 #endif /* HAVE_CHARSET_utf8mb4 */

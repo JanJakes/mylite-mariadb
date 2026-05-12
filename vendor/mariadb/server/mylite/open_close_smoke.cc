@@ -53,6 +53,7 @@ struct SmokeResult
   std::string exec_scalar_rows;
   std::string exec_collation_rows;
   std::string exec_uca_collation_message;
+  std::string exec_general1400_collation_message;
   std::string exec_oracle_mode_message;
   std::string exec_oracle_function_standard_rows;
   std::string exec_oracle_function_message;
@@ -752,6 +753,24 @@ static bool check_collation_profile(const SmokeOptions &options,
         result->exec_uca_collation_message.find("utf8mb4_uca1400_ai_ci") ==
           std::string::npos)
       ok= false;
+
+#ifdef MYLITE_DISABLE_GENERAL1400_COLLATIONS
+    errmsg= nullptr;
+    rc= mylite_exec(db,
+                    "SELECT _utf8mb4'a' COLLATE utf8mb4_general1400_as_ci",
+                    nullptr, nullptr, &errmsg);
+    if (errmsg)
+    {
+      result->exec_general1400_collation_message= errmsg;
+      mylite_free(errmsg);
+    }
+    ok= record_result(result, "collation_general1400_select", MYLITE_ERROR,
+                      rc, db) && ok;
+    if (mylite_mariadb_errno(db) != ER_UNKNOWN_COLLATION ||
+        result->exec_general1400_collation_message.find(
+          "utf8mb4_general1400_as_ci") == std::string::npos)
+      ok= false;
+#endif
 #else
     ok= exec_query_capture(
           db,
@@ -2725,6 +2744,9 @@ static void write_report(const SmokeOptions &options,
   if (!result.exec_uca_collation_message.empty())
     report << "exec_uca_collation_message="
            << result.exec_uca_collation_message << "\n";
+  if (!result.exec_general1400_collation_message.empty())
+    report << "exec_general1400_collation_message="
+           << result.exec_general1400_collation_message << "\n";
   if (!result.exec_oracle_mode_message.empty())
     report << "exec_oracle_mode_message="
            << result.exec_oracle_mode_message << "\n";

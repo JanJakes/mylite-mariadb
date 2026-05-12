@@ -349,7 +349,7 @@ typedef struct  user_conn {
   */
   static CHARSET_INFO *user_host_key_charset_info_for_hash()
   {
-    return &my_charset_utf8mb3_general1400_as_ci;
+    return &MYLITE_UTF8MB3_INTERNAL_CI;
   }
 } USER_CONN;
 
@@ -375,7 +375,7 @@ typedef struct st_user_stats
   char user[MY_MAX(USERNAME_LENGTH, LIST_PROCESS_HOST_LEN) + 1];
   static CHARSET_INFO *user_key_charset_info_for_hash()
   {
-    return &my_charset_utf8mb3_general1400_as_ci;
+    return &MYLITE_UTF8MB3_INTERNAL_CI;
   }
   // Account name the user is mapped to when this is a user from mapped_user.
   // Otherwise, the same value as user.

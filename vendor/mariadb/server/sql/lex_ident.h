@@ -43,7 +43,7 @@ struct Compare_ident_ci
 {
   CHARSET_INFO *charset_info() const
   {
-    return &my_charset_utf8mb3_general1400_as_ci;
+    return &MYLITE_UTF8MB3_INTERNAL_CI;
   }
 };
 
