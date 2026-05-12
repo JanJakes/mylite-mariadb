@@ -189,6 +189,7 @@ inherited sidecars.
 | 49 | `system-schema-namespace-policy` | Done | Keep server-owned schema names from becoming ordinary MyLite catalog schemas before replacement system surfaces are designed. |
 | 50 | `foreign-server-cache-startup` | Done | Initialize the embedded foreign-server cache without probing missing `mysql.servers` system tables at startup. |
 | 51 | `aria-startup-sidecars` | Done | Omit Aria from the default MyLite embedded profile and remove the remaining inherited Aria log/control sidecar exception. |
+| 52 | `seed-probe-removal` | In progress | Remove the hard-coded `mylite.probe` seed table now that user-created catalog tables cover discovery. |
 
 ## Size and profile direction
 
