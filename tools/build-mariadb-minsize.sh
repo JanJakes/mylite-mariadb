@@ -42,6 +42,9 @@ build_inside_container() {
   fi
 
   mkdir -p "${build_dir}"
+  mkdir -p "${build_dir}/tmp"
+  export TMPDIR
+  TMPDIR="$(cd "${build_dir}/tmp" && pwd)"
 
   local enable_section_gc
   enable_section_gc="${MYLITE_ENABLE_SECTION_GC:-ON}"
