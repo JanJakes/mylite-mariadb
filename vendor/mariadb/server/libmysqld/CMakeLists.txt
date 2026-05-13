@@ -119,6 +119,8 @@ OPTION(MYLITE_DISABLE_PLSQL_CURSOR_ATTRIBUTES
   "Disable PL/SQL cursor attribute expressions in the embedded library" OFF)
 OPTION(MYLITE_DISABLE_STORED_FUNCTION_LOOKUP
   "Disable stored function lookup for unknown SQL functions in the embedded library" OFF)
+OPTION(MYLITE_DISABLE_STORED_PROGRAM_RUNTIME
+  "Disable stored program compiler and runtime in the embedded library" OFF)
 OPTION(MYLITE_DISABLE_SYSTEM_VERSIONING
   "Disable system-versioned table runtime in the embedded library" OFF)
 OPTION(MYLITE_DISABLE_SQL_SEQUENCE
@@ -161,6 +163,9 @@ IF(MYLITE_DISABLE_PLSQL_CURSOR_ATTRIBUTES)
 ENDIF()
 IF(MYLITE_DISABLE_STORED_FUNCTION_LOOKUP)
   ADD_DEFINITIONS(-DMYLITE_DISABLE_STORED_FUNCTION_LOOKUP)
+ENDIF()
+IF(MYLITE_DISABLE_STORED_PROGRAM_RUNTIME)
+  ADD_DEFINITIONS(-DMYLITE_DISABLE_STORED_PROGRAM_RUNTIME)
 ENDIF()
 IF(MYLITE_DISABLE_SYSTEM_VERSIONING)
   ADD_DEFINITIONS(-DMYLITE_DISABLE_SYSTEM_VERSIONING)
@@ -506,6 +511,16 @@ IF(MYLITE_DISABLE_SQL_SEQUENCE)
     ../sql/ha_sequence.cc
     ../sql/ha_sequence.h)
   LIST(APPEND SQL_EMBEDDED_SOURCES mylite_sql_sequence_stub.cc)
+ENDIF()
+IF(MYLITE_DISABLE_STORED_PROGRAM_RUNTIME)
+  LIST(REMOVE_ITEM SQL_EMBEDDED_SOURCES
+    ../sql/sp.cc
+    ../sql/sp_cache.cc
+    ../sql/sp_head.cc
+    ../sql/sp_pcontext.cc
+    ../sql/sp_rcontext.cc
+    ../sql/sp_instr.cc)
+  LIST(APPEND SQL_EMBEDDED_SOURCES mylite_stored_program_runtime_stub.cc)
 ENDIF()
 IF(MYLITE_DISABLE_HELP_COMMAND)
   LIST(REMOVE_ITEM SQL_EMBEDDED_SOURCES ../sql/sql_help.cc)

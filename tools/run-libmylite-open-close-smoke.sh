@@ -71,6 +71,7 @@ run_inside_container() {
   assert_no_status_metadata_symbols "${smoke}"
   assert_no_option_help_text_strings "${smoke}"
   assert_no_query_log_symbols "${smoke}"
+  assert_no_full_stored_program_objects "${abs_build_dir}/libmysqld/libmariadbd.a"
 
   local smoke_log="${abs_build_dir}/libmylite-open-close-output.log"
   local exclusive_log="${abs_build_dir}/libmylite-open-close-exclusive-output.log"
@@ -241,6 +242,22 @@ assert_no_query_log_symbols() {
     return 1
   fi
   printf "libmylite query log symbols: none\n"
+}
+
+assert_no_full_stored_program_objects() {
+  local archive="$1"
+  local objects
+  objects="$(
+    ar t "${archive}" 2>/dev/null \
+      | grep -E "^(sp|sp_cache|sp_head|sp_instr|sp_pcontext|sp_rcontext)\\.cc\\.o$" \
+      || true
+  )"
+  if [[ -n "${objects}" ]]; then
+    printf "unexpected stored-program runtime objects in %s:\n%s\n" \
+      "${archive}" "${objects}" >&2
+    return 1
+  fi
+  printf "libmylite stored-program runtime objects: none\n"
 }
 
 main "$@"

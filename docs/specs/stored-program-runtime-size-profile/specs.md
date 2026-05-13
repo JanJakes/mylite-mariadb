@@ -183,6 +183,23 @@ Expected outcomes:
 - Execution-body fallback: lower risk, probably tens of KiB linked reduction,
   with much smaller archive impact because the original objects remain.
 
+Implemented full stub replacement results from
+`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-stored-program-runtime`:
+
+| Artifact | Bytes | Delta from query-log profile |
+| --- | ---: | ---: |
+| `libmysqld/libmariadbd.a` | 26,682,446 | -626,652 |
+| `libmysqld/libsql_embedded.a` | 25,435,434 | -652,096 |
+| `mylite_stored_program_runtime_stub.cc.o` | 278,056 | +278,056 |
+| unstripped `mylite-open-close-smoke` | 7,101,072 | -124,720 |
+| stripped `mylite-open-close-smoke` | 5,074,696 | -93,712 |
+| unstripped `mylite-compatibility-smoke` | 6,948,584 | -124,496 |
+| stripped `mylite-compatibility-smoke` | 4,946,280 | -93,616 |
+
+The final linked open/close section profile changed from `text=4,105,325`,
+`data=1,059,720`, `bss=227,433`, total `5,392,478` to `text=4,016,597`,
+`data=1,054,928`, `bss=226,265`, total `5,297,790`.
+
 ## License, Trademark, and Dependency Impact
 
 This is a GPL-2.0-only MariaDB-derived build-profile change. It adds no new

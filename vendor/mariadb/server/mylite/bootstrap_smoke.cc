@@ -49,6 +49,10 @@ static int run_smoke(const SmokeOptions &options,
                      SmokeResult *result);
 static bool fetch_select_one(MYSQL *mysql, SmokeResult *result);
 static bool check_unsupported_statements(MYSQL *mysql, SmokeResult *result);
+static bool is_expected_unsupported_error(const std::string &label,
+                                          unsigned int error,
+                                          const std::string &message);
+static bool is_stored_program_runtime_label(const std::string &label);
 static void write_report(const SmokeOptions &options,
                          const std::vector<std::string> &server_args,
                          const SmokeResult &result);
@@ -335,7 +339,8 @@ static bool check_unsupported_statements(MYSQL *mysql, SmokeResult *result)
       unsupported.error= mysql_errno(mysql);
       unsupported.sqlstate= mysql_sqlstate(mysql);
       unsupported.message= mysql_error(mysql);
-      unsupported.passed= unsupported.error == ER_OPTION_PREVENTS_STATEMENT;
+      unsupported.passed= is_expected_unsupported_error(
+          unsupported.label, unsupported.error, unsupported.message);
       ok= ok && unsupported.passed;
     }
 
@@ -345,6 +350,27 @@ static bool check_unsupported_statements(MYSQL *mysql, SmokeResult *result)
   if (!ok)
     result->message= "unsupported statement check failed";
   return ok;
+}
+
+static bool is_expected_unsupported_error(const std::string &label,
+                                          unsigned int error,
+                                          const std::string &message)
+{
+  if (error == ER_OPTION_PREVENTS_STATEMENT)
+    return true;
+
+  return error == ER_NOT_SUPPORTED_YET &&
+         is_stored_program_runtime_label(label) &&
+         message.find("stored program runtime in the MyLite minsize profile") !=
+             std::string::npos;
+}
+
+static bool is_stored_program_runtime_label(const std::string &label)
+{
+  return label == "create_trigger" ||
+         label == "create_procedure" ||
+         label == "create_stored_function" ||
+         label == "create_event";
 }
 
 static void write_report(const SmokeOptions &options,
