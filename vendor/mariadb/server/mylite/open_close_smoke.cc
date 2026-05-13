@@ -56,6 +56,9 @@ struct SmokeResult
   std::string exec_general1400_collation_message;
   std::string exec_locale_profile_rows;
   std::string exec_locale_removed_message;
+  std::string exec_time_zone_rows;
+  std::string exec_time_zone_named_message;
+  std::string exec_time_zone_named_convert_rows;
   std::string exec_oracle_mode_message;
   std::string exec_oracle_function_standard_rows;
   std::string exec_oracle_function_message;
@@ -183,6 +186,8 @@ static bool check_collation_profile(const SmokeOptions &options,
                                     SmokeResult *result);
 static bool check_locale_profile(const SmokeOptions &options,
                                  SmokeResult *result);
+static bool check_time_zone_profile(const SmokeOptions &options,
+                                    SmokeResult *result);
 static bool check_oracle_mode_unsupported(const SmokeOptions &options,
                                           SmokeResult *result);
 static bool check_oracle_functions_unsupported(const SmokeOptions &options,
@@ -395,6 +400,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "locale_profile";
   ok= check_locale_profile(options, result) && ok;
+
+  result->phase= "time_zone_profile";
+  ok= check_time_zone_profile(options, result) && ok;
 
   result->phase= "oracle_mode_unsupported";
   ok= check_oracle_mode_unsupported(options, result) && ok;
@@ -924,6 +932,65 @@ static bool check_locale_profile(const SmokeOptions &options,
 
     rc= mylite_close(db);
     ok= record_result(result, "locale_profile_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+  return ok;
+}
+
+static bool check_time_zone_profile(const SmokeOptions &options,
+                                    SmokeResult *result)
+{
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "time_zone_profile_open", MYLITE_OK, rc, db);
+  if (db)
+  {
+    ok= exec_statement(db, "SET time_zone='+00:00'",
+                       "time_zone_profile_set_offset", result) && ok;
+
+    ExecCapture capture;
+    ok= exec_query_capture(
+          db,
+          "SELECT @@time_zone, "
+          "CONVERT_TZ('2000-01-01 00:00:00','+00:00','+01:00')",
+          "time_zone_profile_select", &capture, result) && ok;
+    result->exec_time_zone_rows= join_strings(capture.rows, ",");
+    if (result->exec_time_zone_rows != "+00:00:2000-01-01 01:00:00")
+      ok= false;
+
+    ok= exec_statement(db, "SET time_zone='SYSTEM'",
+                       "time_zone_profile_set_system", result) && ok;
+
+#ifdef MYLITE_DISABLE_TIME_ZONE_TABLES
+    char *errmsg= nullptr;
+    rc= mylite_exec(db, "SET time_zone='Europe/Prague'", nullptr, nullptr,
+                    &errmsg);
+    if (errmsg)
+    {
+      result->exec_time_zone_named_message= errmsg;
+      mylite_free(errmsg);
+    }
+    ok= record_result(result, "time_zone_profile_set_named", MYLITE_ERROR,
+                      rc, db) && ok;
+    if (mylite_mariadb_errno(db) != ER_UNKNOWN_TIME_ZONE ||
+        result->exec_time_zone_named_message.find("Europe/Prague") ==
+          std::string::npos)
+      ok= false;
+
+    ExecCapture named_capture;
+    ok= exec_query_capture(
+          db,
+          "SELECT CONVERT_TZ('2000-01-01 00:00:00',"
+          "'Europe/Prague','+00:00')",
+          "time_zone_profile_named_convert", &named_capture, result) && ok;
+    result->exec_time_zone_named_convert_rows=
+      join_strings(named_capture.rows, ",");
+    if (result->exec_time_zone_named_convert_rows != "NULL")
+      ok= false;
+#endif
+
+    rc= mylite_close(db);
+    ok= record_result(result, "time_zone_profile_close", MYLITE_OK, rc,
                       nullptr) && ok;
   }
   return ok;
@@ -3549,6 +3616,14 @@ static void write_report(const SmokeOptions &options,
   if (!result.exec_locale_removed_message.empty())
     report << "exec_locale_removed_message="
            << result.exec_locale_removed_message << "\n";
+  if (!result.exec_time_zone_rows.empty())
+    report << "exec_time_zone_rows=" << result.exec_time_zone_rows << "\n";
+  if (!result.exec_time_zone_named_message.empty())
+    report << "exec_time_zone_named_message="
+           << result.exec_time_zone_named_message << "\n";
+  if (!result.exec_time_zone_named_convert_rows.empty())
+    report << "exec_time_zone_named_convert_rows="
+           << result.exec_time_zone_named_convert_rows << "\n";
   if (!result.exec_oracle_mode_message.empty())
     report << "exec_oracle_mode_message="
            << result.exec_oracle_mode_message << "\n";
