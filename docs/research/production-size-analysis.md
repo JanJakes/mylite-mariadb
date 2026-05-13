@@ -34,6 +34,7 @@ The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 - `MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS=ON`
 - `MYLITE_DISABLE_SERVER_ENCRYPTION=ON`
 - `MYLITE_DISABLE_OPENSSL_DIGESTS=ON`
+- `MYLITE_DISABLE_OPTIMIZER_TRACE=ON`
 - `MYLITE_DISABLE_ZLIB_COMPRESSION=ON`
 - `MYLITE_DISABLE_REGEX_FUNCTIONS=ON`
 - `MYLITE_DISABLE_SERVER_UTILITY_FUNCTIONS=ON`
@@ -85,8 +86,9 @@ include the `type-plugin-size-profile`, `charset-small-profile`, and
 `sql-crypto-function-size-profile`, `server-encryption-size-profile`,
 `openssl-digest-size-profile`, and the deeper
 `no-binlog-core-size-profile` follow-up attempts, and
-`tc-log-mmap-size-profile`, `append-query-string-size-profile`, and
-`rpl-gtid-state-size-profile`. Together these remove the built-in
+`tc-log-mmap-size-profile`, `append-query-string-size-profile`,
+`rpl-gtid-state-size-profile`, and `optimizer-trace-size-profile`. Together
+these remove the built-in
 `type_geom`, `type_inet`, `type_uuid`, `sequence`, `thread_pool_info`,
 `user_variables`, `userstat`, `mhnsw`, `csv`, and `myisammrg` plugins, set
 `WITH_EXTRA_CHARSETS=none`, omit the Oracle SQL-mode parser, omit XML, GIS, and
@@ -146,7 +148,9 @@ transaction coordinator `tc.log` implementation while keeping inert status
 variables, and move the remaining SQL string-rendering helper out of
 `log_event_server.cc` so the full event-server object can be omitted, and
 replace the remaining GTID binlog-state lifecycle shell with a tiny no-binlog
-stub so the full `rpl_gtid.cc` object can be omitted.
+stub so the full `rpl_gtid.cc` object can be omitted, and replace optimizer
+trace diagnostics with an inert embedded stub while preserving shared JSON
+writer helpers.
 
 `no-myisam-temp-spill-size-profile` was measured separately as an opt-in
 `MYLITE_DISABLE_MYISAM_TEMP_SPILL=ON` experiment. It is not part of the current
@@ -166,39 +170,39 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 ## Current baseline
 
 The current values were measured from
-`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-rpl-gtid-state`.
+`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-optimizer-trace`.
 Paths below use the default build directory names for readability.
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
-| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 30,257,244 | 28.86 | Main embedded MariaDB archive, 422 objects, stripped; section metadata grows the archive |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 30,229,492 | 28.83 | Main embedded MariaDB archive, 422 objects, stripped; section metadata grows the archive |
 | `build/mariadb-minsize/mylite/libmylite.a` | 122,800 | 0.12 | First-party public wrapper |
 | `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 388,440 | 0.37 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 7,992,176 | 7.62 | Unstripped linked smoke binary, lld RELR, section GC, ICF, reduced unwind tables, no OpenSSL runtime dependency, no retained binlog event reader, GTID-index writer, or full GTID binlog-state code, no `log_event_server.cc.o`, no real mmap `tc.log` transaction coordinator, no server encryption hooks, no window functions, no UDF runtime, no SQL crypto/password functions, no VIO TLS transport, no `ENCRYPT()`, no legacy DES, no `KDF()`, no zlib compression, and no dynamic plugin loading |
-| stripped `mylite-open-close-smoke` copy | 5,750,512 | 5.48 | `strip --strip-unneeded` on copied binary |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 7,983,152 | 7.61 | Unstripped linked smoke binary, lld RELR, section GC, ICF, reduced unwind tables, no OpenSSL runtime dependency, no retained binlog event reader, GTID-index writer, or full GTID binlog-state code, no full optimizer trace implementation, no `log_event_server.cc.o`, no real mmap `tc.log` transaction coordinator, no server encryption hooks, no window functions, no UDF runtime, no SQL crypto/password functions, no VIO TLS transport, no `ENCRYPT()`, no legacy DES, no `KDF()`, no zlib compression, and no dynamic plugin loading |
+| stripped `mylite-open-close-smoke` copy | 5,743,824 | 5.48 | `strip --strip-unneeded` on copied binary |
 
 The linked smoke binary has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 4,531,232 |
-| data | 1,215,936 |
-| bss | 241,881 |
-| total `size` decimal | 5,989,049 |
+| text | 4,524,504 |
+| data | 1,215,920 |
+| bss | 240,377 |
+| total `size` decimal | 5,980,801 |
 
 Largest linked sections in the open-close smoke binary:
 
 | Section | Bytes | Interpretation |
 | --- | ---: | --- |
-| `.text` | 2,801,268 | Executable code |
-| `.data.rel.ro` | 1,003,472 | Relocated read-only data |
-| `.rodata` | 972,747 | Parser tables, SQL metadata, constants, retained Unicode data |
-| `.eh_frame` | 516,336 | Unwind metadata |
+| `.text` | 2,796,636 | Executable code |
+| `.data.rel.ro` | 1,003,456 | Relocated read-only data |
+| `.rodata` | 972,619 | Parser tables, SQL metadata, constants, retained Unicode data |
+| `.eh_frame` | 514,848 | Unwind metadata |
 | `.data` | 184,520 | Writable data |
 | `.bss` | 238,865 | Zero-initialized writable data |
-| `.eh_frame_hdr` | 108,460 | Unwind table index |
+| `.eh_frame_hdr` | 108,164 | Unwind table index |
 | `.rela.dyn` | 45,984 | Remaining unpacked dynamic relocations |
-| `.gcc_except_table` | 40,788 | Exception metadata |
+| `.gcc_except_table` | 40,604 | Exception metadata |
 | `.relr.dyn` | 18,424 | Packed relative relocations |
 
 If a Linux distribution bundle vendors the current dynamic dependencies, it
@@ -320,6 +324,7 @@ The current built-in plugins are:
 | `tc-log-mmap-size-profile` after no-binlog core follow-up | 30,685,528 | -12,719,904 | 5,751,536 | -13,580,368 | Passes current smokes and harness; omits the inherited mmap-backed `tc.log` transaction coordinator implementation and leaves inert status variables |
 | `append-query-string-size-profile` after TC log mmap | 30,385,682 | -13,019,750 | 5,751,112 | -13,580,792 | Passes current smokes and harness; moves the retained SQL string-rendering helper to the minsize stub and omits `log_event_server.cc.o` |
 | `rpl-gtid-state-size-profile` after append-query-string | 30,257,244 | -13,148,188 | 5,750,512 | -13,581,392 | Passes current smokes and harness; replaces retained no-binlog GTID state lifecycle methods with a tiny stub and omits `rpl_gtid.cc.o` |
+| `optimizer-trace-size-profile` after RPL GTID state | 30,229,492 | -13,175,940 | 5,743,824 | -13,588,080 | Passes current smokes and harness; replaces optimizer trace diagnostics with an inert embedded stub while preserving shared JSON writer helpers |
 | `no-myisam-temp-spill-size-profile` after no-binlog-core | 32,836,602 | -10,568,830 | 6,437,408 | -12,894,496 | Opt-in experiment only; open/close smoke passes, but storage/catalog harness fails because schema-table queries need disk temp tables |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
 | Strip archive with `strip --strip-unneeded` | 41,873,048 | -1,532,384 | n/a | n/a | Higher risk than `strip -g` for static archives |
@@ -343,7 +348,7 @@ profile now passes current smokes while retaining the compiled default
 `utf8mb4_uca1400_ai_ci`.
 
 Stripping the current linked open-close smoke binary reduces it from
-7,992,176 bytes to 5,750,512 bytes, saving 2,241,664 bytes, or 2.14 MiB. That
+7,983,152 bytes to 5,743,824 bytes, saving 2,239,328 bytes, or 2.14 MiB. That
 remains the lowest-risk packaging win for any copied executable or
 shared-library style artifact.
 
@@ -511,6 +516,15 @@ top of the append-query-string profile, it reduced the static archive by
 longer contains `rpl_gtid.cc.o`; the replacement stub object is 4,136 bytes.
 The linked smoke retains only tiny `rpl_binlog_state` lifecycle symbols, and
 the compatibility harness still passes.
+
+The `optimizer-trace-size-profile` attempt then removed MariaDB's full
+optimizer trace diagnostics from the aggressive embedded profile while keeping
+the shared JSON writer helpers needed outside optimizer tracing. On top of the
+RPL GTID state profile, it reduced the static archive by 27,752 bytes and the
+stripped linked smoke by 6,688 bytes. The archive no longer contains
+`opt_trace.cc.o`; the replacement stub object is 22,104 bytes because it keeps
+`Json_writer::add_table_name()` and `Json_writer::add_str(Item*)`. The
+compatibility harness still passes.
 
 The LTO build reduced the stripped linked smoke binary by 1.25 MiB, but the
 static archive became 326.61 MiB and GCC emitted type/ODR mismatch warnings
