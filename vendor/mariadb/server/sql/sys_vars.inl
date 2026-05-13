@@ -73,6 +73,11 @@ extern const char *UNUSED_HELP;
 #define REVERSE(X) ~(X)
 #define DEPRECATED(V, REPL) (check_deprecated_version<V>(), REPL)
 #define DEPRECATED_NO_REPLACEMENT(V) DEPRECATED(V, "")
+#ifdef MYLITE_DISABLE_SYSVAR_HELP_TEXT
+#define MYLITE_SYSVAR_HELP_TEXT(X) ""
+#else
+#define MYLITE_SYSVAR_HELP_TEXT(X) X
+#endif
 
 #define session_var(THD, TYPE) (*(TYPE*)session_var_ptr(THD))
 #define global_var(TYPE) (*(TYPE*)global_var_ptr())
@@ -182,7 +187,7 @@ public:
           on_check_function on_check_func=0,
           on_update_function on_update_func=0,
           const char *substitute=0)
-    : sys_var(&all_sys_vars, name_arg, comment, flag_args, off, getopt.id,
+    : sys_var(&all_sys_vars, name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, getopt.id,
               getopt.arg_type, SHOWT, def_val, lock, binlog_status_arg,
               on_check_func, on_update_func, substitute)
   {
@@ -321,7 +326,7 @@ public:
           enum binlog_status_enum binlog_status_arg,
           on_check_function on_check_func, on_update_function on_update_func,
           const char *substitute, int *hidden_values)
-    : sys_var(&all_sys_vars, name_arg, comment, flag_args, off, getopt.id,
+    : sys_var(&all_sys_vars, name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, getopt.id,
               getopt.arg_type, show_val_type_arg, def_val, lock,
               binlog_status_arg, on_check_func,
               on_update_func, substitute)
@@ -388,7 +393,7 @@ public:
           on_check_function on_check_func=0,
           on_update_function on_update_func=0,
           const char *substitute=0)
-    : Sys_var_typelib(name_arg, comment, flag_args, off, getopt,
+    : Sys_var_typelib(name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, getopt,
                       SHOW_CHAR, values, def_val, lock,
                       binlog_status_arg, on_check_func, on_update_func,
                       substitute, nullptr)
@@ -459,7 +464,7 @@ public:
           on_check_function on_check_func=0,
           on_update_function on_update_func=0,
           const char *substitute=0)
-    : Sys_var_typelib(name_arg, comment, flag_args, off, getopt,
+    : Sys_var_typelib(name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, getopt,
                       SHOW_MY_BOOL, bool_values, def_val, lock,
                       binlog_status_arg, on_check_func, on_update_func,
                       substitute, nullptr)
@@ -520,7 +525,7 @@ public:
           on_check_function on_check_func=0,
           on_update_function on_update_func=0,
           const char *substitute=0)
-    : sys_var(&all_sys_vars, name_arg, comment, flag_args, off, getopt.id,
+    : sys_var(&all_sys_vars, name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, getopt.id,
               getopt.arg_type, SHOW_CHAR_PTR, (intptr)def_val,
               lock, binlog_status_arg, on_check_func, on_update_func,
               substitute)
@@ -650,7 +655,7 @@ public:
                       const char *comment,
                       CMD_LINE getopt,
                       const char *def_val, PolyLock *lock= 0) :
-    Sys_var_charptr(name_arg, comment,
+    Sys_var_charptr(name_arg, MYLITE_SYSVAR_HELP_TEXT(comment),
                     SESSION_VAR(session_track_system_variables),
                     getopt, def_val, lock,
                     VARIABLE_NOT_IN_BINLOG, 0, 0, 0)
@@ -706,7 +711,7 @@ class Sys_var_proxy_user: public sys_var
 {
 public:
   Sys_var_proxy_user(const char *name_arg, const char *comment)
-    : sys_var(&all_sys_vars, name_arg, comment,
+    : sys_var(&all_sys_vars, name_arg, MYLITE_SYSVAR_HELP_TEXT(comment),
               sys_var::READONLY+sys_var::ONLY_SESSION, 0, NO_GETOPT,
               NO_ARG, SHOW_CHAR, 0, NULL, VARIABLE_NOT_IN_BINLOG,
               NULL, NULL, NULL)
@@ -744,7 +749,7 @@ class Sys_var_external_user : public Sys_var_proxy_user
 {
 public:
   Sys_var_external_user(const char *name_arg, const char *comment_arg)
-    : Sys_var_proxy_user (name_arg, comment_arg)
+    : Sys_var_proxy_user(name_arg, MYLITE_SYSVAR_HELP_TEXT(comment_arg))
   {}
 
 protected:
@@ -764,7 +769,7 @@ private:
 public:
   Sys_var_rpl_filter(const char *name, int getopt_id, const char *comment,
                      privilege_t access_global)
-    : sys_var(&all_sys_vars, name, comment, sys_var::GLOBAL, 0, NO_GETOPT,
+    : sys_var(&all_sys_vars, name, MYLITE_SYSVAR_HELP_TEXT(comment), sys_var::GLOBAL, 0, NO_GETOPT,
               NO_ARG, SHOW_CHAR, 0, NULL, VARIABLE_NOT_IN_BINLOG,
               NULL, NULL, NULL), opt_id(getopt_id),
       m_access_global(access_global)
@@ -814,7 +819,7 @@ private:
 public:
   Sys_var_binlog_filter(const char *name, int getopt_id, const char *comment,
                      privilege_t access_global)
-    : sys_var(&all_sys_vars, name, comment, sys_var::READONLY+sys_var::GLOBAL, 0, NO_GETOPT,
+    : sys_var(&all_sys_vars, name, MYLITE_SYSVAR_HELP_TEXT(comment), sys_var::READONLY+sys_var::GLOBAL, 0, NO_GETOPT,
               NO_ARG, SHOW_CHAR, 0, NULL, VARIABLE_NOT_IN_BINLOG,
               NULL, NULL, NULL), opt_id(getopt_id),
       m_access_global(access_global)
@@ -887,7 +892,7 @@ public:
           on_check_function on_check_func=0,
           on_update_function on_update_func=0,
           const char *substitute=0)
-    : Sys_var_charptr(name_arg, comment, flag_args, off, sizeof(char*),
+    : Sys_var_charptr(name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, sizeof(char*),
               getopt, def_val, lock, binlog_status_arg,
               on_check_func, on_update_func, substitute)
   {
@@ -934,7 +939,7 @@ public:
                on_check_function on_check_func=0,
                on_update_function on_update_func=0,
                const char *substitute=0)
-    : sys_var(&all_sys_vars, name_arg, comment, flag_args,
+    : sys_var(&all_sys_vars, name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args,
               (char*)&current_dbug_option-(char*)&global_system_variables, getopt.id,
               getopt.arg_type, SHOW_CHAR, (intptr)def_val,
               lock, binlog_status_arg, on_check_func, on_update_func,
@@ -1016,7 +1021,7 @@ public:
           on_check_function on_check_func,
           keycache_update_function on_update_func,
           const char *substitute=0)
-    : Sys_var_ulonglong(name_arg, comment, flag_args, off, size,
+    : Sys_var_ulonglong(name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, size,
               getopt, min_val, max_val, def_val,
               block_size, lock, binlog_status_arg, on_check_func, 0,
               substitute),
@@ -1177,7 +1182,7 @@ public:
           on_check_function on_check_func=0,
           on_update_function on_update_func=0,
           const char *substitute=0)
-    : sys_var(&all_sys_vars, name_arg, comment, flag_args, off, getopt.id,
+    : sys_var(&all_sys_vars, name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, getopt.id,
               getopt.arg_type, SHOW_DOUBLE,
               (longlong) getopt_double2ulonglong(def_val),
               lock, binlog_status_arg, on_check_func, on_update_func,
@@ -1235,7 +1240,7 @@ public:
           on_check_function on_check_func=0,
           on_update_function on_update_func=0,
           const char *substitute=0)
-    :Sys_var_double(name_arg, comment, flag_args, off, size, getopt,
+    :Sys_var_double(name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, size, getopt,
                    min_val, max_val, def_val * arg_cost_adjust, lock,
                    binlog_status_arg,
                    on_check_func,
@@ -1305,7 +1310,7 @@ class Sys_var_engine_optimizer_cost: public Sys_var_optimizer_cost
           double min_val, double max_val, double def_val,
           long cost_adjust, PolyLock *lock= 0,
           const char *substitute=0)
-    : Sys_var_optimizer_cost(name_arg, comment, flag_args, off, size,
+    : Sys_var_optimizer_cost(name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, size,
                              getopt, min_val, max_val, def_val, cost_adjust,
                              lock, VARIABLE_NOT_IN_BINLOG, 0,
                              0, substitute)
@@ -1371,7 +1376,7 @@ public:
           on_check_function on_check_func=0,
           on_update_function on_update_func=0,
           const char *substitute=0)
-    : Sys_var_int(name_arg, comment, SESSION, off, size, getopt,
+    : Sys_var_int(name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), SESSION, off, size, getopt,
               min_val, max_val, def_val, block_size,
               lock, binlog_status_arg, on_check_func, on_update_func,
               substitute)
@@ -1409,7 +1414,7 @@ public:
           on_check_function on_check_func=0,
           on_update_function on_update_func=0,
           const char *substitute=0, int *hidden_values=nullptr)
-    : Sys_var_typelib(name_arg, comment, flag_args, off, getopt,
+    : Sys_var_typelib(name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, getopt,
                       SHOW_CHAR, values, def_val, lock,
                       binlog_status_arg, on_check_func, on_update_func,
                       substitute, hidden_values)
@@ -1522,7 +1527,7 @@ public:
           on_check_function on_check_func=0,
           on_update_function on_update_func=0,
           const char *substitute=0,int *hidden_values=nullptr)
-    : Sys_var_typelib(name_arg, comment, flag_args, off, getopt,
+    : Sys_var_typelib(name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, getopt,
                       SHOW_CHAR, values, def_val, lock,
                       binlog_status_arg, on_check_func, on_update_func,
                       substitute, hidden_values)
@@ -1656,7 +1661,7 @@ public:
           on_check_function on_check_func=0,
           on_update_function on_update_func=0,
           const char *substitute=0)
-    : sys_var(&all_sys_vars, name_arg, comment, flag_args, off, getopt.id,
+    : sys_var(&all_sys_vars, name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, getopt.id,
               getopt.arg_type, SHOW_CHAR, (intptr)def_val,
               lock, binlog_status_arg, on_check_func, on_update_func,
               substitute),
@@ -1793,7 +1798,7 @@ public:
           on_check_function on_check_func=0,
           on_update_function on_update_func=0,
           const char *substitute=0)
-    : sys_var(&all_sys_vars, name_arg, comment, flag_args, off, getopt.id,
+    : sys_var(&all_sys_vars, name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, getopt.id,
               getopt.arg_type, SHOW_CHAR, (intptr)def_val,
               lock, binlog_status_arg, on_check_func, on_update_func,
               substitute)
@@ -1884,7 +1889,7 @@ public:
                on_check_function on_check_func=0,
                on_update_function on_update_func=0,
                const char *substitute=0)
-    : sys_var(&all_sys_vars, name_arg, comment, flag_args, 0, getopt.id,
+    : sys_var(&all_sys_vars, name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, 0, getopt.id,
               getopt.arg_type, SHOW_CHAR, (intptr)def_val,
               lock, binlog_status_arg, on_check_func, on_update_func,
               substitute)
@@ -1980,7 +1985,7 @@ public:
           on_check_function on_check_func=0,
           on_update_function on_update_func=0,
           const char *substitute=0, int *hidden_values=nullptr)
-    : Sys_var_typelib(name_arg, comment, flag_args, off, getopt,
+    : Sys_var_typelib(name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, getopt,
                       SHOW_MY_BOOL, bool_values, def_val, lock,
                       binlog_status_arg, on_check_func, on_update_func,
                       substitute, nullptr)
@@ -2059,7 +2064,7 @@ public:
                session_special_update_function update_func_arg,
                session_special_read_function read_func_arg,
                const char *substitute=0)
-    : Sys_var_ulonglong(name_arg, comment, flag_args, 0,
+    : Sys_var_ulonglong(name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, 0,
               sizeof(ulonglong), getopt, min_val,
               max_val, 0, block_size, lock, binlog_status_arg, on_check_func, 0,
               substitute),
@@ -2114,7 +2119,7 @@ public:
                double min_val, double max_val,
                PolyLock *lock, enum binlog_status_enum binlog_status_arg,
                on_check_function on_check_func=0)
-    : Sys_var_double(name_arg, comment, flag_args, 0,
+    : Sys_var_double(name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, 0,
               sizeof(double), getopt, min_val,
               max_val, 0, lock, binlog_status_arg, on_check_func)
   {
@@ -2186,7 +2191,7 @@ public:
                on_check_function on_check_func=0,
                on_update_function on_update_func=0,
                const char *substitute=0)
-    : sys_var(&all_sys_vars, name_arg, comment, flag_args, off, getopt.id,
+    : sys_var(&all_sys_vars, name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, getopt.id,
               getopt.arg_type, SHOW_CHAR, 0,
               lock, binlog_status_arg, on_check_func, on_update_func,
               substitute)
@@ -2254,7 +2259,7 @@ public:
           on_check_function on_check_func=0,
           on_update_function on_update_func=0,
           const char *substitute=0)
-    : sys_var(&all_sys_vars, name_arg, comment, flag_args, off, getopt.id,
+    : sys_var(&all_sys_vars, name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, getopt.id,
               getopt.arg_type, SHOW_CHAR, (intptr)def_val,
               lock, binlog_status_arg, on_check_func, on_update_func,
               substitute),
@@ -2347,7 +2352,7 @@ public:
              on_check_function on_check_func=0,
              on_update_function on_update_func=0,
              const char *substitute=0)
-    : sys_var(&all_sys_vars, name_arg, comment, flag_args, off, getopt.id,
+    : sys_var(&all_sys_vars, name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, getopt.id,
               getopt.arg_type, SHOW_CHAR, (intptr)def_val,
               lock, binlog_status_arg, on_check_func, on_update_func,
               substitute)
@@ -2434,7 +2439,7 @@ public:
           on_check_function on_check_func,
           on_update_function on_update_func=0,
           const char *substitute=0)
-    :Sys_var_enum(name_arg, comment, flag_args, off, size, getopt,
+    :Sys_var_enum(name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, size, getopt,
                   values, def_val, lock, binlog_status_arg, on_check_func,
                   on_update_func, substitute)
   {}
@@ -2498,7 +2503,7 @@ public:
                        on_check_function on_check_func,
                        on_update_function on_update_func=0,
                        const char *substitute=0)
-    :Sys_var_mybool(name_arg, comment, flag_args, off, size, getopt,
+    :Sys_var_mybool(name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, size, getopt,
                     def_val, lock, binlog_status_arg, on_check_func,
                     on_update_func, substitute)
   {}
@@ -2518,7 +2523,7 @@ public:
           CMD_LINE getopt,
           const char *values[], uint def_val, PolyLock *lock= 0,
           enum binlog_status_enum binlog_status_arg= VARIABLE_NOT_IN_BINLOG)
-    :Sys_var_enum(name_arg, comment, flag_args, off, size, getopt,
+    :Sys_var_enum(name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, size, getopt,
                   values, def_val, lock, binlog_status_arg)
   {}
   bool global_update(THD *thd, set_var *var) override;
@@ -2556,7 +2561,7 @@ public:
                              ulonglong min_val, ulonglong max_val,
                              ulonglong def_val, uint block_size,
                              on_multi_source_update_function on_update_func)
-    :Sys_var_ulonglong(name_arg, comment, flag_args, off, size,
+    :Sys_var_ulonglong(name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, size,
                        getopt, min_val, max_val, def_val, block_size,
                        0, VARIABLE_NOT_IN_BINLOG, 0, update_multi_source_variable),
     mi_accessor_func(mi_accessor_arg),
@@ -2600,7 +2605,7 @@ public:
   Sys_var_gtid_current_pos(const char *name_arg,
           const char *comment, int flag_args, ptrdiff_t off, size_t size,
           CMD_LINE getopt)
-    : sys_var(&all_sys_vars, name_arg, comment, flag_args, off, getopt.id,
+    : sys_var(&all_sys_vars, name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, getopt.id,
               getopt.arg_type, SHOW_CHAR, 0, NULL, VARIABLE_NOT_IN_BINLOG,
               NULL, NULL, NULL)
   {
@@ -2649,7 +2654,7 @@ public:
   Sys_var_gtid_binlog_pos(const char *name_arg,
           const char *comment, int flag_args, ptrdiff_t off, size_t size,
           CMD_LINE getopt)
-    : sys_var(&all_sys_vars, name_arg, comment, flag_args, off, getopt.id,
+    : sys_var(&all_sys_vars, name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, getopt.id,
               getopt.arg_type, SHOW_CHAR, 0, NULL, VARIABLE_NOT_IN_BINLOG,
               NULL, NULL, NULL)
   {
@@ -2698,7 +2703,7 @@ public:
   Sys_var_gtid_slave_pos(const char *name_arg,
           const char *comment, int flag_args, ptrdiff_t off, size_t size,
           CMD_LINE getopt)
-    : sys_var(&all_sys_vars, name_arg, comment, flag_args, off, getopt.id,
+    : sys_var(&all_sys_vars, name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, getopt.id,
               getopt.arg_type, SHOW_CHAR, 0, NULL, VARIABLE_NOT_IN_BINLOG,
               NULL, NULL, NULL)
   {
@@ -2744,7 +2749,7 @@ public:
   Sys_var_gtid_binlog_state(const char *name_arg,
           const char *comment, int flag_args, ptrdiff_t off, size_t size,
           CMD_LINE getopt)
-    : sys_var(&all_sys_vars, name_arg, comment, flag_args, off, getopt.id,
+    : sys_var(&all_sys_vars, name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, getopt.id,
               getopt.arg_type, SHOW_CHAR, 0, NULL, VARIABLE_NOT_IN_BINLOG,
               NULL, NULL, NULL)
   {
@@ -2790,7 +2795,7 @@ class Sys_var_last_gtid: public sys_var
 public:
   Sys_var_last_gtid(const char *name_arg,
           const char *comment, int flag_args, CMD_LINE getopt)
-    : sys_var(&all_sys_vars, name_arg, comment, flag_args, 0, getopt.id,
+    : sys_var(&all_sys_vars, name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, 0, getopt.id,
               getopt.arg_type, SHOW_CHAR, 0, NULL, VARIABLE_NOT_IN_BINLOG,
               NULL, NULL, NULL)
   {
@@ -2840,7 +2845,7 @@ public:
           const char *comment, int flag_args, ptrdiff_t off, size_t size,
           CMD_LINE getopt, const char *values[],
           enum_slave_parallel_mode def_val)
-    : Sys_var_enum(name_arg, comment, flag_args, off, size,
+    : Sys_var_enum(name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off, size,
                    getopt, values, def_val)
   {
     option.var_type|= GET_ASK_ADDR;
@@ -2863,7 +2868,7 @@ public:
           on_check_function on_check_func= NULL,
           on_update_function on_update_func= NULL,
           const char *substitute= NULL)
-    : sys_var(&all_sys_vars, name_arg, comment, flag_args, off,
+    : sys_var(&all_sys_vars, name_arg, MYLITE_SYSVAR_HELP_TEXT(comment), flag_args, off,
               getopt.id, getopt.arg_type, SHOW_CHAR, def_val, lock,
               binlog_status_arg, on_check_func, on_update_func, substitute)
   {
@@ -2979,7 +2984,7 @@ public:
                                 int flag_args, ptrdiff_t off, size_t size,
                                 CMD_LINE getopt,
                                 enum binlog_status_enum binlog_status_arg)
-   :sys_var(&all_sys_vars, name_arg, comment,
+   :sys_var(&all_sys_vars, name_arg, MYLITE_SYSVAR_HELP_TEXT(comment),
             flag_args, off, getopt.id, getopt.arg_type,
             SHOW_CHAR,
             DEFAULT(0), nullptr, binlog_status_arg,

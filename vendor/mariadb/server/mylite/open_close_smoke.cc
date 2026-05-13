@@ -108,6 +108,7 @@ struct SmokeResult
   std::string exec_help_message;
   std::string exec_static_show_info_messages;
   std::string exec_status_metadata_rows;
+  std::string exec_sysvar_help_text_rows;
   std::string exec_processlist_metadata_messages;
   std::string exec_stored_function_lookup_messages;
   std::string exec_plsql_cursor_attribute_message;
@@ -259,6 +260,8 @@ static bool check_static_show_info_unsupported(const SmokeOptions &options,
                                                SmokeResult *result);
 static bool check_status_metadata_profile(const SmokeOptions &options,
                                           SmokeResult *result);
+static bool check_sysvar_help_text_profile(const SmokeOptions &options,
+                                           SmokeResult *result);
 static bool check_processlist_metadata_unsupported(const SmokeOptions &options,
                                                    SmokeResult *result);
 static bool check_stored_function_lookup_unsupported(
@@ -521,6 +524,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "status_metadata_profile";
   ok= check_status_metadata_profile(options, result) && ok;
+
+  result->phase= "sysvar_help_text_profile";
+  ok= check_sysvar_help_text_profile(options, result) && ok;
 
   result->phase= "processlist_metadata_unsupported";
   ok= check_processlist_metadata_unsupported(options, result) && ok;
@@ -2531,6 +2537,45 @@ static bool check_status_metadata_profile(const SmokeOptions &options,
   return ok;
 }
 
+static bool check_sysvar_help_text_profile(const SmokeOptions &options,
+                                           SmokeResult *result)
+{
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "sysvar_help_text_open", MYLITE_OK, rc, db);
+  if (db)
+  {
+    ExecCapture variables;
+    ok= exec_query_capture(db, "SHOW VARIABLES LIKE 'version'",
+                           "sysvar_help_text_show_variables", &variables,
+                           result) && ok;
+
+    ExecCapture comments;
+    ok= exec_query_capture(
+          db,
+          "SELECT VARIABLE_COMMENT "
+          "FROM information_schema.SYSTEM_VARIABLES "
+          "WHERE VARIABLE_NAME='VERSION'",
+          "sysvar_help_text_system_variables", &comments, result) && ok;
+
+    result->exec_sysvar_help_text_rows=
+      "variables=" + join_strings(variables.rows, ",") +
+      ",comments=" + std::to_string(comments.rows.size()) + ":" +
+      join_strings(comments.rows, ",");
+
+    if (variables.rows.empty() ||
+        variables.rows[0].find("version:") != 0 ||
+        comments.rows.size() != 1 ||
+        !comments.rows[0].empty())
+      ok= false;
+
+    rc= mylite_close(db);
+    ok= record_result(result, "sysvar_help_text_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+  return ok;
+}
+
 static bool check_processlist_metadata_unsupported(const SmokeOptions &options,
                                                    SmokeResult *result)
 {
@@ -4390,6 +4435,9 @@ static void write_report(const SmokeOptions &options,
   if (!result.exec_status_metadata_rows.empty())
     report << "exec_status_metadata_rows="
            << result.exec_status_metadata_rows << "\n";
+  if (!result.exec_sysvar_help_text_rows.empty())
+    report << "exec_sysvar_help_text_rows="
+           << result.exec_sysvar_help_text_rows << "\n";
   if (!result.exec_processlist_metadata_messages.empty())
     report << "exec_processlist_metadata_messages="
            << result.exec_processlist_metadata_messages << "\n";
