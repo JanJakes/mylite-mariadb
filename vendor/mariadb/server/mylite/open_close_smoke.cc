@@ -1967,7 +1967,7 @@ static bool check_procedure_analyse_unsupported(const SmokeOptions &options,
                       db) && ok;
     if (mylite_mariadb_errno(db) != ER_NOT_SUPPORTED_YET ||
         std::strcmp(mylite_sqlstate(db), "42000") != 0 ||
-        result->exec_procedure_analyse_message.find("PROCEDURE ANALYSE") ==
+        result->exec_procedure_analyse_message.find("SELECT PROCEDURE clause") ==
           std::string::npos)
       ok= false;
 
