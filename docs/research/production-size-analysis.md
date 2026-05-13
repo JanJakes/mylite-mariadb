@@ -8,6 +8,8 @@ and the measured impact of likely size-reduction levers.
 The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 
 - `CMAKE_BUILD_TYPE=MinSizeRel`
+- `CMAKE_C_FLAGS_MINSIZEREL=-Oz -DNDEBUG`
+- `CMAKE_CXX_FLAGS_MINSIZEREL=-Oz -DNDEBUG`
 - `CMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr -Wl,--gc-sections -Wl,--icf=all`
 - `CMAKE_MODULE_LINKER_FLAGS=-fuse-ld=lld -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr -Wl,--gc-sections -Wl,--icf=all`
 - `CMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr -Wl,--gc-sections -Wl,--icf=all`
@@ -107,7 +109,8 @@ include the `type-plugin-size-profile`, `charset-small-profile`, and
 `trigger-runtime-size-profile`, `view-runtime-size-profile`,
 `table-admin-size-profile`, `persistent-statistics-size-profile`,
 `select-procedure-runtime-size-profile`, `locale-minsize-profile`, and
-`load-data-size-profile`. Together these remove the built-in
+`load-data-size-profile`, and `oz-compiler-size-profile`. Together these remove
+the built-in
 `type_geom`, `type_inet`, `type_uuid`, `sequence`, `thread_pool_info`,
 `user_variables`, `userstat`, `mhnsw`, `csv`, and `myisammrg` plugins, set
 `WITH_EXTRA_CHARSETS=none`, omit the Oracle SQL-mode parser, omit XML, GIS, and
@@ -191,7 +194,8 @@ They also remove the remaining generic `SELECT ... PROCEDURE` runtime after
 `PROCEDURE ANALYSE()` is already unsupported, leaving a small unsupported
 procedure-clause setup stub, replace the generated full locale table with an
 `en_US`-only embedded profile stub, and omit `LOAD DATA` / `LOAD XML`
-server-file import execution.
+server-file import execution, and build the aggressive minsize profile with
+GCC/G++ `-Oz`.
 
 `no-myisam-temp-spill-size-profile` was measured separately as an opt-in
 `MYLITE_DISABLE_MYISAM_TEMP_SPILL=ON` experiment. It is not part of the current
@@ -211,33 +215,33 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 ## Current baseline
 
 The current values were measured from
-`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-load-data`.
+`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-oz`.
 Paths below use the default build directory names for readability.
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
 | `build/mariadb-minsize/libmysqld/libmariadbd.a` | 29,169,370 | 27.82 | Main embedded MariaDB archive, stripped; section metadata grows the archive |
-| `build/mariadb-minsize/mylite/libmylite.a` | 122,792 | 0.12 | First-party public wrapper |
+| `build/mariadb-minsize/mylite/libmylite.a` | 122,784 | 0.12 | First-party public wrapper |
 | `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 388,440 | 0.37 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 7,755,752 | 7.40 | Unstripped linked smoke binary, lld RELR, section GC, ICF, reduced unwind tables, no OpenSSL runtime dependency, no retained binlog event reader, GTID-index writer, full GTID binlog-state code, full optimizer trace implementation, external backup stage implementation, full `JSON_TABLE` table-function implementation, full foreign-server metadata cache implementation, proxy protocol network-listener support, full event parser data validation, full XA transaction implementation, full trigger sidecar runtime, full view sidecar runtime, full table-admin maintenance implementation, key-cache assignment, index preload, inherited persistent statistics tables, JSON histograms, generic `SELECT ... PROCEDURE` runtime, non-`en_US` locale table, or `LOAD DATA` / `LOAD XML` execution, no `log_event_server.cc.o`, no real mmap `tc.log` transaction coordinator, no server encryption hooks, no window functions, no UDF runtime, no SQL crypto/password functions, no VIO TLS transport, no `ENCRYPT()`, no legacy DES, no `KDF()`, no zlib compression, and no dynamic plugin loading |
-| stripped `mylite-open-close-smoke` copy | 5,570,344 | 5.31 | `strip --strip-unneeded` on copied binary |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 7,755,552 | 7.40 | Unstripped linked smoke binary, lld RELR, section GC, ICF, GCC/G++ `-Oz`, reduced unwind tables, no OpenSSL runtime dependency, no retained binlog event reader, GTID-index writer, full GTID binlog-state code, full optimizer trace implementation, external backup stage implementation, full `JSON_TABLE` table-function implementation, full foreign-server metadata cache implementation, proxy protocol network-listener support, full event parser data validation, full XA transaction implementation, full trigger sidecar runtime, full view sidecar runtime, full table-admin maintenance implementation, key-cache assignment, index preload, inherited persistent statistics tables, JSON histograms, generic `SELECT ... PROCEDURE` runtime, non-`en_US` locale table, or `LOAD DATA` / `LOAD XML` execution, no `log_event_server.cc.o`, no real mmap `tc.log` transaction coordinator, no server encryption hooks, no window functions, no UDF runtime, no SQL crypto/password functions, no VIO TLS transport, no `ENCRYPT()`, no legacy DES, no `KDF()`, no zlib compression, and no dynamic plugin loading |
+| stripped `mylite-open-close-smoke` copy | 5,570,216 | 5.31 | `strip --strip-unneeded` on copied binary |
 
 The linked smoke binary has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 4,388,752 |
+| text | 4,388,616 |
 | data | 1,178,232 |
-| bss | 229,737 |
-| total `size` decimal | 5,796,721 |
+| bss | 229,865 |
+| total `size` decimal | 5,796,713 |
 
 Largest linked sections in the open-close smoke binary:
 
 | Section | Bytes | Interpretation |
 | --- | ---: | --- |
-| `.text` | 2,697,796 | Executable code |
+| `.text` | 2,697,788 | Executable code |
 | `.data.rel.ro` | 999,200 | Relocated read-only data |
-| `.rodata` | 954,187 | Parser tables, SQL metadata, constants, retained Unicode data |
+| `.rodata` | 954,059 | Parser tables, SQL metadata, constants, retained Unicode data |
 | `.eh_frame` | 501,180 | Unwind metadata |
 | `.data` | 152,400 | Writable data |
 | `.bss` | 226,129 | Zero-initialized writable data |
@@ -379,6 +383,7 @@ The current built-in plugins are:
 | `select-procedure-runtime-size-profile` after persistent statistics | 29,500,552 | -13,904,880 | 5,640,696 | -13,691,208 | Passes current smokes and harness; replaces generic `SELECT ... PROCEDURE` dispatch with an unsupported embedded stub |
 | `locale-minsize-profile` after SELECT procedure runtime | 29,210,614 | -14,194,818 | 5,582,144 | -13,749,760 | Passes current smokes and harness; replaces the generated full locale table with an `en_US`-only embedded profile stub |
 | `load-data-size-profile` after locale minsize | 29,169,370 | -14,236,062 | 5,570,344 | -13,761,560 | Passes current smokes and harness; omits `LOAD DATA` / `LOAD XML` execution while retaining ordinary inserts |
+| `oz-compiler-size-profile` after LOAD DATA | 29,169,370 | -14,236,062 | 5,570,216 | -13,761,688 | Passes current smokes and harness; switches aggressive minsize compile flags to `-Oz`, a marginal linked-runtime win |
 | `no-myisam-temp-spill-size-profile` after no-binlog-core | 32,836,602 | -10,568,830 | 6,437,408 | -12,894,496 | Opt-in experiment only; open/close smoke passes, but storage/catalog harness fails because schema-table queries need disk temp tables |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
 | Strip archive with `strip --strip-unneeded` | 41,873,048 | -1,532,384 | n/a | n/a | Higher risk than `strip -g` for static archives |
@@ -402,7 +407,7 @@ profile now passes current smokes while retaining the compiled default
 `utf8mb4_uca1400_ai_ci`.
 
 Stripping the current linked open-close smoke binary reduces it from
-7,755,752 bytes to 5,570,344 bytes, saving 2,185,408 bytes, or 2.08 MiB. That
+7,755,552 bytes to 5,570,216 bytes, saving 2,185,336 bytes, or 2.08 MiB. That
 remains the lowest-risk packaging win for any copied executable or
 shared-library style artifact.
 
@@ -709,6 +714,16 @@ linked smoke no longer contains `mysql_load()`, while parser-rooted
 `SELECT INTO OUTFILE` parser-root slice. The open/close smoke verifies both
 `LOAD DATA INFILE` and `LOAD XML INFILE` report the embedded-disabled
 diagnostic, and the compatibility harness still passes.
+
+The `oz-compiler-size-profile` attempt then switched the aggressive minsize
+profile's C and C++ `MinSizeRel` flags from CMake's default `-Os -DNDEBUG` to
+`-Oz -DNDEBUG`. On top of the LOAD DATA profile, the stripped static archive
+was unchanged, the unstripped open-close smoke shrank by 200 bytes, the
+stripped open-close smoke shrank by 128 bytes, and the stripped compatibility
+smoke was unchanged. The open-close `size` total changed by only -8 bytes
+because `.text` shrank by 136 bytes while measured bss grew by 128 bytes. This
+is kept as an aggressive-profile attempt, but it is not a meaningful
+feature-pruning lever.
 
 The LTO build reduced the stripped linked smoke binary by 1.25 MiB, but the
 static archive became 326.61 MiB and GCC emitted type/ODR mismatch warnings
