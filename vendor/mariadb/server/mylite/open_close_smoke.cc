@@ -166,6 +166,7 @@ struct SmokeResult
   std::string prepared_bound_reset_rows;
   std::string prepared_bind_destructor_count;
   std::string prepared_close_busy_message;
+  std::string prepared_unsupported_message;
   std::vector<CaseResult> cases;
 };
 
@@ -3714,6 +3715,62 @@ static bool check_statement_effects(const SmokeOptions &options,
 static bool check_prepared_statement_api(const SmokeOptions &options,
                                          SmokeResult *result)
 {
+#ifdef MYLITE_DISABLE_PREPARED_STATEMENT_API
+  bool ok= true;
+  mylite_stmt *stmt= nullptr;
+  const char *tail= nullptr;
+  int rc= mylite_prepare(nullptr, "SELECT 1", 0, &stmt, &tail);
+  ok= record_result(result, "prepare_null_db", MYLITE_MISUSE, rc,
+                    nullptr) && ok;
+
+  rc= mylite_finalize(nullptr);
+  ok= record_result(result, "finalize_null", MYLITE_OK, rc, nullptr) && ok;
+
+  mylite_db *db= nullptr;
+  rc= mylite_open(options.database.c_str(), &db);
+  ok= record_result(result, "prepared_open", MYLITE_OK, rc, db) && ok;
+  if (!db)
+    return ok;
+
+  rc= mylite_prepare(db, nullptr, 0, &stmt, &tail);
+  ok= record_result(result, "prepare_null_sql", MYLITE_MISUSE, rc, db) &&
+      ok;
+
+  const char *sql= "SELECT ?";
+  tail= nullptr;
+  rc= mylite_prepare(db, sql, 0, &stmt, &tail);
+  result->prepared_unsupported_message= mylite_errmsg(db);
+  ok= record_result(result, "prepare_unsupported", MYLITE_ERROR, rc,
+                    db) && ok;
+  if (stmt ||
+      tail != sql ||
+      mylite_mariadb_errno(db) != ER_NOT_SUPPORTED_YET ||
+      std::strcmp(mylite_sqlstate(db), "0A000") != 0 ||
+      result->prepared_unsupported_message.find("prepared statements") ==
+        std::string::npos)
+    ok= false;
+
+  rc= mylite_step(stmt);
+  ok= record_result(result, "prepared_step_unsupported", MYLITE_MISUSE, rc,
+                    nullptr) && ok;
+  rc= mylite_bind_int64(stmt, 1, 42);
+  ok= record_result(result, "prepared_bind_unsupported", MYLITE_MISUSE, rc,
+                    nullptr) && ok;
+  rc= mylite_reset(stmt);
+  ok= record_result(result, "prepared_reset_unsupported", MYLITE_MISUSE,
+                    rc, nullptr) && ok;
+  if (mylite_column_count(stmt) != 0 ||
+      mylite_column_name(stmt, 0) ||
+      mylite_column_type(stmt, 0) != MYLITE_NULL ||
+      mylite_column_text(stmt, 0) ||
+      mylite_column_blob(stmt, 0) ||
+      mylite_column_bytes(stmt, 0) != 0)
+    ok= false;
+
+  rc= mylite_close(db);
+  ok= record_result(result, "prepared_close", MYLITE_OK, rc, nullptr) && ok;
+  return ok;
+#else
   bool ok= true;
   mylite_stmt *stmt= nullptr;
   const char *tail= nullptr;
@@ -4080,6 +4137,7 @@ static bool check_prepared_statement_api(const SmokeOptions &options,
   rc= mylite_close(db);
   ok= record_result(result, "prepared_close", MYLITE_OK, rc, nullptr) && ok;
   return ok;
+#endif
 }
 
 static bool check_readonly_existing_database(const SmokeOptions &options,
@@ -4151,6 +4209,20 @@ static bool check_readonly_existing_database(const SmokeOptions &options,
 
   mylite_stmt *stmt= nullptr;
   const char *tail= nullptr;
+#ifdef MYLITE_DISABLE_PREPARED_STATEMENT_API
+  rc= mylite_prepare(db,
+                     "INSERT INTO mylite.exec_rows VALUES (4, 'four')",
+                     0, &stmt, &tail);
+  result->readonly_prepare_message= mylite_errmsg(db);
+  ok= record_result(result, "readonly_prepare_insert_unsupported",
+                    MYLITE_ERROR, rc, db) && ok;
+  if (stmt ||
+      mylite_mariadb_errno(db) != ER_NOT_SUPPORTED_YET ||
+      std::strcmp(mylite_sqlstate(db), "0A000") != 0 ||
+      result->readonly_prepare_message.find("prepared statements") ==
+        std::string::npos)
+    ok= false;
+#else
   rc= mylite_prepare(db,
                      "INSERT INTO mylite.exec_rows VALUES (4, 'four')",
                      0, &stmt, &tail);
@@ -4170,6 +4242,7 @@ static bool check_readonly_existing_database(const SmokeOptions &options,
     ok= record_result(result, "readonly_finalize_insert", MYLITE_OK, rc,
                       db) && ok;
   }
+#endif
 
   ExecCapture after_capture;
   ok= exec_query_capture(db,
@@ -4998,6 +5071,9 @@ static void write_report(const SmokeOptions &options,
   if (!result.prepared_close_busy_message.empty())
     report << "prepared_close_busy_message="
            << result.prepared_close_busy_message << "\n";
+  if (!result.prepared_unsupported_message.empty())
+    report << "prepared_unsupported_message="
+           << result.prepared_unsupported_message << "\n";
   report << "\n";
 
   report << "## Cases\n\n";

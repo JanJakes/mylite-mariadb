@@ -151,6 +151,7 @@ void stop_runtime_at_exit();
 int connect_handle(mylite_db *db);
 int execute_result_callback(mylite_db *db, MYSQL_RES *result,
                             mylite_exec_callback callback, void *ctx);
+#ifndef MYLITE_DISABLE_PREPARED_STATEMENT_API
 int execute_prepared_statement(mylite_stmt *stmt);
 int bind_prepared_parameters(mylite_stmt *stmt);
 int bind_prepared_result(mylite_stmt *stmt);
@@ -166,6 +167,7 @@ void reset_prepared_result_state(mylite_stmt *stmt);
 void free_statement_metadata(mylite_stmt *stmt);
 int set_error_from_stmt(mylite_stmt *stmt);
 int set_error_from_mysql_stmt(mylite_db *db, MYSQL_STMT *stmt);
+#endif
 int set_error_from_mysql(mylite_db *db);
 int return_error_with_message(mylite_db *db, char **errmsg);
 int return_standalone_error(int code, const char *message, char **errmsg);
@@ -175,9 +177,11 @@ int classify_mariadb_error(unsigned error, const char *sqlstate,
 MysqlEffectSnapshot snapshot_mysql_effects(MYSQL *mysql);
 void restore_mysql_effects(MYSQL *mysql, const MysqlEffectSnapshot &snapshot);
 unsigned map_warning_level_name(const char *level, size_t length);
+#ifndef MYLITE_DISABLE_PREPARED_STATEMENT_API
 bool valid_column(const mylite_stmt *stmt, unsigned column);
 int map_column_type(const MYSQL_FIELD &field);
 enum_field_types bind_buffer_type(int column_type);
+#endif
 
 } // namespace
 
@@ -449,6 +453,29 @@ extern "C" int mylite_prepare(mylite_db *db, const char *sql,
                               size_t sql_len, mylite_stmt **out_stmt,
                               const char **tail)
 {
+#ifdef MYLITE_DISABLE_PREPARED_STATEMENT_API
+  (void) sql_len;
+  if (out_stmt)
+    *out_stmt= nullptr;
+  if (tail)
+    *tail= sql;
+
+  if (!db)
+    return MYLITE_MISUSE;
+  if (!out_stmt)
+    return set_error(db, MYLITE_MISUSE, 0, "HY000",
+                     "statement output pointer is required");
+  if (!sql)
+    return set_error(db, MYLITE_MISUSE, 0, "HY000",
+                     "SQL string is required");
+  if (!db->mysql)
+    return set_error(db, MYLITE_MISUSE, 0, "HY000",
+                     "database handle is not open");
+
+  return set_error(db, MYLITE_ERROR, ER_NOT_SUPPORTED_YET, "0A000",
+                   "This version of MariaDB doesn't yet support "
+                   "'prepared statements'");
+#else
   if (out_stmt)
     *out_stmt= nullptr;
   if (tail)
@@ -554,10 +581,15 @@ extern "C" int mylite_prepare(mylite_db *db, const char *sql,
     *tail= sql + effective_len;
   clear_error(db);
   return MYLITE_OK;
+#endif
 }
 
 extern "C" int mylite_step(mylite_stmt *stmt)
 {
+#ifdef MYLITE_DISABLE_PREPARED_STATEMENT_API
+  (void) stmt;
+  return MYLITE_MISUSE;
+#else
   if (!stmt || !stmt->stmt || !stmt->db)
     return MYLITE_MISUSE;
   if (stmt->done)
@@ -565,10 +597,15 @@ extern "C" int mylite_step(mylite_stmt *stmt)
   if (!stmt->executed)
     return execute_prepared_statement(stmt);
   return fetch_prepared_row(stmt);
+#endif
 }
 
 extern "C" int mylite_reset(mylite_stmt *stmt)
 {
+#ifdef MYLITE_DISABLE_PREPARED_STATEMENT_API
+  (void) stmt;
+  return MYLITE_MISUSE;
+#else
   if (!stmt || !stmt->stmt || !stmt->db)
     return MYLITE_MISUSE;
   if (mysql_stmt_reset(stmt->stmt) != 0)
@@ -576,10 +613,14 @@ extern "C" int mylite_reset(mylite_stmt *stmt)
   reset_prepared_result_state(stmt);
   clear_error(stmt->db);
   return MYLITE_OK;
+#endif
 }
 
 extern "C" int mylite_finalize(mylite_stmt *stmt)
 {
+#ifdef MYLITE_DISABLE_PREPARED_STATEMENT_API
+  return stmt ? MYLITE_MISUSE : MYLITE_OK;
+#else
   if (!stmt)
     return MYLITE_OK;
 
@@ -597,10 +638,16 @@ extern "C" int mylite_finalize(mylite_stmt *stmt)
   if (db)
     clear_error(db);
   return close_error ? MYLITE_ERROR : MYLITE_OK;
+#endif
 }
 
 extern "C" int mylite_bind_null(mylite_stmt *stmt, unsigned index)
 {
+#ifdef MYLITE_DISABLE_PREPARED_STATEMENT_API
+  (void) stmt;
+  (void) index;
+  return MYLITE_MISUSE;
+#else
   PreparedParameter *param= nullptr;
   const int rc= get_bind_parameter(stmt, index, &param);
   if (rc != MYLITE_OK)
@@ -615,11 +662,18 @@ extern "C" int mylite_bind_null(mylite_stmt *stmt, unsigned index)
   param->length= 0;
   clear_error(stmt->db);
   return MYLITE_OK;
+#endif
 }
 
 extern "C" int mylite_bind_int64(mylite_stmt *stmt, unsigned index,
                                   long long value)
 {
+#ifdef MYLITE_DISABLE_PREPARED_STATEMENT_API
+  (void) stmt;
+  (void) index;
+  (void) value;
+  return MYLITE_MISUSE;
+#else
   PreparedParameter *param= nullptr;
   const int rc= get_bind_parameter(stmt, index, &param);
   if (rc != MYLITE_OK)
@@ -634,11 +688,18 @@ extern "C" int mylite_bind_int64(mylite_stmt *stmt, unsigned index,
   param->length= 0;
   clear_error(stmt->db);
   return MYLITE_OK;
+#endif
 }
 
 extern "C" int mylite_bind_uint64(mylite_stmt *stmt, unsigned index,
                                    unsigned long long value)
 {
+#ifdef MYLITE_DISABLE_PREPARED_STATEMENT_API
+  (void) stmt;
+  (void) index;
+  (void) value;
+  return MYLITE_MISUSE;
+#else
   PreparedParameter *param= nullptr;
   const int rc= get_bind_parameter(stmt, index, &param);
   if (rc != MYLITE_OK)
@@ -653,11 +714,18 @@ extern "C" int mylite_bind_uint64(mylite_stmt *stmt, unsigned index,
   param->length= 0;
   clear_error(stmt->db);
   return MYLITE_OK;
+#endif
 }
 
 extern "C" int mylite_bind_double(mylite_stmt *stmt, unsigned index,
                                    double value)
 {
+#ifdef MYLITE_DISABLE_PREPARED_STATEMENT_API
+  (void) stmt;
+  (void) index;
+  (void) value;
+  return MYLITE_MISUSE;
+#else
   PreparedParameter *param= nullptr;
   const int rc= get_bind_parameter(stmt, index, &param);
   if (rc != MYLITE_OK)
@@ -672,42 +740,78 @@ extern "C" int mylite_bind_double(mylite_stmt *stmt, unsigned index,
   param->length= 0;
   clear_error(stmt->db);
   return MYLITE_OK;
+#endif
 }
 
 extern "C" int mylite_bind_text(mylite_stmt *stmt, unsigned index,
                                  const char *value, size_t value_len,
                                  void (*destructor)(void *))
 {
+#ifdef MYLITE_DISABLE_PREPARED_STATEMENT_API
+  (void) stmt;
+  (void) index;
+  (void) value;
+  (void) value_len;
+  (void) destructor;
+  return MYLITE_MISUSE;
+#else
   return bind_prepared_bytes(stmt, index, PARAMETER_TEXT, value, value_len,
                              destructor);
+#endif
 }
 
 extern "C" int mylite_bind_blob(mylite_stmt *stmt, unsigned index,
                                  const void *value, size_t value_len,
                                  void (*destructor)(void *))
 {
+#ifdef MYLITE_DISABLE_PREPARED_STATEMENT_API
+  (void) stmt;
+  (void) index;
+  (void) value;
+  (void) value_len;
+  (void) destructor;
+  return MYLITE_MISUSE;
+#else
   return bind_prepared_bytes(stmt, index, PARAMETER_BLOB, value, value_len,
                              destructor);
+#endif
 }
 
 extern "C" unsigned mylite_column_count(mylite_stmt *stmt)
 {
+#ifdef MYLITE_DISABLE_PREPARED_STATEMENT_API
+  (void) stmt;
+  return 0;
+#else
   return stmt ? static_cast<unsigned>(stmt->column_names.size()) : 0;
+#endif
 }
 
 extern "C" const char *mylite_column_name(mylite_stmt *stmt, unsigned column)
 {
+#ifdef MYLITE_DISABLE_PREPARED_STATEMENT_API
+  (void) stmt;
+  (void) column;
+  return nullptr;
+#else
   return valid_column(stmt, column) ? stmt->column_names[column].c_str() :
     nullptr;
+#endif
 }
 
 extern "C" int mylite_column_type(mylite_stmt *stmt, unsigned column)
 {
+#ifdef MYLITE_DISABLE_PREPARED_STATEMENT_API
+  (void) stmt;
+  (void) column;
+  return MYLITE_NULL;
+#else
   if (!valid_column(stmt, column))
     return MYLITE_NULL;
   if (stmt->has_current_row && stmt->column_is_null[column])
     return MYLITE_NULL;
   return stmt->column_types[column];
+#endif
 }
 
 extern "C" long long mylite_column_int64(mylite_stmt *stmt, unsigned column)
@@ -737,10 +841,16 @@ extern "C" double mylite_column_double(mylite_stmt *stmt, unsigned column)
 
 extern "C" const char *mylite_column_text(mylite_stmt *stmt, unsigned column)
 {
+#ifdef MYLITE_DISABLE_PREPARED_STATEMENT_API
+  (void) stmt;
+  (void) column;
+  return nullptr;
+#else
   if (!valid_column(stmt, column) || !stmt->has_current_row ||
       stmt->column_is_null[column])
     return nullptr;
   return stmt->column_buffers[column].data();
+#endif
 }
 
 extern "C" const void *mylite_column_blob(mylite_stmt *stmt, unsigned column)
@@ -750,10 +860,16 @@ extern "C" const void *mylite_column_blob(mylite_stmt *stmt, unsigned column)
 
 extern "C" size_t mylite_column_bytes(mylite_stmt *stmt, unsigned column)
 {
+#ifdef MYLITE_DISABLE_PREPARED_STATEMENT_API
+  (void) stmt;
+  (void) column;
+  return 0;
+#else
   if (!valid_column(stmt, column) || !stmt->has_current_row ||
       stmt->column_is_null[column])
     return 0;
   return static_cast<size_t>(stmt->column_lengths[column]);
+#endif
 }
 
 extern "C" int mylite_errcode(mylite_db *db)
@@ -1273,6 +1389,7 @@ int execute_result_callback(mylite_db *db, MYSQL_RES *result,
   return MYLITE_OK;
 }
 
+#ifndef MYLITE_DISABLE_PREPARED_STATEMENT_API
 int execute_prepared_statement(mylite_stmt *stmt)
 {
   mylite_db *db= stmt->db;
@@ -1623,6 +1740,7 @@ int set_error_from_mysql_stmt(mylite_db *db, MYSQL_STMT *stmt)
                    message && message[0] ? message :
                    "MariaDB prepared statement failed");
 }
+#endif
 
 int set_error_from_mysql(mylite_db *db)
 {
@@ -1716,6 +1834,7 @@ unsigned map_warning_level_name(const char *level, size_t length)
   return 0;
 }
 
+#ifndef MYLITE_DISABLE_PREPARED_STATEMENT_API
 bool valid_column(const mylite_stmt *stmt, unsigned column)
 {
   return stmt && column < stmt->column_names.size();
@@ -1754,5 +1873,6 @@ enum_field_types bind_buffer_type(int column_type)
 {
   return column_type == MYLITE_BLOB ? MYSQL_TYPE_BLOB : MYSQL_TYPE_STRING;
 }
+#endif
 
 } // namespace

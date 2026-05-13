@@ -247,6 +247,7 @@ static MYSQL_FIELD *emb_list_fields(MYSQL *mysql)
   return mysql->fields;
 }
 
+#ifndef MYLITE_DISABLE_PREPARED_STATEMENT_API
 static my_bool emb_read_prepare_result(MYSQL *mysql, MYSQL_STMT *stmt)
 {
   THD *thd= (THD*) mysql->thd;
@@ -277,6 +278,7 @@ static my_bool emb_read_prepare_result(MYSQL *mysql, MYSQL_STMT *stmt)
 
   return 0;
 }
+#endif
 
 /**************************************************************************
   Get column lengths of the current row
@@ -334,6 +336,7 @@ static my_bool emb_read_query_result(MYSQL *mysql)
   return 0;
 }
 
+#ifndef MYLITE_DISABLE_PREPARED_STATEMENT_API
 static int emb_stmt_execute(MYSQL_STMT *stmt)
 {
   DBUG_ENTER("emb_stmt_execute");
@@ -407,6 +410,7 @@ int emb_read_rows_from_cursor(MYSQL_STMT *stmt)
 
   return emb_read_binary_rows(stmt);
 }
+#endif
 
 int emb_unbuffered_fetch(MYSQL *mysql, char **row)
 {
@@ -492,13 +496,23 @@ MYSQL_METHODS embedded_methods=
   emb_read_change_user_result,
   emb_on_close_free,
   emb_list_fields,
+#ifdef MYLITE_DISABLE_PREPARED_STATEMENT_API
+  nullptr,
+  nullptr,
+  nullptr,
+#else
   emb_read_prepare_result,
   emb_stmt_execute,
   emb_read_binary_rows,
+#endif
   emb_unbuffered_fetch,
   emb_read_statistics,
   emb_read_query_result,
+#ifdef MYLITE_DISABLE_PREPARED_STATEMENT_API
+  nullptr
+#else
   emb_read_rows_from_cursor
+#endif
 };
 
 /*

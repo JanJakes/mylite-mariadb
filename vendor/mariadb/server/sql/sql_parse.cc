@@ -1828,6 +1828,19 @@ dispatch_command_return dispatch_command(enum enum_server_command command, THD *
     }
     break;
   }
+#ifdef MYLITE_DISABLE_PREPARED_STATEMENT_API
+  case COM_STMT_BULK_EXECUTE:
+  case COM_STMT_EXECUTE:
+  case COM_STMT_FETCH:
+  case COM_STMT_SEND_LONG_DATA:
+  case COM_STMT_PREPARE:
+  case COM_STMT_CLOSE:
+  case COM_STMT_RESET:
+  {
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0), "prepared statements");
+    break;
+  }
+#else
   case COM_STMT_BULK_EXECUTE:
   {
     mysqld_stmt_bulk_execute(thd, packet, packet_length);
@@ -1877,6 +1890,7 @@ dispatch_command_return dispatch_command(enum enum_server_command command, THD *
     mysqld_stmt_reset(thd, packet);
     break;
   }
+#endif
   case COM_QUERY:
   {
     DBUG_ASSERT(thd->m_digest == NULL);
