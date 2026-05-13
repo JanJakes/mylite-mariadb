@@ -78,6 +78,7 @@ run_inside_container() {
   assert_no_full_stored_program_objects "${abs_build_dir}/libmysqld/libmariadbd.a"
   assert_no_show_create_runtime_symbols "${smoke}"
   assert_no_tpool_runtime_symbols "${smoke}"
+  assert_no_default_file_symbols "${smoke}"
 
   local smoke_log="${abs_build_dir}/libmylite-open-close-output.log"
   local exclusive_log="${abs_build_dir}/libmylite-open-close-exclusive-output.log"
@@ -344,6 +345,22 @@ assert_no_tpool_runtime_symbols() {
     return 1
   fi
   printf "libmylite tpool runtime symbols: none\n"
+}
+
+assert_no_default_file_symbols() {
+  local binary="$1"
+  local symbols
+  symbols="$(
+    nm --defined-only -C "${binary}" 2>/dev/null \
+      | grep -E "my_load_defaults|get_defaults_options|search_default_file" \
+      || true
+  )"
+  if [[ -n "${symbols}" ]]; then
+    printf "unexpected default-file symbols in %s:\n%s\n" \
+      "${binary}" "${symbols}" >&2
+    return 1
+  fi
+  printf "libmylite default-file symbols: none\n"
 }
 
 main "$@"

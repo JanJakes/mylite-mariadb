@@ -585,10 +585,28 @@ int init_embedded_server(int argc, char **argv, char **groups)
 
   orig_argc= *argcp;
   orig_argv= *argvp;
+#ifdef MYLITE_DISABLE_EMBEDDED_DEFAULT_FILES
+  if (*argcp < 2 || !*argvp || !(*argvp)[1] ||
+      strcmp((*argvp)[1], "--no-defaults"))
+  {
+    sql_print_error("Embedded MyLite minsize runtime requires --no-defaults");
+    return 1;
+  }
+  if (!(copy_arguments_ptr= copy_arguments(*argcp, *argvp)))
+    return 1;
+  for (int i= 1; i < *argcp - 1; i++)
+    copy_arguments_ptr[i]= copy_arguments_ptr[i + 1];
+  --*argcp;
+  copy_arguments_ptr[*argcp]= 0;
+  *argvp= copy_arguments_ptr;
+  defaults_argc= 0;
+  defaults_argv= 0;
+#else
   if (load_defaults("my", (const char **)groups, argcp, argvp))
     return 1;
   defaults_argc= *argcp;
   defaults_argv= *argvp;
+#endif
   remaining_argc= *argcp;
   remaining_argv= *argvp;
 
