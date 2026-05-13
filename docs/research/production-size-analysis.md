@@ -67,6 +67,7 @@ The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 - `MYLITE_DISABLE_SHOW_STATIC_INFO=ON`
 - `MYLITE_DISABLE_STATUS_METADATA=ON`
 - `MYLITE_DISABLE_SYSVAR_HELP_TEXT=ON`
+- `MYLITE_DISABLE_OPTION_HELP_TEXT=ON`
 - `MYLITE_DISABLE_EXTRA_LOCALES=ON`
 - `MYLITE_DISABLE_LOAD_DATA=ON`
 - `MYLITE_DISABLE_TIME_ZONE_TABLES=ON`
@@ -136,8 +137,8 @@ include the `type-plugin-size-profile`, `charset-small-profile`, and
 `dynamic-column-size-profile`, `routine-information-schema-size-profile`,
 `show-static-info-size-profile`, `processlist-size-profile`, and
 `stored-function-lookup-size-profile`, and
-`plsql-cursor-attribute-size-profile`, `status-metadata-size-profile`, and
-`sysvar-help-text-size-profile`.
+`plsql-cursor-attribute-size-profile`, `status-metadata-size-profile`,
+`sysvar-help-text-size-profile`, and `option-help-text-size-profile`.
 Together these remove the built-in
 `type_geom`, `type_inet`, `type_uuid`, `sequence`, `thread_pool_info`,
 `user_variables`, `userstat`, `mhnsw`, `csv`, and `myisammrg` plugins, set
@@ -223,7 +224,8 @@ runtime while Oracle mode and stored routines remain unsupported, and
 omit `SHOW STATUS` and Information Schema status-table publication metadata
 while retaining internal status counters, omit long system-variable help
 comments while retaining system-variable names, values, validation, defaults,
-and `SHOW VARIABLES`, and
+and `SHOW VARIABLES`, omit hardcoded command-line option help strings while
+retaining option parsing metadata, and
 replace the foreign-server metadata cache with no-op embedded stubs so the
 `mysql.servers` cache implementation is omitted, and replace proxy protocol
 network-listener support
@@ -272,32 +274,32 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 ## Current baseline
 
 The current values were measured from
-`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-sysvar-help-text`.
+`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-option-help-text`.
 Paths below use the default build directory names for readability.
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
-| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 27,364,504 | 26.10 | Main embedded MariaDB archive, stripped; section metadata grows the archive |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 27,357,408 | 26.09 | Main embedded MariaDB archive, stripped; section metadata grows the archive |
 | `build/mariadb-minsize/mylite/libmylite.a` | 122,800 | 0.12 | First-party public wrapper with explicit `MYLITE_API` exports |
 | `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 388,456 | 0.37 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 7,253,464 | 6.92 | Unstripped linked smoke binary, hidden default visibility, lld RELR, section GC, ICF, GCC/G++ `-Oz`, reduced unwind tables, no OpenSSL runtime dependency, no retained binlog event reader, GTID-index writer, full GTID binlog-state code, full optimizer trace implementation, external backup stage implementation, full `JSON_TABLE` table-function implementation, ordinary JSON SQL function implementation, SQL diagnostics statement runtime, no stored-function lookup item construction, no PL/SQL cursor-attribute item runtime, no status metadata publication arrays or registry, no long system-variable help comments, system-versioned table predicate item runtime, row-replication type-conversion implementation, dynamic-column execution, stored routine Information Schema scan path, static `SHOW AUTHORS` / `SHOW CONTRIBUTORS` / `SHOW PRIVILEGES` result tables, process-list row rendering and Information Schema row population, full foreign-server metadata cache implementation, proxy protocol network-listener support, full EXPLAIN/ANALYZE plan-output runtime, vector type handler, event parser data validation, XA transaction implementation, trigger sidecar runtime, view sidecar runtime, table-admin maintenance implementation, key-cache assignment, index preload, inherited persistent statistics tables, JSON histograms, generic `SELECT ... PROCEDURE` runtime, non-`en_US` locale table, `LOAD DATA` / `LOAD XML` execution, or `mysql.time_zone*` table loading, no `log_event_server.cc.o`, no real mmap `tc.log` transaction coordinator, no server encryption hooks, no window functions, no UDF runtime, no SQL crypto/password functions, no VIO TLS transport, no `ENCRYPT()`, no legacy DES, no `KDF()`, no zlib compression, and no dynamic plugin loading |
-| stripped `mylite-open-close-smoke` copy | 5,191,128 | 4.95 | `strip --strip-unneeded` on copied binary |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 7,246,384 | 6.91 | Unstripped linked smoke binary, hidden default visibility, lld RELR, section GC, ICF, GCC/G++ `-Oz`, reduced unwind tables, no OpenSSL runtime dependency, no retained binlog event reader, GTID-index writer, full GTID binlog-state code, full optimizer trace implementation, external backup stage implementation, full `JSON_TABLE` table-function implementation, ordinary JSON SQL function implementation, SQL diagnostics statement runtime, no stored-function lookup item construction, no PL/SQL cursor-attribute item runtime, no status metadata publication arrays or registry, no long system-variable help comments, no command-line option help prose, system-versioned table predicate item runtime, row-replication type-conversion implementation, dynamic-column execution, stored routine Information Schema scan path, static `SHOW AUTHORS` / `SHOW CONTRIBUTORS` / `SHOW PRIVILEGES` result tables, process-list row rendering and Information Schema row population, full foreign-server metadata cache implementation, proxy protocol network-listener support, full EXPLAIN/ANALYZE plan-output runtime, vector type handler, event parser data validation, XA transaction implementation, trigger sidecar runtime, view sidecar runtime, table-admin maintenance implementation, key-cache assignment, index preload, inherited persistent statistics tables, JSON histograms, generic `SELECT ... PROCEDURE` runtime, non-`en_US` locale table, `LOAD DATA` / `LOAD XML` execution, or `mysql.time_zone*` table loading, no `log_event_server.cc.o`, no real mmap `tc.log` transaction coordinator, no server encryption hooks, no window functions, no UDF runtime, no SQL crypto/password functions, no VIO TLS transport, no `ENCRYPT()`, no legacy DES, no `KDF()`, no zlib compression, and no dynamic plugin loading |
+| stripped `mylite-open-close-smoke` copy | 5,183,976 | 4.94 | `strip --strip-unneeded` on copied binary |
 
 The linked smoke binary has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 4,123,617 |
+| text | 4,116,457 |
 | data | 1,064,136 |
-| bss | 225,193 |
-| total `size` decimal | 5,412,946 |
+| bss | 228,249 |
+| total `size` decimal | 5,408,842 |
 
 Largest linked sections in the open-close smoke binary:
 
 | Section | Bytes | Interpretation |
 | --- | ---: | --- |
-| `.text` | 2,534,788 | Executable code |
-| `.rodata` | 895,979 | Parser tables, SQL metadata, constants, retained Unicode data |
+| `.text` | 2,534,796 | Executable code |
+| `.rodata` | 888,811 | Parser tables, SQL metadata, constants, retained Unicode data |
 | `.data.rel.ro` | 912,232 | Relocated read-only data |
 | `.eh_frame` | 471,280 | Unwind metadata |
 | `.data` | 138,632 | Writable data |
@@ -457,6 +459,7 @@ The current built-in plugins are:
 | `plsql-cursor-attribute-size-profile` after stored-function lookup | 27,455,348 | -15,950,084 | 5,242,360 | -14,089,544 | Passes current smokes and harness; omits PL/SQL cursor attribute item runtime while Oracle mode and stored routines remain unsupported |
 | `status-metadata-size-profile` after PL/SQL cursor attributes | 27,417,704 | -15,987,728 | 5,227,600 | -14,104,304 | Passes current smokes and harness; returns `SHOW STATUS` and Information Schema status tables empty and omits status publication arrays |
 | `sysvar-help-text-size-profile` after status metadata | 27,364,504 | -16,040,928 | 5,191,128 | -14,140,776 | Passes current smokes and harness; keeps system-variable values and `SHOW VARIABLES` while emptying `INFORMATION_SCHEMA.SYSTEM_VARIABLES.VARIABLE_COMMENT` and omitting declaration-site help strings |
+| `option-help-text-size-profile` after sysvar help text | 27,357,408 | -16,048,024 | 5,183,976 | -14,147,928 | Passes current smokes and harness; keeps option parsing metadata while omitting hardcoded `my_long_options[]` help strings |
 | `no-myisam-temp-spill-size-profile` after no-binlog-core | 32,836,602 | -10,568,830 | 6,437,408 | -12,894,496 | Opt-in experiment only; open/close smoke passes, but storage/catalog harness fails because schema-table queries need disk temp tables |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
 | Strip archive with `strip --strip-unneeded` | 41,873,048 | -1,532,384 | n/a | n/a | Higher risk than `strip -g` for static archives |
@@ -480,7 +483,7 @@ profile now passes current smokes while retaining the compiled default
 `utf8mb4_uca1400_ai_ci`.
 
 Stripping the current linked open-close smoke binary reduces it from
-7,253,464 bytes to 5,191,128 bytes, saving 2,062,336 bytes, or 1.97 MiB. That
+7,246,384 bytes to 5,183,976 bytes, saving 2,062,408 bytes, or 1.97 MiB. That
 remains the lowest-risk packaging win for any copied executable or
 shared-library style artifact.
 
@@ -997,6 +1000,18 @@ smoke verifies `SHOW VARIABLES LIKE 'version'` still works and
 `VERSION`. Hardcoded option help text in `mysqld.cc` remains a separate
 target.
 
+The `option-help-text-size-profile` attempt then omitted hardcoded
+`my_long_options[]` help strings from the aggressive embedded profile while
+retaining option names, ids, value pointers, defaults, ranges, aliases, and
+callback parsing. On top of the sysvar-help profile, it reduced the static
+archive by 7,096 bytes, the unstripped open-close smoke by 7,080 bytes, the
+stripped open-close smoke by 7,152 bytes, the unstripped compatibility smoke
+by 6,952 bytes, and the stripped compatibility smoke by 7,024 bytes.
+`lib_sql.cc.o` dropped from 475,880 bytes to 468,784 bytes. The open/close
+smoke script now verifies representative option-help strings such as
+`Display this help and exit`, `Log update queries in binary format`, and
+plugin-loading help prose are absent from the linked smoke binary.
+
 The LTO build reduced the stripped linked smoke binary by 1.25 MiB, but the
 static archive became 326.61 MiB and GCC emitted type/ODR mismatch warnings
 around MariaDB parser and server structures, including generated parser types.
@@ -1354,6 +1369,7 @@ MyISAM-compatible storage.
 | Omit PL/SQL cursor attribute item runtime | 0.07 MiB archive, 0.011 MiB stripped linked beyond stored-function lookup | Medium compatibility while Oracle mode and routines are unsupported | Applied as aggressive embedded-size attempt | Current smokes and harness pass; exact cursor attribute item symbols are absent, but broader stored-program parser/runtime remains |
 | Omit status metadata publication | 0.04 MiB archive, 0.014 MiB stripped linked beyond PL/SQL cursor attributes | Low/medium embedded observability | Applied as aggressive embedded-size attempt | Current smokes and harness pass; `SHOW STATUS` and Information Schema status tables return empty results while internal counters and `SHOW VARIABLES` remain |
 | Omit system-variable help text | 0.05 MiB archive, 0.035 MiB stripped linked beyond status metadata | Low/medium embedded metadata compatibility | Applied as aggressive embedded-size attempt | Current smokes and harness pass; system-variable values and `SHOW VARIABLES` remain, but `INFORMATION_SCHEMA.SYSTEM_VARIABLES.VARIABLE_COMMENT` is empty |
+| Omit command-line option help text | 0.007 MiB archive, 0.007 MiB stripped linked beyond sysvar help text | Low embedded metadata compatibility | Applied as aggressive embedded-size attempt | Current smokes and harness pass; option parsing metadata remains, but inherited `mariadbd --help` prose is empty in the embedded profile |
 | Disable statement profiling | 0.16 MiB archive, no stripped linked change beyond vector-function profile | Low/medium | Applied as size attempt | Current smokes pass; `SHOW PROFILE(S)` now report MariaDB's disabled-feature diagnostic |
 | Remove SQL `HELP` command implementation | 0.17 MiB archive, 0.06 MiB stripped linked beyond profiling profile | Low/medium | Applied as size attempt | Current smokes pass; `HELP` now reports a stable unsupported-command diagnostic |
 | Remove `PROCEDURE ANALYSE()` implementation | 0.15 MiB archive, no stripped linked change beyond HELP profile | Low/medium | Applied as size attempt | Current smokes pass; `PROCEDURE ANALYSE()` now reports a stable unsupported-feature diagnostic |
@@ -1603,6 +1619,9 @@ Take these now:
    It is a clean `.rodata` win after wrapping declaration-site comment
    arguments, and embedded applications normally need variable names, values,
    defaults, and validation rather than server help prose.
+61. Keep command-line option help text omitted in the aggressive embedded
+   profile. The win is small but clean, and the embedded library needs option
+   parsing metadata rather than inherited `mariadbd --help` descriptions.
 
 Do not take these now:
 
@@ -1650,10 +1669,10 @@ Research next if size becomes a release blocker:
    linked by MariaDB's schema-table enum contract.
 7. Separate x86-64 size measurements for lld RELR and ICF before making
    architecture-independent claims.
-8. Investigate hardcoded `my_long_options[]` option help text in
-   `mysqld.cc`. System-variable comments are now omitted, but strings such as
-   `--log-bin` help prose still remain because they are table initializer
-   fields rather than `Sys_var_*` comments.
+8. Investigate whether server-only `my_long_options[]` entries can be removed
+   entirely from the embedded profile after a startup/default-initialization
+   audit. Option help text is now omitted, but the option names and table rows
+   remain because `handle_options()` still uses them for parsing and defaults.
 
 The best next decisions are deeper SQL-layer reductions as deliberate
 compatibility work. Apart from RELR packing and section GC for linked runtime

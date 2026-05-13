@@ -69,6 +69,7 @@ run_inside_container() {
   local smoke="${abs_build_dir}/mylite/mylite-open-close-smoke"
   assert_no_plsql_cursor_attribute_symbols "${smoke}"
   assert_no_status_metadata_symbols "${smoke}"
+  assert_no_option_help_text_strings "${smoke}"
 
   local smoke_log="${abs_build_dir}/libmylite-open-close-output.log"
   local exclusive_log="${abs_build_dir}/libmylite-open-close-exclusive-output.log"
@@ -204,6 +205,25 @@ assert_no_status_metadata_symbols() {
     return 1
   fi
   printf "libmylite status metadata symbols: none\n"
+}
+
+assert_no_option_help_text_strings() {
+  local binary="$1"
+  local strings_found
+  strings_found="$(
+    strings "${binary}" 2>/dev/null \
+      | grep -F -e "Display this help and exit" \
+          -e "Log update queries in binary format" \
+          -e "Tells the slave thread to restrict replication" \
+          -e "Semicolon-separated list of plugins to load" \
+      || true
+  )"
+  if [[ -n "${strings_found}" ]]; then
+    printf "unexpected option help text strings in %s:\n%s\n" \
+      "${binary}" "${strings_found}" >&2
+    return 1
+  fi
+  printf "libmylite option help text strings: none\n"
 }
 
 main "$@"

@@ -6642,113 +6642,119 @@ int handle_early_options()
   to be listed here.
 */
 
+#ifdef MYLITE_DISABLE_OPTION_HELP_TEXT
+#define MYLITE_OPTION_HELP_TEXT(X) ""
+#else
+#define MYLITE_OPTION_HELP_TEXT(X) X
+#endif
+
 struct my_option my_long_options[]=
 {
-  {"help", '?', "Display this help and exit", 
+  {"help", '?', MYLITE_OPTION_HELP_TEXT("Display this help and exit"),
    &opt_help, &opt_help, 0, GET_BOOL, NO_ARG, 0, 0, 0, 0,
    0, 0},
-  {"ansi", 'a', "Use ANSI SQL syntax instead of MariaDB syntax. This mode "
-   "will also set transaction isolation level 'serializable'", 0, 0, 0,
+  {"ansi", 'a', MYLITE_OPTION_HELP_TEXT("Use ANSI SQL syntax instead of MariaDB syntax. This mode "
+   "will also set transaction isolation level 'serializable'"), 0, 0, 0,
    GET_NO_ARG, NO_ARG, 0, 0, 0, 0, 0, 0},
   /*
     Because Sys_var_bit does not support command-line options, we need to
     explicitly add one for --autocommit
   */
-  {"autocommit", 0, "Set default value for autocommit (0 or 1)",
+  {"autocommit", 0, MYLITE_OPTION_HELP_TEXT("Set default value for autocommit (0 or 1)"),
    &opt_autocommit, &opt_autocommit, 0,
    GET_BOOL, OPT_ARG, 1, 0, 0, 0, 0, NULL},
   {"binlog-do-db", OPT_BINLOG_DO_DB,
-   "Tells the master it should log updates for the specified database, "
-   "and exclude all others not explicitly mentioned",
+   MYLITE_OPTION_HELP_TEXT("Tells the master it should log updates for the specified database, "
+   "and exclude all others not explicitly mentioned"),
    0, 0, 0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
   {"binlog-ignore-db", OPT_BINLOG_IGNORE_DB,
-   "Tells the master that updates to the given database should not be logged to the binary log",
+   MYLITE_OPTION_HELP_TEXT("Tells the master that updates to the given database should not be logged to the binary log"),
    0, 0, 0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
 #ifndef DISABLE_GRANT_OPTIONS
-  {"bootstrap", OPT_BOOTSTRAP, "Used by MariaDB installation scripts", 0, 0, 0,
+  {"bootstrap", OPT_BOOTSTRAP, MYLITE_OPTION_HELP_TEXT("Used by MariaDB installation scripts"), 0, 0, 0,
    GET_NO_ARG, NO_ARG, 0, 0, 0, 0, 0, 0},
 #endif
   {"character-set-client-handshake", 0,
-   "Don't ignore client side character set value sent during handshake",
+   MYLITE_OPTION_HELP_TEXT("Don't ignore client side character set value sent during handshake"),
    &opt_character_set_client_handshake,
    &opt_character_set_client_handshake,
     0, GET_BOOL, NO_ARG, 1, 0, 0, 0, 0, 0},
   {"character-set-filesystem", 0,
-   "Set the filesystem character set",
+   MYLITE_OPTION_HELP_TEXT("Set the filesystem character set"),
    &character_set_filesystem_name,
    &character_set_filesystem_name,
    0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0 },
-  {"character-set-server", 'C', "Set the default character set",
+  {"character-set-server", 'C', MYLITE_OPTION_HELP_TEXT("Set the default character set"),
    &default_character_set_name, &default_character_set_name,
    0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0 },
-  {"chroot", 'r', "Chroot mariadbd process during startup",
+  {"chroot", 'r', MYLITE_OPTION_HELP_TEXT("Chroot mariadbd process during startup"),
    &mysqld_chroot, &mysqld_chroot, 0, GET_STR, REQUIRED_ARG,
    0, 0, 0, 0, 0, 0},
-  {"collation-server", 0, "Set the default collation",
+  {"collation-server", 0, MYLITE_OPTION_HELP_TEXT("Set the default collation"),
    &default_collation_name, &default_collation_name,
    0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0 },
-  {"character-set-collations", 0, "Overrides for character set default collations",
+  {"character-set-collations", 0, MYLITE_OPTION_HELP_TEXT("Overrides for character set default collations"),
    &character_set_collations_str, &character_set_collations_str,
    0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0 },
-  {"console", OPT_CONSOLE, "Write error output on screen; don't remove the console window on Windows",
+  {"console", OPT_CONSOLE, MYLITE_OPTION_HELP_TEXT("Write error output on screen; don't remove the console window on Windows"),
    &opt_console, &opt_console, 0, GET_BOOL, NO_ARG, 0, 0, 0,
    0, 0, 0},
 #ifdef DBUG_OFF
-  {"debug", '#', "Built in DBUG debugger. Disabled in this build",
+  {"debug", '#', MYLITE_OPTION_HELP_TEXT("Built in DBUG debugger. Disabled in this build"),
    &current_dbug_option, &current_dbug_option, 0, GET_STR, OPT_ARG,
    0, 0, 0, 0, 0, 0},
 #endif
 #ifdef HAVE_REPLICATION
   {"debug-abort-slave-event-count", 0,
-   "Option used by mysql-test for debugging and testing of replication",
+   MYLITE_OPTION_HELP_TEXT("Option used by mysql-test for debugging and testing of replication"),
    &abort_slave_event_count,  &abort_slave_event_count,
    0, GET_INT, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
 #endif /* HAVE_REPLICATION */
 #ifndef DBUG_OFF
   {"debug-assert", 0,
-   "Allow DBUG_ASSERT() to invoke assert()",
+   MYLITE_OPTION_HELP_TEXT("Allow DBUG_ASSERT() to invoke assert()"),
    &my_assert, &my_assert,
    0, GET_BOOL, OPT_ARG, 1, 0, 0, 0, 0, 0},
   {"debug-assert-on-error", 0,
-   "Do an assert in various functions if we get a fatal error",
+   MYLITE_OPTION_HELP_TEXT("Do an assert in various functions if we get a fatal error"),
    &my_assert_on_error, &my_assert_on_error,
    0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
   {"debug-assert-if-crashed-table", 0,
-   "Do an assert in handler::print_error() if we get a crashed table",
+   MYLITE_OPTION_HELP_TEXT("Do an assert in handler::print_error() if we get a crashed table"),
    &debug_assert_if_crashed_table, &debug_assert_if_crashed_table,
    0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
 #endif
 #ifdef HAVE_REPLICATION
   {"debug-disconnect-slave-event-count", 0,
-   "Option used by mysql-test for debugging and testing of replication",
+   MYLITE_OPTION_HELP_TEXT("Option used by mysql-test for debugging and testing of replication"),
    &disconnect_slave_event_count, &disconnect_slave_event_count,
    0, GET_INT, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
 #endif /* HAVE_REPLICATION */
-  {"debug-exit-info", 'T', "Used for debugging. Use at your own risk",
+  {"debug-exit-info", 'T', MYLITE_OPTION_HELP_TEXT("Used for debugging. Use at your own risk"),
    0, 0, 0, GET_LONG, OPT_ARG, 0, 0, 0, 0, 0, 0},
   {"debug-gdb", 0,
-   "Set up signals usable for debugging",
+   MYLITE_OPTION_HELP_TEXT("Set up signals usable for debugging"),
    &opt_debugging, &opt_debugging,
    0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
 #ifdef HAVE_REPLICATION
   {"debug-max-binlog-dump-events", 0,
-   "Option used by mysql-test for debugging and testing of replication",
+   MYLITE_OPTION_HELP_TEXT("Option used by mysql-test for debugging and testing of replication"),
    &max_binlog_dump_events, &max_binlog_dump_events, 0,
    GET_INT, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
 #endif /* HAVE_REPLICATION */
   {"debug-no-sync", 0,
-   "Disables system sync calls. Only for running tests or debugging",
+   MYLITE_OPTION_HELP_TEXT("Disables system sync calls. Only for running tests or debugging"),
    &my_disable_sync, &my_disable_sync, 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
 #ifdef HAVE_REPLICATION
   {"debug-sporadic-binlog-dump-fail", 0,
-   "Option used by mysql-test for debugging and testing of replication",
+   MYLITE_OPTION_HELP_TEXT("Option used by mysql-test for debugging and testing of replication"),
    &opt_sporadic_binlog_dump_fail,
    &opt_sporadic_binlog_dump_fail, 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0,
    0},
 #endif /* HAVE_REPLICATION */
 #ifndef DBUG_OFF
   {"debug-assert-on-not-freed-memory", 0,
-   "Assert if we found problems with memory allocation",
+   MYLITE_OPTION_HELP_TEXT("Assert if we found problems with memory allocation"),
    &debug_assert_on_not_freed_memory,
    &debug_assert_on_not_freed_memory, 0, GET_BOOL, NO_ARG, 1, 0, 0, 0, 0,
    0},
@@ -6756,252 +6762,252 @@ struct my_option my_long_options[]=
   /* default-storage-engine should have "MyISAM" as def_value. Instead
      of initializing it here it is done in init_common_variables() due
      to a compiler bug in Sun Studio compiler. */
-  {"default-storage-engine", 0, "The default storage engine for new tables",
+  {"default-storage-engine", 0, MYLITE_OPTION_HELP_TEXT("The default storage engine for new tables"),
    &default_storage_engine, 0, 0, GET_STR, REQUIRED_ARG,
    0, 0, 0, 0, 0, 0 },
   {"default-tmp-storage-engine", 0,
-    "The default storage engine for user-created temporary tables",
+    MYLITE_OPTION_HELP_TEXT("The default storage engine for user-created temporary tables"),
    &default_tmp_storage_engine, 0, 0, GET_STR, REQUIRED_ARG,
    0, 0, 0, 0, 0, 0 },
-  {"default-time-zone", 0, "Set the default time zone",
+  {"default-time-zone", 0, MYLITE_OPTION_HELP_TEXT("Set the default time zone"),
    &default_tz_name, &default_tz_name,
    0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0 },
 #if defined(ENABLED_DEBUG_SYNC)
   {"debug-sync-timeout", OPT_DEBUG_SYNC_TIMEOUT,
-   "Enable the debug sync facility "
+   MYLITE_OPTION_HELP_TEXT("Enable the debug sync facility "
    "and optionally specify a default wait timeout in seconds. "
-   "A zero value keeps the facility disabled",
+   "A zero value keeps the facility disabled"),
    &opt_debug_sync_timeout, 0,
    0, GET_UINT, OPT_ARG, 0, 0, UINT_MAX, 0, 0, 0},
 #endif /* defined(ENABLED_DEBUG_SYNC) */
 #if defined(HAVE_des) && !defined(MYLITE_DISABLE_DES_FUNCTIONS)
   {"des-key-file", 0,
-   "Load keys for des_encrypt() and des_encrypt from given file",
+   MYLITE_OPTION_HELP_TEXT("Load keys for des_encrypt() and des_encrypt from given file"),
    &des_key_file, &des_key_file, 0, GET_STR, REQUIRED_ARG,
    0, 0, 0, 0, 0, 0},
 #endif /* HAVE_des && !MYLITE_DISABLE_DES_FUNCTIONS */
 #ifdef HAVE_STACKTRACE
-  {"stack-trace", 0 , "Print a symbolic stack trace on failure",
+  {"stack-trace", 0 , MYLITE_OPTION_HELP_TEXT("Print a symbolic stack trace on failure"),
    &opt_stack_trace, &opt_stack_trace, 0, GET_BOOL, NO_ARG, 1, 0, 0, 0, 0, 0},
 #endif /* HAVE_STACKTRACE */
-  {"enforce-storage-engine", 0, "Force the use of a storage engine for new tables",
+  {"enforce-storage-engine", 0, MYLITE_OPTION_HELP_TEXT("Force the use of a storage engine for new tables"),
    &enforced_storage_engine, 0, 0, GET_STR, REQUIRED_ARG,
    0, 0, 0, 0, 0, 0 },
-  {"external-locking", 0, "Use system (external) locking (disabled by "
+  {"external-locking", 0, MYLITE_OPTION_HELP_TEXT("Use system (external) locking (disabled by "
    "default).  With this option enabled you can run myisamchk to test "
    "(not repair) tables while the MariaDB server is running. Disable with "
-   "--skip-external-locking", &opt_external_locking, &opt_external_locking,
+   "--skip-external-locking"), &opt_external_locking, &opt_external_locking,
    0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
   /* We must always support the next option to make scripts like mysqltest
      easier to do */
   {"flashback", 0,
-   "Setup the server to use flashback. This enables binary log in row mode and will enable extra logging for DDL's needed by flashback feature",
+   MYLITE_OPTION_HELP_TEXT("Setup the server to use flashback. This enables binary log in row mode and will enable extra logging for DDL's needed by flashback feature"),
    &opt_support_flashback, &opt_support_flashback,
    0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
   {"gdb", 0,
-   "Set up signals usable for debugging",
+   MYLITE_OPTION_HELP_TEXT("Set up signals usable for debugging"),
    &opt_debugging, &opt_debugging,
    0, GET_BOOL, NO_ARG, 0, 0, 0, "debug_gdb", 0, 0},
   {"gtid-pos-auto-engines", 0,
-   "List of engines for which to automatically create a "
+   MYLITE_OPTION_HELP_TEXT("List of engines for which to automatically create a "
    "mysql.gtid_slave_pos_ENGINE table, if a transaction using that engine "
    "is replicated. This can be used to avoid introducing cross-engine "
    "transactions, if engines are used different from that used by table "
-   "mysql.gtid_slave_pos",
+   "mysql.gtid_slave_pos"),
    &gtid_pos_auto_engines, 0, 0, GET_STR, REQUIRED_ARG,
    0, 0, 0, 0, 0, 0 },
 #ifdef HAVE_SOLARIS_LARGE_PAGES
-  {"super-large-pages", 0, "Enable support for super large pages",
+  {"super-large-pages", 0, MYLITE_OPTION_HELP_TEXT("Enable support for super large pages"),
    &opt_super_large_pages, &opt_super_large_pages, 0,
    GET_BOOL, OPT_ARG, 0, 0, 1, 0, 1, 0},
 #endif
   {"language", 'L',
-   "Client error messages in given language. May be given as a full path",
+   MYLITE_OPTION_HELP_TEXT("Client error messages in given language. May be given as a full path"),
    0, 0, 0, GET_STR, REQUIRED_ARG, 0, 0, 0, "lc_messages_dir", 0, 0},
   {"lc-messages", 0,
-   "Set the language used for the error messages",
+   MYLITE_OPTION_HELP_TEXT("Set the language used for the error messages"),
    &lc_messages, &lc_messages, 0, GET_STR, REQUIRED_ARG,
    0, 0, 0, 0, 0, 0 },
   {"lc-time-names", 0,
-   "Set the language used for the month names and the days of the week",
+   MYLITE_OPTION_HELP_TEXT("Set the language used for the month names and the days of the week"),
    &lc_time_names_name, &lc_time_names_name,
    0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0 },
   {"log-basename", OPT_LOG_BASENAME,
-   "Basename for all log files and the .pid file. This sets all log file "
+   MYLITE_OPTION_HELP_TEXT("Basename for all log files and the .pid file. This sets all log file "
    "names at once (in 'datadir') and is normally the only option you need "
    "for specifying log files. Sets names for --log-bin, --log-bin-index, "
    "--relay-log, --relay-log-index, --general-log-file, "
    "--log-slow-query-file, --log-error-file, and --pid-file. "
    "If log-basename includes a path, the path will apply for all above "
-   "variables except pid-file that will use it without the path",
+   "variables except pid-file that will use it without the path"),
    &opt_log_basename, &opt_log_basename, 0, GET_STR, REQUIRED_ARG,
    0, 0, 0, 0, 0, 0},
   {"log-bin", OPT_BIN_LOG,
-   "Log update queries in binary format. Optional argument should be name for "
+   MYLITE_OPTION_HELP_TEXT("Log update queries in binary format. Optional argument should be name for "
    "binary log. If not given "
    "'datadir'/'log-basename'-bin or 'datadir'/mysql-bin will be used (the later if "
    "--log-basename is not specified). We strongly recommend to use either "
    "--log-basename or specify a filename to ensure that replication doesn't "
-   "stop if the real hostname of the computer changes",
+   "stop if the real hostname of the computer changes"),
    &opt_bin_logname, &opt_bin_logname, 0, GET_STR,
    OPT_ARG, 0, 0, 0, 0, 0, 0},
   {"log-bin-index", 0,
-   "File that holds the names for last binary log files",
+   MYLITE_OPTION_HELP_TEXT("File that holds the names for last binary log files"),
    &opt_binlog_index_name, &opt_binlog_index_name, 0, GET_STR,
    REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
   {"relay-log-index", 0,
-   "The location and name to use for the file that keeps a list of the last "
-   "relay logs",
+   MYLITE_OPTION_HELP_TEXT("The location and name to use for the file that keeps a list of the last "
+   "relay logs"),
    &opt_relaylog_index_name, &opt_relaylog_index_name, 0, GET_STR,
    REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
   {"log-ddl-recovery", 0,
-   "Path to file used for recovery of DDL statements after a crash",
+   MYLITE_OPTION_HELP_TEXT("Path to file used for recovery of DDL statements after a crash"),
    &opt_ddl_recovery_file, &opt_ddl_recovery_file, 0, GET_STR,
    REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
 #if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
-  {"log-isam", OPT_ISAM_LOG, "Log all MyISAM changes to file",
+  {"log-isam", OPT_ISAM_LOG, MYLITE_OPTION_HELP_TEXT("Log all MyISAM changes to file"),
    &myisam_log_filename, &myisam_log_filename, 0, GET_STR,
    OPT_ARG, 0, 0, 0, 0, 0, 0},
 #endif
   {"log-short-format", 0,
-   "Don't log extra information to update and slow-query logs",
+   MYLITE_OPTION_HELP_TEXT("Don't log extra information to update and slow-query logs"),
    &opt_short_log_format, &opt_short_log_format,
    0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
   {"log-tc", 0,
-   "Path to transaction coordinator log (used for transactions that affect "
-   "more than one storage engine, when binary log is disabled)",
+   MYLITE_OPTION_HELP_TEXT("Path to transaction coordinator log (used for transactions that affect "
+   "more than one storage engine, when binary log is disabled)"),
    &opt_tc_log_file, &opt_tc_log_file, 0, GET_STR,
    REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
   {"master-info-file", 0,
-   "The location and name of the file that remembers the master and where "
+   MYLITE_OPTION_HELP_TEXT("The location and name of the file that remembers the master and where "
    "the I/O replication thread is in the master's binlogs. Defaults to "
-   "master.info",
+   "master.info"),
    &master_info_file, &master_info_file, 0, GET_STR,
    REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
   {"master-retry-count", 0,
-   "The number of tries the slave will make to connect to the master before giving up",
+   MYLITE_OPTION_HELP_TEXT("The number of tries the slave will make to connect to the master before giving up"),
    &master_retry_count, &master_retry_count, 0, GET_ULONG,
    REQUIRED_ARG, 100000, 0, 0, 0, 0, 0},
 #ifdef HAVE_REPLICATION
-  {"init-rpl-role", 0, "Set the replication role",
+  {"init-rpl-role", 0, MYLITE_OPTION_HELP_TEXT("Set the replication role"),
    &rpl_status, &rpl_status, &rpl_role_typelib,
    GET_ENUM, REQUIRED_ARG, RPL_AUTH_MASTER, 0, 0, 0, 0, 0},
 #endif /* HAVE_REPLICATION */
-  {"memlock", 0, "Lock mariadbd process in memory", &locked_in_memory,
+  {"memlock", 0, MYLITE_OPTION_HELP_TEXT("Lock mariadbd process in memory"), &locked_in_memory,
    &locked_in_memory, 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
   {"old-style-user-limits", 0,
-   "Enable old-style user limits (before 5.0.3, user resources were counted "
-   "per each user+host vs. per account)",
+   MYLITE_OPTION_HELP_TEXT("Enable old-style user limits (before 5.0.3, user resources were counted "
+   "per each user+host vs. per account)"),
    &opt_old_style_user_limits, &opt_old_style_user_limits,
    0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
   {"port-open-timeout", 0,
-   "Maximum time in seconds to wait for the port to become free. "
-   "(Default: No wait)", &mysqld_port_timeout, &mysqld_port_timeout, 0,
+   MYLITE_OPTION_HELP_TEXT("Maximum time in seconds to wait for the port to become free. "
+   "(Default: No wait)"), &mysqld_port_timeout, &mysqld_port_timeout, 0,
    GET_UINT, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
   {"replicate-do-db", OPT_REPLICATE_DO_DB,
-   "Tells the slave thread to restrict replication to the specified database. "
+   MYLITE_OPTION_HELP_TEXT("Tells the slave thread to restrict replication to the specified database. "
    "To specify more than one database, use the directive multiple times, "
    "once for each database. Note that this will only work if you do not use "
    "cross-database queries such as UPDATE some_db.some_table SET foo='bar' "
    "while having selected a different or no database. If you need cross "
    "database updates to work, make sure you have 3.23.28 or later, and use "
-   "replicate-wild-do-table=db_name.%",
+   "replicate-wild-do-table=db_name.%"),
    0, 0, 0, GET_STR | GET_ASK_ADDR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
   {"replicate-do-table", OPT_REPLICATE_DO_TABLE,
-   "Tells the slave thread to restrict replication to the specified table. "
+   MYLITE_OPTION_HELP_TEXT("Tells the slave thread to restrict replication to the specified table. "
    "To specify more than one table, use the directive multiple times, once "
    "for each table. This will work for cross-database updates, in contrast "
-   "to replicate-do-db", 0, 0, 0, GET_STR | GET_ASK_ADDR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+   "to replicate-do-db"), 0, 0, 0, GET_STR | GET_ASK_ADDR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
   {"replicate-ignore-db", OPT_REPLICATE_IGNORE_DB,
-   "Tells the slave thread to not replicate to the specified database. To "
+   MYLITE_OPTION_HELP_TEXT("Tells the slave thread to not replicate to the specified database. To "
    "specify more than one database to ignore, use the directive multiple "
    "times, once for each database. This option will not work if you use "
    "cross database updates. If you need cross database updates to work, "
    "make sure you have 3.23.28 or later, and use replicate-wild-ignore-"
-   "table=db_name.%. ", 0, 0, 0, GET_STR | GET_ASK_ADDR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+   "table=db_name.%. "), 0, 0, 0, GET_STR | GET_ASK_ADDR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
   {"replicate-ignore-table", OPT_REPLICATE_IGNORE_TABLE,
-   "Tells the slave thread to not replicate to the specified table. To specify "
+   MYLITE_OPTION_HELP_TEXT("Tells the slave thread to not replicate to the specified table. To specify "
    "more than one table to ignore, use the directive multiple times, once for "
    "each table. This will work for cross-database updates, in contrast to "
-   "replicate-ignore-db", 0, 0, 0, GET_STR | GET_ASK_ADDR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+   "replicate-ignore-db"), 0, 0, 0, GET_STR | GET_ASK_ADDR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
   {"replicate-rewrite-db", OPT_REPLICATE_REWRITE_DB,
-   "Updates to a database with a different name than the original. Example: "
-   "replicate-rewrite-db=master_db_name->slave_db_name",
+   MYLITE_OPTION_HELP_TEXT("Updates to a database with a different name than the original. Example: "
+   "replicate-rewrite-db=master_db_name->slave_db_name"),
    0, 0, 0, GET_STR | GET_ASK_ADDR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
 #ifdef HAVE_REPLICATION
   {"replicate-same-server-id", 0,
-   "In replication, if set to 1, do not skip events having our server id. "
+   MYLITE_OPTION_HELP_TEXT("In replication, if set to 1, do not skip events having our server id. "
    "Default value is 0 (to break infinite loops in circular replication). "
-   "Can't be set to 1 if --log-slave-updates is used",
+   "Can't be set to 1 if --log-slave-updates is used"),
    &replicate_same_server_id, &replicate_same_server_id,
    0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
 #endif
   {"replicate-wild-do-table", OPT_REPLICATE_WILD_DO_TABLE,
-   "Tells the slave thread to restrict replication to the tables that match "
+   MYLITE_OPTION_HELP_TEXT("Tells the slave thread to restrict replication to the tables that match "
    "the specified wildcard pattern. To specify more than one table, use the "
    "directive multiple times, once for each table. This will work for cross-"
    "database updates. Example: replicate-wild-do-table=foo%.bar% will "
    "replicate only updates to tables in all databases that start with foo "
-   "and whose table names start with bar",
+   "and whose table names start with bar"),
    0, 0, 0, GET_STR | GET_ASK_ADDR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
   {"replicate-wild-ignore-table", OPT_REPLICATE_WILD_IGNORE_TABLE,
-   "Tells the slave thread to not replicate to the tables that match the "
+   MYLITE_OPTION_HELP_TEXT("Tells the slave thread to not replicate to the tables that match the "
    "given wildcard pattern. To specify more than one table to ignore, use "
    "the directive multiple times, once for each table. This will work for "
    "cross-database updates. Example: replicate-wild-ignore-table=foo%.bar% "
    "will not do updates to tables in databases that start with foo and whose "
-   "table names start with bar",
+   "table names start with bar"),
    0, 0, 0, GET_STR | GET_ASK_ADDR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
-  {"safe-mode", OPT_SAFE, "Skip some optimize stages (for testing)",
+  {"safe-mode", OPT_SAFE, MYLITE_OPTION_HELP_TEXT("Skip some optimize stages (for testing)"),
    0, 0, 0, GET_NO_ARG, NO_ARG, 0, 0, 0, "", 0, 0},
   {"safe-user-create", 0,
-   "Don't allow new user creation by the user who has no write privileges to the mysql.user table",
+   MYLITE_OPTION_HELP_TEXT("Don't allow new user creation by the user who has no write privileges to the mysql.user table"),
    &opt_safe_user_create, &opt_safe_user_create, 0, GET_BOOL,
    NO_ARG, 0, 0, 0, 0, 0, 0},
   {"show-slave-auth-info", 0,
-   "Show user and password in SHOW SLAVE HOSTS on this master",
+   MYLITE_OPTION_HELP_TEXT("Show user and password in SHOW SLAVE HOSTS on this master"),
    &opt_show_slave_auth_info, &opt_show_slave_auth_info, 0,
    GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
-  {"silent-startup", OPT_SILENT, "Don't print [Note] to the error log during startup",
+  {"silent-startup", OPT_SILENT, MYLITE_OPTION_HELP_TEXT("Don't print [Note] to the error log during startup"),
    &opt_silent_startup, &opt_silent_startup, 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
-  {"skip-host-cache", OPT_SKIP_HOST_CACHE, "Don't cache host names", 0, 0, 0,
+  {"skip-host-cache", OPT_SKIP_HOST_CACHE, MYLITE_OPTION_HELP_TEXT("Don't cache host names"), 0, 0, 0,
    GET_NO_ARG, NO_ARG, 0, 0, 0, 0, 0, 0},
   {"skip-slave-start", 0,
-   "If set, slave is not autostarted", &opt_skip_slave_start,
+   MYLITE_OPTION_HELP_TEXT("If set, slave is not autostarted"), &opt_skip_slave_start,
    &opt_skip_slave_start, 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
 #ifdef HAVE_REPLICATION
   {"slave-parallel-mode", OPT_SLAVE_PARALLEL_MODE,
-   "Controls what transactions are applied in parallel when using "
+   MYLITE_OPTION_HELP_TEXT("Controls what transactions are applied in parallel when using "
    "--slave-parallel-threads. Possible values: \"optimistic\" tries to "
    "apply most transactional DML in parallel, and handles any conflicts "
    "with rollback and retry. \"conservative\" limits parallelism in an "
    "effort to avoid any conflicts. \"aggressive\" tries to maximise the "
    "parallelism, possibly at the cost of increased conflict rate. "
    "\"minimal\" only parallelizes the commit steps of transactions. "
-   "\"none\" disables parallel apply completely",
+   "\"none\" disables parallel apply completely"),
    &opt_slave_parallel_mode, &opt_slave_parallel_mode,
    &slave_parallel_mode_typelib, GET_ENUM | GET_ASK_ADDR, REQUIRED_ARG,
    SLAVE_PARALLEL_CONSERVATIVE, 0, 0, 0, 0, 0},
 #endif
 #if defined(_WIN32) && !defined(EMBEDDED_LIBRARY)
   {"slow-start-timeout", 0,
-   "Maximum number of milliseconds that the service control manager should wait "
-   "before trying to kill the windows service during startup",
+   MYLITE_OPTION_HELP_TEXT("Maximum number of milliseconds that the service control manager should wait "
+   "before trying to kill the windows service during startup"),
    &slow_start_timeout, &slow_start_timeout, 0,
    GET_ULONG, REQUIRED_ARG, 15000, 0, 0, 0, 0, 0},
 #endif
 #ifdef HAVE_OPENSSL
   {"ssl", 0,
-   "Enable SSL for connection (automatically enabled if an ssl option is used)",
+   MYLITE_OPTION_HELP_TEXT("Enable SSL for connection (automatically enabled if an ssl option is used)"),
    &opt_use_ssl, &opt_use_ssl, 0, GET_BOOL, OPT_ARG, 1, 0, 0,
    0, 0, 0},
 #endif
 #ifdef _WIN32
   {"standalone", 0,
-  "Dummy option to start as a standalone program (NT)", 0, 0, 0, GET_NO_ARG,
+  MYLITE_OPTION_HELP_TEXT("Dummy option to start as a standalone program (NT)"), 0, 0, 0, GET_NO_ARG,
    NO_ARG, 0, 0, 0, 0, 0, 0},
 #endif
-  {"symbolic-links", 's', "Enable symbolic link support",
+  {"symbolic-links", 's', MYLITE_OPTION_HELP_TEXT("Enable symbolic link support"),
    &my_use_symdir, &my_use_symdir, 0, GET_BOOL, NO_ARG,
    /*
      The system call realpath() produces warnings under valgrind and
@@ -7012,13 +7018,13 @@ struct my_option my_long_options[]=
    */
    IF_WIN(0,1), 0, 0, 0, 0, 0},
   {"sysdate-is-now", 0,
-   "Non-default option to alias SYSDATE() to NOW() to make it safe-replicable. "
+   MYLITE_OPTION_HELP_TEXT("Non-default option to alias SYSDATE() to NOW() to make it safe-replicable. "
    "Since 5.0, SYSDATE() returns a `dynamic' value different for different "
-   "invocations, even within the same statement",
+   "invocations, even within the same statement"),
    &global_system_variables.sysdate_is_now,
    0, 0, GET_BOOL, NO_ARG, 0, 0, 1, 0, 1, 0},
   {"tc-heuristic-recover", 0,
-   "Decision to use in heuristic recover process",
+   MYLITE_OPTION_HELP_TEXT("Decision to use in heuristic recover process"),
    &tc_heuristic_recover, &tc_heuristic_recover,
    &tc_heuristic_recover_typelib, GET_ENUM, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
   {"temp-pool", 0,
@@ -7031,42 +7037,42 @@ struct my_option my_long_options[]=
    &use_temp_pool, &use_temp_pool, 0, GET_BOOL, NO_ARG, 0,
    0, 0, "", 0, 0},
   {"transaction-isolation", 0,
-   "Default transaction isolation level",
+   MYLITE_OPTION_HELP_TEXT("Default transaction isolation level"),
    &global_system_variables.tx_isolation,
    &global_system_variables.tx_isolation, &tx_isolation_typelib,
    GET_ENUM, REQUIRED_ARG, ISO_REPEATABLE_READ, 0, 0, 0, 0, 0},
   {"transaction-read-only", 0,
-   "Default transaction access mode. "
-   "True if transactions are read-only",
+   MYLITE_OPTION_HELP_TEXT("Default transaction access mode. "
+   "True if transactions are read-only"),
    &global_system_variables.tx_read_only,
    &global_system_variables.tx_read_only, 0,
    GET_BOOL, OPT_ARG, 0, 0, 0, 0, 0, 0},
-  {"user", 'u', "User to run mariadbd process as", 0, 0, 0, GET_STR, REQUIRED_ARG,
+  {"user", 'u', MYLITE_OPTION_HELP_TEXT("User to run mariadbd process as"), 0, 0, 0, GET_STR, REQUIRED_ARG,
    0, 0, 0, 0, 0, 0},
-  {"verbose", 'v', "Used with --help option for detailed help",
+  {"verbose", 'v', MYLITE_OPTION_HELP_TEXT("Used with --help option for detailed help"),
    &opt_verbose, &opt_verbose, 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
-  {"version", 'V', "Output version information and exit", 0, 0, 0, GET_STR,
+  {"version", 'V', MYLITE_OPTION_HELP_TEXT("Output version information and exit"), 0, 0, 0, GET_STR,
    OPT_ARG, 0, 0, 0, 0, 0, 0},
   {"plugin-load", OPT_PLUGIN_LOAD,
-   "Semicolon-separated list of plugins to load, where each plugin is "
+   MYLITE_OPTION_HELP_TEXT("Semicolon-separated list of plugins to load, where each plugin is "
    "specified as ether a plugin_name=library_file pair or only a library_file. "
-   "If the latter case, all plugins from a given library_file will be loaded",
+   "If the latter case, all plugins from a given library_file will be loaded"),
    0, 0, 0,
    GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
   {"plugin-load-add", OPT_PLUGIN_LOAD_ADD,
-   "Optional semicolon-separated list of plugins to load. This option adds "
+   MYLITE_OPTION_HELP_TEXT("Optional semicolon-separated list of plugins to load. This option adds "
    "to the list specified by --plugin-load in an incremental way. "
-   "It can be specified many times, adding more plugins every time",
+   "It can be specified many times, adding more plugins every time"),
    0, 0, 0,
     GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
-  {"table_cache", 0, "Sets table_open_cache",
+  {"table_cache", 0, MYLITE_OPTION_HELP_TEXT("Sets table_open_cache"),
    &tc_size, &tc_size, 0, GET_ULONG,
    REQUIRED_ARG, TABLE_OPEN_CACHE_DEFAULT, 1, 512*1024L, "table_open_cache", 1, 0},
 #ifdef WITH_WSREP
-  {"wsrep-new-cluster", 0, "Bootstrap a cluster. It works by overriding the "
+  {"wsrep-new-cluster", 0, MYLITE_OPTION_HELP_TEXT("Bootstrap a cluster. It works by overriding the "
    "current value of wsrep_cluster_address. It is recommended not to add this "
    "option to the config file as this will trigger bootstrap on every server "
-   "start", &wsrep_new_cluster, &wsrep_new_cluster, 0, GET_BOOL, NO_ARG,
+   "start"), &wsrep_new_cluster, &wsrep_new_cluster, 0, GET_BOOL, NO_ARG,
    0, 0, 0, 0, 0, 0},
 #endif
 };
