@@ -5,6 +5,7 @@
    the Free Software Foundation; version 2 of the License. */
 
 #include <mysql.h>
+#include <errmsg.h>
 #include <mysqld_error.h>
 
 #include <cstring>
@@ -38,6 +39,9 @@ struct SmokeResult
   std::string phase;
   std::string message;
   std::string value;
+  unsigned int remote_connect_errno= 0;
+  std::string remote_connect_sqlstate;
+  std::string remote_connect_message;
   std::vector<UnsupportedResult> unsupported;
 };
 
@@ -47,6 +51,9 @@ static std::vector<std::string> build_server_args(const SmokeOptions &options);
 static int run_smoke(const SmokeOptions &options,
                      const std::vector<std::string> &server_args,
                      SmokeResult *result);
+#ifdef MYLITE_DISABLE_EMBEDDED_CLIENT_FALLBACKS
+static bool check_remote_connect_fallback(SmokeResult *result);
+#endif
 static bool fetch_select_one(MYSQL *mysql, SmokeResult *result);
 static bool check_unsupported_statements(MYSQL *mysql, SmokeResult *result);
 static bool is_expected_unsupported_error(const std::string &label,
@@ -172,6 +179,12 @@ static int run_smoke(const SmokeOptions &,
   if (!fetch_select_one(mysql, result))
     goto done;
 
+#ifdef MYLITE_DISABLE_EMBEDDED_CLIENT_FALLBACKS
+  result->phase= "remote_connect_fallback";
+  if (!check_remote_connect_fallback(result))
+    goto done;
+#endif
+
   result->phase= "unsupported";
   if (!check_unsupported_statements(mysql, result))
     goto done;
@@ -187,6 +200,36 @@ done:
     mysql_server_end();
   return result->status;
 }
+
+#ifdef MYLITE_DISABLE_EMBEDDED_CLIENT_FALLBACKS
+static bool check_remote_connect_fallback(SmokeResult *result)
+{
+  MYSQL *remote= mysql_init(nullptr);
+  if (!remote)
+  {
+    result->message= "remote mysql_init failed";
+    return false;
+  }
+
+  if (mysql_real_connect(remote, "mylite.invalid", "root", nullptr, nullptr,
+                         0, nullptr, 0))
+  {
+    result->message= "remote mysql_real_connect unexpectedly succeeded";
+    mysql_close(remote);
+    return false;
+  }
+
+  result->remote_connect_errno= mysql_errno(remote);
+  result->remote_connect_sqlstate= mysql_sqlstate(remote);
+  result->remote_connect_message= mysql_error(remote);
+  const bool ok= result->remote_connect_errno == CR_CONN_UNKNOW_PROTOCOL;
+  if (!ok)
+    result->message= "remote mysql_real_connect failed with unexpected error";
+
+  mysql_close(remote);
+  return ok;
+}
+#endif
 
 static bool fetch_select_one(MYSQL *mysql, SmokeResult *result)
 {
@@ -402,6 +445,14 @@ static void write_report(const SmokeOptions &options,
   report << "message=" << result.message << "\n";
   if (!result.value.empty())
     report << "value=" << result.value << "\n";
+  if (result.remote_connect_errno != 0)
+  {
+    report << "remote_connect_errno=" << result.remote_connect_errno << "\n";
+    report << "remote_connect_sqlstate="
+           << result.remote_connect_sqlstate << "\n";
+    report << "remote_connect_message="
+           << result.remote_connect_message << "\n";
+  }
 
   report << "\n## Unsupported Surface Results\n\n";
   if (result.unsupported.empty())

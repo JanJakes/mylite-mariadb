@@ -35,6 +35,10 @@ MYSQL_ADD_EXECUTABLE(mylite-embedded-bootstrap-smoke
   COMPONENT Test
 )
 TARGET_LINK_LIBRARIES(mylite-embedded-bootstrap-smoke mysqlserver tpool)
+IF(MYLITE_DISABLE_EMBEDDED_CLIENT_FALLBACKS)
+  TARGET_COMPILE_DEFINITIONS(mylite-embedded-bootstrap-smoke PRIVATE
+    MYLITE_DISABLE_EMBEDDED_CLIENT_FALLBACKS)
+ENDIF()
 
 MYSQL_ADD_EXECUTABLE(mylite-open-close-smoke
   open_close_smoke.cc

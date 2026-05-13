@@ -135,8 +135,11 @@ int STDCALL mysql_server_init(int argc __attribute__((unused)),
     if (my_init())				/* Will init threads */
       return 1;
     init_client_errs();
+#ifndef MYLITE_DISABLE_EMBEDDED_CLIENT_FALLBACKS
     if (mysql_client_plugin_init())
       return 1;
+#endif
+#ifndef MYLITE_DISABLE_EMBEDDED_CLIENT_FALLBACKS
     if (!mysql_port)
     {
       char *env;
@@ -175,6 +178,18 @@ int STDCALL mysql_server_init(int argc __attribute__((unused)),
       if ((env = getenv("MYSQL_UNIX_PORT")))
 	mysql_unix_port = env;
     }
+#else
+    if (!mysql_port)
+      mysql_port= MYSQL_PORT;
+    if (!mysql_unix_port)
+    {
+#ifdef _WIN32
+      mysql_unix_port= (char*) MYSQL_NAMEDPIPE;
+#else
+      mysql_unix_port= (char*) MYSQL_UNIX_ADDR;
+#endif
+    }
+#endif
     mysql_debug(NullS);
 #if defined(SIGPIPE) && !defined(_WIN32)
     (void) signal(SIGPIPE, SIG_IGN);
@@ -207,7 +222,9 @@ void STDCALL mysql_server_end()
   if (!mysql_client_init)
     return;
 
+#ifndef MYLITE_DISABLE_EMBEDDED_CLIENT_FALLBACKS
   mysql_client_plugin_deinit();
+#endif
 
   finish_client_errs();
   if (mariadb_deinitialize_ssl)

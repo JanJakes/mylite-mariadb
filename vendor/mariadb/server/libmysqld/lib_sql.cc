@@ -748,6 +748,7 @@ void embedded_set_current_thd(THD *thd)
 
 
 #ifdef NO_EMBEDDED_ACCESS_CHECKS
+#ifndef MYLITE_DISABLE_EMBEDDED_CLIENT_FALLBACKS
 static void
 emb_transfer_connect_attrs(MYSQL *mysql)
 {
@@ -768,6 +769,7 @@ emb_transfer_connect_attrs(MYSQL *mysql)
   }
 #endif
 }
+#endif
 
 
 int check_embedded_connection(MYSQL *mysql, const char *db)
@@ -788,7 +790,9 @@ int check_embedded_connection(MYSQL *mysql, const char *db)
   sctx->user= my_strdup(PSI_NOT_INSTRUMENTED, mysql->user, MYF(0));
   sctx->proxy_user[0]= 0;
   sctx->master_access= GLOBAL_ACLS;       // Full rights
+#ifndef MYLITE_DISABLE_EMBEDDED_CLIENT_FALLBACKS
   emb_transfer_connect_attrs(mysql);
+#endif
   /* Change database if necessary */
   if (!(result= (db && db[0] && mysql_change_db(thd, &db_str, FALSE))))
     my_ok(thd);

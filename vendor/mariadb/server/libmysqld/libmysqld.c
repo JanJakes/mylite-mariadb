@@ -77,7 +77,9 @@ mysql_real_connect(MYSQL *mysql,const char *host, const char *user,
 		   const char *passwd, const char *db,
 		   uint port, const char *unix_socket,ulong client_flag)
 {
+#ifndef MYLITE_DISABLE_EMBEDDED_CLIENT_FALLBACKS
   char name_buff[USERNAME_LENGTH];
+#endif
   THD *org_current_thd= embedded_get_current_thd();
   DBUG_ENTER("mysql_real_connect");
   DBUG_PRINT("enter",("host: %s  db: %s  user: %s (libmysqld)",
@@ -95,16 +97,33 @@ mysql_real_connect(MYSQL *mysql,const char *host, const char *user,
   if (!host || !host[0])
     host= mysql->options.host;
 
+#ifdef MYLITE_DISABLE_EMBEDDED_CLIENT_FALLBACKS
+  if (mysql->options.methods_to_use == MYSQL_OPT_USE_REMOTE_CONNECTION ||
+      (mysql->options.methods_to_use == MYSQL_OPT_GUESS_CONNECTION &&
+       host && *host && strcmp(host,LOCAL_HOST)))
+  {
+    set_mysql_error(mysql, CR_CONN_UNKNOW_PROTOCOL, unknown_sqlstate);
+    DBUG_RETURN(0);
+  }
+#else
   if (mysql->options.methods_to_use == MYSQL_OPT_USE_REMOTE_CONNECTION ||
       (mysql->options.methods_to_use == MYSQL_OPT_GUESS_CONNECTION &&
        host && *host && strcmp(host,LOCAL_HOST)))
     DBUG_RETURN(cli_mysql_real_connect(mysql, host, user, 
 				       passwd, db, port, 
 				       unix_socket, client_flag));
+#endif
 
   mysql->methods= &embedded_methods;
 
   /* use default options */
+#ifdef MYLITE_DISABLE_EMBEDDED_CLIENT_FALLBACKS
+  if (mysql->options.my_cnf_file || mysql->options.my_cnf_group)
+  {
+    set_mysql_error(mysql, CR_UNKNOWN_ERROR, unknown_sqlstate);
+    goto error;
+  }
+#else
   if (mysql->options.my_cnf_file || mysql->options.my_cnf_group)
   {
     mysql_read_default_options(&mysql->options,
@@ -118,6 +137,7 @@ mysql_real_connect(MYSQL *mysql,const char *host, const char *user,
     if (mysql->options.protocol == UINT_MAX32)
       goto error;
   }
+#endif
 
   if (!db || !db[0])
     db=mysql->options.db;
@@ -138,9 +158,11 @@ mysql_real_connect(MYSQL *mysql,const char *host, const char *user,
 #endif /*!NO_EMBEDDED_ACCESS_CHECKS*/
   if (!user || !user[0])
   {
+#ifndef MYLITE_DISABLE_EMBEDDED_CLIENT_FALLBACKS
     read_user_name(name_buff);
     if (name_buff[0])
       user= name_buff;
+#endif
   }
 
   if (!user)

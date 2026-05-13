@@ -38,6 +38,71 @@
 #include "errmsg.h"
 #include <mysql/client_plugin.h>
 
+#ifdef MYLITE_DISABLE_EMBEDDED_CLIENT_FALLBACKS
+
+int mysql_client_plugin_init()
+{
+  return 0;
+}
+
+void mysql_client_plugin_deinit()
+{
+}
+
+struct st_mysql_client_plugin *
+mysql_client_register_plugin(MYSQL *mysql, struct st_mysql_client_plugin *plugin)
+{
+  if (mysql)
+    set_mysql_error(mysql, CR_UNKNOWN_ERROR, unknown_sqlstate);
+  (void) plugin;
+  return NULL;
+}
+
+struct st_mysql_client_plugin *
+mysql_load_plugin_v(MYSQL *mysql, const char *name, int type,
+                    int argc, va_list args)
+{
+  if (mysql)
+    set_mysql_error(mysql, CR_UNKNOWN_ERROR, unknown_sqlstate);
+  (void) name;
+  (void) type;
+  (void) argc;
+  (void) args;
+  return NULL;
+}
+
+struct st_mysql_client_plugin *
+mysql_load_plugin(MYSQL *mysql, const char *name, int type, int argc, ...)
+{
+  if (mysql)
+    set_mysql_error(mysql, CR_UNKNOWN_ERROR, unknown_sqlstate);
+  (void) name;
+  (void) type;
+  (void) argc;
+  return NULL;
+}
+
+struct st_mysql_client_plugin *
+mysql_client_find_plugin(MYSQL *mysql, const char *name, int type)
+{
+  if (mysql)
+    set_mysql_error(mysql, CR_UNKNOWN_ERROR, unknown_sqlstate);
+  (void) name;
+  (void) type;
+  return NULL;
+}
+
+int mysql_plugin_options(struct st_mysql_client_plugin *plugin,
+                         const char *option, const void *value)
+{
+  (void) plugin;
+  (void) option;
+  (void) value;
+  return 1;
+}
+
+#else
+
 PSI_memory_key key_memory_root;
 PSI_memory_key key_memory_load_env_plugins;
 
@@ -507,3 +572,5 @@ int mysql_plugin_options(struct st_mysql_client_plugin *plugin,
     DBUG_RETURN(1);
   DBUG_RETURN(plugin->options(option, value));
 }
+
+#endif
