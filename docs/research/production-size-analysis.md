@@ -43,6 +43,7 @@ The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 - `MYLITE_DISABLE_FOREIGN_SERVER_CACHE=ON`
 - `MYLITE_DISABLE_PROXY_PROTOCOL=ON`
 - `MYLITE_DISABLE_EVENT_PARSE_DATA=ON`
+- `MYLITE_DISABLE_TRIGGER_RUNTIME=ON`
 - `MYLITE_DISABLE_XA_TRANSACTIONS=ON`
 - `MYLITE_DISABLE_GEOMETRY_TYPE=ON`
 - `MYLITE_DISABLE_GENERAL1400_COLLATIONS=ON`
@@ -95,8 +96,9 @@ include the `type-plugin-size-profile`, `charset-small-profile`, and
 `tc-log-mmap-size-profile`, `append-query-string-size-profile`,
 `rpl-gtid-state-size-profile`, `optimizer-trace-size-profile`,
 `backup-stage-size-profile`, `json-table-size-profile`, and
-`foreign-server-cache-size-profile`, `proxy-protocol-size-profile`, and
-`event-parse-data-size-profile`, and `xa-transaction-size-profile`. Together
+`foreign-server-cache-size-profile`, `proxy-protocol-size-profile`,
+`event-parse-data-size-profile`, `xa-transaction-size-profile`, and
+`trigger-runtime-size-profile`. Together
 these remove the built-in
 `type_geom`, `type_inet`, `type_uuid`, `sequence`, `thread_pool_info`,
 `user_variables`, `userstat`, `mhnsw`, `csv`, and `myisammrg` plugins, set
@@ -165,10 +167,11 @@ replace `JSON_TABLE` table-function execution with an unsupported embedded stub
 while retaining ordinary JSON scalar functions, and replace the foreign-server
 metadata cache with no-op embedded stubs so the `mysql.servers` cache
 implementation is omitted, and replace proxy protocol network-listener support
-with embedded disabled stubs, and replace event parser data validation with a
-minimal parser-allocation stub while event DDL remains rejected, and replace
-the full XA transaction implementation with embedded-disabled XA command
-stubs.
+with embedded disabled stubs, replace event parser data validation with a
+minimal parser-allocation stub while event DDL remains rejected, replace the
+full XA transaction implementation with embedded-disabled XA command stubs, and
+replace the full trigger sidecar loader and runtime with inert embedded
+no-trigger stubs while trigger DDL remains rejected.
 
 `no-myisam-temp-spill-size-profile` was measured separately as an opt-in
 `MYLITE_DISABLE_MYISAM_TEMP_SPILL=ON` experiment. It is not part of the current
@@ -188,40 +191,40 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 ## Current baseline
 
 The current values were measured from
-`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-xa`.
+`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-trigger-runtime`.
 Paths below use the default build directory names for readability.
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
-| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 29,920,080 | 28.53 | Main embedded MariaDB archive, 422 objects, stripped; section metadata grows the archive |
-| `build/mariadb-minsize/mylite/libmylite.a` | 122,784 | 0.12 | First-party public wrapper |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 29,848,586 | 28.47 | Main embedded MariaDB archive, 422 objects, stripped; section metadata grows the archive |
+| `build/mariadb-minsize/mylite/libmylite.a` | 122,800 | 0.12 | First-party public wrapper |
 | `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 388,440 | 0.37 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 7,951,584 | 7.58 | Unstripped linked smoke binary, lld RELR, section GC, ICF, reduced unwind tables, no OpenSSL runtime dependency, no retained binlog event reader, GTID-index writer, full GTID binlog-state code, full optimizer trace implementation, external backup stage implementation, full `JSON_TABLE` table-function implementation, full foreign-server metadata cache implementation, proxy protocol network-listener support, full event parser data validation, or full XA transaction implementation, no `log_event_server.cc.o`, no real mmap `tc.log` transaction coordinator, no server encryption hooks, no window functions, no UDF runtime, no SQL crypto/password functions, no VIO TLS transport, no `ENCRYPT()`, no legacy DES, no `KDF()`, no zlib compression, and no dynamic plugin loading |
-| stripped `mylite-open-close-smoke` copy | 5,719,056 | 5.45 | `strip --strip-unneeded` on copied binary |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 7,932,008 | 7.56 | Unstripped linked smoke binary, lld RELR, section GC, ICF, reduced unwind tables, no OpenSSL runtime dependency, no retained binlog event reader, GTID-index writer, full GTID binlog-state code, full optimizer trace implementation, external backup stage implementation, full `JSON_TABLE` table-function implementation, full foreign-server metadata cache implementation, proxy protocol network-listener support, full event parser data validation, full XA transaction implementation, or full trigger sidecar runtime, no `log_event_server.cc.o`, no real mmap `tc.log` transaction coordinator, no server encryption hooks, no window functions, no UDF runtime, no SQL crypto/password functions, no VIO TLS transport, no `ENCRYPT()`, no legacy DES, no `KDF()`, no zlib compression, and no dynamic plugin loading |
+| stripped `mylite-open-close-smoke` copy | 5,705,280 | 5.44 | `strip --strip-unneeded` on copied binary |
 
 The linked smoke binary has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 4,501,800 |
-| data | 1,213,920 |
-| bss | 239,497 |
-| total `size` decimal | 5,955,217 |
+| text | 4,488,776 |
+| data | 1,213,136 |
+| bss | 240,633 |
+| total `size` decimal | 5,942,545 |
 
 Largest linked sections in the open-close smoke binary:
 
 | Section | Bytes | Interpretation |
 | --- | ---: | --- |
-| `.text` | 2,778,876 | Executable code |
-| `.data.rel.ro` | 1,001,600 | Relocated read-only data |
-| `.rodata` | 972,491 | Parser tables, SQL metadata, constants, retained Unicode data |
-| `.eh_frame` | 511,144 | Unwind metadata |
-| `.data` | 184,480 | Writable data |
+| `.text` | 2,768,700 | Executable code |
+| `.data.rel.ro` | 1,001,248 | Relocated read-only data |
+| `.rodata` | 972,107 | Parser tables, SQL metadata, constants, retained Unicode data |
+| `.eh_frame` | 509,256 | Unwind metadata |
+| `.data` | 184,128 | Writable data |
 | `.bss` | 237,833 | Zero-initialized writable data |
-| `.eh_frame_hdr` | 107,380 | Unwind table index |
-| `.rela.dyn` | 45,936 | Remaining unpacked dynamic relocations |
-| `.gcc_except_table` | 40,432 | Exception metadata |
-| `.relr.dyn` | 18,392 | Packed relative relocations |
+| `.eh_frame_hdr` | 107,084 | Unwind table index |
+| `.rela.dyn` | 45,840 | Remaining unpacked dynamic relocations |
+| `.gcc_except_table` | 40,256 | Exception metadata |
+| `.relr.dyn` | 18,384 | Packed relative relocations |
 
 If a Linux distribution bundle vendors the current dynamic dependencies, it
 adds about 5,081,640 bytes, or 4.85 MiB, before compression:
@@ -349,6 +352,7 @@ The current built-in plugins are:
 | `proxy-protocol-size-profile` after foreign-server cache | 30,064,524 | -13,340,908 | 5,726,488 | -13,605,416 | Passes current smokes and harness; replaces proxy protocol network-listener support with disabled embedded stubs and omits `proxy_protocol.cc.o` |
 | `event-parse-data-size-profile` after proxy protocol | 30,052,668 | -13,352,764 | 5,726,400 | -13,605,504 | Passes current smokes and harness; replaces full event parser data validation with a minimal parser-allocation stub while event DDL remains rejected |
 | `xa-transaction-size-profile` after event parse data | 29,920,080 | -13,485,352 | 5,719,056 | -13,612,848 | Passes current smokes and harness; replaces full XA transaction implementation with embedded-disabled stubs |
+| `trigger-runtime-size-profile` after XA transactions | 29,848,586 | -13,556,846 | 5,705,280 | -13,626,624 | Passes current smokes and harness; replaces full trigger sidecar loading and execution with inert embedded no-trigger stubs while trigger DDL remains rejected |
 | `no-myisam-temp-spill-size-profile` after no-binlog-core | 32,836,602 | -10,568,830 | 6,437,408 | -12,894,496 | Opt-in experiment only; open/close smoke passes, but storage/catalog harness fails because schema-table queries need disk temp tables |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
 | Strip archive with `strip --strip-unneeded` | 41,873,048 | -1,532,384 | n/a | n/a | Higher risk than `strip -g` for static archives |
@@ -372,7 +376,7 @@ profile now passes current smokes while retaining the compiled default
 `utf8mb4_uca1400_ai_ci`.
 
 Stripping the current linked open-close smoke binary reduces it from
-7,951,584 bytes to 5,719,056 bytes, saving 2,232,528 bytes, or 2.13 MiB. That
+7,932,008 bytes to 5,705,280 bytes, saving 2,226,728 bytes, or 2.12 MiB. That
 remains the lowest-risk packaging win for any copied executable or
 shared-library style artifact.
 
@@ -604,6 +608,15 @@ the stripped linked smoke by 7,344 bytes. The archive no longer contains
 `XA RECOVER` metadata setup is rejected in `sql_prepare.cc`. The open/close
 smoke verifies `XA START` and `XA RECOVER` report MariaDB's embedded-disabled
 diagnostic, and the compatibility harness still passes.
+
+The `trigger-runtime-size-profile` attempt then removed MariaDB's full
+file-backed trigger loader and runtime from the aggressive embedded profile.
+On top of the XA profile, it reduced the static archive by 71,494 bytes and
+the stripped linked smoke by 13,776 bytes. The archive no longer contains
+`sql_trigger.cc.o`; the replacement no-trigger stub object is 15,112 bytes.
+Embedded bootstrap still rejects `CREATE TRIGGER` and `DROP TRIGGER`, ordinary
+table open leaves `TABLE::triggers` null, the sidecar scan reports no `.TRG` or
+`.TRN` files, and the compatibility harness still passes.
 
 The LTO build reduced the stripped linked smoke binary by 1.25 MiB, but the
 static archive became 326.61 MiB and GCC emitted type/ODR mismatch warnings
@@ -968,6 +981,7 @@ MyISAM-compatible storage.
 | Omit proxy protocol network-listener support | 0.008 MiB archive, negligible stripped linked beyond foreign-server cache | Low embedded compatibility | Applied as aggressive embedded-size attempt | Current smokes and harness pass; MyLite has no network listener, and `proxy_protocol_networks` remains visible but empty and disabled |
 | Omit full event parser data | 0.01 MiB archive, negligible stripped linked beyond proxy protocol | Low/medium embedded compatibility | Applied as aggressive embedded-size attempt | Current smokes and harness pass; event DDL is already rejected and only parser allocation is needed |
 | Omit XA transaction implementation | 0.13 MiB archive, 0.007 MiB stripped linked beyond event parse data | Medium/high SQL compatibility | Applied as aggressive embedded-size attempt | Current smokes and harness pass; XA and two-phase commit are explicit MyLite non-goals and now report embedded-disabled diagnostics |
+| Omit trigger sidecar runtime | 0.07 MiB archive, 0.013 MiB stripped linked beyond XA | High SQL compatibility | Applied as aggressive embedded-size attempt | Current smokes and harness pass; trigger DDL is already rejected, and `.TRG`/`.TRN` sidecar loading is replaced by no-trigger table-open behavior |
 | Omit MyISAM check/repair admin code | 0.11 MiB archive, 0.06 MiB stripped linked beyond no-binlog-core | Low/medium | Applied as size attempt | Keeps MyISAM for disk temp tables but removes unreachable admin repair/check paths from the hidden user engine |
 | Omit MyISAM full-text code | 0.08 MiB archive, 0.03 MiB stripped linked beyond MyISAM admin | Low/medium | Applied as size attempt | Keeps MyISAM for disk temp tables but removes unreachable full-text paths from the hidden user engine |
 | Omit MyISAM RTREE/spatial-key code | 0.04 MiB archive, 0.02 MiB stripped linked beyond MyISAM full-text | Low/medium | Applied as size attempt | Keeps MyISAM for disk temp tables but removes unreachable RTREE paths from the hidden user engine |
@@ -1096,7 +1110,11 @@ Take these now:
 37. Keep XA transactions omitted in the aggressive embedded profile while
    MyLite has no external transaction-manager or two-phase commit recovery
    design. Ordinary local transaction behavior remains covered separately.
-38. Keep a stripped linked smoke binary size in the build report so regressions
+38. Keep trigger sidecar loading and execution omitted in the aggressive
+   embedded profile while trigger DDL remains unsupported. Real trigger
+   support needs a MyLite catalog design rather than `.TRG` and `.TRN`
+   sidecars.
+39. Keep a stripped linked smoke binary size in the build report so regressions
    are visible.
 
 Do not take these now:
