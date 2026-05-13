@@ -188,3 +188,7 @@ PHP-shaped shared-object size so far. Do not switch the default profile yet:
 the archive bloat is substantial, the Docker image does not currently include
 Clang, and x86-64 needs its own measurement before making a broad release
 claim.
+
+Follow-up: after `lld-o2-link-profile`, the Clang/PIC PHP-shaped shared-object
+probe measures 3,783,264 bytes stripped, or 3,780,864 bytes with section
+headers stripped from the copied release artifact.

@@ -75,7 +75,7 @@ build_inside_container() {
   charset_registry_size="${MYLITE_CHARSET_REGISTRY_SIZE:-4096}"
 
   local minsize_linker_flags
-  minsize_linker_flags="-fuse-ld=lld -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr"
+  minsize_linker_flags="-fuse-ld=lld -Wl,-O2 -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr"
   case "${MYLITE_DISABLE_EH_FRAME_HEADER:-ON}" in
     on|ON|1|yes|YES|true|TRUE)
       minsize_linker_flags="${minsize_linker_flags} -Wl,--no-eh-frame-hdr"

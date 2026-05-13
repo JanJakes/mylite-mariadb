@@ -63,6 +63,14 @@ Measured on the opt-in Clang/PIC profile:
 The lowest measured PHP-shaped shared-object size is therefore 3,785,216 bytes:
 Clang/PIC plus `strip --strip-unneeded --strip-section-headers`.
 
+Follow-up measurement after `lld-o2-link-profile` lowered the sectionless
+PHP-shaped shared-object sizes further:
+
+| Artifact | Sectionless after lld `-O2` |
+| --- | ---: |
+| GCC PHP-shaped shared-object probe | 3,879,416 |
+| Clang/PIC PHP-shaped shared-object probe | 3,780,864 |
+
 ## Test And Verification Plan
 
 Run:
