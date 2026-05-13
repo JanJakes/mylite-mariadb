@@ -80,6 +80,7 @@ run_inside_container() {
   assert_no_tpool_runtime_symbols "${smoke}"
   assert_no_default_file_symbols "${smoke}"
   assert_no_auth_protocol_symbols "${smoke}"
+  assert_no_binlog_sysvar_strings "${smoke}"
 
   local smoke_log="${abs_build_dir}/libmylite-open-close-output.log"
   local exclusive_log="${abs_build_dir}/libmylite-open-close-exclusive-output.log"
@@ -378,6 +379,22 @@ assert_no_auth_protocol_symbols() {
     return 1
   fi
   printf "libmylite auth protocol symbols: none\n"
+}
+
+assert_no_binlog_sysvar_strings() {
+  local binary="$1"
+  local strings_found
+  strings_found="$(
+    strings "${binary}" 2>/dev/null \
+      | grep -E "^(binlog_format|binlog_large_commit_threshold|binlog_row_image|gtid_binlog_state|gtid_domain_id|pseudo_slave_mode|replicate_do_db|slave_parallel_threads|sync_binlog)$" \
+      || true
+  )"
+  if [[ -n "${strings_found}" ]]; then
+    printf "unexpected binlog sysvar strings in %s:\n%s\n" \
+      "${binary}" "${strings_found}" >&2
+    return 1
+  fi
+  printf "libmylite binlog sysvar strings: none\n"
 }
 
 main "$@"

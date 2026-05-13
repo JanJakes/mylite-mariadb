@@ -57,6 +57,10 @@
 #include "optimizer_defaults.h"
 #include "vector_mhnsw.h"
 
+#if defined(MYLITE_DISABLE_BINLOG_SYSVARS) && defined(EMBEDDED_LIBRARY)
+#define MYLITE_OMIT_BINLOG_SYSVARS 1
+#endif
+
 #ifdef WITH_PERFSCHEMA_STORAGE_ENGINE
 #include "../storage/perfschema/pfs_server.h"
 #endif /* WITH_PERFSCHEMA_STORAGE_ENGINE */
@@ -555,6 +559,7 @@ static Sys_var_enum Sys_vers_alter_history(
        SESSION_VAR(vers_alter_history), CMD_LINE(REQUIRED_ARG),
        vers_alter_history_keywords, DEFAULT(VERS_ALTER_HISTORY_ERROR));
 
+#ifndef MYLITE_OMIT_BINLOG_SYSVARS
 static Sys_var_on_access_global<Sys_var_ulonglong,
                                 PRIV_SET_SYSTEM_GLOBAL_VAR_BINLOG_CACHE_SIZE>
 Sys_binlog_cache_size(
@@ -585,6 +590,7 @@ Sys_binlog_stmt_cache_size(
        GLOBAL_VAR(binlog_stmt_cache_size),
        CMD_LINE(REQUIRED_ARG),
        VALID_RANGE(IO_SIZE, SIZE_T_MAX), DEFAULT(32768), BLOCK_SIZE(IO_SIZE));
+#endif
 
 /*
   Some variables like @sql_log_bin and @binlog_format change how/if binlogging
@@ -633,6 +639,7 @@ static Sys_var_bit Sys_core_file("core_file", MYLITE_SYSVAR_HELP_TEXT("Write cor
           READ_ONLY GLOBAL_VAR(test_flags), CMD_LINE(OPT_ARG),
           TEST_CORE_ON_SIGNAL, DEFAULT(IF_WIN(TRUE,FALSE)));
 
+#ifndef MYLITE_OMIT_BINLOG_SYSVARS
 static bool binlog_format_check(sys_var *self, THD *thd, set_var *var)
 {
   /*
@@ -746,6 +753,7 @@ Sys_binlog_direct(
        SESSION_VAR(binlog_direct_non_trans_update),
        CMD_LINE(OPT_ARG), DEFAULT(FALSE),
        NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(binlog_direct_check));
+#endif
 
 static bool deprecated_explicit_defaults_for_timestamp(sys_var *self, THD *thd,
                                                        set_var *var)
@@ -1238,6 +1246,7 @@ static Sys_var_enum Sys_event_scheduler(
        ON_CHECK(event_scheduler_check), ON_UPDATE(event_scheduler_update));
 #endif
 
+#ifndef MYLITE_OMIT_BINLOG_SYSVARS
 static bool copy_to_expire_logs_days(sys_var *, THD *,
                                      enum_var_type type)
 {
@@ -1348,6 +1357,7 @@ Sys_slave_connections_needed_for_purge(
        VALID_RANGE(0, UINT_MAX), DEFAULT(1), BLOCK_SIZE(1),
        NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0),
        ON_UPDATE(update_binlog_space_limit));
+#endif
 
 #if !defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
 
@@ -1588,6 +1598,7 @@ static Sys_var_mybool Sys_locked_in_memory(
        READ_ONLY GLOBAL_VAR(locked_in_memory), NO_CMD_LINE, DEFAULT(FALSE));
 #endif
 
+#ifndef MYLITE_OMIT_BINLOG_SYSVARS
 /* this says NO_CMD_LINE, as command-line option takes a string, not a bool */
 static Sys_var_mybool Sys_log_bin(
        "log_bin", MYLITE_SYSVAR_HELP_TEXT("Whether the binary log is enabled"),
@@ -1622,6 +1633,7 @@ Sys_trust_function_creators(
        "this to TRUE"),
        GLOBAL_VAR(trust_function_creators),
        CMD_LINE(OPT_ARG), DEFAULT(FALSE));
+#endif
 
 static Sys_var_charptr_fscs Sys_log_error(
        "log_error",
@@ -1823,6 +1835,7 @@ static Sys_var_ulong Sys_max_allowed_packet(
        BLOCK_SIZE(1024), NO_MUTEX_GUARD, NOT_IN_BINLOG,
        ON_CHECK(check_max_allowed_packet));
 
+#ifndef MYLITE_OMIT_BINLOG_SYSVARS
 static Sys_var_on_access_global<Sys_var_ulong,
                             PRIV_SET_SYSTEM_GLOBAL_VAR_SLAVE_MAX_ALLOWED_PACKET>
 Sys_slave_max_allowed_packet(
@@ -1869,6 +1882,7 @@ Sys_max_binlog_size(
        VALID_RANGE(IO_SIZE, 1024*1024L*1024L), DEFAULT(1024*1024L*1024L),
        BLOCK_SIZE(IO_SIZE), NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0),
        ON_UPDATE(fix_max_binlog_size));
+#endif
 
 static bool fix_max_connections(sys_var *self, THD *thd, enum_var_type type)
 {
@@ -2003,6 +2017,7 @@ Sys_pseudo_thread_id(
        NO_CMD_LINE, VALID_RANGE(0, MY_THREAD_ID_MAX), DEFAULT(0),
        BLOCK_SIZE(1), NO_MUTEX_GUARD, IN_BINLOG);
 
+#ifndef MYLITE_OMIT_BINLOG_SYSVARS
 static bool
 check_gtid_domain_id(sys_var *self, THD *thd, set_var *var)
 {
@@ -2097,9 +2112,10 @@ Sys_gtid_seq_no(
        NO_CMD_LINE, VALID_RANGE(0, ULONGLONG_MAX), DEFAULT(0),
        BLOCK_SIZE(1), NO_MUTEX_GUARD, NOT_IN_BINLOG,
        ON_CHECK(check_gtid_seq_no));
+#endif
 
 
-#ifdef HAVE_REPLICATION
+#if defined(HAVE_REPLICATION) && !defined(MYLITE_OMIT_BINLOG_SYSVARS)
 static unsigned char opt_gtid_binlog_pos_dummy;
 static Sys_var_gtid_binlog_pos Sys_gtid_binlog_pos(
        "gtid_binlog_pos", MYLITE_SYSVAR_HELP_TEXT("Last GTID logged to the binary log, per replication "
@@ -2370,8 +2386,10 @@ static Sys_var_gtid_binlog_state Sys_gtid_binlog_state(
        MYLITE_SYSVAR_HELP_TEXT("The internal GTID state of the binlog, used to keep track of all "
        "GTIDs ever logged to the binlog"),
        GLOBAL_VAR(opt_gtid_binlog_state_dummy), NO_CMD_LINE);
+#endif
 
 
+#ifdef HAVE_REPLICATION
 static Sys_var_last_gtid Sys_last_gtid(
        "last_gtid", MYLITE_SYSVAR_HELP_TEXT("The GTID of the last commit (if binlogging was enabled), "
        "or the empty string if none"),
@@ -2400,8 +2418,10 @@ Sys_var_last_gtid::session_value_ptr(THD *thd, const LEX_CSTRING *base) const
 
   return (uchar *)p;
 }
+#endif
 
 
+#if defined(HAVE_REPLICATION) && !defined(MYLITE_OMIT_BINLOG_SYSVARS)
 static Sys_var_on_access_global<Sys_var_uint,
                             PRIV_SET_SYSTEM_GLOBAL_VAR_GTID_CLEANUP_BATCH_SIZE>
 Sys_gtid_cleanup_batch_size(
@@ -2695,6 +2715,7 @@ static Sys_var_on_access_global<
 #endif
 
 
+#ifndef MYLITE_OMIT_BINLOG_SYSVARS
 static Sys_var_on_access_global<Sys_var_ulong,
                            PRIV_SET_SYSTEM_GLOBAL_VAR_BINLOG_COMMIT_WAIT_COUNT>
 Sys_binlog_commit_wait_count(
@@ -2717,6 +2738,7 @@ Sys_binlog_commit_wait_usec(
        "binlog_commit_wait_count is non-zero"),
        GLOBAL_VAR(opt_binlog_commit_wait_usec), CMD_LINE(REQUIRED_ARG),
        VALID_RANGE(0, ULONG_MAX), DEFAULT(100000), BLOCK_SIZE(1));
+#endif
 
 
 static bool fix_max_join_size(sys_var *self, THD *thd, enum_var_type type)
@@ -3647,6 +3669,7 @@ static Sys_var_charptr Sys_server_uid(
        CMD_LINE_HELP_ONLY,
        DEFAULT(server_uid));
 
+#ifndef MYLITE_OMIT_BINLOG_SYSVARS
 static Sys_var_on_access_global<Sys_var_mybool,
                           PRIV_SET_SYSTEM_GLOBAL_VAR_SLAVE_COMPRESSED_PROTOCOL>
 Sys_slave_compressed_protocol(
@@ -3654,8 +3677,9 @@ Sys_slave_compressed_protocol(
        MYLITE_SYSVAR_HELP_TEXT("Use compression on master/slave protocol"),
        GLOBAL_VAR(opt_slave_compressed_protocol), CMD_LINE(OPT_ARG),
        DEFAULT(FALSE));
+#endif
 
-#ifdef HAVE_REPLICATION
+#if defined(HAVE_REPLICATION) && !defined(MYLITE_OMIT_BINLOG_SYSVARS)
 static const char *slave_exec_mode_names[]= {"STRICT", "IDEMPOTENT", 0};
 static Sys_var_on_access_global<Sys_var_enum,
                                 PRIV_SET_SYSTEM_GLOBAL_VAR_SLAVE_EXEC_MODE>
@@ -4737,7 +4761,7 @@ static Sys_var_plugin Sys_enforce_storage_engine(
        ON_CHECK(check_has_super));
 
 
-#ifdef HAVE_REPLICATION
+#if defined(HAVE_REPLICATION) && !defined(MYLITE_OMIT_BINLOG_SYSVARS)
 /*
   Check
    1. Value for gtid_pos_auto_engines is not NULL.
@@ -5722,7 +5746,7 @@ static Sys_var_set Sys_log_output(
        NO_MUTEX_GUARD, NOT_IN_BINLOG,
        ON_CHECK(check_not_empty_set), ON_UPDATE(fix_log_output));
 
-#ifdef HAVE_REPLICATION
+#if defined(HAVE_REPLICATION) && !defined(MYLITE_OMIT_BINLOG_SYSVARS)
 static Sys_var_mybool Sys_log_slave_updates(
        "log_slave_updates", MYLITE_SYSVAR_HELP_TEXT("Tells the slave to log the updates from "
        "the slave thread to the binary log. You will need to turn it on if "
@@ -6178,6 +6202,7 @@ Sys_sync_relayloginfo_period(
        VALID_RANGE(0, UINT_MAX), DEFAULT(10000), BLOCK_SIZE(1));
 #endif
 
+#ifndef MYLITE_OMIT_BINLOG_SYSVARS
 static Sys_var_on_access_global<Sys_var_uint,
                                 PRIV_SET_SYSTEM_GLOBAL_VAR_SYNC_BINLOG>
 Sys_sync_binlog_period(
@@ -6193,8 +6218,9 @@ Sys_sync_masterinfo_period(
        "after every #th event. Use 0 to disable synchronous flushing"),
        GLOBAL_VAR(sync_masterinfo_period), CMD_LINE(REQUIRED_ARG),
        VALID_RANGE(0, UINT_MAX), DEFAULT(10000), BLOCK_SIZE(1));
+#endif
 
-#ifdef HAVE_REPLICATION
+#if defined(HAVE_REPLICATION) && !defined(MYLITE_OMIT_BINLOG_SYSVARS)
 static Sys_var_ulong Sys_slave_trans_retries(
        "slave_transaction_retries", MYLITE_SYSVAR_HELP_TEXT("Number of times the slave SQL "
        "thread will retry a transaction in case it failed with a deadlock, "
@@ -7030,6 +7056,7 @@ static Sys_var_mybool Sys_userstat(
        GLOBAL_VAR(opt_userstat_running),
        CMD_LINE(OPT_ARG), DEFAULT(FALSE));
 
+#ifndef MYLITE_OMIT_BINLOG_SYSVARS
 static Sys_var_on_access<Sys_var_mybool,
                          PRIV_SET_SYSTEM_VAR_BINLOG_ANNOTATE_ROW_EVENTS,
                          PRIV_SET_SYSTEM_VAR_BINLOG_ANNOTATE_ROW_EVENTS>
@@ -7047,6 +7074,7 @@ static Sys_var_mybool Sys_replicate_annotate_row_events(
        "to its own binary log. Ignored if log_slave_updates is not set"),
        READ_ONLY GLOBAL_VAR(opt_replicate_annotate_row_events),
        CMD_LINE(OPT_ARG), DEFAULT(TRUE));
+#endif
 #endif
 
 static Sys_var_ulonglong Sys_join_buffer_space_limit(
@@ -7157,6 +7185,7 @@ static Sys_var_mybool Sys_binlog_encryption(
        DEFAULT(FALSE));
 #endif
 
+#ifndef MYLITE_OMIT_BINLOG_SYSVARS
 static const char *binlog_row_image_names[]=
 {
   "MINIMAL", "NOBLOB", "FULL", "FULL_NODUP", NullS
@@ -7222,8 +7251,10 @@ Sys_binlog_gtid_index_span_min(
        "to reduce the size of the index. Normally does not need tuning"),
        GLOBAL_VAR(opt_binlog_gtid_index_span_min), CMD_LINE(REQUIRED_ARG),
        VALID_RANGE(1, 1024*1024L*1024L), DEFAULT(65536), BLOCK_SIZE(1));
+#endif
 
 
+#ifndef MYLITE_OMIT_BINLOG_SYSVARS
 static bool check_pseudo_slave_mode(sys_var *self, THD *thd, set_var *var)
 {
   longlong previous_val= thd->variables.pseudo_slave_mode;
@@ -7281,6 +7312,7 @@ static Sys_var_mybool Sys_pseudo_slave_mode(
        "Format_description_event is sent through the session"),
        SESSION_ONLY(pseudo_slave_mode), NO_CMD_LINE, DEFAULT(FALSE),
        NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(check_pseudo_slave_mode));
+#endif
 
 static Sys_var_mybool Sys_mysql56_temporal_format(
        "mysql56_temporal_format",
@@ -7647,6 +7679,7 @@ static Sys_var_enum Sys_block_encryption_mode(
   SESSION_VAR(block_encryption_mode), CMD_LINE(REQUIRED_ARG),
   block_encryption_mode_values, DEFAULT(0));
 
+#ifndef MYLITE_OMIT_BINLOG_SYSVARS
 extern ulonglong opt_binlog_commit_by_rotate_threshold;
 static Sys_var_ulonglong Sys_binlog_large_commit_threshold(
   "binlog_large_commit_threshold",
@@ -7663,3 +7696,4 @@ static Sys_var_ulonglong Sys_binlog_large_commit_threshold(
   // Allow a smaller minimum value for debug builds to help with testing
   VALID_RANGE(IF_DBUG(100, 10240) * 1024, ULLONG_MAX),
   DEFAULT(128 * 1024 * 1024), BLOCK_SIZE(1));
+#endif
