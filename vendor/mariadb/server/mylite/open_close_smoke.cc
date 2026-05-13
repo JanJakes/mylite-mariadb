@@ -86,6 +86,7 @@ struct SmokeResult
   std::string exec_regex_messages;
   std::string exec_fulltext_match_message;
   std::string exec_sql_handler_message;
+  std::string exec_sql_prepare_messages;
   std::string exec_select_outfile_message;
   std::string exec_select_dumpfile_message;
   std::string exec_select_into_variable_rows;
@@ -245,6 +246,8 @@ static bool check_fulltext_match_unsupported(const SmokeOptions &options,
                                              SmokeResult *result);
 static bool check_sql_handler_unsupported(const SmokeOptions &options,
                                           SmokeResult *result);
+static bool check_sql_prepare_commands_unsupported(const SmokeOptions &options,
+                                                   SmokeResult *result);
 static bool check_select_outfile_unsupported(const SmokeOptions &options,
                                              SmokeResult *result);
 static bool check_window_functions_unsupported(const SmokeOptions &options,
@@ -504,6 +507,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "sql_handler_unsupported";
   ok= check_sql_handler_unsupported(options, result) && ok;
+
+  result->phase= "sql_prepare_commands_unsupported";
+  ok= check_sql_prepare_commands_unsupported(options, result) && ok;
 
   result->phase= "select_outfile_unsupported";
   ok= check_select_outfile_unsupported(options, result) && ok;
@@ -1843,6 +1849,56 @@ static bool check_sql_handler_unsupported(const SmokeOptions &options,
 
     rc= mylite_close(db);
     ok= record_result(result, "sql_handler_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+  return ok;
+}
+
+static bool check_sql_prepare_commands_unsupported(const SmokeOptions &options,
+                                                   SmokeResult *result)
+{
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "sql_prepare_open", MYLITE_OK, rc, db);
+  if (db)
+  {
+    struct SqlPrepareCase
+    {
+      const char *label;
+      const char *sql;
+    };
+
+    const SqlPrepareCase cases[] = {
+      {"prepare", "PREPARE mylite_sql_prepare FROM 'SELECT 1'"},
+      {"execute", "EXECUTE mylite_sql_prepare"},
+      {"execute_immediate", "EXECUTE IMMEDIATE 'SELECT 1'"},
+      {"deallocate", "DEALLOCATE PREPARE mylite_sql_prepare"}
+    };
+
+    std::vector<std::string> messages;
+    for (const SqlPrepareCase &prepare_case : cases)
+    {
+      char *errmsg= nullptr;
+      rc= mylite_exec(db, prepare_case.sql, nullptr, nullptr, &errmsg);
+
+      std::string message= errmsg ? errmsg : mylite_errmsg(db);
+      if (errmsg)
+        mylite_free(errmsg);
+      messages.push_back(std::string(prepare_case.label) + ":" + message);
+
+      const std::string label= std::string("sql_prepare_") +
+        prepare_case.label;
+      ok= record_result(result, label.c_str(), MYLITE_ERROR, rc, db) && ok;
+      if (mylite_mariadb_errno(db) != ER_NOT_SUPPORTED_YET ||
+          std::strcmp(mylite_sqlstate(db), "42000") != 0 ||
+          message.find("SQL PREPARE commands") == std::string::npos)
+        ok= false;
+    }
+
+    result->exec_sql_prepare_messages= join_strings(messages, "|");
+
+    rc= mylite_close(db);
+    ok= record_result(result, "sql_prepare_close", MYLITE_OK, rc,
                       nullptr) && ok;
   }
   return ok;
@@ -4721,6 +4777,9 @@ static void write_report(const SmokeOptions &options,
   if (!result.exec_sql_handler_message.empty())
     report << "exec_sql_handler_message="
            << result.exec_sql_handler_message << "\n";
+  if (!result.exec_sql_prepare_messages.empty())
+    report << "exec_sql_prepare_messages="
+           << result.exec_sql_prepare_messages << "\n";
   if (!result.exec_select_outfile_message.empty())
     report << "exec_select_outfile_message="
            << result.exec_select_outfile_message << "\n";

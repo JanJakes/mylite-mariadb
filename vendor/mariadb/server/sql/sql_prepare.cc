@@ -2640,6 +2640,7 @@ end:
   @retval       true on error (out of memory)
 */
 
+#ifndef MYLITE_DISABLE_SQL_PREPARE_COMMANDS
 bool Lex_prepared_stmt::get_dynamic_sql_string(THD *thd,
                                                LEX_CSTRING *dst,
                                                String *buffer)
@@ -2887,6 +2888,7 @@ void mysql_sql_stmt_execute_immediate(THD *thd)
   delete stmt;
   DBUG_VOID_RETURN;
 }
+#endif
 
 
 /**
@@ -3389,6 +3391,7 @@ static void mysql_stmt_execute_common(THD *thd,
     client, otherwise an error is set in THD
 */
 
+#ifndef MYLITE_DISABLE_SQL_PREPARE_COMMANDS
 void mysql_sql_stmt_execute(THD *thd)
 {
   LEX *lex= thd->lex;
@@ -3476,6 +3479,7 @@ void mysql_sql_stmt_execute(THD *thd)
   stmt->lex->restore_set_statement_var();
   DBUG_VOID_RETURN;
 }
+#endif
 
 
 /**
@@ -3635,6 +3639,7 @@ void mysqld_stmt_close(THD *thd, char *packet)
     message is set in THD
 */
 
+#ifndef MYLITE_DISABLE_SQL_PREPARE_COMMANDS
 void mysql_sql_stmt_close(THD *thd)
 {
   Prepared_statement* stmt;
@@ -3654,6 +3659,7 @@ void mysql_sql_stmt_close(THD *thd)
     my_ok(thd);
   }
 }
+#endif
 
 
 /**

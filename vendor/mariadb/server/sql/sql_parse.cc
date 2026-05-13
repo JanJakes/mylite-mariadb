@@ -4032,22 +4032,38 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
   }
   case SQLCOM_EXECUTE_IMMEDIATE:
   {
+#ifdef MYLITE_DISABLE_SQL_PREPARE_COMMANDS
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0), "SQL PREPARE commands");
+#else
     mysql_sql_stmt_execute_immediate(thd);
+#endif
     break;
   }
   case SQLCOM_PREPARE:
   {
+#ifdef MYLITE_DISABLE_SQL_PREPARE_COMMANDS
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0), "SQL PREPARE commands");
+#else
     mysql_sql_stmt_prepare(thd);
+#endif
     break;
   }
   case SQLCOM_EXECUTE:
   {
+#ifdef MYLITE_DISABLE_SQL_PREPARE_COMMANDS
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0), "SQL PREPARE commands");
+#else
     mysql_sql_stmt_execute(thd);
+#endif
     break;
   }
   case SQLCOM_DEALLOCATE_PREPARE:
   {
+#ifdef MYLITE_DISABLE_SQL_PREPARE_COMMANDS
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0), "SQL PREPARE commands");
+#else
     mysql_sql_stmt_close(thd);
+#endif
     break;
   }
   case SQLCOM_DO:
