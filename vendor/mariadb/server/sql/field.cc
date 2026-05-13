@@ -7501,8 +7501,10 @@ const Type_handler *Field_string::type_handler() const
     This is a temporary solution and will be fixed soon (in 10.9?).
     Type_handler_string_json will provide its own Field_string_json.
   */
+#ifndef MYLITE_DISABLE_JSON_TYPE
   if (Type_handler_json_common::has_json_valid_constraint(this))
    return &type_handler_string_json;
+#endif
   return &type_handler_string;
 }
 
@@ -8066,8 +8068,10 @@ const Type_handler *Field_varstring::type_handler() const
     Type_handler_varchar_json will provide its own Field_varstring_json
     and Field_varstring_compressed_json
   */
+#ifndef MYLITE_DISABLE_JSON_TYPE
   if (Type_handler_json_common::has_json_valid_constraint(this))
     return &type_handler_varchar_json;
+#endif
   return &type_handler_varchar;
 }
 
@@ -9286,9 +9290,11 @@ const Type_handler *Field_blob::type_handler() const
     Type_handler_*blob_json will provide its own Field_blob_json
     and Field_blob_compressed_json.
   */
+#ifndef MYLITE_DISABLE_JSON_TYPE
   if (Type_handler_json_common::has_json_valid_constraint(this))
     return Type_handler_json_common::
              json_blob_type_handler_by_length_bytes(packlength);
+#endif
 
   switch (packlength) {
   case 1: return &type_handler_tiny_blob;

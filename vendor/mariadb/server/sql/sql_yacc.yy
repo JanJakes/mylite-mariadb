@@ -152,6 +152,21 @@ int yylex(void *yylval, void *yythd);
                     "minsize profile"))
 #endif
 
+#ifdef MYLITE_DISABLE_JSON_FUNCTIONS
+#define mylite_yyabort_json_arrayagg()           \
+  my_yyabort_error((ER_NOT_SUPPORTED_YET, MYF(0), \
+                    "JSON_ARRAYAGG in the MyLite minsize profile"))
+#define mylite_yyabort_json_objectagg()          \
+  my_yyabort_error((ER_NOT_SUPPORTED_YET, MYF(0), \
+                    "JSON_OBJECTAGG in the MyLite minsize profile"))
+#endif
+
+#ifdef MYLITE_DISABLE_JSON_TYPE
+#define mylite_yyabort_json_type()               \
+  my_yyabort_error((ER_NOT_SUPPORTED_YET, MYF(0), \
+                    "JSON data type in the MyLite minsize profile"))
+#endif
+
 #ifndef DBUG_OFF
 #define YYDEBUG 1
 #else
@@ -6723,7 +6738,11 @@ field_type_lob:
           { $$.set(&type_handler_medium_blob, $2); }
         | JSON_SYM opt_compressed
           {
+#ifdef MYLITE_DISABLE_JSON_TYPE
+            mylite_yyabort_json_type();
+#else
             $$.set(&type_handler_long_blob_json, &MY_CHARSET_UTF8MB4_BIN);
+#endif
           }
         ;
 
@@ -11352,6 +11371,9 @@ sum_expr:
             SELECT_LEX *sel= Select;
             List<Item> *args= $5;
             sel->in_sum_expr--;
+#ifdef MYLITE_DISABLE_JSON_FUNCTIONS
+            mylite_yyabort_json_arrayagg();
+#else
             if (args && args->elements > 1)
             {
               /* JSON_ARRAYAGG supports only one parameter */
@@ -11373,6 +11395,7 @@ sum_expr:
             sel->limit_params.clear();
             $5->empty();
             sel->gorder_list.empty();
+#endif
           }
         | JSON_OBJECTAGG_SYM '('
           { Select->in_sum_expr++; }
@@ -11381,9 +11404,13 @@ sum_expr:
             SELECT_LEX *sel= Select;
             sel->in_sum_expr--;
 
+#ifdef MYLITE_DISABLE_JSON_FUNCTIONS
+            mylite_yyabort_json_objectagg();
+#else
             $$= new (thd->mem_root) Item_func_json_objectagg(thd, $4, $6);
             if (unlikely($$ == NULL))
               MYSQL_YYABORT;
+#endif
           }
         ;
 

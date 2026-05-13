@@ -74,6 +74,7 @@ struct SmokeResult
   std::string exec_json_arrayagg_message;
   std::string exec_json_objectagg_message;
   std::string exec_json_schema_valid_message;
+  std::string exec_json_type_message;
   std::string exec_dynamic_column_messages;
   std::string exec_json_table_message;
   std::string exec_sql_diagnostics_messages;
@@ -1428,6 +1429,21 @@ static bool check_json_functions_unsupported(const SmokeOptions &options,
         std::strcmp(mylite_sqlstate(db), "42000") != 0 ||
         result->exec_json_schema_valid_message.find("JSON_SCHEMA_VALID") ==
           std::string::npos)
+      ok= false;
+
+    errmsg= nullptr;
+    rc= mylite_exec(db, "CREATE TABLE mylite.json_type_rejected (j JSON)",
+                    nullptr, nullptr, &errmsg);
+    if (errmsg)
+    {
+      result->exec_json_type_message= errmsg;
+      mylite_free(errmsg);
+    }
+    ok= record_result(result, "json_type_create", MYLITE_ERROR, rc, db) &&
+        ok;
+    if (mylite_mariadb_errno(db) != ER_NOT_SUPPORTED_YET ||
+        std::strcmp(mylite_sqlstate(db), "42000") != 0 ||
+        result->exec_json_type_message.find("JSON") == std::string::npos)
       ok= false;
 
     rc= mylite_close(db);
@@ -4614,6 +4630,9 @@ static void write_report(const SmokeOptions &options,
   if (!result.exec_json_schema_valid_message.empty())
     report << "exec_json_schema_valid_message="
            << result.exec_json_schema_valid_message << "\n";
+  if (!result.exec_json_type_message.empty())
+    report << "exec_json_type_message="
+           << result.exec_json_type_message << "\n";
   if (!result.exec_dynamic_column_messages.empty())
     report << "exec_dynamic_column_messages="
            << result.exec_dynamic_column_messages << "\n";

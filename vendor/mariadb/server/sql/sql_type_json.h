@@ -41,7 +41,11 @@ public:
   static const Type_collection *type_collection();
   static bool is_json_type_handler(const Type_handler *handler)
   {
+#ifdef MYLITE_DISABLE_JSON_TYPE
+    return false;
+#else
     return handler->type_collection() == type_collection();
+#endif
   }
 };
 

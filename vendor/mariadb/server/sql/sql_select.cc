@@ -21775,6 +21775,7 @@ Field *Item_func_sp::create_tmp_field_ex(MEM_ROOT *root, TABLE *table,
 #endif
 
 
+#ifndef MYLITE_DISABLE_JSON_TYPE
 static bool make_json_valid_expr(TABLE *table, Field *field)
 {
   THD *thd= table->in_use;
@@ -21791,6 +21792,7 @@ static bool make_json_valid_expr(TABLE *table, Field *field)
   thd->restore_active_arena(table->expr_arena, &backup_arena);
   return field->check_constraint == NULL;
 }
+#endif
 
 
 /**
@@ -21838,8 +21840,10 @@ Field *create_tmp_field(TABLE *table, Item *item,
                       make_copy_field);
   Field *result= item->create_tmp_field_ex(table->in_use->mem_root,
                                            table, &src, &prm);
+#ifndef MYLITE_DISABLE_JSON_TYPE
   if (is_json_type(item) && make_json_valid_expr(table, result))
     result= NULL;
+#endif
 
   *from_field= src.field();
   *default_field= src.default_field();
