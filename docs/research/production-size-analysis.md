@@ -46,6 +46,7 @@ The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 - `MYLITE_DISABLE_TRIGGER_RUNTIME=ON`
 - `MYLITE_DISABLE_VIEW_RUNTIME=ON`
 - `MYLITE_DISABLE_TABLE_ADMIN=ON`
+- `MYLITE_DISABLE_PERSISTENT_STATISTICS=ON`
 - `MYLITE_DISABLE_XA_TRANSACTIONS=ON`
 - `MYLITE_DISABLE_GEOMETRY_TYPE=ON`
 - `MYLITE_DISABLE_GENERAL1400_COLLATIONS=ON`
@@ -100,8 +101,9 @@ include the `type-plugin-size-profile`, `charset-small-profile`, and
 `backup-stage-size-profile`, `json-table-size-profile`, and
 `foreign-server-cache-size-profile`, `proxy-protocol-size-profile`,
 `event-parse-data-size-profile`, `xa-transaction-size-profile`,
-`trigger-runtime-size-profile`, `view-runtime-size-profile`, and
-`table-admin-size-profile`. Together these remove the built-in
+`trigger-runtime-size-profile`, `view-runtime-size-profile`,
+`table-admin-size-profile`, and `persistent-statistics-size-profile`. Together
+these remove the built-in
 `type_geom`, `type_inet`, `type_uuid`, `sequence`, `thread_pool_info`,
 `user_variables`, `userstat`, `mhnsw`, `csv`, and `myisammrg` plugins, set
 `WITH_EXTRA_CHARSETS=none`, omit the Oracle SQL-mode parser, omit XML, GIS, and
@@ -175,9 +177,12 @@ full XA transaction implementation with embedded-disabled XA command stubs, and
 replace the full trigger sidecar loader and runtime with inert embedded
 no-trigger stubs while trigger DDL remains rejected, and replace the full view
 sidecar loader and runtime with embedded-disabled view stubs while preserving
-derived-table and CTE column-name helpers, and replace inherited table-admin
+derived-table and CTE column-name helpers, replace inherited table-admin
 maintenance, key-cache assignment, and index-preload execution with
-unsupported embedded stubs while preserving prepared admin result metadata.
+unsupported embedded stubs while preserving prepared admin result metadata,
+and replace inherited persistent `mysql.table_stats`, `mysql.column_stats`,
+`mysql.index_stats`, and JSON histogram storage with embedded no-statistics
+stubs while preserving handler row estimates for ordinary planning.
 
 `no-myisam-temp-spill-size-profile` was measured separately as an opt-in
 `MYLITE_DISABLE_MYISAM_TEMP_SPILL=ON` experiment. It is not part of the current
@@ -197,40 +202,40 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 ## Current baseline
 
 The current values were measured from
-`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-table-admin`.
+`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-persistent-statistics`.
 Paths below use the default build directory names for readability.
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
-| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 29,778,266 | 28.40 | Main embedded MariaDB archive, 422 objects, stripped; section metadata grows the archive |
-| `build/mariadb-minsize/mylite/libmylite.a` | 122,792 | 0.12 | First-party public wrapper |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 29,621,550 | 28.25 | Main embedded MariaDB archive, 421 objects, stripped; section metadata grows the archive |
+| `build/mariadb-minsize/mylite/libmylite.a` | 122,800 | 0.12 | First-party public wrapper |
 | `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 388,440 | 0.37 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 7,894,368 | 7.53 | Unstripped linked smoke binary, lld RELR, section GC, ICF, reduced unwind tables, no OpenSSL runtime dependency, no retained binlog event reader, GTID-index writer, full GTID binlog-state code, full optimizer trace implementation, external backup stage implementation, full `JSON_TABLE` table-function implementation, full foreign-server metadata cache implementation, proxy protocol network-listener support, full event parser data validation, full XA transaction implementation, full trigger sidecar runtime, full view sidecar runtime, full table-admin maintenance implementation, key-cache assignment, or index preload, no `log_event_server.cc.o`, no real mmap `tc.log` transaction coordinator, no server encryption hooks, no window functions, no UDF runtime, no SQL crypto/password functions, no VIO TLS transport, no `ENCRYPT()`, no legacy DES, no `KDF()`, no zlib compression, and no dynamic plugin loading |
-| stripped `mylite-open-close-smoke` copy | 5,674,104 | 5.41 | `strip --strip-unneeded` on copied binary |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 7,848,656 | 7.49 | Unstripped linked smoke binary, lld RELR, section GC, ICF, reduced unwind tables, no OpenSSL runtime dependency, no retained binlog event reader, GTID-index writer, full GTID binlog-state code, full optimizer trace implementation, external backup stage implementation, full `JSON_TABLE` table-function implementation, full foreign-server metadata cache implementation, proxy protocol network-listener support, full event parser data validation, full XA transaction implementation, full trigger sidecar runtime, full view sidecar runtime, full table-admin maintenance implementation, key-cache assignment, index preload, inherited persistent statistics tables, or JSON histograms, no `log_event_server.cc.o`, no real mmap `tc.log` transaction coordinator, no server encryption hooks, no window functions, no UDF runtime, no SQL crypto/password functions, no VIO TLS transport, no `ENCRYPT()`, no legacy DES, no `KDF()`, no zlib compression, and no dynamic plugin loading |
+| stripped `mylite-open-close-smoke` copy | 5,641,032 | 5.38 | `strip --strip-unneeded` on copied binary |
 
 The linked smoke binary has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 4,458,656 |
-| data | 1,212,136 |
-| bss | 238,393 |
-| total `size` decimal | 5,909,185 |
+| text | 4,427,500 |
+| data | 1,210,200 |
+| bss | 238,673 |
+| total `size` decimal | 5,876,373 |
 
 Largest linked sections in the open-close smoke binary:
 
 | Section | Bytes | Interpretation |
 | --- | ---: | --- |
-| `.text` | 2,743,324 | Executable code |
-| `.data.rel.ro` | 1,001,016 | Relocated read-only data |
-| `.rodata` | 970,955 | Parser tables, SQL metadata, constants, retained Unicode data |
-| `.eh_frame` | 506,380 | Unwind metadata |
+| `.text` | 2,719,036 | Executable code |
+| `.data.rel.ro` | 999,168 | Relocated read-only data |
+| `.rodata` | 969,931 | Parser tables, SQL metadata, constants, retained Unicode data |
+| `.eh_frame` | 502,120 | Unwind metadata |
 | `.data` | 183,480 | Writable data |
-| `.bss` | 237,833 | Zero-initialized writable data |
-| `.eh_frame_hdr` | 106,596 | Unwind table index |
-| `.rela.dyn` | 45,768 | Remaining unpacked dynamic relocations |
-| `.gcc_except_table` | 40,116 | Exception metadata |
-| `.relr.dyn` | 18,368 | Packed relative relocations |
+| `.bss` | 237,809 | Zero-initialized writable data |
+| `.eh_frame_hdr` | 105,796 | Unwind table index |
+| `.rela.dyn` | 45,456 | Remaining unpacked dynamic relocations |
+| `.gcc_except_table` | 39,668 | Exception metadata |
+| `.relr.dyn` | 18,344 | Packed relative relocations |
 
 If a Linux distribution bundle vendors the current dynamic dependencies, it
 adds about 5,081,640 bytes, or 4.85 MiB, before compression:
@@ -361,6 +366,7 @@ The current built-in plugins are:
 | `trigger-runtime-size-profile` after XA transactions | 29,848,586 | -13,556,846 | 5,705,280 | -13,626,624 | Passes current smokes and harness; replaces full trigger sidecar loading and execution with inert embedded no-trigger stubs while trigger DDL remains rejected |
 | `view-runtime-size-profile` after trigger runtime | 29,810,458 | -13,594,974 | 5,691,984 | -13,639,920 | Passes current smokes and harness; replaces full view sidecar loading and execution with embedded-disabled stubs while retaining shared derived-table/CTE column-name helpers |
 | `table-admin-size-profile` after view runtime | 29,778,266 | -13,627,166 | 5,674,104 | -13,657,800 | Passes current smokes and harness; replaces full table maintenance, key-cache assignment, and index-preload execution with unsupported embedded stubs while retaining prepared admin metadata |
+| `persistent-statistics-size-profile` after table admin | 29,621,550 | -13,783,882 | 5,641,032 | -13,690,872 | Passes current smokes and harness; replaces persistent `mysql.*` statistics and JSON histogram storage with no-statistics embedded stubs while preserving handler row estimates |
 | `no-myisam-temp-spill-size-profile` after no-binlog-core | 32,836,602 | -10,568,830 | 6,437,408 | -12,894,496 | Opt-in experiment only; open/close smoke passes, but storage/catalog harness fails because schema-table queries need disk temp tables |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
 | Strip archive with `strip --strip-unneeded` | 41,873,048 | -1,532,384 | n/a | n/a | Higher risk than `strip -g` for static archives |
@@ -384,7 +390,7 @@ profile now passes current smokes while retaining the compiled default
 `utf8mb4_uca1400_ai_ci`.
 
 Stripping the current linked open-close smoke binary reduces it from
-7,894,368 bytes to 5,674,104 bytes, saving 2,220,264 bytes, or 2.12 MiB. That
+7,848,656 bytes to 5,641,032 bytes, saving 2,207,624 bytes, or 2.11 MiB. That
 remains the lowest-risk packaging win for any copied executable or
 shared-library style artifact.
 
@@ -647,6 +653,17 @@ in retained `Item` COMDAT/vtable sections. The open/close smoke verifies
 `ANALYZE TABLE`, `CHECK TABLE`, `OPTIMIZE TABLE`, `REPAIR TABLE`,
 `CACHE INDEX`, and `LOAD INDEX INTO CACHE` report unsupported diagnostics, and
 the compatibility harness still passes.
+
+The `persistent-statistics-size-profile` attempt then removed MariaDB's
+persistent engine-independent statistics tables and JSON histogram storage from
+the aggressive embedded profile. On top of the table-admin profile, it reduced
+the static archive by 156,716 bytes and the stripped linked smoke by 33,072
+bytes. The archive no longer contains `sql_statistics.cc.o` or
+`opt_histogram_json.cc.o`; the replacement persistent-statistics stub object is
+5,376 bytes. The stub preserves the non-EITS fallback that copies handler row
+estimates into `TABLE::used_stat_records`, because MariaDB's update/delete
+planning depends on that value even when persistent statistics are disabled.
+The open/close smoke and compatibility harness still pass.
 
 The LTO build reduced the stripped linked smoke binary by 1.25 MiB, but the
 static archive became 326.61 MiB and GCC emitted type/ODR mismatch warnings
@@ -1014,6 +1031,7 @@ MyISAM-compatible storage.
 | Omit trigger sidecar runtime | 0.07 MiB archive, 0.013 MiB stripped linked beyond XA | High SQL compatibility | Applied as aggressive embedded-size attempt | Current smokes and harness pass; trigger DDL is already rejected, and `.TRG`/`.TRN` sidecar loading is replaced by no-trigger table-open behavior |
 | Omit view sidecar runtime | 0.04 MiB archive, 0.013 MiB stripped linked beyond trigger runtime | High SQL compatibility | Applied as aggressive embedded-size attempt | Current smokes and harness pass; view DDL is already rejected, and `.frm` view loading is replaced by disabled embedded stubs while retaining derived-table helpers |
 | Omit table-admin maintenance commands | 0.03 MiB archive, 0.017 MiB stripped linked beyond view runtime | Medium SQL/admin compatibility | Applied as aggressive embedded-size attempt | Current smokes and harness pass; inherited table repair/check/statistics/key-cache maintenance is server- and engine-shaped, so MyLite should expose storage-native maintenance later |
+| Omit persistent engine-independent statistics | 0.15 MiB archive, 0.032 MiB stripped linked beyond table admin | Medium optimizer/statistics compatibility | Applied as aggressive embedded-size attempt | Current smokes and harness pass; MyLite has no storage-native persistent statistics catalog yet, and the stub keeps handler row estimates for ordinary planning |
 | Omit MyISAM check/repair admin code | 0.11 MiB archive, 0.06 MiB stripped linked beyond no-binlog-core | Low/medium | Applied as size attempt | Keeps MyISAM for disk temp tables but removes unreachable admin repair/check paths from the hidden user engine |
 | Omit MyISAM full-text code | 0.08 MiB archive, 0.03 MiB stripped linked beyond MyISAM admin | Low/medium | Applied as size attempt | Keeps MyISAM for disk temp tables but removes unreachable full-text paths from the hidden user engine |
 | Omit MyISAM RTREE/spatial-key code | 0.04 MiB archive, 0.02 MiB stripped linked beyond MyISAM full-text | Low/medium | Applied as size attempt | Keeps MyISAM for disk temp tables but removes unreachable RTREE paths from the hidden user engine |
@@ -1147,14 +1165,18 @@ Take these now:
    support needs a MyLite catalog design rather than `.TRG` and `.TRN`
    sidecars.
 39. Keep view sidecar loading and execution omitted in the aggressive embedded
-    profile while view DDL remains unsupported. Real view support needs a
-    MyLite catalog design rather than `.frm` sidecars, while derived-table and
-    CTE column-name helpers remain retained.
+   profile while view DDL remains unsupported. Real view support needs a
+   MyLite catalog design rather than `.frm` sidecars, while derived-table and
+   CTE column-name helpers remain retained.
 40. Keep table-admin maintenance omitted in the aggressive embedded profile.
-    MyLite needs storage-native integrity, statistics, repair, and compaction
-    semantics before exposing `CHECK`, `REPAIR`, `ANALYZE`, or `OPTIMIZE`
-    honestly; key-cache assignment and index preload are MyISAM-shaped.
-41. Keep a stripped linked smoke binary size in the build report so regressions
+   MyLite needs storage-native integrity, statistics, repair, and compaction
+   semantics before exposing `CHECK`, `REPAIR`, `ANALYZE`, or `OPTIMIZE`
+   honestly; key-cache assignment and index preload are MyISAM-shaped.
+41. Keep persistent engine-independent statistics omitted in the aggressive
+   embedded profile. MyLite needs a storage-native statistics catalog before
+   exposing durable `ANALYZE` behavior, while the current stub preserves
+   handler row estimates for ordinary optimizer planning.
+42. Keep a stripped linked smoke binary size in the build report so regressions
    are visible.
 
 Do not take these now:
