@@ -82,6 +82,9 @@ struct SmokeResult
   std::string exec_regex_messages;
   std::string exec_fulltext_match_message;
   std::string exec_sql_handler_message;
+  std::string exec_select_outfile_message;
+  std::string exec_select_dumpfile_message;
+  std::string exec_select_into_variable_rows;
   std::string exec_window_aggregate_rows;
   std::string exec_window_function_messages;
   std::string exec_binlog_replication_message;
@@ -237,6 +240,8 @@ static bool check_fulltext_match_unsupported(const SmokeOptions &options,
                                              SmokeResult *result);
 static bool check_sql_handler_unsupported(const SmokeOptions &options,
                                           SmokeResult *result);
+static bool check_select_outfile_unsupported(const SmokeOptions &options,
+                                             SmokeResult *result);
 static bool check_window_functions_unsupported(const SmokeOptions &options,
                                                SmokeResult *result);
 static bool check_binlog_replication_unsupported(const SmokeOptions &options,
@@ -494,6 +499,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "sql_handler_unsupported";
   ok= check_sql_handler_unsupported(options, result) && ok;
+
+  result->phase= "select_outfile_unsupported";
+  ok= check_select_outfile_unsupported(options, result) && ok;
 
   result->phase= "window_functions_unsupported";
   ok= check_window_functions_unsupported(options, result) && ok;
@@ -1771,6 +1779,70 @@ static bool check_sql_handler_unsupported(const SmokeOptions &options,
 
     rc= mylite_close(db);
     ok= record_result(result, "sql_handler_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+  return ok;
+}
+
+static bool check_select_outfile_unsupported(const SmokeOptions &options,
+                                             SmokeResult *result)
+{
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "select_outfile_open", MYLITE_OK, rc, db);
+  if (db)
+  {
+    rc= mylite_exec(db, "SET @mylite_select_outfile_keep = 0",
+                    nullptr, nullptr, nullptr);
+    ok= record_result(result, "select_outfile_var_init", MYLITE_OK, rc,
+                      db) && ok;
+    rc= mylite_exec(db, "SELECT 42 INTO @mylite_select_outfile_keep",
+                    nullptr, nullptr, nullptr);
+    ok= record_result(result, "select_outfile_var_assign", MYLITE_OK, rc,
+                      db) && ok;
+
+    ExecCapture capture;
+    ok= exec_query_capture(db, "SELECT @mylite_select_outfile_keep",
+                           "select_outfile_var_read", &capture,
+                           result) && ok;
+    result->exec_select_into_variable_rows= join_strings(capture.rows, ",");
+    if (result->exec_select_into_variable_rows != "42")
+      ok= false;
+
+    char *errmsg= nullptr;
+    rc= mylite_exec(db, "SELECT 1 INTO OUTFILE 'mylite-outfile.txt'",
+                    nullptr, nullptr, &errmsg);
+    if (errmsg)
+    {
+      result->exec_select_outfile_message= errmsg;
+      mylite_free(errmsg);
+    }
+    ok= record_result(result, "select_outfile_statement", MYLITE_ERROR,
+                      rc, db) && ok;
+    if (mylite_mariadb_errno(db) != ER_NOT_SUPPORTED_YET ||
+        std::strcmp(mylite_sqlstate(db), "42000") != 0 ||
+        result->exec_select_outfile_message.find("SELECT INTO OUTFILE") ==
+          std::string::npos)
+      ok= false;
+
+    errmsg= nullptr;
+    rc= mylite_exec(db, "SELECT 1 INTO DUMPFILE 'mylite-dumpfile.bin'",
+                    nullptr, nullptr, &errmsg);
+    if (errmsg)
+    {
+      result->exec_select_dumpfile_message= errmsg;
+      mylite_free(errmsg);
+    }
+    ok= record_result(result, "select_dumpfile_statement", MYLITE_ERROR,
+                      rc, db) && ok;
+    if (mylite_mariadb_errno(db) != ER_NOT_SUPPORTED_YET ||
+        std::strcmp(mylite_sqlstate(db), "42000") != 0 ||
+        result->exec_select_dumpfile_message.find("DUMPFILE") ==
+          std::string::npos)
+      ok= false;
+
+    rc= mylite_close(db);
+    ok= record_result(result, "select_outfile_close", MYLITE_OK, rc,
                       nullptr) && ok;
   }
   return ok;
@@ -4542,6 +4614,15 @@ static void write_report(const SmokeOptions &options,
   if (!result.exec_sql_handler_message.empty())
     report << "exec_sql_handler_message="
            << result.exec_sql_handler_message << "\n";
+  if (!result.exec_select_outfile_message.empty())
+    report << "exec_select_outfile_message="
+           << result.exec_select_outfile_message << "\n";
+  if (!result.exec_select_dumpfile_message.empty())
+    report << "exec_select_dumpfile_message="
+           << result.exec_select_dumpfile_message << "\n";
+  if (!result.exec_select_into_variable_rows.empty())
+    report << "exec_select_into_variable_rows="
+           << result.exec_select_into_variable_rows << "\n";
   if (!result.exec_window_aggregate_rows.empty())
     report << "exec_window_aggregate_rows="
            << result.exec_window_aggregate_rows << "\n";

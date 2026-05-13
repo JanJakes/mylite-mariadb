@@ -138,6 +138,13 @@ int yylex(void *yylval, void *yythd);
                     "SQL HANDLER commands in the MyLite minsize profile"))
 #endif
 
+#ifdef MYLITE_DISABLE_SELECT_OUTFILE
+#define mylite_yyabort_select_outfile()          \
+  my_yyabort_error((ER_NOT_SUPPORTED_YET, MYF(0), \
+                    "SELECT INTO OUTFILE and DUMPFILE in the MyLite " \
+                    "minsize profile"))
+#endif
+
 #ifdef MYLITE_DISABLE_SQL_CRYPTO_FUNCTIONS
 #define mylite_yyabort_sql_crypto_functions()    \
   my_yyabort_error((ER_NOT_SUPPORTED_YET, MYF(0), \
@@ -13494,6 +13501,9 @@ into:
 into_destination:
           OUTFILE TEXT_STRING_filesystem
           {
+#ifdef MYLITE_DISABLE_SELECT_OUTFILE
+            mylite_yyabort_select_outfile();
+#else
             LEX *lex= Lex;
             lex->uncacheable(UNCACHEABLE_SIDEEFFECT);
             if (unlikely(!(lex->exchange=
@@ -13503,12 +13513,20 @@ into_destination:
                          select_export(thd, lex->exchange))))
               MYSQL_YYABORT;
             status_var_increment(thd->status_var.feature_into_outfile);
+#endif
           }
           opt_load_data_charset
-          { Lex->exchange->cs= $4; }
+          {
+#ifndef MYLITE_DISABLE_SELECT_OUTFILE
+            Lex->exchange->cs= $4;
+#endif
+          }
           opt_field_term opt_line_term
         | DUMPFILE TEXT_STRING_filesystem
           {
+#ifdef MYLITE_DISABLE_SELECT_OUTFILE
+            mylite_yyabort_select_outfile();
+#else
             LEX *lex=Lex;
             if (!lex->describe)
             {
@@ -13521,6 +13539,7 @@ into_destination:
                            select_dump(thd, lex->exchange))))
                 MYSQL_YYABORT;
             }
+#endif
           }
         | select_var_list_init
           {

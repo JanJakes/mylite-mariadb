@@ -73,6 +73,7 @@ run_inside_container() {
   assert_no_query_log_symbols "${smoke}"
   assert_no_fulltext_match_symbols "${smoke}"
   assert_no_sql_handler_object "${abs_build_dir}/libmysqld/libmariadbd.a"
+  assert_no_select_outfile_symbols "${smoke}"
   assert_no_full_stored_program_objects "${abs_build_dir}/libmysqld/libmariadbd.a"
 
   local smoke_log="${abs_build_dir}/libmylite-open-close-output.log"
@@ -276,6 +277,22 @@ assert_no_sql_handler_object() {
     return 1
   fi
   printf "libmylite SQL HANDLER object: none\n"
+}
+
+assert_no_select_outfile_symbols() {
+  local binary="$1"
+  local symbols
+  symbols="$(
+    nm --defined-only -C "${binary}" 2>/dev/null \
+      | grep -E "select_(export|dump)::(prepare|send_data)|create_file\\(" \
+      || true
+  )"
+  if [[ -n "${symbols}" ]]; then
+    printf "unexpected SELECT OUTFILE symbols in %s:\n%s\n" \
+      "${binary}" "${symbols}" >&2
+    return 1
+  fi
+  printf "libmylite SELECT OUTFILE symbols: none\n"
 }
 
 assert_no_full_stored_program_objects() {

@@ -3369,6 +3369,7 @@ void select_to_file::abort_result_set()
   free_recources();
 }
 
+#ifndef MYLITE_DISABLE_SELECT_OUTFILE
 void select_to_file::reset_for_next_ps_execution()
 {
   /* In case of error send_eof() may be not called: close the file here. */
@@ -3853,6 +3854,7 @@ err:
   DBUG_RETURN(1);
 }
 
+#endif
 
 int select_singlerow_subselect::send_data(List<Item> &items)
 {
