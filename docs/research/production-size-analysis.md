@@ -66,6 +66,7 @@ The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 - `MYLITE_DISABLE_PERSISTENT_STATISTICS=ON`
 - `MYLITE_DISABLE_SELECT_PROCEDURE_RUNTIME=ON`
 - `MYLITE_DISABLE_PROCESSLIST_METADATA=ON`
+- `MYLITE_DISABLE_SHOW_CREATE_RUNTIME=ON`
 - `MYLITE_DISABLE_SHOW_STATIC_INFO=ON`
 - `MYLITE_DISABLE_STATUS_METADATA=ON`
 - `MYLITE_DISABLE_SYSVAR_HELP_TEXT=ON`
@@ -159,7 +160,7 @@ disabled server-option table row trim, `json-type-size-profile`, and
 `sql-digest-size-profile`, `legacy-mysql500-collation-size-profile`,
 `embedded-client-fallback-size-profile`, and
 `sql-prepare-command-size-profile`, and
-`no-prepared-api-size-profile`. The opt-in
+`no-prepared-api-size-profile`, and `show-create-size-profile`. The opt-in
 `charset-registry-size-profile` attempt was measured after
 `sql-digest-size-profile`, but is not included in the default baseline because
 it reduces loaded `.bss` rather than stripped bundle bytes.
@@ -249,7 +250,8 @@ table metadata, replace row-replication type-conversion utilities with
 fail-closed embedded stubs, omit MariaDB dynamic-column SQL item execution and
 the dynamic-column BLOB helper implementation, make stored routine Information
 Schema tables empty without scanning `mysql.proc`, omit static `SHOW AUTHORS`,
-`SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES` metadata surfaces, replace the
+`SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES` metadata surfaces, omit
+`SHOW CREATE` runtime and formatting from the aggressive profile, replace the
 process-list row producers with unsupported or empty embedded behavior, and
 replace unknown stored-function lookup with a missing-function diagnostic
 instead of constructing `Item_func_sp`, and omit PL/SQL cursor-attribute item
@@ -321,39 +323,39 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 ## Current baseline
 
 The current values were measured from
-`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-prepared-api`.
+`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-show-create`.
 Paths below use the default build directory names for readability.
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
-| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 25,489,666 | 24.31 | Main embedded MariaDB archive, stripped; section metadata grows the archive |
+| `build/mariadb-minsize/libmysqld/libmariadbd.a` | 25,389,516 | 24.21 | Main embedded MariaDB archive, stripped; section metadata grows the archive |
 | `build/mariadb-minsize/mylite/libmylite.a` | 76,130 | 0.07 | First-party public wrapper with explicit `MYLITE_API` exports |
 | `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 388,456 | 0.37 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 6,503,344 | 6.20 | Unstripped linked smoke binary, hidden default visibility, lld RELR, no `.eh_frame_hdr`, section GC, ICF, GCC/G++ `-Oz`, reduced unwind tables, no OpenSSL runtime dependency, no retained binlog event reader, GTID-index writer, full GTID binlog-state code, full optimizer trace implementation, external backup stage implementation, no `JSON_TABLE` table-function implementation, no ordinary JSON SQL function implementation, no retained JSON data-type implementation, no SQL statement digest normalizer or parser digest token table, no legacy MySQL 5.0 utf8mb3/ucs2 collation implementation, no embedded client remote/default-option/plugin fallback paths, no SQL-language prepared-statement commands, no public prepared-statement implementation or binary `COM_STMT_*` dispatch, SQL diagnostics statement runtime, no stored-function lookup item construction, no full stored-program runtime objects, compact server error-message catalog, no SQL `MATCH ... AGAINST` runtime, no SQL `HANDLER` command implementation, no `SELECT ... INTO OUTFILE` / `DUMPFILE` host-file export runtime, no MyISAM temporary-table spill engine, no PL/SQL cursor-attribute item runtime, no status metadata publication arrays or registry, no long system-variable help comments, no command-line option help prose, no disabled binlog/replication/plugin-loading option table rows, no general or slow query-log handlers, system-versioned table predicate item runtime, row-replication type-conversion implementation, dynamic-column execution, stored routine Information Schema scan path, static `SHOW AUTHORS` / `SHOW CONTRIBUTORS` / `SHOW PRIVILEGES` result tables, process-list row rendering and Information Schema row population, full foreign-server metadata cache implementation, proxy protocol network-listener support, full EXPLAIN/ANALYZE plan-output runtime, vector type handler, event parser data validation, XA transaction implementation, trigger sidecar runtime, view sidecar runtime, table-admin maintenance implementation, key-cache assignment, index preload, inherited persistent statistics tables, JSON histograms, generic `SELECT ... PROCEDURE` runtime, non-`en_US` locale table, `LOAD DATA` / `LOAD XML` execution, or `mysql.time_zone*` table loading, no `log_event_server.cc.o`, no real mmap `tc.log` transaction coordinator, no server encryption hooks, no window functions, no UDF runtime, no SQL crypto/password functions, no VIO TLS transport, no `ENCRYPT()`, no legacy DES, no `KDF()`, no zlib compression, and no dynamic plugin loading |
-| stripped `mylite-open-close-smoke` copy | 4,566,544 | 4.35 | `llvm-strip` on copied binary |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 6,486,024 | 6.19 | Unstripped linked smoke binary, hidden default visibility, lld RELR, no `.eh_frame_hdr`, section GC, ICF, GCC/G++ `-Oz`, reduced unwind tables, no OpenSSL runtime dependency, no retained binlog event reader, GTID-index writer, full GTID binlog-state code, full optimizer trace implementation, external backup stage implementation, no `JSON_TABLE` table-function implementation, no ordinary JSON SQL function implementation, no retained JSON data-type implementation, no SQL statement digest normalizer or parser digest token table, no legacy MySQL 5.0 utf8mb3/ucs2 collation implementation, no embedded client remote/default-option/plugin fallback paths, no SQL-language prepared-statement commands, no public prepared-statement implementation or binary `COM_STMT_*` dispatch, no `SHOW CREATE` runtime formatting, SQL diagnostics statement runtime, no stored-function lookup item construction, no full stored-program runtime objects, compact server error-message catalog, no SQL `MATCH ... AGAINST` runtime, no SQL `HANDLER` command implementation, no `SELECT ... INTO OUTFILE` / `DUMPFILE` host-file export runtime, no MyISAM temporary-table spill engine, no PL/SQL cursor-attribute item runtime, no status metadata publication arrays or registry, no long system-variable help comments, no command-line option help prose, no disabled binlog/replication/plugin-loading option table rows, no general or slow query-log handlers, system-versioned table predicate item runtime, row-replication type-conversion implementation, dynamic-column execution, stored routine Information Schema scan path, static `SHOW AUTHORS` / `SHOW CONTRIBUTORS` / `SHOW PRIVILEGES` result tables, process-list row rendering and Information Schema row population, full foreign-server metadata cache implementation, proxy protocol network-listener support, full EXPLAIN/ANALYZE plan-output runtime, vector type handler, event parser data validation, XA transaction implementation, trigger sidecar runtime, view sidecar runtime, table-admin maintenance implementation, key-cache assignment, index preload, inherited persistent statistics tables, JSON histograms, generic `SELECT ... PROCEDURE` runtime, non-`en_US` locale table, `LOAD DATA` / `LOAD XML` execution, or `mysql.time_zone*` table loading, no `log_event_server.cc.o`, no real mmap `tc.log` transaction coordinator, no server encryption hooks, no window functions, no UDF runtime, no SQL crypto/password functions, no VIO TLS transport, no `ENCRYPT()`, no legacy DES, no `KDF()`, no zlib compression, and no dynamic plugin loading |
+| stripped `mylite-open-close-smoke` copy | 4,552,192 | 4.34 | `strip --strip-unneeded` on copied binary |
 
 The linked smoke binary has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 3,583,971 |
-| data | 979,424 |
-| bss | 227,417 |
-| total `size` decimal | 4,790,812 |
+| text | 3,569,507 |
+| data | 979,488 |
+| bss | 225,465 |
+| total `size` decimal | 4,774,460 |
 
 Largest linked sections in the open-close smoke binary:
 
 | Section | Bytes | Interpretation |
 | --- | ---: | --- |
-| `.text` | 2,261,068 | Executable code |
-| `.rodata` | 769,651 | Parser tables, SQL metadata, constants, retained Unicode data |
-| `.data.rel.ro` | 851,616 | Relocated read-only data |
-| `.eh_frame` | 438,800 | Unwind metadata |
+| `.text` | 2,248,556 | Executable code |
+| `.rodata` | 769,011 | Parser tables, SQL metadata, constants, retained Unicode data |
+| `.data.rel.ro` | 851,680 | Relocated read-only data |
+| `.eh_frame` | 437,692 | Unwind metadata |
 | `.data` | 115,864 | Writable data |
-| `.bss` | 223,425 | Zero-initialized writable data |
-| `.rela.dyn` | 40,872 | Remaining unpacked dynamic relocations |
-| `.gcc_except_table` | 33,944 | Exception metadata |
-| `.relr.dyn` | 14,736 | Packed relative relocations |
+| `.bss` | 223,361 | Zero-initialized writable data |
+| `.rela.dyn` | 40,848 | Remaining unpacked dynamic relocations |
+| `.gcc_except_table` | 33,756 | Exception metadata |
+| `.relr.dyn` | 14,744 | Packed relative relocations |
 
 If a Linux distribution bundle vendors the current dynamic dependencies, it
 adds about 5,081,640 bytes, or 4.85 MiB, before compression:
@@ -520,6 +522,7 @@ The current built-in plugins are:
 | `embedded-client-fallback-size-profile` after legacy MySQL 5.0 collations | 25,504,414 | -17,901,018 | 4,628,736 | -14,703,168 | Passes current smokes and harness; omits inherited embedded remote-client fallback, option-file defaults, client plugin loading, connection attributes, and OS username fallback while retaining local embedded `mysql_real_connect()` |
 | `sql-prepare-command-size-profile` after embedded client fallbacks | 25,493,040 | -17,912,392 | 4,626,880 | -14,705,024 | Passes current smokes and harness; rejects SQL-language `PREPARE`, `EXECUTE`, `EXECUTE IMMEDIATE`, and `DEALLOCATE PREPARE` while retaining public MyLite prepared statements and binary `COM_STMT_*` internals |
 | `no-prepared-api-size-profile` after SQL PREPARE commands | 25,489,666 | -17,915,766 | 4,566,544 | -14,765,360 | Passes current smokes and harness; keeps public prepared API symbols but makes prepared statements explicitly unsupported, omits MyLite's prepared implementation, and drops linked `mysql_stmt_*` / `mysqld_stmt_*` roots |
+| `show-create-size-profile` after no prepared API | 25,389,516 | -18,015,916 | 4,552,192 | -14,779,712 | Passes current smokes and harness; rejects `SHOW CREATE` runtime variants and compiles out the heavy CREATE-statement formatting bodies |
 | opt-in `charset-registry-size-profile` after SQL digest | 25,523,738 | -17,881,694 | 4,658,664 | -14,673,240 | Passes current smokes and harness with `MYLITE_CHARSET_REGISTRY_SIZE=1152`; reduces `llvm-size` total by 47,180 bytes and `all_charsets` from 32,768 to 9,216 bytes, but stripped linked size grows by 960 bytes, so it is not a default bundle-size win |
 | older `no-myisam-temp-spill-size-profile` after no-binlog-core | 32,836,602 | -10,568,830 | 6,437,408 | -12,894,496 | Superseded opt-in attempt; open/close smoke passed, but storage/catalog harness failed before schema-table MEMORY compatibility work |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
@@ -544,7 +547,7 @@ profile now passes current smokes while retaining the compiled default
 `utf8mb4_uca1400_ai_ci`.
 
 Stripping the current linked open-close smoke binary reduces it from
-6,620,632 bytes to 4,657,704 bytes, saving 1,962,928 bytes, or 1.87 MiB. That
+6,486,024 bytes to 4,552,192 bytes, saving 1,933,832 bytes, or 1.84 MiB. That
 remains the lowest-risk packaging win for any copied executable or
 shared-library style artifact.
 
@@ -1545,6 +1548,20 @@ linked symbol checks show `mylite_prepare` remains but `mysql_stmt_*`,
 still needs shared `Item_param`, reprepare, and bulk-parameter definitions
 from that object.
 
+The `show-create-size-profile` then rejected `SHOW CREATE` runtime variants
+and compiled out the heavy CREATE-statement formatting bodies from
+`sql_show.cc`. On top of `no-prepared-api-size-profile`, it reduced the static
+archive by another 100,150 bytes and the stripped linked smoke by another
+14,496 bytes when both before/after binaries were stripped with GNU
+`strip --strip-unneeded`. The open-close smoke verifies `SHOW CREATE TABLE`,
+`SHOW CREATE DATABASE`, `SHOW CREATE SERVER`, `SHOW CREATE TRIGGER`,
+`SHOW CREATE EVENT`, `SHOW CREATE PROCEDURE`, `SHOW CREATE PACKAGE`, and
+`SHOW CREATE PACKAGE BODY` all report
+`ER_NOT_SUPPORTED_YET`; linked symbol checks show `show_create_view`,
+`show_create_sequence`, `show_create_trigger_impl`, and `get_trigger_table`
+are absent. This is an aggressive introspection compatibility tradeoff, not a
+default recommendation for every embedding.
+
 ## Decision matrix
 
 | Lever | Expected savings | Risk | Worth doing? | Reason |
@@ -1571,6 +1588,7 @@ from that object.
 | Omit embedded client fallback paths | 0.010 MiB archive, 0.025 MiB stripped linked beyond MySQL 5.0 collations | Medium embedded C API compatibility | Applied as aggressive size attempt | Current smokes and harness pass; local embedded `mysql_real_connect()` still works, but remote-host fallback, option-file defaults, client plugin loading, connection attributes, and OS username fallback are unavailable in the aggressive profile |
 | Omit SQL-language prepared-statement commands | 0.011 MiB archive, 0.002 MiB stripped linked beyond embedded client fallbacks | Medium SQL compatibility | Applied as aggressive size attempt | Current smokes and harness pass; public MyLite prepared statements and binary `COM_STMT_*` internals remain, but SQL text `PREPARE`, `EXECUTE`, `EXECUTE IMMEDIATE`, and `DEALLOCATE PREPARE` are unsupported in the aggressive profile |
 | Omit public prepared-statement implementation | 0.003 MiB archive, 0.058 MiB stripped linked beyond SQL PREPARE commands | High API compatibility | Applied as lowest-size experiment | Current smokes and harness pass after changing prepared API expectations to explicit unsupported diagnostics; likely not worth keeping for PDO-style embeddings, but useful as a lower-bound data point |
+| Omit `SHOW CREATE` runtime formatting | 0.095 MiB archive, 0.014 MiB stripped linked beyond no prepared API | Medium SQL introspection compatibility | Applied as aggressive size attempt | Current smokes and harness pass; this removes useful schema-dump introspection, so it is a size floor lever rather than an obvious default |
 | Reduce charset registry capacity | 0 bundle-size saving; about 0.045 MiB loaded-size saving | Medium compatibility/maintenance | No for default bundle-size profile; opt-in only | Retained no-pad collation ids require at least 1152 entries, and `.bss` does not reduce stripped file size |
 | Omit SQL diagnostics statements | 0.11 MiB archive, 0.006 MiB stripped linked beyond JSON functions | Medium compatibility | Applied as aggressive size attempt | Current smokes and harness pass; `GET DIAGNOSTICS`, `SIGNAL`, and `RESIGNAL` are unsupported, but internal diagnostics and MyLite C API warning access remain |
 | Omit system-versioning item runtime | 0.11 MiB archive, 0.002 MiB stripped linked beyond diagnostics statements | High compatibility | Applied as aggressive size attempt | Current smokes and harness pass; MyLite temporal table metadata is now explicitly rejected, and the tiny remaining methods live in `sql_select.cc` to avoid a separate stub object |

@@ -76,6 +76,7 @@ run_inside_container() {
   assert_no_sql_handler_object "${abs_build_dir}/libmysqld/libmariadbd.a"
   assert_no_select_outfile_symbols "${smoke}"
   assert_no_full_stored_program_objects "${abs_build_dir}/libmysqld/libmariadbd.a"
+  assert_no_show_create_runtime_symbols "${smoke}"
 
   local smoke_log="${abs_build_dir}/libmylite-open-close-output.log"
   local exclusive_log="${abs_build_dir}/libmylite-open-close-exclusive-output.log"
@@ -310,6 +311,22 @@ assert_no_full_stored_program_objects() {
     return 1
   fi
   printf "libmylite stored-program runtime objects: none\n"
+}
+
+assert_no_show_create_runtime_symbols() {
+  local binary="$1"
+  local symbols
+  symbols="$(
+    nm --defined-only -C "${binary}" 2>/dev/null \
+      | grep -E "show_create_(view|sequence|trigger_impl)|get_trigger_table" \
+      || true
+  )"
+  if [[ -n "${symbols}" ]]; then
+    printf "unexpected SHOW CREATE runtime symbols in %s:\n%s\n" \
+      "${binary}" "${symbols}" >&2
+    return 1
+  fi
+  printf "libmylite SHOW CREATE runtime symbols: none\n"
 }
 
 main "$@"

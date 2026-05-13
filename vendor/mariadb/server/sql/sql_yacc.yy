@@ -14855,8 +14855,14 @@ show_param:
           }
         | CREATE EVENT_SYM sp_name
           {
+#ifdef MYLITE_DISABLE_SHOW_CREATE_RUNTIME
+            my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+                     "SHOW CREATE in the MyLite minsize profile");
+            MYSQL_YYABORT;
+#else
             Lex->spname= $3;
             Lex->sql_command = SQLCOM_SHOW_CREATE_EVENT;
+#endif
           }
         | describe_command opt_format_json FOR_SYM expr
           /*

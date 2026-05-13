@@ -4462,6 +4462,11 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
   case SQLCOM_SHOW_CREATE:
   {
      DBUG_ASSERT(first_table == all_tables && first_table != 0);
+#ifdef MYLITE_DISABLE_SHOW_CREATE_RUNTIME
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+             "SHOW CREATE in the MyLite minsize profile");
+    break;
+#else
 #ifdef DONT_ALLOW_SHOW_COMMANDS
     my_message(ER_NOT_ALLOWED_COMMAND, ER_THD(thd, ER_NOT_ALLOWED_COMMAND),
                MYF(0)); /* purecov: inspected */
@@ -4483,6 +4488,7 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
                            first_table->db.str, first_table->table_name.str));
       res= mysqld_show_create(thd, first_table);
       break;
+#endif
 #endif
   }
   case SQLCOM_CHECKSUM:
@@ -5246,12 +5252,22 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
     break;
   }
   case SQLCOM_SHOW_CREATE_DB:
+#ifdef MYLITE_DISABLE_SHOW_CREATE_RUNTIME
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+             "SHOW CREATE in the MyLite minsize profile");
+#else
     WSREP_SYNC_WAIT(thd, WSREP_SYNC_WAIT_BEFORE_SHOW);
     res= show_create_db(thd, lex);
+#endif
     break;
   case SQLCOM_SHOW_CREATE_SERVER:
+#ifdef MYLITE_DISABLE_SHOW_CREATE_RUNTIME
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+             "SHOW CREATE in the MyLite minsize profile");
+#else
     WSREP_SYNC_WAIT(thd, WSREP_SYNC_WAIT_BEFORE_SHOW);
     res= mysql_show_create_server(thd, &lex->name);
+#endif
     break;
   case SQLCOM_CREATE_EVENT:
   case SQLCOM_ALTER_EVENT:
@@ -5301,9 +5317,14 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
   /* lex->unit.cleanup() is called outside, no need to call it here */
   break;
   case SQLCOM_SHOW_CREATE_EVENT:
+#ifdef MYLITE_DISABLE_SHOW_CREATE_RUNTIME
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+             "SHOW CREATE in the MyLite minsize profile");
+#else
     WSREP_SYNC_WAIT(thd, WSREP_SYNC_WAIT_BEFORE_SHOW);
     res= Events::show_create_event(thd, &lex->spname->m_db,
                                    &lex->spname->m_name);
+#endif
     break;
   #ifndef EMBEDDED_LIBRARY
   case SQLCOM_DROP_EVENT:
@@ -5590,11 +5611,16 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
 #ifndef NO_EMBEDDED_ACCESS_CHECKS
   case SQLCOM_SHOW_CREATE_USER:
   {
+#ifdef MYLITE_DISABLE_SHOW_CREATE_RUNTIME
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+             "SHOW CREATE in the MyLite minsize profile");
+#else
     LEX_USER *grant_user= lex->grant_user;
     if (!grant_user)
       goto error;
 
     res = mysql_show_create_user(thd, grant_user);
+#endif
     break;
   }
   case SQLCOM_SHOW_GRANTS:
@@ -5798,6 +5824,11 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
   case SQLCOM_SHOW_CREATE_FUNC:
   case SQLCOM_SHOW_CREATE_PACKAGE:
   case SQLCOM_SHOW_CREATE_PACKAGE_BODY:
+#ifdef MYLITE_DISABLE_SHOW_CREATE_RUNTIME
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+             "SHOW CREATE in the MyLite minsize profile");
+    break;
+#else
     {
       WSREP_SYNC_WAIT(thd, WSREP_SYNC_WAIT_BEFORE_SHOW);
       const Sp_handler *sph= Sp_handler::handler(lex->sql_command);
@@ -5805,14 +5836,20 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
         goto error;
       break;
     }
+#endif
   case SQLCOM_SHOW_CREATE_TRIGGER:
     {
+#ifdef MYLITE_DISABLE_SHOW_CREATE_RUNTIME
+      my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+               "SHOW CREATE in the MyLite minsize profile");
+#else
       if (check_ident_length(&lex->spname->m_name))
         goto error;
 
       WSREP_SYNC_WAIT(thd, WSREP_SYNC_WAIT_BEFORE_SHOW);
       if (show_create_trigger(thd, lex->spname))
         goto error; /* Error has been already logged. */
+#endif
 
       break;
     }

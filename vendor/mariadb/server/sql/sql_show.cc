@@ -1226,6 +1226,15 @@ bool
 mysqld_show_create_get_fields(THD *thd, TABLE_LIST *table_list,
                               List<Item> *field_list, String *buffer)
 {
+#ifdef MYLITE_DISABLE_SHOW_CREATE_RUNTIME
+  (void) thd;
+  (void) table_list;
+  (void) field_list;
+  (void) buffer;
+  my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+           "SHOW CREATE in the MyLite minsize profile");
+  return TRUE;
+#else
   bool error= TRUE;
   LEX *lex= thd->lex;
   MEM_ROOT *mem_root= thd->mem_root;
@@ -1360,6 +1369,7 @@ mysqld_show_create_get_fields(THD *thd, TABLE_LIST *table_list,
 
 exit:
   DBUG_RETURN(error);
+#endif
 }
 
 
@@ -1381,6 +1391,13 @@ exit:
 bool
 mysqld_show_create(THD *thd, TABLE_LIST *table_list)
 {
+#ifdef MYLITE_DISABLE_SHOW_CREATE_RUNTIME
+  (void) thd;
+  (void) table_list;
+  my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+           "SHOW CREATE in the MyLite minsize profile");
+  return TRUE;
+#else
   Protocol *protocol= thd->protocol;
   char buff[2048];
   String buffer(buff, sizeof(buff), &my_charset_utf8mb4_general_ci);
@@ -1445,11 +1462,17 @@ exit:
   /* Release any metadata locks taken during SHOW CREATE. */
   thd->mdl_context.rollback_to_savepoint(mdl_savepoint);
   DBUG_RETURN(error);
+#endif
 }
 
 
 void mysqld_show_create_db_get_fields(THD *thd, List<Item> *field_list)
 {
+#ifdef MYLITE_DISABLE_SHOW_CREATE_RUNTIME
+  (void) thd;
+  (void) field_list;
+  return;
+#else
   MEM_ROOT *mem_root= thd->mem_root;
   field_list->push_back(new (mem_root)
                         Item_empty_string(thd, "Database", NAME_CHAR_LEN),
@@ -1457,6 +1480,7 @@ void mysqld_show_create_db_get_fields(THD *thd, List<Item> *field_list)
   field_list->push_back(new (mem_root)
                         Item_empty_string(thd, "Create Database", 1024),
                         mem_root);
+#endif
 }
 
 
@@ -1464,6 +1488,15 @@ bool mysqld_show_create_db(THD *thd, LEX_CSTRING *dbname,
                            LEX_CSTRING *orig_dbname,
                            const DDL_options_st &options)
 {
+#ifdef MYLITE_DISABLE_SHOW_CREATE_RUNTIME
+  (void) thd;
+  (void) dbname;
+  (void) orig_dbname;
+  (void) options;
+  my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+           "SHOW CREATE in the MyLite minsize profile");
+  return TRUE;
+#else
   char buff[2048+DATABASE_COMMENT_MAXLEN];
   String buffer(buff, sizeof(buff), system_charset_info);
 #ifndef NO_EMBEDDED_ACCESS_CHECKS
@@ -1556,10 +1589,18 @@ bool mysqld_show_create_db(THD *thd, LEX_CSTRING *dbname,
     DBUG_RETURN(TRUE);
   my_eof(thd);
   DBUG_RETURN(FALSE);
+#endif
 }
 
 bool mysql_show_create_server(THD *thd, LEX_CSTRING *name)
 {
+#ifdef MYLITE_DISABLE_SHOW_CREATE_RUNTIME
+  (void) thd;
+  (void) name;
+  my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+           "SHOW CREATE in the MyLite minsize profile");
+  return TRUE;
+#else
   MEM_ROOT *mem_root= thd->mem_root;
   FOREIGN_SERVER *server, server_buf;
   Protocol *protocol=thd->protocol;
@@ -1612,6 +1653,7 @@ bool mysql_show_create_server(THD *thd, LEX_CSTRING *name)
 
   my_eof(thd);
   DBUG_RETURN(FALSE);
+#endif
 }
 
 
@@ -2190,8 +2232,13 @@ int show_create_table(THD *thd, TABLE_LIST *table_list, String *packet,
                       Table_specification_st *create_info_arg,
                       enum_with_db_name with_db_name)
 {
+#ifdef MYLITE_DISABLE_SHOW_CREATE_RUNTIME
   return show_create_table_ex(thd, table_list, NULL, NULL, packet,
                               create_info_arg, with_db_name);
+#else
+  return show_create_table_ex(thd, table_list, NULL, NULL, packet,
+                              create_info_arg, with_db_name);
+#endif
 }
 
 /*
@@ -2228,6 +2275,17 @@ int show_create_table_ex(THD *thd, TABLE_LIST *table_list, const char *force_db,
                          Table_specification_st *create_info_arg,
                          enum_with_db_name with_db_name)
 {
+#ifdef MYLITE_DISABLE_SHOW_CREATE_RUNTIME
+  (void) thd;
+  (void) table_list;
+  (void) force_db;
+  (void) force_name;
+  (void) create_info_arg;
+  (void) with_db_name;
+  if (packet)
+    packet->length(0);
+  return 0;
+#else
   List<Item> field_list;
   char tmp[MAX_FIELD_WIDTH], *for_str, def_value_buf[MAX_FIELD_WIDTH];
   LEX_CSTRING alias;
@@ -2669,6 +2727,7 @@ int show_create_table_ex(THD *thd, TABLE_LIST *table_list, const char *force_db,
 #endif
   tmp_restore_column_map(&table->read_set, old_map);
   DBUG_RETURN(error);
+#endif
 }
 
 
@@ -2743,6 +2802,7 @@ bool append_definer(THD *thd, String *buffer, const LEX_CSTRING *definer_user,
 }
 
 
+#ifndef MYLITE_DISABLE_SHOW_CREATE_RUNTIME
 static int show_create_view(THD *thd, TABLE_LIST *table, String *buff)
 {
   my_bool compact_view_name= TRUE;
@@ -2880,6 +2940,7 @@ static int show_create_sequence(THD *thd, TABLE_LIST *table_list,
     add_table_options(thd, table, 0, 0, 1, packet);
   return 0;
 }
+#endif
 
 
 /****************************************************************************
@@ -11131,6 +11192,7 @@ int finalize_schema_table(void *plugin_)
 }
 
 
+#ifndef MYLITE_DISABLE_SHOW_CREATE_RUNTIME
 /**
   Output trigger information (SHOW CREATE TRIGGER) to the client.
 
@@ -11413,6 +11475,16 @@ exit:
   thd->mdl_context.rollback_to_savepoint(mdl_savepoint);
   return error;
 }
+#else
+bool show_create_trigger(THD *thd, const sp_name *trg_name)
+{
+  (void) thd;
+  (void) trg_name;
+  my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+           "SHOW CREATE in the MyLite minsize profile");
+  return TRUE;
+}
+#endif
 
 class IS_internal_schema_access : public ACL_internal_schema_access
 {
