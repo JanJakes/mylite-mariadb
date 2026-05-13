@@ -2184,34 +2184,36 @@ Do not take these now:
 2. Do not spend time on `WITH_EXTRA_CHARSETS=complex`, PSI switches, section GC
    variants, RTTI flags, or exception-disabling compiler flags as standalone
    size work.
+3. Do not spend near-term size work on replacing the remaining
+   `mysql_bin_log` / `binlog_tp` shell. A post-lld-`O2` symbol scan leaves
+   about 4.4 KiB of `mysql_bin_log` BSS, 160 bytes of `binlog_tp`, and small
+   no-op methods/vtables. Removing it would require reshaping
+   `MYSQL_BIN_LOG` / `log.h` class layout or a broader embedded transaction-log
+   shell for a very small linked-size ceiling.
 
 Research next if size becomes a release blocker:
 
-1. Investigate whether the remaining `MYSQL_BIN_LOG` shell, `binlog_tp`, and
-   `rpl_binlog_state` globals can be replaced by smaller embedded-only
-   transaction/logging stubs. `log_event_server.cc` should stay until its
-   generic SQL string-rendering helpers are moved cleanly.
-2. Investigate whether remaining generic `MYSQL_TYPE_GEOMETRY` metadata
+1. Investigate whether remaining generic `MYSQL_TYPE_GEOMETRY` metadata
    branches can be removed cleanly. The current profile still keeps minimal
    GEOMETRY handler symbols so retained MariaDB type aggregation and metadata
    paths link.
-3. Longer-term SQL-layer pruning of server-only surfaces. This is likely where
+2. Longer-term SQL-layer pruning of server-only surfaces. This is likely where
    meaningful multi-MiB savings exist, but it should be done as compatibility
    slices, not as broad dead-code removal.
-4. Investigate whether generated parser actions for stored programs can be
+3. Investigate whether generated parser actions for stored programs can be
    pruned further. The large `sp*.cc` runtime objects are now gone, but
    `MYSQLparse()`, `sql_lex.cc`, SP item vtables, and minimal fail-closed
    symbols still keep about tens of KiB in the linked runtime.
-5. Investigate remaining Information Schema and `SHOW` table population paths
+4. Investigate remaining Information Schema and `SHOW` table population paths
    for surfaces that are already unsupported in MyLite, especially
    server/plugin/process metadata that should not read inherited sidecar
    tables. Static `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES`
    are already omitted, process-list row population is empty, and status
    metadata publication is empty/omitted, but retained field descriptors remain
    linked by MariaDB's schema-table enum contract.
-6. Separate x86-64 size measurements for lld RELR and ICF before making
+5. Separate x86-64 size measurements for lld RELR and ICF before making
    architecture-independent claims.
-7. Further `my_long_options[]` pruning is low priority. The current profile
+6. Further `my_long_options[]` pruning is low priority. The current profile
    already removes rows for disabled binlog, replication, and dynamic plugin
    loading options; additional rows need a startup/default-initialization audit
    because `handle_options()` still uses the retained table for parsing and
