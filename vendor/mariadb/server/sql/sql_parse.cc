@@ -3912,6 +3912,17 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
   }
 #endif /* WITH_WSREP */
 
+#ifdef MYLITE_DISABLE_EXPLAIN_RUNTIME
+  if (lex->describe || lex->analyze_stmt ||
+      lex->sql_command == SQLCOM_SHOW_EXPLAIN ||
+      lex->sql_command == SQLCOM_SHOW_ANALYZE)
+  {
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+             "EXPLAIN runtime in the MyLite minsize profile");
+    goto error;
+  }
+#endif
+
   switch (lex->sql_command) {
 
   case SQLCOM_SHOW_EVENTS:

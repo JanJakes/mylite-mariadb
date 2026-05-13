@@ -70,6 +70,7 @@ struct SmokeResult
   std::string exec_json_valid_rows;
   std::string exec_json_schema_valid_message;
   std::string exec_json_table_message;
+  std::string exec_explain_runtime_messages;
   std::string exec_regex_like_rows;
   std::string exec_regex_messages;
   std::string exec_window_aggregate_rows;
@@ -202,6 +203,8 @@ static bool check_json_schema_valid_unsupported(const SmokeOptions &options,
                                                 SmokeResult *result);
 static bool check_json_table_unsupported(const SmokeOptions &options,
                                          SmokeResult *result);
+static bool check_explain_runtime_unsupported(const SmokeOptions &options,
+                                              SmokeResult *result);
 static bool check_regex_functions_unsupported(const SmokeOptions &options,
                                               SmokeResult *result);
 static bool check_window_functions_unsupported(const SmokeOptions &options,
@@ -424,6 +427,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "json_table_unsupported";
   ok= check_json_table_unsupported(options, result) && ok;
+
+  result->phase= "explain_runtime_unsupported";
+  ok= check_explain_runtime_unsupported(options, result) && ok;
 
   result->phase= "regex_functions_unsupported";
   ok= check_regex_functions_unsupported(options, result) && ok;
@@ -1268,6 +1274,63 @@ static bool check_json_table_unsupported(const SmokeOptions &options,
     rc= mylite_close(db);
     ok= record_result(result, "json_table_close", MYLITE_OK, rc, nullptr) &&
         ok;
+  }
+  return ok;
+}
+
+static bool check_explain_runtime_unsupported(const SmokeOptions &options,
+                                              SmokeResult *result)
+{
+  struct UnsupportedExplain
+  {
+    const char *label;
+    const char *sql;
+  };
+
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "explain_runtime_open", MYLITE_OK, rc, db);
+  if (db)
+  {
+    ok= exec_statement(db, "DROP TABLE IF EXISTS mylite.explain_describe_rows",
+                       "explain_describe_drop_before", result) && ok;
+    ok= exec_statement(db,
+                       "CREATE TABLE mylite.explain_describe_rows (id INT)",
+                       "explain_describe_create", result) && ok;
+    ok= exec_statement(db, "DESCRIBE mylite.explain_describe_rows",
+                       "explain_describe_table", result) && ok;
+
+    static const UnsupportedExplain cases[] = {
+      {"explain_select", "EXPLAIN SELECT 1"},
+      {"analyze_select", "ANALYZE SELECT 1"},
+      {"show_explain", "SHOW EXPLAIN FOR 1"}
+    };
+
+    for (const UnsupportedExplain &test : cases)
+    {
+      char *errmsg= nullptr;
+      std::string message;
+      rc= mylite_exec(db, test.sql, nullptr, nullptr, &errmsg);
+      if (errmsg)
+      {
+        message= errmsg;
+        if (!result->exec_explain_runtime_messages.empty())
+          result->exec_explain_runtime_messages += ",";
+        result->exec_explain_runtime_messages += test.label;
+        result->exec_explain_runtime_messages += ":";
+        result->exec_explain_runtime_messages += message;
+        mylite_free(errmsg);
+      }
+      ok= record_result(result, test.label, MYLITE_ERROR, rc, db) && ok;
+      if (mylite_mariadb_errno(db) != ER_NOT_SUPPORTED_YET ||
+          std::strcmp(mylite_sqlstate(db), "42000") != 0 ||
+          message.find("EXPLAIN runtime") == std::string::npos)
+        ok= false;
+    }
+
+    rc= mylite_close(db);
+    ok= record_result(result, "explain_runtime_close", MYLITE_OK, rc,
+                      nullptr) && ok;
   }
   return ok;
 }
@@ -3656,6 +3719,9 @@ static void write_report(const SmokeOptions &options,
   if (!result.exec_json_table_message.empty())
     report << "exec_json_table_message="
            << result.exec_json_table_message << "\n";
+  if (!result.exec_explain_runtime_messages.empty())
+    report << "exec_explain_runtime_messages="
+           << result.exec_explain_runtime_messages << "\n";
   if (!result.exec_regex_like_rows.empty())
     report << "exec_regex_like_rows=" << result.exec_regex_like_rows << "\n";
   if (!result.exec_regex_messages.empty())
