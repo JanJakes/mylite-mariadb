@@ -6656,6 +6656,7 @@ longlong Item_func_row_count::val_int()
 
 
 
+#ifndef MYLITE_DISABLE_STORED_FUNCTION_LOOKUP
 Item_func_sp::Item_func_sp(THD *thd, Name_resolution_context *context_arg,
                            sp_name *name, const Sp_handler *sph):
   Item_func(thd), Item_sp(thd, context_arg, name), m_handler(sph)
@@ -6686,6 +6687,7 @@ Item_func_sp::func_name_cstring() const
   return Item_sp::func_name_cstring(current_thd,
                                     m_handler == &sp_handler_package_function);
 }
+#endif
 
 
 void my_missing_function_error(const LEX_CSTRING &token, const char *func_name)
@@ -6697,6 +6699,7 @@ void my_missing_function_error(const LEX_CSTRING &token, const char *func_name)
 }
 
 
+#ifndef MYLITE_DISABLE_STORED_FUNCTION_LOOKUP
 /**
   @note
   Deterministic stored procedures are considered inexpensive.
@@ -6763,6 +6766,7 @@ const Type_handler *Item_func_sp::type_handler() const
   const Type_handler *handler= sp_result_field->type_handler();
   DBUG_RETURN(handler->type_handler_for_item_field());
 }
+#endif
 
 
 longlong Item_func_found_rows::val_int()
@@ -6802,6 +6806,7 @@ longlong Item_func_sqlcode::val_int()
 }
 
 
+#ifndef MYLITE_DISABLE_STORED_FUNCTION_LOOKUP
 bool
 Item_func_sp::fix_fields(THD *thd, Item **ref)
 {
@@ -6965,6 +6970,7 @@ bool Item_func_sp::check_vcol_func_processor(void *arg)
 {
   return mark_unsupported_function(func_name(), "()", arg, VCOL_IMPOSSIBLE);
 }
+#endif
 
 /*
   uuid_short handling.

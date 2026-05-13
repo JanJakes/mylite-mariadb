@@ -10196,8 +10196,6 @@ Item *LEX::make_item_func_call_generic(THD *thd,
                                        List<Item> *args)
 {
   Lex_ident_sys db(thd, cdb), pkg(thd, cpkg), func(thd, cfunc);
-  Identifier_chain2 q_pkg_func(pkg, func);
-  sp_name *qname;
 
   if (db.is_null() || pkg.is_null() || func.is_null())
     return NULL; // EOM
@@ -10208,6 +10206,13 @@ Item *LEX::make_item_func_call_generic(THD *thd,
       Lex_ident_routine::check_name_with_error(func))
     return NULL;
 
+#ifdef MYLITE_DISABLE_STORED_FUNCTION_LOOKUP
+  (void) args;
+  my_error(ER_SP_DOES_NOT_EXIST, MYF(0), "FUNCTION", func.str);
+  return NULL;
+#else
+  Identifier_chain2 q_pkg_func(pkg, func);
+  sp_name *qname;
   Database_qualified_name q_db_pkg(dbn, pkg);
 
   // Concat `pkg` and `name` to `pkg.name`
@@ -10228,6 +10233,7 @@ Item *LEX::make_item_func_call_generic(THD *thd,
                                             *args);
   return new (thd->mem_root) Item_func_sp(thd, thd->lex->current_context(),
                                           qname, &sp_handler_package_function);
+#endif
 }
 
 

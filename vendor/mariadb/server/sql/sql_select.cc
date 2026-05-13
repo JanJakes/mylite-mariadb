@@ -21752,6 +21752,7 @@ Item_result_field::create_tmp_field_ex_from_handler(
 }
 
 
+#ifndef MYLITE_DISABLE_STORED_FUNCTION_LOOKUP
 Field *Item_func_sp::create_tmp_field_ex(MEM_ROOT *root, TABLE *table,
                                          Tmp_field_src *src,
                                          const Tmp_field_param *param)
@@ -21766,6 +21767,7 @@ Field *Item_func_sp::create_tmp_field_ex(MEM_ROOT *root, TABLE *table,
   }
   return result;
 }
+#endif
 
 
 static bool make_json_valid_expr(TABLE *table, Field *field)

@@ -108,6 +108,7 @@ struct SmokeResult
   std::string exec_help_message;
   std::string exec_static_show_info_messages;
   std::string exec_processlist_metadata_messages;
+  std::string exec_stored_function_lookup_messages;
   std::string exec_procedure_analyse_message;
   std::string exec_routine_information_schema_rows;
   std::string exec_table_admin_messages;
@@ -256,6 +257,8 @@ static bool check_static_show_info_unsupported(const SmokeOptions &options,
                                                SmokeResult *result);
 static bool check_processlist_metadata_unsupported(const SmokeOptions &options,
                                                    SmokeResult *result);
+static bool check_stored_function_lookup_unsupported(
+  const SmokeOptions &options, SmokeResult *result);
 static bool check_procedure_analyse_unsupported(const SmokeOptions &options,
                                                 SmokeResult *result);
 static bool check_routine_information_schema_profile(
@@ -512,6 +515,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "processlist_metadata_unsupported";
   ok= check_processlist_metadata_unsupported(options, result) && ok;
+
+  result->phase= "stored_function_lookup_unsupported";
+  ok= check_stored_function_lookup_unsupported(options, result) && ok;
 
   result->phase= "procedure_analyse_unsupported";
   ok= check_procedure_analyse_unsupported(options, result) && ok;
@@ -2522,6 +2528,61 @@ static bool check_processlist_metadata_unsupported(const SmokeOptions &options,
   return ok;
 }
 
+static bool check_stored_function_lookup_unsupported(
+  const SmokeOptions &options, SmokeResult *result)
+{
+  struct StoredFunctionCase
+  {
+    const char *label;
+    const char *sql;
+    const char *name;
+  };
+  static const StoredFunctionCase cases[]=
+  {
+    {"stored_function_unqualified",
+     "SELECT mylite_missing_stored_function()",
+     "mylite_missing_stored_function"},
+    {"stored_function_schema_qualified",
+     "SELECT mylite.mylite_missing_schema_function()",
+     "mylite_missing_schema_function"},
+    {"stored_function_package_qualified",
+     "SELECT mylite.pkg.mylite_missing_package_function()",
+     "mylite_missing_package_function"}
+  };
+
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "stored_function_lookup_open", MYLITE_OK,
+                         rc, db);
+  if (db)
+  {
+    std::vector<std::string> messages;
+    for (const StoredFunctionCase &test_case : cases)
+    {
+      char *errmsg= nullptr;
+      rc= mylite_exec(db, test_case.sql, nullptr, nullptr, &errmsg);
+      std::string message= errmsg ? errmsg : mylite_errmsg(db);
+      if (errmsg)
+        mylite_free(errmsg);
+
+      messages.push_back(std::string(test_case.label) + "=" + message);
+
+      ok= record_result(result, test_case.label, MYLITE_ERROR, rc, db) && ok;
+      if (mylite_mariadb_errno(db) != ER_SP_DOES_NOT_EXIST ||
+          std::strcmp(mylite_sqlstate(db), "42000") != 0 ||
+          message.find(test_case.name) == std::string::npos)
+        ok= false;
+    }
+    result->exec_stored_function_lookup_messages=
+      join_strings(messages, " | ");
+
+    rc= mylite_close(db);
+    ok= record_result(result, "stored_function_lookup_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+  return ok;
+}
+
 static bool check_procedure_analyse_unsupported(const SmokeOptions &options,
                                                 SmokeResult *result)
 {
@@ -4231,6 +4292,9 @@ static void write_report(const SmokeOptions &options,
   if (!result.exec_processlist_metadata_messages.empty())
     report << "exec_processlist_metadata_messages="
            << result.exec_processlist_metadata_messages << "\n";
+  if (!result.exec_stored_function_lookup_messages.empty())
+    report << "exec_stored_function_lookup_messages="
+           << result.exec_stored_function_lookup_messages << "\n";
   if (!result.exec_procedure_analyse_message.empty())
     report << "exec_procedure_analyse_message="
            << result.exec_procedure_analyse_message << "\n";

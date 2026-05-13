@@ -64,6 +64,23 @@ extern Native_func_registry_array native_func_registry_array_geom;
   Function builder for Stored Functions.
 */
 
+#ifdef MYLITE_DISABLE_STORED_FUNCTION_LOOKUP
+class Create_missing_func : public Create_qfunc
+{
+public:
+  Item *create_with_db(THD *thd,
+                       const Lex_ident_db_normalized &db,
+                       const Lex_ident_routine &name,
+                       bool use_explicit_name,
+                       List<Item> *item_list) override;
+
+  static Create_missing_func s_singleton;
+
+protected:
+  Create_missing_func() = default;
+  ~Create_missing_func() override = default;
+};
+#else
 class Create_sp_func : public Create_qfunc
 {
 public:
@@ -81,6 +98,7 @@ protected:
   /** Destructor. */
   ~Create_sp_func() override = default;
 };
+#endif
 
 
 /*
@@ -3048,6 +3066,24 @@ Create_udf_func::create(THD *thd, udf_func *udf, List<Item> *item_list)
 #endif
 
 
+#ifdef MYLITE_DISABLE_STORED_FUNCTION_LOOKUP
+Create_missing_func Create_missing_func::s_singleton;
+
+Item*
+Create_missing_func::create_with_db(THD *thd,
+                                    const Lex_ident_db_normalized &db,
+                                    const Lex_ident_routine &name,
+                                    bool use_explicit_name,
+                                    List<Item> *item_list)
+{
+  (void) thd;
+  (void) db;
+  (void) use_explicit_name;
+  (void) item_list;
+  my_error(ER_SP_DOES_NOT_EXIST, MYF(0), "FUNCTION", name.str);
+  return NULL;
+}
+#else
 Create_sp_func Create_sp_func::s_singleton;
 
 Item*
@@ -3097,6 +3133,7 @@ Create_sp_func::create_with_db(THD *thd,
   lex->safe_to_cache_query= 0;
   return func;
 }
+#endif
 
 
 Item*
@@ -6984,7 +7021,12 @@ void item_create_cleanup()
 Create_qfunc *
 find_qualified_function_builder(THD *thd)
 {
+  (void) thd;
+#ifdef MYLITE_DISABLE_STORED_FUNCTION_LOOKUP
+  return & Create_missing_func::s_singleton;
+#else
   return & Create_sp_func::s_singleton;
+#endif
 }
 
 #ifdef MYLITE_DISABLE_DYNAMIC_COLUMNS
