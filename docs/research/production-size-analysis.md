@@ -585,6 +585,7 @@ The current built-in plugins are:
 | `SECURITY_HARDENED=OFF` after RPL filter | 32,762,840 | +479,460 | 6,359,576 | +101,968 | Reject; open/close smoke and harness pass, but both archive and linked runtime grow |
 | early `-ffunction-sections -fdata-sections` plus `--gc-sections` before export removal | 48,305,352 | +4,899,920 | 19,331,816 | -88 | Superseded by `section-gc-size-profile` after executable exports were removed |
 | CMake LTO | 342,480,510 | +299,075,078 | 18,016,192 | -1,315,712 | Reject for now due archive bloat and ODR warnings |
+| GCC skinny LTO with bfd after SFORMAT | 25,909,746 | -17,495,686 | 4,452,104 | -14,879,800 | Reject; non-fat GCC LTO cannot link with lld, and the bfd variant loses no stripped bytes while growing archive and unstripped runtime artifacts |
 
 The two original `WITH_EXTRA_CHARSETS=none` builds both completed and linked,
 but `mylite-open-close-smoke --mode=exclusive` exited with signal 139. The
@@ -1215,6 +1216,13 @@ static archive became 326.61 MiB and GCC emitted type/ODR mismatch warnings
 around MariaDB parser and server structures, including generated parser types.
 That is not a safe release lever today.
 
+A later GCC skinny-LTO experiment after `sformat-function-size-profile` used
+`-flto=auto -fno-fat-lto-objects` with GNU bfd because lld could not consume
+GCC non-fat LTO objects. The bfd build produced the same 4,452,104-byte
+stripped open-close smoke as the non-LTO lld build, while growing the static
+archive to 25,909,746 bytes and the unstripped smoke to 6,507,320 bytes. That
+variant is also not worth keeping.
+
 Disabling MariaDB's `SECURITY_HARDENED` CMake option is also not a size win in
 the current profile. It removes stack-protector and related hardening checks,
 but the measured `build/mariadb-size-no-hardening-rpl` build was larger in
@@ -1803,7 +1811,7 @@ works and `SFORMAT()` now fails explicitly with `ER_SP_DOES_NOT_EXIST`
 | Remove server-only SQL subsystems | Potentially large | High | Research later | The big bytes are entangled in `libsql_embedded.a`; needs slice-by-slice fork work |
 | `DISABLE_PSI_*` switches | 0 in this build | Low | No | No measured effect |
 | `-fno-asynchronous-unwind-tables` | 0 in this build | Low | No | Full rebuild produced identical archive and stripped linked sizes |
-| LTO | About 1.25 MiB linked, archive much larger | High | No | ODR warnings and huge archives are unacceptable for release |
+| LTO | No current stripped linked win with GCC skinny LTO; older CMake LTO saved linked bytes but made archives huge | High | No | lld cannot consume GCC non-fat LTO objects, the bfd variant does not reduce the stripped linked artifact, and older CMake LTO emitted ODR warnings |
 | Bundle fewer dynamic libraries | Up to 4.85 MiB remaining if currently vendored | Distribution-dependent | Decide per packaging target | Current static archive does not include these libraries; OpenSSL, PCRE2, zlib, and libcrypt have already been removed from the linked runtime dependency set |
 
 ## Recommendations
@@ -2083,9 +2091,10 @@ Take these now:
 
 Do not take these now:
 
-1. Do not enable LTO for production. The linked binary gets smaller, but the
-   archive becomes much larger and the compiler reports ODR-sensitive MariaDB
-   type mismatches.
+1. Do not enable LTO for production. The current GCC skinny-LTO/bfd attempt
+   produces no stripped linked-size win and grows archive/unstripped artifacts.
+   The older CMake LTO attempt did reduce the linked binary, but made the
+   archive much larger and reported ODR-sensitive MariaDB type mismatches.
 2. Do not spend time on `WITH_EXTRA_CHARSETS=complex`, PSI switches, section GC
    variants, RTTI flags, or exception-disabling compiler flags as standalone
    size work.
