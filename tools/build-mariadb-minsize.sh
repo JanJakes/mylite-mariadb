@@ -27,6 +27,7 @@ main() {
     --workdir /work \
     --env "MYLITE_MARIADB_BUILD_DIR=${build_dir}" \
     --env "MYLITE_BUILD_JOBS=${MYLITE_BUILD_JOBS:-}" \
+    --env "MYLITE_DISABLE_EH_FRAME_HEADER=${MYLITE_DISABLE_EH_FRAME_HEADER:-ON}" \
     --env "MYLITE_DISABLE_MYISAM_TEMP_SPILL=${MYLITE_DISABLE_MYISAM_TEMP_SPILL:-OFF}" \
     "${image}" \
     /work/tools/build-mariadb-minsize.sh --inside-container
@@ -71,6 +72,18 @@ build_inside_container() {
 
   local minsize_linker_flags
   minsize_linker_flags="-fuse-ld=lld -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr"
+  case "${MYLITE_DISABLE_EH_FRAME_HEADER:-ON}" in
+    on|ON|1|yes|YES|true|TRUE)
+      minsize_linker_flags="${minsize_linker_flags} -Wl,--no-eh-frame-hdr"
+      ;;
+    off|OFF|0|no|NO|false|FALSE)
+      ;;
+    *)
+      printf "Invalid MYLITE_DISABLE_EH_FRAME_HEADER value: %s\n" \
+        "${MYLITE_DISABLE_EH_FRAME_HEADER}" >&2
+      return 1
+      ;;
+  esac
   if [[ "${enable_section_gc}" == "ON" ]]; then
     minsize_linker_flags="${minsize_linker_flags} -Wl,--gc-sections"
   fi
@@ -184,6 +197,7 @@ build_inside_container() {
     -DMYLITE_DISABLE_XML_FUNCTIONS=ON
     "-DMYLITE_ENABLE_SECTION_GC=${enable_section_gc}"
     "-DMYLITE_ENABLE_ICF=${icf_mode}"
+    "-DMYLITE_DISABLE_EH_FRAME_HEADER=${MYLITE_DISABLE_EH_FRAME_HEADER:-ON}"
     -DUSE_ARIA_FOR_TMP_TABLES=OFF
     -DPLUGIN_ARIA=NO
     -DPLUGIN_INNOBASE=NO

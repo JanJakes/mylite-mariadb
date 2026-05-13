@@ -553,6 +553,8 @@ OPTION(MYLITE_ENABLE_SECTION_GC
 IF(MYLITE_ENABLE_SECTION_GC)
   ADD_COMPILE_OPTIONS(-ffunction-sections -fdata-sections)
 ENDIF()
+OPTION(MYLITE_DISABLE_EH_FRAME_HEADER
+  "Disable linked .eh_frame_hdr output in the MyLite minsize profile" OFF)
 OPTION(MYLITE_DISABLE_UNWIND_TABLES
   "Disable nonessential unwind tables in the MyLite minsize profile" OFF)
 IF(MYLITE_DISABLE_UNWIND_TABLES)

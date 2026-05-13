@@ -13,9 +13,9 @@ The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 - `CMAKE_C_VISIBILITY_PRESET=hidden`
 - `CMAKE_CXX_VISIBILITY_PRESET=hidden`
 - `CMAKE_VISIBILITY_INLINES_HIDDEN=ON`
-- `CMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr -Wl,--gc-sections -Wl,--icf=all`
-- `CMAKE_MODULE_LINKER_FLAGS=-fuse-ld=lld -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr -Wl,--gc-sections -Wl,--icf=all`
-- `CMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr -Wl,--gc-sections -Wl,--icf=all`
+- `CMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr -Wl,--no-eh-frame-hdr -Wl,--gc-sections -Wl,--icf=all`
+- `CMAKE_MODULE_LINKER_FLAGS=-fuse-ld=lld -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr -Wl,--no-eh-frame-hdr -Wl,--gc-sections -Wl,--icf=all`
+- `CMAKE_SHARED_LINKER_FLAGS=-fuse-ld=lld -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr -Wl,--no-eh-frame-hdr -Wl,--gc-sections -Wl,--icf=all`
 - `BUILD_CONFIG=mysql_release`
 - `FEATURE_SET=small`
 - `WITH_EMBEDDED_SERVER=ON`
@@ -95,6 +95,7 @@ The baseline is the current `tools/build-mariadb-minsize.sh` profile:
 - `MYLITE_DISABLE_BACKUP_STAGE=ON`
 - `MYLITE_ENABLE_SECTION_GC=ON`
 - `MYLITE_ENABLE_ICF=all`
+- `MYLITE_DISABLE_EH_FRAME_HEADER=ON`
 - `USE_ARIA_FOR_TMP_TABLES=OFF`
 
 The original comparison baseline was generated at `2026-05-12T00:33:29Z` from
@@ -142,7 +143,7 @@ include the `type-plugin-size-profile`, `charset-small-profile`, and
 `plsql-cursor-attribute-size-profile`, `status-metadata-size-profile`,
 `sysvar-help-text-size-profile`, `option-help-text-size-profile`,
 `query-log-size-profile`, `stored-program-runtime-size-profile`, and
-`error-message-size-profile`.
+`error-message-size-profile`, and `eh-frame-header-size-profile`.
 Together these remove the built-in
 `type_geom`, `type_inet`, `type_uuid`, `sequence`, `thread_pool_info`,
 `user_variables`, `userstat`, `mhnsw`, `csv`, and `myisammrg` plugins, set
@@ -263,7 +264,8 @@ ANALYZE, and SHOW EXPLAIN plan-output runtime with an embedded unsupported
 stub while retaining no-op optimizer plan bookkeeping needed by ordinary SQL,
 and omit the retained `VECTOR` type handler, ordinary JSON SQL function
 runtime, and dynamic-column execution/runtime helpers from the aggressive
-embedded profile.
+embedded profile, and link runtime-style artifacts without `.eh_frame_hdr`
+while retaining `.eh_frame` and `.gcc_except_table` exception metadata.
 
 `no-myisam-temp-spill-size-profile` was measured separately as an opt-in
 `MYLITE_DISABLE_MYISAM_TEMP_SPILL=ON` experiment. It is not part of the current
@@ -283,37 +285,36 @@ shared `libmylite.so` bundle. For now, the most useful size signals are:
 ## Current baseline
 
 The current values were measured from
-`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-compact-errors`.
+`MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-eh-frame-header`.
 Paths below use the default build directory names for readability.
 
 | Artifact | Bytes | MiB | Notes |
 | --- | ---: | ---: | --- |
 | `build/mariadb-minsize/libmysqld/libmariadbd.a` | 26,484,414 | 25.26 | Main embedded MariaDB archive, stripped; section metadata grows the archive |
-| `build/mariadb-minsize/mylite/libmylite.a` | 122,792 | 0.12 | First-party public wrapper with explicit `MYLITE_API` exports |
+| `build/mariadb-minsize/mylite/libmylite.a` | 122,800 | 0.12 | First-party public wrapper with explicit `MYLITE_API` exports |
 | `build/mariadb-minsize/storage/mylite/libmylite_embedded.a` | 388,456 | 0.37 | MyLite storage-engine component archive |
-| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 6,965,448 | 6.64 | Unstripped linked smoke binary, hidden default visibility, lld RELR, section GC, ICF, GCC/G++ `-Oz`, reduced unwind tables, no OpenSSL runtime dependency, no retained binlog event reader, GTID-index writer, full GTID binlog-state code, full optimizer trace implementation, external backup stage implementation, full `JSON_TABLE` table-function implementation, ordinary JSON SQL function implementation, SQL diagnostics statement runtime, no stored-function lookup item construction, no full stored-program runtime objects, compact server error-message catalog, no PL/SQL cursor-attribute item runtime, no status metadata publication arrays or registry, no long system-variable help comments, no command-line option help prose, no general or slow query-log handlers, system-versioned table predicate item runtime, row-replication type-conversion implementation, dynamic-column execution, stored routine Information Schema scan path, static `SHOW AUTHORS` / `SHOW CONTRIBUTORS` / `SHOW PRIVILEGES` result tables, process-list row rendering and Information Schema row population, full foreign-server metadata cache implementation, proxy protocol network-listener support, full EXPLAIN/ANALYZE plan-output runtime, vector type handler, event parser data validation, XA transaction implementation, trigger sidecar runtime, view sidecar runtime, table-admin maintenance implementation, key-cache assignment, index preload, inherited persistent statistics tables, JSON histograms, generic `SELECT ... PROCEDURE` runtime, non-`en_US` locale table, `LOAD DATA` / `LOAD XML` execution, or `mysql.time_zone*` table loading, no `log_event_server.cc.o`, no real mmap `tc.log` transaction coordinator, no server encryption hooks, no window functions, no UDF runtime, no SQL crypto/password functions, no VIO TLS transport, no `ENCRYPT()`, no legacy DES, no `KDF()`, no zlib compression, and no dynamic plugin loading |
-| stripped `mylite-open-close-smoke` copy | 4,938,992 | 4.71 | `llvm-strip` on copied binary |
+| `build/mariadb-minsize/mylite/mylite-open-close-smoke` | 6,868,688 | 6.55 | Unstripped linked smoke binary, hidden default visibility, lld RELR, no `.eh_frame_hdr`, section GC, ICF, GCC/G++ `-Oz`, reduced unwind tables, no OpenSSL runtime dependency, no retained binlog event reader, GTID-index writer, full GTID binlog-state code, full optimizer trace implementation, external backup stage implementation, full `JSON_TABLE` table-function implementation, ordinary JSON SQL function implementation, SQL diagnostics statement runtime, no stored-function lookup item construction, no full stored-program runtime objects, compact server error-message catalog, no PL/SQL cursor-attribute item runtime, no status metadata publication arrays or registry, no long system-variable help comments, no command-line option help prose, no general or slow query-log handlers, system-versioned table predicate item runtime, row-replication type-conversion implementation, dynamic-column execution, stored routine Information Schema scan path, static `SHOW AUTHORS` / `SHOW CONTRIBUTORS` / `SHOW PRIVILEGES` result tables, process-list row rendering and Information Schema row population, full foreign-server metadata cache implementation, proxy protocol network-listener support, full EXPLAIN/ANALYZE plan-output runtime, vector type handler, event parser data validation, XA transaction implementation, trigger sidecar runtime, view sidecar runtime, table-admin maintenance implementation, key-cache assignment, index preload, inherited persistent statistics tables, JSON histograms, generic `SELECT ... PROCEDURE` runtime, non-`en_US` locale table, `LOAD DATA` / `LOAD XML` execution, or `mysql.time_zone*` table loading, no `log_event_server.cc.o`, no real mmap `tc.log` transaction coordinator, no server encryption hooks, no window functions, no UDF runtime, no SQL crypto/password functions, no VIO TLS transport, no `ENCRYPT()`, no legacy DES, no `KDF()`, no zlib compression, and no dynamic plugin loading |
+| stripped `mylite-open-close-smoke` copy | 4,842,168 | 4.62 | `llvm-strip` on copied binary |
 
 The linked smoke binary has this section profile:
 
 | Section group | Bytes |
 | --- | ---: |
-| text | 3,911,269 |
+| text | 3,814,505 |
 | data | 1,024,504 |
-| bss | 226,801 |
-| total `size` decimal | 5,162,574 |
+| bss | 225,249 |
+| total `size` decimal | 5,064,258 |
 
 Largest linked sections in the open-close smoke binary:
 
 | Section | Bytes | Interpretation |
 | --- | ---: | --- |
-| `.text` | 2,461,508 | Executable code |
+| `.text` | 2,461,516 | Executable code |
 | `.rodata` | 779,755 | Parser tables, SQL metadata, constants, retained Unicode data |
 | `.data.rel.ro` | 872,928 | Relocated read-only data |
 | `.eh_frame` | 453,928 | Unwind metadata |
 | `.data` | 138,464 | Writable data |
 | `.bss` | 224,425 | Zero-initialized writable data |
-| `.eh_frame_hdr` | 96,772 | Unwind table index |
 | `.rela.dyn` | 41,880 | Remaining unpacked dynamic relocations |
 | `.gcc_except_table` | 35,100 | Exception metadata |
 | `.relr.dyn` | 15,440 | Packed relative relocations |
@@ -472,6 +473,7 @@ The current built-in plugins are:
 | `query-log-size-profile` after option help text | 27,309,098 | -16,096,334 | 5,168,408 | -14,163,496 | Passes current smokes and harness; disables general and slow query logging while preserving error logging and rejecting query-log activation, and omits unreachable query-log handler bodies from the archive |
 | `stored-program-runtime-size-profile` after query logs | 26,682,446 | -16,722,986 | 5,074,696 | -14,257,208 | Passes current smokes and harness; replaces `sp.cc`, `sp_cache.cc`, `sp_head.cc`, `sp_instr.cc`, `sp_pcontext.cc`, and `sp_rcontext.cc` with a fail-closed embedded stub |
 | `error-message-size-profile` after stored-program runtime | 26,484,414 | -16,921,018 | 4,938,992 | -14,392,912 | Passes current smokes and harness; replaces the generated full English server error-message catalog with a compact catalog that preserves common diagnostics and uses a generic fallback for rare server errors |
+| `eh-frame-header-size-profile` after compact error messages | 26,484,414 | -16,921,018 | 4,842,168 | -14,489,736 | Passes current smokes and harness; omits linked `.eh_frame_hdr` while retaining `.eh_frame` and `.gcc_except_table` exception metadata |
 | `no-myisam-temp-spill-size-profile` after no-binlog-core | 32,836,602 | -10,568,830 | 6,437,408 | -12,894,496 | Opt-in experiment only; open/close smoke passes, but storage/catalog harness fails because schema-table queries need disk temp tables |
 | Strip archive with `strip -g` | 42,261,216 | -1,144,216 | n/a | n/a | Low-risk packaging step |
 | Strip archive with `strip --strip-unneeded` | 41,873,048 | -1,532,384 | n/a | n/a | Higher risk than `strip -g` for static archives |
@@ -495,7 +497,7 @@ profile now passes current smokes while retaining the compiled default
 `utf8mb4_uca1400_ai_ci`.
 
 Stripping the current linked open-close smoke binary reduces it from
-6,965,448 bytes to 4,938,992 bytes, saving 2,026,456 bytes, or 1.93 MiB. That
+6,868,688 bytes to 4,842,168 bytes, saving 2,026,520 bytes, or 1.93 MiB. That
 remains the lowest-risk packaging win for any copied executable or
 shared-library style artifact.
 
@@ -1057,6 +1059,13 @@ Numeric errno and SQLSTATE mappings are unchanged. Common MyLite-facing
 diagnostics retain their original MariaDB format strings, while rare server
 errors use a generic no-placeholder fallback in the aggressive minsize profile.
 
+The `eh-frame-header-size-profile` attempt then linked runtime-style minsize
+artifacts with lld `--no-eh-frame-hdr`. On top of the compact error-message
+profile, it left the stripped static archive unchanged, reduced the unstripped
+open-close smoke by 96,760 bytes, and reduced the stripped open-close smoke by
+96,824 bytes. The linked binary no longer has `.eh_frame_hdr` or
+`PT_GNU_EH_FRAME`, but retains `.eh_frame` and `.gcc_except_table`.
+
 The LTO build reduced the stripped linked smoke binary by 1.25 MiB, but the
 static archive became 326.61 MiB and GCC emitted type/ODR mismatch warnings
 around MariaDB parser and server structures, including generated parser types.
@@ -1418,6 +1427,7 @@ MyISAM-compatible storage.
 | Omit general and slow query logs | 0.046 MiB archive, 0.015 MiB stripped linked beyond option help text | Low/medium embedded observability | Applied as aggressive embedded-size attempt | Current smokes and harness pass; embedded error logging remains, while query-log files/tables are disabled and attempts to enable them fail explicitly |
 | Omit stored-program compiler/runtime objects | 0.60 MiB archive, 0.089 MiB stripped linked beyond query logs | High SQL compatibility while routines/triggers/events are unsupported | Applied as aggressive embedded-size attempt | Current smokes and harness pass; stored routine, trigger, event, and package compilation now fail through a stable stored-program-runtime unsupported diagnostic |
 | Compact server error-message catalog | 0.19 MiB archive, 0.13 MiB stripped linked beyond stored-program runtime | Medium diagnostics compatibility | Applied as aggressive embedded-size attempt | Current smokes and harness pass; errno and SQLSTATE are unchanged, common diagnostics keep original format strings, and rare server errors use a generic fallback |
+| Omit linked `.eh_frame_hdr` | 0 archive, 0.09 MiB stripped linked beyond compact error messages | Medium packaging/debuggability | Applied as aggressive linked-size attempt | Current smokes and harness pass; `.eh_frame` and `.gcc_except_table` remain, but linked artifacts no longer publish the compact unwind lookup header |
 | Disable statement profiling | 0.16 MiB archive, no stripped linked change beyond vector-function profile | Low/medium | Applied as size attempt | Current smokes pass; `SHOW PROFILE(S)` now report MariaDB's disabled-feature diagnostic |
 | Remove SQL `HELP` command implementation | 0.17 MiB archive, 0.06 MiB stripped linked beyond profiling profile | Low/medium | Applied as size attempt | Current smokes pass; `HELP` now reports a stable unsupported-command diagnostic |
 | Remove `PROCEDURE ANALYSE()` implementation | 0.15 MiB archive, no stripped linked change beyond HELP profile | Low/medium | Applied as size attempt | Current smokes pass; `PROCEDURE ANALYSE()` now reports a stable unsupported-feature diagnostic |
@@ -1682,6 +1692,14 @@ Take these now:
    profile. It is a clean linked `.rodata` and relocated-data win when paired
    with explicit retained-message coverage, and errno/SQLSTATE compatibility
    remains unchanged. Full prose can stay available in non-aggressive builds.
+65. Keep linked `.eh_frame_hdr` omitted only in the aggressive minsize profile.
+   It saves about 95 KiB from the current stripped linked smoke without
+   changing the static archive, but it is a debugging/unwind lookup tradeoff.
+66. Investigate direct MyLite dispatch next. Replacing internal `MYSQL *`,
+   `MYSQL_RES *`, and `MYSQL_STMT *` usage is architecturally aligned with the
+   public API, but the real size win requires splitting embedded bootstrap from
+   inherited client C API result capture and preserving prepared-statement
+   semantics without SQL interpolation.
 
 Do not take these now:
 
