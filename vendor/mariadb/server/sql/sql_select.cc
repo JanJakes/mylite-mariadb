@@ -16853,6 +16853,10 @@ void JOIN_TAB::estimate_scan_time()
         /* The rows will fit into the heap table */
         using_heap= 1;
       }
+#if defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
+      else
+        tmp_file= file;
+#else
       else if (likely((tmp_file= get_new_handler(share, &table->mem_root,
                                                  TMP_ENGINE_HTON))))
       {
@@ -16860,6 +16864,7 @@ void JOIN_TAB::estimate_scan_time()
       }
       else
         tmp_file= file;                         // Fallback for OOM
+#endif
     }
 
     /*

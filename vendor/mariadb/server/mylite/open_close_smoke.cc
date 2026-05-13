@@ -2876,6 +2876,27 @@ static bool check_processlist_metadata_unsupported(const SmokeOptions &options,
         ok= false;
     }
 
+#ifdef MYLITE_DISABLE_MYISAM_TEMP_SPILL
+    char *errmsg= nullptr;
+    rc= mylite_exec(db,
+                    "SELECT COUNT(*) FROM "
+                    "information_schema.PROCESSLIST",
+                    nullptr, nullptr, &errmsg);
+    std::string message= errmsg ? errmsg : mylite_errmsg(db);
+    if (errmsg)
+      mylite_free(errmsg);
+    if (!result->exec_processlist_metadata_messages.empty())
+      result->exec_processlist_metadata_messages+= ";";
+    result->exec_processlist_metadata_messages+=
+      "is_processlist_error=" + message;
+
+    ok= record_result(result, "is_processlist_empty", MYLITE_ERROR, rc, db) &&
+      ok;
+    if (mylite_mariadb_errno(db) != ER_NOT_SUPPORTED_YET ||
+        std::strcmp(mylite_sqlstate(db), "42000") != 0 ||
+        message.find("MyISAM temporary table spill") == std::string::npos)
+      ok= false;
+#else
     ExecCapture processlist_capture;
     ok= exec_query_capture(db,
                            "SELECT COUNT(*) FROM "
@@ -2888,6 +2909,7 @@ static bool check_processlist_metadata_unsupported(const SmokeOptions &options,
     result->exec_processlist_metadata_messages+= "is_processlist_count=" + rows;
     if (rows != "0")
       ok= false;
+#endif
 
     rc= mylite_close(db);
     ok= record_result(result, "processlist_metadata_close", MYLITE_OK, rc,

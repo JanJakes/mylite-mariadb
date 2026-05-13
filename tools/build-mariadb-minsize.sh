@@ -28,7 +28,7 @@ main() {
     --env "MYLITE_MARIADB_BUILD_DIR=${build_dir}" \
     --env "MYLITE_BUILD_JOBS=${MYLITE_BUILD_JOBS:-}" \
     --env "MYLITE_DISABLE_EH_FRAME_HEADER=${MYLITE_DISABLE_EH_FRAME_HEADER:-ON}" \
-    --env "MYLITE_DISABLE_MYISAM_TEMP_SPILL=${MYLITE_DISABLE_MYISAM_TEMP_SPILL:-OFF}" \
+    --env "MYLITE_DISABLE_MYISAM_TEMP_SPILL=${MYLITE_DISABLE_MYISAM_TEMP_SPILL:-ON}" \
     "${image}" \
     /work/tools/build-mariadb-minsize.sh --inside-container
 }
@@ -68,7 +68,7 @@ build_inside_container() {
   esac
 
   local disable_myisam_temp_spill
-  disable_myisam_temp_spill="${MYLITE_DISABLE_MYISAM_TEMP_SPILL:-OFF}"
+  disable_myisam_temp_spill="${MYLITE_DISABLE_MYISAM_TEMP_SPILL:-ON}"
 
   local minsize_linker_flags
   minsize_linker_flags="-fuse-ld=lld -Wl,-z,pack-relative-relocs -Wl,--pack-dyn-relocs=relr"

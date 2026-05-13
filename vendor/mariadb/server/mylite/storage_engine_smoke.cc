@@ -222,6 +222,9 @@ static bool execute_statement_expect_error(MYSQL *mysql, const char *statement,
 static bool fetch_single_value(MYSQL *mysql, const char *query,
                                const char *label, std::string *value,
                                SmokeResult *result);
+static bool fetch_joined_values(MYSQL *mysql, const char *query,
+                                const char *label, std::string *value,
+                                SmokeResult *result);
 static bool fetch_warning_summary(MYSQL *mysql, const char *label,
                                   std::string *value, SmokeResult *result);
 static bool verify_table_present(MYSQL *mysql, const char *query,
@@ -1221,13 +1224,12 @@ static bool exercise_dml(MYSQL *mysql, SmokeResult *result)
     result->message= "BLOB/TEXT key lookup returned an unexpected value";
     return false;
   }
-  if (!fetch_single_value(mysql,
-                          "SELECT GROUP_CONCAT(id ORDER BY note "
-                          "SEPARATOR ',') "
-                          "FROM mylite.blob_text_key_rows "
-                          "FORCE INDEX(note_prefix)",
-                          "BLOB/TEXT key order",
-                          &result->blob_text_key_order_ids, result))
+  if (!fetch_joined_values(mysql,
+                           "SELECT id "
+                           "FROM mylite.blob_text_key_rows "
+                           "FORCE INDEX(note_prefix) ORDER BY note",
+                           "BLOB/TEXT key order",
+                           &result->blob_text_key_order_ids, result))
     return false;
   if (result->blob_text_key_order_ids != "1,2,3")
   {
@@ -1785,12 +1787,12 @@ static bool exercise_dml(MYSQL *mysql, SmokeResult *result)
         "unsupported FULLTEXT index ALTER",
         &result->unsupported_index_alter_fulltext, result))
     return false;
-  if (!fetch_single_value(mysql,
-                          "SELECT GROUP_CONCAT(CONCAT(id, ':', note, ':', body) "
-                          "ORDER BY id SEPARATOR ',') "
-                          "FROM mylite.unsupported_index_alter_base",
-                          "unsupported index ALTER rows after FULLTEXT",
-                          &result->unsupported_index_alter_rows, result))
+  if (!fetch_joined_values(mysql,
+                           "SELECT CONCAT(id, ':', note, ':', body) "
+                           "FROM mylite.unsupported_index_alter_base "
+                           "ORDER BY id",
+                           "unsupported index ALTER rows after FULLTEXT",
+                           &result->unsupported_index_alter_rows, result))
     return false;
   if (result->unsupported_index_alter_rows != "1:a:alpha,2:b:beta")
   {
@@ -1804,12 +1806,12 @@ static bool exercise_dml(MYSQL *mysql, SmokeResult *result)
         "unsupported HASH index ALTER",
         &result->unsupported_index_alter_hash, result))
     return false;
-  if (!fetch_single_value(mysql,
-                          "SELECT GROUP_CONCAT(CONCAT(id, ':', note, ':', body) "
-                          "ORDER BY id SEPARATOR ',') "
-                          "FROM mylite.unsupported_index_alter_base",
-                          "unsupported index ALTER rows after HASH",
-                          &result->unsupported_index_alter_rows, result))
+  if (!fetch_joined_values(mysql,
+                           "SELECT CONCAT(id, ':', note, ':', body) "
+                           "FROM mylite.unsupported_index_alter_base "
+                           "ORDER BY id",
+                           "unsupported index ALTER rows after HASH",
+                           &result->unsupported_index_alter_rows, result))
     return false;
   if (result->unsupported_index_alter_rows != "1:a:alpha,2:b:beta")
   {
@@ -1823,12 +1825,12 @@ static bool exercise_dml(MYSQL *mysql, SmokeResult *result)
         "unsupported descending index ALTER",
         &result->unsupported_index_alter_reverse, result))
     return false;
-  if (!fetch_single_value(mysql,
-                          "SELECT GROUP_CONCAT(CONCAT(id, ':', note, ':', body) "
-                          "ORDER BY id SEPARATOR ',') "
-                          "FROM mylite.unsupported_index_alter_base",
-                          "unsupported index ALTER rows after descending key",
-                          &result->unsupported_index_alter_rows, result))
+  if (!fetch_joined_values(mysql,
+                           "SELECT CONCAT(id, ':', note, ':', body) "
+                           "FROM mylite.unsupported_index_alter_base "
+                           "ORDER BY id",
+                           "unsupported index ALTER rows after descending key",
+                           &result->unsupported_index_alter_rows, result))
     return false;
   if (result->unsupported_index_alter_rows != "1:a:alpha,2:b:beta")
   {
@@ -1841,12 +1843,12 @@ static bool exercise_dml(MYSQL *mysql, SmokeResult *result)
                          "(3, 'c', 'gamma')",
                          "INSERT unsupported index ALTER final row", result))
     return false;
-  if (!fetch_single_value(mysql,
-                          "SELECT GROUP_CONCAT(CONCAT(id, ':', note, ':', body) "
-                          "ORDER BY id SEPARATOR ',') "
-                          "FROM mylite.unsupported_index_alter_base",
-                          "unsupported index ALTER final rows",
-                          &result->unsupported_index_alter_rows, result))
+  if (!fetch_joined_values(mysql,
+                           "SELECT CONCAT(id, ':', note, ':', body) "
+                           "FROM mylite.unsupported_index_alter_base "
+                           "ORDER BY id",
+                           "unsupported index ALTER final rows",
+                           &result->unsupported_index_alter_rows, result))
     return false;
   if (result->unsupported_index_alter_rows !=
       "1:a:alpha,2:b:beta,3:c:gamma")
@@ -2727,14 +2729,13 @@ static bool exercise_persistence_write(MYSQL *mysql, SmokeResult *result)
                      "unexpected value";
     return false;
   }
-  if (!fetch_single_value(mysql,
-                          "SELECT GROUP_CONCAT(id ORDER BY note "
-                          "SEPARATOR ',') "
-                          "FROM mylite.persisted_blob_text_keyed "
-                          "FORCE INDEX(note_prefix)",
-                          "persisted write BLOB/TEXT key order",
-                          &result->persisted_blob_text_key_order_ids,
-                          result))
+  if (!fetch_joined_values(mysql,
+                           "SELECT id "
+                           "FROM mylite.persisted_blob_text_keyed "
+                           "FORCE INDEX(note_prefix) ORDER BY note",
+                           "persisted write BLOB/TEXT key order",
+                           &result->persisted_blob_text_key_order_ids,
+                           result))
     return false;
   if (result->persisted_blob_text_key_order_ids != "1,2,3")
   {
@@ -3266,14 +3267,13 @@ static bool exercise_persistence_read(MYSQL *mysql, SmokeResult *result)
                      "unexpected value";
     return false;
   }
-  if (!fetch_single_value(mysql,
-                          "SELECT GROUP_CONCAT(id ORDER BY note "
-                          "SEPARATOR ',') "
-                          "FROM mylite.persisted_blob_text_keyed "
-                          "FORCE INDEX(note_prefix)",
-                          "persisted read BLOB/TEXT key order",
-                          &result->persisted_blob_text_key_order_ids,
-                          result))
+  if (!fetch_joined_values(mysql,
+                           "SELECT id "
+                           "FROM mylite.persisted_blob_text_keyed "
+                           "FORCE INDEX(note_prefix) ORDER BY note",
+                           "persisted read BLOB/TEXT key order",
+                           &result->persisted_blob_text_key_order_ids,
+                           result))
     return false;
   if (result->persisted_blob_text_key_order_ids != "1,2,3")
   {
@@ -3923,6 +3923,59 @@ static bool fetch_single_value(MYSQL *mysql, const char *query,
   {
     *value= row[0];
     ok= true;
+  }
+
+  mysql_free_result(res);
+  return ok;
+}
+
+static bool fetch_joined_values(MYSQL *mysql, const char *query,
+                                const char *label, std::string *value,
+                                SmokeResult *result)
+{
+  if (mysql_query(mysql, query))
+  {
+    result->message= std::string(label) + " query failed: " +
+                     mysql_error(mysql);
+    return false;
+  }
+
+  MYSQL_RES *res= mysql_store_result(mysql);
+  if (!res)
+  {
+    result->message= std::string(label) + " result failed: " +
+                     mysql_error(mysql);
+    return false;
+  }
+
+  bool ok= true;
+  value->clear();
+  if (mysql_num_fields(res) < 1)
+  {
+    result->message= std::string(label) +
+                     " returned an unexpected column count";
+    ok= false;
+  }
+  else
+  {
+    MYSQL_ROW row;
+    while ((row= mysql_fetch_row(res)))
+    {
+      if (!row[0])
+      {
+        result->message= std::string(label) + " returned a NULL value";
+        ok= false;
+        break;
+      }
+      if (!value->empty())
+        value->push_back(',');
+      value->append(row[0]);
+    }
+    if (ok && value->empty())
+    {
+      result->message= std::string(label) + " returned no rows";
+      ok= false;
+    }
   }
 
   mysql_free_result(res);

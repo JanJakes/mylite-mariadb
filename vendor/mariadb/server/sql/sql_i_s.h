@@ -155,6 +155,26 @@ public:
   Longtext(uint length) :Type(&type_handler_varchar, length, false) { }
 };
 
+#if defined(MYLITE_DISABLE_MYISAM_TEMP_SPILL)
+/* Keep built-in schema tables eligible for MEMORY temporary tables. */
+inline uint mylite_schema_varchar_length(uint length)
+{
+  const uint max_varchar_chars= MAX_FIELD_VARCHARLENGTH / 3;
+  return length < max_varchar_chars ? length : max_varchar_chars;
+}
+
+class Mylite_spillless_longtext: public Varchar
+{
+public:
+  Mylite_spillless_longtext(uint length)
+   :Varchar(mylite_schema_varchar_length(length))
+  { }
+};
+#define MYLITE_SCHEMA_LONGTEXT(length) Mylite_spillless_longtext(length)
+#else
+#define MYLITE_SCHEMA_LONGTEXT(length) Longtext(length)
+#endif
+
 
 class Yes_or_empty: public Varchar
 {

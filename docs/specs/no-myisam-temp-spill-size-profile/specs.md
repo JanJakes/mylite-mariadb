@@ -3,8 +3,9 @@
 ## Problem
 
 The aggressive MyLite minsize profile hides user-created `ENGINE=MyISAM`, but
-still links MariaDB's MyISAM engine because the inherited SQL layer uses MyISAM
-as the disk temporary-table engine when Aria temporary tables are disabled.
+previously still linked MariaDB's MyISAM engine because the inherited SQL layer
+uses MyISAM as the disk temporary-table engine when Aria temporary tables are
+disabled.
 
 Current measured MyISAM component:
 
@@ -43,14 +44,16 @@ MariaDB source references are from imported MariaDB Server tag
 
 ## Scope
 
-This slice adds an opt-in experimental `MYLITE_DISABLE_MYISAM_TEMP_SPILL`
-option that:
+This slice makes `MYLITE_DISABLE_MYISAM_TEMP_SPILL` viable in the default
+aggressive minsize profile. The option:
 
 - prevents `storage/myisam` from registering the mandatory MyISAM plugin,
 - keeps user `ENGINE=MyISAM` rejected through the existing legacy-engine
   smoke checks,
 - rejects inherited disk temporary-table spill paths with an explicit MariaDB
   diagnostic instead of silently linking MyISAM,
+- bounds built-in schema-table long-text columns to MEMORY-compatible `VARCHAR`
+  columns in this aggressive profile,
 - keeps in-memory `HEAP`/`MEMORY` temporary tables available, and
 - measures the archive and stripped linked impact.
 
@@ -65,10 +68,8 @@ temporary table execution, and it is not durable sidecar storage.
 
 ## Proposed Design
 
-Add `MYLITE_DISABLE_MYISAM_TEMP_SPILL` as an optional minsize build switch.
-The default `tools/build-mariadb-minsize.sh` value remains `OFF` because the
-experiment breaks ordinary schema-table execution before MyLite has a
-replacement disk temporary-table engine.
+Add `MYLITE_DISABLE_MYISAM_TEMP_SPILL` as a minsize build switch and enable it
+by default in `tools/build-mariadb-minsize.sh`.
 
 In `storage/myisam/CMakeLists.txt`, return before `MYSQL_ADD_PLUGIN(myisam ...)`
 when both `MYLITE_DISABLE_LEGACY_STORAGE_ENGINES` and
@@ -85,9 +86,10 @@ paths that would instantiate or dereference `TMP_ENGINE_HTON`:
 - `copy_tmptable_optimizer_costs()` should copy HEAP costs into
   `tmp_table_optimizer_costs` instead of dereferencing `TMP_ENGINE_HTON`.
 
-The first implementation should be conservative: reject disk-spill paths before
-the MyISAM handlerton is needed. If build/link failures expose more hard roots,
-either guard those roots or record the rejection with exact symbols.
+The implementation is conservative: reject disk-spill paths before the MyISAM
+handlerton is needed. Built-in schema-table `Longtext` fields are bounded to
+the largest portable `VARCHAR` size in this profile so common metadata queries
+remain MEMORY-temporary-table compatible.
 
 ## Affected Subsystems
 
@@ -122,19 +124,18 @@ open, create, check, and repair symbols.
 Measured with:
 
 ```sh
-MYLITE_DISABLE_MYISAM_TEMP_SPILL=ON \
-MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-myisam-temp-spill \
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-myisam-temp-spill-current \
 MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
 ```
 
-On top of `no-binlog-core-size-profile`:
+On top of `select-outfile-size-profile`:
 
 | Artifact | Bytes | Delta |
 | --- | ---: | ---: |
-| `libmysqld/libmariadbd.a` | 32,836,602 | -695,536 |
-| archive object count | 398 | -54 |
-| unstripped `mylite-open-close-smoke` | 8,848,848 | -296,192 |
-| stripped `mylite-open-close-smoke` | 6,437,408 | -246,680 |
+| `libmysqld/libmariadbd.a` | 25,994,786 | -419,960 |
+| archive object count | 370 | -41 |
+| unstripped `mylite-open-close-smoke` | 6,696,024 | -151,368 |
+| stripped `mylite-open-close-smoke` | 4,708,544 | -117,152 |
 
 `storage/myisam/libmyisam_embedded.a` is not produced in the experimental
 build, and the merged archive contains no `ha_myisam.cc.o`, `mi_*.c.o`,
@@ -147,9 +148,9 @@ top-level globals such as `myisam_hton` and `THR_LOCK_myisam`, but no live
 Run:
 
 ```sh
-MYLITE_DISABLE_MYISAM_TEMP_SPILL=ON MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-myisam-temp-spill MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
-MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-myisam-temp-spill MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
-MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-myisam-temp-spill MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-myisam-temp-spill-current MYLITE_BUILD_JOBS=8 tools/build-mariadb-minsize.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-myisam-temp-spill-current MYLITE_BUILD_JOBS=8 tools/run-libmylite-open-close-smoke.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-no-myisam-temp-spill-current MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
 git diff --check
 ```
 
@@ -171,8 +172,7 @@ Measure:
   objects.
 - Existing MyLite open/close smokes pass and include explicit coverage for
   in-memory temp tables plus disk-temp-spill rejection.
-- The compatibility harness failure is documented and prevents this switch from
-  becoming the default minsize profile.
+- The compatibility harness passes.
 - User `ENGINE=MyISAM` remains explicitly unavailable.
 - In-memory temporary-table queries still execute.
 - Size deltas and any rejected removal roots are recorded in
@@ -180,23 +180,19 @@ Measure:
 
 ## Verification Result
 
-The opt-in build and `tools/run-libmylite-open-close-smoke.sh` pass. The
-open/close smoke verifies a small in-memory temporary-table query succeeds and
-that forced disk temporary-table selection fails with
-`ER_NOT_SUPPORTED_YET` and message text `MyISAM temporary table spill`.
+The default minsize build, `tools/run-libmylite-open-close-smoke.sh`, and
+`tools/run-compatibility-test-harness.sh` pass. The open/close smoke verifies a
+small in-memory temporary-table query succeeds and that forced disk
+temporary-table selection fails with `ER_NOT_SUPPORTED_YET` and message text
+`MyISAM temporary table spill`.
 
-`tools/run-compatibility-test-harness.sh` fails in the
-`storage_single_file` group. The failures are not sidecar leakage; ordinary
-metadata and catalog checks such as `SHOW COLUMNS FROM ...` need MariaDB's
-inherited disk temporary-table path and now fail with:
-
-```text
-This version of MariaDB doesn't yet support 'MyISAM temporary table spill'
-```
-
-That makes full MyISAM removal too expensive for the default minsize profile
-until MyLite grows a MyLite-owned disk temporary-table replacement or a
-compatible schema-table memory path.
+The initial opt-in version failed in `storage_single_file`: schema-table
+metadata and several smoke-report aggregation queries routed through MariaDB's
+inherited disk temporary-table path. The final version keeps common schema
+metadata in MEMORY by bounding built-in schema-table long-text columns, and the
+storage smoke now joins ordered multi-row assertions in the client where the
+test is checking MyLite storage behavior rather than ordered aggregate
+temporary-table behavior.
 
 ## Risks and Unresolved Questions
 

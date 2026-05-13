@@ -10113,7 +10113,7 @@ ST_FIELD_INFO columns_fields_info[]=
   Column("TABLE_NAME",              Name(),      NOT_NULL,          OPEN_FRM_ONLY),
   Column("COLUMN_NAME",             Name(),      NOT_NULL, "Field", OPEN_FRM_ONLY),
   Column("ORDINAL_POSITION",        ULonglong(), NOT_NULL,          OPEN_FRM_ONLY),
-  Column("COLUMN_DEFAULT", Longtext(MAX_FIELD_VARCHARLENGTH),
+  Column("COLUMN_DEFAULT", MYLITE_SCHEMA_LONGTEXT(MAX_FIELD_VARCHARLENGTH),
                                                  NULLABLE, "Default",OPEN_FRM_ONLY),
   Column("IS_NULLABLE",          Yes_or_empty(), NOT_NULL, "Null",  OPEN_FRM_ONLY),
   Column("DATA_TYPE",               Name(),      NOT_NULL,          OPEN_FRM_ONLY),
@@ -10124,14 +10124,14 @@ ST_FIELD_INFO columns_fields_info[]=
   Column("DATETIME_PRECISION",      ULonglong(), NULLABLE,          OPEN_FRM_ONLY),
   Column("CHARACTER_SET_NAME",      CSName(),    NULLABLE,          OPEN_FRM_ONLY),
   Column("COLLATION_NAME",          CLName(),    NULLABLE, "Collation", OPEN_FRM_ONLY),
-  Column("COLUMN_TYPE",         Longtext(65535), NOT_NULL, "Type",  OPEN_FRM_ONLY),
+  Column("COLUMN_TYPE",         MYLITE_SCHEMA_LONGTEXT(65535), NOT_NULL, "Type",  OPEN_FRM_ONLY),
   Column("COLUMN_KEY",              Varchar(3),  NOT_NULL, "Key",   OPEN_FRM_ONLY),
   Column("EXTRA",                   Varchar(80), NOT_NULL, "Extra", OPEN_FRM_ONLY),
   Column("PRIVILEGES",              Varchar(80), NOT_NULL, "Privileges", OPEN_FRM_ONLY),
   Column("COLUMN_COMMENT", Varchar(COLUMN_COMMENT_MAXLEN), NOT_NULL, "Comment",
                                                                  OPEN_FRM_ONLY),
   Column("IS_GENERATED",            Varchar(6),  NOT_NULL,       OPEN_FRM_ONLY),
-  Column("GENERATION_EXPRESSION",   Longtext(MAX_FIELD_VARCHARLENGTH),
+  Column("GENERATION_EXPRESSION",   MYLITE_SCHEMA_LONGTEXT(MAX_FIELD_VARCHARLENGTH),
                                                  NULLABLE,       OPEN_FRM_ONLY), // 21
   Column("IS_SYSTEM_TIME_PERIOD_START", Varchar(3),  NOT_NULL,   OPEN_FRM_ONLY), // 22
   Column("IS_SYSTEM_TIME_PERIOD_END",   Varchar(3),  NOT_NULL,   OPEN_FRM_ONLY), // 23
@@ -10212,7 +10212,7 @@ ST_FIELD_INFO events_fields_info[]=
   Column("DEFINER",              Definer(),   NOT_NULL, "Definer"),
   Column("TIME_ZONE",            Varchar(64), NOT_NULL, "Time zone"),
   Column("EVENT_BODY",           Varchar(8),  NOT_NULL),
-  Column("EVENT_DEFINITION", Longtext(65535), NOT_NULL),
+  Column("EVENT_DEFINITION", MYLITE_SCHEMA_LONGTEXT(65535), NOT_NULL),
   Column("EVENT_TYPE",           Varchar(9),  NOT_NULL, "Type"),
   Column("EXECUTE_AT",           Datetime(0), NULLABLE, "Execute at"),
   Column("INTERVAL_VALUE",       Varchar(256),NULLABLE, "Interval value"),
@@ -10261,9 +10261,9 @@ ST_FIELD_INFO proc_fields_info[]=
   Column("DATETIME_PRECISION",     ULonglong(), NULLABLE, OPEN_FRM_ONLY),
   Column("CHARACTER_SET_NAME",      Varchar(64),NULLABLE),
   Column("COLLATION_NAME",          Varchar(64),NULLABLE),
-  Column("DTD_IDENTIFIER",     Longtext(65535), NULLABLE),
+  Column("DTD_IDENTIFIER",     MYLITE_SCHEMA_LONGTEXT(65535), NULLABLE),
   Column("ROUTINE_BODY",            Varchar(8), NOT_NULL),
-  Column("ROUTINE_DEFINITION", Longtext(65535), NULLABLE),
+  Column("ROUTINE_DEFINITION", MYLITE_SCHEMA_LONGTEXT(65535), NULLABLE),
   Column("EXTERNAL_NAME",           Name(),     NULLABLE),
   Column("EXTERNAL_LANGUAGE",       Name(),     NULLABLE),
   Column("PARAMETER_STYLE",         Varchar(8), NOT_NULL),
@@ -10274,7 +10274,7 @@ ST_FIELD_INFO proc_fields_info[]=
   Column("CREATED",                Datetime(0), NOT_NULL, "Created"),
   Column("LAST_ALTERED",           Datetime(0), NOT_NULL, "Modified"),
   Column("SQL_MODE",                SQLMode(),  NOT_NULL),
-  Column("ROUTINE_COMMENT",    Longtext(65535), NOT_NULL, "Comment"),
+  Column("ROUTINE_COMMENT",    MYLITE_SCHEMA_LONGTEXT(65535), NOT_NULL, "Comment"),
   Column("DEFINER",                 Definer(),  NOT_NULL, "Definer"),
   Column("CHARACTER_SET_CLIENT",    CSName(),   NOT_NULL, "character_set_client"),
   Column("COLLATION_CONNECTION",    CLName(),   NOT_NULL, "collation_connection"),
@@ -10337,7 +10337,7 @@ ST_FIELD_INFO view_fields_info[]=
   Column("TABLE_CATALOG",        Catalog(),  NOT_NULL, OPEN_FRM_ONLY),
   Column("TABLE_SCHEMA",         Name(),     NOT_NULL, OPEN_FRM_ONLY),
   Column("TABLE_NAME",           Name(),     NOT_NULL, OPEN_FRM_ONLY),
-  Column("VIEW_DEFINITION", Longtext(65535), NOT_NULL, OPEN_FRM_ONLY),
+  Column("VIEW_DEFINITION", MYLITE_SCHEMA_LONGTEXT(65535), NOT_NULL, OPEN_FRM_ONLY),
   Column("CHECK_OPTION",         Varchar(8), NOT_NULL, OPEN_FRM_ONLY),
   Column("IS_UPDATABLE",     Yes_or_empty(), NOT_NULL, OPEN_FULL_TABLE),
   Column("DEFINER",              Definer(),  NOT_NULL, OPEN_FRM_ONLY),
@@ -10468,8 +10468,8 @@ ST_FIELD_INFO triggers_fields_info[]=
   Column("EVENT_OBJECT_SCHEMA",       Name(), NOT_NULL,             OPEN_FRM_ONLY),
   Column("EVENT_OBJECT_TABLE",        Name(), NOT_NULL, "Table",    OPEN_FRM_ONLY),
   Column("ACTION_ORDER",        SLonglong(4), NOT_NULL,             OPEN_FRM_ONLY),
-  Column("ACTION_CONDITION", Longtext(65535), NULLABLE,             OPEN_FRM_ONLY),
-  Column("ACTION_STATEMENT", Longtext(65535), NULLABLE, "Statement",OPEN_FRM_ONLY),
+  Column("ACTION_CONDITION", MYLITE_SCHEMA_LONGTEXT(65535), NULLABLE,             OPEN_FRM_ONLY),
+  Column("ACTION_STATEMENT", MYLITE_SCHEMA_LONGTEXT(65535), NULLABLE, "Statement",OPEN_FRM_ONLY),
   Column("ACTION_ORIENTATION",    Varchar(9), NOT_NULL,             OPEN_FRM_ONLY),
   Column("ACTION_TIMING",         Varchar(6), NOT_NULL, "Timing",   OPEN_FRM_ONLY),
   Column("ACTION_REFERENCE_OLD_TABLE",Name(), NULLABLE,             OPEN_FRM_ONLY),
@@ -10501,9 +10501,9 @@ ST_FIELD_INFO partitions_fields_info[]=
   Column("SUBPARTITION_ORDINAL_POSITION",ULonglong(),NULLABLE, OPEN_FULL_TABLE),
   Column("PARTITION_METHOD",            Varchar(18), NULLABLE, OPEN_FULL_TABLE),
   Column("SUBPARTITION_METHOD",         Varchar(12), NULLABLE, OPEN_FULL_TABLE),
-  Column("PARTITION_EXPRESSION",    Longtext(65535), NULLABLE, OPEN_FULL_TABLE),
-  Column("SUBPARTITION_EXPRESSION", Longtext(65535), NULLABLE, OPEN_FULL_TABLE),
-  Column("PARTITION_DESCRIPTION",   Longtext(65535), NULLABLE, OPEN_FULL_TABLE),
+  Column("PARTITION_EXPRESSION",    MYLITE_SCHEMA_LONGTEXT(65535), NULLABLE, OPEN_FULL_TABLE),
+  Column("SUBPARTITION_EXPRESSION", MYLITE_SCHEMA_LONGTEXT(65535), NULLABLE, OPEN_FULL_TABLE),
+  Column("PARTITION_DESCRIPTION",   MYLITE_SCHEMA_LONGTEXT(65535), NULLABLE, OPEN_FULL_TABLE),
   Column("TABLE_ROWS",                  ULonglong(), NOT_NULL, OPEN_FULL_TABLE),
   Column("AVG_ROW_LENGTH",              ULonglong(), NOT_NULL, OPEN_FULL_TABLE),
   Column("DATA_LENGTH",                 ULonglong(), NOT_NULL, OPEN_FULL_TABLE),
@@ -10542,7 +10542,7 @@ ST_FIELD_INFO sysvars_fields_info[]=
   Column("NUMERIC_MIN_VALUE",    Varchar(MY_INT64_NUM_DECIMAL_DIGITS), NULLABLE),
   Column("NUMERIC_MAX_VALUE",    Varchar(MY_INT64_NUM_DECIMAL_DIGITS), NULLABLE),
   Column("NUMERIC_BLOCK_SIZE",   Varchar(MY_INT64_NUM_DECIMAL_DIGITS), NULLABLE),
-  Column("ENUM_VALUE_LIST",      Longtext(65535),                  NULLABLE),
+  Column("ENUM_VALUE_LIST",      MYLITE_SCHEMA_LONGTEXT(65535),                  NULLABLE),
   Column("READ_ONLY",            Yes_or_empty(),                   NOT_NULL),
   Column("COMMAND_LINE_ARGUMENT",Name(),                           NULLABLE),
   Column("GLOBAL_VALUE_PATH",    Varchar(2048),                    NULLABLE),
@@ -10570,7 +10570,7 @@ ST_FIELD_INFO processlist_fields_info[]=
   Column("COMMAND",        Varchar(16),               NOT_NULL, "Command"),
   Column("TIME",           SLong(7),                  NOT_NULL, "Time"),
   Column("STATE",          Varchar(64),               NULLABLE, "State"),
-  Column("INFO",  Longtext(PROCESS_LIST_INFO_WIDTH),
+  Column("INFO",  MYLITE_SCHEMA_LONGTEXT(PROCESS_LIST_INFO_WIDTH),
                                                       NULLABLE, "Info"),
   Column("TIME_MS", Decimal(100 * (MY_INT64_NUM_DECIMAL_DIGITS + 1) + 3),
                                                       NOT_NULL, "Time_ms"),
@@ -10599,7 +10599,7 @@ ST_FIELD_INFO plugin_fields_info[]=
   Column("PLUGIN_LIBRARY",          Name(),          NULLABLE, "Library"),
   Column("PLUGIN_LIBRARY_VERSION",  Varchar(20),     NULLABLE),
   Column("PLUGIN_AUTHOR",           Name(),          NULLABLE),
-  Column("PLUGIN_DESCRIPTION",      Longtext(65535), NULLABLE),
+  Column("PLUGIN_DESCRIPTION",      MYLITE_SCHEMA_LONGTEXT(65535), NULLABLE),
   Column("PLUGIN_LICENSE",          Varchar(80),     NOT_NULL, "License"),
   Column("LOAD_OPTION",             Varchar(64),     NOT_NULL),
   Column("PLUGIN_MATURITY",         Varchar(12),     NOT_NULL),
@@ -10704,7 +10704,7 @@ ST_FIELD_INFO parameters_fields_info[]=
   Column("DATETIME_PRECISION",      ULonglong(),     NULLABLE, OPEN_FRM_ONLY),
   Column("CHARACTER_SET_NAME",      Varchar(64),     NULLABLE, OPEN_FULL_TABLE),
   Column("COLLATION_NAME",          Varchar(64),     NULLABLE, OPEN_FULL_TABLE),
-  Column("DTD_IDENTIFIER",          Longtext(65535), NOT_NULL, OPEN_FULL_TABLE),
+  Column("DTD_IDENTIFIER",          MYLITE_SCHEMA_LONGTEXT(65535), NOT_NULL, OPEN_FULL_TABLE),
   Column("ROUTINE_TYPE",            Varchar(9),      NOT_NULL, OPEN_FULL_TABLE),
   CEnd()
 };
@@ -10780,7 +10780,7 @@ ST_FIELD_INFO show_explain_tabular_fields_info[]=
 
 ST_FIELD_INFO show_explain_json_fields_info[]=
 {
-  Column("EXPLAIN", Longtext(MAX_FIELD_VARCHARLENGTH), NOT_NULL, "SHOW EXPLAIN"),
+  Column("EXPLAIN", MYLITE_SCHEMA_LONGTEXT(MAX_FIELD_VARCHARLENGTH), NOT_NULL, "SHOW EXPLAIN"),
   CEnd()
 };
 
@@ -10809,7 +10809,7 @@ ST_FIELD_INFO show_analyze_tabular_fields_info[]=
 
 
 ST_FIELD_INFO show_analyze_json_fields_info[]= {
-    Column("ANALYZE", Longtext(MAX_FIELD_VARCHARLENGTH), NOT_NULL, "SHOW ANALYZE"),
+    Column("ANALYZE", MYLITE_SCHEMA_LONGTEXT(MAX_FIELD_VARCHARLENGTH), NOT_NULL, "SHOW ANALYZE"),
     CEnd()};
 
 
@@ -10820,7 +10820,7 @@ ST_FIELD_INFO check_constraints_fields_info[]=
   Column("TABLE_NAME",         Name(),    NOT_NULL, OPEN_FULL_TABLE),
   Column("CONSTRAINT_NAME",    Name(),    NOT_NULL, OPEN_FULL_TABLE),
   Column("LEVEL",              Varchar(6),NOT_NULL, OPEN_FULL_TABLE),
-  Column("CHECK_CLAUSE",       Longtext(MAX_FIELD_VARCHARLENGTH),
+  Column("CHECK_CLAUSE",       MYLITE_SCHEMA_LONGTEXT(MAX_FIELD_VARCHARLENGTH),
                                           NOT_NULL, OPEN_FULL_TABLE),
   CEnd()
 };
