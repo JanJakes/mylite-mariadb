@@ -70,6 +70,7 @@ struct SmokeResult
   std::string exec_window_aggregate_rows;
   std::string exec_window_function_messages;
   std::string exec_binlog_replication_message;
+  std::string exec_xa_transaction_messages;
   std::string exec_server_encryption_rows;
   std::string exec_server_encryption_set_messages;
   std::string exec_proxy_protocol_rows;
@@ -196,6 +197,8 @@ static bool check_window_functions_unsupported(const SmokeOptions &options,
                                                SmokeResult *result);
 static bool check_binlog_replication_unsupported(const SmokeOptions &options,
                                                  SmokeResult *result);
+static bool check_xa_transactions_unsupported(const SmokeOptions &options,
+                                              SmokeResult *result);
 static bool check_server_encryption_profile(const SmokeOptions &options,
                                             SmokeResult *result);
 static bool check_proxy_protocol_profile(const SmokeOptions &options,
@@ -409,6 +412,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "binlog_replication_unsupported";
   ok= check_binlog_replication_unsupported(options, result) && ok;
+
+  result->phase= "xa_transactions_unsupported";
+  ok= check_xa_transactions_unsupported(options, result) && ok;
 
   result->phase= "server_encryption_profile";
   ok= check_server_encryption_profile(options, result) && ok;
@@ -1277,6 +1283,52 @@ static bool check_binlog_replication_unsupported(const SmokeOptions &options,
 
     rc= mylite_close(db);
     ok= record_result(result, "binlog_replication_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+  return ok;
+}
+
+static bool check_xa_transactions_unsupported(const SmokeOptions &options,
+                                              SmokeResult *result)
+{
+  struct XaAttempt
+  {
+    const char *label;
+    const char *sql;
+  };
+
+  const XaAttempt attempts[]=
+  {
+    {"xa_start", "XA START 'mylite-xa'"},
+    {"xa_recover", "XA RECOVER"}
+  };
+
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "xa_transaction_open", MYLITE_OK, rc, db);
+  if (db)
+  {
+    std::vector<std::string> messages;
+    for (size_t i= 0; i < sizeof(attempts) / sizeof(attempts[0]); ++i)
+    {
+      char *errmsg= nullptr;
+      rc= mylite_exec(db, attempts[i].sql, nullptr, nullptr, &errmsg);
+      const std::string message= errmsg ? errmsg : mylite_errmsg(db);
+      if (errmsg)
+        mylite_free(errmsg);
+
+      ok= record_result(result, attempts[i].label, MYLITE_ERROR, rc, db) &&
+          ok;
+      if (mylite_mariadb_errno(db) != ER_OPTION_PREVENTS_STATEMENT ||
+          std::strcmp(mylite_sqlstate(db), "HY000") != 0 ||
+          message.find("embedded option") == std::string::npos)
+        ok= false;
+      messages.push_back(message);
+    }
+    result->exec_xa_transaction_messages= join_strings(messages, " | ");
+
+    rc= mylite_close(db);
+    ok= record_result(result, "xa_transaction_close", MYLITE_OK, rc,
                       nullptr) && ok;
   }
   return ok;
@@ -3349,6 +3401,9 @@ static void write_report(const SmokeOptions &options,
   if (!result.exec_binlog_replication_message.empty())
     report << "exec_binlog_replication_message="
            << result.exec_binlog_replication_message << "\n";
+  if (!result.exec_xa_transaction_messages.empty())
+    report << "exec_xa_transaction_messages="
+           << result.exec_xa_transaction_messages << "\n";
   if (!result.exec_server_encryption_rows.empty())
     report << "exec_server_encryption_rows="
            << result.exec_server_encryption_rows << "\n";

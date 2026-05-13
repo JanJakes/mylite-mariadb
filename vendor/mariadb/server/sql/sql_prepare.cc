@@ -2113,11 +2113,16 @@ static int mysql_test_handler_read(Prepared_statement *stmt,
 
 static int mysql_test_xa_recover(Prepared_statement *stmt)
 {
+#ifdef MYLITE_DISABLE_XA_TRANSACTIONS
+  my_error(ER_OPTION_PREVENTS_STATEMENT, MYF(0), "embedded");
+  return 1;
+#else
   THD *thd= stmt->thd;
   List<Item> field_list;
 
   xa_recover_get_fields(thd, &field_list, nullptr);
   return send_stmt_metadata(thd, stmt, &field_list);
+#endif
 }
 
 
