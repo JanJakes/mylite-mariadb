@@ -73,6 +73,7 @@ struct SmokeResult
   std::string exec_json_arrayagg_message;
   std::string exec_json_objectagg_message;
   std::string exec_json_schema_valid_message;
+  std::string exec_dynamic_column_messages;
   std::string exec_json_table_message;
   std::string exec_sql_diagnostics_messages;
   std::string exec_explain_runtime_messages;
@@ -206,6 +207,8 @@ static bool check_vector_functions_unsupported(const SmokeOptions &options,
                                                SmokeResult *result);
 static bool check_json_functions_unsupported(const SmokeOptions &options,
                                              SmokeResult *result);
+static bool check_dynamic_columns_unsupported(const SmokeOptions &options,
+                                              SmokeResult *result);
 static bool check_json_table_unsupported(const SmokeOptions &options,
                                          SmokeResult *result);
 static bool check_sql_diagnostics_unsupported(const SmokeOptions &options,
@@ -431,6 +434,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "json_functions_unsupported";
   ok= check_json_functions_unsupported(options, result) && ok;
+
+  result->phase= "dynamic_columns_unsupported";
+  ok= check_dynamic_columns_unsupported(options, result) && ok;
 
   result->phase= "json_table_unsupported";
   ok= check_json_table_unsupported(options, result) && ok;
@@ -1322,6 +1328,82 @@ static bool check_json_functions_unsupported(const SmokeOptions &options,
 
     rc= mylite_close(db);
     ok= record_result(result, "json_functions_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+  return ok;
+}
+
+static bool check_dynamic_columns_unsupported(const SmokeOptions &options,
+                                              SmokeResult *result)
+{
+  struct DynamicColumnCase
+  {
+    const char *label;
+    const char *sql;
+    const char *name;
+    unsigned expected_errno;
+  };
+
+  static const DynamicColumnCase cases[] = {
+    {"dynamic_column_create",
+     "SELECT COLUMN_CREATE(1, 'a')",
+     "dynamic columns",
+     ER_NOT_SUPPORTED_YET},
+    {"dynamic_column_add",
+     "SELECT COLUMN_ADD(COLUMN_CREATE(1, 'a'), 2, 'b')",
+     "dynamic columns",
+     ER_NOT_SUPPORTED_YET},
+    {"dynamic_column_delete",
+     "SELECT COLUMN_DELETE(COLUMN_CREATE(1, 'a'), 1)",
+     "dynamic columns",
+     ER_NOT_SUPPORTED_YET},
+    {"dynamic_column_get",
+     "SELECT COLUMN_GET(COLUMN_CREATE(1, 'a'), 1 AS CHAR)",
+     "dynamic columns",
+     ER_NOT_SUPPORTED_YET},
+    {"dynamic_column_check",
+     "SELECT COLUMN_CHECK('bad')",
+     "COLUMN_CHECK",
+     ER_SP_DOES_NOT_EXIST},
+    {"dynamic_column_exists",
+     "SELECT COLUMN_EXISTS('', 1)",
+     "COLUMN_EXISTS",
+     ER_SP_DOES_NOT_EXIST},
+    {"dynamic_column_list",
+     "SELECT COLUMN_LIST('')",
+     "COLUMN_LIST",
+     ER_SP_DOES_NOT_EXIST},
+    {"dynamic_column_json",
+     "SELECT COLUMN_JSON('')",
+     "COLUMN_JSON",
+     ER_SP_DOES_NOT_EXIST}
+  };
+
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "dynamic_columns_open", MYLITE_OK, rc, db);
+  if (db)
+  {
+    std::vector<std::string> messages;
+    for (const DynamicColumnCase &test : cases)
+    {
+      char *errmsg= nullptr;
+      rc= mylite_exec(db, test.sql, nullptr, nullptr, &errmsg);
+      std::string message= errmsg ? errmsg : mylite_errmsg(db);
+      if (errmsg)
+        mylite_free(errmsg);
+
+      messages.push_back(std::string(test.label) + "=" + message);
+      ok= record_result(result, test.label, MYLITE_ERROR, rc, db) && ok;
+      if (mylite_mariadb_errno(db) != test.expected_errno ||
+          std::strcmp(mylite_sqlstate(db), "42000") != 0 ||
+          message.find(test.name) == std::string::npos)
+        ok= false;
+    }
+    result->exec_dynamic_column_messages= join_strings(messages, " | ");
+
+    rc= mylite_close(db);
+    ok= record_result(result, "dynamic_columns_close", MYLITE_OK, rc,
                       nullptr) && ok;
   }
   return ok;
@@ -3867,6 +3949,9 @@ static void write_report(const SmokeOptions &options,
   if (!result.exec_json_schema_valid_message.empty())
     report << "exec_json_schema_valid_message="
            << result.exec_json_schema_valid_message << "\n";
+  if (!result.exec_dynamic_column_messages.empty())
+    report << "exec_dynamic_column_messages="
+           << result.exec_dynamic_column_messages << "\n";
   if (!result.exec_json_table_message.empty())
     report << "exec_json_table_message="
            << result.exec_json_table_message << "\n";

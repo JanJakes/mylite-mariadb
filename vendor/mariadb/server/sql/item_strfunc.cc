@@ -4944,6 +4944,7 @@ err:
 #endif
 
 
+#ifndef MYLITE_DISABLE_DYNAMIC_COLUMNS
 Item_func_dyncol_create::Item_func_dyncol_create(THD *thd, List<Item> &args,
                                                  DYNCALL_CREATE_DEF *dfs):
   Item_str_func(thd, args), defs(dfs), vals(0), keys_num(NULL), keys_str(NULL),
@@ -5832,6 +5833,7 @@ null:
     my_free(names);
   return NULL;
 }
+#endif
 
 Item_temptable_rowid::Item_temptable_rowid(TABLE *table_arg)
   : Item_str_func(table_arg->in_use), table(table_arg)

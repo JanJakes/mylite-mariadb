@@ -2411,6 +2411,7 @@ protected:
 #endif
 
 
+#ifndef MYLITE_DISABLE_DYNAMIC_COLUMNS
 class Item_func_dyncol_create: public Item_str_func
 {
 protected:
@@ -2558,6 +2559,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_dyncol_list>(thd, this); }
 };
+#endif
 
 /*
   this is used by JOIN_TAB::keep_current_rowid

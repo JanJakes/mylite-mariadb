@@ -347,6 +347,7 @@ protected:
   ~Create_func_coercibility() override = default;
 };
 
+#ifndef MYLITE_DISABLE_DYNAMIC_COLUMNS
 class Create_func_dyncol_check : public Create_func_arg1
 {
 public:
@@ -394,6 +395,7 @@ protected:
   Create_func_dyncol_json() = default;
   ~Create_func_dyncol_json() override = default;
 };
+#endif
 
 
 class Create_func_coalesce : public Create_native_func
@@ -3495,7 +3497,7 @@ Create_func_coercibility::create_1_arg(THD *thd, Item *arg1)
   return new (thd->mem_root) Item_func_coercibility(thd, arg1);
 }
 
-
+#ifndef MYLITE_DISABLE_DYNAMIC_COLUMNS
 Create_func_dyncol_check Create_func_dyncol_check::s_singleton;
 
 Item*
@@ -3527,6 +3529,7 @@ Create_func_dyncol_json::create_1_arg(THD *thd, Item *arg1)
 {
   return new (thd->mem_root) Item_func_dyncol_json(thd, arg1);
 }
+#endif
 
 Create_func_coalesce Create_func_coalesce::s_singleton;
 
@@ -6523,10 +6526,12 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("COALESCE") }, BUILDER(Create_func_coalesce)},
   { { STRING_WITH_LEN("COERCIBILITY") }, BUILDER(Create_func_coercibility)},
   { { STRING_WITH_LEN("COLLATION") }, BUILDER(Create_func_collation)},
+#ifndef MYLITE_DISABLE_DYNAMIC_COLUMNS
   { { STRING_WITH_LEN("COLUMN_CHECK") }, BUILDER(Create_func_dyncol_check)},
   { { STRING_WITH_LEN("COLUMN_EXISTS") }, BUILDER(Create_func_dyncol_exists)},
   { { STRING_WITH_LEN("COLUMN_LIST") }, BUILDER(Create_func_dyncol_list)},
   { { STRING_WITH_LEN("COLUMN_JSON") }, BUILDER(Create_func_dyncol_json)},
+#endif
 #ifndef MYLITE_DISABLE_ZLIB_COMPRESSION
   { { STRING_WITH_LEN("COMPRESS") }, BUILDER(Create_func_compress)},
 #endif
@@ -6982,7 +6987,37 @@ find_qualified_function_builder(THD *thd)
   return & Create_sp_func::s_singleton;
 }
 
+#ifdef MYLITE_DISABLE_DYNAMIC_COLUMNS
+static Item *mylite_dynamic_columns_unsupported();
 
+Item *create_func_dyncol_create(THD *, List<DYNCALL_CREATE_DEF> &)
+{
+  return mylite_dynamic_columns_unsupported();
+}
+
+Item *create_func_dyncol_add(THD *, Item *, List<DYNCALL_CREATE_DEF> &)
+{
+  return mylite_dynamic_columns_unsupported();
+}
+
+Item *create_func_dyncol_delete(THD *, Item *, List<Item> &)
+{
+  return mylite_dynamic_columns_unsupported();
+}
+
+Item *create_func_dyncol_get(THD *, Item *, Item *, const Type_handler *,
+                             const Lex_length_and_dec_st &, CHARSET_INFO *)
+{
+  return mylite_dynamic_columns_unsupported();
+}
+
+static Item *mylite_dynamic_columns_unsupported()
+{
+  my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+           "dynamic columns in the MyLite minsize profile");
+  return NULL;
+}
+#else
 static List<Item> *create_func_dyncol_prepare(THD *thd,
                                               DYNCALL_CREATE_DEF **dfs,
                                               List<DYNCALL_CREATE_DEF> &list)
@@ -7073,3 +7108,4 @@ Item *create_func_dyncol_get(THD *thd,  Item *str, Item *num,
   return handler->create_typecast_item(thd, res,
                                        Type_cast_attributes(length_dec, cs));
 }
+#endif

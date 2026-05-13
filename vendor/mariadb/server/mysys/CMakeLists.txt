@@ -57,6 +57,11 @@ SET(MYSYS_SOURCES  array.c charset-def.c charset.c my_default.c
                                 my_timezone.cc  my_thread_name.cc
                                 my_virtual_mem.c)
 
+IF(MYLITE_DISABLE_DYNAMIC_COLUMNS)
+  LIST(REMOVE_ITEM MYSYS_SOURCES ma_dyncol.c)
+  LIST(APPEND MYSYS_SOURCES mylite_dyncol_stub.c)
+ENDIF()
+
 IF (WIN32)
   SET (MYSYS_SOURCES ${MYSYS_SOURCES}
     my_winthread.c

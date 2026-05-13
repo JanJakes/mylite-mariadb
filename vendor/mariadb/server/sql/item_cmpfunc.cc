@@ -7707,7 +7707,7 @@ Item* Item_equal::get_first(JOIN_TAB *context, Item *field_item)
   return NULL;
 }
 
-
+#ifndef MYLITE_DISABLE_DYNAMIC_COLUMNS
 bool Item_func_dyncol_check::val_bool()
 {
   char buff[STRING_BUFFER_USUAL_SIZE];
@@ -7800,6 +7800,7 @@ null:
   null_value= TRUE;
   return 0;
 }
+#endif
 
 
 Item_bool_rowready_func2 *Eq_creator::create(THD *thd, Item *a, Item *b) const

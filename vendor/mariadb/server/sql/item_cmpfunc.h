@@ -3790,6 +3790,7 @@ protected:
   { return get_item_copy<Item_cond_or>(thd, this); }
 };
 
+#ifndef MYLITE_DISABLE_DYNAMIC_COLUMNS
 class Item_func_dyncol_check :public Item_bool_func
 {
 public:
@@ -3822,6 +3823,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_dyncol_exists>(thd, this); }
 };
+#endif
 
 
 class Item_func_cursor_bool_attr: public Item_bool_func, public Cursor_ref
