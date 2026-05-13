@@ -447,12 +447,17 @@ Measured against `build/mariadb-minsize-lld-o2`:
 | unstripped `mylite-open-close-smoke` | 5,855,640 | 5,844,824 | -10,816 |
 | stripped `mylite-open-close-smoke` | 3,990,440 | 3,982,696 | -7,744 |
 | `size` decimal total | 4,203,300 | 4,194,990 | -8,310 |
-| PHP-shaped shared probe, unstripped | 5,729,736 | 5,409,056 | -320,680 |
-| PHP-shaped shared probe, stripped | 3,881,776 | 3,650,336 | -231,440 |
-| PHP-shaped shared probe, sectionless | 3,879,416 | 3,647,976 | -231,440 |
+| Hidden-entry PHP-shaped shared probe, unstripped | 5,729,736 | 5,409,056 | -320,680 |
+| Hidden-entry PHP-shaped shared probe, stripped | 3,881,776 | 3,650,336 | -231,440 |
+| Hidden-entry PHP-shaped shared probe, sectionless | 3,879,416 | 3,647,976 | -231,440 |
 
-The new lowest measured PHP-shaped floor is 3,647,976 bytes
-(3.48 MiB / 3.65 MB) for a section-header-stripped shared probe.
+Follow-up bundle auditing showed that the manual shared-probe command used for
+the table above did not export a dynamic entrypoint in the direct-session
+build, so those rows are useful only as an apples-to-apples hidden-entry link
+comparison. The corrected extension-shaped audit probe exports exactly one
+`mylite_php_probe` symbol and measures 5,703,208 bytes unstripped,
+3,861,728 bytes stripped, and 3,859,368 bytes sectionless. Use those corrected
+values as the current PHP-extension-shaped packaging floor.
 
 Linked symbol checks on `mylite-open-close-smoke` no longer show retained
 `mysql_server_init`, `mysql_server_end`, `mysql_init`, `mysql_real_connect`,
@@ -475,7 +480,10 @@ MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-direct-session \
   MYLITE_BUILD_JOBS=8 tools/run-storage-engine-smoke.sh
 MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-direct-session \
   MYLITE_BUILD_JOBS=8 tools/run-compatibility-test-harness.sh
+MYLITE_MARIADB_BUILD_DIR=build/mariadb-minsize-direct-session \
+  MYLITE_AUDIT_TOP=20 tools/audit-mylite-bundle.sh
 bash -n tools/build-mariadb-minsize.sh \
+  tools/audit-mylite-bundle.sh \
   tools/run-libmylite-open-close-smoke.sh \
   tools/run-embedded-bootstrap-smoke.sh \
   tools/run-storage-engine-smoke.sh \
