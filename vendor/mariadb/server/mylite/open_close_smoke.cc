@@ -120,6 +120,7 @@ struct SmokeResult
   std::string exec_help_message;
   std::string exec_static_show_info_messages;
   std::string exec_show_create_messages;
+  std::string exec_server_account_messages;
   std::string exec_status_metadata_rows;
   std::string exec_sysvar_help_text_rows;
   std::string exec_sql_digest_rows;
@@ -291,6 +292,8 @@ static bool check_static_show_info_unsupported(const SmokeOptions &options,
                                                SmokeResult *result);
 static bool check_show_create_unsupported(const SmokeOptions &options,
                                           SmokeResult *result);
+static bool check_server_account_sql_unsupported(const SmokeOptions &options,
+                                                 SmokeResult *result);
 static bool check_status_metadata_profile(const SmokeOptions &options,
                                           SmokeResult *result);
 static bool check_sysvar_help_text_profile(const SmokeOptions &options,
@@ -577,6 +580,9 @@ static int run_default_smoke(const SmokeOptions &options, SmokeResult *result)
 
   result->phase= "show_create_unsupported";
   ok= check_show_create_unsupported(options, result) && ok;
+
+  result->phase= "server_account_sql_unsupported";
+  ok= check_server_account_sql_unsupported(options, result) && ok;
 
   result->phase= "status_metadata_profile";
   ok= check_status_metadata_profile(options, result) && ok;
@@ -2901,6 +2907,61 @@ static bool check_show_create_unsupported(const SmokeOptions &options,
   return ok;
 }
 
+static bool check_server_account_sql_unsupported(const SmokeOptions &options,
+                                                 SmokeResult *result)
+{
+  struct ServerAccountCase
+  {
+    const char *label;
+    const char *sql;
+  };
+  static const ServerAccountCase cases[]=
+  {
+    {"create_user", "CREATE USER mylite_user@localhost"},
+    {"drop_user", "DROP USER mylite_user@localhost"},
+    {"grant", "GRANT SELECT ON *.* TO mylite_user@localhost"},
+    {"revoke", "REVOKE SELECT ON *.* FROM mylite_user@localhost"},
+    {"show_grants", "SHOW GRANTS FOR mylite_user@localhost"}
+  };
+
+  mylite_db *db= nullptr;
+  int rc= mylite_open(options.database.c_str(), &db);
+  bool ok= record_result(result, "server_account_open", MYLITE_OK, rc,
+                         db);
+  if (db)
+  {
+    for (const ServerAccountCase &test_case : cases)
+    {
+      char *errmsg= nullptr;
+      rc= mylite_exec(db, test_case.sql, nullptr, nullptr, &errmsg);
+      std::string message;
+      if (errmsg)
+      {
+        message= errmsg;
+        mylite_free(errmsg);
+      }
+      if (!result->exec_server_account_messages.empty())
+        result->exec_server_account_messages+= ";";
+      result->exec_server_account_messages+=
+        std::string(test_case.label) + "=" + message;
+
+      const std::string label= std::string("server_account_") +
+        test_case.label;
+      ok= record_result(result, label.c_str(), MYLITE_ERROR, rc, db) &&
+          ok;
+      if (mylite_mariadb_errno(db) != ER_NOT_SUPPORTED_YET ||
+          std::strcmp(mylite_sqlstate(db), "42000") != 0 ||
+          message.find("server users and grants") == std::string::npos)
+        ok= false;
+    }
+
+    rc= mylite_close(db);
+    ok= record_result(result, "server_account_close", MYLITE_OK, rc,
+                      nullptr) && ok;
+  }
+  return ok;
+}
+
 static bool check_status_metadata_profile(const SmokeOptions &options,
                                           SmokeResult *result)
 {
@@ -5060,6 +5121,9 @@ static void write_report(const SmokeOptions &options,
   if (!result.exec_show_create_messages.empty())
     report << "exec_show_create_messages="
            << result.exec_show_create_messages << "\n";
+  if (!result.exec_server_account_messages.empty())
+    report << "exec_server_account_messages="
+           << result.exec_server_account_messages << "\n";
   if (!result.exec_status_metadata_rows.empty())
     report << "exec_status_metadata_rows="
            << result.exec_status_metadata_rows << "\n";

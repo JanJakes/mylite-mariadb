@@ -12387,23 +12387,44 @@ privilege_t get_column_grant(THD *, GRANT_INFO *, const char *, const char *,
 
 #ifdef NO_EMBEDDED_ACCESS_CHECKS
 
+#ifdef MYLITE_DISABLE_SERVER_ACCOUNT_SQL
+static bool mylite_reject_server_account_sql(THD *thd)
+{
+  my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+           "server users and grants in the MyLite minsize profile");
+  return true;
+}
+#endif
+
 bool Sql_cmd_grant_proxy::execute(THD *thd)
 {
+#ifdef MYLITE_DISABLE_SERVER_ACCOUNT_SQL
+  return mylite_reject_server_account_sql(thd);
+#else
   my_ok(thd);
   return false;
+#endif
 }
 
 bool Sql_cmd_grant_table::execute(THD *thd)
 {
+#ifdef MYLITE_DISABLE_SERVER_ACCOUNT_SQL
+  return mylite_reject_server_account_sql(thd);
+#else
   my_ok(thd);
   return false;
+#endif
 }
 
 
 bool Sql_cmd_grant_sp::execute(THD *thd)
 {
+#ifdef MYLITE_DISABLE_SERVER_ACCOUNT_SQL
+  return mylite_reject_server_account_sql(thd);
+#else
   my_ok(thd);
   return false;
+#endif
 }
 
 #else // not NO_EMBEDDED_ACCESS_CHECKS

@@ -5448,6 +5448,20 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
     break;
   }
 #endif /*!NO_EMBEDDED_ACCESS_CHECKS*/
+#if defined(NO_EMBEDDED_ACCESS_CHECKS) && defined(MYLITE_DISABLE_SERVER_ACCOUNT_SQL)
+  case SQLCOM_CREATE_USER:
+  case SQLCOM_CREATE_ROLE:
+  case SQLCOM_DROP_USER:
+  case SQLCOM_DROP_ROLE:
+  case SQLCOM_ALTER_USER:
+  case SQLCOM_RENAME_USER:
+  case SQLCOM_REVOKE_ALL:
+  case SQLCOM_REVOKE_ROLE:
+  case SQLCOM_GRANT_ROLE:
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+             "server users and grants in the MyLite minsize profile");
+    break;
+#endif
   case SQLCOM_RESET:
     /*
       RESET commands are never written to the binary log, so we have to
@@ -5641,6 +5655,13 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
     res = mysql_show_grants(thd, grant_user);
     break;
   }
+#endif
+#if defined(NO_EMBEDDED_ACCESS_CHECKS) && defined(MYLITE_DISABLE_SERVER_ACCOUNT_SQL)
+  case SQLCOM_SHOW_CREATE_USER:
+  case SQLCOM_SHOW_GRANTS:
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+             "server users and grants in the MyLite minsize profile");
+    break;
 #endif
   case SQLCOM_HA_OPEN:
     DBUG_ASSERT(first_table == all_tables && first_table != 0);
