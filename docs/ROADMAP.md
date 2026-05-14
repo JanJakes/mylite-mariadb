@@ -28,7 +28,7 @@ not in a MariaDB datadir or existing engine sidecars.
 | 5 | SQL execution API | 🟡&nbsp;In&nbsp;progress | Add direct execution, prepared statements, bindings, columns, warnings, affected rows, and insert ids. Direct execution is implemented; prepared statements and typed values remain. |
 | 6 | Storage engine skeleton | ✅&nbsp;Done | Register a static MyLite storage engine with controlled handler smoke coverage. |
 | 7 | Metadata discovery and DDL routing | ⚪&nbsp;Planned | Store MariaDB table definitions in the catalog and route `CREATE`, `ALTER`, `DROP`, and `RENAME` without durable metadata sidecars. |
-| 8 | File format and catalog | ⚪&nbsp;Planned | Define the `.mylite` header, catalog pages, schema namespaces, table roots, and format-version policy. |
+| 8 | File format and catalog | 🟡&nbsp;In&nbsp;progress | Define the `.mylite` header, catalog pages, schema namespaces, table roots, and format-version policy. |
 | 9 | Row and index storage | ⚪&nbsp;Planned | Implement table scans, row DML, primary/secondary indexes, uniqueness, autoincrement, BLOB/TEXT overflow, and copy `ALTER` rebuilds. |
 | 10 | Transactions and recovery | ⚪&nbsp;Planned | Add atomic publication, rollback, savepoints, crash recovery, checksums, and companion-file lifecycle tests. |
 | 11 | Locking and concurrency | ⚪&nbsp;Planned | Add safe file locks, multiple-reader behavior, and a storage design that preserves concurrent writer goals. |
