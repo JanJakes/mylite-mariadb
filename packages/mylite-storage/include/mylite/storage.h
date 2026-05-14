@@ -11,6 +11,7 @@ extern "C" {
 #define MYLITE_STORAGE_FORMAT_VERSION 1U
 #define MYLITE_STORAGE_CAPABILITY_FILE_HEADER 0x00000001U
 #define MYLITE_STORAGE_CAPABILITY_EMPTY_CATALOG 0x00000002U
+#define MYLITE_STORAGE_CAPABILITY_TABLE_DEFINITIONS 0x00000004U
 
 typedef enum mylite_storage_result { /* NOLINT(performance-enum-size): C ABI enum. */
                                      MYLITE_STORAGE_OK = 0,
@@ -20,6 +21,7 @@ typedef enum mylite_storage_result { /* NOLINT(performance-enum-size): C ABI enu
                                      MYLITE_STORAGE_IOERR = 10,
                                      MYLITE_STORAGE_CORRUPT = 11,
                                      MYLITE_STORAGE_NOTFOUND = 12,
+                                     MYLITE_STORAGE_FULL = 13,
                                      MYLITE_STORAGE_MISUSE = 21,
                                      MYLITE_STORAGE_UNSUPPORTED = 22
 } mylite_storage_result;
@@ -43,6 +45,22 @@ typedef struct mylite_storage_header {
     unsigned long long page_count;
 } mylite_storage_header;
 
+typedef struct mylite_storage_table_definition {
+    size_t size;
+    const char *schema_name;
+    const char *table_name;
+    const char *requested_engine_name;
+    const char *effective_engine_name;
+    const unsigned char *definition;
+    size_t definition_size;
+} mylite_storage_table_definition;
+
+typedef int (*mylite_storage_table_callback)(
+    void *ctx,
+    const char *schema_name,
+    const char *table_name
+);
+
 const char *mylite_storage_engine_name(void);
 mylite_storage_capabilities mylite_storage_get_capabilities(void);
 mylite_storage_result mylite_storage_create_empty(const char *filename);
@@ -50,6 +68,29 @@ mylite_storage_result mylite_storage_open_header(
     const char *filename,
     mylite_storage_header *out_header
 );
+mylite_storage_result mylite_storage_store_table_definition(
+    const char *filename,
+    const mylite_storage_table_definition *definition
+);
+mylite_storage_result mylite_storage_read_table_definition(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned char **out_definition,
+    size_t *out_definition_size
+);
+mylite_storage_result mylite_storage_table_exists(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name
+);
+mylite_storage_result mylite_storage_list_tables(
+    const char *filename,
+    const char *schema_name,
+    mylite_storage_table_callback callback,
+    void *ctx
+);
+void mylite_storage_free(void *ptr);
 
 #ifdef __cplusplus
 }

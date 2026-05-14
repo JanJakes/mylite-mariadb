@@ -437,6 +437,8 @@ int map_storage_result(mylite_storage_result result) {
         return MYLITE_CORRUPT;
     case MYLITE_STORAGE_NOTFOUND:
         return MYLITE_NOTFOUND;
+    case MYLITE_STORAGE_FULL:
+        return MYLITE_FULL;
     case MYLITE_STORAGE_MISUSE:
         return MYLITE_MISUSE;
     case MYLITE_STORAGE_ERROR:
