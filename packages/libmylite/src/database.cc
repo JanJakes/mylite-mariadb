@@ -1,4 +1,5 @@
 #include <mylite/mylite.h>
+#include <mylite/storage.h>
 
 #include <algorithm>
 #include <chrono>
@@ -8,7 +9,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
-#include <fstream>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -82,6 +82,7 @@ int validate_open_args(
 );
 #if MYLITE_WITH_MARIADB_EMBEDDED
 int prepare_primary_file(const std::filesystem::path &filename, unsigned flags);
+int map_storage_result(mylite_storage_result result);
 int start_runtime(mylite_db &database, const mylite_open_config *config);
 int connect_runtime(mylite_db &database);
 #endif
@@ -401,6 +402,12 @@ int prepare_primary_file(const std::filesystem::path &filename, unsigned flags) 
         return MYLITE_NOTFOUND;
     }
 
+    const std::string path = filename.string();
+    if (exists) {
+        mylite_storage_header header = {};
+        return map_storage_result(mylite_storage_open_header(path.c_str(), &header));
+    }
+
     if (!exists) {
         const std::filesystem::path parent = filename.parent_path();
         if (!parent.empty()) {
@@ -409,13 +416,34 @@ int prepare_primary_file(const std::filesystem::path &filename, unsigned flags) 
                 return MYLITE_IOERR;
             }
         }
-        std::ofstream file(filename);
-        if (!file.good()) {
-            return MYLITE_IOERR;
-        }
+        return map_storage_result(mylite_storage_create_empty(path.c_str()));
     }
 
     return MYLITE_OK;
+}
+
+int map_storage_result(mylite_storage_result result) {
+    switch (result) {
+    case MYLITE_STORAGE_OK:
+        return MYLITE_OK;
+    case MYLITE_STORAGE_NOMEM:
+        return MYLITE_NOMEM;
+    case MYLITE_STORAGE_READONLY:
+        return MYLITE_READONLY;
+    case MYLITE_STORAGE_IOERR:
+        return MYLITE_IOERR;
+    case MYLITE_STORAGE_CORRUPT:
+    case MYLITE_STORAGE_UNSUPPORTED:
+        return MYLITE_CORRUPT;
+    case MYLITE_STORAGE_NOTFOUND:
+        return MYLITE_NOTFOUND;
+    case MYLITE_STORAGE_MISUSE:
+        return MYLITE_MISUSE;
+    case MYLITE_STORAGE_ERROR:
+        return MYLITE_ERROR;
+    }
+
+    return MYLITE_ERROR;
 }
 
 int start_runtime(mylite_db &database, const mylite_open_config *config) {

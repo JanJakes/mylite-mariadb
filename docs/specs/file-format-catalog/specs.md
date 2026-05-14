@@ -100,6 +100,12 @@ file. The exact binary constants belong in the implementation header, but the
 header must be fixed-size, endian-marked, checksummed, and forward-versioned
 from the first durable write.
 
+Implementation status: the first header-only increment now writes a fixed
+4096-byte header page and an empty catalog root page, validates magic bytes,
+format version, endian marker, checksums, page count, and empty-root metadata,
+and maps unsupported storage formats to a corrupt open result through
+`libmylite`. Catalog table records remain in the next metadata slice.
+
 ### Catalog Records
 
 The catalog is the authoritative metadata store. The first record families are:

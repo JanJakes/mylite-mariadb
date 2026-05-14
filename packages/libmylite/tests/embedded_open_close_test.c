@@ -1,4 +1,7 @@
+#include "storage_format.h"
+
 #include <mylite/mylite.h>
+#include <mylite/storage.h>
 
 #include <assert.h>
 #include <dirent.h>
@@ -17,6 +20,7 @@ static void test_missing_file_without_create_fails(void);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static mylite_open_config open_config(const char *temp_directory);
+static void assert_valid_primary_file(const char *filename);
 static int is_directory_empty(const char *path);
 static void write_file(const char *path, const char *contents);
 static void remove_tree(const char *path);
@@ -51,6 +55,7 @@ static void test_open_close_repeatedly(void) {
         assert(strcmp(mylite_sqlstate(db), "00000") == 0);
         assert(strcmp(mylite_errmsg(db), "not an error") == 0);
         assert(mylite_close(db) == MYLITE_OK);
+        assert_valid_primary_file(filename);
         assert(is_directory_empty(runtime_root));
     }
 
@@ -171,6 +176,14 @@ static mylite_open_config open_config(const char *temp_directory) {
         .temp_directory = temp_directory,
     };
     return config;
+}
+
+static void assert_valid_primary_file(const char *filename) {
+    mylite_storage_header header = {0};
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.format_version == MYLITE_STORAGE_FORMAT_VERSION);
+    assert(header.page_size == MYLITE_STORAGE_FORMAT_PAGE_SIZE);
+    assert(header.catalog_root_page == MYLITE_STORAGE_FORMAT_CATALOG_ROOT_PAGE_ID);
 }
 
 static int is_directory_empty(const char *path) {

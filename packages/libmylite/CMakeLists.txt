@@ -19,6 +19,7 @@ target_include_directories(mylite
 
 mylite_configure_c_target(mylite)
 mylite_configure_cxx_target(mylite)
+target_link_libraries(mylite PRIVATE MyLite::storage)
 mylite_link_mariadb_embedded(mylite)
 
 if(BUILD_TESTING)
@@ -41,7 +42,11 @@ if(BUILD_TESTING)
     add_executable(mylite_embedded_open_close_test
       tests/embedded_open_close_test.c
     )
-    target_link_libraries(mylite_embedded_open_close_test PRIVATE MyLite::mylite)
+    target_include_directories(
+      mylite_embedded_open_close_test
+      PRIVATE "${PROJECT_SOURCE_DIR}/packages/mylite-storage/src"
+    )
+    target_link_libraries(mylite_embedded_open_close_test PRIVATE MyLite::mylite MyLite::storage)
     mylite_configure_c_target(mylite_embedded_open_close_test)
 
     add_executable(mylite_embedded_exec_test

@@ -51,7 +51,7 @@ for drop-in application expectations.
 
 | Capability | MyLite status | Target behavior |
 | --- | --- | --- |
-| Primary portable database file | 🟡&nbsp;Partial | Open/create establishes the `.mylite` path, but no durable catalog or table state is stored there yet |
+| Primary portable database file | 🟡&nbsp;Partial | Open/create writes and validates a versioned `.mylite` header plus an empty catalog root; durable table metadata is not stored there yet |
 | Persistent `.frm` files | ➖&nbsp;Out&nbsp;of&nbsp;scope | Store table definitions in the MyLite catalog |
 | Persistent InnoDB sidecars | ➖&nbsp;Out&nbsp;of&nbsp;scope | No `.ibd`, redo, undo, or independent tablespace files |
 | Persistent MyISAM sidecars | ➖&nbsp;Out&nbsp;of&nbsp;scope | No `.MYD` or `.MYI` durable table files |

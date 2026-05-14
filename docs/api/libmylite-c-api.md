@@ -89,6 +89,9 @@ Profiles:
 ```
 
 `mylite_open()` is equivalent to read/write create with default configuration.
+Creating a local file writes a versioned `.mylite` header and empty catalog
+root. Opening an existing local file validates that header and rejects
+unsupported or corrupt formats before the embedded runtime starts.
 `mylite_open_config.size` makes the struct growable without breaking ABI.
 
 `mylite_close()` returns `MYLITE_BUSY` when statements or dependent resources

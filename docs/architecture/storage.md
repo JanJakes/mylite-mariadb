@@ -83,6 +83,11 @@ The header stores:
 - transaction/checkpoint pointers,
 - durability and feature flags.
 
+The current implementation writes page 0 as a fixed-size, little-endian,
+checksummed header and page 1 as an empty catalog root. That root is only a
+catalog anchor for subsequent metadata work; table definitions, rows, indexes,
+and transaction state are still planned slices.
+
 The catalog stores:
 
 - schemas,
