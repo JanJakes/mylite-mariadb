@@ -27,15 +27,17 @@ not in a MariaDB datadir or existing engine sidecars.
 | 4 | Public open/close API | ✅&nbsp;Done | Add `libmylite` database handles, diagnostics, open flags, and close behavior. |
 | 5 | SQL execution API | 🟡&nbsp;In&nbsp;progress | Add direct execution, prepared statements, bindings, columns, warnings, affected rows, and insert ids. Direct execution is implemented; prepared statements and typed values remain. |
 | 6 | Storage engine skeleton | ✅&nbsp;Done | Register a static MyLite storage engine with controlled handler smoke coverage. |
-| 7 | Metadata discovery and DDL routing | ⚪&nbsp;Planned | Store MariaDB table definitions in the catalog and route `CREATE`, `ALTER`, `DROP`, and `RENAME` without durable metadata sidecars. |
-| 8 | File format and catalog | 🟡&nbsp;In&nbsp;progress | Define the `.mylite` header, catalog pages, schema namespaces, table roots, and format-version policy. |
-| 9 | Row and index storage | ⚪&nbsp;Planned | Implement table scans, row DML, primary/secondary indexes, uniqueness, autoincrement, BLOB/TEXT overflow, and copy `ALTER` rebuilds. |
-| 10 | Transactions and recovery | ⚪&nbsp;Planned | Add atomic publication, rollback, savepoints, crash recovery, checksums, and companion-file lifecycle tests. |
-| 11 | Locking and concurrency | ⚪&nbsp;Planned | Add safe file locks, multiple-reader behavior, and a storage design that preserves concurrent writer goals. |
-| 12 | Compatibility harness | ⚪&nbsp;Planned | Run embedded lifecycle, sidecar detection, MariaDB comparison, crash/reopen, and application-query coverage in repeatable groups. |
-| 13 | Engine routing and application schemas | ⚪&nbsp;Planned | Route common `ENGINE=` clauses to MyLite and test representative application schemas, including WordPress-shaped DDL. |
-| 14 | Server-surface policy | ⚪&nbsp;Planned | Explicitly reject or replace users/auth, replication/binlog, dynamic plugins, events, performance schema, and external durable engines. |
-| 15 | Size profile hardening | ⚪&nbsp;Planned | Trim daemon-only and low-value optional components after the embedded runtime and storage shape are measurable. |
+| 7 | File header and empty catalog | 🟡&nbsp;In&nbsp;progress | Create/open a valid `.mylite` file with a versioned header and empty catalog. |
+| 8 | MyLite metadata DDL and discovery | ⚪&nbsp;Planned | Store explicit `ENGINE=MYLITE` table definitions in the catalog and discover them without durable `.frm` sidecars. |
+| 9 | Sidecar lifecycle gates | ⚪&nbsp;Planned | Detect and reject persistent MariaDB engine sidecars around metadata DDL, close/reopen, and failed-create cleanup. |
+| 10 | Engine routing policy | ⚪&nbsp;Planned | Record requested engine vs. effective MyLite engine and route omitted/default, `InnoDB`, `MyISAM`, and `Aria` metadata where safe. |
+| 11 | Row and index storage | ⚪&nbsp;Planned | Implement table scans, row DML, primary/secondary indexes, uniqueness, autoincrement, BLOB/TEXT overflow, and copy `ALTER` rebuilds. |
+| 12 | Transactions and recovery | ⚪&nbsp;Planned | Add atomic publication, rollback, savepoints, crash recovery, checksums, and companion-file lifecycle tests. |
+| 13 | Locking and concurrency | ⚪&nbsp;Planned | Add safe file locks, multiple-reader behavior, and a storage design that preserves concurrent writer goals. |
+| 14 | Compatibility harness | ⚪&nbsp;Planned | Run embedded lifecycle, sidecar detection, MariaDB comparison, crash/reopen, and application-query coverage in repeatable groups. |
+| 15 | Application schemas | ⚪&nbsp;Planned | Test representative application schemas, including WordPress-shaped DDL and common MySQL/MariaDB ORM output. |
+| 16 | Server-surface policy | ⚪&nbsp;Planned | Explicitly reject or replace users/auth, replication/binlog, dynamic plugins, events, performance schema, and external durable engines. |
+| 17 | Size profile hardening | ⚪&nbsp;Planned | Trim daemon-only and low-value optional components after the embedded runtime and storage shape are measurable. |
 
 ## Size And Profile Direction
 
