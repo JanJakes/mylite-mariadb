@@ -173,10 +173,12 @@ toward typed native encodings when there is a compatibility and size benefit.
 Current row support is intentionally narrow. For tables without declared keys
 or autoincrement columns, `write_row()` stores MariaDB's record image in an
 append-only row page and `rnd_next()` reads those images back during full table
-scans. Tables with keys still reject writes, because MyLite cannot claim
-MySQL/MariaDB duplicate-key, ordering, or index-access behavior until the index
-slice implements it. Update, delete, truncate, BLOB/TEXT overflow, and copy
-`ALTER` rebuilds remain planned.
+scans. Nullable fixed and variable fields are covered for this keyless non-BLOB
+path because the stored record image includes MariaDB's null bitmap. Tables
+with keys still reject writes, because MyLite cannot claim MySQL/MariaDB
+duplicate-key, ordering, or index-access behavior until the index slice
+implements it. Update, delete, truncate, BLOB/TEXT overflow, and copy `ALTER`
+rebuilds remain planned.
 
 The storage engine must support:
 

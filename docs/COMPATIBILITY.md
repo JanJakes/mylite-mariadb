@@ -80,8 +80,8 @@ for drop-in application expectations.
 | Capability | MyLite status | Compatibility target |
 | --- | --- | --- |
 | Keyless table scans | 🟡&nbsp;Partial | Insert and full-scan rows for MyLite-routed tables without declared keys, with values persisted in the primary `.mylite` file across close/reopen |
-| Fixed and variable row fields | 🟡&nbsp;Partial | Store MariaDB record-compatible row images for keyless non-BLOB rows covered by smoke tests |
-| NULL columns | ⚪&nbsp;Planned | Preserve MariaDB NULL storage and comparison behavior |
+| Fixed and variable row fields | 🟡&nbsp;Partial | Store MariaDB record-compatible row images for keyless non-BLOB rows, including nullable fixed and variable fields covered by smoke tests |
+| NULL columns | 🟡&nbsp;Partial | Preserve SQL NULL values for keyless non-BLOB row inserts and full scans before and after reopen; nullable-key semantics remain planned |
 | BLOB/TEXT values | ⚪&nbsp;Planned | Binary-safe overflow storage |
 | Primary and secondary indexes | ⚪&nbsp;Planned | Ordered access paths over MyLite pages |
 | Unique indexes | ⚪&nbsp;Planned | MariaDB duplicate-key behavior, including nullable-key rules |
