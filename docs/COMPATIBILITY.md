@@ -40,18 +40,18 @@ for drop-in application expectations.
 | SQL engine request | MyLite status | Target behavior |
 | --- | --- | --- |
 | MyLite engine registration | 🟡&nbsp;Partial | Opt-in static handler builds expose `MYLITE` through `SHOW ENGINES`; file-backed MyLite sessions configure it as the default effective engine |
-| No explicit engine | 🟡&nbsp;Partial | `CREATE TABLE` routes to MyLite, stores requested engine `DEFAULT` with effective engine `MYLITE`, supports keyless row insert plus full scans and the narrow single-column autoincrement key path, and updates catalog metadata on `DROP TABLE` and simple `RENAME TABLE`; general keyed writes and alter DDL remain unsupported |
-| `ENGINE=MYLITE` | 🟡&nbsp;Partial | Explicit MyLite DDL stores MariaDB table-definition metadata in the `.mylite` catalog, rediscovers it after reopen, supports keyless row insert plus full scans and the narrow single-column autoincrement key path, and updates catalog metadata on `DROP TABLE` and simple `RENAME TABLE`; general keyed writes remain unsupported |
-| `ENGINE=InnoDB` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `InnoDB`; keyless row insert, single-column autoincrement primary-key insert, full scans, `DROP TABLE`, and simple `RENAME TABLE` are covered, while InnoDB transactions, foreign keys, general indexes, and tablespaces remain unsupported |
-| `ENGINE=MyISAM` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `MyISAM`; keyless row insert, full scans, `DROP TABLE`, and simple `RENAME TABLE` are covered, while MyISAM data and index files are never durable application storage |
-| `ENGINE=Aria` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `Aria`; keyless row insert, full scans, `DROP TABLE`, and simple `RENAME TABLE` are covered, while Aria data, index, and log files are never durable application storage |
+| No explicit engine | 🟡&nbsp;Partial | `CREATE TABLE` routes to MyLite, stores requested engine `DEFAULT` with effective engine `MYLITE`, supports keyless row insert plus full scans, BLOB/TEXT payloads, and the narrow single-column autoincrement key path, and updates catalog metadata on `DROP TABLE` and simple `RENAME TABLE`; general keyed writes and alter DDL remain unsupported |
+| `ENGINE=MYLITE` | 🟡&nbsp;Partial | Explicit MyLite DDL stores MariaDB table-definition metadata in the `.mylite` catalog, rediscovers it after reopen, supports keyless row insert plus full scans, BLOB/TEXT payloads, and the narrow single-column autoincrement key path, and updates catalog metadata on `DROP TABLE` and simple `RENAME TABLE`; general keyed writes remain unsupported |
+| `ENGINE=InnoDB` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `InnoDB`; keyless row insert, BLOB/TEXT payloads, single-column autoincrement primary-key insert, full scans, `DROP TABLE`, and simple `RENAME TABLE` are covered, while InnoDB transactions, foreign keys, general indexes, and tablespaces remain unsupported |
+| `ENGINE=MyISAM` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `MyISAM`; keyless row insert, BLOB/TEXT payloads, full scans, `DROP TABLE`, and simple `RENAME TABLE` are covered, while MyISAM data and index files are never durable application storage |
+| `ENGINE=Aria` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `Aria`; keyless row insert, BLOB/TEXT payloads, full scans, `DROP TABLE`, and simple `RENAME TABLE` are covered, while Aria data, index, and log files are never durable application storage |
 | Dynamic external engines | ➖&nbsp;Out&nbsp;of&nbsp;scope | Unsupported explicit engine requests fail before catalog publication |
 
 ## File Ownership
 
 | Capability | MyLite status | Target behavior |
 | --- | --- | --- |
-| Primary portable database file | 🟡&nbsp;Partial | Open/create writes and validates a versioned `.mylite` header, catalog root, table-definition records, and keyless row pages |
+| Primary portable database file | 🟡&nbsp;Partial | Open/create writes and validates a versioned `.mylite` header, catalog root, table-definition records, keyless row pages, row-payload overflow pages, and autoincrement state pages |
 | Persistent `.frm` files | ➖&nbsp;Out&nbsp;of&nbsp;scope | Store table definitions in the MyLite catalog; metadata DDL smoke tests gate against durable `.frm` sidecars |
 | Persistent InnoDB sidecars | ➖&nbsp;Out&nbsp;of&nbsp;scope | No `.ibd`, redo, undo, or independent tablespace files; metadata DDL smoke tests gate against known InnoDB sidecar names |
 | Persistent MyISAM sidecars | ➖&nbsp;Out&nbsp;of&nbsp;scope | No `.MYD` or `.MYI` durable table files; metadata DDL smoke tests gate against those sidecars |
@@ -80,12 +80,12 @@ for drop-in application expectations.
 | Capability | MyLite status | Compatibility target |
 | --- | --- | --- |
 | Keyless table scans | 🟡&nbsp;Partial | Insert and full-scan rows for MyLite-routed tables without declared keys, with values persisted in the primary `.mylite` file across close/reopen |
-| Fixed and variable row fields | 🟡&nbsp;Partial | Store MariaDB record-compatible row images for keyless non-BLOB rows, including nullable fixed and variable fields covered by smoke tests |
-| NULL columns | 🟡&nbsp;Partial | Preserve SQL NULL values for keyless non-BLOB row inserts and full scans before and after reopen; nullable-key semantics remain planned |
-| BLOB/TEXT values | ⚪&nbsp;Planned | Binary-safe overflow storage |
+| Fixed and variable row fields | 🟡&nbsp;Partial | Store MariaDB record-compatible row images for keyless rows, including nullable fixed fields, variable fields, and BLOB/TEXT payloads covered by smoke tests |
+| NULL columns | 🟡&nbsp;Partial | Preserve SQL NULL values for keyless row inserts and full scans before and after reopen, including BLOB/TEXT fields; nullable-key semantics remain planned |
+| BLOB/TEXT values | 🟡&nbsp;Partial | Keyless routed rows and the supported single-column autoincrement key path persist `TEXT`/`BLOB` values in primary-file row payloads, including NULL, empty, binary, and large overflow values; BLOB/TEXT indexes, update/delete, and binary-safe public value APIs remain planned |
 | Primary and secondary indexes | ⚪&nbsp;Planned | Ordered access paths over MyLite pages |
 | Unique indexes | 🟡&nbsp;Partial | Duplicate-key checks are covered only for the supported single-column autoincrement key path; general unique indexes and nullable-key rules remain planned |
-| Autoincrement | 🟡&nbsp;Partial | Durable table-local state is covered for single-column autoincrement keys on non-BLOB rows, including explicit high values and close/reopen; compound keys, `ALTER TABLE ... AUTO_INCREMENT`, and transaction-aware rollback remain planned |
+| Autoincrement | 🟡&nbsp;Partial | Durable table-local state is covered for single-column autoincrement keys, including BLOB/TEXT payload rows, explicit high values, and close/reopen; compound keys, `ALTER TABLE ... AUTO_INCREMENT`, and transaction-aware rollback remain planned |
 | CHECK constraints | ⚪&nbsp;Planned | Use MariaDB expression evaluation and persist metadata in the catalog |
 | Foreign keys | ⚪&nbsp;Planned | InnoDB-compatible semantics where practical; reject unsupported cases explicitly |
 | Generated columns | ⚪&nbsp;Planned | Preserve MariaDB virtual/stored generated-column behavior through storage support |

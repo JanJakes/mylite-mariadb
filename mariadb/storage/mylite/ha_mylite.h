@@ -40,9 +40,11 @@ class ha_mylite: public handler
   THR_LOCK_DATA lock;
   Mylite_share *share;
   unsigned char *scan_rows;
+  unsigned char *scan_blob_payloads;
   size_t scan_row_size;
   size_t scan_row_count;
   size_t scan_row_index;
+  size_t scan_blob_payloads_size;
   uint duplicate_key_index;
 
   Mylite_share *get_share();

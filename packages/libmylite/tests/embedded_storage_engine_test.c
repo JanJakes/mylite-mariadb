@@ -31,6 +31,14 @@ typedef struct nullable_row_context {
     int found_value_row;
 } nullable_row_context;
 
+typedef struct blob_row_context {
+    int rows;
+    int found_text_binary;
+    int found_nulls;
+    int found_empty;
+    int found_large;
+} blob_row_context;
+
 typedef struct auto_row_context {
     int rows;
     int found_first;
@@ -65,6 +73,7 @@ static int table_callback(void *ctx, int column_count, char **values, char **col
 static int row_callback(void *ctx, int column_count, char **values, char **column_names);
 static int post_row_callback(void *ctx, int column_count, char **values, char **column_names);
 static int nullable_row_callback(void *ctx, int column_count, char **values, char **column_names);
+static int blob_row_callback(void *ctx, int column_count, char **values, char **column_names);
 static int auto_row_callback(void *ctx, int column_count, char **values, char **column_names);
 static int catalog_table_callback(void *ctx, const char *schema_name, const char *table_name);
 static mylite_db *open_database(const char *root, char **filename);
@@ -139,6 +148,7 @@ static void test_create_table_persists_catalog_metadata(void) {
     post_row_context row_posts = {0};
     post_row_context renamed_row_posts = {0};
     nullable_row_context nullable_rows = {0};
+    blob_row_context blob_rows = {0};
     auto_row_context auto_rows = {0};
     char *errmsg = NULL;
 
@@ -173,7 +183,12 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert_exec_succeeds(
         db,
         "CREATE TABLE auto_posts (id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
-        "title VARCHAR(255) NOT NULL) ENGINE=InnoDB"
+        "title TEXT NOT NULL) ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE content_posts (id INT NOT NULL, body TEXT NULL, data BLOB NULL) "
+        "ENGINE=InnoDB"
     );
     assert_exec_succeeds(
         db,
@@ -187,8 +202,9 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert(mylite_storage_table_exists(filename, "app", "row_posts") == MYLITE_STORAGE_OK);
     assert(mylite_storage_table_exists(filename, "app", "nullable_posts") == MYLITE_STORAGE_OK);
     assert(mylite_storage_table_exists(filename, "app", "auto_posts") == MYLITE_STORAGE_OK);
+    assert(mylite_storage_table_exists(filename, "app", "content_posts") == MYLITE_STORAGE_OK);
     assert(mylite_storage_table_exists(filename, "app", "drop_posts") == MYLITE_STORAGE_OK);
-    assert_catalog_table_count(filename, "app", 9U);
+    assert_catalog_table_count(filename, "app", 10U);
     assert_catalog_table_metadata(filename, "app", "default_posts", "DEFAULT", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "explicit_posts", "MYLITE", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "innodb_posts", "InnoDB", "MYLITE");
@@ -197,25 +213,30 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert_catalog_table_metadata(filename, "app", "row_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "nullable_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "auto_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "content_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "drop_posts", "InnoDB", "MYLITE");
     assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
-    assert(tables.rows == 9);
+    assert(tables.rows == 10);
     assert_exec_fails(
         db,
         "CREATE TABLE memory_posts (id INT PRIMARY KEY, title VARCHAR(255)) ENGINE=MEMORY"
     );
     assert(mylite_storage_table_exists(filename, "app", "memory_posts") == MYLITE_STORAGE_NOTFOUND);
-    assert_catalog_table_count(filename, "app", 9U);
+    assert_catalog_table_count(filename, "app", 10U);
     assert_exec_fails(
         db,
         "CREATE TABLE innodb_posts (id INT PRIMARY KEY, title VARCHAR(255)) ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 9U);
+    assert_catalog_table_count(filename, "app", 10U);
     assert_exec_succeeds(db, "INSERT INTO row_posts VALUES (1, 'draft')");
     assert_exec_succeeds(db, "INSERT INTO row_posts VALUES (2, 'published')");
     assert_exec_succeeds(db, "INSERT INTO nullable_posts VALUES (1, NULL, NULL)");
     assert_exec_succeeds(db, "INSERT INTO nullable_posts VALUES (2, 'filled', 42)");
+    assert_exec_succeeds(db, "INSERT INTO content_posts VALUES (1, 'short text', X'000102FF')");
+    assert_exec_succeeds(db, "INSERT INTO content_posts VALUES (2, NULL, NULL)");
+    assert_exec_succeeds(db, "INSERT INTO content_posts VALUES (3, '', X'')");
+    assert_exec_succeeds(db, "INSERT INTO content_posts VALUES (4, REPEAT('large-', 900), NULL)");
     assert_exec_succeeds(db, "INSERT INTO auto_posts (title) VALUES ('first')");
     assert_exec_succeeds(db, "INSERT INTO auto_posts (id, title) VALUES (7, 'manual')");
     assert_exec_succeeds(db, "INSERT INTO auto_posts (title) VALUES ('after manual')");
@@ -250,6 +271,22 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert(
         mylite_exec(
             db,
+            "SELECT id, body IS NULL, LENGTH(body), body, data IS NULL, LENGTH(data), HEX(data) "
+            "FROM content_posts",
+            blob_row_callback,
+            &blob_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(blob_rows.rows == 4);
+    assert(blob_rows.found_text_binary);
+    assert(blob_rows.found_nulls);
+    assert(blob_rows.found_empty);
+    assert(blob_rows.found_large);
+    assert(
+        mylite_exec(
+            db,
             "SELECT id, title FROM auto_posts",
             auto_row_callback,
             &auto_rows,
@@ -270,12 +307,12 @@ static void test_create_table_persists_catalog_metadata(void) {
     errmsg = NULL;
     assert_exec_succeeds(db, "DROP TABLE drop_posts");
     assert(mylite_storage_table_exists(filename, "app", "drop_posts") == MYLITE_STORAGE_NOTFOUND);
-    assert_catalog_table_count(filename, "app", 8U);
+    assert_catalog_table_count(filename, "app", 9U);
     assert_exec_succeeds(
         db,
         "CREATE TABLE drop_posts (id INT NOT NULL, title VARCHAR(255) NOT NULL) ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 9U);
+    assert_catalog_table_count(filename, "app", 10U);
     assert(
         mylite_exec(db, "SELECT id, title FROM drop_posts", row_callback, &drop_rows, &errmsg) ==
         MYLITE_OK
@@ -284,7 +321,7 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert(drop_rows.rows == 0);
     assert_exec_succeeds(db, "DROP TABLE aria_posts");
     assert(mylite_storage_table_exists(filename, "app", "aria_posts") == MYLITE_STORAGE_NOTFOUND);
-    assert_catalog_table_count(filename, "app", 8U);
+    assert_catalog_table_count(filename, "app", 9U);
     assert_exec_succeeds(db, "RENAME TABLE row_posts TO renamed_row_posts");
     assert(mylite_storage_table_exists(filename, "app", "row_posts") == MYLITE_STORAGE_NOTFOUND);
     assert(mylite_storage_table_exists(filename, "app", "renamed_row_posts") == MYLITE_STORAGE_OK);
@@ -305,7 +342,7 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert_exec_succeeds(db, "RENAME TABLE myisam_posts TO renamed_posts");
     assert(mylite_storage_table_exists(filename, "app", "myisam_posts") == MYLITE_STORAGE_NOTFOUND);
     assert(mylite_storage_table_exists(filename, "app", "renamed_posts") == MYLITE_STORAGE_OK);
-    assert_catalog_table_count(filename, "app", 8U);
+    assert_catalog_table_count(filename, "app", 9U);
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
@@ -313,13 +350,14 @@ static void test_create_table_persists_catalog_metadata(void) {
     drop_rows = (table_context){0};
     renamed_row_posts = (post_row_context){0};
     nullable_rows = (nullable_row_context){0};
+    blob_rows = (blob_row_context){0};
     auto_rows = (auto_row_context){0};
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "CREATE DATABASE app");
     assert_exec_succeeds(db, "USE app");
     assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
-    assert(tables.rows == 8);
+    assert(tables.rows == 9);
     assert(
         mylite_exec(db, "SELECT * FROM innodb_posts", row_callback, &rows, &errmsg) == MYLITE_OK
     );
@@ -351,6 +389,22 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert(nullable_rows.rows == 2);
     assert(nullable_rows.found_null_row);
     assert(nullable_rows.found_value_row);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id, body IS NULL, LENGTH(body), body, data IS NULL, LENGTH(data), HEX(data) "
+            "FROM content_posts",
+            blob_row_callback,
+            &blob_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(blob_rows.rows == 4);
+    assert(blob_rows.found_text_binary);
+    assert(blob_rows.found_nulls);
+    assert(blob_rows.found_empty);
+    assert(blob_rows.found_large);
     assert_exec_succeeds(db, "INSERT INTO auto_posts (title) VALUES ('reopened')");
     assert(
         mylite_exec(
@@ -373,12 +427,13 @@ static void test_create_table_persists_catalog_metadata(void) {
     );
     assert(errmsg == NULL);
     assert(drop_rows.rows == 0);
-    assert_catalog_table_count(filename, "app", 8U);
+    assert_catalog_table_count(filename, "app", 9U);
     assert_catalog_table_metadata(filename, "app", "innodb_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "renamed_row_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "renamed_posts", "MyISAM", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "nullable_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "auto_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "content_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "drop_posts", "InnoDB", "MYLITE");
     assert(mylite_storage_table_exists(filename, "app", "row_posts") == MYLITE_STORAGE_NOTFOUND);
     assert(mylite_storage_table_exists(filename, "app", "myisam_posts") == MYLITE_STORAGE_NOTFOUND);
@@ -521,6 +576,58 @@ static int nullable_row_callback(void *ctx, int column_count, char **values, cha
         assert(strcmp(values[1], "filled") == 0);
         assert(strcmp(values[2], "42") == 0);
         row_ctx->found_value_row = 1;
+        return 0;
+    }
+
+    assert(0);
+    return 1;
+}
+
+static int blob_row_callback(void *ctx, int column_count, char **values, char **column_names) {
+    blob_row_context *row_ctx = (blob_row_context *)ctx;
+    (void)column_names;
+
+    assert(column_count == 7);
+    assert(values[0] != NULL);
+    ++row_ctx->rows;
+    if (strcmp(values[0], "1") == 0) {
+        assert(strcmp(values[1], "0") == 0);
+        assert(values[2] != NULL && strcmp(values[2], "10") == 0);
+        assert(values[3] != NULL && strcmp(values[3], "short text") == 0);
+        assert(strcmp(values[4], "0") == 0);
+        assert(values[5] != NULL && strcmp(values[5], "4") == 0);
+        assert(values[6] != NULL && strcmp(values[6], "000102FF") == 0);
+        row_ctx->found_text_binary = 1;
+        return 0;
+    }
+    if (strcmp(values[0], "2") == 0) {
+        assert(strcmp(values[1], "1") == 0);
+        assert(values[2] == NULL);
+        assert(values[3] == NULL);
+        assert(strcmp(values[4], "1") == 0);
+        assert(values[5] == NULL);
+        assert(values[6] == NULL);
+        row_ctx->found_nulls = 1;
+        return 0;
+    }
+    if (strcmp(values[0], "3") == 0) {
+        assert(strcmp(values[1], "0") == 0);
+        assert(values[2] != NULL && strcmp(values[2], "0") == 0);
+        assert(values[3] != NULL && strcmp(values[3], "") == 0);
+        assert(strcmp(values[4], "0") == 0);
+        assert(values[5] != NULL && strcmp(values[5], "0") == 0);
+        assert(values[6] != NULL && strcmp(values[6], "") == 0);
+        row_ctx->found_empty = 1;
+        return 0;
+    }
+    if (strcmp(values[0], "4") == 0) {
+        assert(strcmp(values[1], "0") == 0);
+        assert(values[2] != NULL && strcmp(values[2], "5400") == 0);
+        assert(values[3] != NULL && strlen(values[3]) == 5400U);
+        assert(strcmp(values[4], "1") == 0);
+        assert(values[5] == NULL);
+        assert(values[6] == NULL);
+        row_ctx->found_large = 1;
         return 0;
     }
 

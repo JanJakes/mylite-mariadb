@@ -21,8 +21,10 @@ static void test_rejects_bad_catalog_root(void);
 static void test_store_and_read_table_definition(void);
 static void test_store_large_table_definition(void);
 static void test_append_and_read_rows(void);
+static void test_append_and_read_large_row_payload(void);
 static void test_autoincrement_state(void);
 static void test_rejects_corrupt_row_page(void);
+static void test_rejects_corrupt_row_payload_page(void);
 static void test_rejects_corrupt_autoincrement_page(void);
 static void test_drop_table_definition(void);
 static void test_rename_table_definition(void);
@@ -50,8 +52,10 @@ int main(void) {
     test_store_and_read_table_definition();
     test_store_large_table_definition();
     test_append_and_read_rows();
+    test_append_and_read_large_row_payload();
     test_autoincrement_state();
     test_rejects_corrupt_row_page();
+    test_rejects_corrupt_row_payload_page();
     test_rejects_corrupt_autoincrement_page();
     test_drop_table_definition();
     test_rename_table_definition();
@@ -69,6 +73,7 @@ static void test_capabilities(void) {
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_TABLE_DEFINITIONS) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_TABLE_ROWS) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_AUTOINCREMENT) != 0U);
+    assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_BLOB_TEXT_ROWS) != 0U);
 }
 
 static void test_create_empty_database(void) {
@@ -343,10 +348,74 @@ static void test_append_and_read_rows(void) {
     assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
     assert(rows.row_size == sizeof(post_row_1));
     assert(rows.row_count == 2U);
+    assert(rows.row_bytes == sizeof(post_row_1) + sizeof(post_row_2));
+    assert(rows.row_offsets[0] == 0U);
+    assert(rows.row_sizes[0] == sizeof(post_row_1));
+    assert(rows.row_offsets[1] == sizeof(post_row_1));
+    assert(rows.row_sizes[1] == sizeof(post_row_2));
     assert(memcmp(rows.rows, post_row_1, sizeof(post_row_1)) == 0);
     assert(memcmp(rows.rows + rows.row_size, post_row_2, sizeof(post_row_2)) == 0);
 
-    mylite_storage_free(rows.rows);
+    mylite_storage_free_rowset(&rows);
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_append_and_read_large_row_payload(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char small_row[] = {0x00U, 0x01U, 's'};
+    const size_t payload_capacity =
+        MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_BLOB_PAYLOAD_OFFSET;
+    const size_t large_row_size = (payload_capacity * 2U) + 17U;
+    unsigned char *large_row = (unsigned char *)malloc(large_row_size);
+    assert(large_row != NULL);
+    for (size_t i = 0U; i < large_row_size; ++i) {
+        large_row[i] = (unsigned char)(i % UINT8_MAX);
+    }
+
+    char *root = make_temp_root();
+    char *filename = path_join(root, "large-row-payload.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "payloads",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_header header = {0};
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row(filename, "app", "payloads", small_row, sizeof(small_row)) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row(filename, "app", "payloads", large_row, large_row_size) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 6ULL);
+    assert(mylite_storage_read_rows(filename, "app", "payloads", &rows) == MYLITE_STORAGE_OK);
+    assert(rows.row_size == 0U);
+    assert(rows.row_count == 2U);
+    assert(rows.row_bytes == sizeof(small_row) + large_row_size);
+    assert(rows.row_offsets[0] == 0U);
+    assert(rows.row_sizes[0] == sizeof(small_row));
+    assert(rows.row_offsets[1] == sizeof(small_row));
+    assert(rows.row_sizes[1] == large_row_size);
+    assert(memcmp(rows.rows + rows.row_offsets[0], small_row, sizeof(small_row)) == 0);
+    assert(memcmp(rows.rows + rows.row_offsets[1], large_row, large_row_size) == 0);
+
+    mylite_storage_free_rowset(&rows);
+    free(large_row);
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
     free(filename);
@@ -450,6 +519,54 @@ static void test_rejects_corrupt_row_page(void) {
         mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_CORRUPT
     );
 
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_rejects_corrupt_row_payload_page(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    const size_t payload_capacity =
+        MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_BLOB_PAYLOAD_OFFSET;
+    const size_t row_size = payload_capacity + 17U;
+    unsigned char *row = (unsigned char *)malloc(row_size);
+    assert(row != NULL);
+    for (size_t i = 0U; i < row_size; ++i) {
+        row[i] = (unsigned char)(i % UINT8_MAX);
+    }
+
+    char *root = make_temp_root();
+    char *filename = path_join(root, "corrupt-row-payload-page.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "payloads",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+    unsigned long long row_count = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row(filename, "app", "payloads", row, row_size) == MYLITE_STORAGE_OK
+    );
+    flip_file_byte(
+        filename,
+        (long)((MYLITE_STORAGE_FORMAT_PAGE_SIZE * 3U) + MYLITE_STORAGE_FORMAT_BLOB_PAYLOAD_OFFSET)
+    );
+    assert(mylite_storage_read_rows(filename, "app", "payloads", &rows) == MYLITE_STORAGE_CORRUPT);
+    assert(
+        mylite_storage_count_rows(filename, "app", "payloads", &row_count) == MYLITE_STORAGE_CORRUPT
+    );
+
+    free(row);
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
     free(filename);
@@ -611,7 +728,7 @@ static void test_rename_table_definition(void) {
     assert(rows.row_size == sizeof(row));
     assert(rows.row_count == 1U);
     assert(memcmp(rows.rows, row, sizeof(row)) == 0);
-    mylite_storage_free(rows.rows);
+    mylite_storage_free_rowset(&rows);
     assert(
         mylite_storage_read_table_definition(
             filename,

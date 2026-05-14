@@ -14,6 +14,7 @@ extern "C" {
 #define MYLITE_STORAGE_CAPABILITY_TABLE_DEFINITIONS 0x00000004U
 #define MYLITE_STORAGE_CAPABILITY_TABLE_ROWS 0x00000008U
 #define MYLITE_STORAGE_CAPABILITY_AUTOINCREMENT 0x00000010U
+#define MYLITE_STORAGE_CAPABILITY_BLOB_TEXT_ROWS 0x00000020U
 
 typedef enum mylite_storage_result { /* NOLINT(performance-enum-size): C ABI enum. */
                                      MYLITE_STORAGE_OK = 0,
@@ -68,6 +69,9 @@ typedef struct mylite_storage_rowset {
     unsigned char *rows;
     size_t row_size;
     size_t row_count;
+    size_t *row_offsets;
+    size_t *row_sizes;
+    size_t row_bytes;
 } mylite_storage_rowset;
 
 typedef int (*mylite_storage_table_callback)(
@@ -155,6 +159,7 @@ mylite_storage_result mylite_storage_list_tables(
     void *ctx
 );
 void mylite_storage_free(void *ptr);
+void mylite_storage_free_rowset(mylite_storage_rowset *rowset);
 
 #ifdef __cplusplus
 }
