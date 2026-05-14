@@ -51,3 +51,8 @@ surface that does not fit a local directory-owned library:
 
 The minimal embedded build establishes the first baseline. Later slices record
 meaningful size changes when they add or remove runtime surface.
+
+Historical branch-level size research is archived in
+[Bundle size reduction attempts](architecture/bundle-size-research.md). Treat
+it as ranked evidence for size-profile work; rerun candidates against the
+current baseline before accepting them.
