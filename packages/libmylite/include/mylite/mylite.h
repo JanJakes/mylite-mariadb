@@ -66,6 +66,13 @@ typedef struct mylite_open_config {
 #define MYLITE_DURABILITY_NORMAL 1
 #define MYLITE_DURABILITY_FULL 2
 
+typedef int (*mylite_exec_callback)(
+    void *ctx,
+    int column_count,
+    char **values,
+    char **column_names
+);
+
 MYLITE_API const char *mylite_version(void);
 MYLITE_API int mylite_open(const char *filename, mylite_db **out_db);
 MYLITE_API int mylite_open_v2(
@@ -75,12 +82,22 @@ MYLITE_API int mylite_open_v2(
     const mylite_open_config *config
 );
 MYLITE_API int mylite_close(mylite_db *db);
+MYLITE_API int mylite_exec(
+    mylite_db *db,
+    const char *sql,
+    mylite_exec_callback callback,
+    void *ctx,
+    char **errmsg
+);
 
 MYLITE_API int mylite_errcode(mylite_db *db);
 MYLITE_API int mylite_extended_errcode(mylite_db *db);
 MYLITE_API unsigned mylite_mariadb_errno(mylite_db *db);
 MYLITE_API const char *mylite_sqlstate(mylite_db *db);
 MYLITE_API const char *mylite_errmsg(mylite_db *db);
+MYLITE_API long long mylite_changes(mylite_db *db);
+MYLITE_API unsigned long long mylite_last_insert_id(mylite_db *db);
+MYLITE_API void mylite_free(void *ptr);
 
 #ifdef __cplusplus
 }
