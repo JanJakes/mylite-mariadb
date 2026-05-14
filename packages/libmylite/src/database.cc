@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <climits>
 #include <cstddef>
 #include <cstdio>
 #include <cstdlib>
@@ -59,6 +60,8 @@ struct mylite_db {
     unsigned mariadb_errno = 0;
     std::string sqlstate = k_sqlstate_ok;
     std::string errmsg = k_not_an_error;
+    long long changes = 0;
+    unsigned long long last_insert_id = 0;
     bool connected = false;
 };
 
@@ -84,7 +87,20 @@ int connect_runtime(mylite_db &db);
 #endif
 void close_connection(mylite_db &db);
 void release_runtime(void);
+int exec_impl(
+    mylite_db *db,
+    const char *sql,
+    mylite_exec_callback callback,
+    void *ctx,
+    char **errmsg
+);
 #if MYLITE_WITH_MARIADB_EMBEDDED
+int store_and_emit_result(
+    mylite_db &db,
+    mylite_exec_callback callback,
+    void *ctx,
+    bool *has_result
+);
 std::filesystem::path normalize_database_path(const char *path);
 std::filesystem::path create_runtime_directory(const mylite_open_config *config);
 std::filesystem::path runtime_root(const mylite_open_config *config);
@@ -94,8 +110,12 @@ std::vector<std::string> runtime_arguments(const std::filesystem::path &runtime_
 std::vector<char *> mutable_arguments(std::vector<std::string> &arguments);
 #endif
 void remove_directory_if_present(const std::filesystem::path &directory);
+int copy_error_message(mylite_db &db, char **errmsg);
 #if MYLITE_WITH_MARIADB_EMBEDDED
+void set_ok(mylite_db &db);
+#endif
 void set_error(mylite_db &db, int code, const char *message);
+#if MYLITE_WITH_MARIADB_EMBEDDED
 void set_mariadb_error(mylite_db &db);
 #endif
 const char *safe_c_str(const std::string &value);
@@ -123,6 +143,16 @@ int mylite_close(mylite_db *db) {
     return MYLITE_OK;
 }
 
+int mylite_exec(
+    mylite_db *db,
+    const char *sql,
+    mylite_exec_callback callback,
+    void *ctx,
+    char **errmsg
+) {
+    return exec_impl(db, sql, callback, ctx, errmsg);
+}
+
 int mylite_errcode(mylite_db *db) {
     return db != nullptr ? db->errcode : MYLITE_MISUSE;
 }
@@ -141,6 +171,18 @@ const char *mylite_sqlstate(mylite_db *db) {
 
 const char *mylite_errmsg(mylite_db *db) {
     return db != nullptr ? safe_c_str(db->errmsg) : k_bad_db_handle;
+}
+
+long long mylite_changes(mylite_db *db) {
+    return db != nullptr ? db->changes : 0;
+}
+
+unsigned long long mylite_last_insert_id(mylite_db *db) {
+    return db != nullptr ? db->last_insert_id : 0;
+}
+
+void mylite_free(void *ptr) {
+    std::free(ptr);
 }
 
 namespace {
@@ -253,6 +295,51 @@ int validate_open_args(
     return MYLITE_OK;
 }
 
+int exec_impl(
+    mylite_db *db,
+    const char *sql,
+    mylite_exec_callback callback,
+    void *ctx,
+    char **errmsg
+) {
+    if (errmsg != nullptr) {
+        *errmsg = nullptr;
+    }
+
+    if (db == nullptr || sql == nullptr) {
+        return MYLITE_MISUSE;
+    }
+
+#if !MYLITE_WITH_MARIADB_EMBEDDED
+    (void)callback;
+    (void)ctx;
+    set_error(*db, MYLITE_ERROR, "MariaDB embedded backend is not enabled");
+    return copy_error_message(*db, errmsg);
+#else
+    set_ok(*db);
+    if (mysql_query(&db->mysql, sql) != 0) {
+        set_mariadb_error(*db);
+        return copy_error_message(*db, errmsg);
+    }
+
+    bool has_result = false;
+    const int result = store_and_emit_result(*db, callback, ctx, &has_result);
+    if (result != MYLITE_OK) {
+        return copy_error_message(*db, errmsg);
+    }
+
+    const my_ulonglong affected_rows = mysql_affected_rows(&db->mysql);
+    db->changes =
+        has_result || affected_rows == static_cast<my_ulonglong>(-1)
+            ? 0
+            : static_cast<long long>(
+                  std::min<my_ulonglong>(affected_rows, static_cast<my_ulonglong>(LLONG_MAX))
+              );
+    db->last_insert_id = static_cast<unsigned long long>(mysql_insert_id(&db->mysql));
+    return MYLITE_OK;
+#endif
+}
+
 #if MYLITE_WITH_MARIADB_EMBEDDED
 int validate_runtime_database_path(mylite_db &db) {
     std::lock_guard<std::mutex> guard(g_runtime.mutex);
@@ -260,6 +347,49 @@ int validate_runtime_database_path(mylite_db &db) {
         set_error(db, MYLITE_BUSY, "embedded runtime is already open for another database");
         return MYLITE_BUSY;
     }
+    return MYLITE_OK;
+}
+
+int store_and_emit_result(
+    mylite_db &db,
+    mylite_exec_callback callback,
+    void *ctx,
+    bool *has_result
+) {
+    MYSQL_RES *result = mysql_store_result(&db.mysql);
+    if (result == nullptr) {
+        if (mysql_field_count(&db.mysql) != 0U) {
+            set_mariadb_error(db);
+            return MYLITE_ERROR;
+        }
+        return MYLITE_OK;
+    }
+    *has_result = true;
+
+    const unsigned field_count = mysql_num_fields(result);
+    if (field_count > static_cast<unsigned>(INT_MAX)) {
+        mysql_free_result(result);
+        set_error(db, MYLITE_ERROR, "result has too many columns");
+        return MYLITE_ERROR;
+    }
+
+    std::vector<char *> column_names;
+    column_names.reserve(field_count);
+    MYSQL_FIELD *fields = mysql_fetch_fields(result);
+    for (unsigned i = 0; i < field_count; ++i) {
+        column_names.push_back(fields[i].name);
+    }
+
+    for (MYSQL_ROW row = mysql_fetch_row(result); row != nullptr; row = mysql_fetch_row(result)) {
+        if (callback != nullptr &&
+            callback(ctx, static_cast<int>(field_count), row, column_names.data()) != 0) {
+            mysql_free_result(result);
+            set_error(db, MYLITE_ERROR, "query callback requested abort");
+            return MYLITE_ERROR;
+        }
+    }
+
+    mysql_free_result(result);
     return MYLITE_OK;
 }
 
@@ -309,7 +439,7 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
         return MYLITE_OK;
     }
 
-#if MYLITE_WITH_MARIADB_EMBEDDED
+#  if MYLITE_WITH_MARIADB_EMBEDDED
     const std::filesystem::path runtime_dir = create_runtime_directory(config);
     g_runtime.arguments = runtime_arguments(runtime_dir);
     g_runtime.argv = mutable_arguments(g_runtime.arguments);
@@ -329,15 +459,15 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
     g_runtime.database_path = db.database_path;
     g_runtime.ref_count = 1;
     return MYLITE_OK;
-#else
+#  else
     (void)config;
     set_error(db, MYLITE_ERROR, "MariaDB embedded backend is not enabled");
     return MYLITE_ERROR;
-#endif
+#  endif
 }
 
 int connect_runtime(mylite_db &db) {
-#if MYLITE_WITH_MARIADB_EMBEDDED
+#  if MYLITE_WITH_MARIADB_EMBEDDED
     if (mysql_init(&db.mysql) == nullptr) {
         set_error(db, MYLITE_NOMEM, "MariaDB connection allocation failed");
         return MYLITE_NOMEM;
@@ -352,7 +482,7 @@ int connect_runtime(mylite_db &db) {
 
     db.connected = true;
     return MYLITE_OK;
-#endif
+#  endif
 }
 #endif
 
@@ -497,7 +627,32 @@ void remove_directory_if_present(const std::filesystem::path &directory) {
     std::filesystem::remove_all(directory, ignored);
 }
 
+int copy_error_message(mylite_db &db, char **errmsg) {
+    if (errmsg == nullptr) {
+        return db.errcode;
+    }
+
+    const std::size_t length = db.errmsg.size();
+    char *copy = static_cast<char *>(std::malloc(length + 1U));
+    if (copy == nullptr) {
+        return MYLITE_NOMEM;
+    }
+
+    std::memcpy(copy, db.errmsg.c_str(), length + 1U);
+    *errmsg = copy;
+    return db.errcode;
+}
+
 #if MYLITE_WITH_MARIADB_EMBEDDED
+void set_ok(mylite_db &db) {
+    db.errcode = MYLITE_OK;
+    db.extended_errcode = MYLITE_OK;
+    db.mariadb_errno = 0;
+    db.sqlstate = k_sqlstate_ok;
+    db.errmsg = k_not_an_error;
+}
+#endif
+
 void set_error(mylite_db &db, int code, const char *message) {
     db.errcode = code;
     db.extended_errcode = code;
@@ -506,6 +661,7 @@ void set_error(mylite_db &db, int code, const char *message) {
     db.errmsg = message;
 }
 
+#if MYLITE_WITH_MARIADB_EMBEDDED
 void set_mariadb_error(mylite_db &db) {
     db.errcode = MYLITE_ERROR;
     db.extended_errcode = MYLITE_ERROR;

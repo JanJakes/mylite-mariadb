@@ -134,6 +134,12 @@ execution or binary-safe values uses prepared statements.
 If `errmsg` is non-NULL and an error string is returned, the caller releases it
 with `mylite_free()`.
 
+Initial implementation status: `mylite_exec()` runs through the embedded
+MariaDB connection in `embedded-dev` builds, returns text result rows, preserves
+SQL `NULL` values as `NULL` callback entries, and populates MariaDB diagnostics
+on query failure. It does not claim persistent DDL or DML until native storage
+and directory lifecycle are configured and tested.
+
 ## Prepared Statements
 
 ```c
@@ -270,6 +276,10 @@ unsigned long long mylite_last_insert_id(mylite_db *db);
 
 These are part of observable MariaDB application behavior. Exposing them through
 MyLite avoids forcing callers into raw MariaDB handles.
+
+Initial implementation status: direct execution updates the last insert id after
+successful statements and reports affected rows for successful non-result
+statements. Result-producing statements report zero changed rows.
 
 ## Memory Ownership
 

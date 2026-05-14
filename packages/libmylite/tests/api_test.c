@@ -55,6 +55,12 @@ int main(void) {
     assert(mylite_mariadb_errno(NULL) == 0U);
     assert(strcmp(mylite_sqlstate(NULL), "HY000") == 0);
     assert(strcmp(mylite_errmsg(NULL), "bad database handle") == 0);
+    assert(mylite_exec(NULL, "SELECT 1", NULL, NULL, NULL) == MYLITE_MISUSE);
+    db = (mylite_db *)1;
+    assert(mylite_exec(db, NULL, NULL, NULL, NULL) == MYLITE_MISUSE);
+    assert(mylite_changes(NULL) == 0);
+    assert(mylite_last_insert_id(NULL) == 0U);
+    mylite_free(NULL);
 
     return 0;
 }

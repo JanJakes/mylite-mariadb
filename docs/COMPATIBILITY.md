@@ -28,12 +28,12 @@ for drop-in application expectations.
 | --- | --- | --- |
 | Open and close a database directory | 🟡&nbsp;Partial | Implemented for read/write local directory paths with one active database directory per process and a temporary MariaDB runtime directory that is removed on final close |
 | Read-only opens | ⚪&nbsp;Planned | Reserved until native storage can enforce read-only engine access |
-| Direct SQL execution | ⚪&nbsp;Planned | Convenience API for one-shot SQL and textual result callbacks |
+| Direct SQL execution | 🟡&nbsp;Partial | `mylite_exec()` executes controlled one-shot SQL with textual result callbacks in embedded builds |
 | Prepared statements | ⚪&nbsp;Planned | Reusable statements with 1-based parameter binding |
 | Binary-safe values | ⚪&nbsp;Planned | Explicit BLOB/TEXT byte counts; no NUL-terminated-value assumptions |
 | Diagnostics | 🟡&nbsp;Partial | Open handles expose stable MyLite result codes, MariaDB errno, SQLSTATE, and message text |
 | Warnings | ⚪&nbsp;Planned | MariaDB-compatible warning counts and structured warning access |
-| Affected rows and insert ids | ⚪&nbsp;Planned | Preserve common MariaDB application behavior |
+| Affected rows and insert ids | 🟡&nbsp;Partial | Successful direct execution exposes affected rows for non-result statements and the last insert id |
 | Raw `MYSQL *` as primary API | ➖&nbsp;Out&nbsp;of&nbsp;scope | Available only through a deliberate compatibility adapter |
 
 ## Engine Routing
