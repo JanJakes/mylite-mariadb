@@ -218,8 +218,23 @@ static int mylite_storage_to_handler_error(mylite_storage_result result)
 }
 
 ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
-  :handler(hton, table_arg), share(NULL)
+  :handler(hton, table_arg), share(NULL), scan_rows(NULL), scan_row_size(0),
+   scan_row_count(0), scan_row_index(0)
 {}
+
+ha_mylite::~ha_mylite()
+{
+  clear_scan_rows();
+}
+
+void ha_mylite::clear_scan_rows()
+{
+  mylite_storage_free(scan_rows);
+  scan_rows= NULL;
+  scan_row_size= 0;
+  scan_row_count= 0;
+  scan_row_index= 0;
+}
 
 int ha_mylite::open(const char *, int, uint)
 {
@@ -236,19 +251,57 @@ int ha_mylite::open(const char *, int, uint)
 int ha_mylite::close(void)
 {
   DBUG_ENTER("ha_mylite::close");
+  clear_scan_rows();
   DBUG_RETURN(0);
 }
 
-int ha_mylite::rnd_init(bool)
+int ha_mylite::rnd_init(bool scan)
 {
   DBUG_ENTER("ha_mylite::rnd_init");
+
+  clear_scan_rows();
+  if (!scan)
+    DBUG_RETURN(0);
+
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    DBUG_RETURN(HA_ERR_NO_CONNECTION);
+
+  mylite_storage_rowset rowset= {sizeof(rowset), NULL, 0, 0};
+  const mylite_storage_result result=
+    mylite_storage_read_rows(primary_file, table->s->db.str,
+                             table->s->table_name.str, &rowset);
+  if (result != MYLITE_STORAGE_OK)
+    DBUG_RETURN(mylite_storage_to_handler_error(result));
+  if (rowset.row_count > 0 && rowset.row_size != table->s->reclength)
+  {
+    mylite_storage_free(rowset.rows);
+    DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
+  }
+
+  scan_rows= rowset.rows;
+  scan_row_size= rowset.row_size;
+  scan_row_count= rowset.row_count;
+  scan_row_index= 0;
   DBUG_RETURN(0);
 }
 
-int ha_mylite::rnd_next(uchar *)
+int ha_mylite::rnd_end(void)
+{
+  DBUG_ENTER("ha_mylite::rnd_end");
+  clear_scan_rows();
+  DBUG_RETURN(0);
+}
+
+int ha_mylite::rnd_next(uchar *buf)
 {
   DBUG_ENTER("ha_mylite::rnd_next");
-  DBUG_RETURN(HA_ERR_END_OF_FILE);
+  if (scan_row_index >= scan_row_count)
+    DBUG_RETURN(HA_ERR_END_OF_FILE);
+
+  memcpy(buf, scan_rows + (scan_row_index * scan_row_size), scan_row_size);
+  ++scan_row_index;
+  DBUG_RETURN(0);
 }
 
 int ha_mylite::rnd_pos(uchar *, uchar *)
@@ -272,6 +325,18 @@ int ha_mylite::info(uint)
   stats.data_file_length= 0;
   stats.index_file_length= 0;
 
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    DBUG_RETURN(0);
+
+  unsigned long long row_count= 0;
+  const mylite_storage_result result=
+    mylite_storage_count_rows(primary_file, table->s->db.str,
+                              table->s->table_name.str, &row_count);
+  if (result != MYLITE_STORAGE_OK)
+    DBUG_RETURN(mylite_storage_to_handler_error(result));
+
+  stats.records= (ha_rows) row_count;
   DBUG_RETURN(0);
 }
 
@@ -279,6 +344,24 @@ int ha_mylite::external_lock(THD *, int)
 {
   DBUG_ENTER("ha_mylite::external_lock");
   DBUG_RETURN(0);
+}
+
+int ha_mylite::write_row(const uchar *buf)
+{
+  DBUG_ENTER("ha_mylite::write_row");
+
+  if (table->s->keys != 0 || table->next_number_field)
+    DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    DBUG_RETURN(HA_ERR_NO_CONNECTION);
+
+  const mylite_storage_result result=
+    mylite_storage_append_row(primary_file, table->s->db.str,
+                              table->s->table_name.str, buf,
+                              table->s->reclength);
+  DBUG_RETURN(mylite_storage_to_handler_error(result));
 }
 
 int ha_mylite::create(const char *, TABLE *form, HA_CREATE_INFO *create_info)

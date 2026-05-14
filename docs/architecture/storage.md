@@ -56,8 +56,9 @@ The initial handler is opt-in. It is disabled in the default embedded baseline
 and covered by a separate storage smoke build. That build verifies the
 `MYLITE` row from `SHOW ENGINES`, explicit `CREATE TABLE ... ENGINE=MYLITE`
 stores metadata in the primary `.mylite` catalog, and catalog discovery works
-after close/reopen. Row DML, `DROP`, and `RENAME` still reject until the
-catalog and row-storage slices define those update paths.
+after close/reopen. Keyless routed tables support row inserts and full scans
+from the primary file. Keyed writes, indexes, update/delete, `DROP`, and
+`RENAME` still reject until later slices define those update paths.
 
 ## File Layout
 
@@ -88,7 +89,10 @@ The header stores:
 The current implementation writes page 0 as a fixed-size, little-endian,
 checksummed header and page 1 as a catalog root. Explicit MyLite table
 definitions are stored as catalog records plus checksummed definition blob
-pages. Rows, indexes, and transaction state are still planned slices.
+pages. Keyless row inserts append checksummed row pages that store raw MariaDB
+record images tagged by catalog table id; table scans validate those pages and
+copy matching records back into MariaDB's row buffers. Indexes and transaction
+state are still planned slices.
 
 The catalog stores:
 
@@ -157,6 +161,14 @@ Rows and indexes live in MyLite pages, not in MariaDB engine files. The first
 row format should preserve enough MariaDB record layout information to avoid
 inventing a parallel SQL type system. Over time, the storage format can move
 toward typed native encodings when there is a compatibility and size benefit.
+
+Current row support is intentionally narrow. For tables without declared keys
+or autoincrement columns, `write_row()` stores MariaDB's record image in an
+append-only row page and `rnd_next()` reads those images back during full table
+scans. Tables with keys still reject writes, because MyLite cannot claim
+MySQL/MariaDB duplicate-key, ordering, or index-access behavior until the index
+slice implements it. Update, delete, truncate, BLOB/TEXT overflow, and copy
+`ALTER` rebuilds remain planned.
 
 The storage engine must support:
 

@@ -9,9 +9,17 @@
 
 typedef struct mylite_storage_catalog_entry {
     const unsigned char *record;
+    unsigned long long table_id;
     unsigned long long definition_root_page;
     unsigned long long definition_size;
 } mylite_storage_catalog_entry;
+
+typedef struct mylite_storage_row_page {
+    unsigned long long table_id;
+    size_t row_size;
+    size_t row_count;
+    const unsigned char *payload;
+} mylite_storage_row_page;
 
 typedef struct mylite_storage_definition_lengths {
     size_t schema_name_size;
@@ -19,6 +27,11 @@ typedef struct mylite_storage_definition_lengths {
     size_t requested_engine_name_size;
     size_t effective_engine_name_size;
 } mylite_storage_definition_lengths;
+
+typedef mylite_storage_result (*mylite_storage_row_page_callback)(
+    void *ctx,
+    const mylite_storage_row_page *row_page
+);
 
 static mylite_storage_result path_exists(const char *filename, int *exists);
 static mylite_storage_result write_empty_database(FILE *file);
@@ -113,6 +126,40 @@ static void encode_blob_page(
     const unsigned char *payload,
     size_t payload_size
 );
+static mylite_storage_result find_table_id(
+    FILE *file,
+    const mylite_storage_header *header,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long *out_table_id
+);
+static void encode_row_page(
+    unsigned char *page,
+    unsigned long long page_id,
+    unsigned long long table_id,
+    const unsigned char *row,
+    size_t row_size
+);
+static mylite_storage_result scan_table_row_pages(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    mylite_storage_row_page_callback callback,
+    void *ctx
+);
+static mylite_storage_result read_row_page(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    unsigned char *page,
+    mylite_storage_row_page *out_row_page
+);
+static int is_row_page(const unsigned char *page);
+static mylite_storage_result append_row_page_to_rowset(
+    void *ctx,
+    const mylite_storage_row_page *row_page
+);
+static mylite_storage_result count_row_page(void *ctx, const mylite_storage_row_page *row_page);
 static mylite_storage_result read_definition_blob_pages(
     FILE *file,
     const mylite_storage_header *header,
@@ -145,6 +192,7 @@ static uint64_t checksum_page(const unsigned char *page, size_t checksum_offset)
 static const unsigned char k_header_magic[8] = {'M', 'Y', 'L', 'I', 'T', 'E', '1', '\0'};
 static const unsigned char k_catalog_magic[8] = {'M', 'Y', 'L', 'C', 'A', 'T', '1', '\0'};
 static const unsigned char k_blob_magic[8] = {'M', 'Y', 'L', 'B', 'L', 'B', '1', '\0'};
+static const unsigned char k_row_magic[8] = {'M', 'Y', 'L', 'R', 'O', 'W', '1', '\0'};
 
 const char *mylite_storage_engine_name(void) {
     return MYLITE_STORAGE_ENGINE_NAME;
@@ -155,7 +203,7 @@ mylite_storage_capabilities mylite_storage_get_capabilities(void) {
         .size = sizeof(capabilities),
         .format_version = MYLITE_STORAGE_FORMAT_VERSION,
         .flags = MYLITE_STORAGE_CAPABILITY_FILE_HEADER | MYLITE_STORAGE_CAPABILITY_EMPTY_CATALOG |
-                 MYLITE_STORAGE_CAPABILITY_TABLE_DEFINITIONS,
+                 MYLITE_STORAGE_CAPABILITY_TABLE_DEFINITIONS | MYLITE_STORAGE_CAPABILITY_TABLE_ROWS,
     };
 
     return capabilities;
@@ -437,6 +485,145 @@ mylite_storage_result mylite_storage_table_exists(
 
     if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
+    }
+    return result;
+}
+
+mylite_storage_result mylite_storage_append_row(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    const unsigned char *row,
+    size_t row_size
+) {
+    const size_t row_payload_capacity =
+        MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET;
+    if (filename == NULL || filename[0] == '\0' || schema_name == NULL || schema_name[0] == '\0' ||
+        table_name == NULL || table_name[0] == '\0' || row == NULL || row_size == 0U) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+    if (row_size > UINT32_MAX || row_size > row_payload_capacity) {
+        return MYLITE_STORAGE_UNSUPPORTED;
+    }
+
+    FILE *file = NULL;
+    mylite_storage_result result = open_existing_file_for_update(filename, &file);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_header header = {0};
+    unsigned long long table_id = 0ULL;
+    result = read_header(file, &header);
+    if (result == MYLITE_STORAGE_OK) {
+        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+    }
+    if (result == MYLITE_STORAGE_OK && header.page_count == ULLONG_MAX) {
+        result = MYLITE_STORAGE_FULL;
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        const unsigned long long row_page_id = header.page_count;
+        unsigned char row_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        encode_row_page(row_page, row_page_id, table_id, row, row_size);
+
+        result = write_page_at(file, row_page_id, header.page_size, row_page);
+        if (result == MYLITE_STORAGE_OK) {
+            ++header.page_count;
+            unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+            encode_header_page(header_page, &header);
+            result = write_page_at(
+                file,
+                MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
+                header.page_size,
+                header_page
+            );
+        }
+    }
+
+    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    return result;
+}
+
+mylite_storage_result mylite_storage_read_rows(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    mylite_storage_rowset *out_rows
+) {
+    if (filename == NULL || filename[0] == '\0' || schema_name == NULL || schema_name[0] == '\0' ||
+        table_name == NULL || table_name[0] == '\0' || out_rows == NULL ||
+        out_rows->size < sizeof(*out_rows)) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    *out_rows = (mylite_storage_rowset){
+        .size = sizeof(*out_rows),
+    };
+
+    FILE *file = NULL;
+    mylite_storage_result result = open_existing_file(filename, &file);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_header header = {0};
+    unsigned long long table_id = 0ULL;
+    result = read_header(file, &header);
+    if (result == MYLITE_STORAGE_OK) {
+        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = scan_table_row_pages(file, &header, table_id, append_row_page_to_rowset, out_rows);
+    }
+
+    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    if (result != MYLITE_STORAGE_OK) {
+        free(out_rows->rows);
+        *out_rows = (mylite_storage_rowset){
+            .size = sizeof(*out_rows),
+        };
+    }
+    return result;
+}
+
+mylite_storage_result mylite_storage_count_rows(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long *out_row_count
+) {
+    if (filename == NULL || filename[0] == '\0' || schema_name == NULL || schema_name[0] == '\0' ||
+        table_name == NULL || table_name[0] == '\0' || out_row_count == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    *out_row_count = 0ULL;
+
+    FILE *file = NULL;
+    mylite_storage_result result = open_existing_file(filename, &file);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_header header = {0};
+    unsigned long long table_id = 0ULL;
+    result = read_header(file, &header);
+    if (result == MYLITE_STORAGE_OK) {
+        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = scan_table_row_pages(file, &header, table_id, count_row_page, out_row_count);
+    }
+
+    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    if (result != MYLITE_STORAGE_OK) {
+        *out_row_count = 0ULL;
     }
     return result;
 }
@@ -915,7 +1102,9 @@ static mylite_storage_result validate_catalog_record(
         get_u64_le(record, MYLITE_STORAGE_FORMAT_RECORD_DEFINITION_ROOT_PAGE_OFFSET);
     const unsigned long long definition_size =
         get_u64_le(record, MYLITE_STORAGE_FORMAT_RECORD_DEFINITION_SIZE_OFFSET);
-    if (record_size != expected_size || definition_size == 0ULL ||
+    const unsigned long long table_id =
+        get_u64_le(record, MYLITE_STORAGE_FORMAT_RECORD_TABLE_ID_OFFSET);
+    if (record_size != expected_size || definition_size == 0ULL || table_id == 0ULL ||
         definition_root_page <= header->catalog_root_page ||
         definition_root_page >= header->page_count) {
         return MYLITE_STORAGE_CORRUPT;
@@ -992,6 +1181,7 @@ static mylite_storage_result find_table_record(
             if (out_entry != NULL) {
                 *out_entry = (mylite_storage_catalog_entry){
                     .record = record,
+                    .table_id = get_u64_le(record, MYLITE_STORAGE_FORMAT_RECORD_TABLE_ID_OFFSET),
                     .definition_root_page = get_u64_le(
                         record,
                         MYLITE_STORAGE_FORMAT_RECORD_DEFINITION_ROOT_PAGE_OFFSET
@@ -1233,6 +1423,202 @@ static void encode_blob_page(
         MYLITE_STORAGE_FORMAT_BLOB_CHECKSUM_OFFSET,
         checksum_page(page, MYLITE_STORAGE_FORMAT_BLOB_CHECKSUM_OFFSET)
     );
+}
+
+static mylite_storage_result find_table_id(
+    FILE *file,
+    const mylite_storage_header *header,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long *out_table_id
+) {
+    unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    mylite_storage_catalog_entry entry = {0};
+    mylite_storage_result result = read_catalog_root(file, header, catalog_page);
+    if (result == MYLITE_STORAGE_OK) {
+        result = find_table_record(catalog_page, schema_name, table_name, &entry);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        *out_table_id = entry.table_id;
+    }
+    return result;
+}
+
+static void encode_row_page(
+    unsigned char *page,
+    unsigned long long page_id,
+    unsigned long long table_id,
+    const unsigned char *row,
+    size_t row_size
+) {
+    memset(page, 0, MYLITE_STORAGE_FORMAT_PAGE_SIZE);
+    memcpy(page + MYLITE_STORAGE_FORMAT_ROW_MAGIC_OFFSET, k_row_magic, sizeof(k_row_magic));
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_ROW_PAGE_TYPE_OFFSET,
+        MYLITE_STORAGE_FORMAT_ROW_PAGE_TYPE_TABLE_ROWS
+    );
+    put_u32_le(page, MYLITE_STORAGE_FORMAT_ROW_PAGE_VERSION_OFFSET, 1U);
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_ROW_FORMAT_VERSION_OFFSET,
+        MYLITE_STORAGE_FORMAT_VERSION
+    );
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_ALGORITHM_OFFSET,
+        MYLITE_STORAGE_FORMAT_CHECKSUM_FNV1A64
+    );
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_ROW_PAGE_ID_OFFSET, page_id);
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_ROW_TABLE_ID_OFFSET, table_id);
+    put_u32_le(page, MYLITE_STORAGE_FORMAT_ROW_RECORD_SIZE_OFFSET, (unsigned)row_size);
+    put_u32_le(page, MYLITE_STORAGE_FORMAT_ROW_RECORD_COUNT_OFFSET, 1U);
+    memcpy(page + MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET, row, row_size);
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET, 0ULL);
+    put_u64_le(
+        page,
+        MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET,
+        checksum_page(page, MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET)
+    );
+}
+
+static mylite_storage_result scan_table_row_pages(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    mylite_storage_row_page_callback callback,
+    void *ctx
+) {
+    for (unsigned long long page_id = MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT;
+         page_id < header->page_count;
+         ++page_id) {
+        unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        mylite_storage_row_page row_page = {0};
+        mylite_storage_result result = read_row_page(file, header, page_id, page, &row_page);
+        if (result == MYLITE_STORAGE_NOTFOUND) {
+            continue;
+        }
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+        if (row_page.table_id == table_id) {
+            result = callback(ctx, &row_page);
+            if (result != MYLITE_STORAGE_OK) {
+                return result;
+            }
+        }
+    }
+
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result read_row_page(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    unsigned char *page,
+    mylite_storage_row_page *out_row_page
+) {
+    if (page_id <= header->catalog_root_page || page_id >= header->page_count) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    mylite_storage_result result = read_page_at(file, page_id, header->page_size, page);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    if (!is_row_page(page)) {
+        if (memcmp(
+                page + MYLITE_STORAGE_FORMAT_BLOB_MAGIC_OFFSET,
+                k_blob_magic,
+                sizeof(k_blob_magic)
+            ) == 0) {
+            return MYLITE_STORAGE_NOTFOUND;
+        }
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    const unsigned page_type = get_u32_le(page, MYLITE_STORAGE_FORMAT_ROW_PAGE_TYPE_OFFSET);
+    const unsigned page_version = get_u32_le(page, MYLITE_STORAGE_FORMAT_ROW_PAGE_VERSION_OFFSET);
+    const unsigned format_version =
+        get_u32_le(page, MYLITE_STORAGE_FORMAT_ROW_FORMAT_VERSION_OFFSET);
+    const unsigned checksum_algorithm =
+        get_u32_le(page, MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_ALGORITHM_OFFSET);
+    const unsigned long long stored_page_id =
+        get_u64_le(page, MYLITE_STORAGE_FORMAT_ROW_PAGE_ID_OFFSET);
+    const unsigned long long table_id = get_u64_le(page, MYLITE_STORAGE_FORMAT_ROW_TABLE_ID_OFFSET);
+    const size_t row_size = get_u32_le(page, MYLITE_STORAGE_FORMAT_ROW_RECORD_SIZE_OFFSET);
+    const size_t row_count = get_u32_le(page, MYLITE_STORAGE_FORMAT_ROW_RECORD_COUNT_OFFSET);
+    const unsigned long long expected_checksum =
+        get_u64_le(page, MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET);
+    const unsigned long long actual_checksum =
+        checksum_page(page, MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET);
+    const size_t payload_capacity =
+        MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET;
+    if (page_type != MYLITE_STORAGE_FORMAT_ROW_PAGE_TYPE_TABLE_ROWS || page_version != 1U ||
+        format_version != MYLITE_STORAGE_FORMAT_VERSION ||
+        checksum_algorithm != MYLITE_STORAGE_FORMAT_CHECKSUM_FNV1A64 || stored_page_id != page_id ||
+        table_id == 0ULL || expected_checksum != actual_checksum || row_size == 0U ||
+        row_count == 0U || row_count > payload_capacity / row_size) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    *out_row_page = (mylite_storage_row_page){
+        .table_id = table_id,
+        .row_size = row_size,
+        .row_count = row_count,
+        .payload = page + MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET,
+    };
+    return MYLITE_STORAGE_OK;
+}
+
+static int is_row_page(const unsigned char *page) {
+    return memcmp(
+               page + MYLITE_STORAGE_FORMAT_ROW_MAGIC_OFFSET,
+               k_row_magic,
+               sizeof(k_row_magic)
+           ) == 0;
+}
+
+static mylite_storage_result append_row_page_to_rowset(
+    void *ctx,
+    const mylite_storage_row_page *row_page
+) {
+    mylite_storage_rowset *rowset = (mylite_storage_rowset *)ctx;
+    if (rowset->row_size != 0U && rowset->row_size != row_page->row_size) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+    if (row_page->row_count > SIZE_MAX - rowset->row_count) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    const size_t new_row_count = rowset->row_count + row_page->row_count;
+    if (row_page->row_size > SIZE_MAX / new_row_count) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    const size_t old_bytes = row_page->row_size * rowset->row_count;
+    const size_t new_bytes = row_page->row_size * new_row_count;
+    unsigned char *rows = (unsigned char *)realloc(rowset->rows, new_bytes);
+    if (rows == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    memcpy(rows + old_bytes, row_page->payload, row_page->row_size * row_page->row_count);
+    rowset->rows = rows;
+    rowset->row_size = row_page->row_size;
+    rowset->row_count = new_row_count;
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result count_row_page(void *ctx, const mylite_storage_row_page *row_page) {
+    unsigned long long *row_count = (unsigned long long *)ctx;
+    if (row_page->row_count > ULLONG_MAX - *row_count) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    *row_count += (unsigned long long)row_page->row_count;
+    return MYLITE_STORAGE_OK;
 }
 
 static mylite_storage_result read_definition_blob_pages(

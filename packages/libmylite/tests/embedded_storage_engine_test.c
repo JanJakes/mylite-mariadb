@@ -19,6 +19,12 @@ typedef struct table_context {
     int rows;
 } table_context;
 
+typedef struct post_row_context {
+    int rows;
+    int found_draft;
+    int found_published;
+} post_row_context;
+
 typedef struct catalog_table_context {
     unsigned count;
 } catalog_table_context;
@@ -43,6 +49,7 @@ static void assert_catalog_table_metadata(
 static int engine_callback(void *ctx, int column_count, char **values, char **column_names);
 static int table_callback(void *ctx, int column_count, char **values, char **column_names);
 static int row_callback(void *ctx, int column_count, char **values, char **column_names);
+static int post_row_callback(void *ctx, int column_count, char **values, char **column_names);
 static int catalog_table_callback(void *ctx, const char *schema_name, const char *table_name);
 static mylite_db *open_database(const char *root, char **filename);
 static mylite_db *open_database_with_filename(const char *root, const char *filename);
@@ -112,6 +119,7 @@ static void test_create_table_persists_catalog_metadata(void) {
     mylite_db *db = open_database(root, &filename);
     table_context tables = {0};
     table_context rows = {0};
+    post_row_context row_posts = {0};
     char *errmsg = NULL;
 
     assert_exec_succeeds(db, "CREATE DATABASE app");
@@ -133,31 +141,52 @@ static void test_create_table_persists_catalog_metadata(void) {
         db,
         "CREATE TABLE aria_posts (id INT PRIMARY KEY, title VARCHAR(255)) ENGINE=Aria"
     );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE row_posts (id INT NOT NULL, title VARCHAR(255) NOT NULL) ENGINE=InnoDB"
+    );
     assert(mylite_storage_table_exists(filename, "app", "default_posts") == MYLITE_STORAGE_OK);
     assert(mylite_storage_table_exists(filename, "app", "explicit_posts") == MYLITE_STORAGE_OK);
     assert(mylite_storage_table_exists(filename, "app", "innodb_posts") == MYLITE_STORAGE_OK);
     assert(mylite_storage_table_exists(filename, "app", "myisam_posts") == MYLITE_STORAGE_OK);
     assert(mylite_storage_table_exists(filename, "app", "aria_posts") == MYLITE_STORAGE_OK);
-    assert_catalog_table_count(filename, "app", 5U);
+    assert(mylite_storage_table_exists(filename, "app", "row_posts") == MYLITE_STORAGE_OK);
+    assert_catalog_table_count(filename, "app", 6U);
     assert_catalog_table_metadata(filename, "app", "default_posts", "DEFAULT", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "explicit_posts", "MYLITE", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "innodb_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "myisam_posts", "MyISAM", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "aria_posts", "Aria", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "row_posts", "InnoDB", "MYLITE");
     assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
-    assert(tables.rows == 5);
+    assert(tables.rows == 6);
     assert_exec_fails(
         db,
         "CREATE TABLE memory_posts (id INT PRIMARY KEY, title VARCHAR(255)) ENGINE=MEMORY"
     );
     assert(mylite_storage_table_exists(filename, "app", "memory_posts") == MYLITE_STORAGE_NOTFOUND);
-    assert_catalog_table_count(filename, "app", 5U);
+    assert_catalog_table_count(filename, "app", 6U);
     assert_exec_fails(
         db,
         "CREATE TABLE innodb_posts (id INT PRIMARY KEY, title VARCHAR(255)) ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 5U);
+    assert_catalog_table_count(filename, "app", 6U);
+    assert_exec_succeeds(db, "INSERT INTO row_posts VALUES (1, 'draft')");
+    assert_exec_succeeds(db, "INSERT INTO row_posts VALUES (2, 'published')");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id, title FROM row_posts",
+            post_row_callback,
+            &row_posts,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(row_posts.rows == 2);
+    assert(row_posts.found_draft);
+    assert(row_posts.found_published);
     assert(
         mylite_exec(db, "INSERT INTO innodb_posts VALUES (1, 'draft')", NULL, NULL, &errmsg) !=
         MYLITE_OK
@@ -167,24 +196,39 @@ static void test_create_table_persists_catalog_metadata(void) {
     errmsg = NULL;
     assert_exec_fails(db, "DROP TABLE aria_posts");
     assert(mylite_storage_table_exists(filename, "app", "aria_posts") == MYLITE_STORAGE_OK);
-    assert_catalog_table_count(filename, "app", 5U);
+    assert_catalog_table_count(filename, "app", 6U);
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
     tables = (table_context){0};
+    row_posts = (post_row_context){0};
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "CREATE DATABASE app");
     assert_exec_succeeds(db, "USE app");
     assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
-    assert(tables.rows == 5);
+    assert(tables.rows == 6);
     assert(
         mylite_exec(db, "SELECT * FROM innodb_posts", row_callback, &rows, &errmsg) == MYLITE_OK
     );
     assert(errmsg == NULL);
     assert(rows.rows == 0);
-    assert_catalog_table_count(filename, "app", 5U);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id, title FROM row_posts",
+            post_row_callback,
+            &row_posts,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(row_posts.rows == 2);
+    assert(row_posts.found_draft);
+    assert(row_posts.found_published);
+    assert_catalog_table_count(filename, "app", 6U);
     assert_catalog_table_metadata(filename, "app", "innodb_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "row_posts", "InnoDB", "MYLITE");
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
@@ -281,6 +325,27 @@ static int row_callback(void *ctx, int column_count, char **values, char **colum
     (void)column_names;
     ++table_ctx->rows;
     return 0;
+}
+
+static int post_row_callback(void *ctx, int column_count, char **values, char **column_names) {
+    post_row_context *row_ctx = (post_row_context *)ctx;
+    (void)column_names;
+
+    assert(column_count == 2);
+    assert(values[0] != NULL);
+    assert(values[1] != NULL);
+    ++row_ctx->rows;
+    if (strcmp(values[0], "1") == 0 && strcmp(values[1], "draft") == 0) {
+        row_ctx->found_draft = 1;
+        return 0;
+    }
+    if (strcmp(values[0], "2") == 0 && strcmp(values[1], "published") == 0) {
+        row_ctx->found_published = 1;
+        return 0;
+    }
+
+    assert(0);
+    return 1;
 }
 
 static int catalog_table_callback(void *ctx, const char *schema_name, const char *table_name) {

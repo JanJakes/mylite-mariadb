@@ -20,6 +20,8 @@ static void test_rejects_newer_format_version(void);
 static void test_rejects_bad_catalog_root(void);
 static void test_store_and_read_table_definition(void);
 static void test_store_large_table_definition(void);
+static void test_append_and_read_rows(void);
+static void test_rejects_corrupt_row_page(void);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static long long file_size(const char *path);
@@ -41,6 +43,8 @@ int main(void) {
     test_rejects_bad_catalog_root();
     test_store_and_read_table_definition();
     test_store_large_table_definition();
+    test_append_and_read_rows();
+    test_rejects_corrupt_row_page();
     return 0;
 }
 
@@ -53,6 +57,7 @@ static void test_capabilities(void) {
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_FILE_HEADER) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_EMPTY_CATALOG) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_TABLE_DEFINITIONS) != 0U);
+    assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_TABLE_ROWS) != 0U);
 }
 
 static void test_create_empty_database(void) {
@@ -263,6 +268,113 @@ static void test_store_large_table_definition(void) {
 
     mylite_storage_free(stored_definition);
     free(definition);
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_append_and_read_rows(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char post_row_1[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    static const unsigned char post_row_2[] = {0x00U, 0x02U, 'd', 'e', 'f'};
+    static const unsigned char comment_row[] = {0x00U, 0x03U, 'x', 'y', 'z'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "table-rows.mylite");
+    mylite_storage_table_definition posts_definition = {
+        .size = sizeof(posts_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_table_definition comments_definition = {
+        .size = sizeof(comments_definition),
+        .schema_name = "app",
+        .table_name = "comments",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_header header = {0};
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+    unsigned long long row_count = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &posts_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_store_table_definition(filename, &comments_definition) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", post_row_1, sizeof(post_row_1)) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row(filename, "app", "comments", comment_row, sizeof(comment_row)) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", post_row_2, sizeof(post_row_2)) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 5ULL);
+
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 2ULL);
+    assert(mylite_storage_count_rows(filename, "app", "comments", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 1ULL);
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
+    assert(rows.row_size == sizeof(post_row_1));
+    assert(rows.row_count == 2U);
+    assert(memcmp(rows.rows, post_row_1, sizeof(post_row_1)) == 0);
+    assert(memcmp(rows.rows + rows.row_size, post_row_2, sizeof(post_row_2)) == 0);
+
+    mylite_storage_free(rows.rows);
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_rejects_corrupt_row_page(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "corrupt-row-page.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+    unsigned long long row_count = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", row, sizeof(row)) == MYLITE_STORAGE_OK
+    );
+    flip_file_byte(
+        filename,
+        (long)((MYLITE_STORAGE_FORMAT_PAGE_SIZE * 3U) + MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET)
+    );
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_CORRUPT);
+    assert(
+        mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_CORRUPT
+    );
+
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
     free(filename);

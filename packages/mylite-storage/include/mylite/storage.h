@@ -12,6 +12,7 @@ extern "C" {
 #define MYLITE_STORAGE_CAPABILITY_FILE_HEADER 0x00000001U
 #define MYLITE_STORAGE_CAPABILITY_EMPTY_CATALOG 0x00000002U
 #define MYLITE_STORAGE_CAPABILITY_TABLE_DEFINITIONS 0x00000004U
+#define MYLITE_STORAGE_CAPABILITY_TABLE_ROWS 0x00000008U
 
 typedef enum mylite_storage_result { /* NOLINT(performance-enum-size): C ABI enum. */
                                      MYLITE_STORAGE_OK = 0,
@@ -61,6 +62,13 @@ typedef struct mylite_storage_table_metadata {
     char *effective_engine_name;
 } mylite_storage_table_metadata;
 
+typedef struct mylite_storage_rowset {
+    size_t size;
+    unsigned char *rows;
+    size_t row_size;
+    size_t row_count;
+} mylite_storage_rowset;
+
 typedef int (*mylite_storage_table_callback)(
     void *ctx,
     const char *schema_name,
@@ -95,6 +103,25 @@ mylite_storage_result mylite_storage_table_exists(
     const char *filename,
     const char *schema_name,
     const char *table_name
+);
+mylite_storage_result mylite_storage_append_row(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    const unsigned char *row,
+    size_t row_size
+);
+mylite_storage_result mylite_storage_read_rows(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    mylite_storage_rowset *out_rows
+);
+mylite_storage_result mylite_storage_count_rows(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long *out_row_count
 );
 mylite_storage_result mylite_storage_list_tables(
     const char *filename,

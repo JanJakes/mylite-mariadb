@@ -101,8 +101,9 @@ Initial implementation status: open/close is backed by MariaDB embedded startup
 when the `embedded-dev` CMake preset enables it. MyLite passes owned startup
 options, ignores ambient option files with `--no-defaults`, creates a temporary
 runtime directory for MariaDB bootstrap files, and removes that directory on the
-final close. Durable catalog and table state are not stored in the `.mylite`
-file until the file-format and catalog slices land.
+final close. Current storage-engine smoke builds persist table-definition
+metadata and keyless row pages in the primary `.mylite` file; broader DDL,
+indexes, transactions, and recovery remain planned.
 
 ## Direct Execution
 
@@ -131,8 +132,9 @@ with `mylite_free()`.
 Initial implementation status: `mylite_exec()` runs through the embedded
 MariaDB connection in `embedded-dev` builds, returns text result rows, preserves
 SQL `NULL` values as `NULL` callback entries, and populates MariaDB diagnostics
-on query failure. It does not claim persistent DDL or DML until the catalog and
-MyLite storage slices land.
+on query failure. File-backed MyLite storage-engine builds support routed
+`CREATE TABLE` metadata plus keyless `INSERT` and full-scan `SELECT` over
+persisted MyLite row pages.
 
 ## Prepared Statements
 

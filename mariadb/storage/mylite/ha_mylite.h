@@ -16,6 +16,8 @@
 #ifndef HA_MYLITE_INCLUDED
 #define HA_MYLITE_INCLUDED
 
+#include <stddef.h>
+
 #include "handler.h"
 #include "my_base.h"
 #include "my_global.h"
@@ -37,12 +39,17 @@ class ha_mylite: public handler
 {
   THR_LOCK_DATA lock;
   Mylite_share *share;
+  unsigned char *scan_rows;
+  size_t scan_row_size;
+  size_t scan_row_count;
+  size_t scan_row_index;
 
   Mylite_share *get_share();
+  void clear_scan_rows();
 
 public:
   ha_mylite(handlerton *hton, TABLE_SHARE *table_arg);
-  ~ha_mylite() = default;
+  ~ha_mylite() override;
 
   ulonglong table_flags() const override
   {
@@ -67,11 +74,13 @@ public:
   int open(const char *name, int mode, uint test_if_locked) override;
   int close(void) override;
   int rnd_init(bool scan) override;
+  int rnd_end(void) override;
   int rnd_next(uchar *buf) override;
   int rnd_pos(uchar *buf, uchar *pos) override;
   void position(const uchar *record) override;
   int info(uint flag) override;
   int external_lock(THD *thd, int lock_type) override;
+  int write_row(const uchar *buf) override;
   int create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) override;
   int delete_table(const char *name) override;
   int rename_table(const char *from, const char *to) override;

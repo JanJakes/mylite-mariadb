@@ -31,7 +31,7 @@ not in a MariaDB datadir or existing engine sidecars.
 | 8 | MyLite metadata DDL and discovery | 🟡&nbsp;In&nbsp;progress | Store explicit `ENGINE=MYLITE` table definitions in the catalog and discover them without durable `.frm` sidecars. Explicit create/discovery is implemented; catalog-changing DDL remains. |
 | 9 | Sidecar lifecycle gates | ✅&nbsp;Done | Detect known MariaDB durable engine sidecars around metadata DDL, close/reopen, and failed-create cleanup. |
 | 10 | Engine routing policy | ✅&nbsp;Done | Record requested engine vs. effective MyLite engine and route omitted/default, `InnoDB`, `MyISAM`, and `Aria` metadata where safe. |
-| 11 | Row and index storage | ⚪&nbsp;Planned | Implement table scans, row DML, primary/secondary indexes, uniqueness, autoincrement, BLOB/TEXT overflow, and copy `ALTER` rebuilds. |
+| 11 | Row and index storage | 🟡&nbsp;In&nbsp;progress | Keyless table insert and full-scan storage is implemented; primary/secondary indexes, uniqueness, autoincrement, BLOB/TEXT overflow, update/delete, and copy `ALTER` rebuilds remain. |
 | 12 | Transactions and recovery | ⚪&nbsp;Planned | Add atomic publication, rollback, savepoints, crash recovery, checksums, and companion-file lifecycle tests. |
 | 13 | Locking and concurrency | ⚪&nbsp;Planned | Add safe file locks, multiple-reader behavior, and a storage design that preserves concurrent writer goals. |
 | 14 | Compatibility harness | ⚪&nbsp;Planned | Run embedded lifecycle, sidecar detection, MariaDB comparison, crash/reopen, and application-query coverage in repeatable groups. |
