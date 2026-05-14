@@ -39,13 +39,13 @@ for drop-in application expectations.
 
 | SQL engine request | MyLite status | Target behavior |
 | --- | --- | --- |
-| MyLite engine registration | 🟡&nbsp;Partial | Opt-in static handler builds expose `MYLITE` through `SHOW ENGINES` |
-| No explicit engine | ⚪&nbsp;Planned | Create a MyLite table |
+| MyLite engine registration | 🟡&nbsp;Partial | Opt-in static handler builds expose `MYLITE` through `SHOW ENGINES`; file-backed MyLite sessions configure it as the default effective engine |
+| No explicit engine | 🟡&nbsp;Partial | Metadata-only `CREATE TABLE` routes to MyLite and stores requested engine `DEFAULT` with effective engine `MYLITE`; row DML and catalog-changing DDL remain unsupported |
 | `ENGINE=MYLITE` | 🟡&nbsp;Partial | Explicit MyLite DDL stores MariaDB table-definition metadata in the `.mylite` catalog and rediscovers it after reopen; row DML and catalog-changing DDL remain unsupported |
-| `ENGINE=InnoDB` | ⚪&nbsp;Planned | Route application DDL to MyLite storage where semantics are supported |
-| `ENGINE=MyISAM` | ⚪&nbsp;Planned | Route legacy application DDL to MyLite storage where semantics are supported |
-| `ENGINE=Aria` | ⚪&nbsp;Planned | Route application DDL to MyLite storage where semantics are supported; never create Aria durable sidecars |
-| Dynamic external engines | ➖&nbsp;Out&nbsp;of&nbsp;scope | Default embedded profile does not load storage-engine plugins |
+| `ENGINE=InnoDB` | 🟡&nbsp;Partial | Metadata-only DDL routes to MyLite and records requested `InnoDB`; InnoDB row, transaction, foreign-key, and tablespace semantics remain unsupported |
+| `ENGINE=MyISAM` | 🟡&nbsp;Partial | Metadata-only DDL routes to MyLite and records requested `MyISAM`; MyISAM data and index files are never durable application storage |
+| `ENGINE=Aria` | 🟡&nbsp;Partial | Metadata-only DDL routes to MyLite and records requested `Aria`; Aria data, index, and log files are never durable application storage |
+| Dynamic external engines | ➖&nbsp;Out&nbsp;of&nbsp;scope | Unsupported explicit engine requests fail before catalog publication |
 
 ## File Ownership
 
@@ -62,7 +62,7 @@ for drop-in application expectations.
 
 | Capability | MyLite status | Compatibility target |
 | --- | --- | --- |
-| `CREATE TABLE ... ENGINE=MYLITE` | 🟡&nbsp;Partial | Store metadata-only MyLite table definitions in the catalog without durable `.frm` sidecars |
+| `CREATE TABLE` metadata | 🟡&nbsp;Partial | Store metadata-only MyLite table definitions for omitted/default engine, `ENGINE=MYLITE`, `ENGINE=InnoDB`, `ENGINE=MyISAM`, and `ENGINE=Aria` without durable MariaDB sidecars |
 | `DROP TABLE`, `RENAME TABLE` | ⚪&nbsp;Planned | Catalog transactions that remove or rename MyLite metadata without falling back to MariaDB file sidecars; currently rejected for MyLite tables |
 | `ALTER TABLE` | ⚪&nbsp;Planned | Copy/rebuild path first; in-place algorithms later when storage supports them |
 | Standalone `CREATE INDEX` / `DROP INDEX` | ⚪&nbsp;Planned | Route through MariaDB DDL and MyLite catalog/index updates |

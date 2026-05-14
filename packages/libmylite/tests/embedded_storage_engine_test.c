@@ -3,6 +3,7 @@
 
 #include <assert.h>
 #include <dirent.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -16,25 +17,28 @@ typedef struct engine_context {
 
 typedef struct table_context {
     int rows;
-    int found_posts;
 } table_context;
 
 typedef struct catalog_table_context {
-    const char *expected_schema_name;
-    const char *expected_table_name;
     unsigned count;
-    int found_expected_table;
 } catalog_table_context;
 
 static void test_show_engines_reports_mylite(void);
 static void test_memory_database_has_empty_mylite_discovery(void);
 static void test_create_table_persists_catalog_metadata(void);
+static void assert_exec_succeeds(mylite_db *db, const char *sql);
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_catalog_table_count(
     const char *filename,
     const char *schema_name,
-    const char *table_name,
     unsigned count
+);
+static void assert_catalog_table_metadata(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    const char *requested_engine_name,
+    const char *effective_engine_name
 );
 static int engine_callback(void *ctx, int column_count, char **values, char **column_names);
 static int table_callback(void *ctx, int column_count, char **values, char **column_names);
@@ -87,10 +91,8 @@ static void test_memory_database_has_empty_mylite_discovery(void) {
     table_context tables = {0};
     char *errmsg = NULL;
 
-    assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, &errmsg) == MYLITE_OK);
-    assert(errmsg == NULL);
-    assert(mylite_exec(db, "USE app", NULL, NULL, &errmsg) == MYLITE_OK);
-    assert(errmsg == NULL);
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
     assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
     assert(tables.rows == 0);
@@ -112,61 +114,93 @@ static void test_create_table_persists_catalog_metadata(void) {
     table_context rows = {0};
     char *errmsg = NULL;
 
-    assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, &errmsg) == MYLITE_OK);
-    assert(errmsg == NULL);
-    assert(mylite_exec(db, "USE app", NULL, NULL, &errmsg) == MYLITE_OK);
-    assert(errmsg == NULL);
-    assert(
-        mylite_exec(
-            db,
-            "CREATE TABLE posts (id INT PRIMARY KEY, title VARCHAR(255)) ENGINE=MYLITE",
-            NULL,
-            NULL,
-            &errmsg
-        ) == MYLITE_OK
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(db, "CREATE TABLE default_posts (id INT PRIMARY KEY, title VARCHAR(255))");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE explicit_posts (id INT PRIMARY KEY, title VARCHAR(255)) ENGINE=MYLITE"
     );
-    assert(errmsg == NULL);
-    assert(mylite_storage_table_exists(filename, "app", "posts") == MYLITE_STORAGE_OK);
-    assert_catalog_table_count(filename, "app", "posts", 1U);
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE innodb_posts (id INT PRIMARY KEY, title VARCHAR(255)) ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE myisam_posts (id INT PRIMARY KEY, title VARCHAR(255)) ENGINE=MyISAM"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE aria_posts (id INT PRIMARY KEY, title VARCHAR(255)) ENGINE=Aria"
+    );
+    assert(mylite_storage_table_exists(filename, "app", "default_posts") == MYLITE_STORAGE_OK);
+    assert(mylite_storage_table_exists(filename, "app", "explicit_posts") == MYLITE_STORAGE_OK);
+    assert(mylite_storage_table_exists(filename, "app", "innodb_posts") == MYLITE_STORAGE_OK);
+    assert(mylite_storage_table_exists(filename, "app", "myisam_posts") == MYLITE_STORAGE_OK);
+    assert(mylite_storage_table_exists(filename, "app", "aria_posts") == MYLITE_STORAGE_OK);
+    assert_catalog_table_count(filename, "app", 5U);
+    assert_catalog_table_metadata(filename, "app", "default_posts", "DEFAULT", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "explicit_posts", "MYLITE", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "innodb_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "myisam_posts", "MyISAM", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "aria_posts", "Aria", "MYLITE");
     assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
-    assert(tables.found_posts);
+    assert(tables.rows == 5);
     assert_exec_fails(
         db,
-        "CREATE TABLE posts (id INT PRIMARY KEY, title VARCHAR(255)) ENGINE=MYLITE"
+        "CREATE TABLE memory_posts (id INT PRIMARY KEY, title VARCHAR(255)) ENGINE=MEMORY"
     );
-    assert_catalog_table_count(filename, "app", "posts", 1U);
+    assert(mylite_storage_table_exists(filename, "app", "memory_posts") == MYLITE_STORAGE_NOTFOUND);
+    assert_catalog_table_count(filename, "app", 5U);
+    assert_exec_fails(
+        db,
+        "CREATE TABLE innodb_posts (id INT PRIMARY KEY, title VARCHAR(255)) ENGINE=InnoDB"
+    );
+    assert_catalog_table_count(filename, "app", 5U);
     assert(
-        mylite_exec(db, "INSERT INTO posts VALUES (1, 'draft')", NULL, NULL, &errmsg) != MYLITE_OK
+        mylite_exec(db, "INSERT INTO innodb_posts VALUES (1, 'draft')", NULL, NULL, &errmsg) !=
+        MYLITE_OK
     );
     assert(errmsg != NULL);
     mylite_free(errmsg);
     errmsg = NULL;
-    assert_exec_fails(db, "DROP TABLE posts");
-    assert(mylite_storage_table_exists(filename, "app", "posts") == MYLITE_STORAGE_OK);
-    assert_catalog_table_count(filename, "app", "posts", 1U);
+    assert_exec_fails(db, "DROP TABLE aria_posts");
+    assert(mylite_storage_table_exists(filename, "app", "aria_posts") == MYLITE_STORAGE_OK);
+    assert_catalog_table_count(filename, "app", 5U);
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
     tables = (table_context){0};
     db = open_database_with_filename(root, filename);
-    assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, &errmsg) == MYLITE_OK);
-    assert(errmsg == NULL);
-    assert(mylite_exec(db, "USE app", NULL, NULL, &errmsg) == MYLITE_OK);
-    assert(errmsg == NULL);
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
     assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
-    assert(tables.found_posts);
-    assert(mylite_exec(db, "SELECT * FROM posts", row_callback, &rows, &errmsg) == MYLITE_OK);
+    assert(tables.rows == 5);
+    assert(
+        mylite_exec(db, "SELECT * FROM innodb_posts", row_callback, &rows, &errmsg) == MYLITE_OK
+    );
     assert(errmsg == NULL);
     assert(rows.rows == 0);
-    assert_catalog_table_count(filename, "app", "posts", 1U);
+    assert_catalog_table_count(filename, "app", 5U);
+    assert_catalog_table_metadata(filename, "app", "innodb_posts", "InnoDB", "MYLITE");
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
     free(filename);
     remove_tree(root);
     free(root);
+}
+
+static void assert_exec_succeeds(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+    const int result = mylite_exec(db, sql, NULL, NULL, &errmsg);
+    if (result != MYLITE_OK) {
+        fprintf(stderr, "SQL failed: %s\n%s\n", sql, errmsg != NULL ? errmsg : "(no error)");
+    }
+    assert(result == MYLITE_OK);
+    assert(errmsg == NULL);
 }
 
 static void assert_exec_fails(mylite_db *db, const char *sql) {
@@ -179,20 +213,36 @@ static void assert_exec_fails(mylite_db *db, const char *sql) {
 static void assert_catalog_table_count(
     const char *filename,
     const char *schema_name,
-    const char *table_name,
     unsigned count
 ) {
-    catalog_table_context ctx = {
-        .expected_schema_name = schema_name,
-        .expected_table_name = table_name,
-    };
+    catalog_table_context ctx = {0};
 
     assert(
         mylite_storage_list_tables(filename, schema_name, catalog_table_callback, &ctx) ==
         MYLITE_STORAGE_OK
     );
     assert(ctx.count == count);
-    assert(count == 0U || ctx.found_expected_table);
+}
+
+static void assert_catalog_table_metadata(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    const char *requested_engine_name,
+    const char *effective_engine_name
+) {
+    mylite_storage_table_metadata metadata = {
+        .size = sizeof(metadata),
+    };
+
+    assert(
+        mylite_storage_read_table_metadata(filename, schema_name, table_name, &metadata) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(strcmp(metadata.requested_engine_name, requested_engine_name) == 0);
+    assert(strcmp(metadata.effective_engine_name, effective_engine_name) == 0);
+    mylite_storage_free(metadata.requested_engine_name);
+    mylite_storage_free(metadata.effective_engine_name);
 }
 
 static int engine_callback(void *ctx, int column_count, char **values, char **column_names) {
@@ -207,7 +257,7 @@ static int engine_callback(void *ctx, int column_count, char **values, char **co
     }
 
     engine_ctx->found_mylite = 1;
-    if (values[1] != NULL && strcmp(values[1], "YES") == 0) {
+    if (values[1] != NULL && (strcmp(values[1], "YES") == 0 || strcmp(values[1], "DEFAULT") == 0)) {
         engine_ctx->supported_mylite = 1;
     }
 
@@ -220,9 +270,7 @@ static int table_callback(void *ctx, int column_count, char **values, char **col
 
     assert(column_count >= 1);
     ++table_ctx->rows;
-    if (values[0] != NULL && strcmp(values[0], "posts") == 0) {
-        table_ctx->found_posts = 1;
-    }
+    assert(values[0] != NULL);
     return 0;
 }
 
@@ -240,11 +288,8 @@ static int catalog_table_callback(void *ctx, const char *schema_name, const char
 
     assert(schema_name != NULL);
     assert(table_name != NULL);
+    assert(strcmp(schema_name, "app") == 0);
     ++catalog_ctx->count;
-    if (strcmp(schema_name, catalog_ctx->expected_schema_name) == 0 &&
-        strcmp(table_name, catalog_ctx->expected_table_name) == 0) {
-        catalog_ctx->found_expected_table = 1;
-    }
     return 0;
 }
 

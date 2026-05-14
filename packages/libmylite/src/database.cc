@@ -85,6 +85,7 @@ int prepare_primary_file(const std::filesystem::path &filename, unsigned flags);
 int map_storage_result(mylite_storage_result result);
 int start_runtime(mylite_db &database, const mylite_open_config *config);
 int connect_runtime(mylite_db &database);
+int configure_connection(mylite_db &database);
 #endif
 void close_connection(mylite_db &database);
 void release_runtime(void);
@@ -508,8 +509,27 @@ int connect_runtime(mylite_db &database) {
     }
 
     database.connected = true;
-    return MYLITE_OK;
+    return configure_connection(database);
 #  endif
+}
+
+int configure_connection(mylite_db &database) {
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+    if (database.filename == ":memory:") {
+        return MYLITE_OK;
+    }
+
+    if (mysql_query(&database.mysql, "SET SESSION sql_mode=''") != 0 ||
+        mysql_query(&database.mysql, "SET SESSION default_storage_engine=MYLITE") != 0 ||
+        mysql_query(&database.mysql, "SET SESSION enforce_storage_engine=MYLITE") != 0) {
+        set_mariadb_error(database);
+        return MYLITE_ERROR;
+    }
+#  else
+    (void)database;
+#  endif
+
+    return MYLITE_OK;
 }
 #endif
 

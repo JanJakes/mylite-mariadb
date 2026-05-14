@@ -82,6 +82,10 @@ static mylite_storage_result find_table_record(
     const char *table_name,
     mylite_storage_catalog_entry *out_entry
 );
+static mylite_storage_result read_table_metadata_from_record(
+    const unsigned char *record,
+    mylite_storage_table_metadata *out_metadata
+);
 static int record_matches_table(
     const unsigned char *record,
     const char *schema_name,
@@ -352,6 +356,55 @@ mylite_storage_result mylite_storage_read_table_definition(
         free(*out_definition);
         *out_definition = NULL;
         *out_definition_size = 0U;
+    }
+    return result;
+}
+
+mylite_storage_result mylite_storage_read_table_metadata(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    mylite_storage_table_metadata *out_metadata
+) {
+    if (filename == NULL || filename[0] == '\0' || schema_name == NULL || schema_name[0] == '\0' ||
+        table_name == NULL || table_name[0] == '\0' || out_metadata == NULL ||
+        out_metadata->size < sizeof(*out_metadata)) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    *out_metadata = (mylite_storage_table_metadata){
+        .size = sizeof(*out_metadata),
+    };
+
+    FILE *file = NULL;
+    mylite_storage_result result = open_existing_file(filename, &file);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_header header = {0};
+    unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    mylite_storage_catalog_entry entry = {0};
+    result = read_header(file, &header);
+    if (result == MYLITE_STORAGE_OK) {
+        result = read_catalog_root(file, &header, catalog_page);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = find_table_record(catalog_page, schema_name, table_name, &entry);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = read_table_metadata_from_record(entry.record, out_metadata);
+    }
+
+    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    if (result != MYLITE_STORAGE_OK) {
+        free(out_metadata->requested_engine_name);
+        free(out_metadata->effective_engine_name);
+        *out_metadata = (mylite_storage_table_metadata){
+            .size = sizeof(*out_metadata),
+        };
     }
     return result;
 }
@@ -952,6 +1005,23 @@ static mylite_storage_result find_table_record(
         offset += get_u32_le(record, MYLITE_STORAGE_FORMAT_RECORD_SIZE_OFFSET);
     }
     return MYLITE_STORAGE_NOTFOUND;
+}
+
+static mylite_storage_result read_table_metadata_from_record(
+    const unsigned char *record,
+    mylite_storage_table_metadata *out_metadata
+) {
+    char *requested_engine_name = copy_record_field(record, 2U);
+    char *effective_engine_name = copy_record_field(record, 3U);
+    if (requested_engine_name == NULL || effective_engine_name == NULL) {
+        free(requested_engine_name);
+        free(effective_engine_name);
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    out_metadata->requested_engine_name = requested_engine_name;
+    out_metadata->effective_engine_name = effective_engine_name;
+    return MYLITE_STORAGE_OK;
 }
 
 static int record_matches_table(

@@ -122,10 +122,14 @@ DDL routing must cover both discovery and writes:
 `CREATE`, `ALTER`, `DROP`, and `RENAME` are the minimum DDL lifecycle for
 claiming native single-file table metadata.
 
-Current support covers explicit `CREATE TABLE ... ENGINE=MYLITE` metadata
-capture and discovery only. `DROP` and `RENAME` deliberately return unsupported
-handler errors so the default MariaDB file-extension delete/rename paths cannot
-silently diverge from the MyLite catalog.
+Current support covers metadata capture and discovery for omitted/default
+engine requests, explicit `ENGINE=MYLITE`, and metadata-safe `ENGINE=InnoDB`,
+`ENGINE=MyISAM`, and `ENGINE=Aria` requests. The catalog records both the
+requested engine name and the effective `MYLITE` engine. Unsupported explicit
+engine requests fail before catalog publication. `DROP` and `RENAME`
+deliberately return unsupported handler errors so the default MariaDB
+file-extension delete/rename paths cannot silently diverge from the MyLite
+catalog.
 
 ## Schemas And System Surfaces
 

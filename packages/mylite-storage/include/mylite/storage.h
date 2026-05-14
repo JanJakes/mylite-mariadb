@@ -55,6 +55,12 @@ typedef struct mylite_storage_table_definition {
     size_t definition_size;
 } mylite_storage_table_definition;
 
+typedef struct mylite_storage_table_metadata {
+    size_t size;
+    char *requested_engine_name;
+    char *effective_engine_name;
+} mylite_storage_table_metadata;
+
 typedef int (*mylite_storage_table_callback)(
     void *ctx,
     const char *schema_name,
@@ -78,6 +84,12 @@ mylite_storage_result mylite_storage_read_table_definition(
     const char *table_name,
     unsigned char **out_definition,
     size_t *out_definition_size
+);
+mylite_storage_result mylite_storage_read_table_metadata(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    mylite_storage_table_metadata *out_metadata
 );
 mylite_storage_result mylite_storage_table_exists(
     const char *filename,

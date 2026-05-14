@@ -13,13 +13,17 @@
   along with this program; if not, write to the Free Software
   Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1335  USA */
 
+#define MYSQL_SERVER 1
+
 #include <my_global.h>
+#include <m_ctype.h>
 #include <mylite/storage.h>
 #include <mysql/plugin.h>
 
 #include "ha_mylite.h"
 #include "handler.h"
 #include "sql_class.h"
+#include "sql_cmd.h"
 
 static handler *mylite_create_handler(handlerton *hton,
                                       TABLE_SHARE *table,
@@ -35,6 +39,13 @@ static int mylite_done_func(void *p);
 static int mylite_add_discovered_table(void *ctx, const char *schema_name,
                                        const char *table_name);
 static const char *mylite_primary_file_path();
+static int mylite_requested_engine_name(HA_CREATE_INFO *create_info,
+                                        char *out_name, size_t out_name_size);
+static int mylite_copy_engine_name(const LEX_CSTRING *engine_name,
+                                   char *out_name, size_t out_name_size);
+static bool mylite_supported_engine_request(const char *engine_name);
+static bool mylite_engine_name_equals(const char *engine_name,
+                                      const char *expected_engine_name);
 static int mylite_storage_to_handler_error(mylite_storage_result result);
 
 static const char *ha_mylite_exts[]= {
@@ -278,6 +289,15 @@ int ha_mylite::create(const char *, TABLE *form, HA_CREATE_INFO *create_info)
   if (!primary_file)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
 
+  char requested_engine_name[NAME_LEN + 1];
+  int engine_name_error=
+    mylite_requested_engine_name(create_info, requested_engine_name,
+                                 sizeof(requested_engine_name));
+  if (engine_name_error)
+    DBUG_RETURN(engine_name_error);
+  if (!mylite_supported_engine_request(requested_engine_name))
+    DBUG_RETURN(HA_ERR_UNSUPPORTED);
+
   const uchar *frm= NULL;
   size_t frm_len= 0;
   if (form->s->read_frm_image(&frm, &frm_len))
@@ -287,7 +307,7 @@ int ha_mylite::create(const char *, TABLE *form, HA_CREATE_INFO *create_info)
     sizeof(definition),
     form->s->db.str,
     form->s->table_name.str,
-    ha_resolve_storage_engine_name(create_info->db_type),
+    requested_engine_name,
     MYLITE_STORAGE_ENGINE_NAME,
     frm,
     frm_len
@@ -309,6 +329,55 @@ int ha_mylite::rename_table(const char *, const char *)
 {
   DBUG_ENTER("ha_mylite::rename_table");
   DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+}
+
+static int mylite_requested_engine_name(HA_CREATE_INFO *create_info,
+                                        char *out_name, size_t out_name_size)
+{
+  if (!(create_info->used_fields & HA_CREATE_USED_ENGINE))
+  {
+    static const LEX_CSTRING default_engine= {STRING_WITH_LEN("DEFAULT")};
+    return mylite_copy_engine_name(&default_engine, out_name, out_name_size);
+  }
+
+  THD *thd= current_thd;
+  if (!thd || !thd->lex || !thd->lex->m_sql_cmd)
+    return HA_ERR_UNSUPPORTED;
+
+  Storage_engine_name *storage_engine_name=
+    thd->lex->m_sql_cmd->option_storage_engine_name();
+  if (!storage_engine_name || !storage_engine_name->name()->str)
+    return HA_ERR_UNSUPPORTED;
+
+  return mylite_copy_engine_name(storage_engine_name->name(), out_name,
+                                 out_name_size);
+}
+
+static int mylite_copy_engine_name(const LEX_CSTRING *engine_name,
+                                   char *out_name, size_t out_name_size)
+{
+  if (!engine_name || !engine_name->str || engine_name->length == 0 ||
+      engine_name->length >= out_name_size)
+    return HA_ERR_UNSUPPORTED;
+
+  memcpy(out_name, engine_name->str, engine_name->length);
+  out_name[engine_name->length]= '\0';
+  return 0;
+}
+
+static bool mylite_supported_engine_request(const char *engine_name)
+{
+  return mylite_engine_name_equals(engine_name, "DEFAULT") ||
+         mylite_engine_name_equals(engine_name, MYLITE_STORAGE_ENGINE_NAME) ||
+         mylite_engine_name_equals(engine_name, "InnoDB") ||
+         mylite_engine_name_equals(engine_name, "MyISAM") ||
+         mylite_engine_name_equals(engine_name, "Aria");
+}
+
+static bool mylite_engine_name_equals(const char *engine_name,
+                                      const char *expected_engine_name)
+{
+  return my_strcasecmp_latin1(engine_name, expected_engine_name) == 0;
 }
 
 THR_LOCK_DATA **ha_mylite::store_lock(THD *, THR_LOCK_DATA **to,

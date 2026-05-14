@@ -174,6 +174,9 @@ static void test_store_and_read_table_definition(void) {
     mylite_storage_header header = {0};
     unsigned char *stored_definition = NULL;
     size_t stored_definition_size = 0U;
+    mylite_storage_table_metadata metadata = {
+        .size = sizeof(metadata),
+    };
     table_list_capture capture = {0};
 
     assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
@@ -198,6 +201,13 @@ static void test_store_and_read_table_definition(void) {
     assert(stored_definition_size == sizeof(definition));
     assert(memcmp(stored_definition, definition, sizeof(definition)) == 0);
     mylite_storage_free(stored_definition);
+    assert(
+        mylite_storage_read_table_metadata(filename, "app", "posts", &metadata) == MYLITE_STORAGE_OK
+    );
+    assert(strcmp(metadata.requested_engine_name, "MYLITE") == 0);
+    assert(strcmp(metadata.effective_engine_name, "MYLITE") == 0);
+    mylite_storage_free(metadata.requested_engine_name);
+    mylite_storage_free(metadata.effective_engine_name);
 
     assert(
         mylite_storage_list_tables(filename, "app", collect_table, &capture) == MYLITE_STORAGE_OK
