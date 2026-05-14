@@ -24,9 +24,11 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(CTest)
 include(MyLiteCompilerOptions)
 include(MyLiteDeveloperTools)
+include(MyLiteMariaDB)
 
 option(MYLITE_BUILD_TOOLS "Build MyLite command-line tools" ON)
 option(MYLITE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
+option(MYLITE_WITH_MARIADB_EMBEDDED "Build libmylite with the MariaDB embedded backend" OFF)
 
 add_subdirectory(packages/libmylite)
 

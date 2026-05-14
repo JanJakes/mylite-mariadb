@@ -24,7 +24,9 @@ typedef struct mylite_stmt mylite_stmt;
 
 `mylite_db` owns one logical embedded MariaDB connection to one MyLite database
 directory. Multiple handles for the same directory coordinate through a shared
-directory runtime.
+directory runtime. The current embedded implementation supports one open
+database directory per process at a time; opening a different directory while
+the runtime is active returns `MYLITE_BUSY`.
 
 `mylite_stmt` owns one prepared statement.
 
@@ -73,11 +75,11 @@ int mylite_close(mylite_db *db);
 Flags:
 
 ```c
-#define MYLITE_OPEN_READONLY   0x00000001u
-#define MYLITE_OPEN_READWRITE  0x00000002u
-#define MYLITE_OPEN_CREATE     0x00000004u
-#define MYLITE_OPEN_EXCLUSIVE  0x00000008u
-#define MYLITE_OPEN_URI        0x00000010u
+#define MYLITE_OPEN_READONLY   0x00000001U
+#define MYLITE_OPEN_READWRITE  0x00000002U
+#define MYLITE_OPEN_CREATE     0x00000004U
+#define MYLITE_OPEN_EXCLUSIVE  0x00000008U
+#define MYLITE_OPEN_URI        0x00000010U
 ```
 
 Profiles:
@@ -92,9 +94,21 @@ Profiles:
 Pass `MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE` with `NULL` configuration for
 the default read/write-create behavior.
 `mylite_open_config.size` makes the struct growable without breaking ABI.
+`MYLITE_OPEN_READONLY` currently returns `MYLITE_MISUSE`; it is reserved until
+the native-storage lifecycle can enforce read-only access through MariaDB engine
+configuration.
 
-`mylite_close()` returns `MYLITE_BUSY` when statements or dependent resources
-still exist. Deferred close can be added separately if a real use case appears.
+Once statement handles exist, `mylite_close()` returns `MYLITE_BUSY` when
+statements or dependent resources still exist. Deferred close can be added
+separately if a real use case appears.
+
+Initial implementation status: open/close is backed by MariaDB embedded startup
+when the `embedded-dev` CMake preset enables it. MyLite passes owned startup
+options, ignores ambient option files with `--no-defaults`, establishes the
+requested MyLite database directory, creates a temporary runtime directory for
+MariaDB bootstrap files, and removes that runtime directory on the final close.
+Durable native storage inside the MyLite database directory is not claimed until
+the native-storage directory lifecycle is configured and tested.
 
 ## Direct Execution
 

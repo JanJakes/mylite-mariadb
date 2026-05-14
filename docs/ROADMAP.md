@@ -23,9 +23,9 @@ native storage files inside that directory.
 | 0 | Project foundation | ✅&nbsp;Done | Define the product goal, GPL baseline, architecture direction, workflow, and initial MariaDB research. |
 | 1 | Import MariaDB 11.8.6 | ✅&nbsp;Done | Import `mariadb-11.8.6` mechanically and record upstream refs. |
 | 2 | Minimal embedded build | ✅&nbsp;Done | Produce a reproducible embedded build and record baseline artifact size and enabled components. |
-| 3 | Embedded bootstrap | 🟡&nbsp;In&nbsp;progress | Start the MariaDB-derived runtime under MyLite-owned defaults and reject daemon-only startup surfaces. |
-| 4 | Public open/close API | ⚪&nbsp;Planned | Add `libmylite` database handles, diagnostics, open flags, and close behavior. |
-| 5 | SQL execution API | ⚪&nbsp;Planned | Add direct execution, prepared statements, bindings, columns, warnings, affected rows, and insert ids. |
+| 3 | Embedded bootstrap | ✅&nbsp;Done | Start the MariaDB-derived runtime under MyLite-owned defaults and reject daemon-only startup surfaces. |
+| 4 | Public open/close API | ✅&nbsp;Done | Add `libmylite` database handles, diagnostics, open flags, and close behavior. |
+| 5 | SQL execution API | 🟡&nbsp;In&nbsp;progress | Add direct execution, prepared statements, bindings, columns, warnings, affected rows, and insert ids. |
 | 6 | Native storage baseline | ⚪&nbsp;Planned | Configure MariaDB native storage engines inside the MyLite database directory and add controlled smoke coverage. |
 | 7 | Metadata and DDL lifecycle | ⚪&nbsp;Planned | Keep `CREATE`, `ALTER`, `DROP`, and `RENAME` metadata and engine files inside the MyLite database directory. |
 | 8 | Directory lifecycle policy | ⚪&nbsp;Planned | Define database-directory layout, initialization markers, schema namespaces, cleanup rules, and version policy. |

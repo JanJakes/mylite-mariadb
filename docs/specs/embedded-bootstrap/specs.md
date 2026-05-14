@@ -48,9 +48,11 @@ database directory in the product architecture.
 ## Design
 
 `libmylite` should own one process-global embedded runtime. Initialization must
-be guarded by a mutex and reference count so multiple `mylite_db` handles share
-one MariaDB embedded runtime and the final close calls `mysql_library_end()`
-only after all handles are closed.
+be guarded by a mutex and reference count so multiple `mylite_db` handles for
+the same database directory share one MariaDB embedded runtime and the final
+close calls `mysql_library_end()` only after all handles are closed. Until a
+per-directory runtime model exists, opening a different database directory while
+the runtime is active returns `MYLITE_BUSY`.
 
 The bootstrap argv should be constructed by MyLite, not inherited from the host
 process. The first implementation should pass `--no-defaults` so MariaDB does
@@ -64,7 +66,10 @@ The public open path should:
 
 - validate `mylite_open()` arguments before touching MariaDB;
 - validate open flags and reject conflicting modes;
+- reject read-only opens until native storage can enforce read-only access;
 - normalize the requested path enough to produce deterministic diagnostics;
+- reject a different database directory while the process-global runtime is
+  active before creating that directory;
 - initialize the process-global embedded runtime when the first handle opens;
 - initialize per-thread MariaDB state before using embedded connection APIs;
 - create an embedded `MYSQL` connection with local/embedded semantics only;
@@ -77,6 +82,46 @@ The first implementation should keep MyLite's handle structure opaque and
 private to `packages/libmylite`. Raw MariaDB handles may be stored internally
 only as an implementation detail.
 
+## Implementation Notes
+
+The first implementation adds an optional MariaDB embedded backend to
+`libmylite`. The normal `dev` preset keeps first-party validation lightweight;
+the `embedded-dev` preset links `libmylite` against
+`build/mariadb-embedded/libmysqld/libmariadbd.a` and runs the embedded lifecycle
+tests.
+
+Runtime startup uses MyLite-owned arguments:
+
+- `--no-defaults`
+- `--datadir=<runtime>/data`
+- `--tmpdir=<runtime>/tmp`
+- `--plugin-dir=<runtime>/plugins`
+- `--skip-grant-tables`
+- `--skip-networking`
+- `--default-storage-engine=MyISAM`
+- `--innodb=OFF`
+- explicit message and character-set directories from the MariaDB build/source
+
+`--default-storage-engine=MyISAM` and `--innodb=OFF` are temporary bootstrap
+choices. They avoid non-final InnoDB sidecars in open/close and SQL smoke tests;
+they do not resolve the later compatibility requirement to configure native
+InnoDB storage inside the MyLite database directory.
+
+MariaDB embedded restart required two narrow fork patches:
+
+- `mariadb/sql/mysqld.cc` restores the scheduler function pointers after
+  `mysql_server_end()` so a later embedded startup does not call through a null
+  scheduler.
+- `mariadb/sql/sql_locale.cc` preserves the active error-message table across
+  `mysql_server_end()` so the next `init_errmessage()` call can release it
+  through MariaDB's existing owner path.
+
+The implementation does not call `mysql_thread_init()` per handle. In the tested
+single-threaded embedded path, `mysql_real_connect()` creates and stores the
+embedded THD; extra per-handle thread init/end calls corrupted repeated
+same-thread lifecycle tests. Multi-threaded handle use remains a later
+concurrency slice.
+
 ## File Lifecycle
 
 Before native storage directory lifecycle exists, open/create establishes the
@@ -86,6 +131,11 @@ runtime directory is either removed on close or its remaining contents are
 documented as transient bootstrap debt. The user-provided MyLite path is the
 product boundary and must not silently become a server datadir outside MyLite
 ownership.
+
+The implemented bootstrap removes the temporary runtime directory on the final
+close. With InnoDB disabled, MariaDB still creates Aria control/log files during
+startup; those files remain confined to the temporary runtime directory and are
+not durable MyLite state.
 
 Once native storage directory lifecycle exists, durable metadata and table state
 must stay inside the MyLite database directory and this bootstrap layer should
@@ -101,7 +151,8 @@ Compatibility evidence should focus on lifecycle behavior:
 - unsupported server surfaces fail explicitly instead of leaking through
   defaults;
 - diagnostics preserve MariaDB errno and SQLSTATE where available;
-- close behavior is deterministic when statements or dependent handles exist.
+- close behavior is deterministic. Statement-dependent `MYLITE_BUSY` close
+  behavior belongs to the later prepared-statement slice.
 
 Update `docs/COMPATIBILITY.md` when public open/close behavior lands.
 
@@ -116,14 +167,19 @@ Update `docs/COMPATIBILITY.md` when public open/close behavior lands.
    bootstrap scaffolding.
 5. Add diagnostics tests for at least one startup failure and one bad path or
    flag failure.
+6. Add coverage for `:memory:` open/close, exclusive existing-directory failure,
+   and the temporary one-active-directory-per-process runtime limit.
 
 ## Acceptance Criteria
 
 - `mylite_open()` is implemented behind the documented public C API shape.
 - `MYLITE_OPEN_CREATE` creates the requested MyLite database directory, not a
   placeholder file.
+- `MYLITE_OPEN_READONLY` fails explicitly until native storage can enforce it.
 - `mylite_close()` releases all per-handle state and tears down the global
   embedded runtime only when the last handle closes.
+- A second database directory open returns `MYLITE_BUSY` while the runtime is
+  active and does not create the rejected directory.
 - The open path uses MyLite-owned argv/options and does not read ambient MariaDB
   option files.
 - Tests cover successful open/close, invalid arguments, diagnostics, and

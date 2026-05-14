@@ -2061,7 +2061,12 @@ static void clean_up(bool print_message)
   if (print_message && my_default_lc_messages && server_start_time)
     sql_print_information(ER_DEFAULT(ER_SHUTDOWN_COMPLETE),my_progname);
   MYSQL_CALLBACK(thread_scheduler, end, ());
+#ifdef EMBEDDED_LIBRARY
+  thread_scheduler= &thread_scheduler_struct;
+  extra_thread_scheduler= &extra_thread_scheduler_struct;
+#else
   thread_scheduler= 0;
+#endif
   mysql_library_end();
   finish_client_errs();
   free_root(&startup_root, MYF(0));

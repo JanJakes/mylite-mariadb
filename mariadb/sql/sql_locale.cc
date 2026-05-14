@@ -3542,6 +3542,17 @@ void cleanup_errmsgs()
 {
   for (MY_LOCALE_ERRMSGS *msgs= global_errmsgs; msgs->language; msgs++)
   {
+#ifdef EMBEDDED_LIBRARY
+    /*
+      init_errmessage() owns the active table through a private static pointer.
+      Keep it alive across mysql_server_end(), so an embedded restart can let
+      init_errmessage() release it before registering the next table.
+    */
+    if (my_default_lc_messages &&
+        msgs->errmsgs == my_default_lc_messages->errmsgs->errmsgs)
+      continue;
+#endif
     my_free(msgs->errmsgs);
+    msgs->errmsgs= 0;
   }
 }

@@ -26,11 +26,12 @@ for drop-in application expectations.
 
 | Capability | MyLite status | Compatibility target |
 | --- | --- | --- |
-| Open and close a database directory | ⚪&nbsp;Planned | SQLite-like handle ownership over a MyLite directory path |
+| Open and close a database directory | 🟡&nbsp;Partial | Implemented for read/write local directory paths with one active database directory per process and a temporary MariaDB runtime directory that is removed on final close |
+| Read-only opens | ⚪&nbsp;Planned | Reserved until native storage can enforce read-only engine access |
 | Direct SQL execution | ⚪&nbsp;Planned | Convenience API for one-shot SQL and textual result callbacks |
 | Prepared statements | ⚪&nbsp;Planned | Reusable statements with 1-based parameter binding |
 | Binary-safe values | ⚪&nbsp;Planned | Explicit BLOB/TEXT byte counts; no NUL-terminated-value assumptions |
-| Diagnostics | ⚪&nbsp;Planned | Stable MyLite result codes plus MariaDB errno and SQLSTATE |
+| Diagnostics | 🟡&nbsp;Partial | Open handles expose stable MyLite result codes, MariaDB errno, SQLSTATE, and message text |
 | Warnings | ⚪&nbsp;Planned | MariaDB-compatible warning counts and structured warning access |
 | Affected rows and insert ids | ⚪&nbsp;Planned | Preserve common MariaDB application behavior |
 | Raw `MYSQL *` as primary API | ➖&nbsp;Out&nbsp;of&nbsp;scope | Available only through a deliberate compatibility adapter |
@@ -50,12 +51,12 @@ for drop-in application expectations.
 
 | Capability | MyLite status | Target behavior |
 | --- | --- | --- |
-| Primary portable database directory | ⚪&nbsp;Planned | One user-visible MyLite database directory |
+| Primary portable database directory | 🟡&nbsp;Partial | Open/create establishes a MyLite-owned directory; durable native storage layout is still being defined |
 | MariaDB metadata files | ⚪&nbsp;Planned | Allowed when created inside the MyLite database directory |
 | InnoDB files | ⚪&nbsp;Planned | Tablespaces, redo, undo, and recovery files stay inside the MyLite database directory |
 | MyISAM files | ⚪&nbsp;Planned | `.MYD` and `.MYI` files stay inside the MyLite database directory |
 | Aria files | ⚪&nbsp;Planned | `.MAI`, `.MAD`, `aria_log.*`, and Aria control state stay inside the MyLite database directory |
-| MyLite-owned transient paths | ⚪&nbsp;Planned | Deterministic recovery, lock, shared-memory, and temporary files with documented cleanup rules |
+| MyLite-owned transient paths | 🟡&nbsp;Partial | Bootstrap uses a MyLite-owned temporary MariaDB runtime directory and removes it on final close |
 | Durable files outside the database directory | ➖&nbsp;Out&nbsp;of&nbsp;scope | Reject or reconfigure surfaces that would write durable state outside the MyLite directory |
 
 ## SQL Surface

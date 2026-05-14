@@ -31,13 +31,16 @@ PLUGIN_S3=NO
 ```
 
 `WITH_ZLIB=bundled` prevents the system zlib lookup from adding the macOS SDK
-root include directory as a normal `-I` path. `WITH_WSREP=OFF` and
+root include directory as a normal `-I` path. The embedded archive includes the
+bundled zlib objects, so `libmylite` does not add a separate host zlib link.
+`WITH_WSREP=OFF` and
 `PLUGIN_S3=NO` are required because the initial MariaDB import intentionally
 omits `wsrep-lib` and `storage/maria/libmarias3`.
 
 ## Measurement
 
-Measured on 2026-05-14 from the imported MariaDB 11.8.6 source tree.
+Measured on 2026-05-14 from the imported MariaDB 11.8.6 source tree with the
+MyLite embedded-restart patches applied.
 
 | Field | Value |
 | --- | --- |

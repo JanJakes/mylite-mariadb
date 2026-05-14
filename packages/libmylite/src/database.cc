@@ -1,0 +1,526 @@
+#include <mylite/mylite.h>
+
+#include <algorithm>
+#include <chrono>
+#include <cstddef>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <filesystem>
+#include <memory>
+#include <mutex>
+#include <new>
+#include <string>
+#include <system_error>
+#include <vector>
+
+#if MYLITE_WITH_MARIADB_EMBEDDED
+#  include <mysql.h>
+#endif
+
+#ifndef MYLITE_MARIADB_MESSAGES_DIR
+#  define MYLITE_MARIADB_MESSAGES_DIR ""
+#endif
+
+#ifndef MYLITE_MARIADB_CHARSETS_DIR
+#  define MYLITE_MARIADB_CHARSETS_DIR ""
+#endif
+
+namespace {
+
+constexpr unsigned k_known_open_flags = MYLITE_OPEN_READONLY | MYLITE_OPEN_READWRITE |
+                                        MYLITE_OPEN_CREATE | MYLITE_OPEN_EXCLUSIVE |
+                                        MYLITE_OPEN_URI;
+constexpr const char *k_sqlstate_ok = "00000";
+constexpr const char *k_sqlstate_general = "HY000";
+constexpr const char *k_not_an_error = "not an error";
+constexpr const char *k_bad_db_handle = "bad database handle";
+
+struct RuntimeState {
+    std::mutex mutex;
+    unsigned ref_count = 0;
+    std::filesystem::path directory;
+    std::string database_path;
+    std::vector<std::string> arguments;
+    std::vector<char *> argv;
+};
+
+RuntimeState g_runtime;
+
+} // namespace
+
+struct mylite_db {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    MYSQL mysql = {};
+#endif
+    std::string database_path;
+    int errcode = MYLITE_OK;
+    int extended_errcode = MYLITE_OK;
+    unsigned mariadb_errno = 0;
+    std::string sqlstate = k_sqlstate_ok;
+    std::string errmsg = k_not_an_error;
+    bool connected = false;
+};
+
+namespace {
+
+int open_impl(
+    const char *path,
+    mylite_db **out_db,
+    unsigned flags,
+    const mylite_open_config *config
+);
+int validate_open_args(
+    const char *path,
+    mylite_db **out_db,
+    unsigned flags,
+    const mylite_open_config *config
+);
+#if MYLITE_WITH_MARIADB_EMBEDDED
+int validate_runtime_database_path(mylite_db &db);
+int prepare_database_directory(const std::filesystem::path &database_path, unsigned flags);
+int start_runtime(mylite_db &db, const mylite_open_config *config);
+int connect_runtime(mylite_db &db);
+#endif
+void close_connection(mylite_db &db);
+void release_runtime(void);
+#if MYLITE_WITH_MARIADB_EMBEDDED
+std::filesystem::path normalize_database_path(const char *path);
+std::filesystem::path create_runtime_directory(const mylite_open_config *config);
+std::filesystem::path runtime_root(const mylite_open_config *config);
+std::string unique_runtime_name(void);
+void create_runtime_subdirectory(const std::filesystem::path &directory, const char *message);
+std::vector<std::string> runtime_arguments(const std::filesystem::path &runtime_dir);
+std::vector<char *> mutable_arguments(std::vector<std::string> &arguments);
+#endif
+void remove_directory_if_present(const std::filesystem::path &directory);
+#if MYLITE_WITH_MARIADB_EMBEDDED
+void set_error(mylite_db &db, int code, const char *message);
+void set_mariadb_error(mylite_db &db);
+#endif
+const char *safe_c_str(const std::string &value);
+bool has_config_field(const mylite_open_config *config, std::size_t field_end);
+
+} // namespace
+
+int mylite_open(
+    const char *path,
+    mylite_db **out_db,
+    unsigned flags,
+    const mylite_open_config *config
+) {
+    return open_impl(path, out_db, flags, config);
+}
+
+int mylite_close(mylite_db *db) {
+    if (db == nullptr) {
+        return MYLITE_OK;
+    }
+
+    close_connection(*db);
+    release_runtime();
+    delete db;
+    return MYLITE_OK;
+}
+
+int mylite_errcode(mylite_db *db) {
+    return db != nullptr ? db->errcode : MYLITE_MISUSE;
+}
+
+int mylite_extended_errcode(mylite_db *db) {
+    return db != nullptr ? db->extended_errcode : MYLITE_MISUSE;
+}
+
+unsigned mylite_mariadb_errno(mylite_db *db) {
+    return db != nullptr ? db->mariadb_errno : 0;
+}
+
+const char *mylite_sqlstate(mylite_db *db) {
+    return db != nullptr ? safe_c_str(db->sqlstate) : k_sqlstate_general;
+}
+
+const char *mylite_errmsg(mylite_db *db) {
+    return db != nullptr ? safe_c_str(db->errmsg) : k_bad_db_handle;
+}
+
+namespace {
+
+int open_impl(
+    const char *path,
+    mylite_db **out_db,
+    unsigned flags,
+    const mylite_open_config *config
+) {
+    const int validation_result = validate_open_args(path, out_db, flags, config);
+    if (validation_result != MYLITE_OK) {
+        return validation_result;
+    }
+
+#if !MYLITE_WITH_MARIADB_EMBEDDED
+    (void)config;
+    return MYLITE_ERROR;
+#else
+    try {
+        std::unique_ptr<mylite_db> db(new mylite_db());
+        db->database_path = normalize_database_path(path).string();
+
+        const int runtime_path_result = validate_runtime_database_path(*db);
+        if (runtime_path_result != MYLITE_OK) {
+            return runtime_path_result;
+        }
+
+        const int directory_result = prepare_database_directory(db->database_path, flags);
+        if (directory_result != MYLITE_OK) {
+            return directory_result;
+        }
+
+        const int runtime_result = start_runtime(*db, config);
+        if (runtime_result != MYLITE_OK) {
+            return runtime_result;
+        }
+
+        const int connect_result = connect_runtime(*db);
+        if (connect_result != MYLITE_OK) {
+            close_connection(*db);
+            release_runtime();
+            return connect_result;
+        }
+
+        *out_db = db.release();
+        return MYLITE_OK;
+    } catch (const std::bad_alloc &) {
+        return MYLITE_NOMEM;
+    } catch (const std::filesystem::filesystem_error &) {
+        return MYLITE_IOERR;
+    }
+#endif
+}
+
+int validate_open_args(
+    const char *path,
+    mylite_db **out_db,
+    unsigned flags,
+    const mylite_open_config *config
+) {
+    if (out_db == nullptr) {
+        return MYLITE_MISUSE;
+    }
+    *out_db = nullptr;
+
+    if (path == nullptr || path[0] == '\0') {
+        return MYLITE_MISUSE;
+    }
+
+    if ((flags & ~k_known_open_flags) != 0U) {
+        return MYLITE_MISUSE;
+    }
+
+    const bool readonly = (flags & MYLITE_OPEN_READONLY) != 0U;
+    const bool readwrite = (flags & MYLITE_OPEN_READWRITE) != 0U;
+    if (readonly == readwrite) {
+        return MYLITE_MISUSE;
+    }
+
+    if (readonly) {
+        return MYLITE_MISUSE;
+    }
+
+    if ((flags & MYLITE_OPEN_URI) != 0U) {
+        return MYLITE_MISUSE;
+    }
+
+    if (config != nullptr && config->size > 0U) {
+        if (has_config_field(
+                config,
+                offsetof(mylite_open_config, profile) + sizeof(config->profile)
+            ) &&
+            config->profile != MYLITE_PROFILE_DEFAULT && config->profile != MYLITE_PROFILE_STRICT &&
+            config->profile != MYLITE_PROFILE_COMPAT) {
+            return MYLITE_MISUSE;
+        }
+
+        if (has_config_field(
+                config,
+                offsetof(mylite_open_config, durability) + sizeof(config->durability)
+            ) &&
+            config->durability != MYLITE_DURABILITY_OFF &&
+            config->durability != MYLITE_DURABILITY_NORMAL &&
+            config->durability != MYLITE_DURABILITY_FULL) {
+            return MYLITE_MISUSE;
+        }
+    }
+
+    return MYLITE_OK;
+}
+
+#if MYLITE_WITH_MARIADB_EMBEDDED
+int validate_runtime_database_path(mylite_db &db) {
+    std::lock_guard<std::mutex> guard(g_runtime.mutex);
+    if (g_runtime.ref_count > 0U && g_runtime.database_path != db.database_path) {
+        set_error(db, MYLITE_BUSY, "embedded runtime is already open for another database");
+        return MYLITE_BUSY;
+    }
+    return MYLITE_OK;
+}
+
+int prepare_database_directory(const std::filesystem::path &database_path, unsigned flags) {
+    if (database_path == ":memory:") {
+        return MYLITE_OK;
+    }
+
+    std::error_code error;
+    const bool exists = std::filesystem::exists(database_path, error);
+    if (error) {
+        return MYLITE_IOERR;
+    }
+
+    if ((flags & MYLITE_OPEN_EXCLUSIVE) != 0U && exists) {
+        return MYLITE_ERROR;
+    }
+
+    if (!exists && (flags & MYLITE_OPEN_CREATE) == 0U) {
+        return MYLITE_NOTFOUND;
+    }
+
+    if (exists) {
+        const bool is_directory = std::filesystem::is_directory(database_path, error);
+        if (error || !is_directory) {
+            return MYLITE_IOERR;
+        }
+        return MYLITE_OK;
+    }
+
+    std::filesystem::create_directories(database_path, error);
+    if (error) {
+        return MYLITE_IOERR;
+    }
+
+    return MYLITE_OK;
+}
+
+int start_runtime(mylite_db &db, const mylite_open_config *config) {
+    std::lock_guard<std::mutex> guard(g_runtime.mutex);
+    if (g_runtime.ref_count > 0U) {
+        if (g_runtime.database_path != db.database_path) {
+            set_error(db, MYLITE_BUSY, "embedded runtime is already open for another database");
+            return MYLITE_BUSY;
+        }
+        ++g_runtime.ref_count;
+        return MYLITE_OK;
+    }
+
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    const std::filesystem::path runtime_dir = create_runtime_directory(config);
+    g_runtime.arguments = runtime_arguments(runtime_dir);
+    g_runtime.argv = mutable_arguments(g_runtime.arguments);
+    char *groups[] = {const_cast<char *>("server"), const_cast<char *>("embedded"), nullptr};
+
+    const int init_result =
+        mysql_server_init(static_cast<int>(g_runtime.argv.size()), g_runtime.argv.data(), groups);
+    if (init_result != 0) {
+        g_runtime.argv.clear();
+        g_runtime.arguments.clear();
+        remove_directory_if_present(runtime_dir);
+        set_error(db, MYLITE_ERROR, "MariaDB embedded runtime initialization failed");
+        return MYLITE_ERROR;
+    }
+
+    g_runtime.directory = runtime_dir;
+    g_runtime.database_path = db.database_path;
+    g_runtime.ref_count = 1;
+    return MYLITE_OK;
+#else
+    (void)config;
+    set_error(db, MYLITE_ERROR, "MariaDB embedded backend is not enabled");
+    return MYLITE_ERROR;
+#endif
+}
+
+int connect_runtime(mylite_db &db) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (mysql_init(&db.mysql) == nullptr) {
+        set_error(db, MYLITE_NOMEM, "MariaDB connection allocation failed");
+        return MYLITE_NOMEM;
+    }
+
+    MYSQL *connection =
+        mysql_real_connect(&db.mysql, nullptr, nullptr, nullptr, nullptr, 0, nullptr, 0);
+    if (connection == nullptr) {
+        set_mariadb_error(db);
+        return MYLITE_ERROR;
+    }
+
+    db.connected = true;
+    return MYLITE_OK;
+#endif
+}
+#endif
+
+void close_connection(mylite_db &db) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (db.connected) {
+        mysql_close(&db.mysql);
+        db.connected = false;
+    }
+#else
+    (void)db;
+#endif
+}
+
+void release_runtime(void) {
+    std::filesystem::path runtime_dir;
+    {
+        const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+        if (g_runtime.ref_count == 0U) {
+            return;
+        }
+
+        --g_runtime.ref_count;
+        if (g_runtime.ref_count > 0U) {
+            return;
+        }
+
+        runtime_dir = g_runtime.directory;
+#if MYLITE_WITH_MARIADB_EMBEDDED
+        mysql_server_end();
+#endif
+        g_runtime.directory.clear();
+        g_runtime.database_path.clear();
+        g_runtime.argv.clear();
+        g_runtime.arguments.clear();
+    }
+
+    remove_directory_if_present(runtime_dir);
+}
+
+#if MYLITE_WITH_MARIADB_EMBEDDED
+std::filesystem::path normalize_database_path(const char *path) {
+    if (std::strcmp(path, ":memory:") == 0) {
+        return std::filesystem::path(":memory:");
+    }
+    return std::filesystem::absolute(std::filesystem::path(path));
+}
+
+std::filesystem::path create_runtime_directory(const mylite_open_config *config) {
+    std::filesystem::path root = runtime_root(config);
+    std::error_code error;
+    std::filesystem::create_directories(root, error);
+    if (error) {
+        throw std::filesystem::filesystem_error("create runtime root", root, error);
+    }
+
+    for (int attempt = 0; attempt < 100; ++attempt) {
+        std::filesystem::path candidate = root / unique_runtime_name();
+        if (std::filesystem::create_directory(candidate, error)) {
+            create_runtime_subdirectory(candidate / "data", "create runtime data directory");
+            create_runtime_subdirectory(candidate / "tmp", "create runtime temporary directory");
+            create_runtime_subdirectory(candidate / "plugins", "create runtime plugin directory");
+            return candidate;
+        }
+        if (error) {
+            throw std::filesystem::filesystem_error("create runtime directory", candidate, error);
+        }
+    }
+
+    throw std::filesystem::filesystem_error(
+        "create runtime directory",
+        root,
+        std::make_error_code(std::errc::file_exists)
+    );
+}
+
+std::filesystem::path runtime_root(const mylite_open_config *config) {
+    if (config != nullptr &&
+        has_config_field(
+            config,
+            offsetof(mylite_open_config, temp_directory) + sizeof(config->temp_directory)
+        ) &&
+        config->temp_directory != nullptr && config->temp_directory[0] != '\0') {
+        return std::filesystem::path(config->temp_directory);
+    }
+    return std::filesystem::temp_directory_path();
+}
+
+std::string unique_runtime_name(void) {
+    const auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+    static unsigned counter = 0;
+    return "mylite-runtime-" + std::to_string(now) + "-" + std::to_string(++counter);
+}
+
+void create_runtime_subdirectory(const std::filesystem::path &directory, const char *message) {
+    std::error_code error;
+    std::filesystem::create_directories(directory, error);
+    if (error) {
+        throw std::filesystem::filesystem_error(message, directory, error);
+    }
+}
+
+std::vector<std::string> runtime_arguments(const std::filesystem::path &runtime_dir) {
+    const std::filesystem::path data_dir = runtime_dir / "data";
+    const std::filesystem::path tmp_dir = runtime_dir / "tmp";
+    const std::filesystem::path plugin_dir = runtime_dir / "plugins";
+
+    return {
+        "mylite",
+        "--no-defaults",
+        "--datadir=" + data_dir.string(),
+        "--tmpdir=" + tmp_dir.string(),
+        "--plugin-dir=" + plugin_dir.string(),
+        "--skip-grant-tables",
+        "--skip-networking",
+        "--default-storage-engine=MyISAM",
+        "--innodb=OFF",
+        "--lc-messages-dir=" MYLITE_MARIADB_MESSAGES_DIR,
+        "--character-sets-dir=" MYLITE_MARIADB_CHARSETS_DIR,
+    };
+}
+
+std::vector<char *> mutable_arguments(std::vector<std::string> &arguments) {
+    std::vector<char *> argv;
+    argv.reserve(arguments.size());
+    std::transform(
+        arguments.begin(),
+        arguments.end(),
+        std::back_inserter(argv),
+        [](std::string &argument) { return argument.data(); }
+    );
+    return argv;
+}
+#endif
+
+void remove_directory_if_present(const std::filesystem::path &directory) {
+    if (directory.empty()) {
+        return;
+    }
+
+    std::error_code ignored;
+    std::filesystem::remove_all(directory, ignored);
+}
+
+#if MYLITE_WITH_MARIADB_EMBEDDED
+void set_error(mylite_db &db, int code, const char *message) {
+    db.errcode = code;
+    db.extended_errcode = code;
+    db.mariadb_errno = 0;
+    db.sqlstate = k_sqlstate_general;
+    db.errmsg = message;
+}
+
+void set_mariadb_error(mylite_db &db) {
+    db.errcode = MYLITE_ERROR;
+    db.extended_errcode = MYLITE_ERROR;
+    db.mariadb_errno = mysql_errno(&db.mysql);
+    db.sqlstate = mysql_sqlstate(&db.mysql);
+    db.errmsg = mysql_error(&db.mysql);
+}
+#endif
+
+const char *safe_c_str(const std::string &value) {
+    return value.empty() ? "" : value.c_str();
+}
+
+bool has_config_field(const mylite_open_config *config, std::size_t field_end) {
+    return config != nullptr && config->size >= field_end;
+}
+
+} // namespace

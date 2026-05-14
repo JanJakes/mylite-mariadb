@@ -15,12 +15,25 @@
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "MYLITE_WARNINGS_AS_ERRORS": "ON"
       }
+    },
+    {
+      "name": "embedded-dev",
+      "displayName": "Developer build with MariaDB embedded backend",
+      "inherits": "dev",
+      "binaryDir": "${sourceDir}/build/embedded-dev",
+      "cacheVariables": {
+        "MYLITE_WITH_MARIADB_EMBEDDED": "ON"
+      }
     }
   ],
   "buildPresets": [
     {
       "name": "dev",
       "configurePreset": "dev"
+    },
+    {
+      "name": "embedded-dev",
+      "configurePreset": "embedded-dev"
     },
     {
       "name": "format",
@@ -48,6 +61,13 @@
     {
       "name": "dev",
       "configurePreset": "dev",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "embedded-dev",
+      "configurePreset": "embedded-dev",
       "output": {
         "outputOnFailure": true
       }

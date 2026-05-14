@@ -96,8 +96,8 @@ The key difference is that MyLite's directory can hold multiple databases, follo
 MariaDB engine capabilities.
 
 MyLite should also be capable of setting up a full in-memory database regardless
-of what engines are defined for table storage in the SQL. This should be supported
-via the special `:memory:` database path.
+of what engines are defined for table storage in the SQL. This should be
+supported via the special `:memory:` database path.
 
 ### Integration packages
 
@@ -118,6 +118,16 @@ The repository uses CMake presets for first-party packages and tools:
 cmake --preset dev
 cmake --build --preset dev
 ctest --preset dev
+```
+
+The MariaDB-backed `libmylite` lifecycle tests use the embedded archive built by
+the MariaDB baseline wrapper:
+
+```sh
+tools/mariadb-embedded-build all
+cmake --preset embedded-dev
+cmake --build --preset embedded-dev
+ctest --preset embedded-dev
 ```
 
 See [docs/architecture/monorepo.md](docs/architecture/monorepo.md) for the
