@@ -134,7 +134,8 @@ MariaDB connection in `embedded-dev` builds, returns text result rows, preserves
 SQL `NULL` values as `NULL` callback entries, and populates MariaDB diagnostics
 on query failure. File-backed MyLite storage-engine builds support routed
 `CREATE TABLE` metadata, catalog-backed `DROP TABLE` and simple `RENAME TABLE`,
-and keyless `INSERT` plus full-scan `SELECT` over persisted MyLite row pages.
+keyless copy `ALTER` rebuilds, and keyless `INSERT` plus full-scan `SELECT`
+over persisted MyLite row pages.
 
 ## Prepared Statements
 

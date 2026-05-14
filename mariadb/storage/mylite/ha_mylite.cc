@@ -42,10 +42,17 @@ static int mylite_done_func(void *p);
 static int mylite_add_discovered_table(void *ctx, const char *schema_name,
                                        const char *table_name);
 static const char *mylite_primary_file_path();
-static int mylite_requested_engine_name(HA_CREATE_INFO *create_info,
+static int mylite_requested_engine_name(const char *primary_file,
+                                        HA_CREATE_INFO *create_info,
                                         char *out_name, size_t out_name_size);
+static int mylite_preserve_alter_requested_engine_name(
+  const char *primary_file, char *out_name, size_t out_name_size);
 static int mylite_copy_engine_name(const LEX_CSTRING *engine_name,
                                    char *out_name, size_t out_name_size);
+static int mylite_copy_lex_string(const LEX_CSTRING *value, char *out_value,
+                                  size_t out_value_size);
+static int mylite_copy_string(const char *value, char *out_value,
+                              size_t out_value_size);
 static bool mylite_supported_engine_request(const char *engine_name);
 static bool mylite_engine_name_equals(const char *engine_name,
                                       const char *expected_engine_name);
@@ -73,9 +80,13 @@ static ulonglong mylite_first_auto_increment_value(ulonglong next_value,
                                                    ulonglong offset,
                                                    ulonglong increment);
 static int mylite_check_duplicate_auto_increment_value(const char *primary_file,
+                                                       const char *schema_name,
+                                                       const char *table_name,
                                                        TABLE *table,
                                                        uint *out_duplicate_key);
 static int mylite_advance_auto_increment_from_row(const char *primary_file,
+                                                  const char *schema_name,
+                                                  const char *table_name,
                                                   TABLE *table);
 static int mylite_storage_to_handler_error(mylite_storage_result result);
 static bool mylite_table_has_blob_fields(TABLE *table);
@@ -192,12 +203,23 @@ static int mylite_discover_table(handlerton *, THD *thd, TABLE_SHARE *share)
   if (!primary_file)
     DBUG_RETURN(HA_ERR_NO_SUCH_TABLE);
 
+  /*
+    Copy ALTER temporary shares keep the final SQL table name while the
+    handler path carries the temporary storage identity.
+  */
+  char schema_name[NAME_LEN + 1];
+  char table_name[NAME_LEN + 1];
+  int path_error= mylite_table_name_from_path(share->path.str, schema_name,
+                                              sizeof(schema_name), table_name,
+                                              sizeof(table_name));
+  if (path_error)
+    DBUG_RETURN(path_error);
+
   unsigned char *frm= NULL;
   size_t frm_len= 0;
   mylite_storage_result storage_result=
-    mylite_storage_read_table_definition(primary_file, share->db.str,
-                                         share->table_name.str, &frm,
-                                         &frm_len);
+    mylite_storage_read_table_definition(primary_file, schema_name, table_name,
+                                         &frm, &frm_len);
   if (storage_result != MYLITE_STORAGE_OK)
     DBUG_RETURN(mylite_storage_to_handler_error(storage_result));
 
@@ -287,6 +309,8 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
    position_blob_payloads_size(0), current_row_id(0),
    duplicate_key_index((uint) -1)
 {
+  storage_schema_name[0]= '\0';
+  storage_table_name[0]= '\0';
   ref_length= sizeof(ulonglong);
 }
 
@@ -313,9 +337,26 @@ void ha_mylite::clear_scan_rows()
   current_row_id= 0;
 }
 
-int ha_mylite::open(const char *, int, uint)
+const char *ha_mylite::storage_schema() const
+{
+  return storage_schema_name[0] ? storage_schema_name : table->s->db.str;
+}
+
+const char *ha_mylite::storage_table() const
+{
+  return storage_table_name[0] ? storage_table_name : table->s->table_name.str;
+}
+
+int ha_mylite::open(const char *name, int, uint)
 {
   DBUG_ENTER("ha_mylite::open");
+
+  int path_error= mylite_table_name_from_path(name, storage_schema_name,
+                                              sizeof(storage_schema_name),
+                                              storage_table_name,
+                                              sizeof(storage_table_name));
+  if (path_error)
+    DBUG_RETURN(path_error);
 
   if (!(share= get_share()))
     DBUG_RETURN(HA_ERR_OUT_OF_MEM);
@@ -346,8 +387,8 @@ int ha_mylite::rnd_init(bool scan)
 
   mylite_storage_rowset rowset= {sizeof(rowset), NULL, 0, 0};
   const mylite_storage_result result=
-    mylite_storage_read_rows(primary_file, table->s->db.str,
-                             table->s->table_name.str, &rowset);
+    mylite_storage_read_rows(primary_file, storage_schema(), storage_table(),
+                             &rowset);
   if (result != MYLITE_STORAGE_OK)
     DBUG_RETURN(mylite_storage_to_handler_error(result));
 
@@ -411,9 +452,8 @@ int ha_mylite::rnd_pos(uchar *buf, uchar *pos)
   uchar *row_payload= NULL;
   size_t row_payload_size= 0;
   mylite_storage_result result=
-    mylite_storage_read_row(primary_file, table->s->db.str,
-                            table->s->table_name.str, row_id, &row_payload,
-                            &row_payload_size);
+    mylite_storage_read_row(primary_file, storage_schema(), storage_table(),
+                            row_id, &row_payload, &row_payload_size);
   if (result != MYLITE_STORAGE_OK)
     DBUG_RETURN(mylite_storage_to_handler_error(result));
 
@@ -480,8 +520,8 @@ int ha_mylite::info(uint flag)
 
   unsigned long long row_count= 0;
   const mylite_storage_result result=
-    mylite_storage_count_rows(primary_file, table->s->db.str,
-                              table->s->table_name.str, &row_count);
+    mylite_storage_count_rows(primary_file, storage_schema(), storage_table(),
+                              &row_count);
   if (result != MYLITE_STORAGE_OK)
     DBUG_RETURN(mylite_storage_to_handler_error(result));
 
@@ -510,8 +550,8 @@ void ha_mylite::get_auto_increment(ulonglong offset, ulonglong increment,
 
   unsigned long long next_value= 0ULL;
   const mylite_storage_result result=
-    mylite_storage_read_auto_increment(primary_file, table->s->db.str,
-                                       table->s->table_name.str, &next_value);
+    mylite_storage_read_auto_increment(primary_file, storage_schema(),
+                                       storage_table(), &next_value);
   if (result != MYLITE_STORAGE_OK)
     DBUG_VOID_RETURN;
 
@@ -544,15 +584,16 @@ int ha_mylite::write_row(const uchar *buf)
   }
 
   uint duplicate_key= (uint) -1;
-  int error= mylite_check_duplicate_auto_increment_value(primary_file, table,
-                                                        &duplicate_key);
+  int error= mylite_check_duplicate_auto_increment_value(
+    primary_file, storage_schema(), storage_table(), table, &duplicate_key);
   if (error)
   {
     duplicate_key_index= duplicate_key;
     DBUG_RETURN(error);
   }
 
-  error= mylite_advance_auto_increment_from_row(primary_file, table);
+  error= mylite_advance_auto_increment_from_row(primary_file, storage_schema(),
+                                                storage_table(), table);
   if (error)
     DBUG_RETURN(error);
 
@@ -565,9 +606,8 @@ int ha_mylite::write_row(const uchar *buf)
     DBUG_RETURN(error);
 
   const mylite_storage_result result=
-    mylite_storage_append_row(primary_file, table->s->db.str,
-                              table->s->table_name.str, row_payload,
-                              row_payload_size);
+    mylite_storage_append_row(primary_file, storage_schema(), storage_table(),
+                              row_payload, row_payload_size);
   mylite_storage_free(owned_row_payload);
   DBUG_RETURN(mylite_storage_to_handler_error(result));
 }
@@ -596,9 +636,9 @@ int ha_mylite::update_row(const uchar *, const uchar *new_data)
 
   unsigned long long new_row_id= 0ULL;
   const mylite_storage_result result=
-    mylite_storage_update_row(primary_file, table->s->db.str,
-                              table->s->table_name.str, current_row_id,
-                              row_payload, row_payload_size, &new_row_id);
+    mylite_storage_update_row(primary_file, storage_schema(), storage_table(),
+                              current_row_id, row_payload, row_payload_size,
+                              &new_row_id);
   mylite_storage_free(owned_row_payload);
   if (result != MYLITE_STORAGE_OK)
     DBUG_RETURN(mylite_storage_to_handler_error(result));
@@ -621,8 +661,8 @@ int ha_mylite::delete_row(const uchar *)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
 
   const mylite_storage_result result=
-    mylite_storage_delete_row(primary_file, table->s->db.str,
-                              table->s->table_name.str, current_row_id);
+    mylite_storage_delete_row(primary_file, storage_schema(), storage_table(),
+                              current_row_id);
   if (result != MYLITE_STORAGE_OK)
     DBUG_RETURN(mylite_storage_to_handler_error(result));
 
@@ -630,7 +670,7 @@ int ha_mylite::delete_row(const uchar *)
   DBUG_RETURN(0);
 }
 
-int ha_mylite::create(const char *, TABLE *form, HA_CREATE_INFO *create_info)
+int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info)
 {
   DBUG_ENTER("ha_mylite::create");
 
@@ -638,9 +678,28 @@ int ha_mylite::create(const char *, TABLE *form, HA_CREATE_INFO *create_info)
   if (!primary_file)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
 
+  char schema_name[NAME_LEN + 1];
+  char table_name[NAME_LEN + 1];
+  int path_error= mylite_table_name_from_path(name, schema_name,
+                                              sizeof(schema_name), table_name,
+                                              sizeof(table_name));
+  if (path_error)
+    DBUG_RETURN(path_error);
+
+  THD *thd= current_thd;
+  if (thd && thd->lex && thd->lex->sql_command == SQLCOM_ALTER_TABLE)
+  {
+    if (thd->lex->alter_info.requested_lock ==
+        Alter_info::ALTER_TABLE_LOCK_NONE)
+      DBUG_RETURN(HA_ERR_UNSUPPORTED);
+    if (!mylite_table_supports_row_write(form))
+      DBUG_RETURN(HA_ERR_UNSUPPORTED);
+  }
+
   char requested_engine_name[NAME_LEN + 1];
   int engine_name_error=
-    mylite_requested_engine_name(create_info, requested_engine_name,
+    mylite_requested_engine_name(primary_file, create_info,
+                                 requested_engine_name,
                                  sizeof(requested_engine_name));
   if (engine_name_error)
     DBUG_RETURN(engine_name_error);
@@ -654,8 +713,8 @@ int ha_mylite::create(const char *, TABLE *form, HA_CREATE_INFO *create_info)
 
   const mylite_storage_table_definition definition= {
     sizeof(definition),
-    form->s->db.str,
-    form->s->table_name.str,
+    schema_name,
+    table_name,
     requested_engine_name,
     MYLITE_STORAGE_ENGINE_NAME,
     frm,
@@ -721,16 +780,21 @@ int ha_mylite::rename_table(const char *from, const char *to)
   DBUG_RETURN(mylite_storage_to_handler_error(result));
 }
 
-static int mylite_requested_engine_name(HA_CREATE_INFO *create_info,
+static int mylite_requested_engine_name(const char *primary_file,
+                                        HA_CREATE_INFO *create_info,
                                         char *out_name, size_t out_name_size)
 {
+  THD *thd= current_thd;
   if (!(create_info->used_fields & HA_CREATE_USED_ENGINE))
   {
+    if (thd && thd->lex && thd->lex->sql_command == SQLCOM_ALTER_TABLE)
+      return mylite_preserve_alter_requested_engine_name(primary_file, out_name,
+                                                         out_name_size);
+
     static const LEX_CSTRING default_engine= {STRING_WITH_LEN("DEFAULT")};
     return mylite_copy_engine_name(&default_engine, out_name, out_name_size);
   }
 
-  THD *thd= current_thd;
   if (!thd || !thd->lex || !thd->lex->m_sql_cmd)
     return HA_ERR_UNSUPPORTED;
 
@@ -743,15 +807,68 @@ static int mylite_requested_engine_name(HA_CREATE_INFO *create_info,
                                  out_name_size);
 }
 
+static int mylite_preserve_alter_requested_engine_name(
+  const char *primary_file, char *out_name, size_t out_name_size)
+{
+  THD *thd= current_thd;
+  if (!thd || !thd->lex || !thd->lex->query_tables)
+    return HA_ERR_UNSUPPORTED;
+
+  TABLE_LIST *source_table= thd->lex->query_tables;
+  char schema_name[NAME_LEN + 1];
+  char table_name[NAME_LEN + 1];
+  int error= mylite_copy_lex_string(&source_table->db, schema_name,
+                                    sizeof(schema_name));
+  if (error)
+    return error;
+  error= mylite_copy_lex_string(&source_table->table_name, table_name,
+                                sizeof(table_name));
+  if (error)
+    return error;
+
+  mylite_storage_table_metadata metadata= {sizeof(metadata), NULL, NULL};
+  const mylite_storage_result result=
+    mylite_storage_read_table_metadata(primary_file, schema_name, table_name,
+                                       &metadata);
+  if (result != MYLITE_STORAGE_OK)
+    return mylite_storage_to_handler_error(result);
+
+  error= mylite_copy_string(metadata.requested_engine_name, out_name,
+                            out_name_size);
+  mylite_storage_free(metadata.requested_engine_name);
+  mylite_storage_free(metadata.effective_engine_name);
+  return error;
+}
+
 static int mylite_copy_engine_name(const LEX_CSTRING *engine_name,
                                    char *out_name, size_t out_name_size)
 {
-  if (!engine_name || !engine_name->str || engine_name->length == 0 ||
-      engine_name->length >= out_name_size)
+  return mylite_copy_lex_string(engine_name, out_name, out_name_size);
+}
+
+static int mylite_copy_lex_string(const LEX_CSTRING *value, char *out_value,
+                                  size_t out_value_size)
+{
+  if (!value || !value->str || value->length == 0 ||
+      value->length >= out_value_size)
     return HA_ERR_UNSUPPORTED;
 
-  memcpy(out_name, engine_name->str, engine_name->length);
-  out_name[engine_name->length]= '\0';
+  memcpy(out_value, value->str, value->length);
+  out_value[value->length]= '\0';
+  return 0;
+}
+
+static int mylite_copy_string(const char *value, char *out_value,
+                              size_t out_value_size)
+{
+  if (!value || !value[0])
+    return HA_ERR_UNSUPPORTED;
+
+  const size_t value_length= strlen(value);
+  if (value_length >= out_value_size)
+    return HA_ERR_UNSUPPORTED;
+
+  memcpy(out_value, value, value_length + 1);
   return 0;
 }
 
@@ -987,6 +1104,8 @@ static ulonglong mylite_first_auto_increment_value(ulonglong next_value,
 }
 
 static int mylite_check_duplicate_auto_increment_value(const char *primary_file,
+                                                       const char *schema_name,
+                                                       const char *table_name,
                                                        TABLE *table,
                                                        uint *out_duplicate_key)
 {
@@ -995,8 +1114,7 @@ static int mylite_check_duplicate_auto_increment_value(const char *primary_file,
 
   mylite_storage_rowset rowset= {sizeof(rowset), NULL, 0, 0};
   mylite_storage_result result=
-    mylite_storage_read_rows(primary_file, table->s->db.str,
-                             table->s->table_name.str, &rowset);
+    mylite_storage_read_rows(primary_file, schema_name, table_name, &rowset);
   if (result != MYLITE_STORAGE_OK)
     return mylite_storage_to_handler_error(result);
 
@@ -1041,6 +1159,8 @@ static int mylite_check_duplicate_auto_increment_value(const char *primary_file,
 }
 
 static int mylite_advance_auto_increment_from_row(const char *primary_file,
+                                                  const char *schema_name,
+                                                  const char *table_name,
                                                   TABLE *table)
 {
   Field *auto_field= mylite_auto_increment_field(table);
@@ -1056,8 +1176,7 @@ static int mylite_advance_auto_increment_from_row(const char *primary_file,
     return HA_ERR_AUTOINC_ERANGE;
 
   const mylite_storage_result result=
-    mylite_storage_advance_auto_increment(primary_file, table->s->db.str,
-                                          table->s->table_name.str,
+    mylite_storage_advance_auto_increment(primary_file, schema_name, table_name,
                                           value + 1ULL);
   return mylite_storage_to_handler_error(result);
 }

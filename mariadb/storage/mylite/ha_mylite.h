@@ -43,6 +43,8 @@ class ha_mylite: public handler
   unsigned char *scan_blob_payloads;
   ulonglong *scan_row_ids;
   unsigned char *position_blob_payloads;
+  char storage_schema_name[NAME_LEN + 1];
+  char storage_table_name[NAME_LEN + 1];
   size_t scan_row_size;
   size_t scan_row_count;
   size_t scan_row_index;
@@ -53,6 +55,8 @@ class ha_mylite: public handler
 
   Mylite_share *get_share();
   void clear_scan_rows();
+  const char *storage_schema() const;
+  const char *storage_table() const;
 
 public:
   ha_mylite(handlerton *hton, TABLE_SHARE *table_arg);
@@ -60,7 +64,8 @@ public:
 
   ulonglong table_flags() const override
   {
-    return HA_NO_TRANSACTIONS | HA_REC_NOT_IN_SEQ | HA_BINLOG_STMT_CAPABLE;
+    return HA_NO_TRANSACTIONS | HA_REC_NOT_IN_SEQ | HA_BINLOG_STMT_CAPABLE |
+           HA_NO_ONLINE_ALTER;
   }
 
   ulong index_flags(uint, uint, bool) const override

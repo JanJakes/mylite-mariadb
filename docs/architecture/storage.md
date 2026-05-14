@@ -62,7 +62,9 @@ updates, and deletes from the primary file, including BLOB/TEXT payloads.
 updates catalog identity while preserving table ids and row pages. The narrow
 single-column autoincrement key path is supported for insert and full-scan
 workloads, including BLOB/TEXT payload rows. General keyed update/delete,
-indexes, and `ALTER` still reject until later slices define those paths.
+indexes, online `ALTER`, and in-place `ALTER` still reject until later slices
+define those paths. Keyless copy `ALTER` rebuilds use MariaDB's table-copy path
+and append rebuilt table definitions and rows inside the primary file.
 
 ## File Layout
 
@@ -149,8 +151,13 @@ allocated above both live catalog records and existing row pages so
 drop/recreate does not expose old rows. Simple `RENAME TABLE` rewrites the
 catalog record identity while preserving table id, requested/effective engine
 metadata, and the stored table-definition blob reference, so existing keyless
-row pages move with the renamed table. Index rename paths remain planned until
-MyLite owns index storage.
+row pages move with the renamed table. Copy `ALTER` rebuilds let MariaDB create
+a temporary MyLite table, copy rows through `ha_write_row()`, rename the old
+table to a backup, rename the rebuilt table to the final name, and drop the
+backup catalog record. This preserves requested engine metadata for implicit
+rebuilds and records explicit supported engine requests on engine rebuilds.
+`LOCK=NONE` copy ALTER, in-place ALTER, and index rebuild paths remain planned
+until MyLite has locking, recovery, and index storage.
 
 ## Schemas And System Surfaces
 
@@ -195,7 +202,8 @@ MyLite stores the durable next value in append-only state pages and performs a
 scan-based duplicate check for that narrow key shape. Keyed update/delete still
 rejects, because MyLite cannot claim MySQL/MariaDB duplicate-key, ordering,
 index-access, or index-maintenance behavior until the index slice implements it.
-Truncate and copy `ALTER` rebuilds remain planned.
+Copy `ALTER` rebuilds are supported for table shapes that remain writable by
+the current row writer. Truncate remains planned.
 
 The storage engine must support:
 

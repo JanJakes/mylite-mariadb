@@ -45,6 +45,12 @@ typedef struct mutable_row_context {
     int found_untouched;
 } mutable_row_context;
 
+typedef struct alter_row_context {
+    int rows;
+    int found_first;
+    int found_large;
+} alter_row_context;
+
 typedef struct auto_row_context {
     int rows;
     int found_first;
@@ -60,6 +66,7 @@ typedef struct catalog_table_context {
 static void test_show_engines_reports_mylite(void);
 static void test_memory_database_has_empty_mylite_discovery(void);
 static void test_create_table_persists_catalog_metadata(void);
+static void test_alter_table_rebuilds_keyless_rows(void);
 static void assert_exec_succeeds(mylite_db *db, const char *sql);
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_catalog_table_count(
@@ -81,6 +88,7 @@ static int post_row_callback(void *ctx, int column_count, char **values, char **
 static int nullable_row_callback(void *ctx, int column_count, char **values, char **column_names);
 static int blob_row_callback(void *ctx, int column_count, char **values, char **column_names);
 static int mutable_row_callback(void *ctx, int column_count, char **values, char **column_names);
+static int alter_row_callback(void *ctx, int column_count, char **values, char **column_names);
 static int auto_row_callback(void *ctx, int column_count, char **values, char **column_names);
 static int catalog_table_callback(void *ctx, const char *schema_name, const char *table_name);
 static mylite_db *open_database(const char *root, char **filename);
@@ -102,6 +110,7 @@ int main(void) {
     test_show_engines_reports_mylite();
     test_memory_database_has_empty_mylite_discovery();
     test_create_table_persists_catalog_metadata();
+    test_alter_table_rebuilds_keyless_rows();
     return 0;
 }
 
@@ -505,6 +514,103 @@ static void test_create_table_persists_catalog_metadata(void) {
     free(root);
 }
 
+static void test_alter_table_rebuilds_keyless_rows(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    alter_row_context rows = {0};
+    table_context tables = {0};
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE alter_posts (id INT NOT NULL, title VARCHAR(32) NOT NULL, notes TEXT NULL) "
+        "ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO alter_posts VALUES (1, 'first', 'alpha')");
+    assert_exec_succeeds(db, "INSERT INTO alter_posts VALUES (2, 'second', REPEAT('large-', 700))");
+    assert_catalog_table_count(filename, "app", 1U);
+    assert_catalog_table_metadata(filename, "app", "alter_posts", "InnoDB", "MYLITE");
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE alter_posts ADD COLUMN status VARCHAR(16) NOT NULL DEFAULT 'draft', "
+        "ALGORITHM=COPY"
+    );
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE alter_posts ADD COLUMN drop_me INT NOT NULL DEFAULT 7, ALGORITHM=COPY"
+    );
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE alter_posts CHANGE COLUMN title headline VARCHAR(64) NOT NULL, "
+        "ALGORITHM=COPY"
+    );
+    assert_exec_succeeds(db, "ALTER TABLE alter_posts DROP COLUMN drop_me, ALGORITHM=COPY");
+    assert_exec_succeeds(db, "ALTER TABLE alter_posts ENGINE=InnoDB, ALGORITHM=COPY");
+    assert_catalog_table_count(filename, "app", 1U);
+    assert_catalog_table_metadata(filename, "app", "alter_posts", "InnoDB", "MYLITE");
+
+    assert_exec_fails(
+        db,
+        "ALTER TABLE alter_posts ADD COLUMN blocked INT NULL, ALGORITHM=COPY, LOCK=NONE"
+    );
+    assert_exec_fails(db, "ALTER TABLE alter_posts ADD PRIMARY KEY (id), ALGORITHM=COPY");
+    assert_catalog_table_count(filename, "app", 1U);
+    assert_catalog_table_metadata(filename, "app", "alter_posts", "InnoDB", "MYLITE");
+
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id, headline, status, LENGTH(notes), notes IS NULL FROM alter_posts",
+            alter_row_callback,
+            &rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rows.rows == 2);
+    assert(rows.found_first);
+    assert(rows.found_large);
+    assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
+    assert(errmsg == NULL);
+    assert(tables.rows == 1);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    rows = (alter_row_context){0};
+    tables = (table_context){0};
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id, headline, status, LENGTH(notes), notes IS NULL FROM alter_posts",
+            alter_row_callback,
+            &rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rows.rows == 2);
+    assert(rows.found_first);
+    assert(rows.found_large);
+    assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
+    assert(errmsg == NULL);
+    assert(tables.rows == 1);
+    assert_catalog_table_count(filename, "app", 1U);
+    assert_catalog_table_metadata(filename, "app", "alter_posts", "InnoDB", "MYLITE");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
 static void assert_exec_succeeds(mylite_db *db, const char *sql) {
     char *errmsg = NULL;
     const int result = mylite_exec(db, sql, NULL, NULL, &errmsg);
@@ -517,7 +623,11 @@ static void assert_exec_succeeds(mylite_db *db, const char *sql) {
 
 static void assert_exec_fails(mylite_db *db, const char *sql) {
     char *errmsg = NULL;
-    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) != MYLITE_OK);
+    const int result = mylite_exec(db, sql, NULL, NULL, &errmsg);
+    if (result == MYLITE_OK) {
+        fprintf(stderr, "SQL unexpectedly succeeded: %s\n", sql);
+    }
+    assert(result != MYLITE_OK);
     assert(errmsg != NULL);
     mylite_free(errmsg);
 }
@@ -713,6 +823,34 @@ static int mutable_row_callback(void *ctx, int column_count, char **values, char
         assert(values[2] == NULL);
         assert(values[3] != NULL && strcmp(values[3], "1") == 0);
         row_ctx->found_untouched = 1;
+        return 0;
+    }
+
+    assert(0);
+    return 1;
+}
+
+static int alter_row_callback(void *ctx, int column_count, char **values, char **column_names) {
+    alter_row_context *row_ctx = (alter_row_context *)ctx;
+    (void)column_names;
+
+    assert(column_count == 5);
+    assert(values[0] != NULL);
+    ++row_ctx->rows;
+    if (strcmp(values[0], "1") == 0) {
+        assert(values[1] != NULL && strcmp(values[1], "first") == 0);
+        assert(values[2] != NULL && strcmp(values[2], "draft") == 0);
+        assert(values[3] != NULL && strcmp(values[3], "5") == 0);
+        assert(values[4] != NULL && strcmp(values[4], "0") == 0);
+        row_ctx->found_first = 1;
+        return 0;
+    }
+    if (strcmp(values[0], "2") == 0) {
+        assert(values[1] != NULL && strcmp(values[1], "second") == 0);
+        assert(values[2] != NULL && strcmp(values[2], "draft") == 0);
+        assert(values[3] != NULL && strcmp(values[3], "4200") == 0);
+        assert(values[4] != NULL && strcmp(values[4], "0") == 0);
+        row_ctx->found_large = 1;
         return 0;
     }
 
