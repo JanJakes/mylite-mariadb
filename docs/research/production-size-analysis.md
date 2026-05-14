@@ -1856,7 +1856,7 @@ section-header metadata needed by post-link tooling.
 | Strip release static archive with `strip --strip-unneeded` | 1.28 MiB beyond Oracle-parser profile | Medium | Applied as size attempt | Current smokes relink and pass; downstream static consumers may still need coverage |
 | Strip release static archive with `strip -g` | About 0.95 MiB on the current archive | Low | Fallback | Less aggressive alternative if `--strip-unneeded` breaks a consumer |
 | Link runtime artifacts with lld `-O2` | About 0.004 MiB on the current stripped shared-object probe | Low | Applied as size attempt | Current smokes and harness pass; this keeps build-id and RELRO |
-| Build PHP-shaped artifacts with Clang/PIC | Unknown after direct sessions; older run was 0.13 MiB larger than current GCC direct-session shared probe | Medium packaging/toolchain | Re-test only if final packaging needs every byte | Previous smokes passed and the shared-object probe linked, but the static archive grew and the old Clang/PIC floor is now higher than the current GCC direct-session floor |
+| Build PHP-shaped artifacts with Clang/PIC | Unknown after direct sessions; older run was 0.07 MiB smaller than the corrected current GCC direct-session shared probe | Medium packaging/toolchain | Re-test only if final packaging needs every byte | Previous smokes passed and the shared-object probe linked, but the static archive grew and the old Clang/PIC floor was measured before direct sessions |
 | Strip section headers from copied release artifacts | About 0.002 MiB on the current stripped shared-object probe | Medium packaging/debugging | Candidate for absolute floor | Runtime `dlopen()` and smoke probes pass, but post-link inspection and debugging are worse |
 | `WITH_EXTRA_CHARSETS=complex` | About 0.08 MiB | Low | No | Savings are too small to justify a compatibility profile |
 | `WITH_EXTRA_CHARSETS=none` / `charset-small-profile` | 2.46 MiB archive and 2.38 MiB stripped linked beyond type-plugin profile | High compatibility | Applied as size attempt | Current smokes pass after the UCA 1400 null-base fix, but non-default charsets are omitted |
@@ -2283,8 +2283,9 @@ Research next if size becomes a release blocker:
    because `handle_options()` still uses the retained table for parsing and
    defaults.
 7. Re-test Clang/PIC on top of direct sessions only when final packaging is
-   being measured. The older Clang/PIC shared probe is now larger than the GCC
-   direct-session probe, but the combination has not been measured.
+   being measured. The older Clang/PIC shared probe remains smaller than the
+   corrected GCC direct-session probe, but the combination has not been
+   measured.
 8. Finish the direct prepared-statement bridge if prepared API support is
    restored in the minsize profile. That is the remaining way to remove the
    inherited prepared C API compatibility route without changing bound
