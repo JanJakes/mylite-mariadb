@@ -28,20 +28,20 @@ extern "C" {
 typedef struct mylite_db mylite_db;
 typedef struct mylite_stmt mylite_stmt;
 
-typedef enum mylite_result {
-    MYLITE_OK = 0,
-    MYLITE_ERROR = 1,
-    MYLITE_BUSY = 5,
-    MYLITE_NOMEM = 7,
-    MYLITE_READONLY = 8,
-    MYLITE_IOERR = 10,
-    MYLITE_CORRUPT = 11,
-    MYLITE_NOTFOUND = 12,
-    MYLITE_FULL = 13,
-    MYLITE_CONSTRAINT = 19,
-    MYLITE_MISUSE = 21,
-    MYLITE_ROW = 100,
-    MYLITE_DONE = 101
+typedef enum mylite_result { /* NOLINT(performance-enum-size): C ABI enum. */
+                             MYLITE_OK = 0,
+                             MYLITE_ERROR = 1,
+                             MYLITE_BUSY = 5,
+                             MYLITE_NOMEM = 7,
+                             MYLITE_READONLY = 8,
+                             MYLITE_IOERR = 10,
+                             MYLITE_CORRUPT = 11,
+                             MYLITE_NOTFOUND = 12,
+                             MYLITE_FULL = 13,
+                             MYLITE_CONSTRAINT = 19,
+                             MYLITE_MISUSE = 21,
+                             MYLITE_ROW = 100,
+                             MYLITE_DONE = 101
 } mylite_result;
 
 typedef struct mylite_open_config {
@@ -52,11 +52,11 @@ typedef struct mylite_open_config {
     const char *temp_directory;
 } mylite_open_config;
 
-#define MYLITE_OPEN_READONLY 0x00000001u
-#define MYLITE_OPEN_READWRITE 0x00000002u
-#define MYLITE_OPEN_CREATE 0x00000004u
-#define MYLITE_OPEN_EXCLUSIVE 0x00000008u
-#define MYLITE_OPEN_URI 0x00000010u
+#define MYLITE_OPEN_READONLY 0x00000001U
+#define MYLITE_OPEN_READWRITE 0x00000002U
+#define MYLITE_OPEN_CREATE 0x00000004U
+#define MYLITE_OPEN_EXCLUSIVE 0x00000008U
+#define MYLITE_OPEN_URI 0x00000010U
 
 #define MYLITE_PROFILE_DEFAULT 0
 #define MYLITE_PROFILE_STRICT 1
@@ -81,22 +81,22 @@ MYLITE_API int mylite_open_v2(
     unsigned flags,
     const mylite_open_config *config
 );
-MYLITE_API int mylite_close(mylite_db *db);
+MYLITE_API int mylite_close(mylite_db *database);
 MYLITE_API int mylite_exec(
-    mylite_db *db,
+    mylite_db *database,
     const char *sql,
     mylite_exec_callback callback,
     void *ctx,
     char **errmsg
 );
 
-MYLITE_API int mylite_errcode(mylite_db *db);
-MYLITE_API int mylite_extended_errcode(mylite_db *db);
-MYLITE_API unsigned mylite_mariadb_errno(mylite_db *db);
-MYLITE_API const char *mylite_sqlstate(mylite_db *db);
-MYLITE_API const char *mylite_errmsg(mylite_db *db);
-MYLITE_API long long mylite_changes(mylite_db *db);
-MYLITE_API unsigned long long mylite_last_insert_id(mylite_db *db);
+MYLITE_API int mylite_errcode(mylite_db *database);
+MYLITE_API int mylite_extended_errcode(mylite_db *database);
+MYLITE_API unsigned mylite_mariadb_errno(mylite_db *database);
+MYLITE_API const char *mylite_sqlstate(mylite_db *database);
+MYLITE_API const char *mylite_errmsg(mylite_db *database);
+MYLITE_API long long mylite_changes(mylite_db *database);
+MYLITE_API unsigned long long mylite_last_insert_id(mylite_db *database);
 MYLITE_API void mylite_free(void *ptr);
 
 #ifdef __cplusplus
