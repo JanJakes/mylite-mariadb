@@ -1,0 +1,19 @@
+Checks: >
+  -*,
+  bugprone-*,
+  clang-analyzer-*,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  misc-*,
+  -misc-include-cleaner,
+  performance-*,
+  -performance-enum-size,
+  portability-*,
+  readability-*
+HeaderFilterRegex: '.*/(packages|tools|tests)/.*'
+WarningsAsErrors: '*'
+FormatStyle: file
+CheckOptions:
+  - key: readability-identifier-length.IgnoredVariableNames
+    value: 'db|i|j|k|n|rc'
+  - key: readability-identifier-length.IgnoredParameterNames
+    value: 'db|i|j|k|n|rc'
