@@ -26,11 +26,11 @@ for drop-in application expectations.
 
 | Capability | MyLite status | Compatibility target |
 | --- | --- | --- |
-| Open and close a database file | ⚪&nbsp;Planned | SQLite-like handle ownership over a `.mylite` path |
+| Open and close a database file | 🟡&nbsp;Partial | Implemented for local files with a temporary MariaDB runtime directory that is removed on final close |
 | Direct SQL execution | ⚪&nbsp;Planned | Convenience API for one-shot SQL and textual result callbacks |
 | Prepared statements | ⚪&nbsp;Planned | Reusable statements with 1-based parameter binding |
 | Binary-safe values | ⚪&nbsp;Planned | Explicit BLOB/TEXT byte counts; no NUL-terminated-value assumptions |
-| Diagnostics | ⚪&nbsp;Planned | Stable MyLite result codes plus MariaDB errno and SQLSTATE |
+| Diagnostics | 🟡&nbsp;Partial | Open handles expose stable MyLite result codes, MariaDB errno, SQLSTATE, and message text |
 | Warnings | ⚪&nbsp;Planned | MariaDB-compatible warning counts and structured warning access |
 | Affected rows and insert ids | ⚪&nbsp;Planned | Preserve common MariaDB application behavior |
 | Raw `MYSQL *` as primary API | ➖&nbsp;Out&nbsp;of&nbsp;scope | Available only through a deliberate compatibility adapter |
@@ -50,12 +50,12 @@ for drop-in application expectations.
 
 | Capability | MyLite status | Target behavior |
 | --- | --- | --- |
-| Primary portable database file | ⚪&nbsp;Planned | One user-visible `.mylite` file |
+| Primary portable database file | 🟡&nbsp;Partial | Open/create establishes the `.mylite` path, but no durable catalog or table state is stored there yet |
 | Persistent `.frm` files | ➖&nbsp;Out&nbsp;of&nbsp;scope | Store table definitions in the MyLite catalog |
 | Persistent InnoDB sidecars | ➖&nbsp;Out&nbsp;of&nbsp;scope | No `.ibd`, redo, undo, or independent tablespace files |
 | Persistent MyISAM sidecars | ➖&nbsp;Out&nbsp;of&nbsp;scope | No `.MYD` or `.MYI` durable table files |
 | Persistent Aria sidecars | ➖&nbsp;Out&nbsp;of&nbsp;scope | No `.MAI`, `.MAD`, `aria_log.*`, or Aria control state as application storage |
-| MyLite-owned companions | ⚪&nbsp;Planned | Deterministic recovery, lock, shared-memory, and temporary files with documented cleanup rules |
+| MyLite-owned companions | 🟡&nbsp;Partial | Bootstrap uses a MyLite-owned temporary MariaDB runtime directory and removes it on final close |
 
 ## SQL Surface
 

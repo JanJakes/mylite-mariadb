@@ -36,6 +36,21 @@ MyLite uses this embedded foundation but does not expose `mysql_library_init()`
 as the product API. `libmylite` owns file-oriented open/close, diagnostics, and
 configuration.
 
+The first MyLite bootstrap keeps MariaDB's server-shaped state inside a
+MyLite-owned temporary runtime directory. That runtime starts with
+`--no-defaults`, `--skip-grant-tables`, `--skip-networking`,
+`--default-storage-engine=MyISAM`, and `--innodb=OFF`. Disabling InnoDB here is
+not a compatibility decision for application DDL; it only avoids non-final
+InnoDB sidecars while the storage-routing and catalog slices are still absent.
+
+MariaDB 11.8.6 needed two narrow embedded-restart fixes for repeated
+`mylite_open()` / `mylite_close()` tests in one process:
+
+- `mariadb/sql/mysqld.cc` restores the embedded scheduler pointers after
+  `mysql_server_end()` cleanup.
+- `mariadb/sql/sql_locale.cc` keeps the active error-message table alive until
+  the next embedded initialization releases it through `init_errmessage()`.
+
 ## Metadata And Discovery
 
 MariaDB 11.8 still has `.frm` table-definition paths. Durable `.frm` files are

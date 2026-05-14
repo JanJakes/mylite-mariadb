@@ -94,6 +94,13 @@ Profiles:
 `mylite_close()` returns `MYLITE_BUSY` when statements or dependent resources
 still exist. Deferred close can be added separately if a real use case appears.
 
+Initial implementation status: open/close is backed by MariaDB embedded startup
+when the `embedded-dev` CMake preset enables it. MyLite passes owned startup
+options, ignores ambient option files with `--no-defaults`, creates a temporary
+runtime directory for MariaDB bootstrap files, and removes that directory on the
+final close. Durable catalog and table state are not stored in the `.mylite`
+file until the file-format and catalog slices land.
+
 ## Direct Execution
 
 ```c

@@ -105,6 +105,16 @@ cmake --build --preset dev
 ctest --preset dev
 ```
 
+The MariaDB-backed `libmylite` lifecycle tests use the embedded archive built by
+the MariaDB baseline wrapper:
+
+```sh
+tools/mariadb-embedded-build all
+cmake --preset embedded-dev
+cmake --build --preset embedded-dev
+ctest --preset embedded-dev
+```
+
 See [docs/architecture/monorepo.md](docs/architecture/monorepo.md) for the
 repository layout and import discipline.
 

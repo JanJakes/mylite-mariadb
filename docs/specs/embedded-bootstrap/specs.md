@@ -77,6 +77,46 @@ The first implementation should keep MyLite's handle structure opaque and
 private to `packages/libmylite`. Raw MariaDB handles may be stored internally
 only as an implementation detail.
 
+## Implementation Notes
+
+The first implementation adds an optional MariaDB embedded backend to
+`libmylite`. The normal `dev` preset keeps first-party validation lightweight;
+the `embedded-dev` preset links `libmylite` against
+`build/mariadb-embedded/libmysqld/libmariadbd.a` and runs the embedded lifecycle
+tests.
+
+Runtime startup uses MyLite-owned arguments:
+
+- `--no-defaults`
+- `--datadir=<runtime>/data`
+- `--tmpdir=<runtime>/tmp`
+- `--plugin-dir=<runtime>/plugins`
+- `--skip-grant-tables`
+- `--skip-networking`
+- `--default-storage-engine=MyISAM`
+- `--innodb=OFF`
+- explicit message and character-set directories from the MariaDB build/source
+
+`--default-storage-engine=MyISAM` and `--innodb=OFF` are temporary bootstrap
+choices. They avoid non-final InnoDB sidecars in open/close and SQL smoke tests;
+they do not resolve the later compatibility requirement to route InnoDB-shaped
+application DDL to MyLite storage.
+
+MariaDB embedded restart required two narrow fork patches:
+
+- `mariadb/sql/mysqld.cc` restores the scheduler function pointers after
+  `mysql_server_end()` so a later embedded startup does not call through a null
+  scheduler.
+- `mariadb/sql/sql_locale.cc` preserves the active error-message table across
+  `mysql_server_end()` so the next `init_errmessage()` call can release it
+  through MariaDB's existing owner path.
+
+The implementation does not call `mysql_thread_init()` per handle. In the tested
+single-threaded embedded path, `mysql_real_connect()` creates and stores the
+embedded THD; extra per-handle thread init/end calls corrupted repeated
+same-thread lifecycle tests. Multi-threaded handle use remains a later
+concurrency slice.
+
 ## File Lifecycle
 
 Before MyLite storage exists, open/close tests may create MariaDB runtime files
@@ -84,6 +124,11 @@ inside a temporary MyLite-owned directory. Tests must assert the directory is
 either removed on close or its remaining contents are documented as transient
 bootstrap debt. The user-provided `.mylite` path is the product boundary and
 must not silently become a MariaDB datadir.
+
+The implemented bootstrap removes the temporary runtime directory on the final
+close. With InnoDB disabled, MariaDB still creates Aria control/log files during
+startup; those files remain confined to the temporary runtime directory and are
+not durable MyLite state.
 
 Once the storage engine and catalog exist, durable metadata and table state must
 move into the `.mylite` file and this bootstrap layer should stop creating any

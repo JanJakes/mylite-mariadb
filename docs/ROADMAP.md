@@ -23,9 +23,9 @@ not in a MariaDB datadir or existing engine sidecars.
 | 0 | Project foundation | ✅&nbsp;Done | Define the product goal, GPL baseline, architecture direction, workflow, and initial MariaDB research. |
 | 1 | Import MariaDB 11.8.6 | ✅&nbsp;Done | Import `mariadb-11.8.6` mechanically and record upstream refs. |
 | 2 | Minimal embedded build | ✅&nbsp;Done | Produce a reproducible embedded build and record baseline artifact size and enabled components. |
-| 3 | Embedded bootstrap | 🟡&nbsp;In&nbsp;progress | Start the MariaDB-derived runtime under MyLite-owned defaults and reject daemon-only startup surfaces. |
-| 4 | Public open/close API | ⚪&nbsp;Planned | Add `libmylite` database handles, diagnostics, open flags, and close behavior. |
-| 5 | SQL execution API | ⚪&nbsp;Planned | Add direct execution, prepared statements, bindings, columns, warnings, affected rows, and insert ids. |
+| 3 | Embedded bootstrap | ✅&nbsp;Done | Start the MariaDB-derived runtime under MyLite-owned defaults and reject daemon-only startup surfaces. |
+| 4 | Public open/close API | ✅&nbsp;Done | Add `libmylite` database handles, diagnostics, open flags, and close behavior. |
+| 5 | SQL execution API | 🟡&nbsp;In&nbsp;progress | Add direct execution, prepared statements, bindings, columns, warnings, affected rows, and insert ids. |
 | 6 | Storage engine skeleton | 🟡&nbsp;In&nbsp;progress | Register a static MyLite storage engine with controlled handler smoke coverage. |
 | 7 | Metadata discovery and DDL routing | ⚪&nbsp;Planned | Store MariaDB table definitions in the catalog and route `CREATE`, `ALTER`, `DROP`, and `RENAME` without durable metadata sidecars. |
 | 8 | File format and catalog | ⚪&nbsp;Planned | Define the `.mylite` header, catalog pages, schema namespaces, table roots, and format-version policy. |

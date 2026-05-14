@@ -34,7 +34,8 @@ import intentionally omits `wsrep-lib` and `storage/maria/libmarias3`.
 
 ## Measurement
 
-Measured on 2026-05-14 from the imported MariaDB 11.8.6 source tree.
+Measured on 2026-05-14 from the imported MariaDB 11.8.6 source tree with the
+MyLite embedded-restart patches applied.
 
 | Field | Value |
 | --- | --- |
@@ -44,7 +45,7 @@ Measured on 2026-05-14 from the imported MariaDB 11.8.6 source tree.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 33,736,888 bytes / 32.17 MiB |
+| Archive size | 33,736,928 bytes / 32.17 MiB |
 | Archive members | 807 |
 
 The build found system OpenSSL 3.6.2, zlib, Curses, CURL, LibXml2, GSSAPI,
