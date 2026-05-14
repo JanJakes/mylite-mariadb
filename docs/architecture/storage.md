@@ -56,13 +56,13 @@ The initial handler is opt-in. It is disabled in the default embedded baseline
 and covered by a separate storage smoke build. That build verifies the
 `MYLITE` row from `SHOW ENGINES`, explicit `CREATE TABLE ... ENGINE=MYLITE`
 stores metadata in the primary `.mylite` catalog, and catalog discovery works
-after close/reopen. Keyless routed tables support row inserts and full scans
-from the primary file, including BLOB/TEXT payloads. `DROP TABLE` removes
-catalog metadata for routed tables. Simple `RENAME TABLE` updates catalog
-identity while preserving table ids and row pages. The narrow single-column
-autoincrement key path is supported for insert and full-scan workloads,
-including BLOB/TEXT payload rows. General keyed writes, indexes, update/delete,
-and `ALTER` still reject until later slices define those update paths.
+after close/reopen. Keyless routed tables support row inserts, full scans,
+updates, and deletes from the primary file, including BLOB/TEXT payloads.
+`DROP TABLE` removes catalog metadata for routed tables. Simple `RENAME TABLE`
+updates catalog identity while preserving table ids and row pages. The narrow
+single-column autoincrement key path is supported for insert and full-scan
+workloads, including BLOB/TEXT payload rows. General keyed update/delete,
+indexes, and `ALTER` still reject until later slices define those paths.
 
 ## File Layout
 
@@ -97,11 +97,13 @@ pages. Keyless row inserts append checksummed row pages tagged by catalog table
 id; non-BLOB rows store raw MariaDB record images, while BLOB/TEXT rows store a
 durable handler-owned row payload that replaces process pointers with value
 bytes. Large row payloads spill into checksummed row-payload blob pages inside
-the primary file. Table scans validate those pages and reconstruct MariaDB row
-buffers before returning them to the SQL layer. Autoincrement tables append
-checksummed state pages keyed by catalog table id so generated values survive
-close/reopen and dropped table ids do not leak into recreated tables. Indexes
-and transaction state are still planned slices.
+the primary file. Keyless update/delete appends checksummed row-state pages that
+hide deleted or superseded row page ids; replacement row payloads are appended
+as new row pages. Table scans validate those pages, filter hidden row ids, and
+reconstruct MariaDB row buffers before returning them to the SQL layer.
+Autoincrement tables append checksummed state pages keyed by catalog table id so
+generated values survive close/reopen and dropped table ids do not leak into
+recreated tables. Indexes and transaction state are still planned slices.
 
 The catalog stores:
 
@@ -179,17 +181,21 @@ toward typed native encodings when there is a compatibility and size benefit.
 
 Current row support is intentionally narrow. For tables without declared keys
 or autoincrement columns, `write_row()` stores a durable MyLite row payload in
-an append-only row page and `rnd_next()` reads those payloads back during full
-table scans. Nullable fixed and variable fields are covered because the stored
-record image includes MariaDB's null bitmap. BLOB/TEXT fields are serialized as
+an append-only row page, `rnd_next()` reads those payloads back during full
+table scans, `position()` stores the row page id as the handler row reference,
+and `rnd_pos()` reopens a live row by that id for sorted update/delete paths.
+`update_row()` appends a replacement row and a row-state page that hides the old
+row id; `delete_row()` appends a row-state page that hides the current row id.
+Nullable fixed and variable fields are covered because the stored record image
+includes MariaDB's null bitmap. BLOB/TEXT fields are serialized as
 length-prefixed value bytes, not process pointers, and large payloads use
 primary-file overflow pages. Tables whose only key is the single
-`AUTO_INCREMENT` column can also insert and scan rows through the same payload
-path; MyLite stores the durable next value in append-only state pages and
-performs a scan-based duplicate check for that narrow key shape. Other keyed
-writes still reject, because MyLite cannot claim MySQL/MariaDB duplicate-key,
-ordering, or index-access behavior until the index slice implements it. Update,
-delete, truncate, and copy `ALTER` rebuilds remain planned.
+`AUTO_INCREMENT` column can insert and scan rows through the same payload path;
+MyLite stores the durable next value in append-only state pages and performs a
+scan-based duplicate check for that narrow key shape. Keyed update/delete still
+rejects, because MyLite cannot claim MySQL/MariaDB duplicate-key, ordering,
+index-access, or index-maintenance behavior until the index slice implements it.
+Truncate and copy `ALTER` rebuilds remain planned.
 
 The storage engine must support:
 

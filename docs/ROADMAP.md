@@ -31,13 +31,15 @@ not in a MariaDB datadir or existing engine sidecars.
 | 8 | MyLite metadata DDL and discovery | 🟡&nbsp;In&nbsp;progress | Store routed table definitions in the catalog and discover them without durable `.frm` sidecars. Create/discovery, `DROP TABLE`, and simple `RENAME TABLE` are implemented; `ALTER` remains. |
 | 9 | Sidecar lifecycle gates | ✅&nbsp;Done | Detect known MariaDB durable engine sidecars around metadata DDL, close/reopen, and failed-create cleanup. |
 | 10 | Engine routing policy | ✅&nbsp;Done | Record requested engine vs. effective MyLite engine and route omitted/default, `InnoDB`, `MyISAM`, and `Aria` metadata where safe. |
-| 11 | Row and index storage | 🟡&nbsp;In&nbsp;progress | Keyless table insert and full-scan storage is implemented, including NULL values and BLOB/TEXT overflow payloads; the narrow single-column autoincrement key path is implemented; primary/secondary indexes, general uniqueness, update/delete, and copy `ALTER` rebuilds remain. |
-| 12 | Transactions and recovery | ⚪&nbsp;Planned | Add atomic publication, rollback, savepoints, crash recovery, checksums, and companion-file lifecycle tests. |
-| 13 | Locking and concurrency | ⚪&nbsp;Planned | Add safe file locks, multiple-reader behavior, and a storage design that preserves concurrent writer goals. |
-| 14 | Compatibility harness | ⚪&nbsp;Planned | Run embedded lifecycle, sidecar detection, MariaDB comparison, crash/reopen, and application-query coverage in repeatable groups. |
-| 15 | Application schemas | ⚪&nbsp;Planned | Test representative application schemas, including WordPress-shaped DDL and common MySQL/MariaDB ORM output. |
-| 16 | Server-surface policy | ⚪&nbsp;Planned | Explicitly reject or replace users/auth, replication/binlog, dynamic plugins, events, performance schema, and external durable engines. |
-| 17 | Size profile hardening | ⚪&nbsp;Planned | Trim daemon-only and low-value optional components after the embedded runtime and storage shape are measurable. |
+| 11 | Row and index storage | 🟡&nbsp;In&nbsp;progress | Keyless table insert, full-scan, update/delete, NULL values, BLOB/TEXT overflow payloads, and the narrow single-column autoincrement key insert path are implemented; copy `ALTER`, primary/secondary indexes, and general uniqueness remain. |
+| 12 | Copy `ALTER` rebuilds | ⚪&nbsp;Planned | Add table-copy rebuild support over current keyless row lifecycle before index metadata multiplies DDL rebuild cases. |
+| 13 | Primary and secondary indexes | ⚪&nbsp;Planned | Add ordered access paths, duplicate checks, nullable-key semantics, and index maintenance for insert/update/delete. |
+| 14 | Transactions and recovery | ⚪&nbsp;Planned | Add atomic publication, rollback, savepoints, crash recovery, checksums, and companion-file lifecycle tests. |
+| 15 | Locking and concurrency | ⚪&nbsp;Planned | Add safe file locks, multiple-reader behavior, and a storage design that preserves concurrent writer goals. |
+| 16 | Compatibility harness | ⚪&nbsp;Planned | Run embedded lifecycle, sidecar detection, MariaDB comparison, crash/reopen, and application-query coverage in repeatable groups. |
+| 17 | Application schemas | ⚪&nbsp;Planned | Test representative application schemas, including WordPress-shaped DDL and common MySQL/MariaDB ORM output. |
+| 18 | Server-surface policy | ⚪&nbsp;Planned | Explicitly reject or replace users/auth, replication/binlog, dynamic plugins, events, performance schema, and external durable engines. |
+| 19 | Size profile hardening | ⚪&nbsp;Planned | Trim daemon-only and low-value optional components after the embedded runtime and storage shape are measurable. |
 
 ## Size And Profile Direction
 

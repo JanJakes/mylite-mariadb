@@ -54,6 +54,7 @@ static int mylite_table_name_from_path(const char *path, char *out_schema_name,
                                        char *out_table_name,
                                        size_t out_table_name_size);
 static bool mylite_table_supports_row_write(TABLE *table);
+static bool mylite_table_supports_row_lifecycle(TABLE *table);
 static bool mylite_table_uses_supported_auto_increment_key(TABLE *table);
 static Field *mylite_auto_increment_field(TABLE *table);
 static int mylite_prepare_row_payload(TABLE *table, const uchar *buf,
@@ -65,6 +66,7 @@ static int mylite_prepare_scan_rows(TABLE *table,
                                     uchar **out_rows,
                                     size_t *out_row_size,
                                     size_t *out_row_count,
+                                    ulonglong **out_row_ids,
                                     uchar **out_blob_payloads,
                                     size_t *out_blob_payloads_size);
 static ulonglong mylite_first_auto_increment_value(ulonglong next_value,
@@ -94,6 +96,8 @@ static bool mylite_is_blob_row_payload(const uchar *payload,
                                        size_t payload_size);
 static unsigned mylite_get_u32(const uchar *ptr);
 static void mylite_put_u32(uchar *ptr, unsigned value);
+static ulonglong mylite_get_u64(const uchar *ptr);
+static void mylite_put_u64(uchar *ptr, ulonglong value);
 
 static const char *ha_mylite_exts[]= {
   NullS
@@ -277,10 +281,14 @@ static int mylite_storage_to_handler_error(mylite_storage_result result)
 
 ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
   :handler(hton, table_arg), share(NULL), scan_rows(NULL),
-   scan_blob_payloads(NULL), scan_row_size(0), scan_row_count(0),
+   scan_blob_payloads(NULL), scan_row_ids(NULL),
+   position_blob_payloads(NULL), scan_row_size(0), scan_row_count(0),
    scan_row_index(0), scan_blob_payloads_size(0),
+   position_blob_payloads_size(0), current_row_id(0),
    duplicate_key_index((uint) -1)
-{}
+{
+  ref_length= sizeof(ulonglong);
+}
 
 ha_mylite::~ha_mylite()
 {
@@ -291,12 +299,18 @@ void ha_mylite::clear_scan_rows()
 {
   mylite_storage_free(scan_rows);
   mylite_storage_free(scan_blob_payloads);
+  mylite_storage_free(scan_row_ids);
+  mylite_storage_free(position_blob_payloads);
   scan_rows= NULL;
   scan_blob_payloads= NULL;
+  scan_row_ids= NULL;
+  position_blob_payloads= NULL;
   scan_row_size= 0;
   scan_row_count= 0;
   scan_row_index= 0;
   scan_blob_payloads_size= 0;
+  position_blob_payloads_size= 0;
+  current_row_id= 0;
 }
 
 int ha_mylite::open(const char *, int, uint)
@@ -339,26 +353,30 @@ int ha_mylite::rnd_init(bool scan)
 
   uchar *rows= NULL;
   uchar *blob_payloads= NULL;
+  ulonglong *row_ids= NULL;
   size_t row_size= 0;
   size_t row_count= 0;
   size_t blob_payloads_size= 0;
   int error= mylite_prepare_scan_rows(table, &rowset, &rows, &row_size,
-                                      &row_count, &blob_payloads,
+                                      &row_count, &row_ids, &blob_payloads,
                                       &blob_payloads_size);
   mylite_storage_free_rowset(&rowset);
   if (error)
   {
     mylite_storage_free(rows);
+    mylite_storage_free(row_ids);
     mylite_storage_free(blob_payloads);
     DBUG_RETURN(error);
   }
 
   scan_rows= rows;
   scan_blob_payloads= blob_payloads;
+  scan_row_ids= row_ids;
   scan_row_size= row_size;
   scan_row_count= row_count;
   scan_blob_payloads_size= blob_payloads_size;
   scan_row_index= 0;
+  current_row_id= 0;
   DBUG_RETURN(0);
 }
 
@@ -375,20 +393,72 @@ int ha_mylite::rnd_next(uchar *buf)
   if (scan_row_index >= scan_row_count)
     DBUG_RETURN(HA_ERR_END_OF_FILE);
 
+  current_row_id= scan_row_ids[scan_row_index];
   memcpy(buf, scan_rows + (scan_row_index * scan_row_size), scan_row_size);
   ++scan_row_index;
   DBUG_RETURN(0);
 }
 
-int ha_mylite::rnd_pos(uchar *, uchar *)
+int ha_mylite::rnd_pos(uchar *buf, uchar *pos)
 {
   DBUG_ENTER("ha_mylite::rnd_pos");
-  DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    DBUG_RETURN(HA_ERR_NO_CONNECTION);
+
+  const ulonglong row_id= mylite_get_u64(pos);
+  uchar *row_payload= NULL;
+  size_t row_payload_size= 0;
+  mylite_storage_result result=
+    mylite_storage_read_row(primary_file, table->s->db.str,
+                            table->s->table_name.str, row_id, &row_payload,
+                            &row_payload_size);
+  if (result != MYLITE_STORAGE_OK)
+    DBUG_RETURN(mylite_storage_to_handler_error(result));
+
+  size_t blob_payloads_size= 0;
+  int error= mylite_scan_stored_row(table, row_payload, row_payload_size,
+                                    &blob_payloads_size);
+  if (error)
+  {
+    mylite_storage_free(row_payload);
+    DBUG_RETURN(error);
+  }
+
+  uchar *blob_payloads= NULL;
+  if (blob_payloads_size > 0)
+  {
+    blob_payloads= static_cast<uchar *>(malloc(blob_payloads_size));
+    if (!blob_payloads)
+    {
+      mylite_storage_free(row_payload);
+      DBUG_RETURN(HA_ERR_OUT_OF_MEM);
+    }
+  }
+
+  size_t blob_payloads_used= 0;
+  error= mylite_copy_stored_row_to_scan(table, row_payload, row_payload_size,
+                                        buf, blob_payloads,
+                                        &blob_payloads_used);
+  mylite_storage_free(row_payload);
+  if (error || blob_payloads_used != blob_payloads_size)
+  {
+    mylite_storage_free(blob_payloads);
+    DBUG_RETURN(error ? error : HA_ERR_CRASHED_ON_USAGE);
+  }
+
+  mylite_storage_free(position_blob_payloads);
+  position_blob_payloads= blob_payloads;
+  position_blob_payloads_size= blob_payloads_size;
+  current_row_id= row_id;
+  DBUG_RETURN(0);
 }
 
 void ha_mylite::position(const uchar *)
 {
   DBUG_ENTER("ha_mylite::position");
+  mylite_put_u64(ref, current_row_id);
   DBUG_VOID_RETURN;
 }
 
@@ -500,6 +570,64 @@ int ha_mylite::write_row(const uchar *buf)
                               row_payload_size);
   mylite_storage_free(owned_row_payload);
   DBUG_RETURN(mylite_storage_to_handler_error(result));
+}
+
+int ha_mylite::update_row(const uchar *, const uchar *new_data)
+{
+  DBUG_ENTER("ha_mylite::update_row");
+
+  if (!mylite_table_supports_row_lifecycle(table))
+    DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+  if (current_row_id == 0)
+    DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
+
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    DBUG_RETURN(HA_ERR_NO_CONNECTION);
+
+  const uchar *row_payload= NULL;
+  size_t row_payload_size= 0;
+  uchar *owned_row_payload= NULL;
+  int error= mylite_prepare_row_payload(table, new_data, &row_payload,
+                                        &row_payload_size,
+                                        &owned_row_payload);
+  if (error)
+    DBUG_RETURN(error);
+
+  unsigned long long new_row_id= 0ULL;
+  const mylite_storage_result result=
+    mylite_storage_update_row(primary_file, table->s->db.str,
+                              table->s->table_name.str, current_row_id,
+                              row_payload, row_payload_size, &new_row_id);
+  mylite_storage_free(owned_row_payload);
+  if (result != MYLITE_STORAGE_OK)
+    DBUG_RETURN(mylite_storage_to_handler_error(result));
+
+  current_row_id= new_row_id;
+  DBUG_RETURN(0);
+}
+
+int ha_mylite::delete_row(const uchar *)
+{
+  DBUG_ENTER("ha_mylite::delete_row");
+
+  if (!mylite_table_supports_row_lifecycle(table))
+    DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+  if (current_row_id == 0)
+    DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
+
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    DBUG_RETURN(HA_ERR_NO_CONNECTION);
+
+  const mylite_storage_result result=
+    mylite_storage_delete_row(primary_file, table->s->db.str,
+                              table->s->table_name.str, current_row_id);
+  if (result != MYLITE_STORAGE_OK)
+    DBUG_RETURN(mylite_storage_to_handler_error(result));
+
+  current_row_id= 0;
+  DBUG_RETURN(0);
 }
 
 int ha_mylite::create(const char *, TABLE *form, HA_CREATE_INFO *create_info)
@@ -687,6 +815,11 @@ static bool mylite_table_supports_row_write(TABLE *table)
   return mylite_table_uses_supported_auto_increment_key(table);
 }
 
+static bool mylite_table_supports_row_lifecycle(TABLE *table)
+{
+  return table->s->keys == 0 && !mylite_auto_increment_field(table);
+}
+
 static bool mylite_table_uses_supported_auto_increment_key(TABLE *table)
 {
   Field *auto_field= mylite_auto_increment_field(table);
@@ -732,19 +865,21 @@ static int mylite_prepare_scan_rows(TABLE *table,
                                     uchar **out_rows,
                                     size_t *out_row_size,
                                     size_t *out_row_count,
+                                    ulonglong **out_row_ids,
                                     uchar **out_blob_payloads,
                                     size_t *out_blob_payloads_size)
 {
   *out_rows= NULL;
   *out_row_size= table->s->reclength;
   *out_row_count= 0;
+  *out_row_ids= NULL;
   *out_blob_payloads= NULL;
   *out_blob_payloads_size= 0;
 
   if (rowset->row_count == 0)
     return 0;
   if (rowset->row_offsets == NULL || rowset->row_sizes == NULL ||
-      table->s->reclength == 0 ||
+      rowset->row_ids == NULL || table->s->reclength == 0 ||
       rowset->row_count > SIZE_MAX / table->s->reclength)
     return HA_ERR_CRASHED_ON_USAGE;
 
@@ -772,6 +907,14 @@ static int mylite_prepare_scan_rows(TABLE *table,
   if (!rows)
     return HA_ERR_OUT_OF_MEM;
 
+  ulonglong *row_ids= static_cast<ulonglong *>(
+    malloc(rowset->row_count * sizeof(ulonglong)));
+  if (!row_ids)
+  {
+    free(rows);
+    return HA_ERR_OUT_OF_MEM;
+  }
+
   uchar *blob_payloads= NULL;
   if (blob_payloads_size > 0)
   {
@@ -779,6 +922,7 @@ static int mylite_prepare_scan_rows(TABLE *table,
     if (!blob_payloads)
     {
       free(rows);
+      free(row_ids);
       return HA_ERR_OUT_OF_MEM;
     }
   }
@@ -797,19 +941,23 @@ static int mylite_prepare_scan_rows(TABLE *table,
     if (error)
     {
       free(rows);
+      free(row_ids);
       free(blob_payloads);
       return error;
     }
+    row_ids[i]= (ulonglong) rowset->row_ids[i];
   }
   if (blob_payloads_used != blob_payloads_size)
   {
     free(rows);
+    free(row_ids);
     free(blob_payloads);
     return HA_ERR_CRASHED_ON_USAGE;
   }
 
   *out_rows= rows;
   *out_row_count= rowset->row_count;
+  *out_row_ids= row_ids;
   *out_blob_payloads= blob_payloads;
   *out_blob_payloads_size= blob_payloads_size;
   return 0;
@@ -854,16 +1002,18 @@ static int mylite_check_duplicate_auto_increment_value(const char *primary_file,
 
   uchar *rows= NULL;
   uchar *blob_payloads= NULL;
+  ulonglong *row_ids= NULL;
   size_t row_size= 0;
   size_t row_count= 0;
   size_t blob_payloads_size= 0;
   int error= mylite_prepare_scan_rows(table, &rowset, &rows, &row_size,
-                                      &row_count, &blob_payloads,
+                                      &row_count, &row_ids, &blob_payloads,
                                       &blob_payloads_size);
   mylite_storage_free_rowset(&rowset);
   if (error)
   {
     mylite_storage_free(rows);
+    mylite_storage_free(row_ids);
     mylite_storage_free(blob_payloads);
     return error;
   }
@@ -877,6 +1027,7 @@ static int mylite_check_duplicate_auto_increment_value(const char *primary_file,
     if (auto_field->val_int_offset(table->s->rec_buff_length) == value)
     {
       mylite_storage_free(rows);
+      mylite_storage_free(row_ids);
       mylite_storage_free(blob_payloads);
       *out_duplicate_key= table->s->next_number_index;
       return HA_ERR_FOUND_DUPP_KEY;
@@ -884,6 +1035,7 @@ static int mylite_check_duplicate_auto_increment_value(const char *primary_file,
   }
 
   mylite_storage_free(rows);
+  mylite_storage_free(row_ids);
   mylite_storage_free(blob_payloads);
   return 0;
 }
@@ -1239,6 +1391,20 @@ static unsigned mylite_get_u32(const uchar *ptr)
 static void mylite_put_u32(uchar *ptr, unsigned value)
 {
   for (size_t i= 0; i < sizeof(uint32_t); ++i)
+    ptr[i]= (uchar)((value >> (i * 8U)) & UINT8_MAX);
+}
+
+static ulonglong mylite_get_u64(const uchar *ptr)
+{
+  ulonglong value= 0;
+  for (size_t i= 0; i < sizeof(uint64_t); ++i)
+    value|= (ulonglong) ptr[i] << (i * 8U);
+  return value;
+}
+
+static void mylite_put_u64(uchar *ptr, ulonglong value)
+{
+  for (size_t i= 0; i < sizeof(uint64_t); ++i)
     ptr[i]= (uchar)((value >> (i * 8U)) & UINT8_MAX);
 }
 

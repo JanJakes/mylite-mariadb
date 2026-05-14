@@ -15,6 +15,7 @@ extern "C" {
 #define MYLITE_STORAGE_CAPABILITY_TABLE_ROWS 0x00000008U
 #define MYLITE_STORAGE_CAPABILITY_AUTOINCREMENT 0x00000010U
 #define MYLITE_STORAGE_CAPABILITY_BLOB_TEXT_ROWS 0x00000020U
+#define MYLITE_STORAGE_CAPABILITY_ROW_LIFECYCLE 0x00000040U
 
 typedef enum mylite_storage_result { /* NOLINT(performance-enum-size): C ABI enum. */
                                      MYLITE_STORAGE_OK = 0,
@@ -72,6 +73,7 @@ typedef struct mylite_storage_rowset {
     size_t *row_offsets;
     size_t *row_sizes;
     size_t row_bytes;
+    unsigned long long *row_ids;
 } mylite_storage_rowset;
 
 typedef int (*mylite_storage_table_callback)(
@@ -139,6 +141,29 @@ mylite_storage_result mylite_storage_count_rows(
     const char *schema_name,
     const char *table_name,
     unsigned long long *out_row_count
+);
+mylite_storage_result mylite_storage_read_row(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long row_id,
+    unsigned char **out_row,
+    size_t *out_row_size
+);
+mylite_storage_result mylite_storage_update_row(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long row_id,
+    const unsigned char *row,
+    size_t row_size,
+    unsigned long long *out_new_row_id
+);
+mylite_storage_result mylite_storage_delete_row(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long row_id
 );
 mylite_storage_result mylite_storage_read_auto_increment(
     const char *filename,

@@ -22,15 +22,30 @@ static void test_store_and_read_table_definition(void);
 static void test_store_large_table_definition(void);
 static void test_append_and_read_rows(void);
 static void test_append_and_read_large_row_payload(void);
+static void test_update_and_delete_rows(void);
 static void test_autoincrement_state(void);
 static void test_rejects_corrupt_row_page(void);
 static void test_rejects_corrupt_row_payload_page(void);
+static void test_rejects_corrupt_row_state_page(void);
 static void test_rejects_corrupt_autoincrement_page(void);
 static void test_drop_table_definition(void);
 static void test_rename_table_definition(void);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static long long file_size(const char *path);
+static void assert_post_rowset_layout(const mylite_storage_rowset *rows, size_t row_size);
+static void assert_lifecycle_initial_rows(const mylite_storage_rowset *rows);
+static void assert_lifecycle_live_rows(
+    const mylite_storage_rowset *rows,
+    unsigned long long new_row_id
+);
+static void assert_row_not_found(const char *filename, unsigned long long row_id);
+static void assert_row_equals(
+    const char *filename,
+    unsigned long long row_id,
+    const unsigned char *expected_row,
+    size_t expected_row_size
+);
 static void flip_file_byte(const char *path, long offset);
 static void write_header_format_version(const char *path, unsigned value);
 static int collect_table(void *ctx, const char *schema_name, const char *table_name);
@@ -53,9 +68,11 @@ int main(void) {
     test_store_large_table_definition();
     test_append_and_read_rows();
     test_append_and_read_large_row_payload();
+    test_update_and_delete_rows();
     test_autoincrement_state();
     test_rejects_corrupt_row_page();
     test_rejects_corrupt_row_payload_page();
+    test_rejects_corrupt_row_state_page();
     test_rejects_corrupt_autoincrement_page();
     test_drop_table_definition();
     test_rename_table_definition();
@@ -74,6 +91,7 @@ static void test_capabilities(void) {
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_TABLE_ROWS) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_AUTOINCREMENT) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_BLOB_TEXT_ROWS) != 0U);
+    assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_ROW_LIFECYCLE) != 0U);
 }
 
 static void test_create_empty_database(void) {
@@ -346,13 +364,7 @@ static void test_append_and_read_rows(void) {
     assert(mylite_storage_count_rows(filename, "app", "comments", &row_count) == MYLITE_STORAGE_OK);
     assert(row_count == 1ULL);
     assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
-    assert(rows.row_size == sizeof(post_row_1));
-    assert(rows.row_count == 2U);
-    assert(rows.row_bytes == sizeof(post_row_1) + sizeof(post_row_2));
-    assert(rows.row_offsets[0] == 0U);
-    assert(rows.row_sizes[0] == sizeof(post_row_1));
-    assert(rows.row_offsets[1] == sizeof(post_row_1));
-    assert(rows.row_sizes[1] == sizeof(post_row_2));
+    assert_post_rowset_layout(&rows, sizeof(post_row_1));
     assert(memcmp(rows.rows, post_row_1, sizeof(post_row_1)) == 0);
     assert(memcmp(rows.rows + rows.row_size, post_row_2, sizeof(post_row_2)) == 0);
 
@@ -409,13 +421,101 @@ static void test_append_and_read_large_row_payload(void) {
     assert(rows.row_bytes == sizeof(small_row) + large_row_size);
     assert(rows.row_offsets[0] == 0U);
     assert(rows.row_sizes[0] == sizeof(small_row));
+    assert(rows.row_ids[0] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 1ULL);
     assert(rows.row_offsets[1] == sizeof(small_row));
     assert(rows.row_sizes[1] == large_row_size);
+    assert(rows.row_ids[1] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 5ULL);
     assert(memcmp(rows.rows + rows.row_offsets[0], small_row, sizeof(small_row)) == 0);
     assert(memcmp(rows.rows + rows.row_offsets[1], large_row, large_row_size) == 0);
 
     mylite_storage_free_rowset(&rows);
     free(large_row);
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_update_and_delete_rows(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row_1[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    static const unsigned char row_2[] = {0x00U, 0x02U, 'd', 'e', 'f'};
+    static const unsigned char row_3[] = {0x00U, 0x03U, 'x', 'y', 'z'};
+    static const unsigned char updated_row_1[] = {0x00U, 0x04U, 'u', 'p', 'd', 'a', 't', 'e', 'd'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "row-lifecycle.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+    unsigned long long row_count = 0ULL;
+    unsigned long long new_row_id = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", row_1, sizeof(row_1)) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", row_2, sizeof(row_2)) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", row_3, sizeof(row_3)) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
+    assert_lifecycle_initial_rows(&rows);
+
+    assert(
+        mylite_storage_update_row(
+            filename,
+            "app",
+            "posts",
+            rows.row_ids[0],
+            updated_row_1,
+            sizeof(updated_row_1),
+            &new_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(new_row_id == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 4ULL);
+    assert(
+        mylite_storage_delete_row(filename, "app", "posts", rows.row_ids[1]) == MYLITE_STORAGE_OK
+    );
+    assert_row_not_found(filename, rows.row_ids[0]);
+    assert_row_not_found(filename, rows.row_ids[1]);
+    assert_row_equals(filename, new_row_id, updated_row_1, sizeof(updated_row_1));
+    mylite_storage_free_rowset(&rows);
+
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 2ULL);
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
+    assert_lifecycle_live_rows(&rows, new_row_id);
+    assert(
+        mylite_storage_delete_row(filename, "app", "posts", rows.row_ids[1]) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_update_row(
+            filename,
+            "app",
+            "posts",
+            rows.row_ids[1],
+            row_1,
+            sizeof(row_1),
+            &new_row_id
+        ) == MYLITE_STORAGE_NOTFOUND
+    );
+
+    mylite_storage_free_rowset(&rows);
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
     free(filename);
@@ -567,6 +667,52 @@ static void test_rejects_corrupt_row_payload_page(void) {
     );
 
     free(row);
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_rejects_corrupt_row_state_page(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "corrupt-row-state-page.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+    unsigned long long row_count = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", row, sizeof(row)) == MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
+    assert(rows.row_count == 1U);
+    assert(
+        mylite_storage_delete_row(filename, "app", "posts", rows.row_ids[0]) == MYLITE_STORAGE_OK
+    );
+    mylite_storage_free_rowset(&rows);
+
+    flip_file_byte(
+        filename,
+        (long)((MYLITE_STORAGE_FORMAT_PAGE_SIZE * 4U) + MYLITE_STORAGE_FORMAT_ROW_STATE_KIND_OFFSET)
+    );
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_CORRUPT);
+    assert(
+        mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_CORRUPT
+    );
+
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
     free(filename);
@@ -785,6 +931,70 @@ static long long file_size(const char *path) {
     struct stat path_stat;
     assert(stat(path, &path_stat) == 0);
     return (long long)path_stat.st_size;
+}
+
+static void assert_post_rowset_layout(const mylite_storage_rowset *rows, size_t row_size) {
+    assert(rows->row_size == row_size);
+    assert(rows->row_count == 2U);
+    assert(rows->row_bytes == row_size * 2U);
+    assert(rows->row_offsets[0] == 0U);
+    assert(rows->row_sizes[0] == row_size);
+    assert(rows->row_ids[0] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 2ULL);
+    assert(rows->row_offsets[1] == row_size);
+    assert(rows->row_sizes[1] == row_size);
+    assert(rows->row_ids[1] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 4ULL);
+}
+
+static void assert_lifecycle_initial_rows(const mylite_storage_rowset *rows) {
+    assert(rows->row_count == 3U);
+    assert(rows->row_ids[0] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 1ULL);
+    assert(rows->row_ids[1] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 2ULL);
+    assert(rows->row_ids[2] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 3ULL);
+}
+
+static void assert_lifecycle_live_rows(
+    const mylite_storage_rowset *rows,
+    unsigned long long new_row_id
+) {
+    static const unsigned char row_3[] = {0x00U, 0x03U, 'x', 'y', 'z'};
+    static const unsigned char updated_row_1[] = {0x00U, 0x04U, 'u', 'p', 'd', 'a', 't', 'e', 'd'};
+
+    assert(rows->row_size == 0U);
+    assert(rows->row_count == 2U);
+    assert(rows->row_ids[0] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 3ULL);
+    assert(rows->row_ids[1] == new_row_id);
+    assert(memcmp(rows->rows + rows->row_offsets[0], row_3, sizeof(row_3)) == 0);
+    assert(memcmp(rows->rows + rows->row_offsets[1], updated_row_1, sizeof(updated_row_1)) == 0);
+}
+
+static void assert_row_not_found(const char *filename, unsigned long long row_id) {
+    unsigned char *stored_row = NULL;
+    size_t stored_row_size = 0U;
+
+    assert(
+        mylite_storage_read_row(filename, "app", "posts", row_id, &stored_row, &stored_row_size) ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert(stored_row == NULL);
+    assert(stored_row_size == 0U);
+}
+
+static void assert_row_equals(
+    const char *filename,
+    unsigned long long row_id,
+    const unsigned char *expected_row,
+    size_t expected_row_size
+) {
+    unsigned char *stored_row = NULL;
+    size_t stored_row_size = 0U;
+
+    assert(
+        mylite_storage_read_row(filename, "app", "posts", row_id, &stored_row, &stored_row_size) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(stored_row_size == expected_row_size);
+    assert(memcmp(stored_row, expected_row, expected_row_size) == 0);
+    mylite_storage_free(stored_row);
 }
 
 static void flip_file_byte(const char *path, long offset) {
