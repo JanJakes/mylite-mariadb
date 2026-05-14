@@ -22,6 +22,7 @@ static void test_store_and_read_table_definition(void);
 static void test_store_large_table_definition(void);
 static void test_append_and_read_rows(void);
 static void test_rejects_corrupt_row_page(void);
+static void test_drop_table_definition(void);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static long long file_size(const char *path);
@@ -45,6 +46,7 @@ int main(void) {
     test_store_large_table_definition();
     test_append_and_read_rows();
     test_rejects_corrupt_row_page();
+    test_drop_table_definition();
     return 0;
 }
 
@@ -374,6 +376,54 @@ static void test_rejects_corrupt_row_page(void) {
     assert(
         mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_CORRUPT
     );
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_drop_table_definition(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "drop-table.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+    table_list_capture capture = {0};
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", row, sizeof(row)) == MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_drop_table(filename, "app", "posts") == MYLITE_STORAGE_OK);
+    assert(mylite_storage_table_exists(filename, "app", "posts") == MYLITE_STORAGE_NOTFOUND);
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_NOTFOUND);
+    assert(
+        mylite_storage_list_tables(filename, "app", collect_table, &capture) == MYLITE_STORAGE_OK
+    );
+    assert(capture.count == 0U);
+    assert(mylite_storage_drop_table(filename, "app", "posts") == MYLITE_STORAGE_NOTFOUND);
+
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
+    assert(rows.row_count == 0U);
+    assert(rows.rows == NULL);
+    assert(
+        mylite_storage_list_tables(filename, "app", collect_table, &capture) == MYLITE_STORAGE_OK
+    );
+    assert(capture.count == 1U);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);

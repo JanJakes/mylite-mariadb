@@ -46,6 +46,10 @@ static int mylite_copy_engine_name(const LEX_CSTRING *engine_name,
 static bool mylite_supported_engine_request(const char *engine_name);
 static bool mylite_engine_name_equals(const char *engine_name,
                                       const char *expected_engine_name);
+static int mylite_table_name_from_path(const char *path, char *out_schema_name,
+                                       size_t out_schema_name_size,
+                                       char *out_table_name,
+                                       size_t out_table_name_size);
 static int mylite_storage_to_handler_error(mylite_storage_result result);
 
 static const char *ha_mylite_exts[]= {
@@ -402,10 +406,25 @@ int ha_mylite::create(const char *, TABLE *form, HA_CREATE_INFO *create_info)
   DBUG_RETURN(mylite_storage_to_handler_error(result));
 }
 
-int ha_mylite::delete_table(const char *)
+int ha_mylite::delete_table(const char *name)
 {
   DBUG_ENTER("ha_mylite::delete_table");
-  DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    DBUG_RETURN(HA_ERR_NO_CONNECTION);
+
+  char schema_name[NAME_LEN + 1];
+  char table_name[NAME_LEN + 1];
+  int path_error= mylite_table_name_from_path(name, schema_name,
+                                              sizeof(schema_name), table_name,
+                                              sizeof(table_name));
+  if (path_error)
+    DBUG_RETURN(path_error);
+
+  const mylite_storage_result result=
+    mylite_storage_drop_table(primary_file, schema_name, table_name);
+  DBUG_RETURN(mylite_storage_to_handler_error(result));
 }
 
 int ha_mylite::rename_table(const char *, const char *)
@@ -461,6 +480,43 @@ static bool mylite_engine_name_equals(const char *engine_name,
                                       const char *expected_engine_name)
 {
   return my_strcasecmp_latin1(engine_name, expected_engine_name) == 0;
+}
+
+static int mylite_table_name_from_path(const char *path, char *out_schema_name,
+                                       size_t out_schema_name_size,
+                                       char *out_table_name,
+                                       size_t out_table_name_size)
+{
+  if (!path || !path[0])
+    return HA_ERR_UNSUPPORTED;
+
+  const char *table_start= path + strlen(path);
+  while (table_start > path && table_start[-1] != '/' &&
+         table_start[-1] != '\\')
+    --table_start;
+
+  const char *schema_end= table_start;
+  if (schema_end > path &&
+      (schema_end[-1] == '/' || schema_end[-1] == '\\'))
+    --schema_end;
+
+  const char *schema_start= schema_end;
+  while (schema_start > path && schema_start[-1] != '/' &&
+         schema_start[-1] != '\\')
+    --schema_start;
+
+  const size_t schema_name_length= (size_t)(schema_end - schema_start);
+  const size_t table_name_length= strlen(table_start);
+  if (schema_name_length == 0 || table_name_length == 0 ||
+      schema_name_length >= out_schema_name_size ||
+      table_name_length >= out_table_name_size)
+    return HA_ERR_UNSUPPORTED;
+
+  memcpy(out_schema_name, schema_start, schema_name_length);
+  out_schema_name[schema_name_length]= '\0';
+  memcpy(out_table_name, table_start, table_name_length);
+  out_table_name[table_name_length]= '\0';
+  return 0;
 }
 
 THR_LOCK_DATA **ha_mylite::store_lock(THD *, THR_LOCK_DATA **to,

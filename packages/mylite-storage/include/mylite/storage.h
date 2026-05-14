@@ -104,6 +104,11 @@ mylite_storage_result mylite_storage_table_exists(
     const char *schema_name,
     const char *table_name
 );
+mylite_storage_result mylite_storage_drop_table(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name
+);
 mylite_storage_result mylite_storage_append_row(
     const char *filename,
     const char *schema_name,

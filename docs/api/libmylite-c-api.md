@@ -133,8 +133,8 @@ Initial implementation status: `mylite_exec()` runs through the embedded
 MariaDB connection in `embedded-dev` builds, returns text result rows, preserves
 SQL `NULL` values as `NULL` callback entries, and populates MariaDB diagnostics
 on query failure. File-backed MyLite storage-engine builds support routed
-`CREATE TABLE` metadata plus keyless `INSERT` and full-scan `SELECT` over
-persisted MyLite row pages.
+`CREATE TABLE` metadata, catalog-backed `DROP TABLE`, and keyless `INSERT` plus
+full-scan `SELECT` over persisted MyLite row pages.
 
 ## Prepared Statements
 

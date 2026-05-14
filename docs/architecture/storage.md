@@ -57,8 +57,9 @@ and covered by a separate storage smoke build. That build verifies the
 `MYLITE` row from `SHOW ENGINES`, explicit `CREATE TABLE ... ENGINE=MYLITE`
 stores metadata in the primary `.mylite` catalog, and catalog discovery works
 after close/reopen. Keyless routed tables support row inserts and full scans
-from the primary file. Keyed writes, indexes, update/delete, `DROP`, and
-`RENAME` still reject until later slices define those update paths.
+from the primary file. `DROP TABLE` removes catalog metadata for routed tables.
+Keyed writes, indexes, update/delete, `RENAME`, and `ALTER` still reject until
+later slices define those update paths.
 
 ## File Layout
 
@@ -130,10 +131,14 @@ Current support covers metadata capture and discovery for omitted/default
 engine requests, explicit `ENGINE=MYLITE`, and metadata-safe `ENGINE=InnoDB`,
 `ENGINE=MyISAM`, and `ENGINE=Aria` requests. The catalog records both the
 requested engine name and the effective `MYLITE` engine. Unsupported explicit
-engine requests fail before catalog publication. `DROP` and `RENAME`
-deliberately return unsupported handler errors so the default MariaDB
-file-extension delete/rename paths cannot silently diverge from the MyLite
-catalog.
+engine requests fail before catalog publication. `DROP TABLE` removes the live
+catalog record and increments the catalog generation without deleting external
+MariaDB sidecars. Dropped table-definition blobs and row pages remain orphaned
+inside the primary file until free-space management exists; new table ids are
+allocated above both live catalog records and existing row pages so
+drop/recreate does not expose old rows. `RENAME` deliberately returns an
+unsupported handler error so the default MariaDB file-extension rename path
+cannot silently diverge from the MyLite catalog.
 
 ## Schemas And System Surfaces
 

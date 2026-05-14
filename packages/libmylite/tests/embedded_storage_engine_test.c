@@ -119,6 +119,7 @@ static void test_create_table_persists_catalog_metadata(void) {
     mylite_db *db = open_database(root, &filename);
     table_context tables = {0};
     table_context rows = {0};
+    table_context drop_rows = {0};
     post_row_context row_posts = {0};
     char *errmsg = NULL;
 
@@ -145,35 +146,42 @@ static void test_create_table_persists_catalog_metadata(void) {
         db,
         "CREATE TABLE row_posts (id INT NOT NULL, title VARCHAR(255) NOT NULL) ENGINE=InnoDB"
     );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE drop_posts (id INT NOT NULL, title VARCHAR(255) NOT NULL) ENGINE=InnoDB"
+    );
     assert(mylite_storage_table_exists(filename, "app", "default_posts") == MYLITE_STORAGE_OK);
     assert(mylite_storage_table_exists(filename, "app", "explicit_posts") == MYLITE_STORAGE_OK);
     assert(mylite_storage_table_exists(filename, "app", "innodb_posts") == MYLITE_STORAGE_OK);
     assert(mylite_storage_table_exists(filename, "app", "myisam_posts") == MYLITE_STORAGE_OK);
     assert(mylite_storage_table_exists(filename, "app", "aria_posts") == MYLITE_STORAGE_OK);
     assert(mylite_storage_table_exists(filename, "app", "row_posts") == MYLITE_STORAGE_OK);
-    assert_catalog_table_count(filename, "app", 6U);
+    assert(mylite_storage_table_exists(filename, "app", "drop_posts") == MYLITE_STORAGE_OK);
+    assert_catalog_table_count(filename, "app", 7U);
     assert_catalog_table_metadata(filename, "app", "default_posts", "DEFAULT", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "explicit_posts", "MYLITE", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "innodb_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "myisam_posts", "MyISAM", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "aria_posts", "Aria", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "row_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "drop_posts", "InnoDB", "MYLITE");
     assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
-    assert(tables.rows == 6);
+    assert(tables.rows == 7);
     assert_exec_fails(
         db,
         "CREATE TABLE memory_posts (id INT PRIMARY KEY, title VARCHAR(255)) ENGINE=MEMORY"
     );
     assert(mylite_storage_table_exists(filename, "app", "memory_posts") == MYLITE_STORAGE_NOTFOUND);
-    assert_catalog_table_count(filename, "app", 6U);
+    assert_catalog_table_count(filename, "app", 7U);
     assert_exec_fails(
         db,
         "CREATE TABLE innodb_posts (id INT PRIMARY KEY, title VARCHAR(255)) ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 6U);
+    assert_catalog_table_count(filename, "app", 7U);
     assert_exec_succeeds(db, "INSERT INTO row_posts VALUES (1, 'draft')");
     assert_exec_succeeds(db, "INSERT INTO row_posts VALUES (2, 'published')");
+    assert_exec_succeeds(db, "INSERT INTO drop_posts VALUES (7, 'old')");
     assert(
         mylite_exec(
             db,
@@ -194,13 +202,33 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert(errmsg != NULL);
     mylite_free(errmsg);
     errmsg = NULL;
-    assert_exec_fails(db, "DROP TABLE aria_posts");
-    assert(mylite_storage_table_exists(filename, "app", "aria_posts") == MYLITE_STORAGE_OK);
+    assert_exec_succeeds(db, "DROP TABLE drop_posts");
+    assert(mylite_storage_table_exists(filename, "app", "drop_posts") == MYLITE_STORAGE_NOTFOUND);
     assert_catalog_table_count(filename, "app", 6U);
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE drop_posts (id INT NOT NULL, title VARCHAR(255) NOT NULL) ENGINE=InnoDB"
+    );
+    assert_catalog_table_count(filename, "app", 7U);
+    assert(
+        mylite_exec(db, "SELECT id, title FROM drop_posts", row_callback, &drop_rows, &errmsg) ==
+        MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(drop_rows.rows == 0);
+    assert_exec_succeeds(db, "DROP TABLE aria_posts");
+    assert(mylite_storage_table_exists(filename, "app", "aria_posts") == MYLITE_STORAGE_NOTFOUND);
+    assert_catalog_table_count(filename, "app", 6U);
+    assert_exec_fails(db, "RENAME TABLE myisam_posts TO renamed_posts");
+    assert(mylite_storage_table_exists(filename, "app", "myisam_posts") == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_table_exists(filename, "app", "renamed_posts") == MYLITE_STORAGE_NOTFOUND
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
     tables = (table_context){0};
+    drop_rows = (table_context){0};
     row_posts = (post_row_context){0};
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "CREATE DATABASE app");
@@ -226,9 +254,17 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert(row_posts.rows == 2);
     assert(row_posts.found_draft);
     assert(row_posts.found_published);
+    assert(
+        mylite_exec(db, "SELECT id, title FROM drop_posts", row_callback, &drop_rows, &errmsg) ==
+        MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(drop_rows.rows == 0);
     assert_catalog_table_count(filename, "app", 6U);
     assert_catalog_table_metadata(filename, "app", "innodb_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "row_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "drop_posts", "InnoDB", "MYLITE");
+    assert(mylite_storage_table_exists(filename, "app", "aria_posts") == MYLITE_STORAGE_NOTFOUND);
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
