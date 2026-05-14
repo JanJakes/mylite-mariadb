@@ -28,7 +28,7 @@ not in a MariaDB datadir or existing engine sidecars.
 | 5 | SQL execution API | 🟡&nbsp;In&nbsp;progress | Add direct execution, prepared statements, bindings, columns, warnings, affected rows, and insert ids. Direct execution is implemented; prepared statements and typed values remain. |
 | 6 | Storage engine skeleton | ✅&nbsp;Done | Register a static MyLite storage engine with controlled handler smoke coverage. |
 | 7 | File header and empty catalog | ✅&nbsp;Done | Create/open a valid `.mylite` file with a versioned header and empty catalog. |
-| 8 | MyLite metadata DDL and discovery | 🟡&nbsp;In&nbsp;progress | Store routed table definitions in the catalog and discover them without durable `.frm` sidecars. Create/discovery and `DROP TABLE` are implemented; `RENAME` and `ALTER` catalog updates remain. |
+| 8 | MyLite metadata DDL and discovery | 🟡&nbsp;In&nbsp;progress | Store routed table definitions in the catalog and discover them without durable `.frm` sidecars. Create/discovery, `DROP TABLE`, and simple `RENAME TABLE` are implemented; `ALTER` remains. |
 | 9 | Sidecar lifecycle gates | ✅&nbsp;Done | Detect known MariaDB durable engine sidecars around metadata DDL, close/reopen, and failed-create cleanup. |
 | 10 | Engine routing policy | ✅&nbsp;Done | Record requested engine vs. effective MyLite engine and route omitted/default, `InnoDB`, `MyISAM`, and `Aria` metadata where safe. |
 | 11 | Row and index storage | 🟡&nbsp;In&nbsp;progress | Keyless table insert and full-scan storage is implemented; primary/secondary indexes, uniqueness, autoincrement, BLOB/TEXT overflow, update/delete, and copy `ALTER` rebuilds remain. |

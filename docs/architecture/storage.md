@@ -58,7 +58,8 @@ and covered by a separate storage smoke build. That build verifies the
 stores metadata in the primary `.mylite` catalog, and catalog discovery works
 after close/reopen. Keyless routed tables support row inserts and full scans
 from the primary file. `DROP TABLE` removes catalog metadata for routed tables.
-Keyed writes, indexes, update/delete, `RENAME`, and `ALTER` still reject until
+Simple `RENAME TABLE` updates catalog identity while preserving table ids and
+row pages. Keyed writes, indexes, update/delete, and `ALTER` still reject until
 later slices define those update paths.
 
 ## File Layout
@@ -136,9 +137,11 @@ catalog record and increments the catalog generation without deleting external
 MariaDB sidecars. Dropped table-definition blobs and row pages remain orphaned
 inside the primary file until free-space management exists; new table ids are
 allocated above both live catalog records and existing row pages so
-drop/recreate does not expose old rows. `RENAME` deliberately returns an
-unsupported handler error so the default MariaDB file-extension rename path
-cannot silently diverge from the MyLite catalog.
+drop/recreate does not expose old rows. Simple `RENAME TABLE` rewrites the
+catalog record identity while preserving table id, requested/effective engine
+metadata, and the stored table-definition blob reference, so existing keyless
+row pages move with the renamed table. Index rename paths remain planned until
+MyLite owns index storage.
 
 ## Schemas And System Surfaces
 

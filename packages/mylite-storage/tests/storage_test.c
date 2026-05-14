@@ -23,6 +23,7 @@ static void test_store_large_table_definition(void);
 static void test_append_and_read_rows(void);
 static void test_rejects_corrupt_row_page(void);
 static void test_drop_table_definition(void);
+static void test_rename_table_definition(void);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static long long file_size(const char *path);
@@ -31,6 +32,8 @@ static void write_header_format_version(const char *path, unsigned value);
 static int collect_table(void *ctx, const char *schema_name, const char *table_name);
 
 typedef struct table_list_capture {
+    const char *schema_name;
+    const char *table_name;
     unsigned count;
 } table_list_capture;
 
@@ -47,6 +50,7 @@ int main(void) {
     test_append_and_read_rows();
     test_rejects_corrupt_row_page();
     test_drop_table_definition();
+    test_rename_table_definition();
     return 0;
 }
 
@@ -431,6 +435,105 @@ static void test_drop_table_definition(void) {
     free(root);
 }
 
+static void test_rename_table_definition(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "rename-table.mylite");
+    mylite_storage_table_definition posts_definition = {
+        .size = sizeof(posts_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "InnoDB",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_table_definition target_definition = {
+        .size = sizeof(target_definition),
+        .schema_name = "app",
+        .table_name = "target_posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+    mylite_storage_table_metadata metadata = {
+        .size = sizeof(metadata),
+    };
+    unsigned char *stored_definition = NULL;
+    size_t stored_definition_size = 0U;
+    table_list_capture capture = {
+        .schema_name = "blog",
+        .table_name = "articles",
+    };
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &posts_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_store_table_definition(filename, &target_definition) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", row, sizeof(row)) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_rename_table(filename, "app", "missing", "blog", "articles") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert(
+        mylite_storage_rename_table(filename, "app", "missing", "app", "target_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert(
+        mylite_storage_rename_table(filename, "app", "posts", "app", "target_posts") ==
+        MYLITE_STORAGE_ERROR
+    );
+    assert(
+        mylite_storage_rename_table(filename, "app", "posts", "blog", "articles") ==
+        MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_table_exists(filename, "app", "posts") == MYLITE_STORAGE_NOTFOUND);
+    assert(mylite_storage_table_exists(filename, "blog", "articles") == MYLITE_STORAGE_OK);
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_NOTFOUND);
+    assert(mylite_storage_read_rows(filename, "blog", "articles", &rows) == MYLITE_STORAGE_OK);
+    assert(rows.row_size == sizeof(row));
+    assert(rows.row_count == 1U);
+    assert(memcmp(rows.rows, row, sizeof(row)) == 0);
+    mylite_storage_free(rows.rows);
+    assert(
+        mylite_storage_read_table_definition(
+            filename,
+            "blog",
+            "articles",
+            &stored_definition,
+            &stored_definition_size
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(stored_definition_size == sizeof(definition));
+    assert(memcmp(stored_definition, definition, sizeof(definition)) == 0);
+    mylite_storage_free(stored_definition);
+    assert(
+        mylite_storage_read_table_metadata(filename, "blog", "articles", &metadata) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(strcmp(metadata.requested_engine_name, "InnoDB") == 0);
+    assert(strcmp(metadata.effective_engine_name, "MYLITE") == 0);
+    mylite_storage_free(metadata.requested_engine_name);
+    mylite_storage_free(metadata.effective_engine_name);
+    assert(
+        mylite_storage_list_tables(filename, "blog", collect_table, &capture) == MYLITE_STORAGE_OK
+    );
+    assert(capture.count == 1U);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
 static char *make_temp_root(void) {
     char template_path[] = "/tmp/mylite-storage-test.XXXXXX";
     char *root = mkdtemp(template_path);
@@ -481,8 +584,10 @@ static void write_header_format_version(const char *path, unsigned value) {
 
 static int collect_table(void *ctx, const char *schema_name, const char *table_name) {
     table_list_capture *capture = (table_list_capture *)ctx;
-    assert(strcmp(schema_name, "app") == 0);
-    assert(strcmp(table_name, "posts") == 0);
+    const char *expected_schema_name = capture->schema_name == NULL ? "app" : capture->schema_name;
+    const char *expected_table_name = capture->table_name == NULL ? "posts" : capture->table_name;
+    assert(strcmp(schema_name, expected_schema_name) == 0);
+    assert(strcmp(table_name, expected_table_name) == 0);
     ++capture->count;
     return 0;
 }

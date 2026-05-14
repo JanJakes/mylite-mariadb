@@ -427,10 +427,36 @@ int ha_mylite::delete_table(const char *name)
   DBUG_RETURN(mylite_storage_to_handler_error(result));
 }
 
-int ha_mylite::rename_table(const char *, const char *)
+int ha_mylite::rename_table(const char *from, const char *to)
 {
   DBUG_ENTER("ha_mylite::rename_table");
-  DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    DBUG_RETURN(HA_ERR_NO_CONNECTION);
+
+  char old_schema_name[NAME_LEN + 1];
+  char old_table_name[NAME_LEN + 1];
+  int path_error= mylite_table_name_from_path(from, old_schema_name,
+                                              sizeof(old_schema_name),
+                                              old_table_name,
+                                              sizeof(old_table_name));
+  if (path_error)
+    DBUG_RETURN(path_error);
+
+  char new_schema_name[NAME_LEN + 1];
+  char new_table_name[NAME_LEN + 1];
+  path_error= mylite_table_name_from_path(to, new_schema_name,
+                                          sizeof(new_schema_name),
+                                          new_table_name,
+                                          sizeof(new_table_name));
+  if (path_error)
+    DBUG_RETURN(path_error);
+
+  const mylite_storage_result result=
+    mylite_storage_rename_table(primary_file, old_schema_name, old_table_name,
+                                new_schema_name, new_table_name);
+  DBUG_RETURN(mylite_storage_to_handler_error(result));
 }
 
 static int mylite_requested_engine_name(HA_CREATE_INFO *create_info,

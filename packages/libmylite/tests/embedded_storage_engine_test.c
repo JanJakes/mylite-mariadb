@@ -121,6 +121,7 @@ static void test_create_table_persists_catalog_metadata(void) {
     table_context rows = {0};
     table_context drop_rows = {0};
     post_row_context row_posts = {0};
+    post_row_context renamed_row_posts = {0};
     char *errmsg = NULL;
 
     assert_exec_succeeds(db, "CREATE DATABASE app");
@@ -219,17 +220,33 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert_exec_succeeds(db, "DROP TABLE aria_posts");
     assert(mylite_storage_table_exists(filename, "app", "aria_posts") == MYLITE_STORAGE_NOTFOUND);
     assert_catalog_table_count(filename, "app", 6U);
-    assert_exec_fails(db, "RENAME TABLE myisam_posts TO renamed_posts");
-    assert(mylite_storage_table_exists(filename, "app", "myisam_posts") == MYLITE_STORAGE_OK);
+    assert_exec_succeeds(db, "RENAME TABLE row_posts TO renamed_row_posts");
+    assert(mylite_storage_table_exists(filename, "app", "row_posts") == MYLITE_STORAGE_NOTFOUND);
+    assert(mylite_storage_table_exists(filename, "app", "renamed_row_posts") == MYLITE_STORAGE_OK);
+    assert_exec_fails(db, "SELECT id, title FROM row_posts");
     assert(
-        mylite_storage_table_exists(filename, "app", "renamed_posts") == MYLITE_STORAGE_NOTFOUND
+        mylite_exec(
+            db,
+            "SELECT id, title FROM renamed_row_posts",
+            post_row_callback,
+            &renamed_row_posts,
+            &errmsg
+        ) == MYLITE_OK
     );
+    assert(errmsg == NULL);
+    assert(renamed_row_posts.rows == 2);
+    assert(renamed_row_posts.found_draft);
+    assert(renamed_row_posts.found_published);
+    assert_exec_succeeds(db, "RENAME TABLE myisam_posts TO renamed_posts");
+    assert(mylite_storage_table_exists(filename, "app", "myisam_posts") == MYLITE_STORAGE_NOTFOUND);
+    assert(mylite_storage_table_exists(filename, "app", "renamed_posts") == MYLITE_STORAGE_OK);
+    assert_catalog_table_count(filename, "app", 6U);
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
     tables = (table_context){0};
     drop_rows = (table_context){0};
-    row_posts = (post_row_context){0};
+    renamed_row_posts = (post_row_context){0};
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "CREATE DATABASE app");
     assert_exec_succeeds(db, "USE app");
@@ -244,16 +261,16 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert(
         mylite_exec(
             db,
-            "SELECT id, title FROM row_posts",
+            "SELECT id, title FROM renamed_row_posts",
             post_row_callback,
-            &row_posts,
+            &renamed_row_posts,
             &errmsg
         ) == MYLITE_OK
     );
     assert(errmsg == NULL);
-    assert(row_posts.rows == 2);
-    assert(row_posts.found_draft);
-    assert(row_posts.found_published);
+    assert(renamed_row_posts.rows == 2);
+    assert(renamed_row_posts.found_draft);
+    assert(renamed_row_posts.found_published);
     assert(
         mylite_exec(db, "SELECT id, title FROM drop_posts", row_callback, &drop_rows, &errmsg) ==
         MYLITE_OK
@@ -262,8 +279,11 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert(drop_rows.rows == 0);
     assert_catalog_table_count(filename, "app", 6U);
     assert_catalog_table_metadata(filename, "app", "innodb_posts", "InnoDB", "MYLITE");
-    assert_catalog_table_metadata(filename, "app", "row_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "renamed_row_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "renamed_posts", "MyISAM", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "drop_posts", "InnoDB", "MYLITE");
+    assert(mylite_storage_table_exists(filename, "app", "row_posts") == MYLITE_STORAGE_NOTFOUND);
+    assert(mylite_storage_table_exists(filename, "app", "myisam_posts") == MYLITE_STORAGE_NOTFOUND);
     assert(mylite_storage_table_exists(filename, "app", "aria_posts") == MYLITE_STORAGE_NOTFOUND);
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");

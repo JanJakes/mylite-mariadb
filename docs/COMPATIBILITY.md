@@ -40,11 +40,11 @@ for drop-in application expectations.
 | SQL engine request | MyLite status | Target behavior |
 | --- | --- | --- |
 | MyLite engine registration | 🟡&nbsp;Partial | Opt-in static handler builds expose `MYLITE` through `SHOW ENGINES`; file-backed MyLite sessions configure it as the default effective engine |
-| No explicit engine | 🟡&nbsp;Partial | `CREATE TABLE` routes to MyLite, stores requested engine `DEFAULT` with effective engine `MYLITE`, supports keyless row insert plus full scans, and removes catalog metadata on `DROP TABLE`; keyed writes and rename/alter DDL remain unsupported |
-| `ENGINE=MYLITE` | 🟡&nbsp;Partial | Explicit MyLite DDL stores MariaDB table-definition metadata in the `.mylite` catalog, rediscovers it after reopen, supports keyless row insert plus full scans, and removes catalog metadata on `DROP TABLE`; keyed writes remain unsupported |
-| `ENGINE=InnoDB` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `InnoDB`; keyless row insert, full scans, and `DROP TABLE` are covered, while InnoDB transactions, foreign keys, indexes, and tablespaces remain unsupported |
-| `ENGINE=MyISAM` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `MyISAM`; keyless row insert, full scans, and `DROP TABLE` are covered, while MyISAM data and index files are never durable application storage |
-| `ENGINE=Aria` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `Aria`; keyless row insert, full scans, and `DROP TABLE` are covered, while Aria data, index, and log files are never durable application storage |
+| No explicit engine | 🟡&nbsp;Partial | `CREATE TABLE` routes to MyLite, stores requested engine `DEFAULT` with effective engine `MYLITE`, supports keyless row insert plus full scans, and updates catalog metadata on `DROP TABLE` and simple `RENAME TABLE`; keyed writes and alter DDL remain unsupported |
+| `ENGINE=MYLITE` | 🟡&nbsp;Partial | Explicit MyLite DDL stores MariaDB table-definition metadata in the `.mylite` catalog, rediscovers it after reopen, supports keyless row insert plus full scans, and updates catalog metadata on `DROP TABLE` and simple `RENAME TABLE`; keyed writes remain unsupported |
+| `ENGINE=InnoDB` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `InnoDB`; keyless row insert, full scans, `DROP TABLE`, and simple `RENAME TABLE` are covered, while InnoDB transactions, foreign keys, indexes, and tablespaces remain unsupported |
+| `ENGINE=MyISAM` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `MyISAM`; keyless row insert, full scans, `DROP TABLE`, and simple `RENAME TABLE` are covered, while MyISAM data and index files are never durable application storage |
+| `ENGINE=Aria` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `Aria`; keyless row insert, full scans, `DROP TABLE`, and simple `RENAME TABLE` are covered, while Aria data, index, and log files are never durable application storage |
 | Dynamic external engines | ➖&nbsp;Out&nbsp;of&nbsp;scope | Unsupported explicit engine requests fail before catalog publication |
 
 ## File Ownership
@@ -64,7 +64,7 @@ for drop-in application expectations.
 | --- | --- | --- |
 | `CREATE TABLE` metadata | 🟡&nbsp;Partial | Store MyLite table definitions for omitted/default engine, `ENGINE=MYLITE`, `ENGINE=InnoDB`, `ENGINE=MyISAM`, and `ENGINE=Aria` without durable MariaDB sidecars |
 | `DROP TABLE` | 🟡&nbsp;Partial | Remove MyLite catalog metadata for routed base tables without durable MariaDB sidecars; orphaned definition and row pages are not reclaimed yet |
-| `RENAME TABLE` | ⚪&nbsp;Planned | Rename MyLite catalog metadata without falling back to MariaDB file sidecars; currently rejected for MyLite tables |
+| `RENAME TABLE` | 🟡&nbsp;Partial | Rename MyLite catalog metadata for simple routed base tables without durable MariaDB sidecars; index rename paths remain planned |
 | `ALTER TABLE` | ⚪&nbsp;Planned | Copy/rebuild path first; in-place algorithms later when storage supports them |
 | Standalone `CREATE INDEX` / `DROP INDEX` | ⚪&nbsp;Planned | Route through MariaDB DDL and MyLite catalog/index updates |
 | `CREATE TABLE ... LIKE` | ⚪&nbsp;Planned | Preserve MariaDB table definition behavior |
