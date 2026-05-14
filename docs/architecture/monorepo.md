@@ -52,6 +52,17 @@ CC="$LLVM_PREFIX/bin/clang" CXX="$LLVM_PREFIX/bin/clang++" \
 PATH="$LLVM_PREFIX/bin:$PATH" cmake --build --preset tidy
 ```
 
+Build the current MariaDB embedded-library baseline with:
+
+```sh
+tools/mariadb-embedded-build all
+```
+
+The wrapper keeps MyLite-owned build orchestration outside `mariadb/`, uses the
+initial cache in `cmake/mariadb-embedded-baseline.cmake`, and records
+`libmariadbd.a` size evidence. The current baseline is documented in
+[MariaDB Embedded Build](mariadb-embedded-build.md).
+
 ## Import Discipline
 
 MariaDB is imported under `mariadb/` as source, not as a submodule. MyLite is a
@@ -77,16 +88,9 @@ slice justifies them:
 - `storage/rocksdb/rocksdb`,
 - `wsrep-lib`.
 
-Until the minimal embedded build profile owns these defaults, configure the
-import with submodule updates disabled and server-only optional surfaces turned
-off:
+For the MariaDB embedded baseline, configure the import with submodule updates
+disabled and the absent-submodule surfaces turned off:
 
 ```sh
-cmake -S mariadb -B build/mariadb-configure -G Ninja \
-  -DUPDATE_SUBMODULES=OFF \
-  -DWITH_EMBEDDED_SERVER=ON \
-  -DWITH_SSL=system \
-  -DWITH_UNIT_TESTS=OFF \
-  -DWITH_WSREP=OFF \
-  -DPLUGIN_S3=NO
+tools/mariadb-embedded-build configure
 ```

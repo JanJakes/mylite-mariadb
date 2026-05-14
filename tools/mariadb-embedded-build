@@ -1,0 +1,139 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+build_dir="${BUILD_DIR:-"${root_dir}/build/mariadb-embedded"}"
+generator="${GENERATOR:-Ninja}"
+profile="${PROFILE:-"${root_dir}/cmake/mariadb-embedded-baseline.cmake"}"
+target="${TARGET:-libmariadbd.a}"
+
+usage() {
+  cat <<EOF
+Usage: tools/mariadb-embedded-build [configure|build|measure|all] [cmake args...]
+
+Environment:
+  BUILD_DIR   Build directory. Defaults to build/mariadb-embedded.
+  GENERATOR   CMake generator. Defaults to Ninja.
+  PROFILE     Initial cache file. Defaults to cmake/mariadb-embedded-baseline.cmake.
+  TARGET      Build target. Defaults to libmariadbd.a.
+EOF
+}
+
+prefer_homebrew_bison() {
+  local prefix
+
+  for prefix in /opt/homebrew/opt/bison /usr/local/opt/bison; do
+    if [ -x "${prefix}/bin/bison" ]; then
+      PATH="${prefix}/bin:${PATH}"
+      export PATH
+      return
+    fi
+  done
+}
+
+require_command() {
+  local command_name="$1"
+
+  if ! command -v "${command_name}" >/dev/null 2>&1; then
+    echo "Missing required command: ${command_name}" >&2
+    exit 1
+  fi
+}
+
+configure() {
+  require_command cmake
+  prefer_homebrew_bison
+
+  cmake --fresh \
+    -S "${root_dir}/mariadb" \
+    -B "${build_dir}" \
+    -G "${generator}" \
+    -C "${profile}" \
+    "$@"
+}
+
+build() {
+  require_command cmake
+  prefer_homebrew_bison
+
+  cmake --build "${build_dir}" --target "${target}"
+}
+
+measure() {
+  local archive
+  local cache_options
+  local member_count
+  local size_bytes
+  local size_mib
+
+  require_command ar
+
+  archive="${build_dir}/libmysqld/libmariadbd.a"
+  if [ ! -f "${archive}" ]; then
+    archive="$(find "${build_dir}" -name libmariadbd.a -type f -print -quit 2>/dev/null || true)"
+  fi
+
+  if [ -z "${archive}" ] || [ ! -f "${archive}" ]; then
+    echo "Could not find libmariadbd.a under ${build_dir}" >&2
+    exit 1
+  fi
+
+  size_bytes="$(file_size "${archive}")"
+  size_mib="$(awk -v bytes="${size_bytes}" 'BEGIN { printf "%.2f", bytes / 1048576 }')"
+  member_count="$(ar -t "${archive}" | wc -l | tr -d '[:space:]')"
+
+  echo "archive=${archive}"
+  echo "size_bytes=${size_bytes}"
+  echo "size_mib=${size_mib}"
+  echo "members=${member_count}"
+
+  cache_options="$(grep -E \
+    '^(CMAKE_BUILD_TYPE|UPDATE_SUBMODULES|WITH_EMBEDDED_SERVER|WITH_UNIT_TESTS|WITH_SSL|WITH_WSREP|PLUGIN_S3):' \
+    "${build_dir}/CMakeCache.txt" \
+    || true)"
+
+  if [ -n "${cache_options}" ]; then
+    echo
+    echo "${cache_options}"
+  fi
+}
+
+file_size() {
+  local path="$1"
+
+  if size="$(stat -f %z "${path}" 2>/dev/null)"; then
+    echo "${size}"
+    return
+  fi
+
+  stat -c %s "${path}"
+}
+
+command_name="${1:-all}"
+if [ "$#" -gt 0 ]; then
+  shift
+fi
+
+case "${command_name}" in
+  configure)
+    configure "$@"
+    ;;
+  build)
+    build
+    ;;
+  measure)
+    measure
+    ;;
+  all)
+    configure "$@"
+    build
+    measure
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 1
+    ;;
+esac
