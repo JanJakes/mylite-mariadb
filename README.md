@@ -97,7 +97,16 @@ The repository is intended to hold the core library, as well as some surrounding
 
 ## Development
 
-TBD.
+The repository uses CMake presets for first-party packages and tools:
+
+```sh
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
+```
+
+See [docs/architecture/monorepo.md](docs/architecture/monorepo.md) for the
+repository layout and import discipline.
 
 ## References
 

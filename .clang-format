@@ -1,0 +1,26 @@
+BasedOnStyle: LLVM
+BreakBeforeBraces: Attach
+AlwaysBreakAfterReturnType: None
+ColumnLimit: 100
+IndentWidth: 4
+AlignAfterOpenBracket: BlockIndent
+ContinuationIndentWidth: 4
+IndentPPDirectives: AfterHash
+PPIndentWidth: 2
+TabWidth: 4
+UseTab: Never
+
+AllowAllArgumentsOnNextLine: false
+AllowAllParametersOfDeclarationOnNextLine: false
+AllowShortBlocksOnASingleLine: Empty
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+BinPackArguments: false
+BinPackParameters: false
+
+DerivePointerAlignment: false
+PenaltyReturnTypeOnItsOwnLine: 1000000000
+PointerAlignment: Right
+SeparateDefinitionBlocks: Always
+SortIncludes: CaseSensitive
