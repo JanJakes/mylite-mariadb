@@ -41,6 +41,17 @@ Reasons:
 - SQLite is useful as design evidence for file ownership and pager tradeoffs,
   but SQLite SQL semantics do not match MariaDB semantics.
 
+## Implementation Boundary
+
+Durable MyLite storage lives in the internal first-party
+`packages/mylite-storage/` target. MariaDB-facing handler glue lives under
+`mariadb/storage/mylite/` and should stay as thin as practical: translate
+MariaDB handler calls into MyLite storage operations, return MariaDB handler
+errors, and preserve upstream registration conventions.
+
+This split keeps catalog, page, transaction, lock, and recovery code outside the
+MariaDB import while limiting the long-lived fork delta under `mariadb/`.
+
 ## File Layout
 
 The `.mylite` file format should be page based:

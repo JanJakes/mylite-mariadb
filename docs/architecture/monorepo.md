@@ -16,6 +16,7 @@ mechanical imports and local MyLite changes remain reviewable.
 | `docs/specs/` | Slice specifications for substantive compatibility and storage work. |
 | `mariadb/` | Mechanical import of the pinned MariaDB source tree. MyLite patches land after the import commit. |
 | `packages/libmylite/` | First-party embedded runtime library. This owns the public MyLite C API boundary. |
+| `packages/mylite-storage/` | Internal first-party storage core. This owns MyLite catalog, page, transaction, lock, and recovery code behind the MariaDB handler glue. |
 | `tests/` | Cross-package and integration tests. Package-local tests stay next to the package they exercise. |
 | `tools/` | Command-line tools and developer utilities. Buildable tools live in subdirectories. |
 

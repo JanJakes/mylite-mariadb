@@ -79,6 +79,10 @@ The baseline explicitly disables:
 - Aria S3 support
 - MariaDB upstream unit-test targets
 
+After the storage-engine skeleton slice, MariaDB configure also discovers
+`MYLITE_SE` and leaves it disabled by default. Opt-in handler smoke builds use
+`-DPLUGIN_MYLITE_SE=STATIC`; that path is not part of this baseline size.
+
 Configure also reports unavailable optional features on this host, including
 RocksDB, OQGraph, AWS key management, CONNECT JDBC, and Snappy.
 
