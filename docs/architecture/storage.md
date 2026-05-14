@@ -52,10 +52,12 @@ errors, and preserve upstream registration conventions.
 This split keeps catalog, page, transaction, lock, and recovery code outside the
 MariaDB import while limiting the long-lived fork delta under `mariadb/`.
 
-The initial handler is an opt-in registration skeleton. It is disabled in the
-default embedded baseline and covered by a separate storage smoke build that
-verifies `SHOW ENGINES` reports `MYLITE`. It deliberately rejects table creation
-until the catalog, row storage, and DDL routing slices define real behavior.
+The initial handler is opt-in. It is disabled in the default embedded baseline
+and covered by a separate storage smoke build. That build verifies the
+`MYLITE` row from `SHOW ENGINES`, explicit `CREATE TABLE ... ENGINE=MYLITE`
+stores metadata in the primary `.mylite` catalog, and catalog discovery works
+after close/reopen. Row DML, `DROP`, and `RENAME` still reject until the
+catalog and row-storage slices define those update paths.
 
 ## File Layout
 
@@ -84,9 +86,9 @@ The header stores:
 - durability and feature flags.
 
 The current implementation writes page 0 as a fixed-size, little-endian,
-checksummed header and page 1 as an empty catalog root. That root is only a
-catalog anchor for subsequent metadata work; table definitions, rows, indexes,
-and transaction state are still planned slices.
+checksummed header and page 1 as a catalog root. Explicit MyLite table
+definitions are stored as catalog records plus checksummed definition blob
+pages. Rows, indexes, and transaction state are still planned slices.
 
 The catalog stores:
 
@@ -119,6 +121,11 @@ DDL routing must cover both discovery and writes:
 
 `CREATE`, `ALTER`, `DROP`, and `RENAME` are the minimum DDL lifecycle for
 claiming native single-file table metadata.
+
+Current support covers explicit `CREATE TABLE ... ENGINE=MYLITE` metadata
+capture and discovery only. `DROP` and `RENAME` deliberately return unsupported
+handler errors so the default MariaDB file-extension delete/rename paths cannot
+silently diverge from the MyLite catalog.
 
 ## Schemas And System Surfaces
 

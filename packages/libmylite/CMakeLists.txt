@@ -61,7 +61,10 @@ if(BUILD_TESTING)
       add_executable(mylite_embedded_storage_engine_test
         tests/embedded_storage_engine_test.c
       )
-      target_link_libraries(mylite_embedded_storage_engine_test PRIVATE MyLite::mylite)
+      target_link_libraries(
+        mylite_embedded_storage_engine_test
+        PRIVATE MyLite::mylite MyLite::storage
+      )
       mylite_configure_c_target(mylite_embedded_storage_engine_test)
 
       add_test(

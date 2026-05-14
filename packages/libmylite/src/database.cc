@@ -106,7 +106,10 @@ std::filesystem::path normalize_filename(const char *filename);
 std::filesystem::path create_runtime_directory(const mylite_open_config *config);
 std::filesystem::path runtime_root(const mylite_open_config *config);
 std::string unique_runtime_name(void);
-std::vector<std::string> runtime_arguments(const std::filesystem::path &runtime_dir);
+std::vector<std::string> runtime_arguments(
+    const std::filesystem::path &runtime_dir,
+    const std::string &primary_filename
+);
 std::vector<char *> mutable_arguments(std::vector<std::string> &arguments);
 #endif
 void remove_directory_if_present(const std::filesystem::path &directory);
@@ -465,7 +468,7 @@ int start_runtime(mylite_db &database, const mylite_open_config *config) {
 
 #  if MYLITE_WITH_MARIADB_EMBEDDED
     const std::filesystem::path runtime_dir = create_runtime_directory(config);
-    g_runtime.arguments = runtime_arguments(runtime_dir);
+    g_runtime.arguments = runtime_arguments(runtime_dir, database.filename);
     g_runtime.argv = mutable_arguments(g_runtime.arguments);
     char *groups[] = {const_cast<char *>("server"), const_cast<char *>("embedded"), nullptr};
 
@@ -601,12 +604,15 @@ std::string unique_runtime_name(void) {
     return "mylite-runtime-" + std::to_string(now) + "-" + std::to_string(++counter);
 }
 
-std::vector<std::string> runtime_arguments(const std::filesystem::path &runtime_dir) {
+std::vector<std::string> runtime_arguments(
+    const std::filesystem::path &runtime_dir,
+    const std::string &primary_filename
+) {
     const std::filesystem::path data_dir = runtime_dir / "data";
     const std::filesystem::path tmp_dir = runtime_dir / "tmp";
     const std::filesystem::path plugin_dir = runtime_dir / "plugins";
 
-    return {
+    std::vector<std::string> arguments = {
         "mylite",
         "--no-defaults",
         "--datadir=" + data_dir.string(),
@@ -619,6 +625,14 @@ std::vector<std::string> runtime_arguments(const std::filesystem::path &runtime_
         "--lc-messages-dir=" MYLITE_MARIADB_MESSAGES_DIR,
         "--character-sets-dir=" MYLITE_MARIADB_CHARSETS_DIR,
     };
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+    if (primary_filename != ":memory:") {
+        arguments.push_back("--mylite-primary-file=" + primary_filename);
+    }
+#  else
+    (void)primary_filename;
+#  endif
+    return arguments;
 }
 
 std::vector<char *> mutable_arguments(std::vector<std::string> &arguments) {

@@ -100,11 +100,12 @@ file. The exact binary constants belong in the implementation header, but the
 header must be fixed-size, endian-marked, checksummed, and forward-versioned
 from the first durable write.
 
-Implementation status: the first header-only increment now writes a fixed
-4096-byte header page and an empty catalog root page, validates magic bytes,
-format version, endian marker, checksums, page count, and empty-root metadata,
-and maps unsupported storage formats to a corrupt open result through
-`libmylite`. Catalog table records remain in the next metadata slice.
+Implementation status: MyLite now writes a fixed 4096-byte header page and a
+catalog root page, validates magic bytes, format version, endian marker,
+checksums, page count, and catalog metadata, and maps unsupported storage
+formats to a corrupt open result through `libmylite`. The storage package also
+stores explicit MyLite table-definition records and checksummed definition blob
+pages.
 
 ### Catalog Records
 
@@ -232,6 +233,13 @@ The only engine request affected by this slice is explicit `ENGINE=MYLITE`.
 Routing `ENGINE=InnoDB`, `ENGINE=MyISAM`, `ENGINE=Aria`, and no-engine DDL to
 MyLite remains a later compatibility slice because those paths require policy
 for engine-specific options and unsupported semantics.
+
+Implementation status: explicit `CREATE TABLE ... ENGINE=MYLITE` now stores the
+MariaDB-generated table-definition image in the primary `.mylite` file and uses
+catalog-backed `discover_table`, `discover_table_names`, and
+`discover_table_existence`. Row-modifying DML, `DROP`, and `RENAME` still fail
+through unsupported handler paths until their catalog transaction semantics are
+specified.
 
 ## Wire Protocol Or Integration Impact
 

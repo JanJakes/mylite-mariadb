@@ -39,9 +39,9 @@ for drop-in application expectations.
 
 | SQL engine request | MyLite status | Target behavior |
 | --- | --- | --- |
-| MyLite engine registration | 🟡&nbsp;Partial | Opt-in static handler builds expose `MYLITE` through `SHOW ENGINES`; table storage remains unsupported |
+| MyLite engine registration | 🟡&nbsp;Partial | Opt-in static handler builds expose `MYLITE` through `SHOW ENGINES` |
 | No explicit engine | ⚪&nbsp;Planned | Create a MyLite table |
-| `ENGINE=MYLITE` | ⚪&nbsp;Planned | Create a MyLite table |
+| `ENGINE=MYLITE` | 🟡&nbsp;Partial | Explicit MyLite DDL stores MariaDB table-definition metadata in the `.mylite` catalog and rediscovers it after reopen; row DML and catalog-changing DDL remain unsupported |
 | `ENGINE=InnoDB` | ⚪&nbsp;Planned | Route application DDL to MyLite storage where semantics are supported |
 | `ENGINE=MyISAM` | ⚪&nbsp;Planned | Route legacy application DDL to MyLite storage where semantics are supported |
 | `ENGINE=Aria` | ⚪&nbsp;Planned | Route application DDL to MyLite storage where semantics are supported; never create Aria durable sidecars |
@@ -51,7 +51,7 @@ for drop-in application expectations.
 
 | Capability | MyLite status | Target behavior |
 | --- | --- | --- |
-| Primary portable database file | 🟡&nbsp;Partial | Open/create writes and validates a versioned `.mylite` header plus an empty catalog root; durable table metadata is not stored there yet |
+| Primary portable database file | 🟡&nbsp;Partial | Open/create writes and validates a versioned `.mylite` header, catalog root, and explicit MyLite table-definition records |
 | Persistent `.frm` files | ➖&nbsp;Out&nbsp;of&nbsp;scope | Store table definitions in the MyLite catalog |
 | Persistent InnoDB sidecars | ➖&nbsp;Out&nbsp;of&nbsp;scope | No `.ibd`, redo, undo, or independent tablespace files |
 | Persistent MyISAM sidecars | ➖&nbsp;Out&nbsp;of&nbsp;scope | No `.MYD` or `.MYI` durable table files |
@@ -62,7 +62,8 @@ for drop-in application expectations.
 
 | Capability | MyLite status | Compatibility target |
 | --- | --- | --- |
-| `CREATE TABLE`, `DROP TABLE`, `RENAME TABLE` | ⚪&nbsp;Planned | MariaDB DDL semantics without durable metadata sidecars |
+| `CREATE TABLE ... ENGINE=MYLITE` | 🟡&nbsp;Partial | Store metadata-only MyLite table definitions in the catalog without durable `.frm` sidecars |
+| `DROP TABLE`, `RENAME TABLE` | ⚪&nbsp;Planned | Catalog transactions that remove or rename MyLite metadata without falling back to MariaDB file sidecars; currently rejected for MyLite tables |
 | `ALTER TABLE` | ⚪&nbsp;Planned | Copy/rebuild path first; in-place algorithms later when storage supports them |
 | Standalone `CREATE INDEX` / `DROP INDEX` | ⚪&nbsp;Planned | Route through MariaDB DDL and MyLite catalog/index updates |
 | `CREATE TABLE ... LIKE` | ⚪&nbsp;Planned | Preserve MariaDB table definition behavior |

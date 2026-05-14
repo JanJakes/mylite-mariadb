@@ -81,13 +81,23 @@ endfunction()
 
 function(mylite_link_mariadb_embedded target)
   if(NOT MYLITE_WITH_MARIADB_EMBEDDED)
-    target_compile_definitions("${target}" PRIVATE MYLITE_WITH_MARIADB_EMBEDDED=0)
+    target_compile_definitions("${target}" PRIVATE
+      MYLITE_WITH_MARIADB_EMBEDDED=0
+      MYLITE_MARIADB_HAS_MYLITE_SE=0
+    )
     return()
   endif()
 
   mylite_add_mariadb_embedded_target()
+  if(MYLITE_MARIADB_HAS_MYLITE_SE)
+    set(mylite_mariadb_has_mylite_se_define 1)
+  else()
+    set(mylite_mariadb_has_mylite_se_define 0)
+  endif()
+
   target_compile_definitions("${target}" PRIVATE
     MYLITE_WITH_MARIADB_EMBEDDED=1
+    MYLITE_MARIADB_HAS_MYLITE_SE=${mylite_mariadb_has_mylite_se_define}
     MYLITE_MARIADB_MESSAGES_DIR="${MYLITE_MARIADB_MESSAGES_DIR}"
     MYLITE_MARIADB_CHARSETS_DIR="${MYLITE_MARIADB_CHARSETS_DIR}"
   )

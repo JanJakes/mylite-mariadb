@@ -54,6 +54,16 @@ public:
     return 0;
   }
 
+  uint max_supported_keys() const override
+  {
+    return MAX_KEY;
+  }
+
+  uint max_supported_key_part_length() const override
+  {
+    return MAX_DATA_LENGTH_FOR_KEY;
+  }
+
   int open(const char *name, int mode, uint test_if_locked) override;
   int close(void) override;
   int rnd_init(bool scan) override;
@@ -63,6 +73,8 @@ public:
   int info(uint flag) override;
   int external_lock(THD *thd, int lock_type) override;
   int create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) override;
+  int delete_table(const char *name) override;
+  int rename_table(const char *from, const char *to) override;
   THR_LOCK_DATA **store_lock(THD *thd, THR_LOCK_DATA **to,
                              enum thr_lock_type lock_type) override;
 };
