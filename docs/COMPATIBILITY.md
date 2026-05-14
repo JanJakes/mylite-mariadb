@@ -40,9 +40,9 @@ for drop-in application expectations.
 | SQL engine request | MyLite status | Target behavior |
 | --- | --- | --- |
 | MyLite engine registration | 🟡&nbsp;Partial | Opt-in static handler builds expose `MYLITE` through `SHOW ENGINES`; file-backed MyLite sessions configure it as the default effective engine |
-| No explicit engine | 🟡&nbsp;Partial | `CREATE TABLE` routes to MyLite, stores requested engine `DEFAULT` with effective engine `MYLITE`, supports keyless row insert plus full scans, and updates catalog metadata on `DROP TABLE` and simple `RENAME TABLE`; keyed writes and alter DDL remain unsupported |
-| `ENGINE=MYLITE` | 🟡&nbsp;Partial | Explicit MyLite DDL stores MariaDB table-definition metadata in the `.mylite` catalog, rediscovers it after reopen, supports keyless row insert plus full scans, and updates catalog metadata on `DROP TABLE` and simple `RENAME TABLE`; keyed writes remain unsupported |
-| `ENGINE=InnoDB` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `InnoDB`; keyless row insert, full scans, `DROP TABLE`, and simple `RENAME TABLE` are covered, while InnoDB transactions, foreign keys, indexes, and tablespaces remain unsupported |
+| No explicit engine | 🟡&nbsp;Partial | `CREATE TABLE` routes to MyLite, stores requested engine `DEFAULT` with effective engine `MYLITE`, supports keyless row insert plus full scans and the narrow single-column autoincrement key path, and updates catalog metadata on `DROP TABLE` and simple `RENAME TABLE`; general keyed writes and alter DDL remain unsupported |
+| `ENGINE=MYLITE` | 🟡&nbsp;Partial | Explicit MyLite DDL stores MariaDB table-definition metadata in the `.mylite` catalog, rediscovers it after reopen, supports keyless row insert plus full scans and the narrow single-column autoincrement key path, and updates catalog metadata on `DROP TABLE` and simple `RENAME TABLE`; general keyed writes remain unsupported |
+| `ENGINE=InnoDB` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `InnoDB`; keyless row insert, single-column autoincrement primary-key insert, full scans, `DROP TABLE`, and simple `RENAME TABLE` are covered, while InnoDB transactions, foreign keys, general indexes, and tablespaces remain unsupported |
 | `ENGINE=MyISAM` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `MyISAM`; keyless row insert, full scans, `DROP TABLE`, and simple `RENAME TABLE` are covered, while MyISAM data and index files are never durable application storage |
 | `ENGINE=Aria` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `Aria`; keyless row insert, full scans, `DROP TABLE`, and simple `RENAME TABLE` are covered, while Aria data, index, and log files are never durable application storage |
 | Dynamic external engines | ➖&nbsp;Out&nbsp;of&nbsp;scope | Unsupported explicit engine requests fail before catalog publication |
@@ -84,8 +84,8 @@ for drop-in application expectations.
 | NULL columns | 🟡&nbsp;Partial | Preserve SQL NULL values for keyless non-BLOB row inserts and full scans before and after reopen; nullable-key semantics remain planned |
 | BLOB/TEXT values | ⚪&nbsp;Planned | Binary-safe overflow storage |
 | Primary and secondary indexes | ⚪&nbsp;Planned | Ordered access paths over MyLite pages |
-| Unique indexes | ⚪&nbsp;Planned | MariaDB duplicate-key behavior, including nullable-key rules |
-| Autoincrement | ⚪&nbsp;Planned | Durable table-local state compatible with MariaDB expectations |
+| Unique indexes | 🟡&nbsp;Partial | Duplicate-key checks are covered only for the supported single-column autoincrement key path; general unique indexes and nullable-key rules remain planned |
+| Autoincrement | 🟡&nbsp;Partial | Durable table-local state is covered for single-column autoincrement keys on non-BLOB rows, including explicit high values and close/reopen; compound keys, `ALTER TABLE ... AUTO_INCREMENT`, and transaction-aware rollback remain planned |
 | CHECK constraints | ⚪&nbsp;Planned | Use MariaDB expression evaluation and persist metadata in the catalog |
 | Foreign keys | ⚪&nbsp;Planned | InnoDB-compatible semantics where practical; reject unsupported cases explicitly |
 | Generated columns | ⚪&nbsp;Planned | Preserve MariaDB virtual/stored generated-column behavior through storage support |

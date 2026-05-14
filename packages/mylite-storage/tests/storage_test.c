@@ -21,7 +21,9 @@ static void test_rejects_bad_catalog_root(void);
 static void test_store_and_read_table_definition(void);
 static void test_store_large_table_definition(void);
 static void test_append_and_read_rows(void);
+static void test_autoincrement_state(void);
 static void test_rejects_corrupt_row_page(void);
+static void test_rejects_corrupt_autoincrement_page(void);
 static void test_drop_table_definition(void);
 static void test_rename_table_definition(void);
 static char *make_temp_root(void);
@@ -48,7 +50,9 @@ int main(void) {
     test_store_and_read_table_definition();
     test_store_large_table_definition();
     test_append_and_read_rows();
+    test_autoincrement_state();
     test_rejects_corrupt_row_page();
+    test_rejects_corrupt_autoincrement_page();
     test_drop_table_definition();
     test_rename_table_definition();
     return 0;
@@ -64,6 +68,7 @@ static void test_capabilities(void) {
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_EMPTY_CATALOG) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_TABLE_DEFINITIONS) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_TABLE_ROWS) != 0U);
+    assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_AUTOINCREMENT) != 0U);
 }
 
 static void test_create_empty_database(void) {
@@ -348,6 +353,70 @@ static void test_append_and_read_rows(void) {
     free(root);
 }
 
+static void test_autoincrement_state(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "autoincrement-state.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "InnoDB",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_header header = {0};
+    unsigned long long next_value = 0ULL;
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_read_auto_increment(filename, "app", "posts", &next_value) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(next_value == 1ULL);
+    assert(
+        mylite_storage_advance_auto_increment(filename, "app", "posts", 2ULL) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_advance_auto_increment(filename, "app", "posts", 2ULL) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_advance_auto_increment(filename, "app", "posts", 9ULL) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_read_auto_increment(filename, "app", "posts", &next_value) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(next_value == 9ULL);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 3ULL);
+
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", row, sizeof(row)) == MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_drop_table(filename, "app", "posts") == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
+    assert(rows.row_count == 0U);
+    assert(rows.rows == NULL);
+    assert(
+        mylite_storage_read_auto_increment(filename, "app", "posts", &next_value) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(next_value == 1ULL);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
 static void test_rejects_corrupt_row_page(void) {
     static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
     static const unsigned char row[] = {0x00U, 0x01U, 'a', 'b', 'c'};
@@ -379,6 +448,46 @@ static void test_rejects_corrupt_row_page(void) {
     assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_CORRUPT);
     assert(
         mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_CORRUPT
+    );
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_rejects_corrupt_autoincrement_page(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "corrupt-autoincrement-page.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "InnoDB",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    unsigned long long next_value = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_advance_auto_increment(filename, "app", "posts", 2ULL) == MYLITE_STORAGE_OK
+    );
+    flip_file_byte(
+        filename,
+        (long)((MYLITE_STORAGE_FORMAT_PAGE_SIZE * 3U) +
+               MYLITE_STORAGE_FORMAT_AUTOINCREMENT_NEXT_VALUE_OFFSET)
+    );
+    assert(
+        mylite_storage_read_auto_increment(filename, "app", "posts", &next_value) ==
+        MYLITE_STORAGE_CORRUPT
+    );
+    assert(
+        mylite_storage_advance_auto_increment(filename, "app", "posts", 3ULL) ==
+        MYLITE_STORAGE_CORRUPT
     );
 
     assert(unlink(filename) == 0);

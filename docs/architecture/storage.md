@@ -59,8 +59,9 @@ stores metadata in the primary `.mylite` catalog, and catalog discovery works
 after close/reopen. Keyless routed tables support row inserts and full scans
 from the primary file. `DROP TABLE` removes catalog metadata for routed tables.
 Simple `RENAME TABLE` updates catalog identity while preserving table ids and
-row pages. Keyed writes, indexes, update/delete, and `ALTER` still reject until
-later slices define those update paths.
+row pages. The narrow single-column autoincrement key path is supported for
+insert and full-scan workloads. General keyed writes, indexes, update/delete,
+and `ALTER` still reject until later slices define those update paths.
 
 ## File Layout
 
@@ -93,8 +94,10 @@ checksummed header and page 1 as a catalog root. Explicit MyLite table
 definitions are stored as catalog records plus checksummed definition blob
 pages. Keyless row inserts append checksummed row pages that store raw MariaDB
 record images tagged by catalog table id; table scans validate those pages and
-copy matching records back into MariaDB's row buffers. Indexes and transaction
-state are still planned slices.
+copy matching records back into MariaDB's row buffers. Autoincrement tables
+append checksummed state pages keyed by catalog table id so generated values
+survive close/reopen and dropped table ids do not leak into recreated tables.
+Indexes and transaction state are still planned slices.
 
 The catalog stores:
 
@@ -175,7 +178,10 @@ or autoincrement columns, `write_row()` stores MariaDB's record image in an
 append-only row page and `rnd_next()` reads those images back during full table
 scans. Nullable fixed and variable fields are covered for this keyless non-BLOB
 path because the stored record image includes MariaDB's null bitmap. Tables
-with keys still reject writes, because MyLite cannot claim MySQL/MariaDB
+whose only key is the single `AUTO_INCREMENT` column can also insert and scan
+non-BLOB rows; MyLite stores the durable next value in append-only state pages
+and performs a scan-based duplicate check for that narrow key shape. Other
+keyed writes still reject, because MyLite cannot claim MySQL/MariaDB
 duplicate-key, ordering, or index-access behavior until the index slice
 implements it. Update, delete, truncate, BLOB/TEXT overflow, and copy `ALTER`
 rebuilds remain planned.

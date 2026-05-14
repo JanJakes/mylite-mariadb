@@ -43,6 +43,7 @@ class ha_mylite: public handler
   size_t scan_row_size;
   size_t scan_row_count;
   size_t scan_row_index;
+  uint duplicate_key_index;
 
   Mylite_share *get_share();
   void clear_scan_rows();
@@ -80,6 +81,10 @@ public:
   void position(const uchar *record) override;
   int info(uint flag) override;
   int external_lock(THD *thd, int lock_type) override;
+  void get_auto_increment(ulonglong offset, ulonglong increment,
+                          ulonglong nb_desired_values,
+                          ulonglong *first_value,
+                          ulonglong *nb_reserved_values) override;
   int write_row(const uchar *buf) override;
   int create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) override;
   int delete_table(const char *name) override;

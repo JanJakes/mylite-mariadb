@@ -50,6 +50,17 @@ static int mylite_table_name_from_path(const char *path, char *out_schema_name,
                                        size_t out_schema_name_size,
                                        char *out_table_name,
                                        size_t out_table_name_size);
+static bool mylite_table_supports_row_write(TABLE *table);
+static bool mylite_table_uses_supported_auto_increment_key(TABLE *table);
+static Field *mylite_auto_increment_field(TABLE *table);
+static ulonglong mylite_first_auto_increment_value(ulonglong next_value,
+                                                   ulonglong offset,
+                                                   ulonglong increment);
+static int mylite_check_duplicate_auto_increment_value(const char *primary_file,
+                                                       TABLE *table,
+                                                       uint *out_duplicate_key);
+static int mylite_advance_auto_increment_from_row(const char *primary_file,
+                                                  TABLE *table);
 static int mylite_storage_to_handler_error(mylite_storage_result result);
 
 static const char *ha_mylite_exts[]= {
@@ -223,7 +234,7 @@ static int mylite_storage_to_handler_error(mylite_storage_result result)
 
 ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
   :handler(hton, table_arg), share(NULL), scan_rows(NULL), scan_row_size(0),
-   scan_row_count(0), scan_row_index(0)
+   scan_row_count(0), scan_row_index(0), duplicate_key_index((uint) -1)
 {}
 
 ha_mylite::~ha_mylite()
@@ -320,9 +331,12 @@ void ha_mylite::position(const uchar *)
   DBUG_VOID_RETURN;
 }
 
-int ha_mylite::info(uint)
+int ha_mylite::info(uint flag)
 {
   DBUG_ENTER("ha_mylite::info");
+
+  if ((flag & HA_STATUS_ERRKEY) && duplicate_key_index != (uint) -1)
+    errkey= duplicate_key_index;
 
   stats.records= 0;
   stats.deleted= 0;
@@ -350,16 +364,66 @@ int ha_mylite::external_lock(THD *, int)
   DBUG_RETURN(0);
 }
 
+void ha_mylite::get_auto_increment(ulonglong offset, ulonglong increment,
+                                   ulonglong, ulonglong *first_value,
+                                   ulonglong *nb_reserved_values)
+{
+  DBUG_ENTER("ha_mylite::get_auto_increment");
+
+  *first_value= ULONGLONG_MAX;
+  *nb_reserved_values= 0ULL;
+
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    DBUG_VOID_RETURN;
+
+  unsigned long long next_value= 0ULL;
+  const mylite_storage_result result=
+    mylite_storage_read_auto_increment(primary_file, table->s->db.str,
+                                       table->s->table_name.str, &next_value);
+  if (result != MYLITE_STORAGE_OK)
+    DBUG_VOID_RETURN;
+
+  *first_value= mylite_first_auto_increment_value(next_value, offset,
+                                                  increment);
+  if (*first_value != ULONGLONG_MAX)
+    *nb_reserved_values= ULONGLONG_MAX;
+
+  DBUG_VOID_RETURN;
+}
+
 int ha_mylite::write_row(const uchar *buf)
 {
   DBUG_ENTER("ha_mylite::write_row");
 
-  if (table->s->keys != 0 || table->next_number_field)
+  duplicate_key_index= (uint) -1;
+
+  if (!mylite_table_supports_row_write(table))
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
 
   const char *primary_file= mylite_primary_file_path();
   if (!primary_file)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
+
+  if (table->next_number_field && buf == table->record[0])
+  {
+    const int error= update_auto_increment();
+    if (error)
+      DBUG_RETURN(error);
+  }
+
+  uint duplicate_key= (uint) -1;
+  int error= mylite_check_duplicate_auto_increment_value(primary_file, table,
+                                                        &duplicate_key);
+  if (error)
+  {
+    duplicate_key_index= duplicate_key;
+    DBUG_RETURN(error);
+  }
+
+  error= mylite_advance_auto_increment_from_row(primary_file, table);
+  if (error)
+    DBUG_RETURN(error);
 
   const mylite_storage_result result=
     mylite_storage_append_row(primary_file, table->s->db.str,
@@ -543,6 +607,115 @@ static int mylite_table_name_from_path(const char *path, char *out_schema_name,
   memcpy(out_table_name, table_start, table_name_length);
   out_table_name[table_name_length]= '\0';
   return 0;
+}
+
+static bool mylite_table_supports_row_write(TABLE *table)
+{
+  if (table->s->keys == 0 && !mylite_auto_increment_field(table))
+    return true;
+
+  return mylite_table_uses_supported_auto_increment_key(table);
+}
+
+static bool mylite_table_uses_supported_auto_increment_key(TABLE *table)
+{
+  Field *auto_field= mylite_auto_increment_field(table);
+  if (!auto_field || table->s->keys != 1 ||
+      table->s->next_number_index >= table->s->keys ||
+      table->s->next_number_keypart != 0)
+    return false;
+
+  KEY *key= table->key_info + table->s->next_number_index;
+  return (key->flags & HA_NOSAME) && key->user_defined_key_parts == 1 &&
+         key->key_part[0].fieldnr == auto_field->field_index + 1;
+}
+
+static Field *mylite_auto_increment_field(TABLE *table)
+{
+  return table->found_next_number_field ? table->found_next_number_field :
+                                          table->next_number_field;
+}
+
+static ulonglong mylite_first_auto_increment_value(ulonglong next_value,
+                                                   ulonglong offset,
+                                                   ulonglong increment)
+{
+  if (next_value == 0ULL || offset == 0ULL || increment == 0ULL)
+    return ULONGLONG_MAX;
+  if (next_value <= offset)
+    return offset;
+
+  const ulonglong distance= next_value - offset;
+  ulonglong steps= distance / increment;
+  if (distance % increment != 0ULL)
+  {
+    if (steps == ULONGLONG_MAX)
+      return ULONGLONG_MAX;
+    ++steps;
+  }
+  if (steps > (ULONGLONG_MAX - offset) / increment)
+    return ULONGLONG_MAX;
+
+  return offset + (steps * increment);
+}
+
+static int mylite_check_duplicate_auto_increment_value(const char *primary_file,
+                                                       TABLE *table,
+                                                       uint *out_duplicate_key)
+{
+  if (!mylite_auto_increment_field(table))
+    return 0;
+
+  mylite_storage_rowset rowset= {sizeof(rowset), NULL, 0, 0};
+  mylite_storage_result result=
+    mylite_storage_read_rows(primary_file, table->s->db.str,
+                             table->s->table_name.str, &rowset);
+  if (result != MYLITE_STORAGE_OK)
+    return mylite_storage_to_handler_error(result);
+  if (rowset.row_count > 0 && rowset.row_size != table->s->reclength)
+  {
+    mylite_storage_free(rowset.rows);
+    return HA_ERR_CRASHED_ON_USAGE;
+  }
+
+  Field *auto_field= mylite_auto_increment_field(table);
+  const longlong value= auto_field->val_int();
+  for (size_t i= 0; i < rowset.row_count; ++i)
+  {
+    memcpy(table->record[1], rowset.rows + (i * rowset.row_size),
+           rowset.row_size);
+    if (auto_field->val_int_offset(table->s->rec_buff_length) == value)
+    {
+      mylite_storage_free(rowset.rows);
+      *out_duplicate_key= table->s->next_number_index;
+      return HA_ERR_FOUND_DUPP_KEY;
+    }
+  }
+
+  mylite_storage_free(rowset.rows);
+  return 0;
+}
+
+static int mylite_advance_auto_increment_from_row(const char *primary_file,
+                                                  TABLE *table)
+{
+  Field *auto_field= mylite_auto_increment_field(table);
+  if (!auto_field)
+    return 0;
+
+  const longlong signed_value= auto_field->val_int();
+  if (signed_value < 0 && !(auto_field->flags & UNSIGNED_FLAG))
+    return 0;
+
+  const ulonglong value= (ulonglong) signed_value;
+  if (value == ULONGLONG_MAX)
+    return HA_ERR_AUTOINC_ERANGE;
+
+  const mylite_storage_result result=
+    mylite_storage_advance_auto_increment(primary_file, table->s->db.str,
+                                          table->s->table_name.str,
+                                          value + 1ULL);
+  return mylite_storage_to_handler_error(result);
 }
 
 THR_LOCK_DATA **ha_mylite::store_lock(THD *, THR_LOCK_DATA **to,

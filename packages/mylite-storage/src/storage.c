@@ -21,6 +21,11 @@ typedef struct mylite_storage_row_page {
     const unsigned char *payload;
 } mylite_storage_row_page;
 
+typedef struct mylite_storage_autoincrement_page {
+    unsigned long long table_id;
+    unsigned long long next_value;
+} mylite_storage_autoincrement_page;
+
 typedef struct mylite_storage_definition_lengths {
     size_t schema_name_size;
     size_t table_name_size;
@@ -187,6 +192,26 @@ static mylite_storage_result append_row_page_to_rowset(
     const mylite_storage_row_page *row_page
 );
 static mylite_storage_result count_row_page(void *ctx, const mylite_storage_row_page *row_page);
+static void encode_autoincrement_page(
+    unsigned char *page,
+    unsigned long long page_id,
+    unsigned long long table_id,
+    unsigned long long next_value
+);
+static mylite_storage_result read_autoincrement_page(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    unsigned char *page,
+    mylite_storage_autoincrement_page *out_autoincrement_page
+);
+static int is_autoincrement_page(const unsigned char *page);
+static mylite_storage_result latest_auto_increment_value(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned long long *out_next_value
+);
 static mylite_storage_result read_definition_blob_pages(
     FILE *file,
     const mylite_storage_header *header,
@@ -220,6 +245,7 @@ static const unsigned char k_header_magic[8] = {'M', 'Y', 'L', 'I', 'T', 'E', '1
 static const unsigned char k_catalog_magic[8] = {'M', 'Y', 'L', 'C', 'A', 'T', '1', '\0'};
 static const unsigned char k_blob_magic[8] = {'M', 'Y', 'L', 'B', 'L', 'B', '1', '\0'};
 static const unsigned char k_row_magic[8] = {'M', 'Y', 'L', 'R', 'O', 'W', '1', '\0'};
+static const unsigned char k_autoincrement_magic[8] = {'M', 'Y', 'L', 'A', 'U', 'T', '1', '\0'};
 
 const char *mylite_storage_engine_name(void) {
     return MYLITE_STORAGE_ENGINE_NAME;
@@ -230,7 +256,8 @@ mylite_storage_capabilities mylite_storage_get_capabilities(void) {
         .size = sizeof(capabilities),
         .format_version = MYLITE_STORAGE_FORMAT_VERSION,
         .flags = MYLITE_STORAGE_CAPABILITY_FILE_HEADER | MYLITE_STORAGE_CAPABILITY_EMPTY_CATALOG |
-                 MYLITE_STORAGE_CAPABILITY_TABLE_DEFINITIONS | MYLITE_STORAGE_CAPABILITY_TABLE_ROWS,
+                 MYLITE_STORAGE_CAPABILITY_TABLE_DEFINITIONS |
+                 MYLITE_STORAGE_CAPABILITY_TABLE_ROWS | MYLITE_STORAGE_CAPABILITY_AUTOINCREMENT,
     };
 
     return capabilities;
@@ -771,6 +798,105 @@ mylite_storage_result mylite_storage_count_rows(
     }
     if (result != MYLITE_STORAGE_OK) {
         *out_row_count = 0ULL;
+    }
+    return result;
+}
+
+mylite_storage_result mylite_storage_read_auto_increment(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long *out_next_value
+) {
+    if (filename == NULL || filename[0] == '\0' || schema_name == NULL || schema_name[0] == '\0' ||
+        table_name == NULL || table_name[0] == '\0' || out_next_value == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    *out_next_value = 0ULL;
+
+    FILE *file = NULL;
+    mylite_storage_result result = open_existing_file(filename, &file);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_header header = {0};
+    unsigned long long table_id = 0ULL;
+    result = read_header(file, &header);
+    if (result == MYLITE_STORAGE_OK) {
+        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = latest_auto_increment_value(file, &header, table_id, out_next_value);
+    }
+
+    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    if (result != MYLITE_STORAGE_OK) {
+        *out_next_value = 0ULL;
+    }
+    return result;
+}
+
+mylite_storage_result mylite_storage_advance_auto_increment(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long next_value
+) {
+    if (filename == NULL || filename[0] == '\0' || schema_name == NULL || schema_name[0] == '\0' ||
+        table_name == NULL || table_name[0] == '\0' || next_value == 0ULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    FILE *file = NULL;
+    mylite_storage_result result = open_existing_file_for_update(filename, &file);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_header header = {0};
+    unsigned long long table_id = 0ULL;
+    unsigned long long current_next_value = 0ULL;
+    result = read_header(file, &header);
+    if (result == MYLITE_STORAGE_OK) {
+        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = latest_auto_increment_value(file, &header, table_id, &current_next_value);
+    }
+    if (result == MYLITE_STORAGE_OK && next_value <= current_next_value) {
+        if (fclose(file) != 0) {
+            return MYLITE_STORAGE_IOERR;
+        }
+        return MYLITE_STORAGE_OK;
+    }
+    if (result == MYLITE_STORAGE_OK && header.page_count == ULLONG_MAX) {
+        result = MYLITE_STORAGE_FULL;
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        const unsigned long long page_id = header.page_count;
+        unsigned char autoincrement_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        encode_autoincrement_page(autoincrement_page, page_id, table_id, next_value);
+
+        result = write_page_at(file, page_id, header.page_size, autoincrement_page);
+        if (result == MYLITE_STORAGE_OK) {
+            ++header.page_count;
+            unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+            encode_header_page(header_page, &header);
+            result = write_page_at(
+                file,
+                MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
+                header.page_size,
+                header_page
+            );
+        }
+    }
+
+    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
     }
     return result;
 }
@@ -1901,7 +2027,8 @@ static mylite_storage_result read_row_page(
                 page + MYLITE_STORAGE_FORMAT_BLOB_MAGIC_OFFSET,
                 k_blob_magic,
                 sizeof(k_blob_magic)
-            ) == 0) {
+            ) == 0 ||
+            is_autoincrement_page(page)) {
             return MYLITE_STORAGE_NOTFOUND;
         }
         return MYLITE_STORAGE_CORRUPT;
@@ -1987,6 +2114,140 @@ static mylite_storage_result count_row_page(void *ctx, const mylite_storage_row_
     }
 
     *row_count += (unsigned long long)row_page->row_count;
+    return MYLITE_STORAGE_OK;
+}
+
+static void encode_autoincrement_page(
+    unsigned char *page,
+    unsigned long long page_id,
+    unsigned long long table_id,
+    unsigned long long next_value
+) {
+    memset(page, 0, MYLITE_STORAGE_FORMAT_PAGE_SIZE);
+    memcpy(
+        page + MYLITE_STORAGE_FORMAT_AUTOINCREMENT_MAGIC_OFFSET,
+        k_autoincrement_magic,
+        sizeof(k_autoincrement_magic)
+    );
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_AUTOINCREMENT_PAGE_TYPE_OFFSET,
+        MYLITE_STORAGE_FORMAT_AUTOINCREMENT_PAGE_TYPE_TABLE_STATE
+    );
+    put_u32_le(page, MYLITE_STORAGE_FORMAT_AUTOINCREMENT_PAGE_VERSION_OFFSET, 1U);
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_AUTOINCREMENT_FORMAT_VERSION_OFFSET,
+        MYLITE_STORAGE_FORMAT_VERSION
+    );
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_AUTOINCREMENT_CHECKSUM_ALGORITHM_OFFSET,
+        MYLITE_STORAGE_FORMAT_CHECKSUM_FNV1A64
+    );
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_AUTOINCREMENT_PAGE_ID_OFFSET, page_id);
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_AUTOINCREMENT_TABLE_ID_OFFSET, table_id);
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_AUTOINCREMENT_NEXT_VALUE_OFFSET, next_value);
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_AUTOINCREMENT_CHECKSUM_OFFSET, 0ULL);
+    put_u64_le(
+        page,
+        MYLITE_STORAGE_FORMAT_AUTOINCREMENT_CHECKSUM_OFFSET,
+        checksum_page(page, MYLITE_STORAGE_FORMAT_AUTOINCREMENT_CHECKSUM_OFFSET)
+    );
+}
+
+static mylite_storage_result read_autoincrement_page(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    unsigned char *page,
+    mylite_storage_autoincrement_page *out_autoincrement_page
+) {
+    if (page_id <= header->catalog_root_page || page_id >= header->page_count) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    mylite_storage_result result = read_page_at(file, page_id, header->page_size, page);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    if (!is_autoincrement_page(page)) {
+        if (memcmp(
+                page + MYLITE_STORAGE_FORMAT_BLOB_MAGIC_OFFSET,
+                k_blob_magic,
+                sizeof(k_blob_magic)
+            ) == 0 ||
+            is_row_page(page)) {
+            return MYLITE_STORAGE_NOTFOUND;
+        }
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    const unsigned page_type =
+        get_u32_le(page, MYLITE_STORAGE_FORMAT_AUTOINCREMENT_PAGE_TYPE_OFFSET);
+    const unsigned page_version =
+        get_u32_le(page, MYLITE_STORAGE_FORMAT_AUTOINCREMENT_PAGE_VERSION_OFFSET);
+    const unsigned format_version =
+        get_u32_le(page, MYLITE_STORAGE_FORMAT_AUTOINCREMENT_FORMAT_VERSION_OFFSET);
+    const unsigned checksum_algorithm =
+        get_u32_le(page, MYLITE_STORAGE_FORMAT_AUTOINCREMENT_CHECKSUM_ALGORITHM_OFFSET);
+    const unsigned long long stored_page_id =
+        get_u64_le(page, MYLITE_STORAGE_FORMAT_AUTOINCREMENT_PAGE_ID_OFFSET);
+    const unsigned long long table_id =
+        get_u64_le(page, MYLITE_STORAGE_FORMAT_AUTOINCREMENT_TABLE_ID_OFFSET);
+    const unsigned long long next_value =
+        get_u64_le(page, MYLITE_STORAGE_FORMAT_AUTOINCREMENT_NEXT_VALUE_OFFSET);
+    const unsigned long long expected_checksum =
+        get_u64_le(page, MYLITE_STORAGE_FORMAT_AUTOINCREMENT_CHECKSUM_OFFSET);
+    const unsigned long long actual_checksum =
+        checksum_page(page, MYLITE_STORAGE_FORMAT_AUTOINCREMENT_CHECKSUM_OFFSET);
+    if (page_type != MYLITE_STORAGE_FORMAT_AUTOINCREMENT_PAGE_TYPE_TABLE_STATE ||
+        page_version != 1U || format_version != MYLITE_STORAGE_FORMAT_VERSION ||
+        checksum_algorithm != MYLITE_STORAGE_FORMAT_CHECKSUM_FNV1A64 || stored_page_id != page_id ||
+        table_id == 0ULL || next_value == 0ULL || expected_checksum != actual_checksum) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    *out_autoincrement_page = (mylite_storage_autoincrement_page){
+        .table_id = table_id,
+        .next_value = next_value,
+    };
+    return MYLITE_STORAGE_OK;
+}
+
+static int is_autoincrement_page(const unsigned char *page) {
+    return memcmp(
+               page + MYLITE_STORAGE_FORMAT_AUTOINCREMENT_MAGIC_OFFSET,
+               k_autoincrement_magic,
+               sizeof(k_autoincrement_magic)
+           ) == 0;
+}
+
+static mylite_storage_result latest_auto_increment_value(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned long long *out_next_value
+) {
+    *out_next_value = 1ULL;
+    for (unsigned long long page_id = MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT;
+         page_id < header->page_count;
+         ++page_id) {
+        unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        mylite_storage_autoincrement_page autoincrement_page = {0};
+        mylite_storage_result result =
+            read_autoincrement_page(file, header, page_id, page, &autoincrement_page);
+        if (result == MYLITE_STORAGE_NOTFOUND) {
+            continue;
+        }
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+        if (autoincrement_page.table_id == table_id) {
+            *out_next_value = autoincrement_page.next_value;
+        }
+    }
+
     return MYLITE_STORAGE_OK;
 }
 

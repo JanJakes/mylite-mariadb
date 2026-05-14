@@ -13,6 +13,7 @@ extern "C" {
 #define MYLITE_STORAGE_CAPABILITY_EMPTY_CATALOG 0x00000002U
 #define MYLITE_STORAGE_CAPABILITY_TABLE_DEFINITIONS 0x00000004U
 #define MYLITE_STORAGE_CAPABILITY_TABLE_ROWS 0x00000008U
+#define MYLITE_STORAGE_CAPABILITY_AUTOINCREMENT 0x00000010U
 
 typedef enum mylite_storage_result { /* NOLINT(performance-enum-size): C ABI enum. */
                                      MYLITE_STORAGE_OK = 0,
@@ -134,6 +135,18 @@ mylite_storage_result mylite_storage_count_rows(
     const char *schema_name,
     const char *table_name,
     unsigned long long *out_row_count
+);
+mylite_storage_result mylite_storage_read_auto_increment(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long *out_next_value
+);
+mylite_storage_result mylite_storage_advance_auto_increment(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long next_value
 );
 mylite_storage_result mylite_storage_list_tables(
     const char *filename,
