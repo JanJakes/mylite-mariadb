@@ -39,6 +39,7 @@ for drop-in application expectations.
 
 | SQL engine request | MyLite status | Target behavior |
 | --- | --- | --- |
+| MyLite engine registration | 🟡&nbsp;Partial | Opt-in static handler builds expose `MYLITE` through `SHOW ENGINES`; table storage remains unsupported |
 | No explicit engine | ⚪&nbsp;Planned | Create a MyLite table |
 | `ENGINE=MYLITE` | ⚪&nbsp;Planned | Create a MyLite table |
 | `ENGINE=InnoDB` | ⚪&nbsp;Planned | Route application DDL to MyLite storage where semantics are supported |

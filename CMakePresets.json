@@ -24,6 +24,15 @@
       "cacheVariables": {
         "MYLITE_WITH_MARIADB_EMBEDDED": "ON"
       }
+    },
+    {
+      "name": "storage-smoke-dev",
+      "displayName": "Developer build with MariaDB embedded storage-engine smoke backend",
+      "inherits": "embedded-dev",
+      "binaryDir": "${sourceDir}/build/storage-smoke-dev",
+      "cacheVariables": {
+        "MYLITE_MARIADB_BUILD_DIR": "${sourceDir}/build/mariadb-mylite-storage-smoke"
+      }
     }
   ],
   "buildPresets": [
@@ -34,6 +43,10 @@
     {
       "name": "embedded-dev",
       "configurePreset": "embedded-dev"
+    },
+    {
+      "name": "storage-smoke-dev",
+      "configurePreset": "storage-smoke-dev"
     },
     {
       "name": "format",
@@ -68,6 +81,13 @@
     {
       "name": "embedded-dev",
       "configurePreset": "embedded-dev",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "storage-smoke-dev",
+      "configurePreset": "storage-smoke-dev",
       "output": {
         "outputOnFailure": true
       }

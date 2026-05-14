@@ -87,6 +87,30 @@ After the storage-engine skeleton slice, MariaDB configure also discovers
 Configure also reports unavailable optional features on this host, including
 RocksDB, OQGraph, AWS key management, CONNECT JDBC, and Snappy.
 
+## Opt-In Storage Handler Smoke
+
+The MyLite storage-engine handler registration smoke uses a separate MariaDB
+build directory so the baseline archive above stays unchanged:
+
+```sh
+BUILD_DIR=build/mariadb-mylite-storage-smoke tools/mariadb-embedded-build all \
+  -DPLUGIN_MYLITE_SE=STATIC
+cmake --preset storage-smoke-dev
+cmake --build --preset storage-smoke-dev
+ctest --preset storage-smoke-dev
+```
+
+Measured on 2026-05-14 with the same host and toolchain as the baseline:
+
+| Field | Value |
+| --- | --- |
+| Archive | `build/mariadb-mylite-storage-smoke/libmysqld/libmariadbd.a` |
+| Archive size | 33,778,328 bytes / 32.21 MiB |
+| Archive members | 808 |
+
+This smoke path proves static plugin registration through `SHOW ENGINES` only.
+It does not claim MyLite table creation, durable DDL, DML, or engine routing.
+
 ## Offline Build Caveat
 
 This profile does not fetch MariaDB submodules, but upstream MariaDB's

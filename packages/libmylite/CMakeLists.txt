@@ -51,6 +51,20 @@ if(BUILD_TESTING)
     mylite_configure_c_target(mylite_embedded_exec_test)
 
     add_test(NAME libmylite.embedded-exec COMMAND mylite_embedded_exec_test)
+
+    if(MYLITE_MARIADB_HAS_MYLITE_SE)
+      add_executable(mylite_embedded_storage_engine_test
+        tests/embedded_storage_engine_test.c
+      )
+      target_link_libraries(mylite_embedded_storage_engine_test PRIVATE MyLite::mylite)
+      mylite_configure_c_target(mylite_embedded_storage_engine_test)
+
+      add_test(
+        NAME libmylite.embedded-storage-engine
+        COMMAND mylite_embedded_storage_engine_test
+      )
+    endif()
+
     add_test(NAME libmylite.embedded-open-close COMMAND mylite_embedded_open_close_test)
   endif()
 endif()

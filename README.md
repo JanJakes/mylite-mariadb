@@ -115,6 +115,17 @@ cmake --build --preset embedded-dev
 ctest --preset embedded-dev
 ```
 
+The opt-in storage-engine registration smoke uses a separate MariaDB archive so
+the default embedded baseline does not enable the MyLite handler:
+
+```sh
+BUILD_DIR=build/mariadb-mylite-storage-smoke tools/mariadb-embedded-build all \
+  -DPLUGIN_MYLITE_SE=STATIC
+cmake --preset storage-smoke-dev
+cmake --build --preset storage-smoke-dev
+ctest --preset storage-smoke-dev
+```
+
 See [docs/architecture/monorepo.md](docs/architecture/monorepo.md) for the
 repository layout and import discipline.
 

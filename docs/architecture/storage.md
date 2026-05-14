@@ -52,6 +52,11 @@ errors, and preserve upstream registration conventions.
 This split keeps catalog, page, transaction, lock, and recovery code outside the
 MariaDB import while limiting the long-lived fork delta under `mariadb/`.
 
+The initial handler is an opt-in registration skeleton. It is disabled in the
+default embedded baseline and covered by a separate storage smoke build that
+verifies `SHOW ENGINES` reports `MYLITE`. It deliberately rejects table creation
+until the catalog, row storage, and DDL routing slices define real behavior.
+
 ## File Layout
 
 The `.mylite` file format should be page based:

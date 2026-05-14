@@ -23,7 +23,7 @@ must not present stubbed DDL or DML as supported MyLite storage.
 
 ## Source Findings
 
-- MariaDB base: `mariadb-11.8.6` / `9bfea48642ed6d21e54668641d5f31475f62fa0e`.
+- MariaDB base: `mariadb-11.8.6` / `9bfea48ce1214cc4470f6f6f8a4e30352cef84e7`.
 - `mariadb/cmake/plugin.cmake:35` defines `MYSQL_ADD_PLUGIN()`. Lines 111-115
   derive the `WITH_<PLUGIN>_STORAGE_ENGINE` variable for storage engines.
 - `mariadb/cmake/plugin.cmake:147` creates static plugin libraries. Lines
@@ -67,8 +67,9 @@ The handler skeleton is disabled by default:
 ```
 
 is required to compile and register it in a MariaDB build. This keeps the
-minimal embedded build baseline stable until a later slice adds handler smoke
-tests and records the size delta.
+minimal embedded build baseline stable. Handler smoke tests use a separate
+`storage-smoke-dev` preset backed by a MariaDB archive configured with
+`PLUGIN_MYLITE_SE=STATIC`.
 
 The first handler behavior should be deliberately conservative:
 
@@ -81,9 +82,9 @@ The first handler behavior should be deliberately conservative:
 ## Compatibility Impact
 
 The default build and runtime compatibility surface do not change because the
-MariaDB handler is opt-in and disabled by default. When enabled manually, the
-engine may appear as `MYLITE`, but it must not be treated as a supported storage
-engine yet.
+MariaDB handler is opt-in and disabled by default. When the smoke archive is
+configured with `PLUGIN_MYLITE_SE=STATIC`, `SHOW ENGINES` reports `MYLITE` as a
+visible engine. It must not be treated as supported table storage yet.
 
 The storage package does not change SQL behavior or public `libmylite` ABI.
 Later slices that enable DDL, DML, engine routing, or default registration must
@@ -95,8 +96,10 @@ update `docs/COMPATIBILITY.md` and the baseline size evidence.
 2. Run the first-party storage capabilities test.
 3. Configure a separate MariaDB build with `-DPLUGIN_MYLITE_SE=STATIC`.
 4. Build the opt-in MariaDB `mylite_se` target to prove the handler compiles.
-5. Do not claim SQL smoke coverage until the embedded bootstrap and execution
-   APIs can run controlled statements.
+5. Configure the first-party `storage-smoke-dev` preset against that MariaDB
+   build and run the embedded SQL smoke test.
+6. Verify `SHOW ENGINES` reports `MYLITE` without creating or claiming durable
+   MyLite tables.
 
 ## Acceptance Criteria
 
@@ -105,12 +108,13 @@ update `docs/COMPATIBILITY.md` and the baseline size evidence.
 - The storage package has focused tests proving only skeleton capabilities.
 - `mariadb/storage/mylite/` contains an opt-in storage-engine handler skeleton.
 - The opt-in MariaDB handler target compiles with the embedded build profile.
+- The opt-in first-party smoke preset proves `SHOW ENGINES` reports `MYLITE`.
 - The default MariaDB embedded baseline remains unchanged.
 
 ## Risks And Open Questions
 
-- Handler coverage is compile-only until the embedded bootstrap and SQL
-  execution APIs can run controlled smoke statements.
+- Handler coverage proves registration only. DDL and DML remain unsupported
+  until catalog, row storage, and DDL routing slices land.
 - The MariaDB handler is not linked to `MyLite::storage` yet; that boundary
   should be connected only when real storage behavior exists.
 - Enabling DDL or routing existing MariaDB engines to MyLite requires explicit

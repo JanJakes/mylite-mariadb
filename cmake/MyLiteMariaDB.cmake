@@ -14,6 +14,18 @@ set(MYLITE_MARIADB_CHARSETS_DIR
   "MariaDB character set directory"
 )
 
+set(MYLITE_MARIADB_HAS_MYLITE_SE OFF)
+if(EXISTS "${MYLITE_MARIADB_BUILD_DIR}/CMakeCache.txt")
+  file(STRINGS
+    "${MYLITE_MARIADB_BUILD_DIR}/CMakeCache.txt"
+    mylite_mariadb_mylite_se_cache
+    REGEX "^PLUGIN_MYLITE_SE:.*=STATIC$"
+  )
+  if(mylite_mariadb_mylite_se_cache)
+    set(MYLITE_MARIADB_HAS_MYLITE_SE ON)
+  endif()
+endif()
+
 function(mylite_add_mariadb_embedded_target)
   if(NOT MYLITE_WITH_MARIADB_EMBEDDED)
     return()
