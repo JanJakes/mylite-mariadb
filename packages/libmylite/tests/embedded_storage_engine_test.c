@@ -1696,6 +1696,40 @@ static void test_create_table_persists_catalog_metadata(void) {
     );
     assert(errmsg == NULL);
     assert(rollback_count.rows == 1);
+    assert_exec_fails(
+        db,
+        "REPLACE INTO rollback_posts "
+        "SELECT id, title, rating FROM ("
+        "SELECT 2 AS id, 'select-replaced' AS title, 2 AS rating "
+        "UNION ALL SELECT 6, 'select-bad', 6"
+        ") AS replace_rows ORDER BY id"
+    );
+    rollback_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM rollback_posts FORCE INDEX (title) "
+            "WHERE title = 'select-replaced'",
+            single_value_callback,
+            &rollback_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rollback_count.rows == 1);
+    rollback_count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM rollback_posts FORCE INDEX (title) "
+            "WHERE id = 2 AND title = 'second'",
+            single_value_callback,
+            &rollback_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rollback_count.rows == 1);
     assert(
         mylite_exec(
             db,
@@ -2133,6 +2167,19 @@ static void test_create_table_persists_catalog_metadata(void) {
             db,
             "SELECT COUNT(*) FROM rollback_posts FORCE INDEX (title) "
             "WHERE id = 2 AND title = 'second'",
+            single_value_callback,
+            &rollback_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rollback_count.rows == 1);
+    rollback_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM rollback_posts FORCE INDEX (title) "
+            "WHERE title = 'select-replaced'",
             single_value_callback,
             &rollback_count,
             &errmsg

@@ -16,6 +16,9 @@ MariaDB base: `mariadb-11.8.6`
 
 - `mariadb/sql/sql_parse.cc:607-614` marks `SQLCOM_REPLACE` and
   `SQLCOM_REPLACE_SELECT` as data-changing insert-style statements.
+- `mariadb/sql/sql_parse.cc:4555-4596` routes `SQLCOM_REPLACE_SELECT` through
+  the insert-select execution path and marks unordered `REPLACE SELECT` as
+  unsafe for statement binlogging.
 - `mariadb/sql/sql_insert.cc:2118-2134` documents `REPLACE` as either
   `INSERT` or `DELETE` plus `INSERT`.
 - `mariadb/sql/sql_insert.cc:2134-2197` implements
@@ -24,6 +27,8 @@ MariaDB base: `mariadb-11.8.6`
   the insert.
 - `mariadb/sql/sql_insert.cc:2402-2424` routes duplicate mode `DUP_REPLACE`
   through `Write_record::replace_row()`.
+- `mariadb/sql/sql_insert.cc:4476-4504` writes each selected row through
+  `select_insert::send_data()` and `Write_record::write_record()`.
 - `docs/specs/transaction-handler-hooks/specs.md` includes `REPLACE` in the
   row-DML statements expected to flow through MariaDB's statement transaction
   hook path.
@@ -32,13 +37,14 @@ MariaDB base: `mariadb-11.8.6`
 
 - Direct failed multi-row `REPLACE` over a routed `ENGINE=InnoDB` table.
 - Prepared failed multi-row `REPLACE` over the same table shape.
+- Direct failed `REPLACE ... SELECT` over the same table shape.
 - Preservation of original rows, unique-key visibility, and close/reopen
   visibility after the failed statements.
 
 ## Non-Goals
 
 - Full SQL transaction, savepoint, or crash-safe statement undo semantics.
-- `REPLACE ... SELECT`, triggers, foreign keys, partitioned tables, or
+- Prepared `REPLACE ... SELECT`, triggers, foreign keys, partitioned tables, or
   multi-table interactions.
 - Autoincrement gap compatibility for failed `REPLACE` statements.
 
@@ -52,7 +58,9 @@ Extend the existing storage-engine rollback smoke table:
    primary-key row and the second row fails the CHECK constraint.
 3. Assert the replacement title is not visible and the original row remains.
 4. Repeat the same shape through `mylite_prepare()` and bound parameters.
-5. Reopen the database and assert the failed replacement rows remain invisible.
+5. Run a `REPLACE ... SELECT` where the ordered SELECT output first replaces an
+   existing row and then yields a CHECK-violating row.
+6. Reopen the database and assert the failed replacement rows remain invisible.
 
 No production code change is expected if the current statement hook path is
 correct.
@@ -71,8 +79,8 @@ primary `.mylite` file and the existing statement checkpoint lifecycle.
 
 ## Test And Verification Plan
 
-- Extend `libmylite.embedded-storage-engine` with direct and prepared failed
-  `REPLACE` rollback checks.
+- Extend `libmylite.embedded-storage-engine` with direct, prepared, and
+  select-source failed `REPLACE` rollback checks.
 - Run the focused storage-smoke test.
 - Run the `statement-rollback` compatibility report.
 - Run formatting, shell, whitespace, and tidy checks used by adjacent rollback
@@ -84,6 +92,8 @@ primary `.mylite` file and the existing statement checkpoint lifecycle.
   row invisible.
 - Failed prepared `REPLACE` leaves the original row visible and the replacement
   row invisible.
+- Failed `REPLACE ... SELECT` leaves the original row visible and the
+  replacement row invisible.
 - The same visibility holds after close/reopen.
 - Roadmap, compatibility, and harness docs name `REPLACE` row-DML rollback as
   covered without implying full SQL transaction support.
