@@ -2,20 +2,22 @@
 
 ## Goal
 
-Cover MariaDB-compatible existence options for standalone routed index DDL.
+Cover MariaDB-compatible existence options for routed index DDL.
 `CREATE INDEX IF NOT EXISTS` should skip existing indexes with warnings and
 create missing supported indexes through the MyLite copy-rebuild path.
 `DROP INDEX IF EXISTS` should skip missing indexes with warnings and drop
 existing supported indexes without corrupting rows or other indexes.
+`ALTER TABLE ... ADD INDEX IF NOT EXISTS` and `ALTER TABLE ... DROP INDEX IF
+EXISTS` should provide the same skip/create/drop behavior through ALTER-table
+syntax.
 `ALTER TABLE ... RENAME INDEX IF EXISTS` should skip missing indexes with
 warnings and rename existing supported indexes through the same copy-rebuild
 path.
 
 ## Non-Goals
 
-- Do not cover every `ALTER TABLE ADD/DROP INDEX IF [NOT] EXISTS` spelling in
-  this slice; standalone `CREATE INDEX`, standalone `DROP INDEX`, and
-  `ALTER TABLE ... RENAME INDEX IF EXISTS` are the target.
+- Do not exhaust every `ALTER TABLE ADD/DROP INDEX IF [NOT] EXISTS` spelling;
+  one representative secondary-index add/drop path is the target.
 - Do not cover `ALTER INDEX IF EXISTS ... [NOT] IGNORED`; index ignorability
   affects optimizer-visible metadata and should get a separate slice.
 - Do not add online/in-place index DDL; MyLite still forces supported index
@@ -32,6 +34,10 @@ path.
   `CREATE INDEX opt_if_not_exists` and routes it through `add_create_index()`.
 - `mariadb/sql/sql_yacc.yy:2634-2645` does the same for standalone
   `CREATE UNIQUE INDEX opt_if_not_exists`.
+- `mariadb/sql/sql_yacc.yy:7976-7985` parses `ALTER TABLE ... ADD INDEX IF
+  NOT EXISTS` through `ADD key_def`.
+- `mariadb/sql/sql_yacc.yy:8073-8082` parses `ALTER TABLE ... DROP INDEX IF
+  EXISTS` into an `Alter_drop::KEY`.
 - `mariadb/sql/sql_yacc.yy:13431-13448` parses standalone
   `DROP INDEX opt_if_exists_table_element` and stores an `Alter_drop::KEY`.
 - `mariadb/sql/sql_yacc.yy:8121-8131` parses
@@ -55,15 +61,19 @@ DDL existence options:
 - duplicate supported index creates are warning-producing no-ops;
 - missing supported index creates add MyLite catalog/index metadata through
   the existing copy-rebuild path;
+- representative ALTER-table index add forms match standalone create skip and
+  add semantics;
 - missing index drops are warning-producing no-ops;
 - existing index drops remove index metadata while preserving rows and other
   supported indexes;
+- representative ALTER-table index drop forms match standalone drop skip and
+  drop semantics;
 - missing index renames are warning-producing no-ops;
 - existing index renames update index metadata while preserving rows and index
   entries;
 - close/reopen discovery sees the committed index state.
 
-The behavior remains partial because `ALTER TABLE ADD/DROP INDEX` spellings,
+The behavior remains partial because exhaustive ALTER-table index spellings,
 index ignorability, online/in-place index algorithms, unsupported index classes,
 foreign keys, and partitions remain separate work.
 
@@ -72,14 +82,16 @@ foreign keys, and partitions remain separate work.
 No production code change is expected. MariaDB maps standalone index DDL to
 ALTER metadata, handles the existence options, and then invokes the same
 copy-rebuild paths MyLite already supports for standalone `CREATE INDEX` and
-`DROP INDEX` plus SQL-level index rename.
+`DROP INDEX`, representative ALTER-table add/drop index forms, and SQL-level
+index rename.
 
 The MyLite-specific risk is index metadata publication. The test must prove
 that skipped duplicate creates leave the existing index usable, new creates
-publish forced-index-readable entries, skipped missing drops do not mutate the
-table, skipped missing renames do not mutate the table, existing renames move
-forced-index access to the new name, and existing drops remove the index from
-reopened metadata.
+publish forced-index-readable entries, representative ALTER-table add forms do
+the same, skipped missing drops do not mutate the table, representative
+ALTER-table drop forms do the same, skipped missing renames do not mutate the
+table, existing renames move forced-index access to the new name, and existing
+drops remove the index from reopened metadata.
 
 ## Affected Subsystems
 
@@ -92,8 +104,8 @@ reopened metadata.
 
 ## DDL Metadata Routing Impact
 
-Supported standalone index creates/drops and SQL-level index renames still
-rebuild the table definition inside the MyLite catalog. Skipped
+Supported standalone and ALTER-table index creates/drops plus SQL-level index
+renames still rebuild the table definition inside the MyLite catalog. Skipped
 existence-option operations do not publish a new definition.
 
 ## Single-File And Lifecycle Impact
@@ -122,10 +134,14 @@ dependency changes.
    missing index.
 6. Add storage-engine smoke coverage for `RENAME INDEX IF EXISTS` renaming an
    existing supported secondary index.
-7. Assert warnings contain the skipped index names, forced-index reads work
+7. Add storage-engine smoke coverage for representative
+   `ALTER TABLE ... ADD INDEX IF NOT EXISTS` duplicate and missing-index forms.
+8. Add storage-engine smoke coverage for representative
+   `ALTER TABLE ... DROP INDEX IF EXISTS` missing and existing-index forms.
+9. Assert warnings contain the skipped index names, forced-index reads work
    before/drop as appropriate, rows remain visible, close/reopen discovery is
    correct, and durable sidecar gates pass.
-8. Run format, focused storage-smoke tests, harness reports, clang-tidy, and
+10. Run format, focused storage-smoke tests, harness reports, clang-tidy, and
    the `dev`, `embedded-dev`, and `storage-smoke-dev` gates.
 
 ## Acceptance Criteria
@@ -139,6 +155,15 @@ dependency changes.
   leaves the table unchanged.
 - Existing `DROP INDEX IF EXISTS created_key ...` succeeds and the dropped
   index is unavailable after close/reopen.
+- Duplicate `ALTER TABLE ... ADD INDEX IF NOT EXISTS category_key ...` succeeds
+  with a warning and leaves the existing index usable.
+- Missing `ALTER TABLE ... ADD INDEX IF NOT EXISTS alter_status_key ...`
+  succeeds and the new index supports forced-index reads before and after
+  close/reopen until it is dropped.
+- Missing `ALTER TABLE ... DROP INDEX IF EXISTS missing_alter_key ...` succeeds
+  with a warning and leaves the table unchanged.
+- Existing `ALTER TABLE ... DROP INDEX IF EXISTS alter_status_key ...` succeeds
+  and the dropped index is unavailable.
 - Missing `RENAME INDEX IF EXISTS missing_status_key ...` succeeds with a
   warning and leaves the existing index usable.
 - Existing `RENAME INDEX IF EXISTS status_key ...` succeeds, moves forced-index
@@ -150,5 +175,5 @@ dependency changes.
 
 - This slice intentionally tests warning message contents rather than exact
   MariaDB warning levels or ordering.
-- `ALTER TABLE ADD/DROP INDEX IF [NOT] EXISTS` and index ignorability options
-  should get separate coverage if application schemas need those spellings.
+- Additional ALTER-table index spellings and index ignorability options should
+  get separate coverage if application schemas need those forms.

@@ -3499,6 +3499,18 @@ static void test_index_ddl_if_exists(void) {
 
     assert_exec_succeeds(
         db,
+        "ALTER TABLE index_posts "
+        "ADD INDEX IF NOT EXISTS category_key (category), ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "category_key");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM index_posts FORCE INDEX (category_key) WHERE category = 'news'",
+        "2"
+    );
+
+    assert_exec_succeeds(
+        db,
         "CREATE INDEX IF NOT EXISTS status_key ON index_posts (status) ALGORITHM=COPY"
     );
     assert_catalog_table_count(filename, "index_if_exists", 1U);
@@ -3562,6 +3574,28 @@ static void test_index_ddl_if_exists(void) {
         "3"
     );
 
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE index_posts "
+        "ADD INDEX IF NOT EXISTS alter_status_key (status), ALGORITHM=COPY"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM index_posts FORCE INDEX (alter_status_key) WHERE status = 'open'",
+        "2"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE index_posts DROP INDEX IF EXISTS missing_alter_key, ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "missing_alter_key");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM index_posts FORCE INDEX (alter_status_key) WHERE status = 'open'",
+        "2"
+    );
+
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
@@ -3580,6 +3614,19 @@ static void test_index_ddl_if_exists(void) {
         db,
         "SELECT id FROM index_posts FORCE INDEX (slug_key) WHERE slug = 'alpha'",
         "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM index_posts FORCE INDEX (alter_status_key) WHERE status = 'open'",
+        "2"
+    );
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE index_posts DROP INDEX IF EXISTS alter_status_key, ALGORITHM=COPY"
+    );
+    assert_exec_fails(
+        db,
+        "SELECT COUNT(*) FROM index_posts FORCE INDEX (alter_status_key) WHERE status = 'open'"
     );
     assert_exec_fails(
         db,
