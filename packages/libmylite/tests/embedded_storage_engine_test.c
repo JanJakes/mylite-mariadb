@@ -109,6 +109,7 @@ static void test_schema_namespaces(void);
 static void test_prepared_schema_namespaces(void);
 static void test_schema_options(void);
 static void test_non_table_object_policy(void);
+static void test_transaction_control_policy(void);
 static void test_create_table_persists_catalog_metadata(void);
 static void test_alter_table_rebuilds_keyless_rows(void);
 static void test_indexed_rows(void);
@@ -121,6 +122,7 @@ static void test_wordpress_shaped_schema(void);
 static void assert_exec_succeeds(mylite_db *db, const char *sql);
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_non_table_object_exec_fails(mylite_db *db, const char *sql);
+static void assert_transaction_control_exec_fails(mylite_db *db, const char *sql);
 static void assert_prepared_succeeds(mylite_db *db, const char *sql);
 static void assert_schema_options(
     mylite_db *db,
@@ -190,6 +192,7 @@ int main(void) {
     test_prepared_schema_namespaces();
     test_schema_options();
     test_non_table_object_policy();
+    test_transaction_control_policy();
     test_create_table_persists_catalog_metadata();
     test_alter_table_rebuilds_keyless_rows();
     test_indexed_rows();
@@ -395,6 +398,37 @@ static void test_non_table_object_policy(void) {
     assert_non_table_object_exec_fails(db, "CREATE FUNCTION blocked_func() RETURNS INT RETURN 1");
     assert_non_table_object_exec_fails(db, "CALL blocked_proc()");
     assert_non_table_object_exec_fails(db, "CREATE SEQUENCE blocked_seq");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_transaction_control_policy(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    single_value_context count = {.expected_value = "1"};
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE posts (id INT PRIMARY KEY, title VARCHAR(64)) ENGINE=InnoDB"
+    );
+
+    assert_transaction_control_exec_fails(db, "START TRANSACTION");
+    assert_transaction_control_exec_fails(db, "SET autocommit=0");
+    assert_transaction_control_exec_fails(db, "SAVEPOINT mylite_probe");
+    assert_transaction_control_exec_fails(db, "ROLLBACK");
+    assert_exec_succeeds(db, "INSERT INTO posts VALUES (1, 'autocommit')");
+    assert(
+        mylite_exec(db, "SELECT COUNT(*) FROM posts", single_value_callback, &count, NULL) ==
+        MYLITE_OK
+    );
+    assert(count.rows == 1);
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
@@ -2238,6 +2272,21 @@ static void assert_non_table_object_exec_fails(mylite_db *db, const char *sql) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "non-table database object") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_transaction_control_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+    const int result = mylite_exec(db, sql, NULL, NULL, &errmsg);
+    if (result == MYLITE_OK) {
+        fprintf(stderr, "SQL unexpectedly succeeded: %s\n", sql);
+    }
+    assert(result == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "transaction control") != NULL);
     mylite_free(errmsg);
 }
 

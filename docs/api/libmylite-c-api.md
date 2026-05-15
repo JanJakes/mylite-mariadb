@@ -106,9 +106,10 @@ records with default character set, collation, and comment options,
 table-definition metadata, rows, autoincrement state, supported indexes, and
 rollback-journal publication state in the primary `.mylite` file. File-backed
 opens answer schema and table discovery from the catalog when no transient
-MariaDB schema directory exists; SQL transactions and savepoints remain
-planned. Existing-file opens preserve storage lock conflicts as `MYLITE_BUSY`
-before starting the embedded runtime.
+MariaDB schema directory exists. Explicit SQL transaction control is rejected
+until MyLite has transaction-aware handler hooks; SQL rollback and savepoints
+remain planned. Existing-file opens preserve storage lock conflicts as
+`MYLITE_BUSY` before starting the embedded runtime.
 
 ## Direct Execution
 
@@ -400,9 +401,10 @@ the embedded library model:
 - performance schema.
 
 Representative account, event, plugin, replication, binlog, view, trigger,
-routine, package, sequence, and `CALL` commands are rejected before MariaDB
-execution with stable MyLite errors. Other unsupported surfaces should fail with
-stable MyLite result codes and MariaDB diagnostics where possible.
+routine, package, sequence, `CALL`, transaction-control, and autocommit-control
+commands are rejected before MariaDB execution with stable MyLite errors. Other
+unsupported surfaces should fail with stable MyLite result codes and MariaDB
+diagnostics where possible.
 
 ## Compatibility Adapter
 

@@ -289,9 +289,12 @@ std::string field_string(const char *value, unsigned int length);
 const char *unsupported_sql_surface_message(std::string_view sql);
 bool is_server_surface_sql(std::string_view sql);
 bool is_non_table_object_sql(std::string_view sql);
+bool is_transaction_control_sql(std::string_view sql);
 bool is_non_table_object_keyword(std::string_view token);
+bool is_set_transaction_control_sql(std::string_view sql);
 std::string_view skip_sql_leading_noise(std::string_view sql);
 std::string_view pop_sql_token(std::string_view &sql);
+std::string_view pop_sql_token_after_separators(std::string_view &sql);
 bool sql_token_equals(std::string_view token, const char *keyword);
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
 int sync_schema_catalog(mylite_db &database);
@@ -1784,6 +1787,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_non_table_object_sql(sql)) {
         return "unsupported non-table database object SQL surface";
     }
+    if (is_transaction_control_sql(sql)) {
+        return "unsupported SQL transaction control";
+    }
     return nullptr;
 }
 
@@ -1873,6 +1879,44 @@ bool is_non_table_object_keyword(std::string_view token) {
            sql_token_equals(token, "PACKAGE") || sql_token_equals(token, "SEQUENCE");
 }
 
+bool is_transaction_control_sql(std::string_view sql) {
+    std::string_view rest = skip_sql_leading_noise(sql);
+    const std::string_view first = pop_sql_token(rest);
+    std::string_view after_first = rest;
+    const std::string_view second = pop_sql_token(rest);
+
+    if (sql_token_equals(first, "BEGIN") || sql_token_equals(first, "COMMIT") ||
+        sql_token_equals(first, "ROLLBACK") || sql_token_equals(first, "SAVEPOINT") ||
+        sql_token_equals(first, "XA")) {
+        return true;
+    }
+
+    if (sql_token_equals(first, "START")) {
+        return sql_token_equals(second, "TRANSACTION");
+    }
+
+    if (sql_token_equals(first, "RELEASE")) {
+        return sql_token_equals(second, "SAVEPOINT");
+    }
+
+    return sql_token_equals(first, "SET") && is_set_transaction_control_sql(after_first);
+}
+
+bool is_set_transaction_control_sql(std::string_view sql) {
+    const std::string_view first = pop_sql_token_after_separators(sql);
+    if (sql_token_equals(first, "AUTOCOMMIT") || sql_token_equals(first, "TRANSACTION")) {
+        return true;
+    }
+
+    if (!sql_token_equals(first, "GLOBAL") && !sql_token_equals(first, "LOCAL") &&
+        !sql_token_equals(first, "SESSION")) {
+        return false;
+    }
+
+    const std::string_view second = pop_sql_token_after_separators(sql);
+    return sql_token_equals(second, "AUTOCOMMIT") || sql_token_equals(second, "TRANSACTION");
+}
+
 std::string_view skip_sql_leading_noise(std::string_view sql) {
     for (;;) {
         while (!sql.empty() && std::isspace(static_cast<unsigned char>(sql.front())) != 0) {
@@ -1922,6 +1966,14 @@ std::string_view pop_sql_token(std::string_view &sql) {
     std::string_view token = sql.substr(0, token_end);
     sql.remove_prefix(token_end);
     return token;
+}
+
+std::string_view pop_sql_token_after_separators(std::string_view &sql) {
+    while (!sql.empty() &&
+           (std::isalnum(static_cast<unsigned char>(sql.front())) == 0 && sql.front() != '_')) {
+        sql.remove_prefix(1);
+    }
+    return pop_sql_token(sql);
 }
 
 bool sql_token_equals(std::string_view token, const char *keyword) {

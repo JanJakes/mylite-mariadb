@@ -20,7 +20,7 @@ groups cover public API validation, storage, crash recovery, locking, embedded
 lifecycle, direct SQL, prepared statements, column metadata, large value reads,
 warnings, MariaDB baseline SQL API comparison, storage-engine smoke, sidecar
 gates, routed DDL/DML including schema namespaces, `CREATE TABLE ... LIKE`,
-and `CREATE TABLE ... SELECT`, initial application-schema smoke, and
+`CREATE TABLE ... SELECT`, transaction-control policy, initial application-schema smoke, and
 unsupported server/non-table-object policy. MariaDB MTR comparison suites and broader
 application-schema suites remain planned.
 
@@ -112,9 +112,9 @@ application-schema suites remain planned.
 
 | Capability | MyLite status | Compatibility target |
 | --- | --- | --- |
-| Atomic commit | 🟡&nbsp;Partial | Rollback journal protects current catalog, row, row-state, truncate, autoincrement, and index-entry publication; SQL transaction commit remains planned |
-| Rollback | ⚪&nbsp;Planned | Restore rows, indexes, constraints, and catalog state for failed transactions |
-| Savepoints | ⚪&nbsp;Planned | Match MariaDB transaction behavior for supported MyLite tables |
+| Atomic commit | 🟡&nbsp;Partial | Rollback journal protects current catalog, row, row-state, truncate, autoincrement, and index-entry publication; explicit SQL transaction control is rejected until commit hooks exist |
+| Rollback | 🟡&nbsp;Partial | `ROLLBACK` and rollback-to-savepoint are rejected before MariaDB execution so MyLite does not imply rollback support for routed non-transactional writes; real row, index, constraint, and catalog rollback remains planned |
+| Savepoints | 🟡&nbsp;Partial | `SAVEPOINT` and `RELEASE SAVEPOINT` are rejected before MariaDB execution; MariaDB-compatible savepoint behavior for supported MyLite tables remains planned |
 | Crash recovery | 🟡&nbsp;Partial | Recover the primary file from `<database>.mylite-journal` for current publication paths while holding the exclusive primary-file lock; WAL/checkpoints and transaction rollback remain planned |
 | Multiple readers | 🟡&nbsp;Partial | Storage read APIs acquire shared non-blocking advisory locks over stable committed state; SQL transaction lock integration and busy-timeout behavior remain planned |
 | Concurrent writers | ⚪&nbsp;Planned | Preserve the full write-concurrency goal in storage and lock design |

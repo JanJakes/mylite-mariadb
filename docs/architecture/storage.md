@@ -313,8 +313,10 @@ created. These locks protect cooperating MyLite processes from unsafe concurrent
 access but are not the final multi-writer lock manager.
 
 This is not SQL transaction support yet. The MyLite handler still advertises
-non-transactional engine flags, and MariaDB commit, rollback, and savepoint
-handlerton hooks remain planned.
+non-transactional engine flags. Public `libmylite` SQL entry points reject
+explicit transaction-control and autocommit-control statements before MariaDB
+execution so routed `ENGINE=InnoDB` tables do not imply rollback semantics.
+MariaDB commit, rollback, and savepoint handlerton hooks remain planned.
 
 The storage design must preserve the full write-concurrency goal. Early
 milestones may use coarse locks for correctness, but the page, transaction,

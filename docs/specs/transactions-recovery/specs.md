@@ -11,7 +11,8 @@ single-file durability goal.
 This slice adds the first bounded recovery guarantee: atomic publication of the
 current append-only storage mutations through a MyLite-owned rollback journal.
 It does not yet add SQL transaction registration, savepoints, multi-statement
-rollback, or concurrent writer locking.
+rollback, or concurrent writer locking. Later transaction-control policy work
+rejects those SQL surfaces explicitly until the handler hooks exist.
 
 ## Source Findings
 
@@ -78,7 +79,9 @@ reclamation exists, but they are not part of the committed logical database.
 
 Atomic commit and crash recovery move from planned to partial. Rollback and
 savepoints remain planned because MariaDB's SQL transaction hooks are still not
-implemented and MyLite continues to advertise `HA_NO_TRANSACTIONS`.
+implemented and MyLite continues to advertise `HA_NO_TRANSACTIONS`; public
+MyLite entry points reject explicit transaction control rather than claiming
+rollback behavior.
 
 `ENGINE=InnoDB`, `ENGINE=MyISAM`, and `ENGINE=Aria` requests that route to
 MyLite get the same MyLite recovery behavior. They do not use durable
