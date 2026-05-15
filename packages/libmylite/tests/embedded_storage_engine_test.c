@@ -91,6 +91,7 @@ static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
 static void test_blob_text_prefix_indexes(void);
 static void test_create_table_like(void);
+static void test_create_table_select(void);
 static void test_truncate_table_lifecycle(void);
 static void test_wordpress_shaped_schema(void);
 static void assert_exec_succeeds(mylite_db *db, const char *sql);
@@ -145,6 +146,7 @@ int main(void) {
     test_standalone_index_ddl();
     test_blob_text_prefix_indexes();
     test_create_table_like();
+    test_create_table_select();
     test_truncate_table_lifecycle();
     test_wordpress_shaped_schema();
     return 0;
@@ -1343,6 +1345,181 @@ static void test_create_table_like(void) {
             db,
             "SELECT id FROM like_clone_posts FORCE INDEX (body_prefix) "
             "WHERE body = 'clone body one'",
+            row_callback,
+            &reopened_body_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_body_rows.rows == 1);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_create_table_select(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    single_value_context default_label = {
+        .expected_value = "constant row",
+    };
+    single_value_context copied_count = {
+        .expected_value = "2",
+    };
+    single_value_context copied_payload = {
+        .expected_value = "010203",
+    };
+    single_value_context next_id = {
+        .expected_value = "3",
+    };
+    single_value_context reopened_count = {
+        .expected_value = "3",
+    };
+    table_context body_rows = {0};
+    table_context reopened_body_rows = {0};
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE ctas_source_posts ("
+        "id INT NOT NULL AUTO_INCREMENT, "
+        "slug VARCHAR(32) NOT NULL, "
+        "body LONGTEXT NULL, "
+        "payload BLOB NULL, "
+        "PRIMARY KEY (id), "
+        "UNIQUE KEY slug_key (slug)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO ctas_source_posts (slug, body, payload) VALUES "
+        "('source-alpha', 'source body one', UNHEX('010203')), "
+        "('source-beta', 'source body two', UNHEX('040506'))"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE ctas_default_constants AS "
+        "SELECT 10 AS id, 'constant row' AS label"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE ctas_indexed_posts ("
+        "id INT NOT NULL AUTO_INCREMENT, "
+        "slug VARCHAR(32) NOT NULL, "
+        "body LONGTEXT NULL, "
+        "payload BLOB NULL, "
+        "PRIMARY KEY (id), "
+        "UNIQUE KEY slug_key (slug), "
+        "KEY body_prefix (body(8))"
+        ") ENGINE=InnoDB "
+        "SELECT id, slug, body, payload FROM ctas_source_posts"
+    );
+    assert_catalog_table_count(filename, "app", 3U);
+    assert_catalog_table_metadata(filename, "app", "ctas_source_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "ctas_default_constants", "DEFAULT", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "ctas_indexed_posts", "InnoDB", "MYLITE");
+
+    assert(
+        mylite_exec(
+            db,
+            "SELECT label FROM ctas_default_constants WHERE id = 10",
+            single_value_callback,
+            &default_label,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(default_label.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM ctas_indexed_posts",
+            single_value_callback,
+            &copied_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(copied_count.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT HEX(payload) FROM ctas_indexed_posts FORCE INDEX (slug_key) "
+            "WHERE slug = 'source-alpha'",
+            single_value_callback,
+            &copied_payload,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(copied_payload.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM ctas_indexed_posts FORCE INDEX (body_prefix) "
+            "WHERE body = 'source body two'",
+            row_callback,
+            &body_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(body_rows.rows == 1);
+
+    assert_exec_fails(
+        db,
+        "INSERT INTO ctas_indexed_posts (slug, body, payload) VALUES "
+        "('source-alpha', 'duplicate slug', UNHEX('AA'))"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO ctas_indexed_posts (slug, body, payload) VALUES "
+        "('source-gamma', 'source body three', UNHEX('070809'))"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM ctas_indexed_posts FORCE INDEX (slug_key) "
+            "WHERE slug = 'source-gamma'",
+            single_value_callback,
+            &next_id,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(next_id.rows == 1);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_catalog_table_count(filename, "app", 3U);
+    assert_catalog_table_metadata(filename, "app", "ctas_source_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "ctas_default_constants", "DEFAULT", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "ctas_indexed_posts", "InnoDB", "MYLITE");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM ctas_indexed_posts",
+            single_value_callback,
+            &reopened_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_count.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM ctas_indexed_posts FORCE INDEX (body_prefix) "
+            "WHERE body = 'source body three'",
             row_callback,
             &reopened_body_rows,
             &errmsg

@@ -180,6 +180,10 @@ rollback remain planned until MyLite has locking and recovery.
 MariaDB's normal LIKE path, does not copy rows, resets target autoincrement
 state, and records the source requested engine with effective `MYLITE` when the
 statement has no explicit engine.
+Successful supported `CREATE TABLE ... SELECT` uses MariaDB's `select_create`
+path to derive or open the target definition and then inserts result rows
+through MyLite's normal `write_row()` path. Failed CTAS cleanup remains planned
+until SQL rollback and DDL undo are implemented.
 
 ## Schemas And System Surfaces
 

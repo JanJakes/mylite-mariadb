@@ -41,7 +41,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `sql-comparison` | `embedded-dev` | `compat-sql-comparison` | MariaDB baseline SQL API comparison |
 | `storage-engine` | `storage-smoke-dev` | `compat-storage-engine` | Static handler registration and SQL storage-engine smoke |
 | `sidecar` | `storage-smoke-dev` | `compat-sidecar` | Forbidden durable sidecar gates |
-| `routed-ddl-dml` | `storage-smoke-dev` | `compat-routed-ddl-dml` | Routed table, index DDL, `CREATE TABLE ... LIKE`, truncate, and DML smoke |
+| `routed-ddl-dml` | `storage-smoke-dev` | `compat-routed-ddl-dml` | Routed table, index DDL, `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`, truncate, and DML smoke |
 | `application-schema` | `storage-smoke-dev` | `compat-application-schema` | WordPress-shaped application schema and prefix-index smoke |
 | `server-surface` | `storage-smoke-dev` | `compat-server-surface` | Unsupported server-oriented surface policy |
 
