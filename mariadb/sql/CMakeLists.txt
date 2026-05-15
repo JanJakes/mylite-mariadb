@@ -91,6 +91,13 @@ IF(SSL_DEFINES)
  ADD_DEFINITIONS(${SSL_DEFINES})
 ENDIF()
 
+OPTION(MYLITE_WITH_LOAD_DATA "Build LOAD DATA and LOAD XML execution support" ON)
+IF(MYLITE_WITH_LOAD_DATA)
+  SET(MYLITE_LOAD_DATA_SOURCE sql_load.cc)
+ELSE()
+  SET(MYLITE_LOAD_DATA_SOURCE mylite_sql_load_disabled.cc)
+ENDIF()
+
 SET (SQL_SOURCE
                ${CMAKE_CURRENT_BINARY_DIR}/yy_mariadb.cc
                ${CMAKE_CURRENT_BINARY_DIR}/yy_oracle.cc
@@ -131,7 +138,7 @@ SET (SQL_SOURCE
                sql_error.cc sql_handler.cc sql_get_diagnostics.cc
                sql_help.cc sql_insert.cc sql_lex.cc
                mylite_schema_hook.cc
-               sql_list.cc sql_load.cc sql_manager.cc
+               sql_list.cc ${MYLITE_LOAD_DATA_SOURCE} sql_manager.cc
                sql_parse.cc sql_bootstrap.cc
                sql_partition.cc sql_plugin.cc sql_prepare.cc sql_rename.cc
                debug_sync.cc debug.cc

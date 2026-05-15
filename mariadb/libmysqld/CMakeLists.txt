@@ -47,6 +47,13 @@ IF(CMAKE_C_COMPILER_ID MATCHES "Clang" AND
    COMPILE_FLAGS "-Wno-unused-but-set-variable")
 ENDIF()
 
+OPTION(MYLITE_WITH_LOAD_DATA "Build LOAD DATA and LOAD XML execution support" ON)
+IF(MYLITE_WITH_LOAD_DATA)
+  SET(MYLITE_LOAD_DATA_SOURCE ../sql/sql_load.cc)
+ELSE()
+  SET(MYLITE_LOAD_DATA_SOURCE ../sql/mylite_sql_load_disabled.cc)
+ENDIF()
+
 SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc 
            libmysql.c ../sql-common/errmsg.c
            ../sql-common/client.c
@@ -91,7 +98,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/mylite_schema_hook.cc
            ../sql/sql_admin.cc ../sql/sql_truncate.cc ../sql/sql_reload.cc
            ../sql/sql_lex.cc ../sql/keycaches.cc
-           ../sql/sql_list.cc ../sql/sql_load.cc ../sql/sql_locale.cc 
+           ../sql/sql_list.cc ${MYLITE_LOAD_DATA_SOURCE} ../sql/sql_locale.cc
            ../sql/sql_binlog.cc ../sql/sql_manager.cc
            ../sql/sql_parse.cc ../sql/sql_bootstrap.cc
            ../sql/sql_partition.cc ../sql/sql_plugin.cc 
