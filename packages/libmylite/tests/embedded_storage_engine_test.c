@@ -90,6 +90,7 @@ static void test_alter_table_rebuilds_keyless_rows(void);
 static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
 static void test_blob_text_prefix_indexes(void);
+static void test_create_table_like(void);
 static void test_truncate_table_lifecycle(void);
 static void test_wordpress_shaped_schema(void);
 static void assert_exec_succeeds(mylite_db *db, const char *sql);
@@ -143,6 +144,7 @@ int main(void) {
     test_indexed_rows();
     test_standalone_index_ddl();
     test_blob_text_prefix_indexes();
+    test_create_table_like();
     test_truncate_table_lifecycle();
     test_wordpress_shaped_schema();
     return 0;
@@ -1180,6 +1182,174 @@ static void test_blob_text_prefix_indexes(void) {
         "InnoDB",
         "MYLITE"
     );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_create_table_like(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    single_value_context empty_clone_count = {
+        .expected_value = "0",
+    };
+    single_value_context clone_first_id = {
+        .expected_value = "1",
+    };
+    single_value_context source_count = {
+        .expected_value = "2",
+    };
+    single_value_context clone_count = {
+        .expected_value = "1",
+    };
+    table_context slug_index_rows = {0};
+    table_context body_index_rows = {0};
+    table_context payload_rows = {0};
+    table_context reopened_body_rows = {0};
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE like_source_posts ("
+        "id INT NOT NULL AUTO_INCREMENT, "
+        "slug VARCHAR(32) NOT NULL, "
+        "body LONGTEXT NULL, "
+        "payload BLOB NULL, "
+        "PRIMARY KEY (id), "
+        "UNIQUE KEY slug_key (slug), "
+        "KEY body_prefix (body(8)), "
+        "KEY payload_prefix (payload(2))"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO like_source_posts (slug, body, payload) VALUES "
+        "('source-alpha', 'source body one', UNHEX('010203')), "
+        "('source-beta', 'source body two', UNHEX('040506'))"
+    );
+    assert_exec_succeeds(db, "CREATE TABLE like_clone_posts LIKE like_source_posts");
+    assert_catalog_table_count(filename, "app", 2U);
+    assert_catalog_table_metadata(filename, "app", "like_source_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "like_clone_posts", "InnoDB", "MYLITE");
+
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM like_clone_posts",
+            single_value_callback,
+            &empty_clone_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(empty_clone_count.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM like_clone_posts WHERE Key_name = 'body_prefix'",
+            row_callback,
+            &body_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(body_index_rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM like_clone_posts WHERE Key_name = 'slug_key'",
+            row_callback,
+            &slug_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(slug_index_rows.rows == 1);
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO like_clone_posts (slug, body, payload) VALUES "
+        "('clone-alpha', 'clone body one', UNHEX('BEEF01'))"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO like_clone_posts (slug, body, payload) VALUES "
+        "('clone-alpha', 'duplicate slug', UNHEX('CAFE01'))"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM like_clone_posts FORCE INDEX (slug_key) "
+            "WHERE slug = 'clone-alpha'",
+            single_value_callback,
+            &clone_first_id,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(clone_first_id.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM like_clone_posts FORCE INDEX (payload_prefix) "
+            "WHERE payload = UNHEX('BEEF01')",
+            row_callback,
+            &payload_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(payload_rows.rows == 1);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_catalog_table_count(filename, "app", 2U);
+    assert_catalog_table_metadata(filename, "app", "like_source_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "like_clone_posts", "InnoDB", "MYLITE");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM like_source_posts",
+            single_value_callback,
+            &source_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(source_count.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM like_clone_posts",
+            single_value_callback,
+            &clone_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(clone_count.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM like_clone_posts FORCE INDEX (body_prefix) "
+            "WHERE body = 'clone body one'",
+            row_callback,
+            &reopened_body_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_body_rows.rows == 1);
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 

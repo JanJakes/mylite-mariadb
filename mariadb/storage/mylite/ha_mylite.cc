@@ -47,8 +47,9 @@ static int mylite_requested_engine_name(const char *primary_file,
                                         HA_CREATE_INFO *create_info,
                                         char *out_name, size_t out_name_size);
 static bool mylite_preserves_requested_engine_name(const THD *thd);
-static int mylite_preserve_rebuild_requested_engine_name(
+static int mylite_preserve_source_requested_engine_name(
   const char *primary_file, char *out_name, size_t out_name_size);
+static TABLE_LIST *mylite_requested_engine_source_table(const THD *thd);
 static int mylite_copy_engine_name(const LEX_CSTRING *engine_name,
                                    char *out_name, size_t out_name_size);
 static int mylite_copy_lex_string(const LEX_CSTRING *value, char *out_value,
@@ -1350,7 +1351,7 @@ static int mylite_requested_engine_name(const char *primary_file,
   if (!(create_info->used_fields & HA_CREATE_USED_ENGINE))
   {
     if (mylite_preserves_requested_engine_name(thd))
-      return mylite_preserve_rebuild_requested_engine_name(
+      return mylite_preserve_source_requested_engine_name(
         primary_file, out_name, out_name_size);
 
     static const LEX_CSTRING default_engine= {STRING_WITH_LEN("DEFAULT")};
@@ -1375,18 +1376,20 @@ static bool mylite_preserves_requested_engine_name(const THD *thd)
     return false;
 
   return thd->lex->sql_command == SQLCOM_ALTER_TABLE ||
+         (thd->lex->sql_command == SQLCOM_CREATE_TABLE &&
+          thd->lex->create_like()) ||
          thd->lex->sql_command == SQLCOM_CREATE_INDEX ||
          thd->lex->sql_command == SQLCOM_DROP_INDEX;
 }
 
-static int mylite_preserve_rebuild_requested_engine_name(
+static int mylite_preserve_source_requested_engine_name(
   const char *primary_file, char *out_name, size_t out_name_size)
 {
   THD *thd= current_thd;
-  if (!thd || !thd->lex || !thd->lex->query_tables)
+  TABLE_LIST *source_table= mylite_requested_engine_source_table(thd);
+  if (!source_table)
     return HA_ERR_UNSUPPORTED;
 
-  TABLE_LIST *source_table= thd->lex->query_tables;
   char schema_name[NAME_LEN + 1];
   char table_name[NAME_LEN + 1];
   int error= mylite_copy_lex_string(&source_table->db, schema_name,
@@ -1410,6 +1413,23 @@ static int mylite_preserve_rebuild_requested_engine_name(
   mylite_storage_free(metadata.requested_engine_name);
   mylite_storage_free(metadata.effective_engine_name);
   return error;
+}
+
+static TABLE_LIST *mylite_requested_engine_source_table(const THD *thd)
+{
+  if (!thd || !thd->lex || !thd->lex->query_tables)
+    return NULL;
+
+  if (thd->lex->sql_command == SQLCOM_CREATE_TABLE &&
+      thd->lex->create_like())
+  {
+    TABLE_LIST *create_table= thd->lex->create_last_non_select_table;
+    if (create_table && create_table->next_global)
+      return create_table->next_global;
+    return thd->lex->query_tables->next_global;
+  }
+
+  return thd->lex->query_tables;
 }
 
 static int mylite_copy_engine_name(const LEX_CSTRING *engine_name,

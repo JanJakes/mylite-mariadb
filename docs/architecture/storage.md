@@ -66,11 +66,13 @@ metadata. `DROP TABLE` removes catalog metadata for routed tables.
 Simple `RENAME TABLE` updates catalog identity while preserving table ids, row
 pages, and index-entry pages. Copy `ALTER` rebuilds use MariaDB's table-copy
 path and append rebuilt table definitions, rows, and supported index entries
-inside the primary file. Online `ALTER`, in-place `ALTER`,
-transaction-aware index maintenance, free-space reclamation, and unsupported
-index classes still reject or remain planned until those slices define the
-paths. Standalone `CREATE INDEX` and `DROP INDEX` use MariaDB's ALTER-backed
-DDL path for supported copy-rebuild index additions and drops.
+inside the primary file. `CREATE TABLE ... LIKE` uses MariaDB's clone-definition
+path and publishes an empty MyLite catalog record with source requested-engine
+metadata preserved. Online `ALTER`, in-place `ALTER`, transaction-aware index
+maintenance, free-space reclamation, and unsupported index classes still reject
+or remain planned until those slices define the paths. Standalone
+`CREATE INDEX` and `DROP INDEX` use MariaDB's ALTER-backed DDL path for
+supported copy-rebuild index additions and drops.
 
 ## File Layout
 
@@ -174,6 +176,10 @@ Supported key additions on copy `ALTER` rebuild through the same table-copy
 path and publish rebuilt rows with matching index-entry pages. `LOCK=NONE` copy
 ALTER, in-place ALTER, unsupported index rebuilds, and transactional DDL
 rollback remain planned until MyLite has locking and recovery.
+`CREATE TABLE ... LIKE` clones supported routed source table definitions through
+MariaDB's normal LIKE path, does not copy rows, resets target autoincrement
+state, and records the source requested engine with effective `MYLITE` when the
+statement has no explicit engine.
 
 ## Schemas And System Surfaces
 

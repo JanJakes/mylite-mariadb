@@ -117,7 +117,7 @@ Measured on 2026-05-15 with the same host and toolchain as the default profile:
 | Field | Value |
 | --- | --- |
 | Archive | `build/mariadb-mylite-storage-smoke/libmysqld/libmariadbd.a` |
-| Archive size | 32,165,672 bytes / 30.68 MiB |
+| Archive size | 32,165,736 bytes / 30.68 MiB |
 | Archive members | 693 |
 
 This smoke path now covers static plugin registration, current routed
@@ -143,7 +143,7 @@ outputs:
 | Artifact | Size | Stripped Size | Members | Global Symbols |
 | --- | ---: | ---: | ---: | ---: |
 | MariaDB embedded archive | 32,048,256 bytes / 30.56 MiB | n/a | 691 | n/a |
-| MariaDB storage-smoke archive | 32,165,672 bytes / 30.68 MiB | n/a | 693 | n/a |
+| MariaDB storage-smoke archive | 32,165,736 bytes / 30.68 MiB | n/a | 693 | n/a |
 | Embedded open-close smoke | 19,582,608 bytes / 18.68 MiB | 17,642,448 bytes / 16.83 MiB | n/a | 16,840 |
 | Embedded exec smoke | 19,582,440 bytes / 18.68 MiB | 17,642,296 bytes / 16.83 MiB | n/a | 16,840 |
 | Embedded statement smoke | 19,582,432 bytes / 18.68 MiB | 17,642,240 bytes / 16.82 MiB | n/a | 16,840 |
@@ -154,7 +154,7 @@ outputs:
 | Storage-smoke statement smoke | 19,623,456 bytes / 18.71 MiB | 17,675,792 bytes / 16.86 MiB | n/a | 16,840 |
 | Storage-smoke warning smoke | 19,606,880 bytes / 18.70 MiB | 17,659,280 bytes / 16.84 MiB | n/a | 16,840 |
 | Storage-smoke comparison smoke | 19,683,520 bytes / 18.77 MiB | 17,693,392 bytes / 16.87 MiB | n/a | 16,842 |
-| Storage-engine smoke | 19,674,032 bytes / 18.76 MiB | 17,725,376 bytes / 16.90 MiB | n/a | 16,840 |
+| Storage-engine smoke | 19,674,080 bytes / 18.76 MiB | 17,725,376 bytes / 16.90 MiB | n/a | 16,840 |
 
 ## Offline Build Caveat
 
