@@ -3508,6 +3508,34 @@ static void test_index_ddl_if_exists(void) {
         "2"
     );
 
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE index_posts "
+        "RENAME INDEX IF EXISTS missing_status_key TO renamed_status_key, "
+        "ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "missing_status_key");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM index_posts FORCE INDEX (status_key) WHERE status = 'open'",
+        "2"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE index_posts "
+        "RENAME INDEX IF EXISTS status_key TO renamed_status_key, ALGORITHM=COPY"
+    );
+    assert_exec_fails(
+        db,
+        "SELECT COUNT(*) FROM index_posts FORCE INDEX (status_key) WHERE status = 'open'"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM index_posts FORCE INDEX (renamed_status_key) WHERE status = 'open'",
+        "2"
+    );
+
     assert_exec_succeeds(db, "DROP INDEX IF EXISTS missing_key ON index_posts");
     assert_warning_message_contains(db, "missing_key");
     assert_query_single_value(
@@ -3517,15 +3545,15 @@ static void test_index_ddl_if_exists(void) {
     );
     assert_query_single_value(
         db,
-        "SELECT COUNT(*) FROM index_posts FORCE INDEX (status_key) WHERE status = 'open'",
+        "SELECT COUNT(*) FROM index_posts FORCE INDEX (renamed_status_key) WHERE status = 'open'",
         "2"
     );
 
-    assert_exec_succeeds(db, "DROP INDEX IF EXISTS status_key ON index_posts");
+    assert_exec_succeeds(db, "DROP INDEX IF EXISTS renamed_status_key ON index_posts");
     assert_catalog_table_count(filename, "index_if_exists", 1U);
     assert_exec_fails(
         db,
-        "SELECT COUNT(*) FROM index_posts FORCE INDEX (status_key) WHERE status = 'open'"
+        "SELECT COUNT(*) FROM index_posts FORCE INDEX (renamed_status_key) WHERE status = 'open'"
     );
     assert_query_single_value(db, "SELECT COUNT(*) FROM index_posts", "3");
     assert_query_single_value(
@@ -3555,7 +3583,7 @@ static void test_index_ddl_if_exists(void) {
     );
     assert_exec_fails(
         db,
-        "SELECT COUNT(*) FROM index_posts FORCE INDEX (status_key) WHERE status = 'open'"
+        "SELECT COUNT(*) FROM index_posts FORCE INDEX (renamed_status_key) WHERE status = 'open'"
     );
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
