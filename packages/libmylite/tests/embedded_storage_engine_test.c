@@ -151,6 +151,7 @@ static void test_create_table_persists_catalog_metadata(void);
 static void test_check_constraint_if_exists(void);
 static void test_non_check_constraint_ddl(void);
 static void test_primary_key_alter_ddl(void);
+static void test_failed_add_unique_constraint_rollback(void);
 static void test_create_table_if_not_exists(void);
 static void test_alter_table_rebuilds_keyless_rows(void);
 static void test_column_alter_if_exists(void);
@@ -318,6 +319,7 @@ int main(void) {
     test_check_constraint_if_exists();
     test_non_check_constraint_ddl();
     test_primary_key_alter_ddl();
+    test_failed_add_unique_constraint_rollback();
     test_create_table_if_not_exists();
     test_alter_table_rebuilds_keyless_rows();
     test_column_alter_if_exists();
@@ -2434,6 +2436,157 @@ static void test_primary_key_alter_ddl(void) {
         "SELECT id FROM pk_posts FORCE INDEX (category_key) WHERE category = 'tech'",
         "2"
     );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_failed_add_unique_constraint_rollback(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    table_context missing_unique_index_rows = {0};
+    table_context reopened_missing_unique_index_rows = {0};
+    table_context added_unique_index_rows = {0};
+    table_context final_unique_index_rows = {0};
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE unique_constraint_rollback");
+    assert_exec_succeeds(db, "USE unique_constraint_rollback");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE unique_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "author VARCHAR(64) NOT NULL, "
+        "category VARCHAR(64) NOT NULL, "
+        "KEY category_key (category)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO unique_posts VALUES "
+        "(1, 'jan', 'news'), "
+        "(2, 'jan', 'tech'), "
+        "(3, 'jane', 'news')"
+    );
+    assert_catalog_table_count(filename, "unique_constraint_rollback", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "unique_constraint_rollback",
+        "unique_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+
+    assert_exec_fails_with_message(
+        db,
+        "ALTER TABLE unique_posts ADD CONSTRAINT author_unique UNIQUE (author), "
+        "ALGORITHM=COPY",
+        "Duplicate"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM unique_posts WHERE Key_name = 'author_unique'",
+            table_callback,
+            &missing_unique_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(missing_unique_index_rows.rows == 0);
+    assert_exec_fails(
+        db,
+        "SELECT id FROM unique_posts FORCE INDEX (author_unique) WHERE author = 'jan'"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM unique_posts WHERE author = 'jan'", "2");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM unique_posts FORCE INDEX (category_key) WHERE category = 'news'",
+        "2"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE unique_constraint_rollback");
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM unique_posts WHERE Key_name = 'author_unique'",
+            table_callback,
+            &reopened_missing_unique_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_missing_unique_index_rows.rows == 0);
+    assert_query_single_value(db, "SELECT COUNT(*) FROM unique_posts WHERE author = 'jan'", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM unique_posts FORCE INDEX (category_key) WHERE category = 'tech'",
+        "2"
+    );
+
+    assert_exec_succeeds(db, "DELETE FROM unique_posts WHERE id = 2");
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE unique_posts ADD CONSTRAINT author_unique UNIQUE (author), "
+        "ALGORITHM=COPY"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM unique_posts WHERE Key_name = 'author_unique'",
+            table_callback,
+            &added_unique_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(added_unique_index_rows.rows == 1);
+    assert_exec_fails(db, "INSERT INTO unique_posts VALUES (4, 'jan', 'docs')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM unique_posts FORCE INDEX (author_unique) WHERE author = 'jane'",
+        "3"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE unique_constraint_rollback");
+    assert_catalog_table_count(filename, "unique_constraint_rollback", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "unique_constraint_rollback",
+        "unique_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM unique_posts WHERE Key_name = 'author_unique'",
+            table_callback,
+            &final_unique_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(final_unique_index_rows.rows == 1);
+    assert_query_single_value(db, "SELECT COUNT(*) FROM unique_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM unique_posts FORCE INDEX (author_unique) WHERE author = 'jan'",
+        "1"
+    );
+    assert_exec_fails(db, "INSERT INTO unique_posts VALUES (5, 'jane', 'docs')");
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 

@@ -154,6 +154,9 @@ Implemented:
 - The `primary-key-alter-ddl` follow-up slice covers primary-key add/drop/re-add
   through copy ALTER, including duplicate `ADD PRIMARY KEY IF NOT EXISTS`
   warnings and failed re-add over duplicate rows.
+- The `failed-add-unique-constraint-rollback` follow-up slice covers failed
+  `ADD CONSTRAINT ... UNIQUE` over duplicate existing rows preserving the old
+  table, then successful add after duplicate cleanup.
 
 No MariaDB source, public API, storage file-format, dependency, license, or
 binary-size change was required.
