@@ -126,6 +126,14 @@ cmake --build --preset storage-smoke-dev
 ctest --preset storage-smoke-dev
 ```
 
+Compatibility-oriented groups can be run through the MyLite harness:
+
+```sh
+tools/mylite-compat-harness list
+tools/mylite-compat-harness run public-api storage-core
+tools/mylite-compat-harness report embedded-lifecycle sidecar routed-ddl-dml
+```
+
 See [docs/architecture/monorepo.md](docs/architecture/monorepo.md) for the
 repository layout and import discipline.
 

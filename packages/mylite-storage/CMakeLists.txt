@@ -19,4 +19,8 @@ if(BUILD_TESTING)
   mylite_configure_c_target(mylite_storage_test)
 
   add_test(NAME mylite-storage.capabilities COMMAND mylite_storage_test)
+  set_tests_properties(
+    mylite-storage.capabilities
+    PROPERTIES LABELS "compat-storage;compat-crash-recovery;compat-locking"
+  )
 endif()

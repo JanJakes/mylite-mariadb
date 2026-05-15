@@ -1,0 +1,247 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+all_groups="public-api storage-core crash-recovery locking embedded-lifecycle direct-sql storage-engine sidecar routed-ddl-dml"
+
+usage() {
+  cat <<EOF
+Usage: tools/mylite-compat-harness [list|run|report] [group...]
+
+Commands:
+  list       Show available compatibility groups.
+  run        Run selected groups. Defaults to all implemented groups.
+  report     Run selected groups and write a Markdown report.
+
+Environment:
+  MYLITE_COMPAT_REPORT   Report path for the report command.
+                         Defaults to build/mylite-compat-report.md.
+EOF
+}
+
+group_spec() {
+  case "$1" in
+    public-api)
+      echo "dev|compat-public-api|Public C API validation and version surface"
+      ;;
+    storage-core)
+      echo "dev|compat-storage|Primary-file storage format, catalog, row, index, and mutation coverage"
+      ;;
+    crash-recovery)
+      echo "dev|compat-crash-recovery|Rollback-journal recovery and corrupt-journal coverage"
+      ;;
+    locking)
+      echo "dev|compat-locking|Primary-file lock conflict coverage"
+      ;;
+    embedded-lifecycle)
+      echo "embedded-dev|compat-embedded-lifecycle|Embedded runtime open, close, direct execution, and cleanup coverage"
+      ;;
+    direct-sql)
+      echo "embedded-dev|compat-direct-sql|Direct SQL execution through the public libmylite API"
+      ;;
+    storage-engine)
+      echo "storage-smoke-dev|compat-storage-engine|Static MyLite handler registration and SQL storage-engine smoke"
+      ;;
+    sidecar)
+      echo "storage-smoke-dev|compat-sidecar|Forbidden durable sidecar gates around routed SQL"
+      ;;
+    routed-ddl-dml)
+      echo "storage-smoke-dev|compat-routed-ddl-dml|Routed CREATE, ALTER, DROP, RENAME, INSERT, SELECT, UPDATE, and DELETE smoke"
+      ;;
+    *)
+      echo "Unknown compatibility group: $1" >&2
+      return 1
+      ;;
+  esac
+}
+
+build_dir_for_preset() {
+  case "$1" in
+    dev)
+      echo "${root_dir}/build/dev"
+      ;;
+    embedded-dev)
+      echo "${root_dir}/build/embedded-dev"
+      ;;
+    storage-smoke-dev)
+      echo "${root_dir}/build/storage-smoke-dev"
+      ;;
+    *)
+      echo "Unknown preset: $1" >&2
+      return 1
+      ;;
+  esac
+}
+
+list_groups() {
+  local group
+  local spec
+  local preset
+  local label
+  local description
+
+  for group in ${all_groups}; do
+    spec="$(group_spec "${group}")"
+    preset="${spec%%|*}"
+    spec="${spec#*|}"
+    label="${spec%%|*}"
+    description="${spec#*|}"
+    printf '%-20s %-18s %-28s %s\n' "${group}" "${preset}" "${label}" "${description}"
+  done
+}
+
+require_command() {
+  local command_name="$1"
+
+  if ! command -v "${command_name}" >/dev/null 2>&1; then
+    echo "Missing required command: ${command_name}" >&2
+    exit 1
+  fi
+}
+
+prepare_preset() {
+  case "$1" in
+    dev)
+      ;;
+    embedded-dev)
+      prepare_embedded_archive
+      ;;
+    storage-smoke-dev)
+      prepare_storage_smoke_archive
+      ;;
+    *)
+      echo "Unknown preset: $1" >&2
+      return 1
+      ;;
+  esac
+}
+
+prepare_embedded_archive() {
+  local archive="${root_dir}/build/mariadb-embedded/libmysqld/libmariadbd.a"
+
+  if [ -f "${archive}" ]; then
+    BUILD_DIR="${root_dir}/build/mariadb-embedded" "${root_dir}/tools/mariadb-embedded-build" build
+    return
+  fi
+
+  BUILD_DIR="${root_dir}/build/mariadb-embedded" "${root_dir}/tools/mariadb-embedded-build" all
+}
+
+prepare_storage_smoke_archive() {
+  local build_dir="${root_dir}/build/mariadb-mylite-storage-smoke"
+  local archive="${build_dir}/libmysqld/libmariadbd.a"
+  local cache="${build_dir}/CMakeCache.txt"
+
+  if [ -f "${archive}" ] &&
+    [ -f "${cache}" ] &&
+    grep -q '^PLUGIN_MYLITE_SE:STRING=STATIC$' "${cache}"; then
+    cmake --build "${build_dir}" --target mysqlserver
+    return
+  fi
+
+  BUILD_DIR="${build_dir}" TARGET=mysqlserver \
+    "${root_dir}/tools/mariadb-embedded-build" all -DPLUGIN_MYLITE_SE=STATIC
+}
+
+run_group() {
+  local group="$1"
+  local spec
+  local preset
+  local label
+  local description
+  local build_dir
+
+  spec="$(group_spec "${group}")"
+  preset="${spec%%|*}"
+  spec="${spec#*|}"
+  label="${spec%%|*}"
+  description="${spec#*|}"
+  build_dir="$(build_dir_for_preset "${preset}")"
+
+  echo "==> ${group}: ${description}"
+  prepare_preset "${preset}"
+  cmake --preset "${preset}"
+  cmake --build --preset "${preset}"
+  ctest --test-dir "${build_dir}" -L "${label}" --output-on-failure
+}
+
+selected_groups() {
+  if [ "$#" -eq 0 ]; then
+    echo "${all_groups}"
+    return
+  fi
+
+  printf '%s\n' "$@"
+}
+
+run_groups() {
+  local group
+
+  for group in $(selected_groups "$@"); do
+    run_group "${group}"
+  done
+}
+
+report_groups() {
+  local report="${MYLITE_COMPAT_REPORT:-"${root_dir}/build/mylite-compat-report.md"}"
+  local group
+  local spec
+  local status
+  local failures=0
+
+  mkdir -p "$(dirname "${report}")"
+  {
+    echo "# MyLite Compatibility Harness Report"
+    echo
+    echo "| Group | Preset | Label | Status |"
+    echo "| --- | --- | --- | --- |"
+  } >"${report}"
+
+  for group in $(selected_groups "$@"); do
+    spec="$(group_spec "${group}")"
+    if run_group "${group}"; then
+      status="PASS"
+    else
+      status="FAIL"
+      failures=1
+    fi
+
+    {
+      printf '| `%s` | `%s` | `%s` | %s |\n' \
+        "${group}" \
+        "${spec%%|*}" \
+        "$(printf '%s' "${spec#*|}" | cut -d '|' -f 1)" \
+        "${status}"
+    } >>"${report}"
+  done
+
+  echo "report=${report}"
+  return "${failures}"
+}
+
+require_command cmake
+require_command ctest
+
+command_name="${1:-run}"
+if [ "$#" -gt 0 ]; then
+  shift
+fi
+
+case "${command_name}" in
+  list)
+    list_groups
+    ;;
+  run)
+    run_groups "$@"
+    ;;
+  report)
+    report_groups "$@"
+    ;;
+  -h | --help | help)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 1
+    ;;
+esac

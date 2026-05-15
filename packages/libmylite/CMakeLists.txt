@@ -37,6 +37,14 @@ if(BUILD_TESTING)
 
   add_test(NAME libmylite.api COMMAND mylite_api_test)
   add_test(NAME libmylite.version COMMAND mylite_version_test)
+  set_tests_properties(
+    libmylite.api
+    PROPERTIES LABELS "compat-public-api"
+  )
+  set_tests_properties(
+    libmylite.version
+    PROPERTIES LABELS "compat-public-api"
+  )
 
   if(MYLITE_WITH_MARIADB_EMBEDDED)
     add_executable(mylite_embedded_open_close_test
@@ -56,6 +64,10 @@ if(BUILD_TESTING)
     mylite_configure_c_target(mylite_embedded_exec_test)
 
     add_test(NAME libmylite.embedded-exec COMMAND mylite_embedded_exec_test)
+    set_tests_properties(
+      libmylite.embedded-exec
+      PROPERTIES LABELS "compat-direct-sql;compat-embedded-lifecycle"
+    )
 
     if(MYLITE_MARIADB_HAS_MYLITE_SE)
       add_executable(mylite_embedded_storage_engine_test
@@ -71,8 +83,16 @@ if(BUILD_TESTING)
         NAME libmylite.embedded-storage-engine
         COMMAND mylite_embedded_storage_engine_test
       )
+      set_tests_properties(
+        libmylite.embedded-storage-engine
+        PROPERTIES LABELS "compat-storage-engine;compat-sidecar;compat-routed-ddl-dml"
+      )
     endif()
 
     add_test(NAME libmylite.embedded-open-close COMMAND mylite_embedded_open_close_test)
+    set_tests_properties(
+      libmylite.embedded-open-close
+      PROPERTIES LABELS "compat-embedded-lifecycle;compat-locking"
+    )
   endif()
 endif()

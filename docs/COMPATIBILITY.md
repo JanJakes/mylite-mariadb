@@ -12,6 +12,14 @@ for drop-in application expectations.
 - ➖&nbsp;Out&nbsp;of&nbsp;scope: deliberately omitted from the embedded
   single-file product.
 
+## Validation
+
+Compatibility evidence is grouped by the local harness documented in
+[Compatibility Harness](architecture/compatibility-harness.md). The initial
+groups cover public API validation, storage, crash recovery, locking, embedded
+lifecycle, direct SQL, storage-engine smoke, sidecar gates, and routed DDL/DML.
+MariaDB MTR comparison suites and application-schema suites remain planned.
+
 ## Baseline
 
 | Area | Target |

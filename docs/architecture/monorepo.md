@@ -53,6 +53,17 @@ CC="$LLVM_PREFIX/bin/clang" CXX="$LLVM_PREFIX/bin/clang++" \
 PATH="$LLVM_PREFIX/bin:$PATH" cmake --build --preset tidy
 ```
 
+Run compatibility-oriented groups with:
+
+```sh
+tools/mylite-compat-harness list
+tools/mylite-compat-harness run public-api storage-core
+```
+
+The harness maps compatibility surfaces to CTest labels and prepares MariaDB
+embedded archives for groups that need them. See
+[Compatibility Harness](compatibility-harness.md).
+
 Build the current MariaDB embedded-library baseline with:
 
 ```sh

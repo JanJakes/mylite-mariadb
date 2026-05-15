@@ -13,6 +13,7 @@ also read the relevant design documents:
 - [docs/architecture/pre-implementation-checklist.md](docs/architecture/pre-implementation-checklist.md)
 - [docs/architecture/mariadb-foundation.md](docs/architecture/mariadb-foundation.md)
 - [docs/architecture/storage.md](docs/architecture/storage.md)
+- [docs/architecture/compatibility-harness.md](docs/architecture/compatibility-harness.md)
 - [docs/api/libmylite-c-api.md](docs/api/libmylite-c-api.md)
 - [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)
 - [docs/ROADMAP.md](docs/ROADMAP.md)
