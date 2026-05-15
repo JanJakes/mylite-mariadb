@@ -18,6 +18,8 @@ MTR suite.
   result set.
 - Compare prepared statement parameter binding, row values, column names, and
   native metadata against direct `MYSQL_STMT` behavior.
+- Compare direct and prepared statement affected rows and insert ids against
+  raw MariaDB embedded behavior for representative non-result statements.
 - Compare warning count and first structured warning row against direct
   `SHOW WARNINGS` behavior.
 - Expose the comparison as a first-party compatibility harness group.
@@ -59,15 +61,15 @@ Add an embedded-only comparison test binary that runs in two separate phases:
    datadir/tmp/plugin directories, skip grants, skip binlog, skip networking,
    MyISAM default storage, InnoDB off, and the configured message/charset
    directories.
-2. Execute representative direct, prepared, metadata, and warning probes
-   through the MariaDB C API, copy the observed values, then close the
-   connection and call `mysql_server_end()`.
+2. Execute representative direct, prepared, metadata, statement-effect, and
+   warning probes through the MariaDB C API, copy the observed values, then
+   close the connection and call `mysql_server_end()`.
 3. Open a MyLite database with its normal embedded runtime and run the same SQL
    through `libmylite`.
 4. Compare normalized values that the public MyLite API is supposed to expose:
    column names, row string values for direct execution, prepared scalar
-   values, native MariaDB type numbers, warning count, warning level, warning
-   code, and warning message.
+   values, native MariaDB type numbers, affected rows, insert ids, warning
+   count, warning level, warning code, and warning message.
 
 The test intentionally avoids durable table DDL. That keeps this slice focused
 on SQL API behavior and avoids comparing MariaDB sidecar behavior against the
@@ -113,6 +115,8 @@ measured but does not change the shipped library surface.
   direct MariaDB embedded baseline for the selected probe.
 - The comparison test proves prepared binding output and native metadata match
   the direct MariaDB embedded baseline for the selected probe.
+- The comparison test proves direct and prepared statement effects match the
+  direct MariaDB embedded baseline for selected non-result statements.
 - The comparison test proves warning count and first warning row match the
   direct MariaDB embedded baseline for the selected probe.
 - Compatibility docs and harness docs describe the comparison group without

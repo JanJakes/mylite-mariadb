@@ -54,9 +54,19 @@ struct WarningRow {
     std::string message;
 };
 
+struct StatementEffect {
+    long long affected_rows = 0;
+    unsigned long long last_insert_id = 0;
+};
+
+struct StatementEffects {
+    std::vector<StatementEffect> values;
+};
+
 struct Observation {
     QueryResult direct;
     PreparedResult prepared;
+    StatementEffects effects;
     unsigned warning_count = 0;
     WarningRow warning;
 };
@@ -104,6 +114,7 @@ constexpr const char *kTextProbeValue = "hello";
 constexpr unsigned long kTextProbeLength = 5;
 constexpr std::size_t kTextOutputBufferSize = 32;
 constexpr std::size_t kWarningColumnCount = 3;
+constexpr std::size_t kStatementEffectCount = 6;
 
 Observation run_raw_observation(void);
 Observation run_mylite_observation(void);
@@ -112,15 +123,28 @@ void start_raw_runtime(RawRuntime &runtime);
 void stop_raw_runtime(RawRuntime &runtime);
 QueryResult run_raw_query(RawRuntime &runtime, const char *sql);
 PreparedResult run_raw_prepared_query(RawRuntime &runtime);
+StatementEffects run_raw_statement_effects(RawRuntime &runtime);
+StatementEffect run_raw_effect_query(RawRuntime &runtime, const char *sql);
+StatementEffect run_raw_prepared_insert(RawRuntime &runtime);
+StatementEffect run_raw_prepared_update(RawRuntime &runtime);
+StatementEffect run_raw_prepared_delete(RawRuntime &runtime);
+StatementEffect raw_statement_effect(RawRuntime &runtime);
 Observation run_mylite_queries(mylite_db *database);
 QueryResult run_mylite_query(mylite_db *database, const char *sql);
 PreparedResult run_mylite_prepared_query(mylite_db *database);
+StatementEffects run_mylite_statement_effects(mylite_db *database);
+StatementEffect run_mylite_effect_query(mylite_db *database, const char *sql);
+StatementEffect run_mylite_prepared_insert(mylite_db *database);
+StatementEffect run_mylite_prepared_update(mylite_db *database);
+StatementEffect run_mylite_prepared_delete(mylite_db *database);
+StatementEffect mylite_statement_effect(mylite_db *database);
 WarningRow first_mylite_warning(mylite_db *database);
 void open_mylite_runtime(MyLiteRuntime &runtime);
 void close_mylite_runtime(MyLiteRuntime &runtime);
 int collect_mylite_row(void *ctx, int column_count, char **values, char **column_names);
 void compare_query_results(const QueryResult &expected, const QueryResult &actual);
 void compare_prepared_results(const PreparedResult &expected, const PreparedResult &actual);
+void compare_statement_effects(const StatementEffects &expected, const StatementEffects &actual);
 void compare_warning_rows(const WarningRow &expected, const WarningRow &actual);
 WarningRow first_raw_warning(RawRuntime &runtime);
 std::filesystem::path make_temp_root(const char *prefix);
@@ -151,6 +175,7 @@ Observation run_raw_observation(void) {
 
     observation.direct = run_raw_query(runtime, kDirectSql);
     observation.prepared = run_raw_prepared_query(runtime);
+    observation.effects = run_raw_statement_effects(runtime);
     const QueryResult warning_result = run_raw_query(runtime, kWarningSql);
     observation.warning_count = warning_result.warning_count;
     observation.warning = first_raw_warning(runtime);
@@ -171,6 +196,7 @@ Observation run_mylite_observation(void) {
 void compare_observations(const Observation &expected, const Observation &actual) {
     compare_query_results(expected.direct, actual.direct);
     compare_prepared_results(expected.prepared, actual.prepared);
+    compare_statement_effects(expected.effects, actual.effects);
     assert(actual.warning_count == expected.warning_count);
     compare_warning_rows(expected.warning, actual.warning);
 }
@@ -333,11 +359,134 @@ PreparedResult run_raw_prepared_query(RawRuntime &runtime) {
     return result;
 }
 
+StatementEffects run_raw_statement_effects(RawRuntime &runtime) {
+    StatementEffects effects = {};
+    effects.values.reserve(kStatementEffectCount);
+
+    assert(mysql_query(&runtime.mysql, "CREATE DATABASE effect_compare") == 0);
+    assert(mysql_query(&runtime.mysql, "USE effect_compare") == 0);
+    assert(
+        mysql_query(
+            &runtime.mysql,
+            "CREATE TEMPORARY TABLE effect_values ("
+            "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+            "name VARCHAR(32),"
+            "qty INT NOT NULL)"
+        ) == 0
+    );
+
+    effects.values.push_back(run_raw_effect_query(
+        runtime,
+        "INSERT INTO effect_values(name, qty) VALUES ('alpha', 1), ('beta', 2)"
+    ));
+    effects.values.push_back(
+        run_raw_effect_query(runtime, "UPDATE effect_values SET qty = qty + 10 WHERE name = 'beta'")
+    );
+    effects.values.push_back(
+        run_raw_effect_query(runtime, "DELETE FROM effect_values WHERE name = 'alpha'")
+    );
+    effects.values.push_back(run_raw_prepared_insert(runtime));
+    effects.values.push_back(run_raw_prepared_update(runtime));
+    effects.values.push_back(run_raw_prepared_delete(runtime));
+    return effects;
+}
+
+StatementEffect run_raw_effect_query(RawRuntime &runtime, const char *sql) {
+    assert(mysql_query(&runtime.mysql, sql) == 0);
+    return raw_statement_effect(runtime);
+}
+
+StatementEffect run_raw_prepared_insert(RawRuntime &runtime) {
+    MYSQL_STMT *statement = mysql_stmt_init(&runtime.mysql);
+    assert(statement != nullptr);
+    constexpr const char *sql = "INSERT INTO effect_values(name, qty) VALUES (?, ?)";
+    assert(mysql_stmt_prepare(statement, sql, string_length(sql)) == 0);
+
+    char name[] = "gamma";
+    unsigned long name_length = 5;
+    int quantity = 3;
+    std::array<MYSQL_BIND, 2> parameters = {};
+    parameters[0].buffer_type = MYSQL_TYPE_STRING;
+    parameters[0].buffer = name;
+    parameters[0].buffer_length = name_length;
+    parameters[0].length = &name_length;
+    parameters[1].buffer_type = MYSQL_TYPE_LONG;
+    parameters[1].buffer = &quantity;
+
+    assert(mysql_stmt_bind_param(statement, parameters.data()) == 0);
+    assert(mysql_stmt_execute(statement) == 0);
+    const StatementEffect effect{
+        static_cast<long long>(mysql_stmt_affected_rows(statement)),
+        mysql_stmt_insert_id(statement),
+    };
+    assert(mysql_stmt_close(statement) == 0);
+    return effect;
+}
+
+StatementEffect run_raw_prepared_update(RawRuntime &runtime) {
+    MYSQL_STMT *statement = mysql_stmt_init(&runtime.mysql);
+    assert(statement != nullptr);
+    constexpr const char *sql = "UPDATE effect_values SET qty = qty + ? WHERE name = ?";
+    assert(mysql_stmt_prepare(statement, sql, string_length(sql)) == 0);
+
+    int increment = 5;
+    char name[] = "gamma";
+    unsigned long name_length = 5;
+    std::array<MYSQL_BIND, 2> parameters = {};
+    parameters[0].buffer_type = MYSQL_TYPE_LONG;
+    parameters[0].buffer = &increment;
+    parameters[1].buffer_type = MYSQL_TYPE_STRING;
+    parameters[1].buffer = name;
+    parameters[1].buffer_length = name_length;
+    parameters[1].length = &name_length;
+
+    assert(mysql_stmt_bind_param(statement, parameters.data()) == 0);
+    assert(mysql_stmt_execute(statement) == 0);
+    const StatementEffect effect{
+        static_cast<long long>(mysql_stmt_affected_rows(statement)),
+        mysql_stmt_insert_id(statement),
+    };
+    assert(mysql_stmt_close(statement) == 0);
+    return effect;
+}
+
+StatementEffect run_raw_prepared_delete(RawRuntime &runtime) {
+    MYSQL_STMT *statement = mysql_stmt_init(&runtime.mysql);
+    assert(statement != nullptr);
+    constexpr const char *sql = "DELETE FROM effect_values WHERE name = ?";
+    assert(mysql_stmt_prepare(statement, sql, string_length(sql)) == 0);
+
+    char name[] = "beta";
+    unsigned long name_length = 4;
+    std::array<MYSQL_BIND, 1> parameters = {};
+    parameters[0].buffer_type = MYSQL_TYPE_STRING;
+    parameters[0].buffer = name;
+    parameters[0].buffer_length = name_length;
+    parameters[0].length = &name_length;
+
+    assert(mysql_stmt_bind_param(statement, parameters.data()) == 0);
+    assert(mysql_stmt_execute(statement) == 0);
+    const StatementEffect effect{
+        static_cast<long long>(mysql_stmt_affected_rows(statement)),
+        mysql_stmt_insert_id(statement),
+    };
+    assert(mysql_stmt_close(statement) == 0);
+    return effect;
+}
+
+StatementEffect raw_statement_effect(RawRuntime &runtime) {
+    return StatementEffect{
+        static_cast<long long>(mysql_affected_rows(&runtime.mysql)),
+        mysql_insert_id(&runtime.mysql),
+    };
+}
+
 Observation run_mylite_queries(mylite_db *database) {
     Observation observation = {};
 
     observation.direct = run_mylite_query(database, kDirectSql);
     observation.prepared = run_mylite_prepared_query(database);
+    observation.effects = run_mylite_statement_effects(database);
     assert(mylite_exec(database, kWarningSql, nullptr, nullptr, nullptr) == MYLITE_OK);
     observation.warning_count = mylite_warning_count(database);
     observation.warning = first_mylite_warning(database);
@@ -390,6 +539,119 @@ PreparedResult run_mylite_prepared_query(mylite_db *database) {
     assert(mylite_step(statement) == MYLITE_DONE);
     assert(mylite_finalize(statement) == MYLITE_OK);
     return result;
+}
+
+StatementEffects run_mylite_statement_effects(mylite_db *database) {
+    StatementEffects effects = {};
+    effects.values.reserve(kStatementEffectCount);
+
+    assert(
+        mylite_exec(database, "CREATE DATABASE effect_compare", nullptr, nullptr, nullptr) ==
+        MYLITE_OK
+    );
+    assert(mylite_exec(database, "USE effect_compare", nullptr, nullptr, nullptr) == MYLITE_OK);
+    assert(
+        mylite_exec(
+            database,
+            "CREATE TEMPORARY TABLE effect_values ("
+            "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+            "name VARCHAR(32),"
+            "qty INT NOT NULL)",
+            nullptr,
+            nullptr,
+            nullptr
+        ) == MYLITE_OK
+    );
+
+    effects.values.push_back(run_mylite_effect_query(
+        database,
+        "INSERT INTO effect_values(name, qty) VALUES ('alpha', 1), ('beta', 2)"
+    ));
+    effects.values.push_back(run_mylite_effect_query(
+        database,
+        "UPDATE effect_values SET qty = qty + 10 WHERE name = 'beta'"
+    ));
+    effects.values.push_back(
+        run_mylite_effect_query(database, "DELETE FROM effect_values WHERE name = 'alpha'")
+    );
+    effects.values.push_back(run_mylite_prepared_insert(database));
+    effects.values.push_back(run_mylite_prepared_update(database));
+    effects.values.push_back(run_mylite_prepared_delete(database));
+    return effects;
+}
+
+StatementEffect run_mylite_effect_query(mylite_db *database, const char *sql) {
+    assert(mylite_exec(database, sql, nullptr, nullptr, nullptr) == MYLITE_OK);
+    return mylite_statement_effect(database);
+}
+
+StatementEffect run_mylite_prepared_insert(mylite_db *database) {
+    mylite_stmt *statement = nullptr;
+    assert(
+        mylite_prepare(
+            database,
+            "INSERT INTO effect_values(name, qty) VALUES (?, ?)",
+            MYLITE_NUL_TERMINATED,
+            &statement,
+            nullptr
+        ) == MYLITE_OK
+    );
+    assert(statement != nullptr);
+    assert(
+        mylite_bind_text(statement, 1U, "gamma", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(statement, 2U, 3) == MYLITE_OK);
+    assert(mylite_step(statement) == MYLITE_DONE);
+    const StatementEffect effect = mylite_statement_effect(database);
+    assert(mylite_finalize(statement) == MYLITE_OK);
+    return effect;
+}
+
+StatementEffect run_mylite_prepared_update(mylite_db *database) {
+    mylite_stmt *statement = nullptr;
+    assert(
+        mylite_prepare(
+            database,
+            "UPDATE effect_values SET qty = qty + ? WHERE name = ?",
+            MYLITE_NUL_TERMINATED,
+            &statement,
+            nullptr
+        ) == MYLITE_OK
+    );
+    assert(statement != nullptr);
+    assert(mylite_bind_int64(statement, 1U, 5) == MYLITE_OK);
+    assert(
+        mylite_bind_text(statement, 2U, "gamma", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK
+    );
+    assert(mylite_step(statement) == MYLITE_DONE);
+    const StatementEffect effect = mylite_statement_effect(database);
+    assert(mylite_finalize(statement) == MYLITE_OK);
+    return effect;
+}
+
+StatementEffect run_mylite_prepared_delete(mylite_db *database) {
+    mylite_stmt *statement = nullptr;
+    assert(
+        mylite_prepare(
+            database,
+            "DELETE FROM effect_values WHERE name = ?",
+            MYLITE_NUL_TERMINATED,
+            &statement,
+            nullptr
+        ) == MYLITE_OK
+    );
+    assert(statement != nullptr);
+    assert(
+        mylite_bind_text(statement, 1U, "beta", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK
+    );
+    assert(mylite_step(statement) == MYLITE_DONE);
+    const StatementEffect effect = mylite_statement_effect(database);
+    assert(mylite_finalize(statement) == MYLITE_OK);
+    return effect;
+}
+
+StatementEffect mylite_statement_effect(mylite_db *database) {
+    return StatementEffect{mylite_changes(database), mylite_last_insert_id(database)};
 }
 
 WarningRow first_mylite_warning(mylite_db *database) {
@@ -477,6 +739,15 @@ void compare_prepared_results(const PreparedResult &expected, const PreparedResu
     assert(actual.unsigned_value == expected.unsigned_value);
     assert(std::fabs(actual.double_value - expected.double_value) < kDoubleTolerance);
     assert(actual.text_value == expected.text_value);
+}
+
+void compare_statement_effects(const StatementEffects &expected, const StatementEffects &actual) {
+    assert(actual.values.size() == expected.values.size());
+    assert(actual.values.size() == kStatementEffectCount);
+    for (std::size_t i = 0; i < expected.values.size(); ++i) {
+        assert(actual.values[i].affected_rows == expected.values[i].affected_rows);
+        assert(actual.values[i].last_insert_id == expected.values[i].last_insert_id);
+    }
 }
 
 void compare_warning_rows(const WarningRow &expected, const WarningRow &actual) {
