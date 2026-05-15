@@ -9,7 +9,9 @@ table name.
 
 ## Non-Goals
 
-- Do not implement SQL index renaming or `ALTER TABLE ... RENAME INDEX`.
+- Do not implement SQL index renaming or `ALTER TABLE ... RENAME INDEX` in this
+  table-rename slice; that is covered separately by
+  [Index Rename DDL](../index-rename-ddl/specs.md).
 - Do not change physical index-entry page format.
 - Do not add transactional DDL rollback beyond the current statement
   checkpoint behavior.
@@ -104,7 +106,8 @@ Implemented in the storage-engine smoke test:
 ## Risks And Open Questions
 
 - MariaDB's high-level index rename path is separate from preserving existing
-  indexes across a table rename. This slice covers the latter only.
+  indexes across a table rename. That path is covered separately by the
+  index-rename DDL slice.
 - If the restored table-definition blob embeds old table identity in a path that
   affects indexes, the implementation may need to rewrite more than catalog
   identity.

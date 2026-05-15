@@ -20,11 +20,12 @@ groups cover public API validation, storage, crash recovery, locking, embedded
 lifecycle, direct SQL including statement effects, prepared statements, column
 metadata, large value reads, warnings, MariaDB baseline SQL API comparison,
 storage-engine smoke, sidecar gates, routed DDL/DML including schema namespaces,
-`CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`, transaction-control policy,
-foreign-key DDL rejection, CHECK constraint enforcement, generated column
-coverage, unsupported index-class rejection, MariaDB statement transaction hook
-integration, busy-timeout lock waits, failed statement rollback, initial
-application-schema smoke, and unsupported server/non-table-object policy.
+`CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`, standalone index DDL,
+index rename DDL, transaction-control policy, foreign-key DDL rejection, CHECK
+constraint enforcement, generated column coverage, unsupported index-class
+rejection, MariaDB statement transaction hook integration, busy-timeout lock
+waits, failed statement rollback, initial application-schema smoke, and
+unsupported server/non-table-object policy.
 MariaDB MTR comparison suites and broader application-schema suites remain
 planned.
 
@@ -81,11 +82,12 @@ planned.
 | --- | --- | --- |
 | `CREATE TABLE` metadata | 🟡&nbsp;Partial | Store MyLite table definitions for omitted/default engine, `ENGINE=MYLITE`, `ENGINE=InnoDB`, `ENGINE=MyISAM`, and `ENGINE=Aria` without durable MariaDB sidecars |
 | `DROP TABLE` | 🟡&nbsp;Partial | Remove MyLite catalog metadata for routed base tables without durable MariaDB sidecars; orphaned definition, row, and index-entry pages are not reclaimed yet |
-| `RENAME TABLE` | 🟡&nbsp;Partial | Rename MyLite catalog metadata for simple routed base tables without durable MariaDB sidecars, preserving supported index reads and duplicate checks across close/reopen; SQL-level index rename paths remain planned |
+| `RENAME TABLE` | 🟡&nbsp;Partial | Rename MyLite catalog metadata for simple routed base tables without durable MariaDB sidecars, preserving supported index reads and duplicate checks across close/reopen; foreign-key, trigger, partition, and broader rename semantics remain planned |
 | `UPDATE` / `DELETE` | 🟡&nbsp;Partial | Full-scan and supported keyed update/delete are covered for routed base tables, including BLOB/TEXT payload rows, failed-statement rollback for covered unique-key update failures, and close/reopen visibility; multi-statement rollback, triggers, foreign keys, generated-column edge cases, and unsupported index classes remain planned |
 | `TRUNCATE TABLE` | 🟡&nbsp;Partial | Logical truncate is covered for supported routed table shapes: live rows and index entries become invisible, autoincrement resets to the first generated value, catalog metadata is preserved, and close/reopen visibility is tested; SQL rollback, foreign keys, physical compaction, and transaction-aware indexes remain planned |
 | `ALTER TABLE` | 🟡&nbsp;Partial | Copy rebuilds are covered for supported MyLite-routed table shapes, including column add/drop/rename, supported index additions and drops, BLOB/TEXT payload rows, requested-engine metadata, close/reopen visibility, catalog-only reopened CHECK drop, representative catalog-only reopened default-algorithm column/index/autoincrement ALTER, and rollback-journal publication; `LOCK=NONE`, in-place algorithms, unsupported index classes, SQL rollback, and foreign keys remain planned |
 | Standalone `CREATE INDEX` / `DROP INDEX` | 🟡&nbsp;Partial | Route supported copy-rebuild index additions and drops through MariaDB DDL and MyLite catalog/index updates, including representative default-algorithm standalone index DDL after catalog-only reopen; online DDL, unsupported index classes, SQL rollback, and foreign keys remain planned |
+| `ALTER TABLE ... RENAME INDEX` | 🟡&nbsp;Partial | Route supported copy-rebuild secondary-index renames through MariaDB ALTER and MyLite catalog/index updates, preserving forced-index reads, duplicate-key checks, and close/reopen discovery; primary-key rename, conflict matrices, online DDL, unsupported index classes, SQL rollback, and foreign keys remain planned |
 | `CREATE TABLE ... LIKE` | 🟡&nbsp;Partial | Clone supported MyLite-routed table definitions without copying source rows, preserve source requested-engine metadata when no explicit engine is specified, reset target autoincrement state, and cover cloned supported indexes before and after close/reopen; temporary-table variants, unsupported source objects, foreign keys, partitions, and SQL rollback remain planned |
 | `CREATE TABLE ... SELECT` | 🟡&nbsp;Partial | Successful supported CTAS creates MyLite catalog metadata and inserts SELECT result rows through the normal handler write path, including no-engine and explicit `ENGINE=InnoDB` targets, BLOB/TEXT payloads, autoincrement state, supported indexes, close/reopen visibility, and sidecar gates; duplicate-key CTAS abort removes target catalog metadata, and statement checkpoints now restore covered failed statement visibility, while temporary CTAS, `OR REPLACE`, `IGNORE` / `REPLACE`, unsupported source objects, foreign keys, partitions, and broader SQL rollback remain planned |
 | Schemas/databases | 🟡&nbsp;Partial | Direct and prepared `CREATE DATABASE` / `CREATE SCHEMA` store catalog namespace records with default character set, collation, and comment options, file-backed reopen uses SQL-layer catalog hooks so `USE`, `SHOW DATABASES`, `SHOW TABLES`, `SHOW CREATE DATABASE`, information-schema schema options, table resolution, and representative default-algorithm copy `ALTER` paths work without rehydrated runtime schema directories, and direct and prepared `DROP DATABASE` / `DROP SCHEMA` remove covered catalog metadata; broader filesystem-free schema DDL, non-table objects, and SQL rollback remain planned |

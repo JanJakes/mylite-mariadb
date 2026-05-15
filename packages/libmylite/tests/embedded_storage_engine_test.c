@@ -1907,8 +1907,13 @@ static void test_standalone_index_ddl(void) {
     char *filename = NULL;
     mylite_db *db = open_database(root, &filename);
     table_context slug_rows = {0};
+    table_context renamed_slug_rows = {0};
+    table_context old_renamed_index_rows = {0};
+    table_context new_renamed_index_rows = {0};
     table_context dropped_index_rows = {0};
     table_context reopened_slug_rows = {0};
+    table_context reopened_old_renamed_index_rows = {0};
+    table_context reopened_new_renamed_index_rows = {0};
     table_context reopened_dropped_index_rows = {0};
     const char *category_ids[] = {"1", "3"};
     id_sequence_context category_sequence = {
@@ -1972,6 +1977,52 @@ static void test_standalone_index_ddl(void) {
     assert(errmsg == NULL);
     assert(category_sequence.rows == 2);
 
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE standalone_index_posts "
+        "RENAME INDEX slug_lookup TO renamed_slug_lookup, ALGORITHM=COPY"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM standalone_index_posts WHERE Key_name = 'slug_lookup'",
+            table_callback,
+            &old_renamed_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(old_renamed_index_rows.rows == 0);
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM standalone_index_posts WHERE Key_name = 'renamed_slug_lookup'",
+            table_callback,
+            &new_renamed_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(new_renamed_index_rows.rows == 1);
+    assert_exec_fails(
+        db,
+        "SELECT id FROM standalone_index_posts FORCE INDEX (slug_lookup) WHERE slug = 'beta'"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM standalone_index_posts FORCE INDEX (renamed_slug_lookup) "
+            "WHERE slug = 'beta'",
+            row_callback,
+            &renamed_slug_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(renamed_slug_rows.rows == 1);
+    assert_exec_fails(db, "INSERT INTO standalone_index_posts VALUES (4, 'beta', 'docs', 40)");
+    assert_catalog_table_count(filename, "app", 1U);
+
     assert_exec_succeeds(db, "DROP INDEX category_lookup ON standalone_index_posts");
     assert_catalog_table_count(filename, "app", 1U);
     assert(
@@ -2009,7 +2060,8 @@ static void test_standalone_index_ddl(void) {
     assert(
         mylite_exec(
             db,
-            "SELECT id FROM standalone_index_posts FORCE INDEX (slug_lookup) WHERE slug = 'gamma'",
+            "SELECT id FROM standalone_index_posts FORCE INDEX (renamed_slug_lookup) "
+            "WHERE slug = 'gamma'",
             row_callback,
             &reopened_slug_rows,
             &errmsg
@@ -2017,6 +2069,32 @@ static void test_standalone_index_ddl(void) {
     );
     assert(errmsg == NULL);
     assert(reopened_slug_rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM standalone_index_posts WHERE Key_name = 'slug_lookup'",
+            table_callback,
+            &reopened_old_renamed_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_old_renamed_index_rows.rows == 0);
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM standalone_index_posts WHERE Key_name = 'renamed_slug_lookup'",
+            table_callback,
+            &reopened_new_renamed_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_new_renamed_index_rows.rows == 1);
+    assert_exec_fails(
+        db,
+        "SELECT id FROM standalone_index_posts FORCE INDEX (slug_lookup) WHERE slug = 'gamma'"
+    );
     assert(
         mylite_exec(
             db,
