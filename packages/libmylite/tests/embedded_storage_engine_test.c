@@ -149,6 +149,7 @@ static void test_non_table_object_policy(void);
 static void test_transaction_and_foreign_key_policies(void);
 static void test_create_table_persists_catalog_metadata(void);
 static void test_check_constraint_if_exists(void);
+static void test_non_check_constraint_ddl(void);
 static void test_create_table_if_not_exists(void);
 static void test_alter_table_rebuilds_keyless_rows(void);
 static void test_column_alter_if_exists(void);
@@ -314,6 +315,7 @@ int main(void) {
     test_transaction_and_foreign_key_policies();
     test_create_table_persists_catalog_metadata();
     test_check_constraint_if_exists();
+    test_non_check_constraint_ddl();
     test_create_table_if_not_exists();
     test_alter_table_rebuilds_keyless_rows();
     test_column_alter_if_exists();
@@ -2010,6 +2012,244 @@ static void test_check_constraint_if_exists(void) {
     assert_check_constraint_count(db, "constraint_if_exists", "constraint_posts", "rating_min", 0U);
     assert_exec_succeeds(db, "INSERT INTO constraint_posts VALUES (7, -2)");
     assert_exec_fails_with_message(db, "INSERT INTO constraint_posts VALUES (8, 11)", "CONSTRAINT");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_non_check_constraint_ddl(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    table_context primary_index_rows = {0};
+    table_context slug_index_rows = {0};
+    table_context author_index_rows = {0};
+    table_context reopened_primary_index_rows = {0};
+    table_context reopened_slug_index_rows = {0};
+    table_context reopened_author_index_rows = {0};
+    table_context missing_author_index_rows = {0};
+    table_context category_index_rows = {0};
+    table_context reopened_missing_author_index_rows = {0};
+    table_context reopened_category_index_rows = {0};
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE non_check_constraints");
+    assert_exec_succeeds(db, "USE non_check_constraints");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE constraint_posts ("
+        "id INT NOT NULL, "
+        "slug VARCHAR(64) NOT NULL, "
+        "author VARCHAR(64) NOT NULL, "
+        "category VARCHAR(64) NOT NULL, "
+        "CONSTRAINT posts_pk PRIMARY KEY (id), "
+        "CONSTRAINT slug_unique UNIQUE (slug)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO constraint_posts VALUES (1, 'alpha', 'jan', 'news')");
+    assert_exec_succeeds(db, "INSERT INTO constraint_posts VALUES (2, 'beta', 'jane', 'tech')");
+    assert_catalog_table_count(filename, "non_check_constraints", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "non_check_constraints",
+        "constraint_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM constraint_posts WHERE Key_name = 'PRIMARY'",
+            table_callback,
+            &primary_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(primary_index_rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM constraint_posts WHERE Key_name = 'slug_unique'",
+            table_callback,
+            &slug_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(slug_index_rows.rows == 1);
+    assert_exec_fails(db, "INSERT INTO constraint_posts VALUES (1, 'gamma', 'jim', 'docs')");
+    assert_exec_fails(db, "INSERT INTO constraint_posts VALUES (3, 'beta', 'jim', 'docs')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM constraint_posts FORCE INDEX (slug_unique) WHERE slug = 'beta'",
+        "2"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE constraint_posts "
+        "ADD CONSTRAINT author_unique UNIQUE (author), ALGORITHM=COPY"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM constraint_posts WHERE Key_name = 'author_unique'",
+            table_callback,
+            &author_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(author_index_rows.rows == 1);
+    assert_exec_fails(db, "INSERT INTO constraint_posts VALUES (3, 'gamma', 'jan', 'docs')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM constraint_posts FORCE INDEX (author_unique) WHERE author = 'jan'",
+        "1"
+    );
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE constraint_posts "
+        "ADD CONSTRAINT author_unique UNIQUE IF NOT EXISTS (author), ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "author_unique");
+    assert_catalog_table_count(filename, "non_check_constraints", 1U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE non_check_constraints");
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM constraint_posts WHERE Key_name = 'PRIMARY'",
+            table_callback,
+            &reopened_primary_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_primary_index_rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM constraint_posts WHERE Key_name = 'slug_unique'",
+            table_callback,
+            &reopened_slug_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_slug_index_rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM constraint_posts WHERE Key_name = 'author_unique'",
+            table_callback,
+            &reopened_author_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_author_index_rows.rows == 1);
+    assert_exec_fails(db, "INSERT INTO constraint_posts VALUES (3, 'gamma', 'jan', 'docs')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM constraint_posts FORCE INDEX (author_unique) WHERE author = 'jane'",
+        "2"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE constraint_posts "
+        "DROP CONSTRAINT IF EXISTS missing_unique, ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "missing_unique");
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE constraint_posts DROP CONSTRAINT author_unique, ALGORITHM=COPY"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM constraint_posts WHERE Key_name = 'author_unique'",
+            table_callback,
+            &missing_author_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(missing_author_index_rows.rows == 0);
+    assert_exec_fails(
+        db,
+        "SELECT id FROM constraint_posts FORCE INDEX (author_unique) WHERE author = 'jan'"
+    );
+    assert_exec_succeeds(db, "INSERT INTO constraint_posts VALUES (3, 'gamma', 'jan', 'docs')");
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE constraint_posts "
+        "ADD CONSTRAINT category_unique UNIQUE (category), ALGORITHM=COPY"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM constraint_posts WHERE Key_name = 'category_unique'",
+            table_callback,
+            &category_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(category_index_rows.rows == 1);
+    assert_exec_fails(db, "INSERT INTO constraint_posts VALUES (4, 'delta', 'jill', 'news')");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE non_check_constraints");
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM constraint_posts WHERE Key_name = 'author_unique'",
+            table_callback,
+            &reopened_missing_author_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_missing_author_index_rows.rows == 0);
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM constraint_posts WHERE Key_name = 'category_unique'",
+            table_callback,
+            &reopened_category_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_category_index_rows.rows == 1);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM constraint_posts FORCE INDEX (category_unique) WHERE category = 'docs'",
+        "3"
+    );
+    assert_exec_succeeds(db, "INSERT INTO constraint_posts VALUES (4, 'delta', 'jan', 'notes')");
+    assert_exec_fails(db, "INSERT INTO constraint_posts VALUES (5, 'epsilon', 'jim', 'news')");
+    assert_catalog_table_count(filename, "non_check_constraints", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "non_check_constraints",
+        "constraint_posts",
+        "InnoDB",
+        "MYLITE"
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
