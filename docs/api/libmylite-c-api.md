@@ -189,14 +189,16 @@ non-NULL, receives the first uncompiled byte.
 Initial implementation status: prepared statements run through MariaDB's
 embedded `MYSQL_STMT` API. The implementation supports one statement per
 prepare call, 1-based scalar parameter binding, row stepping, reset/finalize
-ownership, affected rows, insert ids, MariaDB diagnostics, warnings after
-completed execution and selected failed execution paths, and binary-safe
-text/BLOB column reads. File-backed MyLite storage-engine builds synchronize
+ownership, parameter counts, affected rows, insert ids, MariaDB diagnostics,
+warnings after completed execution and selected failed execution paths, and
+binary-safe text/BLOB column reads. File-backed MyLite storage-engine builds synchronize
 successful prepared `CREATE/DROP DATABASE` and `CREATE/DROP SCHEMA` statements
 plus prepared `ALTER DATABASE` / `ALTER SCHEMA` option changes with the schema
-namespace catalog. Multi-result execution, parameter metadata, array binding,
-streaming parameter binding, and direct-execution large-value streaming remain
-planned.
+namespace catalog. Rich parameter metadata is not exposed on the current
+MariaDB base because `mysql_stmt_param_metadata()` is reserved and returns no
+metadata. Multi-result execution, array binding, streaming parameter binding,
+parser-derived parameter metadata, and direct-execution large-value streaming
+remain planned.
 
 ## Bindings
 

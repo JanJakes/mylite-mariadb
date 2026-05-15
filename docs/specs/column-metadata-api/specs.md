@@ -13,7 +13,9 @@ This fills the next SQL execution API gap after typed values and warnings.
 - Do not expose raw `MYSQL_FIELD`, `MYSQL_RES`, or `MYSQL_STMT` handles.
 - Do not add direct-execution result metadata beyond the existing callback
   column names.
-- Do not add parameter metadata.
+- Do not add parameter metadata; see
+  `docs/specs/prepared-parameter-metadata-policy/specs.md` for the current
+  MariaDB-backed policy.
 - Do not translate MariaDB charset numbers to collation names in this slice.
 - Do not implement streaming values, multi-results, or comparison suites.
 
