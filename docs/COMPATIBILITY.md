@@ -24,11 +24,12 @@ storage-engine smoke, sidecar gates, routed DDL/DML including schema namespaces,
 duplicate modes, temporary LIKE/CTAS isolation, shadowing, and representative
 temporary OR REPLACE, representative OR REPLACE replacement and failed
 replacement rollback, representative failed table-DDL rollback, standalone
-index DDL, index rename DDL, transaction-control policy, foreign-key DDL
-rejection, CHECK constraint enforcement, generated column coverage, unsupported index-class
-rejection including long-unique hash keys, partition DDL rejection, online and
-in-place ALTER rejection, MariaDB statement transaction hook integration,
-busy-timeout lock waits, SQL locking policy rejection, failed
+routed table-DDL `IF EXISTS` skip semantics, standalone index DDL, index rename
+DDL, transaction-control policy, foreign-key DDL rejection, CHECK constraint
+enforcement, generated column coverage, unsupported index-class rejection
+including long-unique hash keys, partition DDL rejection, online and in-place
+ALTER rejection, MariaDB statement transaction hook integration, busy-timeout
+lock waits, SQL locking policy rejection, failed
 statement rollback, initial application-schema smoke,
 unsupported server/non-table-object policy, and representative
 `SHOW CREATE TABLE` round-trip export/import.
@@ -87,8 +88,8 @@ planned.
 | Capability | MyLite status | Compatibility target |
 | --- | --- | --- |
 | `CREATE TABLE` metadata | 🟡&nbsp;Partial | Store MyLite table definitions for omitted/default engine, `ENGINE=MYLITE`, `ENGINE=InnoDB`, `ENGINE=MyISAM`, and `ENGINE=Aria` without durable MariaDB sidecars, and cover representative catalog-backed `SHOW CREATE TABLE` export/import round trips |
-| `DROP TABLE` | 🟡&nbsp;Partial | Remove MyLite catalog metadata for routed base tables without durable MariaDB sidecars, and preserve the original table for a representative failed multi-table drop; orphaned definition, row, and index-entry pages are not reclaimed yet |
-| `RENAME TABLE` | 🟡&nbsp;Partial | Rename MyLite catalog metadata for simple routed base tables without durable MariaDB sidecars, preserving supported index reads and duplicate checks across close/reopen; a representative failed multi-table rename preserves the original name and rejects the intermediate new name; foreign-key, trigger, partition, and broader rename semantics remain planned |
+| `DROP TABLE` | 🟡&nbsp;Partial | Remove MyLite catalog metadata for routed base tables without durable MariaDB sidecars, preserve the original table for a representative failed multi-table drop, and cover `DROP TABLE IF EXISTS` missing-table skips with warning rows; orphaned definition, row, and index-entry pages are not reclaimed yet |
+| `RENAME TABLE` | 🟡&nbsp;Partial | Rename MyLite catalog metadata for simple routed base tables without durable MariaDB sidecars, preserving supported index reads and duplicate checks across close/reopen; a representative failed multi-table rename preserves the original name and rejects the intermediate new name, and `RENAME TABLE IF EXISTS` missing-source skips are covered with warning rows; foreign-key, trigger, partition, and broader rename semantics remain planned |
 | `UPDATE` / `DELETE` | 🟡&nbsp;Partial | Full-scan and supported keyed update/delete are covered for routed base tables, including BLOB/TEXT payload rows, failed-statement rollback for covered unique-key update failures, and close/reopen visibility; multi-statement rollback, triggers, foreign keys, generated-column edge cases, and unsupported index classes remain planned |
 | `TRUNCATE TABLE` | 🟡&nbsp;Partial | Logical truncate is covered for supported routed table shapes: live rows and index entries become invisible, autoincrement resets to the first generated value, catalog metadata is preserved, and close/reopen visibility is tested; SQL rollback, foreign keys, physical compaction, and transaction-aware indexes remain planned |
 | `ALTER TABLE` | 🟡&nbsp;Partial | Copy rebuilds are covered for supported MyLite-routed table shapes, including column add/drop/rename, generated-column add/modify/drop, supported base and generated-column index additions, drops, and renames, BLOB/TEXT payload rows, requested-engine metadata, close/reopen visibility, catalog-only reopened CHECK drop, failed ADD CHECK rollback over incompatible existing rows, representative catalog-only reopened default-algorithm column/index/autoincrement ALTER, and rollback-journal publication; representative `LOCK=NONE`, `ALTER ONLINE TABLE`, and `ALGORITHM=INPLACE` / `INSTANT` / `NOCOPY` requests are rejected explicitly, while implementation of online/in-place algorithms, unsupported index classes, broader SQL rollback, and foreign keys remain planned |

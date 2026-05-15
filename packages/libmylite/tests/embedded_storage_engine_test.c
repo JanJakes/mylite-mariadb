@@ -159,6 +159,7 @@ static void test_temporary_table_catalog_isolation(void);
 static void test_create_or_replace_table(void);
 static void test_failed_create_or_replace_rollback(void);
 static void test_failed_table_ddl_rollback(void);
+static void test_table_ddl_if_exists(void);
 static void test_constraint_generated_dump_fixture(void);
 static void test_show_create_table_round_trip(void);
 static void test_constraint_generated_expression_matrix(void);
@@ -218,6 +219,7 @@ static void assert_table_collation(
     const char *expected_collation
 );
 static void assert_query_single_value(mylite_db *db, const char *sql, const char *expected_value);
+static void assert_warning_message_contains(mylite_db *db, const char *expected_message);
 static void exec_sql_fixture(mylite_db *db, const char *fixture_name);
 static int sql_fixture_cursor_is_separator(
     char **cursor,
@@ -299,6 +301,7 @@ int main(void) {
     test_create_or_replace_table();
     test_failed_create_or_replace_rollback();
     test_failed_table_ddl_rollback();
+    test_table_ddl_if_exists();
     test_constraint_generated_dump_fixture();
     test_show_create_table_round_trip();
     test_constraint_generated_expression_matrix();
@@ -4882,6 +4885,123 @@ static void test_failed_table_ddl_rollback(void) {
     free(root);
 }
 
+static void test_table_ddl_if_exists(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE ddl_if_exists");
+    assert_exec_succeeds(db, "USE ddl_if_exists");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE drop_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(32) NOT NULL, "
+        "body LONGTEXT NULL, "
+        "UNIQUE KEY slug_key (slug), "
+        "KEY body_prefix (body(8))"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO drop_posts VALUES "
+        "(1, 'drop-alpha', 'drop body one'), "
+        "(2, 'drop-beta', 'drop body two')"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE rename_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(32) NOT NULL, "
+        "body LONGTEXT NULL, "
+        "UNIQUE KEY slug_key (slug), "
+        "KEY body_prefix (body(8))"
+        ") ENGINE=MyISAM"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO rename_posts VALUES "
+        "(1, 'rename-alpha', 'rename body one'), "
+        "(2, 'rename-beta', 'rename body two')"
+    );
+    assert_catalog_table_count(filename, "ddl_if_exists", 2U);
+
+    assert_exec_succeeds(db, "DROP TABLE IF EXISTS drop_posts, missing_drop_posts");
+    assert_warning_message_contains(db, "missing_drop_posts");
+    assert_catalog_table_count(filename, "ddl_if_exists", 1U);
+    assert(
+        mylite_storage_table_exists(filename, "ddl_if_exists", "drop_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_exec_fails(db, "SELECT COUNT(*) FROM drop_posts");
+    assert_catalog_table_metadata(filename, "ddl_if_exists", "rename_posts", "MyISAM", "MYLITE");
+
+    assert_exec_succeeds(db, "DROP TABLE IF EXISTS missing_only_posts");
+    assert_warning_message_contains(db, "missing_only_posts");
+    assert_catalog_table_count(filename, "ddl_if_exists", 1U);
+    assert_query_single_value(db, "SELECT COUNT(*) FROM rename_posts", "2");
+
+    assert_exec_succeeds(
+        db,
+        "RENAME TABLE IF EXISTS missing_rename_posts TO skipped_rename_posts, "
+        "rename_posts TO renamed_posts"
+    );
+    assert_warning_message_contains(db, "missing_rename_posts");
+    assert_catalog_table_count(filename, "ddl_if_exists", 1U);
+    assert(
+        mylite_storage_table_exists(filename, "ddl_if_exists", "missing_rename_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert(
+        mylite_storage_table_exists(filename, "ddl_if_exists", "skipped_rename_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert(
+        mylite_storage_table_exists(filename, "ddl_if_exists", "rename_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_catalog_table_metadata(filename, "ddl_if_exists", "renamed_posts", "MyISAM", "MYLITE");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM renamed_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM renamed_posts FORCE INDEX (slug_key) WHERE slug = 'rename-beta'",
+        "2"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "ddl_if_exists");
+    assert_exec_succeeds(db, "USE ddl_if_exists");
+    assert_catalog_table_count(filename, "ddl_if_exists", 1U);
+    assert(
+        mylite_storage_table_exists(filename, "ddl_if_exists", "drop_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert(
+        mylite_storage_table_exists(filename, "ddl_if_exists", "skipped_rename_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert(
+        mylite_storage_table_exists(filename, "ddl_if_exists", "rename_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_catalog_table_metadata(filename, "ddl_if_exists", "renamed_posts", "MyISAM", "MYLITE");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM renamed_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM renamed_posts FORCE INDEX (body_prefix) WHERE body = 'rename body one'",
+        "1"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_constraint_generated_dump_fixture(void) {
     char *root = make_temp_root();
     char *filename = NULL;
@@ -5335,6 +5455,27 @@ static void assert_query_single_value(mylite_db *db, const char *sql, const char
     assert(mylite_exec(db, sql, single_value_callback, &value, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
     assert(value.rows == 1);
+}
+
+static void assert_warning_message_contains(mylite_db *db, const char *expected_message) {
+    const unsigned warning_count = mylite_warning_count(db);
+    assert(warning_count >= 1U);
+
+    for (unsigned index = 0U; index < warning_count; ++index) {
+        mylite_warning_level level = MYLITE_WARNING_NOTE;
+        unsigned code = 0U;
+        const char *message = NULL;
+        assert(mylite_warning(db, index, &level, &code, &message) == MYLITE_OK);
+        (void)level;
+        (void)code;
+
+        if (message != NULL && strstr(message, expected_message) != NULL) {
+            return;
+        }
+    }
+
+    fprintf(stderr, "Missing warning containing: %s\n", expected_message);
+    assert(0);
 }
 
 static void test_truncate_table_lifecycle(void) {

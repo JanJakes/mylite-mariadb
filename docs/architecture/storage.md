@@ -66,9 +66,12 @@ metadata. `DROP TABLE` removes catalog metadata for routed tables.
 Simple `RENAME TABLE` updates catalog identity while preserving table ids, row
 pages, and index-entry pages. Representative failed multi-table DROP/RENAME
 paths restore the statement-start catalog and row/index visibility through the
-statement checkpoint. Copy `ALTER` rebuilds use MariaDB's table-copy path and
-append rebuilt table definitions, rows, and supported index entries inside the
-primary file. `CREATE TABLE ... LIKE` uses MariaDB's clone-definition
+statement checkpoint. Representative table-DDL `IF EXISTS` statements skip
+missing DROP/RENAME targets through MariaDB's warning semantics while applying
+existing routed-table catalog mutations in the same statement. Copy `ALTER`
+rebuilds use MariaDB's table-copy path and append rebuilt table definitions,
+rows, and supported index entries inside the primary file. `CREATE TABLE ...
+LIKE` uses MariaDB's clone-definition
 path and publishes an empty MyLite catalog record with source requested-engine
 metadata preserved. Online `ALTER`, in-place `ALTER`, transaction-aware index
 maintenance, free-space reclamation, and unsupported index classes still reject
@@ -202,7 +205,11 @@ requested/effective engine metadata, and the stored table-definition blob
 reference, so existing row and index-entry pages move with the renamed table.
 Representative failed multi-table `DROP TABLE` and `RENAME TABLE` statements
 preserve original table metadata, rows, and supported index reads before and
-after close/reopen through the statement checkpoint.
+after close/reopen through the statement checkpoint. `DROP TABLE IF EXISTS`
+and `RENAME TABLE IF EXISTS` inherit MariaDB's missing-object skip semantics
+for routed base tables; MyLite applies existing-table catalog mutations, leaves
+skipped missing names absent, and exposes the MariaDB warnings through the
+public warning API.
 Copy `ALTER` rebuilds let MariaDB create a temporary MyLite table, copy rows
 through `ha_write_row()`, rename the old table to a backup, rename the rebuilt
 table to the final name, and drop the backup catalog record. This preserves
