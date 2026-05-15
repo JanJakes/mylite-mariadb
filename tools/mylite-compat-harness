@@ -46,7 +46,7 @@ group_spec() {
       echo "storage-smoke-dev|compat-foreign-key|Foreign-key DDL rejection policy"
       ;;
     check-constraint)
-      echo "storage-smoke-dev|compat-check-constraint|CHECK constraint enforcement, CTAS targets, and failed ADD CHECK rollback"
+      echo "storage-smoke-dev|compat-check-constraint|CHECK constraint enforcement, ALTER existence-option skips, CTAS targets, and failed ADD CHECK rollback"
       ;;
     generated-column)
       echo "storage-smoke-dev|compat-generated-column|Generated column coverage"
@@ -85,7 +85,7 @@ group_spec() {
       echo "storage-smoke-dev|compat-sidecar|Forbidden durable sidecar gates around routed SQL"
       ;;
     routed-ddl-dml)
-      echo "storage-smoke-dev|compat-routed-ddl-dml|Routed CREATE, CREATE TABLE IF NOT EXISTS, temporary LIKE/CTAS isolation, shadowing, and OR REPLACE, online/in-place ALTER rejection, column ALTER existence-option skips, duplicate-mode CTAS, OR REPLACE, failed replacement rollback, table-DDL IF EXISTS skips, index DDL existence-option skips, index rename existence-option skips, index ignorability, failed table-DDL rollback, ALTER, DROP, indexed table/index RENAME, CREATE/ADD/DROP INDEX, TRUNCATE, INSERT, SELECT, UPDATE, and DELETE smoke"
+      echo "storage-smoke-dev|compat-routed-ddl-dml|Routed CREATE, CREATE TABLE IF NOT EXISTS, temporary LIKE/CTAS isolation, shadowing, and OR REPLACE, online/in-place ALTER rejection, column ALTER existence-option skips, CHECK constraint existence-option skips, duplicate-mode CTAS, OR REPLACE, failed replacement rollback, table-DDL IF EXISTS skips, index DDL existence-option skips, index rename existence-option skips, index ignorability, failed table-DDL rollback, ALTER, DROP, indexed table/index RENAME, CREATE/ADD/DROP INDEX, TRUNCATE, INSERT, SELECT, UPDATE, and DELETE smoke"
       ;;
     application-schema)
       echo "storage-smoke-dev|compat-application-schema|WordPress-shaped schema, installer DDL/seed fixtures, and collation matrix"

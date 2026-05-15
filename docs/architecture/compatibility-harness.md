@@ -36,7 +36,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `statement-rollback` | `storage-smoke-dev` | `compat-statement-rollback` | Failed statement rollback for routed MyLite storage, including representative OR REPLACE replacement and table-DDL failures |
 | `partition` | `storage-smoke-dev` | `compat-partition` | Partition DDL rejection until partition metadata and routing exist |
 | `foreign-key` | `storage-smoke-dev` | `compat-foreign-key` | Foreign-key DDL rejection until catalog metadata and enforcement exist |
-| `check-constraint` | `storage-smoke-dev` | `compat-check-constraint` | CHECK constraint enforcement, CTAS targets, and failed ADD CHECK rollback on routed tables |
+| `check-constraint` | `storage-smoke-dev` | `compat-check-constraint` | CHECK constraint enforcement, ALTER existence-option skips, CTAS targets, and failed ADD CHECK rollback on routed tables |
 | `generated-column` | `storage-smoke-dev` | `compat-generated-column` | Generated column read/write, CTAS projection, ALTER, BLOB/TEXT prefix, and generated-column index coverage |
 | `unsupported-index` | `storage-smoke-dev` | `compat-unsupported-index` | Unsupported FULLTEXT, SPATIAL, and long-unique index rejection |
 | `locking` | `storage-smoke-dev` | `compat-locking` | Primary-file lock conflicts, busy timeouts, and SQL locking policy |
@@ -49,7 +49,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `sql-comparison` | `embedded-dev` | `compat-sql-comparison` | MariaDB baseline SQL API comparison |
 | `storage-engine` | `storage-smoke-dev` | `compat-storage-engine` | Static handler registration and SQL storage-engine smoke |
 | `sidecar` | `storage-smoke-dev` | `compat-sidecar` | Forbidden durable sidecar gates |
-| `routed-ddl-dml` | `storage-smoke-dev` | `compat-routed-ddl-dml` | Routed direct/prepared schema namespaces, table and index DDL, ordinary `CREATE TABLE IF NOT EXISTS`, column ALTER existence-option skips, index DDL existence-option skips, index rename existence-option skips, index ignorability, indexed table/index rename, table-DDL `IF EXISTS` skips, failed table-DDL rollback, temporary LIKE/CTAS isolation, shadowing, and OR REPLACE, online/in-place ALTER rejection, `CREATE TABLE ... SELECT` duplicate modes, OR REPLACE, truncate, and DML smoke |
+| `routed-ddl-dml` | `storage-smoke-dev` | `compat-routed-ddl-dml` | Routed direct/prepared schema namespaces, table and index DDL, ordinary `CREATE TABLE IF NOT EXISTS`, column ALTER existence-option skips, index DDL existence-option skips, index rename existence-option skips, index ignorability, CHECK constraint existence-option skips, indexed table/index rename, table-DDL `IF EXISTS` skips, failed table-DDL rollback, temporary LIKE/CTAS isolation, shadowing, and OR REPLACE, online/in-place ALTER rejection, `CREATE TABLE ... SELECT` duplicate modes, OR REPLACE, truncate, and DML smoke |
 | `application-schema` | `storage-smoke-dev` | `compat-application-schema` | WordPress-shaped core schema, WordPress installer DDL and seed fixtures, collation restart matrix, and prefix-index smoke |
 | `server-surface` | `storage-smoke-dev` | `compat-server-surface` | Unsupported server and non-table object surface policy |
 

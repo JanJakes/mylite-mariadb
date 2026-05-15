@@ -145,6 +145,7 @@ static void test_collation_restart_matrix(void);
 static void test_non_table_object_policy(void);
 static void test_transaction_and_foreign_key_policies(void);
 static void test_create_table_persists_catalog_metadata(void);
+static void test_check_constraint_if_exists(void);
 static void test_create_table_if_not_exists(void);
 static void test_alter_table_rebuilds_keyless_rows(void);
 static void test_column_alter_if_exists(void);
@@ -223,6 +224,13 @@ static void assert_table_collation(
     const char *expected_collation
 );
 static void assert_query_single_value(mylite_db *db, const char *sql, const char *expected_value);
+static void assert_check_constraint_count(
+    mylite_db *db,
+    const char *schema_name,
+    const char *table_name,
+    const char *constraint_name,
+    unsigned expected_count
+);
 static void assert_index_ignored(
     mylite_db *db,
     const char *schema_name,
@@ -298,6 +306,7 @@ int main(void) {
     test_non_table_object_policy();
     test_transaction_and_foreign_key_policies();
     test_create_table_persists_catalog_metadata();
+    test_check_constraint_if_exists();
     test_create_table_if_not_exists();
     test_alter_table_rebuilds_keyless_rows();
     test_column_alter_if_exists();
@@ -1722,6 +1731,85 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert(mylite_storage_table_exists(filename, "app", "row_posts") == MYLITE_STORAGE_NOTFOUND);
     assert(mylite_storage_table_exists(filename, "app", "myisam_posts") == MYLITE_STORAGE_NOTFOUND);
     assert(mylite_storage_table_exists(filename, "app", "aria_posts") == MYLITE_STORAGE_NOTFOUND);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_check_constraint_if_exists(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE constraint_if_exists");
+    assert_exec_succeeds(db, "USE constraint_if_exists");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE constraint_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "rating INT NOT NULL, "
+        "CONSTRAINT rating_max CHECK (rating <= 10)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO constraint_posts VALUES (1, 10)");
+    assert_catalog_table_count(filename, "constraint_if_exists", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "constraint_if_exists",
+        "constraint_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_check_constraint_count(db, "constraint_if_exists", "constraint_posts", "rating_max", 1U);
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE constraint_posts "
+        "ADD CONSTRAINT IF NOT EXISTS rating_max CHECK (rating <= 10), "
+        "ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "rating_max");
+    assert_check_constraint_count(db, "constraint_if_exists", "constraint_posts", "rating_max", 1U);
+    assert_exec_fails_with_message(db, "INSERT INTO constraint_posts VALUES (2, 11)", "CONSTRAINT");
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE constraint_posts "
+        "ADD CONSTRAINT IF NOT EXISTS rating_min CHECK (rating >= 0), "
+        "ALGORITHM=COPY"
+    );
+    assert_check_constraint_count(db, "constraint_if_exists", "constraint_posts", "rating_min", 1U);
+    assert_exec_fails_with_message(db, "INSERT INTO constraint_posts VALUES (3, -1)", "CONSTRAINT");
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE constraint_posts "
+        "DROP CONSTRAINT IF EXISTS missing_rating, ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "missing_rating");
+    assert_check_constraint_count(db, "constraint_if_exists", "constraint_posts", "rating_min", 1U);
+    assert_exec_fails_with_message(db, "INSERT INTO constraint_posts VALUES (4, -1)", "CONSTRAINT");
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE constraint_posts "
+        "DROP CONSTRAINT IF EXISTS rating_min, ALGORITHM=COPY"
+    );
+    assert_check_constraint_count(db, "constraint_if_exists", "constraint_posts", "rating_min", 0U);
+    assert_exec_succeeds(db, "INSERT INTO constraint_posts VALUES (5, -1)");
+    assert_exec_fails_with_message(db, "INSERT INTO constraint_posts VALUES (6, 11)", "CONSTRAINT");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE constraint_if_exists");
+    assert_check_constraint_count(db, "constraint_if_exists", "constraint_posts", "rating_max", 1U);
+    assert_check_constraint_count(db, "constraint_if_exists", "constraint_posts", "rating_min", 0U);
+    assert_exec_succeeds(db, "INSERT INTO constraint_posts VALUES (7, -2)");
+    assert_exec_fails_with_message(db, "INSERT INTO constraint_posts VALUES (8, 11)", "CONSTRAINT");
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
@@ -6225,6 +6313,36 @@ static void test_constraint_generated_expression_matrix(void) {
     free(filename);
     remove_tree(root);
     free(root);
+}
+
+static void assert_check_constraint_count(
+    mylite_db *db,
+    const char *schema_name,
+    const char *table_name,
+    const char *constraint_name,
+    unsigned expected_count
+) {
+    char sql[512];
+    char expected_value[32];
+    const int sql_written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.CHECK_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = '%s' "
+        "AND TABLE_NAME = '%s' "
+        "AND CONSTRAINT_NAME = '%s'",
+        schema_name,
+        table_name,
+        constraint_name
+    );
+    assert(sql_written > 0);
+    assert((size_t)sql_written < sizeof(sql));
+
+    const int expected_written =
+        snprintf(expected_value, sizeof(expected_value), "%u", expected_count);
+    assert(expected_written > 0);
+    assert((size_t)expected_written < sizeof(expected_value));
+    assert_query_single_value(db, sql, expected_value);
 }
 
 static void assert_index_ignored(
