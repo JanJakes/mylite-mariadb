@@ -338,10 +338,11 @@ static int mylite_storage_to_handler_error(mylite_storage_result result)
 ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
   :handler(hton, table_arg), share(NULL), scan_rows(NULL),
    scan_blob_payloads(NULL), scan_row_ids(NULL),
-   current_blob_payloads(NULL), index_rows(NULL), index_blob_payloads(NULL),
-   index_keys(NULL), index_entries(NULL), scan_row_size(0),
-   scan_row_count(0), scan_row_index(0), scan_blob_payloads_size(0),
-   current_blob_payloads_size(0), index_row_size(0), index_row_count(0),
+   record_blob_payloads{NULL, NULL}, index_rows(NULL),
+   index_blob_payloads(NULL), index_keys(NULL), index_entries(NULL),
+   scan_row_size(0), scan_row_count(0), scan_row_index(0),
+   scan_blob_payloads_size(0), record_blob_payloads_size{0, 0},
+   index_row_size(0), index_row_count(0),
    index_row_index(0), index_blob_payloads_size(0),
    index_cursor_number(MAX_KEY), current_row_id(0),
    duplicate_key_index((uint) -1)
@@ -355,7 +356,7 @@ ha_mylite::~ha_mylite()
 {
   clear_scan_rows();
   clear_index_cursor();
-  clear_current_blob_payloads();
+  clear_record_blob_payloads();
 }
 
 void ha_mylite::clear_scan_rows()
@@ -390,11 +391,14 @@ void ha_mylite::clear_index_cursor()
   index_cursor_number= MAX_KEY;
 }
 
-void ha_mylite::clear_current_blob_payloads()
+void ha_mylite::clear_record_blob_payloads()
 {
-  mylite_storage_free(current_blob_payloads);
-  current_blob_payloads= NULL;
-  current_blob_payloads_size= 0;
+  for (size_t i= 0; i < 2; ++i)
+  {
+    mylite_storage_free(record_blob_payloads[i]);
+    record_blob_payloads[i]= NULL;
+    record_blob_payloads_size[i]= 0;
+  }
 }
 
 const char *ha_mylite::storage_schema() const
@@ -595,7 +599,7 @@ int ha_mylite::read_index_cursor_row(uchar *buf, size_t row_index)
     DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
 
   memcpy(buf, index_rows + entry->row_offset, index_row_size);
-  const int error= preserve_current_blob_payloads(buf);
+  const int error= preserve_record_blob_payloads(buf);
   if (error)
     DBUG_RETURN(error);
   index_row_index= row_index;
@@ -603,14 +607,37 @@ int ha_mylite::read_index_cursor_row(uchar *buf, size_t row_index)
   DBUG_RETURN(0);
 }
 
-int ha_mylite::preserve_current_blob_payloads(uchar *buf)
+int ha_mylite::record_blob_payload_slot(const uchar *buf, size_t *out_slot) const
 {
-  DBUG_ENTER("ha_mylite::preserve_current_blob_payloads");
+  if (buf == table->record[0])
+  {
+    *out_slot= 0;
+    return 0;
+  }
+  if (table->record[1] && buf == table->record[1])
+  {
+    *out_slot= 1;
+    return 0;
+  }
+
+  return HA_ERR_CRASHED_ON_USAGE;
+}
+
+int ha_mylite::preserve_record_blob_payloads(uchar *buf)
+{
+  DBUG_ENTER("ha_mylite::preserve_record_blob_payloads");
+
+  size_t slot= 0;
+  int error= record_blob_payload_slot(buf, &slot);
+  if (error)
+    DBUG_RETURN(error);
 
   /* Joined result evaluation can outlive scan or index cursor buffers. */
   if (!mylite_table_has_blob_fields(table))
   {
-    clear_current_blob_payloads();
+    mylite_storage_free(record_blob_payloads[slot]);
+    record_blob_payloads[slot]= NULL;
+    record_blob_payloads_size[slot]= 0;
     DBUG_RETURN(0);
   }
 
@@ -637,7 +664,9 @@ int ha_mylite::preserve_current_blob_payloads(uchar *buf)
 
   if (blob_payloads_size == 0)
   {
-    clear_current_blob_payloads();
+    mylite_storage_free(record_blob_payloads[slot]);
+    record_blob_payloads[slot]= NULL;
+    record_blob_payloads_size[slot]= 0;
     DBUG_RETURN(0);
   }
 
@@ -677,9 +706,9 @@ int ha_mylite::preserve_current_blob_payloads(uchar *buf)
     DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
   }
 
-  mylite_storage_free(current_blob_payloads);
-  current_blob_payloads= blob_payloads;
-  current_blob_payloads_size= blob_payloads_size;
+  mylite_storage_free(record_blob_payloads[slot]);
+  record_blob_payloads[slot]= blob_payloads;
+  record_blob_payloads_size[slot]= blob_payloads_size;
   DBUG_RETURN(0);
 }
 
@@ -707,7 +736,7 @@ int ha_mylite::close(void)
   DBUG_ENTER("ha_mylite::close");
   clear_scan_rows();
   clear_index_cursor();
-  clear_current_blob_payloads();
+  clear_record_blob_payloads();
   DBUG_RETURN(0);
 }
 
@@ -873,7 +902,7 @@ int ha_mylite::rnd_next(uchar *buf)
 
   current_row_id= scan_row_ids[scan_row_index];
   memcpy(buf, scan_rows + (scan_row_index * scan_row_size), scan_row_size);
-  const int error= preserve_current_blob_payloads(buf);
+  const int error= preserve_record_blob_payloads(buf);
   if (error)
     DBUG_RETURN(error);
   ++scan_row_index;
@@ -928,9 +957,17 @@ int ha_mylite::rnd_pos(uchar *buf, uchar *pos)
     DBUG_RETURN(error ? error : HA_ERR_CRASHED_ON_USAGE);
   }
 
-  mylite_storage_free(current_blob_payloads);
-  current_blob_payloads= blob_payloads;
-  current_blob_payloads_size= blob_payloads_size;
+  size_t slot= 0;
+  error= record_blob_payload_slot(buf, &slot);
+  if (error)
+  {
+    mylite_storage_free(blob_payloads);
+    DBUG_RETURN(error);
+  }
+
+  mylite_storage_free(record_blob_payloads[slot]);
+  record_blob_payloads[slot]= blob_payloads;
+  record_blob_payloads_size[slot]= blob_payloads_size;
   current_row_id= row_id;
   DBUG_RETURN(0);
 }

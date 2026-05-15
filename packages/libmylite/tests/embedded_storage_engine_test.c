@@ -995,7 +995,7 @@ static void test_wordpress_shaped_schema(void) {
     assert(
         mylite_exec(
             db,
-            "SELECT p.ID, p.post_title, m.meta_value "
+            "SELECT p.ID, LENGTH(p.post_title), p.post_title, m.meta_value "
             "FROM wp_posts p JOIN wp_postmeta m ON m.post_id = p.ID "
             "WHERE p.post_type = 'post' AND p.post_status = 'publish' "
             "AND m.meta_key = '_thumbnail_id'",
@@ -1457,13 +1457,20 @@ static int wordpress_join_callback(
     wordpress_join_context *join_ctx = (wordpress_join_context *)ctx;
     (void)column_names;
 
-    assert(column_count == 3);
+    assert(column_count == 4);
     assert(values[0] != NULL && strcmp(values[0], "1") == 0);
-    if (values[1] == NULL || strcmp(values[1], "Hello world") != 0) {
-        fprintf(stderr, "unexpected joined post title: '%s'\n", values[1] ? values[1] : "(null)");
+    if (values[1] == NULL || strcmp(values[1], "11") != 0 || values[2] == NULL ||
+        strcmp(values[2], "Hello world") != 0) {
+        fprintf(
+            stderr,
+            "unexpected joined post title: length='%s' value='%s'\n",
+            values[1] ? values[1] : "(null)",
+            values[2] ? values[2] : "(null)"
+        );
     }
-    assert(values[1] != NULL && strcmp(values[1], "Hello world") == 0);
-    assert(values[2] != NULL && strcmp(values[2], "42") == 0);
+    assert(values[1] != NULL && strcmp(values[1], "11") == 0);
+    assert(values[2] != NULL && strcmp(values[2], "Hello world") == 0);
+    assert(values[3] != NULL && strcmp(values[3], "42") == 0);
     ++join_ctx->rows;
     return 0;
 }

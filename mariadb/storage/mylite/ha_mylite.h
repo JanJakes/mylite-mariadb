@@ -50,7 +50,7 @@ class ha_mylite: public handler
   unsigned char *scan_rows;
   unsigned char *scan_blob_payloads;
   ulonglong *scan_row_ids;
-  unsigned char *current_blob_payloads;
+  unsigned char *record_blob_payloads[2];
   unsigned char *index_rows;
   unsigned char *index_blob_payloads;
   unsigned char *index_keys;
@@ -61,7 +61,7 @@ class ha_mylite: public handler
   size_t scan_row_count;
   size_t scan_row_index;
   size_t scan_blob_payloads_size;
-  size_t current_blob_payloads_size;
+  size_t record_blob_payloads_size[2];
   size_t index_row_size;
   size_t index_row_count;
   size_t index_row_index;
@@ -73,12 +73,13 @@ class ha_mylite: public handler
   Mylite_share *get_share();
   void clear_scan_rows();
   void clear_index_cursor();
-  void clear_current_blob_payloads();
+  void clear_record_blob_payloads();
   const char *storage_schema() const;
   const char *storage_table() const;
   int build_index_cursor(uint index_number);
   int read_index_cursor_row(uchar *buf, size_t row_index);
-  int preserve_current_blob_payloads(uchar *buf);
+  int record_blob_payload_slot(const uchar *buf, size_t *out_slot) const;
+  int preserve_record_blob_payloads(uchar *buf);
 
 public:
   ha_mylite(handlerton *hton, TABLE_SHARE *table_arg);

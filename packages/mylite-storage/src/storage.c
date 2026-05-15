@@ -343,6 +343,7 @@ static mylite_storage_result validate_live_row(
     const mylite_storage_header *header,
     const mylite_storage_row_state_map *row_state_map,
     mylite_storage_live_row_request request,
+    unsigned char *page,
     mylite_storage_row_page *out_row_page
 );
 static void encode_row_state_page(
@@ -1109,6 +1110,7 @@ mylite_storage_result mylite_storage_read_row(
     unsigned long long table_id = 0ULL;
     mylite_storage_row_state_map row_state_map = {0};
     mylite_storage_row_page row_page = {0};
+    unsigned char row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
         result = find_table_id(file, &header, schema_name, table_name, &table_id);
@@ -1125,6 +1127,7 @@ mylite_storage_result mylite_storage_read_row(
                 .table_id = table_id,
                 .row_id = row_id,
             },
+            row_buffer,
             &row_page
         );
     }
@@ -1210,6 +1213,7 @@ mylite_storage_result mylite_storage_update_row_with_index_entries(
     unsigned long long table_id = 0ULL;
     mylite_storage_row_state_map row_state_map = {0};
     mylite_storage_row_page old_row_page = {0};
+    unsigned char old_row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     mylite_storage_row_write_position position = {0};
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
@@ -1227,6 +1231,7 @@ mylite_storage_result mylite_storage_update_row_with_index_entries(
                 .table_id = table_id,
                 .row_id = row_id,
             },
+            old_row_buffer,
             &old_row_page
         );
     }
@@ -1316,6 +1321,7 @@ mylite_storage_result mylite_storage_delete_row(
     unsigned long long table_id = 0ULL;
     mylite_storage_row_state_map row_state_map = {0};
     mylite_storage_row_page row_page = {0};
+    unsigned char row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
         result = find_table_id(file, &header, schema_name, table_name, &table_id);
@@ -1332,6 +1338,7 @@ mylite_storage_result mylite_storage_delete_row(
                 .table_id = table_id,
                 .row_id = row_id,
             },
+            row_buffer,
             &row_page
         );
     }
@@ -1428,6 +1435,7 @@ mylite_storage_result mylite_storage_read_index_entries(
         }
 
         mylite_storage_row_page row_page = {0};
+        unsigned char row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
         result = validate_live_row(
             file,
             &header,
@@ -1436,6 +1444,7 @@ mylite_storage_result mylite_storage_read_index_entries(
                 .table_id = table_id,
                 .row_id = entry_page.row_id,
             },
+            row_buffer,
             &row_page
         );
         free(row_page.owned_payload);
@@ -3518,6 +3527,7 @@ static mylite_storage_result validate_live_row(
     const mylite_storage_header *header,
     const mylite_storage_row_state_map *row_state_map,
     mylite_storage_live_row_request request,
+    unsigned char *page,
     mylite_storage_row_page *out_row_page
 ) {
     if (request.row_id <= header->catalog_root_page || request.row_id >= header->page_count) {
@@ -3527,7 +3537,6 @@ static mylite_storage_result validate_live_row(
         return MYLITE_STORAGE_NOTFOUND;
     }
 
-    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     mylite_storage_row_page row_page = {0};
     mylite_storage_result result = read_row_page(file, header, request.row_id, page, &row_page);
     if (result == MYLITE_STORAGE_NOTFOUND) {
