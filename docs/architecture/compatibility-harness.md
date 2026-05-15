@@ -40,7 +40,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `unsupported-index` | `storage-smoke-dev` | `compat-unsupported-index` | Unsupported generated-column, FULLTEXT, and SPATIAL index rejection |
 | `locking` | `storage-smoke-dev` | `compat-locking` | Primary-file lock conflicts and busy timeouts |
 | `embedded-lifecycle` | `embedded-dev` | `compat-embedded-lifecycle` | Embedded runtime open/close, direct execution, and cleanup |
-| `direct-sql` | `embedded-dev` | `compat-direct-sql` | `mylite_exec()` SQL execution |
+| `direct-sql` | `embedded-dev` | `compat-direct-sql` | `mylite_exec()` SQL execution and statement effects |
 | `prepared-statement` | `embedded-dev` | `compat-prepared-statement` | Prepared statements, typed bindings, and binary-safe column access |
 | `column-metadata` | `embedded-dev` | `compat-column-metadata` | Prepared statement column metadata |
 | `large-value` | `embedded-dev` | `compat-large-value` | Prepared statement large-value segment reads |

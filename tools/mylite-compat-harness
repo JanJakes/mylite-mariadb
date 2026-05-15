@@ -58,7 +58,7 @@ group_spec() {
       echo "embedded-dev|compat-embedded-lifecycle|Embedded runtime open, close, direct execution, and cleanup coverage"
       ;;
     direct-sql)
-      echo "embedded-dev|compat-direct-sql|Direct SQL execution through the public libmylite API"
+      echo "embedded-dev|compat-direct-sql|Direct SQL execution and statement effects through the public libmylite API"
       ;;
     prepared-statement)
       echo "embedded-dev|compat-prepared-statement|Prepared statements, typed bindings, and binary-safe column access"

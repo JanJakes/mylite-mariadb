@@ -19,6 +19,7 @@ typedef struct variable_context {
 } variable_context;
 
 static void test_select_callback(void);
+static void test_statement_effects(void);
 static void test_callback_abort(void);
 static void test_syntax_error_diagnostics(void);
 static void test_server_surfaces_are_disabled(void);
@@ -43,6 +44,7 @@ static void remove_tree_entry(const char *path);
 
 int main(void) {
     test_select_callback();
+    test_statement_effects();
     test_callback_abort();
     test_syntax_error_diagnostics();
     test_server_surfaces_are_disabled();
@@ -64,6 +66,60 @@ static void test_select_callback(void) {
     assert(ctx.rows == 1);
     assert(mylite_changes(db) == 0);
     assert(mylite_last_insert_id(db) == 0U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_statement_effects(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "USE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(
+            db,
+            "CREATE TEMPORARY TABLE direct_effects ("
+            "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, value INT NOT NULL)",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(
+        mylite_exec(db, "INSERT INTO direct_effects (value) VALUES (10),(20)", NULL, NULL, NULL) ==
+        MYLITE_OK
+    );
+    assert(mylite_changes(db) == 2);
+    assert(mylite_last_insert_id(db) == 1U);
+
+    assert(
+        mylite_exec(
+            db,
+            "UPDATE direct_effects SET value = value + 1 WHERE value = 20",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_changes(db) == 1);
+
+    assert(
+        mylite_exec(db, "DELETE FROM direct_effects WHERE value = 10", NULL, NULL, NULL) ==
+        MYLITE_OK
+    );
+    assert(mylite_changes(db) == 1);
+
+    assert(
+        mylite_exec(db, "INSERT INTO direct_effects (value) VALUES (30)", NULL, NULL, NULL) ==
+        MYLITE_OK
+    );
+    assert(mylite_changes(db) == 1);
+    assert(mylite_last_insert_id(db) == 3U);
 
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);

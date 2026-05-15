@@ -140,9 +140,11 @@ with `mylite_free()`.
 
 Initial implementation status: `mylite_exec()` runs through the embedded
 MariaDB connection in `embedded-dev` builds, returns text result rows, preserves
-SQL `NULL` values as `NULL` callback entries, and populates MariaDB diagnostics
-on query failure. File-backed MyLite storage-engine builds support catalog
-schema namespaces for successful direct `CREATE/DROP DATABASE` and
+SQL `NULL` values as `NULL` callback entries, populates MariaDB diagnostics on
+query failure, and exposes affected rows plus generated insert ids after
+representative temporary-table non-result statements. File-backed MyLite
+storage-engine builds support catalog schema namespaces for successful direct
+`CREATE/DROP DATABASE` and
 `CREATE/DROP SCHEMA` statements, including `ALTER DATABASE` / `ALTER SCHEMA`
 updates to default character set, collation, and comment options, routed
 `CREATE TABLE` metadata, catalog-backed `DROP TABLE` and simple
@@ -350,7 +352,9 @@ MyLite avoids forcing callers into raw MariaDB handles.
 
 Initial implementation status: direct and prepared execution update the last
 insert id after successful statements and report affected rows for successful
-non-result statements. Result-producing statements report zero changed rows.
+non-result statements. Direct execution covers temporary-table
+insert/update/delete effects, prepared execution covers parameterized insert
+effects, and result-producing statements report zero changed rows.
 
 ## Memory Ownership
 

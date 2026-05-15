@@ -17,15 +17,16 @@ for drop-in application expectations.
 Compatibility evidence is grouped by the local harness documented in
 [Compatibility Harness](architecture/compatibility-harness.md). The initial
 groups cover public API validation, storage, crash recovery, locking, embedded
-lifecycle, direct SQL, prepared statements, column metadata, large value reads,
-warnings, MariaDB baseline SQL API comparison, storage-engine smoke, sidecar
-gates, routed DDL/DML including schema namespaces, `CREATE TABLE ... LIKE`,
-`CREATE TABLE ... SELECT`, transaction-control policy, foreign-key DDL rejection,
-CHECK constraint enforcement, generated column coverage, unsupported index-class
-rejection, MariaDB statement transaction hook integration, busy-timeout lock
-waits, failed statement rollback, initial application-schema smoke, and unsupported
-server/non-table-object policy. MariaDB MTR comparison suites and broader
-application-schema suites remain planned.
+lifecycle, direct SQL including statement effects, prepared statements, column
+metadata, large value reads, warnings, MariaDB baseline SQL API comparison,
+storage-engine smoke, sidecar gates, routed DDL/DML including schema namespaces,
+`CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`, transaction-control policy,
+foreign-key DDL rejection, CHECK constraint enforcement, generated column
+coverage, unsupported index-class rejection, MariaDB statement transaction hook
+integration, busy-timeout lock waits, failed statement rollback, initial
+application-schema smoke, and unsupported server/non-table-object policy.
+MariaDB MTR comparison suites and broader application-schema suites remain
+planned.
 
 ## Baseline
 
@@ -42,13 +43,13 @@ application-schema suites remain planned.
 | Capability | MyLite status | Compatibility target |
 | --- | --- | --- |
 | Open and close a database file | 🟡&nbsp;Partial | Implemented for local files with a temporary MariaDB runtime directory that is removed on final close; repeated same-process open/close cycles and two-handle shared-runtime lifetime are covered |
-| Direct SQL execution | 🟡&nbsp;Partial | `mylite_exec()` executes controlled one-shot SQL with textual result callbacks in embedded builds |
+| Direct SQL execution | 🟡&nbsp;Partial | `mylite_exec()` executes controlled one-shot SQL with textual result callbacks and direct statement-effect coverage in embedded builds |
 | Prepared statements | 🟡&nbsp;Partial | Reusable embedded statements with 1-based scalar parameter binding, row stepping, reset/finalize ownership, MariaDB diagnostics, and representative baseline comparison coverage |
 | Binary-safe values | 🟡&nbsp;Partial | Prepared statements expose explicit TEXT/BLOB byte counts, BLOB values with embedded NUL bytes, and current-row byte-range reads for large TEXT/BLOB results |
 | Column metadata | 🟡&nbsp;Partial | Prepared statements expose alias, schema/table/origin names, MariaDB-native type, flags, charset, decimals, and length metadata; representative native type/name comparison is covered, while parameter metadata remains planned |
 | Diagnostics | 🟡&nbsp;Partial | Open handles expose stable MyLite result codes, MariaDB errno, SQLSTATE, and message text |
 | Warnings | 🟡&nbsp;Partial | Successful direct and prepared execution expose retained `SHOW WARNINGS` rows; failed direct execution, failed prepare, and failed prepared execute retain structured error rows before a result set is active; representative baseline comparison is covered, while fetch-time failure warning capture remains planned |
-| Affected rows and insert ids | 🟡&nbsp;Partial | Successful direct and prepared execution expose affected rows for non-result statements and the last insert id |
+| Affected rows and insert ids | 🟡&nbsp;Partial | Successful direct and prepared execution expose affected rows for non-result statements and the last insert id; direct execution covers temporary-table insert/update/delete effects, and prepared execution covers parameterized insert effects |
 | Raw `MYSQL *` as primary API | ➖&nbsp;Out&nbsp;of&nbsp;scope | Available only through a deliberate compatibility adapter |
 
 ## Engine Routing
