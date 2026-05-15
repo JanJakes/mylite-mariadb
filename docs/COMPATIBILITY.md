@@ -42,9 +42,10 @@ transaction hook integration, busy-timeout lock waits, SQL locking policy
 rejection, failed
 statement rollback, initial application-schema smoke,
 unsupported server, SQL file-I/O, server utility function, Oracle SQL mode, XML
-SQL function, GIS SQL function, SFORMAT SQL function, SQL HELP command, and
-SELECT PROCEDURE, stored-program runtime stubbing, and non-table-object
-policies, and representative `SHOW CREATE TABLE` round-trip export/import.
+SQL function, GIS SQL function, SFORMAT SQL function, SQL HELP command, SELECT
+PROCEDURE, stored-program runtime stubbing, dynamic UDF runtime, and
+non-table-object policies, and representative `SHOW CREATE TABLE` round-trip
+export/import.
 The opt-in embedded MTR smoke runner covers MariaDB bootstrap and scalar
 CAST/CONVERT behavior, while MariaDB MTR comparison suites and broader
 application-schema suites remain planned.
@@ -126,6 +127,7 @@ application-schema suites remain planned.
 | `SFORMAT()` | ➖&nbsp;Out&nbsp;of&nbsp;scope | MariaDB's fmtlib-backed `SFORMAT()` helper is not part of the current core embedded profile; the default embedded profile omits its builder, registry entry, and implementation so retained `sql_embedded` C++ sources can compile without exceptions, and direct/prepared calls are rejected before MariaDB execution while ordinary `FORMAT()`, `DATE_FORMAT()`, `TIME_FORMAT()`, and `GET_FORMAT()` remain available |
 | Schemas/databases | 🟡&nbsp;Partial | Direct and prepared `CREATE DATABASE` / `CREATE SCHEMA` store catalog namespace records with default character set, collation, and comment options, file-backed schema creation, reopen, `USE`, `SHOW DATABASES`, `SHOW TABLES`, `SHOW CREATE DATABASE`, information-schema schema options, table resolution, catalog-backed `CREATE DATABASE` duplicate, `IF NOT EXISTS`, and `OR REPLACE` paths, and representative default-algorithm copy `ALTER` paths work without runtime schema directories, and direct and prepared `DROP DATABASE` / `DROP SCHEMA` remove covered catalog metadata; non-table objects and SQL rollback remain planned |
 | Views, triggers, and routines | 🟡&nbsp;Partial | Catalog-backed persistent objects remain planned after table DDL is stable; current `libmylite` entry points reject representative view, trigger, routine, package, sequence, and `CALL` statements before MariaDB can publish filesystem or server-table metadata, and the default embedded profile links a fail-closed MyLite stored-program runtime stub instead of MariaDB's full stored-program compiler/runtime objects |
+| Dynamic UDFs | ➖&nbsp;Out&nbsp;of&nbsp;scope | Dynamic user-defined function registration, `mysql.func` lookup, external library loading, and UDF execution are not part of the embedded profile; direct and prepared `CREATE FUNCTION ... SONAME` calls are rejected before MariaDB execution, the default embedded profile omits `sql_udf.cc` and UDF item construction/execution bodies, and ordinary native-function plus stored-function resolution remains unchanged |
 | Events and scheduler | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server scheduler is not part of the core embedded profile; event activation and event DDL are rejected by MyLite SQL policy |
 | Users, grants, and password auth | ➖&nbsp;Out&nbsp;of&nbsp;scope | Local embedded file ownership replaces server account management; account SQL is rejected by MyLite SQL policy |
 | Replication and binlog | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server topology feature, not core library behavior; binlog is disabled at startup and representative replication/binlog SQL is rejected |

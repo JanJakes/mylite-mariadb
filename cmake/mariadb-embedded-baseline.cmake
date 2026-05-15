@@ -74,5 +74,8 @@ set(MYLITE_WITH_SELECT_PROCEDURE_RUNTIME OFF CACHE BOOL "Omit SELECT PROCEDURE r
 # MyLite rejects stored routine, trigger, event, and package runtime surfaces.
 set(MYLITE_WITH_STORED_PROGRAM_RUNTIME OFF CACHE BOOL "Omit stored program runtime" FORCE)
 
+# MyLite rejects dynamic UDF registration and library loading.
+set(MYLITE_WITH_UDF_RUNTIME OFF CACHE BOOL "Omit UDF lookup and execution runtime" FORCE)
+
 # MyLite's embedded SQL profile has no retained C++ exception users.
 set(MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS OFF CACHE BOOL "Enable embedded SQL C++ exceptions" FORCE)

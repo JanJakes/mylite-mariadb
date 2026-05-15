@@ -125,6 +125,13 @@ ENDIF()
 
 OPTION(MYLITE_WITH_STORED_PROGRAM_RUNTIME "Build stored program compiler and runtime" ON)
 
+OPTION(MYLITE_WITH_UDF_RUNTIME "Build UDF lookup and execution runtime" ON)
+IF(MYLITE_WITH_UDF_RUNTIME)
+  ADD_DEFINITIONS(-DMYLITE_WITH_UDF_RUNTIME=1)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_UDF_RUNTIME=0)
+ENDIF()
+
 OPTION(MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS "Compile embedded SQL with C++ exceptions" ON)
 
 SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc 
@@ -250,6 +257,10 @@ IF(NOT MYLITE_WITH_STORED_PROGRAM_RUNTIME)
     ../sql/sp_pcontext.cc
     ../sql/sp_rcontext.cc)
   LIST(APPEND SQL_EMBEDDED_SOURCES mylite_stored_program_runtime_stub.cc)
+ENDIF()
+
+IF(NOT MYLITE_WITH_UDF_RUNTIME)
+  LIST(REMOVE_ITEM SQL_EMBEDDED_SOURCES ../sql/sql_udf.cc)
 ENDIF()
 
 ADD_CONVENIENCE_LIBRARY(sql_embedded ${SQL_EMBEDDED_SOURCES})

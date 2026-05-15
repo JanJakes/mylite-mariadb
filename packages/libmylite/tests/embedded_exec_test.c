@@ -475,6 +475,10 @@ static void test_non_table_objects_are_rejected(void) {
     );
     assert_non_table_object_exec_fails(db, "CREATE PROCEDURE blocked_proc() SELECT 1");
     assert_non_table_object_exec_fails(db, "CREATE FUNCTION blocked_func() RETURNS INT RETURN 1");
+    assert_non_table_object_exec_fails(
+        db,
+        "CREATE FUNCTION blocked_udf RETURNS INTEGER SONAME 'blocked_udf.so'"
+    );
     assert_non_table_object_exec_fails(db, "CALL blocked_proc()");
     assert_non_table_object_exec_fails(db, "DROP VIEW blocked_view");
     assert_non_table_object_exec_fails(db, "CREATE SEQUENCE blocked_seq");
