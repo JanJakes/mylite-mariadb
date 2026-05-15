@@ -35,7 +35,7 @@ not in a MariaDB datadir or existing engine sidecars.
 | 12 | Copy `ALTER` rebuilds | ✅&nbsp;Done | Table-copy rebuild support works over the current row and supported index lifecycle. |
 | 13 | Primary and secondary indexes | ✅&nbsp;Done | Add append-only index-entry pages, ordered handler cursors, duplicate checks, nullable unique-key semantics, and index maintenance for supported insert/update/delete paths. |
 | 14 | Transactions and recovery | 🟡&nbsp;In&nbsp;progress | Rollback-journal atomic publication and recovery are implemented for current append-only storage mutations; SQL rollback, savepoints, WAL/checkpoints, and transaction-aware engine hooks remain. |
-| 15 | Locking and concurrency | ⚪&nbsp;Planned | Add safe file locks before broadening recovery claims to multiple processes, then preserve the concurrent writer goal in the storage design. |
+| 15 | Locking and concurrency | 🟡&nbsp;In&nbsp;progress | Advisory primary-file locks reject unsafe cross-process readers, writers, and recovery races; busy waits, SQL lock integration, and full concurrent writers remain. |
 | 16 | Compatibility harness | ⚪&nbsp;Planned | Run embedded lifecycle, sidecar detection, MariaDB comparison, crash/reopen, and application-query coverage in repeatable groups. |
 | 17 | Application schemas | ⚪&nbsp;Planned | Test representative application schemas, including WordPress-shaped DDL and common MySQL/MariaDB ORM output. |
 | 18 | Server-surface policy | ⚪&nbsp;Planned | Explicitly reject or replace users/auth, replication/binlog, dynamic plugins, events, performance schema, and external durable engines. |

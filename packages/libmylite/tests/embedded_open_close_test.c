@@ -9,20 +9,30 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
+
+typedef struct lock_child {
+    pid_t pid;
+    int release_fd;
+} lock_child;
 
 static void test_open_close_repeatedly(void);
 static void test_two_handles_share_runtime(void);
 static void test_no_defaults_ignores_ambient_option_files(void);
 static void test_missing_file_without_create_fails(void);
+static void test_open_reports_busy_when_file_locked(void);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static mylite_open_config open_config(const char *temp_directory);
 static void assert_valid_primary_file(const char *filename);
 static int is_directory_empty(const char *path);
 static void write_file(const char *path, const char *contents);
+static lock_child hold_test_lock(const char *filename, int operation);
+static void release_test_lock(lock_child child);
 static void remove_tree(const char *path);
 static void remove_tree_entry(const char *path);
 
@@ -31,6 +41,7 @@ int main(void) {
     test_two_handles_share_runtime();
     test_no_defaults_ignores_ambient_option_files();
     test_missing_file_without_create_fails();
+    test_open_reports_busy_when_file_locked();
     return 0;
 }
 
@@ -146,6 +157,31 @@ static void test_missing_file_without_create_fails(void) {
     free(root);
 }
 
+static void test_open_reports_busy_when_file_locked(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *filename = path_join(root, "locked.mylite");
+    mylite_open_config config = open_config(runtime_root);
+    mylite_db *db = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    lock_child child = hold_test_lock(filename, LOCK_EX);
+
+    assert(
+        mylite_open_v2(filename, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
+        MYLITE_BUSY
+    );
+    assert(db == NULL);
+    assert(is_directory_empty(runtime_root));
+
+    release_test_lock(child);
+    free(filename);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static char *make_temp_root(void) {
     char template_path[] = "/tmp/mylite-test.XXXXXX";
     char *root = mkdtemp(template_path);
@@ -206,6 +242,57 @@ static void write_file(const char *path, const char *contents) {
     assert(file != NULL);
     assert(fputs(contents, file) >= 0);
     assert(fclose(file) == 0);
+}
+
+static lock_child hold_test_lock(const char *filename, int operation) {
+    int ready_pipe[2];
+    int release_pipe[2];
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    const pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        FILE *file = fopen(filename, "r+b");
+        if (file == NULL || flock(fileno(file), operation) != 0) {
+            _exit(2);
+        }
+        const unsigned char ready = 1U;
+        if (write(ready_pipe[1], &ready, sizeof(ready)) != (ssize_t)sizeof(ready)) {
+            _exit(3);
+        }
+        unsigned char release = 0U;
+        (void)read(release_pipe[0], &release, sizeof(release));
+        fclose(file);
+        close(ready_pipe[1]);
+        close(release_pipe[0]);
+        _exit(0);
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    unsigned char ready = 0U;
+    assert(read(ready_pipe[0], &ready, sizeof(ready)) == (ssize_t)sizeof(ready));
+    assert(ready == 1U);
+    close(ready_pipe[0]);
+
+    return (lock_child){
+        .pid = pid,
+        .release_fd = release_pipe[1],
+    };
+}
+
+static void release_test_lock(lock_child child) {
+    const unsigned char release = 1U;
+    assert(write(child.release_fd, &release, sizeof(release)) == (ssize_t)sizeof(release));
+    assert(close(child.release_fd) == 0);
+
+    int status = 0;
+    assert(waitpid(child.pid, &status, 0) == child.pid);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
 }
 
 static void remove_tree(const char *path) {

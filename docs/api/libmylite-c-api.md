@@ -104,7 +104,8 @@ runtime directory for MariaDB bootstrap files, and removes that directory on the
 final close. Current storage-engine smoke builds persist table-definition
 metadata, rows, autoincrement state, supported indexes, and rollback-journal
 publication state in the primary `.mylite` file; broader DDL, SQL
-transactions, and savepoints remain planned.
+transactions, and savepoints remain planned. Existing-file opens preserve
+storage lock conflicts as `MYLITE_BUSY` before starting the embedded runtime.
 
 ## Direct Execution
 
@@ -313,8 +314,10 @@ The public API exposes MyLite concepts, not raw `my.cnf` option names.
   serialized mode.
 - Different handles may be used on different threads.
 - Handles opened on the same file coordinate through the shared file runtime.
-- Cross-process and multi-writer behavior require storage locking and recovery
-  tests before they are exposed as supported modes.
+- Cooperating storage opens use primary-file advisory locks to reject unsafe
+  cross-process readers, writers, and recovery with busy errors.
+- Full cross-process multi-writer behavior, SQL transaction lock integration,
+  and busy-timeout behavior remain planned.
 
 SQLite-style threading modes can be added when backed by tests.
 

@@ -263,6 +263,13 @@ open first recovers and removes a valid pending journal. Recovery restores the
 previously committed header/catalog state; appended pages beyond the restored
 header page count are ignored until free-space reclamation exists.
 
+Storage operations now use non-blocking advisory locks on the primary
+`.mylite` file descriptor. Read APIs take a shared lock after pending recovery
+is handled, while writes and recovery take an exclusive lock before mutating or
+restoring pages. Conflicts return busy errors; no durable lock sidecar is
+created. These locks protect cooperating MyLite processes from unsafe concurrent
+access but are not the final multi-writer lock manager.
+
 This is not SQL transaction support yet. The MyLite handler still advertises
 non-transactional engine flags, and MariaDB commit, rollback, and savepoint
 handlerton hooks remain planned.

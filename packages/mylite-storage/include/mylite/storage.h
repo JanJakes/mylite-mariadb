@@ -18,10 +18,12 @@ extern "C" {
 #define MYLITE_STORAGE_CAPABILITY_ROW_LIFECYCLE 0x00000040U
 #define MYLITE_STORAGE_CAPABILITY_INDEX_ENTRIES 0x00000080U
 #define MYLITE_STORAGE_CAPABILITY_RECOVERY_JOURNAL 0x00000100U
+#define MYLITE_STORAGE_CAPABILITY_FILE_LOCKS 0x00000200U
 
 typedef enum mylite_storage_result { /* NOLINT(performance-enum-size): C ABI enum. */
                                      MYLITE_STORAGE_OK = 0,
                                      MYLITE_STORAGE_ERROR = 1,
+                                     MYLITE_STORAGE_BUSY = 5,
                                      MYLITE_STORAGE_NOMEM = 7,
                                      MYLITE_STORAGE_READONLY = 8,
                                      MYLITE_STORAGE_IOERR = 10,

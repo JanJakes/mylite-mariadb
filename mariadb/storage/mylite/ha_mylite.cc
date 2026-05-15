@@ -312,6 +312,8 @@ static int mylite_storage_to_handler_error(mylite_storage_result result)
     return 0;
   case MYLITE_STORAGE_NOMEM:
     return HA_ERR_OUT_OF_MEM;
+  case MYLITE_STORAGE_BUSY:
+    return HA_ERR_LOCK_WAIT_TIMEOUT;
   case MYLITE_STORAGE_READONLY:
     return HA_ERR_TABLE_READONLY;
   case MYLITE_STORAGE_IOERR:

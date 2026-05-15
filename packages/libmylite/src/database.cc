@@ -432,6 +432,8 @@ int map_storage_result(mylite_storage_result result) {
         return MYLITE_OK;
     case MYLITE_STORAGE_NOMEM:
         return MYLITE_NOMEM;
+    case MYLITE_STORAGE_BUSY:
+        return MYLITE_BUSY;
     case MYLITE_STORAGE_READONLY:
         return MYLITE_READONLY;
     case MYLITE_STORAGE_IOERR:

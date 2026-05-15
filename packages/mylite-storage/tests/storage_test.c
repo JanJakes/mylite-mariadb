@@ -7,7 +7,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include <mylite/storage.h>
@@ -39,6 +41,11 @@ typedef struct index_entries_test_context {
     unsigned long long updated_row_1_id;
 } index_entries_test_context;
 
+typedef struct lock_child {
+    pid_t pid;
+    int release_fd;
+} lock_child;
+
 static void test_capabilities(void);
 static void test_create_empty_database(void);
 static void test_missing_file(void);
@@ -64,6 +71,9 @@ static void test_cleans_recovery_journal_after_mutations(void);
 static void test_recovers_row_publication_journal(void);
 static void test_recovers_catalog_publication_journal(void);
 static void test_rejects_corrupt_recovery_journal(void);
+static void test_rejects_operations_during_exclusive_file_lock(void);
+static void test_shared_file_lock_allows_readers_and_blocks_writers(void);
+static void test_recovery_requires_exclusive_file_lock(void);
 static void test_rejects_corrupt_row_page(void);
 static void test_rejects_corrupt_row_payload_page(void);
 static void test_rejects_corrupt_row_state_page(void);
@@ -109,6 +119,8 @@ static void write_test_journal_header_page(
     const unsigned long long *page_ids,
     size_t page_count
 );
+static lock_child hold_test_lock(const char *filename, int operation);
+static void release_test_lock(lock_child child);
 static void put_test_u32_le(unsigned char *page, size_t offset, unsigned value);
 static void put_test_u64_le(unsigned char *page, size_t offset, unsigned long long value);
 static unsigned long long checksum_test_page(const unsigned char *page, size_t checksum_offset);
@@ -141,6 +153,9 @@ int main(void) {
     test_recovers_row_publication_journal();
     test_recovers_catalog_publication_journal();
     test_rejects_corrupt_recovery_journal();
+    test_rejects_operations_during_exclusive_file_lock();
+    test_shared_file_lock_allows_readers_and_blocks_writers();
+    test_recovery_requires_exclusive_file_lock();
     test_rejects_corrupt_row_page();
     test_rejects_corrupt_row_payload_page();
     test_rejects_corrupt_row_state_page();
@@ -166,6 +181,7 @@ static void test_capabilities(void) {
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_ROW_LIFECYCLE) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_INDEX_ENTRIES) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_RECOVERY_JOURNAL) != 0U);
+    assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_FILE_LOCKS) != 0U);
 }
 
 static void test_create_empty_database(void) {
@@ -1036,6 +1052,117 @@ static void test_rejects_corrupt_recovery_journal(void) {
     free(root);
 }
 
+static void test_rejects_operations_during_exclusive_file_lock(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "exclusive-lock.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_header header = {0};
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    lock_child child = hold_test_lock(filename, LOCK_EX);
+
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_BUSY);
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", row, sizeof(row)) == MYLITE_STORAGE_BUSY
+    );
+
+    release_test_lock(child);
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_shared_file_lock_allows_readers_and_blocks_writers(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "shared-lock.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_header header = {0};
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    lock_child child = hold_test_lock(filename, LOCK_SH);
+
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", row, sizeof(row)) == MYLITE_STORAGE_BUSY
+    );
+
+    release_test_lock(child);
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_recovery_requires_exclusive_file_lock(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "recovery-lock.mylite");
+    char *journal_filename = journal_path(filename);
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    unsigned char saved_pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {{0}};
+    const unsigned long long page_ids[] = {MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID};
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    read_test_page(filename, MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID, saved_pages[0]);
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", row, sizeof(row)) == MYLITE_STORAGE_OK
+    );
+    write_test_recovery_journal(filename, page_ids, 1U, saved_pages);
+
+    lock_child child = hold_test_lock(filename, LOCK_SH);
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_BUSY);
+    assert(access(journal_filename, F_OK) == 0);
+    release_test_lock(child);
+
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
+    assert(rows.row_count == 0U);
+    mylite_storage_free_rowset(&rows);
+    assert_file_missing(journal_filename);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(journal_filename);
+    free(filename);
+    free(root);
+}
+
 static void test_rejects_corrupt_row_page(void) {
     static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
     static const unsigned char row[] = {0x00U, 0x01U, 'a', 'b', 'c'};
@@ -1630,6 +1757,57 @@ static void write_test_journal_header_page(
         MYLITE_STORAGE_FORMAT_JOURNAL_CHECKSUM_OFFSET,
         checksum_test_page(page, MYLITE_STORAGE_FORMAT_JOURNAL_CHECKSUM_OFFSET)
     );
+}
+
+static lock_child hold_test_lock(const char *filename, int operation) {
+    int ready_pipe[2];
+    int release_pipe[2];
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    const pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        FILE *file = fopen(filename, "r+b");
+        if (file == NULL || flock(fileno(file), operation) != 0) {
+            _exit(2);
+        }
+        const unsigned char ready = 1U;
+        if (write(ready_pipe[1], &ready, sizeof(ready)) != (ssize_t)sizeof(ready)) {
+            _exit(3);
+        }
+        unsigned char release = 0U;
+        (void)read(release_pipe[0], &release, sizeof(release));
+        fclose(file);
+        close(ready_pipe[1]);
+        close(release_pipe[0]);
+        _exit(0);
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    unsigned char ready = 0U;
+    assert(read(ready_pipe[0], &ready, sizeof(ready)) == (ssize_t)sizeof(ready));
+    assert(ready == 1U);
+    close(ready_pipe[0]);
+
+    return (lock_child){
+        .pid = pid,
+        .release_fd = release_pipe[1],
+    };
+}
+
+static void release_test_lock(lock_child child) {
+    const unsigned char release = 1U;
+    assert(write(child.release_fd, &release, sizeof(release)) == (ssize_t)sizeof(release));
+    assert(close(child.release_fd) == 0);
+
+    int status = 0;
+    assert(waitpid(child.pid, &status, 0) == child.pid);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
 }
 
 static void put_test_u32_le(unsigned char *page, size_t offset, unsigned value) {

@@ -99,7 +99,7 @@ for drop-in application expectations.
 | Atomic commit | 🟡&nbsp;Partial | Rollback journal protects current catalog, row, row-state, autoincrement, and index-entry publication; SQL transaction commit remains planned |
 | Rollback | ⚪&nbsp;Planned | Restore rows, indexes, constraints, and catalog state for failed transactions |
 | Savepoints | ⚪&nbsp;Planned | Match MariaDB transaction behavior for supported MyLite tables |
-| Crash recovery | 🟡&nbsp;Partial | Recover the primary file from `<database>.mylite-journal` for current publication paths; WAL/checkpoints, locks, and transaction rollback remain planned |
-| Multiple readers | ⚪&nbsp;Planned | Safe readers over stable committed state |
+| Crash recovery | 🟡&nbsp;Partial | Recover the primary file from `<database>.mylite-journal` for current publication paths while holding the exclusive primary-file lock; WAL/checkpoints and transaction rollback remain planned |
+| Multiple readers | 🟡&nbsp;Partial | Storage read APIs acquire shared non-blocking advisory locks over stable committed state; SQL transaction lock integration and busy-timeout behavior remain planned |
 | Concurrent writers | ⚪&nbsp;Planned | Preserve the full write-concurrency goal in storage and lock design |
-| Cross-process unsafe writers | ➖&nbsp;Out&nbsp;of&nbsp;scope | Reject or block unsafe opens until locking and recovery prove safety |
+| Cross-process unsafe writers | 🟡&nbsp;Partial | Cooperating MyLite storage operations reject conflicting cross-process opens, writes, and recovery with busy errors; non-MyLite writers remain out of scope |

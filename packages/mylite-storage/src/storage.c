@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <unistd.h>
 
 typedef struct mylite_storage_catalog_entry {
@@ -122,6 +123,7 @@ static void initialize_empty_catalog_page(unsigned char *page);
 static void update_catalog_checksum(unsigned char *page);
 static char *recovery_journal_path(const char *filename);
 static mylite_storage_result recover_pending_journal(const char *filename);
+static mylite_storage_result recover_pending_journal_locked(FILE *file, const char *filename);
 static mylite_storage_result read_recovery_journal(
     FILE *journal_file,
     mylite_storage_recovery_journal *out_journal,
@@ -130,7 +132,7 @@ static mylite_storage_result read_recovery_journal(
     mylite_storage_header *out_header
 );
 static mylite_storage_result restore_recovery_journal(
-    const char *filename,
+    FILE *file,
     const mylite_storage_recovery_journal *journal,
     const unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
                              [MYLITE_STORAGE_FORMAT_PAGE_SIZE],
@@ -158,6 +160,7 @@ static mylite_storage_result validate_recovery_journal_pages(
     mylite_storage_header *out_header
 );
 static mylite_storage_result write_page(FILE *file, const unsigned char *page, size_t size);
+static mylite_storage_result lock_file(FILE *file, int operation);
 static mylite_storage_result flush_file(FILE *file);
 static mylite_storage_result flush_parent_directory(const char *filename);
 static mylite_storage_result close_created_file(FILE *file, const char *filename);
@@ -463,7 +466,7 @@ mylite_storage_capabilities mylite_storage_get_capabilities(void) {
                  MYLITE_STORAGE_CAPABILITY_TABLE_ROWS | MYLITE_STORAGE_CAPABILITY_AUTOINCREMENT |
                  MYLITE_STORAGE_CAPABILITY_BLOB_TEXT_ROWS |
                  MYLITE_STORAGE_CAPABILITY_ROW_LIFECYCLE | MYLITE_STORAGE_CAPABILITY_INDEX_ENTRIES |
-                 MYLITE_STORAGE_CAPABILITY_RECOVERY_JOURNAL,
+                 MYLITE_STORAGE_CAPABILITY_RECOVERY_JOURNAL | MYLITE_STORAGE_CAPABILITY_FILE_LOCKS,
     };
 
     return capabilities;
@@ -483,12 +486,23 @@ mylite_storage_result mylite_storage_create_empty(const char *filename) {
         return MYLITE_STORAGE_ERROR;
     }
 
-    FILE *file = fopen(filename, "wb");
+    errno = 0;
+    const int file_descriptor = open(filename, O_WRONLY | O_CREAT | O_EXCL, 0600);
+    if (file_descriptor < 0) {
+        return errno == EEXIST ? MYLITE_STORAGE_ERROR : MYLITE_STORAGE_IOERR;
+    }
+
+    FILE *file = fdopen(file_descriptor, "wb");
     if (file == NULL) {
+        close(file_descriptor);
+        remove(filename);
         return MYLITE_STORAGE_IOERR;
     }
 
-    result = write_empty_database(file);
+    result = lock_file(file, LOCK_EX);
+    if (result == MYLITE_STORAGE_OK) {
+        result = write_empty_database(file);
+    }
     if (result != MYLITE_STORAGE_OK) {
         fclose(file);
         remove(filename);
@@ -1775,6 +1789,35 @@ static mylite_storage_result recover_pending_journal(const char *filename) {
         return MYLITE_STORAGE_NOMEM;
     }
 
+    int exists = 0;
+    mylite_storage_result result = path_exists(journal_filename, &exists);
+    free(journal_filename);
+    if (result != MYLITE_STORAGE_OK || !exists) {
+        return result;
+    }
+
+    errno = 0;
+    FILE *file = fopen(filename, "r+b");
+    if (file == NULL) {
+        return errno == ENOENT ? MYLITE_STORAGE_CORRUPT : MYLITE_STORAGE_IOERR;
+    }
+
+    result = lock_file(file, LOCK_EX);
+    if (result == MYLITE_STORAGE_OK) {
+        result = recover_pending_journal_locked(file, filename);
+    }
+    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    return result;
+}
+
+static mylite_storage_result recover_pending_journal_locked(FILE *file, const char *filename) {
+    char *journal_filename = recovery_journal_path(filename);
+    if (journal_filename == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+
     errno = 0;
     FILE *journal_file = fopen(journal_filename, "rb");
     if (journal_file == NULL) {
@@ -1789,7 +1832,7 @@ static mylite_storage_result recover_pending_journal(const char *filename) {
     mylite_storage_header saved_header = {0};
     result = read_recovery_journal(journal_file, &journal, pages, &saved_header);
     if (result == MYLITE_STORAGE_OK) {
-        result = restore_recovery_journal(filename, &journal, pages, &saved_header);
+        result = restore_recovery_journal(file, &journal, pages, &saved_header);
     }
     if (fclose(journal_file) != 0 && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
@@ -1837,27 +1880,18 @@ static mylite_storage_result read_recovery_journal(
 }
 
 static mylite_storage_result restore_recovery_journal(
-    const char *filename,
+    FILE *file,
     const mylite_storage_recovery_journal *journal,
     const unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
                              [MYLITE_STORAGE_FORMAT_PAGE_SIZE],
     const mylite_storage_header *saved_header
 ) {
-    errno = 0;
-    FILE *file = fopen(filename, "r+b");
-    if (file == NULL) {
-        return errno == ENOENT ? MYLITE_STORAGE_CORRUPT : MYLITE_STORAGE_IOERR;
-    }
-
     mylite_storage_result result = MYLITE_STORAGE_OK;
     for (size_t i = 0U; result == MYLITE_STORAGE_OK && i < journal->page_count; ++i) {
         result = write_page_at(file, journal->page_ids[i], saved_header->page_size, pages[i]);
     }
     if (result == MYLITE_STORAGE_OK) {
         result = flush_file(file);
-    }
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
-        result = MYLITE_STORAGE_IOERR;
     }
     return result;
 }
@@ -2108,6 +2142,21 @@ static mylite_storage_result write_page(FILE *file, const unsigned char *page, s
     return MYLITE_STORAGE_OK;
 }
 
+static mylite_storage_result lock_file(FILE *file, int operation) {
+    if (flock(fileno(file), operation | LOCK_NB) == 0) {
+        return MYLITE_STORAGE_OK;
+    }
+    if (errno == EWOULDBLOCK) {
+        return MYLITE_STORAGE_BUSY;
+    }
+#if EAGAIN != EWOULDBLOCK
+    if (errno == EAGAIN) {
+        return MYLITE_STORAGE_BUSY;
+    }
+#endif
+    return MYLITE_STORAGE_IOERR;
+}
+
 static mylite_storage_result flush_file(FILE *file) {
     if (fflush(file) != 0) {
         return MYLITE_STORAGE_IOERR;
@@ -2176,20 +2225,30 @@ static mylite_storage_result open_existing_file(const char *filename, FILE **out
         return errno == ENOENT ? MYLITE_STORAGE_NOTFOUND : MYLITE_STORAGE_IOERR;
     }
 
+    result = lock_file(file, LOCK_SH);
+    if (result != MYLITE_STORAGE_OK) {
+        fclose(file);
+        return result;
+    }
+
     *out_file = file;
     return MYLITE_STORAGE_OK;
 }
 
 static mylite_storage_result open_existing_file_for_update(const char *filename, FILE **out_file) {
-    mylite_storage_result result = recover_pending_journal(filename);
-    if (result != MYLITE_STORAGE_OK) {
-        return result;
-    }
-
     errno = 0;
     FILE *file = fopen(filename, "r+b");
     if (file == NULL) {
         return errno == ENOENT ? MYLITE_STORAGE_NOTFOUND : MYLITE_STORAGE_IOERR;
+    }
+
+    mylite_storage_result result = lock_file(file, LOCK_EX);
+    if (result == MYLITE_STORAGE_OK) {
+        result = recover_pending_journal_locked(file, filename);
+    }
+    if (result != MYLITE_STORAGE_OK) {
+        fclose(file);
+        return result;
     }
 
     *out_file = file;
