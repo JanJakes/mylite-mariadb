@@ -233,9 +233,11 @@ operations and CTAS projections from generated source columns. Ordinary
 secondary and unique indexes on scalar virtual or stored generated columns use
 the same MariaDB-generated key tuples as supported base-column indexes,
 including initial definitions and supported copy-rebuild add, drop, rename, and
-standalone index DDL paths. Generated primary keys, expression/hidden generated
-indexes, generated target CTAS definitions, BLOB/TEXT generated key payloads,
-and broader expression matrices remain planned.
+standalone index DDL paths. Bounded generated BLOB/TEXT prefix indexes declared
+in initial table definitions use the same generated-value and BLOB/TEXT prefix
+key-image paths. Generated primary keys, expression/hidden generated indexes,
+generated target CTAS definitions, full or oversized BLOB/TEXT generated key
+payloads, and broader expression matrices remain planned.
 The same create-time key-shape gate rejects FULLTEXT and SPATIAL indexes before
 catalog publication; MyLite must not publish a table definition whose index
 class cannot be maintained by the current storage format.

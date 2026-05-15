@@ -48,8 +48,10 @@ unindexed generated columns to ordinary secondary and unique indexes on scalar
 virtual or stored generated columns. The follow-up generated-column-index DDL
 slice extends the same key support to copy-rebuild add, drop, rename, and
 standalone index DDL. MyLite still does not claim expression indexes, generated
-primary keys, generated BLOB/TEXT key payloads, foreign-key interactions, or
-broad SQL-mode-sensitive expression coverage.
+primary keys, full or oversized generated BLOB/TEXT key payloads, foreign-key
+interactions, or broad SQL-mode-sensitive expression coverage. A follow-up
+generated BLOB/TEXT prefix slice covers bounded generated prefix key payloads
+declared in initial DDL.
 
 ## Design
 
@@ -76,7 +78,7 @@ indexes:
 - Generated primary keys.
 - Expression indexes backed by hidden generated keys.
 - FULLTEXT, SPATIAL, hash, vector, or long-hash indexes.
-- Generated BLOB/TEXT values or oversized generated key payloads.
+- Full or oversized generated BLOB/TEXT key payloads.
 - SQL-mode-sensitive expression matrix coverage.
 - Transaction rollback, savepoint rollback, or crash recovery beyond existing
   statement-checkpoint and append-only index behavior.
@@ -133,7 +135,8 @@ small handler capability refinement plus tests and docs.
 
 - MariaDB permits many generated expressions. This slice covers deterministic
   scalar expressions that fit existing key-size and row-format limits.
-- Generated-column indexes over BLOB/TEXT payloads may need the same bounded
-  prefix policy as ordinary BLOB/TEXT prefix indexes.
+- Generated-column indexes over BLOB/TEXT payloads use the same bounded prefix
+  policy as ordinary BLOB/TEXT prefix indexes in the follow-up initial-DDL
+  coverage.
 - Future transaction work must make generated index-entry maintenance
   transaction-aware instead of relying on append-only row-state filtering.

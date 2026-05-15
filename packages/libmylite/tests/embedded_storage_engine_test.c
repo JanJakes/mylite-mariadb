@@ -2636,9 +2636,17 @@ static void test_blob_text_prefix_indexes(void) {
     table_context payload_rows = {0};
     table_context deleted_payload_rows = {0};
     table_context standalone_body_rows = {0};
+    table_context generated_body_rows = {0};
+    table_context generated_payload_rows = {0};
+    table_context generated_old_label_rows = {0};
+    table_context generated_updated_label_rows = {0};
+    table_context generated_reused_label_rows = {0};
+    table_context generated_deleted_body_rows = {0};
     table_context reopened_body_rows = {0};
     table_context reopened_payload_rows = {0};
     table_context reopened_standalone_body_rows = {0};
+    table_context reopened_generated_body_rows = {0};
+    table_context reopened_generated_payload_rows = {0};
     char *errmsg = NULL;
 
     assert_exec_succeeds(db, "CREATE DATABASE app");
@@ -2663,7 +2671,20 @@ static void test_blob_text_prefix_indexes(void) {
         "payload LONGBLOB NULL"
         ") ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 2U);
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE generated_blob_prefix_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL, "
+        "generated_body TEXT AS (CONCAT(title, '-body')) STORED, "
+        "generated_label TEXT AS (CONCAT(title, '-label')) VIRTUAL, "
+        "generated_payload BLOB AS (UNHEX(HEX(CONCAT(title, '-bin')))) STORED, "
+        "KEY generated_body_prefix (generated_body(12)), "
+        "UNIQUE KEY generated_label_prefix (generated_label(10)), "
+        "KEY generated_payload_prefix (generated_payload(6))"
+        ") ENGINE=InnoDB"
+    );
+    assert_catalog_table_count(filename, "app", 3U);
 
     assert_exec_succeeds(
         db,
@@ -2748,6 +2769,94 @@ static void test_blob_text_prefix_indexes(void) {
 
     assert_exec_succeeds(
         db,
+        "INSERT INTO generated_blob_prefix_posts (id, title) VALUES "
+        "(1, 'alpha'), (2, 'beta')"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO generated_blob_prefix_posts (id, title) VALUES (3, 'alpha')"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_blob_prefix_posts FORCE INDEX (generated_body_prefix) "
+            "WHERE generated_body = 'alpha-body'",
+            row_callback,
+            &generated_body_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_body_rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_blob_prefix_posts FORCE INDEX (generated_payload_prefix) "
+            "WHERE generated_payload = UNHEX('616C7068612D62696E')",
+            row_callback,
+            &generated_payload_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_payload_rows.rows == 1);
+    assert_exec_succeeds(db, "UPDATE generated_blob_prefix_posts SET title = 'gamma' WHERE id = 1");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_blob_prefix_posts FORCE INDEX (generated_label_prefix) "
+            "WHERE generated_label = 'alpha-label'",
+            row_callback,
+            &generated_old_label_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_old_label_rows.rows == 0);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_blob_prefix_posts FORCE INDEX (generated_label_prefix) "
+            "WHERE generated_label = 'gamma-label'",
+            row_callback,
+            &generated_updated_label_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_updated_label_rows.rows == 1);
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO generated_blob_prefix_posts (id, title) VALUES (3, 'alpha')"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_blob_prefix_posts FORCE INDEX (generated_label_prefix) "
+            "WHERE generated_label = 'alpha-label'",
+            row_callback,
+            &generated_reused_label_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_reused_label_rows.rows == 1);
+    assert_exec_succeeds(db, "DELETE FROM generated_blob_prefix_posts WHERE id = 2");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_blob_prefix_posts FORCE INDEX (generated_body_prefix) "
+            "WHERE generated_body = 'beta-body'",
+            row_callback,
+            &generated_deleted_body_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_deleted_body_rows.rows == 0);
+
+    assert_exec_succeeds(
+        db,
         "INSERT INTO standalone_blob_prefix_posts VALUES "
         "(1, 'standalone alpha body', UNHEX('AABBCC01')), "
         "(2, 'standalone beta body', UNHEX('DDEEFF02'))"
@@ -2779,7 +2888,7 @@ static void test_blob_text_prefix_indexes(void) {
     );
     assert(errmsg == NULL);
     assert(standalone_body_rows.rows == 1);
-    assert_catalog_table_count(filename, "app", 2U);
+    assert_catalog_table_count(filename, "app", 3U);
     assert_catalog_table_metadata(filename, "app", "blob_prefix_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(
         filename,
@@ -2788,10 +2897,18 @@ static void test_blob_text_prefix_indexes(void) {
         "InnoDB",
         "MYLITE"
     );
+    assert_catalog_table_metadata(
+        filename,
+        "app",
+        "generated_blob_prefix_posts",
+        "InnoDB",
+        "MYLITE"
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
     db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "app");
     assert_exec_succeeds(db, "USE app");
     assert(
         mylite_exec(
@@ -2829,12 +2946,43 @@ static void test_blob_text_prefix_indexes(void) {
     );
     assert(errmsg == NULL);
     assert(reopened_standalone_body_rows.rows == 1);
-    assert_catalog_table_count(filename, "app", 2U);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_blob_prefix_posts FORCE INDEX (generated_body_prefix) "
+            "WHERE generated_body = 'gamma-body'",
+            row_callback,
+            &reopened_generated_body_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_generated_body_rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_blob_prefix_posts FORCE INDEX (generated_payload_prefix) "
+            "WHERE generated_payload = UNHEX('616C7068612D62696E')",
+            row_callback,
+            &reopened_generated_payload_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_generated_payload_rows.rows == 1);
+    assert_catalog_table_count(filename, "app", 3U);
     assert_catalog_table_metadata(filename, "app", "blob_prefix_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(
         filename,
         "app",
         "standalone_blob_prefix_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "app",
+        "generated_blob_prefix_posts",
         "InnoDB",
         "MYLITE"
     );

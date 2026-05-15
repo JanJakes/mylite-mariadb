@@ -60,8 +60,9 @@ MariaDB base: `mariadb-11.8.6`
 
 - Full-length unbounded BLOB/TEXT indexes that exceed the current single
   index-entry page capacity.
-- FULLTEXT, SPATIAL, vector, generated/expression, hash, or foreign-key
-  indexes.
+- FULLTEXT, SPATIAL, vector, expression/hidden generated, hash, or foreign-key
+  indexes. Bounded generated BLOB/TEXT prefix indexes declared in initial DDL
+  are covered by the generated BLOB/TEXT prefix slice.
 - Key-only reads, index condition pushdown, multi-range read optimization, or
   persistent B-tree pages.
 - Physical compaction of stale row, overflow, or index-entry pages.
@@ -169,6 +170,9 @@ Implemented in the MyLite handler:
 - Storage-engine smoke coverage checks declared and standalone BLOB/TEXT
   prefix indexes, unique prefix duplicate enforcement, update/delete filtering,
   close/reopen persistence, and durable-sidecar gates.
+- The generated BLOB/TEXT prefix slice composes this support with
+  generated-column index support for bounded generated prefix indexes declared
+  in initial table definitions.
 - Application-schema smoke now includes `meta_key(191)` on a wider
   `varchar(255)` and a bounded `text` prefix index.
 
