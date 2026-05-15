@@ -152,6 +152,7 @@ static void test_generated_primary_key_policy(void);
 static void test_autoincrement_key_policy(void);
 static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
+static void test_index_ddl_if_exists(void);
 static void test_blob_text_prefix_indexes(void);
 static void test_create_table_like(void);
 static void test_create_table_select(void);
@@ -295,6 +296,7 @@ int main(void) {
     test_autoincrement_key_policy();
     test_indexed_rows();
     test_standalone_index_ddl();
+    test_index_ddl_if_exists();
     test_blob_text_prefix_indexes();
     test_create_table_like();
     test_create_table_select();
@@ -3175,6 +3177,116 @@ static void test_standalone_index_ddl(void) {
         "generated_blob_index_ddl_posts",
         "InnoDB",
         "MYLITE"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_index_ddl_if_exists(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE index_if_exists");
+    assert_exec_succeeds(db, "USE index_if_exists");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE index_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(32) NOT NULL, "
+        "category VARCHAR(32) NOT NULL, "
+        "status VARCHAR(16) NOT NULL, "
+        "body LONGTEXT NULL, "
+        "UNIQUE KEY slug_key (slug), "
+        "KEY category_key (category), "
+        "KEY body_prefix (body(8))"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO index_posts VALUES "
+        "(1, 'alpha', 'news', 'open', 'alpha body'), "
+        "(2, 'beta', 'tech', 'closed', 'beta body'), "
+        "(3, 'gamma', 'news', 'open', 'gamma body')"
+    );
+    assert_catalog_table_count(filename, "index_if_exists", 1U);
+    assert_catalog_table_metadata(filename, "index_if_exists", "index_posts", "InnoDB", "MYLITE");
+
+    assert_exec_succeeds(
+        db,
+        "CREATE INDEX IF NOT EXISTS category_key "
+        "ON index_posts (category) ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "category_key");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM index_posts FORCE INDEX (category_key) WHERE category = 'news'",
+        "2"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE INDEX IF NOT EXISTS status_key ON index_posts (status) ALGORITHM=COPY"
+    );
+    assert_catalog_table_count(filename, "index_if_exists", 1U);
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM index_posts FORCE INDEX (status_key) WHERE status = 'open'",
+        "2"
+    );
+
+    assert_exec_succeeds(db, "DROP INDEX IF EXISTS missing_key ON index_posts");
+    assert_warning_message_contains(db, "missing_key");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM index_posts FORCE INDEX (slug_key) WHERE slug = 'beta'",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM index_posts FORCE INDEX (status_key) WHERE status = 'open'",
+        "2"
+    );
+
+    assert_exec_succeeds(db, "DROP INDEX IF EXISTS status_key ON index_posts");
+    assert_catalog_table_count(filename, "index_if_exists", 1U);
+    assert_exec_fails(
+        db,
+        "SELECT COUNT(*) FROM index_posts FORCE INDEX (status_key) WHERE status = 'open'"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM index_posts", "3");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM index_posts FORCE INDEX (body_prefix) WHERE body = 'gamma body'",
+        "3"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "index_if_exists");
+    assert_exec_succeeds(db, "USE index_if_exists");
+    assert_catalog_table_count(filename, "index_if_exists", 1U);
+    assert_catalog_table_metadata(filename, "index_if_exists", "index_posts", "InnoDB", "MYLITE");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM index_posts", "3");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM index_posts FORCE INDEX (category_key) WHERE category = 'news'",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM index_posts FORCE INDEX (slug_key) WHERE slug = 'alpha'",
+        "1"
+    );
+    assert_exec_fails(
+        db,
+        "SELECT COUNT(*) FROM index_posts FORCE INDEX (status_key) WHERE status = 'open'"
     );
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");

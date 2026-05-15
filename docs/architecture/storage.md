@@ -79,9 +79,10 @@ metadata preserved. Online `ALTER`, in-place `ALTER`, transaction-aware index
 maintenance, free-space reclamation, and unsupported index classes still reject
 or remain planned until those slices define the paths. Standalone
 `CREATE INDEX` and `DROP INDEX` use MariaDB's ALTER-backed DDL path for
-supported copy-rebuild index additions and drops. File-backed opens answer
-MariaDB SQL-layer schema and table discovery from MyLite catalog namespace
-records when no transient runtime schema directory exists.
+supported copy-rebuild index additions and drops, including representative
+`CREATE INDEX IF NOT EXISTS` and `DROP INDEX IF EXISTS` skips. File-backed
+opens answer MariaDB SQL-layer schema and table discovery from MyLite catalog
+namespace records when no transient runtime schema directory exists.
 The SQL layer forces routed MyLite `ALTER TABLE` statements onto the copy
 algorithm before MariaDB's in-place ALTER preparation can write temporary
 `.frm` files under schema directories; MyLite does not support in-place ALTER
@@ -223,11 +224,12 @@ engine requests on engine rebuilds.
 Supported key additions on copy `ALTER` rebuild through the same table-copy
 path and publish rebuilt rows with matching index-entry pages. Representative
 default-algorithm copy ALTER paths after catalog-only reopen cover column
-add/drop/rename, ALTER-backed index add/drop, standalone index create/drop, and
-autoincrement metadata updates. `LOCK=NONE` and in-place/instant/no-copy ALTER
-requests are explicitly rejected until MyLite has online DDL and lock
-integration. Unsupported index rebuilds and transactional DDL rollback remain
-planned until MyLite has locking and recovery.
+add/drop/rename, ALTER-backed index add/drop, standalone index create/drop
+including representative existence-option skips, and autoincrement metadata
+updates. `LOCK=NONE` and in-place/instant/no-copy ALTER requests are explicitly
+rejected until MyLite has online DDL and lock integration. Unsupported index
+rebuilds and transactional DDL rollback remain planned until MyLite has
+locking and recovery.
 `CREATE TABLE ... LIKE` clones supported routed source table definitions through
 MariaDB's normal LIKE path, does not copy rows, resets target autoincrement
 state, and records the source requested engine with effective `MYLITE` when the
