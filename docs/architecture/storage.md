@@ -219,6 +219,12 @@ target columns. Duplicate-key CTAS abort follows MariaDB's target-drop path and
 removes target catalog metadata; the current statement checkpoint restores
 pre-statement MyLite header/catalog visibility for covered failed file-backed
 statements.
+Representative user temporary `CREATE TABLE ... LIKE` and
+`CREATE TABLE ... SELECT` paths use MariaDB's temporary-table lifecycle while
+keeping SQL-visible temporary names out of the durable user schema catalog.
+Storage-smoke coverage verifies the temporary tables are usable during the
+session, are cleaned up after `DROP TEMPORARY TABLE`, and are gone after
+close/reopen.
 Basic column-level and named table-level CHECK constraints survive close/reopen
 because they are stored in the catalog-backed table-definition image. MariaDB
 enforces those checks before insert/update handler calls unless

@@ -154,6 +154,7 @@ static void test_standalone_index_ddl(void);
 static void test_blob_text_prefix_indexes(void);
 static void test_create_table_like(void);
 static void test_create_table_select(void);
+static void test_temporary_table_catalog_isolation(void);
 static void test_constraint_generated_dump_fixture(void);
 static void test_show_create_table_round_trip(void);
 static void test_constraint_generated_expression_matrix(void);
@@ -288,6 +289,7 @@ int main(void) {
     test_blob_text_prefix_indexes();
     test_create_table_like();
     test_create_table_select();
+    test_temporary_table_catalog_isolation();
     test_constraint_generated_dump_fixture();
     test_show_create_table_round_trip();
     test_constraint_generated_expression_matrix();
@@ -4032,6 +4034,101 @@ static void test_create_table_select(void) {
     );
     assert(errmsg == NULL);
     assert(reopened_checked_rows.rows == 1);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_temporary_table_catalog_isolation(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE temp_isolation");
+    assert_exec_succeeds(db, "USE temp_isolation");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE source_posts ("
+        "id INT NOT NULL AUTO_INCREMENT, "
+        "slug VARCHAR(32) NOT NULL, "
+        "body LONGTEXT NULL, "
+        "PRIMARY KEY (id), "
+        "UNIQUE KEY slug_key (slug)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO source_posts (slug, body) VALUES "
+        "('source-alpha', 'source body one'), "
+        "('source-beta', 'source body two')"
+    );
+    assert_catalog_table_count(filename, "temp_isolation", 1U);
+    assert_catalog_table_count(filename, "tmp", 0U);
+
+    assert_exec_succeeds(db, "CREATE TEMPORARY TABLE temp_like_posts LIKE source_posts");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO temp_like_posts (slug, body) VALUES "
+        "('temp-alpha', 'temporary like body')"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM temp_like_posts", "1");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM temp_like_posts FORCE INDEX (slug_key) WHERE slug = 'temp-alpha'",
+        "1"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "temp_isolation", "temp_like_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_catalog_table_count(filename, "temp_isolation", 1U);
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TEMPORARY TABLE temp_select_posts AS "
+        "SELECT id, slug, body FROM source_posts WHERE id = 2"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM temp_select_posts", "1");
+    assert_query_single_value(db, "SELECT slug FROM temp_select_posts WHERE id = 2", "source-beta");
+    assert(
+        mylite_storage_table_exists(filename, "temp_isolation", "temp_select_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_catalog_table_count(filename, "temp_isolation", 1U);
+
+    assert_exec_succeeds(db, "DROP TEMPORARY TABLE temp_like_posts, temp_select_posts");
+    assert_catalog_table_count(filename, "temp_isolation", 1U);
+    assert_catalog_table_count(filename, "tmp", 0U);
+
+    assert_exec_succeeds(db, "CREATE TEMPORARY TABLE temp_close_posts LIKE source_posts");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO temp_close_posts (slug, body) VALUES "
+        "('temp-close', 'temporary close body')"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM temp_close_posts", "1");
+    assert(
+        mylite_storage_table_exists(filename, "temp_isolation", "temp_close_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_catalog_table_count(filename, "temp_isolation", 1U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_catalog_table_count(filename, "tmp", 0U);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "temp_isolation");
+    assert_exec_succeeds(db, "USE temp_isolation");
+    assert_catalog_table_count(filename, "temp_isolation", 1U);
+    assert_catalog_table_metadata(filename, "temp_isolation", "source_posts", "InnoDB", "MYLITE");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM source_posts", "2");
+    assert_exec_fails(db, "SELECT COUNT(*) FROM temp_like_posts");
+    assert_exec_fails(db, "SELECT COUNT(*) FROM temp_select_posts");
+    assert_catalog_table_count(filename, "tmp", 0U);
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 

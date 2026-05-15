@@ -53,8 +53,9 @@ MariaDB base: `mariadb-11.8.6`
 
 - `CREATE TABLE ... SELECT`, which has separate row-copy and statement rollback
   behavior.
-- Temporary `CREATE TEMPORARY TABLE ... LIKE` and `CREATE OR REPLACE TABLE ...
-  LIKE` lock-table edge cases.
+- Broader temporary-table edge cases beyond the representative catalog
+  isolation covered by `temporary-table-catalog-isolation`.
+- `CREATE OR REPLACE TABLE ... LIKE` lock-table edge cases.
 - Cloning views, information-schema tables, partitions, foreign keys, triggers,
   or unsupported index classes.
 - SQL rollback, savepoints, or transaction-aware DDL rollback.
@@ -79,8 +80,10 @@ only routing metadata and single-file publication.
 ## Compatibility Impact
 
 `CREATE TABLE ... LIKE` moves from planned to partial for supported routed base
-tables. It remains partial because unsupported source objects, temporary-table
-variants, foreign keys, partitions, and SQL rollback need separate slices.
+tables. Representative temporary-table catalog isolation is covered by a
+follow-up slice. It remains partial because unsupported source objects, broader
+temporary-table variants, foreign keys, partitions, and SQL rollback need
+separate slices.
 
 ## DDL Metadata Routing Impact
 
@@ -147,12 +150,15 @@ Implemented in the MyLite handler and storage-engine smoke:
   target, reset target autoincrement, cloned unique and BLOB/TEXT prefix
   indexes, duplicate-key checks, forced-index reads, close/reopen metadata, and
   durable-sidecar gates.
+- The `temporary-table-catalog-isolation` slice covers representative
+  `CREATE TEMPORARY TABLE ... LIKE` behavior and verifies the SQL-visible
+  temporary name does not become a durable user-schema catalog table.
 
 ## Risks And Open Questions
 
 - `CREATE TABLE ... LIKE` has separate temporary-table and `OR REPLACE`
-  branches in MariaDB. This slice keeps those outside the support claim until
-  lock-table and temporary lifecycle coverage exists.
+  branches in MariaDB. Representative temporary catalog isolation is covered,
+  but broader lock-table and temporary lifecycle matrices remain.
 - Source-table selection in the MyLite handler must match MariaDB's `LEX`
   layout for `CREATE TABLE ... LIKE`; using the target table would silently
   store the wrong requested-engine metadata.

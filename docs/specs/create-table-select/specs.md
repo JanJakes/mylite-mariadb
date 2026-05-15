@@ -56,8 +56,10 @@ MariaDB base: `mariadb-11.8.6`
 
 - Physical rollback of row, overflow, index-entry, or autoincrement pages
   written before failed CTAS abort.
-- `CREATE OR REPLACE ... SELECT`, `CREATE TEMPORARY TABLE ... SELECT`, `IGNORE`
-  / `REPLACE` CTAS, and lock-table edge cases.
+- `CREATE OR REPLACE ... SELECT`, `IGNORE` / `REPLACE` CTAS, and lock-table
+  edge cases.
+- Broader temporary CTAS edge cases beyond the representative catalog
+  isolation covered by `temporary-table-catalog-isolation`.
 - Generated-column definitions on CTAS targets, CTAS from views, information
   schema, foreign keys, partitions, unsupported indexes, or server-only
   sources.
@@ -86,11 +88,11 @@ mid-statement failure remains a separate transaction/DDL cleanup slice.
 ## Compatibility Impact
 
 `CREATE TABLE ... SELECT` moves from planned to partial for supported routed
-table shapes. Explicit CHECK-constrained targets are covered by a follow-up
-slice. It remains partial because physical rollback of pages written before
-failed CTAS abort, temporary-table CTAS, `OR REPLACE`, `IGNORE` / `REPLACE`,
-foreign keys, partitions, unsupported source objects, and SQL rollback remain
-planned.
+table shapes. Explicit CHECK-constrained targets and representative temporary
+CTAS catalog isolation are covered by follow-up slices. It remains partial
+because physical rollback of pages written before failed CTAS abort,
+`OR REPLACE`, `IGNORE` / `REPLACE`, broader temporary-table CTAS, foreign keys,
+partitions, unsupported source objects, and SQL rollback remain planned.
 
 ## DDL Metadata Routing Impact
 
@@ -168,6 +170,9 @@ entry points:
   advancement from copied rows, generated-source projections, explicit
   generated and CHECK-constrained target definitions, forced-index reads,
   close/reopen metadata and rows, and durable-sidecar gates.
+- The `temporary-table-catalog-isolation` slice covers representative
+  `CREATE TEMPORARY TABLE ... AS SELECT` behavior and verifies the SQL-visible
+  temporary name does not become a durable user-schema catalog table.
 
 ## Risks And Open Questions
 
