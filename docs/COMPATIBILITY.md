@@ -19,10 +19,10 @@ Compatibility evidence is grouped by the local harness documented in
 groups cover public API validation, storage, crash recovery, locking, embedded
 lifecycle, direct SQL, prepared statements, column metadata, large value reads,
 warnings, MariaDB baseline SQL API comparison, storage-engine smoke, sidecar
-gates, routed DDL/DML including `CREATE TABLE ... LIKE` and
-`CREATE TABLE ... SELECT`, initial application-schema smoke, and server-surface
-policy. MariaDB MTR comparison suites and broader application-schema suites
-remain planned.
+gates, routed DDL/DML including schema namespaces, `CREATE TABLE ... LIKE`,
+and `CREATE TABLE ... SELECT`, initial application-schema smoke, and
+server-surface policy. MariaDB MTR comparison suites and broader
+application-schema suites remain planned.
 
 ## Baseline
 
@@ -69,7 +69,7 @@ remain planned.
 | Persistent InnoDB sidecars | ➖&nbsp;Out&nbsp;of&nbsp;scope | No `.ibd`, redo, undo, or independent tablespace files; metadata DDL smoke tests gate against known InnoDB sidecar names |
 | Persistent MyISAM sidecars | ➖&nbsp;Out&nbsp;of&nbsp;scope | No `.MYD` or `.MYI` durable table files; metadata DDL smoke tests gate against those sidecars |
 | Persistent Aria sidecars | ➖&nbsp;Out&nbsp;of&nbsp;scope | No `.MAI`, `.MAD`, `aria_log.*`, or Aria control state as application storage; metadata DDL smoke tests gate against those names |
-| MyLite-owned companions | 🟡&nbsp;Partial | Bootstrap uses a MyLite-owned temporary MariaDB runtime directory and requires it to be empty after final close in storage-engine smoke tests |
+| MyLite-owned companions | 🟡&nbsp;Partial | Bootstrap uses a MyLite-owned temporary MariaDB runtime directory, rehydrates transient schema directories from catalog namespace records on file-backed open, and requires the runtime directory to be empty after final close in storage-engine smoke tests |
 
 ## SQL Surface
 
@@ -84,7 +84,7 @@ remain planned.
 | Standalone `CREATE INDEX` / `DROP INDEX` | 🟡&nbsp;Partial | Route supported copy-rebuild index additions and drops through MariaDB DDL and MyLite catalog/index updates; online DDL, unsupported index classes, SQL rollback, and foreign keys remain planned |
 | `CREATE TABLE ... LIKE` | 🟡&nbsp;Partial | Clone supported MyLite-routed table definitions without copying source rows, preserve source requested-engine metadata when no explicit engine is specified, reset target autoincrement state, and cover cloned supported indexes before and after close/reopen; temporary-table variants, unsupported source objects, foreign keys, partitions, and SQL rollback remain planned |
 | `CREATE TABLE ... SELECT` | 🟡&nbsp;Partial | Successful supported CTAS creates MyLite catalog metadata and inserts SELECT result rows through the normal handler write path, including no-engine and explicit `ENGINE=InnoDB` targets, BLOB/TEXT payloads, autoincrement state, supported indexes, close/reopen visibility, and sidecar gates; duplicate-key CTAS abort removes target catalog metadata, while physical page rollback, temporary CTAS, `OR REPLACE`, `IGNORE` / `REPLACE`, unsupported source objects, foreign keys, partitions, and SQL rollback remain planned |
-| Schemas/databases | ⚪&nbsp;Planned | Catalog namespaces, not datadir directories |
+| Schemas/databases | 🟡&nbsp;Partial | Direct `CREATE DATABASE` / `CREATE SCHEMA` stores catalog namespace records, file-backed reopen rehydrates transient runtime directories from the catalog so `USE`, `SHOW DATABASES`, and table resolution work without durable datadir directories, and `DROP DATABASE` / `DROP SCHEMA` removes covered catalog metadata; schema options, prepared DDL sync, and final SQL-layer database hooks remain planned |
 | Views, triggers, and routines | ⚪&nbsp;Planned | Catalog-backed persistent objects after table DDL is stable |
 | Events and scheduler | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server scheduler is not part of the core embedded profile; event activation and event DDL are rejected by MyLite SQL policy |
 | Users, grants, and password auth | ➖&nbsp;Out&nbsp;of&nbsp;scope | Local embedded file ownership replaces server account management; account SQL is rejected by MyLite SQL policy |

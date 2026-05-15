@@ -48,6 +48,7 @@ typedef struct lock_child {
 
 static void test_capabilities(void);
 static void test_create_empty_database(void);
+static void test_schema_records(void);
 static void test_missing_file(void);
 static void test_rejects_bad_magic(void);
 static void test_rejects_bad_checksum(void);
@@ -160,6 +161,7 @@ static unsigned long long checksum_test_page(const unsigned char *page, size_t c
 static void flip_file_byte(const char *path, long offset);
 static void write_header_format_version(const char *path, unsigned value);
 static int collect_table(void *ctx, const char *schema_name, const char *table_name);
+static int collect_schema(void *ctx, const char *schema_name);
 
 typedef struct table_list_capture {
     const char *schema_name;
@@ -167,9 +169,16 @@ typedef struct table_list_capture {
     unsigned count;
 } table_list_capture;
 
+typedef struct schema_list_capture {
+    const char *app_schema;
+    const char *blog_schema;
+    unsigned count;
+} schema_list_capture;
+
 int main(void) {
     test_capabilities();
     test_create_empty_database();
+    test_schema_records();
     test_missing_file();
     test_rejects_bad_magic();
     test_rejects_bad_checksum();
@@ -217,6 +226,7 @@ static void test_capabilities(void) {
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_RECOVERY_JOURNAL) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_FILE_LOCKS) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_TRUNCATE) != 0U);
+    assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_SCHEMAS) != 0U);
 }
 
 static void test_create_empty_database(void) {
@@ -240,6 +250,55 @@ static void test_create_empty_database(void) {
         file_size(filename) ==
         (long long)(MYLITE_STORAGE_FORMAT_PAGE_SIZE * MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT)
     );
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_schema_records(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "schemas.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "blog",
+        .table_name = "posts",
+        .requested_engine_name = "InnoDB",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    schema_list_capture schemas = {
+        .app_schema = "app",
+        .blog_schema = "blog",
+    };
+    table_list_capture tables = {
+        .schema_name = "blog",
+        .table_name = "posts",
+    };
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_schema_exists(filename, "app") == MYLITE_STORAGE_NOTFOUND);
+    assert(mylite_storage_store_schema(filename, "app") == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_schema(filename, "app") == MYLITE_STORAGE_OK);
+    assert(mylite_storage_schema_exists(filename, "app") == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_schema_exists(filename, "blog") == MYLITE_STORAGE_OK);
+    assert(mylite_storage_list_schemas(filename, collect_schema, &schemas) == MYLITE_STORAGE_OK);
+    assert(schemas.count == 2U);
+
+    assert(mylite_storage_drop_schema(filename, "app") == MYLITE_STORAGE_OK);
+    assert(mylite_storage_schema_exists(filename, "app") == MYLITE_STORAGE_NOTFOUND);
+    assert(mylite_storage_schema_exists(filename, "blog") == MYLITE_STORAGE_OK);
+    assert(mylite_storage_drop_schema(filename, "blog") == MYLITE_STORAGE_OK);
+    assert(mylite_storage_schema_exists(filename, "blog") == MYLITE_STORAGE_NOTFOUND);
+    assert(
+        mylite_storage_list_tables(filename, "blog", collect_table, &tables) == MYLITE_STORAGE_OK
+    );
+    assert(tables.count == 0U);
+    assert(mylite_storage_drop_schema(filename, "blog") == MYLITE_STORAGE_NOTFOUND);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
@@ -2132,6 +2191,16 @@ static int collect_table(void *ctx, const char *schema_name, const char *table_n
     const char *expected_table_name = capture->table_name == NULL ? "posts" : capture->table_name;
     assert(strcmp(schema_name, expected_schema_name) == 0);
     assert(strcmp(table_name, expected_table_name) == 0);
+    ++capture->count;
+    return 0;
+}
+
+static int collect_schema(void *ctx, const char *schema_name) {
+    schema_list_capture *capture = (schema_list_capture *)ctx;
+    assert(
+        strcmp(schema_name, capture->app_schema) == 0 ||
+        strcmp(schema_name, capture->blog_schema) == 0
+    );
     ++capture->count;
     return 0;
 }

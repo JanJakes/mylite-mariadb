@@ -120,10 +120,10 @@ Measured on 2026-05-15 with the same host and toolchain as the default profile:
 | Archive size | 32,165,736 bytes / 30.68 MiB |
 | Archive members | 693 |
 
-This smoke path now covers static plugin registration, current routed
-DDL/DML, sidecar gates, application-schema smoke, and representative
-server-surface policy. It is still opt-in so the default embedded profile
-remains separate from the MyLite handler build.
+This smoke path now covers static plugin registration, current routed schema
+namespaces and DDL/DML, sidecar gates, application-schema smoke, and
+representative server-surface policy. It is still opt-in so the default
+embedded profile remains separate from the MyLite handler build.
 
 ## Size Report
 
@@ -143,18 +143,18 @@ outputs:
 | Artifact | Size | Stripped Size | Members | Global Symbols |
 | --- | ---: | ---: | ---: | ---: |
 | MariaDB embedded archive | 32,048,256 bytes / 30.56 MiB | n/a | 691 | n/a |
-| MariaDB storage-smoke archive | 32,165,736 bytes / 30.68 MiB | n/a | 693 | n/a |
-| Embedded open-close smoke | 19,582,608 bytes / 18.68 MiB | 17,642,448 bytes / 16.83 MiB | n/a | 16,840 |
-| Embedded exec smoke | 19,582,440 bytes / 18.68 MiB | 17,642,296 bytes / 16.83 MiB | n/a | 16,840 |
-| Embedded statement smoke | 19,582,432 bytes / 18.68 MiB | 17,642,240 bytes / 16.82 MiB | n/a | 16,840 |
-| Embedded warning smoke | 19,582,384 bytes / 18.68 MiB | 17,642,240 bytes / 16.82 MiB | n/a | 16,840 |
-| Embedded comparison smoke | 19,662,880 bytes / 18.75 MiB | 17,676,448 bytes / 16.86 MiB | n/a | 16,842 |
-| Storage-smoke open-close smoke | 19,607,104 bytes / 18.70 MiB | 17,659,488 bytes / 16.84 MiB | n/a | 16,840 |
-| Storage-smoke exec smoke | 19,606,936 bytes / 18.70 MiB | 17,659,320 bytes / 16.84 MiB | n/a | 16,840 |
-| Storage-smoke statement smoke | 19,623,456 bytes / 18.71 MiB | 17,675,792 bytes / 16.86 MiB | n/a | 16,840 |
-| Storage-smoke warning smoke | 19,606,880 bytes / 18.70 MiB | 17,659,280 bytes / 16.84 MiB | n/a | 16,840 |
-| Storage-smoke comparison smoke | 19,683,520 bytes / 18.77 MiB | 17,693,392 bytes / 16.87 MiB | n/a | 16,842 |
-| Storage-engine smoke | 19,674,112 bytes / 18.76 MiB | 17,725,376 bytes / 16.90 MiB | n/a | 16,840 |
+| MariaDB storage-smoke archive | 32,172,024 bytes / 30.68 MiB | n/a | 693 | n/a |
+| Embedded open-close smoke | 19,583,248 bytes / 18.68 MiB | 17,642,464 bytes / 16.83 MiB | n/a | 16,840 |
+| Embedded exec smoke | 19,583,096 bytes / 18.68 MiB | 17,642,328 bytes / 16.83 MiB | n/a | 16,840 |
+| Embedded statement smoke | 19,599,600 bytes / 18.69 MiB | 17,658,784 bytes / 16.84 MiB | n/a | 16,840 |
+| Embedded warning smoke | 19,583,024 bytes / 18.68 MiB | 17,642,272 bytes / 16.82 MiB | n/a | 16,840 |
+| Embedded comparison smoke | 19,680,048 bytes / 18.77 MiB | 17,692,992 bytes / 16.87 MiB | n/a | 16,842 |
+| Storage-smoke open-close smoke | 19,630,608 bytes / 18.72 MiB | 17,676,080 bytes / 16.86 MiB | n/a | 16,840 |
+| Storage-smoke exec smoke | 19,630,440 bytes / 18.72 MiB | 17,675,928 bytes / 16.86 MiB | n/a | 16,840 |
+| Storage-smoke statement smoke | 19,646,960 bytes / 18.74 MiB | 17,692,400 bytes / 16.87 MiB | n/a | 16,840 |
+| Storage-smoke warning smoke | 19,630,384 bytes / 18.72 MiB | 17,675,872 bytes / 16.86 MiB | n/a | 16,840 |
+| Storage-smoke comparison smoke | 19,704,928 bytes / 18.79 MiB | 17,709,952 bytes / 16.89 MiB | n/a | 16,842 |
+| Storage-engine smoke | 19,697,696 bytes / 18.79 MiB | 17,741,984 bytes / 16.92 MiB | n/a | 16,840 |
 
 ## Offline Build Caveat
 

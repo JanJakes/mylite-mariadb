@@ -19,6 +19,12 @@ typedef struct table_context {
     int rows;
 } table_context;
 
+typedef struct schema_context {
+    int rows;
+    int found_app;
+    int found_empty_blog;
+} schema_context;
+
 typedef struct post_row_context {
     int rows;
     int found_draft;
@@ -85,6 +91,7 @@ typedef struct catalog_table_context {
 
 static void test_show_engines_reports_mylite(void);
 static void test_memory_database_has_empty_mylite_discovery(void);
+static void test_schema_namespaces(void);
 static void test_create_table_persists_catalog_metadata(void);
 static void test_alter_table_rebuilds_keyless_rows(void);
 static void test_indexed_rows(void);
@@ -109,6 +116,7 @@ static void assert_catalog_table_metadata(
     const char *effective_engine_name
 );
 static int engine_callback(void *ctx, int column_count, char **values, char **column_names);
+static int schema_callback(void *ctx, int column_count, char **values, char **column_names);
 static int table_callback(void *ctx, int column_count, char **values, char **column_names);
 static int row_callback(void *ctx, int column_count, char **values, char **column_names);
 static int post_row_callback(void *ctx, int column_count, char **values, char **column_names);
@@ -140,6 +148,7 @@ static void remove_tree_entry(const char *path);
 int main(void) {
     test_show_engines_reports_mylite();
     test_memory_database_has_empty_mylite_discovery();
+    test_schema_namespaces();
     test_create_table_persists_catalog_metadata();
     test_alter_table_rebuilds_keyless_rows();
     test_indexed_rows();
@@ -188,6 +197,58 @@ static void test_memory_database_has_empty_mylite_discovery(void) {
     );
 
     assert(mylite_close(db) == MYLITE_OK);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_schema_namespaces(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    schema_context schemas = {0};
+    table_context tables = {0};
+    table_context rows = {0};
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "CREATE DATABASE empty_blog");
+    assert(mylite_storage_schema_exists(filename, "app") == MYLITE_STORAGE_OK);
+    assert(mylite_storage_schema_exists(filename, "empty_blog") == MYLITE_STORAGE_OK);
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(db, "CREATE TABLE posts (id INT PRIMARY KEY, title VARCHAR(64))");
+    assert_exec_succeeds(db, "INSERT INTO posts VALUES (1, 'first')");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE app");
+    assert(mylite_exec(db, "SHOW DATABASES", schema_callback, &schemas, &errmsg) == MYLITE_OK);
+    assert(errmsg == NULL);
+    assert(schemas.found_app);
+    assert(schemas.found_empty_blog);
+    assert(schemas.rows == 2);
+    assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
+    assert(errmsg == NULL);
+    assert(tables.rows == 1);
+    assert(mylite_exec(db, "SELECT id FROM posts", row_callback, &rows, &errmsg) == MYLITE_OK);
+    assert(errmsg == NULL);
+    assert(rows.rows == 1);
+    assert_exec_succeeds(db, "USE empty_blog");
+    tables = (table_context){0};
+    assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
+    assert(errmsg == NULL);
+    assert(tables.rows == 0);
+
+    assert_exec_succeeds(db, "DROP DATABASE empty_blog");
+    assert(mylite_storage_schema_exists(filename, "empty_blog") == MYLITE_STORAGE_NOTFOUND);
+    assert_exec_fails(db, "USE empty_blog");
+    assert_exec_succeeds(db, "DROP DATABASE app");
+    assert(mylite_storage_schema_exists(filename, "app") == MYLITE_STORAGE_NOTFOUND);
+    assert(mylite_storage_table_exists(filename, "app", "posts") == MYLITE_STORAGE_NOTFOUND);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
     remove_tree(root);
     free(root);
 }
@@ -437,7 +498,6 @@ static void test_create_table_persists_catalog_metadata(void) {
     mutable_rows = (mutable_row_context){0};
     auto_rows = (auto_row_context){0};
     db = open_database_with_filename(root, filename);
-    assert_exec_succeeds(db, "CREATE DATABASE app");
     assert_exec_succeeds(db, "USE app");
     assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
@@ -618,7 +678,6 @@ static void test_alter_table_rebuilds_keyless_rows(void) {
     rows = (alter_row_context){0};
     tables = (table_context){0};
     db = open_database_with_filename(root, filename);
-    assert_exec_succeeds(db, "CREATE DATABASE app");
     assert_exec_succeeds(db, "USE app");
     assert(
         mylite_exec(
@@ -808,7 +867,6 @@ static void test_indexed_rows(void) {
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
     db = open_database_with_filename(root, filename);
-    assert_exec_succeeds(db, "CREATE DATABASE app");
     assert_exec_succeeds(db, "USE app");
     assert(
         mylite_exec(
@@ -937,7 +995,6 @@ static void test_standalone_index_ddl(void) {
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
     db = open_database_with_filename(root, filename);
-    assert_exec_succeeds(db, "CREATE DATABASE app");
     assert_exec_succeeds(db, "USE app");
     assert(
         mylite_exec(
@@ -1137,7 +1194,6 @@ static void test_blob_text_prefix_indexes(void) {
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
     db = open_database_with_filename(root, filename);
-    assert_exec_succeeds(db, "CREATE DATABASE app");
     assert_exec_succeeds(db, "USE app");
     assert(
         mylite_exec(
@@ -1313,7 +1369,6 @@ static void test_create_table_like(void) {
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
     db = open_database_with_filename(root, filename);
-    assert_exec_succeeds(db, "CREATE DATABASE app");
     assert_exec_succeeds(db, "USE app");
     assert_catalog_table_count(filename, "app", 2U);
     assert_catalog_table_metadata(filename, "app", "like_source_posts", "InnoDB", "MYLITE");
@@ -1523,7 +1578,6 @@ static void test_create_table_select(void) {
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
     db = open_database_with_filename(root, filename);
-    assert_exec_succeeds(db, "CREATE DATABASE app");
     assert_exec_succeeds(db, "USE app");
     assert_catalog_table_count(filename, "app", 3U);
     assert_catalog_table_metadata(filename, "app", "ctas_source_posts", "InnoDB", "MYLITE");
@@ -1685,7 +1739,6 @@ static void test_truncate_table_lifecycle(void) {
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
     db = open_database_with_filename(root, filename);
-    assert_exec_succeeds(db, "CREATE DATABASE app");
     assert_exec_succeeds(db, "USE app");
     assert(
         mylite_exec(
@@ -1930,7 +1983,6 @@ static void test_wordpress_shaped_schema(void) {
         .expected_value = "42",
     };
     db = open_database_with_filename(root, filename);
-    assert_exec_succeeds(db, "CREATE DATABASE app");
     assert_exec_succeeds(db, "USE app");
     assert_catalog_table_count(filename, "app", 3U);
     assert_catalog_table_metadata(filename, "app", "wp_options", "InnoDB", "MYLITE");
@@ -2075,6 +2127,24 @@ static int engine_callback(void *ctx, int column_count, char **values, char **co
         engine_ctx->supported_mylite = 1;
     }
 
+    return 0;
+}
+
+static int schema_callback(void *ctx, int column_count, char **values, char **column_names) {
+    schema_context *schema_ctx = (schema_context *)ctx;
+    (void)column_names;
+
+    assert(column_count == 1);
+    if (values[0] == NULL) {
+        return 0;
+    }
+    if (strcmp(values[0], "app") == 0) {
+        schema_ctx->found_app = 1;
+        ++schema_ctx->rows;
+    } else if (strcmp(values[0], "empty_blog") == 0) {
+        schema_ctx->found_empty_blog = 1;
+        ++schema_ctx->rows;
+    }
     return 0;
 }
 

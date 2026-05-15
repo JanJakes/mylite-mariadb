@@ -105,6 +105,11 @@ typedef struct mylite_storage_definition_lengths {
     size_t effective_engine_name_size;
 } mylite_storage_definition_lengths;
 
+typedef struct mylite_storage_schema_list {
+    char **names;
+    size_t count;
+} mylite_storage_schema_list;
+
 typedef struct mylite_storage_table_identity {
     const char *schema_name;
     const char *table_name;
@@ -210,6 +215,7 @@ static mylite_storage_result validate_table_definition(
     const mylite_storage_table_definition *definition,
     mylite_storage_definition_lengths *out_lengths
 );
+static mylite_storage_result validate_schema_name(const char *schema_name, size_t *out_length);
 static mylite_storage_result validate_index_entries(
     const mylite_storage_index_entry *index_entries,
     size_t index_entry_count
@@ -227,6 +233,11 @@ static mylite_storage_result find_table_record(
     const char *table_name,
     mylite_storage_catalog_entry *out_entry
 );
+static mylite_storage_result find_schema_record(
+    const unsigned char *catalog_page,
+    const char *schema_name
+);
+static int catalog_has_schema(const unsigned char *catalog_page, const char *schema_name);
 static mylite_storage_result read_table_metadata_from_record(
     const unsigned char *record,
     mylite_storage_table_metadata *out_metadata
@@ -235,6 +246,10 @@ static mylite_storage_result remove_table_record(
     unsigned char *catalog_page,
     const char *schema_name,
     const char *table_name
+);
+static mylite_storage_result remove_schema_records(
+    unsigned char *catalog_page,
+    const char *schema_name
 );
 static mylite_storage_result rename_table_record(
     unsigned char *catalog_page,
@@ -246,8 +261,16 @@ static int record_matches_table(
     const char *schema_name,
     const char *table_name
 );
+static int record_is_table(const unsigned char *record);
+static int record_is_schema(const unsigned char *record);
+static int record_matches_schema(const unsigned char *record, const char *schema_name);
 static size_t record_field_offset(const unsigned char *record, unsigned field_index);
 static size_t record_field_size(const unsigned char *record, unsigned field_index);
+static mylite_storage_result append_schema_record(
+    unsigned char *catalog_page,
+    const char *schema_name,
+    size_t schema_name_size
+);
 static mylite_storage_result append_table_record(
     unsigned char *catalog_page,
     const mylite_storage_table_definition *definition,
@@ -476,6 +499,21 @@ static mylite_storage_result read_blob_page(
     unsigned expected_page_type
 );
 static char *copy_record_field(const unsigned char *record, unsigned field_index);
+static mylite_storage_result list_catalog_schemas(
+    const unsigned char *catalog_page,
+    mylite_storage_schema_callback callback,
+    void *ctx
+);
+static mylite_storage_result collect_schema_name(
+    mylite_storage_schema_list *list,
+    const unsigned char *record
+);
+static int schema_list_contains(
+    const mylite_storage_schema_list *list,
+    const char *schema_name,
+    size_t schema_name_size
+);
+static void free_schema_list(mylite_storage_schema_list *list);
 static mylite_storage_result list_catalog_tables(
     const unsigned char *catalog_page,
     const char *schema_name,
@@ -511,7 +549,7 @@ mylite_storage_capabilities mylite_storage_get_capabilities(void) {
                  MYLITE_STORAGE_CAPABILITY_BLOB_TEXT_ROWS |
                  MYLITE_STORAGE_CAPABILITY_ROW_LIFECYCLE | MYLITE_STORAGE_CAPABILITY_INDEX_ENTRIES |
                  MYLITE_STORAGE_CAPABILITY_RECOVERY_JOURNAL | MYLITE_STORAGE_CAPABILITY_FILE_LOCKS |
-                 MYLITE_STORAGE_CAPABILITY_TRUNCATE,
+                 MYLITE_STORAGE_CAPABILITY_TRUNCATE | MYLITE_STORAGE_CAPABILITY_SCHEMAS,
     };
 
     return capabilities;
@@ -682,6 +720,175 @@ mylite_storage_result mylite_storage_store_table_definition(
     }
     return result;
 }
+
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
+mylite_storage_result mylite_storage_store_schema(const char *filename, const char *schema_name) {
+    if (filename == NULL || filename[0] == '\0') {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    size_t schema_name_size = 0U;
+    mylite_storage_result result = validate_schema_name(schema_name, &schema_name_size);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    FILE *file = NULL;
+    result = open_existing_file_for_update(filename, &file);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_header header = {0};
+    unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    result = read_header(file, &header);
+    if (result == MYLITE_STORAGE_OK) {
+        result = read_catalog_root(file, &header, catalog_page);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = find_schema_record(catalog_page, schema_name);
+        if (result == MYLITE_STORAGE_OK) {
+            if (fclose(file) != 0) {
+                return MYLITE_STORAGE_IOERR;
+            }
+            return MYLITE_STORAGE_OK;
+        }
+        if (result == MYLITE_STORAGE_NOTFOUND) {
+            result = append_schema_record(catalog_page, schema_name, schema_name_size);
+        }
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = begin_recovery_journal(file, filename, &header, 1);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        ++header.catalog_generation;
+        put_u64_le(
+            catalog_page,
+            MYLITE_STORAGE_FORMAT_CATALOG_GENERATION_OFFSET,
+            header.catalog_generation
+        );
+        update_catalog_checksum(catalog_page);
+
+        unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        encode_header_page(header_page, &header);
+
+        result = write_page_at(file, header.catalog_root_page, header.page_size, catalog_page);
+        if (result == MYLITE_STORAGE_OK) {
+            result = write_page_at(
+                file,
+                MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
+                header.page_size,
+                header_page
+            );
+        }
+        if (result == MYLITE_STORAGE_OK) {
+            result = finish_recovery_journal(file, filename);
+        }
+    }
+
+    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    return result;
+}
+
+mylite_storage_result mylite_storage_drop_schema(const char *filename, const char *schema_name) {
+    if (filename == NULL || filename[0] == '\0') {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    size_t schema_name_size = 0U;
+    mylite_storage_result result = validate_schema_name(schema_name, &schema_name_size);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    (void)schema_name_size;
+
+    FILE *file = NULL;
+    result = open_existing_file_for_update(filename, &file);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_header header = {0};
+    unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    result = read_header(file, &header);
+    if (result == MYLITE_STORAGE_OK) {
+        result = read_catalog_root(file, &header, catalog_page);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = remove_schema_records(catalog_page, schema_name);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = begin_recovery_journal(file, filename, &header, 1);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        ++header.catalog_generation;
+        put_u64_le(
+            catalog_page,
+            MYLITE_STORAGE_FORMAT_CATALOG_GENERATION_OFFSET,
+            header.catalog_generation
+        );
+        update_catalog_checksum(catalog_page);
+
+        unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        encode_header_page(header_page, &header);
+
+        result = write_page_at(file, header.catalog_root_page, header.page_size, catalog_page);
+        if (result == MYLITE_STORAGE_OK) {
+            result = write_page_at(
+                file,
+                MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
+                header.page_size,
+                header_page
+            );
+        }
+        if (result == MYLITE_STORAGE_OK) {
+            result = finish_recovery_journal(file, filename);
+        }
+    }
+
+    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    return result;
+}
+
+mylite_storage_result mylite_storage_schema_exists(const char *filename, const char *schema_name) {
+    if (filename == NULL || filename[0] == '\0') {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    size_t schema_name_size = 0U;
+    mylite_storage_result result = validate_schema_name(schema_name, &schema_name_size);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    (void)schema_name_size;
+
+    FILE *file = NULL;
+    result = open_existing_file(filename, &file);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_header header = {0};
+    unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    result = read_header(file, &header);
+    if (result == MYLITE_STORAGE_OK) {
+        result = read_catalog_root(file, &header, catalog_page);
+    }
+    if (result == MYLITE_STORAGE_OK && !catalog_has_schema(catalog_page, schema_name)) {
+        result = MYLITE_STORAGE_NOTFOUND;
+    }
+
+    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    return result;
+}
+
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
 mylite_storage_result mylite_storage_read_table_definition(
     const char *filename,
@@ -1696,6 +1903,37 @@ mylite_storage_result mylite_storage_list_tables(
     return result;
 }
 
+mylite_storage_result mylite_storage_list_schemas(
+    const char *filename,
+    mylite_storage_schema_callback callback,
+    void *ctx
+) {
+    if (filename == NULL || filename[0] == '\0' || callback == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    FILE *file = NULL;
+    mylite_storage_result result = open_existing_file(filename, &file);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_header header = {0};
+    unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    result = read_header(file, &header);
+    if (result == MYLITE_STORAGE_OK) {
+        result = read_catalog_root(file, &header, catalog_page);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = list_catalog_schemas(catalog_page, callback, ctx);
+    }
+
+    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    return result;
+}
+
 void mylite_storage_free(void *ptr) {
     free(ptr);
 }
@@ -2587,10 +2825,8 @@ static mylite_storage_result validate_catalog_record(
         get_u32_le(record, MYLITE_STORAGE_FORMAT_RECORD_REQUESTED_ENGINE_LENGTH_OFFSET);
     const size_t effective_engine_name_size =
         get_u32_le(record, MYLITE_STORAGE_FORMAT_RECORD_EFFECTIVE_ENGINE_LENGTH_OFFSET);
-    if (record_type != MYLITE_STORAGE_FORMAT_RECORD_TYPE_TABLE_DEFINITION ||
-        record_size < MYLITE_STORAGE_FORMAT_RECORD_HEADER_SIZE || record_size > available_bytes ||
-        schema_name_size == 0U || table_name_size == 0U || requested_engine_name_size == 0U ||
-        effective_engine_name_size == 0U) {
+    if (record_size < MYLITE_STORAGE_FORMAT_RECORD_HEADER_SIZE || record_size > available_bytes ||
+        schema_name_size == 0U) {
         return MYLITE_STORAGE_CORRUPT;
     }
 
@@ -2618,7 +2854,23 @@ static mylite_storage_result validate_catalog_record(
         get_u64_le(record, MYLITE_STORAGE_FORMAT_RECORD_DEFINITION_SIZE_OFFSET);
     const unsigned long long table_id =
         get_u64_le(record, MYLITE_STORAGE_FORMAT_RECORD_TABLE_ID_OFFSET);
-    if (record_size != expected_size || definition_size == 0ULL || table_id == 0ULL ||
+    if (record_size != expected_size) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    if (record_type == MYLITE_STORAGE_FORMAT_RECORD_TYPE_SCHEMA) {
+        if (table_name_size != 0U || requested_engine_name_size != 0U ||
+            effective_engine_name_size != 0U || definition_size != 0ULL || table_id != 0ULL ||
+            definition_root_page != 0ULL) {
+            return MYLITE_STORAGE_CORRUPT;
+        }
+        *out_record_size = record_size;
+        return MYLITE_STORAGE_OK;
+    }
+
+    if (record_type != MYLITE_STORAGE_FORMAT_RECORD_TYPE_TABLE_DEFINITION ||
+        table_name_size == 0U || requested_engine_name_size == 0U ||
+        effective_engine_name_size == 0U || definition_size == 0ULL || table_id == 0ULL ||
         definition_root_page <= header->catalog_root_page ||
         definition_root_page >= header->page_count) {
         return MYLITE_STORAGE_CORRUPT;
@@ -2653,6 +2905,18 @@ static mylite_storage_result validate_table_definition(
         return MYLITE_STORAGE_UNSUPPORTED;
     }
 
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result validate_schema_name(const char *schema_name, size_t *out_length) {
+    if (schema_name == NULL || schema_name[0] == '\0' || out_length == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    *out_length = strlen(schema_name);
+    if (*out_length > UINT32_MAX) {
+        return MYLITE_STORAGE_UNSUPPORTED;
+    }
     return MYLITE_STORAGE_OK;
 }
 
@@ -2716,7 +2980,7 @@ static mylite_storage_result find_table_record(
     const unsigned long long record_count = catalog_record_count(catalog_page);
     for (unsigned long long i = 0ULL; i < record_count; ++i) {
         const unsigned char *record = catalog_page + offset;
-        if (record_matches_table(record, schema_name, table_name)) {
+        if (record_is_table(record) && record_matches_table(record, schema_name, table_name)) {
             if (out_entry != NULL) {
                 *out_entry = (mylite_storage_catalog_entry){
                     .record = record,
@@ -2734,6 +2998,35 @@ static mylite_storage_result find_table_record(
         offset += get_u32_le(record, MYLITE_STORAGE_FORMAT_RECORD_SIZE_OFFSET);
     }
     return MYLITE_STORAGE_NOTFOUND;
+}
+
+static mylite_storage_result find_schema_record(
+    const unsigned char *catalog_page,
+    const char *schema_name
+) {
+    size_t offset = MYLITE_STORAGE_FORMAT_CATALOG_HEADER_SIZE;
+    const unsigned long long record_count = catalog_record_count(catalog_page);
+    for (unsigned long long i = 0ULL; i < record_count; ++i) {
+        const unsigned char *record = catalog_page + offset;
+        if (record_is_schema(record) && record_matches_schema(record, schema_name)) {
+            return MYLITE_STORAGE_OK;
+        }
+        offset += get_u32_le(record, MYLITE_STORAGE_FORMAT_RECORD_SIZE_OFFSET);
+    }
+    return MYLITE_STORAGE_NOTFOUND;
+}
+
+static int catalog_has_schema(const unsigned char *catalog_page, const char *schema_name) {
+    size_t offset = MYLITE_STORAGE_FORMAT_CATALOG_HEADER_SIZE;
+    const unsigned long long record_count = catalog_record_count(catalog_page);
+    for (unsigned long long i = 0ULL; i < record_count; ++i) {
+        const unsigned char *record = catalog_page + offset;
+        if (record_matches_schema(record, schema_name)) {
+            return 1;
+        }
+        offset += get_u32_le(record, MYLITE_STORAGE_FORMAT_RECORD_SIZE_OFFSET);
+    }
+    return 0;
 }
 
 static mylite_storage_result read_table_metadata_from_record(
@@ -2780,7 +3073,61 @@ static mylite_storage_result remove_table_record(
     for (unsigned long long i = 0ULL; i < record_count; ++i) {
         const unsigned char *record = catalog_page + old_offset;
         const size_t record_size = get_u32_le(record, MYLITE_STORAGE_FORMAT_RECORD_SIZE_OFFSET);
-        if (record_matches_table(record, schema_name, table_name)) {
+        if (record_is_table(record) && record_matches_table(record, schema_name, table_name)) {
+            removed = 1;
+        } else {
+            memcpy(new_catalog_page + new_offset, record, record_size);
+            new_offset += record_size;
+            ++new_record_count;
+        }
+        old_offset += record_size;
+    }
+
+    if (!removed) {
+        return MYLITE_STORAGE_NOTFOUND;
+    }
+
+    put_u32_le(
+        new_catalog_page,
+        MYLITE_STORAGE_FORMAT_CATALOG_RECORD_COUNT_OFFSET,
+        new_record_count
+    );
+    put_u32_le(
+        new_catalog_page,
+        MYLITE_STORAGE_FORMAT_CATALOG_USED_BYTES_OFFSET,
+        (unsigned)new_offset
+    );
+    memcpy(catalog_page, new_catalog_page, MYLITE_STORAGE_FORMAT_PAGE_SIZE);
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result remove_schema_records(
+    unsigned char *catalog_page,
+    const char *schema_name
+) {
+    unsigned char new_catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    memcpy(new_catalog_page, catalog_page, sizeof(new_catalog_page));
+    memset(
+        new_catalog_page + MYLITE_STORAGE_FORMAT_CATALOG_HEADER_SIZE,
+        0,
+        MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_CATALOG_HEADER_SIZE
+    );
+    put_u32_le(new_catalog_page, MYLITE_STORAGE_FORMAT_CATALOG_RECORD_COUNT_OFFSET, 0U);
+    put_u32_le(
+        new_catalog_page,
+        MYLITE_STORAGE_FORMAT_CATALOG_USED_BYTES_OFFSET,
+        MYLITE_STORAGE_FORMAT_CATALOG_HEADER_SIZE
+    );
+
+    size_t old_offset = MYLITE_STORAGE_FORMAT_CATALOG_HEADER_SIZE;
+    size_t new_offset = MYLITE_STORAGE_FORMAT_CATALOG_HEADER_SIZE;
+    unsigned new_record_count = 0U;
+    int removed = 0;
+    const unsigned long long record_count = catalog_record_count(catalog_page);
+    for (unsigned long long i = 0ULL; i < record_count; ++i) {
+        const unsigned char *record = catalog_page + old_offset;
+        const size_t record_size = get_u32_le(record, MYLITE_STORAGE_FORMAT_RECORD_SIZE_OFFSET);
+        if (record_matches_schema(record, schema_name)) {
             removed = 1;
         } else {
             memcpy(new_catalog_page + new_offset, record, record_size);
@@ -2848,7 +3195,8 @@ static mylite_storage_result rename_table_record(
     for (unsigned long long i = 0ULL; i < record_count; ++i) {
         const unsigned char *record = catalog_page + old_offset;
         const size_t record_size = get_u32_le(record, MYLITE_STORAGE_FORMAT_RECORD_SIZE_OFFSET);
-        if (record_matches_table(record, old_identity.schema_name, old_identity.table_name)) {
+        if (record_is_table(record) &&
+            record_matches_table(record, old_identity.schema_name, old_identity.table_name)) {
             char *requested_engine_name = copy_record_field(record, 2U);
             char *effective_engine_name = copy_record_field(record, 3U);
             if (requested_engine_name == NULL || effective_engine_name == NULL) {
@@ -2930,6 +3278,24 @@ static int record_matches_table(
            memcmp(record_table, table_name, table_name_size) == 0;
 }
 
+static int record_is_table(const unsigned char *record) {
+    return get_u32_le(record, MYLITE_STORAGE_FORMAT_RECORD_TYPE_OFFSET) ==
+           MYLITE_STORAGE_FORMAT_RECORD_TYPE_TABLE_DEFINITION;
+}
+
+static int record_is_schema(const unsigned char *record) {
+    return get_u32_le(record, MYLITE_STORAGE_FORMAT_RECORD_TYPE_OFFSET) ==
+           MYLITE_STORAGE_FORMAT_RECORD_TYPE_SCHEMA;
+}
+
+static int record_matches_schema(const unsigned char *record, const char *schema_name) {
+    const size_t schema_name_size =
+        get_u32_le(record, MYLITE_STORAGE_FORMAT_RECORD_SCHEMA_LENGTH_OFFSET);
+    const unsigned char *record_schema = record + record_field_offset(record, 0U);
+    return strlen(schema_name) == schema_name_size &&
+           memcmp(record_schema, schema_name, schema_name_size) == 0;
+}
+
 static size_t record_field_offset(const unsigned char *record, unsigned field_index) {
     size_t offset = MYLITE_STORAGE_FORMAT_RECORD_HEADER_SIZE;
     for (unsigned i = 0U; i < field_index; ++i) {
@@ -2951,6 +3317,55 @@ static size_t record_field_size(const unsigned char *record, unsigned field_inde
     default:
         return 0U;
     }
+}
+
+static mylite_storage_result append_schema_record(
+    unsigned char *catalog_page,
+    const char *schema_name,
+    size_t schema_name_size
+) {
+    size_t record_size = MYLITE_STORAGE_FORMAT_RECORD_HEADER_SIZE;
+    if (schema_name_size > SIZE_MAX - record_size) {
+        return MYLITE_STORAGE_FULL;
+    }
+    record_size += schema_name_size;
+    if (record_size > UINT32_MAX) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    const size_t used_bytes = catalog_used_bytes(catalog_page);
+    const unsigned long long record_count = catalog_record_count(catalog_page);
+    if (record_count >= UINT32_MAX || used_bytes > MYLITE_STORAGE_FORMAT_PAGE_SIZE ||
+        record_size > MYLITE_STORAGE_FORMAT_PAGE_SIZE - used_bytes) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    unsigned char *record = catalog_page + used_bytes;
+    memset(record, 0, record_size);
+    put_u32_le(
+        record,
+        MYLITE_STORAGE_FORMAT_RECORD_TYPE_OFFSET,
+        MYLITE_STORAGE_FORMAT_RECORD_TYPE_SCHEMA
+    );
+    put_u32_le(record, MYLITE_STORAGE_FORMAT_RECORD_SIZE_OFFSET, (unsigned)record_size);
+    put_u32_le(
+        record,
+        MYLITE_STORAGE_FORMAT_RECORD_SCHEMA_LENGTH_OFFSET,
+        (unsigned)schema_name_size
+    );
+    memcpy(record + MYLITE_STORAGE_FORMAT_RECORD_HEADER_SIZE, schema_name, schema_name_size);
+
+    put_u32_le(
+        catalog_page,
+        MYLITE_STORAGE_FORMAT_CATALOG_RECORD_COUNT_OFFSET,
+        (unsigned)(record_count + 1ULL)
+    );
+    put_u32_le(
+        catalog_page,
+        MYLITE_STORAGE_FORMAT_CATALOG_USED_BYTES_OFFSET,
+        (unsigned)(used_bytes + record_size)
+    );
+    return MYLITE_STORAGE_OK;
 }
 
 static mylite_storage_result append_table_record(
@@ -3083,10 +3498,12 @@ static unsigned long long catalog_max_table_id(const unsigned char *catalog_page
     const unsigned long long record_count = catalog_record_count(catalog_page);
     for (unsigned long long i = 0ULL; i < record_count; ++i) {
         const unsigned char *record = catalog_page + offset;
-        const unsigned long long table_id =
-            get_u64_le(record, MYLITE_STORAGE_FORMAT_RECORD_TABLE_ID_OFFSET);
-        if (table_id > max_table_id) {
-            max_table_id = table_id;
+        if (record_is_table(record)) {
+            const unsigned long long table_id =
+                get_u64_le(record, MYLITE_STORAGE_FORMAT_RECORD_TABLE_ID_OFFSET);
+            if (table_id > max_table_id) {
+                max_table_id = table_id;
+            }
         }
         offset += get_u32_le(record, MYLITE_STORAGE_FORMAT_RECORD_SIZE_OFFSET);
     }
@@ -4451,6 +4868,92 @@ static char *copy_record_field(const unsigned char *record, unsigned field_index
     return copy;
 }
 
+static mylite_storage_result list_catalog_schemas(
+    const unsigned char *catalog_page,
+    mylite_storage_schema_callback callback,
+    void *ctx
+) {
+    mylite_storage_schema_list list = {0};
+    size_t offset = MYLITE_STORAGE_FORMAT_CATALOG_HEADER_SIZE;
+    const unsigned long long record_count = catalog_record_count(catalog_page);
+    for (unsigned long long i = 0ULL; i < record_count; ++i) {
+        const unsigned char *record = catalog_page + offset;
+        mylite_storage_result result = collect_schema_name(&list, record);
+        if (result != MYLITE_STORAGE_OK) {
+            free_schema_list(&list);
+            return result;
+        }
+        offset += get_u32_le(record, MYLITE_STORAGE_FORMAT_RECORD_SIZE_OFFSET);
+    }
+
+    for (size_t i = 0U; i < list.count; ++i) {
+        if (callback(ctx, list.names[i]) != 0) {
+            free_schema_list(&list);
+            return MYLITE_STORAGE_ERROR;
+        }
+    }
+
+    free_schema_list(&list);
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result collect_schema_name(
+    mylite_storage_schema_list *list,
+    const unsigned char *record
+) {
+    const size_t schema_name_size = record_field_size(record, 0U);
+    const char *schema_name = (const char *)(record + record_field_offset(record, 0U));
+    if (schema_list_contains(list, schema_name, schema_name_size)) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    if (list->count == SIZE_MAX / sizeof(*list->names)) {
+        return MYLITE_STORAGE_FULL;
+    }
+    char **names = (char **)realloc((void *)list->names, (list->count + 1U) * sizeof(*list->names));
+    if (names == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+    list->names = names;
+    if (schema_name_size == SIZE_MAX) {
+        return MYLITE_STORAGE_FULL;
+    }
+    list->names[list->count] = (char *)malloc(schema_name_size + 1U);
+    if (list->names[list->count] == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    memcpy(list->names[list->count], schema_name, schema_name_size);
+    list->names[list->count][schema_name_size] = '\0';
+    ++list->count;
+    return MYLITE_STORAGE_OK;
+}
+
+static int schema_list_contains(
+    const mylite_storage_schema_list *list,
+    const char *schema_name,
+    size_t schema_name_size
+) {
+    for (size_t i = 0U; i < list->count; ++i) {
+        if (strlen(list->names[i]) == schema_name_size &&
+            memcmp(list->names[i], schema_name, schema_name_size) == 0) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void free_schema_list(mylite_storage_schema_list *list) {
+    if (list == NULL) {
+        return;
+    }
+    for (size_t i = 0U; i < list->count; ++i) {
+        free(list->names[i]);
+    }
+    free((void *)list->names);
+    *list = (mylite_storage_schema_list){0};
+}
+
 static mylite_storage_result list_catalog_tables(
     const unsigned char *catalog_page,
     const char *schema_name,
@@ -4463,7 +4966,7 @@ static mylite_storage_result list_catalog_tables(
         const unsigned char *record = catalog_page + offset;
         const char *record_schema = (const char *)(record + record_field_offset(record, 0U));
         const size_t record_schema_size = record_field_size(record, 0U);
-        if (strlen(schema_name) == record_schema_size &&
+        if (record_is_table(record) && strlen(schema_name) == record_schema_size &&
             memcmp(record_schema, schema_name, record_schema_size) == 0) {
             char *schema_copy = copy_record_field(record, 0U);
             char *table_copy = copy_record_field(record, 1U);

@@ -72,7 +72,9 @@ metadata preserved. Online `ALTER`, in-place `ALTER`, transaction-aware index
 maintenance, free-space reclamation, and unsupported index classes still reject
 or remain planned until those slices define the paths. Standalone
 `CREATE INDEX` and `DROP INDEX` use MariaDB's ALTER-backed DDL path for
-supported copy-rebuild index additions and drops.
+supported copy-rebuild index additions and drops. File-backed opens rehydrate
+transient MariaDB runtime schema directories from MyLite catalog namespace
+records so schema existence does not depend on durable datadir directories.
 
 ## File Layout
 
@@ -103,7 +105,10 @@ The header stores:
 The current implementation writes page 0 as a fixed-size, little-endian,
 checksummed header and page 1 as a catalog root. Explicit MyLite table
 definitions are stored as catalog records plus checksummed definition blob
-pages. Row inserts append checksummed row pages tagged by catalog table id;
+pages. Schema namespace names use lightweight catalog records; table-definition
+schema names are also treated as namespaces for compatibility with files that
+pre-date explicit schema records. Row inserts append checksummed row pages
+tagged by catalog table id;
 non-BLOB rows store raw MariaDB record images, while BLOB/TEXT rows store a
 durable handler-owned row payload that replaces process pointers with value
 bytes. Large row payloads spill into checksummed row-payload blob pages inside
@@ -199,7 +204,13 @@ index_id  -> table_id + index name
 
 No persistent directory is created for a schema. `CREATE DATABASE`,
 `DROP DATABASE`, `USE`, table-name resolution, and information schema listing
-read catalog namespaces.
+are represented as catalog namespaces. The current implementation keeps
+MariaDB's SQL-layer directory checks intact by reconstructing transient
+runtime directories from the catalog on file-backed open and by syncing
+successful direct `CREATE/DROP DATABASE` and `CREATE/DROP SCHEMA` statements
+back to schema records. Schema default charset, collation, comments,
+prepared-statement DDL sync, and a final SQL-layer hook that removes the
+transient directory bridge remain planned.
 
 The default embedded profile does not expose server account administration,
 dynamic plugin installation, replication metadata, or the event scheduler.

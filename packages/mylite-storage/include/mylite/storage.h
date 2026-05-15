@@ -21,6 +21,7 @@ extern "C" {
 #define MYLITE_STORAGE_CAPABILITY_RECOVERY_JOURNAL 0x00000100U
 #define MYLITE_STORAGE_CAPABILITY_FILE_LOCKS 0x00000200U
 #define MYLITE_STORAGE_CAPABILITY_TRUNCATE 0x00000400U
+#define MYLITE_STORAGE_CAPABILITY_SCHEMAS 0x00000800U
 
 typedef enum mylite_storage_result { /* NOLINT(performance-enum-size): C ABI enum. */
                                      MYLITE_STORAGE_OK = 0,
@@ -104,6 +105,7 @@ typedef int (*mylite_storage_table_callback)(
     const char *schema_name,
     const char *table_name
 );
+typedef int (*mylite_storage_schema_callback)(void *ctx, const char *schema_name);
 
 const char *mylite_storage_engine_name(void);
 mylite_storage_capabilities mylite_storage_get_capabilities(void);
@@ -116,6 +118,9 @@ mylite_storage_result mylite_storage_store_table_definition(
     const char *filename,
     const mylite_storage_table_definition *definition
 );
+mylite_storage_result mylite_storage_store_schema(const char *filename, const char *schema_name);
+mylite_storage_result mylite_storage_drop_schema(const char *filename, const char *schema_name);
+mylite_storage_result mylite_storage_schema_exists(const char *filename, const char *schema_name);
 mylite_storage_result mylite_storage_read_table_definition(
     const char *filename,
     const char *schema_name,
@@ -237,6 +242,11 @@ mylite_storage_result mylite_storage_list_tables(
     const char *filename,
     const char *schema_name,
     mylite_storage_table_callback callback,
+    void *ctx
+);
+mylite_storage_result mylite_storage_list_schemas(
+    const char *filename,
+    mylite_storage_schema_callback callback,
     void *ctx
 );
 void mylite_storage_free(void *ptr);

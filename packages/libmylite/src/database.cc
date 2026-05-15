@@ -282,6 +282,16 @@ bool is_server_surface_sql(std::string_view sql);
 std::string_view skip_sql_leading_noise(std::string_view sql);
 std::string_view pop_sql_token(std::string_view &sql);
 bool sql_token_equals(std::string_view token, const char *keyword);
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+int rehydrate_schema_directories(mylite_db &database);
+int sync_schema_catalog(mylite_db &database);
+bool is_schema_catalog_sql(std::string_view sql);
+int collect_storage_schema(void *ctx, const char *schema_name);
+int load_runtime_schema_names(mylite_db &database, std::vector<std::string> &out_names);
+bool is_system_schema(std::string_view schema_name);
+bool has_schema_name(const std::vector<std::string> &schemas, const std::string &schema_name);
+std::string quote_identifier(std::string_view identifier);
+#  endif
 int store_and_emit_result(
     mylite_db &database,
     mylite_exec_callback callback,
@@ -1130,7 +1140,20 @@ int exec_impl(
                   std::min<my_ulonglong>(affected_rows, static_cast<my_ulonglong>(LLONG_MAX))
               );
     database->last_insert_id = static_cast<unsigned long long>(mysql_insert_id(&database->mysql));
-    return capture_warnings(*database, mysql_warning_count(&database->mysql));
+    const unsigned warning_count = mysql_warning_count(&database->mysql);
+    const int warning_result = capture_warnings(*database, warning_count);
+    if (warning_result != MYLITE_OK) {
+        return copy_error_message(*database, errmsg);
+    }
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+    if (database->filename != ":memory:" && is_schema_catalog_sql(std::string_view(sql))) {
+        const int sync_result = sync_schema_catalog(*database);
+        if (sync_result != MYLITE_OK) {
+            return copy_error_message(*database, errmsg);
+        }
+    }
+#  endif
+    return MYLITE_OK;
 #endif
 }
 
@@ -1844,6 +1867,173 @@ bool sql_token_equals(std::string_view token, const char *keyword) {
     return token.size() == std::strlen(keyword);
 }
 
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+int rehydrate_schema_directories(mylite_db &database) {
+    if (database.filename == ":memory:") {
+        return MYLITE_OK;
+    }
+
+    std::vector<std::string> schema_names;
+    mylite_storage_result storage_result = mylite_storage_list_schemas(
+        database.filename.c_str(),
+        collect_storage_schema,
+        &schema_names
+    );
+    if (storage_result != MYLITE_STORAGE_OK) {
+        set_error(database, map_storage_result(storage_result), "schema catalog read failed");
+        return database.errcode;
+    }
+
+    for (const std::string &schema_name : schema_names) {
+        const std::string sql = "CREATE DATABASE IF NOT EXISTS " + quote_identifier(schema_name);
+        if (mysql_query(&database.mysql, sql.c_str()) != 0) {
+            set_mariadb_error(database);
+            return MYLITE_ERROR;
+        }
+    }
+    return MYLITE_OK;
+}
+
+int sync_schema_catalog(mylite_db &database) {
+    std::vector<std::string> runtime_schema_names;
+    int result = load_runtime_schema_names(database, runtime_schema_names);
+    if (result != MYLITE_OK) {
+        return result;
+    }
+
+    for (const std::string &schema_name : runtime_schema_names) {
+        const mylite_storage_result storage_result =
+            mylite_storage_store_schema(database.filename.c_str(), schema_name.c_str());
+        if (storage_result != MYLITE_STORAGE_OK) {
+            set_error(database, map_storage_result(storage_result), "schema catalog write failed");
+            return database.errcode;
+        }
+    }
+
+    std::vector<std::string> catalog_schema_names;
+    mylite_storage_result storage_result = mylite_storage_list_schemas(
+        database.filename.c_str(),
+        collect_storage_schema,
+        &catalog_schema_names
+    );
+    if (storage_result != MYLITE_STORAGE_OK) {
+        set_error(database, map_storage_result(storage_result), "schema catalog read failed");
+        return database.errcode;
+    }
+
+    for (const std::string &schema_name : catalog_schema_names) {
+        if (has_schema_name(runtime_schema_names, schema_name)) {
+            continue;
+        }
+        storage_result = mylite_storage_drop_schema(database.filename.c_str(), schema_name.c_str());
+        if (storage_result != MYLITE_STORAGE_OK && storage_result != MYLITE_STORAGE_NOTFOUND) {
+            set_error(database, map_storage_result(storage_result), "schema catalog drop failed");
+            return database.errcode;
+        }
+    }
+
+    return MYLITE_OK;
+}
+
+bool is_schema_catalog_sql(std::string_view sql) {
+    std::string_view rest = skip_sql_leading_noise(sql);
+    const std::string_view first = pop_sql_token(rest);
+    std::string_view second = pop_sql_token(rest);
+
+    if (sql_token_equals(first, "CREATE") && sql_token_equals(second, "OR")) {
+        const std::string_view third = pop_sql_token(rest);
+        if (!sql_token_equals(third, "REPLACE")) {
+            return false;
+        }
+        second = pop_sql_token(rest);
+    }
+
+    return (sql_token_equals(first, "CREATE") || sql_token_equals(first, "DROP")) &&
+           (sql_token_equals(second, "DATABASE") || sql_token_equals(second, "SCHEMA"));
+}
+
+int collect_storage_schema(void *ctx, const char *schema_name) {
+    auto *schema_names = static_cast<std::vector<std::string> *>(ctx);
+    try {
+        schema_names->emplace_back(schema_name);
+    } catch (const std::bad_alloc &) {
+        return 1;
+    }
+    return 0;
+}
+
+int load_runtime_schema_names(mylite_db &database, std::vector<std::string> &out_names) {
+    if (mysql_query(&database.mysql, "SHOW DATABASES") != 0) {
+        set_mariadb_error(database);
+        return MYLITE_ERROR;
+    }
+
+    MYSQL_RES *result = mysql_store_result(&database.mysql);
+    if (result == nullptr) {
+        if (mysql_field_count(&database.mysql) != 0U) {
+            set_mariadb_error(database);
+            return MYLITE_ERROR;
+        }
+        return MYLITE_OK;
+    }
+
+    try {
+        for (MYSQL_ROW row = mysql_fetch_row(result); row != nullptr;
+             row = mysql_fetch_row(result)) {
+            unsigned long *lengths = mysql_fetch_lengths(result);
+            if (lengths == nullptr || row[0] == nullptr) {
+                mysql_free_result(result);
+                set_error(database, MYLITE_ERROR, "malformed SHOW DATABASES result");
+                return MYLITE_ERROR;
+            }
+
+            std::string_view schema_name(row[0], static_cast<std::size_t>(lengths[0]));
+            if (!is_system_schema(schema_name)) {
+                out_names.emplace_back(schema_name);
+            }
+        }
+    } catch (const std::bad_alloc &) {
+        mysql_free_result(result);
+        set_error(database, MYLITE_NOMEM, "schema list allocation failed");
+        return MYLITE_NOMEM;
+    }
+
+    if (mysql_errno(&database.mysql) != 0U) {
+        mysql_free_result(result);
+        set_mariadb_error(database);
+        return MYLITE_ERROR;
+    }
+
+    mysql_free_result(result);
+    return MYLITE_OK;
+}
+
+bool is_system_schema(std::string_view schema_name) {
+    return sql_token_equals(schema_name, "information_schema") ||
+           sql_token_equals(schema_name, "mysql") ||
+           sql_token_equals(schema_name, "performance_schema") ||
+           sql_token_equals(schema_name, "sys");
+}
+
+bool has_schema_name(const std::vector<std::string> &schemas, const std::string &schema_name) {
+    return std::find(schemas.begin(), schemas.end(), schema_name) != schemas.end();
+}
+
+std::string quote_identifier(std::string_view identifier) {
+    std::string quoted;
+    quoted.reserve(identifier.size() + 2U);
+    quoted.push_back('`');
+    for (char ch : identifier) {
+        quoted.push_back(ch);
+        if (ch == '`') {
+            quoted.push_back('`');
+        }
+    }
+    quoted.push_back('`');
+    return quoted;
+}
+#  endif
+
 int prepare_primary_file(const std::filesystem::path &filename, unsigned flags) {
     if (filename == ":memory:") {
         return MYLITE_OK;
@@ -1984,6 +2174,7 @@ int configure_connection(mylite_db &database) {
         set_mariadb_error(database);
         return MYLITE_ERROR;
     }
+    return rehydrate_schema_directories(database);
 #  else
     (void)database;
 #  endif
