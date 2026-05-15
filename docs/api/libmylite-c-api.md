@@ -399,8 +399,8 @@ The public API exposes MyLite concepts, not raw `my.cnf` option names.
 - Cooperating storage opens use primary-file advisory locks to reject unsafe
   cross-process readers, writers, and recovery with busy errors after the
   configured busy timeout expires.
-- Full cross-process multi-writer behavior and SQL transaction lock integration
-  remain planned.
+- Full cross-process multi-writer behavior and SQL table, row, named-lock, and
+  transaction lock integration remain planned.
 
 SQLite-style threading modes can be added when backed by tests.
 
@@ -417,6 +417,8 @@ the embedded library model:
 - foreign-key DDL until referential metadata and enforcement exist,
 - filesystem-backed views, triggers, routines, and sequences until they have
   MyLite catalog storage,
+- SQL locking statements and named-lock functions until MyLite has real table,
+  row, named-lock, and transaction-aware lock semantics,
 - server audit plugins,
 - network-protocol `LOAD DATA LOCAL`,
 - event scheduler,
@@ -424,9 +426,9 @@ the embedded library model:
 
 Representative account, event, plugin, replication, binlog, view, trigger,
 routine, package, sequence, `CALL`, transaction-control, autocommit-control,
-and foreign-key DDL commands are rejected before MariaDB execution with stable
-MyLite errors. Other unsupported surfaces should fail with stable MyLite result
-codes and MariaDB diagnostics where possible.
+SQL locking, named-lock, and foreign-key DDL commands are rejected before
+MariaDB execution with stable MyLite errors. Other unsupported surfaces should
+fail with stable MyLite result codes and MariaDB diagnostics where possible.
 
 ## Compatibility Adapter
 

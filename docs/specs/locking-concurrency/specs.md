@@ -57,6 +57,8 @@ transactional write sets, and conflict resolution.
 
 Follow-up status: the `busy-timeout-lock-waits` slice adds bounded waits before
 returning busy while keeping the same coarse lock ownership model.
+The `sql-locking-policy` slice rejects representative SQL locking constructs
+until table, row, named-lock, and transaction-aware lock semantics exist.
 
 ## Supported Scope
 

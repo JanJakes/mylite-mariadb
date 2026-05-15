@@ -327,9 +327,11 @@ const char *unsupported_sql_surface_message(std::string_view sql);
 bool is_server_surface_sql(std::string_view sql);
 bool is_non_table_object_sql(std::string_view sql);
 bool is_transaction_control_sql(std::string_view sql);
+bool is_locking_sql(std::string_view sql);
 bool is_foreign_key_sql(std::string_view sql);
 bool is_non_table_object_keyword(std::string_view token);
 bool is_set_transaction_control_sql(std::string_view sql);
+bool sql_tokens_contain_locking_marker(std::string_view sql);
 bool sql_tokens_contain_foreign_key_marker(std::string_view sql);
 std::string_view skip_sql_leading_noise(std::string_view sql);
 std::string_view pop_sql_token(std::string_view &sql);
@@ -1982,6 +1984,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_transaction_control_sql(sql)) {
         return "unsupported SQL transaction control";
     }
+    if (is_locking_sql(sql)) {
+        return "unsupported SQL locking surface";
+    }
     if (is_foreign_key_sql(sql)) {
         return "unsupported foreign-key SQL surface";
     }
@@ -2110,6 +2115,52 @@ bool is_set_transaction_control_sql(std::string_view sql) {
 
     const std::string_view second = pop_sql_token_after_separators(sql);
     return sql_token_equals(second, "AUTOCOMMIT") || sql_token_equals(second, "TRANSACTION");
+}
+
+bool is_locking_sql(std::string_view sql) {
+    std::string_view rest = skip_sql_leading_noise(sql);
+    const std::string_view first = pop_sql_token(rest);
+
+    if (sql_token_equals(first, "LOCK") || sql_token_equals(first, "UNLOCK")) {
+        const std::string_view second = pop_sql_token(rest);
+        return sql_token_equals(second, "TABLE") || sql_token_equals(second, "TABLES");
+    }
+
+    return sql_token_equals(first, "SELECT") && sql_tokens_contain_locking_marker(rest);
+}
+
+bool sql_tokens_contain_locking_marker(std::string_view sql) {
+    std::string_view token;
+    while (pop_sql_scanned_token(sql, token)) {
+        if (sql_token_equals(token, "FOR")) {
+            std::string_view after_for = sql;
+            std::string_view next;
+            if (pop_sql_scanned_token(after_for, next) && sql_token_equals(next, "UPDATE")) {
+                return true;
+            }
+        }
+
+        if (sql_token_equals(token, "LOCK")) {
+            std::string_view after_lock = sql;
+            std::string_view next;
+            if (!pop_sql_scanned_token(after_lock, next) || !sql_token_equals(next, "IN")) {
+                continue;
+            }
+            if (!pop_sql_scanned_token(after_lock, next) || !sql_token_equals(next, "SHARE")) {
+                continue;
+            }
+            if (pop_sql_scanned_token(after_lock, next) && sql_token_equals(next, "MODE")) {
+                return true;
+            }
+        }
+
+        if (sql_token_equals(token, "GET_LOCK") || sql_token_equals(token, "RELEASE_LOCK") ||
+            sql_token_equals(token, "RELEASE_ALL_LOCKS") ||
+            sql_token_equals(token, "IS_FREE_LOCK") || sql_token_equals(token, "IS_USED_LOCK")) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool is_foreign_key_sql(std::string_view sql) {

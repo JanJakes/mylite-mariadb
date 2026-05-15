@@ -24,7 +24,8 @@ storage-engine smoke, sidecar gates, routed DDL/DML including schema namespaces,
 index rename DDL, transaction-control policy, foreign-key DDL rejection, CHECK
 constraint enforcement, generated column coverage, unsupported index-class
 rejection, MariaDB statement transaction hook integration, busy-timeout lock
-waits, failed statement rollback, initial application-schema smoke, and
+waits, SQL locking policy rejection, failed statement rollback, initial
+application-schema smoke, and
 unsupported server/non-table-object policy.
 MariaDB MTR comparison suites and broader application-schema suites remain
 planned.
@@ -123,6 +124,7 @@ planned.
 | Savepoints | 🟡&nbsp;Partial | `SAVEPOINT` and `RELEASE SAVEPOINT` are rejected before MariaDB execution; MariaDB-compatible savepoint behavior for supported MyLite tables remains planned |
 | Crash recovery | 🟡&nbsp;Partial | Recover the primary file from `<database>.mylite-journal` for current publication paths while holding the exclusive primary-file lock; WAL/checkpoints and transaction rollback remain planned |
 | Multiple readers | 🟡&nbsp;Partial | Storage read APIs acquire shared advisory locks over stable committed state; configured busy timeouts wait for cooperating primary-file lock conflicts before returning busy, while SQL transaction lock integration remains planned |
+| SQL locking statements | 🟡&nbsp;Partial | `LOCK TABLES`, `UNLOCK TABLES`, locking reads such as `SELECT ... FOR UPDATE` and `LOCK IN SHARE MODE`, and representative named-lock functions are rejected before MariaDB execution until table, row, named-lock, and transaction-aware lock semantics exist |
 | Concurrent writers | ⚪&nbsp;Planned | Preserve the full write-concurrency goal in storage and lock design |
 | Cross-process unsafe writers | 🟡&nbsp;Partial | Cooperating MyLite storage operations reject conflicting cross-process opens, writes, and recovery with busy errors after the configured timeout expires; non-MyLite writers remain out of scope |
 
