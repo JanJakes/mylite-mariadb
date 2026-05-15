@@ -34,8 +34,8 @@ not in a MariaDB datadir or existing engine sidecars.
 | 11 | Row and index storage | 🟡&nbsp;In&nbsp;progress | Table insert, full-scan, update/delete, copy rebuild, NULL values, BLOB/TEXT overflow payloads, autoincrement state, and supported primary/unique/secondary index entries are implemented; truncate, BLOB/TEXT indexes, compaction, and transactional index maintenance remain. |
 | 12 | Copy `ALTER` rebuilds | ✅&nbsp;Done | Table-copy rebuild support works over the current row and supported index lifecycle. |
 | 13 | Primary and secondary indexes | ✅&nbsp;Done | Add append-only index-entry pages, ordered handler cursors, duplicate checks, nullable unique-key semantics, and index maintenance for supported insert/update/delete paths. |
-| 14 | Transactions and recovery | ⚪&nbsp;Planned | Add atomic publication, rollback, savepoints, crash recovery, checksums, and companion-file lifecycle tests. |
-| 15 | Locking and concurrency | ⚪&nbsp;Planned | Add safe file locks, multiple-reader behavior, and a storage design that preserves concurrent writer goals. |
+| 14 | Transactions and recovery | 🟡&nbsp;In&nbsp;progress | Rollback-journal atomic publication and recovery are implemented for current append-only storage mutations; SQL rollback, savepoints, WAL/checkpoints, and transaction-aware engine hooks remain. |
+| 15 | Locking and concurrency | ⚪&nbsp;Planned | Add safe file locks before broadening recovery claims to multiple processes, then preserve the concurrent writer goal in the storage design. |
 | 16 | Compatibility harness | ⚪&nbsp;Planned | Run embedded lifecycle, sidecar detection, MariaDB comparison, crash/reopen, and application-query coverage in repeatable groups. |
 | 17 | Application schemas | ⚪&nbsp;Planned | Test representative application schemas, including WordPress-shaped DDL and common MySQL/MariaDB ORM output. |
 | 18 | Server-surface policy | ⚪&nbsp;Planned | Explicitly reject or replace users/auth, replication/binlog, dynamic plugins, events, performance schema, and external durable engines. |

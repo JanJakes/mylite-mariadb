@@ -1,6 +1,7 @@
 #include "storage_format.h"
 
 #include <assert.h>
+#include <errno.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -59,6 +60,10 @@ static void delete_index_entry_test_row(const index_entries_test_context *ctx);
 static void assert_secondary_index_entries_after_delete(const index_entries_test_context *ctx);
 static void assert_index_entry_test_live_rows(const index_entries_test_context *ctx);
 static void test_autoincrement_state(void);
+static void test_cleans_recovery_journal_after_mutations(void);
+static void test_recovers_row_publication_journal(void);
+static void test_recovers_catalog_publication_journal(void);
+static void test_rejects_corrupt_recovery_journal(void);
 static void test_rejects_corrupt_row_page(void);
 static void test_rejects_corrupt_row_payload_page(void);
 static void test_rejects_corrupt_row_state_page(void);
@@ -68,7 +73,9 @@ static void test_drop_table_definition(void);
 static void test_rename_table_definition(void);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
+static char *journal_path(const char *filename);
 static long long file_size(const char *path);
+static void assert_file_missing(const char *path);
 static void assert_post_rowset_layout(const mylite_storage_rowset *rows, size_t row_size);
 static void assert_lifecycle_initial_rows(const mylite_storage_rowset *rows);
 static void assert_lifecycle_live_rows(
@@ -89,6 +96,22 @@ static void assert_index_entry(
     const unsigned char *key,
     size_t key_size
 );
+static void read_test_page(const char *path, unsigned long long page_id, unsigned char *out_page);
+static void write_test_recovery_journal(
+    const char *filename,
+    const unsigned long long *page_ids,
+    size_t page_count,
+    const unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE]
+);
+static void write_test_journal_header_page(
+    unsigned char *page,
+    const unsigned long long *page_ids,
+    size_t page_count
+);
+static void put_test_u32_le(unsigned char *page, size_t offset, unsigned value);
+static void put_test_u64_le(unsigned char *page, size_t offset, unsigned long long value);
+static unsigned long long checksum_test_page(const unsigned char *page, size_t checksum_offset);
 static void flip_file_byte(const char *path, long offset);
 static void write_header_format_version(const char *path, unsigned value);
 static int collect_table(void *ctx, const char *schema_name, const char *table_name);
@@ -114,6 +137,10 @@ int main(void) {
     test_update_and_delete_rows();
     test_index_entries();
     test_autoincrement_state();
+    test_cleans_recovery_journal_after_mutations();
+    test_recovers_row_publication_journal();
+    test_recovers_catalog_publication_journal();
+    test_rejects_corrupt_recovery_journal();
     test_rejects_corrupt_row_page();
     test_rejects_corrupt_row_payload_page();
     test_rejects_corrupt_row_state_page();
@@ -138,6 +165,7 @@ static void test_capabilities(void) {
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_BLOB_TEXT_ROWS) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_ROW_LIFECYCLE) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_INDEX_ENTRIES) != 0U);
+    assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_RECOVERY_JOURNAL) != 0U);
 }
 
 static void test_create_empty_database(void) {
@@ -833,6 +861,181 @@ static void test_autoincrement_state(void) {
     free(root);
 }
 
+static void test_cleans_recovery_journal_after_mutations(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row_1[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    static const unsigned char row_2[] = {0x00U, 0x02U, 'd', 'e', 'f'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "clean-journal.mylite");
+    char *journal_filename = journal_path(filename);
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "InnoDB",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    unsigned long long row_id = 0ULL;
+    unsigned long long new_row_id = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert_file_missing(journal_filename);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert_file_missing(journal_filename);
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", row_1, sizeof(row_1)) ==
+        MYLITE_STORAGE_OK
+    );
+    assert_file_missing(journal_filename);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_2,
+            sizeof(row_2),
+            NULL,
+            0U,
+            &row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert_file_missing(journal_filename);
+    assert(
+        mylite_storage_update_row(
+            filename,
+            "app",
+            "posts",
+            row_id,
+            row_1,
+            sizeof(row_1),
+            &new_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert_file_missing(journal_filename);
+    assert(mylite_storage_delete_row(filename, "app", "posts", new_row_id) == MYLITE_STORAGE_OK);
+    assert_file_missing(journal_filename);
+    assert(
+        mylite_storage_advance_auto_increment(filename, "app", "posts", 7ULL) == MYLITE_STORAGE_OK
+    );
+    assert_file_missing(journal_filename);
+    assert(mylite_storage_drop_table(filename, "app", "posts") == MYLITE_STORAGE_OK);
+    assert_file_missing(journal_filename);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(journal_filename);
+    free(filename);
+    free(root);
+}
+
+static void test_recovers_row_publication_journal(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "row-recovery.mylite");
+    char *journal_filename = journal_path(filename);
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    unsigned char saved_pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {{0}};
+    const unsigned long long page_ids[] = {MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID};
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    read_test_page(filename, MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID, saved_pages[0]);
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", row, sizeof(row)) == MYLITE_STORAGE_OK
+    );
+    write_test_recovery_journal(filename, page_ids, 1U, saved_pages);
+
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
+    assert(rows.row_count == 0U);
+    mylite_storage_free_rowset(&rows);
+    assert_file_missing(journal_filename);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(journal_filename);
+    free(filename);
+    free(root);
+}
+
+static void test_recovers_catalog_publication_journal(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "catalog-recovery.mylite");
+    char *journal_filename = journal_path(filename);
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "InnoDB",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    unsigned char saved_pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {{0}};
+    const unsigned long long page_ids[] = {
+        MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
+        MYLITE_STORAGE_FORMAT_CATALOG_ROOT_PAGE_ID,
+    };
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    read_test_page(filename, MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID, saved_pages[0]);
+    read_test_page(filename, MYLITE_STORAGE_FORMAT_CATALOG_ROOT_PAGE_ID, saved_pages[1]);
+    assert(mylite_storage_drop_table(filename, "app", "posts") == MYLITE_STORAGE_OK);
+    assert(mylite_storage_table_exists(filename, "app", "posts") == MYLITE_STORAGE_NOTFOUND);
+    write_test_recovery_journal(filename, page_ids, 2U, saved_pages);
+
+    assert(mylite_storage_table_exists(filename, "app", "posts") == MYLITE_STORAGE_OK);
+    assert_file_missing(journal_filename);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(journal_filename);
+    free(filename);
+    free(root);
+}
+
+static void test_rejects_corrupt_recovery_journal(void) {
+    char *root = make_temp_root();
+    char *filename = path_join(root, "corrupt-journal.mylite");
+    char *journal_filename = journal_path(filename);
+    mylite_storage_header header = {0};
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    FILE *journal_file = NULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    journal_file = fopen(journal_filename, "wb");
+    assert(journal_file != NULL);
+    assert(fwrite(page, 1U, sizeof(page), journal_file) == sizeof(page));
+    assert(fclose(journal_file) == 0);
+
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_CORRUPT);
+    assert(access(journal_filename, F_OK) == 0);
+
+    assert(unlink(journal_filename) == 0);
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(journal_filename);
+    free(filename);
+    free(root);
+}
+
 static void test_rejects_corrupt_row_page(void) {
     static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
     static const unsigned char row[] = {0x00U, 0x01U, 'a', 'b', 'c'};
@@ -1237,10 +1440,26 @@ static char *path_join(const char *directory, const char *name) {
     return path;
 }
 
+static char *journal_path(const char *filename) {
+    static const char suffix[] = "-journal";
+    const size_t filename_len = strlen(filename);
+    char *path = (char *)malloc(filename_len + sizeof(suffix));
+    assert(path != NULL);
+    memcpy(path, filename, filename_len);
+    memcpy(path + filename_len, suffix, sizeof(suffix));
+    return path;
+}
+
 static long long file_size(const char *path) {
     struct stat path_stat;
     assert(stat(path, &path_stat) == 0);
     return (long long)path_stat.st_size;
+}
+
+static void assert_file_missing(const char *path) {
+    errno = 0;
+    assert(access(path, F_OK) != 0);
+    assert(errno == ENOENT);
 }
 
 static void assert_post_rowset_layout(const mylite_storage_rowset *rows, size_t row_size) {
@@ -1319,6 +1538,121 @@ static void assert_index_entry(
     assert(
         memcmp(index_entries->keys + index_entries->key_offsets[entry_index], key, key_size) == 0
     );
+}
+
+static void read_test_page(const char *path, unsigned long long page_id, unsigned char *out_page) {
+    FILE *file = fopen(path, "rb");
+    assert(file != NULL);
+    assert(fseek(file, (long)(page_id * MYLITE_STORAGE_FORMAT_PAGE_SIZE), SEEK_SET) == 0);
+    assert(
+        fread(out_page, 1U, MYLITE_STORAGE_FORMAT_PAGE_SIZE, file) ==
+        MYLITE_STORAGE_FORMAT_PAGE_SIZE
+    );
+    assert(fclose(file) == 0);
+}
+
+static void write_test_recovery_journal(
+    const char *filename,
+    const unsigned long long *page_ids,
+    size_t page_count,
+    const unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE]
+) {
+    char *journal_filename = journal_path(filename);
+    unsigned char journal_header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    FILE *file = fopen(journal_filename, "wb");
+    assert(file != NULL);
+
+    write_test_journal_header_page(journal_header_page, page_ids, page_count);
+    assert(
+        fwrite(journal_header_page, 1U, sizeof(journal_header_page), file) ==
+        sizeof(journal_header_page)
+    );
+    for (size_t i = 0U; i < page_count; ++i) {
+        assert(
+            fwrite(pages[i], 1U, MYLITE_STORAGE_FORMAT_PAGE_SIZE, file) ==
+            MYLITE_STORAGE_FORMAT_PAGE_SIZE
+        );
+    }
+
+    assert(fclose(file) == 0);
+    free(journal_filename);
+}
+
+static void write_test_journal_header_page(
+    unsigned char *page,
+    const unsigned long long *page_ids,
+    size_t page_count
+) {
+    static const unsigned char magic[8] = {'M', 'Y', 'L', 'J', 'N', 'L', '1', '\0'};
+
+    memset(page, 0, MYLITE_STORAGE_FORMAT_PAGE_SIZE);
+    memcpy(page + MYLITE_STORAGE_FORMAT_JOURNAL_MAGIC_OFFSET, magic, sizeof(magic));
+    put_test_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_JOURNAL_PAGE_TYPE_OFFSET,
+        MYLITE_STORAGE_FORMAT_JOURNAL_PAGE_TYPE_ROLLBACK
+    );
+    put_test_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_JOURNAL_PAGE_VERSION_OFFSET,
+        MYLITE_STORAGE_FORMAT_JOURNAL_VERSION
+    );
+    put_test_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_JOURNAL_FORMAT_VERSION_OFFSET,
+        MYLITE_STORAGE_FORMAT_VERSION
+    );
+    put_test_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_JOURNAL_CHECKSUM_ALGORITHM_OFFSET,
+        MYLITE_STORAGE_FORMAT_CHECKSUM_FNV1A64
+    );
+    put_test_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_JOURNAL_PRIMARY_PAGE_SIZE_OFFSET,
+        MYLITE_STORAGE_FORMAT_PAGE_SIZE
+    );
+    put_test_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_JOURNAL_PROTECTED_PAGE_COUNT_OFFSET,
+        (unsigned)page_count
+    );
+    for (size_t i = 0U; i < page_count; ++i) {
+        put_test_u64_le(
+            page,
+            MYLITE_STORAGE_FORMAT_JOURNAL_PROTECTED_PAGE_IDS_OFFSET + (i * sizeof(uint64_t)),
+            page_ids[i]
+        );
+    }
+    put_test_u64_le(
+        page,
+        MYLITE_STORAGE_FORMAT_JOURNAL_CHECKSUM_OFFSET,
+        checksum_test_page(page, MYLITE_STORAGE_FORMAT_JOURNAL_CHECKSUM_OFFSET)
+    );
+}
+
+static void put_test_u32_le(unsigned char *page, size_t offset, unsigned value) {
+    for (size_t i = 0U; i < sizeof(uint32_t); ++i) {
+        page[offset + i] = (unsigned char)((value >> (unsigned)(i * CHAR_BIT)) & UINT8_MAX);
+    }
+}
+
+static void put_test_u64_le(unsigned char *page, size_t offset, unsigned long long value) {
+    for (size_t i = 0U; i < sizeof(uint64_t); ++i) {
+        page[offset + i] = (unsigned char)((value >> (unsigned)(i * CHAR_BIT)) & UINT8_MAX);
+    }
+}
+
+static unsigned long long checksum_test_page(const unsigned char *page, size_t checksum_offset) {
+    unsigned long long checksum = UINT64_C(1469598103934665603);
+    for (size_t i = 0U; i < MYLITE_STORAGE_FORMAT_PAGE_SIZE; ++i) {
+        const unsigned char byte =
+            i >= checksum_offset && i < checksum_offset + sizeof(uint64_t) ? 0U : page[i];
+        checksum ^= byte;
+        checksum *= UINT64_C(1099511628211);
+    }
+    return checksum;
 }
 
 static void flip_file_byte(const char *path, long offset) {

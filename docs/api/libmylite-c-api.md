@@ -102,8 +102,9 @@ when the `embedded-dev` CMake preset enables it. MyLite passes owned startup
 options, ignores ambient option files with `--no-defaults`, creates a temporary
 runtime directory for MariaDB bootstrap files, and removes that directory on the
 final close. Current storage-engine smoke builds persist table-definition
-metadata and keyless row pages in the primary `.mylite` file; broader DDL,
-indexes, transactions, and recovery remain planned.
+metadata, rows, autoincrement state, supported indexes, and rollback-journal
+publication state in the primary `.mylite` file; broader DDL, SQL
+transactions, and savepoints remain planned.
 
 ## Direct Execution
 

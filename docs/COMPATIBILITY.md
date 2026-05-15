@@ -18,7 +18,7 @@ for drop-in application expectations.
 | --- | --- |
 | MariaDB base | MariaDB 11.8 LTS, initial import ref `mariadb-11.8.6` / `9bfea48ce1214cc4470f6f6f8a4e30352cef84e7` |
 | Runtime shape | Embedded in-process library, no daemon required for core use |
-| Durable storage | One primary `.mylite` file, plus documented MyLite-owned recovery, lock, shared-memory, and temporary companions |
+| Durable storage | One primary `.mylite` file, plus documented MyLite-owned recovery journal, lock, shared-memory, and temporary companions |
 | Primary API | `libmylite` file-owned C API |
 | MariaDB C API | Optional adapter, not the primary lifetime model |
 
@@ -66,7 +66,7 @@ for drop-in application expectations.
 | `DROP TABLE` | 🟡&nbsp;Partial | Remove MyLite catalog metadata for routed base tables without durable MariaDB sidecars; orphaned definition, row, and index-entry pages are not reclaimed yet |
 | `RENAME TABLE` | 🟡&nbsp;Partial | Rename MyLite catalog metadata for simple routed base tables without durable MariaDB sidecars; index rename paths remain planned |
 | `UPDATE` / `DELETE` | 🟡&nbsp;Partial | Full-scan and supported keyed update/delete are covered for routed base tables, including BLOB/TEXT payload rows and close/reopen visibility; rollback, triggers, foreign keys, generated-column edge cases, and unsupported index classes remain planned |
-| `ALTER TABLE` | 🟡&nbsp;Partial | Copy rebuilds are covered for supported MyLite-routed table shapes, including column add/drop/rename, supported index additions, BLOB/TEXT payload rows, requested-engine metadata, and close/reopen visibility; `LOCK=NONE`, in-place algorithms, unsupported index classes, rollback, crash recovery, and foreign keys remain planned |
+| `ALTER TABLE` | 🟡&nbsp;Partial | Copy rebuilds are covered for supported MyLite-routed table shapes, including column add/drop/rename, supported index additions, BLOB/TEXT payload rows, requested-engine metadata, close/reopen visibility, and rollback-journal publication; `LOCK=NONE`, in-place algorithms, unsupported index classes, SQL rollback, and foreign keys remain planned |
 | Standalone `CREATE INDEX` / `DROP INDEX` | ⚪&nbsp;Planned | Route through MariaDB DDL and MyLite catalog/index updates |
 | `CREATE TABLE ... LIKE` | ⚪&nbsp;Planned | Preserve MariaDB table definition behavior |
 | `CREATE TABLE ... SELECT` | ⚪&nbsp;Planned | Preserve MariaDB statement semantics over MyLite tables |
@@ -96,10 +96,10 @@ for drop-in application expectations.
 
 | Capability | MyLite status | Compatibility target |
 | --- | --- | --- |
-| Atomic commit | ⚪&nbsp;Planned | No torn catalog or row/index publication |
+| Atomic commit | 🟡&nbsp;Partial | Rollback journal protects current catalog, row, row-state, autoincrement, and index-entry publication; SQL transaction commit remains planned |
 | Rollback | ⚪&nbsp;Planned | Restore rows, indexes, constraints, and catalog state for failed transactions |
 | Savepoints | ⚪&nbsp;Planned | Match MariaDB transaction behavior for supported MyLite tables |
-| Crash recovery | ⚪&nbsp;Planned | Recover primary file and any MyLite-owned journal/WAL companions |
+| Crash recovery | 🟡&nbsp;Partial | Recover the primary file from `<database>.mylite-journal` for current publication paths; WAL/checkpoints, locks, and transaction rollback remain planned |
 | Multiple readers | ⚪&nbsp;Planned | Safe readers over stable committed state |
 | Concurrent writers | ⚪&nbsp;Planned | Preserve the full write-concurrency goal in storage and lock design |
 | Cross-process unsafe writers | ➖&nbsp;Out&nbsp;of&nbsp;scope | Reject or block unsafe opens until locking and recovery prove safety |

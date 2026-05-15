@@ -111,8 +111,10 @@ recreated tables. Supported primary, unique, and secondary indexes append
 checksummed index-entry pages containing the catalog table id, MariaDB key
 number, row page id, and MariaDB key-tuple bytes. Handler index reads build
 ordered in-memory cursors from live index entries and compare keys with
-MariaDB's key helpers. Transaction state, recovery state, free-space metadata,
-and B-tree-style index navigation are still planned slices.
+MariaDB's key helpers. Current mutating publication paths are protected by a
+rollback journal before the header or catalog root page is overwritten.
+Transaction state, free-space metadata, and B-tree-style index navigation are
+still planned slices.
 
 The catalog stores:
 
@@ -218,8 +220,7 @@ cursors from live index entries and then reconstruct row buffers from row
 pages. This provides correct indexed insert, lookup, update, delete, reopen,
 and copy `ALTER` behavior for the supported shapes, but it is not the final
 performance structure. Truncate, B-tree pages, free-space reclamation,
-transaction rollback, recovery, and transaction-aware index maintenance remain
-planned.
+transaction rollback, and transaction-aware index maintenance remain planned.
 
 The storage engine must support:
 
@@ -251,6 +252,20 @@ Minimum guarantees:
 - deterministic recovery and cleanup for any MyLite-owned journal or WAL
   companions,
 - file locking that prevents unsafe concurrent writers.
+
+Current implementation status: MyLite writes a deterministic
+`<database>.mylite-journal` rollback companion before publishing current
+append-only mutations. The journal stores the committed header page and, for
+catalog mutations, the committed catalog root page. It is fsynced before
+primary-file writes, the primary file is fsynced before the journal is removed,
+the parent directory is synced after journal create/remove, and every storage
+open first recovers and removes a valid pending journal. Recovery restores the
+previously committed header/catalog state; appended pages beyond the restored
+header page count are ignored until free-space reclamation exists.
+
+This is not SQL transaction support yet. The MyLite handler still advertises
+non-transactional engine flags, and MariaDB commit, rollback, and savepoint
+handlerton hooks remain planned.
 
 The storage design must preserve the full write-concurrency goal. Early
 milestones may use coarse locks for correctness, but the page, transaction,

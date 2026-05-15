@@ -1,11 +1,13 @@
 #include "storage_format.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 typedef struct mylite_storage_catalog_entry {
     const unsigned char *record;
@@ -102,6 +104,11 @@ typedef struct mylite_storage_table_identity {
     const char *table_name;
 } mylite_storage_table_identity;
 
+typedef struct mylite_storage_recovery_journal {
+    unsigned long long page_ids[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES];
+    size_t page_count;
+} mylite_storage_recovery_journal;
+
 typedef mylite_storage_result (*mylite_storage_row_page_callback)(
     void *ctx,
     const mylite_storage_row_page *row_page
@@ -113,7 +120,46 @@ static void initialize_header_page(unsigned char *page);
 static void encode_header_page(unsigned char *page, const mylite_storage_header *header);
 static void initialize_empty_catalog_page(unsigned char *page);
 static void update_catalog_checksum(unsigned char *page);
+static char *recovery_journal_path(const char *filename);
+static mylite_storage_result recover_pending_journal(const char *filename);
+static mylite_storage_result read_recovery_journal(
+    FILE *journal_file,
+    mylite_storage_recovery_journal *out_journal,
+    unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                       [MYLITE_STORAGE_FORMAT_PAGE_SIZE],
+    mylite_storage_header *out_header
+);
+static mylite_storage_result restore_recovery_journal(
+    const char *filename,
+    const mylite_storage_recovery_journal *journal,
+    const unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE],
+    const mylite_storage_header *saved_header
+);
+static mylite_storage_result begin_recovery_journal(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    int include_catalog
+);
+static mylite_storage_result finish_recovery_journal(FILE *file, const char *filename);
+static void encode_recovery_journal_header(
+    unsigned char *page,
+    const mylite_storage_recovery_journal *journal
+);
+static mylite_storage_result decode_recovery_journal_header(
+    const unsigned char *page,
+    mylite_storage_recovery_journal *out_journal
+);
+static mylite_storage_result validate_recovery_journal_pages(
+    const mylite_storage_recovery_journal *journal,
+    const unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE],
+    mylite_storage_header *out_header
+);
 static mylite_storage_result write_page(FILE *file, const unsigned char *page, size_t size);
+static mylite_storage_result flush_file(FILE *file);
+static mylite_storage_result flush_parent_directory(const char *filename);
 static mylite_storage_result close_created_file(FILE *file, const char *filename);
 static mylite_storage_result open_existing_file(const char *filename, FILE **out_file);
 static mylite_storage_result open_existing_file_for_update(const char *filename, FILE **out_file);
@@ -402,6 +448,7 @@ static const unsigned char k_row_magic[8] = {'M', 'Y', 'L', 'R', 'O', 'W', '1', 
 static const unsigned char k_autoincrement_magic[8] = {'M', 'Y', 'L', 'A', 'U', 'T', '1', '\0'};
 static const unsigned char k_row_state_magic[8] = {'M', 'Y', 'L', 'R', 'S', 'T', '1', '\0'};
 static const unsigned char k_index_magic[8] = {'M', 'Y', 'L', 'I', 'D', 'X', '1', '\0'};
+static const unsigned char k_journal_magic[8] = {'M', 'Y', 'L', 'J', 'N', 'L', '1', '\0'};
 
 const char *mylite_storage_engine_name(void) {
     return MYLITE_STORAGE_ENGINE_NAME;
@@ -415,7 +462,8 @@ mylite_storage_capabilities mylite_storage_get_capabilities(void) {
                  MYLITE_STORAGE_CAPABILITY_TABLE_DEFINITIONS |
                  MYLITE_STORAGE_CAPABILITY_TABLE_ROWS | MYLITE_STORAGE_CAPABILITY_AUTOINCREMENT |
                  MYLITE_STORAGE_CAPABILITY_BLOB_TEXT_ROWS |
-                 MYLITE_STORAGE_CAPABILITY_ROW_LIFECYCLE | MYLITE_STORAGE_CAPABILITY_INDEX_ENTRIES,
+                 MYLITE_STORAGE_CAPABILITY_ROW_LIFECYCLE | MYLITE_STORAGE_CAPABILITY_INDEX_ENTRIES |
+                 MYLITE_STORAGE_CAPABILITY_RECOVERY_JOURNAL,
     };
 
     return capabilities;
@@ -533,6 +581,9 @@ mylite_storage_result mylite_storage_store_table_definition(
         result = append_table_record(catalog_page, definition, &lengths, first_blob_page, table_id);
     }
     if (result == MYLITE_STORAGE_OK) {
+        result = begin_recovery_journal(file, filename, &header, 1);
+    }
+    if (result == MYLITE_STORAGE_OK) {
         result = write_definition_blob_pages(
             file,
             first_blob_page,
@@ -561,6 +612,9 @@ mylite_storage_result mylite_storage_store_table_definition(
                 header.page_size,
                 header_page
             );
+        }
+        if (result == MYLITE_STORAGE_OK) {
+            result = finish_recovery_journal(file, filename);
         }
     }
 
@@ -725,6 +779,9 @@ mylite_storage_result mylite_storage_drop_table(
         result = remove_table_record(catalog_page, schema_name, table_name);
     }
     if (result == MYLITE_STORAGE_OK) {
+        result = begin_recovery_journal(file, filename, &header, 1);
+    }
+    if (result == MYLITE_STORAGE_OK) {
         ++header.catalog_generation;
         put_u64_le(
             catalog_page,
@@ -744,6 +801,9 @@ mylite_storage_result mylite_storage_drop_table(
                 header.page_size,
                 header_page
             );
+        }
+        if (result == MYLITE_STORAGE_OK) {
+            result = finish_recovery_journal(file, filename);
         }
     }
 
@@ -793,6 +853,9 @@ mylite_storage_result mylite_storage_rename_table(
         );
     }
     if (result == MYLITE_STORAGE_OK) {
+        result = begin_recovery_journal(file, filename, &header, 1);
+    }
+    if (result == MYLITE_STORAGE_OK) {
         ++header.catalog_generation;
         put_u64_le(
             catalog_page,
@@ -812,6 +875,9 @@ mylite_storage_result mylite_storage_rename_table(
                 header.page_size,
                 header_page
             );
+        }
+        if (result == MYLITE_STORAGE_OK) {
+            result = finish_recovery_journal(file, filename);
         }
     }
 
@@ -879,6 +945,9 @@ mylite_storage_result mylite_storage_append_row_with_index_entries(
     }
     mylite_storage_row_write_position position = {0};
     if (result == MYLITE_STORAGE_OK) {
+        result = begin_recovery_journal(file, filename, &header, 0);
+    }
+    if (result == MYLITE_STORAGE_OK) {
         result = write_row_payload_pages(file, &header, table_id, row, row_size, &position);
     }
     unsigned long long next_page_id = position.next_page_id;
@@ -906,6 +975,9 @@ mylite_storage_result mylite_storage_append_row_with_index_entries(
             header.page_size,
             header_page
         );
+        if (result == MYLITE_STORAGE_OK) {
+            result = finish_recovery_journal(file, filename);
+        }
     }
 
     if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
@@ -1145,6 +1217,9 @@ mylite_storage_result mylite_storage_update_row_with_index_entries(
         );
     }
     if (result == MYLITE_STORAGE_OK) {
+        result = begin_recovery_journal(file, filename, &header, 0);
+    }
+    if (result == MYLITE_STORAGE_OK) {
         result = write_row_payload_pages(file, &header, table_id, row, row_size, &position);
     }
     if (result == MYLITE_STORAGE_OK && position.next_page_id == ULLONG_MAX) {
@@ -1187,6 +1262,9 @@ mylite_storage_result mylite_storage_update_row_with_index_entries(
             header.page_size,
             header_page
         );
+        if (result == MYLITE_STORAGE_OK) {
+            result = finish_recovery_journal(file, filename);
+        }
     }
     if (result == MYLITE_STORAGE_OK) {
         *out_new_row_id = position.row_page_id;
@@ -1247,6 +1325,9 @@ mylite_storage_result mylite_storage_delete_row(
         result = MYLITE_STORAGE_FULL;
     }
     if (result == MYLITE_STORAGE_OK) {
+        result = begin_recovery_journal(file, filename, &header, 0);
+    }
+    if (result == MYLITE_STORAGE_OK) {
         const unsigned long long state_page_id = header.page_count;
         const mylite_storage_row_state_page row_state = {
             .table_id = table_id,
@@ -1267,6 +1348,9 @@ mylite_storage_result mylite_storage_delete_row(
                 header.page_size,
                 header_page
             );
+            if (result == MYLITE_STORAGE_OK) {
+                result = finish_recovery_journal(file, filename);
+            }
         }
     }
 
@@ -1431,6 +1515,9 @@ mylite_storage_result mylite_storage_advance_auto_increment(
         result = MYLITE_STORAGE_FULL;
     }
     if (result == MYLITE_STORAGE_OK) {
+        result = begin_recovery_journal(file, filename, &header, 0);
+    }
+    if (result == MYLITE_STORAGE_OK) {
         const unsigned long long page_id = header.page_count;
         unsigned char autoincrement_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
         encode_autoincrement_page(autoincrement_page, page_id, table_id, next_value);
@@ -1446,6 +1533,9 @@ mylite_storage_result mylite_storage_advance_auto_increment(
                 header.page_size,
                 header_page
             );
+            if (result == MYLITE_STORAGE_OK) {
+                result = finish_recovery_journal(file, filename);
+            }
         }
     }
 
@@ -1662,6 +1752,355 @@ static void update_catalog_checksum(unsigned char *page) {
     );
 }
 
+static char *recovery_journal_path(const char *filename) {
+    static const char suffix[] = "-journal";
+    const size_t filename_size = strlen(filename);
+    if (filename_size > SIZE_MAX - sizeof(suffix)) {
+        return NULL;
+    }
+
+    char *journal_filename = (char *)malloc(filename_size + sizeof(suffix));
+    if (journal_filename == NULL) {
+        return NULL;
+    }
+
+    memcpy(journal_filename, filename, filename_size);
+    memcpy(journal_filename + filename_size, suffix, sizeof(suffix));
+    return journal_filename;
+}
+
+static mylite_storage_result recover_pending_journal(const char *filename) {
+    char *journal_filename = recovery_journal_path(filename);
+    if (journal_filename == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    errno = 0;
+    FILE *journal_file = fopen(journal_filename, "rb");
+    if (journal_file == NULL) {
+        free(journal_filename);
+        return errno == ENOENT ? MYLITE_STORAGE_OK : MYLITE_STORAGE_IOERR;
+    }
+
+    mylite_storage_result result = MYLITE_STORAGE_OK;
+    mylite_storage_recovery_journal journal = {0};
+    unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                       [MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {{0}};
+    mylite_storage_header saved_header = {0};
+    result = read_recovery_journal(journal_file, &journal, pages, &saved_header);
+    if (result == MYLITE_STORAGE_OK) {
+        result = restore_recovery_journal(filename, &journal, pages, &saved_header);
+    }
+    if (fclose(journal_file) != 0 && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    if (result == MYLITE_STORAGE_OK && remove(journal_filename) != 0) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = flush_parent_directory(journal_filename);
+    }
+
+    free(journal_filename);
+    return result;
+}
+
+static mylite_storage_result read_recovery_journal(
+    FILE *journal_file,
+    mylite_storage_recovery_journal *out_journal,
+    unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                       [MYLITE_STORAGE_FORMAT_PAGE_SIZE],
+    mylite_storage_header *out_header
+) {
+    unsigned char journal_header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    mylite_storage_result result = read_page_at(
+        journal_file,
+        MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
+        MYLITE_STORAGE_FORMAT_PAGE_SIZE,
+        journal_header_page
+    );
+    if (result == MYLITE_STORAGE_OK) {
+        result = decode_recovery_journal_header(journal_header_page, out_journal);
+    }
+    for (size_t i = 0U; result == MYLITE_STORAGE_OK && i < out_journal->page_count; ++i) {
+        result = read_page_at(
+            journal_file,
+            (unsigned long long)i + 1ULL,
+            MYLITE_STORAGE_FORMAT_PAGE_SIZE,
+            pages[i]
+        );
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = validate_recovery_journal_pages(out_journal, pages, out_header);
+    }
+    return result;
+}
+
+static mylite_storage_result restore_recovery_journal(
+    const char *filename,
+    const mylite_storage_recovery_journal *journal,
+    const unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE],
+    const mylite_storage_header *saved_header
+) {
+    errno = 0;
+    FILE *file = fopen(filename, "r+b");
+    if (file == NULL) {
+        return errno == ENOENT ? MYLITE_STORAGE_CORRUPT : MYLITE_STORAGE_IOERR;
+    }
+
+    mylite_storage_result result = MYLITE_STORAGE_OK;
+    for (size_t i = 0U; result == MYLITE_STORAGE_OK && i < journal->page_count; ++i) {
+        result = write_page_at(file, journal->page_ids[i], saved_header->page_size, pages[i]);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = flush_file(file);
+    }
+    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    return result;
+}
+
+static mylite_storage_result begin_recovery_journal(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    int include_catalog
+) {
+    if (header->page_size != MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+        return MYLITE_STORAGE_UNSUPPORTED;
+    }
+
+    char *journal_filename = recovery_journal_path(filename);
+    if (journal_filename == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    mylite_storage_result result = MYLITE_STORAGE_OK;
+    mylite_storage_recovery_journal journal = {
+        .page_ids = {MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID, header->catalog_root_page},
+        .page_count = include_catalog ? 2U : 1U,
+    };
+    unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                       [MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {{0}};
+    for (size_t i = 0U; result == MYLITE_STORAGE_OK && i < journal.page_count; ++i) {
+        result = read_page_at(file, journal.page_ids[i], header->page_size, pages[i]);
+    }
+    mylite_storage_header saved_header = {0};
+    if (result == MYLITE_STORAGE_OK) {
+        result = validate_recovery_journal_pages(&journal, pages, &saved_header);
+    }
+
+    FILE *journal_file = NULL;
+    int journal_created = 0;
+    if (result == MYLITE_STORAGE_OK) {
+        errno = 0;
+        const int journal_fd = open(journal_filename, O_WRONLY | O_CREAT | O_EXCL, 0600);
+        if (journal_fd < 0) {
+            result = errno == EEXIST ? MYLITE_STORAGE_CORRUPT : MYLITE_STORAGE_IOERR;
+        } else {
+            journal_created = 1;
+            journal_file = fdopen(journal_fd, "wb");
+            if (journal_file == NULL) {
+                close(journal_fd);
+                result = MYLITE_STORAGE_IOERR;
+            }
+        }
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        unsigned char journal_header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        encode_recovery_journal_header(journal_header_page, &journal);
+        result = write_page(journal_file, journal_header_page, sizeof(journal_header_page));
+    }
+    for (size_t i = 0U; result == MYLITE_STORAGE_OK && i < journal.page_count; ++i) {
+        result = write_page(journal_file, pages[i], header->page_size);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = flush_file(journal_file);
+    }
+
+    if (journal_file != NULL && fclose(journal_file) != 0 && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = flush_parent_directory(journal_filename);
+    }
+    if (result != MYLITE_STORAGE_OK && journal_created) {
+        remove(journal_filename);
+    }
+
+    free(journal_filename);
+    return result;
+}
+
+static mylite_storage_result finish_recovery_journal(FILE *file, const char *filename) {
+    char *journal_filename = recovery_journal_path(filename);
+    if (journal_filename == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    mylite_storage_result result = flush_file(file);
+    if (result == MYLITE_STORAGE_OK && remove(journal_filename) != 0) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = flush_parent_directory(journal_filename);
+    }
+
+    free(journal_filename);
+    return result;
+}
+
+static void encode_recovery_journal_header(
+    unsigned char *page,
+    const mylite_storage_recovery_journal *journal
+) {
+    memset(page, 0, MYLITE_STORAGE_FORMAT_PAGE_SIZE);
+    memcpy(
+        page + MYLITE_STORAGE_FORMAT_JOURNAL_MAGIC_OFFSET,
+        k_journal_magic,
+        sizeof(k_journal_magic)
+    );
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_JOURNAL_PAGE_TYPE_OFFSET,
+        MYLITE_STORAGE_FORMAT_JOURNAL_PAGE_TYPE_ROLLBACK
+    );
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_JOURNAL_PAGE_VERSION_OFFSET,
+        MYLITE_STORAGE_FORMAT_JOURNAL_VERSION
+    );
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_JOURNAL_FORMAT_VERSION_OFFSET,
+        MYLITE_STORAGE_FORMAT_VERSION
+    );
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_JOURNAL_CHECKSUM_ALGORITHM_OFFSET,
+        MYLITE_STORAGE_FORMAT_CHECKSUM_FNV1A64
+    );
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_JOURNAL_PRIMARY_PAGE_SIZE_OFFSET,
+        MYLITE_STORAGE_FORMAT_PAGE_SIZE
+    );
+    put_u32_le(
+        page,
+        MYLITE_STORAGE_FORMAT_JOURNAL_PROTECTED_PAGE_COUNT_OFFSET,
+        (unsigned)journal->page_count
+    );
+    for (size_t i = 0U; i < journal->page_count; ++i) {
+        put_u64_le(
+            page,
+            MYLITE_STORAGE_FORMAT_JOURNAL_PROTECTED_PAGE_IDS_OFFSET + (i * sizeof(uint64_t)),
+            journal->page_ids[i]
+        );
+    }
+    put_u64_le(
+        page,
+        MYLITE_STORAGE_FORMAT_JOURNAL_CHECKSUM_OFFSET,
+        checksum_page(page, MYLITE_STORAGE_FORMAT_JOURNAL_CHECKSUM_OFFSET)
+    );
+}
+
+static mylite_storage_result decode_recovery_journal_header(
+    const unsigned char *page,
+    mylite_storage_recovery_journal *out_journal
+) {
+    if (memcmp(
+            page + MYLITE_STORAGE_FORMAT_JOURNAL_MAGIC_OFFSET,
+            k_journal_magic,
+            sizeof(k_journal_magic)
+        ) != 0) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    const unsigned page_type = get_u32_le(page, MYLITE_STORAGE_FORMAT_JOURNAL_PAGE_TYPE_OFFSET);
+    const unsigned page_version =
+        get_u32_le(page, MYLITE_STORAGE_FORMAT_JOURNAL_PAGE_VERSION_OFFSET);
+    const unsigned format_version =
+        get_u32_le(page, MYLITE_STORAGE_FORMAT_JOURNAL_FORMAT_VERSION_OFFSET);
+    const unsigned checksum_algorithm =
+        get_u32_le(page, MYLITE_STORAGE_FORMAT_JOURNAL_CHECKSUM_ALGORITHM_OFFSET);
+    const unsigned primary_page_size =
+        get_u32_le(page, MYLITE_STORAGE_FORMAT_JOURNAL_PRIMARY_PAGE_SIZE_OFFSET);
+    if (page_type != MYLITE_STORAGE_FORMAT_JOURNAL_PAGE_TYPE_ROLLBACK) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+    if (page_version != MYLITE_STORAGE_FORMAT_JOURNAL_VERSION ||
+        format_version != MYLITE_STORAGE_FORMAT_VERSION ||
+        checksum_algorithm != MYLITE_STORAGE_FORMAT_CHECKSUM_FNV1A64 ||
+        primary_page_size != MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+        return MYLITE_STORAGE_UNSUPPORTED;
+    }
+
+    const unsigned long long expected_checksum =
+        get_u64_le(page, MYLITE_STORAGE_FORMAT_JOURNAL_CHECKSUM_OFFSET);
+    const unsigned long long actual_checksum =
+        checksum_page(page, MYLITE_STORAGE_FORMAT_JOURNAL_CHECKSUM_OFFSET);
+    if (expected_checksum != actual_checksum) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    const unsigned page_count =
+        get_u32_le(page, MYLITE_STORAGE_FORMAT_JOURNAL_PROTECTED_PAGE_COUNT_OFFSET);
+    if (page_count == 0U || page_count > MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    mylite_storage_recovery_journal journal = {
+        .page_count = page_count,
+    };
+    for (size_t i = 0U; i < journal.page_count; ++i) {
+        journal.page_ids[i] = get_u64_le(
+            page,
+            MYLITE_STORAGE_FORMAT_JOURNAL_PROTECTED_PAGE_IDS_OFFSET + (i * sizeof(uint64_t))
+        );
+    }
+
+    *out_journal = journal;
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result validate_recovery_journal_pages(
+    const mylite_storage_recovery_journal *journal,
+    const unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE],
+    mylite_storage_header *out_header
+) {
+    if (journal->page_count == 0U || journal->page_ids[0] != MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    mylite_storage_result result = decode_header_page(pages[0], out_header);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    for (size_t i = 1U; i < journal->page_count; ++i) {
+        if (journal->page_ids[i] == MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID) {
+            return MYLITE_STORAGE_CORRUPT;
+        }
+        for (size_t j = 1U; j < i; ++j) {
+            if (journal->page_ids[i] == journal->page_ids[j]) {
+                return MYLITE_STORAGE_CORRUPT;
+            }
+        }
+        if (journal->page_ids[i] != out_header->catalog_root_page) {
+            return MYLITE_STORAGE_CORRUPT;
+        }
+        result = validate_catalog_root_bytes(pages[i], out_header);
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+    }
+
+    return MYLITE_STORAGE_OK;
+}
+
 static mylite_storage_result write_page(FILE *file, const unsigned char *page, size_t size) {
     if (fwrite(page, 1U, size, file) != size) {
         return MYLITE_STORAGE_IOERR;
@@ -1669,8 +2108,55 @@ static mylite_storage_result write_page(FILE *file, const unsigned char *page, s
     return MYLITE_STORAGE_OK;
 }
 
+static mylite_storage_result flush_file(FILE *file) {
+    if (fflush(file) != 0) {
+        return MYLITE_STORAGE_IOERR;
+    }
+    if (fsync(fileno(file)) != 0) {
+        return MYLITE_STORAGE_IOERR;
+    }
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result flush_parent_directory(const char *filename) {
+    const char *last_slash = strrchr(filename, '/');
+    const char *parent_path = ".";
+    char *owned_parent_path = NULL;
+    if (last_slash == filename) {
+        parent_path = "/";
+    } else if (last_slash != NULL) {
+        const size_t parent_path_size = (size_t)(last_slash - filename);
+        owned_parent_path = (char *)malloc(parent_path_size + 1U);
+        if (owned_parent_path == NULL) {
+            return MYLITE_STORAGE_NOMEM;
+        }
+        memcpy(owned_parent_path, filename, parent_path_size);
+        owned_parent_path[parent_path_size] = '\0';
+        parent_path = owned_parent_path;
+    }
+
+    const int directory_fd = open(parent_path, O_RDONLY);
+    free(owned_parent_path);
+    if (directory_fd < 0) {
+        return MYLITE_STORAGE_IOERR;
+    }
+
+    mylite_storage_result result = MYLITE_STORAGE_OK;
+    if (fsync(directory_fd) != 0) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    if (close(directory_fd) != 0 && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    return result;
+}
+
 static mylite_storage_result close_created_file(FILE *file, const char *filename) {
-    if (fclose(file) == 0) {
+    mylite_storage_result result = flush_file(file);
+    if (fclose(file) == 0 && result == MYLITE_STORAGE_OK) {
+        result = flush_parent_directory(filename);
+    }
+    if (result == MYLITE_STORAGE_OK) {
         return MYLITE_STORAGE_OK;
     }
 
@@ -1679,6 +2165,11 @@ static mylite_storage_result close_created_file(FILE *file, const char *filename
 }
 
 static mylite_storage_result open_existing_file(const char *filename, FILE **out_file) {
+    mylite_storage_result result = recover_pending_journal(filename);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
     errno = 0;
     FILE *file = fopen(filename, "rb");
     if (file == NULL) {
@@ -1690,6 +2181,11 @@ static mylite_storage_result open_existing_file(const char *filename, FILE **out
 }
 
 static mylite_storage_result open_existing_file_for_update(const char *filename, FILE **out_file) {
+    mylite_storage_result result = recover_pending_journal(filename);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
     errno = 0;
     FILE *file = fopen(filename, "r+b");
     if (file == NULL) {
