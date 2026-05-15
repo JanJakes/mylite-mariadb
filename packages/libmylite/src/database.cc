@@ -326,6 +326,7 @@ std::string field_string(const char *value, unsigned int length);
 const char *unsupported_sql_surface_message(std::string_view sql);
 bool is_server_surface_sql(std::string_view sql);
 bool is_file_import_sql(std::string_view sql);
+bool is_file_export_sql(std::string_view sql);
 bool is_non_table_object_sql(std::string_view sql);
 bool is_transaction_control_sql(std::string_view sql);
 bool is_locking_sql(std::string_view sql);
@@ -334,6 +335,8 @@ bool is_partition_sql(std::string_view sql);
 bool is_foreign_key_sql(std::string_view sql);
 bool is_non_table_object_keyword(std::string_view token);
 bool is_set_transaction_control_sql(std::string_view sql);
+bool sql_tokens_contain_file_import_function(std::string_view sql);
+bool sql_tokens_contain_file_export_marker(std::string_view sql);
 bool sql_tokens_contain_locking_marker(std::string_view sql);
 bool sql_tokens_contain_online_alter_marker(std::string_view sql);
 bool sql_tokens_contain_partition_marker(std::string_view sql);
@@ -343,6 +346,9 @@ std::string_view pop_sql_token(std::string_view &sql);
 std::string_view pop_sql_token_after_separators(std::string_view &sql);
 bool pop_sql_scanned_token(std::string_view &sql, std::string_view &out_token);
 void skip_sql_quoted_span(std::string_view &sql, char quote);
+bool sql_next_non_noise_is(std::string_view sql, char expected);
+bool sql_starts_with_token(std::string_view sql, const char *keyword);
+std::size_t executable_sql_comment_prefix_size(std::string_view sql);
 bool sql_token_equals(std::string_view token, const char *keyword);
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
 int sync_schema_catalog(mylite_db &database);
@@ -1986,6 +1992,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_file_import_sql(sql)) {
         return "unsupported SQL file import surface";
     }
+    if (is_file_export_sql(sql)) {
+        return "unsupported SQL file export surface";
+    }
     if (is_non_table_object_sql(sql)) {
         return "unsupported non-table database object SQL surface";
     }
@@ -2066,13 +2075,24 @@ bool is_file_import_sql(std::string_view sql) {
     std::string_view first;
     std::string_view second;
 
-    if (!pop_sql_scanned_token(rest, first) || !sql_token_equals(first, "LOAD")) {
+    if (pop_sql_scanned_token(rest, first) && sql_token_equals(first, "LOAD") &&
+        pop_sql_scanned_token(rest, second) &&
+        (sql_token_equals(second, "DATA") || sql_token_equals(second, "XML"))) {
+        return true;
+    }
+
+    return sql_tokens_contain_file_import_function(sql);
+}
+
+bool is_file_export_sql(std::string_view sql) {
+    std::string_view rest = skip_sql_leading_noise(sql);
+    const std::string_view first = pop_sql_token(rest);
+
+    if (sql_token_equals(first, "EXPLAIN")) {
         return false;
     }
-    if (!pop_sql_scanned_token(rest, second)) {
-        return false;
-    }
-    return sql_token_equals(second, "DATA") || sql_token_equals(second, "XML");
+
+    return sql_tokens_contain_file_export_marker(rest);
 }
 
 bool is_non_table_object_sql(std::string_view sql) {
@@ -2143,6 +2163,27 @@ bool is_set_transaction_control_sql(std::string_view sql) {
 
     const std::string_view second = pop_sql_token_after_separators(sql);
     return sql_token_equals(second, "AUTOCOMMIT") || sql_token_equals(second, "TRANSACTION");
+}
+
+bool sql_tokens_contain_file_import_function(std::string_view sql) {
+    std::string_view token;
+    while (pop_sql_scanned_token(sql, token)) {
+        if (sql_token_equals(token, "LOAD_FILE") && sql_next_non_noise_is(sql, '(')) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool sql_tokens_contain_file_export_marker(std::string_view sql) {
+    std::string_view token;
+    while (pop_sql_scanned_token(sql, token)) {
+        if (sql_token_equals(token, "INTO") &&
+            (sql_starts_with_token(sql, "OUTFILE") || sql_starts_with_token(sql, "DUMPFILE"))) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool is_locking_sql(std::string_view sql) {
@@ -2376,6 +2417,9 @@ std::string_view skip_sql_leading_noise(std::string_view sql) {
             continue;
         }
         if (sql.size() >= 2U && sql[0] == '/' && sql[1] == '*') {
+            if (executable_sql_comment_prefix_size(sql) != 0U) {
+                return sql;
+            }
             const std::size_t end = sql.find("*/");
             if (end == std::string_view::npos) {
                 return {};
@@ -2447,6 +2491,12 @@ bool pop_sql_scanned_token(std::string_view &sql, std::string_view &out_token) {
         }
 
         if (sql.size() >= 2U && sql[0] == '/' && sql[1] == '*') {
+            const std::size_t executable_comment_prefix = executable_sql_comment_prefix_size(sql);
+            if (executable_comment_prefix != 0U) {
+                sql.remove_prefix(executable_comment_prefix);
+                continue;
+            }
+
             const std::size_t end = sql.find("*/");
             if (end == std::string_view::npos) {
                 sql = {};
@@ -2502,6 +2552,38 @@ void skip_sql_quoted_span(std::string_view &sql, char quote) {
             return;
         }
     }
+}
+
+bool sql_next_non_noise_is(std::string_view sql, char expected) {
+    const std::string_view rest = skip_sql_leading_noise(sql);
+    return !rest.empty() && rest.front() == expected;
+}
+
+bool sql_starts_with_token(std::string_view sql, const char *keyword) {
+    const std::string_view rest = skip_sql_leading_noise(sql);
+    std::size_t i = 0;
+    for (; keyword[i] != '\0'; ++i) {
+        if (i >= rest.size()) {
+            return false;
+        }
+        const auto token_char = static_cast<unsigned char>(rest[i]);
+        const auto keyword_char = static_cast<unsigned char>(keyword[i]);
+        if (std::toupper(token_char) != std::toupper(keyword_char)) {
+            return false;
+        }
+    }
+    return i == rest.size() ||
+           (std::isalnum(static_cast<unsigned char>(rest[i])) == 0 && rest[i] != '_');
+}
+
+std::size_t executable_sql_comment_prefix_size(std::string_view sql) {
+    if (sql.size() >= 3U && sql[0] == '/' && sql[1] == '*' && sql[2] == '!') {
+        return 3U;
+    }
+    if (sql.size() >= 4U && sql[0] == '/' && sql[1] == '*' && sql[2] == 'M' && sql[3] == '!') {
+        return 4U;
+    }
+    return 0U;
 }
 
 bool sql_token_equals(std::string_view token, const char *keyword) {

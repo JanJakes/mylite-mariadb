@@ -429,12 +429,13 @@ the embedded library model:
 - server audit plugins,
 - `LOAD DATA` / `LOAD XML` file import, including network-protocol
   `LOAD DATA LOCAL`,
+- `LOAD_FILE()` and `SELECT ... INTO OUTFILE` / `DUMPFILE` host-file SQL I/O,
 - event scheduler,
 - performance schema.
 
 Representative account, event, plugin, replication, binlog, view, trigger,
 routine, package, sequence, `CALL`, transaction-control, autocommit-control,
-SQL locking, named-lock, file-import, partition, and foreign-key DDL commands
+SQL locking, named-lock, SQL file-I/O, partition, and foreign-key DDL commands
 are rejected before MariaDB execution with stable MyLite errors. Other
 unsupported surfaces should fail with stable MyLite result codes and MariaDB
 diagnostics where possible.

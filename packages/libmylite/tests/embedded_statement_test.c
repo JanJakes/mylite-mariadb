@@ -422,6 +422,51 @@ static void test_prepare_diagnostics(void) {
     assert(
         mylite_prepare(
             db,
+            "SELECT LOAD_FILE('/tmp/mylite-load.txt')",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_ERROR
+    );
+    assert(stmt == NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), "file import") != NULL);
+
+    assert(
+        mylite_prepare(
+            db,
+            "SELECT ? INTO OUTFILE '/tmp/mylite-out.csv'",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_ERROR
+    );
+    assert(stmt == NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), "file export") != NULL);
+
+    assert(
+        mylite_prepare(
+            db,
+            "SELECT ? INTO DUMPFILE '/tmp/mylite-out.bin'",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_ERROR
+    );
+    assert(stmt == NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), "file export") != NULL);
+
+    assert(
+        mylite_prepare(
+            db,
             "CREATE VIEW blocked_view AS SELECT 1",
             MYLITE_NUL_TERMINATED,
             &stmt,
