@@ -132,6 +132,7 @@ unless handler fixes are needed; update size measurements after verification.
   - BLOB/TEXT payloads selected into the target;
   - virtual and stored generated source columns projected into ordinary target
     columns;
+  - explicit generated target definitions;
   - explicit CHECK-constrained target definitions;
   - explicit target primary/unique/secondary indexes before `SELECT`;
   - duplicate-key checks and forced-index reads after CTAS;
@@ -146,7 +147,8 @@ unless handler fixes are needed; update size measurements after verification.
   SELECT result rows.
 - Target metadata records the requested engine correctly.
 - CTAS target rows, BLOB/TEXT payloads, generated-source projections,
-  autoincrement values, and supported indexes survive close/reopen.
+  generated target definitions, autoincrement values, and supported indexes
+  survive close/reopen.
 - Failed CTAS duplicate-key abort removes the target catalog metadata before
   the statement returns an error.
 - Compatibility, roadmap, and storage architecture docs describe CTAS as
@@ -164,8 +166,8 @@ entry points:
 - Storage-engine smoke covers selected BLOB/TEXT payloads, duplicate-key checks
   after CTAS, duplicate-key CTAS abort target cleanup, autoincrement
   advancement from copied rows, generated-source projections, explicit
-  CHECK-constrained target definitions, forced-index reads, close/reopen
-  metadata and rows, and durable-sidecar gates.
+  generated and CHECK-constrained target definitions, forced-index reads,
+  close/reopen metadata and rows, and durable-sidecar gates.
 
 ## Risks And Open Questions
 
@@ -175,5 +177,6 @@ entry points:
 - CTAS can derive many SQL types from expressions. This slice should cover
   representative supported types and leave broad type-matrix comparison to a
   later MariaDB/MTR-scale compatibility effort.
-- Generated-column definitions on CTAS targets need separate syntax and storage
-  evidence before MyLite claims that DDL shape.
+- Generated-column definitions on CTAS targets are covered for the explicit
+  base-column projection shape; broader target-expression matrices remain
+  planned.

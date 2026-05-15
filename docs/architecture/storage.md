@@ -230,20 +230,20 @@ Broader CHECK expression, failed ALTER rollback, dump-import,
 prepared-diagnostic, and rollback coverage remains planned.
 Basic virtual and stored generated columns follow the same catalog-backed
 table-definition path, including supported copy ALTER add/modify/drop
-operations and CTAS projections from generated source columns. Ordinary
-secondary and unique indexes on scalar virtual or stored generated columns use
-the same MariaDB-generated key tuples as supported base-column indexes,
-including initial definitions and supported copy-rebuild add, drop, rename, and
-standalone index DDL paths. Bounded generated BLOB/TEXT prefix indexes declared
-in initial table definitions or added through standalone copy-rebuild index DDL
-use the same generated-value and BLOB/TEXT prefix key-image paths. Generated
+operations, CTAS projections from generated source columns, and generated
+target CTAS definitions. Ordinary secondary and unique indexes on scalar
+virtual or stored generated columns use the same MariaDB-generated key tuples
+as supported base-column indexes, including initial definitions and supported
+copy-rebuild add, drop, rename, and standalone index DDL paths. Bounded
+generated BLOB/TEXT prefix indexes declared in initial table definitions or
+added through standalone copy-rebuild index DDL use the same generated-value and
+BLOB/TEXT prefix key-image paths. Generated
 primary-key DDL inherits MariaDB's SQL-layer rejection before catalog
 publication. Unbounded unique BLOB/TEXT keys that MariaDB represents as hidden
 long-unique hash metadata reject before catalog publication, including generated
 BLOB/TEXT columns. MariaDB 11.8 does not expose MySQL-style base-table
-expression key-part syntax; generated target CTAS definitions, full BLOB/TEXT
-index support, MySQL-style expression-index compatibility, and broader
-expression matrices remain planned.
+expression key-part syntax; full BLOB/TEXT index support, MySQL-style
+expression-index compatibility, and broader expression matrices remain planned.
 The same create-time key-shape gate rejects FULLTEXT, SPATIAL, and long-unique
 hash indexes before catalog publication; MyLite must not publish a table
 definition whose index class cannot be maintained by the current storage

@@ -3529,6 +3529,12 @@ static void test_create_table_select(void) {
     single_value_context generated_label = {
         .expected_value = "draft-1",
     };
+    single_value_context target_title_len = {
+        .expected_value = "6",
+    };
+    single_value_context target_label = {
+        .expected_value = "target-2",
+    };
     single_value_context checked_rating = {
         .expected_value = "4",
     };
@@ -3642,6 +3648,16 @@ static void test_create_table_select(void) {
     );
     assert_exec_succeeds(
         db,
+        "CREATE TABLE ctas_generated_target_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL, "
+        "title_len INT AS (CHAR_LENGTH(title)) VIRTUAL, "
+        "label VARCHAR(80) AS (CONCAT(title, '-', id)) STORED"
+        ") ENGINE=InnoDB "
+        "SELECT 2 AS id, 'target' AS title"
+    );
+    assert_exec_succeeds(
+        db,
         "CREATE TABLE ctas_checked_posts ("
         "id INT NOT NULL, "
         "rating INT NOT NULL CHECK (rating >= 0), "
@@ -3649,12 +3665,19 @@ static void test_create_table_select(void) {
         ") ENGINE=InnoDB "
         "SELECT 1 AS id, 4 AS rating"
     );
-    assert_catalog_table_count(filename, "app", 6U);
+    assert_catalog_table_count(filename, "app", 7U);
     assert_catalog_table_metadata(filename, "app", "ctas_source_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_default_constants", "DEFAULT", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_indexed_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_generated_source", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_generated_projection", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(
+        filename,
+        "app",
+        "ctas_generated_target_posts",
+        "InnoDB",
+        "MYLITE"
+    );
     assert_catalog_table_metadata(filename, "app", "ctas_checked_posts", "InnoDB", "MYLITE");
 
     assert(
@@ -3728,6 +3751,28 @@ static void test_create_table_select(void) {
     assert(
         mylite_exec(
             db,
+            "SELECT title_len FROM ctas_generated_target_posts WHERE id = 2",
+            single_value_callback,
+            &target_title_len,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(target_title_len.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT label FROM ctas_generated_target_posts WHERE id = 2",
+            single_value_callback,
+            &target_label,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(target_label.rows == 1);
+    assert(
+        mylite_exec(
+            db,
             "SELECT rating FROM ctas_checked_posts WHERE id = 1",
             single_value_callback,
             &checked_rating,
@@ -3769,12 +3814,21 @@ static void test_create_table_select(void) {
     assert_exec_succeeds(db, "USE app");
     generated_title_len = (single_value_context){.expected_value = "5"};
     generated_label = (single_value_context){.expected_value = "draft-1"};
-    assert_catalog_table_count(filename, "app", 6U);
+    target_title_len = (single_value_context){.expected_value = "6"};
+    target_label = (single_value_context){.expected_value = "target-2"};
+    assert_catalog_table_count(filename, "app", 7U);
     assert_catalog_table_metadata(filename, "app", "ctas_source_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_default_constants", "DEFAULT", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_indexed_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_generated_source", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_generated_projection", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(
+        filename,
+        "app",
+        "ctas_generated_target_posts",
+        "InnoDB",
+        "MYLITE"
+    );
     assert_catalog_table_metadata(filename, "app", "ctas_checked_posts", "InnoDB", "MYLITE");
     assert(
         mylite_exec(
@@ -3821,6 +3875,28 @@ static void test_create_table_select(void) {
     );
     assert(errmsg == NULL);
     assert(generated_label.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT title_len FROM ctas_generated_target_posts WHERE id = 2",
+            single_value_callback,
+            &target_title_len,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(target_title_len.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT label FROM ctas_generated_target_posts WHERE id = 2",
+            single_value_callback,
+            &target_label,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(target_label.rows == 1);
     assert_exec_fails(db, "INSERT INTO ctas_checked_posts VALUES (4, 7)");
     assert(
         mylite_exec(

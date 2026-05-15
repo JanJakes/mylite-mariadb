@@ -35,7 +35,8 @@ the target rows are written through the MyLite handler.
 
 ## Non-Goals
 
-- Declaring generated columns on the CTAS target table.
+- Declaring generated columns on the CTAS target table, which is covered by a
+  later generated target CTAS slice.
 - CTAS from views, information schema, foreign keys, partitions, unsupported
   index classes, or server-only sources.
 - `CREATE OR REPLACE`, temporary CTAS, `IGNORE` / `REPLACE` CTAS, or lock-table
@@ -99,7 +100,7 @@ documentation only unless the existing handler path needs a fix.
 - No durable MariaDB sidecars or runtime schema directories are required after
   reopen.
 - Compatibility docs distinguish generated-source CTAS projection from
-  generated CTAS target definitions and dump/import work.
+  generated target CTAS and dump/import work.
 
 ## Risks And Open Questions
 

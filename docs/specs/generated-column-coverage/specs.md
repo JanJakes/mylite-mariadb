@@ -133,6 +133,8 @@ unchanged for practical purposes.
   after close/reopen.
 - CTAS projections from virtual and stored generated source columns materialize
   expected values before and after close/reopen.
+- Generated target CTAS definitions compute virtual and stored generated values
+  before and after close/reopen.
 - Bounded generated BLOB/TEXT prefix indexes work for forced-index reads,
   duplicate checks, update/delete maintenance, standalone copy-rebuild index
   DDL, and close/reopen.
