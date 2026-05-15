@@ -137,8 +137,9 @@ Initial implementation status: `mylite_exec()` runs through the embedded
 MariaDB connection in `embedded-dev` builds, returns text result rows, preserves
 SQL `NULL` values as `NULL` callback entries, and populates MariaDB diagnostics
 on query failure. File-backed MyLite storage-engine builds support catalog
-schema namespaces for successful direct `CREATE/DROP DATABASE` statements,
-routed `CREATE TABLE` metadata, catalog-backed `DROP TABLE` and simple
+schema namespaces for successful direct `CREATE/DROP DATABASE` and
+`CREATE/DROP SCHEMA` statements, routed `CREATE TABLE` metadata,
+catalog-backed `DROP TABLE` and simple
 `RENAME TABLE`, keyless copy `ALTER` rebuilds, and keyless `INSERT` plus
 full-scan `SELECT` over persisted MyLite row pages.
 
@@ -175,8 +176,10 @@ embedded `MYSQL_STMT` API. The implementation supports one statement per
 prepare call, 1-based scalar parameter binding, row stepping, reset/finalize
 ownership, affected rows, insert ids, MariaDB diagnostics, warnings after
 completed execution and selected failed execution paths, and binary-safe
-text/BLOB column reads. Multi-result execution, parameter metadata, array
-binding, streaming parameter binding, and direct-execution large-value
+text/BLOB column reads. File-backed MyLite storage-engine builds synchronize
+successful prepared `CREATE/DROP DATABASE` and `CREATE/DROP SCHEMA` statements
+with the schema namespace catalog. Multi-result execution, parameter metadata,
+array binding, streaming parameter binding, and direct-execution large-value
 streaming remain planned.
 
 ## Bindings

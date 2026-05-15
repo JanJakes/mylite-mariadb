@@ -221,6 +221,7 @@ struct mylite_stmt {
     bool executed = false;
     bool done = false;
     bool has_current_row = false;
+    bool sync_schema_catalog_after_execute = false;
 };
 
 namespace {
@@ -1198,6 +1199,11 @@ int prepare_impl(
     try {
         std::unique_ptr<mylite_stmt> statement(new mylite_stmt());
         statement->database = database;
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        statement->sync_schema_catalog_after_execute =
+            database->filename != ":memory:" &&
+            is_schema_catalog_sql(std::string_view(sql, sql_len));
+#  endif
         statement->statement = mysql_stmt_init(&database->mysql);
         if (statement->statement == nullptr) {
             set_error(*database, MYLITE_NOMEM, "statement allocation failed");
@@ -1358,7 +1364,18 @@ int execute_statement(mylite_stmt &statement) {
         const unsigned warning_count = mysql_warning_count(&statement.database->mysql);
         mysql_stmt_free_result(statement.statement);
         const int warning_result = capture_warnings(*statement.database, warning_count);
-        return warning_result == MYLITE_OK ? MYLITE_DONE : warning_result;
+        if (warning_result != MYLITE_OK) {
+            return warning_result;
+        }
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        if (statement.sync_schema_catalog_after_execute) {
+            const int sync_result = sync_schema_catalog(*statement.database);
+            if (sync_result != MYLITE_OK) {
+                return sync_result;
+            }
+        }
+#  endif
+        return MYLITE_DONE;
     }
 
     const int result_bind_result = bind_statement_results(statement);

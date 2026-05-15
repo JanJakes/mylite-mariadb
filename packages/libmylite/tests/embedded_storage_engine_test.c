@@ -92,6 +92,7 @@ typedef struct catalog_table_context {
 static void test_show_engines_reports_mylite(void);
 static void test_memory_database_has_empty_mylite_discovery(void);
 static void test_schema_namespaces(void);
+static void test_prepared_schema_namespaces(void);
 static void test_create_table_persists_catalog_metadata(void);
 static void test_alter_table_rebuilds_keyless_rows(void);
 static void test_indexed_rows(void);
@@ -103,6 +104,7 @@ static void test_truncate_table_lifecycle(void);
 static void test_wordpress_shaped_schema(void);
 static void assert_exec_succeeds(mylite_db *db, const char *sql);
 static void assert_exec_fails(mylite_db *db, const char *sql);
+static void assert_prepared_succeeds(mylite_db *db, const char *sql);
 static void assert_catalog_table_count(
     const char *filename,
     const char *schema_name,
@@ -149,6 +151,7 @@ int main(void) {
     test_show_engines_reports_mylite();
     test_memory_database_has_empty_mylite_discovery();
     test_schema_namespaces();
+    test_prepared_schema_namespaces();
     test_create_table_persists_catalog_metadata();
     test_alter_table_rebuilds_keyless_rows();
     test_indexed_rows();
@@ -245,6 +248,29 @@ static void test_schema_namespaces(void) {
     assert_exec_succeeds(db, "DROP DATABASE app");
     assert(mylite_storage_schema_exists(filename, "app") == MYLITE_STORAGE_NOTFOUND);
     assert(mylite_storage_table_exists(filename, "app", "posts") == MYLITE_STORAGE_NOTFOUND);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_prepared_schema_namespaces(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_prepared_succeeds(db, "CREATE SCHEMA prepared_app");
+    assert(mylite_storage_schema_exists(filename, "prepared_app") == MYLITE_STORAGE_OK);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE prepared_app");
+    assert_prepared_succeeds(db, "DROP SCHEMA prepared_app");
+    assert(mylite_storage_schema_exists(filename, "prepared_app") == MYLITE_STORAGE_NOTFOUND);
+    assert_exec_fails(db, "USE prepared_app");
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
@@ -2074,6 +2100,23 @@ static void assert_exec_fails(mylite_db *db, const char *sql) {
     assert(result != MYLITE_OK);
     assert(errmsg != NULL);
     mylite_free(errmsg);
+}
+
+static void assert_prepared_succeeds(mylite_db *db, const char *sql) {
+    mylite_stmt *stmt = NULL;
+    const int prepare_result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, NULL);
+    if (prepare_result != MYLITE_OK) {
+        fprintf(stderr, "Prepare failed: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(prepare_result == MYLITE_OK);
+    assert(stmt != NULL);
+
+    const int step_result = mylite_step(stmt);
+    if (step_result != MYLITE_DONE) {
+        fprintf(stderr, "Prepared SQL failed: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(step_result == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
 }
 
 static void assert_catalog_table_count(

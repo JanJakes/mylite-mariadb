@@ -154,7 +154,7 @@ outputs:
 | Storage-smoke statement smoke | 19,646,960 bytes / 18.74 MiB | 17,692,400 bytes / 16.87 MiB | n/a | 16,840 |
 | Storage-smoke warning smoke | 19,630,384 bytes / 18.72 MiB | 17,675,872 bytes / 16.86 MiB | n/a | 16,840 |
 | Storage-smoke comparison smoke | 19,704,928 bytes / 18.79 MiB | 17,709,952 bytes / 16.89 MiB | n/a | 16,842 |
-| Storage-engine smoke | 19,697,696 bytes / 18.79 MiB | 17,741,984 bytes / 16.92 MiB | n/a | 16,840 |
+| Storage-engine smoke | 19,697,792 bytes / 18.79 MiB | 17,741,984 bytes / 16.92 MiB | n/a | 16,840 |
 
 ## Offline Build Caveat
 

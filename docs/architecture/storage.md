@@ -207,10 +207,10 @@ No persistent directory is created for a schema. `CREATE DATABASE`,
 are represented as catalog namespaces. The current implementation keeps
 MariaDB's SQL-layer directory checks intact by reconstructing transient
 runtime directories from the catalog on file-backed open and by syncing
-successful direct `CREATE/DROP DATABASE` and `CREATE/DROP SCHEMA` statements
-back to schema records. Schema default charset, collation, comments,
-prepared-statement DDL sync, and a final SQL-layer hook that removes the
-transient directory bridge remain planned.
+successful direct and prepared `CREATE/DROP DATABASE` and
+`CREATE/DROP SCHEMA` statements back to schema records. Schema default charset,
+collation, comments, and a final SQL-layer hook that removes the transient
+directory bridge remain planned.
 
 The default embedded profile does not expose server account administration,
 dynamic plugin installation, replication metadata, or the event scheduler.
