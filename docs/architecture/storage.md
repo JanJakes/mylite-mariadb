@@ -62,7 +62,9 @@ primary, unique, and secondary indexes append durable index-entry pages and
 serve ordered handler cursors from MariaDB key tuples, including bounded
 BLOB/TEXT prefix key images produced by MariaDB. `TRUNCATE TABLE` logically
 deletes live rows and resets autoincrement state without changing catalog
-metadata. `DROP TABLE` removes catalog metadata for routed tables.
+metadata. Ordinary `CREATE TABLE IF NOT EXISTS` creates missing routed tables
+and skips existing routed tables without changing their catalog metadata.
+`DROP TABLE` removes catalog metadata for routed tables.
 Simple `RENAME TABLE` updates catalog identity while preserving table ids, row
 pages, and index-entry pages. Representative failed multi-table DROP/RENAME
 paths restore the statement-start catalog and row/index visibility through the
@@ -194,12 +196,15 @@ Current support covers metadata capture and discovery for omitted/default
 engine requests, explicit `ENGINE=MYLITE`, and metadata-safe `ENGINE=InnoDB`,
 `ENGINE=MyISAM`, and `ENGINE=Aria` requests. The catalog records both the
 requested engine name and the effective `MYLITE` engine. Unsupported explicit
-engine requests fail before catalog publication. `DROP TABLE` removes the live
-catalog record and increments the catalog generation without deleting external
-MariaDB sidecars. Dropped table-definition blobs, row pages, and index-entry
-pages remain orphaned inside the primary file until free-space management
-exists; new table ids are allocated above both live catalog records and
-existing row pages so drop/recreate does not expose old rows. Simple
+engine requests fail before catalog publication. Ordinary `CREATE TABLE IF NOT
+EXISTS` statements publish missing targets through the normal create path and
+leave existing routed targets unchanged while exposing MariaDB warnings through
+the public warning API. `DROP TABLE` removes the live catalog record and
+increments the catalog generation without deleting external MariaDB sidecars.
+Dropped table-definition blobs, row pages, and index-entry pages remain
+orphaned inside the primary file until free-space management exists; new table
+ids are allocated above both live catalog records and existing row pages so
+drop/recreate does not expose old rows. Simple
 `RENAME TABLE` rewrites the catalog record identity while preserving table id,
 requested/effective engine metadata, and the stored table-definition blob
 reference, so existing row and index-entry pages move with the renamed table.

@@ -21,8 +21,9 @@ lifecycle, direct SQL including statement effects, prepared statements, column
 metadata, large value reads, warnings, MariaDB baseline SQL API comparison,
 storage-engine smoke, sidecar gates, routed DDL/DML including schema namespaces,
 `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT` including representative
-duplicate modes, temporary LIKE/CTAS isolation, shadowing, and representative
-temporary OR REPLACE, representative OR REPLACE replacement and failed
+duplicate modes, ordinary `CREATE TABLE IF NOT EXISTS`, temporary LIKE/CTAS
+isolation, shadowing, and representative temporary OR REPLACE, representative
+OR REPLACE replacement and failed
 replacement rollback, representative failed table-DDL rollback, standalone
 routed table-DDL `IF EXISTS` skip semantics, standalone index DDL, index rename
 DDL, transaction-control policy, foreign-key DDL rejection, CHECK constraint
@@ -87,7 +88,7 @@ planned.
 
 | Capability | MyLite status | Compatibility target |
 | --- | --- | --- |
-| `CREATE TABLE` metadata | 🟡&nbsp;Partial | Store MyLite table definitions for omitted/default engine, `ENGINE=MYLITE`, `ENGINE=InnoDB`, `ENGINE=MyISAM`, and `ENGINE=Aria` without durable MariaDB sidecars, and cover representative catalog-backed `SHOW CREATE TABLE` export/import round trips |
+| `CREATE TABLE` metadata | 🟡&nbsp;Partial | Store MyLite table definitions for omitted/default engine, `ENGINE=MYLITE`, `ENGINE=InnoDB`, `ENGINE=MyISAM`, and `ENGINE=Aria` without durable MariaDB sidecars, cover ordinary `CREATE TABLE IF NOT EXISTS` missing-target creates and existing-target skips, and cover representative catalog-backed `SHOW CREATE TABLE` export/import round trips |
 | `DROP TABLE` | 🟡&nbsp;Partial | Remove MyLite catalog metadata for routed base tables without durable MariaDB sidecars, preserve the original table for a representative failed multi-table drop, and cover `DROP TABLE IF EXISTS` missing-table skips with warning rows; orphaned definition, row, and index-entry pages are not reclaimed yet |
 | `RENAME TABLE` | 🟡&nbsp;Partial | Rename MyLite catalog metadata for simple routed base tables without durable MariaDB sidecars, preserving supported index reads and duplicate checks across close/reopen; a representative failed multi-table rename preserves the original name and rejects the intermediate new name, and `RENAME TABLE IF EXISTS` missing-source skips are covered with warning rows; foreign-key, trigger, partition, and broader rename semantics remain planned |
 | `UPDATE` / `DELETE` | 🟡&nbsp;Partial | Full-scan and supported keyed update/delete are covered for routed base tables, including BLOB/TEXT payload rows, failed-statement rollback for covered unique-key update failures, and close/reopen visibility; multi-statement rollback, triggers, foreign keys, generated-column edge cases, and unsupported index classes remain planned |
