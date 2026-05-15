@@ -39,7 +39,7 @@ not in a MariaDB datadir or existing engine sidecars.
 | 16 | Compatibility harness | 🟡&nbsp;In&nbsp;progress | Group existing public API, storage, recovery, locking, embedded lifecycle, sidecar, and routed SQL tests by compatibility surface; MariaDB comparison and application suites remain. |
 | 17 | Application schemas | 🟡&nbsp;In&nbsp;progress | WordPress-shaped `wp_options`, `wp_posts`, and `wp_postmeta` smoke coverage is implemented; broader WordPress, ORM, and plugin schemas remain. |
 | 18 | Server-surface policy | 🟡&nbsp;In&nbsp;progress | Runtime defaults disable networking, grants, binlog, events, dynamic host plugin discovery, and performance schema; representative server SQL rejection smoke is implemented, while source trimming remains. |
-| 19 | Size profile hardening | ⚪&nbsp;Planned | Trim daemon-only and low-value optional components after the embedded runtime and storage shape are measurable. |
+| 19 | Size profile hardening | 🟡&nbsp;In&nbsp;progress | Add archive and linked-runtime size reporting, then trim daemon-only and low-value optional components with fresh measurements. |
 
 ## Size And Profile Direction
 

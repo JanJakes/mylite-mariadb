@@ -108,8 +108,35 @@ Measured on 2026-05-14 with the same host and toolchain as the baseline:
 | Archive size | 33,778,328 bytes / 32.21 MiB |
 | Archive members | 808 |
 
-This smoke path proves static plugin registration through `SHOW ENGINES` only.
-It does not claim MyLite table creation, durable DDL, DML, or engine routing.
+This smoke path now covers static plugin registration, current routed
+DDL/DML, sidecar gates, application-schema smoke, and representative
+server-surface policy. It is still opt-in so the default embedded baseline
+remains separate from the MyLite handler build.
+
+## Size Report
+
+Use the first-party size report when evaluating profile hardening:
+
+```sh
+tools/mylite-size-report
+```
+
+The report keeps archive measurements beside linked MyLite runtime proxies,
+because source and linker changes can affect `libmariadbd.a` and the final
+linked payload differently.
+
+Measured on 2026-05-15 with the current embedded and storage-smoke build
+outputs:
+
+| Artifact | Size | Stripped Size | Members | Global Symbols |
+| --- | ---: | ---: | ---: | ---: |
+| MariaDB embedded archive | 33,736,928 bytes / 32.17 MiB | n/a | 807 | n/a |
+| MariaDB storage-smoke archive | 33,851,288 bytes / 32.28 MiB | n/a | 809 | n/a |
+| Embedded open-close smoke | 20,297,088 bytes / 19.36 MiB | 18,201,680 bytes / 17.36 MiB | n/a | 17,004 |
+| Embedded exec smoke | 20,296,872 bytes / 19.36 MiB | 18,201,496 bytes / 17.36 MiB | n/a | 17,004 |
+| Storage-smoke open-close smoke | 20,321,536 bytes / 19.38 MiB | 18,218,704 bytes / 17.37 MiB | n/a | 17,004 |
+| Storage-smoke exec smoke | 20,321,304 bytes / 19.38 MiB | 18,218,536 bytes / 17.37 MiB | n/a | 17,004 |
+| Storage-engine smoke | 20,371,808 bytes / 19.43 MiB | 18,268,080 bytes / 17.42 MiB | n/a | 17,004 |
 
 ## Offline Build Caveat
 
@@ -123,5 +150,5 @@ fully offline builds become a requirement.
 ## Follow-Up
 
 Use this baseline as the comparison point for later profile changes. Each
-future trimming slice should record the same archive path, size, member count,
-cache options, and compatibility rationale.
+future trimming slice should record the size report, cache options, and
+compatibility rationale.
