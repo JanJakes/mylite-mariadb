@@ -162,6 +162,12 @@ struct ColumnValue {
 };
 #endif
 
+struct StoredWarning {
+    mylite_warning_level level = MYLITE_WARNING_WARNING;
+    unsigned code = 0;
+    std::string message;
+};
+
 struct RuntimeState {
     std::mutex mutex;
     unsigned ref_count = 0;
@@ -185,6 +191,8 @@ struct mylite_db {
     unsigned mariadb_errno = 0;
     std::string sqlstate = k_sqlstate_ok;
     std::string errmsg = k_not_an_error;
+    unsigned warning_count = 0;
+    std::vector<StoredWarning> warnings;
     long long changes = 0;
     unsigned long long last_insert_id = 0;
     unsigned active_statements = 0;
@@ -250,6 +258,7 @@ int execute_statement(mylite_stmt &statement);
 int fetch_statement_row(mylite_stmt &statement);
 int bind_statement_results(mylite_stmt &statement);
 int fetch_truncated_column(mylite_stmt &statement, unsigned column);
+int capture_warnings(mylite_db &database, unsigned warning_count);
 void clear_current_row(mylite_stmt &statement);
 bool is_variable_column_type(mylite_value_type type);
 const void *bound_value_data(const BoundValue &value);
@@ -257,6 +266,7 @@ enum enum_field_types bound_value_type(const BoundValue &value);
 mylite_value_type map_column_type(const ColumnInfo &column);
 mylite_value_type map_mariadb_type(enum enum_field_types type, unsigned int flags);
 bool is_unsigned_column(unsigned int flags);
+mylite_warning_level map_warning_level(const char *level);
 bool is_server_surface_sql(std::string_view sql);
 std::string_view skip_sql_leading_noise(std::string_view sql);
 std::string_view pop_sql_token(std::string_view &sql);
@@ -279,6 +289,9 @@ std::vector<char *> mutable_arguments(std::vector<std::string> &arguments);
 #endif
 void remove_directory_if_present(const std::filesystem::path &directory);
 int copy_error_message(mylite_db &database, char **errmsg);
+#if MYLITE_WITH_MARIADB_EMBEDDED
+void clear_warnings(mylite_db &database);
+#endif
 void set_ok(mylite_db &database);
 void set_error(mylite_db &database, int code, const char *message);
 #if MYLITE_WITH_MARIADB_EMBEDDED
@@ -677,6 +690,40 @@ const char *mylite_errmsg(mylite_db *database) {
     return database != nullptr ? safe_c_str(database->errmsg) : k_bad_db_handle;
 }
 
+unsigned mylite_warning_count(mylite_db *database) {
+    return database != nullptr ? database->warning_count : 0U;
+}
+
+int mylite_warning(
+    mylite_db *database,
+    unsigned index,
+    mylite_warning_level *level,
+    unsigned *code,
+    const char **message
+) {
+    if (database == nullptr) {
+        return MYLITE_MISUSE;
+    }
+    if (level == nullptr || code == nullptr || message == nullptr) {
+        set_error(*database, MYLITE_MISUSE, "bad warning output argument");
+        return MYLITE_MISUSE;
+    }
+    *level = MYLITE_WARNING_NOTE;
+    *code = 0;
+    *message = nullptr;
+    if (index >= database->warnings.size()) {
+        set_error(*database, MYLITE_NOTFOUND, "warning is not stored");
+        return MYLITE_NOTFOUND;
+    }
+
+    const StoredWarning &warning = database->warnings[index];
+    *level = warning.level;
+    *code = warning.code;
+    *message = warning.message.c_str();
+    set_ok(*database);
+    return MYLITE_OK;
+}
+
 long long mylite_changes(mylite_db *database) {
     return database != nullptr ? database->changes : 0;
 }
@@ -816,6 +863,7 @@ int exec_impl(
     return copy_error_message(*database, errmsg);
 #else
     set_ok(*database);
+    clear_warnings(*database);
     if (is_server_surface_sql(std::string_view(sql))) {
         set_error(*database, MYLITE_ERROR, "unsupported server-oriented SQL surface");
         return copy_error_message(*database, errmsg);
@@ -840,7 +888,7 @@ int exec_impl(
                   std::min<my_ulonglong>(affected_rows, static_cast<my_ulonglong>(LLONG_MAX))
               );
     database->last_insert_id = static_cast<unsigned long long>(mysql_insert_id(&database->mysql));
-    return MYLITE_OK;
+    return capture_warnings(*database, mysql_warning_count(&database->mysql));
 #endif
 }
 
@@ -999,6 +1047,7 @@ int bind_statement_parameters(mylite_stmt &statement) {
 
 int execute_statement(mylite_stmt &statement) {
     set_ok(*statement.database);
+    clear_warnings(*statement.database);
     clear_current_row(statement);
 
     const int bind_result = bind_statement_parameters(statement);
@@ -1025,7 +1074,10 @@ int execute_statement(mylite_stmt &statement) {
                       std::min<my_ulonglong>(affected_rows, static_cast<my_ulonglong>(LLONG_MAX))
                   );
         statement.done = true;
-        return MYLITE_DONE;
+        const unsigned warning_count = mysql_warning_count(&statement.database->mysql);
+        mysql_stmt_free_result(statement.statement);
+        const int warning_result = capture_warnings(*statement.database, warning_count);
+        return warning_result == MYLITE_OK ? MYLITE_DONE : warning_result;
     }
 
     const int result_bind_result = bind_statement_results(statement);
@@ -1041,7 +1093,10 @@ int fetch_statement_row(mylite_stmt &statement) {
 
     if (fetch_result == MYSQL_NO_DATA) {
         statement.done = true;
-        return MYLITE_DONE;
+        const unsigned warning_count = mysql_warning_count(&statement.database->mysql);
+        mysql_stmt_free_result(statement.statement);
+        const int warning_result = capture_warnings(*statement.database, warning_count);
+        return warning_result == MYLITE_OK ? MYLITE_DONE : warning_result;
     }
     if (fetch_result != 0 && fetch_result != MYSQL_DATA_TRUNCATED) {
         set_mariadb_statement_error(statement);
@@ -1160,6 +1215,69 @@ int fetch_truncated_column(mylite_stmt &statement, unsigned column) {
     return MYLITE_OK;
 }
 
+int capture_warnings(mylite_db &database, unsigned warning_count) {
+    clear_warnings(database);
+    database.warning_count = warning_count;
+    if (warning_count == 0U) {
+        return MYLITE_OK;
+    }
+
+    if (mysql_query(&database.mysql, "SHOW WARNINGS") != 0) {
+        clear_warnings(database);
+        set_mariadb_error(database);
+        return MYLITE_ERROR;
+    }
+
+    MYSQL_RES *result = mysql_store_result(&database.mysql);
+    if (result == nullptr) {
+        if (mysql_field_count(&database.mysql) != 0U) {
+            clear_warnings(database);
+            set_mariadb_error(database);
+            return MYLITE_ERROR;
+        }
+        return MYLITE_OK;
+    }
+
+    try {
+        for (MYSQL_ROW row = mysql_fetch_row(result); row != nullptr;
+             row = mysql_fetch_row(result)) {
+            unsigned long *lengths = mysql_fetch_lengths(result);
+            if (lengths == nullptr || row[0] == nullptr || row[1] == nullptr || row[2] == nullptr) {
+                mysql_free_result(result);
+                clear_warnings(database);
+                set_error(database, MYLITE_ERROR, "malformed SHOW WARNINGS result");
+                return MYLITE_ERROR;
+            }
+
+            const unsigned long parsed_code = std::strtoul(row[1], nullptr, 10);
+            database.warnings.push_back(
+                StoredWarning{
+                    map_warning_level(row[0]),
+                    parsed_code > static_cast<unsigned long>(UINT_MAX)
+                        ? UINT_MAX
+                        : static_cast<unsigned>(parsed_code),
+                    std::string(row[2], static_cast<std::size_t>(lengths[2])),
+                }
+            );
+        }
+    } catch (const std::bad_alloc &) {
+        mysql_free_result(result);
+        clear_warnings(database);
+        set_error(database, MYLITE_NOMEM, "warning allocation failed");
+        return MYLITE_NOMEM;
+    }
+
+    if (mysql_errno(&database.mysql) != 0U) {
+        mysql_free_result(result);
+        clear_warnings(database);
+        set_mariadb_error(database);
+        return MYLITE_ERROR;
+    }
+
+    mysql_free_result(result);
+    return MYLITE_OK;
+}
+
 void clear_current_row(mylite_stmt &statement) {
     statement.has_current_row = false;
     for (ColumnValue &value : statement.values) {
@@ -1263,6 +1381,16 @@ mylite_value_type map_mariadb_type(enum enum_field_types type, unsigned int flag
 
 bool is_unsigned_column(unsigned int flags) {
     return (flags & UNSIGNED_FLAG) != 0U;
+}
+
+mylite_warning_level map_warning_level(const char *level) {
+    if (std::strcmp(level, "Note") == 0) {
+        return MYLITE_WARNING_NOTE;
+    }
+    if (std::strcmp(level, "Error") == 0) {
+        return MYLITE_WARNING_ERROR;
+    }
+    return MYLITE_WARNING_WARNING;
 }
 
 int store_and_emit_result(
@@ -1738,6 +1866,13 @@ int copy_error_message(mylite_db &database, char **errmsg) {
     *errmsg = copy;
     return database.errcode;
 }
+
+#if MYLITE_WITH_MARIADB_EMBEDDED
+void clear_warnings(mylite_db &database) {
+    database.warning_count = 0;
+    database.warnings.clear();
+}
+#endif
 
 int bind_parameter_index(mylite_stmt *statement, unsigned index) {
     if (statement == nullptr || statement->database == nullptr) {

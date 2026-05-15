@@ -69,6 +69,12 @@ if(BUILD_TESTING)
     target_link_libraries(mylite_embedded_statement_test PRIVATE MyLite::mylite)
     mylite_configure_c_target(mylite_embedded_statement_test)
 
+    add_executable(mylite_embedded_warning_test
+      tests/embedded_warning_test.c
+    )
+    target_link_libraries(mylite_embedded_warning_test PRIVATE MyLite::mylite)
+    mylite_configure_c_target(mylite_embedded_warning_test)
+
     add_test(NAME libmylite.embedded-exec COMMAND mylite_embedded_exec_test)
     set_tests_properties(
       libmylite.embedded-exec
@@ -78,6 +84,11 @@ if(BUILD_TESTING)
     set_tests_properties(
       libmylite.embedded-statement
       PROPERTIES LABELS "compat-prepared-statement;compat-embedded-lifecycle;compat-public-api"
+    )
+    add_test(NAME libmylite.embedded-warning COMMAND mylite_embedded_warning_test)
+    set_tests_properties(
+      libmylite.embedded-warning
+      PROPERTIES LABELS "compat-warning;compat-direct-sql;compat-prepared-statement;compat-public-api"
     )
 
     if(MYLITE_MARIADB_HAS_MYLITE_SE)

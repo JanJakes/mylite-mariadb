@@ -144,13 +144,15 @@ outputs:
 | --- | ---: | ---: | ---: | ---: |
 | MariaDB embedded archive | 32,048,256 bytes / 30.56 MiB | n/a | 691 | n/a |
 | MariaDB storage-smoke archive | 32,162,624 bytes / 30.67 MiB | n/a | 693 | n/a |
-| Embedded open-close smoke | 19,554,544 bytes / 18.65 MiB | 17,625,024 bytes / 16.81 MiB | n/a | 16,827 |
-| Embedded exec smoke | 19,554,360 bytes / 18.65 MiB | 17,624,856 bytes / 16.81 MiB | n/a | 16,827 |
-| Embedded statement smoke | 19,554,320 bytes / 18.65 MiB | 17,624,816 bytes / 16.81 MiB | n/a | 16,827 |
-| Storage-smoke open-close smoke | 19,578,976 bytes / 18.67 MiB | 17,642,064 bytes / 16.82 MiB | n/a | 16,827 |
-| Storage-smoke exec smoke | 19,578,808 bytes / 18.67 MiB | 17,641,896 bytes / 16.82 MiB | n/a | 16,827 |
-| Storage-smoke statement smoke | 19,595,280 bytes / 18.69 MiB | 17,658,368 bytes / 16.84 MiB | n/a | 16,827 |
-| Storage-engine smoke | 19,629,280 bytes / 18.72 MiB | 17,691,440 bytes / 16.87 MiB | n/a | 16,827 |
+| Embedded open-close smoke | 19,564,880 bytes / 18.66 MiB | 17,625,216 bytes / 16.81 MiB | n/a | 16,829 |
+| Embedded exec smoke | 19,564,712 bytes / 18.66 MiB | 17,625,064 bytes / 16.81 MiB | n/a | 16,829 |
+| Embedded statement smoke | 19,581,184 bytes / 18.67 MiB | 17,641,520 bytes / 16.82 MiB | n/a | 16,829 |
+| Embedded warning smoke | 19,564,480 bytes / 18.66 MiB | 17,624,992 bytes / 16.81 MiB | n/a | 16,829 |
+| Storage-smoke open-close smoke | 19,605,840 bytes / 18.70 MiB | 17,658,768 bytes / 16.84 MiB | n/a | 16,829 |
+| Storage-smoke exec smoke | 19,605,672 bytes / 18.70 MiB | 17,658,616 bytes / 16.84 MiB | n/a | 16,829 |
+| Storage-smoke statement smoke | 19,605,648 bytes / 18.70 MiB | 17,658,576 bytes / 16.84 MiB | n/a | 16,829 |
+| Storage-smoke warning smoke | 19,605,456 bytes / 18.70 MiB | 17,658,560 bytes / 16.84 MiB | n/a | 16,829 |
+| Storage-engine smoke | 19,639,600 bytes / 18.73 MiB | 17,691,632 bytes / 16.87 MiB | n/a | 16,829 |
 
 ## Offline Build Caveat
 

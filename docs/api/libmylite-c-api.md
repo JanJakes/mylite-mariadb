@@ -170,9 +170,10 @@ non-NULL, receives the first uncompiled byte.
 Initial implementation status: prepared statements run through MariaDB's
 embedded `MYSQL_STMT` API. The implementation supports one statement per
 prepare call, 1-based scalar parameter binding, row stepping, reset/finalize
-ownership, affected rows, insert ids, MariaDB diagnostics, and binary-safe
-text/BLOB column reads. Multi-result execution, rich metadata, warnings, array
-binding, and streaming large values remain planned.
+ownership, affected rows, insert ids, MariaDB diagnostics, warnings after
+completed execution, and binary-safe text/BLOB column reads. Multi-result
+execution, rich metadata, array binding, and streaming large values remain
+planned.
 
 ## Bindings
 
@@ -283,6 +284,13 @@ SQLSTATE remain available for callers that need server-compatible diagnostics.
 `mylite_warning()` uses a zero-based index. It returns `MYLITE_NOTFOUND` when
 the requested warning is not stored.
 
+Initial implementation status: successful direct execution stores MariaDB's
+warning count and the structured rows returned by `SHOW WARNINGS`. Prepared
+non-result statements expose warnings after `mylite_step()` returns
+`MYLITE_DONE`; prepared result statements expose warnings after the result set
+is drained. `mylite_warning_count()` reports MariaDB's total count even if
+MariaDB retained fewer structured rows due to `max_error_count`.
+
 ## Statement Effects
 
 ```c
@@ -293,9 +301,9 @@ unsigned long long mylite_last_insert_id(mylite_db *db);
 These are part of observable MariaDB application behavior. Exposing them through
 MyLite avoids forcing callers into raw MariaDB handles.
 
-Initial implementation status: direct execution updates the last insert id after
-successful statements and reports affected rows for successful non-result
-statements. Result-producing statements report zero changed rows.
+Initial implementation status: direct and prepared execution update the last
+insert id after successful statements and report affected rows for successful
+non-result statements. Result-producing statements report zero changed rows.
 
 ## Memory Ownership
 

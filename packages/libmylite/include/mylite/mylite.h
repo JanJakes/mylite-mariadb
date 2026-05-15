@@ -84,6 +84,12 @@ typedef enum mylite_value_type { /* NOLINT(performance-enum-size): C ABI enum. *
                                  MYLITE_TYPE_BLOB = 5
 } mylite_value_type;
 
+typedef enum mylite_warning_level { /* NOLINT(performance-enum-size): C ABI enum. */
+                                    MYLITE_WARNING_NOTE = 1,
+                                    MYLITE_WARNING_WARNING = 2,
+                                    MYLITE_WARNING_ERROR = 3
+} mylite_warning_level;
+
 #define MYLITE_NUL_TERMINATED ((size_t)-1)
 #define MYLITE_STATIC ((mylite_destructor)0)
 #define MYLITE_TRANSIENT ((mylite_destructor)(-1))
@@ -152,6 +158,14 @@ MYLITE_API int mylite_extended_errcode(mylite_db *database);
 MYLITE_API unsigned mylite_mariadb_errno(mylite_db *database);
 MYLITE_API const char *mylite_sqlstate(mylite_db *database);
 MYLITE_API const char *mylite_errmsg(mylite_db *database);
+MYLITE_API unsigned mylite_warning_count(mylite_db *database);
+MYLITE_API int mylite_warning(
+    mylite_db *database,
+    unsigned index,
+    mylite_warning_level *level,
+    unsigned *code,
+    const char **message
+);
 MYLITE_API long long mylite_changes(mylite_db *database);
 MYLITE_API unsigned long long mylite_last_insert_id(mylite_db *database);
 MYLITE_API void mylite_free(void *ptr);

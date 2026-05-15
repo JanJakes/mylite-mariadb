@@ -35,6 +35,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `embedded-lifecycle` | `embedded-dev` | `compat-embedded-lifecycle` | Embedded runtime open/close, direct execution, and cleanup |
 | `direct-sql` | `embedded-dev` | `compat-direct-sql` | `mylite_exec()` SQL execution |
 | `prepared-statement` | `embedded-dev` | `compat-prepared-statement` | Prepared statements, typed bindings, and binary-safe column access |
+| `warning` | `embedded-dev` | `compat-warning` | Warning counts and structured `SHOW WARNINGS` rows |
 | `storage-engine` | `storage-smoke-dev` | `compat-storage-engine` | Static handler registration and SQL storage-engine smoke |
 | `sidecar` | `storage-smoke-dev` | `compat-sidecar` | Forbidden durable sidecar gates |
 | `routed-ddl-dml` | `storage-smoke-dev` | `compat-routed-ddl-dml` | Routed table DDL and DML smoke |

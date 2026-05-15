@@ -81,6 +81,8 @@ static void test_null_database_api(void) {
     assert(mylite_mariadb_errno(NULL) == 0U);
     assert(strcmp(mylite_sqlstate(NULL), "HY000") == 0);
     assert(strcmp(mylite_errmsg(NULL), "bad database handle") == 0);
+    assert(mylite_warning_count(NULL) == 0U);
+    assert(mylite_warning(NULL, 0U, NULL, NULL, NULL) == MYLITE_MISUSE);
     assert(mylite_exec(NULL, "SELECT 1", NULL, NULL, NULL) == MYLITE_MISUSE);
     database = (mylite_db *)1;
     assert(mylite_exec(database, NULL, NULL, NULL, NULL) == MYLITE_MISUSE);

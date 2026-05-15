@@ -17,10 +17,10 @@ for drop-in application expectations.
 Compatibility evidence is grouped by the local harness documented in
 [Compatibility Harness](architecture/compatibility-harness.md). The initial
 groups cover public API validation, storage, crash recovery, locking, embedded
-lifecycle, direct SQL, prepared statements, storage-engine smoke, sidecar gates,
-routed DDL/DML, initial application-schema smoke, and server-surface policy.
-MariaDB MTR comparison suites and broader application-schema suites remain
-planned.
+lifecycle, direct SQL, prepared statements, warnings, storage-engine smoke,
+sidecar gates, routed DDL/DML, initial application-schema smoke, and
+server-surface policy. MariaDB MTR comparison suites and broader
+application-schema suites remain planned.
 
 ## Baseline
 
@@ -41,7 +41,7 @@ planned.
 | Prepared statements | 🟡&nbsp;Partial | Reusable embedded statements with 1-based scalar parameter binding, row stepping, reset/finalize ownership, and MariaDB diagnostics |
 | Binary-safe values | 🟡&nbsp;Partial | Prepared statements expose explicit TEXT/BLOB byte counts and BLOB values with embedded NUL bytes; richer typed metadata and streaming large values remain planned |
 | Diagnostics | 🟡&nbsp;Partial | Open handles expose stable MyLite result codes, MariaDB errno, SQLSTATE, and message text |
-| Warnings | ⚪&nbsp;Planned | MariaDB-compatible warning counts and structured warning access |
+| Warnings | 🟡&nbsp;Partial | Successful direct and prepared execution expose MariaDB warning counts and retained `SHOW WARNINGS` rows; failed-statement warning enumeration and broader comparison coverage remain planned |
 | Affected rows and insert ids | 🟡&nbsp;Partial | Successful direct and prepared execution expose affected rows for non-result statements and the last insert id |
 | Raw `MYSQL *` as primary API | ➖&nbsp;Out&nbsp;of&nbsp;scope | Available only through a deliberate compatibility adapter |
 
