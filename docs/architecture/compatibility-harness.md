@@ -49,7 +49,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `sql-comparison` | `embedded-dev` | `compat-sql-comparison` | MariaDB baseline SQL API comparison |
 | `storage-engine` | `storage-smoke-dev` | `compat-storage-engine` | Static handler registration and SQL storage-engine smoke |
 | `sidecar` | `storage-smoke-dev` | `compat-sidecar` | Forbidden durable sidecar gates |
-| `routed-ddl-dml` | `storage-smoke-dev` | `compat-routed-ddl-dml` | Routed direct/prepared schema namespaces, table and index DDL, indexed table/index rename, temporary LIKE/CTAS isolation and shadowing, `CREATE TABLE ... SELECT` duplicate modes, OR REPLACE, truncate, and DML smoke |
+| `routed-ddl-dml` | `storage-smoke-dev` | `compat-routed-ddl-dml` | Routed direct/prepared schema namespaces, table and index DDL, indexed table/index rename, temporary LIKE/CTAS isolation, shadowing, and OR REPLACE, `CREATE TABLE ... SELECT` duplicate modes, OR REPLACE, truncate, and DML smoke |
 | `application-schema` | `storage-smoke-dev` | `compat-application-schema` | WordPress-shaped core schema, WordPress installer DDL and seed fixtures, collation restart matrix, and prefix-index smoke |
 | `server-surface` | `storage-smoke-dev` | `compat-server-surface` | Unsupported server and non-table object surface policy |
 

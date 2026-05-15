@@ -230,6 +230,12 @@ Storage-smoke coverage verifies the temporary tables are usable during the
 session, same-name temporary tables shadow durable base tables until
 `DROP TEMPORARY TABLE`, durable tables become visible again after the temporary
 drop, and temporary tables are gone after close/reopen.
+Representative `CREATE OR REPLACE TEMPORARY TABLE` coverage verifies LIKE
+replacement over a same-name durable shadow, CTAS replacement from a distinct
+durable source, and new same-name temporary CTAS over a durable source. A
+repeated same-name temporary CTAS replacement that also reads the same SQL name
+hits MariaDB's temporary-table reopen guard and remains a tracked compatibility
+edge case rather than a MyLite storage claim.
 Successful representative `CREATE OR REPLACE TABLE ... LIKE` and
 `CREATE OR REPLACE TABLE ... SELECT` statements use MariaDB's drop-then-create
 flow: MyLite removes the old catalog record, publishes the replacement
@@ -237,8 +243,9 @@ definition, writes replacement rows and indexes where applicable, and verifies
 close/reopen visibility. Representative failed OR REPLACE rollback covers
 self-LIKE rejection, unsupported replacement definitions, and duplicate-key
 replacement CTAS while preserving old target metadata, rows, indexes, and
-autoincrement state through the existing statement checkpoint; broader
-temporary, locking, and SQL transaction/savepoint semantics remain planned.
+autoincrement state through the existing statement checkpoint; broader locking,
+temporary-table edge cases, and SQL transaction/savepoint semantics remain
+planned.
 Basic column-level and named table-level CHECK constraints survive close/reopen
 because they are stored in the catalog-backed table-definition image. MariaDB
 enforces those checks before insert/update handler calls unless

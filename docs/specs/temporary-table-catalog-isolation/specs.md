@@ -56,8 +56,8 @@ MariaDB base: `mariadb-11.8.6`
 - New storage file-format primitives for a dedicated in-memory temp-table
   store.
 - Claiming full temp-table compatibility for all column types, indexes,
-  `OR REPLACE`, `IGNORE` / `REPLACE`, locks, views, partitions, or foreign
-  keys.
+  broader `OR REPLACE` variants, `IGNORE` / `REPLACE`, locks, views,
+  partitions, or foreign keys.
 - Physical compaction of table-definition, row, or index pages orphaned by
   normal drop-style lifecycle cleanup.
 - Changing public `libmylite` APIs.
@@ -170,6 +170,8 @@ Implemented in storage-engine smoke coverage:
 - Same-name temporary LIKE and CTAS tables shadow durable tables during the
   session, then durable rows and indexes become visible again after
   `DROP TEMPORARY TABLE`.
+- The `temporary-create-or-replace-table` slice extends this lifecycle coverage
+  to representative temporary OR REPLACE LIKE and CTAS paths.
 - The SQL-visible temporary names never appear as durable user-schema catalog
   records, explicit `DROP TEMPORARY TABLE` and close-time cleanup remove live
   temporary storage records from the runtime temp namespace, and close/reopen

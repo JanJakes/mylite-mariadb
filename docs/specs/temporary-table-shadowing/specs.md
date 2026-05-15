@@ -10,7 +10,8 @@ after `DROP TEMPORARY TABLE` and after close/reopen.
 ## Non-Goals
 
 - Exhaustive temporary-table compatibility for all column types, locks,
-  triggers, views, partitions, foreign keys, `OR REPLACE`, or duplicate modes.
+  triggers, views, partitions, foreign keys, broader `OR REPLACE` variants, or
+  duplicate modes.
 - Dedicated non-durable temporary storage outside the current MyLite temporary
   handler lifecycle.
 - SQL transaction, savepoint, or rollback semantics for temporary-table DDL.
@@ -48,7 +49,8 @@ MariaDB base: `mariadb-11.8.6`
 Temporary `LIKE` and CTAS support remains partial, but MyLite no longer treats
 same-name temporary/base-table shadowing as an uncovered temporary-table edge
 case for representative supported table shapes. Broader temporary lock,
-replacement, and unsupported-source cases remain planned.
+replacement, and unsupported-source cases remain planned; representative
+temporary OR REPLACE behavior is covered by a dedicated follow-up slice.
 
 ## Design
 
@@ -112,6 +114,8 @@ and documentation unless a handler fix is required.
 - Compatibility, roadmap, storage architecture, and the temporary-table spec
   identify shadowing as covered representative behavior while keeping broader
   temporary-table variants planned.
+- The dedicated temporary OR REPLACE slice verifies representative replacement
+  behavior on top of this shadowing lifecycle.
 
 ## Risks And Open Questions
 

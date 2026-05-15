@@ -4313,6 +4313,97 @@ static void test_temporary_table_catalog_isolation(void) {
         "1"
     );
 
+    assert_exec_succeeds(db, "CREATE TEMPORARY TABLE shadow_like_posts LIKE source_posts");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO shadow_like_posts (slug, body) VALUES "
+        "('temp-before-replace-like', 'temporary before replace like body')"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM shadow_like_posts", "1");
+    assert_exec_succeeds(
+        db,
+        "CREATE OR REPLACE TEMPORARY TABLE shadow_like_posts LIKE source_posts"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM shadow_like_posts", "0");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO shadow_like_posts (slug, body) VALUES "
+        "('temp-replaced-like', 'temporary replaced like body')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM shadow_like_posts FORCE INDEX (body_prefix) "
+        "WHERE body = 'temporary replaced like body'",
+        "1"
+    );
+    assert_catalog_table_count(filename, "temp_isolation", 2U);
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TEMPORARY TABLE replace_select_posts AS "
+        "SELECT id, slug, body FROM source_posts WHERE id = 1"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM replace_select_posts", "1");
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM replace_select_posts WHERE id = 1",
+        "source-alpha"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE OR REPLACE TEMPORARY TABLE replace_select_posts AS "
+        "SELECT id, slug, body FROM source_posts WHERE id = 2"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM replace_select_posts", "1");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM replace_select_posts WHERE id = 1", "0");
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM replace_select_posts WHERE id = 2",
+        "source-beta"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "temp_isolation", "replace_select_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_catalog_table_count(filename, "temp_isolation", 2U);
+
+    assert_exec_succeeds(
+        db,
+        "CREATE OR REPLACE TEMPORARY TABLE source_posts AS "
+        "SELECT id, slug, body FROM source_posts WHERE id = 1"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM source_posts", "1");
+    assert_query_single_value(db, "SELECT slug FROM source_posts WHERE id = 1", "source-alpha");
+    assert_exec_fails_with_message(
+        db,
+        "CREATE OR REPLACE TEMPORARY TABLE source_posts AS "
+        "SELECT id, slug, body FROM source_posts WHERE id = 2",
+        "Can't reopen table"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM source_posts", "1");
+    assert_query_single_value(db, "SELECT slug FROM source_posts WHERE id = 1", "source-alpha");
+    assert_catalog_table_count(filename, "temp_isolation", 2U);
+
+    assert_exec_succeeds(
+        db,
+        "DROP TEMPORARY TABLE shadow_like_posts, replace_select_posts, source_posts"
+    );
+    assert_catalog_table_count(filename, "temp_isolation", 2U);
+    assert_catalog_table_count(filename, "tmp", 0U);
+    assert_query_single_value(db, "SELECT COUNT(*) FROM source_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM shadow_like_posts FORCE INDEX (slug_key) "
+        "WHERE slug = 'durable-shadow-like'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM shadow_like_posts FORCE INDEX (body_prefix) "
+        "WHERE body = 'durable shadow like body'",
+        "1"
+    );
+
     assert_exec_succeeds(db, "CREATE TEMPORARY TABLE temp_close_posts LIKE source_posts");
     assert_exec_succeeds(
         db,

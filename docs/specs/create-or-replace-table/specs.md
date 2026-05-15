@@ -51,9 +51,9 @@ MariaDB base: `mariadb-11.8.6`
 - Failed OR REPLACE rollback beyond the representative follow-up coverage for
   self-LIKE rejection, unsupported replacement definitions, and duplicate-key
   replacement CTAS.
-- `CREATE OR REPLACE TEMPORARY TABLE`, `IGNORE` / `REPLACE` CTAS, lock-table
-  edge cases, views, foreign keys, partitions, triggers, or unsupported index
-  classes.
+- `CREATE OR REPLACE TEMPORARY TABLE` beyond the representative temporary slice,
+  `IGNORE` / `REPLACE` CTAS, lock-table edge cases, views, foreign keys,
+  partitions, triggers, or unsupported index classes.
 - Physical compaction of pages made unreachable by the drop-then-create
   lifecycle.
 - SQL transaction or savepoint semantics.
@@ -78,9 +78,10 @@ supported table shapes.
 ## Compatibility Impact
 
 Successful OR REPLACE for representative routed LIKE and CTAS shapes moves from
-planned to partial. A follow-up slice covers representative failed replacement
-rollback through the existing statement checkpoint. The support claim remains
-narrower than full transactional MariaDB semantics.
+planned to partial. Follow-up slices cover representative failed replacement
+rollback through the existing statement checkpoint and representative temporary
+OR REPLACE behavior. The support claim remains narrower than full transactional
+MariaDB semantics.
 
 ## DDL Metadata Routing Impact
 
@@ -149,12 +150,15 @@ Implemented in storage-engine smoke coverage:
   sidecars.
 - The `failed-create-or-replace-rollback` slice covers representative failed
   replacement rollback.
+- The `temporary-create-or-replace-table` slice covers representative temporary
+  LIKE and CTAS replacement while keeping broader temporary-table edge cases
+  planned.
 
 ## Risks And Unresolved Questions
 
 - MariaDB's OR REPLACE flow is drop-then-create. Representative failed
   replacement rollback is covered separately, but this must not imply full
   transactional replacement semantics.
-- OR REPLACE interacts with locks, temporary tables, binary logging, and
-  duplicate source/target checks. This slice covers only representative
-  embedded, binlog-disabled, file-backed MyLite paths.
+- OR REPLACE interacts with locks, binary logging, duplicate source/target
+  checks, and broader temporary-table edge cases. This slice covers only
+  representative embedded, binlog-disabled, file-backed MyLite paths.
