@@ -6489,6 +6489,15 @@ static int catalog_table_callback(void *ctx, const char *schema_name, const char
     assert(schema_name != NULL);
     assert(table_name != NULL);
     assert(catalog_ctx->expected_schema_name != NULL);
+    if (strcmp(schema_name, catalog_ctx->expected_schema_name) != 0) {
+        fprintf(
+            stderr,
+            "unexpected catalog table schema: got '%s'.'%s', expected schema '%s'\n",
+            schema_name,
+            table_name,
+            catalog_ctx->expected_schema_name
+        );
+    }
     assert(strcmp(schema_name, catalog_ctx->expected_schema_name) == 0);
     ++catalog_ctx->count;
     return 0;
