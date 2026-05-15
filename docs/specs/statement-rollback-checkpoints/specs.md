@@ -111,7 +111,8 @@ before this slice: multi-row inserts that fail after a prior row write, CHECK
 constraint failures after an earlier row write, and unique-key update failures
 after a prior replacement row/index publication. Follow-up storage-smoke
 coverage extends the same checkpoint evidence to representative failed OR
-REPLACE replacement paths.
+REPLACE replacement paths and representative failed multi-table DROP/RENAME
+paths.
 
 ## Single-File And Embedded-Lifecycle Impact
 
@@ -155,6 +156,9 @@ storage checkpoint helper and a `libmylite` execution guard.
   `ENGINE=InnoDB` tables.
 - Add follow-up storage-engine smoke coverage for representative failed
   `CREATE OR REPLACE TABLE` paths preserving old targets.
+- Add follow-up storage-engine smoke coverage for representative failed
+  multi-table `DROP TABLE` and `RENAME TABLE` paths preserving original
+  tables.
 - Verify close/reopen visibility after failed-statement rollback.
 - Add a compatibility harness group for statement rollback.
 - Run format, tidy, first-party tests, embedded tests, storage-smoke tests,

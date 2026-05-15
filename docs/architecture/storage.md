@@ -64,9 +64,11 @@ BLOB/TEXT prefix key images produced by MariaDB. `TRUNCATE TABLE` logically
 deletes live rows and resets autoincrement state without changing catalog
 metadata. `DROP TABLE` removes catalog metadata for routed tables.
 Simple `RENAME TABLE` updates catalog identity while preserving table ids, row
-pages, and index-entry pages. Copy `ALTER` rebuilds use MariaDB's table-copy
-path and append rebuilt table definitions, rows, and supported index entries
-inside the primary file. `CREATE TABLE ... LIKE` uses MariaDB's clone-definition
+pages, and index-entry pages. Representative failed multi-table DROP/RENAME
+paths restore the statement-start catalog and row/index visibility through the
+statement checkpoint. Copy `ALTER` rebuilds use MariaDB's table-copy path and
+append rebuilt table definitions, rows, and supported index entries inside the
+primary file. `CREATE TABLE ... LIKE` uses MariaDB's clone-definition
 path and publishes an empty MyLite catalog record with source requested-engine
 metadata preserved. Online `ALTER`, in-place `ALTER`, transaction-aware index
 maintenance, free-space reclamation, and unsupported index classes still reject
@@ -198,6 +200,9 @@ existing row pages so drop/recreate does not expose old rows. Simple
 `RENAME TABLE` rewrites the catalog record identity while preserving table id,
 requested/effective engine metadata, and the stored table-definition blob
 reference, so existing row and index-entry pages move with the renamed table.
+Representative failed multi-table `DROP TABLE` and `RENAME TABLE` statements
+preserve original table metadata, rows, and supported index reads before and
+after close/reopen through the statement checkpoint.
 Copy `ALTER` rebuilds let MariaDB create a temporary MyLite table, copy rows
 through `ha_write_row()`, rename the old table to a backup, rename the rebuilt
 table to the final name, and drop the backup catalog record. This preserves
@@ -247,9 +252,10 @@ definition, writes replacement rows and indexes where applicable, and verifies
 close/reopen visibility. Representative failed OR REPLACE rollback covers
 self-LIKE rejection, unsupported replacement definitions, and duplicate-key
 replacement CTAS while preserving old target metadata, rows, indexes, and
-autoincrement state through the existing statement checkpoint; broader locking,
-temporary-table edge cases, and SQL transaction/savepoint semantics remain
-planned.
+autoincrement state through the existing statement checkpoint. Representative
+failed multi-table DROP/RENAME rollback preserves original target metadata,
+rows, and indexes through the same checkpoint; broader locking, temporary-table
+edge cases, and SQL transaction/savepoint semantics remain planned.
 Basic column-level and named table-level CHECK constraints survive close/reopen
 because they are stored in the catalog-backed table-definition image. MariaDB
 enforces those checks before insert/update handler calls unless

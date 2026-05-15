@@ -158,6 +158,7 @@ static void test_create_table_select_duplicate_modes(void);
 static void test_temporary_table_catalog_isolation(void);
 static void test_create_or_replace_table(void);
 static void test_failed_create_or_replace_rollback(void);
+static void test_failed_table_ddl_rollback(void);
 static void test_constraint_generated_dump_fixture(void);
 static void test_show_create_table_round_trip(void);
 static void test_constraint_generated_expression_matrix(void);
@@ -297,6 +298,7 @@ int main(void) {
     test_temporary_table_catalog_isolation();
     test_create_or_replace_table();
     test_failed_create_or_replace_rollback();
+    test_failed_table_ddl_rollback();
     test_constraint_generated_dump_fixture();
     test_show_create_table_round_trip();
     test_constraint_generated_expression_matrix();
@@ -4778,6 +4780,99 @@ static void test_failed_create_or_replace_rollback(void) {
         db,
         "SELECT id FROM target_posts FORCE INDEX (body_prefix) WHERE body = 'old body three'",
         "3"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_failed_table_ddl_rollback(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE ddl_rollback");
+    assert_exec_succeeds(db, "USE ddl_rollback");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE drop_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(32) NOT NULL, "
+        "body LONGTEXT NULL, "
+        "UNIQUE KEY slug_key (slug), "
+        "KEY body_prefix (body(8))"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO drop_posts VALUES "
+        "(1, 'drop-alpha', 'old drop body one'), "
+        "(2, 'drop-beta', 'old drop body two')"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE rename_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(32) NOT NULL, "
+        "body LONGTEXT NULL, "
+        "UNIQUE KEY slug_key (slug), "
+        "KEY body_prefix (body(8))"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO rename_posts VALUES "
+        "(1, 'rename-alpha', 'old rename body one'), "
+        "(2, 'rename-beta', 'old rename body two')"
+    );
+    assert_catalog_table_count(filename, "ddl_rollback", 2U);
+
+    assert_exec_fails(db, "DROP TABLE drop_posts, missing_drop_posts");
+    assert_catalog_table_count(filename, "ddl_rollback", 2U);
+    assert_catalog_table_metadata(filename, "ddl_rollback", "drop_posts", "InnoDB", "MYLITE");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM drop_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM drop_posts FORCE INDEX (slug_key) WHERE slug = 'drop-beta'",
+        "2"
+    );
+
+    assert_exec_fails(
+        db,
+        "RENAME TABLE rename_posts TO renamed_posts, "
+        "missing_rename_posts TO missing_renamed_posts"
+    );
+    assert_catalog_table_count(filename, "ddl_rollback", 2U);
+    assert_catalog_table_metadata(filename, "ddl_rollback", "rename_posts", "InnoDB", "MYLITE");
+    assert(
+        mylite_storage_table_exists(filename, "ddl_rollback", "renamed_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_exec_fails(db, "SELECT COUNT(*) FROM renamed_posts");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM rename_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM rename_posts FORCE INDEX (body_prefix) WHERE body = 'old rename body one'",
+        "1"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "ddl_rollback");
+    assert_exec_succeeds(db, "USE ddl_rollback");
+    assert_catalog_table_count(filename, "ddl_rollback", 2U);
+    assert_catalog_table_metadata(filename, "ddl_rollback", "drop_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "ddl_rollback", "rename_posts", "InnoDB", "MYLITE");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM drop_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM rename_posts FORCE INDEX (slug_key) WHERE slug = 'rename-beta'",
+        "2"
     );
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
