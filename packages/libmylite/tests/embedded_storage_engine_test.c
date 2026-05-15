@@ -2204,12 +2204,19 @@ static void test_standalone_index_ddl(void) {
     table_context generated_new_renamed_index_rows = {0};
     table_context generated_dropped_index_rows = {0};
     table_context generated_post_drop_rows = {0};
+    table_context generated_blob_body_rows = {0};
+    table_context generated_blob_payload_rows = {0};
+    table_context generated_blob_dropped_index_rows = {0};
+    table_context generated_blob_post_drop_rows = {0};
     table_context reopened_generated_slug_rows = {0};
     table_context reopened_generated_old_renamed_index_rows = {0};
     table_context reopened_generated_new_renamed_index_rows = {0};
     table_context reopened_generated_dropped_index_rows = {0};
     table_context reopened_generated_label_rows = {0};
     table_context reopened_generated_label_dropped_rows = {0};
+    table_context reopened_generated_blob_payload_rows = {0};
+    table_context reopened_generated_blob_unique_rows = {0};
+    table_context reopened_generated_blob_dropped_index_rows = {0};
     const char *category_ids[] = {"1", "3"};
     id_sequence_context category_sequence = {
         .expected_count = 2,
@@ -2241,6 +2248,16 @@ static void test_standalone_index_ddl(void) {
         "label VARCHAR(48) AS (CONCAT(title, '-', id)) STORED"
         ") ENGINE=InnoDB"
     );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE generated_blob_index_ddl_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL, "
+        "generated_body TEXT AS (CONCAT(title, '-body')) STORED, "
+        "generated_label TEXT AS (CONCAT(title, '-label')) VIRTUAL, "
+        "generated_payload BLOB AS (UNHEX(HEX(CONCAT(title, '-bin')))) STORED"
+        ") ENGINE=InnoDB"
+    );
     assert_exec_succeeds(db, "INSERT INTO standalone_index_posts VALUES (1, 'alpha', 'news', 10)");
     assert_exec_succeeds(db, "INSERT INTO standalone_index_posts VALUES (2, 'beta', 'tech', 20)");
     assert_exec_succeeds(db, "INSERT INTO standalone_index_posts VALUES (3, 'gamma', 'news', 30)");
@@ -2255,6 +2272,11 @@ static void test_standalone_index_ddl(void) {
     assert_exec_succeeds(
         db,
         "INSERT INTO generated_index_ddl_posts (id, title) VALUES (3, 'gamma')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO generated_blob_index_ddl_posts (id, title) VALUES "
+        "(1, 'alpha'), (2, 'beta'), (3, 'gamma')"
     );
 
     assert_exec_succeeds(
@@ -2274,11 +2296,37 @@ static void test_standalone_index_ddl(void) {
         db,
         "CREATE INDEX generated_label_key ON generated_index_ddl_posts (label) ALGORITHM=COPY"
     );
-    assert_catalog_table_count(filename, "app", 2U);
+    assert_exec_succeeds(
+        db,
+        "CREATE INDEX generated_body_prefix_ddl "
+        "ON generated_blob_index_ddl_posts (generated_body(12)) ALGORITHM=COPY"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE UNIQUE INDEX generated_label_prefix_ddl "
+        "ON generated_blob_index_ddl_posts (generated_label(10)) ALGORITHM=COPY"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE INDEX generated_payload_prefix_ddl "
+        "ON generated_blob_index_ddl_posts (generated_payload(6)) ALGORITHM=COPY"
+    );
+    assert_catalog_table_count(filename, "app", 3U);
     assert_catalog_table_metadata(filename, "app", "standalone_index_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "generated_index_ddl_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(
+        filename,
+        "app",
+        "generated_blob_index_ddl_posts",
+        "InnoDB",
+        "MYLITE"
+    );
     assert_exec_fails(db, "INSERT INTO standalone_index_posts VALUES (4, 'beta', 'docs', 40)");
     assert_exec_fails(db, "INSERT INTO generated_index_ddl_posts (id, title) VALUES (4, 'alpha')");
+    assert_exec_fails(
+        db,
+        "INSERT INTO generated_blob_index_ddl_posts (id, title) VALUES (4, 'alpha')"
+    );
 
     assert(
         mylite_exec(
@@ -2327,6 +2375,31 @@ static void test_standalone_index_ddl(void) {
     );
     assert(errmsg == NULL);
     assert(generated_label_rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_blob_index_ddl_posts "
+            "FORCE INDEX (generated_body_prefix_ddl) WHERE generated_body = 'alpha-body'",
+            row_callback,
+            &generated_blob_body_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_blob_body_rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_blob_index_ddl_posts "
+            "FORCE INDEX (generated_payload_prefix_ddl) "
+            "WHERE generated_payload = UNHEX('626574612D62696E')",
+            row_callback,
+            &generated_blob_payload_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_blob_payload_rows.rows == 1);
 
     assert_exec_succeeds(
         db,
@@ -2419,11 +2492,19 @@ static void test_standalone_index_ddl(void) {
     assert(generated_slug_rows.rows == 1);
     assert_exec_fails(db, "INSERT INTO generated_index_ddl_posts (id, title) VALUES (4, 'beta')");
     assert_exec_fails(db, "INSERT INTO standalone_index_posts VALUES (4, 'beta', 'docs', 40)");
-    assert_catalog_table_count(filename, "app", 2U);
+    assert_exec_fails(
+        db,
+        "INSERT INTO generated_blob_index_ddl_posts (id, title) VALUES (4, 'beta')"
+    );
+    assert_catalog_table_count(filename, "app", 3U);
 
     assert_exec_succeeds(db, "DROP INDEX category_lookup ON standalone_index_posts");
     assert_exec_succeeds(db, "DROP INDEX generated_label_key ON generated_index_ddl_posts");
-    assert_catalog_table_count(filename, "app", 2U);
+    assert_exec_succeeds(
+        db,
+        "DROP INDEX generated_body_prefix_ddl ON generated_blob_index_ddl_posts"
+    );
+    assert_catalog_table_count(filename, "app", 3U);
     assert(
         mylite_exec(
             db,
@@ -2446,6 +2527,18 @@ static void test_standalone_index_ddl(void) {
     );
     assert(errmsg == NULL);
     assert(generated_dropped_index_rows.rows == 0);
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM generated_blob_index_ddl_posts "
+            "WHERE Key_name = 'generated_body_prefix_ddl'",
+            table_callback,
+            &generated_blob_dropped_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_blob_dropped_index_rows.rows == 0);
     assert_exec_fails(
         db,
         "SELECT id FROM standalone_index_posts FORCE INDEX (category_lookup) "
@@ -2478,6 +2571,22 @@ static void test_standalone_index_ddl(void) {
     );
     assert(errmsg == NULL);
     assert(generated_post_drop_rows.rows == 1);
+    assert_exec_fails(
+        db,
+        "SELECT id FROM generated_blob_index_ddl_posts "
+        "FORCE INDEX (generated_body_prefix_ddl) WHERE generated_body = 'alpha-body'"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_blob_index_ddl_posts WHERE generated_body = 'alpha-body'",
+            row_callback,
+            &generated_blob_post_drop_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_blob_post_drop_rows.rows == 1);
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
@@ -2564,6 +2673,31 @@ static void test_standalone_index_ddl(void) {
     assert(
         mylite_exec(
             db,
+            "SELECT id FROM generated_blob_index_ddl_posts "
+            "FORCE INDEX (generated_payload_prefix_ddl) "
+            "WHERE generated_payload = UNHEX('67616D6D612D62696E')",
+            row_callback,
+            &reopened_generated_blob_payload_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_generated_blob_payload_rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_blob_index_ddl_posts "
+            "FORCE INDEX (generated_label_prefix_ddl) WHERE generated_label = 'beta-label'",
+            row_callback,
+            &reopened_generated_blob_unique_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_generated_blob_unique_rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
             "SHOW INDEX FROM standalone_index_posts WHERE Key_name = 'category_lookup'",
             table_callback,
             &reopened_dropped_index_rows,
@@ -2583,6 +2717,18 @@ static void test_standalone_index_ddl(void) {
     );
     assert(errmsg == NULL);
     assert(reopened_generated_dropped_index_rows.rows == 0);
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM generated_blob_index_ddl_posts "
+            "WHERE Key_name = 'generated_body_prefix_ddl'",
+            table_callback,
+            &reopened_generated_blob_dropped_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_generated_blob_dropped_index_rows.rows == 0);
     assert_exec_succeeds(
         db,
         "CREATE INDEX reopened_generated_label_key ON generated_index_ddl_posts (label)"
@@ -2615,9 +2761,16 @@ static void test_standalone_index_ddl(void) {
     );
     assert(errmsg == NULL);
     assert(reopened_generated_label_dropped_rows.rows == 0);
-    assert_catalog_table_count(filename, "app", 2U);
+    assert_catalog_table_count(filename, "app", 3U);
     assert_catalog_table_metadata(filename, "app", "standalone_index_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "generated_index_ddl_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(
+        filename,
+        "app",
+        "generated_blob_index_ddl_posts",
+        "InnoDB",
+        "MYLITE"
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 

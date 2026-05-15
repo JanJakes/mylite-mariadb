@@ -101,6 +101,6 @@ InnoDB, MyISAM, Aria, binlog, relay-log, or plugin-owned sidecars.
 
 - Copy-rebuild DDL inherits the current append-only storage and statement
   checkpoint limits.
-- Broader generated expression coverage, standalone generated BLOB/TEXT prefix
-  index DDL, and full or oversized generated BLOB/TEXT key payloads need
+- Broader generated expression coverage, full or oversized generated BLOB/TEXT
+  key payloads, and default/online generated BLOB/TEXT prefix index DDL need
   separate compatibility matrices.

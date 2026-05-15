@@ -13,7 +13,8 @@ behavior. Later generated-column slices expand the covered subset to
 CTAS projections from generated source columns, copy-rebuild generated-column
 add/modify/drop, and ordinary secondary and unique indexes on scalar generated
 columns, including supported copy-rebuild generated-index DDL and bounded
-generated BLOB/TEXT prefix indexes declared in initial table definitions.
+generated BLOB/TEXT prefix indexes declared in initial table definitions or
+added through standalone copy-rebuild index DDL.
 
 ## Non-Goals
 
@@ -113,7 +114,8 @@ unchanged for practical purposes.
 - Storage-engine smoke verifies CTAS projections from virtual and stored
   generated source columns into ordinary target columns.
 - Storage-engine smoke verifies generated BLOB/TEXT values and bounded
-  generated BLOB/TEXT prefix indexes declared in initial table definitions.
+  generated BLOB/TEXT prefix indexes declared in initial table definitions and
+  added through standalone copy-rebuild index DDL.
 - Add a compatibility harness group for generated columns.
 - Run formatting, tidy, configured CTest presets, the named harness report, and
   `git diff --check`.
@@ -131,7 +133,8 @@ unchanged for practical purposes.
 - CTAS projections from virtual and stored generated source columns materialize
   expected values before and after close/reopen.
 - Bounded generated BLOB/TEXT prefix indexes work for forced-index reads,
-  duplicate checks, update/delete maintenance, and close/reopen.
+  duplicate checks, update/delete maintenance, standalone copy-rebuild index
+  DDL, and close/reopen.
 - Compatibility docs and roadmap mark generated columns as partial rather than
   planned.
 - The compatibility harness can run the generated-column evidence by name.

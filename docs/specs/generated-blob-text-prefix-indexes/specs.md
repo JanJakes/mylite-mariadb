@@ -46,8 +46,7 @@ prefix key image fits the current MyLite index-entry page.
   page limit.
 - Generated primary keys, expression/hidden generated indexes, FULLTEXT,
   SPATIAL, hash, vector, or foreign-key indexes.
-- Standalone generated BLOB/TEXT prefix index DDL; this can follow the same
-  pattern if initial DDL remains stable.
+- Online or default-algorithm generated BLOB/TEXT prefix index DDL.
 - SQL rollback, savepoints, crash recovery beyond current statement
   checkpointing, or broad generated expression matrices.
 
@@ -68,10 +67,11 @@ behavior:
 ## Compatibility Impact
 
 Generated-column support expands to generated BLOB/TEXT values and bounded
-generated BLOB/TEXT prefix indexes. It remains partial because full or
-oversized generated BLOB/TEXT indexes, generated primary keys,
-expression/hidden indexes, SQL rollback, and broad expression matrices remain
-planned.
+generated BLOB/TEXT prefix indexes declared in initial DDL. A follow-up slice
+extends the same key class to standalone copy-rebuild index DDL. The area
+remains partial because full or oversized generated BLOB/TEXT indexes,
+generated primary keys, expression/hidden indexes, SQL rollback, and broad
+expression matrices remain planned.
 
 ## DDL Metadata Routing Impact
 
@@ -118,7 +118,7 @@ existing support predicates or key-copy path need correction.
 
 ## Risks And Open Questions
 
-- This slice intentionally does not claim standalone generated BLOB/TEXT prefix
-  index DDL until the initial DDL path is proven and reviewed.
+- Standalone generated BLOB/TEXT prefix index DDL is covered by the follow-up
+  generated BLOB/TEXT prefix index DDL slice.
 - BLOB/TEXT generated expressions beyond deterministic string/binary functions
   need broader MariaDB comparison coverage.
