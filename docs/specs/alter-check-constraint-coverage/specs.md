@@ -86,8 +86,8 @@ than failed ALTER rollback.
 
 MyLite moves basic successful CHECK `ALTER` behavior for supported routed
 tables from planned to covered. Broader CHECK expressions, failed copy ALTER
-rollback beyond ADD CHECK validation, and CTAS/dump-import edge cases remain
-planned.
+rollback beyond ADD CHECK validation, and CTAS plus broader dump/export edge
+cases remain planned.
 
 ## DDL Metadata Routing Impact
 

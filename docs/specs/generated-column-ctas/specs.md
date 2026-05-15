@@ -60,7 +60,7 @@ path is:
 
 Generated-column support expands from direct DML, close/reopen, generated-index
 paths, and copy ALTER to include CTAS projections from generated source
-columns. Generated-column definitions on CTAS targets, dump/import,
+columns. Generated-column definitions on CTAS targets, broader dump/export,
 transactional rollback, and broader expression matrices remain planned.
 
 ## DDL Metadata Routing Impact
@@ -100,7 +100,7 @@ documentation only unless the existing handler path needs a fix.
 - No durable MariaDB sidecars or runtime schema directories are required after
   reopen.
 - Compatibility docs distinguish generated-source CTAS projection from
-  generated target CTAS and dump/import work.
+  generated target CTAS and broader dump/export work.
 
 ## Risks And Open Questions
 

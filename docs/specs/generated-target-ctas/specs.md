@@ -64,7 +64,7 @@ No MyLite handler change is required. The supported path is:
 Generated columns remain partial support, but generated target CTAS definitions
 move from planned to covered for the explicit base-column projection shape.
 Generated-source CTAS projection remains covered separately. Broader generated
-expression matrices and dump/import fixtures remain planned.
+expression matrices and broader dump/export fixtures remain planned.
 
 ## DDL Metadata Routing Impact
 

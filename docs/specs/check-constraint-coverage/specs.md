@@ -54,7 +54,7 @@ This slice marks CHECK constraints as partial support: covered for basic
 column-level and table-level constraints on routed base tables. Later coverage
 adds named table-level CHECK add/drop ALTER, failed ADD CHECK rollback over
 incompatible existing rows, and explicit CHECK-constrained CTAS targets, while
-broader expression, dump-import, and rollback cases remain planned.
+broader expression, broader dump/export, and rollback cases remain planned.
 
 ## Design
 

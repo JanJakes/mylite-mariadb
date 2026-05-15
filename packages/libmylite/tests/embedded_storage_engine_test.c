@@ -147,6 +147,7 @@ static void test_standalone_index_ddl(void);
 static void test_blob_text_prefix_indexes(void);
 static void test_create_table_like(void);
 static void test_create_table_select(void);
+static void test_constraint_generated_dump_fixture(void);
 static void test_truncate_table_lifecycle(void);
 static void test_wordpress_shaped_schema(void);
 static void test_wordpress_installer_schema_fixture(void);
@@ -269,6 +270,7 @@ int main(void) {
     test_blob_text_prefix_indexes();
     test_create_table_like();
     test_create_table_select();
+    test_constraint_generated_dump_fixture();
     test_truncate_table_lifecycle();
     test_wordpress_shaped_schema();
     test_wordpress_installer_schema_fixture();
@@ -3951,6 +3953,157 @@ static void test_create_table_select(void) {
     );
     assert(errmsg == NULL);
     assert(reopened_checked_rows.rows == 1);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_constraint_generated_dump_fixture(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    single_value_context title_len = {
+        .expected_value = "5",
+    };
+    single_value_context title_key = {
+        .expected_value = "alpha",
+    };
+    single_value_context title_len_index = {
+        .expected_value = "1",
+    };
+    single_value_context title_key_index = {
+        .expected_value = "1",
+    };
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE dump_import");
+    assert_exec_succeeds(db, "USE dump_import");
+    exec_sql_fixture(db, "constraint-generated-dump.sql");
+    assert_catalog_table_count(filename, "dump_import", 1U);
+    assert_catalog_table_metadata(filename, "dump_import", "dump_posts", "InnoDB", "MYLITE");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT title_len FROM dump_posts WHERE id = 1",
+            single_value_callback,
+            &title_len,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(title_len.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT title_key FROM dump_posts WHERE id = 1",
+            single_value_callback,
+            &title_key,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(title_key.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM dump_posts FORCE INDEX (title_len_key) WHERE title_len = 5",
+            single_value_callback,
+            &title_len_index,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(title_len_index.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM dump_posts FORCE INDEX (title_key_unique) WHERE title_key = 'alpha'",
+            single_value_callback,
+            &title_key_index,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(title_key_index.rows == 1);
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO dump_posts (id, title, rating) VALUES (3, 'Gamma', 11)",
+        "CONSTRAINT"
+    );
+    assert_prepared_fails_with_message(
+        db,
+        "INSERT INTO dump_posts (id, title, rating) VALUES (4, 'ALPHA', 5)",
+        "Duplicate"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    title_len = (single_value_context){.expected_value = "4"};
+    title_key = (single_value_context){.expected_value = "beta"};
+    title_len_index = (single_value_context){.expected_value = "2"};
+    title_key_index = (single_value_context){.expected_value = "2"};
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE dump_import");
+    assert_catalog_table_count(filename, "dump_import", 1U);
+    assert_catalog_table_metadata(filename, "dump_import", "dump_posts", "InnoDB", "MYLITE");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT title_len FROM dump_posts WHERE id = 2",
+            single_value_callback,
+            &title_len,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(title_len.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT title_key FROM dump_posts WHERE id = 2",
+            single_value_callback,
+            &title_key,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(title_key.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM dump_posts FORCE INDEX (title_len_key) WHERE title_len = 4",
+            single_value_callback,
+            &title_len_index,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(title_len_index.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM dump_posts FORCE INDEX (title_key_unique) WHERE title_key = 'beta'",
+            single_value_callback,
+            &title_key_index,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(title_key_index.rows == 1);
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO dump_posts (id, title, rating) VALUES (5, 'Delta', -1)",
+        "CONSTRAINT"
+    );
+    assert_prepared_fails_with_message(
+        db,
+        "INSERT INTO dump_posts (id, title, rating) VALUES (6, 'beta', 6)",
+        "Duplicate"
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 

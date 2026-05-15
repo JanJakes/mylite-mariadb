@@ -37,7 +37,7 @@ Generated-column support expands to copy-rebuild ALTER DDL for:
 - dropping a generated column,
 - preserving the resulting metadata and values after close/reopen.
 
-Instant, in-place, online, SQL rollback, CTAS, dump/import, broad expression
+Instant, in-place, online, SQL rollback, CTAS, broad dump/export, broad expression
 matrices, and MySQL-style expression-index compatibility remain planned.
 Generated primary-key DDL follows MariaDB's SQL-layer rejection policy, and
 hidden long-unique hash indexes are covered by a separate unsupported-policy
@@ -57,7 +57,7 @@ No MyLite expression evaluator is introduced. The supported path is:
 ## Non-Goals
 
 - Online, instant, in-place, or lock-free generated-column ALTER.
-- Generated-column target definitions in CTAS or dump/import fixtures.
+- Generated-column target definitions in CTAS or broader dump/export fixtures.
 - Exhaustive generated expression compatibility.
 - Generated BLOB/TEXT payload matrices.
 - Transaction rollback or crash recovery for interrupted ALTER beyond current
@@ -93,7 +93,7 @@ close/reopen.
 - The final generated-column metadata survives close/reopen without durable
   sidecars.
 - Compatibility docs and roadmap distinguish copy ALTER coverage from online
-  ALTER, CTAS, dump/import, and broader expression work.
+  ALTER, CTAS, broader dump/export, and broader expression work.
 
 ## Risks And Open Questions
 

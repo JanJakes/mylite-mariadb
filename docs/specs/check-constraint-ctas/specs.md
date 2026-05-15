@@ -42,7 +42,7 @@ definitions are preserved and enforced during supported CTAS.
 - Generated target CTAS definitions.
 - `CREATE TABLE ... SELECT` with `IGNORE`, `REPLACE`, temporary tables, views,
   triggers, foreign keys, partitions, or unsupported index classes.
-- Broad CHECK expression matrices, dump/import fixtures, or prepared-statement
+- Broad CHECK expression matrices, broader dump/export fixtures, or prepared-statement
   diagnostics.
 - Multi-statement transaction rollback beyond existing failed-statement
   checkpoints and MariaDB's CTAS target cleanup path.
@@ -103,5 +103,5 @@ No public API, dependency, license, or binary-size impact is expected.
 - CHECK CTAS relies on MariaDB's field-redefinition path matching SELECT aliases
   to explicit target column names. Generated target definitions are deliberately
   left for a separate CTAS slice.
-- Broader expression functions, disabled checks during CTAS, and dump/import
+- Broader expression functions, disabled checks during CTAS, and broader dump/export
   remain to be covered separately.
