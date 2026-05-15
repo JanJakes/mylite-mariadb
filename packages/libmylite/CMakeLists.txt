@@ -83,7 +83,7 @@ if(BUILD_TESTING)
     add_test(NAME libmylite.embedded-statement COMMAND mylite_embedded_statement_test)
     set_tests_properties(
       libmylite.embedded-statement
-      PROPERTIES LABELS "compat-prepared-statement;compat-column-metadata;compat-embedded-lifecycle;compat-public-api"
+      PROPERTIES LABELS "compat-prepared-statement;compat-column-metadata;compat-large-value;compat-embedded-lifecycle;compat-public-api"
     )
     add_test(NAME libmylite.embedded-warning COMMAND mylite_embedded_warning_test)
     set_tests_properties(

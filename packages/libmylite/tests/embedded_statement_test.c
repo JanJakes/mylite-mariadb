@@ -11,6 +11,7 @@
 
 static void test_scalar_select(void);
 static void test_table_roundtrip(void);
+static void test_segment_reads(void);
 static void test_reset_reuse_and_destructors(void);
 static void test_finalize_before_drain(void);
 static void test_close_rejects_active_statement(void);
@@ -30,6 +31,7 @@ static int destructor_calls = 0;
 int main(void) {
     test_scalar_select();
     test_table_roundtrip();
+    test_segment_reads();
     test_reset_reuse_and_destructors();
     test_finalize_before_drain();
     test_close_rejects_active_statement();
@@ -137,6 +139,77 @@ static void test_table_roundtrip(void) {
     assert(mylite_column_type(select, 2U) == MYLITE_TYPE_BLOB);
     assert(mylite_column_bytes(select, 2U) == sizeof(payload));
     assert(memcmp(mylite_column_blob(select, 2U), payload, sizeof(payload)) == 0);
+    assert(mylite_step(select) == MYLITE_DONE);
+    assert(mylite_finalize(select) == MYLITE_OK);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_segment_reads(void) {
+    unsigned char payload[600];
+    unsigned char chunk[17];
+    size_t bytes_read = 99U;
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    mylite_stmt *insert = NULL;
+    mylite_stmt *select = NULL;
+
+    for (size_t i = 0; i < sizeof(payload); ++i) {
+        payload[i] = (unsigned char)((i * 37U) & 0xffU);
+    }
+
+    assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "USE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(
+            db,
+            "CREATE TEMPORARY TABLE large_values ("
+            "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+            "payload LONGBLOB,"
+            "missing LONGBLOB)",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+
+    insert = prepare_statement(db, "INSERT INTO large_values(payload, missing) VALUES (?, ?)");
+    assert(mylite_bind_blob(insert, 1U, payload, sizeof(payload), MYLITE_TRANSIENT) == MYLITE_OK);
+    assert(mylite_bind_null(insert, 2U) == MYLITE_OK);
+    assert(mylite_step(insert) == MYLITE_DONE);
+    assert(mylite_finalize(insert) == MYLITE_OK);
+
+    select = prepare_statement(db, "SELECT payload, missing, id FROM large_values WHERE id=1");
+    assert(mylite_column_read(select, 0U, 0U, chunk, sizeof(chunk), &bytes_read) == MYLITE_MISUSE);
+    assert(mylite_step(select) == MYLITE_ROW);
+
+    assert(mylite_column_read(select, 0U, 5U, chunk, sizeof(chunk), &bytes_read) == MYLITE_OK);
+    assert(bytes_read == sizeof(chunk));
+    assert(memcmp(chunk, payload + 5U, sizeof(chunk)) == 0);
+    assert(
+        mylite_column_read(select, 0U, sizeof(payload) - 7U, chunk, sizeof(chunk), &bytes_read) ==
+        MYLITE_OK
+    );
+    assert(bytes_read == 7U);
+    assert(memcmp(chunk, payload + sizeof(payload) - 7U, bytes_read) == 0);
+    assert(mylite_column_read(select, 0U, 0U, NULL, 0U, &bytes_read) == MYLITE_OK);
+    assert(bytes_read == 0U);
+    assert(
+        mylite_column_read(select, 0U, sizeof(payload), chunk, sizeof(chunk), &bytes_read) ==
+        MYLITE_OK
+    );
+    assert(bytes_read == 0U);
+    assert(mylite_column_read(select, 1U, 0U, chunk, sizeof(chunk), &bytes_read) == MYLITE_OK);
+    assert(bytes_read == 0U);
+    assert(mylite_column_read(select, 2U, 0U, chunk, sizeof(chunk), &bytes_read) == MYLITE_MISUSE);
+    assert(mylite_column_read(select, 3U, 0U, chunk, sizeof(chunk), &bytes_read) == MYLITE_MISUSE);
+
+    assert(mylite_column_bytes(select, 0U) == sizeof(payload));
+    assert(memcmp(mylite_column_blob(select, 0U), payload, sizeof(payload)) == 0);
     assert(mylite_step(select) == MYLITE_DONE);
     assert(mylite_finalize(select) == MYLITE_OK);
 

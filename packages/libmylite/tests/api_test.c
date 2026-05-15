@@ -126,4 +126,5 @@ static void test_null_column_api(void) {
     assert(mylite_column_text(NULL, 0U) == NULL);
     assert(mylite_column_blob(NULL, 0U) == NULL);
     assert(mylite_column_bytes(NULL, 0U) == 0U);
+    assert(mylite_column_read(NULL, 0U, 0U, NULL, 0U, NULL) == MYLITE_MISUSE);
 }

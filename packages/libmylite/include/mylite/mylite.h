@@ -162,6 +162,14 @@ MYLITE_API double mylite_column_double(mylite_stmt *statement, unsigned column);
 MYLITE_API const char *mylite_column_text(mylite_stmt *statement, unsigned column);
 MYLITE_API const void *mylite_column_blob(mylite_stmt *statement, unsigned column);
 MYLITE_API size_t mylite_column_bytes(mylite_stmt *statement, unsigned column);
+MYLITE_API int mylite_column_read(
+    mylite_stmt *statement,
+    unsigned column,
+    size_t offset,
+    void *buffer,
+    size_t buffer_len,
+    size_t *out_read
+);
 
 MYLITE_API int mylite_errcode(mylite_db *database);
 MYLITE_API int mylite_extended_errcode(mylite_db *database);

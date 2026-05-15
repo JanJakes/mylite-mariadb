@@ -172,8 +172,8 @@ embedded `MYSQL_STMT` API. The implementation supports one statement per
 prepare call, 1-based scalar parameter binding, row stepping, reset/finalize
 ownership, affected rows, insert ids, MariaDB diagnostics, warnings after
 completed execution, and binary-safe text/BLOB column reads. Multi-result
-execution, parameter metadata, array binding, and streaming large values remain
-planned.
+execution, parameter metadata, array binding, streaming parameter binding, and
+direct-execution large-value streaming remain planned.
 
 ## Bindings
 
@@ -249,6 +249,13 @@ double mylite_column_double(mylite_stmt *stmt, unsigned column);
 const char *mylite_column_text(mylite_stmt *stmt, unsigned column);
 const void *mylite_column_blob(mylite_stmt *stmt, unsigned column);
 size_t mylite_column_bytes(mylite_stmt *stmt, unsigned column);
+int mylite_column_read(
+    mylite_stmt *stmt,
+    unsigned column,
+    size_t offset,
+    void *buffer,
+    size_t buffer_len,
+    size_t *out_read);
 ```
 
 Column indexes are 0-based. Column values are valid until the next
@@ -266,6 +273,12 @@ table, and original column names may be empty for expressions and literal
 columns. `mylite_column_mariadb_type()` returns MariaDB's native
 `enum_field_types` numeric value; flags, charset, decimals, display length, and
 maximum observed length follow MariaDB's `MYSQL_FIELD` metadata.
+
+`mylite_column_read()` copies a byte range from the current TEXT/BLOB value
+into caller-owned memory. It returns `MYLITE_OK` with `*out_read == 0` for SQL
+`NULL` values or offsets at or beyond the column length. The full pointer APIs
+still materialize statement-owned values when callers need a stable pointer for
+the current row.
 
 ## Diagnostics And Warnings
 

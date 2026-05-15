@@ -36,6 +36,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `direct-sql` | `embedded-dev` | `compat-direct-sql` | `mylite_exec()` SQL execution |
 | `prepared-statement` | `embedded-dev` | `compat-prepared-statement` | Prepared statements, typed bindings, and binary-safe column access |
 | `column-metadata` | `embedded-dev` | `compat-column-metadata` | Prepared statement column metadata |
+| `large-value` | `embedded-dev` | `compat-large-value` | Prepared statement large-value segment reads |
 | `warning` | `embedded-dev` | `compat-warning` | Warning counts and structured `SHOW WARNINGS` rows |
 | `storage-engine` | `storage-smoke-dev` | `compat-storage-engine` | Static handler registration and SQL storage-engine smoke |
 | `sidecar` | `storage-smoke-dev` | `compat-sidecar` | Forbidden durable sidecar gates |

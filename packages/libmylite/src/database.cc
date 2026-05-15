@@ -167,6 +167,7 @@ struct ColumnValue {
     unsigned long buffer_length = 0;
     my_bool mysql_is_null = true;
     my_bool mysql_error = 0;
+    bool bytes_complete = false;
 };
 #endif
 
@@ -266,6 +267,7 @@ int execute_statement(mylite_stmt &statement);
 int fetch_statement_row(mylite_stmt &statement);
 int bind_statement_results(mylite_stmt &statement);
 int fetch_truncated_column(mylite_stmt &statement, unsigned column);
+int materialize_column_value(mylite_stmt &statement, unsigned column);
 int capture_warnings(mylite_db &database, unsigned warning_count);
 void clear_current_row(mylite_stmt &statement);
 bool is_variable_column_type(mylite_value_type type);
@@ -766,8 +768,11 @@ const char *mylite_column_text(mylite_stmt *statement, unsigned column) {
     if (statement == nullptr || !statement->has_current_row || column >= statement->values.size()) {
         return nullptr;
     }
-    const ColumnValue &value = statement->values[column];
+    ColumnValue &value = statement->values[column];
     if (value.type != MYLITE_TYPE_TEXT || value.mysql_is_null != 0) {
+        return nullptr;
+    }
+    if (!value.bytes_complete && materialize_column_value(*statement, column) != MYLITE_OK) {
         return nullptr;
     }
     return reinterpret_cast<const char *>(value.bytes.data());
@@ -783,8 +788,11 @@ const void *mylite_column_blob(mylite_stmt *statement, unsigned column) {
     if (statement == nullptr || !statement->has_current_row || column >= statement->values.size()) {
         return nullptr;
     }
-    const ColumnValue &value = statement->values[column];
+    ColumnValue &value = statement->values[column];
     if (!is_variable_column_type(value.type) || value.mysql_is_null != 0) {
+        return nullptr;
+    }
+    if (!value.bytes_complete && materialize_column_value(*statement, column) != MYLITE_OK) {
         return nullptr;
     }
     return value.bytes.data();
@@ -808,6 +816,96 @@ std::size_t mylite_column_bytes(mylite_stmt *statement, unsigned column) {
     return 0U;
 #endif
 }
+
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
+int mylite_column_read(
+    mylite_stmt *statement,
+    unsigned column,
+    std::size_t offset,
+    void *buffer,
+    std::size_t buffer_len,
+    std::size_t *out_read
+) {
+    if (out_read == nullptr) {
+        return MYLITE_MISUSE;
+    }
+    *out_read = 0U;
+    if (statement == nullptr || (buffer == nullptr && buffer_len != 0U)) {
+        return MYLITE_MISUSE;
+    }
+
+#if !MYLITE_WITH_MARIADB_EMBEDDED
+    (void)column;
+    (void)offset;
+    (void)buffer;
+    (void)buffer_len;
+    set_error(*statement->database, MYLITE_ERROR, "MariaDB embedded backend is not enabled");
+    return MYLITE_ERROR;
+#else
+    if (!statement->has_current_row || column >= statement->values.size()) {
+        set_error(*statement->database, MYLITE_MISUSE, "invalid column read");
+        return MYLITE_MISUSE;
+    }
+
+    ColumnValue &value = statement->values[column];
+    if (value.mysql_is_null != 0) {
+        set_ok(*statement->database);
+        return MYLITE_OK;
+    }
+    if (!is_variable_column_type(value.type)) {
+        set_error(*statement->database, MYLITE_MISUSE, "column is not TEXT or BLOB");
+        return MYLITE_MISUSE;
+    }
+
+    const auto total_length = static_cast<std::size_t>(value.mysql_length);
+    if (offset >= total_length || buffer_len == 0U) {
+        set_ok(*statement->database);
+        return MYLITE_OK;
+    }
+
+    const std::size_t requested = std::min(buffer_len, total_length - offset);
+    if (value.bytes_complete) {
+        std::memcpy(buffer, value.bytes.data() + offset, requested);
+        *out_read = requested;
+        set_ok(*statement->database);
+        return MYLITE_OK;
+    }
+
+    if (offset > static_cast<std::size_t>(ULONG_MAX) ||
+        requested > static_cast<std::size_t>(ULONG_MAX)) {
+        set_error(*statement->database, MYLITE_MISUSE, "column read range is too large");
+        return MYLITE_MISUSE;
+    }
+
+    unsigned long mysql_length = 0;
+    my_bool mysql_is_null = false;
+    my_bool mysql_error = 0;
+    MYSQL_BIND bind = {};
+    bind.buffer_type = value.type == MYLITE_TYPE_BLOB ? MYSQL_TYPE_BLOB : MYSQL_TYPE_STRING;
+    bind.buffer = buffer;
+    bind.buffer_length = static_cast<unsigned long>(requested);
+    bind.length = &mysql_length;
+    bind.is_null = &mysql_is_null;
+    bind.error = &mysql_error;
+
+    const int fetch_result = mysql_stmt_fetch_column(
+        statement->statement,
+        &bind,
+        column,
+        static_cast<unsigned long>(offset)
+    );
+    if (fetch_result != 0 && fetch_result != MYSQL_DATA_TRUNCATED) {
+        set_mariadb_statement_error(*statement);
+        return MYLITE_ERROR;
+    }
+
+    *out_read = requested;
+    set_ok(*statement->database);
+    return MYLITE_OK;
+#endif
+}
+
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
 int mylite_errcode(mylite_db *database) {
     return database != nullptr ? database->errcode : MYLITE_MISUSE;
@@ -1251,11 +1349,11 @@ int fetch_statement_row(mylite_stmt &statement) {
     }
 
     for (unsigned i = 0; i < statement.values.size(); ++i) {
-        if (statement.values[i].mysql_error != 0) {
-            const int column_result = fetch_truncated_column(statement, i);
-            if (column_result != MYLITE_OK) {
-                return column_result;
-            }
+        ColumnValue &value = statement.values[i];
+        if (value.mysql_error != 0 &&
+            !is_variable_column_type(map_column_type(statement.columns[i]))) {
+            set_error(*statement.database, MYLITE_ERROR, "numeric column truncated during fetch");
+            return MYLITE_ERROR;
         }
     }
 
@@ -1263,11 +1361,18 @@ int fetch_statement_row(mylite_stmt &statement) {
         ColumnValue &value = statement.values[i];
         value.type =
             value.mysql_is_null != 0 ? MYLITE_TYPE_NULL : map_column_type(statement.columns[i]);
-        if (value.type == MYLITE_TYPE_TEXT) {
-            if (value.bytes.size() <= value.mysql_length) {
-                value.bytes.resize(static_cast<std::size_t>(value.mysql_length) + 1U);
+        if (is_variable_column_type(value.type)) {
+            const std::size_t stored_bytes =
+                std::min<std::size_t>(value.buffer_length, value.mysql_length);
+            value.bytes_complete = value.mysql_is_null != 0 || stored_bytes >= value.mysql_length;
+            if (value.type == MYLITE_TYPE_TEXT) {
+                if (value.bytes.size() <= stored_bytes) {
+                    value.bytes.resize(stored_bytes + 1U);
+                }
+                value.bytes[stored_bytes] = '\0';
             }
-            value.bytes[static_cast<std::size_t>(value.mysql_length)] = '\0';
+        } else {
+            value.bytes_complete = true;
         }
     }
 
@@ -1307,6 +1412,7 @@ int bind_statement_results(mylite_stmt &statement) {
         case MYLITE_TYPE_BLOB:
         case MYLITE_TYPE_TEXT:
             value.buffer_length = k_initial_column_buffer_size;
+            value.bytes_complete = false;
             value.bytes.assign(
                 static_cast<std::size_t>(value.buffer_length) +
                     (type == MYLITE_TYPE_TEXT ? 1U : 0U),
@@ -1357,9 +1463,24 @@ int fetch_truncated_column(mylite_stmt &statement, unsigned column) {
         return MYLITE_ERROR;
     }
 
+    if (type == MYLITE_TYPE_TEXT) {
+        value.bytes[static_cast<std::size_t>(value.mysql_length)] = '\0';
+    }
+    value.bytes_complete = true;
     statement.result_binds[column].buffer = value.bytes.data();
     statement.result_binds[column].buffer_length = value.buffer_length;
     return MYLITE_OK;
+}
+
+int materialize_column_value(mylite_stmt &statement, unsigned column) {
+    if (column >= statement.values.size()) {
+        return MYLITE_MISUSE;
+    }
+    ColumnValue &value = statement.values[column];
+    if (value.bytes_complete || value.mysql_is_null != 0) {
+        return MYLITE_OK;
+    }
+    return fetch_truncated_column(statement, column);
 }
 
 int capture_warnings(mylite_db &database, unsigned warning_count) {
@@ -1432,6 +1553,7 @@ void clear_current_row(mylite_stmt &statement) {
         value.mysql_length = 0;
         value.mysql_is_null = true;
         value.mysql_error = 0;
+        value.bytes_complete = false;
     }
 }
 

@@ -105,10 +105,9 @@ embedded execution with:
 - MariaDB diagnostics on prepare/execute/fetch failures,
 - affected-row and insert-id updates for successful non-result execution.
 
-Broader compatibility continues through follow-up slices: warning enumeration
-and column metadata have separate specs, while array/bulk binding, streaming
-large values, multi-results, and MariaDB/MySQL comparison suites remain
-planned.
+Broader compatibility continues through follow-up slices: warning enumeration,
+column metadata, and column segment reads have separate specs, while array/bulk
+binding, multi-results, and MariaDB/MySQL comparison suites remain planned.
 
 `docs/COMPATIBILITY.md` should move prepared statements and binary-safe values
 from planned to partial when tests land.
