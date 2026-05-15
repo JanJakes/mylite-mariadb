@@ -127,10 +127,20 @@ typedef struct mylite_storage_recovery_journal {
     size_t page_count;
 } mylite_storage_recovery_journal;
 
+struct mylite_storage_statement {
+    FILE *file;
+    char *filename;
+    mylite_storage_header header;
+    unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+};
+
 typedef mylite_storage_result (*mylite_storage_row_page_callback)(
     void *ctx,
     const mylite_storage_row_page *row_page
 );
+
+static _Thread_local mylite_storage_statement *active_statement;
 
 static mylite_storage_result path_exists(const char *filename, int *exists);
 static mylite_storage_result write_empty_database(FILE *file);
@@ -183,6 +193,11 @@ static mylite_storage_result flush_parent_directory(const char *filename);
 static mylite_storage_result close_created_file(FILE *file, const char *filename);
 static mylite_storage_result open_existing_file(const char *filename, FILE **out_file);
 static mylite_storage_result open_existing_file_for_update(const char *filename, FILE **out_file);
+static mylite_storage_result close_existing_file(FILE *file);
+static mylite_storage_statement *active_statement_for(const char *filename);
+static mylite_storage_result close_statement(mylite_storage_statement *statement);
+static void free_statement(mylite_storage_statement *statement);
+static char *copy_filename(const char *filename);
 static mylite_storage_result read_header(FILE *file, mylite_storage_header *out_header);
 static mylite_storage_result read_page_at(
     FILE *file,
@@ -568,7 +583,8 @@ mylite_storage_capabilities mylite_storage_get_capabilities(void) {
                  MYLITE_STORAGE_CAPABILITY_BLOB_TEXT_ROWS |
                  MYLITE_STORAGE_CAPABILITY_ROW_LIFECYCLE | MYLITE_STORAGE_CAPABILITY_INDEX_ENTRIES |
                  MYLITE_STORAGE_CAPABILITY_RECOVERY_JOURNAL | MYLITE_STORAGE_CAPABILITY_FILE_LOCKS |
-                 MYLITE_STORAGE_CAPABILITY_TRUNCATE | MYLITE_STORAGE_CAPABILITY_SCHEMAS,
+                 MYLITE_STORAGE_CAPABILITY_TRUNCATE | MYLITE_STORAGE_CAPABILITY_SCHEMAS |
+                 MYLITE_STORAGE_CAPABILITY_STATEMENT_CHECKPOINTS,
     };
 
     return capabilities;
@@ -606,7 +622,7 @@ mylite_storage_result mylite_storage_create_empty(const char *filename) {
         result = write_empty_database(file);
     }
     if (result != MYLITE_STORAGE_OK) {
-        fclose(file);
+        close_existing_file(file);
         remove(filename);
         return result;
     }
@@ -635,7 +651,7 @@ mylite_storage_result mylite_storage_open_header(
         result = validate_catalog_root_page(file, out_header);
     }
 
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
 
@@ -734,7 +750,7 @@ mylite_storage_result mylite_storage_store_table_definition(
         }
     }
 
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;
@@ -767,7 +783,7 @@ mylite_storage_result mylite_storage_store_schema(const char *filename, const ch
     if (result == MYLITE_STORAGE_OK) {
         result = find_schema_record(catalog_page, schema_name);
         if (result == MYLITE_STORAGE_OK) {
-            if (fclose(file) != 0) {
+            if (close_existing_file(file) != MYLITE_STORAGE_OK) {
                 return MYLITE_STORAGE_IOERR;
             }
             return MYLITE_STORAGE_OK;
@@ -812,7 +828,7 @@ mylite_storage_result mylite_storage_store_schema(const char *filename, const ch
         }
     }
 
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;
@@ -882,7 +898,7 @@ mylite_storage_result mylite_storage_store_schema_definition(
         }
     }
 
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;
@@ -944,7 +960,7 @@ mylite_storage_result mylite_storage_drop_schema(const char *filename, const cha
         }
     }
 
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;
@@ -978,7 +994,7 @@ mylite_storage_result mylite_storage_schema_exists(const char *filename, const c
         result = MYLITE_STORAGE_NOTFOUND;
     }
 
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;
@@ -1035,7 +1051,7 @@ mylite_storage_result mylite_storage_read_schema_definition(
         }
     }
 
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     if (result != MYLITE_STORAGE_OK) {
@@ -1086,7 +1102,7 @@ mylite_storage_result mylite_storage_read_table_definition(
             read_definition_blob_pages(file, &header, &entry, out_definition, out_definition_size);
     }
 
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     if (result != MYLITE_STORAGE_OK) {
@@ -1133,7 +1149,7 @@ mylite_storage_result mylite_storage_read_table_metadata(
         result = read_table_metadata_from_record(entry.record, out_metadata);
     }
 
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     if (result != MYLITE_STORAGE_OK) {
@@ -1172,7 +1188,7 @@ mylite_storage_result mylite_storage_table_exists(
         result = find_table_record(catalog_page, schema_name, table_name, NULL);
     }
 
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;
@@ -1232,7 +1248,7 @@ mylite_storage_result mylite_storage_drop_table(
         }
     }
 
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;
@@ -1306,7 +1322,7 @@ mylite_storage_result mylite_storage_rename_table(
         }
     }
 
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;
@@ -1405,7 +1421,7 @@ mylite_storage_result mylite_storage_append_row_with_index_entries(
         }
     }
 
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     if (result == MYLITE_STORAGE_OK && out_row_id != NULL) {
@@ -1446,7 +1462,7 @@ mylite_storage_result mylite_storage_read_rows(
         result = scan_table_row_pages(file, &header, table_id, append_row_page_to_rowset, out_rows);
     }
 
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     if (result != MYLITE_STORAGE_OK) {
@@ -1484,7 +1500,7 @@ mylite_storage_result mylite_storage_count_rows(
         result = scan_table_row_pages(file, &header, table_id, count_row_page, out_row_count);
     }
 
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     if (result != MYLITE_STORAGE_OK) {
@@ -1554,7 +1570,7 @@ mylite_storage_result mylite_storage_read_row(
 
     free(row_page.owned_payload);
     free_row_state_map(&row_state_map);
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     if (result != MYLITE_STORAGE_OK) {
@@ -1701,7 +1717,7 @@ mylite_storage_result mylite_storage_update_row_with_index_entries(
 
     free(old_row_page.owned_payload);
     free_row_state_map(&row_state_map);
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     if (result != MYLITE_STORAGE_OK) {
@@ -1787,7 +1803,7 @@ mylite_storage_result mylite_storage_delete_row(
 
     free(row_page.owned_payload);
     free_row_state_map(&row_state_map);
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;
@@ -1838,7 +1854,7 @@ mylite_storage_result mylite_storage_truncate_table(
     }
 
     free(live_rows.row_ids);
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;
@@ -1915,7 +1931,7 @@ mylite_storage_result mylite_storage_read_index_entries(
     }
 
     free_row_state_map(&row_state_map);
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     if (result != MYLITE_STORAGE_OK) {
@@ -1953,7 +1969,7 @@ mylite_storage_result mylite_storage_read_auto_increment(
         result = latest_auto_increment_value(file, &header, table_id, out_next_value);
     }
 
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     if (result != MYLITE_STORAGE_OK) {
@@ -1990,7 +2006,7 @@ mylite_storage_result mylite_storage_advance_auto_increment(
         result = latest_auto_increment_value(file, &header, table_id, &current_next_value);
     }
     if (result == MYLITE_STORAGE_OK && next_value <= current_next_value) {
-        if (fclose(file) != 0) {
+        if (close_existing_file(file) != MYLITE_STORAGE_OK) {
             return MYLITE_STORAGE_IOERR;
         }
         return MYLITE_STORAGE_OK;
@@ -2023,7 +2039,7 @@ mylite_storage_result mylite_storage_advance_auto_increment(
         }
     }
 
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;
@@ -2056,7 +2072,7 @@ mylite_storage_result mylite_storage_list_tables(
         result = list_catalog_tables(catalog_page, schema_name, callback, ctx);
     }
 
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;
@@ -2087,10 +2103,119 @@ mylite_storage_result mylite_storage_list_schemas(
         result = list_catalog_schemas(catalog_page, callback, ctx);
     }
 
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;
+}
+
+mylite_storage_result mylite_storage_begin_statement(
+    const char *filename,
+    mylite_storage_statement **out_statement
+) {
+    if (filename == NULL || filename[0] == '\0' || out_statement == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+    *out_statement = NULL;
+    if (active_statement != NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    mylite_storage_statement *statement =
+        (mylite_storage_statement *)calloc(1U, sizeof(*statement));
+    if (statement == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    statement->filename = copy_filename(filename);
+    if (statement->filename == NULL) {
+        free(statement);
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    errno = 0;
+    statement->file = fopen(filename, "r+b");
+    if (statement->file == NULL) {
+        mylite_storage_result result =
+            errno == ENOENT ? MYLITE_STORAGE_NOTFOUND : MYLITE_STORAGE_IOERR;
+        free_statement(statement);
+        return result;
+    }
+
+    mylite_storage_result result = lock_file(statement->file, LOCK_EX);
+    if (result == MYLITE_STORAGE_OK) {
+        result = recover_pending_journal_locked(statement->file, filename);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = read_page_at(
+            statement->file,
+            MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
+            MYLITE_STORAGE_FORMAT_PAGE_SIZE,
+            statement->header_page
+        );
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = decode_header_page(statement->header_page, &statement->header);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = read_page_at(
+            statement->file,
+            statement->header.catalog_root_page,
+            statement->header.page_size,
+            statement->catalog_page
+        );
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = validate_catalog_root_bytes(statement->catalog_page, &statement->header);
+    }
+    if (result != MYLITE_STORAGE_OK) {
+        free_statement(statement);
+        return result;
+    }
+
+    active_statement = statement;
+    *out_statement = statement;
+    return MYLITE_STORAGE_OK;
+}
+
+mylite_storage_result mylite_storage_commit_statement(mylite_storage_statement *statement) {
+    if (statement == NULL || active_statement != statement) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    active_statement = NULL;
+    mylite_storage_result result = close_statement(statement);
+    free_statement(statement);
+    return result;
+}
+
+mylite_storage_result mylite_storage_rollback_statement(mylite_storage_statement *statement) {
+    if (statement == NULL || active_statement != statement) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    mylite_storage_result result = write_page_at(
+        statement->file,
+        statement->header.catalog_root_page,
+        statement->header.page_size,
+        statement->catalog_page
+    );
+    if (result == MYLITE_STORAGE_OK) {
+        result = write_page_at(
+            statement->file,
+            MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
+            statement->header.page_size,
+            statement->header_page
+        );
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = flush_file(statement->file);
+    }
+
+    active_statement = NULL;
+    mylite_storage_result close_result = close_statement(statement);
+    free_statement(statement);
+    return result == MYLITE_STORAGE_OK ? close_result : result;
 }
 
 void mylite_storage_free(void *ptr) {
@@ -2129,7 +2254,7 @@ static mylite_storage_result path_exists(const char *filename, int *exists) {
     errno = 0;
     FILE *file = fopen(filename, "rb");
     if (file != NULL) {
-        if (fclose(file) != 0) {
+        if (close_existing_file(file) != MYLITE_STORAGE_OK) {
             return MYLITE_STORAGE_IOERR;
         }
         *exists = 1;
@@ -2307,7 +2432,7 @@ static mylite_storage_result recover_pending_journal(const char *filename) {
     if (result == MYLITE_STORAGE_OK) {
         result = recover_pending_journal_locked(file, filename);
     }
-    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;
@@ -2703,7 +2828,11 @@ static mylite_storage_result flush_parent_directory(const char *filename) {
 
 static mylite_storage_result close_created_file(FILE *file, const char *filename) {
     mylite_storage_result result = flush_file(file);
-    if (fclose(file) == 0 && result == MYLITE_STORAGE_OK) {
+    const mylite_storage_result close_result = close_existing_file(file);
+    if (close_result != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+        result = close_result;
+    }
+    if (result == MYLITE_STORAGE_OK) {
         result = flush_parent_directory(filename);
     }
     if (result == MYLITE_STORAGE_OK) {
@@ -2715,6 +2844,12 @@ static mylite_storage_result close_created_file(FILE *file, const char *filename
 }
 
 static mylite_storage_result open_existing_file(const char *filename, FILE **out_file) {
+    mylite_storage_statement *statement = active_statement_for(filename);
+    if (statement != NULL) {
+        *out_file = statement->file;
+        return MYLITE_STORAGE_OK;
+    }
+
     mylite_storage_result result = recover_pending_journal(filename);
     if (result != MYLITE_STORAGE_OK) {
         return result;
@@ -2728,7 +2863,7 @@ static mylite_storage_result open_existing_file(const char *filename, FILE **out
 
     result = lock_file(file, LOCK_SH);
     if (result != MYLITE_STORAGE_OK) {
-        fclose(file);
+        close_existing_file(file);
         return result;
     }
 
@@ -2737,6 +2872,12 @@ static mylite_storage_result open_existing_file(const char *filename, FILE **out
 }
 
 static mylite_storage_result open_existing_file_for_update(const char *filename, FILE **out_file) {
+    mylite_storage_statement *statement = active_statement_for(filename);
+    if (statement != NULL) {
+        *out_file = statement->file;
+        return MYLITE_STORAGE_OK;
+    }
+
     errno = 0;
     FILE *file = fopen(filename, "r+b");
     if (file == NULL) {
@@ -2748,12 +2889,63 @@ static mylite_storage_result open_existing_file_for_update(const char *filename,
         result = recover_pending_journal_locked(file, filename);
     }
     if (result != MYLITE_STORAGE_OK) {
-        fclose(file);
+        close_existing_file(file);
         return result;
     }
 
     *out_file = file;
     return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result close_existing_file(FILE *file) {
+#ifndef __clang_analyzer__
+    /* Statement-owned handles stay open until checkpoint commit or rollback. */
+    if (active_statement != NULL && file == active_statement->file) {
+        clearerr(file);
+        return MYLITE_STORAGE_OK;
+    }
+#endif
+    return fclose(file) == 0 ? MYLITE_STORAGE_OK : MYLITE_STORAGE_IOERR;
+}
+
+static mylite_storage_statement *active_statement_for(const char *filename) {
+    if (active_statement == NULL || filename == NULL) {
+        return NULL;
+    }
+    return strcmp(active_statement->filename, filename) == 0 ? active_statement : NULL;
+}
+
+static mylite_storage_result close_statement(mylite_storage_statement *statement) {
+    if (statement->file == NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    FILE *file = statement->file;
+    statement->file = NULL;
+    return fclose(file) == 0 ? MYLITE_STORAGE_OK : MYLITE_STORAGE_IOERR;
+}
+
+static void free_statement(mylite_storage_statement *statement) {
+    if (statement == NULL) {
+        return;
+    }
+
+    if (statement->file != NULL) {
+        fclose(statement->file);
+    }
+    free(statement->filename);
+    free(statement);
+}
+
+static char *copy_filename(const char *filename) {
+    const size_t filename_size = strlen(filename) + 1U;
+    char *copy = (char *)malloc(filename_size);
+    if (copy == NULL) {
+        return NULL;
+    }
+
+    memcpy(copy, filename, filename_size);
+    return copy;
 }
 
 static mylite_storage_result read_header(FILE *file, mylite_storage_header *out_header) {

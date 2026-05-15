@@ -22,6 +22,7 @@ extern "C" {
 #define MYLITE_STORAGE_CAPABILITY_FILE_LOCKS 0x00000200U
 #define MYLITE_STORAGE_CAPABILITY_TRUNCATE 0x00000400U
 #define MYLITE_STORAGE_CAPABILITY_SCHEMAS 0x00000800U
+#define MYLITE_STORAGE_CAPABILITY_STATEMENT_CHECKPOINTS 0x00001000U
 
 typedef enum mylite_storage_result { /* NOLINT(performance-enum-size): C ABI enum. */
                                      MYLITE_STORAGE_OK = 0,
@@ -114,6 +115,8 @@ typedef struct mylite_storage_index_entryset {
     size_t *key_sizes;
     unsigned long long *row_ids;
 } mylite_storage_index_entryset;
+
+typedef struct mylite_storage_statement mylite_storage_statement;
 
 typedef int (*mylite_storage_table_callback)(
     void *ctx,
@@ -273,6 +276,12 @@ mylite_storage_result mylite_storage_list_schemas(
     mylite_storage_schema_callback callback,
     void *ctx
 );
+mylite_storage_result mylite_storage_begin_statement(
+    const char *filename,
+    mylite_storage_statement **out_statement
+);
+mylite_storage_result mylite_storage_commit_statement(mylite_storage_statement *statement);
+mylite_storage_result mylite_storage_rollback_statement(mylite_storage_statement *statement);
 void mylite_storage_free(void *ptr);
 void mylite_storage_free_rowset(mylite_storage_rowset *rowset);
 void mylite_storage_free_index_entryset(mylite_storage_index_entryset *entryset);

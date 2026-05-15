@@ -229,9 +229,27 @@ struct mylite_stmt {
     bool done = false;
     bool has_current_row = false;
     bool sync_schema_catalog_after_execute = false;
+    bool uses_statement_checkpoint = false;
 };
 
 namespace {
+
+#if MYLITE_WITH_MARIADB_EMBEDDED && MYLITE_MARIADB_HAS_MYLITE_SE
+class StorageStatementCheckpoint {
+  public:
+    StorageStatementCheckpoint() = default;
+    StorageStatementCheckpoint(const StorageStatementCheckpoint &) = delete;
+    StorageStatementCheckpoint &operator=(const StorageStatementCheckpoint &) = delete;
+    ~StorageStatementCheckpoint();
+
+    int begin(mylite_db &database, bool enabled);
+    int commit(mylite_db &database);
+    int rollback(mylite_db &database);
+
+  private:
+    mylite_storage_statement *statement_ = nullptr;
+};
+#endif
 
 int open_v2_impl(
     const char *filename,
@@ -303,6 +321,7 @@ bool sql_token_equals(std::string_view token, const char *keyword);
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
 int sync_schema_catalog(mylite_db &database);
 bool is_schema_catalog_sql(std::string_view sql);
+bool is_storage_mutation_sql(std::string_view sql);
 int collect_storage_schema(void *ctx, const char *schema_name);
 int load_runtime_schema_definitions(
     mylite_db &database,
@@ -1135,9 +1154,25 @@ int exec_impl(
         return copy_error_message(*database, errmsg);
     }
 
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+    StorageStatementCheckpoint checkpoint;
+    const bool checkpoint_enabled =
+        database->filename != ":memory:" && is_storage_mutation_sql(std::string_view(sql));
+    int checkpoint_result = checkpoint.begin(*database, checkpoint_enabled);
+    if (checkpoint_result != MYLITE_OK) {
+        return copy_error_message(*database, errmsg);
+    }
+#  endif
+
     if (mysql_query(&database->mysql, sql) != 0) {
         const unsigned warning_count = mysql_warning_count(&database->mysql);
         set_mariadb_error(*database);
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        checkpoint_result = checkpoint.rollback(*database);
+        if (checkpoint_result != MYLITE_OK) {
+            return copy_error_message(*database, errmsg);
+        }
+#  endif
         const int warning_result = capture_warnings(*database, warning_count, true);
         if (warning_result != MYLITE_OK) {
             return copy_error_message(*database, errmsg);
@@ -1148,6 +1183,12 @@ int exec_impl(
     bool has_result = false;
     const int result = store_and_emit_result(*database, callback, ctx, &has_result);
     if (result != MYLITE_OK) {
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        checkpoint_result = checkpoint.commit(*database);
+        if (checkpoint_result != MYLITE_OK) {
+            return copy_error_message(*database, errmsg);
+        }
+#  endif
         return copy_error_message(*database, errmsg);
     }
 
@@ -1162,14 +1203,28 @@ int exec_impl(
     const unsigned warning_count = mysql_warning_count(&database->mysql);
     const int warning_result = capture_warnings(*database, warning_count);
     if (warning_result != MYLITE_OK) {
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        checkpoint_result = checkpoint.commit(*database);
+        if (checkpoint_result != MYLITE_OK) {
+            return copy_error_message(*database, errmsg);
+        }
+#  endif
         return copy_error_message(*database, errmsg);
     }
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
     if (database->filename != ":memory:" && is_schema_catalog_sql(std::string_view(sql))) {
         const int sync_result = sync_schema_catalog(*database);
         if (sync_result != MYLITE_OK) {
+            checkpoint_result = checkpoint.rollback(*database);
+            if (checkpoint_result != MYLITE_OK) {
+                return copy_error_message(*database, errmsg);
+            }
             return copy_error_message(*database, errmsg);
         }
+    }
+    checkpoint_result = checkpoint.commit(*database);
+    if (checkpoint_result != MYLITE_OK) {
+        return copy_error_message(*database, errmsg);
     }
 #  endif
     return MYLITE_OK;
@@ -1222,6 +1277,9 @@ int prepare_impl(
         statement->sync_schema_catalog_after_execute =
             database->filename != ":memory:" &&
             is_schema_catalog_sql(std::string_view(sql, sql_len));
+        statement->uses_statement_checkpoint =
+            database->filename != ":memory:" &&
+            is_storage_mutation_sql(std::string_view(sql, sql_len));
 #  endif
         statement->statement = mysql_stmt_init(&database->mysql);
         if (statement->statement == nullptr) {
@@ -1359,9 +1417,24 @@ int execute_statement(mylite_stmt &statement) {
         return bind_result;
     }
 
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+    StorageStatementCheckpoint checkpoint;
+    int checkpoint_result =
+        checkpoint.begin(*statement.database, statement.uses_statement_checkpoint);
+    if (checkpoint_result != MYLITE_OK) {
+        return checkpoint_result;
+    }
+#  endif
+
     if (mysql_stmt_execute(statement.statement) != 0) {
         const unsigned warning_count = mysql_warning_count(&statement.database->mysql);
         set_mariadb_statement_error(statement);
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        checkpoint_result = checkpoint.rollback(*statement.database);
+        if (checkpoint_result != MYLITE_OK) {
+            return checkpoint_result;
+        }
+#  endif
         const int warning_result = capture_warnings(*statement.database, warning_count, true);
         return warning_result == MYLITE_OK ? MYLITE_ERROR : warning_result;
     }
@@ -1384,14 +1457,28 @@ int execute_statement(mylite_stmt &statement) {
         mysql_stmt_free_result(statement.statement);
         const int warning_result = capture_warnings(*statement.database, warning_count);
         if (warning_result != MYLITE_OK) {
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+            checkpoint_result = checkpoint.commit(*statement.database);
+            if (checkpoint_result != MYLITE_OK) {
+                return checkpoint_result;
+            }
+#  endif
             return warning_result;
         }
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
         if (statement.sync_schema_catalog_after_execute) {
             const int sync_result = sync_schema_catalog(*statement.database);
             if (sync_result != MYLITE_OK) {
+                checkpoint_result = checkpoint.rollback(*statement.database);
+                if (checkpoint_result != MYLITE_OK) {
+                    return checkpoint_result;
+                }
                 return sync_result;
             }
+        }
+        checkpoint_result = checkpoint.commit(*statement.database);
+        if (checkpoint_result != MYLITE_OK) {
+            return checkpoint_result;
         }
 #  endif
         return MYLITE_DONE;
@@ -1399,10 +1486,74 @@ int execute_statement(mylite_stmt &statement) {
 
     const int result_bind_result = bind_statement_results(statement);
     if (result_bind_result != MYLITE_OK) {
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        checkpoint_result = checkpoint.commit(*statement.database);
+        if (checkpoint_result != MYLITE_OK) {
+            return checkpoint_result;
+        }
+#  endif
         return result_bind_result;
     }
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+    checkpoint_result = checkpoint.commit(*statement.database);
+    if (checkpoint_result != MYLITE_OK) {
+        return checkpoint_result;
+    }
+#  endif
     return fetch_statement_row(statement);
 }
+
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+StorageStatementCheckpoint::~StorageStatementCheckpoint() {
+    if (statement_ != nullptr) {
+        mylite_storage_commit_statement(statement_);
+    }
+}
+
+int StorageStatementCheckpoint::begin(mylite_db &database, bool enabled) {
+    if (!enabled || database.filename == ":memory:") {
+        return MYLITE_OK;
+    }
+
+    const mylite_storage_result result =
+        mylite_storage_begin_statement(database.filename.c_str(), &statement_);
+    if (result != MYLITE_STORAGE_OK) {
+        set_error(database, map_storage_result(result), "statement checkpoint failed");
+        return database.errcode;
+    }
+    return MYLITE_OK;
+}
+
+int StorageStatementCheckpoint::commit(mylite_db &database) {
+    if (statement_ == nullptr) {
+        return MYLITE_OK;
+    }
+
+    mylite_storage_statement *statement = statement_;
+    statement_ = nullptr;
+    const mylite_storage_result result = mylite_storage_commit_statement(statement);
+    if (result != MYLITE_STORAGE_OK) {
+        set_error(database, map_storage_result(result), "statement checkpoint commit failed");
+        return database.errcode;
+    }
+    return MYLITE_OK;
+}
+
+int StorageStatementCheckpoint::rollback(mylite_db &database) {
+    if (statement_ == nullptr) {
+        return MYLITE_OK;
+    }
+
+    mylite_storage_statement *statement = statement_;
+    statement_ = nullptr;
+    const mylite_storage_result result = mylite_storage_rollback_statement(statement);
+    if (result != MYLITE_STORAGE_OK) {
+        set_error(database, map_storage_result(result), "statement rollback failed");
+        return database.errcode;
+    }
+    return MYLITE_OK;
+}
+#  endif
 
 int fetch_statement_row(mylite_stmt &statement) {
     clear_current_row(statement);
@@ -2210,6 +2361,17 @@ bool is_schema_catalog_sql(std::string_view sql) {
     return (sql_token_equals(first, "CREATE") || sql_token_equals(first, "DROP") ||
             sql_token_equals(first, "ALTER")) &&
            (sql_token_equals(second, "DATABASE") || sql_token_equals(second, "SCHEMA"));
+}
+
+bool is_storage_mutation_sql(std::string_view sql) {
+    std::string_view rest = skip_sql_leading_noise(sql);
+    const std::string_view first = pop_sql_token(rest);
+
+    return sql_token_equals(first, "CREATE") || sql_token_equals(first, "ALTER") ||
+           sql_token_equals(first, "DROP") || sql_token_equals(first, "RENAME") ||
+           sql_token_equals(first, "TRUNCATE") || sql_token_equals(first, "INSERT") ||
+           sql_token_equals(first, "UPDATE") || sql_token_equals(first, "DELETE") ||
+           sql_token_equals(first, "REPLACE") || sql_token_equals(first, "LOAD");
 }
 
 int collect_storage_schema(void *ctx, const char *schema_name) {

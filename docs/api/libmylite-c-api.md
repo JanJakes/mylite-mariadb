@@ -107,8 +107,10 @@ table-definition metadata, rows, autoincrement state, supported indexes, and
 rollback-journal publication state in the primary `.mylite` file. File-backed
 opens answer schema and table discovery from the catalog when no transient
 MariaDB schema directory exists. Explicit SQL transaction control is rejected
-until MyLite has transaction-aware handler hooks; SQL rollback and savepoints
-remain planned. Existing-file opens preserve storage lock conflicts as
+until MyLite has transaction-aware handler hooks; covered failed file-backed
+statements roll back MyLite-visible storage changes through statement
+checkpoints, while multi-statement rollback and savepoints remain planned.
+Existing-file opens preserve storage lock conflicts as
 `MYLITE_BUSY` before starting the embedded runtime.
 
 ## Direct Execution

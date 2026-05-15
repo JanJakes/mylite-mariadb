@@ -21,6 +21,6 @@ if(BUILD_TESTING)
   add_test(NAME mylite-storage.capabilities COMMAND mylite_storage_test)
   set_tests_properties(
     mylite-storage.capabilities
-    PROPERTIES LABELS "compat-storage;compat-crash-recovery;compat-locking"
+    PROPERTIES LABELS "compat-storage;compat-crash-recovery;compat-locking;compat-statement-rollback"
   )
 endif()

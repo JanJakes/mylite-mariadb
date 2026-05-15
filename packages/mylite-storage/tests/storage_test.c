@@ -41,6 +41,21 @@ typedef struct index_entries_test_context {
     unsigned long long updated_row_1_id;
 } index_entries_test_context;
 
+typedef struct statement_checkpoint_test_context {
+    const char *filename;
+    const unsigned char *row_1;
+    size_t row_1_size;
+    const unsigned char *row_2;
+    size_t row_2_size;
+    const mylite_storage_table_definition *rollback_definition;
+    const mylite_storage_index_entry *row_1_entry;
+    const mylite_storage_index_entry *row_2_entry;
+    const unsigned char *key_1;
+    size_t key_1_size;
+    unsigned long long row_1_id;
+    unsigned long long row_2_id;
+} statement_checkpoint_test_context;
+
 typedef struct lock_child {
     pid_t pid;
     int release_fd;
@@ -101,6 +116,10 @@ static void assert_truncate_test_reused_row(
     const unsigned char *key,
     size_t key_size
 );
+static void test_statement_checkpoints(void);
+static void assert_statement_checkpoint_rolls_back_row(statement_checkpoint_test_context *ctx);
+static void assert_statement_checkpoint_commits_row(statement_checkpoint_test_context *ctx);
+static void assert_statement_checkpoint_rolls_back_catalog(statement_checkpoint_test_context *ctx);
 static void test_cleans_recovery_journal_after_mutations(void);
 static void test_recovers_row_publication_journal(void);
 static void test_recovers_catalog_publication_journal(void);
@@ -192,6 +211,7 @@ int main(void) {
     test_index_entries();
     test_autoincrement_state();
     test_truncate_table_lifecycle();
+    test_statement_checkpoints();
     test_cleans_recovery_journal_after_mutations();
     test_recovers_row_publication_journal();
     test_recovers_catalog_publication_journal();
@@ -227,6 +247,7 @@ static void test_capabilities(void) {
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_FILE_LOCKS) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_TRUNCATE) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_SCHEMAS) != 0U);
+    assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_STATEMENT_CHECKPOINTS) != 0U);
 }
 
 static void test_create_empty_database(void) {
@@ -1225,6 +1246,182 @@ static void assert_truncate_test_reused_row(
     assert(entries.entry_count == 1U);
     assert_index_entry(&entries, 0U, row_id, key, key_size);
     mylite_storage_free_index_entryset(&entries);
+}
+
+static void test_statement_checkpoints(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row_1[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    static const unsigned char row_2[] = {0x00U, 0x02U, 'd', 'e', 'f'};
+    static const unsigned char key_1[] = {0x01U};
+    static const unsigned char key_2[] = {0x02U};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "statement-checkpoint.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "InnoDB",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_table_definition rollback_definition = {
+        .size = sizeof(rollback_definition),
+        .schema_name = "app",
+        .table_name = "rollback_posts",
+        .requested_engine_name = "InnoDB",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_index_entry row_1_entry = {
+        .size = sizeof(row_1_entry),
+        .index_number = 0U,
+        .key = key_1,
+        .key_size = sizeof(key_1),
+    };
+    mylite_storage_index_entry row_2_entry = {
+        .size = sizeof(row_2_entry),
+        .index_number = 0U,
+        .key = key_2,
+        .key_size = sizeof(key_2),
+    };
+    statement_checkpoint_test_context ctx = {
+        .filename = filename,
+        .row_1 = row_1,
+        .row_1_size = sizeof(row_1),
+        .row_2 = row_2,
+        .row_2_size = sizeof(row_2),
+        .rollback_definition = &rollback_definition,
+        .row_1_entry = &row_1_entry,
+        .row_2_entry = &row_2_entry,
+        .key_1 = key_1,
+        .key_1_size = sizeof(key_1),
+    };
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+
+    assert_statement_checkpoint_rolls_back_row(&ctx);
+    assert_statement_checkpoint_commits_row(&ctx);
+    assert_statement_checkpoint_rolls_back_catalog(&ctx);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void assert_statement_checkpoint_rolls_back_row(statement_checkpoint_test_context *ctx) {
+    mylite_storage_statement *statement = NULL;
+    unsigned long long row_count = 0ULL;
+    mylite_storage_index_entryset entries = {
+        .size = sizeof(entries),
+    };
+
+    assert(mylite_storage_begin_statement(ctx->filename, &statement) == MYLITE_STORAGE_OK);
+    assert(statement != NULL);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            ctx->filename,
+            "app",
+            "posts",
+            ctx->row_1,
+            ctx->row_1_size,
+            ctx->row_1_entry,
+            1U,
+            &ctx->row_1_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_count_rows(ctx->filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK
+    );
+    assert(row_count == 1ULL);
+    assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
+
+    assert(
+        mylite_storage_count_rows(ctx->filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK
+    );
+    assert(row_count == 0ULL);
+    assert(
+        mylite_storage_read_index_entries(ctx->filename, "app", "posts", 0U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == 0U);
+    mylite_storage_free_index_entryset(&entries);
+    assert(mylite_storage_table_exists(ctx->filename, "app", "posts") == MYLITE_STORAGE_OK);
+}
+
+static void assert_statement_checkpoint_commits_row(statement_checkpoint_test_context *ctx) {
+    mylite_storage_statement *statement = NULL;
+    unsigned long long row_count = 0ULL;
+    mylite_storage_index_entryset entries = {
+        .size = sizeof(entries),
+    };
+
+    assert(mylite_storage_begin_statement(ctx->filename, &statement) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            ctx->filename,
+            "app",
+            "posts",
+            ctx->row_1,
+            ctx->row_1_size,
+            ctx->row_1_entry,
+            1U,
+            &ctx->row_1_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_commit_statement(statement) == MYLITE_STORAGE_OK);
+
+    assert(
+        mylite_storage_count_rows(ctx->filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK
+    );
+    assert(row_count == 1ULL);
+    assert(
+        mylite_storage_read_index_entries(ctx->filename, "app", "posts", 0U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == 1U);
+    assert_index_entry(&entries, 0U, ctx->row_1_id, ctx->key_1, ctx->key_1_size);
+    mylite_storage_free_index_entryset(&entries);
+}
+
+static void assert_statement_checkpoint_rolls_back_catalog(statement_checkpoint_test_context *ctx) {
+    mylite_storage_statement *statement = NULL;
+    unsigned long long row_count = 0ULL;
+
+    assert(mylite_storage_begin_statement(ctx->filename, &statement) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_store_table_definition(ctx->filename, ctx->rollback_definition) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            ctx->filename,
+            "app",
+            "posts",
+            ctx->row_2,
+            ctx->row_2_size,
+            ctx->row_2_entry,
+            1U,
+            &ctx->row_2_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_table_exists(ctx->filename, "app", "rollback_posts") == MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
+
+    assert(
+        mylite_storage_table_exists(ctx->filename, "app", "rollback_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert(
+        mylite_storage_count_rows(ctx->filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK
+    );
+    assert(row_count == 1ULL);
+    assert_row_not_found(ctx->filename, ctx->row_2_id);
 }
 
 static void test_cleans_recovery_journal_after_mutations(void) {

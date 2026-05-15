@@ -32,6 +32,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `storage-core` | `dev` | `compat-storage` | Primary file, catalog, rows, indexes, and mutations |
 | `crash-recovery` | `dev` | `compat-crash-recovery` | Rollback-journal recovery and corrupt-journal handling |
 | `transaction` | `storage-smoke-dev` | `compat-transaction` | SQL transaction-control rejection until handler hooks exist |
+| `statement-rollback` | `storage-smoke-dev` | `compat-statement-rollback` | Failed statement rollback for routed MyLite storage |
 | `foreign-key` | `storage-smoke-dev` | `compat-foreign-key` | Foreign-key DDL rejection until catalog metadata and enforcement exist |
 | `check-constraint` | `storage-smoke-dev` | `compat-check-constraint` | CHECK constraint enforcement on routed tables |
 | `generated-column` | `storage-smoke-dev` | `compat-generated-column` | Generated column read/write and generated-index rejection |

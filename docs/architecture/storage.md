@@ -198,9 +198,9 @@ statement has no explicit engine.
 Successful supported `CREATE TABLE ... SELECT` uses MariaDB's `select_create`
 path to derive or open the target definition and then inserts result rows
 through MyLite's normal `write_row()` path. Duplicate-key CTAS abort follows
-MariaDB's target-drop path and removes target catalog metadata, but pages
-written before abort remain orphaned until SQL rollback, DDL undo, and
-compaction are implemented.
+MariaDB's target-drop path and removes target catalog metadata; the current
+statement checkpoint restores pre-statement MyLite header/catalog visibility
+for covered failed file-backed statements.
 Basic column-level and named table-level CHECK constraints survive close/reopen
 because they are stored in the catalog-backed table-definition image. MariaDB
 enforces those checks before insert/update handler calls unless
@@ -287,8 +287,8 @@ pages. This provides correct indexed insert, lookup, update, delete, reopen,
 and copy `ALTER` behavior for the supported shapes, but it is not the final
 performance structure. Standalone `CREATE INDEX` and `DROP INDEX` are covered
 for supported copy-rebuild index definitions. B-tree pages, free-space
-reclamation, transaction rollback, and transaction-aware index maintenance
-remain planned.
+reclamation, multi-statement transaction rollback, and transaction-aware index
+maintenance remain planned.
 
 The storage engine must support:
 
@@ -341,11 +341,21 @@ restoring pages. Conflicts return busy errors; no durable lock sidecar is
 created. These locks protect cooperating MyLite processes from unsafe concurrent
 access but are not the final multi-writer lock manager.
 
-This is not SQL transaction support yet. The MyLite handler still advertises
+File-backed `libmylite` statements that can mutate MyLite storage now take an
+in-process statement checkpoint before MariaDB execution. The checkpoint saves
+the committed header and catalog root pages while holding the primary-file
+exclusive lock; storage APIs in the same thread borrow that locked descriptor.
+If MariaDB reports statement failure, MyLite restores the saved catalog/header
+pages so rows, row-state pages, index entries, autoincrement pages, and catalog
+records appended after the checkpoint are no longer visible. Successful
+statements release the checkpoint after required schema-catalog synchronization.
+
+This is still not SQL transaction support. The MyLite handler still advertises
 non-transactional engine flags. Public `libmylite` SQL entry points reject
 explicit transaction-control and autocommit-control statements before MariaDB
-execution so routed `ENGINE=InnoDB` tables do not imply rollback semantics.
-MariaDB commit, rollback, and savepoint handlerton hooks remain planned.
+execution so routed `ENGINE=InnoDB` tables do not imply multi-statement
+rollback semantics. MariaDB commit, rollback, and savepoint handlerton hooks
+remain planned.
 
 The storage design must preserve the full write-concurrency goal. Early
 milestones may use coarse locks for correctness, but the page, transaction,

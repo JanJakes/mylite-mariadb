@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-all_groups="public-api storage-core crash-recovery transaction foreign-key check-constraint generated-column unsupported-index locking embedded-lifecycle direct-sql prepared-statement column-metadata large-value warning sql-comparison storage-engine sidecar routed-ddl-dml application-schema server-surface"
+all_groups="public-api storage-core crash-recovery transaction statement-rollback foreign-key check-constraint generated-column unsupported-index locking embedded-lifecycle direct-sql prepared-statement column-metadata large-value warning sql-comparison storage-engine sidecar routed-ddl-dml application-schema server-surface"
 
 usage() {
   cat <<EOF
@@ -32,6 +32,9 @@ group_spec() {
       ;;
     transaction)
       echo "storage-smoke-dev|compat-transaction|SQL transaction-control policy"
+      ;;
+    statement-rollback)
+      echo "storage-smoke-dev|compat-statement-rollback|Failed statement rollback for routed MyLite storage"
       ;;
     foreign-key)
       echo "storage-smoke-dev|compat-foreign-key|Foreign-key DDL rejection policy"
