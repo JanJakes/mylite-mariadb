@@ -60,18 +60,24 @@ The initial coverage uses the concrete CHECK case that exposed the gap:
 - drop that CHECK after reopen, and
 - verify the formerly invalid row now succeeds.
 
+The follow-up catalog-reopen ALTER matrix broadens this to representative
+default-algorithm column, index, standalone-index, and autoincrement ALTER
+operations after catalog-only reopen.
+
 ## Supported Scope
 
 - Copy `ALTER TABLE` on routed MyLite tables after catalog-only reopen when the
   schema directory has not been rehydrated.
-- The concrete covered behavior is reopened named table-level CHECK drop.
+- The concrete covered behavior in this slice is reopened named table-level
+  CHECK drop; the follow-up matrix covers additional representative ALTER
+  families.
 - Existing same-runtime copy ALTER behavior remains supported.
 
 ## Non-Goals
 
 - Implementing in-place ALTER for MyLite storage.
 - Rehydrating MariaDB runtime schema directories after reopen.
-- Broad coverage for every ALTER clause.
+- Exhaustive coverage for every ALTER clause.
 - Failed ALTER rollback when row copy or validation fails.
 - Metadata-only ALTER optimizations.
 
@@ -133,8 +139,8 @@ No dependency is added. The fork delta is a small MariaDB SQL-layer condition.
 
 ## Risks And Unresolved Questions
 
-- Other ALTER clauses may still contain earlier filesystem assumptions and need
-  separate coverage.
+- ALTER clauses outside the CHECK case and the follow-up representative matrix
+  may still contain earlier filesystem assumptions and need separate coverage.
 - MyLite may later add a native in-place or metadata-only ALTER path. That
   should be designed as a separate storage-engine capability instead of
   reusing MariaDB `.frm` preparation.

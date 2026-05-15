@@ -90,6 +90,7 @@ typedef struct auto_row_context {
     int found_after_alter;
     int found_after_low_alter;
     int found_reopened;
+    int found_after_reopened_alter;
 } auto_row_context;
 
 typedef struct id_sequence_context {
@@ -1029,6 +1030,7 @@ static void test_create_table_persists_catalog_metadata(void) {
     generated_label = (single_value_context){.expected_value = "published-1"};
     rollback_count = (single_value_context){.expected_value = "3"};
     db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "app");
     assert_exec_succeeds(db, "USE app");
     assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
@@ -1094,6 +1096,8 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert(mutable_rows.found_updated);
     assert(mutable_rows.found_untouched);
     assert_exec_succeeds(db, "INSERT INTO auto_posts (title) VALUES ('reopened')");
+    assert_exec_succeeds(db, "ALTER TABLE auto_posts AUTO_INCREMENT = 80");
+    assert_exec_succeeds(db, "INSERT INTO auto_posts (title) VALUES ('after reopened alter')");
     assert(
         mylite_exec(
             db,
@@ -1104,13 +1108,14 @@ static void test_create_table_persists_catalog_metadata(void) {
         ) == MYLITE_OK
     );
     assert(errmsg == NULL);
-    assert(auto_rows.rows == 6);
+    assert(auto_rows.rows == 7);
     assert(auto_rows.found_first);
     assert(auto_rows.found_manual);
     assert(auto_rows.found_after_manual);
     assert(auto_rows.found_after_alter);
     assert(auto_rows.found_after_low_alter);
     assert(auto_rows.found_reopened);
+    assert(auto_rows.found_after_reopened_alter);
     assert_exec_fails_with_message(db, "INSERT INTO checked_posts VALUES (5, 10)", "CONSTRAINT");
     assert_exec_succeeds(db, "ALTER TABLE checked_posts DROP CONSTRAINT rating_reopen_cap");
     assert_exec_succeeds(db, "INSERT INTO checked_posts VALUES (5, 10)");
@@ -1216,6 +1221,11 @@ static void test_alter_table_rebuilds_keyless_rows(void) {
     mylite_db *db = open_database(root, &filename);
     alter_row_context rows = {0};
     table_context tables = {0};
+    table_context reopened_headline_rows = {0};
+    table_context reopened_status_rows = {0};
+    table_context dropped_headline_index_rows = {0};
+    table_context dropped_status_index_rows = {0};
+    single_value_context reopened_status_count = {.expected_value = "2"};
     char *errmsg = NULL;
 
     assert_exec_succeeds(db, "CREATE DATABASE app");
@@ -1284,6 +1294,7 @@ static void test_alter_table_rebuilds_keyless_rows(void) {
     rows = (alter_row_context){0};
     tables = (table_context){0};
     db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "app");
     assert_exec_succeeds(db, "USE app");
     assert(
         mylite_exec(
@@ -1301,6 +1312,90 @@ static void test_alter_table_rebuilds_keyless_rows(void) {
     assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
     assert(tables.rows == 1);
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE alter_posts ADD COLUMN reopened_status VARCHAR(16) NOT NULL DEFAULT 'open'"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM alter_posts WHERE reopened_status = 'open'",
+            single_value_callback,
+            &reopened_status_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_status_count.rows == 1);
+    assert_exec_succeeds(db, "ALTER TABLE alter_posts ADD KEY reopened_headline_key (headline)");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM alter_posts FORCE INDEX (reopened_headline_key) "
+            "WHERE headline = 'second'",
+            row_callback,
+            &reopened_headline_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_headline_rows.rows == 1);
+    assert_exec_succeeds(db, "CREATE INDEX reopened_status_key ON alter_posts (status)");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM alter_posts FORCE INDEX (reopened_status_key) WHERE status = 'draft'",
+            row_callback,
+            &reopened_status_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_status_rows.rows == 2);
+    assert_exec_succeeds(db, "DROP INDEX reopened_status_key ON alter_posts");
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM alter_posts WHERE Key_name = 'reopened_status_key'",
+            table_callback,
+            &dropped_status_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(dropped_status_index_rows.rows == 0);
+    assert_exec_succeeds(db, "ALTER TABLE alter_posts DROP INDEX reopened_headline_key");
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM alter_posts WHERE Key_name = 'reopened_headline_key'",
+            table_callback,
+            &dropped_headline_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(dropped_headline_index_rows.rows == 0);
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE alter_posts CHANGE COLUMN headline reopened_headline VARCHAR(64) NOT NULL"
+    );
+    rows = (alter_row_context){0};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id, reopened_headline, status, LENGTH(notes), notes IS NULL FROM alter_posts",
+            alter_row_callback,
+            &rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rows.rows == 2);
+    assert(rows.found_first);
+    assert(rows.found_large);
+    assert_exec_succeeds(db, "ALTER TABLE alter_posts DROP COLUMN reopened_status");
+    assert_exec_fails(db, "SELECT reopened_status FROM alter_posts");
     assert_catalog_table_count(filename, "app", 1U);
     assert_catalog_table_metadata(filename, "app", "alter_posts", "InnoDB", "MYLITE");
     assert(mylite_close(db) == MYLITE_OK);
@@ -3142,6 +3237,10 @@ static int auto_row_callback(void *ctx, int column_count, char **values, char **
     }
     if (strcmp(values[0], "52") == 0 && strcmp(values[1], "reopened") == 0) {
         row_ctx->found_reopened = 1;
+        return 0;
+    }
+    if (strcmp(values[0], "80") == 0 && strcmp(values[1], "after reopened alter") == 0) {
+        row_ctx->found_after_reopened_alter = 1;
         return 0;
     }
 

@@ -78,7 +78,9 @@ records when no transient runtime schema directory exists.
 The SQL layer forces routed MyLite `ALTER TABLE` statements onto the copy
 algorithm before MariaDB's in-place ALTER preparation can write temporary
 `.frm` files under schema directories; MyLite does not support in-place ALTER
-yet.
+yet. Storage-smoke coverage includes representative default-algorithm column,
+index, standalone-index, CHECK, and autoincrement ALTER operations after
+catalog-only reopen without a rehydrated runtime schema directory.
 Foreign-key DDL is rejected at the `libmylite` boundary until MyLite has
 catalog metadata, enforcement, locking, recovery, and transaction-aware checks
 for referential constraints.
@@ -194,9 +196,12 @@ table to the final name, and drop the backup catalog record. This preserves
 requested engine metadata for implicit rebuilds and records explicit supported
 engine requests on engine rebuilds.
 Supported key additions on copy `ALTER` rebuild through the same table-copy
-path and publish rebuilt rows with matching index-entry pages. `LOCK=NONE` copy
-ALTER, in-place ALTER, unsupported index rebuilds, and transactional DDL
-rollback remain planned until MyLite has locking and recovery.
+path and publish rebuilt rows with matching index-entry pages. Representative
+default-algorithm copy ALTER paths after catalog-only reopen cover column
+add/drop/rename, ALTER-backed index add/drop, standalone index create/drop, and
+autoincrement metadata updates. `LOCK=NONE` copy ALTER, in-place ALTER,
+unsupported index rebuilds, and transactional DDL rollback remain planned until
+MyLite has locking and recovery.
 `CREATE TABLE ... LIKE` clones supported routed source table definitions through
 MariaDB's normal LIKE path, does not copy rows, resets target autoincrement
 state, and records the source requested engine with effective `MYLITE` when the
@@ -278,8 +283,9 @@ appends a row-state page that hides the current row id; stale index entries
 remain on disk until compaction exists but are filtered through the row-state
 map. `truncate()` appends delete row-state pages for all live row ids and
 resets table-local autoincrement state to the first generated value. Explicit
-`ALTER TABLE ... AUTO_INCREMENT` publishes an exact table-local next value, and
-copy `ALTER` row movement can advance that value above copied live row data.
+`ALTER TABLE ... AUTO_INCREMENT` publishes an exact table-local next value
+before and after catalog-only reopen, and copy `ALTER` row movement can advance
+that value above copied live row data.
 Row, overflow, index-entry, and old autoincrement pages remain orphaned until
 compaction exists. Nullable fixed and variable fields are covered because the
 stored record image includes MariaDB's null bitmap. BLOB/TEXT fields are

@@ -80,7 +80,7 @@ index invariants.
 ## Supported Scope
 
 - `ALTER TABLE ... AUTO_INCREMENT = N` for supported routed MyLite table
-  shapes.
+  shapes, including after catalog-only close/reopen.
 - Preservation of a raised counter across later copy ALTER statements that do
   not specify `AUTO_INCREMENT`.
 - Close/reopen persistence of altered autoincrement state.
@@ -144,7 +144,8 @@ and small handler hook implementations.
   reset after drop/recreate.
 - Add storage-smoke SQL coverage for explicit high
   `ALTER TABLE ... AUTO_INCREMENT`, preservation across a later copy ALTER,
-  close/reopen persistence, and low explicit values bounded by copied rows.
+  close/reopen persistence, reopened explicit changes, and low explicit values
+  bounded by copied rows.
 - Update compatibility and roadmap docs to remove the planned-only
   `ALTER TABLE ... AUTO_INCREMENT` caveat.
 - Run format, tidy, first-party tests, embedded tests, storage-smoke tests, and
@@ -159,6 +160,7 @@ and small handler hook implementations.
 - Explicit lower values do not cause copied tables to reuse ids already present
   in live row data.
 - The altered state survives `mylite_close()` and reopen.
+- The same explicit ALTER path works after catalog-only reopen.
 - Docs and compatibility tables match the implemented behavior.
 
 ## Risks And Unresolved Questions

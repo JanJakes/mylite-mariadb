@@ -32,8 +32,8 @@ prove they route through the same catalog and index-entry lifecycle.
 - Standalone `CREATE UNIQUE INDEX ... ALGORITHM=COPY` duplicate checks after
   the rebuilt index exists.
 - Standalone `DROP INDEX` over supported MyLite-routed table shapes.
-- Catalog metadata, row visibility, forced-index lookup, close/reopen, and
-  durable-sidecar gates.
+- Catalog metadata, row visibility, forced-index lookup, close/reopen,
+  catalog-only reopened default-algorithm index DDL, and durable-sidecar gates.
 
 ## Non-Goals
 
@@ -69,9 +69,10 @@ groups cover this SQL surface.
 ## Compatibility Impact
 
 Standalone `CREATE INDEX` and `DROP INDEX` move from planned to partial for
-supported copy-rebuild table shapes. They remain partial because online DDL,
-unsupported index classes, SQL rollback, foreign keys, and broader crash
-recovery still need separate slices.
+supported copy-rebuild table shapes, including representative default-algorithm
+standalone index DDL after catalog-only reopen. They remain partial because
+online DDL, unsupported index classes, SQL rollback, foreign keys, and broader
+crash recovery still need separate slices.
 
 ## Single-File, Storage, And Embedded Lifecycle Impact
 
@@ -89,7 +90,8 @@ sidecars are allowed.
    - duplicate-key enforcement after standalone unique index creation;
    - forced-index lookup through the new standalone indexes;
    - standalone `DROP INDEX` removing metadata and preserving row visibility;
-   - close/reopen visibility and no durable sidecars.
+   - close/reopen visibility, reopened default-algorithm standalone
+     `CREATE INDEX` / `DROP INDEX`, and no durable sidecars.
 2. Run storage-smoke routed DDL/DML and sidecar groups.
 3. Run normal dev, embedded-dev, storage-smoke-dev, format, tidy, diff, shell,
    and size checks.
