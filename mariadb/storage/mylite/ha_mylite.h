@@ -57,6 +57,8 @@ class ha_mylite: public handler
   Mylite_index_cursor_entry *index_entries;
   char storage_schema_name[NAME_LEN + 1];
   char storage_table_name[NAME_LEN + 1];
+  char display_engine_name[NAME_LEN + 1];
+  LEX_CSTRING display_engine_name_lex;
   size_t scan_row_size;
   size_t scan_row_count;
   size_t scan_row_index;
@@ -106,6 +108,7 @@ public:
 
   int open(const char *name, int mode, uint test_if_locked) override;
   int close(void) override;
+  LEX_CSTRING *engine_name() override;
   int index_init(uint idx, bool sorted) override;
   int index_end() override;
   int index_read_map(uchar *buf, const uchar *key, key_part_map keypart_map,

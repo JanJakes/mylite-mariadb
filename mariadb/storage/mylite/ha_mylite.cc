@@ -68,6 +68,10 @@ static int mylite_schema_hook_add_table(void *ctx, const char *,
 static int mylite_requested_engine_name(const char *primary_file,
                                         HA_CREATE_INFO *create_info,
                                         char *out_name, size_t out_name_size);
+static int mylite_display_engine_name(const char *primary_file,
+                                      const char *schema_name,
+                                      const char *table_name, char *out_name,
+                                      size_t out_name_size);
 static bool mylite_preserves_requested_engine_name(const THD *thd);
 static int mylite_preserve_source_requested_engine_name(
   const char *primary_file, char *out_name, size_t out_name_size);
@@ -584,6 +588,9 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
 {
   storage_schema_name[0]= '\0';
   storage_table_name[0]= '\0';
+  strcpy(display_engine_name, MYLITE_STORAGE_ENGINE_NAME);
+  display_engine_name_lex.str= display_engine_name;
+  display_engine_name_lex.length= strlen(display_engine_name);
   ref_length= sizeof(ulonglong);
 }
 
@@ -958,12 +965,29 @@ int ha_mylite::open(const char *name, int, uint)
   if (path_error)
     DBUG_RETURN(path_error);
 
+  const char *primary_file= mylite_primary_file_path();
+  if (primary_file)
+  {
+    const int engine_name_error=
+      mylite_display_engine_name(primary_file, storage_schema_name,
+                                 storage_table_name, display_engine_name,
+                                 sizeof(display_engine_name));
+    if (engine_name_error)
+      DBUG_RETURN(engine_name_error);
+    display_engine_name_lex.length= strlen(display_engine_name);
+  }
+
   if (!(share= get_share()))
     DBUG_RETURN(HA_ERR_OUT_OF_MEM);
 
   thr_lock_data_init(&share->lock, &lock, NULL);
 
   DBUG_RETURN(0);
+}
+
+LEX_CSTRING *ha_mylite::engine_name()
+{
+  return &display_engine_name_lex;
 }
 
 int ha_mylite::close(void)
@@ -1670,6 +1694,36 @@ static int mylite_requested_engine_name(const char *primary_file,
 
   return mylite_copy_engine_name(storage_engine_name->name(), out_name,
                                  out_name_size);
+}
+
+static int mylite_display_engine_name(const char *primary_file,
+                                      const char *schema_name,
+                                      const char *table_name, char *out_name,
+                                      size_t out_name_size)
+{
+  mylite_storage_table_metadata metadata= {sizeof(metadata), NULL, NULL};
+  const mylite_storage_result result=
+    mylite_storage_read_table_metadata(primary_file, schema_name, table_name,
+                                       &metadata);
+  if (result == MYLITE_STORAGE_NOTFOUND)
+    return mylite_copy_string(MYLITE_STORAGE_ENGINE_NAME, out_name,
+                              out_name_size);
+  if (result != MYLITE_STORAGE_OK)
+    return mylite_storage_to_handler_error(result);
+
+  const char *engine_name= metadata.requested_engine_name;
+  if (!engine_name)
+  {
+    mylite_storage_free(metadata.requested_engine_name);
+    mylite_storage_free(metadata.effective_engine_name);
+    return HA_ERR_UNSUPPORTED;
+  }
+  if (mylite_engine_name_equals(engine_name, "DEFAULT"))
+    engine_name= MYLITE_STORAGE_ENGINE_NAME;
+  const int error= mylite_copy_string(engine_name, out_name, out_name_size);
+  mylite_storage_free(metadata.requested_engine_name);
+  mylite_storage_free(metadata.effective_engine_name);
+  return error;
 }
 
 static bool mylite_preserves_requested_engine_name(const THD *thd)

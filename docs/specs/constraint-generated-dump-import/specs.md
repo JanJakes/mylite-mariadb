@@ -63,7 +63,9 @@ then verifies:
 - Full `mysqldump` directive compatibility, including versioned comments,
   locks, triggers, routines, users, character-set toggles, or replication
   metadata.
-- SQL dump export.
+- SQL dump export. The separate `show-create-round-trip` slice covers a
+  representative `SHOW CREATE TABLE` export/import path; full dump-tool
+  round-trip coverage remains planned.
 - Broad CHECK/generated expression matrices.
 - Transaction rollback or savepoint behavior while importing a dump.
 - Foreign-key-enabled dump import.
@@ -72,7 +74,8 @@ then verifies:
 
 CHECK and generated-column support remain partial, but representative
 dump-style import is now covered for supported routed table shapes. A
-representative deterministic expression matrix is covered separately; broader
+representative deterministic expression matrix and representative
+`SHOW CREATE TABLE` round-trip export/import are covered separately; broader
 dump/export compatibility and exhaustive expression matrices remain planned.
 
 ## DDL Metadata Routing Impact
@@ -123,4 +126,4 @@ test fixture plus documentation.
 
 - The fixture runner intentionally supports a narrow SQL subset. Full
   `mysqldump` import will need a separate compatibility slice.
-- Exporting MariaDB-compatible SQL from a `.mylite` file remains planned.
+- Full dump-tool export from a `.mylite` file remains planned.

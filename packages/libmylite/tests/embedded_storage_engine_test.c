@@ -55,6 +55,12 @@ typedef struct show_create_schema_context {
     const char *expected_collation;
 } show_create_schema_context;
 
+typedef struct show_create_table_context {
+    int rows;
+    const char *expected_table_name;
+    char *create_sql;
+} show_create_table_context;
+
 typedef struct post_row_context {
     int rows;
     int found_draft;
@@ -149,6 +155,7 @@ static void test_blob_text_prefix_indexes(void);
 static void test_create_table_like(void);
 static void test_create_table_select(void);
 static void test_constraint_generated_dump_fixture(void);
+static void test_show_create_table_round_trip(void);
 static void test_constraint_generated_expression_matrix(void);
 static void test_truncate_table_lifecycle(void);
 static void test_wordpress_shaped_schema(void);
@@ -175,6 +182,7 @@ static void assert_show_create_schema(
     const char *expected_character_set,
     const char *expected_collation
 );
+static char *capture_show_create_table(mylite_db *db, const char *table_name);
 static void assert_catalog_table_count(
     const char *filename,
     const char *schema_name,
@@ -218,6 +226,12 @@ static int engine_callback(void *ctx, int column_count, char **values, char **co
 static int schema_callback(void *ctx, int column_count, char **values, char **column_names);
 static int schema_option_callback(void *ctx, int column_count, char **values, char **column_names);
 static int show_create_schema_callback(
+    void *ctx,
+    int column_count,
+    char **values,
+    char **column_names
+);
+static int show_create_table_callback(
     void *ctx,
     int column_count,
     char **values,
@@ -275,6 +289,7 @@ int main(void) {
     test_create_table_like();
     test_create_table_select();
     test_constraint_generated_dump_fixture();
+    test_show_create_table_round_trip();
     test_constraint_generated_expression_matrix();
     test_truncate_table_lifecycle();
     test_wordpress_shaped_schema();
@@ -4176,6 +4191,113 @@ static void test_constraint_generated_dump_fixture(void) {
     free(root);
 }
 
+static void test_show_create_table_round_trip(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE export_source");
+    assert_exec_succeeds(db, "USE export_source");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE export_posts ("
+        "id int NOT NULL AUTO_INCREMENT,"
+        "title varchar(64) NOT NULL,"
+        "status varchar(16) NOT NULL,"
+        "rating int NOT NULL,"
+        "body text NOT NULL,"
+        "slug varchar(96) AS (LOWER(REPLACE(title, ' ', '-'))) STORED,"
+        "PRIMARY KEY (id),"
+        "UNIQUE KEY slug_unique (slug),"
+        "KEY status_rating (status, rating),"
+        "KEY body_prefix (body(12)),"
+        "CONSTRAINT rating_window CHECK (rating BETWEEN 0 AND 10),"
+        "CONSTRAINT status_choice CHECK (status IN ('draft', 'published'))"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO export_posts (title, status, rating, body) "
+        "VALUES ('Source Post', 'draft', 4, 'source-body')"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE export_source");
+    char *create_sql = capture_show_create_table(db, "export_posts");
+    assert(strstr(create_sql, "ENGINE=InnoDB") != NULL);
+    assert(strstr(create_sql, "AUTO_INCREMENT=2") != NULL);
+
+    assert_exec_succeeds(db, "CREATE DATABASE export_roundtrip");
+    assert_exec_succeeds(db, "USE export_roundtrip");
+    assert_exec_succeeds(db, create_sql);
+    assert_catalog_table_count(filename, "export_roundtrip", 1U);
+    assert_catalog_table_metadata(filename, "export_roundtrip", "export_posts", "InnoDB", "MYLITE");
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO export_posts (title, status, rating, body) "
+        "VALUES ('Round Trip', 'published', 8, 'roundtrip-body')"
+    );
+    assert_query_single_value(db, "SELECT id FROM export_posts WHERE title = 'Round Trip'", "2");
+    assert_query_single_value(db, "SELECT slug FROM export_posts WHERE id = 2", "round-trip");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM export_posts FORCE INDEX (slug_unique) WHERE slug = 'round-trip'",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM export_posts FORCE INDEX (status_rating) "
+        "WHERE status = 'published' AND rating = 8",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM export_posts FORCE INDEX (body_prefix) WHERE body = 'roundtrip-body'",
+        "2"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO export_posts (title, status, rating, body) "
+        "VALUES ('Bad Status', 'archived', 5, 'bad-status')",
+        "CONSTRAINT"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO export_posts (title, status, rating, body) "
+        "VALUES ('Round Trip', 'draft', 3, 'duplicate-slug')",
+        "Duplicate"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE export_roundtrip");
+    assert_catalog_table_count(filename, "export_roundtrip", 1U);
+    assert_catalog_table_metadata(filename, "export_roundtrip", "export_posts", "InnoDB", "MYLITE");
+    assert_query_single_value(db, "SELECT slug FROM export_posts WHERE id = 2", "round-trip");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM export_posts FORCE INDEX (body_prefix) WHERE body = 'roundtrip-body'",
+        "2"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO export_posts (title, status, rating, body) "
+        "VALUES ('Too High', 'draft', 11, 'too-high')",
+        "CONSTRAINT"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(create_sql);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_constraint_generated_expression_matrix(void) {
     char *root = make_temp_root();
     char *filename = NULL;
@@ -5816,6 +5938,23 @@ static void assert_show_create_schema(
     assert(show_create.rows == 1);
 }
 
+static char *capture_show_create_table(mylite_db *db, const char *table_name) {
+    char sql[256];
+    const int written = snprintf(sql, sizeof(sql), "SHOW CREATE TABLE %s", table_name);
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+
+    show_create_table_context ctx = {
+        .expected_table_name = table_name,
+    };
+    char *errmsg = NULL;
+    assert(mylite_exec(db, sql, show_create_table_callback, &ctx, &errmsg) == MYLITE_OK);
+    assert(errmsg == NULL);
+    assert(ctx.rows == 1);
+    assert(ctx.create_sql != NULL);
+    return ctx.create_sql;
+}
+
 static void assert_catalog_table_count(
     const char *filename,
     const char *schema_name,
@@ -5931,6 +6070,27 @@ static int show_create_schema_callback(
     assert(strstr(values[1], show_create_ctx->expected_character_set) != NULL);
     assert(strstr(values[1], show_create_ctx->expected_collation) != NULL);
     ++show_create_ctx->rows;
+    return 0;
+}
+
+static int show_create_table_callback(
+    void *ctx,
+    int column_count,
+    char **values,
+    char **column_names
+) {
+    show_create_table_context *show_ctx = (show_create_table_context *)ctx;
+    (void)column_names;
+
+    assert(column_count == 2);
+    assert(values[0] != NULL);
+    assert(values[1] != NULL);
+    assert(show_ctx->expected_table_name != NULL);
+    assert(show_ctx->rows == 0);
+    assert(strcmp(values[0], show_ctx->expected_table_name) == 0);
+    show_ctx->create_sql = strdup(values[1]);
+    assert(show_ctx->create_sql != NULL);
+    ++show_ctx->rows;
     return 0;
 }
 
