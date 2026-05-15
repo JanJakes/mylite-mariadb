@@ -47,6 +47,10 @@
 #define MYLITE_WITH_SERVER_UTILITY_FUNCTIONS 1
 #endif
 
+#ifndef MYLITE_WITH_XML_SQL_FUNCTIONS
+#define MYLITE_WITH_XML_SQL_FUNCTIONS 1
+#endif
+
 
 extern "C" const uchar *get_native_fct_hash_key(const void *buff,
                                                 size_t *length, my_bool)
@@ -2788,6 +2792,7 @@ protected:
 #endif /* WITH_WSREP */
 
 
+#if MYLITE_WITH_XML_SQL_FUNCTIONS
 class Create_func_xml_extractvalue : public Create_func_arg2
 {
 public:
@@ -2812,6 +2817,7 @@ protected:
   Create_func_xml_update() = default;
   ~Create_func_xml_update() override = default;
 };
+#endif
 
 
 class Create_func_year_week : public Create_native_func
@@ -6238,6 +6244,7 @@ Create_func_wsrep_sync_wait_upto::create_native(THD *thd,
 }
 #endif /* WITH_WSREP */
 
+#if MYLITE_WITH_XML_SQL_FUNCTIONS
 Create_func_xml_extractvalue Create_func_xml_extractvalue::s_singleton;
 
 Item*
@@ -6254,6 +6261,7 @@ Create_func_xml_update::create_3_arg(THD *thd, Item *arg1, Item *arg2, Item *arg
 {
   return new (thd->mem_root) Item_func_xml_update(thd, arg1, arg2, arg3);
 }
+#endif
 
 
 Create_func_year_week Create_func_year_week::s_singleton;
@@ -6448,7 +6456,9 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("ENCRYPT") }, BUILDER(Create_func_encrypt)},
   { { STRING_WITH_LEN("EXP") }, BUILDER(Create_func_exp)},
   { { STRING_WITH_LEN("EXPORT_SET") }, BUILDER(Create_func_export_set)},
+#if MYLITE_WITH_XML_SQL_FUNCTIONS
   { { STRING_WITH_LEN("EXTRACTVALUE") }, BUILDER(Create_func_xml_extractvalue)},
+#endif
   { { STRING_WITH_LEN("FIELD") }, BUILDER(Create_func_field)},
   { { STRING_WITH_LEN("FIND_IN_SET") }, BUILDER(Create_func_find_in_set)},
   { { STRING_WITH_LEN("FLOOR") }, BUILDER(Create_func_floor)},
@@ -6614,7 +6624,9 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("UNCOMPRESSED_LENGTH") }, BUILDER(Create_func_uncompressed_length)},
   { { STRING_WITH_LEN("UNHEX") }, BUILDER(Create_func_unhex)},
   { { STRING_WITH_LEN("UNIX_TIMESTAMP") }, BUILDER(Create_func_unix_timestamp)},
+#if MYLITE_WITH_XML_SQL_FUNCTIONS
   { { STRING_WITH_LEN("UPDATEXML") }, BUILDER(Create_func_xml_update)},
+#endif
   { { STRING_WITH_LEN("UPPER") }, BUILDER(Create_func_ucase)},
 #if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
   { { STRING_WITH_LEN("UUID_SHORT") }, BUILDER(Create_func_uuid_short)},

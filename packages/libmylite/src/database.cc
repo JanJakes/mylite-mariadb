@@ -328,6 +328,7 @@ bool is_server_surface_sql(std::string_view sql);
 bool is_file_import_sql(std::string_view sql);
 bool is_file_export_sql(std::string_view sql);
 bool is_server_utility_function_sql(std::string_view sql);
+bool is_xml_sql_function_sql(std::string_view sql);
 bool is_oracle_sql_mode_sql(std::string_view sql);
 bool sql_set_assignment_has_oracle_sql_mode(std::string_view assignment);
 std::string_view pop_sql_set_assignment(std::string_view &sql);
@@ -343,6 +344,7 @@ bool is_set_transaction_control_sql(std::string_view sql);
 bool sql_tokens_contain_file_import_function(std::string_view sql);
 bool sql_tokens_contain_file_export_marker(std::string_view sql);
 bool sql_tokens_contain_server_utility_function(std::string_view sql);
+bool sql_tokens_contain_xml_sql_function(std::string_view sql);
 bool sql_tokens_contain_locking_marker(std::string_view sql);
 bool sql_tokens_contain_named_lock_function(std::string_view sql);
 bool sql_span_contains_token(std::string_view sql, const char *keyword);
@@ -2007,6 +2009,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_server_utility_function_sql(sql)) {
         return "unsupported server utility SQL function";
     }
+    if (is_xml_sql_function_sql(sql)) {
+        return "unsupported XML SQL function";
+    }
     if (is_oracle_sql_mode_sql(sql)) {
         return "unsupported Oracle SQL mode";
     }
@@ -2112,6 +2117,10 @@ bool is_file_export_sql(std::string_view sql) {
 
 bool is_server_utility_function_sql(std::string_view sql) {
     return sql_tokens_contain_server_utility_function(sql);
+}
+
+bool is_xml_sql_function_sql(std::string_view sql) {
+    return sql_tokens_contain_xml_sql_function(sql);
 }
 
 bool is_oracle_sql_mode_sql(std::string_view sql) {
@@ -2412,6 +2421,20 @@ bool sql_tokens_contain_server_utility_function(std::string_view sql) {
         if (sql_token_equals(token, "BENCHMARK") || sql_token_equals(token, "SLEEP") ||
             sql_token_equals(token, "UUID_SHORT") || sql_token_equals(token, "MASTER_POS_WAIT") ||
             sql_token_equals(token, "MASTER_GTID_WAIT")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool sql_tokens_contain_xml_sql_function(std::string_view sql) {
+    std::string_view token;
+    while (pop_sql_scanned_token(sql, token)) {
+        if (!sql_next_non_noise_is(sql, '(')) {
+            continue;
+        }
+
+        if (sql_token_equals(token, "EXTRACTVALUE") || sql_token_equals(token, "UPDATEXML")) {
             return true;
         }
     }

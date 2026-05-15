@@ -112,6 +112,15 @@ ELSE()
   ADD_DEFINITIONS(-DMYLITE_WITH_SERVER_UTILITY_FUNCTIONS=0)
 ENDIF()
 
+OPTION(MYLITE_WITH_XML_SQL_FUNCTIONS "Build XML SQL functions" ON)
+IF(MYLITE_WITH_XML_SQL_FUNCTIONS)
+  ADD_DEFINITIONS(-DMYLITE_WITH_XML_SQL_FUNCTIONS=1)
+  SET(MYLITE_XML_SQL_FUNCTION_SOURCE item_xmlfunc.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_XML_SQL_FUNCTIONS=0)
+  SET(MYLITE_XML_SQL_FUNCTION_SOURCE)
+ENDIF()
+
 OPTION(MYLITE_WITH_ORACLE_SQL_MODE "Build Oracle SQL mode parser" ON)
 IF(MYLITE_WITH_ORACLE_SQL_MODE)
   SET(MYLITE_ORACLE_PARSER_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/yy_oracle.cc)
@@ -169,7 +178,7 @@ SET (SQL_SOURCE
                sql_table.cc sql_test.cc sql_trigger.cc sql_udf.cc sql_union.cc
                ddl_log.cc ddl_log.h
                sql_update.cc sql_view.cc strfunc.cc table.cc thr_malloc.cc
-               sql_time.cc tztime.cc unireg.cc item_xmlfunc.cc
+               sql_time.cc tztime.cc unireg.cc ${MYLITE_XML_SQL_FUNCTION_SOURCE}
                uniques.cc
                rpl_tblmap.cc sql_binlog.cc event_scheduler.cc
                event_data_objects.cc

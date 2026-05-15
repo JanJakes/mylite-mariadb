@@ -41,9 +41,9 @@ partition DDL rejection, online and in-place ALTER rejection, MariaDB statement
 transaction hook integration, busy-timeout lock waits, SQL locking policy
 rejection, failed
 statement rollback, initial application-schema smoke,
-unsupported server, SQL file-I/O, server utility function, Oracle SQL mode,
-and non-table-object policy, and representative `SHOW CREATE TABLE` round-trip
-export/import.
+unsupported server, SQL file-I/O, server utility function, Oracle SQL mode, XML
+SQL function, and non-table-object policy, and representative
+`SHOW CREATE TABLE` round-trip export/import.
 The opt-in embedded MTR smoke runner covers MariaDB bootstrap and scalar
 CAST/CONVERT behavior, while MariaDB MTR comparison suites and broader
 application-schema suites remain planned.
@@ -118,6 +118,7 @@ application-schema suites remain planned.
 | `LOAD_FILE()` / `SELECT ... INTO OUTFILE` / `DUMPFILE` | ➖&nbsp;Out&nbsp;of&nbsp;scope | Host-file SQL I/O is outside the embedded file-owned API; direct and prepared statements using these surfaces are rejected before MariaDB execution with stable MyLite diagnostics, while ordinary result fetching and `SELECT ... INTO` user variables remain available |
 | Server utility functions | ➖&nbsp;Out&nbsp;of&nbsp;scope | Blocking, timing, named-lock, replication-wait, and server-identity utility functions such as `BENCHMARK()`, `SLEEP()`, `UUID_SHORT()`, `MASTER_POS_WAIT()`, and `MASTER_GTID_WAIT()` are rejected before MariaDB execution with stable MyLite diagnostics; named-lock helpers such as `GET_LOCK()` and `RELEASE_LOCK()` remain rejected by the SQL locking policy, while ordinary scalar helpers such as `VERSION()` remain available |
 | Oracle SQL mode | ➖&nbsp;Out&nbsp;of&nbsp;scope | Oracle Database compatibility mode is not part of MyLite's MySQL/MariaDB embedded profile; the default embedded profile links a MyLite `ORAparse()` stub instead of the generated Oracle parser, and direct/prepared `SET sql_mode` assignments that include the `ORACLE` mode token are rejected before MariaDB execution while ordinary MySQL/MariaDB SQL modes remain available |
+| XML SQL functions | ➖&nbsp;Out&nbsp;of&nbsp;scope | Legacy XML XPath helpers `EXTRACTVALUE()` and `UPDATEXML()` are not part of the core embedded profile; the default embedded profile omits `item_xmlfunc.cc`, and direct/prepared calls are rejected before MariaDB execution while quoted mentions and separate file-import policy for `LOAD XML` remain unchanged |
 | Schemas/databases | 🟡&nbsp;Partial | Direct and prepared `CREATE DATABASE` / `CREATE SCHEMA` store catalog namespace records with default character set, collation, and comment options, file-backed schema creation, reopen, `USE`, `SHOW DATABASES`, `SHOW TABLES`, `SHOW CREATE DATABASE`, information-schema schema options, table resolution, catalog-backed `CREATE DATABASE` duplicate, `IF NOT EXISTS`, and `OR REPLACE` paths, and representative default-algorithm copy `ALTER` paths work without runtime schema directories, and direct and prepared `DROP DATABASE` / `DROP SCHEMA` remove covered catalog metadata; non-table objects and SQL rollback remain planned |
 | Views, triggers, and routines | 🟡&nbsp;Partial | Catalog-backed persistent objects remain planned after table DDL is stable; current `libmylite` entry points reject representative view, trigger, routine, package, sequence, and `CALL` statements before MariaDB can publish filesystem or server-table metadata |
 | Events and scheduler | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server scheduler is not part of the core embedded profile; event activation and event DDL are rejected by MyLite SQL policy |

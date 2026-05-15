@@ -77,6 +77,15 @@ ELSE()
   ADD_DEFINITIONS(-DMYLITE_WITH_SERVER_UTILITY_FUNCTIONS=0)
 ENDIF()
 
+OPTION(MYLITE_WITH_XML_SQL_FUNCTIONS "Build XML SQL functions" ON)
+IF(MYLITE_WITH_XML_SQL_FUNCTIONS)
+  ADD_DEFINITIONS(-DMYLITE_WITH_XML_SQL_FUNCTIONS=1)
+  SET(MYLITE_XML_SQL_FUNCTION_SOURCE ../sql/item_xmlfunc.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_XML_SQL_FUNCTIONS=0)
+  SET(MYLITE_XML_SQL_FUNCTION_SOURCE)
+ENDIF()
+
 SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc 
            libmysql.c ../sql-common/errmsg.c
            ../sql-common/client.c
@@ -94,7 +103,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/item.cc ../sql/item_create.cc ../sql/item_func.cc 
            ../sql/item_geofunc.cc ../sql/item_row.cc ../sql/item_strfunc.cc 
            ../sql/item_subselect.cc ../sql/item_sum.cc ../sql/item_timefunc.cc 
-           ../sql/item_xmlfunc.cc ../sql/item_jsonfunc.cc
+           ${MYLITE_XML_SQL_FUNCTION_SOURCE} ../sql/item_jsonfunc.cc
            ../sql/json_schema.cc ../sql/json_schema_helper.cc
            ../sql/key.cc ../sql/lock.cc ../sql/log.cc ../sql/log_cache.cc
            ../sql/log_event.cc ../sql/log_event_server.cc 

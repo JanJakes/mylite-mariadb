@@ -433,15 +433,17 @@ the embedded library model:
 - server utility functions such as `BENCHMARK()`, `SLEEP()`, `UUID_SHORT()`,
   `MASTER_POS_WAIT()`, and `MASTER_GTID_WAIT()`,
 - Oracle SQL mode,
+- XML SQL functions `EXTRACTVALUE()` and `UPDATEXML()`,
 - event scheduler,
 - performance schema.
 
 Representative account, event, plugin, replication, binlog, view, trigger,
 routine, package, sequence, `CALL`, transaction-control, autocommit-control,
 SQL locking, named-lock, SQL file-I/O, server utility function, Oracle SQL
-mode, partition, and foreign-key DDL commands are rejected before MariaDB
-execution with stable MyLite errors. Other unsupported surfaces should fail
-with stable MyLite result codes and MariaDB diagnostics where possible.
+mode, XML SQL function, partition, and foreign-key DDL commands are rejected
+before MariaDB execution with stable MyLite errors. Other unsupported surfaces
+should fail with stable MyLite result codes and MariaDB diagnostics where
+possible.
 
 ## Compatibility Adapter
 

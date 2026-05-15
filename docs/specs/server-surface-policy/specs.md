@@ -71,6 +71,8 @@ Add `compat-server-surface` coverage:
   explicit unsupported surfaces.
 - MyLite SQL-policy rejection for Oracle SQL mode as a follow-up explicit
   unsupported surface.
+- MyLite SQL-policy rejection for XML SQL functions as a follow-up explicit
+  unsupported surface.
 - Existing unsupported external-engine DDL smoke grouped under the same
   compatibility surface.
 
@@ -109,8 +111,9 @@ continue to route to MyLite where already covered.
 
 The original policy slice did not trim the archive directly. Follow-up
 size-profile slices now use these explicit unsupported surfaces to remove
-unreachable LOAD execution, host-file SQL I/O, and server utility function
-paths plus the Oracle SQL mode parser from the default embedded profile.
+unreachable LOAD execution, host-file SQL I/O, server utility function paths,
+the Oracle SQL mode parser, and XML SQL functions from the default embedded
+profile.
 
 ## Test Plan
 
