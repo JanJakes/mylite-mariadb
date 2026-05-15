@@ -8,8 +8,9 @@ the expression before MyLite handler writes, and the definition survives
 close/reopen through the `.mylite` catalog. The compatibility matrix still
 lists CHECK `ALTER` behavior as planned.
 
-This slice adds coverage for `ALTER TABLE ... ADD CONSTRAINT ... CHECK (...)`
-and `ALTER TABLE ... DROP CONSTRAINT ...` on supported routed MyLite tables.
+This slice adds coverage for successful
+`ALTER TABLE ... ADD CONSTRAINT ... CHECK (...)` and
+`ALTER TABLE ... DROP CONSTRAINT ...` on supported routed MyLite tables.
 
 ## Source Findings
 
@@ -72,7 +73,8 @@ than failed ALTER rollback.
 
 ## Non-Goals
 
-- Failed ADD CHECK rollback when existing rows violate the new constraint.
+- Broader failed copy ALTER rollback beyond the later covered failed ADD CHECK
+  constraint-validation case.
 - Column-level CHECK drops by generated internal name.
 - `ADD CONSTRAINT IF NOT EXISTS`, unnamed CHECK name generation, or duplicate
   CHECK diagnostics.
@@ -82,9 +84,10 @@ than failed ALTER rollback.
 
 ## Compatibility Impact
 
-MyLite moves basic CHECK `ALTER` behavior for supported routed tables from
-planned to covered. Broader CHECK expressions, failed ALTER rollback,
-CTAS/dump-import edge cases, and prepared diagnostics remain planned.
+MyLite moves basic successful CHECK `ALTER` behavior for supported routed
+tables from planned to covered. Broader CHECK expressions, failed copy ALTER
+rollback beyond ADD CHECK validation, CTAS/dump-import edge cases, and
+prepared diagnostics remain planned.
 
 ## DDL Metadata Routing Impact
 
@@ -137,7 +140,8 @@ documentation coverage over existing MariaDB SQL behavior.
 
 ## Risks And Unresolved Questions
 
-- Failed ADD CHECK over incompatible existing rows remains a separate rollback
-  slice because DDL rollback is broader than this coverage-only change.
+- Failed ADD CHECK over incompatible existing rows is covered by the
+  `failed-alter-check-rollback` slice. Other failed copy ALTER shapes remain
+  broader DDL rollback work.
 - Metadata-only CHECK ALTER support must be reconsidered when MyLite adds an
   in-place ALTER path; this slice intentionally stays on copy rebuilds.

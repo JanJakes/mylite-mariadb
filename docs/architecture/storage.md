@@ -226,8 +226,10 @@ enforces those checks before insert/update handler calls unless
 named table-level CHECK additions and drops, including dropping an ALTER-added
 CHECK after catalog-only close/reopen. Supported CTAS paths cover explicit
 CHECK-constrained target definitions and CHECK-violation target cleanup.
-Broader CHECK expression, failed ALTER rollback, dump-import,
-prepared-diagnostic, and rollback coverage remains planned.
+Failed ADD CHECK copy ALTER over incompatible existing rows restores visible
+pre-statement catalog and row state through the existing statement checkpoint.
+Broader CHECK expression, broader failed ALTER rollback, dump-import,
+prepared-diagnostic, and transaction rollback coverage remains planned.
 Basic virtual and stored generated columns follow the same catalog-backed
 table-definition path, including supported copy ALTER add/modify/drop
 operations, CTAS projections from generated source columns, and generated

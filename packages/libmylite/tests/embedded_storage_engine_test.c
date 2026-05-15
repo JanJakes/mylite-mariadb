@@ -802,6 +802,7 @@ static void test_create_table_persists_catalog_metadata(void) {
     auto_row_context auto_rows = {0};
     single_value_context checked_rating = {.expected_value = "4"};
     single_value_context checked_disabled_rating = {.expected_value = "7"};
+    single_value_context checked_row_count = {.expected_value = "5"};
     single_value_context generated_title_len = {.expected_value = "5"};
     single_value_context generated_label = {.expected_value = "draft-1"};
     single_value_context generated_title_len_index = {.expected_value = "1"};
@@ -1008,6 +1009,24 @@ static void test_create_table_persists_catalog_metadata(void) {
         db,
         "ALTER TABLE checked_posts ADD CONSTRAINT rating_reopen_cap CHECK (rating <= 9)"
     );
+    assert_exec_fails_with_message(
+        db,
+        "ALTER TABLE checked_posts ADD CONSTRAINT impossible_rating CHECK (rating < 9)",
+        "CONSTRAINT"
+    );
+    assert_catalog_table_count(filename, "app", 14U);
+    assert_exec_succeeds(db, "INSERT INTO checked_posts VALUES (6, 9)");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM checked_posts",
+            single_value_callback,
+            &checked_row_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(checked_row_count.rows == 1);
     assert_exec_succeeds(db, "INSERT INTO generated_posts (id, title) VALUES (1, 'draft')");
     assert(
         mylite_exec(
@@ -1367,6 +1386,7 @@ static void test_create_table_persists_catalog_metadata(void) {
     auto_rows = (auto_row_context){0};
     checked_rating = (single_value_context){.expected_value = "4"};
     checked_disabled_rating = (single_value_context){.expected_value = "7"};
+    checked_row_count = (single_value_context){.expected_value = "5"};
     generated_title_len = (single_value_context){.expected_value = "9"};
     generated_label = (single_value_context){.expected_value = "published-1"};
     generated_title_len_index = (single_value_context){.expected_value = "1"};
@@ -1462,6 +1482,18 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert(auto_rows.found_reopened);
     assert(auto_rows.found_after_reopened_alter);
     assert_exec_fails_with_message(db, "INSERT INTO checked_posts VALUES (5, 10)", "CONSTRAINT");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM checked_posts",
+            single_value_callback,
+            &checked_row_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(checked_row_count.rows == 1);
+    assert_exec_succeeds(db, "INSERT INTO checked_posts VALUES (7, 9)");
     assert_exec_succeeds(db, "ALTER TABLE checked_posts DROP CONSTRAINT rating_reopen_cap");
     assert_exec_succeeds(db, "INSERT INTO checked_posts VALUES (5, 10)");
     assert(
