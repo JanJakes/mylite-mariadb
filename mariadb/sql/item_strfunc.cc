@@ -4382,6 +4382,7 @@ void Item_func_binary::print(String *str, enum_query_type query_type)
 }
 
 
+#if !defined(MYLITE_WITH_SQL_FILE_IO) || MYLITE_WITH_SQL_FILE_IO
 #include <my_dir.h>				// For my_stat
 
 String *Item_load_file::val_str(String *str)
@@ -4449,6 +4450,17 @@ err:
   null_value = 1;
   DBUG_RETURN(0);
 }
+#else
+
+String *Item_load_file::val_str(String *str __attribute__((unused)))
+{
+  null_value= 1;
+  my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+           "LOAD_FILE() in the MyLite embedded profile");
+  return 0;
+}
+
+#endif
 
 
 String* Item_func_export_set::val_str(String* str)

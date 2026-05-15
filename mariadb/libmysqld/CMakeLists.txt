@@ -54,6 +54,13 @@ ELSE()
   SET(MYLITE_LOAD_DATA_SOURCE ../sql/mylite_sql_load_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_SQL_FILE_IO "Build host-file SQL I/O support" ON)
+IF(MYLITE_WITH_SQL_FILE_IO)
+  ADD_DEFINITIONS(-DMYLITE_WITH_SQL_FILE_IO=1)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_SQL_FILE_IO=0)
+ENDIF()
+
 SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc 
            libmysql.c ../sql-common/errmsg.c
            ../sql-common/client.c

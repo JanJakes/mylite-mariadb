@@ -3410,6 +3410,7 @@ select_export::~select_export()
 */
 
 
+#if !defined(MYLITE_WITH_SQL_FILE_IO) || MYLITE_WITH_SQL_FILE_IO
 static File create_file(THD *thd, char *path, sql_exchange *exchange,
 			IO_CACHE *cache)
 {
@@ -3852,6 +3853,42 @@ int select_dump::send_data(List<Item> &items)
 err:
   DBUG_RETURN(1);
 }
+#else
+
+int
+select_export::prepare(List<Item> &list __attribute__((unused)),
+                       SELECT_LEX_UNIT *u)
+{
+  unit= u;
+  my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+           "SELECT ... INTO OUTFILE in the MyLite embedded profile");
+  return 1;
+}
+
+
+int select_export::send_data(List<Item> &items __attribute__((unused)))
+{
+  return 1;
+}
+
+
+int
+select_dump::prepare(List<Item> &list __attribute__((unused)),
+                     SELECT_LEX_UNIT *u)
+{
+  unit= u;
+  my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+           "SELECT ... INTO DUMPFILE in the MyLite embedded profile");
+  return 1;
+}
+
+
+int select_dump::send_data(List<Item> &items __attribute__((unused)))
+{
+  return 1;
+}
+
+#endif
 
 
 int select_singlerow_subselect::send_data(List<Item> &items)
