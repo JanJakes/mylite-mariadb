@@ -70,7 +70,8 @@ catalog table ids, and row payload lifecycles.
 
 - General typed row encoding for every SQL type.
 - BLOB/TEXT indexes, prefix indexes, or duplicate checks beyond the existing
-  single-column autoincrement key path.
+  single-column autoincrement key path. A later BLOB/TEXT prefix-index slice
+  adds bounded prefix-index support.
 - Update/delete, truncate, copy `ALTER`, or free-space reclamation.
 - Transaction rollback, crash recovery, or cross-process writer safety.
 - Compression or deduplication of BLOB/TEXT payloads.

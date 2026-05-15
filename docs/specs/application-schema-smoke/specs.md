@@ -32,9 +32,10 @@ MariaDB base: `mariadb-11.8.6`
   <https://codex.wordpress.org/Database_Description>.
 
 The smoke uses a WordPress-shaped subset rather than an exact current WordPress
-installer dump. Exact WordPress schema import, prefix indexes, charset/collation
-variants, and plugin tables need broader support than this first slice should
-hide inside one test.
+installer dump. Exact WordPress schema import, charset/collation variants, and
+plugin tables need broader support than this first slice should hide inside one
+test. A later BLOB/TEXT prefix-index slice broadened this smoke with prefix
+indexes on wider `varchar` and `text`/`longtext` columns.
 
 ## Design
 
@@ -42,8 +43,8 @@ Extend the opt-in `storage-smoke-dev` embedded storage-engine test with a new
 application-schema case:
 
 - create `wp_options`, `wp_posts`, and `wp_postmeta` with `ENGINE=InnoDB`;
-- use MyLite-supported key shapes by keeping `meta_key` at `varchar(191)` rather
-  than a prefix index;
+- cover supported prefix key shapes, including `meta_key(191)` on
+  `varchar(255)` and a bounded `text` prefix index;
 - insert option, post, and postmeta rows with `bigint unsigned`, `datetime`,
   `varchar`, `text`, and `longtext` values;
 - query by unique and secondary indexes;
@@ -70,7 +71,6 @@ storage-engine smoke label carrying this test.
 ## Non-Goals
 
 - Full WordPress installer compatibility.
-- Prefix indexes such as `meta_key(191)` on a wider `varchar(255)`.
 - Character set, collation, and index-length edge cases.
 - Foreign keys or referential enforcement; WordPress itself does not depend on
   database-enforced foreign keys for these core relationships.
@@ -107,9 +107,9 @@ durable `.frm`, InnoDB, MyISAM, Aria, binlog, and relay-log companions.
 
 ## Risks
 
-- The current smoke uses a subset of WordPress's schema because unsupported
-  prefix indexes and broader collation behavior would otherwise make the result
-  look more complete than it is.
+- The current smoke uses a subset of WordPress's schema because broader
+  collation behavior and the full installer schema would otherwise make the
+  result look more complete than it is.
 - The test still lives in one broad storage-engine smoke binary. Future
   application suites should move into narrower fixtures once the harness grows
   per-application test executables.

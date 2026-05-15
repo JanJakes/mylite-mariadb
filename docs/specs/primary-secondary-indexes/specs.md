@@ -110,7 +110,8 @@ with B-tree or pager-backed navigation without changing SQL-visible behavior.
 - Transaction rollback, statement rollback, savepoints, crash recovery, or
   concurrency guarantees for index updates.
 - FULLTEXT, SPATIAL, vector, generated, expression, hash, long-hash,
-  application-time-period, foreign-key, or BLOB/TEXT prefix indexes.
+  application-time-period, foreign-key, or BLOB/TEXT prefix indexes. A later
+  BLOB/TEXT prefix-index slice adds bounded prefix-index support.
 - Key-only reads, index condition pushdown, multi-range read optimization, or
   invisible-index policy beyond MariaDB metadata preservation.
 - Clustered-index physical row layout.

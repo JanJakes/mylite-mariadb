@@ -59,9 +59,10 @@ stores metadata in the primary `.mylite` catalog, and catalog discovery works
 after close/reopen. Routed tables support row inserts, full scans, updates, and
 deletes from the primary file, including BLOB/TEXT payloads. Supported
 primary, unique, and secondary indexes append durable index-entry pages and
-serve ordered handler cursors from MariaDB key tuples. `TRUNCATE TABLE`
-logically deletes live rows and resets autoincrement state without changing
-catalog metadata. `DROP TABLE` removes catalog metadata for routed tables.
+serve ordered handler cursors from MariaDB key tuples, including bounded
+BLOB/TEXT prefix key images produced by MariaDB. `TRUNCATE TABLE` logically
+deletes live rows and resets autoincrement state without changing catalog
+metadata. `DROP TABLE` removes catalog metadata for routed tables.
 Simple `RENAME TABLE` updates catalog identity while preserving table ids, row
 pages, and index-entry pages. Copy `ALTER` rebuilds use MariaDB's table-copy
 path and append rebuilt table definitions, rows, and supported index entries
@@ -218,9 +219,11 @@ serialized as length-prefixed value bytes, not process pointers, and large
 payloads use primary-file overflow pages.
 
 Supported primary, unique, and secondary keys use MariaDB key tuples generated
-from the row buffer. The handler rejects unsupported key classes before table
-publication, including FULLTEXT, SPATIAL, generated, hash, and BLOB/TEXT-prefix
-keys. Duplicate checks read live index entries, use MariaDB key comparison, and
+from the row buffer. Bounded BLOB/TEXT prefix indexes are supported by storing
+MariaDB's normal variable-length key image, not row-buffer process pointers.
+The handler rejects unsupported key classes before table publication, including
+FULLTEXT, SPATIAL, generated, hash, and oversized or unbounded BLOB/TEXT keys.
+Duplicate checks read live index entries, use MariaDB key comparison, and
 preserve nullable unique-key semantics. Ordered index reads build in-memory
 cursors from live index entries and then reconstruct row buffers from row
 pages. This provides correct indexed insert, lookup, update, delete, reopen,

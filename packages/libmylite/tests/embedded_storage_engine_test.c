@@ -89,6 +89,7 @@ static void test_create_table_persists_catalog_metadata(void);
 static void test_alter_table_rebuilds_keyless_rows(void);
 static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
+static void test_blob_text_prefix_indexes(void);
 static void test_truncate_table_lifecycle(void);
 static void test_wordpress_shaped_schema(void);
 static void assert_exec_succeeds(mylite_db *db, const char *sql);
@@ -141,6 +142,7 @@ int main(void) {
     test_alter_table_rebuilds_keyless_rows();
     test_indexed_rows();
     test_standalone_index_ddl();
+    test_blob_text_prefix_indexes();
     test_truncate_table_lifecycle();
     test_wordpress_shaped_schema();
     return 0;
@@ -687,11 +689,6 @@ static void test_indexed_rows(void) {
         "CREATE TABLE alter_index_posts (id INT NOT NULL, slug VARCHAR(32) NOT NULL) "
         "ENGINE=InnoDB"
     );
-    assert_exec_fails(
-        db,
-        "CREATE TABLE blob_index_posts (id INT NOT NULL, body TEXT, KEY body_key (body(8))) "
-        "ENGINE=InnoDB"
-    );
     assert_catalog_table_count(filename, "app", 3U);
 
     assert_exec_succeeds(db, "INSERT INTO indexed_posts VALUES (1, 'alpha', 'news', 10)");
@@ -970,6 +967,227 @@ static void test_standalone_index_ddl(void) {
     free(root);
 }
 
+static void test_blob_text_prefix_indexes(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    table_context body_rows = {0};
+    table_context old_body_rows = {0};
+    table_context updated_body_rows = {0};
+    table_context payload_rows = {0};
+    table_context deleted_payload_rows = {0};
+    table_context standalone_body_rows = {0};
+    table_context reopened_body_rows = {0};
+    table_context reopened_payload_rows = {0};
+    table_context reopened_standalone_body_rows = {0};
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE blob_prefix_posts ("
+        "id INT NOT NULL AUTO_INCREMENT, "
+        "body TEXT NULL, "
+        "payload BLOB NULL, "
+        "PRIMARY KEY (id), "
+        "KEY body_prefix (body(8)), "
+        "KEY payload_prefix (payload(3)), "
+        "UNIQUE KEY unique_body_prefix (body(12))"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE standalone_blob_prefix_posts ("
+        "id INT NOT NULL, "
+        "body LONGTEXT NULL, "
+        "payload LONGBLOB NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_catalog_table_count(filename, "app", 2U);
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO blob_prefix_posts (body, payload) VALUES "
+        "('alpha body one', UNHEX('010203AA')), "
+        "('beta body two', UNHEX('010204BB')), "
+        "('alphabet soup', UNHEX('FF0001'))"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO blob_prefix_posts (body, payload) VALUES "
+        "('alpha body other', UNHEX('ABCDEF'))"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM blob_prefix_posts FORCE INDEX (body_prefix) "
+            "WHERE body = 'alpha body one'",
+            row_callback,
+            &body_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(body_rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM blob_prefix_posts FORCE INDEX (payload_prefix) "
+            "WHERE payload = UNHEX('010203AA')",
+            row_callback,
+            &payload_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(payload_rows.rows == 1);
+
+    assert_exec_succeeds(
+        db,
+        "UPDATE blob_prefix_posts SET body = 'gamma body one', payload = UNHEX('0A0B0C') "
+        "WHERE id = 1"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM blob_prefix_posts FORCE INDEX (body_prefix) "
+            "WHERE body = 'alpha body one'",
+            row_callback,
+            &old_body_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(old_body_rows.rows == 0);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM blob_prefix_posts FORCE INDEX (body_prefix) "
+            "WHERE body = 'gamma body one'",
+            row_callback,
+            &updated_body_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(updated_body_rows.rows == 1);
+
+    assert_exec_succeeds(db, "DELETE FROM blob_prefix_posts WHERE id = 2");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM blob_prefix_posts FORCE INDEX (payload_prefix) "
+            "WHERE payload = UNHEX('010204BB')",
+            row_callback,
+            &deleted_payload_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(deleted_payload_rows.rows == 0);
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO standalone_blob_prefix_posts VALUES "
+        "(1, 'standalone alpha body', UNHEX('AABBCC01')), "
+        "(2, 'standalone beta body', UNHEX('DDEEFF02'))"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE INDEX standalone_body_prefix "
+        "ON standalone_blob_prefix_posts (body(10)) ALGORITHM=COPY"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE UNIQUE INDEX standalone_payload_prefix "
+        "ON standalone_blob_prefix_posts (payload(3)) ALGORITHM=COPY"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO standalone_blob_prefix_posts VALUES "
+        "(3, 'standalone gamma body', UNHEX('AABBCCFF'))"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM standalone_blob_prefix_posts FORCE INDEX (standalone_body_prefix) "
+            "WHERE body = 'standalone alpha body'",
+            row_callback,
+            &standalone_body_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(standalone_body_rows.rows == 1);
+    assert_catalog_table_count(filename, "app", 2U);
+    assert_catalog_table_metadata(filename, "app", "blob_prefix_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(
+        filename,
+        "app",
+        "standalone_blob_prefix_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM blob_prefix_posts FORCE INDEX (body_prefix) "
+            "WHERE body = 'gamma body one'",
+            row_callback,
+            &reopened_body_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_body_rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM blob_prefix_posts FORCE INDEX (payload_prefix) "
+            "WHERE payload = UNHEX('0A0B0C')",
+            row_callback,
+            &reopened_payload_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_payload_rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM standalone_blob_prefix_posts FORCE INDEX (standalone_body_prefix) "
+            "WHERE body = 'standalone beta body'",
+            row_callback,
+            &reopened_standalone_body_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_standalone_body_rows.rows == 1);
+    assert_catalog_table_count(filename, "app", 2U);
+    assert_catalog_table_metadata(filename, "app", "blob_prefix_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(
+        filename,
+        "app",
+        "standalone_blob_prefix_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_truncate_table_lifecycle(void) {
     char *root = make_temp_root();
     char *filename = NULL;
@@ -1173,6 +1391,7 @@ static void test_wordpress_shaped_schema(void) {
         "comment_count BIGINT NOT NULL DEFAULT 0, "
         "PRIMARY KEY (ID), "
         "KEY post_name (post_name), "
+        "KEY post_title_prefix (post_title(16)), "
         "KEY type_status_date (post_type, post_status, post_date, ID), "
         "KEY post_parent (post_parent), "
         "KEY post_author (post_author)"
@@ -1183,11 +1402,11 @@ static void test_wordpress_shaped_schema(void) {
         "CREATE TABLE wp_postmeta ("
         "meta_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, "
         "post_id BIGINT UNSIGNED NOT NULL DEFAULT 0, "
-        "meta_key VARCHAR(191) NULL, "
+        "meta_key VARCHAR(255) NULL, "
         "meta_value LONGTEXT NULL, "
         "PRIMARY KEY (meta_id), "
         "KEY post_id (post_id), "
-        "KEY meta_key (meta_key)"
+        "KEY meta_key (meta_key(191))"
         ") ENGINE=InnoDB"
     );
     assert_catalog_table_count(filename, "app", 3U);
@@ -1262,7 +1481,8 @@ static void test_wordpress_shaped_schema(void) {
     assert(
         mylite_exec(
             db,
-            "SELECT post_title FROM wp_posts WHERE ID = 1",
+            "SELECT post_title FROM wp_posts FORCE INDEX (post_title_prefix) "
+            "WHERE post_title = 'Hello world'",
             single_value_callback,
             &post_title,
             &errmsg
@@ -1382,7 +1602,8 @@ static void test_wordpress_shaped_schema(void) {
     assert(
         mylite_exec(
             db,
-            "SELECT post_title FROM wp_posts WHERE ID = 1",
+            "SELECT post_title FROM wp_posts FORCE INDEX (post_title_prefix) "
+            "WHERE post_title = 'Hello world'",
             single_value_callback,
             &post_title,
             &errmsg

@@ -88,7 +88,7 @@ public:
   ulonglong table_flags() const override
   {
     return HA_NO_TRANSACTIONS | HA_NULL_IN_KEY | HA_REC_NOT_IN_SEQ |
-           HA_BINLOG_STMT_CAPABLE | HA_NO_ONLINE_ALTER;
+           HA_CAN_INDEX_BLOBS | HA_BINLOG_STMT_CAPABLE | HA_NO_ONLINE_ALTER;
   }
 
   ulong index_flags(uint index_number, uint part, bool all_parts) const override;

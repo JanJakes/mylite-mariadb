@@ -2660,8 +2660,7 @@ static mylite_storage_result validate_index_entries(
     const mylite_storage_index_entry *index_entries,
     size_t index_entry_count
 ) {
-    const size_t key_capacity =
-        MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET;
+    const size_t key_capacity = MYLITE_STORAGE_MAX_INDEX_KEY_SIZE;
     if (index_entry_count == 0U) {
         return MYLITE_STORAGE_OK;
     }

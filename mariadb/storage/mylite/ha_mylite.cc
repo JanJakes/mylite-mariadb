@@ -1520,6 +1520,7 @@ static bool mylite_table_supports_indexes(TABLE *table)
 static bool mylite_key_is_supported(const KEY *key)
 {
   if (!key || key->key_length == 0 ||
+      key->key_length > MYLITE_STORAGE_MAX_INDEX_KEY_SIZE ||
       (key->algorithm != HA_KEY_ALG_UNDEF &&
        key->algorithm != HA_KEY_ALG_BTREE) ||
       (key->flags & (HA_FULLTEXT_legacy | HA_SPATIAL_legacy |
@@ -1529,7 +1530,9 @@ static bool mylite_key_is_supported(const KEY *key)
   for (uint i= 0; i < key->user_defined_key_parts; ++i)
   {
     const KEY_PART_INFO *key_part= key->key_part + i;
-    if (!key_part->field || (key_part->key_part_flag & HA_BLOB_PART))
+    if (!key_part->field)
+      return false;
+    if ((key_part->key_part_flag & HA_BLOB_PART) && key_part->length == 0)
       return false;
   }
 
