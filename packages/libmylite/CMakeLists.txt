@@ -85,7 +85,8 @@ if(BUILD_TESTING)
       )
       set_tests_properties(
         libmylite.embedded-storage-engine
-        PROPERTIES LABELS "compat-storage-engine;compat-sidecar;compat-routed-ddl-dml"
+        PROPERTIES LABELS
+          "compat-storage-engine;compat-sidecar;compat-routed-ddl-dml;compat-application-schema"
       )
     endif()
 

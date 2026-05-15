@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-all_groups="public-api storage-core crash-recovery locking embedded-lifecycle direct-sql storage-engine sidecar routed-ddl-dml"
+all_groups="public-api storage-core crash-recovery locking embedded-lifecycle direct-sql storage-engine sidecar routed-ddl-dml application-schema"
 
 usage() {
   cat <<EOF
@@ -47,6 +47,9 @@ group_spec() {
       ;;
     routed-ddl-dml)
       echo "storage-smoke-dev|compat-routed-ddl-dml|Routed CREATE, ALTER, DROP, RENAME, INSERT, SELECT, UPDATE, and DELETE smoke"
+      ;;
+    application-schema)
+      echo "storage-smoke-dev|compat-application-schema|WordPress-shaped application schema smoke"
       ;;
     *)
       echo "Unknown compatibility group: $1" >&2

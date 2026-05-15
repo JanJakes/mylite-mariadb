@@ -65,6 +65,20 @@ typedef struct id_sequence_context {
     const char **expected_ids;
 } id_sequence_context;
 
+typedef struct single_value_context {
+    int rows;
+    const char *expected_value;
+} single_value_context;
+
+typedef struct wordpress_post_context {
+    int rows;
+    const char *expected_status;
+} wordpress_post_context;
+
+typedef struct wordpress_join_context {
+    int rows;
+} wordpress_join_context;
+
 typedef struct catalog_table_context {
     unsigned count;
 } catalog_table_context;
@@ -74,6 +88,7 @@ static void test_memory_database_has_empty_mylite_discovery(void);
 static void test_create_table_persists_catalog_metadata(void);
 static void test_alter_table_rebuilds_keyless_rows(void);
 static void test_indexed_rows(void);
+static void test_wordpress_shaped_schema(void);
 static void assert_exec_succeeds(mylite_db *db, const char *sql);
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_catalog_table_count(
@@ -98,6 +113,9 @@ static int mutable_row_callback(void *ctx, int column_count, char **values, char
 static int alter_row_callback(void *ctx, int column_count, char **values, char **column_names);
 static int auto_row_callback(void *ctx, int column_count, char **values, char **column_names);
 static int id_sequence_callback(void *ctx, int column_count, char **values, char **column_names);
+static int single_value_callback(void *ctx, int column_count, char **values, char **column_names);
+static int wordpress_post_callback(void *ctx, int column_count, char **values, char **column_names);
+static int wordpress_join_callback(void *ctx, int column_count, char **values, char **column_names);
 static int catalog_table_callback(void *ctx, const char *schema_name, const char *table_name);
 static mylite_db *open_database(const char *root, char **filename);
 static mylite_db *open_database_with_filename(const char *root, const char *filename);
@@ -120,6 +138,7 @@ int main(void) {
     test_create_table_persists_catalog_metadata();
     test_alter_table_rebuilds_keyless_rows();
     test_indexed_rows();
+    test_wordpress_shaped_schema();
     return 0;
 }
 
@@ -810,6 +829,297 @@ static void test_indexed_rows(void) {
     free(root);
 }
 
+static void test_wordpress_shaped_schema(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    single_value_context option_value = {
+        .expected_value = "MyLite Site",
+    };
+    single_value_context postmeta_value = {
+        .expected_value = "42",
+    };
+    single_value_context post_content_length = {
+        .expected_value = "1800",
+    };
+    single_value_context post_title = {
+        .expected_value = "Hello world",
+    };
+    wordpress_post_context published_post = {
+        .expected_status = "publish",
+    };
+    wordpress_join_context joined_postmeta = {0};
+    table_context deleted_meta = {0};
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE wp_options ("
+        "option_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, "
+        "option_name VARCHAR(191) NOT NULL DEFAULT '', "
+        "option_value LONGTEXT NOT NULL, "
+        "autoload VARCHAR(20) NOT NULL DEFAULT 'yes', "
+        "PRIMARY KEY (option_id), "
+        "UNIQUE KEY option_name (option_name), "
+        "KEY autoload (autoload)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE wp_posts ("
+        "ID BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, "
+        "post_author BIGINT UNSIGNED NOT NULL DEFAULT 0, "
+        "post_date DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00', "
+        "post_content LONGTEXT NOT NULL, "
+        "post_title TEXT NOT NULL, "
+        "post_status VARCHAR(20) NOT NULL DEFAULT 'publish', "
+        "post_name VARCHAR(200) NOT NULL DEFAULT '', "
+        "post_modified DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00', "
+        "post_parent BIGINT UNSIGNED NOT NULL DEFAULT 0, "
+        "guid VARCHAR(255) NOT NULL DEFAULT '', "
+        "post_type VARCHAR(20) NOT NULL DEFAULT 'post', "
+        "comment_count BIGINT NOT NULL DEFAULT 0, "
+        "PRIMARY KEY (ID), "
+        "KEY post_name (post_name), "
+        "KEY type_status_date (post_type, post_status, post_date, ID), "
+        "KEY post_parent (post_parent), "
+        "KEY post_author (post_author)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE wp_postmeta ("
+        "meta_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, "
+        "post_id BIGINT UNSIGNED NOT NULL DEFAULT 0, "
+        "meta_key VARCHAR(191) NULL, "
+        "meta_value LONGTEXT NULL, "
+        "PRIMARY KEY (meta_id), "
+        "KEY post_id (post_id), "
+        "KEY meta_key (meta_key)"
+        ") ENGINE=InnoDB"
+    );
+    assert_catalog_table_count(filename, "app", 3U);
+    assert_catalog_table_metadata(filename, "app", "wp_options", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "wp_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "wp_postmeta", "InnoDB", "MYLITE");
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_options (option_name, option_value, autoload) VALUES "
+        "('siteurl', 'https://example.test', 'yes'), "
+        "('blogname', 'MyLite Site', 'yes')"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO wp_options (option_name, option_value, autoload) VALUES "
+        "('blogname', 'Duplicate', 'yes')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_posts ("
+        "post_author, post_date, post_content, post_title, post_status, post_name, "
+        "post_modified, post_parent, guid, post_type, comment_count"
+        ") VALUES ("
+        "1, '2026-05-14 12:00:00', REPEAT('hello ', 300), 'Hello world', "
+        "'publish', 'hello-world', '2026-05-14 12:01:00', 0, "
+        "'https://example.test/?p=1', 'post', 0"
+        ")"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_postmeta (post_id, meta_key, meta_value) VALUES "
+        "(1, '_thumbnail_id', '42'), "
+        "(1, '_edit_lock', '1760000000:1')"
+    );
+
+    assert(
+        mylite_exec(
+            db,
+            "SELECT option_value FROM wp_options FORCE INDEX (option_name) "
+            "WHERE option_name = 'blogname'",
+            single_value_callback,
+            &option_value,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(option_value.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT ID, post_name, post_status FROM wp_posts FORCE INDEX (post_name) "
+            "WHERE post_name = 'hello-world'",
+            wordpress_post_callback,
+            &published_post,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(published_post.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT LENGTH(post_content) FROM wp_posts WHERE ID = 1",
+            single_value_callback,
+            &post_content_length,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(post_content_length.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT post_title FROM wp_posts WHERE ID = 1",
+            single_value_callback,
+            &post_title,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(post_title.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT meta_value FROM wp_postmeta FORCE INDEX (post_id) "
+            "WHERE post_id = 1 AND meta_key = '_thumbnail_id'",
+            single_value_callback,
+            &postmeta_value,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(postmeta_value.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT p.ID, p.post_title, m.meta_value "
+            "FROM wp_posts p JOIN wp_postmeta m ON m.post_id = p.ID "
+            "WHERE p.post_type = 'post' AND p.post_status = 'publish' "
+            "AND m.meta_key = '_thumbnail_id'",
+            wordpress_join_callback,
+            &joined_postmeta,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(joined_postmeta.rows == 1);
+
+    assert_exec_succeeds(
+        db,
+        "UPDATE wp_options SET option_value = 'Updated MyLite Site' "
+        "WHERE option_name = 'blogname'"
+    );
+    assert_exec_succeeds(
+        db,
+        "UPDATE wp_posts SET post_status = 'draft' WHERE post_name = 'hello-world'"
+    );
+    assert_exec_succeeds(db, "DELETE FROM wp_postmeta WHERE meta_key = '_edit_lock'");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT meta_id FROM wp_postmeta WHERE meta_key = '_edit_lock'",
+            row_callback,
+            &deleted_meta,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(deleted_meta.rows == 0);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    option_value = (single_value_context){
+        .expected_value = "Updated MyLite Site",
+    };
+    post_content_length = (single_value_context){
+        .expected_value = "1800",
+    };
+    post_title = (single_value_context){
+        .expected_value = "Hello world",
+    };
+    published_post = (wordpress_post_context){
+        .expected_status = "draft",
+    };
+    postmeta_value = (single_value_context){
+        .expected_value = "42",
+    };
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_catalog_table_count(filename, "app", 3U);
+    assert_catalog_table_metadata(filename, "app", "wp_options", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "wp_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "wp_postmeta", "InnoDB", "MYLITE");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT option_value FROM wp_options FORCE INDEX (option_name) "
+            "WHERE option_name = 'blogname'",
+            single_value_callback,
+            &option_value,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(option_value.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT ID, post_name, post_status FROM wp_posts FORCE INDEX (post_name) "
+            "WHERE post_name = 'hello-world'",
+            wordpress_post_callback,
+            &published_post,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(published_post.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT LENGTH(post_content) FROM wp_posts WHERE ID = 1",
+            single_value_callback,
+            &post_content_length,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(post_content_length.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT post_title FROM wp_posts WHERE ID = 1",
+            single_value_callback,
+            &post_title,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(post_title.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT meta_value FROM wp_postmeta FORCE INDEX (meta_key) "
+            "WHERE meta_key = '_thumbnail_id'",
+            single_value_callback,
+            &postmeta_value,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(postmeta_value.rows == 1);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
 static void assert_exec_succeeds(mylite_db *db, const char *sql) {
     char *errmsg = NULL;
     const int result = mylite_exec(db, sql, NULL, NULL, &errmsg);
@@ -1096,6 +1406,65 @@ static int id_sequence_callback(void *ctx, int column_count, char **values, char
     assert(sequence_ctx->rows < sequence_ctx->expected_count);
     assert(strcmp(values[0], sequence_ctx->expected_ids[sequence_ctx->rows]) == 0);
     ++sequence_ctx->rows;
+    return 0;
+}
+
+static int single_value_callback(void *ctx, int column_count, char **values, char **column_names) {
+    single_value_context *value_ctx = (single_value_context *)ctx;
+    (void)column_names;
+
+    assert(column_count == 1);
+    assert(values[0] != NULL);
+    assert(value_ctx->expected_value != NULL);
+    if (strcmp(values[0], value_ctx->expected_value) != 0) {
+        fprintf(
+            stderr,
+            "unexpected single value: got '%s', expected '%s'\n",
+            values[0],
+            value_ctx->expected_value
+        );
+    }
+    assert(strcmp(values[0], value_ctx->expected_value) == 0);
+    ++value_ctx->rows;
+    return 0;
+}
+
+static int wordpress_post_callback(
+    void *ctx,
+    int column_count,
+    char **values,
+    char **column_names
+) {
+    wordpress_post_context *post_ctx = (wordpress_post_context *)ctx;
+    (void)column_names;
+
+    assert(column_count == 3);
+    assert(values[0] != NULL && strcmp(values[0], "1") == 0);
+    assert(values[1] != NULL && strcmp(values[1], "hello-world") == 0);
+    assert(values[2] != NULL);
+    assert(post_ctx->expected_status != NULL);
+    assert(strcmp(values[2], post_ctx->expected_status) == 0);
+    ++post_ctx->rows;
+    return 0;
+}
+
+static int wordpress_join_callback(
+    void *ctx,
+    int column_count,
+    char **values,
+    char **column_names
+) {
+    wordpress_join_context *join_ctx = (wordpress_join_context *)ctx;
+    (void)column_names;
+
+    assert(column_count == 3);
+    assert(values[0] != NULL && strcmp(values[0], "1") == 0);
+    if (values[1] == NULL || strcmp(values[1], "Hello world") != 0) {
+        fprintf(stderr, "unexpected joined post title: '%s'\n", values[1] ? values[1] : "(null)");
+    }
+    assert(values[1] != NULL && strcmp(values[1], "Hello world") == 0);
+    assert(values[2] != NULL && strcmp(values[2], "42") == 0);
+    ++join_ctx->rows;
     return 0;
 }
 

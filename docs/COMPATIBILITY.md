@@ -17,8 +17,9 @@ for drop-in application expectations.
 Compatibility evidence is grouped by the local harness documented in
 [Compatibility Harness](architecture/compatibility-harness.md). The initial
 groups cover public API validation, storage, crash recovery, locking, embedded
-lifecycle, direct SQL, storage-engine smoke, sidecar gates, and routed DDL/DML.
-MariaDB MTR comparison suites and application-schema suites remain planned.
+lifecycle, direct SQL, storage-engine smoke, sidecar gates, routed DDL/DML, and
+initial application-schema smoke. MariaDB MTR comparison suites and broader
+application-schema suites remain planned.
 
 ## Baseline
 
@@ -111,3 +112,9 @@ MariaDB MTR comparison suites and application-schema suites remain planned.
 | Multiple readers | 🟡&nbsp;Partial | Storage read APIs acquire shared non-blocking advisory locks over stable committed state; SQL transaction lock integration and busy-timeout behavior remain planned |
 | Concurrent writers | ⚪&nbsp;Planned | Preserve the full write-concurrency goal in storage and lock design |
 | Cross-process unsafe writers | 🟡&nbsp;Partial | Cooperating MyLite storage operations reject conflicting cross-process opens, writes, and recovery with busy errors; non-MyLite writers remain out of scope |
+
+## Application Schemas
+
+| Capability | MyLite status | Compatibility target |
+| --- | --- | --- |
+| WordPress-shaped core tables | 🟡&nbsp;Partial | Storage-engine smoke covers a reduced `wp_options`, `wp_posts`, and `wp_postmeta` subset with `ENGINE=InnoDB` routing, autoincrement ids, `longtext` payloads, secondary indexes, joins, updates, deletes, close/reopen, and sidecar gates; full WordPress installer schema, prefix indexes, collation variants, multisite, users, comments, terms, and plugin tables remain planned |
