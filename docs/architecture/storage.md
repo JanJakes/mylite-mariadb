@@ -211,6 +211,9 @@ catalog-backed table-definition path. Generated-column indexes remain
 unsupported: the handler rejects generated-field key parts before catalog
 publication, leaving generated/expression index support for a later storage and
 recovery design.
+The same create-time key-shape gate rejects FULLTEXT and SPATIAL indexes before
+catalog publication; MyLite must not publish a table definition whose index
+class cannot be maintained by the current storage format.
 
 ## Schemas And System Surfaces
 
@@ -303,8 +306,8 @@ The storage engine must support:
 FULLTEXT, SPATIAL, generated-column indexes, and foreign-key enforcement need
 explicit storage designs before support is claimed. Current `libmylite` entry
 points reject foreign-key DDL before MariaDB execution; unsupported index
-classes, including generated-column indexes, reject through handler capability
-checks before catalog publication.
+classes, including generated-column, FULLTEXT, and SPATIAL indexes, reject
+through handler capability checks before catalog publication.
 
 ## Transactions And Recovery
 

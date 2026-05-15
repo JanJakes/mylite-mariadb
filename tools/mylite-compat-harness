@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-all_groups="public-api storage-core crash-recovery transaction foreign-key check-constraint generated-column locking embedded-lifecycle direct-sql prepared-statement column-metadata large-value warning sql-comparison storage-engine sidecar routed-ddl-dml application-schema server-surface"
+all_groups="public-api storage-core crash-recovery transaction foreign-key check-constraint generated-column unsupported-index locking embedded-lifecycle direct-sql prepared-statement column-metadata large-value warning sql-comparison storage-engine sidecar routed-ddl-dml application-schema server-surface"
 
 usage() {
   cat <<EOF
@@ -41,6 +41,9 @@ group_spec() {
       ;;
     generated-column)
       echo "storage-smoke-dev|compat-generated-column|Generated column coverage"
+      ;;
+    unsupported-index)
+      echo "storage-smoke-dev|compat-unsupported-index|Unsupported index-class rejection"
       ;;
     locking)
       echo "dev|compat-locking|Primary-file lock conflict coverage"

@@ -634,6 +634,32 @@ static void test_create_table_persists_catalog_metadata(void) {
         MYLITE_STORAGE_NOTFOUND
     );
     assert_catalog_table_count(filename, "app", 13U);
+    assert_exec_fails(
+        db,
+        "CREATE TABLE fulltext_index_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "body TEXT NOT NULL, "
+        "FULLTEXT KEY body_fulltext (body)"
+        ") ENGINE=InnoDB"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "fulltext_index_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_catalog_table_count(filename, "app", 13U);
+    assert_exec_fails(
+        db,
+        "CREATE TABLE spatial_index_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "location POINT NOT NULL, "
+        "SPATIAL KEY location_spatial (location)"
+        ") ENGINE=InnoDB"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "spatial_index_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_catalog_table_count(filename, "app", 13U);
     assert_exec_succeeds(db, "INSERT INTO row_posts VALUES (1, 'draft')");
     assert_exec_succeeds(db, "INSERT INTO row_posts VALUES (2, 'published')");
     assert_exec_succeeds(db, "INSERT INTO nullable_posts VALUES (1, NULL, NULL)");
