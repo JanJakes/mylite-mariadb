@@ -78,7 +78,8 @@ The handlerton callbacks will:
 do not reliably enter `external_lock()`, including `CREATE`, `ALTER`, `DROP`,
 `RENAME`, and `TRUNCATE`. It will stop wrapping row-DML tokens that naturally
 flow through the handler statement transaction path: `INSERT`, `UPDATE`,
-`DELETE`, `REPLACE`, and `LOAD`.
+`DELETE`, and `REPLACE`. `LOAD DATA` and `LOAD XML` are covered by the
+file-import rejection policy until a controlled import surface exists.
 
 The storage checkpoint API will expose a small query helper so the handler can
 detect an already-active outer checkpoint for the same primary file rather than
@@ -171,8 +172,8 @@ transaction glue and one storage API helper.
 - Update storage-smoke row-DML rollback coverage so direct `INSERT`, `UPDATE`,
   and representative direct/prepared/select-source `REPLACE` paths prove
   rollback through the handler transaction hook, not the outer `libmylite`
-  wrapper. `DELETE` and `LOAD` remain follow-up paths because they need separate
-  failure shapes.
+  wrapper. `DELETE` remains a follow-up path because it needs separate failure
+  shapes; LOAD statements are explicitly rejected as file import.
 - Add prepared row-DML rollback coverage in the storage-engine smoke tests.
 - Keep transaction-control rejection tests passing.
 - Keep DDL rollback and sidecar lifecycle tests passing.

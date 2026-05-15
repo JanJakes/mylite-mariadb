@@ -118,9 +118,10 @@ behavior plus MyLite catalog persistence.
 ## Risks And Open Questions
 
 - Exhaustive deterministic functions, JSON-specific checks, strict-mode warning
-  interactions, `IGNORE`, `LOAD DATA`, and MTR-scale expression comparison need
-  later coverage. Explicit CHECK-constrained CTAS targets, failed ADD CHECK
-  rollback over incompatible existing rows, and a representative deterministic
-  expression matrix are covered by follow-up slices.
+  interactions, `IGNORE`, controlled import if LOAD is ever supported, and
+  MTR-scale expression comparison need later coverage. Explicit
+  CHECK-constrained CTAS targets, failed ADD CHECK rollback over incompatible
+  existing rows, and a representative deterministic expression matrix are
+  covered by follow-up slices.
 - Failed statements still depend on current non-transactional rollback limits
   outside this slice.

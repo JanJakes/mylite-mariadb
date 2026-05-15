@@ -427,16 +427,17 @@ the embedded library model:
 - online and in-place ALTER forms until MyLite has online DDL and lock
   integration,
 - server audit plugins,
-- network-protocol `LOAD DATA LOCAL`,
+- `LOAD DATA` / `LOAD XML` file import, including network-protocol
+  `LOAD DATA LOCAL`,
 - event scheduler,
 - performance schema.
 
 Representative account, event, plugin, replication, binlog, view, trigger,
 routine, package, sequence, `CALL`, transaction-control, autocommit-control,
-SQL locking, named-lock, partition, and foreign-key DDL commands are rejected
-before MariaDB execution with stable MyLite errors. Other unsupported surfaces
-should fail with stable MyLite result codes and MariaDB diagnostics where
-possible.
+SQL locking, named-lock, file-import, partition, and foreign-key DDL commands
+are rejected before MariaDB execution with stable MyLite errors. Other
+unsupported surfaces should fail with stable MyLite result codes and MariaDB
+diagnostics where possible.
 
 ## Compatibility Adapter
 

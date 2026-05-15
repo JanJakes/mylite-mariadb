@@ -23,6 +23,7 @@ static void test_statement_effects(void);
 static void test_callback_abort(void);
 static void test_syntax_error_diagnostics(void);
 static void test_server_surfaces_are_disabled(void);
+static void test_file_import_policy_is_rejected(void);
 static void test_non_table_objects_are_rejected(void);
 static void test_transaction_control_is_rejected(void);
 static void test_locking_sql_is_rejected(void);
@@ -32,6 +33,7 @@ static void test_partition_policy_is_rejected(void);
 static void assert_variable_value(mylite_db *db, const char *name, const char *value);
 static void assert_variable_value_or_missing(mylite_db *db, const char *name, const char *value);
 static void assert_exec_fails(mylite_db *db, const char *sql);
+static void assert_file_import_exec_fails(mylite_db *db, const char *sql);
 static void assert_non_table_object_exec_fails(mylite_db *db, const char *sql);
 static void assert_transaction_control_exec_fails(mylite_db *db, const char *sql);
 static void assert_locking_sql_exec_fails(mylite_db *db, const char *sql);
@@ -54,6 +56,7 @@ int main(void) {
     test_callback_abort();
     test_syntax_error_diagnostics();
     test_server_surfaces_are_disabled();
+    test_file_import_policy_is_rejected();
     test_non_table_objects_are_rejected();
     test_transaction_control_is_rejected();
     test_locking_sql_is_rejected();
@@ -195,6 +198,45 @@ static void test_server_surfaces_are_disabled(void) {
     assert_exec_fails(db, "BINLOG 'AAAA'");
     assert_exec_fails(db, "CHANGE MASTER TO MASTER_HOST='example.test'");
     assert_exec_fails(db, "SHOW MASTER STATUS");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_file_import_policy_is_rejected(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "USE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(
+            db,
+            "CREATE TEMPORARY TABLE load_target (id INT NOT NULL PRIMARY KEY)",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+
+    assert_file_import_exec_fails(
+        db,
+        "LOAD DATA INFILE '/tmp/mylite-load.csv' INTO TABLE load_target"
+    );
+    assert_file_import_exec_fails(
+        db,
+        "LOAD DATA LOCAL INFILE '/tmp/mylite-load.csv' INTO TABLE load_target"
+    );
+    assert_file_import_exec_fails(
+        db,
+        "LOAD XML INFILE '/tmp/mylite-load.xml' INTO TABLE load_target"
+    );
+    assert(
+        mylite_exec(db, "SELECT 'LOAD DATA INFILE' AS quoted_text", NULL, NULL, NULL) == MYLITE_OK
+    );
 
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);
@@ -490,6 +532,18 @@ static void assert_exec_fails(mylite_db *db, const char *sql) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "server-oriented") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_file_import_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "file import") != NULL);
     mylite_free(errmsg);
 }
 

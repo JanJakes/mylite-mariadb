@@ -48,6 +48,8 @@ Add `compat-server-surface` coverage:
 
 - assert disabled runtime variables through SQL;
 - assert representative server SQL fails through `mylite_exec()`;
+- include direct and prepared file-import rejection through the follow-up
+  file-import policy slice;
 - include storage-smoke coverage so unsupported external durable engine requests
   are also represented by the same group.
 
@@ -61,6 +63,8 @@ Add `compat-server-surface` coverage:
 - MyLite SQL-policy rejection for event scheduler activation, event DDL, dynamic
   plugin installation, binlog row-injection SQL, replication commands, and
   server account commands.
+- MyLite SQL-policy rejection for `LOAD DATA` and `LOAD XML` file import as a
+  follow-up explicit unsupported surface.
 - Existing unsupported external-engine DDL smoke grouped under the same
   compatibility surface.
 

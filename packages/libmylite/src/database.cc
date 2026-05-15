@@ -325,6 +325,7 @@ mylite_warning_level map_warning_level(const char *level);
 std::string field_string(const char *value, unsigned int length);
 const char *unsupported_sql_surface_message(std::string_view sql);
 bool is_server_surface_sql(std::string_view sql);
+bool is_file_import_sql(std::string_view sql);
 bool is_non_table_object_sql(std::string_view sql);
 bool is_transaction_control_sql(std::string_view sql);
 bool is_locking_sql(std::string_view sql);
@@ -1982,6 +1983,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_server_surface_sql(sql)) {
         return "unsupported server-oriented SQL surface";
     }
+    if (is_file_import_sql(sql)) {
+        return "unsupported SQL file import surface";
+    }
     if (is_non_table_object_sql(sql)) {
         return "unsupported non-table database object SQL surface";
     }
@@ -2055,6 +2059,20 @@ bool is_server_surface_sql(std::string_view sql) {
     return sql_token_equals(first, "SHOW") &&
            (sql_token_equals(second, "MASTER") || sql_token_equals(second, "SLAVE") ||
             sql_token_equals(second, "REPLICA"));
+}
+
+bool is_file_import_sql(std::string_view sql) {
+    std::string_view rest = sql;
+    std::string_view first;
+    std::string_view second;
+
+    if (!pop_sql_scanned_token(rest, first) || !sql_token_equals(first, "LOAD")) {
+        return false;
+    }
+    if (!pop_sql_scanned_token(rest, second)) {
+        return false;
+    }
+    return sql_token_equals(second, "DATA") || sql_token_equals(second, "XML");
 }
 
 bool is_non_table_object_sql(std::string_view sql) {

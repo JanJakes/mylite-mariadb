@@ -60,10 +60,11 @@ the handler pass a new storage context through every existing call.
 The initial implementation created checkpoints in `libmylite` for all
 file-backed SQL statements that could mutate MyLite storage. The follow-up
 transaction-handler hook slice moves row DML (`INSERT`, `UPDATE`, `DELETE`,
-`REPLACE`, and `LOAD`) onto MariaDB's statement transaction hook path. DDL and
-catalog paths that do not reliably enter `external_lock()` continue to use the
-outer `libmylite` checkpoint for `CREATE`, `ALTER`, `DROP`, `RENAME`, and
-`TRUNCATE`.
+and `REPLACE`) onto MariaDB's statement transaction hook path. `LOAD DATA` and
+`LOAD XML` are rejected as unsupported file-import surfaces until a controlled
+import design exists. DDL and catalog paths that do not reliably enter
+`external_lock()` continue to use the outer `libmylite` checkpoint for
+`CREATE`, `ALTER`, `DROP`, `RENAME`, and `TRUNCATE`.
 
 If MariaDB execution fails, MyLite restores the active checkpoint before
 returning the SQL error. If execution succeeds, the checkpoint is committed
