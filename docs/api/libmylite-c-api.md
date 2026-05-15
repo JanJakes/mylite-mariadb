@@ -336,8 +336,10 @@ the embedded library model:
 - event scheduler,
 - performance schema.
 
-When a rejected feature reaches the SQL layer, it should fail with stable
-MyLite result codes and MariaDB diagnostics where possible.
+Representative account, event, plugin, replication, and binlog commands are
+rejected before MariaDB execution with stable MyLite errors. Other unsupported
+surfaces should fail with stable MyLite result codes and MariaDB diagnostics
+where possible.
 
 ## Compatibility Adapter
 

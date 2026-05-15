@@ -38,7 +38,7 @@ not in a MariaDB datadir or existing engine sidecars.
 | 15 | Locking and concurrency | 🟡&nbsp;In&nbsp;progress | Advisory primary-file locks reject unsafe cross-process readers, writers, and recovery races; busy waits, SQL lock integration, and full concurrent writers remain. |
 | 16 | Compatibility harness | 🟡&nbsp;In&nbsp;progress | Group existing public API, storage, recovery, locking, embedded lifecycle, sidecar, and routed SQL tests by compatibility surface; MariaDB comparison and application suites remain. |
 | 17 | Application schemas | 🟡&nbsp;In&nbsp;progress | WordPress-shaped `wp_options`, `wp_posts`, and `wp_postmeta` smoke coverage is implemented; broader WordPress, ORM, and plugin schemas remain. |
-| 18 | Server-surface policy | ⚪&nbsp;Planned | Explicitly reject or replace users/auth, replication/binlog, dynamic plugins, events, performance schema, and external durable engines. |
+| 18 | Server-surface policy | 🟡&nbsp;In&nbsp;progress | Runtime defaults disable networking, grants, binlog, events, dynamic host plugin discovery, and performance schema; representative server SQL rejection smoke is implemented, while source trimming remains. |
 | 19 | Size profile hardening | ⚪&nbsp;Planned | Trim daemon-only and low-value optional components after the embedded runtime and storage shape are measurable. |
 
 ## Size And Profile Direction

@@ -18,8 +18,8 @@ Compatibility evidence is grouped by the local harness documented in
 [Compatibility Harness](architecture/compatibility-harness.md). The initial
 groups cover public API validation, storage, crash recovery, locking, embedded
 lifecycle, direct SQL, storage-engine smoke, sidecar gates, routed DDL/DML, and
-initial application-schema smoke. MariaDB MTR comparison suites and broader
-application-schema suites remain planned.
+initial application-schema smoke, and server-surface policy. MariaDB MTR
+comparison suites and broader application-schema suites remain planned.
 
 ## Baseline
 
@@ -81,9 +81,11 @@ application-schema suites remain planned.
 | `CREATE TABLE ... SELECT` | ⚪&nbsp;Planned | Preserve MariaDB statement semantics over MyLite tables |
 | Schemas/databases | ⚪&nbsp;Planned | Catalog namespaces, not datadir directories |
 | Views, triggers, and routines | ⚪&nbsp;Planned | Catalog-backed persistent objects after table DDL is stable |
-| Events and scheduler | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server scheduler is not part of the core embedded profile |
-| Users, grants, and password auth | ➖&nbsp;Out&nbsp;of&nbsp;scope | Local embedded file ownership replaces server account management |
-| Replication and binlog | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server topology feature, not core library behavior |
+| Events and scheduler | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server scheduler is not part of the core embedded profile; event activation and event DDL are rejected by MyLite SQL policy |
+| Users, grants, and password auth | ➖&nbsp;Out&nbsp;of&nbsp;scope | Local embedded file ownership replaces server account management; account SQL is rejected by MyLite SQL policy |
+| Replication and binlog | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server topology feature, not core library behavior; binlog is disabled at startup and representative replication/binlog SQL is rejected |
+| Dynamic plugin installation | ➖&nbsp;Out&nbsp;of&nbsp;scope | Core startup uses a MyLite-owned plugin directory and representative plugin-install SQL is rejected |
+| Performance schema | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server instrumentation tables are disabled in the embedded runtime profile |
 
 ## Rows, Indexes, And Constraints
 

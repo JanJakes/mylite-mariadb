@@ -66,7 +66,7 @@ if(BUILD_TESTING)
     add_test(NAME libmylite.embedded-exec COMMAND mylite_embedded_exec_test)
     set_tests_properties(
       libmylite.embedded-exec
-      PROPERTIES LABELS "compat-direct-sql;compat-embedded-lifecycle"
+      PROPERTIES LABELS "compat-direct-sql;compat-embedded-lifecycle;compat-server-surface"
     )
 
     if(MYLITE_MARIADB_HAS_MYLITE_SE)
@@ -86,7 +86,7 @@ if(BUILD_TESTING)
       set_tests_properties(
         libmylite.embedded-storage-engine
         PROPERTIES LABELS
-          "compat-storage-engine;compat-sidecar;compat-routed-ddl-dml;compat-application-schema"
+          "compat-storage-engine;compat-sidecar;compat-routed-ddl-dml;compat-application-schema;compat-server-surface"
       )
     endif()
 

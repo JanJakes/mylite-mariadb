@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-all_groups="public-api storage-core crash-recovery locking embedded-lifecycle direct-sql storage-engine sidecar routed-ddl-dml application-schema"
+all_groups="public-api storage-core crash-recovery locking embedded-lifecycle direct-sql storage-engine sidecar routed-ddl-dml application-schema server-surface"
 
 usage() {
   cat <<EOF
@@ -50,6 +50,9 @@ group_spec() {
       ;;
     application-schema)
       echo "storage-smoke-dev|compat-application-schema|WordPress-shaped application schema smoke"
+      ;;
+    server-surface)
+      echo "storage-smoke-dev|compat-server-surface|Unsupported server-oriented surface policy"
       ;;
     *)
       echo "Unknown compatibility group: $1" >&2

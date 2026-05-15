@@ -12,11 +12,21 @@ typedef struct select_context {
     int rows;
 } select_context;
 
+typedef struct variable_context {
+    const char *name;
+    const char *value;
+    int rows;
+} variable_context;
+
 static void test_select_callback(void);
 static void test_callback_abort(void);
 static void test_syntax_error_diagnostics(void);
+static void test_server_surfaces_are_disabled(void);
+static void assert_variable_value(mylite_db *db, const char *name, const char *value);
+static void assert_exec_fails(mylite_db *db, const char *sql);
 static int select_callback(void *ctx, int column_count, char **values, char **column_names);
 static int abort_callback(void *ctx, int column_count, char **values, char **column_names);
+static int variable_callback(void *ctx, int column_count, char **values, char **column_names);
 static mylite_db *open_database(const char *root, char **filename);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
@@ -28,6 +38,7 @@ int main(void) {
     test_select_callback();
     test_callback_abort();
     test_syntax_error_diagnostics();
+    test_server_surfaces_are_disabled();
     return 0;
 }
 
@@ -90,6 +101,62 @@ static void test_syntax_error_diagnostics(void) {
     free(root);
 }
 
+static void test_server_surfaces_are_disabled(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_variable_value(db, "skip_networking", "ON");
+    assert_variable_value(db, "log_bin", "OFF");
+    assert_variable_value(db, "performance_schema", "OFF");
+
+    assert_exec_fails(db, "CREATE USER 'mylite_probe'@'localhost' IDENTIFIED BY 'secret'");
+    assert_exec_fails(db, "GRANT SELECT ON *.* TO 'mylite_probe'@'localhost'");
+    assert_exec_fails(db, "SET GLOBAL event_scheduler = ON");
+    assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "USE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert_exec_fails(db, "CREATE EVENT mylite_probe_event ON SCHEDULE EVERY 1 SECOND DO SELECT 1");
+    assert_exec_fails(db, "INSTALL SONAME 'mylite_probe'");
+    assert_exec_fails(db, "BINLOG 'AAAA'");
+    assert_exec_fails(db, "CHANGE MASTER TO MASTER_HOST='example.test'");
+    assert_exec_fails(db, "SHOW MASTER STATUS");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void assert_variable_value(mylite_db *db, const char *name, const char *value) {
+    variable_context ctx = {
+        .name = name,
+        .value = value,
+        .rows = 0,
+    };
+    char sql[128];
+    const int written = snprintf(sql, sizeof(sql), "SHOW VARIABLES LIKE '%s'", name);
+
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert(mylite_exec(db, sql, variable_callback, &ctx, NULL) == MYLITE_OK);
+    if (ctx.rows != 1) {
+        fprintf(stderr, "variable not found or duplicate: %s rows=%d\n", name, ctx.rows);
+    }
+    assert(ctx.rows == 1);
+}
+
+static void assert_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "server-oriented") != NULL);
+    mylite_free(errmsg);
+}
+
 static int select_callback(void *ctx, int column_count, char **values, char **column_names) {
     select_context *select_ctx = (select_context *)ctx;
     assert(column_count == 2);
@@ -109,6 +176,19 @@ static int abort_callback(void *ctx, int column_count, char **values, char **col
     (void)column_names;
     ++*callback_count;
     return 1;
+}
+
+static int variable_callback(void *ctx, int column_count, char **values, char **column_names) {
+    variable_context *variable_ctx = (variable_context *)ctx;
+    (void)column_names;
+
+    assert(column_count == 2);
+    assert(values[0] != NULL);
+    assert(values[1] != NULL);
+    assert(strcmp(values[0], variable_ctx->name) == 0);
+    assert(strcmp(values[1], variable_ctx->value) == 0);
+    ++variable_ctx->rows;
+    return 0;
 }
 
 static mylite_db *open_database(const char *root, char **filename) {

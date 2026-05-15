@@ -2,6 +2,7 @@
 #include <mylite/storage.h>
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <climits>
 #include <cstddef>
@@ -13,6 +14,7 @@
 #include <mutex>
 #include <new>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <vector>
 
@@ -97,6 +99,10 @@ int exec_impl(
     char **errmsg
 );
 #if MYLITE_WITH_MARIADB_EMBEDDED
+bool is_server_surface_sql(const char *sql);
+std::string_view skip_sql_leading_noise(std::string_view sql);
+std::string_view pop_sql_token(std::string_view &sql);
+bool sql_token_equals(std::string_view token, const char *keyword);
 int store_and_emit_result(
     mylite_db &database,
     mylite_exec_callback callback,
@@ -320,6 +326,11 @@ int exec_impl(
     return copy_error_message(*database, errmsg);
 #else
     set_ok(*database);
+    if (is_server_surface_sql(sql)) {
+        set_error(*database, MYLITE_ERROR, "unsupported server-oriented SQL surface");
+        return copy_error_message(*database, errmsg);
+    }
+
     if (mysql_query(&database->mysql, sql) != 0) {
         set_mariadb_error(*database);
         return copy_error_message(*database, errmsg);
@@ -385,6 +396,125 @@ int store_and_emit_result(
 
     mysql_free_result(result);
     return MYLITE_OK;
+}
+
+bool is_server_surface_sql(const char *sql) {
+    std::string_view rest = skip_sql_leading_noise(sql);
+    const std::string_view first = pop_sql_token(rest);
+    const std::string_view second = pop_sql_token(rest);
+    const std::string_view third = pop_sql_token(rest);
+
+    if (sql_token_equals(first, "BINLOG") || sql_token_equals(first, "GRANT") ||
+        sql_token_equals(first, "REVOKE")) {
+        return true;
+    }
+
+    if (sql_token_equals(first, "CREATE")) {
+        return sql_token_equals(second, "USER") || sql_token_equals(second, "ROLE") ||
+               sql_token_equals(second, "EVENT") || sql_token_equals(second, "SERVER");
+    }
+
+    if (sql_token_equals(first, "ALTER")) {
+        return sql_token_equals(second, "USER") || sql_token_equals(second, "EVENT") ||
+               sql_token_equals(second, "SERVER");
+    }
+
+    if (sql_token_equals(first, "DROP")) {
+        return sql_token_equals(second, "USER") || sql_token_equals(second, "ROLE") ||
+               sql_token_equals(second, "EVENT") || sql_token_equals(second, "SERVER");
+    }
+
+    if (sql_token_equals(first, "RENAME")) {
+        return sql_token_equals(second, "USER");
+    }
+
+    if (sql_token_equals(first, "SET")) {
+        return sql_token_equals(second, "PASSWORD") ||
+               (sql_token_equals(second, "GLOBAL") && sql_token_equals(third, "EVENT_SCHEDULER"));
+    }
+
+    if (sql_token_equals(first, "INSTALL") || sql_token_equals(first, "UNINSTALL")) {
+        return sql_token_equals(second, "PLUGIN") || sql_token_equals(second, "SONAME");
+    }
+
+    if (sql_token_equals(first, "CHANGE")) {
+        return sql_token_equals(second, "MASTER") || sql_token_equals(second, "REPLICATION");
+    }
+
+    if (sql_token_equals(first, "START") || sql_token_equals(first, "STOP") ||
+        sql_token_equals(first, "RESET")) {
+        return sql_token_equals(second, "MASTER") || sql_token_equals(second, "SLAVE") ||
+               sql_token_equals(second, "REPLICA");
+    }
+
+    return sql_token_equals(first, "SHOW") &&
+           (sql_token_equals(second, "MASTER") || sql_token_equals(second, "SLAVE") ||
+            sql_token_equals(second, "REPLICA"));
+}
+
+std::string_view skip_sql_leading_noise(std::string_view sql) {
+    for (;;) {
+        while (!sql.empty() && std::isspace(static_cast<unsigned char>(sql.front())) != 0) {
+            sql.remove_prefix(1);
+        }
+        if (sql.size() >= 2U && sql[0] == '-' && sql[1] == '-') {
+            const std::size_t newline = sql.find('\n');
+            if (newline == std::string_view::npos) {
+                return {};
+            }
+            sql.remove_prefix(newline + 1U);
+            continue;
+        }
+        if (!sql.empty() && sql.front() == '#') {
+            const std::size_t newline = sql.find('\n');
+            if (newline == std::string_view::npos) {
+                return {};
+            }
+            sql.remove_prefix(newline + 1U);
+            continue;
+        }
+        if (sql.size() >= 2U && sql[0] == '/' && sql[1] == '*') {
+            const std::size_t end = sql.find("*/");
+            if (end == std::string_view::npos) {
+                return {};
+            }
+            sql.remove_prefix(end + 2U);
+            continue;
+        }
+        return sql;
+    }
+}
+
+std::string_view pop_sql_token(std::string_view &sql) {
+    while (!sql.empty() && std::isspace(static_cast<unsigned char>(sql.front())) != 0) {
+        sql.remove_prefix(1);
+    }
+
+    const std::size_t token_end =
+        sql.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_");
+    if (token_end == std::string_view::npos) {
+        std::string_view token = sql;
+        sql = {};
+        return token;
+    }
+
+    std::string_view token = sql.substr(0, token_end);
+    sql.remove_prefix(token_end);
+    return token;
+}
+
+bool sql_token_equals(std::string_view token, const char *keyword) {
+    for (std::size_t i = 0; keyword[i] != '\0'; ++i) {
+        if (i >= token.size()) {
+            return false;
+        }
+        const auto token_char = static_cast<unsigned char>(token[i]);
+        const auto keyword_char = static_cast<unsigned char>(keyword[i]);
+        if (std::toupper(token_char) != std::toupper(keyword_char)) {
+            return false;
+        }
+    }
+    return token.size() == std::strlen(keyword);
 }
 
 int prepare_primary_file(const std::filesystem::path &filename, unsigned flags) {
@@ -641,9 +771,11 @@ std::vector<std::string> runtime_arguments(
         "--tmpdir=" + tmp_dir.string(),
         "--plugin-dir=" + plugin_dir.string(),
         "--skip-grant-tables",
+        "--skip-log-bin",
         "--skip-networking",
         "--default-storage-engine=MyISAM",
         "--innodb=OFF",
+        "--performance-schema=OFF",
         "--lc-messages-dir=" MYLITE_MARIADB_MESSAGES_DIR,
         "--character-sets-dir=" MYLITE_MARIADB_CHARSETS_DIR,
     };

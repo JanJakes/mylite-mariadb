@@ -38,6 +38,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `sidecar` | `storage-smoke-dev` | `compat-sidecar` | Forbidden durable sidecar gates |
 | `routed-ddl-dml` | `storage-smoke-dev` | `compat-routed-ddl-dml` | Routed table DDL and DML smoke |
 | `application-schema` | `storage-smoke-dev` | `compat-application-schema` | WordPress-shaped application schema smoke |
+| `server-surface` | `storage-smoke-dev` | `compat-server-surface` | Unsupported server-oriented surface policy |
 
 ## Relationship To MariaDB MTR
 
