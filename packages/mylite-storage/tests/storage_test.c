@@ -70,6 +70,10 @@ static const unsigned k_busy_timeout_expiry_ms = 20U;
 static const unsigned k_busy_timeout_release_ms = 50U;
 static const unsigned k_busy_timeout_wait_ms = 1000U;
 static const useconds_t k_microseconds_per_millisecond = 1000U;
+static const unsigned long long k_autoincrement_set_value = 5ULL;
+static const unsigned long long k_autoincrement_lower_value = 3ULL;
+static const unsigned long long k_autoincrement_ignored_advance = 4ULL;
+static const unsigned long long k_autoincrement_advanced_value = 9ULL;
 
 static void test_capabilities(void);
 static void test_create_empty_database(void);
@@ -93,6 +97,8 @@ static void delete_index_entry_test_row(const index_entries_test_context *ctx);
 static void assert_secondary_index_entries_after_delete(const index_entries_test_context *ctx);
 static void assert_index_entry_test_live_rows(const index_entries_test_context *ctx);
 static void test_autoincrement_state(void);
+static void exercise_exact_autoincrement_set(const char *filename);
+static void assert_auto_increment_value(const char *filename, unsigned long long expected_value);
 static void test_truncate_table_lifecycle(void);
 static void append_truncate_test_rows(
     const char *filename,
@@ -981,34 +987,16 @@ static void test_autoincrement_state(void) {
         .definition_size = sizeof(definition),
     };
     mylite_storage_header header = {0};
-    unsigned long long next_value = 0ULL;
     mylite_storage_rowset rows = {
         .size = sizeof(rows),
     };
 
     assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
     assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
-    assert(
-        mylite_storage_read_auto_increment(filename, "app", "posts", &next_value) ==
-        MYLITE_STORAGE_OK
-    );
-    assert(next_value == 1ULL);
-    assert(
-        mylite_storage_advance_auto_increment(filename, "app", "posts", 2ULL) == MYLITE_STORAGE_OK
-    );
-    assert(
-        mylite_storage_advance_auto_increment(filename, "app", "posts", 2ULL) == MYLITE_STORAGE_OK
-    );
-    assert(
-        mylite_storage_advance_auto_increment(filename, "app", "posts", 9ULL) == MYLITE_STORAGE_OK
-    );
-    assert(
-        mylite_storage_read_auto_increment(filename, "app", "posts", &next_value) ==
-        MYLITE_STORAGE_OK
-    );
-    assert(next_value == 9ULL);
+    assert_auto_increment_value(filename, 1ULL);
+    exercise_exact_autoincrement_set(filename);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
-    assert(header.page_count == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 3ULL);
+    assert(header.page_count == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 4ULL);
 
     assert(
         mylite_storage_append_row(filename, "app", "posts", row, sizeof(row)) == MYLITE_STORAGE_OK
@@ -1018,16 +1006,55 @@ static void test_autoincrement_state(void) {
     assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
     assert(rows.row_count == 0U);
     assert(rows.rows == NULL);
-    assert(
-        mylite_storage_read_auto_increment(filename, "app", "posts", &next_value) ==
-        MYLITE_STORAGE_OK
-    );
-    assert(next_value == 1ULL);
+    assert_auto_increment_value(filename, 1ULL);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
     free(filename);
     free(root);
+}
+
+static void exercise_exact_autoincrement_set(const char *filename) {
+    assert(
+        mylite_storage_set_auto_increment(filename, "app", "posts", 0ULL) == MYLITE_STORAGE_MISUSE
+    );
+    assert(
+        mylite_storage_set_auto_increment(filename, "app", "posts", k_autoincrement_set_value) ==
+        MYLITE_STORAGE_OK
+    );
+    assert_auto_increment_value(filename, k_autoincrement_set_value);
+    assert(
+        mylite_storage_advance_auto_increment(
+            filename,
+            "app",
+            "posts",
+            k_autoincrement_ignored_advance
+        ) == MYLITE_STORAGE_OK
+    );
+    assert_auto_increment_value(filename, k_autoincrement_set_value);
+    assert(
+        mylite_storage_set_auto_increment(filename, "app", "posts", k_autoincrement_lower_value) ==
+        MYLITE_STORAGE_OK
+    );
+    assert_auto_increment_value(filename, k_autoincrement_lower_value);
+    assert(
+        mylite_storage_advance_auto_increment(
+            filename,
+            "app",
+            "posts",
+            k_autoincrement_advanced_value
+        ) == MYLITE_STORAGE_OK
+    );
+    assert_auto_increment_value(filename, k_autoincrement_advanced_value);
+}
+
+static void assert_auto_increment_value(const char *filename, unsigned long long expected_value) {
+    unsigned long long next_value = 0ULL;
+    assert(
+        mylite_storage_read_auto_increment(filename, "app", "posts", &next_value) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(next_value == expected_value);
 }
 
 static void test_truncate_table_lifecycle(void) {

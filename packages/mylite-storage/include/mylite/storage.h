@@ -260,6 +260,12 @@ mylite_storage_result mylite_storage_read_auto_increment(
     const char *table_name,
     unsigned long long *out_next_value
 );
+mylite_storage_result mylite_storage_set_auto_increment(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long next_value
+);
 mylite_storage_result mylite_storage_advance_auto_increment(
     const char *filename,
     const char *schema_name,

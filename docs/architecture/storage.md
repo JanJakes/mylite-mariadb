@@ -268,8 +268,10 @@ row id, and replacement index entries for supported keys. `delete_row()`
 appends a row-state page that hides the current row id; stale index entries
 remain on disk until compaction exists but are filtered through the row-state
 map. `truncate()` appends delete row-state pages for all live row ids and
-resets table-local autoincrement state to the first generated value; row,
-overflow, index-entry, and old autoincrement pages remain orphaned until
+resets table-local autoincrement state to the first generated value. Explicit
+`ALTER TABLE ... AUTO_INCREMENT` publishes an exact table-local next value, and
+copy `ALTER` row movement can advance that value above copied live row data.
+Row, overflow, index-entry, and old autoincrement pages remain orphaned until
 compaction exists. Nullable fixed and variable fields are covered because the
 stored record image includes MariaDB's null bitmap. BLOB/TEXT fields are
 serialized as length-prefixed value bytes, not process pointers, and large

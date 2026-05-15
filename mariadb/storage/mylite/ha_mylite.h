@@ -123,11 +123,13 @@ public:
   int rnd_pos(uchar *buf, uchar *pos) override;
   void position(const uchar *record) override;
   int info(uint flag) override;
+  void update_create_info(HA_CREATE_INFO *create_info) override;
   int external_lock(THD *thd, int lock_type) override;
   void get_auto_increment(ulonglong offset, ulonglong increment,
                           ulonglong nb_desired_values,
                           ulonglong *first_value,
                           ulonglong *nb_reserved_values) override;
+  int reset_auto_increment(ulonglong value) override;
   int write_row(const uchar *buf) override;
   int update_row(const uchar *old_data, const uchar *new_data) override;
   int delete_row(const uchar *buf) override;

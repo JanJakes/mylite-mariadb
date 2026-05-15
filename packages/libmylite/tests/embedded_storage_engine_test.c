@@ -87,6 +87,8 @@ typedef struct auto_row_context {
     int found_first;
     int found_manual;
     int found_after_manual;
+    int found_after_alter;
+    int found_after_low_alter;
     int found_reopened;
 } auto_row_context;
 
@@ -711,6 +713,11 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert_exec_succeeds(db, "INSERT INTO auto_posts (id, title) VALUES (7, 'manual')");
     assert_exec_succeeds(db, "INSERT INTO auto_posts (title) VALUES ('after manual')");
     assert_exec_fails(db, "INSERT INTO auto_posts (id, title) VALUES (7, 'duplicate')");
+    assert_exec_succeeds(db, "ALTER TABLE auto_posts AUTO_INCREMENT = 50");
+    assert_exec_succeeds(db, "ALTER TABLE auto_posts ADD COLUMN summary VARCHAR(32) NULL");
+    assert_exec_succeeds(db, "INSERT INTO auto_posts (title) VALUES ('after alter')");
+    assert_exec_succeeds(db, "ALTER TABLE auto_posts AUTO_INCREMENT = 4");
+    assert_exec_succeeds(db, "INSERT INTO auto_posts (title) VALUES ('after low alter')");
     assert_exec_succeeds(db, "INSERT INTO checked_posts VALUES (1, 5)");
     assert_exec_fails(db, "INSERT INTO checked_posts VALUES (2, -1)");
     assert_exec_fails(db, "INSERT INTO checked_posts VALUES (3, 6)");
@@ -948,10 +955,12 @@ static void test_create_table_persists_catalog_metadata(void) {
         ) == MYLITE_OK
     );
     assert(errmsg == NULL);
-    assert(auto_rows.rows == 3);
+    assert(auto_rows.rows == 5);
     assert(auto_rows.found_first);
     assert(auto_rows.found_manual);
     assert(auto_rows.found_after_manual);
+    assert(auto_rows.found_after_alter);
+    assert(auto_rows.found_after_low_alter);
     assert_exec_succeeds(db, "INSERT INTO innodb_posts VALUES (1, 'draft')");
     assert_exec_succeeds(db, "DROP TABLE drop_posts");
     assert(mylite_storage_table_exists(filename, "app", "drop_posts") == MYLITE_STORAGE_NOTFOUND);
@@ -1082,10 +1091,12 @@ static void test_create_table_persists_catalog_metadata(void) {
         ) == MYLITE_OK
     );
     assert(errmsg == NULL);
-    assert(auto_rows.rows == 4);
+    assert(auto_rows.rows == 6);
     assert(auto_rows.found_first);
     assert(auto_rows.found_manual);
     assert(auto_rows.found_after_manual);
+    assert(auto_rows.found_after_alter);
+    assert(auto_rows.found_after_low_alter);
     assert(auto_rows.found_reopened);
     assert_exec_fails(db, "INSERT INTO checked_posts VALUES (3, 6)");
     assert(
@@ -3094,7 +3105,15 @@ static int auto_row_callback(void *ctx, int column_count, char **values, char **
         row_ctx->found_after_manual = 1;
         return 0;
     }
-    if (strcmp(values[0], "9") == 0 && strcmp(values[1], "reopened") == 0) {
+    if (strcmp(values[0], "50") == 0 && strcmp(values[1], "after alter") == 0) {
+        row_ctx->found_after_alter = 1;
+        return 0;
+    }
+    if (strcmp(values[0], "51") == 0 && strcmp(values[1], "after low alter") == 0) {
+        row_ctx->found_after_low_alter = 1;
+        return 0;
+    }
+    if (strcmp(values[0], "52") == 0 && strcmp(values[1], "reopened") == 0) {
         row_ctx->found_reopened = 1;
         return 0;
     }

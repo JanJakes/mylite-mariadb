@@ -510,6 +510,13 @@ static mylite_storage_result latest_auto_increment_value(
     unsigned long long table_id,
     unsigned long long *out_next_value
 );
+static mylite_storage_result publish_auto_increment_value(
+    FILE *file,
+    const char *filename,
+    mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned long long next_value
+);
 static mylite_storage_result read_definition_blob_pages(
     FILE *file,
     const mylite_storage_header *header,
@@ -1983,6 +1990,43 @@ mylite_storage_result mylite_storage_read_auto_increment(
     return result;
 }
 
+mylite_storage_result mylite_storage_set_auto_increment(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long next_value
+) {
+    if (filename == NULL || filename[0] == '\0' || schema_name == NULL || schema_name[0] == '\0' ||
+        table_name == NULL || table_name[0] == '\0' || next_value == 0ULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    FILE *file = NULL;
+    mylite_storage_result result = open_existing_file_for_update(filename, &file);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_header header = {0};
+    unsigned long long table_id = 0ULL;
+    unsigned long long current_next_value = 0ULL;
+    result = read_header(file, &header);
+    if (result == MYLITE_STORAGE_OK) {
+        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = latest_auto_increment_value(file, &header, table_id, &current_next_value);
+    }
+    if (result == MYLITE_STORAGE_OK && next_value != current_next_value) {
+        result = publish_auto_increment_value(file, filename, &header, table_id, next_value);
+    }
+
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    return result;
+}
+
 mylite_storage_result mylite_storage_advance_auto_increment(
     const char *filename,
     const char *schema_name,
@@ -2016,32 +2060,8 @@ mylite_storage_result mylite_storage_advance_auto_increment(
         }
         return MYLITE_STORAGE_OK;
     }
-    if (result == MYLITE_STORAGE_OK && header.page_count == ULLONG_MAX) {
-        result = MYLITE_STORAGE_FULL;
-    }
     if (result == MYLITE_STORAGE_OK) {
-        result = begin_recovery_journal(file, filename, &header, 0);
-    }
-    if (result == MYLITE_STORAGE_OK) {
-        const unsigned long long page_id = header.page_count;
-        unsigned char autoincrement_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-        encode_autoincrement_page(autoincrement_page, page_id, table_id, next_value);
-
-        result = write_page_at(file, page_id, header.page_size, autoincrement_page);
-        if (result == MYLITE_STORAGE_OK) {
-            ++header.page_count;
-            unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-            encode_header_page(header_page, &header);
-            result = write_page_at(
-                file,
-                MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
-                header.page_size,
-                header_page
-            );
-            if (result == MYLITE_STORAGE_OK) {
-                result = finish_recovery_journal(file, filename);
-            }
-        }
+        result = publish_auto_increment_value(file, filename, &header, table_id, next_value);
     }
 
     if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
@@ -5248,6 +5268,36 @@ static mylite_storage_result latest_auto_increment_value(
     }
 
     return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result publish_auto_increment_value(
+    FILE *file,
+    const char *filename,
+    mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned long long next_value
+) {
+    if (header->page_count == ULLONG_MAX) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    mylite_storage_result result = begin_recovery_journal(file, filename, header, 0);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    const unsigned long long page_id = header->page_count;
+    unsigned char autoincrement_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    encode_autoincrement_page(autoincrement_page, page_id, table_id, next_value);
+
+    result = write_page_at(file, page_id, header->page_size, autoincrement_page);
+    if (result == MYLITE_STORAGE_OK) {
+        result = publish_header_page_count(file, header, page_id + 1ULL);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = finish_recovery_journal(file, filename);
+    }
+    return result;
 }
 
 static mylite_storage_result read_definition_blob_pages(

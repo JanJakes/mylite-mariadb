@@ -1224,6 +1224,7 @@ int ha_mylite::info(uint flag)
   stats.deleted= 0;
   stats.data_file_length= 0;
   stats.index_file_length= 0;
+  stats.auto_increment_value= 0;
 
   const char *primary_file= mylite_primary_file_path();
   if (!primary_file)
@@ -1237,7 +1238,32 @@ int ha_mylite::info(uint flag)
     DBUG_RETURN(mylite_storage_to_handler_error(result));
 
   stats.records= (ha_rows) row_count;
+
+  if ((flag & HA_STATUS_AUTO) && mylite_auto_increment_field(table))
+  {
+    unsigned long long next_value= 0ULL;
+    const mylite_storage_result auto_result=
+      mylite_storage_read_auto_increment(primary_file, storage_schema(),
+                                         storage_table(), &next_value);
+    if (auto_result != MYLITE_STORAGE_OK)
+      DBUG_RETURN(mylite_storage_to_handler_error(auto_result));
+    stats.auto_increment_value= next_value;
+  }
+
   DBUG_RETURN(0);
+}
+
+void ha_mylite::update_create_info(HA_CREATE_INFO *create_info)
+{
+  DBUG_ENTER("ha_mylite::update_create_info");
+
+  if (!(create_info->used_fields & HA_CREATE_USED_AUTO))
+  {
+    ha_mylite::info(HA_STATUS_AUTO);
+    create_info->auto_increment_value= stats.auto_increment_value;
+  }
+
+  DBUG_VOID_RETURN;
 }
 
 int ha_mylite::external_lock(THD *thd, int lock_type)
@@ -1288,6 +1314,21 @@ void ha_mylite::get_auto_increment(ulonglong offset, ulonglong increment,
     *nb_reserved_values= ULONGLONG_MAX;
 
   DBUG_VOID_RETURN;
+}
+
+int ha_mylite::reset_auto_increment(ulonglong value)
+{
+  DBUG_ENTER("ha_mylite::reset_auto_increment");
+
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    DBUG_RETURN(HA_ERR_NO_CONNECTION);
+
+  const ulonglong next_value= value == 0ULL ? 1ULL : value;
+  const mylite_storage_result result=
+    mylite_storage_set_auto_increment(primary_file, storage_schema(),
+                                      storage_table(), next_value);
+  DBUG_RETURN(mylite_storage_to_handler_error(result));
 }
 
 int ha_mylite::write_row(const uchar *buf)
@@ -1534,8 +1575,20 @@ int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info
   const mylite_storage_result result=
     mylite_storage_store_table_definition(primary_file, &definition);
   form->s->free_frm_image(frm);
+  if (result != MYLITE_STORAGE_OK)
+    DBUG_RETURN(mylite_storage_to_handler_error(result));
 
-  DBUG_RETURN(mylite_storage_to_handler_error(result));
+  if (mylite_auto_increment_field(form) &&
+      create_info->auto_increment_value != 0ULL)
+  {
+    const mylite_storage_result auto_result=
+      mylite_storage_set_auto_increment(primary_file, schema_name, table_name,
+                                        create_info->auto_increment_value);
+    if (auto_result != MYLITE_STORAGE_OK)
+      DBUG_RETURN(mylite_storage_to_handler_error(auto_result));
+  }
+
+  DBUG_RETURN(0);
 }
 
 int ha_mylite::delete_table(const char *name)
