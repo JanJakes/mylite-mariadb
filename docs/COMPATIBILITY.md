@@ -18,9 +18,10 @@ Compatibility evidence is grouped by the local harness documented in
 [Compatibility Harness](architecture/compatibility-harness.md). The initial
 groups cover public API validation, storage, crash recovery, locking, embedded
 lifecycle, direct SQL, prepared statements, column metadata, large value reads,
-warnings, storage-engine smoke, sidecar gates, routed DDL/DML, initial
-application-schema smoke, and server-surface policy. MariaDB MTR comparison
-suites and broader application-schema suites remain planned.
+warnings, MariaDB baseline SQL API comparison, storage-engine smoke, sidecar
+gates, routed DDL/DML, initial application-schema smoke, and server-surface
+policy. MariaDB MTR comparison suites and broader application-schema suites
+remain planned.
 
 ## Baseline
 
@@ -38,11 +39,11 @@ suites and broader application-schema suites remain planned.
 | --- | --- | --- |
 | Open and close a database file | 🟡&nbsp;Partial | Implemented for local files with a temporary MariaDB runtime directory that is removed on final close |
 | Direct SQL execution | 🟡&nbsp;Partial | `mylite_exec()` executes controlled one-shot SQL with textual result callbacks in embedded builds |
-| Prepared statements | 🟡&nbsp;Partial | Reusable embedded statements with 1-based scalar parameter binding, row stepping, reset/finalize ownership, and MariaDB diagnostics |
+| Prepared statements | 🟡&nbsp;Partial | Reusable embedded statements with 1-based scalar parameter binding, row stepping, reset/finalize ownership, MariaDB diagnostics, and representative baseline comparison coverage |
 | Binary-safe values | 🟡&nbsp;Partial | Prepared statements expose explicit TEXT/BLOB byte counts, BLOB values with embedded NUL bytes, and current-row byte-range reads for large TEXT/BLOB results |
-| Column metadata | 🟡&nbsp;Partial | Prepared statements expose alias, schema/table/origin names, MariaDB-native type, flags, charset, decimals, and length metadata; parameter metadata and broader comparison coverage remain planned |
+| Column metadata | 🟡&nbsp;Partial | Prepared statements expose alias, schema/table/origin names, MariaDB-native type, flags, charset, decimals, and length metadata; representative native type/name comparison is covered, while parameter metadata remains planned |
 | Diagnostics | 🟡&nbsp;Partial | Open handles expose stable MyLite result codes, MariaDB errno, SQLSTATE, and message text |
-| Warnings | 🟡&nbsp;Partial | Successful direct and prepared execution expose MariaDB warning counts and retained `SHOW WARNINGS` rows; failed-statement warning enumeration and broader comparison coverage remain planned |
+| Warnings | 🟡&nbsp;Partial | Successful direct and prepared execution expose MariaDB warning counts and retained `SHOW WARNINGS` rows; representative baseline comparison is covered, while failed-statement warning enumeration remains planned |
 | Affected rows and insert ids | 🟡&nbsp;Partial | Successful direct and prepared execution expose affected rows for non-result statements and the last insert id |
 | Raw `MYSQL *` as primary API | ➖&nbsp;Out&nbsp;of&nbsp;scope | Available only through a deliberate compatibility adapter |
 

@@ -38,6 +38,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `column-metadata` | `embedded-dev` | `compat-column-metadata` | Prepared statement column metadata |
 | `large-value` | `embedded-dev` | `compat-large-value` | Prepared statement large-value segment reads |
 | `warning` | `embedded-dev` | `compat-warning` | Warning counts and structured `SHOW WARNINGS` rows |
+| `sql-comparison` | `embedded-dev` | `compat-sql-comparison` | MariaDB baseline SQL API comparison |
 | `storage-engine` | `storage-smoke-dev` | `compat-storage-engine` | Static handler registration and SQL storage-engine smoke |
 | `sidecar` | `storage-smoke-dev` | `compat-sidecar` | Forbidden durable sidecar gates |
 | `routed-ddl-dml` | `storage-smoke-dev` | `compat-routed-ddl-dml` | Routed table DDL and DML smoke |
@@ -46,12 +47,14 @@ first-party preset. Storage-engine groups use the opt-in
 
 ## Relationship To MariaDB MTR
 
-MariaDB's MTR remains the long-term source for broad upstream compatibility
-cases. MyLite should not run MTR blindly as the primary local signal yet:
-current MyLite behavior is embedded, file-owned, and intentionally excludes
-server surfaces that many upstream suites assume. MTR integration should be a
-separate comparison slice with explicit include lists, expected unsupported
-surfaces, and stable result normalization.
+The `sql-comparison` group compares representative direct execution, prepared
+statement, metadata, and warning behavior against a raw MariaDB embedded
+runtime. MariaDB's MTR remains the long-term source for broad upstream
+compatibility cases. MyLite should not run MTR blindly as the primary local
+signal yet: current MyLite behavior is embedded, file-owned, and intentionally
+excludes server surfaces that many upstream suites assume. MTR integration
+should be a separate comparison slice with explicit include lists, expected
+unsupported surfaces, and stable result normalization.
 
 ## Maintenance Rules
 

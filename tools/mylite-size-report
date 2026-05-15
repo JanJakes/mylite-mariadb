@@ -64,6 +64,9 @@ write_report() {
     "Embedded warning smoke" \
     "${embedded_build_dir}/packages/libmylite/mylite_embedded_warning_test"
   append_linked_row \
+    "Embedded comparison smoke" \
+    "${embedded_build_dir}/packages/libmylite/mylite_embedded_comparison_test"
+  append_linked_row \
     "Storage-smoke open-close smoke" \
     "${storage_build_dir}/packages/libmylite/mylite_embedded_open_close_test"
   append_linked_row \
@@ -75,6 +78,9 @@ write_report() {
   append_linked_row \
     "Storage-smoke warning smoke" \
     "${storage_build_dir}/packages/libmylite/mylite_embedded_warning_test"
+  append_linked_row \
+    "Storage-smoke comparison smoke" \
+    "${storage_build_dir}/packages/libmylite/mylite_embedded_comparison_test"
   append_linked_row \
     "Storage-engine smoke" \
     "${storage_build_dir}/packages/libmylite/mylite_embedded_storage_engine_test"
