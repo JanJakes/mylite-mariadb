@@ -103,5 +103,5 @@ No public API, dependency, license, or binary-size impact is expected.
 - CHECK CTAS relies on MariaDB's field-redefinition path matching SELECT aliases
   to explicit target column names. Generated target definitions are deliberately
   left for a separate CTAS slice.
-- Broader expression functions, disabled checks during CTAS, dump/import, and
-  prepared diagnostics remain to be covered separately.
+- Broader expression functions, disabled checks during CTAS, and dump/import
+  remain to be covered separately.

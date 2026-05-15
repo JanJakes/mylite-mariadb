@@ -228,8 +228,9 @@ CHECK after catalog-only close/reopen. Supported CTAS paths cover explicit
 CHECK-constrained target definitions and CHECK-violation target cleanup.
 Failed ADD CHECK copy ALTER over incompatible existing rows restores visible
 pre-statement catalog and row state through the existing statement checkpoint.
-Broader CHECK expression, broader failed ALTER rollback, dump-import,
-prepared-diagnostic, and transaction rollback coverage remains planned.
+Prepared execution diagnostics are covered for representative CHECK failures.
+Broader CHECK expression, broader failed ALTER rollback, dump-import, and
+transaction rollback coverage remains planned.
 Basic virtual and stored generated columns follow the same catalog-backed
 table-definition path, including supported copy ALTER add/modify/drop
 operations, CTAS projections from generated source columns, and generated
@@ -246,6 +247,8 @@ long-unique hash metadata reject before catalog publication, including generated
 BLOB/TEXT columns. MariaDB 11.8 does not expose MySQL-style base-table
 expression key-part syntax; full BLOB/TEXT index support, MySQL-style
 expression-index compatibility, and broader expression matrices remain planned.
+Prepared execution diagnostics are covered for representative generated-column
+unique-key failures.
 The same create-time key-shape gate rejects FULLTEXT, SPATIAL, and long-unique
 hash indexes before catalog publication; MyLite must not publish a table
 definition whose index class cannot be maintained by the current storage

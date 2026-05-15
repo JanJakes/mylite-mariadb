@@ -160,6 +160,7 @@ static void assert_partition_exec_fails(mylite_db *db, const char *sql);
 static void assert_foreign_key_exec_fails(mylite_db *db, const char *sql);
 static void assert_prepared_succeeds(mylite_db *db, const char *sql);
 static void assert_prepared_fails(mylite_db *db, const char *sql);
+static void assert_prepared_fails_with_message(mylite_db *db, const char *sql, const char *message);
 static void assert_schema_options(
     mylite_db *db,
     const char *expected_character_set,
@@ -1016,6 +1017,11 @@ static void test_create_table_persists_catalog_metadata(void) {
     );
     assert_catalog_table_count(filename, "app", 14U);
     assert_exec_succeeds(db, "INSERT INTO checked_posts VALUES (6, 9)");
+    assert_prepared_fails_with_message(
+        db,
+        "INSERT INTO checked_posts VALUES (8, 10)",
+        "CONSTRAINT"
+    );
     assert(
         mylite_exec(
             db,
@@ -1073,7 +1079,11 @@ static void test_create_table_persists_catalog_metadata(void) {
     );
     assert(errmsg == NULL);
     assert(generated_label_index.rows == 1);
-    assert_exec_fails(db, "INSERT INTO generated_posts (id, title) VALUES (2, 'draft')");
+    assert_prepared_fails_with_message(
+        db,
+        "INSERT INTO generated_posts (id, title) VALUES (2, 'draft')",
+        "Duplicate"
+    );
     assert_exec_succeeds(db, "UPDATE generated_posts SET title = 'published' WHERE id = 1");
     generated_title_len = (single_value_context){.expected_value = "9"};
     generated_label = (single_value_context){.expected_value = "published-1"};
@@ -5303,6 +5313,41 @@ static void assert_prepared_fails(mylite_db *db, const char *sql) {
         fprintf(stderr, "Prepared SQL unexpectedly succeeded: %s\n", sql);
     }
     assert(step_result == MYLITE_ERROR);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+}
+
+static void assert_prepared_fails_with_message(
+    mylite_db *db,
+    const char *sql,
+    const char *message
+) {
+    mylite_stmt *stmt = NULL;
+    mylite_warning_level warning_level = MYLITE_WARNING_NOTE;
+    unsigned warning_code = 0U;
+    const char *warning_message = NULL;
+    const int prepare_result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, NULL);
+    if (prepare_result != MYLITE_OK) {
+        fprintf(stderr, "Prepare failed before execution: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(prepare_result == MYLITE_OK);
+    assert(stmt != NULL);
+
+    const int step_result = mylite_step(stmt);
+    if (step_result != MYLITE_ERROR) {
+        fprintf(stderr, "Prepared SQL unexpectedly succeeded: %s\n", sql);
+    }
+    assert(step_result == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    const unsigned mariadb_errno = mylite_mariadb_errno(db);
+    assert(mariadb_errno != 0U);
+    assert(strcmp(mylite_sqlstate(db), "00000") != 0);
+    assert(strstr(mylite_errmsg(db), message) != NULL);
+    assert(mylite_warning_count(db) >= 1U);
+    assert(mylite_warning(db, 0U, &warning_level, &warning_code, &warning_message) == MYLITE_OK);
+    assert(warning_level == MYLITE_WARNING_ERROR);
+    assert(warning_code == mariadb_errno);
+    assert(warning_message != NULL);
+    assert(strstr(warning_message, message) != NULL);
     assert(mylite_finalize(stmt) == MYLITE_OK);
 }
 

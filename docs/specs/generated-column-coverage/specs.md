@@ -144,9 +144,8 @@ unchanged for practical purposes.
 
 ## Risks And Open Questions
 
-- Broader expression classes, SQL-mode-sensitive expressions, generated
-  target CTAS definitions, dump/import, prepared diagnostics, and rollback
-  remain uncovered.
+- Broader expression classes, SQL-mode-sensitive expressions, dump/import, and
+  rollback remain uncovered.
 - Expression/hidden generated indexes, generated full/oversized BLOB/TEXT key
   payloads, and broader expression matrices need separate specs before support
   is claimed.
