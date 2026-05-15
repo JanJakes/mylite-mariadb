@@ -40,9 +40,10 @@ they route through the same catalog and index-entry lifecycle.
 ## Non-Goals
 
 - In-place, instant, or online standalone index DDL.
-- Unsupported index classes: FULLTEXT, SPATIAL, expression/hidden generated
-  keys, hash keys, foreign keys, or oversized/full BLOB/TEXT keys. Generated
-  primary keys follow MariaDB's SQL-layer rejection policy.
+- Unsupported index classes: FULLTEXT, SPATIAL, MySQL-style expression keys,
+  hidden generated keys, hash keys, long-unique hash keys, foreign keys, or
+  oversized/full BLOB/TEXT keys. Generated primary keys follow MariaDB's
+  SQL-layer rejection policy.
 - Transaction rollback, statement rollback, or crash recovery for failed or
   interrupted standalone index DDL.
 - A separate MyLite parser or executor for standalone index DDL.

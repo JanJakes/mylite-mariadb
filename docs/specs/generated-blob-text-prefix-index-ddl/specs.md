@@ -60,8 +60,10 @@ The standalone DDL path should compose existing pieces:
 
 Generated BLOB/TEXT prefix support expands from initial DDL to standalone
 copy-rebuild index DDL. Online DDL, full/oversized key payloads,
-expression/hidden generated indexes, and transaction-aware DDL rollback remain
-planned; generated primary keys follow MariaDB's SQL-layer rejection policy.
+MySQL-style expression-index compatibility, and transaction-aware DDL rollback
+remain planned; generated primary keys follow MariaDB's SQL-layer rejection
+policy, and hidden long-unique hash indexes are covered by a separate
+unsupported-policy slice.
 
 ## DDL Metadata Routing Impact
 

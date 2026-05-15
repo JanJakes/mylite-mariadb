@@ -39,8 +39,8 @@ MariaDB base: `mariadb-11.8.6`
 - Primary-key rename.
 - Multi-rename conflict matrices.
 - Instant, in-place, online, or lock-free index rename.
-- Renaming unsupported FULLTEXT, SPATIAL, expression/hidden generated, generated
-  primary-key, or oversized BLOB/TEXT indexes.
+- Renaming unsupported FULLTEXT, SPATIAL, MySQL-style expression, hidden
+  generated, generated primary-key, or oversized BLOB/TEXT indexes.
 - SQL rollback or crash recovery for interrupted rename-index DDL.
 
 ## Design

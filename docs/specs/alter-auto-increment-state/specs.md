@@ -93,8 +93,9 @@ index invariants.
 - Metadata-only or in-place autoincrement ALTER.
 - Transaction-aware rollback of successful explicit autoincrement ALTER.
 - Full SQL transaction semantics around autoincrement allocation.
-- Changing unsupported ALTER, expression/hidden generated-index, generated
-  primary-key, fulltext, spatial, foreign-key, or partition behavior.
+- Changing unsupported ALTER, MySQL-style expression-index, hidden
+  generated-index, generated primary-key, fulltext, spatial, foreign-key, or
+  partition behavior.
 
 ## Compatibility Impact
 

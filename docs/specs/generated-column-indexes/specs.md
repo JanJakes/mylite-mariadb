@@ -117,8 +117,8 @@ small handler capability refinement plus tests and docs.
 - Verify duplicate rejection through a unique generated-column index.
 - Verify update/delete maintenance for generated index entries.
 - Verify generated-index reads after close/reopen.
-- Keep FULLTEXT, SPATIAL, expression/hidden generated-key, and unbounded
-  BLOB/TEXT index classes rejected.
+- Keep FULLTEXT, SPATIAL, MySQL-style expression, hidden generated, and
+  unbounded BLOB/TEXT index classes rejected.
 - Run the generated-column and unsupported-index compatibility groups plus the
   normal format, tidy, preset, and diff checks.
 

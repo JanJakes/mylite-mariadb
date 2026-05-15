@@ -60,9 +60,10 @@ MariaDB base: `mariadb-11.8.6`
 
 - Full-length unbounded BLOB/TEXT indexes that exceed the current single
   index-entry page capacity.
-- FULLTEXT, SPATIAL, vector, expression/hidden generated, hash, or foreign-key
-  indexes. Bounded generated BLOB/TEXT prefix indexes declared in initial DDL
-  are covered by the generated BLOB/TEXT prefix slice.
+- FULLTEXT, SPATIAL, vector, MySQL-style expression, hidden generated, hash,
+  long-unique hash, or foreign-key indexes. Bounded generated BLOB/TEXT prefix
+  indexes declared in initial DDL are covered by the generated BLOB/TEXT prefix
+  slice.
 - Key-only reads, index condition pushdown, multi-range read optimization, or
   persistent B-tree pages.
 - Physical compaction of stale row, overflow, or index-entry pages.

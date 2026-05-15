@@ -52,7 +52,7 @@ group_spec() {
       echo "storage-smoke-dev|compat-generated-column|Generated column coverage"
       ;;
     unsupported-index)
-      echo "storage-smoke-dev|compat-unsupported-index|Unsupported index-class rejection"
+      echo "storage-smoke-dev|compat-unsupported-index|Unsupported FULLTEXT, SPATIAL, and long-unique index rejection"
       ;;
     locking)
       echo "storage-smoke-dev|compat-locking|Primary-file lock conflict, busy-timeout, and SQL locking policy coverage"

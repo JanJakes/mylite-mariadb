@@ -237,12 +237,16 @@ standalone index DDL paths. Bounded generated BLOB/TEXT prefix indexes declared
 in initial table definitions or added through standalone copy-rebuild index DDL
 use the same generated-value and BLOB/TEXT prefix key-image paths. Generated
 primary-key DDL inherits MariaDB's SQL-layer rejection before catalog
-publication. Expression/hidden generated indexes, generated target CTAS
-definitions, full or oversized BLOB/TEXT generated key payloads, and broader
+publication. Unbounded unique BLOB/TEXT keys that MariaDB represents as hidden
+long-unique hash metadata reject before catalog publication, including generated
+BLOB/TEXT columns. MariaDB 11.8 does not expose MySQL-style base-table
+expression key-part syntax; generated target CTAS definitions, full BLOB/TEXT
+index support, MySQL-style expression-index compatibility, and broader
 expression matrices remain planned.
-The same create-time key-shape gate rejects FULLTEXT and SPATIAL indexes before
-catalog publication; MyLite must not publish a table definition whose index
-class cannot be maintained by the current storage format.
+The same create-time key-shape gate rejects FULLTEXT, SPATIAL, and long-unique
+hash indexes before catalog publication; MyLite must not publish a table
+definition whose index class cannot be maintained by the current storage
+format.
 
 ## Schemas And System Surfaces
 
@@ -311,8 +315,8 @@ Supported primary, unique, and secondary keys use MariaDB key tuples generated
 from the row buffer. Bounded BLOB/TEXT prefix indexes are supported by storing
 MariaDB's normal variable-length key image, not row-buffer process pointers.
 The handler rejects unsupported key classes before table publication, including
-FULLTEXT, SPATIAL, hidden generated, hash, and oversized or unbounded BLOB/TEXT
-keys.
+FULLTEXT, SPATIAL, hidden generated, hash, long-unique hash, and oversized or
+unbounded BLOB/TEXT keys.
 Duplicate checks read live index entries, use MariaDB key comparison, and
 preserve nullable unique-key semantics. Ordered index reads build in-memory
 cursors from live index entries and then reconstruct row buffers from row
@@ -336,13 +340,13 @@ The storage engine must support:
 - truncate,
 - table rebuilds for copy `ALTER`.
 
-FULLTEXT, SPATIAL, expression/hidden generated indexes, foreign-key
-enforcement, and partitioned tables need explicit storage designs before
-support is claimed. Generated primary keys follow MariaDB's SQL-layer rejection
-policy.
+FULLTEXT, SPATIAL, MySQL-style expression indexes, foreign-key enforcement, and
+partitioned tables need explicit storage designs before support is claimed.
+Generated primary keys follow MariaDB's SQL-layer rejection policy. Long-unique
+hash keys remain unsupported until MyLite has a durable hidden-key design.
 Current `libmylite` entry points reject foreign-key and partition DDL before
-MariaDB execution; unsupported FULLTEXT and SPATIAL indexes reject through
-handler capability checks before catalog publication.
+MariaDB execution; unsupported FULLTEXT, SPATIAL, and long-unique indexes reject
+through handler capability checks before catalog publication.
 
 ## Transactions And Recovery
 

@@ -38,8 +38,10 @@ Generated-column support expands to copy-rebuild ALTER DDL for:
 - preserving the resulting metadata and values after close/reopen.
 
 Instant, in-place, online, SQL rollback, CTAS, dump/import, broad expression
-matrices, and expression/hidden generated indexes remain planned. Generated
-primary-key DDL follows MariaDB's SQL-layer rejection policy.
+matrices, and MySQL-style expression-index compatibility remain planned.
+Generated primary-key DDL follows MariaDB's SQL-layer rejection policy, and
+hidden long-unique hash indexes are covered by a separate unsupported-policy
+slice.
 
 ## Design
 

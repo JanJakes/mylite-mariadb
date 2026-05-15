@@ -2893,12 +2893,16 @@ static void test_blob_text_prefix_indexes(void) {
     table_context payload_rows = {0};
     table_context deleted_payload_rows = {0};
     table_context standalone_body_rows = {0};
+    table_context standalone_unbounded_index_rows = {0};
+    table_context standalone_unbounded_body_rows = {0};
     table_context generated_body_rows = {0};
     table_context generated_payload_rows = {0};
     table_context generated_old_label_rows = {0};
     table_context generated_updated_label_rows = {0};
     table_context generated_reused_label_rows = {0};
     table_context generated_deleted_body_rows = {0};
+    table_context generated_unbounded_index_rows = {0};
+    table_context generated_unbounded_payload_rows = {0};
     table_context reopened_body_rows = {0};
     table_context reopened_payload_rows = {0};
     table_context reopened_standalone_body_rows = {0};
@@ -2940,6 +2944,31 @@ static void test_blob_text_prefix_indexes(void) {
         "UNIQUE KEY generated_label_prefix (generated_label(10)), "
         "KEY generated_payload_prefix (generated_payload(6))"
         ") ENGINE=InnoDB"
+    );
+    assert_exec_fails(
+        db,
+        "CREATE TABLE full_blob_unique_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "body TEXT NOT NULL, "
+        "UNIQUE KEY body_unique (body)"
+        ") ENGINE=InnoDB"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "full_blob_unique_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_exec_fails(
+        db,
+        "CREATE TABLE generated_full_blob_unique_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL, "
+        "generated_body TEXT AS (CONCAT(title, '-body')) STORED, "
+        "UNIQUE KEY generated_body_unique (generated_body)"
+        ") ENGINE=InnoDB"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "generated_full_blob_unique_posts") ==
+        MYLITE_STORAGE_NOTFOUND
     );
     assert_catalog_table_count(filename, "app", 3U);
 
@@ -3133,6 +3162,63 @@ static void test_blob_text_prefix_indexes(void) {
         "INSERT INTO standalone_blob_prefix_posts VALUES "
         "(3, 'standalone gamma body', UNHEX('AABBCCFF'))"
     );
+    assert_exec_fails(
+        db,
+        "CREATE UNIQUE INDEX standalone_body_unique "
+        "ON standalone_blob_prefix_posts (body) ALGORITHM=COPY"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM standalone_blob_prefix_posts "
+            "WHERE Key_name = 'standalone_body_unique'",
+            table_callback,
+            &standalone_unbounded_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(standalone_unbounded_index_rows.rows == 0);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM standalone_blob_prefix_posts WHERE body = 'standalone alpha body'",
+            row_callback,
+            &standalone_unbounded_body_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(standalone_unbounded_body_rows.rows == 1);
+    assert_exec_fails(
+        db,
+        "ALTER TABLE generated_blob_prefix_posts "
+        "ADD UNIQUE KEY generated_payload_unique (generated_payload), ALGORITHM=COPY"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM generated_blob_prefix_posts "
+            "WHERE Key_name = 'generated_payload_unique'",
+            table_callback,
+            &generated_unbounded_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_unbounded_index_rows.rows == 0);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_blob_prefix_posts "
+            "WHERE generated_payload = UNHEX('616C7068612D62696E')",
+            row_callback,
+            &generated_unbounded_payload_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_unbounded_payload_rows.rows == 1);
     assert(
         mylite_exec(
             db,
