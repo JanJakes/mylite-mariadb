@@ -59,6 +59,10 @@
 #define sp_restore_security_context(A,B) while (0) {}
 #endif
 
+#ifndef MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
+#define MYLITE_WITH_SERVER_UTILITY_FUNCTIONS 1
+#endif
+
 bool check_reserved_words(const LEX_CSTRING *name)
 {
   if (lex_string_eq(name, STRING_WITH_LEN("GLOBAL")) ||
@@ -3973,6 +3977,7 @@ bool udf_handler::get_arguments() { return 0; }
 #endif /* HAVE_DLOPEN */
 
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 longlong Item_master_pos_wait::val_int()
 {
   DBUG_ASSERT(fixed());
@@ -4066,6 +4071,7 @@ longlong Item_master_gtid_wait::val_int()
 #endif /* REPLICATION */
   DBUG_RETURN(result);
 }
+#endif
 
 
 /**
@@ -4299,6 +4305,7 @@ static int ull_name_ok(String *name)
     NULL : Error
 */
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 longlong Item_func_get_lock::val_int()
 {
   DBUG_ASSERT(fixed());
@@ -4518,6 +4525,7 @@ longlong Item_func_is_used_lock::val_int()
   null_value= 0;
   return thread_id;
 }
+#endif
 
 
 longlong Item_func_last_insert_id::val_int()
@@ -4553,6 +4561,7 @@ bool Item_func_last_insert_id::fix_fields(THD *thd, Item **ref)
 
 /* This function is just used to test speed of different functions */
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 longlong Item_func_benchmark::val_int()
 {
   DBUG_ASSERT(fixed());
@@ -4615,6 +4624,7 @@ void Item_func_benchmark::print(String *str, enum_query_type query_type)
   args[1]->print(str, query_type);
   str->append(')');
 }
+#endif
 
 
 mysql_mutex_t LOCK_item_func_sleep;
@@ -4667,6 +4677,7 @@ void item_func_sleep_free(void)
 
 /** This function is just used to create tests with time gaps. */
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 longlong Item_func_sleep::val_int()
 {
   THD *thd= current_thd;
@@ -4701,6 +4712,7 @@ longlong Item_func_sleep::val_int()
 
   return MY_TEST(!error);                  // Return 1 killed
 }
+#endif
 
 
 bool Item_func_user_var::check_vcol_func_processor(void *arg)
@@ -6989,10 +7001,12 @@ ulonglong server_uuid_value()
   return val;
 }
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 longlong Item_func_uuid_short::val_int()
 {
   return (longlong) server_uuid_value();
 }
+#endif
 
 
 /**

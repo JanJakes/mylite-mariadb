@@ -66,6 +66,9 @@ Add `compat-server-surface` coverage:
 - MyLite SQL-policy rejection for `LOAD DATA`, `LOAD XML`, `LOAD_FILE()`,
   and `SELECT ... INTO OUTFILE` / `DUMPFILE` as follow-up explicit
   unsupported surfaces.
+- MyLite SQL-policy rejection for blocking, timing, named-lock,
+  replication-wait, and server-identity utility functions as follow-up
+  explicit unsupported surfaces.
 - Existing unsupported external-engine DDL smoke grouped under the same
   compatibility surface.
 
@@ -102,8 +105,10 @@ continue to route to MyLite where already covered.
 
 ## Binary-Size Impact
 
-No archive trimming is included. Size-profile removals should build on these
-explicit unsupported surfaces in a later slice.
+The original policy slice did not trim the archive directly. Follow-up
+size-profile slices now use these explicit unsupported surfaces to remove
+unreachable LOAD execution, host-file SQL I/O, and server utility function
+paths from the default embedded profile.
 
 ## Test Plan
 

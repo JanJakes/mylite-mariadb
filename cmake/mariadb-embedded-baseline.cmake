@@ -46,3 +46,6 @@ set(MYLITE_WITH_LOAD_DATA OFF CACHE BOOL "Omit LOAD DATA/XML execution support" 
 
 # MyLite rejects host-file SQL I/O before MariaDB execution.
 set(MYLITE_WITH_SQL_FILE_IO OFF CACHE BOOL "Omit host-file SQL I/O support" FORCE)
+
+# MyLite rejects server utility functions before MariaDB execution.
+set(MYLITE_WITH_SERVER_UTILITY_FUNCTIONS OFF CACHE BOOL "Omit server utility SQL functions" FORCE)

@@ -30,6 +30,10 @@ extern "C"				/* Bug in BSDI include file */
 #include "my_decimal.h" // string2my_decimal
 #include <cmath>
 
+#ifndef MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
+#define MYLITE_WITH_SERVER_UTILITY_FUNCTIONS 1
+#endif
+
 
 extern bool st_append_json(String *s,
               CHARSET_INFO *json_cs, const uchar *js, uint js_len);
@@ -2980,6 +2984,7 @@ protected:
 };
 
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 class Item_func_benchmark :public Item_long_func
 {
   bool check_arguments() const override
@@ -3012,11 +3017,13 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_benchmark>(thd, this); }
 };
+#endif
 
 
 void item_func_sleep_init(void);
 void item_func_sleep_free(void);
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 class Item_func_sleep :public Item_long_func
 {
   bool check_arguments() const override
@@ -3044,7 +3051,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_sleep>(thd, this); }
 };
-
+#endif
 
 
 #ifdef HAVE_DLOPEN
@@ -3361,6 +3368,7 @@ void mysql_ull_cleanup(THD *thd);
 void mysql_ull_set_explicit_lock_duration(THD *thd);
 
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 class Item_func_lock :public Item_long_func
 {
  public:
@@ -3520,6 +3528,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_master_gtid_wait>(thd, this); }
 };
+#endif
 
 
 /* Handling of user definable variables */
@@ -3945,6 +3954,7 @@ protected:
   { return get_item_copy<Item_func_bit_xor>(thd, this); }
 };
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 class Item_func_is_free_lock :public Item_long_func
 {
   bool check_arguments() const override
@@ -4001,6 +4011,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_is_used_lock>(thd, this); }
 };
+#endif
 
 
 struct Lex_cast_type_st: public Lex_length_and_dec_st
@@ -4423,6 +4434,7 @@ protected:
 void uuid_short_init();
 ulonglong server_uuid_value();
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 class Item_func_uuid_short :public Item_longlong_func
 {
 public:
@@ -4446,6 +4458,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_uuid_short>(thd, this); }
 };
+#endif
 
 
 class Item_func_last_value :public Item_func

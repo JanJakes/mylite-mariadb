@@ -327,6 +327,7 @@ const char *unsupported_sql_surface_message(std::string_view sql);
 bool is_server_surface_sql(std::string_view sql);
 bool is_file_import_sql(std::string_view sql);
 bool is_file_export_sql(std::string_view sql);
+bool is_server_utility_function_sql(std::string_view sql);
 bool is_non_table_object_sql(std::string_view sql);
 bool is_transaction_control_sql(std::string_view sql);
 bool is_locking_sql(std::string_view sql);
@@ -337,7 +338,9 @@ bool is_non_table_object_keyword(std::string_view token);
 bool is_set_transaction_control_sql(std::string_view sql);
 bool sql_tokens_contain_file_import_function(std::string_view sql);
 bool sql_tokens_contain_file_export_marker(std::string_view sql);
+bool sql_tokens_contain_server_utility_function(std::string_view sql);
 bool sql_tokens_contain_locking_marker(std::string_view sql);
+bool sql_tokens_contain_named_lock_function(std::string_view sql);
 bool sql_tokens_contain_online_alter_marker(std::string_view sql);
 bool sql_tokens_contain_partition_marker(std::string_view sql);
 bool sql_tokens_contain_foreign_key_marker(std::string_view sql);
@@ -1995,6 +1998,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_file_export_sql(sql)) {
         return "unsupported SQL file export surface";
     }
+    if (is_server_utility_function_sql(sql)) {
+        return "unsupported server utility SQL function";
+    }
     if (is_non_table_object_sql(sql)) {
         return "unsupported non-table database object SQL surface";
     }
@@ -2095,6 +2101,10 @@ bool is_file_export_sql(std::string_view sql) {
     return sql_tokens_contain_file_export_marker(rest);
 }
 
+bool is_server_utility_function_sql(std::string_view sql) {
+    return sql_tokens_contain_server_utility_function(sql);
+}
+
 bool is_non_table_object_sql(std::string_view sql) {
     std::string_view rest = skip_sql_leading_noise(sql);
     const std::string_view first = pop_sql_token(rest);
@@ -2186,6 +2196,22 @@ bool sql_tokens_contain_file_export_marker(std::string_view sql) {
     return false;
 }
 
+bool sql_tokens_contain_server_utility_function(std::string_view sql) {
+    std::string_view token;
+    while (pop_sql_scanned_token(sql, token)) {
+        if (!sql_next_non_noise_is(sql, '(')) {
+            continue;
+        }
+
+        if (sql_token_equals(token, "BENCHMARK") || sql_token_equals(token, "SLEEP") ||
+            sql_token_equals(token, "UUID_SHORT") || sql_token_equals(token, "MASTER_POS_WAIT") ||
+            sql_token_equals(token, "MASTER_GTID_WAIT")) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool is_locking_sql(std::string_view sql) {
     std::string_view rest = skip_sql_leading_noise(sql);
     const std::string_view first = pop_sql_token(rest);
@@ -2193,6 +2219,9 @@ bool is_locking_sql(std::string_view sql) {
     if (sql_token_equals(first, "LOCK") || sql_token_equals(first, "UNLOCK")) {
         const std::string_view second = pop_sql_token(rest);
         return sql_token_equals(second, "TABLE") || sql_token_equals(second, "TABLES");
+    }
+    if (sql_tokens_contain_named_lock_function(sql)) {
+        return true;
     }
 
     return sql_token_equals(first, "SELECT") && sql_tokens_contain_locking_marker(rest);
@@ -2221,6 +2250,16 @@ bool sql_tokens_contain_locking_marker(std::string_view sql) {
             if (pop_sql_scanned_token(after_lock, next) && sql_token_equals(next, "MODE")) {
                 return true;
             }
+        }
+    }
+    return false;
+}
+
+bool sql_tokens_contain_named_lock_function(std::string_view sql) {
+    std::string_view token;
+    while (pop_sql_scanned_token(sql, token)) {
+        if (!sql_next_non_noise_is(sql, '(')) {
+            continue;
         }
 
         if (sql_token_equals(token, "GET_LOCK") || sql_token_equals(token, "RELEASE_LOCK") ||
