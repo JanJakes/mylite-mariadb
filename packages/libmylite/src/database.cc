@@ -337,6 +337,7 @@ bool sql_set_assignment_has_oracle_sql_mode(std::string_view assignment);
 std::string_view pop_sql_set_assignment(std::string_view &sql);
 bool sql_set_assignment_targets_variable(std::string_view &assignment, const char *keyword);
 bool is_non_table_object_sql(std::string_view sql);
+bool is_procedure_analyse_sql(std::string_view sql);
 bool is_transaction_control_sql(std::string_view sql);
 bool is_locking_sql(std::string_view sql);
 bool is_online_alter_sql(std::string_view sql);
@@ -2033,6 +2034,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_non_table_object_sql(sql)) {
         return "unsupported non-table database object SQL surface";
     }
+    if (is_procedure_analyse_sql(sql)) {
+        return "unsupported PROCEDURE ANALYSE SQL clause";
+    }
     if (is_transaction_control_sql(sql)) {
         return "unsupported SQL transaction control";
     }
@@ -2379,6 +2383,27 @@ bool is_non_table_object_keyword(std::string_view token) {
     return sql_token_equals(token, "VIEW") || sql_token_equals(token, "TRIGGER") ||
            sql_token_equals(token, "PROCEDURE") || sql_token_equals(token, "FUNCTION") ||
            sql_token_equals(token, "PACKAGE") || sql_token_equals(token, "SEQUENCE");
+}
+
+bool is_procedure_analyse_sql(std::string_view sql) {
+    std::string_view token;
+    while (pop_sql_scanned_token(sql, token)) {
+        if (!sql_token_equals(token, "PROCEDURE")) {
+            continue;
+        }
+
+        std::string_view after_procedure = sql;
+        std::string_view procedure_name;
+        if (!pop_sql_scanned_token(after_procedure, procedure_name)) {
+            return false;
+        }
+
+        if (sql_token_equals(procedure_name, "ANALYSE") &&
+            sql_next_non_noise_is(after_procedure, '(')) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool is_transaction_control_sql(std::string_view sql) {
