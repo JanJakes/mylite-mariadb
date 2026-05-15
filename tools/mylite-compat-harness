@@ -79,7 +79,7 @@ group_spec() {
       echo "embedded-dev|compat-sql-comparison|MariaDB baseline SQL API comparison"
       ;;
     storage-engine)
-      echo "storage-smoke-dev|compat-storage-engine|Static MyLite handler registration, routed engine metadata, and BLACKHOLE row-discard smoke"
+      echo "storage-smoke-dev|compat-storage-engine|Static MyLite handler registration, routed engine metadata, BLACKHOLE row-discard smoke, and MEMORY/HEAP volatile-row smoke"
       ;;
     sidecar)
       echo "storage-smoke-dev|compat-sidecar|Forbidden durable sidecar gates around routed SQL"

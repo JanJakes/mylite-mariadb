@@ -195,12 +195,16 @@ claiming native single-file table metadata.
 
 Current support covers metadata capture and discovery for omitted/default
 engine requests, explicit `ENGINE=MYLITE`, and metadata-safe `ENGINE=InnoDB`,
-`ENGINE=MyISAM`, `ENGINE=Aria`, and `ENGINE=BLACKHOLE` requests. The catalog
-records both the requested engine name and the effective `MYLITE` engine.
-BLACKHOLE-routed tables persist only table metadata and discard row writes
-instead of publishing MyLite row or index-entry pages. Unsupported explicit
-engine requests fail before catalog publication. Ordinary `CREATE TABLE IF NOT
-EXISTS` statements publish missing targets through the normal create path and
+`ENGINE=MyISAM`, `ENGINE=Aria`, `ENGINE=BLACKHOLE`, `ENGINE=MEMORY`, and
+`ENGINE=HEAP` requests. The catalog records both the requested engine name and
+the effective `MYLITE` engine. BLACKHOLE-routed tables persist only table
+metadata and discard row writes instead of publishing MyLite row or index-entry
+pages. MEMORY/HEAP-routed tables persist only table metadata in the primary
+file; row contents and supported index entries live in a process-runtime
+volatile store and are cleared when the embedded MariaDB runtime shuts down.
+Unsupported explicit engine requests fail before catalog publication. Ordinary
+`CREATE TABLE IF NOT EXISTS` statements publish missing targets through the
+normal create path and
 leave existing routed targets unchanged while exposing MariaDB warnings through
 the public warning API. `DROP TABLE` removes the live catalog record and
 increments the catalog generation without deleting external MariaDB sidecars.

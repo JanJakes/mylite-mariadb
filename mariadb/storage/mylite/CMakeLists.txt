@@ -8,6 +8,7 @@ INCLUDE_DIRECTORIES(
 
 SET(MYLITE_SE_SOURCES
   ha_mylite.cc
+  mylite_volatile_rows.cc
   "${MYLITE_STORAGE_DIR}/src/storage.c"
 )
 MYSQL_ADD_PLUGIN(mylite_se ${MYLITE_SE_SOURCES} STORAGE_ENGINE STATIC_ONLY DISABLED)

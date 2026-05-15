@@ -138,6 +138,7 @@ typedef struct catalog_table_context {
 
 static void test_show_engines_reports_mylite(void);
 static void test_blackhole_engine_routes_to_mylite(void);
+static void test_memory_engine_routes_to_mylite(void);
 static void test_memory_database_has_empty_mylite_discovery(void);
 static void test_schema_namespaces(void);
 static void test_prepared_schema_namespaces(void);
@@ -307,6 +308,7 @@ static void remove_tree_entry(const char *path);
 int main(void) {
     test_show_engines_reports_mylite();
     test_blackhole_engine_routes_to_mylite();
+    test_memory_engine_routes_to_mylite();
     test_memory_database_has_empty_mylite_discovery();
     test_schema_namespaces();
     test_prepared_schema_namespaces();
@@ -426,6 +428,125 @@ static void test_blackhole_engine_routes_to_mylite(void) {
         "SELECT COUNT(*) FROM blackhole_posts FORCE INDEX (title_key) WHERE title = 'second'",
         "0"
     );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_memory_engine_routes_to_mylite(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    unsigned long long durable_row_count = 0ULL;
+    char *show_create = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE memory_posts ("
+        "id INT NOT NULL AUTO_INCREMENT, "
+        "title VARCHAR(64) NOT NULL, "
+        "PRIMARY KEY USING BTREE (id), "
+        "UNIQUE KEY title_key USING BTREE (title)"
+        ") ENGINE=MEMORY AUTO_INCREMENT=10"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE heap_posts (id INT NOT NULL, title VARCHAR(64) NOT NULL) ENGINE=HEAP"
+    );
+    assert_catalog_table_count(filename, "app", 2U);
+    assert_catalog_table_metadata(filename, "app", "memory_posts", "MEMORY", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "heap_posts", "HEAP", "MYLITE");
+    show_create = capture_show_create_table(db, "memory_posts");
+    assert(strstr(show_create, "ENGINE=MEMORY") != NULL);
+    free(show_create);
+    show_create = capture_show_create_table(db, "heap_posts");
+    assert(strstr(show_create, "ENGINE=HEAP") != NULL);
+    free(show_create);
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE memory_rename_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL"
+        ") ENGINE=MEMORY"
+    );
+    assert_exec_succeeds(db, "INSERT INTO memory_rename_source VALUES (1, 'rename-row')");
+    assert_exec_succeeds(db, "RENAME TABLE memory_rename_source TO memory_rename_target");
+    assert_query_single_value(
+        db,
+        "SELECT title FROM memory_rename_target WHERE id = 1",
+        "rename-row"
+    );
+    assert_exec_succeeds(db, "DROP TABLE memory_rename_target");
+    assert(
+        mylite_storage_table_exists(filename, "app", "memory_rename_target") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_catalog_table_count(filename, "app", 2U);
+
+    assert_exec_succeeds(db, "INSERT INTO memory_posts (title) VALUES ('first'), ('second')");
+    assert_exec_succeeds(db, "INSERT INTO heap_posts VALUES (1, 'heap-row')");
+    assert(
+        mylite_storage_count_rows(filename, "app", "memory_posts", &durable_row_count) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(durable_row_count == 0ULL);
+    assert_query_single_value(db, "SELECT COUNT(*) FROM memory_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM memory_posts FORCE INDEX (title_key) WHERE title = 'first'",
+        "10"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM heap_posts", "1");
+    assert_exec_fails(db, "INSERT INTO memory_posts (title) VALUES ('first')");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM memory_posts", "2");
+    assert_exec_succeeds(db, "UPDATE memory_posts SET title = 'updated' WHERE id = 11");
+    assert_query_single_value(
+        db,
+        "SELECT title FROM memory_posts FORCE INDEX (title_key) WHERE title = 'updated'",
+        "updated"
+    );
+    assert_exec_succeeds(db, "DELETE FROM memory_posts WHERE id = 10");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM memory_posts", "1");
+    assert_exec_succeeds(db, "TRUNCATE TABLE memory_posts");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM memory_posts", "0");
+    assert_exec_succeeds(db, "INSERT INTO memory_posts (title) VALUES ('after-truncate')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM memory_posts FORCE INDEX (title_key) WHERE title = 'after-truncate'",
+        "1"
+    );
+    assert_exec_fails(db, "CREATE TABLE memory_blob_posts (body TEXT) ENGINE=MEMORY");
+    assert(
+        mylite_storage_table_exists(filename, "app", "memory_blob_posts") == MYLITE_STORAGE_NOTFOUND
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE app");
+    assert_catalog_table_count(filename, "app", 2U);
+    assert_catalog_table_metadata(filename, "app", "memory_posts", "MEMORY", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "heap_posts", "HEAP", "MYLITE");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM memory_posts", "0");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM heap_posts", "0");
+    assert_exec_succeeds(db, "INSERT INTO memory_posts (title) VALUES ('after-reopen')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM memory_posts FORCE INDEX (title_key) WHERE title = 'after-reopen'",
+        "1"
+    );
+    assert(
+        mylite_storage_count_rows(filename, "app", "memory_posts", &durable_row_count) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(durable_row_count == 0ULL);
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
@@ -1287,9 +1408,11 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert(tables.rows == 14);
     assert_exec_fails(
         db,
-        "CREATE TABLE memory_posts (id INT PRIMARY KEY, title VARCHAR(255)) ENGINE=MEMORY"
+        "CREATE TABLE archive_posts (id INT PRIMARY KEY, title VARCHAR(255)) ENGINE=ARCHIVE"
     );
-    assert(mylite_storage_table_exists(filename, "app", "memory_posts") == MYLITE_STORAGE_NOTFOUND);
+    assert(
+        mylite_storage_table_exists(filename, "app", "archive_posts") == MYLITE_STORAGE_NOTFOUND
+    );
     assert_catalog_table_count(filename, "app", 14U);
     assert_exec_fails(
         db,

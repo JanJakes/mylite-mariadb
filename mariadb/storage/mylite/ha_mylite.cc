@@ -26,6 +26,7 @@
 #include "field.h"
 #include "handler.h"
 #include "mylite_schema_hook.h"
+#include "mylite_volatile_rows.h"
 #include "key.h"
 #include "sql_class.h"
 #include "sql_cmd.h"
@@ -84,6 +85,7 @@ static int mylite_copy_string(const char *value, char *out_value,
                               size_t out_value_size);
 static bool mylite_supported_engine_request(const char *engine_name);
 static bool mylite_discards_rows_engine_request(const char *engine_name);
+static bool mylite_uses_volatile_rows_engine_request(const char *engine_name);
 static bool mylite_engine_name_equals(const char *engine_name,
                                       const char *expected_engine_name);
 static int mylite_begin_statement_checkpoint(THD *thd,
@@ -121,6 +123,11 @@ static ulonglong mylite_first_auto_increment_value(ulonglong next_value,
                                                    ulonglong offset,
                                                    ulonglong increment);
 static int mylite_check_duplicate_keys(
+  const char *primary_file, const char *schema_name, const char *table_name,
+  TABLE *table, const mylite_storage_index_entry *index_entries,
+  size_t index_entry_count, const uchar *buf, ulonglong skip_row_id,
+  uint *out_duplicate_key);
+static int mylite_check_volatile_duplicate_keys(
   const char *primary_file, const char *schema_name, const char *table_name,
   TABLE *table, const mylite_storage_index_entry *index_entries,
   size_t index_entry_count, const uchar *buf, ulonglong skip_row_id,
@@ -242,6 +249,7 @@ static int mylite_init_func(void *p)
 
 static int mylite_done_func(void *)
 {
+  mylite_volatile_clear_tables();
   mylite_register_schema_hooks(NULL);
   mylite_primary_file= NULL;
   return 0;
@@ -585,7 +593,7 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
    index_row_size(0), index_row_count(0),
    index_row_index(0), index_blob_payloads_size(0),
    index_cursor_number(MAX_KEY), current_row_id(0),
-   duplicate_key_index((uint) -1), discard_rows(false)
+   duplicate_key_index((uint) -1), discard_rows(false), volatile_rows(false)
 {
   storage_schema_name[0]= '\0';
   storage_table_name[0]= '\0';
@@ -683,7 +691,10 @@ int ha_mylite::build_index_cursor(uint index_number)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
 
   mylite_storage_index_entryset entryset= {sizeof(entryset), NULL, 0, 0};
-  mylite_storage_result storage_result=
+  mylite_storage_result storage_result= volatile_rows ?
+    mylite_volatile_read_index_entries(primary_file, storage_schema(),
+                                       storage_table(), index_number,
+                                       &entryset) :
     mylite_storage_read_index_entries(primary_file, storage_schema(),
                                       storage_table(), index_number,
                                       &entryset);
@@ -719,7 +730,10 @@ int ha_mylite::build_index_cursor(uint index_number)
 
     uchar *row_payload= NULL;
     size_t row_payload_size= 0;
-    storage_result=
+    storage_result= volatile_rows ?
+      mylite_volatile_read_row(primary_file, storage_schema(), storage_table(),
+                               entryset.row_ids[i], &row_payload,
+                               &row_payload_size) :
       mylite_storage_read_row(primary_file, storage_schema(), storage_table(),
                               entryset.row_ids[i], &row_payload,
                               &row_payload_size);
@@ -767,7 +781,10 @@ int ha_mylite::build_index_cursor(uint index_number)
   {
     uchar *row_payload= NULL;
     size_t row_payload_size= 0;
-    storage_result=
+    storage_result= volatile_rows ?
+      mylite_volatile_read_row(primary_file, storage_schema(), storage_table(),
+                               entryset.row_ids[i], &row_payload,
+                               &row_payload_size) :
       mylite_storage_read_row(primary_file, storage_schema(), storage_table(),
                               entryset.row_ids[i], &row_payload,
                               &row_payload_size);
@@ -982,6 +999,7 @@ int ha_mylite::open(const char *name, int, uint)
       DBUG_RETURN(engine_name_error);
     display_engine_name_lex.length= strlen(display_engine_name);
     discard_rows= mylite_discards_rows_engine_request(display_engine_name);
+    volatile_rows= mylite_uses_volatile_rows_engine_request(display_engine_name);
   }
 
   if (!(share= get_share()))
@@ -1004,6 +1022,7 @@ int ha_mylite::close(void)
   clear_index_cursor();
   clear_record_blob_payloads();
   discard_rows= false;
+  volatile_rows= false;
   DBUG_RETURN(0);
 }
 
@@ -1121,7 +1140,9 @@ int ha_mylite::rnd_init(bool scan)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
 
   mylite_storage_rowset rowset= {sizeof(rowset), NULL, 0, 0};
-  const mylite_storage_result result=
+  const mylite_storage_result result= volatile_rows ?
+    mylite_volatile_read_rows(primary_file, storage_schema(), storage_table(),
+                              &rowset) :
     mylite_storage_read_rows(primary_file, storage_schema(), storage_table(),
                              &rowset);
   if (result != MYLITE_STORAGE_OK)
@@ -1191,7 +1212,9 @@ int ha_mylite::rnd_pos(uchar *buf, uchar *pos)
   const ulonglong row_id= mylite_get_u64(pos);
   uchar *row_payload= NULL;
   size_t row_payload_size= 0;
-  mylite_storage_result result=
+  mylite_storage_result result= volatile_rows ?
+    mylite_volatile_read_row(primary_file, storage_schema(), storage_table(),
+                             row_id, &row_payload, &row_payload_size) :
     mylite_storage_read_row(primary_file, storage_schema(), storage_table(),
                             row_id, &row_payload, &row_payload_size);
   if (result != MYLITE_STORAGE_OK)
@@ -1275,7 +1298,9 @@ int ha_mylite::info(uint flag)
     DBUG_RETURN(0);
 
   unsigned long long row_count= 0;
-  const mylite_storage_result result=
+  const mylite_storage_result result= volatile_rows ?
+    mylite_volatile_count_rows(primary_file, storage_schema(), storage_table(),
+                               &row_count) :
     mylite_storage_count_rows(primary_file, storage_schema(), storage_table(),
                               &row_count);
   if (result != MYLITE_STORAGE_OK)
@@ -1286,7 +1311,9 @@ int ha_mylite::info(uint flag)
   if ((flag & HA_STATUS_AUTO) && mylite_auto_increment_field(table))
   {
     unsigned long long next_value= 0ULL;
-    const mylite_storage_result auto_result=
+    const mylite_storage_result auto_result= volatile_rows ?
+      mylite_volatile_read_auto_increment(primary_file, storage_schema(),
+                                          storage_table(), &next_value) :
       mylite_storage_read_auto_increment(primary_file, storage_schema(),
                                          storage_table(), &next_value);
     if (auto_result != MYLITE_STORAGE_OK)
@@ -1346,7 +1373,9 @@ void ha_mylite::get_auto_increment(ulonglong offset, ulonglong increment,
     DBUG_VOID_RETURN;
 
   unsigned long long next_value= 0ULL;
-  const mylite_storage_result result=
+  const mylite_storage_result result= volatile_rows ?
+    mylite_volatile_read_auto_increment(primary_file, storage_schema(),
+                                        storage_table(), &next_value) :
     mylite_storage_read_auto_increment(primary_file, storage_schema(),
                                        storage_table(), &next_value);
   if (result != MYLITE_STORAGE_OK)
@@ -1369,7 +1398,9 @@ int ha_mylite::reset_auto_increment(ulonglong value)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
 
   const ulonglong next_value= value == 0ULL ? 1ULL : value;
-  const mylite_storage_result result=
+  const mylite_storage_result result= volatile_rows ?
+    mylite_volatile_set_auto_increment(primary_file, storage_schema(),
+                                       storage_table(), next_value) :
     mylite_storage_set_auto_increment(primary_file, storage_schema(),
                                       storage_table(), next_value);
   DBUG_RETURN(mylite_storage_to_handler_error(result));
@@ -1407,10 +1438,15 @@ int ha_mylite::write_row(const uchar *buf)
     DBUG_RETURN(error);
 
   uint duplicate_key= (uint) -1;
-  error= mylite_check_duplicate_keys(primary_file, storage_schema(),
-                                     storage_table(), table, index_entries,
-                                     index_entry_count, buf, 0ULL,
-                                     &duplicate_key);
+  error= volatile_rows ?
+    mylite_check_volatile_duplicate_keys(primary_file, storage_schema(),
+                                         storage_table(), table, index_entries,
+                                         index_entry_count, buf, 0ULL,
+                                         &duplicate_key) :
+    mylite_check_duplicate_keys(primary_file, storage_schema(),
+                                storage_table(), table, index_entries,
+                                index_entry_count, buf, 0ULL,
+                                &duplicate_key);
   if (error)
   {
     mylite_free_index_entries(index_entries, index_key_storage);
@@ -1418,8 +1454,28 @@ int ha_mylite::write_row(const uchar *buf)
     DBUG_RETURN(error);
   }
 
-  error= mylite_advance_auto_increment_from_row(primary_file, storage_schema(),
-                                                storage_table(), table);
+  if (volatile_rows)
+  {
+    Field *auto_field= mylite_auto_increment_field(table);
+    if (auto_field)
+    {
+      const longlong signed_value= auto_field->val_int();
+      if (signed_value >= 0 || (auto_field->flags & UNSIGNED_FLAG))
+      {
+        const ulonglong value= (ulonglong) signed_value;
+        error= value == ULONGLONG_MAX ? HA_ERR_AUTOINC_ERANGE :
+          mylite_storage_to_handler_error(
+            mylite_volatile_advance_auto_increment(primary_file,
+                                                   storage_schema(),
+                                                   storage_table(),
+                                                   value + 1ULL));
+      }
+    }
+  }
+  else
+    error= mylite_advance_auto_increment_from_row(primary_file,
+                                                  storage_schema(),
+                                                  storage_table(), table);
   if (error)
   {
     mylite_free_index_entries(index_entries, index_key_storage);
@@ -1438,7 +1494,10 @@ int ha_mylite::write_row(const uchar *buf)
   }
 
   unsigned long long row_id= 0ULL;
-  const mylite_storage_result result=
+  const mylite_storage_result result= volatile_rows ?
+    mylite_volatile_append_row_with_index_entries(
+      primary_file, storage_schema(), storage_table(), row_payload,
+      row_payload_size, index_entries, index_entry_count, &row_id) :
     mylite_storage_append_row_with_index_entries(
       primary_file, storage_schema(), storage_table(), row_payload,
       row_payload_size, index_entries, index_entry_count, &row_id);
@@ -1476,11 +1535,17 @@ int ha_mylite::update_row(const uchar *, const uchar *new_data)
     DBUG_RETURN(error);
 
   uint duplicate_key= (uint) -1;
-  error= mylite_check_duplicate_keys(primary_file, storage_schema(),
-                                     storage_table(), table, index_entries,
-                                     index_entry_count, new_data,
-                                     current_row_id,
-                                     &duplicate_key);
+  error= volatile_rows ?
+    mylite_check_volatile_duplicate_keys(primary_file, storage_schema(),
+                                         storage_table(), table, index_entries,
+                                         index_entry_count, new_data,
+                                         current_row_id,
+                                         &duplicate_key) :
+    mylite_check_duplicate_keys(primary_file, storage_schema(),
+                                storage_table(), table, index_entries,
+                                index_entry_count, new_data,
+                                current_row_id,
+                                &duplicate_key);
   if (error)
   {
     mylite_free_index_entries(index_entries, index_key_storage);
@@ -1488,8 +1553,28 @@ int ha_mylite::update_row(const uchar *, const uchar *new_data)
     DBUG_RETURN(error);
   }
 
-  error= mylite_advance_auto_increment_from_row(primary_file, storage_schema(),
-                                                storage_table(), table);
+  if (volatile_rows)
+  {
+    Field *auto_field= mylite_auto_increment_field(table);
+    if (auto_field)
+    {
+      const longlong signed_value= auto_field->val_int();
+      if (signed_value >= 0 || (auto_field->flags & UNSIGNED_FLAG))
+      {
+        const ulonglong value= (ulonglong) signed_value;
+        error= value == ULONGLONG_MAX ? HA_ERR_AUTOINC_ERANGE :
+          mylite_storage_to_handler_error(
+            mylite_volatile_advance_auto_increment(primary_file,
+                                                   storage_schema(),
+                                                   storage_table(),
+                                                   value + 1ULL));
+      }
+    }
+  }
+  else
+    error= mylite_advance_auto_increment_from_row(primary_file,
+                                                  storage_schema(),
+                                                  storage_table(), table);
   if (error)
   {
     mylite_free_index_entries(index_entries, index_key_storage);
@@ -1508,7 +1593,11 @@ int ha_mylite::update_row(const uchar *, const uchar *new_data)
   }
 
   unsigned long long new_row_id= 0ULL;
-  const mylite_storage_result result=
+  const mylite_storage_result result= volatile_rows ?
+    mylite_volatile_update_row_with_index_entries(
+      primary_file, storage_schema(), storage_table(), current_row_id,
+      row_payload, row_payload_size, index_entries, index_entry_count,
+      &new_row_id) :
     mylite_storage_update_row_with_index_entries(
       primary_file, storage_schema(), storage_table(), current_row_id,
       row_payload, row_payload_size, index_entries, index_entry_count,
@@ -1537,7 +1626,9 @@ int ha_mylite::delete_row(const uchar *)
   if (!primary_file)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
 
-  const mylite_storage_result result=
+  const mylite_storage_result result= volatile_rows ?
+    mylite_volatile_delete_row(primary_file, storage_schema(), storage_table(),
+                               current_row_id) :
     mylite_storage_delete_row(primary_file, storage_schema(), storage_table(),
                               current_row_id);
   if (result != MYLITE_STORAGE_OK)
@@ -1567,7 +1658,9 @@ int ha_mylite::truncate()
   if (!primary_file)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
 
-  const mylite_storage_result result=
+  const mylite_storage_result result= volatile_rows ?
+    mylite_volatile_truncate_table(primary_file, storage_schema(),
+                                   storage_table()) :
     mylite_storage_truncate_table(primary_file, storage_schema(),
                                   storage_table());
   if (result != MYLITE_STORAGE_OK)
@@ -1618,7 +1711,15 @@ int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info
     DBUG_RETURN(HA_ERR_UNSUPPORTED);
   const bool requested_engine_discards_rows=
     mylite_discards_rows_engine_request(requested_engine_name);
+  const bool requested_engine_uses_volatile_rows=
+    mylite_uses_volatile_rows_engine_request(requested_engine_name);
+  if (requested_engine_uses_volatile_rows && mylite_table_has_blob_fields(form))
+    DBUG_RETURN(HA_ERR_UNSUPPORTED);
   if (requested_engine_discards_rows &&
+      mylite_copy_string(requested_engine_name, display_engine_name,
+                         sizeof(display_engine_name)))
+    DBUG_RETURN(HA_ERR_UNSUPPORTED);
+  if (requested_engine_uses_volatile_rows &&
       mylite_copy_string(requested_engine_name, display_engine_name,
                          sizeof(display_engine_name)))
     DBUG_RETURN(HA_ERR_UNSUPPORTED);
@@ -1647,11 +1748,22 @@ int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info
     discard_rows= true;
     display_engine_name_lex.length= strlen(display_engine_name);
   }
+  if (requested_engine_uses_volatile_rows)
+  {
+    const mylite_storage_result volatile_result=
+      mylite_volatile_create_table(primary_file, schema_name, table_name);
+    if (volatile_result != MYLITE_STORAGE_OK)
+      DBUG_RETURN(mylite_storage_to_handler_error(volatile_result));
+    volatile_rows= true;
+    display_engine_name_lex.length= strlen(display_engine_name);
+  }
 
   if (mylite_auto_increment_field(form) &&
       create_info->auto_increment_value != 0ULL)
   {
-    const mylite_storage_result auto_result=
+    const mylite_storage_result auto_result= requested_engine_uses_volatile_rows ?
+      mylite_volatile_set_auto_increment(primary_file, schema_name, table_name,
+                                         create_info->auto_increment_value) :
       mylite_storage_set_auto_increment(primary_file, schema_name, table_name,
                                         create_info->auto_increment_value);
     if (auto_result != MYLITE_STORAGE_OK)
@@ -1679,7 +1791,11 @@ int ha_mylite::delete_table(const char *name)
 
   const mylite_storage_result result=
     mylite_storage_drop_table(primary_file, schema_name, table_name);
-  DBUG_RETURN(mylite_storage_to_handler_error(result));
+  if (result != MYLITE_STORAGE_OK)
+    DBUG_RETURN(mylite_storage_to_handler_error(result));
+  const mylite_storage_result volatile_result=
+    mylite_volatile_drop_table(primary_file, schema_name, table_name);
+  DBUG_RETURN(mylite_storage_to_handler_error(volatile_result));
 }
 
 int ha_mylite::rename_table(const char *from, const char *to)
@@ -1711,7 +1827,12 @@ int ha_mylite::rename_table(const char *from, const char *to)
   const mylite_storage_result result=
     mylite_storage_rename_table(primary_file, old_schema_name, old_table_name,
                                 new_schema_name, new_table_name);
-  DBUG_RETURN(mylite_storage_to_handler_error(result));
+  if (result != MYLITE_STORAGE_OK)
+    DBUG_RETURN(mylite_storage_to_handler_error(result));
+  const mylite_storage_result volatile_result=
+    mylite_volatile_rename_table(primary_file, old_schema_name, old_table_name,
+                                 new_schema_name, new_table_name);
+  DBUG_RETURN(mylite_storage_to_handler_error(volatile_result));
 }
 
 static int mylite_requested_engine_name(const char *primary_file,
@@ -1872,12 +1993,19 @@ static bool mylite_supported_engine_request(const char *engine_name)
          mylite_engine_name_equals(engine_name, "InnoDB") ||
          mylite_engine_name_equals(engine_name, "MyISAM") ||
          mylite_engine_name_equals(engine_name, "Aria") ||
-         mylite_discards_rows_engine_request(engine_name);
+         mylite_discards_rows_engine_request(engine_name) ||
+         mylite_uses_volatile_rows_engine_request(engine_name);
 }
 
 static bool mylite_discards_rows_engine_request(const char *engine_name)
 {
   return mylite_engine_name_equals(engine_name, "BLACKHOLE");
+}
+
+static bool mylite_uses_volatile_rows_engine_request(const char *engine_name)
+{
+  return mylite_engine_name_equals(engine_name, "MEMORY") ||
+         mylite_engine_name_equals(engine_name, "HEAP");
 }
 
 static bool mylite_engine_name_equals(const char *engine_name,
@@ -2302,6 +2430,58 @@ static int mylite_check_duplicate_keys(
       const uchar *entry_key= entryset.keys + entryset.key_offsets[j];
       if (!key_buf_cmp(key_info, key_info->user_defined_key_parts, entry_key,
                        index_entries[i].key))
+      {
+        mylite_storage_free_index_entryset(&entryset);
+        *out_duplicate_key= i;
+        return HA_ERR_FOUND_DUPP_KEY;
+      }
+    }
+
+    mylite_storage_free_index_entryset(&entryset);
+  }
+
+  return 0;
+}
+
+static int mylite_check_volatile_duplicate_keys(
+  const char *primary_file, const char *schema_name, const char *table_name,
+  TABLE *table, const mylite_storage_index_entry *index_entries,
+  size_t index_entry_count, const uchar *buf, ulonglong skip_row_id,
+  uint *out_duplicate_key)
+{
+  *out_duplicate_key= (uint) -1;
+  if (table->s->keys == 0)
+    return 0;
+  if (index_entry_count != table->s->keys)
+    return HA_ERR_CRASHED_ON_USAGE;
+
+  for (uint i= 0; i < table->s->keys; ++i)
+  {
+    KEY *key_info= table->key_info + i;
+    if (!(key_info->flags & HA_NOSAME) ||
+        mylite_unique_key_allows_duplicate_null(table, key_info, buf))
+      continue;
+
+    mylite_storage_index_entryset entryset= {sizeof(entryset), NULL, 0, 0};
+    const mylite_storage_result storage_result=
+      mylite_volatile_read_index_entries(primary_file, schema_name, table_name,
+                                         i, &entryset);
+    if (storage_result != MYLITE_STORAGE_OK)
+      return mylite_storage_to_handler_error(storage_result);
+
+    for (size_t j= 0; j < entryset.entry_count; ++j)
+    {
+      if (entryset.row_ids[j] == skip_row_id)
+        continue;
+      if (entryset.key_sizes[j] != index_entries[i].key_size)
+      {
+        mylite_storage_free_index_entryset(&entryset);
+        return HA_ERR_CRASHED_ON_USAGE;
+      }
+
+      const uchar *entry_key= entryset.keys + entryset.key_offsets[j];
+      if (!key_buf_cmp(key_info, key_info->user_defined_key_parts,
+                       entry_key, index_entries[i].key))
       {
         mylite_storage_free_index_entryset(&entryset);
         *out_duplicate_key= i;
