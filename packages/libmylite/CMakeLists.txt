@@ -112,6 +112,10 @@ if(BUILD_TESTING)
         mylite_embedded_storage_engine_test
         PRIVATE MyLite::mylite MyLite::storage
       )
+      target_compile_definitions(
+        mylite_embedded_storage_engine_test
+        PRIVATE MYLITE_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
+      )
       mylite_configure_c_target(mylite_embedded_storage_engine_test)
 
       add_test(

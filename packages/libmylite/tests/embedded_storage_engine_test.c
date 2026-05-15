@@ -2,6 +2,7 @@
 #include <mylite/storage.h>
 
 #include <assert.h>
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
@@ -11,6 +12,10 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+
+#ifndef MYLITE_TEST_FIXTURE_DIR
+#  define MYLITE_TEST_FIXTURE_DIR "."
+#endif
 
 typedef struct timed_lock_request {
     int operation;
@@ -115,6 +120,7 @@ typedef struct wordpress_join_context {
 
 typedef struct catalog_table_context {
     unsigned count;
+    const char *expected_schema_name;
 } catalog_table_context;
 
 static void test_show_engines_reports_mylite(void);
@@ -134,6 +140,7 @@ static void test_create_table_like(void);
 static void test_create_table_select(void);
 static void test_truncate_table_lifecycle(void);
 static void test_wordpress_shaped_schema(void);
+static void test_wordpress_installer_schema_fixture(void);
 static void assert_exec_succeeds(mylite_db *db, const char *sql);
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_exec_fails_with_message(mylite_db *db, const char *sql, const char *message);
@@ -166,12 +173,17 @@ static void assert_catalog_table_metadata(
     const char *effective_engine_name
 );
 static void assert_wordpress_catalog_metadata(const char *filename);
+static void assert_wordpress_installer_catalog_metadata(const char *filename);
 static void assert_table_collation(
     mylite_db *db,
     const char *schema_name,
     const char *table_name,
     const char *expected_collation
 );
+static void exec_sql_fixture(mylite_db *db, const char *fixture_name);
+static void exec_sql_statement_if_present(mylite_db *db, const char *statement);
+static int is_sql_statement_empty(const char *statement);
+static char *read_text_file(const char *path);
 static int engine_callback(void *ctx, int column_count, char **values, char **column_names);
 static int schema_callback(void *ctx, int column_count, char **values, char **column_names);
 static int schema_option_callback(void *ctx, int column_count, char **values, char **column_names);
@@ -230,6 +242,7 @@ int main(void) {
     test_create_table_select();
     test_truncate_table_lifecycle();
     test_wordpress_shaped_schema();
+    test_wordpress_installer_schema_fixture();
     return 0;
 }
 
@@ -3208,6 +3221,38 @@ static void test_wordpress_shaped_schema(void) {
     free(root);
 }
 
+static void test_wordpress_installer_schema_fixture(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(
+        db,
+        "CREATE DATABASE wordpress_install "
+        "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    );
+    assert_exec_succeeds(db, "USE wordpress_install");
+    exec_sql_fixture(db, "wordpress-6.9.4-single-site-schema.sql");
+    assert_wordpress_installer_catalog_metadata(filename);
+    assert_table_collation(db, "wordpress_install", "wp_posts", "utf8mb4_unicode_ci");
+    assert_table_collation(db, "wordpress_install", "wp_termmeta", "utf8mb4_unicode_ci");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE wordpress_install");
+    assert_wordpress_installer_catalog_metadata(filename);
+    assert_table_collation(db, "wordpress_install", "wp_posts", "utf8mb4_unicode_ci");
+    assert_table_collation(db, "wordpress_install", "wp_termmeta", "utf8mb4_unicode_ci");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
 static void assert_wordpress_catalog_metadata(const char *filename) {
     assert_catalog_table_count(filename, "app", 11U);
     assert_catalog_table_metadata(filename, "app", "wp_options", "InnoDB", "MYLITE");
@@ -3221,6 +3266,64 @@ static void assert_wordpress_catalog_metadata(const char *filename) {
     assert_catalog_table_metadata(filename, "app", "wp_comments", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "wp_commentmeta", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "wp_links", "InnoDB", "MYLITE");
+}
+
+static void assert_wordpress_installer_catalog_metadata(const char *filename) {
+    assert_catalog_table_count(filename, "wordpress_install", 12U);
+    assert_catalog_table_metadata(filename, "wordpress_install", "wp_users", "DEFAULT", "MYLITE");
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_install",
+        "wp_usermeta",
+        "DEFAULT",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_install",
+        "wp_termmeta",
+        "DEFAULT",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(filename, "wordpress_install", "wp_terms", "DEFAULT", "MYLITE");
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_install",
+        "wp_term_taxonomy",
+        "DEFAULT",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_install",
+        "wp_term_relationships",
+        "DEFAULT",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_install",
+        "wp_commentmeta",
+        "DEFAULT",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_install",
+        "wp_comments",
+        "DEFAULT",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(filename, "wordpress_install", "wp_links", "DEFAULT", "MYLITE");
+    assert_catalog_table_metadata(filename, "wordpress_install", "wp_options", "DEFAULT", "MYLITE");
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_install",
+        "wp_postmeta",
+        "DEFAULT",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(filename, "wordpress_install", "wp_posts", "DEFAULT", "MYLITE");
 }
 
 static void assert_table_collation(
@@ -3248,6 +3351,60 @@ static void assert_table_collation(
     assert(mylite_exec(db, sql, single_value_callback, &table_collation, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
     assert(table_collation.rows == 1);
+}
+
+static void exec_sql_fixture(mylite_db *db, const char *fixture_name) {
+    char *path = path_join(MYLITE_TEST_FIXTURE_DIR, fixture_name);
+    char *sql = read_text_file(path);
+    char *statement_start = sql;
+
+    for (char *cursor = sql; *cursor != '\0'; ++cursor) {
+        if (*cursor != ';') {
+            continue;
+        }
+
+        *cursor = '\0';
+        exec_sql_statement_if_present(db, statement_start);
+        statement_start = cursor + 1;
+    }
+    assert(is_sql_statement_empty(statement_start));
+
+    free(sql);
+    free(path);
+}
+
+static void exec_sql_statement_if_present(mylite_db *db, const char *statement) {
+    if (is_sql_statement_empty(statement)) {
+        return;
+    }
+
+    assert_exec_succeeds(db, statement);
+}
+
+static int is_sql_statement_empty(const char *statement) {
+    while (*statement != '\0') {
+        if (!isspace((unsigned char)*statement)) {
+            return 0;
+        }
+        ++statement;
+    }
+    return 1;
+}
+
+static char *read_text_file(const char *path) {
+    FILE *file = fopen(path, "rb");
+    assert(file != NULL);
+    assert(fseek(file, 0, SEEK_END) == 0);
+    const long file_size = ftell(file);
+    assert(file_size >= 0);
+    assert(fseek(file, 0, SEEK_SET) == 0);
+
+    char *contents = (char *)malloc((size_t)file_size + 1U);
+    assert(contents != NULL);
+    assert(fread(contents, 1U, (size_t)file_size, file) == (size_t)file_size);
+    contents[file_size] = '\0';
+    assert(fclose(file) == 0);
+    return contents;
 }
 
 static void assert_exec_succeeds(mylite_db *db, const char *sql) {
@@ -3418,7 +3575,9 @@ static void assert_catalog_table_count(
     const char *schema_name,
     unsigned count
 ) {
-    catalog_table_context ctx = {0};
+    catalog_table_context ctx = {
+        .expected_schema_name = schema_name,
+    };
 
     assert(
         mylite_storage_list_tables(filename, schema_name, catalog_table_callback, &ctx) ==
@@ -3826,7 +3985,8 @@ static int catalog_table_callback(void *ctx, const char *schema_name, const char
 
     assert(schema_name != NULL);
     assert(table_name != NULL);
-    assert(strcmp(schema_name, "app") == 0);
+    assert(catalog_ctx->expected_schema_name != NULL);
+    assert(strcmp(schema_name, catalog_ctx->expected_schema_name) == 0);
     ++catalog_ctx->count;
     return 0;
 }

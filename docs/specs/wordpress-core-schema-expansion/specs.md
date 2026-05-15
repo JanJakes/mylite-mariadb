@@ -40,10 +40,11 @@ tables to the currently supported core-table subset:
 - `wp_comments` and `wp_commentmeta`;
 - `wp_links`.
 
-Keep the schema WordPress-shaped rather than an exact installer dump. The test
-uses the same MySQL/MariaDB column families, default patterns, autoincrement
-ids, composite keys, and representative prefix indexes, but still leaves exact
-charset/collation variants and full installer import to later suites.
+Keep the schema WordPress-shaped rather than a full runtime installer dump. The
+test uses the same MySQL/MariaDB column families, default patterns,
+autoincrement ids, composite keys, and representative prefix indexes, but still
+leaves exact charset/collation variants and runtime install behavior to later
+suites.
 
 The smoke should insert representative rows, query through secondary indexes,
 join taxonomy and postmeta relationships, update and delete rows, close/reopen
@@ -63,7 +64,7 @@ row/index state.
 
 ## Non-Goals
 
-- Exact WordPress installer import.
+- Full WordPress runtime installer import.
 - Charset, collation, and index-length matrix coverage.
 - Multisite tables, plugin tables, migrations, or WP-CLI.
 - Foreign-key enforcement; WordPress core table relationships are not enforced
@@ -115,5 +116,5 @@ existing storage-smoke executable.
 
 - A larger single smoke test gives useful compatibility pressure, but it is not
   a substitute for a real WordPress installer/import suite.
-- Exact WordPress schema versions and charset defaults will need a versioned
-  fixture strategy before MyLite can claim installer compatibility.
+- Versioned DDL fixtures are still not a substitute for WordPress runtime
+  installer behavior, option seeding, multisite, or plugin coverage.
