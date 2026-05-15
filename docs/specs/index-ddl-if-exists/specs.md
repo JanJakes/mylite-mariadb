@@ -19,7 +19,8 @@ path.
 - Do not exhaust every `ALTER TABLE ADD/DROP INDEX IF [NOT] EXISTS` spelling;
   one representative secondary-index add/drop path is the target.
 - Do not cover `ALTER INDEX IF EXISTS ... [NOT] IGNORED`; index ignorability
-  affects optimizer-visible metadata and should get a separate slice.
+  affects optimizer-visible metadata and is covered by
+  [Index Ignorability](../index-ignorability/specs.md).
 - Do not add online/in-place index DDL; MyLite still forces supported index
   DDL through copy rebuilds.
 - Do not add FULLTEXT, SPATIAL, unbounded BLOB/TEXT unique, foreign-key, or
@@ -74,8 +75,8 @@ DDL existence options:
 - close/reopen discovery sees the committed index state.
 
 The behavior remains partial because exhaustive ALTER-table index spellings,
-index ignorability, online/in-place index algorithms, unsupported index classes,
-foreign keys, and partitions remain separate work.
+online/in-place index algorithms, unsupported index classes, foreign keys, and
+partitions remain separate work.
 
 ## Design
 
@@ -175,5 +176,5 @@ dependency changes.
 
 - This slice intentionally tests warning message contents rather than exact
   MariaDB warning levels or ordering.
-- Additional ALTER-table index spellings and index ignorability options should
-  get separate coverage if application schemas need those forms.
+- Additional ALTER-table index spellings should get separate coverage if
+  application schemas need those forms.

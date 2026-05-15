@@ -154,6 +154,7 @@ static void test_autoincrement_key_policy(void);
 static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
 static void test_index_ddl_if_exists(void);
+static void test_index_ignorability(void);
 static void test_blob_text_prefix_indexes(void);
 static void test_create_table_like(void);
 static void test_create_table_select(void);
@@ -222,6 +223,13 @@ static void assert_table_collation(
     const char *expected_collation
 );
 static void assert_query_single_value(mylite_db *db, const char *sql, const char *expected_value);
+static void assert_index_ignored(
+    mylite_db *db,
+    const char *schema_name,
+    const char *table_name,
+    const char *index_name,
+    const char *expected_ignored
+);
 static void assert_warning_message_contains(mylite_db *db, const char *expected_message);
 static void exec_sql_fixture(mylite_db *db, const char *fixture_name);
 static int sql_fixture_cursor_is_separator(
@@ -299,6 +307,7 @@ int main(void) {
     test_indexed_rows();
     test_standalone_index_ddl();
     test_index_ddl_if_exists();
+    test_index_ignorability();
     test_blob_text_prefix_indexes();
     test_create_table_like();
     test_create_table_select();
@@ -3640,6 +3649,186 @@ static void test_index_ddl_if_exists(void) {
     free(root);
 }
 
+static void test_index_ignorability(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE index_ignorability");
+    assert_exec_succeeds(db, "USE index_ignorability");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE ignored_index_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(32) NOT NULL, "
+        "status VARCHAR(16) NOT NULL, "
+        "category VARCHAR(16) NOT NULL, "
+        "KEY status_key (status) IGNORED, "
+        "KEY category_key (category) NOT IGNORED"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO ignored_index_posts VALUES "
+        "(1, 'alpha', 'open', 'news'), "
+        "(2, 'beta', 'closed', 'docs'), "
+        "(3, 'gamma', 'open', 'news')"
+    );
+    assert_catalog_table_count(filename, "index_ignorability", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "index_ignorability",
+        "ignored_index_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_index_ignored(db, "index_ignorability", "ignored_index_posts", "status_key", "YES");
+    assert_index_ignored(db, "index_ignorability", "ignored_index_posts", "category_key", "NO");
+    assert_exec_fails_with_message(
+        db,
+        "SELECT COUNT(*) FROM ignored_index_posts "
+        "FORCE INDEX (status_key) WHERE status = 'open'",
+        "status_key"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM ignored_index_posts "
+        "FORCE INDEX (category_key) WHERE category = 'news'",
+        "2"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE INDEX created_ignored_key ON ignored_index_posts (slug) IGNORED "
+        "ALGORITHM=COPY"
+    );
+    assert_index_ignored(
+        db,
+        "index_ignorability",
+        "ignored_index_posts",
+        "created_ignored_key",
+        "YES"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "SELECT id FROM ignored_index_posts "
+        "FORCE INDEX (created_ignored_key) WHERE slug = 'beta'",
+        "created_ignored_key"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE ignored_index_posts "
+        "ADD INDEX alter_category_key (category) NOT IGNORED, ALGORITHM=COPY"
+    );
+    assert_index_ignored(
+        db,
+        "index_ignorability",
+        "ignored_index_posts",
+        "alter_category_key",
+        "NO"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM ignored_index_posts "
+        "FORCE INDEX (alter_category_key) WHERE category = 'news'",
+        "2"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE ignored_index_posts "
+        "ALTER INDEX IF EXISTS missing_ignored_key IGNORED, ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "missing_ignored_key");
+    assert_index_ignored(db, "index_ignorability", "ignored_index_posts", "category_key", "NO");
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE ignored_index_posts "
+        "ALTER INDEX IF EXISTS category_key IGNORED, ALGORITHM=COPY"
+    );
+    assert_index_ignored(db, "index_ignorability", "ignored_index_posts", "category_key", "YES");
+    assert_exec_fails_with_message(
+        db,
+        "SELECT COUNT(*) FROM ignored_index_posts "
+        "FORCE INDEX (category_key) WHERE category = 'news'",
+        "category_key"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE ignored_index_posts "
+        "ALTER INDEX IF EXISTS missing_ignored_key NOT IGNORED, ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "missing_ignored_key");
+    assert_index_ignored(db, "index_ignorability", "ignored_index_posts", "category_key", "YES");
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE ignored_index_posts "
+        "ALTER INDEX IF EXISTS category_key NOT IGNORED, ALGORITHM=COPY"
+    );
+    assert_index_ignored(db, "index_ignorability", "ignored_index_posts", "category_key", "NO");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM ignored_index_posts "
+        "FORCE INDEX (category_key) WHERE category = 'news'",
+        "2"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE index_ignorability");
+    assert_index_ignored(db, "index_ignorability", "ignored_index_posts", "status_key", "YES");
+    assert_index_ignored(
+        db,
+        "index_ignorability",
+        "ignored_index_posts",
+        "created_ignored_key",
+        "YES"
+    );
+    assert_index_ignored(db, "index_ignorability", "ignored_index_posts", "category_key", "NO");
+    assert_index_ignored(
+        db,
+        "index_ignorability",
+        "ignored_index_posts",
+        "alter_category_key",
+        "NO"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "SELECT COUNT(*) FROM ignored_index_posts "
+        "FORCE INDEX (status_key) WHERE status = 'open'",
+        "status_key"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "SELECT id FROM ignored_index_posts "
+        "FORCE INDEX (created_ignored_key) WHERE slug = 'beta'",
+        "created_ignored_key"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM ignored_index_posts "
+        "FORCE INDEX (category_key) WHERE category = 'news'",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM ignored_index_posts "
+        "FORCE INDEX (alter_category_key) WHERE category = 'news'",
+        "2"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_blob_text_prefix_indexes(void) {
     char *root = make_temp_root();
     char *filename = NULL;
@@ -6036,6 +6225,31 @@ static void test_constraint_generated_expression_matrix(void) {
     free(filename);
     remove_tree(root);
     free(root);
+}
+
+static void assert_index_ignored(
+    mylite_db *db,
+    const char *schema_name,
+    const char *table_name,
+    const char *index_name,
+    const char *expected_ignored
+) {
+    char sql[512];
+    const int written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT IGNORED FROM INFORMATION_SCHEMA.STATISTICS "
+        "WHERE TABLE_SCHEMA = '%s' "
+        "AND TABLE_NAME = '%s' "
+        "AND INDEX_NAME = '%s' "
+        "AND SEQ_IN_INDEX = 1",
+        schema_name,
+        table_name,
+        index_name
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_query_single_value(db, sql, expected_ignored);
 }
 
 static void assert_query_single_value(mylite_db *db, const char *sql, const char *expected_value) {
