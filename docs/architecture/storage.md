@@ -224,12 +224,13 @@ engine requests on engine rebuilds.
 Supported key additions on copy `ALTER` rebuild through the same table-copy
 path and publish rebuilt rows with matching index-entry pages. Representative
 default-algorithm copy ALTER paths after catalog-only reopen cover column
-add/drop/rename, ALTER-backed index add/drop, standalone index create/drop
-including representative existence-option skips, and autoincrement metadata
-updates. `LOCK=NONE` and in-place/instant/no-copy ALTER requests are explicitly
-rejected until MyLite has online DDL and lock integration. Unsupported index
-rebuilds and transactional DDL rollback remain planned until MyLite has
-locking and recovery.
+add/drop/rename including representative `ADD COLUMN IF NOT EXISTS` and
+`DROP COLUMN IF EXISTS` skips, ALTER-backed index add/drop, standalone index
+create/drop including representative existence-option skips, and autoincrement
+metadata updates. `LOCK=NONE` and in-place/instant/no-copy ALTER requests are
+explicitly rejected until MyLite has online DDL and lock integration.
+Unsupported index rebuilds and transactional DDL rollback remain planned until
+MyLite has locking and recovery.
 `CREATE TABLE ... LIKE` clones supported routed source table definitions through
 MariaDB's normal LIKE path, does not copy rows, resets target autoincrement
 state, and records the source requested engine with effective `MYLITE` when the

@@ -147,6 +147,7 @@ static void test_transaction_and_foreign_key_policies(void);
 static void test_create_table_persists_catalog_metadata(void);
 static void test_create_table_if_not_exists(void);
 static void test_alter_table_rebuilds_keyless_rows(void);
+static void test_column_alter_if_exists(void);
 static void test_generated_column_alter_ddl(void);
 static void test_generated_primary_key_policy(void);
 static void test_autoincrement_key_policy(void);
@@ -291,6 +292,7 @@ int main(void) {
     test_create_table_persists_catalog_metadata();
     test_create_table_if_not_exists();
     test_alter_table_rebuilds_keyless_rows();
+    test_column_alter_if_exists();
     test_generated_column_alter_ddl();
     test_generated_primary_key_policy();
     test_autoincrement_key_policy();
@@ -2036,6 +2038,116 @@ static void test_alter_table_rebuilds_keyless_rows(void) {
     assert_exec_fails(db, "SELECT reopened_status FROM alter_posts");
     assert_catalog_table_count(filename, "app", 1U);
     assert_catalog_table_metadata(filename, "app", "alter_posts", "InnoDB", "MYLITE");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_column_alter_if_exists(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE column_if_exists");
+    assert_exec_succeeds(db, "USE column_if_exists");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE column_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(32) NOT NULL, "
+        "title VARCHAR(64) NOT NULL, "
+        "body LONGTEXT NULL, "
+        "UNIQUE KEY slug_key (slug), "
+        "KEY title_key (title), "
+        "KEY body_prefix (body(8))"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO column_posts VALUES "
+        "(1, 'alpha', 'Alpha title', 'alpha body'), "
+        "(2, 'beta', 'Beta title', 'beta body')"
+    );
+    assert_catalog_table_count(filename, "column_if_exists", 1U);
+    assert_catalog_table_metadata(filename, "column_if_exists", "column_posts", "InnoDB", "MYLITE");
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE column_posts "
+        "ADD COLUMN IF NOT EXISTS title VARCHAR(128) NOT NULL, ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "title");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM column_posts FORCE INDEX (title_key) WHERE title = 'Beta title'",
+        "2"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM column_posts", "2");
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE column_posts "
+        "ADD COLUMN IF NOT EXISTS subtitle VARCHAR(64) NOT NULL DEFAULT 'untitled', "
+        "ALGORITHM=COPY"
+    );
+    assert_catalog_table_count(filename, "column_if_exists", 1U);
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM column_posts WHERE subtitle = 'untitled'",
+        "2"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE column_posts DROP COLUMN IF EXISTS missing_subtitle, ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "missing_subtitle");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM column_posts WHERE subtitle = 'untitled'",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM column_posts FORCE INDEX (body_prefix) WHERE body = 'alpha body'",
+        "1"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE column_posts DROP COLUMN IF EXISTS subtitle, ALGORITHM=COPY"
+    );
+    assert_exec_fails(db, "SELECT subtitle FROM column_posts");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM column_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM column_posts FORCE INDEX (slug_key) WHERE slug = 'beta'",
+        "2"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "column_if_exists");
+    assert_exec_succeeds(db, "USE column_if_exists");
+    assert_catalog_table_count(filename, "column_if_exists", 1U);
+    assert_catalog_table_metadata(filename, "column_if_exists", "column_posts", "InnoDB", "MYLITE");
+    assert_exec_fails(db, "SELECT subtitle FROM column_posts");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM column_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM column_posts FORCE INDEX (title_key) WHERE title = 'Alpha title'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM column_posts FORCE INDEX (body_prefix) WHERE body = 'beta body'",
+        "2"
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
