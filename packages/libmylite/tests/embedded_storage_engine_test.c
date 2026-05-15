@@ -2205,6 +2205,68 @@ static void test_column_alter_if_exists(void) {
         "2"
     );
 
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE column_posts "
+        "RENAME COLUMN IF EXISTS missing_final_headline TO final_headline, "
+        "ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "missing_final_headline");
+    assert_exec_fails(db, "SELECT final_headline FROM column_posts");
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE column_posts "
+        "RENAME COLUMN IF EXISTS headline TO final_headline, ALGORITHM=COPY"
+    );
+    assert_exec_fails(db, "SELECT headline FROM column_posts");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM column_posts FORCE INDEX (title_key) WHERE final_headline = "
+        "'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789plus'",
+        "1"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE column_posts "
+        "ALTER COLUMN IF EXISTS missing_slug SET DEFAULT 'missing', ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "missing_slug");
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE column_posts "
+        "ALTER COLUMN IF EXISTS slug SET DEFAULT 'gamma', ALGORITHM=COPY"
+    );
+    char *create_sql = capture_show_create_table(db, "column_posts");
+    assert(strstr(create_sql, "DEFAULT 'gamma'") != NULL);
+    free(create_sql);
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO column_posts (id, final_headline, body) "
+        "VALUES (3, 'Gamma title', 'gamma body')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM column_posts FORCE INDEX (slug_key) WHERE slug = 'gamma'",
+        "3"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE column_posts "
+        "ALTER COLUMN IF EXISTS missing_slug DROP DEFAULT, ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "missing_slug");
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE column_posts ALTER COLUMN IF EXISTS slug DROP DEFAULT, ALGORITHM=COPY"
+    );
+    create_sql = capture_show_create_table(db, "column_posts");
+    assert(strstr(create_sql, "DEFAULT 'gamma'") == NULL);
+    free(create_sql);
+    assert_query_single_value(db, "SELECT COUNT(*) FROM column_posts", "3");
+
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
@@ -2215,20 +2277,29 @@ static void test_column_alter_if_exists(void) {
     assert_catalog_table_metadata(filename, "column_if_exists", "column_posts", "InnoDB", "MYLITE");
     assert_exec_fails(db, "SELECT subtitle FROM column_posts");
     assert_exec_fails(db, "SELECT title FROM column_posts");
-    assert_query_single_value(db, "SELECT COUNT(*) FROM column_posts", "2");
+    assert_exec_fails(db, "SELECT headline FROM column_posts");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM column_posts", "3");
     assert_query_single_value(
         db,
-        "SELECT id FROM column_posts FORCE INDEX (title_key) WHERE headline = "
+        "SELECT id FROM column_posts FORCE INDEX (title_key) WHERE final_headline = "
         "'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789plus'",
         "1"
     );
     assert_query_single_value(
         db,
-        "SELECT id FROM column_posts FORCE INDEX (title_key) WHERE headline = "
+        "SELECT id FROM column_posts FORCE INDEX (title_key) WHERE final_headline = "
         "'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzA"
         "BCDEFGHIJKL'",
         "2"
     );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM column_posts FORCE INDEX (slug_key) WHERE slug = 'gamma'",
+        "3"
+    );
+    create_sql = capture_show_create_table(db, "column_posts");
+    assert(strstr(create_sql, "DEFAULT 'gamma'") == NULL);
+    free(create_sql);
     assert_query_single_value(
         db,
         "SELECT id FROM column_posts FORCE INDEX (body_prefix) WHERE body = 'beta body'",

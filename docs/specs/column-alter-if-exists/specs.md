@@ -8,13 +8,17 @@ warnings and add missing columns through MyLite's copy-rebuild path.
 `MODIFY COLUMN IF EXISTS` and `CHANGE COLUMN IF EXISTS` should skip missing
 columns with warnings and rebuild existing columns without losing rows, indexes,
 or catalog metadata.
+`RENAME COLUMN IF EXISTS` should skip missing columns with warnings and rename
+existing columns through the routed ALTER path. `ALTER COLUMN IF EXISTS SET
+DEFAULT` and `ALTER COLUMN IF EXISTS DROP DEFAULT` should skip missing columns
+with warnings and update existing column default metadata.
 `DROP COLUMN IF EXISTS` should skip missing columns with warnings and drop
 existing columns without losing rows, indexes, or catalog metadata.
 
 ## Non-Goals
 
-- Do not exhaust every type, default, nullability, or rename matrix for
-  `CHANGE COLUMN IF EXISTS` and `MODIFY COLUMN IF EXISTS`.
+- Do not exhaust every type, default expression, nullability, or rename matrix
+  for column existence-option ALTER forms.
 - Do not add online/in-place column DDL; MyLite still rejects online and
   in-place ALTER requests.
 - Do not cover generated columns, CHECK constraints, foreign keys, partitions,
@@ -32,10 +36,15 @@ existing columns without losing rows, indexes, or catalog metadata.
   same alter create-list machinery.
 - `mariadb/sql/sql_yacc.yy:8030-8039` parses `DROP COLUMN
   opt_if_exists_table_element` into an `Alter_drop::COLUMN`.
+- `mariadb/sql/sql_yacc.yy:8094-8120` parses `ALTER COLUMN IF EXISTS ... SET
+  DEFAULT`, `ALTER COLUMN IF EXISTS ... DROP DEFAULT`, and
+  `RENAME COLUMN IF EXISTS ... TO ...` into the alter column list.
 - `mariadb/sql/sql_table.cc:6270-6313` removes duplicate
   `ADD COLUMN IF NOT EXISTS` entries and pushes note-level diagnostics.
 - `mariadb/sql/sql_table.cc:6316-6351` removes missing
   `MODIFY/CHANGE COLUMN IF EXISTS` entries and pushes note-level diagnostics.
+- `mariadb/sql/sql_table.cc:6353-6384` removes missing
+  `ALTER/RENAME COLUMN IF EXISTS` entries and pushes note-level diagnostics.
 - `mariadb/sql/sql_table.cc:6386-6512` removes missing
   `DROP COLUMN IF EXISTS` entries and pushes note-level diagnostics.
 
@@ -49,6 +58,9 @@ This slice covers partial MariaDB compatibility for routed copy
 - missing column modify/change requests are warning-producing no-ops;
 - existing column modify/change requests rebuild the table definition and rows
   while preserving supported index access paths;
+- missing column rename and default changes are warning-producing no-ops;
+- existing column rename and default changes update catalog metadata while
+  preserving rows and supported index access paths;
 - missing column drops are warning-producing no-ops;
 - existing column drops rebuild the table definition and rows without the
   dropped column;
@@ -56,18 +68,20 @@ This slice covers partial MariaDB compatibility for routed copy
 
 The behavior remains partial because generated-column edge cases,
 CHECK/foreign-key interactions, online/in-place algorithms, exhaustive
-change/modify matrices, and broader rollback matrices remain separate work.
+column alter matrices, and broader rollback matrices remain separate work.
 
 ## Design
 
 No production code change is expected. MariaDB filters skipped existence-option
 items before executing the ALTER. MyLite handles the remaining supported column
-adds, drops, modifies, and changes through its existing copy-rebuild path.
+adds, drops, modifies, changes, renames, and default changes through its
+existing routed ALTER paths.
 
 The MyLite-specific risk is rebuild publication. The test must prove that
-skipped duplicate adds, missing modifies/changes, and missing drops leave the
-table unchanged, while actual adds, modifies, changes, and drops preserve
-existing rows and supported indexes before and after close/reopen.
+skipped duplicate adds, missing modifies/changes/renames/default changes, and
+missing drops leave the table unchanged, while actual adds, modifies, changes,
+renames, default changes, and drops preserve existing rows and supported indexes
+before and after close/reopen.
 
 ## Affected Subsystems
 
@@ -79,9 +93,9 @@ existing rows and supported indexes before and after close/reopen.
 
 ## DDL Metadata Routing Impact
 
-Supported column adds, drops, modifies, and changes append a rebuilt table
-definition inside the MyLite catalog. Skipped existence-option operations do not
-publish a new definition.
+Supported column adds, drops, modifies, changes, renames, and default changes
+publish updated table-definition metadata inside the MyLite catalog. Skipped
+existence-option operations do not publish a new definition.
 
 ## Single-File And Lifecycle Impact
 
@@ -113,11 +127,19 @@ dependency changes.
    missing column.
 8. Add storage-engine smoke coverage for `CHANGE COLUMN IF EXISTS` renaming an
    existing indexed column.
-9. Assert warnings contain the skipped column names, row values and supported
+9. Add storage-engine smoke coverage for `RENAME COLUMN IF EXISTS` skipping a
+   missing column.
+10. Add storage-engine smoke coverage for `RENAME COLUMN IF EXISTS` renaming an
+   existing indexed column.
+11. Add storage-engine smoke coverage for `ALTER COLUMN IF EXISTS SET DEFAULT`
+   skipping a missing column and updating an existing column default.
+12. Add storage-engine smoke coverage for `ALTER COLUMN IF EXISTS DROP DEFAULT`
+   skipping a missing column and removing an existing column default.
+13. Assert warnings contain the skipped column names, row values and supported
    index reads survive each operation, dropped columns are unavailable after
    close/reopen, renamed columns are available after close/reopen, and durable
    sidecar gates pass.
-10. Run format, focused storage-smoke tests, harness reports, clang-tidy, and
+14. Run format, focused storage-smoke tests, harness reports, clang-tidy, and
    the `dev`, `embedded-dev`, and `storage-smoke-dev` gates.
 
 ## Acceptance Criteria
@@ -140,6 +162,15 @@ dependency changes.
 - Existing `CHANGE COLUMN IF EXISTS title headline ...` succeeds, the old column
   name becomes unavailable, and the renamed column plus supported index reads
   survive close/reopen.
+- Missing `RENAME COLUMN IF EXISTS missing_final_headline ...` succeeds with a
+  warning and leaves the table unchanged.
+- Existing `RENAME COLUMN IF EXISTS headline final_headline ...` succeeds, the
+  old column name becomes unavailable, and the renamed column plus supported
+  index reads survive close/reopen.
+- Missing `ALTER COLUMN IF EXISTS missing_slug SET/DROP DEFAULT` forms succeed
+  with warnings and leave the table unchanged.
+- Existing `ALTER COLUMN IF EXISTS slug SET DEFAULT ...` applies the default,
+  and `DROP DEFAULT` removes it before and after close/reopen.
 - Docs and compatibility matrices describe this as partial routed copy ALTER
   column existence-option support.
 

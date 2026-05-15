@@ -226,10 +226,12 @@ path and publish rebuilt rows with matching index-entry pages. Representative
 default-algorithm copy ALTER paths after catalog-only reopen cover column
 add/drop/rename including representative `ADD COLUMN IF NOT EXISTS` and
 `DROP COLUMN IF EXISTS` skips plus representative `MODIFY COLUMN IF EXISTS` and
-`CHANGE COLUMN IF EXISTS` skips, ALTER-backed index add/drop, standalone index
-create/drop including representative existence-option skips, and autoincrement
-metadata updates. `LOCK=NONE` and in-place/instant/no-copy ALTER requests are
-explicitly rejected until MyLite has online DDL and lock integration.
+`CHANGE COLUMN IF EXISTS` skips, `RENAME COLUMN IF EXISTS` skips, and
+`ALTER COLUMN IF EXISTS SET/DROP DEFAULT` skips, ALTER-backed index add/drop,
+standalone index create/drop including representative existence-option skips,
+and autoincrement metadata updates. `LOCK=NONE` and in-place/instant/no-copy
+ALTER requests are explicitly rejected until MyLite has online DDL and lock
+integration.
 Unsupported index rebuilds and transactional DDL rollback remain planned until
 MyLite has locking and recovery.
 `CREATE TABLE ... LIKE` clones supported routed source table definitions through
