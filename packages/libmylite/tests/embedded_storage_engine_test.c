@@ -1106,6 +1106,7 @@ static void test_create_table_persists_catalog_metadata(void) {
     single_value_context generated_reused_title_key = {.expected_value = "3"};
     single_value_context generated_deleted_title_key = {.expected_value = "4"};
     single_value_context rollback_count = {.expected_value = "1"};
+    mylite_stmt *rollback_update = NULL;
     char *errmsg = NULL;
 
     assert_exec_succeeds(db, "CREATE DATABASE app");
@@ -1536,6 +1537,76 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert(errmsg == NULL);
     assert(rollback_count.rows == 1);
     assert(
+        mylite_prepare(
+            db,
+            "UPDATE rollback_posts SET title=? WHERE id IN (2, 3) ORDER BY id",
+            MYLITE_NUL_TERMINATED,
+            &rollback_update,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(rollback_update != NULL);
+    assert(
+        mylite_bind_text(
+            rollback_update,
+            1U,
+            "prepared-duplicate",
+            MYLITE_NUL_TERMINATED,
+            MYLITE_STATIC
+        ) == MYLITE_OK
+    );
+    assert(mylite_step(rollback_update) == MYLITE_ERROR);
+    assert(strstr(mylite_errmsg(db), "Duplicate") != NULL);
+    assert(mylite_finalize(rollback_update) == MYLITE_OK);
+    rollback_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM rollback_posts WHERE title = 'prepared-duplicate'",
+            single_value_callback,
+            &rollback_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rollback_count.rows == 1);
+    rollback_count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM rollback_posts WHERE id = 2 AND title = 'second'",
+            single_value_callback,
+            &rollback_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rollback_count.rows == 1);
+    rollback_count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM rollback_posts WHERE id = 2 AND title = 'second'",
+            single_value_callback,
+            &rollback_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rollback_count.rows == 1);
+    rollback_count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM rollback_posts WHERE id = 3 AND title = 'third'",
+            single_value_callback,
+            &rollback_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rollback_count.rows == 1);
+    assert(
         mylite_exec(
             db,
             "SELECT rating FROM checked_posts WHERE id = 1",
@@ -1909,6 +1980,30 @@ static void test_create_table_persists_catalog_metadata(void) {
         mylite_exec(
             db,
             "SELECT COUNT(*) FROM rollback_posts WHERE title = 'duplicate'",
+            single_value_callback,
+            &rollback_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rollback_count.rows == 1);
+    rollback_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM rollback_posts WHERE title = 'prepared-duplicate'",
+            single_value_callback,
+            &rollback_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rollback_count.rows == 1);
+    rollback_count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM rollback_posts WHERE id = 3 AND title = 'third'",
             single_value_callback,
             &rollback_count,
             &errmsg
