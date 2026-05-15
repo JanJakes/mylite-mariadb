@@ -23,6 +23,7 @@ extern "C" {
 #define MYLITE_STORAGE_CAPABILITY_TRUNCATE 0x00000400U
 #define MYLITE_STORAGE_CAPABILITY_SCHEMAS 0x00000800U
 #define MYLITE_STORAGE_CAPABILITY_STATEMENT_CHECKPOINTS 0x00001000U
+#define MYLITE_STORAGE_CAPABILITY_BUSY_TIMEOUT 0x00002000U
 
 typedef enum mylite_storage_result { /* NOLINT(performance-enum-size): C ABI enum. */
                                      MYLITE_STORAGE_OK = 0,
@@ -281,6 +282,8 @@ mylite_storage_result mylite_storage_begin_statement(
     mylite_storage_statement **out_statement
 );
 int mylite_storage_statement_active(const char *filename);
+void mylite_storage_set_busy_timeout(unsigned milliseconds);
+unsigned mylite_storage_busy_timeout(void);
 mylite_storage_result mylite_storage_commit_statement(mylite_storage_statement *statement);
 mylite_storage_result mylite_storage_rollback_statement(mylite_storage_statement *statement);
 void mylite_storage_free(void *ptr);

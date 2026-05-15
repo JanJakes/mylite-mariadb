@@ -61,6 +61,16 @@ typedef struct lock_child {
     int release_fd;
 } lock_child;
 
+typedef struct timed_lock_request {
+    int operation;
+    unsigned milliseconds;
+} timed_lock_request;
+
+static const unsigned k_busy_timeout_expiry_ms = 20U;
+static const unsigned k_busy_timeout_release_ms = 50U;
+static const unsigned k_busy_timeout_wait_ms = 1000U;
+static const useconds_t k_microseconds_per_millisecond = 1000U;
+
 static void test_capabilities(void);
 static void test_create_empty_database(void);
 static void test_schema_records(void);
@@ -127,6 +137,8 @@ static void test_rejects_corrupt_recovery_journal(void);
 static void test_rejects_operations_during_exclusive_file_lock(void);
 static void test_shared_file_lock_allows_readers_and_blocks_writers(void);
 static void test_recovery_requires_exclusive_file_lock(void);
+static void test_busy_timeout_expires_while_lock_held(void);
+static void test_busy_timeout_waits_for_lock_release(void);
 static void test_rejects_corrupt_row_page(void);
 static void test_rejects_corrupt_row_payload_page(void);
 static void test_rejects_corrupt_row_state_page(void);
@@ -174,6 +186,8 @@ static void write_test_journal_header_page(
 );
 static lock_child hold_test_lock(const char *filename, int operation);
 static void release_test_lock(lock_child child);
+static pid_t hold_test_lock_for(const char *filename, timed_lock_request request);
+static void wait_test_lock_child(pid_t pid);
 static void put_test_u32_le(unsigned char *page, size_t offset, unsigned value);
 static void put_test_u64_le(unsigned char *page, size_t offset, unsigned long long value);
 static unsigned long long checksum_test_page(const unsigned char *page, size_t checksum_offset);
@@ -219,6 +233,8 @@ int main(void) {
     test_rejects_operations_during_exclusive_file_lock();
     test_shared_file_lock_allows_readers_and_blocks_writers();
     test_recovery_requires_exclusive_file_lock();
+    test_busy_timeout_expires_while_lock_held();
+    test_busy_timeout_waits_for_lock_release();
     test_rejects_corrupt_row_page();
     test_rejects_corrupt_row_payload_page();
     test_rejects_corrupt_row_state_page();
@@ -248,6 +264,7 @@ static void test_capabilities(void) {
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_TRUNCATE) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_SCHEMAS) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_STATEMENT_CHECKPOINTS) != 0U);
+    assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_BUSY_TIMEOUT) != 0U);
 }
 
 static void test_create_empty_database(void) {
@@ -1719,6 +1736,51 @@ static void test_recovery_requires_exclusive_file_lock(void) {
     free(root);
 }
 
+static void test_busy_timeout_expires_while_lock_held(void) {
+    char *root = make_temp_root();
+    char *filename = path_join(root, "busy-timeout-expires.mylite");
+    mylite_storage_header header = {0};
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    lock_child child = hold_test_lock(filename, LOCK_EX);
+
+    mylite_storage_set_busy_timeout(k_busy_timeout_expiry_ms);
+    assert(mylite_storage_busy_timeout() == k_busy_timeout_expiry_ms);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_BUSY);
+    mylite_storage_set_busy_timeout(0U);
+
+    release_test_lock(child);
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_busy_timeout_waits_for_lock_release(void) {
+    char *root = make_temp_root();
+    char *filename = path_join(root, "busy-timeout-waits.mylite");
+    mylite_storage_header header = {0};
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    pid_t child = hold_test_lock_for(
+        filename,
+        (timed_lock_request){
+            .operation = LOCK_EX,
+            .milliseconds = k_busy_timeout_release_ms,
+        }
+    );
+
+    mylite_storage_set_busy_timeout(k_busy_timeout_wait_ms);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    mylite_storage_set_busy_timeout(0U);
+    wait_test_lock_child(child);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
 static void test_rejects_corrupt_row_page(void) {
     static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
     static const unsigned char row[] = {0x00U, 0x01U, 'a', 'b', 'c'};
@@ -2362,6 +2424,43 @@ static void release_test_lock(lock_child child) {
 
     int status = 0;
     assert(waitpid(child.pid, &status, 0) == child.pid);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
+}
+
+static pid_t hold_test_lock_for(const char *filename, timed_lock_request request) {
+    int ready_pipe[2];
+    assert(pipe(ready_pipe) == 0);
+
+    const pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        close(ready_pipe[0]);
+        FILE *file = fopen(filename, "r+b");
+        if (file == NULL || flock(fileno(file), request.operation) != 0) {
+            _exit(2);
+        }
+        const unsigned char ready = 1U;
+        if (write(ready_pipe[1], &ready, sizeof(ready)) != (ssize_t)sizeof(ready)) {
+            _exit(3);
+        }
+        usleep((useconds_t)request.milliseconds * k_microseconds_per_millisecond);
+        fclose(file);
+        close(ready_pipe[1]);
+        _exit(0);
+    }
+
+    close(ready_pipe[1]);
+    unsigned char ready = 0U;
+    assert(read(ready_pipe[0], &ready, sizeof(ready)) == (ssize_t)sizeof(ready));
+    assert(ready == 1U);
+    close(ready_pipe[0]);
+    return pid;
+}
+
+static void wait_test_lock_child(pid_t pid) {
+    int status = 0;
+    assert(waitpid(pid, &status, 0) == pid);
     assert(WIFEXITED(status));
     assert(WEXITSTATUS(status) == 0);
 }

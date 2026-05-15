@@ -103,6 +103,7 @@ MYLITE_API int mylite_open_v2(
     const mylite_open_config *config
 );
 MYLITE_API int mylite_close(mylite_db *database);
+MYLITE_API int mylite_busy_timeout(mylite_db *database, unsigned milliseconds);
 MYLITE_API int mylite_exec(
     mylite_db *database,
     const char *sql,

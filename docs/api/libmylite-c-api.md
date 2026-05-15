@@ -370,6 +370,12 @@ int mylite_set_durability(mylite_db *db, int durability);
 int mylite_limit(mylite_db *db, int limit_id, long long value);
 ```
 
+`mylite_open_config.busy_timeout_ms` configures primary-file advisory lock
+waits during open. `mylite_busy_timeout()` updates the same handle-local
+setting for later SQL work. A zero timeout keeps immediate `MYLITE_BUSY`
+behavior; a nonzero timeout retries cooperating primary-file lock conflicts
+until the lock is acquired or the timeout expires.
+
 Durability modes:
 
 ```c
@@ -387,9 +393,10 @@ The public API exposes MyLite concepts, not raw `my.cnf` option names.
 - Different handles may be used on different threads.
 - Handles opened on the same file coordinate through the shared file runtime.
 - Cooperating storage opens use primary-file advisory locks to reject unsafe
-  cross-process readers, writers, and recovery with busy errors.
-- Full cross-process multi-writer behavior, SQL transaction lock integration,
-  and busy-timeout behavior remain planned.
+  cross-process readers, writers, and recovery with busy errors after the
+  configured busy timeout expires.
+- Full cross-process multi-writer behavior and SQL transaction lock integration
+  remain planned.
 
 SQLite-style threading modes can be added when backed by tests.
 

@@ -20,11 +20,22 @@ typedef struct lock_child {
     int release_fd;
 } lock_child;
 
+typedef struct timed_lock_request {
+    int operation;
+    unsigned milliseconds;
+} timed_lock_request;
+
+static const unsigned k_handle_busy_timeout_ms = 25U;
+static const unsigned k_busy_timeout_release_ms = 50U;
+static const unsigned k_busy_timeout_wait_ms = 1000U;
+static const useconds_t k_microseconds_per_millisecond = 1000U;
+
 static void test_open_close_repeatedly(void);
 static void test_two_handles_share_runtime(void);
 static void test_no_defaults_ignores_ambient_option_files(void);
 static void test_missing_file_without_create_fails(void);
 static void test_open_reports_busy_when_file_locked(void);
+static void test_open_waits_for_busy_timeout_lock_release(void);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static mylite_open_config open_config(const char *temp_directory);
@@ -33,6 +44,8 @@ static int is_directory_empty(const char *path);
 static void write_file(const char *path, const char *contents);
 static lock_child hold_test_lock(const char *filename, int operation);
 static void release_test_lock(lock_child child);
+static pid_t hold_test_lock_for(const char *filename, timed_lock_request request);
+static void wait_test_lock_child(pid_t pid);
 static void remove_tree(const char *path);
 static void remove_tree_entry(const char *path);
 
@@ -42,6 +55,7 @@ int main(void) {
     test_no_defaults_ignores_ambient_option_files();
     test_missing_file_without_create_fails();
     test_open_reports_busy_when_file_locked();
+    test_open_waits_for_busy_timeout_lock_release();
     return 0;
 }
 
@@ -65,6 +79,8 @@ static void test_open_close_repeatedly(void) {
         assert(mylite_mariadb_errno(db) == 0U);
         assert(strcmp(mylite_sqlstate(db), "00000") == 0);
         assert(strcmp(mylite_errmsg(db), "not an error") == 0);
+        assert(mylite_busy_timeout(db, k_handle_busy_timeout_ms) == MYLITE_OK);
+        assert(mylite_errcode(db) == MYLITE_OK);
         assert(mylite_close(db) == MYLITE_OK);
         assert_valid_primary_file(filename);
         assert(is_directory_empty(runtime_root));
@@ -182,6 +198,39 @@ static void test_open_reports_busy_when_file_locked(void) {
     free(root);
 }
 
+static void test_open_waits_for_busy_timeout_lock_release(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *filename = path_join(root, "busy-timeout-open.mylite");
+    mylite_open_config config = open_config(runtime_root);
+    mylite_db *db = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    pid_t child = hold_test_lock_for(
+        filename,
+        (timed_lock_request){
+            .operation = LOCK_EX,
+            .milliseconds = k_busy_timeout_release_ms,
+        }
+    );
+
+    config.busy_timeout_ms = k_busy_timeout_wait_ms;
+    assert(
+        mylite_open_v2(filename, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
+        MYLITE_OK
+    );
+    assert(db != NULL);
+    assert(mylite_close(db) == MYLITE_OK);
+    wait_test_lock_child(child);
+    assert(is_directory_empty(runtime_root));
+
+    free(filename);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static char *make_temp_root(void) {
     char template_path[] = "/tmp/mylite-test.XXXXXX";
     char *root = mkdtemp(template_path);
@@ -291,6 +340,43 @@ static void release_test_lock(lock_child child) {
 
     int status = 0;
     assert(waitpid(child.pid, &status, 0) == child.pid);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
+}
+
+static pid_t hold_test_lock_for(const char *filename, timed_lock_request request) {
+    int ready_pipe[2];
+    assert(pipe(ready_pipe) == 0);
+
+    const pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        close(ready_pipe[0]);
+        FILE *file = fopen(filename, "r+b");
+        if (file == NULL || flock(fileno(file), request.operation) != 0) {
+            _exit(2);
+        }
+        const unsigned char ready = 1U;
+        if (write(ready_pipe[1], &ready, sizeof(ready)) != (ssize_t)sizeof(ready)) {
+            _exit(3);
+        }
+        usleep((useconds_t)request.milliseconds * k_microseconds_per_millisecond);
+        fclose(file);
+        close(ready_pipe[1]);
+        _exit(0);
+    }
+
+    close(ready_pipe[1]);
+    unsigned char ready = 0U;
+    assert(read(ready_pipe[0], &ready, sizeof(ready)) == (ssize_t)sizeof(ready));
+    assert(ready == 1U);
+    close(ready_pipe[0]);
+    return pid;
+}
+
+static void wait_test_lock_child(pid_t pid) {
+    int status = 0;
+    assert(waitpid(pid, &status, 0) == pid);
     assert(WIFEXITED(status));
     assert(WEXITSTATUS(status) == 0);
 }

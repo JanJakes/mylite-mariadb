@@ -55,6 +55,9 @@ conflicting writers instead of waiting or interleaving writes. Later slices can
 replace the coarse lock with a lock manager that supports multiple writers,
 transactional write sets, and conflict resolution.
 
+Follow-up status: the `busy-timeout-lock-waits` slice adds bounded waits before
+returning busy while keeping the same coarse lock ownership model.
+
 ## Supported Scope
 
 - Multiple concurrent read opens over the same primary file.
@@ -66,8 +69,7 @@ transactional write sets, and conflict resolution.
 ## Non-Goals
 
 - Cross-process write concurrency.
-- Blocking waits, busy timeout configuration, deadlock detection, or lock
-  priority.
+- Deadlock detection, lock priority, or full multi-writer waiting semantics.
 - SQL transaction registration, row locks, gap locks, metadata locks, or
   savepoint-aware lock release.
 - Network server connection scheduling or global daemon locks.
@@ -111,9 +113,9 @@ the process exits.
 
 ## Risks
 
-- Non-blocking conflicts can surface as immediate errors where a future
-  application may expect waiting. A busy-timeout API can be added once lock
-  ownership is stable.
+- Zero-timeout conflicts surface as immediate errors. The follow-up
+  busy-timeout API adds bounded waits, but still does not provide full
+  multi-writer progress.
 - Advisory locks only protect cooperating MyLite processes. Non-MyLite writers
   can still corrupt the file and remain out of scope.
 - Coarse file locks are deliberately conservative. They should be replaced by a

@@ -202,6 +202,7 @@ struct mylite_db {
     MYSQL mysql = {};
 #endif
     std::string filename;
+    unsigned busy_timeout_ms = 0;
     int errcode = MYLITE_OK;
     int extended_errcode = MYLITE_OK;
     unsigned mariadb_errno = 0;
@@ -250,6 +251,24 @@ class StorageStatementCheckpoint {
     mylite_storage_statement *statement_ = nullptr;
 };
 #endif
+
+class StorageBusyTimeoutScope {
+  public:
+    explicit StorageBusyTimeoutScope(unsigned milliseconds)
+        : previous_(mylite_storage_busy_timeout()) {
+        mylite_storage_set_busy_timeout(milliseconds);
+    }
+
+    StorageBusyTimeoutScope(const StorageBusyTimeoutScope &) = delete;
+    StorageBusyTimeoutScope &operator=(const StorageBusyTimeoutScope &) = delete;
+
+    ~StorageBusyTimeoutScope() {
+        mylite_storage_set_busy_timeout(previous_);
+    }
+
+  private:
+    unsigned previous_ = 0;
+};
 
 int open_v2_impl(
     const char *filename,
@@ -337,6 +356,7 @@ int store_and_emit_result(
     bool *has_result
 );
 std::filesystem::path normalize_filename(const char *filename);
+unsigned busy_timeout_from_config(const mylite_open_config *config);
 std::filesystem::path create_runtime_directory(const mylite_open_config *config);
 std::filesystem::path runtime_root(const mylite_open_config *config);
 std::string unique_runtime_name(void);
@@ -402,6 +422,16 @@ int mylite_close(mylite_db *database) {
     return MYLITE_OK;
 }
 
+int mylite_busy_timeout(mylite_db *database, unsigned milliseconds) {
+    if (database == nullptr) {
+        return MYLITE_MISUSE;
+    }
+
+    database->busy_timeout_ms = milliseconds;
+    set_ok(*database);
+    return MYLITE_OK;
+}
+
 int mylite_exec(
     mylite_db *database,
     const char *sql,
@@ -431,6 +461,9 @@ int mylite_step(mylite_stmt *statement) {
     set_error(*statement->database, MYLITE_ERROR, "MariaDB embedded backend is not enabled");
     return MYLITE_ERROR;
 #else
+    StorageBusyTimeoutScope busy_timeout(
+        statement->database != nullptr ? statement->database->busy_timeout_ms : 0U
+    );
     try {
         if (statement->done) {
             return MYLITE_DONE;
@@ -1041,7 +1074,9 @@ int open_v2_impl(
     try {
         std::unique_ptr<mylite_db> database(new mylite_db());
         database->filename = normalize_filename(filename).string();
+        database->busy_timeout_ms = busy_timeout_from_config(config);
 
+        StorageBusyTimeoutScope busy_timeout(database->busy_timeout_ms);
         const int file_result = prepare_primary_file(database->filename, flags);
         if (file_result != MYLITE_OK) {
             return file_result;
@@ -1147,6 +1182,7 @@ int exec_impl(
     set_error(*database, MYLITE_ERROR, "MariaDB embedded backend is not enabled");
     return copy_error_message(*database, errmsg);
 #else
+    StorageBusyTimeoutScope busy_timeout(database->busy_timeout_ms);
     set_ok(*database);
     clear_warnings(*database);
     if (const char *unsupported_message = unsupported_sql_surface_message(std::string_view(sql))) {
@@ -1262,6 +1298,7 @@ int prepare_impl(
     set_error(*database, MYLITE_ERROR, "MariaDB embedded backend is not enabled");
     return MYLITE_ERROR;
 #else
+    StorageBusyTimeoutScope busy_timeout(database->busy_timeout_ms);
     set_ok(*database);
     clear_warnings(*database);
     if (const char *unsupported_message =
@@ -2651,6 +2688,17 @@ std::filesystem::path normalize_filename(const char *filename) {
         return std::filesystem::path(":memory:");
     }
     return std::filesystem::absolute(std::filesystem::path(filename));
+}
+
+unsigned busy_timeout_from_config(const mylite_open_config *config) {
+    if (config != nullptr &&
+        has_config_field(
+            config,
+            offsetof(mylite_open_config, busy_timeout_ms) + sizeof(config->busy_timeout_ms)
+        )) {
+        return config->busy_timeout_ms;
+    }
+    return 0U;
 }
 
 std::filesystem::path create_runtime_directory(const mylite_open_config *config) {

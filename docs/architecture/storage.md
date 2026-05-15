@@ -334,12 +334,14 @@ open first recovers and removes a valid pending journal. Recovery restores the
 previously committed header/catalog state; appended pages beyond the restored
 header page count are ignored until free-space reclamation exists.
 
-Storage operations now use non-blocking advisory locks on the primary
-`.mylite` file descriptor. Read APIs take a shared lock after pending recovery
-is handled, while writes and recovery take an exclusive lock before mutating or
-restoring pages. Conflicts return busy errors; no durable lock sidecar is
-created. These locks protect cooperating MyLite processes from unsafe concurrent
-access but are not the final multi-writer lock manager.
+Storage operations now use advisory locks on the primary `.mylite` file
+descriptor. Read APIs take a shared lock after pending recovery is handled,
+while writes and recovery take an exclusive lock before mutating or restoring
+pages. Conflicts return busy errors after the current thread's configured busy
+timeout expires; a zero timeout keeps immediate non-blocking behavior. No
+durable lock sidecar is created. These locks protect cooperating MyLite
+processes from unsafe concurrent access but are not the final multi-writer lock
+manager.
 
 File-backed MyLite statements that can mutate storage now take an in-process
 statement checkpoint. Row DML begins that checkpoint from the MyLite handler

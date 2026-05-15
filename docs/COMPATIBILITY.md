@@ -22,8 +22,8 @@ warnings, MariaDB baseline SQL API comparison, storage-engine smoke, sidecar
 gates, routed DDL/DML including schema namespaces, `CREATE TABLE ... LIKE`,
 `CREATE TABLE ... SELECT`, transaction-control policy, foreign-key DDL rejection,
 CHECK constraint enforcement, generated column coverage, unsupported index-class
-rejection, MariaDB statement transaction hook integration, failed statement
-rollback, initial application-schema smoke, and unsupported
+rejection, MariaDB statement transaction hook integration, busy-timeout lock
+waits, failed statement rollback, initial application-schema smoke, and unsupported
 server/non-table-object policy. MariaDB MTR comparison suites and broader
 application-schema suites remain planned.
 
@@ -119,9 +119,9 @@ application-schema suites remain planned.
 | Rollback | 🟡&nbsp;Partial | Covered failed file-backed statements restore the pre-statement MyLite header/catalog snapshot, including rows, row-state pages, index entries, autoincrement pages, and catalog records appended after the checkpoint; covered row-DML rollback is driven by MariaDB statement transaction hooks, while explicit `ROLLBACK` and rollback-to-savepoint are still rejected before MariaDB execution and full transaction/savepoint rollback remains planned |
 | Savepoints | 🟡&nbsp;Partial | `SAVEPOINT` and `RELEASE SAVEPOINT` are rejected before MariaDB execution; MariaDB-compatible savepoint behavior for supported MyLite tables remains planned |
 | Crash recovery | 🟡&nbsp;Partial | Recover the primary file from `<database>.mylite-journal` for current publication paths while holding the exclusive primary-file lock; WAL/checkpoints and transaction rollback remain planned |
-| Multiple readers | 🟡&nbsp;Partial | Storage read APIs acquire shared non-blocking advisory locks over stable committed state; SQL transaction lock integration and busy-timeout behavior remain planned |
+| Multiple readers | 🟡&nbsp;Partial | Storage read APIs acquire shared advisory locks over stable committed state; configured busy timeouts wait for cooperating primary-file lock conflicts before returning busy, while SQL transaction lock integration remains planned |
 | Concurrent writers | ⚪&nbsp;Planned | Preserve the full write-concurrency goal in storage and lock design |
-| Cross-process unsafe writers | 🟡&nbsp;Partial | Cooperating MyLite storage operations reject conflicting cross-process opens, writes, and recovery with busy errors; non-MyLite writers remain out of scope |
+| Cross-process unsafe writers | 🟡&nbsp;Partial | Cooperating MyLite storage operations reject conflicting cross-process opens, writes, and recovery with busy errors after the configured timeout expires; non-MyLite writers remain out of scope |
 
 ## Application Schemas
 

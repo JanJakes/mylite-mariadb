@@ -52,7 +52,7 @@ group_spec() {
       echo "storage-smoke-dev|compat-unsupported-index|Unsupported index-class rejection"
       ;;
     locking)
-      echo "dev|compat-locking|Primary-file lock conflict coverage"
+      echo "dev|compat-locking|Primary-file lock conflict and busy-timeout coverage"
       ;;
     embedded-lifecycle)
       echo "embedded-dev|compat-embedded-lifecycle|Embedded runtime open, close, direct execution, and cleanup coverage"

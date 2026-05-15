@@ -188,6 +188,7 @@ static mylite_storage_result validate_recovery_journal_pages(
 );
 static mylite_storage_result write_page(FILE *file, const unsigned char *page, size_t size);
 static mylite_storage_result lock_file(FILE *file, int operation);
+static int is_lock_conflict(int error_number);
 static mylite_storage_result flush_file(FILE *file);
 static mylite_storage_result flush_parent_directory(const char *filename);
 static mylite_storage_result close_created_file(FILE *file, const char *filename);
@@ -568,6 +569,9 @@ static const unsigned char k_autoincrement_magic[8] = {'M', 'Y', 'L', 'A', 'U', 
 static const unsigned char k_row_state_magic[8] = {'M', 'Y', 'L', 'R', 'S', 'T', '1', '\0'};
 static const unsigned char k_index_magic[8] = {'M', 'Y', 'L', 'I', 'D', 'X', '1', '\0'};
 static const unsigned char k_journal_magic[8] = {'M', 'Y', 'L', 'J', 'N', 'L', '1', '\0'};
+static const unsigned k_lock_retry_sleep_ms = 5U;
+static const useconds_t k_microseconds_per_millisecond = 1000U;
+static _Thread_local unsigned active_busy_timeout_ms = 0U;
 
 const char *mylite_storage_engine_name(void) {
     return MYLITE_STORAGE_ENGINE_NAME;
@@ -584,7 +588,8 @@ mylite_storage_capabilities mylite_storage_get_capabilities(void) {
                  MYLITE_STORAGE_CAPABILITY_ROW_LIFECYCLE | MYLITE_STORAGE_CAPABILITY_INDEX_ENTRIES |
                  MYLITE_STORAGE_CAPABILITY_RECOVERY_JOURNAL | MYLITE_STORAGE_CAPABILITY_FILE_LOCKS |
                  MYLITE_STORAGE_CAPABILITY_TRUNCATE | MYLITE_STORAGE_CAPABILITY_SCHEMAS |
-                 MYLITE_STORAGE_CAPABILITY_STATEMENT_CHECKPOINTS,
+                 MYLITE_STORAGE_CAPABILITY_STATEMENT_CHECKPOINTS |
+                 MYLITE_STORAGE_CAPABILITY_BUSY_TIMEOUT,
     };
 
     return capabilities;
@@ -2182,6 +2187,14 @@ int mylite_storage_statement_active(const char *filename) {
     return active_statement_for(filename) != NULL ? 1 : 0;
 }
 
+void mylite_storage_set_busy_timeout(unsigned milliseconds) {
+    active_busy_timeout_ms = milliseconds;
+}
+
+unsigned mylite_storage_busy_timeout(void) {
+    return active_busy_timeout_ms;
+}
+
 mylite_storage_result mylite_storage_commit_statement(mylite_storage_statement *statement) {
     if (statement == NULL || active_statement != statement) {
         return MYLITE_STORAGE_MISUSE;
@@ -2773,18 +2786,36 @@ static mylite_storage_result write_page(FILE *file, const unsigned char *page, s
 }
 
 static mylite_storage_result lock_file(FILE *file, int operation) {
-    if (flock(fileno(file), operation | LOCK_NB) == 0) {
-        return MYLITE_STORAGE_OK;
+    unsigned waited_ms = 0U;
+    for (;;) {
+        if (flock(fileno(file), operation | LOCK_NB) == 0) {
+            return MYLITE_STORAGE_OK;
+        }
+        if (!is_lock_conflict(errno)) {
+            return MYLITE_STORAGE_IOERR;
+        }
+        if (waited_ms >= active_busy_timeout_ms) {
+            return MYLITE_STORAGE_BUSY;
+        }
+
+        const unsigned remaining_ms = active_busy_timeout_ms - waited_ms;
+        const unsigned sleep_ms =
+            remaining_ms < k_lock_retry_sleep_ms ? remaining_ms : k_lock_retry_sleep_ms;
+        usleep((useconds_t)sleep_ms * k_microseconds_per_millisecond);
+        waited_ms += sleep_ms;
     }
-    if (errno == EWOULDBLOCK) {
-        return MYLITE_STORAGE_BUSY;
+}
+
+static int is_lock_conflict(int error_number) {
+    if (error_number == EWOULDBLOCK) {
+        return 1;
     }
 #if EAGAIN != EWOULDBLOCK
-    if (errno == EAGAIN) {
-        return MYLITE_STORAGE_BUSY;
+    if (error_number == EAGAIN) {
+        return 1;
     }
 #endif
-    return MYLITE_STORAGE_IOERR;
+    return 0;
 }
 
 static mylite_storage_result flush_file(FILE *file) {
