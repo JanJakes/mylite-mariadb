@@ -103,6 +103,13 @@ ELSE()
   ADD_DEFINITIONS(-DMYLITE_WITH_SFORMAT_SQL_FUNCTION=0)
 ENDIF()
 
+OPTION(MYLITE_WITH_HELP_COMMAND "Build SQL HELP command" ON)
+IF(MYLITE_WITH_HELP_COMMAND)
+  SET(MYLITE_HELP_COMMAND_SOURCE ../sql/sql_help.cc)
+ELSE()
+  SET(MYLITE_HELP_COMMAND_SOURCE mylite_help_command_stub.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS "Compile embedded SQL with C++ exceptions" ON)
 
 SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc 
@@ -145,7 +152,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/sql_db.cc ../sql/sql_delete.cc ../sql/sql_derived.cc 
            ../sql/sql_do.cc ../sql/sql_error.cc ../sql/sql_handler.cc
             ../sql/sql_get_diagnostics.cc
-           ../sql/sql_help.cc ../sql/sql_insert.cc ../sql/datadict.cc
+           ${MYLITE_HELP_COMMAND_SOURCE} ../sql/sql_insert.cc ../sql/datadict.cc
            ../sql/mylite_schema_hook.cc
            ../sql/sql_admin.cc ../sql/sql_truncate.cc ../sql/sql_reload.cc
            ../sql/sql_lex.cc ../sql/keycaches.cc

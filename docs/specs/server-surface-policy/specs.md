@@ -69,6 +69,8 @@ Add `compat-server-surface` coverage:
 - MyLite SQL-policy rejection for blocking, timing, named-lock,
   replication-wait, and server-identity utility functions as follow-up
   explicit unsupported surfaces.
+- MyLite SQL-policy rejection for the SQL `HELP` command as a follow-up
+  explicit unsupported surface.
 - MyLite SQL-policy rejection for Oracle SQL mode as a follow-up explicit
   unsupported surface.
 - MyLite SQL-policy rejection for XML SQL functions as a follow-up explicit
@@ -116,9 +118,9 @@ continue to route to MyLite where already covered.
 The original policy slice did not trim the archive directly. Follow-up
 size-profile slices now use these explicit unsupported surfaces to remove
 unreachable LOAD execution, host-file SQL I/O, server utility function paths,
-the Oracle SQL mode parser, XML SQL functions, GIS SQL functions, and SFORMAT
-from the default embedded profile, and to compile retained embedded SQL C++
-sources without exceptions.
+the Oracle SQL mode parser, XML SQL functions, GIS SQL functions, SFORMAT, and
+the full SQL `HELP` implementation from the default embedded profile, and to
+compile retained embedded SQL C++ sources without exceptions.
 
 ## Test Plan
 

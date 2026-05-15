@@ -23,6 +23,7 @@ static void test_statement_effects(void);
 static void test_callback_abort(void);
 static void test_syntax_error_diagnostics(void);
 static void test_server_surfaces_are_disabled(void);
+static void test_help_command_is_rejected(void);
 static void test_server_utility_functions_are_rejected(void);
 static void test_gis_sql_functions_are_rejected(void);
 static void test_sformat_sql_function_is_rejected(void);
@@ -39,6 +40,7 @@ static void test_partition_policy_is_rejected(void);
 static void assert_variable_value(mylite_db *db, const char *name, const char *value);
 static void assert_variable_value_or_missing(mylite_db *db, const char *name, const char *value);
 static void assert_exec_fails(mylite_db *db, const char *sql);
+static void assert_help_command_exec_fails(mylite_db *db, const char *sql);
 static void assert_server_utility_exec_fails(mylite_db *db, const char *sql);
 static void assert_gis_sql_function_exec_fails(mylite_db *db, const char *sql);
 static void assert_sformat_sql_function_exec_fails(mylite_db *db, const char *sql);
@@ -68,6 +70,7 @@ int main(void) {
     test_callback_abort();
     test_syntax_error_diagnostics();
     test_server_surfaces_are_disabled();
+    test_help_command_is_rejected();
     test_server_utility_functions_are_rejected();
     test_gis_sql_functions_are_rejected();
     test_sformat_sql_function_is_rejected();
@@ -216,6 +219,22 @@ static void test_server_surfaces_are_disabled(void) {
     assert_exec_fails(db, "BINLOG 'AAAA'");
     assert_exec_fails(db, "CHANGE MASTER TO MASTER_HOST='example.test'");
     assert_exec_fails(db, "SHOW MASTER STATUS");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_help_command_is_rejected(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_help_command_exec_fails(db, "HELP 'contents'");
+    assert_help_command_exec_fails(db, "help contents");
+    assert_help_command_exec_fails(db, "/*! HELP contents */");
+    assert(mylite_exec(db, "SELECT 'HELP contents' AS help_text", NULL, NULL, NULL) == MYLITE_OK);
 
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);
@@ -705,6 +724,18 @@ static void assert_exec_fails(mylite_db *db, const char *sql) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "server-oriented") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_help_command_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "HELP SQL command") != NULL);
     mylite_free(errmsg);
 }
 
