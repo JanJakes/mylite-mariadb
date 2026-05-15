@@ -2,11 +2,10 @@
 
 ## Goal
 
-Expose MariaDB-compatible warning counts and structured warning rows through
-the primary `libmylite` database handle after direct and prepared SQL
-execution.
+Expose retained MariaDB warning rows and their row count through the primary
+`libmylite` database handle after direct and prepared SQL execution.
 
-This completes the warning part of the SQL execution API without exposing raw
+This advances the warning part of the SQL execution API without exposing raw
 MariaDB connection or statement handles.
 
 ## Non-Goals
@@ -24,12 +23,12 @@ MariaDB connection or statement handles.
   `9bfea48ce1214cc4470f6f6f8a4e30352cef84e7`.
 - `mariadb/include/mysql.h` declares `mysql_warning_count(MYSQL *)` and the
   direct-result APIs needed to read `SHOW WARNINGS`.
-- `mariadb/libmariadb/libmariadb/mariadb_lib.c` implements
-  `mysql_warning_count()` by returning `mysql->warning_count`.
-- `mariadb/libmariadb/libmariadb/mariadb_stmt.c` updates
-  `stmt->mysql->warning_count` from statement upsert status for prepared
-  statements, so the connection warning count remains usable through MyLite's
-  private embedded connection.
+- `mariadb/libmysqld/libmysql.c` implements `mysql_warning_count()` by
+  returning `mysql->warning_count` for the embedded API.
+- `mariadb/libmysqld/libmysql.c` updates the connection warning count while
+  reading prepared-statement prepare and result packets. MyLite treats that
+  value as a hint for whether to issue `SHOW WARNINGS`, not as a separate
+  total-count API.
 - `mariadb/sql/sql_error.h` documents `Warning_info::warn_count()` as the value
   used by `@@warning_count` and notes it can be higher than the stored warning
   list when `max_error_count` limits retained rows.
@@ -48,15 +47,13 @@ Add the public warning API already documented in
 
 The database handle stores:
 
-- the total warning count from `mysql_warning_count()` after the user
-  statement;
+- the retained row count from `SHOW WARNINGS`;
 - the structured rows returned by `SHOW WARNINGS`, each with level, numeric
   code, and message text.
 
-`mylite_warning_count()` returns the total count from MariaDB, not just the
-number of retained rows. `mylite_warning()` uses a zero-based index into the
-stored rows and returns `MYLITE_NOTFOUND` if MariaDB reported more warnings
-than it retained for `SHOW WARNINGS`.
+`mylite_warning_count()` returns the number of stored rows. `mylite_warning()`
+uses a zero-based index into those rows and returns `MYLITE_NOTFOUND` for
+indexes beyond the stored diagnostics.
 
 Direct execution captures warnings after MyLite has read the statement result,
 affected rows, and insert id. Prepared execution captures warnings immediately
@@ -68,15 +65,16 @@ rows, warning access reflects the previous completed statement.
 
 This moves warnings from planned to partial coverage:
 
-- direct execution exposes warning count and structured `SHOW WARNINGS` rows
-  after successful statements;
+- direct execution exposes retained structured `SHOW WARNINGS` rows after
+  successful statements;
 - prepared non-result statements expose warnings after `mylite_step()` returns
   `MYLITE_DONE`;
-- prepared result statements expose warnings after the result set is drained.
+- prepared result statements expose warnings after the result set is drained;
+- failed direct execution, failed prepare, and failed prepared execute paths
+  retain structured warning/error rows before a prepared result set is active.
 
 Errors continue to use existing MariaDB errno, SQLSTATE, and message APIs.
-Warning enumeration after failed statements remains out of scope for this
-slice.
+Fetch-time failure warning capture remains out of scope for this slice.
 
 ## Single-File And Storage Impact
 
@@ -104,10 +102,11 @@ result APIs and prepared statements already link statement execution.
 
 1. Extend public API tests for `NULL` warning handles and output pointers.
 2. Add embedded tests for:
-   - direct SQL warning count and structured warning rows;
+   - direct SQL retained warning rows;
    - warnings being cleared by a later clean statement;
    - prepared non-result warning capture;
    - prepared result warnings becoming visible after result exhaustion;
+   - failed direct, prepare, and prepared execute warning rows;
    - missing warning indexes returning `MYLITE_NOTFOUND`.
 3. Add a compatibility harness group for warning enumeration.
 4. Run `dev`, `embedded-dev`, `storage-smoke-dev`, the warning compatibility
@@ -116,16 +115,17 @@ result APIs and prepared statements already link statement execution.
 ## Acceptance Criteria
 
 - The public header exposes warning levels and warning accessors.
-- Successful direct and prepared execution captures MariaDB warning counts.
+- Successful direct and prepared execution captures MariaDB warning rows.
+- Failed direct, prepare, and prepared execute paths capture MariaDB
+  warning/error rows where no prepared result set is active.
 - Structured warning rows expose level, code, and message.
 - Warning rows are database-owned and remain valid until replaced.
 - Docs and compatibility matrix mark warning enumeration as partial, with
-  limits around stored rows and failed statements explicit.
+  limits around stored rows and fetch-time failures explicit.
 
 ## Risks And Open Questions
 
 - `SHOW WARNINGS` returns at most MariaDB's retained warning list. MyLite keeps
-  the total warning count separately so callers can distinguish retained rows
-  from total warnings.
+  the retained rows rather than promising a separate total count.
 - Prepared result warnings may not be final until the result is drained; this
   slice exposes them at `MYLITE_DONE` rather than during active row iteration.

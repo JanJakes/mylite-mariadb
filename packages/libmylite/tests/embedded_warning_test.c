@@ -9,8 +9,11 @@
 #include <unistd.h>
 
 static void test_direct_warning_rows(void);
+static void test_failed_direct_warning_rows(void);
 static void test_prepared_non_result_warnings(void);
 static void test_prepared_result_warnings_after_drain(void);
+static void test_failed_prepare_warning_rows(void);
+static void test_prepared_execute_failure_warning_rows(void);
 static void test_warning_api_validation(void);
 static mylite_stmt *prepare_statement(mylite_db *db, const char *sql);
 static mylite_db *open_database(const char *root, char **filename);
@@ -22,8 +25,11 @@ static void remove_tree_entry(const char *path);
 
 int main(void) {
     test_direct_warning_rows();
+    test_failed_direct_warning_rows();
     test_prepared_non_result_warnings();
     test_prepared_result_warnings_after_drain();
+    test_failed_prepare_warning_rows();
+    test_prepared_execute_failure_warning_rows();
     test_warning_api_validation();
     return 0;
 }
@@ -53,6 +59,41 @@ static void test_direct_warning_rows(void) {
     assert(mylite_warning_count(db) == 0U);
 
     assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_failed_direct_warning_rows(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *database = open_database(root, &filename);
+    mylite_warning_level level = MYLITE_WARNING_NOTE;
+    unsigned code = 0;
+    unsigned mariadb_errno = 0;
+    const char *message = NULL;
+
+    assert(mylite_exec(database, "CREATE DATABASE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(database, "USE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(database, "SELECT * FROM missing_warning_table", NULL, NULL, NULL) ==
+        MYLITE_ERROR
+    );
+    assert(mylite_errcode(database) == MYLITE_ERROR);
+    mariadb_errno = mylite_mariadb_errno(database);
+    assert(mariadb_errno != 0U);
+    assert(strcmp(mylite_sqlstate(database), "00000") != 0);
+    assert(mylite_warning_count(database) >= 1U);
+    assert(mylite_warning(database, 0U, &level, &code, &message) == MYLITE_OK);
+    assert(level == MYLITE_WARNING_ERROR);
+    assert(code == mariadb_errno);
+    assert(message != NULL);
+    assert(strstr(message, "missing_warning_table") != NULL);
+
+    assert(mylite_exec(database, "SELECT 1", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_warning_count(database) == 0U);
+
+    assert(mylite_close(database) == MYLITE_OK);
     free(filename);
     remove_tree(root);
     free(root);
@@ -143,6 +184,87 @@ static void test_prepared_result_warnings_after_drain(void) {
     assert(mylite_finalize(stmt) == MYLITE_OK);
 
     assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_failed_prepare_warning_rows(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *database = open_database(root, &filename);
+    mylite_stmt *stmt = NULL;
+    mylite_warning_level level = MYLITE_WARNING_NOTE;
+    unsigned code = 0;
+    unsigned mariadb_errno = 0;
+    const char *message = NULL;
+
+    assert(
+        mylite_prepare(database, "SELEC broken", MYLITE_NUL_TERMINATED, &stmt, NULL) == MYLITE_ERROR
+    );
+    assert(stmt == NULL);
+    assert(mylite_errcode(database) == MYLITE_ERROR);
+    mariadb_errno = mylite_mariadb_errno(database);
+    assert(mariadb_errno != 0U);
+    assert(strcmp(mylite_sqlstate(database), "00000") != 0);
+    assert(mylite_warning_count(database) >= 1U);
+    assert(mylite_warning(database, 0U, &level, &code, &message) == MYLITE_OK);
+    assert(level == MYLITE_WARNING_ERROR);
+    assert(code == mariadb_errno);
+    assert(message != NULL);
+    assert(strstr(message, "syntax") != NULL || strstr(message, "SQL") != NULL);
+
+    assert(mylite_exec(database, "SELECT 1", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_warning_count(database) == 0U);
+
+    assert(mylite_close(database) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_prepared_execute_failure_warning_rows(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *database = open_database(root, &filename);
+    mylite_stmt *stmt = NULL;
+    mylite_warning_level level = MYLITE_WARNING_NOTE;
+    unsigned code = 0;
+    unsigned mariadb_errno = 0;
+    const char *message = NULL;
+
+    assert(mylite_exec(database, "CREATE DATABASE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(database, "USE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(
+            database,
+            "CREATE TEMPORARY TABLE duplicate_values (id BIGINT NOT NULL PRIMARY KEY)",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(
+        mylite_exec(database, "INSERT INTO duplicate_values(id) VALUES (1)", NULL, NULL, NULL) ==
+        MYLITE_OK
+    );
+
+    stmt = prepare_statement(database, "INSERT INTO duplicate_values(id) VALUES (?)");
+    assert(mylite_bind_int64(stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_ERROR);
+    assert(mylite_errcode(database) == MYLITE_ERROR);
+    mariadb_errno = mylite_mariadb_errno(database);
+    assert(mariadb_errno != 0U);
+    assert(strcmp(mylite_sqlstate(database), "00000") != 0);
+    assert(mylite_warning_count(database) >= 1U);
+    assert(mylite_warning(database, 0U, &level, &code, &message) == MYLITE_OK);
+    assert(level == MYLITE_WARNING_ERROR);
+    assert(code == mariadb_errno);
+    assert(message != NULL);
+    assert(strstr(message, "Duplicate") != NULL || strstr(message, "duplicate") != NULL);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+
+    assert(mylite_close(database) == MYLITE_OK);
     free(filename);
     remove_tree(root);
     free(root);

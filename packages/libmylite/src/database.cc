@@ -268,7 +268,7 @@ int fetch_statement_row(mylite_stmt &statement);
 int bind_statement_results(mylite_stmt &statement);
 int fetch_truncated_column(mylite_stmt &statement, unsigned column);
 int materialize_column_value(mylite_stmt &statement, unsigned column);
-int capture_warnings(mylite_db &database, unsigned warning_count);
+int capture_warnings(mylite_db &database, unsigned warning_count, bool force_query = false);
 void clear_current_row(mylite_stmt &statement);
 bool is_variable_column_type(mylite_value_type type);
 const void *bound_value_data(const BoundValue &value);
@@ -1107,7 +1107,12 @@ int exec_impl(
     }
 
     if (mysql_query(&database->mysql, sql) != 0) {
+        const unsigned warning_count = mysql_warning_count(&database->mysql);
         set_mariadb_error(*database);
+        const int warning_result = capture_warnings(*database, warning_count, true);
+        if (warning_result != MYLITE_OK) {
+            return copy_error_message(*database, errmsg);
+        }
         return copy_error_message(*database, errmsg);
     }
 
@@ -1161,6 +1166,7 @@ int prepare_impl(
     return MYLITE_ERROR;
 #else
     set_ok(*database);
+    clear_warnings(*database);
     if (is_server_surface_sql(std::string_view(sql, sql_len))) {
         set_error(*database, MYLITE_ERROR, "unsupported server-oriented SQL surface");
         return MYLITE_ERROR;
@@ -1177,9 +1183,14 @@ int prepare_impl(
 
         if (mysql_stmt_prepare(statement->statement, sql, static_cast<unsigned long>(sql_len)) !=
             0) {
+            const unsigned warning_count = mysql_warning_count(&database->mysql);
             set_mariadb_statement_error(*statement);
+            const int warning_result = capture_warnings(*database, warning_count, true);
             mysql_stmt_close(statement->statement);
             statement->statement = nullptr;
+            if (warning_result != MYLITE_OK) {
+                return warning_result;
+            }
             return MYLITE_ERROR;
         }
 
@@ -1301,8 +1312,10 @@ int execute_statement(mylite_stmt &statement) {
     }
 
     if (mysql_stmt_execute(statement.statement) != 0) {
+        const unsigned warning_count = mysql_warning_count(&statement.database->mysql);
         set_mariadb_statement_error(statement);
-        return MYLITE_ERROR;
+        const int warning_result = capture_warnings(*statement.database, warning_count, true);
+        return warning_result == MYLITE_OK ? MYLITE_ERROR : warning_result;
     }
 
     statement.executed = true;
@@ -1483,10 +1496,10 @@ int materialize_column_value(mylite_stmt &statement, unsigned column) {
     return fetch_truncated_column(statement, column);
 }
 
-int capture_warnings(mylite_db &database, unsigned warning_count) {
+int capture_warnings(mylite_db &database, unsigned warning_count, bool force_query) {
     clear_warnings(database);
     database.warning_count = warning_count;
-    if (warning_count == 0U) {
+    if (warning_count == 0U && !force_query) {
         return MYLITE_OK;
     }
 
@@ -1528,6 +1541,9 @@ int capture_warnings(mylite_db &database, unsigned warning_count) {
                 }
             );
         }
+        database.warning_count = database.warnings.size() > static_cast<std::size_t>(UINT_MAX)
+                                     ? UINT_MAX
+                                     : static_cast<unsigned>(database.warnings.size());
     } catch (const std::bad_alloc &) {
         mysql_free_result(result);
         clear_warnings(database);

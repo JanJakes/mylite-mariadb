@@ -171,9 +171,10 @@ Initial implementation status: prepared statements run through MariaDB's
 embedded `MYSQL_STMT` API. The implementation supports one statement per
 prepare call, 1-based scalar parameter binding, row stepping, reset/finalize
 ownership, affected rows, insert ids, MariaDB diagnostics, warnings after
-completed execution, and binary-safe text/BLOB column reads. Multi-result
-execution, parameter metadata, array binding, streaming parameter binding, and
-direct-execution large-value streaming remain planned.
+completed execution and selected failed execution paths, and binary-safe
+text/BLOB column reads. Multi-result execution, parameter metadata, array
+binding, streaming parameter binding, and direct-execution large-value
+streaming remain planned.
 
 ## Bindings
 
@@ -309,12 +310,13 @@ SQLSTATE remain available for callers that need server-compatible diagnostics.
 `mylite_warning()` uses a zero-based index. It returns `MYLITE_NOTFOUND` when
 the requested warning is not stored.
 
-Initial implementation status: successful direct execution stores MariaDB's
-warning count and the structured rows returned by `SHOW WARNINGS`. Prepared
-non-result statements expose warnings after `mylite_step()` returns
-`MYLITE_DONE`; prepared result statements expose warnings after the result set
-is drained. `mylite_warning_count()` reports MariaDB's total count even if
-MariaDB retained fewer structured rows due to `max_error_count`.
+Initial implementation status: successful direct execution stores the
+structured rows returned by `SHOW WARNINGS`. Prepared non-result statements
+expose warnings after `mylite_step()` returns `MYLITE_DONE`; prepared result
+statements expose warnings after the result set is drained. Failed direct
+execution, failed prepare, and failed prepared execute paths also retain
+structured warning rows before a prepared result set is active. Fetch-time
+failure warning capture remains planned.
 
 ## Statement Effects
 
