@@ -109,6 +109,16 @@ static void test_null_statement_api(void) {
 static void test_null_column_api(void) {
     assert(mylite_column_count(NULL) == 0U);
     assert(mylite_column_name(NULL, 0U) == NULL);
+    assert(mylite_column_database_name(NULL, 0U) == NULL);
+    assert(mylite_column_table_name(NULL, 0U) == NULL);
+    assert(mylite_column_origin_table_name(NULL, 0U) == NULL);
+    assert(mylite_column_origin_name(NULL, 0U) == NULL);
+    assert(mylite_column_mariadb_type(NULL, 0U) == 0U);
+    assert(mylite_column_flags(NULL, 0U) == 0U);
+    assert(mylite_column_charset(NULL, 0U) == 0U);
+    assert(mylite_column_decimals(NULL, 0U) == 0U);
+    assert(mylite_column_length(NULL, 0U) == 0UL);
+    assert(mylite_column_max_length(NULL, 0U) == 0UL);
     assert(mylite_column_type(NULL, 0U) == MYLITE_TYPE_NULL);
     assert(mylite_column_int64(NULL, 0U) == 0);
     assert(mylite_column_uint64(NULL, 0U) == 0U);

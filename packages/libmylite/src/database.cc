@@ -145,8 +145,16 @@ struct BoundValue {
 #if MYLITE_WITH_MARIADB_EMBEDDED
 struct ColumnInfo {
     std::string name;
+    std::string database_name;
+    std::string table_name;
+    std::string origin_table_name;
+    std::string origin_name;
     enum enum_field_types type = MYSQL_TYPE_NULL;
     unsigned int flags = 0;
+    unsigned int charset = 0;
+    unsigned int decimals = 0;
+    unsigned long length = 0;
+    unsigned long max_length = 0;
 };
 
 struct ColumnValue {
@@ -267,6 +275,7 @@ mylite_value_type map_column_type(const ColumnInfo &column);
 mylite_value_type map_mariadb_type(enum enum_field_types type, unsigned int flags);
 bool is_unsigned_column(unsigned int flags);
 mylite_warning_level map_warning_level(const char *level);
+std::string field_string(const char *value, unsigned int length);
 bool is_server_surface_sql(std::string_view sql);
 std::string_view skip_sql_leading_noise(std::string_view sql);
 std::string_view pop_sql_token(std::string_view &sql);
@@ -567,6 +576,136 @@ const char *mylite_column_name(mylite_stmt *statement, unsigned column) {
     (void)statement;
     (void)column;
     return nullptr;
+#endif
+}
+
+const char *mylite_column_database_name(mylite_stmt *statement, unsigned column) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (statement == nullptr || column >= statement->columns.size()) {
+        return nullptr;
+    }
+    return statement->columns[column].database_name.c_str();
+#else
+    (void)statement;
+    (void)column;
+    return nullptr;
+#endif
+}
+
+const char *mylite_column_table_name(mylite_stmt *statement, unsigned column) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (statement == nullptr || column >= statement->columns.size()) {
+        return nullptr;
+    }
+    return statement->columns[column].table_name.c_str();
+#else
+    (void)statement;
+    (void)column;
+    return nullptr;
+#endif
+}
+
+const char *mylite_column_origin_table_name(mylite_stmt *statement, unsigned column) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (statement == nullptr || column >= statement->columns.size()) {
+        return nullptr;
+    }
+    return statement->columns[column].origin_table_name.c_str();
+#else
+    (void)statement;
+    (void)column;
+    return nullptr;
+#endif
+}
+
+const char *mylite_column_origin_name(mylite_stmt *statement, unsigned column) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (statement == nullptr || column >= statement->columns.size()) {
+        return nullptr;
+    }
+    return statement->columns[column].origin_name.c_str();
+#else
+    (void)statement;
+    (void)column;
+    return nullptr;
+#endif
+}
+
+unsigned mylite_column_mariadb_type(mylite_stmt *statement, unsigned column) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (statement == nullptr || column >= statement->columns.size()) {
+        return 0U;
+    }
+    return static_cast<unsigned>(statement->columns[column].type);
+#else
+    (void)statement;
+    (void)column;
+    return 0U;
+#endif
+}
+
+unsigned mylite_column_flags(mylite_stmt *statement, unsigned column) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (statement == nullptr || column >= statement->columns.size()) {
+        return 0U;
+    }
+    return statement->columns[column].flags;
+#else
+    (void)statement;
+    (void)column;
+    return 0U;
+#endif
+}
+
+unsigned mylite_column_charset(mylite_stmt *statement, unsigned column) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (statement == nullptr || column >= statement->columns.size()) {
+        return 0U;
+    }
+    return statement->columns[column].charset;
+#else
+    (void)statement;
+    (void)column;
+    return 0U;
+#endif
+}
+
+unsigned mylite_column_decimals(mylite_stmt *statement, unsigned column) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (statement == nullptr || column >= statement->columns.size()) {
+        return 0U;
+    }
+    return statement->columns[column].decimals;
+#else
+    (void)statement;
+    (void)column;
+    return 0U;
+#endif
+}
+
+unsigned long mylite_column_length(mylite_stmt *statement, unsigned column) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (statement == nullptr || column >= statement->columns.size()) {
+        return 0UL;
+    }
+    return statement->columns[column].length;
+#else
+    (void)statement;
+    (void)column;
+    return 0UL;
+#endif
+}
+
+unsigned long mylite_column_max_length(mylite_stmt *statement, unsigned column) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (statement == nullptr || column >= statement->columns.size()) {
+        return 0UL;
+    }
+    return statement->columns[column].max_length;
+#else
+    (void)statement;
+    (void)column;
+    return 0UL;
 #endif
 }
 
@@ -1001,9 +1140,17 @@ int initialize_statement_metadata(mylite_stmt &statement) {
         for (unsigned i = 0; i < field_count; ++i) {
             statement.columns.push_back(
                 ColumnInfo{
-                    fields[i].name != nullptr ? fields[i].name : "",
+                    field_string(fields[i].name, fields[i].name_length),
+                    field_string(fields[i].db, fields[i].db_length),
+                    field_string(fields[i].table, fields[i].table_length),
+                    field_string(fields[i].org_table, fields[i].org_table_length),
+                    field_string(fields[i].org_name, fields[i].org_name_length),
                     fields[i].type,
                     fields[i].flags,
+                    fields[i].charsetnr,
+                    fields[i].decimals,
+                    fields[i].length,
+                    fields[i].max_length,
                 }
             );
         }
@@ -1391,6 +1538,10 @@ mylite_warning_level map_warning_level(const char *level) {
         return MYLITE_WARNING_ERROR;
     }
     return MYLITE_WARNING_WARNING;
+}
+
+std::string field_string(const char *value, unsigned int length) {
+    return value != nullptr ? std::string(value, static_cast<std::size_t>(length)) : std::string();
 }
 
 int store_and_emit_result(

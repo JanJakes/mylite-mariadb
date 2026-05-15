@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-all_groups="public-api storage-core crash-recovery locking embedded-lifecycle direct-sql prepared-statement warning storage-engine sidecar routed-ddl-dml application-schema server-surface"
+all_groups="public-api storage-core crash-recovery locking embedded-lifecycle direct-sql prepared-statement column-metadata warning storage-engine sidecar routed-ddl-dml application-schema server-surface"
 
 usage() {
   cat <<EOF
@@ -41,6 +41,9 @@ group_spec() {
       ;;
     prepared-statement)
       echo "embedded-dev|compat-prepared-statement|Prepared statements, typed bindings, and binary-safe column access"
+      ;;
+    column-metadata)
+      echo "embedded-dev|compat-column-metadata|Prepared statement column metadata"
       ;;
     warning)
       echo "embedded-dev|compat-warning|Warning counts and structured SHOW WARNINGS rows"

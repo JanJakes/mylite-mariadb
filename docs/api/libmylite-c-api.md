@@ -172,7 +172,7 @@ embedded `MYSQL_STMT` API. The implementation supports one statement per
 prepare call, 1-based scalar parameter binding, row stepping, reset/finalize
 ownership, affected rows, insert ids, MariaDB diagnostics, warnings after
 completed execution, and binary-safe text/BLOB column reads. Multi-result
-execution, rich metadata, array binding, and streaming large values remain
+execution, parameter metadata, array binding, and streaming large values remain
 planned.
 
 ## Bindings
@@ -231,6 +231,16 @@ typedef enum mylite_value_type {
 
 unsigned mylite_column_count(mylite_stmt *stmt);
 const char *mylite_column_name(mylite_stmt *stmt, unsigned column);
+const char *mylite_column_database_name(mylite_stmt *stmt, unsigned column);
+const char *mylite_column_table_name(mylite_stmt *stmt, unsigned column);
+const char *mylite_column_origin_table_name(mylite_stmt *stmt, unsigned column);
+const char *mylite_column_origin_name(mylite_stmt *stmt, unsigned column);
+unsigned mylite_column_mariadb_type(mylite_stmt *stmt, unsigned column);
+unsigned mylite_column_flags(mylite_stmt *stmt, unsigned column);
+unsigned mylite_column_charset(mylite_stmt *stmt, unsigned column);
+unsigned mylite_column_decimals(mylite_stmt *stmt, unsigned column);
+unsigned long mylite_column_length(mylite_stmt *stmt, unsigned column);
+unsigned long mylite_column_max_length(mylite_stmt *stmt, unsigned column);
 mylite_value_type mylite_column_type(mylite_stmt *stmt, unsigned column);
 
 long long mylite_column_int64(mylite_stmt *stmt, unsigned column);
@@ -250,10 +260,12 @@ BLOB, and string/date/time/decimal fields to TEXT. TEXT values are
 NUL-terminated for `mylite_column_text()`, but `mylite_column_bytes()` remains
 the authoritative byte count.
 
-MariaDB exposes richer type metadata than this primary value classification.
-Later metadata APIs should expose original MariaDB field type, charset,
-collation, signedness, precision, scale, schema, table, and original column
-name where applications need them.
+The metadata accessors expose the MariaDB result metadata copied at prepare
+time. Alias names come from `mylite_column_name()`. Database, table, original
+table, and original column names may be empty for expressions and literal
+columns. `mylite_column_mariadb_type()` returns MariaDB's native
+`enum_field_types` numeric value; flags, charset, decimals, display length, and
+maximum observed length follow MariaDB's `MYSQL_FIELD` metadata.
 
 ## Diagnostics And Warnings
 

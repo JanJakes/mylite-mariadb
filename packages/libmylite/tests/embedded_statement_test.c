@@ -54,6 +54,7 @@ static void test_scalar_select(void) {
     assert(mylite_column_count(stmt) == 5U);
     assert(strcmp(mylite_column_name(stmt, 0U), "n") == 0);
     assert(strcmp(mylite_column_name(stmt, 1U), "i") == 0);
+    assert(strcmp(mylite_column_origin_name(stmt, 0U), "") == 0);
 
     assert(mylite_bind_null(stmt, 1U) == MYLITE_OK);
     assert(mylite_bind_int64(stmt, 2U, -42) == MYLITE_OK);
@@ -118,6 +119,15 @@ static void test_table_roundtrip(void) {
     assert(mylite_finalize(insert) == MYLITE_OK);
 
     select = prepare_statement(db, "SELECT id, name, payload FROM prepared_values WHERE id=?");
+    assert(strcmp(mylite_column_database_name(select, 0U), "app") == 0);
+    assert(strcmp(mylite_column_table_name(select, 1U), "prepared_values") == 0);
+    assert(strcmp(mylite_column_origin_table_name(select, 1U), "prepared_values") == 0);
+    assert(strcmp(mylite_column_origin_name(select, 1U), "name") == 0);
+    assert(mylite_column_mariadb_type(select, 0U) != 0U);
+    assert(mylite_column_flags(select, 0U) != 0U);
+    assert(mylite_column_charset(select, 1U) != 0U);
+    assert(mylite_column_decimals(select, 0U) == 0U);
+    assert(mylite_column_length(select, 1U) >= 32U);
     assert(mylite_bind_uint64(select, 1U, 1U) == MYLITE_OK);
     assert(mylite_step(select) == MYLITE_ROW);
     assert(mylite_column_type(select, 0U) == MYLITE_TYPE_UINT64);
@@ -245,6 +255,14 @@ static void test_invalid_indexes(void) {
     assert(mylite_bind_int64(stmt, 1U, 11) == MYLITE_OK);
     assert(mylite_step(stmt) == MYLITE_ROW);
     assert(mylite_column_name(stmt, 1U) == NULL);
+    assert(mylite_column_database_name(stmt, 1U) == NULL);
+    assert(mylite_column_origin_name(stmt, 1U) == NULL);
+    assert(mylite_column_mariadb_type(stmt, 1U) == 0U);
+    assert(mylite_column_flags(stmt, 1U) == 0U);
+    assert(mylite_column_charset(stmt, 1U) == 0U);
+    assert(mylite_column_decimals(stmt, 1U) == 0U);
+    assert(mylite_column_length(stmt, 1U) == 0UL);
+    assert(mylite_column_max_length(stmt, 1U) == 0UL);
     assert(mylite_column_type(stmt, 1U) == MYLITE_TYPE_NULL);
     assert(mylite_column_blob(stmt, 1U) == NULL);
     assert(mylite_column_bytes(stmt, 1U) == 0U);

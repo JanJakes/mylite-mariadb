@@ -145,6 +145,16 @@ MYLITE_API int mylite_bind_blob(
 
 MYLITE_API unsigned mylite_column_count(mylite_stmt *statement);
 MYLITE_API const char *mylite_column_name(mylite_stmt *statement, unsigned column);
+MYLITE_API const char *mylite_column_database_name(mylite_stmt *statement, unsigned column);
+MYLITE_API const char *mylite_column_table_name(mylite_stmt *statement, unsigned column);
+MYLITE_API const char *mylite_column_origin_table_name(mylite_stmt *statement, unsigned column);
+MYLITE_API const char *mylite_column_origin_name(mylite_stmt *statement, unsigned column);
+MYLITE_API unsigned mylite_column_mariadb_type(mylite_stmt *statement, unsigned column);
+MYLITE_API unsigned mylite_column_flags(mylite_stmt *statement, unsigned column);
+MYLITE_API unsigned mylite_column_charset(mylite_stmt *statement, unsigned column);
+MYLITE_API unsigned mylite_column_decimals(mylite_stmt *statement, unsigned column);
+MYLITE_API unsigned long mylite_column_length(mylite_stmt *statement, unsigned column);
+MYLITE_API unsigned long mylite_column_max_length(mylite_stmt *statement, unsigned column);
 MYLITE_API mylite_value_type mylite_column_type(mylite_stmt *statement, unsigned column);
 MYLITE_API long long mylite_column_int64(mylite_stmt *statement, unsigned column);
 MYLITE_API unsigned long long mylite_column_uint64(mylite_stmt *statement, unsigned column);
