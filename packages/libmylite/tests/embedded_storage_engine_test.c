@@ -134,6 +134,7 @@ static void test_truncate_table_lifecycle(void);
 static void test_wordpress_shaped_schema(void);
 static void assert_exec_succeeds(mylite_db *db, const char *sql);
 static void assert_exec_fails(mylite_db *db, const char *sql);
+static void assert_exec_fails_with_message(mylite_db *db, const char *sql, const char *message);
 static void assert_non_table_object_exec_fails(mylite_db *db, const char *sql);
 static void assert_transaction_control_exec_fails(mylite_db *db, const char *sql);
 static void assert_foreign_key_exec_fails(mylite_db *db, const char *sql);
@@ -726,6 +727,18 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert_exec_succeeds(db, "SET check_constraint_checks=OFF");
     assert_exec_succeeds(db, "INSERT INTO checked_posts VALUES (2, 7)");
     assert_exec_succeeds(db, "SET check_constraint_checks=ON");
+    assert_exec_succeeds(db, "ALTER TABLE checked_posts DROP CONSTRAINT rating_max");
+    assert_exec_succeeds(db, "INSERT INTO checked_posts VALUES (3, 8)");
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE checked_posts ADD CONSTRAINT rating_cap CHECK (rating <= 8)"
+    );
+    assert_exec_succeeds(db, "ALTER TABLE checked_posts DROP CONSTRAINT rating_cap");
+    assert_exec_succeeds(db, "INSERT INTO checked_posts VALUES (4, 9)");
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE checked_posts ADD CONSTRAINT rating_reopen_cap CHECK (rating <= 9)"
+    );
     assert_exec_succeeds(db, "INSERT INTO generated_posts (id, title) VALUES (1, 'draft')");
     assert(
         mylite_exec(
@@ -1098,7 +1111,7 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert(auto_rows.found_after_alter);
     assert(auto_rows.found_after_low_alter);
     assert(auto_rows.found_reopened);
-    assert_exec_fails(db, "INSERT INTO checked_posts VALUES (3, 6)");
+    assert_exec_fails_with_message(db, "INSERT INTO checked_posts VALUES (5, 10)", "CONSTRAINT");
     assert(
         mylite_exec(
             db,
@@ -2664,6 +2677,18 @@ static void assert_exec_fails(mylite_db *db, const char *sql) {
     }
     assert(result != MYLITE_OK);
     assert(errmsg != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_exec_fails_with_message(mylite_db *db, const char *sql, const char *message) {
+    char *errmsg = NULL;
+    const int result = mylite_exec(db, sql, NULL, NULL, &errmsg);
+    if (result == MYLITE_OK) {
+        fprintf(stderr, "SQL unexpectedly succeeded: %s\n", sql);
+    }
+    assert(result != MYLITE_OK);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, message) != NULL);
     mylite_free(errmsg);
 }
 

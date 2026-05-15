@@ -51,8 +51,9 @@ basic CHECK expressions can survive close/reopen and continue to be enforced by
 MariaDB before the MyLite handler writes rows.
 
 This slice marks CHECK constraints as partial support: covered for basic
-column-level and table-level constraints on routed base tables, with broader
-expression, ALTER, CTAS, dump-import, and rollback cases still planned.
+column-level and table-level constraints on routed base tables. Later coverage
+adds named table-level CHECK add/drop ALTER, while broader expression,
+failed-ALTER rollback, CTAS, dump-import, and rollback cases remain planned.
 
 ## Design
 
@@ -115,7 +116,7 @@ behavior plus MyLite catalog persistence.
 ## Risks And Open Questions
 
 - Complex deterministic functions, JSON-specific checks, strict-mode warning
-  interactions, `IGNORE`, `LOAD DATA`, `ALTER TABLE ADD/DROP CONSTRAINT`,
+  interactions, `IGNORE`, `LOAD DATA`, failed `ALTER TABLE ADD CONSTRAINT`,
   `CREATE TABLE ... SELECT`, and prepared-statement-specific diagnostics need
   later coverage.
 - Failed statements still depend on current non-transactional rollback limits
