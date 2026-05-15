@@ -225,11 +225,12 @@ CHECK after catalog-only close/reopen. Broader CHECK expression, failed ALTER
 rollback, CTAS, dump-import, prepared-diagnostic, and rollback coverage remains
 planned.
 Basic virtual and stored generated columns follow the same catalog-backed
-table-definition path. Ordinary secondary and unique indexes on
-scalar virtual or stored generated columns use the same MariaDB-generated key
-tuples as supported base-column indexes. Generated primary keys,
-expression/hidden generated indexes, BLOB/TEXT generated key payloads, and
-broader expression matrices remain planned.
+table-definition path. Ordinary secondary and unique indexes on scalar virtual
+or stored generated columns use the same MariaDB-generated key tuples as
+supported base-column indexes, including initial definitions and supported
+copy-rebuild add, drop, rename, and standalone index DDL paths. Generated
+primary keys, expression/hidden generated indexes, BLOB/TEXT generated key
+payloads, and broader expression matrices remain planned.
 The same create-time key-shape gate rejects FULLTEXT and SPATIAL indexes before
 catalog publication; MyLite must not publish a table definition whose index
 class cannot be maintained by the current storage format.

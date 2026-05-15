@@ -3,11 +3,11 @@
 ## Problem
 
 MyLite already covers supported index creation, drop, and preservation across
-table rename, but SQL-level `ALTER TABLE ... RENAME INDEX` remains unproven.
-Applications and schema migration tools use this syntax to rename secondary
-indexes without changing table rows or key columns, so MyLite needs coverage
-that the renamed key remains catalog-backed, usable through index hints, and
-durable after close/reopen.
+table rename. This slice moved SQL-level `ALTER TABLE ... RENAME INDEX` from
+unproven to partial support. Applications and schema migration tools use this
+syntax to rename secondary indexes without changing table rows or key columns,
+so MyLite needs coverage that the renamed key remains catalog-backed, usable
+through index hints, and durable after close/reopen.
 
 ## Source Findings
 
@@ -25,9 +25,10 @@ MariaDB base: `mariadb-11.8.6`
 
 ## Scope
 
-- `ALTER TABLE ... RENAME INDEX ... TO ..., ALGORITHM=COPY` on a supported
-  MyLite-routed table.
-- Renamed unique secondary index metadata.
+- `ALTER TABLE ... RENAME INDEX ... TO ..., ALGORITHM=COPY` on supported
+  MyLite-routed base-column and generated-column indexes.
+- Renamed unique secondary index metadata, including generated-column unique
+  indexes.
 - Forced-index lookup through the new key name.
 - Rejection of the old key name through `FORCE INDEX`.
 - Duplicate-key enforcement after rename.
@@ -56,17 +57,19 @@ The storage-engine smoke test extends the standalone index DDL scenario:
 
 1. Create a table and standalone unique index.
 2. Rename that index with `ALGORITHM=COPY`.
-3. Verify `SHOW INDEX` exposes the new key name and not the old key name.
-4. Verify `FORCE INDEX` works with the new key and fails with the old key.
-5. Verify duplicate-key enforcement still uses the renamed unique index.
-6. Close and reopen, then repeat representative new-key and old-key checks.
+3. Repeat the rename path for a generated-column unique index.
+4. Verify `SHOW INDEX` exposes the new key name and not the old key name.
+5. Verify `FORCE INDEX` works with the new key and fails with the old key.
+6. Verify duplicate-key enforcement still uses the renamed unique index.
+7. Close and reopen, then repeat representative new-key and old-key checks.
 
 ## Compatibility Impact
 
 `ALTER TABLE ... RENAME INDEX` moves from planned to partial for supported
-copy-rebuild MyLite-routed tables. It remains partial because online rename
-paths, primary-key rename, conflict matrices, unsupported index classes, and
-transactional DDL rollback remain separate work.
+copy-rebuild MyLite-routed tables, including generated-column secondary and
+unique indexes. It remains partial because online rename paths, primary-key
+rename, conflict matrices, unsupported index classes, and transactional DDL
+rollback remain separate work.
 
 ## Single-File And Embedded-Lifecycle Impact
 
@@ -105,8 +108,8 @@ Implemented in the storage-engine smoke test:
   `ALGORITHM=COPY`.
 - The test verifies `SHOW INDEX` old-name removal and new-name discovery,
   old-name `FORCE INDEX` rejection, new-name forced-index reads,
-  duplicate-key rejection, close/reopen discovery, catalog table-count
-  stability, and sidecar cleanup.
+  duplicate-key rejection, generated-column unique-index rename coverage,
+  close/reopen discovery, catalog table-count stability, and sidecar cleanup.
 - No production storage change was required because the current copy ALTER path
   already republishes the rebuilt table definition and index-entry pages.
 

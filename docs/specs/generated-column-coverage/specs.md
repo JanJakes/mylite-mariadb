@@ -9,8 +9,9 @@ the `.mylite` file.
 
 This moved generated columns from planned to partial support for `VIRTUAL` and
 `STORED` columns under basic `CREATE TABLE`, insert, update, and close/reopen
-behavior. A later generated-column-index slice expands the covered subset to
-ordinary secondary and unique indexes on scalar generated columns.
+behavior. Later generated-column-index slices expand the covered subset to
+ordinary secondary and unique indexes on scalar generated columns, including
+supported copy-rebuild generated-index DDL.
 
 ## Non-Goals
 
@@ -55,9 +56,10 @@ capability flags. MyLite supports basic generated columns by advertising
 generated persistent values as part of the row buffer, and letting MariaDB
 compute non-stored virtual values after reads.
 
-The follow-up generated-column-index slice reuses MariaDB key tuple generation
-for ordinary secondary and unique indexes on scalar virtual or stored generated
-columns. Expression/hidden generated indexes and generated primary keys remain
+Follow-up generated-column-index slices reuse MariaDB key tuple generation for
+ordinary secondary and unique indexes on scalar virtual or stored generated
+columns, including supported ALTER-backed and standalone generated-index DDL.
+Expression/hidden generated indexes and generated primary keys remain
 unsupported so the compatibility matrix does not overstate generated/expression
 index support.
 
@@ -73,7 +75,7 @@ index support.
   - one stored generated column,
   - ordinary secondary and unique generated-column indexes.
 - Verify insert, update, full-scan read, close/reopen persistence, and
-  generated-index reads and duplicate checks.
+  generated-index reads, duplicate checks, and supported generated-index DDL.
 
 ## File Lifecycle
 
@@ -102,7 +104,8 @@ unchanged for practical purposes.
 - Storage-engine smoke verifies generated values after insert and update.
 - Storage-engine smoke verifies generated values after close/reopen.
 - Storage-engine smoke verifies ordinary generated-column indexes for
-  forced-index reads, duplicate checks, update maintenance, and close/reopen.
+  forced-index reads, duplicate checks, update maintenance, generated-index DDL,
+  and close/reopen.
 - Add a compatibility harness group for generated columns.
 - Run formatting, tidy, configured CTest presets, the named harness report, and
   `git diff --check`.
@@ -113,8 +116,8 @@ unchanged for practical purposes.
   base row buffers before and after close/reopen.
 - Basic unindexed stored generated columns persist in MyLite row payloads before
   and after close/reopen.
-- Ordinary generated-column secondary and unique indexes work before and after
-  close/reopen.
+- Ordinary generated-column secondary and unique indexes, including supported
+  generated-index DDL paths, work before and after close/reopen.
 - Compatibility docs and roadmap mark generated columns as partial rather than
   planned.
 - The compatibility harness can run the generated-column evidence by name.

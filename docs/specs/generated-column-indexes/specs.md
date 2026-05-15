@@ -45,9 +45,11 @@ MariaDB's key machinery.
 
 Generated columns remain partial, but the supported subset expands from
 unindexed generated columns to ordinary secondary and unique indexes on scalar
-virtual or stored generated columns. MyLite still does not claim expression
-indexes, generated primary keys, generated BLOB/TEXT key payloads, foreign-key
-interactions, or broad SQL-mode-sensitive expression coverage.
+virtual or stored generated columns. The follow-up generated-column-index DDL
+slice extends the same key support to copy-rebuild add, drop, rename, and
+standalone index DDL. MyLite still does not claim expression indexes, generated
+primary keys, generated BLOB/TEXT key payloads, foreign-key interactions, or
+broad SQL-mode-sensitive expression coverage.
 
 ## Design
 
