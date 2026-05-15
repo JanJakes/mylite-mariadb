@@ -1112,6 +1112,8 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert(auto_rows.found_after_low_alter);
     assert(auto_rows.found_reopened);
     assert_exec_fails_with_message(db, "INSERT INTO checked_posts VALUES (5, 10)", "CONSTRAINT");
+    assert_exec_succeeds(db, "ALTER TABLE checked_posts DROP CONSTRAINT rating_reopen_cap");
+    assert_exec_succeeds(db, "INSERT INTO checked_posts VALUES (5, 10)");
     assert(
         mylite_exec(
             db,

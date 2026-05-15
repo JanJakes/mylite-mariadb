@@ -54,6 +54,9 @@ Add storage-engine smoke coverage on an existing routed `ENGINE=InnoDB` table:
   and
 - prove a CHECK added through ALTER is still enforced after close/reopen.
 
+The later catalog-reopen copy ALTER slice extends this coverage to dropping an
+ALTER-added CHECK after catalog-only close/reopen.
+
 The smoke table already has one row inserted while
 `check_constraint_checks=OFF`; using values that satisfy the newly added
 constraint keeps the ADD path focused on supported row-copy behavior rather
@@ -138,6 +141,3 @@ documentation coverage over existing MariaDB SQL behavior.
   slice because DDL rollback is broader than this coverage-only change.
 - Metadata-only CHECK ALTER support must be reconsidered when MyLite adds an
   in-place ALTER path; this slice intentionally stays on copy rebuilds.
-- Dropping an ALTER-added CHECK after close/reopen belongs with the broader
-  fully filesystem-free schema DDL work. This slice covers same-runtime drop
-  and reopened enforcement of ALTER-added CHECK metadata.

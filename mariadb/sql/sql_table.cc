@@ -7867,6 +7867,15 @@ static bool is_inplace_alter_impossible(TABLE *table,
     DBUG_RETURN(true);
 
   /*
+    MyLite publishes ALTER results through copy rebuilds today. Forcing copy
+    here avoids MariaDB's in-place preparation path, which still writes
+    temporary .frm files under the schema directory before the handler can
+    reject in-place ALTER.
+  */
+  if (strcmp(table->file->real_table_type(), "MYLITE") == 0)
+    DBUG_RETURN(true);
+
+  /*
     For the ALTER TABLE tbl_name ORDER BY ... we always use copy
     algorithm. In theory, this operation can be done in-place by some
     engine, but since a) no current engine does this and b) our current

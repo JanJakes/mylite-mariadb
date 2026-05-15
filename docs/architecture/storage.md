@@ -75,6 +75,10 @@ or remain planned until those slices define the paths. Standalone
 supported copy-rebuild index additions and drops. File-backed opens answer
 MariaDB SQL-layer schema and table discovery from MyLite catalog namespace
 records when no transient runtime schema directory exists.
+The SQL layer forces routed MyLite `ALTER TABLE` statements onto the copy
+algorithm before MariaDB's in-place ALTER preparation can write temporary
+`.frm` files under schema directories; MyLite does not support in-place ALTER
+yet.
 Foreign-key DDL is rejected at the `libmylite` boundary until MyLite has
 catalog metadata, enforcement, locking, recovery, and transaction-aware checks
 for referential constraints.
@@ -207,9 +211,10 @@ Basic column-level and named table-level CHECK constraints survive close/reopen
 because they are stored in the catalog-backed table-definition image. MariaDB
 enforces those checks before insert/update handler calls unless
 `check_constraint_checks=OFF` is set. Supported copy `ALTER TABLE` paths cover
-named table-level CHECK additions and drops. Broader CHECK expression, failed
-ALTER rollback, CTAS, dump-import, prepared-diagnostic, and rollback coverage
-remains planned.
+named table-level CHECK additions and drops, including dropping an ALTER-added
+CHECK after catalog-only close/reopen. Broader CHECK expression, failed ALTER
+rollback, CTAS, dump-import, prepared-diagnostic, and rollback coverage remains
+planned.
 Basic unindexed virtual and stored generated columns follow the same
 catalog-backed table-definition path. Generated-column indexes remain
 unsupported: the handler rejects generated-field key parts before catalog
