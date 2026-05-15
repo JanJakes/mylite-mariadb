@@ -130,6 +130,7 @@ public:
   int write_row(const uchar *buf) override;
   int update_row(const uchar *old_data, const uchar *new_data) override;
   int delete_row(const uchar *buf) override;
+  int truncate() override;
   int create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) override;
   int delete_table(const char *name) override;
   int rename_table(const char *from, const char *to) override;

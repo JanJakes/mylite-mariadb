@@ -1207,6 +1207,31 @@ int ha_mylite::delete_row(const uchar *)
   DBUG_RETURN(0);
 }
 
+int ha_mylite::truncate()
+{
+  DBUG_ENTER("ha_mylite::truncate");
+
+  if (!mylite_table_supports_row_lifecycle(table))
+    DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    DBUG_RETURN(HA_ERR_NO_CONNECTION);
+
+  const mylite_storage_result result=
+    mylite_storage_truncate_table(primary_file, storage_schema(),
+                                  storage_table());
+  if (result != MYLITE_STORAGE_OK)
+    DBUG_RETURN(mylite_storage_to_handler_error(result));
+
+  clear_scan_rows();
+  clear_index_cursor();
+  clear_record_blob_payloads();
+  current_row_id= 0;
+  duplicate_key_index= (uint) -1;
+  DBUG_RETURN(0);
+}
+
 int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info)
 {
   DBUG_ENTER("ha_mylite::create");

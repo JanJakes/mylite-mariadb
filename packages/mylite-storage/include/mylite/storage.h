@@ -19,6 +19,7 @@ extern "C" {
 #define MYLITE_STORAGE_CAPABILITY_INDEX_ENTRIES 0x00000080U
 #define MYLITE_STORAGE_CAPABILITY_RECOVERY_JOURNAL 0x00000100U
 #define MYLITE_STORAGE_CAPABILITY_FILE_LOCKS 0x00000200U
+#define MYLITE_STORAGE_CAPABILITY_TRUNCATE 0x00000400U
 
 typedef enum mylite_storage_result { /* NOLINT(performance-enum-size): C ABI enum. */
                                      MYLITE_STORAGE_OK = 0,
@@ -206,6 +207,11 @@ mylite_storage_result mylite_storage_delete_row(
     const char *schema_name,
     const char *table_name,
     unsigned long long row_id
+);
+mylite_storage_result mylite_storage_truncate_table(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name
 );
 mylite_storage_result mylite_storage_read_index_entries(
     const char *filename,

@@ -59,16 +59,17 @@ stores metadata in the primary `.mylite` catalog, and catalog discovery works
 after close/reopen. Routed tables support row inserts, full scans, updates, and
 deletes from the primary file, including BLOB/TEXT payloads. Supported
 primary, unique, and secondary indexes append durable index-entry pages and
-serve ordered handler cursors from MariaDB key tuples. `DROP TABLE` removes
-catalog metadata for routed tables. Simple `RENAME TABLE` updates catalog
-identity while preserving table ids, row pages, and index-entry pages. Copy
-`ALTER` rebuilds use MariaDB's table-copy path and append rebuilt table
-definitions, rows, and supported index entries inside the primary file. Online
-`ALTER`, in-place `ALTER`, transaction-aware index maintenance, truncate,
-free-space reclamation, and unsupported index classes still reject or remain
-planned until those slices define the paths. Standalone `CREATE INDEX` and
-`DROP INDEX` use MariaDB's ALTER-backed DDL path for supported copy-rebuild
-index additions and drops.
+serve ordered handler cursors from MariaDB key tuples. `TRUNCATE TABLE`
+logically deletes live rows and resets autoincrement state without changing
+catalog metadata. `DROP TABLE` removes catalog metadata for routed tables.
+Simple `RENAME TABLE` updates catalog identity while preserving table ids, row
+pages, and index-entry pages. Copy `ALTER` rebuilds use MariaDB's table-copy
+path and append rebuilt table definitions, rows, and supported index entries
+inside the primary file. Online `ALTER`, in-place `ALTER`,
+transaction-aware index maintenance, free-space reclamation, and unsupported
+index classes still reject or remain planned until those slices define the
+paths. Standalone `CREATE INDEX` and `DROP INDEX` use MariaDB's ALTER-backed
+DDL path for supported copy-rebuild index additions and drops.
 
 ## File Layout
 
@@ -208,10 +209,13 @@ scans, `position()` stores the row page id as the handler row reference, and
 row id, and replacement index entries for supported keys. `delete_row()`
 appends a row-state page that hides the current row id; stale index entries
 remain on disk until compaction exists but are filtered through the row-state
-map. Nullable fixed and variable fields are covered because the stored record
-image includes MariaDB's null bitmap. BLOB/TEXT fields are serialized as
-length-prefixed value bytes, not process pointers, and large payloads use
-primary-file overflow pages.
+map. `truncate()` appends delete row-state pages for all live row ids and
+resets table-local autoincrement state to the first generated value; row,
+overflow, index-entry, and old autoincrement pages remain orphaned until
+compaction exists. Nullable fixed and variable fields are covered because the
+stored record image includes MariaDB's null bitmap. BLOB/TEXT fields are
+serialized as length-prefixed value bytes, not process pointers, and large
+payloads use primary-file overflow pages.
 
 Supported primary, unique, and secondary keys use MariaDB key tuples generated
 from the row buffer. The handler rejects unsupported key classes before table
@@ -222,9 +226,9 @@ cursors from live index entries and then reconstruct row buffers from row
 pages. This provides correct indexed insert, lookup, update, delete, reopen,
 and copy `ALTER` behavior for the supported shapes, but it is not the final
 performance structure. Standalone `CREATE INDEX` and `DROP INDEX` are covered
-for supported copy-rebuild index definitions. Truncate, B-tree pages,
-free-space reclamation, transaction rollback, and transaction-aware index
-maintenance remain planned.
+for supported copy-rebuild index definitions. B-tree pages, free-space
+reclamation, transaction rollback, and transaction-aware index maintenance
+remain planned.
 
 The storage engine must support:
 

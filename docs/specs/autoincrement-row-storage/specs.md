@@ -76,7 +76,8 @@ ids, and old autoincrement state pages are ignored like old row pages.
 
 - General primary-key, unique-key, secondary-index, or ordered-index reads.
 - Compound autoincrement keys where the auto column is not the complete key.
-- `ALTER TABLE ... AUTO_INCREMENT=N` and `TRUNCATE TABLE` lifecycle support.
+- `ALTER TABLE ... AUTO_INCREMENT=N`; `TRUNCATE TABLE` reset is handled by the
+  truncate table lifecycle slice.
 - Transaction rollback of consumed autoincrement values.
 - Cross-process autoincrement locking guarantees.
 - BLOB/TEXT rows, update/delete, and copy `ALTER` rebuilds.
@@ -167,6 +168,8 @@ Implemented in the storage package and MyLite handler:
 - Storage-engine smoke coverage checks generated values, explicit high values,
   duplicate failures, close/reopen persistence, `ENGINE=InnoDB` routing, and
   sidecar absence.
+- The truncate table lifecycle slice resets autoincrement to the first
+  generated value during `TRUNCATE TABLE`.
 
 ## Risks
 

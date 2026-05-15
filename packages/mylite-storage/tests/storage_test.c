@@ -67,6 +67,39 @@ static void delete_index_entry_test_row(const index_entries_test_context *ctx);
 static void assert_secondary_index_entries_after_delete(const index_entries_test_context *ctx);
 static void assert_index_entry_test_live_rows(const index_entries_test_context *ctx);
 static void test_autoincrement_state(void);
+static void test_truncate_table_lifecycle(void);
+static void append_truncate_test_rows(
+    const char *filename,
+    const unsigned char *row_1,
+    size_t row_1_size,
+    const mylite_storage_index_entry *row_1_entry,
+    const unsigned char *row_2,
+    size_t row_2_size,
+    const mylite_storage_index_entry *row_2_entry,
+    unsigned long long *out_row_1_id,
+    unsigned long long *out_row_2_id
+);
+static void assert_truncate_test_initial_state(const char *filename);
+static void assert_truncate_test_empty_state(
+    const char *filename,
+    unsigned long long row_1_id,
+    unsigned long long row_2_id
+);
+static void assert_empty_truncate_is_noop(const char *filename);
+static void append_truncate_test_reused_row(
+    const char *filename,
+    const unsigned char *row,
+    size_t row_size,
+    const mylite_storage_index_entry *index_entry,
+    unsigned long long row_2_id,
+    unsigned long long *out_row_id
+);
+static void assert_truncate_test_reused_row(
+    const char *filename,
+    unsigned long long row_id,
+    const unsigned char *key,
+    size_t key_size
+);
 static void test_cleans_recovery_journal_after_mutations(void);
 static void test_recovers_row_publication_journal(void);
 static void test_recovers_catalog_publication_journal(void);
@@ -149,6 +182,7 @@ int main(void) {
     test_update_and_delete_rows();
     test_index_entries();
     test_autoincrement_state();
+    test_truncate_table_lifecycle();
     test_cleans_recovery_journal_after_mutations();
     test_recovers_row_publication_journal();
     test_recovers_catalog_publication_journal();
@@ -182,6 +216,7 @@ static void test_capabilities(void) {
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_INDEX_ENTRIES) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_RECOVERY_JOURNAL) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_FILE_LOCKS) != 0U);
+    assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_TRUNCATE) != 0U);
 }
 
 static void test_create_empty_database(void) {
@@ -877,6 +912,241 @@ static void test_autoincrement_state(void) {
     free(root);
 }
 
+static void test_truncate_table_lifecycle(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row_1[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    static const unsigned char row_2[] = {0x00U, 0x02U, 'd', 'e', 'f'};
+    static const unsigned char row_3[] = {0x00U, 0x01U, 'r', 'e', 'u', 's', 'e'};
+    static const unsigned char key_1[] = {0x01U};
+    static const unsigned char key_2[] = {0x02U};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "truncate-table.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "InnoDB",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_index_entry row_1_entry = {
+        .size = sizeof(row_1_entry),
+        .index_number = 0U,
+        .key = key_1,
+        .key_size = sizeof(key_1),
+    };
+    mylite_storage_index_entry row_2_entry = {
+        .size = sizeof(row_2_entry),
+        .index_number = 0U,
+        .key = key_2,
+        .key_size = sizeof(key_2),
+    };
+    mylite_storage_index_entry row_3_entry = {
+        .size = sizeof(row_3_entry),
+        .index_number = 0U,
+        .key = key_1,
+        .key_size = sizeof(key_1),
+    };
+    unsigned long long row_1_id = 0ULL;
+    unsigned long long row_2_id = 0ULL;
+    unsigned long long row_3_id = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    append_truncate_test_rows(
+        filename,
+        row_1,
+        sizeof(row_1),
+        &row_1_entry,
+        row_2,
+        sizeof(row_2),
+        &row_2_entry,
+        &row_1_id,
+        &row_2_id
+    );
+    assert_truncate_test_initial_state(filename);
+    assert(mylite_storage_truncate_table(filename, "app", "posts") == MYLITE_STORAGE_OK);
+    assert_truncate_test_empty_state(filename, row_1_id, row_2_id);
+    assert_empty_truncate_is_noop(filename);
+    append_truncate_test_reused_row(
+        filename,
+        row_3,
+        sizeof(row_3),
+        &row_3_entry,
+        row_2_id,
+        &row_3_id
+    );
+    assert_truncate_test_reused_row(filename, row_3_id, key_1, sizeof(key_1));
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void append_truncate_test_rows(
+    const char *filename,
+    const unsigned char *row_1,
+    size_t row_1_size,
+    const mylite_storage_index_entry *row_1_entry,
+    const unsigned char *row_2,
+    size_t row_2_size,
+    const mylite_storage_index_entry *row_2_entry,
+    unsigned long long *out_row_1_id,
+    unsigned long long *out_row_2_id
+) {
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_1,
+            row_1_size,
+            row_1_entry,
+            1U,
+            out_row_1_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_2,
+            row_2_size,
+            row_2_entry,
+            1U,
+            out_row_2_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_advance_auto_increment(filename, "app", "posts", 9ULL) == MYLITE_STORAGE_OK
+    );
+}
+
+static void assert_truncate_test_initial_state(const char *filename) {
+    mylite_storage_index_entryset entries = {
+        .size = sizeof(entries),
+    };
+    unsigned long long row_count = 0ULL;
+    unsigned long long next_value = 0ULL;
+
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 2ULL);
+    assert(
+        mylite_storage_read_index_entries(filename, "app", "posts", 0U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == 2U);
+    mylite_storage_free_index_entryset(&entries);
+    assert(
+        mylite_storage_read_auto_increment(filename, "app", "posts", &next_value) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(next_value == 9ULL);
+}
+
+static void assert_truncate_test_empty_state(
+    const char *filename,
+    unsigned long long row_1_id,
+    unsigned long long row_2_id
+) {
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+    mylite_storage_index_entryset entries = {
+        .size = sizeof(entries),
+    };
+    mylite_storage_table_metadata metadata = {
+        .size = sizeof(metadata),
+    };
+    unsigned long long row_count = 0ULL;
+    unsigned long long next_value = 0ULL;
+
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 0ULL);
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
+    assert(rows.row_count == 0U);
+    assert(rows.rows == NULL);
+    mylite_storage_free_rowset(&rows);
+    assert_row_not_found(filename, row_1_id);
+    assert_row_not_found(filename, row_2_id);
+    assert(
+        mylite_storage_read_index_entries(filename, "app", "posts", 0U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == 0U);
+    mylite_storage_free_index_entryset(&entries);
+    assert(
+        mylite_storage_read_auto_increment(filename, "app", "posts", &next_value) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(next_value == 1ULL);
+    assert(
+        mylite_storage_read_table_metadata(filename, "app", "posts", &metadata) == MYLITE_STORAGE_OK
+    );
+    assert(strcmp(metadata.requested_engine_name, "InnoDB") == 0);
+    assert(strcmp(metadata.effective_engine_name, "MYLITE") == 0);
+    mylite_storage_free(metadata.requested_engine_name);
+    mylite_storage_free(metadata.effective_engine_name);
+}
+
+static void assert_empty_truncate_is_noop(const char *filename) {
+    mylite_storage_header header_before = {0};
+    mylite_storage_header header_after = {0};
+
+    assert(mylite_storage_open_header(filename, &header_before) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_truncate_table(filename, "app", "posts") == MYLITE_STORAGE_OK);
+    assert(mylite_storage_open_header(filename, &header_after) == MYLITE_STORAGE_OK);
+    assert(header_before.page_count == header_after.page_count);
+}
+
+static void append_truncate_test_reused_row(
+    const char *filename,
+    const unsigned char *row,
+    size_t row_size,
+    const mylite_storage_index_entry *index_entry,
+    unsigned long long row_2_id,
+    unsigned long long *out_row_id
+) {
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row,
+            row_size,
+            index_entry,
+            1U,
+            out_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(*out_row_id > row_2_id);
+}
+
+static void assert_truncate_test_reused_row(
+    const char *filename,
+    unsigned long long row_id,
+    const unsigned char *key,
+    size_t key_size
+) {
+    mylite_storage_index_entryset entries = {
+        .size = sizeof(entries),
+    };
+    unsigned long long row_count = 0ULL;
+
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 1ULL);
+    assert(
+        mylite_storage_read_index_entries(filename, "app", "posts", 0U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == 1U);
+    assert_index_entry(&entries, 0U, row_id, key, key_size);
+    mylite_storage_free_index_entryset(&entries);
+}
+
 static void test_cleans_recovery_journal_after_mutations(void) {
     static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
     static const unsigned char row_1[] = {0x00U, 0x01U, 'a', 'b', 'c'};
@@ -935,6 +1205,8 @@ static void test_cleans_recovery_journal_after_mutations(void) {
     assert(
         mylite_storage_advance_auto_increment(filename, "app", "posts", 7ULL) == MYLITE_STORAGE_OK
     );
+    assert_file_missing(journal_filename);
+    assert(mylite_storage_truncate_table(filename, "app", "posts") == MYLITE_STORAGE_OK);
     assert_file_missing(journal_filename);
     assert(mylite_storage_drop_table(filename, "app", "posts") == MYLITE_STORAGE_OK);
     assert_file_missing(journal_filename);

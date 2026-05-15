@@ -89,6 +89,7 @@ static void test_create_table_persists_catalog_metadata(void);
 static void test_alter_table_rebuilds_keyless_rows(void);
 static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
+static void test_truncate_table_lifecycle(void);
 static void test_wordpress_shaped_schema(void);
 static void assert_exec_succeeds(mylite_db *db, const char *sql);
 static void assert_exec_fails(mylite_db *db, const char *sql);
@@ -140,6 +141,7 @@ int main(void) {
     test_alter_table_rebuilds_keyless_rows();
     test_indexed_rows();
     test_standalone_index_ddl();
+    test_truncate_table_lifecycle();
     test_wordpress_shaped_schema();
     return 0;
 }
@@ -960,6 +962,155 @@ static void test_standalone_index_ddl(void) {
     assert(reopened_dropped_index_rows.rows == 0);
     assert_catalog_table_count(filename, "app", 1U);
     assert_catalog_table_metadata(filename, "app", "standalone_index_posts", "InnoDB", "MYLITE");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_truncate_table_lifecycle(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    table_context old_slug_rows = {0};
+    table_context primary_rows = {0};
+    single_value_context empty_count = {
+        .expected_value = "0",
+    };
+    single_value_context reset_id = {
+        .expected_value = "1",
+    };
+    const char *news_ids[] = {"1", "4"};
+    id_sequence_context news_sequence = {
+        .expected_count = 2,
+        .expected_ids = news_ids,
+    };
+    id_sequence_context reopened_news_sequence = {
+        .expected_count = 2,
+        .expected_ids = news_ids,
+    };
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE truncate_posts ("
+        "id INT NOT NULL AUTO_INCREMENT, "
+        "slug VARCHAR(32) NOT NULL, "
+        "category VARCHAR(32) NOT NULL, "
+        "body TEXT NULL, "
+        "PRIMARY KEY (id), "
+        "UNIQUE KEY slug_key (slug), "
+        "KEY category_key (category)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO truncate_posts (slug, category, body) VALUES "
+        "('alpha', 'news', 'first'), "
+        "('beta', 'tech', REPEAT('before-', 400))"
+    );
+    assert_catalog_table_count(filename, "app", 1U);
+    assert_catalog_table_metadata(filename, "app", "truncate_posts", "InnoDB", "MYLITE");
+
+    assert_exec_succeeds(db, "TRUNCATE TABLE truncate_posts");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM truncate_posts",
+            single_value_callback,
+            &empty_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(empty_count.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM truncate_posts FORCE INDEX (slug_key) WHERE slug = 'alpha'",
+            row_callback,
+            &old_slug_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(old_slug_rows.rows == 0);
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO truncate_posts (slug, category, body) VALUES "
+        "('alpha', 'news', 'after truncate')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO truncate_posts (id, slug, category, body) VALUES "
+        "(4, 'beta', 'news', REPEAT('after-', 300))"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO truncate_posts (slug, category, body) VALUES "
+        "('alpha', 'dupe', NULL)"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM truncate_posts FORCE INDEX (slug_key) WHERE slug = 'alpha'",
+            single_value_callback,
+            &reset_id,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reset_id.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM truncate_posts FORCE INDEX (PRIMARY) WHERE id = 4",
+            row_callback,
+            &primary_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(primary_rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM truncate_posts FORCE INDEX (category_key) "
+            "WHERE category = 'news' ORDER BY id",
+            id_sequence_callback,
+            &news_sequence,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(news_sequence.rows == 2);
+    assert_catalog_table_count(filename, "app", 1U);
+    assert_catalog_table_metadata(filename, "app", "truncate_posts", "InnoDB", "MYLITE");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM truncate_posts FORCE INDEX (category_key) "
+            "WHERE category = 'news' ORDER BY id",
+            id_sequence_callback,
+            &reopened_news_sequence,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_news_sequence.rows == 2);
+    assert_catalog_table_count(filename, "app", 1U);
+    assert_catalog_table_metadata(filename, "app", "truncate_posts", "InnoDB", "MYLITE");
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 

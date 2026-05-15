@@ -49,6 +49,11 @@ typedef struct mylite_storage_row_state_map {
     size_t count;
 } mylite_storage_row_state_map;
 
+typedef struct mylite_storage_row_id_list {
+    unsigned long long *row_ids;
+    size_t count;
+} mylite_storage_row_id_list;
+
 typedef struct mylite_storage_index_entry_page {
     unsigned long long table_id;
     unsigned long long row_id;
@@ -378,6 +383,44 @@ static mylite_storage_result append_row_page_to_rowset(
     void *ctx,
     const mylite_storage_row_page *row_page
 );
+static mylite_storage_result append_live_row_id(void *ctx, const mylite_storage_row_page *row_page);
+static int truncate_needs_publication(
+    const mylite_storage_row_id_list *live_rows,
+    int reset_auto_increment
+);
+static mylite_storage_result write_truncate_publication(
+    FILE *file,
+    const char *filename,
+    mylite_storage_header *header,
+    unsigned long long table_id,
+    const mylite_storage_row_id_list *live_rows,
+    int reset_auto_increment
+);
+static mylite_storage_result validate_truncate_page_capacity(
+    const mylite_storage_header *header,
+    size_t live_row_count,
+    int reset_auto_increment
+);
+static mylite_storage_result write_truncate_row_state_pages(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    const mylite_storage_row_id_list *live_rows,
+    unsigned long long first_page_id,
+    unsigned long long *out_next_page_id
+);
+static mylite_storage_result write_truncate_auto_increment_page(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned long long page_id,
+    unsigned long long *out_next_page_id
+);
+static mylite_storage_result publish_header_page_count(
+    FILE *file,
+    mylite_storage_header *header,
+    unsigned long long page_count
+);
 static mylite_storage_result append_row_to_rowset(
     mylite_storage_rowset *rowset,
     unsigned long long row_id,
@@ -467,7 +510,8 @@ mylite_storage_capabilities mylite_storage_get_capabilities(void) {
                  MYLITE_STORAGE_CAPABILITY_TABLE_ROWS | MYLITE_STORAGE_CAPABILITY_AUTOINCREMENT |
                  MYLITE_STORAGE_CAPABILITY_BLOB_TEXT_ROWS |
                  MYLITE_STORAGE_CAPABILITY_ROW_LIFECYCLE | MYLITE_STORAGE_CAPABILITY_INDEX_ENTRIES |
-                 MYLITE_STORAGE_CAPABILITY_RECOVERY_JOURNAL | MYLITE_STORAGE_CAPABILITY_FILE_LOCKS,
+                 MYLITE_STORAGE_CAPABILITY_RECOVERY_JOURNAL | MYLITE_STORAGE_CAPABILITY_FILE_LOCKS |
+                 MYLITE_STORAGE_CAPABILITY_TRUNCATE,
     };
 
     return capabilities;
@@ -1377,6 +1421,57 @@ mylite_storage_result mylite_storage_delete_row(
 
     free(row_page.owned_payload);
     free_row_state_map(&row_state_map);
+    if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    return result;
+}
+
+mylite_storage_result mylite_storage_truncate_table(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name
+) {
+    if (filename == NULL || filename[0] == '\0' || schema_name == NULL || schema_name[0] == '\0' ||
+        table_name == NULL || table_name[0] == '\0') {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    FILE *file = NULL;
+    mylite_storage_result result = open_existing_file_for_update(filename, &file);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_header header = {0};
+    unsigned long long table_id = 0ULL;
+    mylite_storage_row_id_list live_rows = {0};
+    unsigned long long current_next_value = 0ULL;
+    result = read_header(file, &header);
+    if (result == MYLITE_STORAGE_OK) {
+        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = scan_table_row_pages(file, &header, table_id, append_live_row_id, &live_rows);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = latest_auto_increment_value(file, &header, table_id, &current_next_value);
+    }
+
+    const int reset_auto_increment = current_next_value != 1ULL;
+    if (result == MYLITE_STORAGE_OK &&
+        truncate_needs_publication(&live_rows, reset_auto_increment)) {
+        result = write_truncate_publication(
+            file,
+            filename,
+            &header,
+            table_id,
+            &live_rows,
+            reset_auto_increment
+        );
+    }
+
+    free(live_rows.row_ids);
     if (fclose(file) != 0 && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
@@ -3794,6 +3889,160 @@ static mylite_storage_result append_row_page_to_rowset(
     }
 
     return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result append_live_row_id(
+    void *ctx,
+    const mylite_storage_row_page *row_page
+) {
+    mylite_storage_row_id_list *rows = (mylite_storage_row_id_list *)ctx;
+    if (rows->count == SIZE_MAX || rows->count >= SIZE_MAX / sizeof(unsigned long long)) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    const size_t new_count = rows->count + 1U;
+    unsigned long long *row_ids =
+        (unsigned long long *)realloc(rows->row_ids, new_count * sizeof(unsigned long long));
+    if (row_ids == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    rows->row_ids = row_ids;
+    rows->row_ids[rows->count] = row_page->row_id;
+    rows->count = new_count;
+    return MYLITE_STORAGE_OK;
+}
+
+static int truncate_needs_publication(
+    const mylite_storage_row_id_list *live_rows,
+    int reset_auto_increment
+) {
+    return live_rows->count > 0U || reset_auto_increment;
+}
+
+static mylite_storage_result write_truncate_publication(
+    FILE *file,
+    const char *filename,
+    mylite_storage_header *header,
+    unsigned long long table_id,
+    const mylite_storage_row_id_list *live_rows,
+    int reset_auto_increment
+) {
+    mylite_storage_result result =
+        validate_truncate_page_capacity(header, live_rows->count, reset_auto_increment);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    result = begin_recovery_journal(file, filename, header, 0);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    unsigned long long next_page_id = header->page_count;
+    result = write_truncate_row_state_pages(
+        file,
+        header,
+        table_id,
+        live_rows,
+        next_page_id,
+        &next_page_id
+    );
+    if (result == MYLITE_STORAGE_OK && reset_auto_increment) {
+        result =
+            write_truncate_auto_increment_page(file, header, table_id, next_page_id, &next_page_id);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = publish_header_page_count(file, header, next_page_id);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = finish_recovery_journal(file, filename);
+    }
+    return result;
+}
+
+static mylite_storage_result validate_truncate_page_capacity(
+    const mylite_storage_header *header,
+    size_t live_row_count,
+    int reset_auto_increment
+) {
+    unsigned long long required_pages = (unsigned long long)live_row_count;
+    if (live_row_count > (size_t)ULLONG_MAX ||
+        (reset_auto_increment && required_pages == ULLONG_MAX)) {
+        return MYLITE_STORAGE_FULL;
+    }
+    if (reset_auto_increment) {
+        ++required_pages;
+    }
+    if (header->page_count > ULLONG_MAX - required_pages) {
+        return MYLITE_STORAGE_FULL;
+    }
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result write_truncate_row_state_pages(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    const mylite_storage_row_id_list *live_rows,
+    unsigned long long first_page_id,
+    unsigned long long *out_next_page_id
+) {
+    unsigned long long next_page_id = first_page_id;
+    for (size_t i = 0U; i < live_rows->count; ++i) {
+        const mylite_storage_row_state_page row_state = {
+            .table_id = table_id,
+            .source_row_id = live_rows->row_ids[i],
+            .replacement_row_id = 0ULL,
+            .state_kind = MYLITE_STORAGE_FORMAT_ROW_STATE_KIND_DELETE,
+        };
+        unsigned char state_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        encode_row_state_page(state_page, next_page_id, &row_state);
+
+        const mylite_storage_result result =
+            write_page_at(file, next_page_id, header->page_size, state_page);
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+        ++next_page_id;
+    }
+
+    *out_next_page_id = next_page_id;
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result write_truncate_auto_increment_page(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned long long page_id,
+    unsigned long long *out_next_page_id
+) {
+    unsigned char autoincrement_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    encode_autoincrement_page(autoincrement_page, page_id, table_id, 1ULL);
+
+    const mylite_storage_result result =
+        write_page_at(file, page_id, header->page_size, autoincrement_page);
+    if (result == MYLITE_STORAGE_OK) {
+        *out_next_page_id = page_id + 1ULL;
+    }
+    return result;
+}
+
+static mylite_storage_result publish_header_page_count(
+    FILE *file,
+    mylite_storage_header *header,
+    unsigned long long page_count
+) {
+    header->page_count = page_count;
+    unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    encode_header_page(header_page, header);
+    return write_page_at(
+        file,
+        MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
+        header->page_size,
+        header_page
+    );
 }
 
 static mylite_storage_result append_row_to_rowset(
