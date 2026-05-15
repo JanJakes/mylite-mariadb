@@ -89,7 +89,8 @@ index invariants.
 
 ## Non-Goals
 
-- Compound autoincrement key edge cases.
+- Compound autoincrement allocation semantics. Compound-only definitions are
+  explicitly rejected by `autoincrement-key-policy`.
 - Metadata-only or in-place autoincrement ALTER.
 - Transaction-aware rollback of successful explicit autoincrement ALTER.
 - Full SQL transaction semantics around autoincrement allocation.

@@ -91,6 +91,7 @@ static int mylite_table_name_from_path(const char *path, char *out_schema_name,
                                        size_t out_table_name_size);
 static bool mylite_table_supports_row_write(TABLE *table);
 static bool mylite_table_supports_row_lifecycle(TABLE *table);
+static bool mylite_table_supports_auto_increment(TABLE *table);
 static bool mylite_table_supports_indexes(TABLE *table);
 static bool mylite_key_is_supported(const KEY *key);
 static Field *mylite_auto_increment_field(TABLE *table);
@@ -1870,12 +1871,30 @@ static int mylite_table_name_from_path(const char *path, char *out_schema_name,
 
 static bool mylite_table_supports_row_write(TABLE *table)
 {
-  return table->s->keys == 0 || mylite_table_supports_indexes(table);
+  return mylite_table_supports_auto_increment(table) &&
+         (table->s->keys == 0 || mylite_table_supports_indexes(table));
 }
 
 static bool mylite_table_supports_row_lifecycle(TABLE *table)
 {
   return mylite_table_supports_row_write(table);
+}
+
+static bool mylite_table_supports_auto_increment(TABLE *table)
+{
+  Field *auto_field= mylite_auto_increment_field(table);
+  if (!auto_field)
+    return true;
+
+  for (uint i= 0; i < table->s->keys; ++i)
+  {
+    const KEY *key= table->key_info + i;
+    if (key->user_defined_key_parts == 1 && key->key_part &&
+        key->key_part->field == auto_field)
+      return true;
+  }
+
+  return false;
 }
 
 static bool mylite_table_supports_indexes(TABLE *table)
@@ -1913,8 +1932,21 @@ static bool mylite_key_is_supported(const KEY *key)
 
 static Field *mylite_auto_increment_field(TABLE *table)
 {
-  return table->found_next_number_field ? table->found_next_number_field :
-                                          table->next_number_field;
+  if (table->found_next_number_field)
+    return table->found_next_number_field;
+  if (table->next_number_field)
+    return table->next_number_field;
+
+  if (table->field)
+  {
+    for (Field **field= table->field; *field; ++field)
+    {
+      if ((*field)->unireg_check == Field::NEXT_NUMBER)
+        return *field;
+    }
+  }
+
+  return NULL;
 }
 
 static int mylite_prepare_row_payload(TABLE *table, const uchar *buf,

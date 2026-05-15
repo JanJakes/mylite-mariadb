@@ -60,8 +60,10 @@ Add a bounded MyLite autoincrement path:
   explicit positive insert. Gaps are acceptable and match normal
   MySQL/MariaDB expectations; MyLite does not promise gapless sequences.
 - Permit writes for tables whose only key is a single-part key over the
-  `AUTO_INCREMENT` column. Continue rejecting arbitrary keys, compound
-  autoincrement keys, and non-autoincrement keys.
+  `AUTO_INCREMENT` column. The follow-up general-index slices allow additional
+  supported keys when the autoincrement column still has a complete
+  single-column key, and `autoincrement-key-policy` keeps compound-only
+  autoincrement definitions rejected.
 - Check duplicate values for that single autoincrement key by scanning existing
   raw row images and comparing the auto field through MariaDB's `Field`
   object. This is a narrow duplicate gate, not general index support.
@@ -75,7 +77,8 @@ ids, and old autoincrement state pages are ignored like old row pages.
 ## Non-Goals
 
 - General primary-key, unique-key, secondary-index, or ordered-index reads.
-- Compound autoincrement keys where the auto column is not the complete key.
+- Compound autoincrement allocation semantics. Compound-only definitions are
+  explicitly rejected by `autoincrement-key-policy`.
 - `ALTER TABLE ... AUTO_INCREMENT=N`; `TRUNCATE TABLE` reset is handled by the
   truncate table lifecycle slice.
 - Transaction rollback of consumed autoincrement values.
@@ -170,6 +173,9 @@ Implemented in the storage package and MyLite handler:
   sidecar absence.
 - The truncate table lifecycle slice resets autoincrement to the first
   generated value during `TRUNCATE TABLE`.
+- The autoincrement key policy slice allows additional supported keys when the
+  autoincrement column has a complete single-column key and rejects
+  compound-only autoincrement definitions before catalog publication.
 
 ## Risks
 

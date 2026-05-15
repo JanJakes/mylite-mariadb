@@ -315,7 +315,10 @@ map. `truncate()` appends delete row-state pages for all live row ids and
 resets table-local autoincrement state to the first generated value. Explicit
 `ALTER TABLE ... AUTO_INCREMENT` publishes an exact table-local next value
 before and after catalog-only reopen, and copy `ALTER` row movement can advance
-that value above copied live row data.
+that value above copied live row data. Routed autoincrement definitions are
+accepted only when the autoincrement column has a complete single-column key;
+compound-only autoincrement key definitions reject before catalog publication
+until allocation semantics are designed.
 Row, overflow, index-entry, and old autoincrement pages remain orphaned until
 compaction exists. Nullable fixed and variable fields are covered because the
 stored record image includes MariaDB's null bitmap. BLOB/TEXT fields are

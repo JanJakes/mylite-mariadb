@@ -142,6 +142,7 @@ static void test_create_table_persists_catalog_metadata(void);
 static void test_alter_table_rebuilds_keyless_rows(void);
 static void test_generated_column_alter_ddl(void);
 static void test_generated_primary_key_policy(void);
+static void test_autoincrement_key_policy(void);
 static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
 static void test_blob_text_prefix_indexes(void);
@@ -267,6 +268,7 @@ int main(void) {
     test_alter_table_rebuilds_keyless_rows();
     test_generated_column_alter_ddl();
     test_generated_primary_key_policy();
+    test_autoincrement_key_policy();
     test_indexed_rows();
     test_standalone_index_ddl();
     test_blob_text_prefix_indexes();
@@ -2081,6 +2083,65 @@ static void test_generated_primary_key_policy(void) {
     );
     assert(errmsg == NULL);
     assert(title.rows == 1);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_autoincrement_key_policy(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_policy");
+    assert_exec_succeeds(db, "USE auto_policy");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE single_auto_posts ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "category INT NOT NULL,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (id),"
+        "KEY category_id (category, id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO single_auto_posts (category, title) VALUES (7, 'first')");
+    assert_query_single_value(db, "SELECT id FROM single_auto_posts WHERE category = 7", "1");
+    assert_catalog_table_count(filename, "auto_policy", 1U);
+    assert_catalog_table_metadata(filename, "auto_policy", "single_auto_posts", "InnoDB", "MYLITE");
+
+    assert_exec_fails(
+        db,
+        "CREATE TABLE compound_auto_first ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "category INT NOT NULL,"
+        "PRIMARY KEY (id, category)"
+        ") ENGINE=InnoDB"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "auto_policy", "compound_auto_first") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_catalog_table_count(filename, "auto_policy", 1U);
+
+    assert_exec_fails(
+        db,
+        "CREATE TABLE grouped_auto_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (category, id)"
+        ") ENGINE=MyISAM"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "auto_policy", "grouped_auto_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_catalog_table_count(filename, "auto_policy", 1U);
+
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
