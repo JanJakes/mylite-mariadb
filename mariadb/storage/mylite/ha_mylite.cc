@@ -25,6 +25,7 @@
 #include "ha_mylite.h"
 #include "field.h"
 #include "handler.h"
+#include "mylite_schema_hook.h"
 #include "key.h"
 #include "sql_class.h"
 #include "sql_cmd.h"
@@ -43,6 +44,24 @@ static int mylite_done_func(void *p);
 static int mylite_add_discovered_table(void *ctx, const char *schema_name,
                                        const char *table_name);
 static const char *mylite_primary_file_path();
+static bool mylite_schema_hook_active();
+static int mylite_schema_hook_exists(const char *schema_name);
+static int mylite_schema_hook_store(const char *schema_name,
+                                    const char *default_character_set_name,
+                                    const char *default_collation_name,
+                                    const char *schema_comment,
+                                    size_t schema_comment_size);
+static int mylite_schema_hook_drop(const char *schema_name);
+static int mylite_schema_hook_read(const char *schema_name,
+                                   Mylite_schema_options *options);
+static void mylite_schema_hook_free(Mylite_schema_options *options);
+static int mylite_schema_hook_list_schemas(
+  mylite_schema_name_callback callback, void *ctx);
+static int mylite_schema_hook_list_tables(const char *schema_name,
+                                          mylite_schema_name_callback callback,
+                                          void *ctx);
+static int mylite_schema_hook_add_table(void *ctx, const char *,
+                                        const char *table_name);
 static int mylite_requested_engine_name(const char *primary_file,
                                         HA_CREATE_INFO *create_info,
                                         char *out_name, size_t out_name_size);
@@ -123,6 +142,7 @@ static int mylite_compare_index_entries(TABLE *table, uint index_number,
                                         const Mylite_index_cursor_entry *right,
                                         int *out_cmp);
 static int mylite_storage_to_handler_error(mylite_storage_result result);
+static int mylite_storage_to_schema_hook_result(mylite_storage_result result);
 static bool mylite_table_has_blob_fields(TABLE *table);
 static int mylite_serialize_blob_row(TABLE *table, const uchar *buf,
                                      uchar **out_payload,
@@ -172,6 +192,18 @@ static struct st_mysql_sys_var *mylite_system_variables[]=
   NULL
 };
 
+static const Mylite_schema_hooks mylite_schema_hooks=
+{
+  mylite_schema_hook_active,
+  mylite_schema_hook_exists,
+  mylite_schema_hook_store,
+  mylite_schema_hook_drop,
+  mylite_schema_hook_read,
+  mylite_schema_hook_free,
+  mylite_schema_hook_list_schemas,
+  mylite_schema_hook_list_tables
+};
+
 Mylite_share::Mylite_share()
 {
   thr_lock_init(&lock);
@@ -187,12 +219,14 @@ static int mylite_init_func(void *p)
   mylite_hton->discover_table_names= mylite_discover_table_names;
   mylite_hton->discover_table_existence= mylite_discover_table_existence;
   mylite_hton->tablefile_extensions= ha_mylite_exts;
+  mylite_register_schema_hooks(&mylite_schema_hooks);
 
   DBUG_RETURN(0);
 }
 
 static int mylite_done_func(void *)
 {
+  mylite_register_schema_hooks(NULL);
   mylite_primary_file= NULL;
   return 0;
 }
@@ -307,6 +341,140 @@ static const char *mylite_primary_file_path()
                                                          NULL;
 }
 
+static bool mylite_schema_hook_active()
+{
+  return mylite_primary_file_path() != NULL;
+}
+
+static int mylite_schema_hook_exists(const char *schema_name)
+{
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    return MYLITE_SCHEMA_HOOK_NOTFOUND;
+
+  mylite_storage_result storage_result=
+    mylite_storage_schema_exists(primary_file, schema_name);
+  return mylite_storage_to_schema_hook_result(storage_result);
+}
+
+static int mylite_schema_hook_store(const char *schema_name,
+                                    const char *default_character_set_name,
+                                    const char *default_collation_name,
+                                    const char *schema_comment,
+                                    size_t schema_comment_size)
+{
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    return MYLITE_SCHEMA_HOOK_NOTFOUND;
+
+  char *schema_comment_copy= NULL;
+  if (schema_comment)
+  {
+    schema_comment_copy= static_cast<char *>(malloc(schema_comment_size + 1));
+    if (!schema_comment_copy)
+      return MYLITE_SCHEMA_HOOK_ERROR;
+    memcpy(schema_comment_copy, schema_comment, schema_comment_size);
+    schema_comment_copy[schema_comment_size]= '\0';
+  }
+
+  mylite_storage_schema_definition definition=
+  {
+    sizeof(definition),
+    schema_name,
+    default_character_set_name,
+    default_collation_name,
+    schema_comment_copy
+  };
+  mylite_storage_result storage_result=
+    mylite_storage_store_schema_definition(primary_file, &definition);
+  free(schema_comment_copy);
+  return mylite_storage_to_schema_hook_result(storage_result);
+}
+
+static int mylite_schema_hook_drop(const char *schema_name)
+{
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    return MYLITE_SCHEMA_HOOK_NOTFOUND;
+
+  mylite_storage_result storage_result=
+    mylite_storage_drop_schema(primary_file, schema_name);
+  return mylite_storage_to_schema_hook_result(storage_result);
+}
+
+static int mylite_schema_hook_read(const char *schema_name,
+                                   Mylite_schema_options *options)
+{
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    return MYLITE_SCHEMA_HOOK_NOTFOUND;
+
+  mylite_storage_schema_metadata metadata= {sizeof(metadata), NULL, NULL, NULL};
+  mylite_storage_result storage_result=
+    mylite_storage_read_schema_definition(primary_file, schema_name, &metadata);
+  if (storage_result != MYLITE_STORAGE_OK)
+    return mylite_storage_to_schema_hook_result(storage_result);
+
+  options->default_character_set_name= metadata.default_character_set_name;
+  options->default_collation_name= metadata.default_collation_name;
+  options->schema_comment= metadata.schema_comment;
+  return MYLITE_SCHEMA_HOOK_OK;
+}
+
+static void mylite_schema_hook_free(Mylite_schema_options *options)
+{
+  if (!options)
+    return;
+
+  mylite_storage_free(options->default_character_set_name);
+  mylite_storage_free(options->default_collation_name);
+  mylite_storage_free(options->schema_comment);
+  options->default_character_set_name= NULL;
+  options->default_collation_name= NULL;
+  options->schema_comment= NULL;
+}
+
+static int mylite_schema_hook_list_schemas(
+  mylite_schema_name_callback callback, void *ctx)
+{
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    return MYLITE_SCHEMA_HOOK_NOTFOUND;
+
+  mylite_storage_result storage_result=
+    mylite_storage_list_schemas(primary_file, callback, ctx);
+  return mylite_storage_to_schema_hook_result(storage_result);
+}
+
+struct Mylite_schema_hook_table_list
+{
+  mylite_schema_name_callback callback;
+  void *ctx;
+};
+
+static int mylite_schema_hook_list_tables(const char *schema_name,
+                                          mylite_schema_name_callback callback,
+                                          void *ctx)
+{
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    return MYLITE_SCHEMA_HOOK_NOTFOUND;
+
+  Mylite_schema_hook_table_list table_list= {callback, ctx};
+  mylite_storage_result storage_result=
+    mylite_storage_list_tables(primary_file, schema_name,
+                               mylite_schema_hook_add_table, &table_list);
+  return mylite_storage_to_schema_hook_result(storage_result);
+}
+
+static int mylite_schema_hook_add_table(void *ctx, const char *,
+                                        const char *table_name)
+{
+  Mylite_schema_hook_table_list *table_list=
+    static_cast<Mylite_schema_hook_table_list *>(ctx);
+  return table_list->callback(table_list->ctx, table_name);
+}
+
 static int mylite_storage_to_handler_error(mylite_storage_result result)
 {
   switch (result) {
@@ -335,6 +503,28 @@ static int mylite_storage_to_handler_error(mylite_storage_result result)
   }
 
   return HA_ERR_GENERIC;
+}
+
+static int mylite_storage_to_schema_hook_result(mylite_storage_result result)
+{
+  switch (result) {
+  case MYLITE_STORAGE_OK:
+    return MYLITE_SCHEMA_HOOK_OK;
+  case MYLITE_STORAGE_NOTFOUND:
+    return MYLITE_SCHEMA_HOOK_NOTFOUND;
+  case MYLITE_STORAGE_NOMEM:
+  case MYLITE_STORAGE_BUSY:
+  case MYLITE_STORAGE_READONLY:
+  case MYLITE_STORAGE_IOERR:
+  case MYLITE_STORAGE_CORRUPT:
+  case MYLITE_STORAGE_FULL:
+  case MYLITE_STORAGE_MISUSE:
+  case MYLITE_STORAGE_UNSUPPORTED:
+  case MYLITE_STORAGE_ERROR:
+    return MYLITE_SCHEMA_HOOK_ERROR;
+  }
+
+  return MYLITE_SCHEMA_HOOK_ERROR;
 }
 
 ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)

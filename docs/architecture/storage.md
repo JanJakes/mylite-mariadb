@@ -72,9 +72,9 @@ metadata preserved. Online `ALTER`, in-place `ALTER`, transaction-aware index
 maintenance, free-space reclamation, and unsupported index classes still reject
 or remain planned until those slices define the paths. Standalone
 `CREATE INDEX` and `DROP INDEX` use MariaDB's ALTER-backed DDL path for
-supported copy-rebuild index additions and drops. File-backed opens rehydrate
-transient MariaDB runtime schema directories from MyLite catalog namespace
-records so schema existence does not depend on durable datadir directories.
+supported copy-rebuild index additions and drops. File-backed opens answer
+MariaDB SQL-layer schema and table discovery from MyLite catalog namespace
+records when no transient runtime schema directory exists.
 
 ## File Layout
 
@@ -207,11 +207,13 @@ No persistent directory is created for a schema. `CREATE DATABASE`,
 information schema listing are represented as catalog namespaces. Schema
 records store the schema name plus the default character set, default
 collation, and schema comment that MariaDB would otherwise keep in `db.opt`.
-The current implementation keeps MariaDB's SQL-layer directory checks intact by
-reconstructing transient runtime directories from the catalog on file-backed
-open and by syncing successful direct and prepared schema create, alter, and
-drop statements back to schema records. A final SQL-layer hook that removes the
-transient directory bridge remains planned.
+The current implementation keeps newly-created schema directories as transient
+runtime state when MariaDB's active table-DDL paths still need them, but
+file-backed reopen no longer reconstructs those directories from the catalog.
+SQL-layer hooks answer schema existence, schema/table listing, option reads,
+and no-directory schema alter/drop paths from catalog records. Final
+filesystem-free hooks for all schema DDL and non-table database objects remain
+planned.
 
 The default embedded profile does not expose server account administration,
 dynamic plugin installation, replication metadata, or the event scheduler.

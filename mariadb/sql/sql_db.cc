@@ -41,6 +41,7 @@
 #include "sql_handler.h"
 #include "sql_statistics.h"
 #include "ddl_log.h"                     // ddl_log functions
+#include "mylite_schema_hook.h"          // MyLite schema catalog hooks
 #include <my_dir.h>
 #include <m_ctype.h>
 #include "log.h"
@@ -66,6 +67,11 @@ static void mysql_change_db_impl(THD *thd,
                                  CHARSET_INFO *new_db_charset);
 static bool mysql_rm_db_internal(THD *thd, const Lex_ident_db &db,
                                  bool if_exists, bool silent);
+static bool mysql_alter_mylite_db(THD *thd, const Lex_ident_db &db,
+                                  Schema_specification_st *create_info);
+static bool mysql_rm_mylite_db(THD *thd, const Lex_ident_db &db,
+                               bool if_exists, bool silent);
+static bool mylite_runtime_schema_dir_exists(const char *db_name);
 
 
 /* Database options hash */
@@ -684,7 +690,12 @@ int load_db_opt_by_name(THD *thd, const char *db_name,
   (void) build_table_filename(db_opt_path, sizeof(db_opt_path) - 1,
                               db_name, "", MY_DB_OPT_FILE, 0);
 
-  return load_db_opt(thd, db_opt_path, db_create_info);
+  int result= load_db_opt(thd, db_opt_path, db_create_info);
+  if (result < 0 &&
+      mylite_schema_load_options(thd, db_name, db_create_info) ==
+        MYLITE_SCHEMA_HOOK_OK)
+    return 0;
+  return result;
 }
 
 
@@ -889,7 +900,6 @@ not_silent:
   DBUG_RETURN(0);
 }
 
-
 /* db-name is already validated when we come here */
 
 static bool
@@ -906,6 +916,10 @@ mysql_alter_db_internal(THD *thd, const Lex_ident_db &db,
 
   if (lock_schema_name(thd, dbnorm))
     DBUG_RETURN(TRUE);
+
+  if (mylite_schema_hooks_active() && mylite_schema_exists(db.str) &&
+      !mylite_runtime_schema_dir_exists(db.str))
+    DBUG_RETURN(mysql_alter_mylite_db(thd, db, create_info));
 
   /* 
      Recreate db options file: /dbpath/.db.opt
@@ -958,6 +972,48 @@ mysql_alter_db_internal(THD *thd, const Lex_ident_db &db,
 
 exit:
   DBUG_RETURN(error);
+}
+
+static bool mysql_alter_mylite_db(THD *thd, const Lex_ident_db &db,
+                                  Schema_specification_st *create_info)
+{
+  DBUG_ENTER("mysql_alter_mylite_db");
+
+  if (mylite_schema_store_options(db.str, create_info) !=
+      MYLITE_SCHEMA_HOOK_OK)
+  {
+    my_error(ER_UNKNOWN_ERROR, MYF(0));
+    DBUG_RETURN(TRUE);
+  }
+
+  if (thd->db.str && !cmp(&thd->db, &db))
+  {
+    thd->db_charset= create_info->default_table_charset ?
+                     create_info->default_table_charset :
+                     thd->variables.collation_server;
+    thd->variables.collation_database= thd->db_charset;
+  }
+
+  backup_log_info ddl_log;
+  bzero(&ddl_log, sizeof(ddl_log));
+  ddl_log.query=                   { C_STRING_WITH_LEN("ALTER") };
+  ddl_log.org_storage_engine_name= { C_STRING_WITH_LEN("DATABASE") };
+  ddl_log.org_database=     db;
+  backup_log_ddl(&ddl_log);
+
+  if (mysql_bin_log.is_open())
+  {
+    int errcode= query_error_code(thd, TRUE);
+    Query_log_event qinfo(thd, thd->query(), thd->query_length(), FALSE, TRUE,
+                          /* suppress_use */ TRUE, errcode);
+    qinfo.db=     db.str;
+    qinfo.db_len= (uint) db.length;
+    if (mysql_bin_log.write(&qinfo))
+      DBUG_RETURN(TRUE);
+  }
+  my_ok(thd, 1);
+
+  DBUG_RETURN(FALSE);
 }
 
 
@@ -1078,6 +1134,10 @@ mysql_rm_db_internal(THD *thd, const Lex_ident_db &db, bool if_exists,
     DBUG_RETURN(true);
 
   path_length= build_table_filename(path, sizeof(path) - 1, db.str, "", "", 0);
+
+  if (mylite_schema_hooks_active() && mylite_schema_exists(db.str) &&
+      !mylite_runtime_schema_dir_exists(db.str))
+    DBUG_RETURN(mysql_rm_mylite_db(thd, db, if_exists, silent));
 
   /* See if the directory exists */
   if (!(dirp= my_dir(path,MYF(MY_DONT_SORT))))
@@ -1316,6 +1376,78 @@ exit:
 end:
   my_dirend(dirp);
   DBUG_RETURN(error);
+}
+
+static bool mysql_rm_mylite_db(THD *thd, const Lex_ident_db &db,
+                               bool, bool silent)
+{
+  bool error= false;
+  DDL_LOG_STATE ddl_log_state;
+  DBUG_ENTER("mysql_rm_mylite_db");
+
+  bzero(&ddl_log_state, sizeof(ddl_log_state));
+  if (mylite_schema_drop(db.str) != MYLITE_SCHEMA_HOOK_OK)
+  {
+    my_error(ER_UNKNOWN_ERROR, MYF(0));
+    DBUG_RETURN(true);
+  }
+
+  backup_log_info ddl_log;
+  bzero(&ddl_log, sizeof(ddl_log));
+  ddl_log.query=                   { C_STRING_WITH_LEN("DROP") };
+  ddl_log.org_storage_engine_name= { C_STRING_WITH_LEN("DATABASE") };
+  ddl_log.org_database=     db;
+  backup_log_ddl(&ddl_log);
+
+  if (!silent)
+  {
+    const char *query= thd->query();
+    ulong query_length= thd->query_length();
+    DBUG_ASSERT(query);
+
+    if (mysql_bin_log.is_open())
+    {
+      int errcode= query_error_code(thd, TRUE);
+      Query_log_event qinfo(thd, query, query_length, FALSE, TRUE,
+                            /* suppress_use */ TRUE, errcode);
+      qinfo.db=     db.str;
+      qinfo.db_len= (uint32) db.length;
+      debug_crash_here("ddl_log_drop_before_binlog");
+      thd->binlog_xid= thd->query_id;
+      ddl_log_update_xid(&ddl_log_state, thd->binlog_xid);
+      error= mysql_bin_log.write(&qinfo);
+      thd->binlog_xid= 0;
+      debug_crash_here("ddl_log_drop_after_binlog");
+    }
+    if (!error)
+    {
+      thd->clear_error();
+      thd->server_status|= SERVER_STATUS_DB_DROPPED;
+      my_ok(thd, 0);
+    }
+  }
+
+  ddl_log_complete(&ddl_log_state);
+  if (unlikely(thd->db.str &&
+               cmp_db_names(Lex_ident_db(thd->db), db) && !error))
+  {
+    mysql_change_db_impl(thd, NULL, NO_ACL, thd->variables.collation_server);
+    thd->session_tracker.current_schema.mark_as_changed(thd);
+  }
+
+  DBUG_RETURN(error);
+}
+
+static bool mylite_runtime_schema_dir_exists(const char *db_name)
+{
+  char path[FN_REFLEN + 1];
+  uint path_length= build_table_filename(path, sizeof(path) - 1,
+                                         db_name, "", "", 0);
+  if (path_length && path[path_length - 1] == FN_LIBCHAR)
+    path[path_length - 1]= 0;
+
+  MY_STAT stat_info;
+  return mysql_file_stat(key_file_misc, path, &stat_info, MYF(0)) != NULL;
 }
 
 
@@ -2139,7 +2271,10 @@ bool check_db_dir_existence(const char *db_name)
   char db_dir_path[FN_REFLEN + 1];
   uint db_dir_path_len;
 
-  if (dbname_cache->contains(db_name))
+  if (mylite_schema_exists(db_name))
+    return 0;
+
+  if (!mylite_schema_hooks_active() && dbname_cache->contains(db_name))
     return 0;
 
   db_dir_path_len= build_table_filename(db_dir_path, sizeof(db_dir_path) - 1,

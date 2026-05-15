@@ -130,6 +130,7 @@ SET (SQL_SOURCE
                sql_digest.cc sql_do.cc
                sql_error.cc sql_handler.cc sql_get_diagnostics.cc
                sql_help.cc sql_insert.cc sql_lex.cc
+               mylite_schema_hook.cc
                sql_list.cc sql_load.cc sql_manager.cc
                sql_parse.cc sql_bootstrap.cc
                sql_partition.cc sql_plugin.cc sql_prepare.cc sql_rename.cc

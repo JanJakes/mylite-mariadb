@@ -142,19 +142,19 @@ outputs:
 
 | Artifact | Size | Stripped Size | Members | Global Symbols |
 | --- | ---: | ---: | ---: | ---: |
-| MariaDB embedded archive | 32,048,256 bytes / 30.56 MiB | n/a | 691 | n/a |
-| MariaDB storage-smoke archive | 32,175,720 bytes / 30.69 MiB | n/a | 693 | n/a |
-| Embedded open-close smoke | 19,583,552 bytes / 18.68 MiB | 17,642,480 bytes / 16.83 MiB | n/a | 16,840 |
-| Embedded exec smoke | 19,583,352 bytes / 18.68 MiB | 17,642,328 bytes / 16.83 MiB | n/a | 16,840 |
-| Embedded statement smoke | 19,599,872 bytes / 18.69 MiB | 17,658,800 bytes / 16.84 MiB | n/a | 16,840 |
-| Embedded warning smoke | 19,599,808 bytes / 18.69 MiB | 17,658,800 bytes / 16.84 MiB | n/a | 16,840 |
-| Embedded comparison smoke | 19,680,320 bytes / 18.77 MiB | 17,693,008 bytes / 16.87 MiB | n/a | 16,842 |
-| Storage-smoke open-close smoke | 19,657,408 bytes / 18.75 MiB | 17,692,720 bytes / 16.87 MiB | n/a | 16,840 |
-| Storage-smoke exec smoke | 19,657,240 bytes / 18.75 MiB | 17,692,552 bytes / 16.87 MiB | n/a | 16,840 |
-| Storage-smoke statement smoke | 19,657,232 bytes / 18.75 MiB | 17,692,496 bytes / 16.87 MiB | n/a | 16,840 |
-| Storage-smoke warning smoke | 19,657,184 bytes / 18.75 MiB | 17,692,496 bytes / 16.87 MiB | n/a | 16,840 |
-| Storage-smoke comparison smoke | 19,716,784 bytes / 18.80 MiB | 17,710,080 bytes / 16.89 MiB | n/a | 16,842 |
-| Storage-engine smoke | 19,724,736 bytes / 18.81 MiB | 17,758,608 bytes / 16.94 MiB | n/a | 16,840 |
+| MariaDB embedded archive | 32,055,856 bytes / 30.57 MiB | n/a | 692 | n/a |
+| MariaDB storage-smoke archive | 32,186,432 bytes / 30.70 MiB | n/a | 694 | n/a |
+| Embedded open-close smoke | 19,584,944 bytes / 18.68 MiB | 17,643,408 bytes / 16.83 MiB | n/a | 16,848 |
+| Embedded exec smoke | 19,584,776 bytes / 18.68 MiB | 17,643,208 bytes / 16.83 MiB | n/a | 16,848 |
+| Embedded statement smoke | 19,601,280 bytes / 18.69 MiB | 17,659,664 bytes / 16.84 MiB | n/a | 16,848 |
+| Embedded warning smoke | 19,601,216 bytes / 18.69 MiB | 17,659,664 bytes / 16.84 MiB | n/a | 16,848 |
+| Embedded comparison smoke | 19,681,696 bytes / 18.77 MiB | 17,693,888 bytes / 16.87 MiB | n/a | 16,850 |
+| Storage-smoke open-close smoke | 19,657,216 bytes / 18.75 MiB | 17,693,616 bytes / 16.87 MiB | n/a | 16,848 |
+| Storage-smoke exec smoke | 19,657,048 bytes / 18.75 MiB | 17,693,448 bytes / 16.87 MiB | n/a | 16,848 |
+| Storage-smoke statement smoke | 19,657,040 bytes / 18.75 MiB | 17,693,408 bytes / 16.87 MiB | n/a | 16,848 |
+| Storage-smoke warning smoke | 19,656,992 bytes / 18.75 MiB | 17,693,408 bytes / 16.87 MiB | n/a | 16,848 |
+| Storage-smoke comparison smoke | 19,716,576 bytes / 18.80 MiB | 17,710,928 bytes / 16.89 MiB | n/a | 16,850 |
+| Storage-engine smoke | 19,724,704 bytes / 18.81 MiB | 17,759,536 bytes / 16.94 MiB | n/a | 16,848 |
 
 ## Offline Build Caveat
 

@@ -3,6 +3,7 @@
 
 #include <assert.h>
 #include <dirent.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,6 +32,12 @@ typedef struct schema_option_context {
     const char *expected_collation;
     const char *expected_comment;
 } schema_option_context;
+
+typedef struct show_create_schema_context {
+    int rows;
+    const char *expected_character_set;
+    const char *expected_collation;
+} show_create_schema_context;
 
 typedef struct post_row_context {
     int rows;
@@ -119,6 +126,11 @@ static void assert_schema_options(
     const char *expected_collation,
     const char *expected_comment
 );
+static void assert_show_create_schema(
+    mylite_db *db,
+    const char *expected_character_set,
+    const char *expected_collation
+);
 static void assert_catalog_table_count(
     const char *filename,
     const char *schema_name,
@@ -134,6 +146,12 @@ static void assert_catalog_table_metadata(
 static int engine_callback(void *ctx, int column_count, char **values, char **column_names);
 static int schema_callback(void *ctx, int column_count, char **values, char **column_names);
 static int schema_option_callback(void *ctx, int column_count, char **values, char **column_names);
+static int show_create_schema_callback(
+    void *ctx,
+    int column_count,
+    char **values,
+    char **column_names
+);
 static int table_callback(void *ctx, int column_count, char **values, char **column_names);
 static int row_callback(void *ctx, int column_count, char **values, char **column_names);
 static int post_row_callback(void *ctx, int column_count, char **values, char **column_names);
@@ -153,6 +171,7 @@ static mylite_open_config open_config(const char *runtime_root);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static void assert_no_durable_sidecars(const char *root, const char *primary_name);
+static void assert_no_runtime_schema_directory(const char *root, const char *schema_name);
 static void assert_no_forbidden_sidecars(const char *path);
 static void assert_only_primary_and_runtime_root(const char *root, const char *primary_name);
 static int is_forbidden_sidecar_name(const char *name);
@@ -240,6 +259,8 @@ static void test_schema_namespaces(void) {
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
     db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "app");
+    assert_no_runtime_schema_directory(root, "empty_blog");
     assert_exec_succeeds(db, "USE app");
     assert(mylite_exec(db, "SHOW DATABASES", schema_callback, &schemas, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
@@ -307,6 +328,7 @@ static void test_schema_options(void) {
         "COMMENT 'first comment'"
     );
     assert_schema_options(db, "latin1", "latin1_bin", "first comment");
+    assert_show_create_schema(db, "latin1", "latin1_bin");
     assert(
         mylite_storage_read_schema_definition(filename, "option_app", &metadata) ==
         MYLITE_STORAGE_OK
@@ -324,13 +346,23 @@ static void test_schema_options(void) {
         "COMMENT 'updated ''comment'"
     );
     assert_schema_options(db, "utf8mb4", "utf8mb4_bin", "updated 'comment");
+    assert_show_create_schema(db, "utf8mb4", "utf8mb4_bin");
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
     db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "option_app");
     assert_exec_succeeds(db, "USE option_app");
     assert_schema_options(db, "utf8mb4", "utf8mb4_bin", "updated 'comment");
+    assert_show_create_schema(db, "utf8mb4", "utf8mb4_bin");
+    assert_exec_succeeds(
+        db,
+        "ALTER DATABASE option_app DEFAULT CHARACTER SET latin1 COLLATE latin1_bin "
+        "COMMENT 'reopened comment'"
+    );
+    assert_schema_options(db, "latin1", "latin1_bin", "reopened comment");
+    assert_show_create_schema(db, "latin1", "latin1_bin");
     assert_exec_succeeds(db, "DROP DATABASE option_app");
     assert(mylite_storage_schema_exists(filename, "option_app") == MYLITE_STORAGE_NOTFOUND);
 
@@ -2208,6 +2240,30 @@ static void assert_schema_options(
     assert(options.rows == 1);
 }
 
+static void assert_show_create_schema(
+    mylite_db *db,
+    const char *expected_character_set,
+    const char *expected_collation
+) {
+    show_create_schema_context show_create = {
+        .expected_character_set = expected_character_set,
+        .expected_collation = expected_collation,
+    };
+    char *errmsg = NULL;
+
+    assert(
+        mylite_exec(
+            db,
+            "SHOW CREATE DATABASE option_app",
+            show_create_schema_callback,
+            &show_create,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(show_create.rows == 1);
+}
+
 static void assert_catalog_table_count(
     const char *filename,
     const char *schema_name,
@@ -2288,10 +2344,39 @@ static int schema_option_callback(void *ctx, int column_count, char **values, ch
     assert(values[0] != NULL);
     assert(values[1] != NULL);
     assert(values[2] != NULL);
+    if (strcmp(values[0], option_ctx->expected_character_set) != 0 ||
+        strcmp(values[1], option_ctx->expected_collation) != 0 ||
+        strcmp(values[2], option_ctx->expected_comment) != 0) {
+        fprintf(
+            stderr,
+            "unexpected schema options: charset='%s' collation='%s' comment='%s'\n",
+            values[0],
+            values[1],
+            values[2]
+        );
+    }
     assert(strcmp(values[0], option_ctx->expected_character_set) == 0);
     assert(strcmp(values[1], option_ctx->expected_collation) == 0);
     assert(strcmp(values[2], option_ctx->expected_comment) == 0);
     ++option_ctx->rows;
+    return 0;
+}
+
+static int show_create_schema_callback(
+    void *ctx,
+    int column_count,
+    char **values,
+    char **column_names
+) {
+    show_create_schema_context *show_create_ctx = (show_create_schema_context *)ctx;
+    (void)column_names;
+
+    assert(column_count == 2);
+    assert(values[0] != NULL && strcmp(values[0], "option_app") == 0);
+    assert(values[1] != NULL);
+    assert(strstr(values[1], show_create_ctx->expected_character_set) != NULL);
+    assert(strstr(values[1], show_create_ctx->expected_collation) != NULL);
+    ++show_create_ctx->rows;
     return 0;
 }
 
@@ -2643,6 +2728,34 @@ static void assert_no_durable_sidecars(const char *root, const char *primary_nam
     assert_no_forbidden_sidecars(root);
     assert_only_primary_and_runtime_root(root, primary_name);
     assert(is_directory_empty(runtime_root));
+    free(runtime_root);
+}
+
+static void assert_no_runtime_schema_directory(const char *root, const char *schema_name) {
+    char *runtime_root = path_join(root, "runtime");
+    DIR *directory = opendir(runtime_root);
+    unsigned runtime_count = 0;
+
+    assert(directory != NULL);
+    for (struct dirent *entry = readdir(directory); entry != NULL; entry = readdir(directory)) {
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
+            continue;
+        }
+
+        char *runtime_dir = path_join(runtime_root, entry->d_name);
+        char *data_dir = path_join(runtime_dir, "data");
+        char *schema_dir = path_join(data_dir, schema_name);
+        struct stat schema_stat;
+        assert(lstat(schema_dir, &schema_stat) != 0);
+        assert(errno == ENOENT);
+        ++runtime_count;
+        free(schema_dir);
+        free(data_dir);
+        free(runtime_dir);
+    }
+
+    assert(runtime_count == 1);
+    assert(closedir(directory) == 0);
     free(runtime_root);
 }
 

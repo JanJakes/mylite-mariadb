@@ -88,6 +88,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/sql_do.cc ../sql/sql_error.cc ../sql/sql_handler.cc
             ../sql/sql_get_diagnostics.cc
            ../sql/sql_help.cc ../sql/sql_insert.cc ../sql/datadict.cc
+           ../sql/mylite_schema_hook.cc
            ../sql/sql_admin.cc ../sql/sql_truncate.cc ../sql/sql_reload.cc
            ../sql/sql_lex.cc ../sql/keycaches.cc
            ../sql/sql_list.cc ../sql/sql_load.cc ../sql/sql_locale.cc 

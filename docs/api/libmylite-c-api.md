@@ -105,10 +105,10 @@ final close. Current storage-engine smoke builds persist schema namespace
 records with default character set, collation, and comment options,
 table-definition metadata, rows, autoincrement state, supported indexes, and
 rollback-journal publication state in the primary `.mylite` file. File-backed
-opens rehydrate transient MariaDB schema directories from the catalog before
-user SQL runs; SQL transactions and savepoints remain planned. Existing-file
-opens preserve storage lock conflicts as `MYLITE_BUSY` before starting the
-embedded runtime.
+opens answer schema and table discovery from the catalog when no transient
+MariaDB schema directory exists; SQL transactions and savepoints remain
+planned. Existing-file opens preserve storage lock conflicts as `MYLITE_BUSY`
+before starting the embedded runtime.
 
 ## Direct Execution
 
