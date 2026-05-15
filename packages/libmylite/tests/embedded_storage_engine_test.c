@@ -1379,6 +1379,7 @@ static void test_create_table_select(void) {
     single_value_context reopened_count = {
         .expected_value = "3",
     };
+    table_context failed_tables = {0};
     table_context body_rows = {0};
     table_context reopened_body_rows = {0};
     char *errmsg = NULL;
@@ -1402,6 +1403,30 @@ static void test_create_table_select(void) {
         "('source-alpha', 'source body one', UNHEX('010203')), "
         "('source-beta', 'source body two', UNHEX('040506'))"
     );
+    assert_exec_fails(
+        db,
+        "CREATE TABLE ctas_failed_posts ("
+        "id INT NOT NULL, "
+        "slug VARCHAR(32) NOT NULL, "
+        "PRIMARY KEY (id), "
+        "UNIQUE KEY slug_key (slug)"
+        ") ENGINE=InnoDB "
+        "SELECT 1 AS id, 'duplicate' AS slug "
+        "UNION ALL SELECT 2 AS id, 'duplicate' AS slug"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW TABLES LIKE 'ctas_failed_posts'",
+            table_callback,
+            &failed_tables,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(failed_tables.rows == 0);
+    assert_catalog_table_count(filename, "app", 1U);
+
     assert_exec_succeeds(
         db,
         "CREATE TABLE ctas_default_constants AS "

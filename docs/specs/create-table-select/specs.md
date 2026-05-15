@@ -52,7 +52,8 @@ MariaDB base: `mariadb-11.8.6`
 
 ## Non-Goals
 
-- Failed CTAS rollback, duplicate-error cleanup, or atomic statement undo.
+- Physical rollback of row, overflow, index-entry, or autoincrement pages
+  written before failed CTAS abort.
 - `CREATE OR REPLACE ... SELECT`, `CREATE TEMPORARY TABLE ... SELECT`, `IGNORE`
   / `REPLACE` CTAS, and lock-table edge cases.
 - CTAS from views, information schema, generated columns, foreign keys,
@@ -81,10 +82,11 @@ mid-statement failure remains a separate transaction/DDL cleanup slice.
 
 ## Compatibility Impact
 
-`CREATE TABLE ... SELECT` moves from planned to partial for successful supported
-routed table shapes. It remains partial because failed-statement cleanup,
-temporary-table CTAS, `OR REPLACE`, `IGNORE` / `REPLACE`, foreign keys,
-partitions, unsupported source objects, and SQL rollback remain planned.
+`CREATE TABLE ... SELECT` moves from planned to partial for supported routed
+table shapes. It remains partial because physical rollback of pages written
+before failed CTAS abort, temporary-table CTAS, `OR REPLACE`, `IGNORE` /
+`REPLACE`, foreign keys, partitions, unsupported source objects, and SQL
+rollback remain planned.
 
 ## DDL Metadata Routing Impact
 
@@ -138,6 +140,8 @@ unless handler fixes are needed; update size measurements after verification.
 - Target metadata records the requested engine correctly.
 - CTAS target rows, BLOB/TEXT payloads, autoincrement values, and supported
   indexes survive close/reopen.
+- Failed CTAS duplicate-key abort removes the target catalog metadata before
+  the statement returns an error.
 - Compatibility, roadmap, and storage architecture docs describe CTAS as
   partial support with explicit remaining limits.
 
@@ -151,14 +155,15 @@ entry points:
 - Explicit `ENGINE=InnoDB` CTAS with target primary, unique, and secondary
   indexes writes result rows through `ha_mylite::write_row()`.
 - Storage-engine smoke covers selected BLOB/TEXT payloads, duplicate-key checks
-  after CTAS, autoincrement advancement from copied rows, forced-index reads,
-  close/reopen metadata and rows, and durable-sidecar gates.
+  after CTAS, duplicate-key CTAS abort target cleanup, autoincrement
+  advancement from copied rows, forced-index reads, close/reopen metadata and
+  rows, and durable-sidecar gates.
 
 ## Risks And Open Questions
 
-- MariaDB has explicit CTAS abort/drop handling. MyLite currently has
-  non-transactional handler flags, so failed CTAS cleanup must remain outside
-  the support claim until SQL rollback and DDL undo are implemented.
+- MariaDB has explicit CTAS abort/drop handling. MyLite follows that path for
+  target catalog cleanup, but it still leaves any pages written before abort
+  orphaned until SQL rollback, DDL undo, and compaction are implemented.
 - CTAS can derive many SQL types from expressions. This slice should cover
   representative supported types and leave broad type-matrix comparison to a
   later MariaDB/MTR-scale compatibility effort.
