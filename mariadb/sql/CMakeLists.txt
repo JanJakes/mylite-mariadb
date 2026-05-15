@@ -121,6 +121,15 @@ ELSE()
   SET(MYLITE_XML_SQL_FUNCTION_SOURCE)
 ENDIF()
 
+OPTION(MYLITE_WITH_GIS_SQL_FUNCTIONS "Build GIS SQL functions" ON)
+IF(MYLITE_WITH_GIS_SQL_FUNCTIONS)
+  ADD_DEFINITIONS(-DMYLITE_WITH_GIS_SQL_FUNCTIONS=1)
+  SET(MYLITE_GIS_SQL_FUNCTION_SOURCES item_geofunc.cc gcalc_slicescan.cc gcalc_tools.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_GIS_SQL_FUNCTIONS=0)
+  SET(MYLITE_GIS_SQL_FUNCTION_SOURCES mylite_gis_sql_functions_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_ORACLE_SQL_MODE "Build Oracle SQL mode parser" ON)
 IF(MYLITE_WITH_ORACLE_SQL_MODE)
   SET(MYLITE_ORACLE_PARSER_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/yy_oracle.cc)
@@ -141,7 +150,7 @@ SET (SQL_SOURCE
                signal_handler.cc
                handler.cc item_vectorfunc.cc
                hostname.cc init.cc item.cc item_buff.cc item_cmpfunc.cc
-               item_create.cc item_func.cc item_geofunc.cc item_row.cc
+               item_create.cc item_func.cc ${MYLITE_GIS_SQL_FUNCTION_SOURCES} item_row.cc
                item_strfunc.cc item_subselect.cc item_sum.cc item_timefunc.cc
                key.cc log.cc log_cache.cc lock.cc
                log_event.cc log_event_server.cc
@@ -202,7 +211,6 @@ SET (SQL_SOURCE
                opt_histogram_json.cc
                opt_index_cond_pushdown.cc opt_subselect.cc
                opt_table_elimination.cc sql_expression_cache.cc
-               gcalc_slicescan.cc gcalc_tools.cc
                my_apc.cc mf_iocache_encr.cc item_jsonfunc.cc
                my_json_writer.cc json_schema.cc json_schema_helper.cc
                rpl_gtid.cc gtid_index.cc rpl_parallel.cc

@@ -469,6 +469,45 @@ static void test_prepare_diagnostics(void) {
     assert(strstr(mylite_errmsg(db), "server utility") != NULL);
 
     assert(
+        mylite_prepare(db, "SELECT ST_AsText(?)", MYLITE_NUL_TERMINATED, &stmt, NULL) ==
+        MYLITE_ERROR
+    );
+    assert(stmt == NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), "GIS SQL function") != NULL);
+
+    assert(
+        mylite_prepare(db, "SELECT ST_GeomFromText(?)", MYLITE_NUL_TERMINATED, &stmt, NULL) ==
+        MYLITE_ERROR
+    );
+    assert(stmt == NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), "GIS SQL function") != NULL);
+
+    assert(
+        mylite_prepare(db, "SELECT Point(?, ?)", MYLITE_NUL_TERMINATED, &stmt, NULL) == MYLITE_ERROR
+    );
+    assert(stmt == NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), "GIS SQL function") != NULL);
+
+    assert(
+        mylite_prepare(db, "SELECT X(Point(?, ?))", MYLITE_NUL_TERMINATED, &stmt, NULL) ==
+        MYLITE_ERROR
+    );
+    assert(stmt == NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), "GIS SQL function") != NULL);
+
+    assert(
         mylite_prepare(db, "SELECT EXTRACTVALUE(?, '/a')", MYLITE_NUL_TERMINATED, &stmt, NULL) ==
         MYLITE_ERROR
     );

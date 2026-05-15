@@ -86,6 +86,16 @@ ELSE()
   SET(MYLITE_XML_SQL_FUNCTION_SOURCE)
 ENDIF()
 
+OPTION(MYLITE_WITH_GIS_SQL_FUNCTIONS "Build GIS SQL functions" ON)
+IF(MYLITE_WITH_GIS_SQL_FUNCTIONS)
+  ADD_DEFINITIONS(-DMYLITE_WITH_GIS_SQL_FUNCTIONS=1)
+  SET(MYLITE_GIS_SQL_FUNCTION_SOURCES
+      ../sql/item_geofunc.cc ../sql/gcalc_tools.cc ../sql/gcalc_slicescan.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_GIS_SQL_FUNCTIONS=0)
+  SET(MYLITE_GIS_SQL_FUNCTION_SOURCES ../sql/mylite_gis_sql_functions_disabled.cc)
+ENDIF()
+
 SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc 
            libmysql.c ../sql-common/errmsg.c
            ../sql-common/client.c
@@ -101,7 +111,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/handler.cc ../sql/hash_filo.cc ../sql/hostname.cc 
            ../sql/init.cc ../sql/item_buff.cc ../sql/item_cmpfunc.cc 
            ../sql/item.cc ../sql/item_create.cc ../sql/item_func.cc 
-           ../sql/item_geofunc.cc ../sql/item_row.cc ../sql/item_strfunc.cc 
+           ${MYLITE_GIS_SQL_FUNCTION_SOURCES} ../sql/item_row.cc ../sql/item_strfunc.cc
            ../sql/item_subselect.cc ../sql/item_sum.cc ../sql/item_timefunc.cc 
            ${MYLITE_XML_SQL_FUNCTION_SOURCE} ../sql/item_jsonfunc.cc
            ../sql/json_schema.cc ../sql/json_schema_helper.cc
@@ -146,7 +156,6 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/ddl_log.cc ../sql/item_vectorfunc.cc
            ../sql/sql_trigger.cc ../sql/sql_udf.cc ../sql/sql_union.cc
            ../sql/sql_update.cc ../sql/sql_view.cc ../sql/sql_profile.cc
-           ../sql/gcalc_tools.cc ../sql/gcalc_slicescan.cc
            ../sql/strfunc.cc ../sql/table.cc ../sql/thr_malloc.cc
            ../sql/sql_time.cc ../sql/tztime.cc ../sql/uniques.cc ../sql/unireg.cc
            ../sql/partition_info.cc ../sql/sql_connect.cc 

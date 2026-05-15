@@ -55,3 +55,6 @@ set(MYLITE_WITH_ORACLE_SQL_MODE OFF CACHE BOOL "Omit Oracle SQL mode parser" FOR
 
 # MyLite rejects XML SQL functions before MariaDB execution.
 set(MYLITE_WITH_XML_SQL_FUNCTIONS OFF CACHE BOOL "Omit XML SQL functions" FORCE)
+
+# MyLite rejects GIS SQL functions before MariaDB execution.
+set(MYLITE_WITH_GIS_SQL_FUNCTIONS OFF CACHE BOOL "Omit GIS SQL functions" FORCE)

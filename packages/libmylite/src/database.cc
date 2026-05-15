@@ -328,6 +328,7 @@ bool is_server_surface_sql(std::string_view sql);
 bool is_file_import_sql(std::string_view sql);
 bool is_file_export_sql(std::string_view sql);
 bool is_server_utility_function_sql(std::string_view sql);
+bool is_gis_sql_function_sql(std::string_view sql);
 bool is_xml_sql_function_sql(std::string_view sql);
 bool is_oracle_sql_mode_sql(std::string_view sql);
 bool sql_set_assignment_has_oracle_sql_mode(std::string_view assignment);
@@ -344,9 +345,11 @@ bool is_set_transaction_control_sql(std::string_view sql);
 bool sql_tokens_contain_file_import_function(std::string_view sql);
 bool sql_tokens_contain_file_export_marker(std::string_view sql);
 bool sql_tokens_contain_server_utility_function(std::string_view sql);
+bool sql_tokens_contain_gis_sql_function(std::string_view sql);
 bool sql_tokens_contain_xml_sql_function(std::string_view sql);
 bool sql_tokens_contain_locking_marker(std::string_view sql);
 bool sql_tokens_contain_named_lock_function(std::string_view sql);
+bool sql_token_is_gis_sql_function(std::string_view token);
 bool sql_span_contains_token(std::string_view sql, const char *keyword);
 bool sql_quoted_span_contains_token(std::string_view &sql, char quote, const char *keyword);
 bool sql_tokens_contain_online_alter_marker(std::string_view sql);
@@ -2009,6 +2012,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_server_utility_function_sql(sql)) {
         return "unsupported server utility SQL function";
     }
+    if (is_gis_sql_function_sql(sql)) {
+        return "unsupported GIS SQL function";
+    }
     if (is_xml_sql_function_sql(sql)) {
         return "unsupported XML SQL function";
     }
@@ -2117,6 +2123,10 @@ bool is_file_export_sql(std::string_view sql) {
 
 bool is_server_utility_function_sql(std::string_view sql) {
     return sql_tokens_contain_server_utility_function(sql);
+}
+
+bool is_gis_sql_function_sql(std::string_view sql) {
+    return sql_tokens_contain_gis_sql_function(sql);
 }
 
 bool is_xml_sql_function_sql(std::string_view sql) {
@@ -2427,6 +2437,20 @@ bool sql_tokens_contain_server_utility_function(std::string_view sql) {
     return false;
 }
 
+bool sql_tokens_contain_gis_sql_function(std::string_view sql) {
+    std::string_view token;
+    while (pop_sql_scanned_token(sql, token)) {
+        if (!sql_next_non_noise_is(sql, '(')) {
+            continue;
+        }
+
+        if (sql_token_is_gis_sql_function(token)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool sql_tokens_contain_xml_sql_function(std::string_view sql) {
     std::string_view token;
     while (pop_sql_scanned_token(sql, token)) {
@@ -2435,6 +2459,180 @@ bool sql_tokens_contain_xml_sql_function(std::string_view sql) {
         }
 
         if (sql_token_equals(token, "EXTRACTVALUE") || sql_token_equals(token, "UPDATEXML")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool sql_token_is_gis_sql_function(std::string_view token) {
+    constexpr const char *k_gis_sql_function_names[] = {
+        "AREA",
+        "ASBINARY",
+        "ASTEXT",
+        "ASWKB",
+        "ASWKT",
+        "BOUNDARY",
+        "BUFFER",
+        "CENTROID",
+        "CONTAINS",
+        "CONVEXHULL",
+        "CROSSES",
+        "DIMENSION",
+        "DISJOINT",
+        "ENDPOINT",
+        "ENVELOPE",
+        "EQUALS",
+        "EXTERIORRING",
+        "GEOMCOLLFROMTEXT",
+        "GEOMCOLLFROMWKB",
+        "GEOMETRY",
+        "GEOMETRYCOLLECTION",
+        "GEOMETRYCOLLECTIONFROMTEXT",
+        "GEOMETRYCOLLECTIONFROMWKB",
+        "GEOMETRYFROMTEXT",
+        "GEOMETRYFROMWKB",
+        "GEOMETRYN",
+        "GEOMETRYTYPE",
+        "GEOMFROMTEXT",
+        "GEOMFROMWKB",
+        "GLENGTH",
+        "INTERIORRINGN",
+        "INTERSECTS",
+        "ISCLOSED",
+        "ISEMPTY",
+        "ISRING",
+        "ISSIMPLE",
+        "LINEFROMTEXT",
+        "LINEFROMWKB",
+        "LINESTRING",
+        "LINESTRINGFROMTEXT",
+        "LINESTRINGFROMWKB",
+        "MBRCONTAINS",
+        "MBRDISJOINT",
+        "MBREQUAL",
+        "MBREQUALS",
+        "MBRINTERSECTS",
+        "MBROVERLAPS",
+        "MBRTOUCHES",
+        "MBRWITHIN",
+        "MLINEFROMTEXT",
+        "MLINEFROMWKB",
+        "MPOINTFROMTEXT",
+        "MPOINTFROMWKB",
+        "MPOLYFROMTEXT",
+        "MPOLYFROMWKB",
+        "MULTILINESTRING",
+        "MULTILINESTRINGFROMTEXT",
+        "MULTILINESTRINGFROMWKB",
+        "MULTIPOINT",
+        "MULTIPOINTFROMTEXT",
+        "MULTIPOINTFROMWKB",
+        "MULTIPOLYGON",
+        "MULTIPOLYGONFROMTEXT",
+        "MULTIPOLYGONFROMWKB",
+        "NUMGEOMETRIES",
+        "NUMINTERIORRINGS",
+        "NUMPOINTS",
+        "OVERLAPS",
+        "POINT",
+        "POINTFROMTEXT",
+        "POINTFROMWKB",
+        "POINTN",
+        "POINTONSURFACE",
+        "POLYFROMTEXT",
+        "POLYFROMWKB",
+        "POLYGON",
+        "POLYGONFROMTEXT",
+        "POLYGONFROMWKB",
+        "SRID",
+        "ST_AREA",
+        "STARTPOINT",
+        "ST_ASBINARY",
+        "ST_ASGEOJSON",
+        "ST_ASTEXT",
+        "ST_ASWKB",
+        "ST_ASWKT",
+        "ST_BOUNDARY",
+        "ST_BUFFER",
+        "ST_CENTROID",
+        "ST_CONTAINS",
+        "ST_CONVEXHULL",
+        "ST_CROSSES",
+        "ST_DIFFERENCE",
+        "ST_DIMENSION",
+        "ST_DISJOINT",
+        "ST_DISTANCE",
+        "ST_DISTANCE_SPHERE",
+        "ST_ENDPOINT",
+        "ST_ENVELOPE",
+        "ST_EQUALS",
+        "ST_EXTERIORRING",
+        "ST_GEOMCOLLFROMTEXT",
+        "ST_GEOMCOLLFROMWKB",
+        "ST_GEOMETRYCOLLECTIONFROMTEXT",
+        "ST_GEOMETRYCOLLECTIONFROMWKB",
+        "ST_GEOMETRYFROMTEXT",
+        "ST_GEOMETRYFROMWKB",
+        "ST_GEOMETRYN",
+        "ST_GEOMETRYTYPE",
+        "ST_GEOMFROMGEOJSON",
+        "ST_GEOMFROMTEXT",
+        "ST_GEOMFROMWKB",
+        "ST_GIS_DEBUG",
+        "ST_INTERIORRINGN",
+        "ST_INTERSECTION",
+        "ST_INTERSECTS",
+        "ST_ISCLOSED",
+        "ST_ISEMPTY",
+        "ST_ISRING",
+        "ST_ISSIMPLE",
+        "ST_LENGTH",
+        "ST_LINEFROMTEXT",
+        "ST_LINEFROMWKB",
+        "ST_LINESTRINGFROMTEXT",
+        "ST_LINESTRINGFROMWKB",
+        "ST_MLINEFROMTEXT",
+        "ST_MLINEFROMWKB",
+        "ST_MPOINTFROMTEXT",
+        "ST_MPOINTFROMWKB",
+        "ST_MPOLYFROMTEXT",
+        "ST_MPOLYFROMWKB",
+        "ST_MULTILINESTRINGFROMTEXT",
+        "ST_MULTILINESTRINGFROMWKB",
+        "ST_MULTIPOINTFROMTEXT",
+        "ST_MULTIPOINTFROMWKB",
+        "ST_MULTIPOLYGONFROMTEXT",
+        "ST_MULTIPOLYGONFROMWKB",
+        "ST_NUMGEOMETRIES",
+        "ST_NUMINTERIORRINGS",
+        "ST_NUMPOINTS",
+        "ST_OVERLAPS",
+        "ST_POINTFROMTEXT",
+        "ST_POINTFROMWKB",
+        "ST_POINTN",
+        "ST_POINTONSURFACE",
+        "ST_POLYFROMTEXT",
+        "ST_POLYFROMWKB",
+        "ST_POLYGONFROMTEXT",
+        "ST_POLYGONFROMWKB",
+        "ST_RELATE",
+        "ST_SRID",
+        "ST_STARTPOINT",
+        "ST_SYMDIFFERENCE",
+        "ST_TOUCHES",
+        "ST_UNION",
+        "ST_WITHIN",
+        "ST_X",
+        "ST_Y",
+        "TOUCHES",
+        "WITHIN",
+        "X",
+        "Y",
+    };
+
+    for (const char *name : k_gis_sql_function_names) {
+        if (sql_token_equals(token, name)) {
             return true;
         }
     }

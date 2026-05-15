@@ -36,6 +36,7 @@ MYLITE_WITH_SQL_FILE_IO=OFF
 MYLITE_WITH_SERVER_UTILITY_FUNCTIONS=OFF
 MYLITE_WITH_ORACLE_SQL_MODE=OFF
 MYLITE_WITH_XML_SQL_FUNCTIONS=OFF
+MYLITE_WITH_GIS_SQL_FUNCTIONS=OFF
 PLUGIN_AUTH_SOCKET=NO
 PLUGIN_FEEDBACK=NO
 PLUGIN_PERFSCHEMA=NO
@@ -45,11 +46,11 @@ PLUGIN_THREAD_POOL_INFO=NO
 `WITH_WSREP=OFF` and `PLUGIN_S3=NO` are required because the initial MariaDB
 import intentionally omits `wsrep-lib` and `storage/maria/libmarias3`.
 Dynamic plugins, LOAD file import, SQL host-file I/O, server utility SQL
-functions, Oracle SQL mode parsing, XML SQL functions, socket authentication,
-feedback, Performance Schema, and thread-pool info are disabled because they
-are server-administration, blocking utility, Oracle compatibility, legacy XML
-helper, or server/client file surfaces, not core MyLite embedded runtime
-behavior.
+functions, Oracle SQL mode parsing, XML SQL functions, GIS SQL functions,
+socket authentication, feedback, Performance Schema, and thread-pool info are
+disabled because they are server-administration, blocking utility, Oracle
+compatibility, legacy XML helper, spatial-function, or server/client file
+surfaces, not core MyLite embedded runtime behavior.
 
 On macOS, the profile also sets `CMAKE_C_FLAGS` and `CMAKE_CXX_FLAGS` to
 `-Wno-nullability-completeness`. That keeps MariaDB's warning-as-error profile
@@ -69,8 +70,8 @@ current MyLite embedded profile patches applied.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 30,712,648 bytes / 29.29 MiB |
-| Archive members | 691 |
+| Archive size | 30,253,824 bytes / 28.85 MiB |
+| Archive members | 689 |
 
 The build found system OpenSSL 3.6.2, zlib, Curses, CURL, LibXml2, GSSAPI,
 BZip2, LZ4, LibLZMA, LZO, PCRE2, and Zstandard support on this machine.
@@ -110,6 +111,8 @@ The profile explicitly disables:
   replication wait helpers, `SLEEP()`, and `UUID_SHORT()`
 - Oracle SQL mode parser
 - XML SQL functions `EXTRACTVALUE()` and `UPDATEXML()`
+- GIS SQL functions including `ST_AsText()`, `ST_GeomFromText()`,
+  `ST_Contains()`, `PointFromText()`, `Point()`, and `X()`
 - socket authentication
 - feedback plugin
 - Performance Schema
@@ -140,8 +143,8 @@ Measured on 2026-05-15 with the same host and toolchain as the default profile:
 | Field | Value |
 | --- | --- |
 | Archive | `build/mariadb-mylite-storage-smoke/libmysqld/libmariadbd.a` |
-| Archive size | 30,893,232 bytes / 29.46 MiB |
-| Archive members | 694 |
+| Archive size | 30,434,408 bytes / 29.02 MiB |
+| Archive members | 692 |
 
 This smoke path now covers static plugin registration, current routed schema
 namespaces and DDL/DML, BLACKHOLE row-discard routing, MEMORY/HEAP volatile-row
@@ -166,19 +169,19 @@ outputs:
 
 | Artifact | Size | Stripped Size | Members | Global Symbols |
 | --- | ---: | ---: | ---: | ---: |
-| MariaDB embedded archive | 30,712,648 bytes / 29.29 MiB | n/a | 691 | n/a |
-| MariaDB storage-smoke archive | 30,893,232 bytes / 29.46 MiB | n/a | 694 | n/a |
-| Embedded open-close smoke | 18,776,640 bytes / 17.91 MiB | 16,865,088 bytes / 16.08 MiB | n/a | 16,657 |
-| Embedded exec smoke | 18,794,072 bytes / 17.92 MiB | 16,881,496 bytes / 16.10 MiB | n/a | 16,657 |
-| Embedded statement smoke | 18,809,392 bytes / 17.94 MiB | 16,897,904 bytes / 16.12 MiB | n/a | 16,657 |
-| Embedded warning smoke | 18,776,288 bytes / 17.91 MiB | 16,864,880 bytes / 16.08 MiB | n/a | 16,657 |
-| Embedded comparison smoke | 18,899,536 bytes / 18.02 MiB | 16,932,176 bytes / 16.15 MiB | n/a | 16,659 |
-| Storage-smoke open-close smoke | 18,871,648 bytes / 18.00 MiB | 16,931,920 bytes / 16.15 MiB | n/a | 16,657 |
-| Storage-smoke exec smoke | 18,889,048 bytes / 18.01 MiB | 16,948,296 bytes / 16.16 MiB | n/a | 16,657 |
-| Storage-smoke statement smoke | 18,887,888 bytes / 18.01 MiB | 16,948,208 bytes / 16.16 MiB | n/a | 16,657 |
-| Storage-smoke warning smoke | 18,871,280 bytes / 18.00 MiB | 16,931,696 bytes / 16.15 MiB | n/a | 16,657 |
-| Storage-smoke comparison smoke | 18,956,992 bytes / 18.08 MiB | 16,965,840 bytes / 16.18 MiB | n/a | 16,659 |
-| Storage-engine smoke | 19,123,824 bytes / 18.24 MiB | 17,179,840 bytes / 16.38 MiB | n/a | 16,657 |
+| MariaDB embedded archive | 30,253,824 bytes / 28.85 MiB | n/a | 689 | n/a |
+| MariaDB storage-smoke archive | 30,434,408 bytes / 29.02 MiB | n/a | 692 | n/a |
+| Embedded open-close smoke | 18,515,744 bytes / 17.66 MiB | 16,642,448 bytes / 15.87 MiB | n/a | 16,257 |
+| Embedded exec smoke | 18,533,256 bytes / 17.67 MiB | 16,658,840 bytes / 15.89 MiB | n/a | 16,257 |
+| Embedded statement smoke | 18,548,496 bytes / 17.69 MiB | 16,675,264 bytes / 15.90 MiB | n/a | 16,257 |
+| Embedded warning smoke | 18,515,376 bytes / 17.66 MiB | 16,642,224 bytes / 15.87 MiB | n/a | 16,257 |
+| Embedded comparison smoke | 18,638,624 bytes / 17.78 MiB | 16,709,536 bytes / 15.94 MiB | n/a | 16,259 |
+| Storage-smoke open-close smoke | 18,610,736 bytes / 17.75 MiB | 16,709,264 bytes / 15.94 MiB | n/a | 16,257 |
+| Storage-smoke exec smoke | 18,628,248 bytes / 17.77 MiB | 16,725,672 bytes / 15.95 MiB | n/a | 16,257 |
+| Storage-smoke statement smoke | 18,626,976 bytes / 17.76 MiB | 16,725,568 bytes / 15.95 MiB | n/a | 16,257 |
+| Storage-smoke warning smoke | 18,610,368 bytes / 17.75 MiB | 16,709,056 bytes / 15.93 MiB | n/a | 16,257 |
+| Storage-smoke comparison smoke | 18,696,096 bytes / 17.83 MiB | 16,743,200 bytes / 15.97 MiB | n/a | 16,259 |
+| Storage-engine smoke | 18,862,912 bytes / 17.99 MiB | 16,957,184 bytes / 16.17 MiB | n/a | 16,257 |
 
 ## Offline Build Caveat
 

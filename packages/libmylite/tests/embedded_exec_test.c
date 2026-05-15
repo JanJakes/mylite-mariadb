@@ -24,6 +24,7 @@ static void test_callback_abort(void);
 static void test_syntax_error_diagnostics(void);
 static void test_server_surfaces_are_disabled(void);
 static void test_server_utility_functions_are_rejected(void);
+static void test_gis_sql_functions_are_rejected(void);
 static void test_xml_sql_functions_are_rejected(void);
 static void test_oracle_sql_mode_is_rejected(void);
 static void test_file_import_policy_is_rejected(void);
@@ -38,6 +39,7 @@ static void assert_variable_value(mylite_db *db, const char *name, const char *v
 static void assert_variable_value_or_missing(mylite_db *db, const char *name, const char *value);
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_server_utility_exec_fails(mylite_db *db, const char *sql);
+static void assert_gis_sql_function_exec_fails(mylite_db *db, const char *sql);
 static void assert_xml_sql_function_exec_fails(mylite_db *db, const char *sql);
 static void assert_oracle_sql_mode_exec_fails(mylite_db *db, const char *sql);
 static void assert_file_import_exec_fails(mylite_db *db, const char *sql);
@@ -65,6 +67,7 @@ int main(void) {
     test_syntax_error_diagnostics();
     test_server_surfaces_are_disabled();
     test_server_utility_functions_are_rejected();
+    test_gis_sql_functions_are_rejected();
     test_xml_sql_functions_are_rejected();
     test_oracle_sql_mode_is_rejected();
     test_file_import_policy_is_rejected();
@@ -229,6 +232,36 @@ static void test_server_utility_functions_are_rejected(void) {
     assert_server_utility_exec_fails(db, "SELECT MASTER_GTID_WAIT('0-1-1', 1)");
     assert(mylite_exec(db, "SELECT 'SLEEP(' AS quoted_text", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "SELECT VERSION()", NULL, NULL, NULL) == MYLITE_OK);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_gis_sql_functions_are_rejected(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_gis_sql_function_exec_fails(db, "SELECT ST_AsText(0x00)");
+    assert_gis_sql_function_exec_fails(db, "SELECT ST_GeomFromText('POINT(1 1)')");
+    assert_gis_sql_function_exec_fails(
+        db,
+        "SELECT ST_Contains(ST_GeomFromText('POINT(1 1)'), ST_GeomFromText('POINT(1 1)'))"
+    );
+    assert_gis_sql_function_exec_fails(db, "SELECT PointFromText('POINT(1 1)')");
+    assert_gis_sql_function_exec_fails(db, "SELECT Point(1, 2)");
+    assert_gis_sql_function_exec_fails(db, "SELECT X(Point(1, 2))");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT 'ST_AsText(' AS st_text, 'PointFromText(' AS point_text, 'X(' AS x_text",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
 
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);
@@ -663,6 +696,18 @@ static void assert_server_utility_exec_fails(mylite_db *db, const char *sql) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "server utility") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_gis_sql_function_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "GIS SQL function") != NULL);
     mylite_free(errmsg);
 }
 
