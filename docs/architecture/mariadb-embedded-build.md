@@ -53,8 +53,8 @@ MyLite embedded-restart patches applied.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 32,048,256 bytes / 30.56 MiB |
-| Archive members | 691 |
+| Archive size | 32,056,256 bytes / 30.57 MiB |
+| Archive members | 692 |
 
 The build found system OpenSSL 3.6.2, zlib, Curses, CURL, LibXml2, GSSAPI,
 BZip2, LZ4, LibLZMA, LZO, PCRE2, and Zstandard support on this machine.
@@ -117,8 +117,8 @@ Measured on 2026-05-15 with the same host and toolchain as the default profile:
 | Field | Value |
 | --- | --- |
 | Archive | `build/mariadb-mylite-storage-smoke/libmysqld/libmariadbd.a` |
-| Archive size | 32,165,736 bytes / 30.68 MiB |
-| Archive members | 693 |
+| Archive size | 32,197,960 bytes / 30.71 MiB |
+| Archive members | 694 |
 
 This smoke path now covers static plugin registration, current routed schema
 namespaces and DDL/DML, sidecar gates, application-schema smoke, and
@@ -142,19 +142,19 @@ outputs:
 
 | Artifact | Size | Stripped Size | Members | Global Symbols |
 | --- | ---: | ---: | ---: | ---: |
-| MariaDB embedded archive | 32,055,856 bytes / 30.57 MiB | n/a | 692 | n/a |
-| MariaDB storage-smoke archive | 32,186,432 bytes / 30.70 MiB | n/a | 694 | n/a |
-| Embedded open-close smoke | 19,584,944 bytes / 18.68 MiB | 17,643,408 bytes / 16.83 MiB | n/a | 16,848 |
-| Embedded exec smoke | 19,584,776 bytes / 18.68 MiB | 17,643,208 bytes / 16.83 MiB | n/a | 16,848 |
-| Embedded statement smoke | 19,601,280 bytes / 18.69 MiB | 17,659,664 bytes / 16.84 MiB | n/a | 16,848 |
-| Embedded warning smoke | 19,601,216 bytes / 18.69 MiB | 17,659,664 bytes / 16.84 MiB | n/a | 16,848 |
-| Embedded comparison smoke | 19,681,696 bytes / 18.77 MiB | 17,693,888 bytes / 16.87 MiB | n/a | 16,850 |
-| Storage-smoke open-close smoke | 19,657,216 bytes / 18.75 MiB | 17,693,616 bytes / 16.87 MiB | n/a | 16,848 |
-| Storage-smoke exec smoke | 19,657,048 bytes / 18.75 MiB | 17,693,448 bytes / 16.87 MiB | n/a | 16,848 |
-| Storage-smoke statement smoke | 19,657,040 bytes / 18.75 MiB | 17,693,408 bytes / 16.87 MiB | n/a | 16,848 |
-| Storage-smoke warning smoke | 19,656,992 bytes / 18.75 MiB | 17,693,408 bytes / 16.87 MiB | n/a | 16,848 |
-| Storage-smoke comparison smoke | 19,716,576 bytes / 18.80 MiB | 17,710,928 bytes / 16.89 MiB | n/a | 16,850 |
-| Storage-engine smoke | 19,724,704 bytes / 18.81 MiB | 17,759,536 bytes / 16.94 MiB | n/a | 16,848 |
+| MariaDB embedded archive | 32,056,256 bytes / 30.57 MiB | n/a | 692 | n/a |
+| MariaDB storage-smoke archive | 32,197,960 bytes / 30.71 MiB | n/a | 694 | n/a |
+| Embedded open-close smoke | 19,604,064 bytes / 18.70 MiB | 17,660,032 bytes / 16.84 MiB | n/a | 16,849 |
+| Embedded exec smoke | 19,604,088 bytes / 18.70 MiB | 17,659,896 bytes / 16.84 MiB | n/a | 16,849 |
+| Embedded statement smoke | 19,620,240 bytes / 18.71 MiB | 17,676,336 bytes / 16.86 MiB | n/a | 16,849 |
+| Embedded warning smoke | 19,603,664 bytes / 18.70 MiB | 17,659,824 bytes / 16.84 MiB | n/a | 16,849 |
+| Embedded comparison smoke | 19,700,688 bytes / 18.79 MiB | 17,710,512 bytes / 16.89 MiB | n/a | 16,851 |
+| Storage-smoke open-close smoke | 19,677,328 bytes / 18.77 MiB | 17,710,272 bytes / 16.89 MiB | n/a | 16,849 |
+| Storage-smoke exec smoke | 19,677,336 bytes / 18.77 MiB | 17,710,120 bytes / 16.89 MiB | n/a | 16,849 |
+| Storage-smoke statement smoke | 19,677,024 bytes / 18.77 MiB | 17,710,064 bytes / 16.89 MiB | n/a | 16,849 |
+| Storage-smoke warning smoke | 19,676,960 bytes / 18.77 MiB | 17,710,048 bytes / 16.89 MiB | n/a | 16,849 |
+| Storage-smoke comparison smoke | 19,736,448 bytes / 18.82 MiB | 17,727,584 bytes / 16.91 MiB | n/a | 16,851 |
+| Storage-engine smoke | 19,761,792 bytes / 18.85 MiB | 17,792,864 bytes / 16.97 MiB | n/a | 16,849 |
 
 ## Offline Build Caveat
 

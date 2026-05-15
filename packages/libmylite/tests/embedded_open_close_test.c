@@ -29,6 +29,7 @@ static const unsigned k_handle_busy_timeout_ms = 25U;
 static const unsigned k_busy_timeout_release_ms = 50U;
 static const unsigned k_busy_timeout_wait_ms = 1000U;
 static const useconds_t k_microseconds_per_millisecond = 1000U;
+static const int k_repeated_open_close_count = 40;
 
 static void test_open_close_repeatedly(void);
 static void test_two_handles_share_runtime(void);
@@ -67,7 +68,7 @@ static void test_open_close_repeatedly(void) {
 
     assert(mkdir(runtime_root, 0700) == 0);
 
-    for (int i = 0; i < 2; ++i) {
+    for (int i = 0; i < k_repeated_open_close_count; ++i) {
         mylite_db *db = NULL;
         assert(
             mylite_open_v2(filename, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==

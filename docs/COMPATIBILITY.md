@@ -41,7 +41,7 @@ application-schema suites remain planned.
 
 | Capability | MyLite status | Compatibility target |
 | --- | --- | --- |
-| Open and close a database file | 🟡&nbsp;Partial | Implemented for local files with a temporary MariaDB runtime directory that is removed on final close |
+| Open and close a database file | 🟡&nbsp;Partial | Implemented for local files with a temporary MariaDB runtime directory that is removed on final close; repeated same-process open/close cycles and two-handle shared-runtime lifetime are covered |
 | Direct SQL execution | 🟡&nbsp;Partial | `mylite_exec()` executes controlled one-shot SQL with textual result callbacks in embedded builds |
 | Prepared statements | 🟡&nbsp;Partial | Reusable embedded statements with 1-based scalar parameter binding, row stepping, reset/finalize ownership, MariaDB diagnostics, and representative baseline comparison coverage |
 | Binary-safe values | 🟡&nbsp;Partial | Prepared statements expose explicit TEXT/BLOB byte counts, BLOB values with embedded NUL bytes, and current-row byte-range reads for large TEXT/BLOB results |

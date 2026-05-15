@@ -47,13 +47,17 @@ application DDL; application `ENGINE=InnoDB` requests are routed to MyLite in
 storage-engine builds. The startup flag only avoids non-final InnoDB sidecars in
 the embedded bootstrap runtime.
 
-MariaDB 11.8.6 needed two narrow embedded-restart fixes for repeated
+MariaDB 11.8.6 needed three narrow embedded-restart fixes for repeated
 `mylite_open()` / `mylite_close()` tests in one process:
 
 - `mariadb/sql/mysqld.cc` restores the embedded scheduler pointers after
   `mysql_server_end()` cleanup.
 - `mariadb/sql/sql_locale.cc` keeps the active error-message table alive until
   the next embedded initialization releases it through `init_errmessage()`.
+- `mariadb/sql/handler.cc` resets embedded handler plugin maps, transaction
+  participant counters, savepoint allocation size, and DDL recovery state after
+  plugin shutdown so the next `mysql_server_init()` starts from a fresh handler
+  registry.
 
 ## Metadata And Discovery
 
@@ -120,6 +124,12 @@ Source anchors at import commit `9bfea48ce1214cc4470f6f6f8a4e30352cef84e7`:
 - `CMakeLists.txt`: `WITH_EMBEDDED_SERVER` embedded server build option.
 - `include/mysql.h`: `mysql_library_init` / `mysql_library_end` public macros
   and broad `MYSQL` C API declarations.
+- `libmysqld/lib_sql.cc`: embedded `mysql_server_init()` and
+  `mysql_server_end()` lifecycle.
+- `sql/mysqld.cc`: embedded scheduler cleanup during `clean_up()`.
+- `sql/sql_locale.cc`: active error-message table initialization and teardown.
+- `sql/handler.cc`: handler plugin maps, transaction participant slots,
+  savepoint allocation size, DDL recovery state, and `ha_end()` cleanup.
 - `sql/handler.h`: `handlerton::discover_table`,
   `handlerton::discover_table_names`, `handlerton::discover_table_existence`,
   `tabledef_version`, and `HA_ERR_TABLE_DEF_CHANGED`.
