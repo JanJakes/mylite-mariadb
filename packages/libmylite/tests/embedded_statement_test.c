@@ -334,6 +334,23 @@ static void test_prepare_diagnostics(void) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
 
+    assert(
+        mylite_prepare(
+            db,
+            "CREATE TABLE fk_blocked_prepare ("
+            "id INT NOT NULL PRIMARY KEY, parent_id INT, "
+            "FOREIGN KEY (parent_id) REFERENCES fk_parent(id))",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_ERROR
+    );
+    assert(stmt == NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), "foreign-key") != NULL);
+
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);
     remove_tree(root);

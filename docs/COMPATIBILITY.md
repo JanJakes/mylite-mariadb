@@ -20,7 +20,8 @@ groups cover public API validation, storage, crash recovery, locking, embedded
 lifecycle, direct SQL, prepared statements, column metadata, large value reads,
 warnings, MariaDB baseline SQL API comparison, storage-engine smoke, sidecar
 gates, routed DDL/DML including schema namespaces, `CREATE TABLE ... LIKE`,
-`CREATE TABLE ... SELECT`, transaction-control policy, initial application-schema smoke, and
+`CREATE TABLE ... SELECT`, transaction-control policy, foreign-key DDL rejection,
+initial application-schema smoke, and
 unsupported server/non-table-object policy. MariaDB MTR comparison suites and broader
 application-schema suites remain planned.
 
@@ -55,7 +56,7 @@ application-schema suites remain planned.
 | MyLite engine registration | 🟡&nbsp;Partial | Opt-in static handler builds expose `MYLITE` through `SHOW ENGINES`; file-backed MyLite sessions configure it as the default effective engine |
 | No explicit engine | 🟡&nbsp;Partial | `CREATE TABLE` routes to MyLite, stores requested engine `DEFAULT` with effective engine `MYLITE`, supports row insert, full scans, update/delete, truncate, copy `ALTER` rebuilds, `CREATE TABLE ... LIKE`, successful supported `CREATE TABLE ... SELECT`, BLOB/TEXT payloads, autoincrement, supported primary/unique/secondary indexes, and bounded BLOB/TEXT prefix indexes, and updates catalog metadata on `DROP TABLE` and simple `RENAME TABLE`; unsupported index classes remain explicit failures |
 | `ENGINE=MYLITE` | 🟡&nbsp;Partial | Explicit MyLite DDL stores MariaDB table-definition metadata in the `.mylite` catalog, rediscovers it after reopen, supports row insert, full scans, update/delete, truncate, copy `ALTER` rebuilds, `CREATE TABLE ... LIKE`, successful supported `CREATE TABLE ... SELECT`, BLOB/TEXT payloads, autoincrement, supported primary/unique/secondary indexes, and bounded BLOB/TEXT prefix indexes, and updates catalog metadata on `DROP TABLE` and simple `RENAME TABLE`; unsupported index classes remain explicit failures |
-| `ENGINE=InnoDB` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `InnoDB`; row insert, update/delete, truncate, copy `ALTER` rebuilds, `CREATE TABLE ... LIKE`, successful supported `CREATE TABLE ... SELECT`, BLOB/TEXT payloads, autoincrement, supported primary/unique/secondary indexes, bounded BLOB/TEXT prefix indexes, full scans, `DROP TABLE`, and simple `RENAME TABLE` are covered, while InnoDB transactions, foreign keys, full BLOB/TEXT indexes, and tablespaces remain unsupported |
+| `ENGINE=InnoDB` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `InnoDB`; row insert, update/delete, truncate, copy `ALTER` rebuilds, `CREATE TABLE ... LIKE`, successful supported `CREATE TABLE ... SELECT`, BLOB/TEXT payloads, autoincrement, supported primary/unique/secondary indexes, bounded BLOB/TEXT prefix indexes, full scans, `DROP TABLE`, and simple `RENAME TABLE` are covered, while InnoDB transactions, foreign-key enforcement, full BLOB/TEXT indexes, and tablespaces remain unsupported; foreign-key DDL is rejected explicitly |
 | `ENGINE=MyISAM` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `MyISAM`; row insert, update/delete, truncate, copy `ALTER` rebuilds, `CREATE TABLE ... LIKE`, successful supported `CREATE TABLE ... SELECT`, BLOB/TEXT payloads, full scans, supported primary/unique/secondary indexes, bounded BLOB/TEXT prefix indexes, `DROP TABLE`, and simple `RENAME TABLE` are covered, while MyISAM data and index files are never durable application storage |
 | `ENGINE=Aria` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `Aria`; row insert, update/delete, truncate, copy `ALTER` rebuilds, `CREATE TABLE ... LIKE`, successful supported `CREATE TABLE ... SELECT`, BLOB/TEXT payloads, full scans, supported primary/unique/secondary indexes, bounded BLOB/TEXT prefix indexes, `DROP TABLE`, and simple `RENAME TABLE` are covered, while Aria data, index, and log files are never durable application storage |
 | Dynamic external engines | ➖&nbsp;Out&nbsp;of&nbsp;scope | Unsupported explicit engine requests fail before catalog publication |
@@ -104,7 +105,7 @@ application-schema suites remain planned.
 | Unique indexes | 🟡&nbsp;Partial | Duplicate-key checks are covered for supported unique indexes, including nullable unique-key semantics where NULL values do not conflict unless MariaDB marks NULLs equal |
 | Autoincrement | 🟡&nbsp;Partial | Durable table-local state is covered for single-column autoincrement keys, including BLOB/TEXT payload rows, explicit high values, close/reopen, supported keyed update/delete, and truncate reset; compound autoincrement edge cases, `ALTER TABLE ... AUTO_INCREMENT`, and transaction-aware rollback remain planned |
 | CHECK constraints | ⚪&nbsp;Planned | Use MariaDB expression evaluation and persist metadata in the catalog |
-| Foreign keys | ⚪&nbsp;Planned | InnoDB-compatible semantics where practical; reject unsupported cases explicitly |
+| Foreign keys | 🟡&nbsp;Partial | `libmylite` rejects `CREATE TABLE` and `ALTER TABLE` foreign-key DDL before MariaDB execution so routed `ENGINE=InnoDB` tables do not imply referential-integrity support; InnoDB-compatible metadata, enforcement, cascading actions, and transaction-aware checks remain planned |
 | Generated columns | ⚪&nbsp;Planned | Preserve MariaDB virtual/stored generated-column behavior through storage support |
 | FULLTEXT and SPATIAL indexes | ⚪&nbsp;Planned | Support only after physical or well-defined metadata-backed access paths are designed |
 

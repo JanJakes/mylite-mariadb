@@ -32,6 +32,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `storage-core` | `dev` | `compat-storage` | Primary file, catalog, rows, indexes, and mutations |
 | `crash-recovery` | `dev` | `compat-crash-recovery` | Rollback-journal recovery and corrupt-journal handling |
 | `transaction` | `storage-smoke-dev` | `compat-transaction` | SQL transaction-control rejection until handler hooks exist |
+| `foreign-key` | `storage-smoke-dev` | `compat-foreign-key` | Foreign-key DDL rejection until catalog metadata and enforcement exist |
 | `locking` | `dev` | `compat-locking` | Primary-file lock conflicts |
 | `embedded-lifecycle` | `embedded-dev` | `compat-embedded-lifecycle` | Embedded runtime open/close, direct execution, and cleanup |
 | `direct-sql` | `embedded-dev` | `compat-direct-sql` | `mylite_exec()` SQL execution |

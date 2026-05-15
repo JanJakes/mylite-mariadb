@@ -109,7 +109,7 @@ static void test_schema_namespaces(void);
 static void test_prepared_schema_namespaces(void);
 static void test_schema_options(void);
 static void test_non_table_object_policy(void);
-static void test_transaction_control_policy(void);
+static void test_transaction_and_foreign_key_policies(void);
 static void test_create_table_persists_catalog_metadata(void);
 static void test_alter_table_rebuilds_keyless_rows(void);
 static void test_indexed_rows(void);
@@ -123,6 +123,7 @@ static void assert_exec_succeeds(mylite_db *db, const char *sql);
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_non_table_object_exec_fails(mylite_db *db, const char *sql);
 static void assert_transaction_control_exec_fails(mylite_db *db, const char *sql);
+static void assert_foreign_key_exec_fails(mylite_db *db, const char *sql);
 static void assert_prepared_succeeds(mylite_db *db, const char *sql);
 static void assert_schema_options(
     mylite_db *db,
@@ -192,7 +193,7 @@ int main(void) {
     test_prepared_schema_namespaces();
     test_schema_options();
     test_non_table_object_policy();
-    test_transaction_control_policy();
+    test_transaction_and_foreign_key_policies();
     test_create_table_persists_catalog_metadata();
     test_alter_table_rebuilds_keyless_rows();
     test_indexed_rows();
@@ -406,11 +407,13 @@ static void test_non_table_object_policy(void) {
     free(root);
 }
 
-static void test_transaction_control_policy(void) {
+static void test_transaction_and_foreign_key_policies(void) {
     char *root = make_temp_root();
     char *filename = NULL;
     mylite_db *db = open_database(root, &filename);
     single_value_context count = {.expected_value = "1"};
+    single_value_context child_count = {.expected_value = "1"};
+    char *errmsg = NULL;
 
     assert_exec_succeeds(db, "CREATE DATABASE app");
     assert_exec_succeeds(db, "USE app");
@@ -429,6 +432,63 @@ static void test_transaction_control_policy(void) {
         MYLITE_OK
     );
     assert(count.rows == 1);
+
+    assert_exec_succeeds(db, "CREATE TABLE fk_parent (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB");
+    assert_catalog_table_count(filename, "app", 2U);
+    assert_catalog_table_metadata(filename, "app", "fk_parent", "InnoDB", "MYLITE");
+
+    assert_foreign_key_exec_fails(
+        db,
+        "CREATE TABLE fk_blocked_table ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT, "
+        "CONSTRAINT fk_parent FOREIGN KEY (parent_id) REFERENCES fk_parent(id)"
+        ") ENGINE=InnoDB"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "fk_blocked_table") == MYLITE_STORAGE_NOTFOUND
+    );
+    assert_catalog_table_count(filename, "app", 2U);
+
+    assert_foreign_key_exec_fails(
+        db,
+        "CREATE TABLE fk_blocked_column ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT REFERENCES fk_parent(id)"
+        ") ENGINE=InnoDB"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "fk_blocked_column") == MYLITE_STORAGE_NOTFOUND
+    );
+    assert_catalog_table_count(filename, "app", 2U);
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_child (id INT NOT NULL PRIMARY KEY, parent_id INT) ENGINE=InnoDB"
+    );
+    assert_catalog_table_count(filename, "app", 3U);
+    assert_catalog_table_metadata(filename, "app", "fk_child", "InnoDB", "MYLITE");
+
+    assert_exec_succeeds(db, "SET foreign_key_checks=0");
+    assert_foreign_key_exec_fails(
+        db,
+        "ALTER TABLE fk_child ADD CONSTRAINT fk_child_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_parent(id)"
+    );
+    assert_foreign_key_exec_fails(db, "ALTER TABLE fk_child DROP FOREIGN KEY fk_child_parent");
+    assert_exec_succeeds(db, "SET foreign_key_checks=1");
+
+    assert_exec_succeeds(db, "INSERT INTO fk_parent VALUES (1)");
+    assert_exec_succeeds(db, "INSERT INTO fk_child VALUES (1, 99)");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM fk_child WHERE parent_id = 99",
+            single_value_callback,
+            &child_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(child_count.rows == 1);
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
@@ -2287,6 +2347,21 @@ static void assert_transaction_control_exec_fails(mylite_db *db, const char *sql
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "transaction control") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_foreign_key_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+    const int result = mylite_exec(db, sql, NULL, NULL, &errmsg);
+    if (result == MYLITE_OK) {
+        fprintf(stderr, "SQL unexpectedly succeeded: %s\n", sql);
+    }
+    assert(result == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "foreign-key") != NULL);
     mylite_free(errmsg);
 }
 

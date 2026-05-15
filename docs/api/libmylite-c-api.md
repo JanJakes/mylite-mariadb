@@ -144,7 +144,9 @@ schema namespaces for successful direct `CREATE/DROP DATABASE` and
 updates to default character set, collation, and comment options, routed
 `CREATE TABLE` metadata, catalog-backed `DROP TABLE` and simple
 `RENAME TABLE`, keyless copy `ALTER` rebuilds, and keyless `INSERT` plus
-full-scan `SELECT` over persisted MyLite row pages.
+full-scan `SELECT` over persisted MyLite row pages. Foreign-key DDL is
+rejected before execution until MyLite has referential metadata and
+enforcement.
 
 ## Prepared Statements
 
@@ -393,6 +395,7 @@ the embedded library model:
 - Galera/wsrep,
 - dynamic plugin installation,
 - external durable storage engines,
+- foreign-key DDL until referential metadata and enforcement exist,
 - filesystem-backed views, triggers, routines, and sequences until they have
   MyLite catalog storage,
 - server audit plugins,
@@ -401,10 +404,10 @@ the embedded library model:
 - performance schema.
 
 Representative account, event, plugin, replication, binlog, view, trigger,
-routine, package, sequence, `CALL`, transaction-control, and autocommit-control
-commands are rejected before MariaDB execution with stable MyLite errors. Other
-unsupported surfaces should fail with stable MyLite result codes and MariaDB
-diagnostics where possible.
+routine, package, sequence, `CALL`, transaction-control, autocommit-control,
+and foreign-key DDL commands are rejected before MariaDB execution with stable
+MyLite errors. Other unsupported surfaces should fail with stable MyLite result
+codes and MariaDB diagnostics where possible.
 
 ## Compatibility Adapter
 

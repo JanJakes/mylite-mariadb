@@ -75,6 +75,9 @@ or remain planned until those slices define the paths. Standalone
 supported copy-rebuild index additions and drops. File-backed opens answer
 MariaDB SQL-layer schema and table discovery from MyLite catalog namespace
 records when no transient runtime schema directory exists.
+Foreign-key DDL is rejected at the `libmylite` boundary until MyLite has
+catalog metadata, enforcement, locking, recovery, and transaction-aware checks
+for referential constraints.
 
 ## File Layout
 
@@ -219,6 +222,9 @@ Views, triggers, routines, packages, sequences, and routine invocation are
 rejected by the current `libmylite` SQL policy before MariaDB can publish
 filesystem-backed or server-table-backed metadata. Catalog-backed persistence
 for those object classes requires a separate format and execution design.
+Foreign-key DDL is also rejected by policy so routed `ENGINE=InnoDB` metadata
+does not imply referential-integrity enforcement before MyLite storage supports
+it.
 
 The default embedded profile does not expose server account administration,
 dynamic plugin installation, replication metadata, or the event scheduler.
@@ -278,7 +284,9 @@ The storage engine must support:
 - table rebuilds for copy `ALTER`.
 
 FULLTEXT, SPATIAL, generated-column indexes, and foreign-key enforcement need
-explicit storage designs before support is claimed.
+explicit storage designs before support is claimed. Current `libmylite` entry
+points reject foreign-key DDL before MariaDB execution; other unsupported index
+classes reject through handler capability checks.
 
 ## Transactions And Recovery
 
