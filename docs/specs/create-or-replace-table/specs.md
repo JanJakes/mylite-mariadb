@@ -48,8 +48,9 @@ MariaDB base: `mariadb-11.8.6`
 
 ## Non-Goals
 
-- Failed OR REPLACE rollback that restores the old table when the replacement
-  create or row population fails.
+- Failed OR REPLACE rollback beyond the representative follow-up coverage for
+  self-LIKE rejection, unsupported replacement definitions, and duplicate-key
+  replacement CTAS.
 - `CREATE OR REPLACE TEMPORARY TABLE`, `IGNORE` / `REPLACE` CTAS, lock-table
   edge cases, views, foreign keys, partitions, triggers, or unsupported index
   classes.
@@ -77,9 +78,9 @@ supported table shapes.
 ## Compatibility Impact
 
 Successful OR REPLACE for representative routed LIKE and CTAS shapes moves from
-planned to partial. The support claim is explicitly narrower than transactional
-MariaDB semantics: a failed replacement may leave the old table dropped until a
-separate DDL rollback slice exists.
+planned to partial. A follow-up slice covers representative failed replacement
+rollback through the existing statement checkpoint. The support claim remains
+narrower than full transactional MariaDB semantics.
 
 ## DDL Metadata Routing Impact
 
@@ -146,11 +147,13 @@ Implemented in storage-engine smoke coverage:
   engine metadata, and keeps supported unique and secondary indexes usable.
 - Both replacement targets survive close/reopen without durable MariaDB
   sidecars.
+- The `failed-create-or-replace-rollback` slice covers representative failed
+  replacement rollback.
 
 ## Risks And Unresolved Questions
 
-- MariaDB's OR REPLACE flow is drop-then-create. Without DDL rollback support,
-  failed replacements may remove the old table. This slice must not imply
+- MariaDB's OR REPLACE flow is drop-then-create. Representative failed
+  replacement rollback is covered separately, but this must not imply full
   transactional replacement semantics.
 - OR REPLACE interacts with locks, temporary tables, binary logging, and
   duplicate source/target checks. This slice covers only representative

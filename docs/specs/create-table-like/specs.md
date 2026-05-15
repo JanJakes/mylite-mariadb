@@ -82,9 +82,11 @@ only routing metadata and single-file publication.
 
 `CREATE TABLE ... LIKE` moves from planned to partial for supported routed base
 tables. Representative temporary-table catalog isolation is covered by a
-follow-up slice. It remains partial because unsupported source objects, broader
-temporary-table variants, broader OR REPLACE variants, failed replacement
-rollback, foreign keys, partitions, and SQL rollback need separate slices.
+follow-up slice, and representative failed self-LIKE OR REPLACE target
+preservation is covered by `failed-create-or-replace-rollback`. It remains
+partial because unsupported source objects, broader temporary-table variants,
+broader OR REPLACE variants, foreign keys, partitions, and SQL rollback need
+separate slices.
 
 ## DDL Metadata Routing Impact
 
@@ -156,13 +158,15 @@ Implemented in the MyLite handler and storage-engine smoke:
   temporary name does not become a durable user-schema catalog table.
 - The `create-or-replace-table` slice covers representative successful
   `CREATE OR REPLACE TABLE ... LIKE` replacement over routed MyLite tables.
+- The `failed-create-or-replace-rollback` slice covers representative failed
+  self-LIKE OR REPLACE target preservation.
 
 ## Risks And Open Questions
 
 - `CREATE TABLE ... LIKE` has separate temporary-table and `OR REPLACE`
   branches in MariaDB. Representative temporary catalog isolation is covered,
   and representative successful OR REPLACE is covered, but broader lock-table,
-  temporary lifecycle, and failed replacement matrices remain.
+  temporary lifecycle, and broader failed replacement matrices remain.
 - Source-table selection in the MyLite handler must match MariaDB's `LEX`
   layout for `CREATE TABLE ... LIKE`; using the target table would silently
   store the wrong requested-engine metadata.

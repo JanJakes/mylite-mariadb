@@ -33,7 +33,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `crash-recovery` | `dev` | `compat-crash-recovery` | Rollback-journal recovery and corrupt-journal handling |
 | `transaction` | `storage-smoke-dev` | `compat-transaction` | SQL transaction-control rejection until full transaction support exists |
 | `transaction-hooks` | `storage-smoke-dev` | `compat-transaction-hooks` | MariaDB statement transaction hook integration |
-| `statement-rollback` | `storage-smoke-dev` | `compat-statement-rollback` | Failed statement rollback for routed MyLite storage |
+| `statement-rollback` | `storage-smoke-dev` | `compat-statement-rollback` | Failed statement rollback for routed MyLite storage, including representative OR REPLACE replacement failures |
 | `partition` | `storage-smoke-dev` | `compat-partition` | Partition DDL rejection until partition metadata and routing exist |
 | `foreign-key` | `storage-smoke-dev` | `compat-foreign-key` | Foreign-key DDL rejection until catalog metadata and enforcement exist |
 | `check-constraint` | `storage-smoke-dev` | `compat-check-constraint` | CHECK constraint enforcement, CTAS targets, and failed ADD CHECK rollback on routed tables |
@@ -49,7 +49,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `sql-comparison` | `embedded-dev` | `compat-sql-comparison` | MariaDB baseline SQL API comparison |
 | `storage-engine` | `storage-smoke-dev` | `compat-storage-engine` | Static handler registration and SQL storage-engine smoke |
 | `sidecar` | `storage-smoke-dev` | `compat-sidecar` | Forbidden durable sidecar gates |
-| `routed-ddl-dml` | `storage-smoke-dev` | `compat-routed-ddl-dml` | Routed direct/prepared schema namespaces, table and index DDL, indexed table/index rename, `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`, truncate, and DML smoke |
+| `routed-ddl-dml` | `storage-smoke-dev` | `compat-routed-ddl-dml` | Routed direct/prepared schema namespaces, table and index DDL, indexed table/index rename, `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`, OR REPLACE, truncate, and DML smoke |
 | `application-schema` | `storage-smoke-dev` | `compat-application-schema` | WordPress-shaped core schema, WordPress installer DDL and seed fixtures, collation restart matrix, and prefix-index smoke |
 | `server-surface` | `storage-smoke-dev` | `compat-server-surface` | Unsupported server and non-table object surface policy |
 

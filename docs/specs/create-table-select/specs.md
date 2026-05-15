@@ -83,18 +83,20 @@ parallel CTAS executor:
 4. Keep unsupported target shapes rejected before or during target publication
    through existing create/index support predicates.
 
-The first support claim is successful-statement compatibility. Rollback on
-mid-statement failure remains a separate transaction/DDL cleanup slice.
+The first support claim was successful-statement compatibility. Follow-up
+slices cover representative failed CTAS target cleanup and failed OR REPLACE
+CTAS target preservation; broader transaction/DDL cleanup remains separate.
 
 ## Compatibility Impact
 
 `CREATE TABLE ... SELECT` moves from planned to partial for supported routed
 table shapes. Explicit CHECK-constrained targets, representative temporary CTAS
-catalog isolation, and representative successful OR REPLACE CTAS are covered by
-follow-up slices. It remains partial because physical rollback of pages written
-before failed CTAS abort, failed replacement rollback, `IGNORE` / `REPLACE`,
-broader temporary-table CTAS, foreign keys, partitions, unsupported source
-objects, and SQL rollback remain planned.
+catalog isolation, representative successful OR REPLACE CTAS, and representative
+failed replacement CTAS rollback are covered by follow-up slices. It remains
+partial because physical rollback of pages written before failed CTAS abort,
+`IGNORE` / `REPLACE`, broader temporary-table CTAS, foreign keys, partitions,
+unsupported source objects, broader failed replacement variants, and SQL
+rollback remain planned.
 
 ## DDL Metadata Routing Impact
 
@@ -177,12 +179,15 @@ entry points:
   temporary name does not become a durable user-schema catalog table.
 - The `create-or-replace-table` slice covers representative successful
   `CREATE OR REPLACE TABLE ... SELECT` replacement over routed MyLite tables.
+- The `failed-create-or-replace-rollback` slice covers representative failed
+  duplicate-key replacement CTAS preserving the old routed target.
 
 ## Risks And Open Questions
 
 - MariaDB has explicit CTAS abort/drop handling. MyLite follows that path for
   target catalog cleanup, but it still leaves any pages written before abort
-  orphaned until SQL rollback, DDL undo, and compaction are implemented.
+  orphaned until broader SQL rollback, DDL undo, and compaction are
+  implemented.
 - CTAS can derive many SQL types from expressions. This slice should cover
   representative supported types and leave broad type-matrix comparison to a
   later MariaDB/MTR-scale compatibility effort.

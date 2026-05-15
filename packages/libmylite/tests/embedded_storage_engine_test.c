@@ -156,6 +156,7 @@ static void test_create_table_like(void);
 static void test_create_table_select(void);
 static void test_temporary_table_catalog_isolation(void);
 static void test_create_or_replace_table(void);
+static void test_failed_create_or_replace_rollback(void);
 static void test_constraint_generated_dump_fixture(void);
 static void test_show_create_table_round_trip(void);
 static void test_constraint_generated_expression_matrix(void);
@@ -292,6 +293,7 @@ int main(void) {
     test_create_table_select();
     test_temporary_table_catalog_isolation();
     test_create_or_replace_table();
+    test_failed_create_or_replace_rollback();
     test_constraint_generated_dump_fixture();
     test_show_create_table_round_trip();
     test_constraint_generated_expression_matrix();
@@ -4317,6 +4319,126 @@ static void test_create_or_replace_table(void) {
         "SELECT id FROM replace_ctas_target FORCE INDEX (body_prefix) "
         "WHERE body = 'ctas body two'",
         "2"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_failed_create_or_replace_rollback(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE replace_rollback");
+    assert_exec_succeeds(db, "USE replace_rollback");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE target_posts ("
+        "id INT NOT NULL AUTO_INCREMENT, "
+        "slug VARCHAR(32) NOT NULL, "
+        "body LONGTEXT NULL, "
+        "PRIMARY KEY (id), "
+        "UNIQUE KEY slug_key (slug), "
+        "KEY body_prefix (body(8))"
+        ") ENGINE=MyISAM"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO target_posts (slug, body) VALUES "
+        "('old-alpha', 'old body one'), "
+        "('old-beta', 'old body two')"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE duplicate_source_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(32) NOT NULL, "
+        "body LONGTEXT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO duplicate_source_posts VALUES "
+        "(10, 'duplicate', 'replacement body one'), "
+        "(11, 'duplicate', 'replacement body two')"
+    );
+    assert_catalog_table_count(filename, "replace_rollback", 2U);
+    assert_catalog_table_metadata(filename, "replace_rollback", "target_posts", "MyISAM", "MYLITE");
+
+    assert_exec_fails(db, "CREATE OR REPLACE TABLE target_posts LIKE target_posts");
+    assert_catalog_table_count(filename, "replace_rollback", 2U);
+    assert_query_single_value(db, "SELECT COUNT(*) FROM target_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM target_posts FORCE INDEX (slug_key) WHERE slug = 'old-beta'",
+        "2"
+    );
+    assert_catalog_table_metadata(filename, "replace_rollback", "target_posts", "MyISAM", "MYLITE");
+
+    assert_exec_fails(
+        db,
+        "CREATE OR REPLACE TABLE target_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "body TEXT NOT NULL, "
+        "FULLTEXT KEY body_fulltext (body)"
+        ") ENGINE=InnoDB"
+    );
+    assert_catalog_table_count(filename, "replace_rollback", 2U);
+    assert_query_single_value(db, "SELECT COUNT(*) FROM target_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM target_posts FORCE INDEX (body_prefix) WHERE body = 'old body one'",
+        "1"
+    );
+    assert_catalog_table_metadata(filename, "replace_rollback", "target_posts", "MyISAM", "MYLITE");
+
+    assert_exec_fails(
+        db,
+        "CREATE OR REPLACE TABLE target_posts ("
+        "id INT NOT NULL, "
+        "slug VARCHAR(32) NOT NULL, "
+        "body LONGTEXT NULL, "
+        "PRIMARY KEY (id), "
+        "UNIQUE KEY slug_key (slug), "
+        "KEY body_prefix (body(8))"
+        ") ENGINE=InnoDB "
+        "SELECT id, slug, body FROM duplicate_source_posts"
+    );
+    assert_catalog_table_count(filename, "replace_rollback", 2U);
+    assert_catalog_table_metadata(filename, "replace_rollback", "target_posts", "MyISAM", "MYLITE");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM target_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM target_posts FORCE INDEX (slug_key) WHERE slug = 'old-alpha'",
+        "1"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO target_posts (slug, body) VALUES ('old-gamma', 'old body three')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM target_posts FORCE INDEX (slug_key) WHERE slug = 'old-gamma'",
+        "3"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "replace_rollback");
+    assert_exec_succeeds(db, "USE replace_rollback");
+    assert_catalog_table_count(filename, "replace_rollback", 2U);
+    assert_catalog_table_metadata(filename, "replace_rollback", "target_posts", "MyISAM", "MYLITE");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM target_posts", "3");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM target_posts FORCE INDEX (body_prefix) WHERE body = 'old body three'",
+        "3"
     );
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");

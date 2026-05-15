@@ -229,8 +229,11 @@ Successful representative `CREATE OR REPLACE TABLE ... LIKE` and
 `CREATE OR REPLACE TABLE ... SELECT` statements use MariaDB's drop-then-create
 flow: MyLite removes the old catalog record, publishes the replacement
 definition, writes replacement rows and indexes where applicable, and verifies
-close/reopen visibility. Failed replacement rollback remains broader DDL
-rollback work.
+close/reopen visibility. Representative failed OR REPLACE rollback covers
+self-LIKE rejection, unsupported replacement definitions, and duplicate-key
+replacement CTAS while preserving old target metadata, rows, indexes, and
+autoincrement state through the existing statement checkpoint; broader
+temporary, locking, and SQL transaction/savepoint semantics remain planned.
 Basic column-level and named table-level CHECK constraints survive close/reopen
 because they are stored in the catalog-backed table-definition image. MariaDB
 enforces those checks before insert/update handler calls unless

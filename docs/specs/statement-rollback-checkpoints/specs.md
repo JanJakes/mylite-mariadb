@@ -109,7 +109,9 @@ claim `COMMIT`, `ROLLBACK`, or savepoint compatibility yet.
 The first compatibility evidence targets partial writes that were observable
 before this slice: multi-row inserts that fail after a prior row write, CHECK
 constraint failures after an earlier row write, and unique-key update failures
-after a prior replacement row/index publication.
+after a prior replacement row/index publication. Follow-up storage-smoke
+coverage extends the same checkpoint evidence to representative failed OR
+REPLACE replacement paths.
 
 ## Single-File And Embedded-Lifecycle Impact
 
@@ -151,6 +153,8 @@ storage checkpoint helper and a `libmylite` execution guard.
 - Add storage-engine smoke coverage for failed multi-row `INSERT`, failed
   CHECK-backed multi-row `INSERT`, and failed unique-key `UPDATE` on routed
   `ENGINE=InnoDB` tables.
+- Add follow-up storage-engine smoke coverage for representative failed
+  `CREATE OR REPLACE TABLE` paths preserving old targets.
 - Verify close/reopen visibility after failed-statement rollback.
 - Add a compatibility harness group for statement rollback.
 - Run format, tidy, first-party tests, embedded tests, storage-smoke tests,

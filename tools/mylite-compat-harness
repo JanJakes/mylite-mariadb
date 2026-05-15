@@ -37,7 +37,7 @@ group_spec() {
       echo "storage-smoke-dev|compat-transaction-hooks|MariaDB statement transaction hook integration"
       ;;
     statement-rollback)
-      echo "storage-smoke-dev|compat-statement-rollback|Failed statement rollback for routed MyLite storage"
+      echo "storage-smoke-dev|compat-statement-rollback|Failed statement rollback for routed MyLite storage, including OR REPLACE replacement failures"
       ;;
     partition)
       echo "storage-smoke-dev|compat-partition|Partition DDL rejection policy"
@@ -85,7 +85,7 @@ group_spec() {
       echo "storage-smoke-dev|compat-sidecar|Forbidden durable sidecar gates around routed SQL"
       ;;
     routed-ddl-dml)
-      echo "storage-smoke-dev|compat-routed-ddl-dml|Routed CREATE, temporary LIKE/CTAS, OR REPLACE, ALTER, DROP, indexed table/index RENAME, CREATE/DROP INDEX, TRUNCATE, INSERT, SELECT, UPDATE, and DELETE smoke"
+      echo "storage-smoke-dev|compat-routed-ddl-dml|Routed CREATE, temporary LIKE/CTAS, OR REPLACE, failed replacement rollback, ALTER, DROP, indexed table/index RENAME, CREATE/DROP INDEX, TRUNCATE, INSERT, SELECT, UPDATE, and DELETE smoke"
       ;;
     application-schema)
       echo "storage-smoke-dev|compat-application-schema|WordPress-shaped schema, installer DDL/seed fixtures, and collation matrix"
