@@ -66,7 +66,9 @@ identity while preserving table ids, row pages, and index-entry pages. Copy
 definitions, rows, and supported index entries inside the primary file. Online
 `ALTER`, in-place `ALTER`, transaction-aware index maintenance, truncate,
 free-space reclamation, and unsupported index classes still reject or remain
-planned until those slices define the paths.
+planned until those slices define the paths. Standalone `CREATE INDEX` and
+`DROP INDEX` use MariaDB's ALTER-backed DDL path for supported copy-rebuild
+index additions and drops.
 
 ## File Layout
 
@@ -219,8 +221,10 @@ preserve nullable unique-key semantics. Ordered index reads build in-memory
 cursors from live index entries and then reconstruct row buffers from row
 pages. This provides correct indexed insert, lookup, update, delete, reopen,
 and copy `ALTER` behavior for the supported shapes, but it is not the final
-performance structure. Truncate, B-tree pages, free-space reclamation,
-transaction rollback, and transaction-aware index maintenance remain planned.
+performance structure. Standalone `CREATE INDEX` and `DROP INDEX` are covered
+for supported copy-rebuild index definitions. Truncate, B-tree pages,
+free-space reclamation, transaction rollback, and transaction-aware index
+maintenance remain planned.
 
 The storage engine must support:
 

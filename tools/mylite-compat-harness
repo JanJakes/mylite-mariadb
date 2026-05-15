@@ -61,7 +61,7 @@ group_spec() {
       echo "storage-smoke-dev|compat-sidecar|Forbidden durable sidecar gates around routed SQL"
       ;;
     routed-ddl-dml)
-      echo "storage-smoke-dev|compat-routed-ddl-dml|Routed CREATE, ALTER, DROP, RENAME, INSERT, SELECT, UPDATE, and DELETE smoke"
+      echo "storage-smoke-dev|compat-routed-ddl-dml|Routed CREATE, ALTER, DROP, RENAME, CREATE/DROP INDEX, INSERT, SELECT, UPDATE, and DELETE smoke"
       ;;
     application-schema)
       echo "storage-smoke-dev|compat-application-schema|WordPress-shaped application schema smoke"

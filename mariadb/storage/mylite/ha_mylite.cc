@@ -46,7 +46,8 @@ static const char *mylite_primary_file_path();
 static int mylite_requested_engine_name(const char *primary_file,
                                         HA_CREATE_INFO *create_info,
                                         char *out_name, size_t out_name_size);
-static int mylite_preserve_alter_requested_engine_name(
+static bool mylite_preserves_requested_engine_name(const THD *thd);
+static int mylite_preserve_rebuild_requested_engine_name(
   const char *primary_file, char *out_name, size_t out_name_size);
 static int mylite_copy_engine_name(const LEX_CSTRING *engine_name,
                                    char *out_name, size_t out_name_size);
@@ -1323,9 +1324,9 @@ static int mylite_requested_engine_name(const char *primary_file,
   THD *thd= current_thd;
   if (!(create_info->used_fields & HA_CREATE_USED_ENGINE))
   {
-    if (thd && thd->lex && thd->lex->sql_command == SQLCOM_ALTER_TABLE)
-      return mylite_preserve_alter_requested_engine_name(primary_file, out_name,
-                                                         out_name_size);
+    if (mylite_preserves_requested_engine_name(thd))
+      return mylite_preserve_rebuild_requested_engine_name(
+        primary_file, out_name, out_name_size);
 
     static const LEX_CSTRING default_engine= {STRING_WITH_LEN("DEFAULT")};
     return mylite_copy_engine_name(&default_engine, out_name, out_name_size);
@@ -1343,7 +1344,17 @@ static int mylite_requested_engine_name(const char *primary_file,
                                  out_name_size);
 }
 
-static int mylite_preserve_alter_requested_engine_name(
+static bool mylite_preserves_requested_engine_name(const THD *thd)
+{
+  if (!thd || !thd->lex)
+    return false;
+
+  return thd->lex->sql_command == SQLCOM_ALTER_TABLE ||
+         thd->lex->sql_command == SQLCOM_CREATE_INDEX ||
+         thd->lex->sql_command == SQLCOM_DROP_INDEX;
+}
+
+static int mylite_preserve_rebuild_requested_engine_name(
   const char *primary_file, char *out_name, size_t out_name_size)
 {
   THD *thd= current_thd;

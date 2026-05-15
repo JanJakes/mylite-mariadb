@@ -88,6 +88,7 @@ static void test_memory_database_has_empty_mylite_discovery(void);
 static void test_create_table_persists_catalog_metadata(void);
 static void test_alter_table_rebuilds_keyless_rows(void);
 static void test_indexed_rows(void);
+static void test_standalone_index_ddl(void);
 static void test_wordpress_shaped_schema(void);
 static void assert_exec_succeeds(mylite_db *db, const char *sql);
 static void assert_exec_fails(mylite_db *db, const char *sql);
@@ -138,6 +139,7 @@ int main(void) {
     test_create_table_persists_catalog_metadata();
     test_alter_table_rebuilds_keyless_rows();
     test_indexed_rows();
+    test_standalone_index_ddl();
     test_wordpress_shaped_schema();
     return 0;
 }
@@ -821,6 +823,143 @@ static void test_indexed_rows(void) {
     assert_catalog_table_metadata(filename, "app", "indexed_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "nullable_unique_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "alter_index_posts", "InnoDB", "MYLITE");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_standalone_index_ddl(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    table_context slug_rows = {0};
+    table_context dropped_index_rows = {0};
+    table_context reopened_slug_rows = {0};
+    table_context reopened_dropped_index_rows = {0};
+    const char *category_ids[] = {"1", "3"};
+    id_sequence_context category_sequence = {
+        .expected_count = 2,
+        .expected_ids = category_ids,
+    };
+    id_sequence_context post_drop_sequence = {
+        .expected_count = 2,
+        .expected_ids = category_ids,
+    };
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE standalone_index_posts ("
+        "id INT NOT NULL, "
+        "slug VARCHAR(32) NOT NULL, "
+        "category VARCHAR(32) NULL, "
+        "score INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO standalone_index_posts VALUES (1, 'alpha', 'news', 10)");
+    assert_exec_succeeds(db, "INSERT INTO standalone_index_posts VALUES (2, 'beta', 'tech', 20)");
+    assert_exec_succeeds(db, "INSERT INTO standalone_index_posts VALUES (3, 'gamma', 'news', 30)");
+
+    assert_exec_succeeds(
+        db,
+        "CREATE INDEX category_lookup ON standalone_index_posts (category) ALGORITHM=COPY"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE UNIQUE INDEX slug_lookup ON standalone_index_posts (slug) ALGORITHM=COPY"
+    );
+    assert_catalog_table_count(filename, "app", 1U);
+    assert_catalog_table_metadata(filename, "app", "standalone_index_posts", "InnoDB", "MYLITE");
+    assert_exec_fails(db, "INSERT INTO standalone_index_posts VALUES (4, 'beta', 'docs', 40)");
+
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM standalone_index_posts FORCE INDEX (slug_lookup) WHERE slug = 'beta'",
+            row_callback,
+            &slug_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(slug_rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM standalone_index_posts FORCE INDEX (category_lookup) "
+            "WHERE category = 'news' ORDER BY id",
+            id_sequence_callback,
+            &category_sequence,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(category_sequence.rows == 2);
+
+    assert_exec_succeeds(db, "DROP INDEX category_lookup ON standalone_index_posts");
+    assert_catalog_table_count(filename, "app", 1U);
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM standalone_index_posts WHERE Key_name = 'category_lookup'",
+            table_callback,
+            &dropped_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(dropped_index_rows.rows == 0);
+    assert_exec_fails(
+        db,
+        "SELECT id FROM standalone_index_posts FORCE INDEX (category_lookup) "
+        "WHERE category = 'news'"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM standalone_index_posts WHERE category = 'news' ORDER BY id",
+            id_sequence_callback,
+            &post_drop_sequence,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(post_drop_sequence.rows == 2);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM standalone_index_posts FORCE INDEX (slug_lookup) WHERE slug = 'gamma'",
+            row_callback,
+            &reopened_slug_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_slug_rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM standalone_index_posts WHERE Key_name = 'category_lookup'",
+            table_callback,
+            &reopened_dropped_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_dropped_index_rows.rows == 0);
+    assert_catalog_table_count(filename, "app", 1U);
+    assert_catalog_table_metadata(filename, "app", "standalone_index_posts", "InnoDB", "MYLITE");
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 

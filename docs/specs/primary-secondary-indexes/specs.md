@@ -97,8 +97,8 @@ with B-tree or pager-backed navigation without changing SQL-visible behavior.
   `HA_READ_KEY_OR_PREV`, `HA_READ_AFTER_KEY`, `HA_READ_BEFORE_KEY`,
   `HA_READ_PREFIX`, `HA_READ_PREFIX_LAST`, and
   `HA_READ_PREFIX_LAST_OR_PREV`.
-- Insert, update, delete, close/reopen, and copy `ALTER` rebuilds for supported
-  keyed table shapes.
+- Insert, update, delete, close/reopen, copy `ALTER` rebuilds, and standalone
+  copy-rebuild `CREATE INDEX` / `DROP INDEX` for supported keyed table shapes.
 - Omitted/default engine requests and explicit `ENGINE=MYLITE`,
   `ENGINE=InnoDB`, `ENGINE=MyISAM`, and `ENGINE=Aria` requests that route to
   MyLite.
@@ -129,12 +129,12 @@ by durable InnoDB/MyISAM/Aria sidecars.
 
 ## DDL Metadata Routing Impact
 
-`CREATE TABLE` and copy `ALTER` should accept supported keyed table shapes and
-reject unsupported index definitions before publishing catalog metadata.
-`RENAME TABLE` keeps table ids, so existing row and index-entry pages remain
-associated with the renamed table. `DROP TABLE` removes the live catalog record;
-old row and index-entry pages become unreachable until free-space reclamation
-exists.
+`CREATE TABLE`, copy `ALTER`, and standalone index DDL should accept supported
+keyed table shapes and reject unsupported index definitions before publishing
+catalog metadata. `RENAME TABLE` keeps table ids, so existing row and
+index-entry pages remain associated with the renamed table. `DROP TABLE`
+removes the live catalog record; old row and index-entry pages become
+unreachable until free-space reclamation exists.
 
 ## Single-File And File-Format Impact
 
@@ -175,6 +175,7 @@ size should be recorded during verification.
   - keyed update/delete through both primary and secondary predicates,
   - `ENGINE=InnoDB` and other supported requested engines resolving to MyLite,
   - copy `ALTER ... ADD INDEX` or `ADD PRIMARY KEY` over supported shapes,
+  - standalone `CREATE INDEX` / `DROP INDEX` over supported shapes,
   - no forbidden durable sidecars.
 - Run the normal dev, embedded, storage-smoke, tidy, format, diff, and
   storage-smoke MariaDB archive size checks.
