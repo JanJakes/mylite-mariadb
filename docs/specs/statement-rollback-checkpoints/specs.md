@@ -57,17 +57,20 @@ checkpoint file handle instead of opening and locking a second descriptor. This
 keeps the exclusive file lock held across the MariaDB statement without making
 the handler pass a new storage context through every existing call.
 
-`libmylite` creates checkpoints only for file-backed SQL statements that can
-mutate MyLite storage: `CREATE`, `ALTER`, `DROP`, `RENAME`, `TRUNCATE`,
-`INSERT`, `UPDATE`, `DELETE`, `REPLACE`, and `LOAD`. Unsupported transaction
-control continues to fail before MariaDB execution. `SELECT`, `SHOW`, `SET`,
-and other read/session statements do not take a write checkpoint.
+The initial implementation created checkpoints in `libmylite` for all
+file-backed SQL statements that could mutate MyLite storage. The follow-up
+transaction-handler hook slice moves row DML (`INSERT`, `UPDATE`, `DELETE`,
+`REPLACE`, and `LOAD`) onto MariaDB's statement transaction hook path. DDL and
+catalog paths that do not reliably enter `external_lock()` continue to use the
+outer `libmylite` checkpoint for `CREATE`, `ALTER`, `DROP`, `RENAME`, and
+`TRUNCATE`.
 
-If MariaDB execution fails, `libmylite` restores the checkpoint before
+If MariaDB execution fails, MyLite restores the active checkpoint before
 returning the SQL error. If execution succeeds, the checkpoint is committed
-after any required schema-catalog synchronization. If schema synchronization
-fails after a successful schema DDL statement, the checkpoint is rolled back so
-the durable MyLite file returns to its previous state.
+through MariaDB's statement commit hook for row DML or after any required
+schema-catalog synchronization for DDL. If schema synchronization fails after a
+successful schema DDL statement, the checkpoint is rolled back so the durable
+MyLite file returns to its previous state.
 
 ## Supported Scope
 
@@ -75,6 +78,8 @@ the durable MyLite file returns to its previous state.
   mutations executed through `mylite_exec()`.
 - Failed prepared statement rollback for file-backed MyLite storage mutations
   executed through `mylite_step()`.
+- MariaDB statement transaction hook ownership for covered row-DML checkpoint
+  commit and rollback.
 - Row, row-state, index-entry, autoincrement, and catalog visibility rollback
   by restoring the statement-start header/catalog snapshot.
 - Cross-process protection while the statement is executing: the checkpoint

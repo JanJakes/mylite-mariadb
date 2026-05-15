@@ -341,21 +341,28 @@ restoring pages. Conflicts return busy errors; no durable lock sidecar is
 created. These locks protect cooperating MyLite processes from unsafe concurrent
 access but are not the final multi-writer lock manager.
 
-File-backed `libmylite` statements that can mutate MyLite storage now take an
-in-process statement checkpoint before MariaDB execution. The checkpoint saves
-the committed header and catalog root pages while holding the primary-file
-exclusive lock; storage APIs in the same thread borrow that locked descriptor.
-If MariaDB reports statement failure, MyLite restores the saved catalog/header
-pages so rows, row-state pages, index entries, autoincrement pages, and catalog
-records appended after the checkpoint are no longer visible. Successful
-statements release the checkpoint after required schema-catalog synchronization.
+File-backed MyLite statements that can mutate storage now take an in-process
+statement checkpoint. Row DML begins that checkpoint from the MyLite handler
+when MariaDB write-locks a routed table, registers the handlerton in MariaDB's
+statement transaction list, and releases or restores the checkpoint from
+MariaDB's statement commit/rollback hooks. DDL and catalog paths that do not
+reliably enter `external_lock()` keep the outer `libmylite` checkpoint before
+MariaDB execution.
+
+The checkpoint saves the committed header and catalog root pages while holding
+the primary-file exclusive lock; storage APIs in the same thread borrow that
+locked descriptor. If MariaDB reports statement failure, MyLite restores the
+saved catalog/header pages so rows, row-state pages, index entries,
+autoincrement pages, and catalog records appended after the checkpoint are no
+longer visible. Successful statements release the checkpoint after handler
+statement commit or required schema-catalog synchronization.
 
 This is still not SQL transaction support. The MyLite handler still advertises
 non-transactional engine flags. Public `libmylite` SQL entry points reject
 explicit transaction-control and autocommit-control statements before MariaDB
 execution so routed `ENGINE=InnoDB` tables do not imply multi-statement
-rollback semantics. MariaDB commit, rollback, and savepoint handlerton hooks
-remain planned.
+rollback semantics. Full transaction, savepoint, and transactional engine-flag
+support remains planned.
 
 The storage design must preserve the full write-concurrency goal. Early
 milestones may use coarse locks for correctness, but the page, transaction,

@@ -321,7 +321,7 @@ bool sql_token_equals(std::string_view token, const char *keyword);
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
 int sync_schema_catalog(mylite_db &database);
 bool is_schema_catalog_sql(std::string_view sql);
-bool is_storage_mutation_sql(std::string_view sql);
+bool is_storage_outer_checkpoint_sql(std::string_view sql);
 int collect_storage_schema(void *ctx, const char *schema_name);
 int load_runtime_schema_definitions(
     mylite_db &database,
@@ -1157,7 +1157,7 @@ int exec_impl(
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
     StorageStatementCheckpoint checkpoint;
     const bool checkpoint_enabled =
-        database->filename != ":memory:" && is_storage_mutation_sql(std::string_view(sql));
+        database->filename != ":memory:" && is_storage_outer_checkpoint_sql(std::string_view(sql));
     int checkpoint_result = checkpoint.begin(*database, checkpoint_enabled);
     if (checkpoint_result != MYLITE_OK) {
         return copy_error_message(*database, errmsg);
@@ -1279,7 +1279,7 @@ int prepare_impl(
             is_schema_catalog_sql(std::string_view(sql, sql_len));
         statement->uses_statement_checkpoint =
             database->filename != ":memory:" &&
-            is_storage_mutation_sql(std::string_view(sql, sql_len));
+            is_storage_outer_checkpoint_sql(std::string_view(sql, sql_len));
 #  endif
         statement->statement = mysql_stmt_init(&database->mysql);
         if (statement->statement == nullptr) {
@@ -2363,15 +2363,13 @@ bool is_schema_catalog_sql(std::string_view sql) {
            (sql_token_equals(second, "DATABASE") || sql_token_equals(second, "SCHEMA"));
 }
 
-bool is_storage_mutation_sql(std::string_view sql) {
+bool is_storage_outer_checkpoint_sql(std::string_view sql) {
     std::string_view rest = skip_sql_leading_noise(sql);
     const std::string_view first = pop_sql_token(rest);
 
     return sql_token_equals(first, "CREATE") || sql_token_equals(first, "ALTER") ||
            sql_token_equals(first, "DROP") || sql_token_equals(first, "RENAME") ||
-           sql_token_equals(first, "TRUNCATE") || sql_token_equals(first, "INSERT") ||
-           sql_token_equals(first, "UPDATE") || sql_token_equals(first, "DELETE") ||
-           sql_token_equals(first, "REPLACE") || sql_token_equals(first, "LOAD");
+           sql_token_equals(first, "TRUNCATE");
 }
 
 int collect_storage_schema(void *ctx, const char *schema_name) {

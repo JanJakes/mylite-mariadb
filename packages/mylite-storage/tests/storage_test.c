@@ -1319,8 +1319,10 @@ static void assert_statement_checkpoint_rolls_back_row(statement_checkpoint_test
         .size = sizeof(entries),
     };
 
+    assert(!mylite_storage_statement_active(ctx->filename));
     assert(mylite_storage_begin_statement(ctx->filename, &statement) == MYLITE_STORAGE_OK);
     assert(statement != NULL);
+    assert(mylite_storage_statement_active(ctx->filename));
     assert(
         mylite_storage_append_row_with_index_entries(
             ctx->filename,
@@ -1338,6 +1340,7 @@ static void assert_statement_checkpoint_rolls_back_row(statement_checkpoint_test
     );
     assert(row_count == 1ULL);
     assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
+    assert(!mylite_storage_statement_active(ctx->filename));
 
     assert(
         mylite_storage_count_rows(ctx->filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK
@@ -1360,6 +1363,7 @@ static void assert_statement_checkpoint_commits_row(statement_checkpoint_test_co
     };
 
     assert(mylite_storage_begin_statement(ctx->filename, &statement) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_statement_active(ctx->filename));
     assert(
         mylite_storage_append_row_with_index_entries(
             ctx->filename,
@@ -1373,6 +1377,7 @@ static void assert_statement_checkpoint_commits_row(statement_checkpoint_test_co
         ) == MYLITE_STORAGE_OK
     );
     assert(mylite_storage_commit_statement(statement) == MYLITE_STORAGE_OK);
+    assert(!mylite_storage_statement_active(ctx->filename));
 
     assert(
         mylite_storage_count_rows(ctx->filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK
@@ -1392,6 +1397,7 @@ static void assert_statement_checkpoint_rolls_back_catalog(statement_checkpoint_
     unsigned long long row_count = 0ULL;
 
     assert(mylite_storage_begin_statement(ctx->filename, &statement) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_statement_active(ctx->filename));
     assert(
         mylite_storage_store_table_definition(ctx->filename, ctx->rollback_definition) ==
         MYLITE_STORAGE_OK
@@ -1412,6 +1418,7 @@ static void assert_statement_checkpoint_rolls_back_catalog(statement_checkpoint_
         mylite_storage_table_exists(ctx->filename, "app", "rollback_posts") == MYLITE_STORAGE_OK
     );
     assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
+    assert(!mylite_storage_statement_active(ctx->filename));
 
     assert(
         mylite_storage_table_exists(ctx->filename, "app", "rollback_posts") ==

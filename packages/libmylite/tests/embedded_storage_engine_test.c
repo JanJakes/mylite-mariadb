@@ -125,6 +125,7 @@ static void assert_non_table_object_exec_fails(mylite_db *db, const char *sql);
 static void assert_transaction_control_exec_fails(mylite_db *db, const char *sql);
 static void assert_foreign_key_exec_fails(mylite_db *db, const char *sql);
 static void assert_prepared_succeeds(mylite_db *db, const char *sql);
+static void assert_prepared_fails(mylite_db *db, const char *sql);
 static void assert_schema_options(
     mylite_db *db,
     const char *expected_character_set,
@@ -782,6 +783,22 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert(errmsg == NULL);
     assert(rollback_count.rows == 1);
     assert_exec_succeeds(db, "INSERT INTO rollback_posts VALUES (2, 'second', 2), (3, 'third', 3)");
+    assert_prepared_fails(
+        db,
+        "INSERT INTO rollback_posts VALUES (4, 'fourth', 4), (5, 'fourth', 5)"
+    );
+    rollback_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM rollback_posts WHERE id IN (4, 5)",
+            single_value_callback,
+            &rollback_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rollback_count.rows == 1);
     assert_exec_fails(
         db,
         "UPDATE rollback_posts SET title = 'duplicate' WHERE id IN (2, 3) ORDER BY id"
@@ -2675,6 +2692,23 @@ static void assert_prepared_succeeds(mylite_db *db, const char *sql) {
         fprintf(stderr, "Prepared SQL failed: %s\n%s\n", sql, mylite_errmsg(db));
     }
     assert(step_result == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+}
+
+static void assert_prepared_fails(mylite_db *db, const char *sql) {
+    mylite_stmt *stmt = NULL;
+    const int prepare_result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, NULL);
+    if (prepare_result != MYLITE_OK) {
+        fprintf(stderr, "Prepare failed before execution: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(prepare_result == MYLITE_OK);
+    assert(stmt != NULL);
+
+    const int step_result = mylite_step(stmt);
+    if (step_result != MYLITE_ERROR) {
+        fprintf(stderr, "Prepared SQL unexpectedly succeeded: %s\n", sql);
+    }
+    assert(step_result == MYLITE_ERROR);
     assert(mylite_finalize(stmt) == MYLITE_OK);
 }
 

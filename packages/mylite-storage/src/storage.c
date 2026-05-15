@@ -2178,6 +2178,10 @@ mylite_storage_result mylite_storage_begin_statement(
     return MYLITE_STORAGE_OK;
 }
 
+int mylite_storage_statement_active(const char *filename) {
+    return active_statement_for(filename) != NULL ? 1 : 0;
+}
+
 mylite_storage_result mylite_storage_commit_statement(mylite_storage_statement *statement) {
     if (statement == NULL || active_statement != statement) {
         return MYLITE_STORAGE_MISUSE;

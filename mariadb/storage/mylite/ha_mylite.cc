@@ -40,6 +40,9 @@ static int mylite_discover_table_names(handlerton *hton, const LEX_CSTRING *db,
                                        handlerton::discovered_list *result);
 static int mylite_discover_table_existence(handlerton *hton, const char *db,
                                            const char *table_name);
+static int mylite_close_connection(THD *thd);
+static int mylite_commit(THD *thd, bool all);
+static int mylite_rollback(THD *thd, bool all);
 static int mylite_done_func(void *p);
 static int mylite_add_discovered_table(void *ctx, const char *schema_name,
                                        const char *table_name);
@@ -78,6 +81,10 @@ static int mylite_copy_string(const char *value, char *out_value,
 static bool mylite_supported_engine_request(const char *engine_name);
 static bool mylite_engine_name_equals(const char *engine_name,
                                       const char *expected_engine_name);
+static int mylite_begin_statement_checkpoint(THD *thd,
+                                             const char *primary_file);
+static int mylite_finish_statement_checkpoint(THD *thd, bool commit);
+static struct Mylite_trx_context *mylite_trx_context(THD *thd, bool create);
 static int mylite_table_name_from_path(const char *path, char *out_schema_name,
                                        size_t out_schema_name_size,
                                        char *out_table_name,
@@ -218,6 +225,9 @@ static int mylite_init_func(void *p)
   mylite_hton->discover_table= mylite_discover_table;
   mylite_hton->discover_table_names= mylite_discover_table_names;
   mylite_hton->discover_table_existence= mylite_discover_table_existence;
+  mylite_hton->close_connection= mylite_close_connection;
+  mylite_hton->commit= mylite_commit;
+  mylite_hton->rollback= mylite_rollback;
   mylite_hton->tablefile_extensions= ha_mylite_exts;
   mylite_register_schema_hooks(&mylite_schema_hooks);
 
@@ -229,6 +239,33 @@ static int mylite_done_func(void *)
   mylite_register_schema_hooks(NULL);
   mylite_primary_file= NULL;
   return 0;
+}
+
+static int mylite_close_connection(THD *thd)
+{
+  DBUG_ENTER("mylite_close_connection");
+
+  int error= mylite_finish_statement_checkpoint(thd, false);
+  Mylite_trx_context *ctx= mylite_trx_context(thd, false);
+  if (ctx)
+  {
+    free(ctx);
+    thd->ha_data[mylite_hton->slot].ha_ptr= NULL;
+  }
+
+  DBUG_RETURN(error);
+}
+
+static int mylite_commit(THD *thd, bool)
+{
+  DBUG_ENTER("mylite_commit");
+  DBUG_RETURN(mylite_finish_statement_checkpoint(thd, true));
+}
+
+static int mylite_rollback(THD *thd, bool)
+{
+  DBUG_ENTER("mylite_rollback");
+  DBUG_RETURN(mylite_finish_statement_checkpoint(thd, false));
 }
 
 Mylite_share *ha_mylite::get_share()
@@ -261,6 +298,11 @@ static handler *mylite_create_handler(handlerton *hton,
 struct Mylite_discover_context
 {
   handlerton::discovered_list *result;
+};
+
+struct Mylite_trx_context
+{
+  mylite_storage_statement *statement;
 };
 
 static int mylite_discover_table(handlerton *, THD *thd, TABLE_SHARE *share)
@@ -1198,9 +1240,25 @@ int ha_mylite::info(uint flag)
   DBUG_RETURN(0);
 }
 
-int ha_mylite::external_lock(THD *, int)
+int ha_mylite::external_lock(THD *thd, int lock_type)
 {
   DBUG_ENTER("ha_mylite::external_lock");
+
+  if (lock_type != F_WRLCK)
+    DBUG_RETURN(0);
+
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    DBUG_RETURN(HA_ERR_NO_CONNECTION);
+
+  int error= mylite_begin_statement_checkpoint(thd, primary_file);
+  if (error)
+    DBUG_RETURN(error);
+
+  trans_register_ha(thd, false, mylite_hton, 0);
+  if (thd_test_options(thd, OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN))
+    trans_register_ha(thd, true, mylite_hton, 0);
+
   DBUG_RETURN(0);
 }
 
@@ -1667,6 +1725,57 @@ static bool mylite_engine_name_equals(const char *engine_name,
                                       const char *expected_engine_name)
 {
   return my_strcasecmp_latin1(engine_name, expected_engine_name) == 0;
+}
+
+static int mylite_begin_statement_checkpoint(THD *thd,
+                                             const char *primary_file)
+{
+  if (mylite_storage_statement_active(primary_file))
+    return 0;
+
+  Mylite_trx_context *ctx= mylite_trx_context(thd, true);
+  if (!ctx)
+    return HA_ERR_OUT_OF_MEM;
+  if (ctx->statement)
+    return 0;
+
+  mylite_storage_result result=
+    mylite_storage_begin_statement(primary_file, &ctx->statement);
+  return mylite_storage_to_handler_error(result);
+}
+
+static int mylite_finish_statement_checkpoint(THD *thd, bool commit)
+{
+  Mylite_trx_context *ctx= mylite_trx_context(thd, false);
+  if (!ctx || !ctx->statement)
+    return 0;
+
+  mylite_storage_statement *statement= ctx->statement;
+  ctx->statement= NULL;
+  mylite_storage_result result;
+  if (commit)
+    result= mylite_storage_commit_statement(statement);
+  else
+    result= mylite_storage_rollback_statement(statement);
+  return mylite_storage_to_handler_error(result);
+}
+
+static Mylite_trx_context *mylite_trx_context(THD *thd, bool create)
+{
+  if (!thd)
+    return NULL;
+
+  Mylite_trx_context *ctx= static_cast<Mylite_trx_context *>(
+    thd->ha_data[mylite_hton->slot].ha_ptr);
+  if (ctx || !create)
+    return ctx;
+
+  ctx= static_cast<Mylite_trx_context *>(calloc(1, sizeof(*ctx)));
+  if (!ctx)
+    return NULL;
+
+  thd->ha_data[mylite_hton->slot].ha_ptr= ctx;
+  return ctx;
 }
 
 static int mylite_table_name_from_path(const char *path, char *out_schema_name,

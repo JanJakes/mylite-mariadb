@@ -280,6 +280,7 @@ mylite_storage_result mylite_storage_begin_statement(
     const char *filename,
     mylite_storage_statement **out_statement
 );
+int mylite_storage_statement_active(const char *filename);
 mylite_storage_result mylite_storage_commit_statement(mylite_storage_statement *statement);
 mylite_storage_result mylite_storage_rollback_statement(mylite_storage_statement *statement);
 void mylite_storage_free(void *ptr);
