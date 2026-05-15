@@ -1,17 +1,25 @@
-# Initial cache for the first MyLite MariaDB embedded-library baseline.
+# Initial cache for the MyLite MariaDB embedded-library profile.
 #
 # Keep this file limited to reproducibility settings and options required by
-# the intentionally partial MariaDB submodule import. Size trimming belongs in
-# later measured slices.
+# the intentionally partial MariaDB submodule import plus measured trims for
+# server-oriented surfaces that are outside the embedded MyLite runtime.
 
-set(CMAKE_BUILD_TYPE "Release" CACHE STRING "MariaDB baseline build type" FORCE)
+set(CMAKE_BUILD_TYPE "Release" CACHE STRING "MariaDB embedded profile build type" FORCE)
 
 set(UPDATE_SUBMODULES OFF CACHE BOOL "Do not fetch MariaDB submodules during configure" FORCE)
 set(WITH_EMBEDDED_SERVER ON CACHE BOOL "Build MariaDB's embedded server library" FORCE)
-set(WITH_UNIT_TESTS OFF CACHE BOOL "Skip MariaDB upstream unit-test targets in the baseline" FORCE)
+set(WITH_UNIT_TESTS OFF CACHE BOOL "Skip MariaDB upstream unit-test targets in the profile" FORCE)
 set(WITH_SSL "system" CACHE STRING "Use the host OpenSSL installation" FORCE)
+set(WITHOUT_DYNAMIC_PLUGINS ON CACHE BOOL "Disable host dynamic plugin support" FORCE)
 
 # These components require optional submodule payloads that are intentionally not
 # included in the initial import.
-set(WITH_WSREP OFF CACHE BOOL "Disable Galera/wsrep support for the embedded baseline" FORCE)
-set(PLUGIN_S3 "NO" CACHE STRING "Disable Aria S3 support for the embedded baseline" FORCE)
+set(WITH_WSREP OFF CACHE BOOL "Disable Galera/wsrep support for the embedded profile" FORCE)
+set(PLUGIN_S3 "NO" CACHE STRING "Disable Aria S3 support for the embedded profile" FORCE)
+
+# MyLite rejects server-oriented plugin management and runs without grants,
+# feedback, and Performance Schema instrumentation.
+set(PLUGIN_AUTH_SOCKET "NO" CACHE STRING "Disable server socket authentication plugin" FORCE)
+set(PLUGIN_FEEDBACK "NO" CACHE STRING "Disable server feedback plugin" FORCE)
+set(PLUGIN_PERFSCHEMA "NO" CACHE STRING "Disable Performance Schema storage engine" FORCE)
+set(PLUGIN_THREAD_POOL_INFO "NO" CACHE STRING "Disable server thread-pool info plugin" FORCE)

@@ -30,6 +30,10 @@
 #  define MYLITE_MARIADB_CHARSETS_DIR ""
 #endif
 
+#ifndef MYLITE_MARIADB_HAS_PERFSCHEMA
+#  define MYLITE_MARIADB_HAS_PERFSCHEMA 1
+#endif
+
 namespace {
 
 constexpr unsigned k_known_open_flags = MYLITE_OPEN_READONLY | MYLITE_OPEN_READWRITE |
@@ -775,7 +779,9 @@ std::vector<std::string> runtime_arguments(
         "--skip-networking",
         "--default-storage-engine=MyISAM",
         "--innodb=OFF",
+#  if MYLITE_MARIADB_HAS_PERFSCHEMA
         "--performance-schema=OFF",
+#  endif
         "--lc-messages-dir=" MYLITE_MARIADB_MESSAGES_DIR,
         "--character-sets-dir=" MYLITE_MARIADB_CHARSETS_DIR,
     };

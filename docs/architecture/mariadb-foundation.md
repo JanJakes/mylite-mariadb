@@ -39,11 +39,13 @@ configuration.
 The first MyLite bootstrap keeps MariaDB's server-shaped state inside a
 MyLite-owned temporary runtime directory. That runtime starts with
 `--no-defaults`, `--skip-grant-tables`, `--skip-networking`,
-`--skip-log-bin`, `--performance-schema=OFF`,
-`--default-storage-engine=MyISAM`, and `--innodb=OFF`. Disabling InnoDB here is
-not a compatibility decision for application DDL; application `ENGINE=InnoDB`
-requests are routed to MyLite in storage-engine builds. The startup flag only
-avoids non-final InnoDB sidecars in the embedded bootstrap runtime.
+`--skip-log-bin`, `--default-storage-engine=MyISAM`, and `--innodb=OFF`.
+When Performance Schema is compiled in, MyLite also starts with
+`--performance-schema=OFF`; the default embedded profile now compiles that
+surface out. Disabling InnoDB here is not a compatibility decision for
+application DDL; application `ENGINE=InnoDB` requests are routed to MyLite in
+storage-engine builds. The startup flag only avoids non-final InnoDB sidecars in
+the embedded bootstrap runtime.
 
 MariaDB 11.8.6 needed two narrow embedded-restart fixes for repeated
 `mylite_open()` / `mylite_close()` tests in one process:

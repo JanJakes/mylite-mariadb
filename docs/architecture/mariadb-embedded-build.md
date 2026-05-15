@@ -1,9 +1,9 @@
 # MariaDB Embedded Build
 
-This document records the first reproducible MariaDB embedded-library baseline
-for MyLite. The baseline is intentionally broad: it proves the imported MariaDB
-source can build an embedded archive before MyLite starts trimming server
-surface or adding storage patches.
+This document records the reproducible MariaDB embedded-library profile for
+MyLite. The profile starts from MariaDB's embedded server build and applies
+measured trims for server-oriented surfaces outside the file-owned embedded
+runtime.
 
 ## Command
 
@@ -27,14 +27,22 @@ WITH_SSL=system
 WITH_UNIT_TESTS=OFF
 WITH_WSREP=OFF
 PLUGIN_S3=NO
+WITHOUT_DYNAMIC_PLUGINS=ON
+PLUGIN_AUTH_SOCKET=NO
+PLUGIN_FEEDBACK=NO
+PLUGIN_PERFSCHEMA=NO
+PLUGIN_THREAD_POOL_INFO=NO
 ```
 
 `WITH_WSREP=OFF` and `PLUGIN_S3=NO` are required because the initial MariaDB
 import intentionally omits `wsrep-lib` and `storage/maria/libmarias3`.
+Dynamic plugins, socket authentication, feedback, Performance Schema, and
+thread-pool info are disabled because they are server-administration surfaces,
+not core MyLite embedded runtime behavior.
 
 ## Measurement
 
-Measured on 2026-05-14 from the imported MariaDB 11.8.6 source tree with the
+Measured on 2026-05-15 from the imported MariaDB 11.8.6 source tree with the
 MyLite embedded-restart patches applied.
 
 | Field | Value |
@@ -45,40 +53,44 @@ MyLite embedded-restart patches applied.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 33,736,928 bytes / 32.17 MiB |
-| Archive members | 807 |
+| Archive size | 32,048,256 bytes / 30.56 MiB |
+| Archive members | 691 |
 
 The build found system OpenSSL 3.6.2, zlib, Curses, CURL, LibXml2, GSSAPI,
 BZip2, LZ4, LibLZMA, LZO, PCRE2, and Zstandard support on this machine.
 
 ## Enabled Surface
 
-The profile leaves most MariaDB defaults intact. The embedded archive includes
-the static embedded server library and static embedded engines/plugins such as:
+The profile keeps the MariaDB components needed by the current embedded
+bootstrap and storage-routing smoke coverage. The embedded archive includes the
+static embedded server library and static embedded engines/plugins such as:
 
 - Aria
 - CSV
 - HEAP/MEMORY
 - InnoDB
 - MyISAM and MRG_MyISAM
-- Performance Schema
 - Sequence and partition support
-- selected static server plugins such as auth socket, feedback, type handlers,
-  user variables, userstat, and thread-pool info
+- selected compatibility helpers such as type handlers, user variables, and
+  userstat
 
-Configure also enables many module targets, including Archive, Blackhole,
-CONNECT, Example, Federated, FederatedX, Mroonga, Sphinx, Spider, and many
-server plugins. The `libmariadbd.a` target does not build every configured
-module, but the enabled list is still important size-profile evidence because
-future profile hardening should disable unwanted surfaces intentionally.
+Some configured module metadata remains visible even when the
+`libmariadbd.a` target does not build the module into the embedded archive.
+Keep treating the configured surface as size-profile evidence: future profile
+hardening should disable unwanted surfaces intentionally and record the effect.
 
 ## Disabled Or Missing Surface
 
-The baseline explicitly disables:
+The profile explicitly disables:
 
 - WSREP/Galera
 - Aria S3 support
 - MariaDB upstream unit-test targets
+- dynamic plugin support
+- socket authentication
+- feedback plugin
+- Performance Schema
+- thread-pool info plugin
 
 After the storage-engine skeleton slice, MariaDB configure also discovers
 `MYLITE_SE` and leaves it disabled by default. Opt-in handler smoke builds use
@@ -100,17 +112,17 @@ cmake --build --preset storage-smoke-dev
 ctest --preset storage-smoke-dev
 ```
 
-Measured on 2026-05-14 with the same host and toolchain as the baseline:
+Measured on 2026-05-15 with the same host and toolchain as the default profile:
 
 | Field | Value |
 | --- | --- |
 | Archive | `build/mariadb-mylite-storage-smoke/libmysqld/libmariadbd.a` |
-| Archive size | 33,778,328 bytes / 32.21 MiB |
-| Archive members | 808 |
+| Archive size | 32,162,624 bytes / 30.67 MiB |
+| Archive members | 693 |
 
 This smoke path now covers static plugin registration, current routed
 DDL/DML, sidecar gates, application-schema smoke, and representative
-server-surface policy. It is still opt-in so the default embedded baseline
+server-surface policy. It is still opt-in so the default embedded profile
 remains separate from the MyLite handler build.
 
 ## Size Report
@@ -130,13 +142,13 @@ outputs:
 
 | Artifact | Size | Stripped Size | Members | Global Symbols |
 | --- | ---: | ---: | ---: | ---: |
-| MariaDB embedded archive | 33,736,928 bytes / 32.17 MiB | n/a | 807 | n/a |
-| MariaDB storage-smoke archive | 33,851,288 bytes / 32.28 MiB | n/a | 809 | n/a |
-| Embedded open-close smoke | 20,297,088 bytes / 19.36 MiB | 18,201,680 bytes / 17.36 MiB | n/a | 17,004 |
-| Embedded exec smoke | 20,296,872 bytes / 19.36 MiB | 18,201,496 bytes / 17.36 MiB | n/a | 17,004 |
-| Storage-smoke open-close smoke | 20,321,536 bytes / 19.38 MiB | 18,218,704 bytes / 17.37 MiB | n/a | 17,004 |
-| Storage-smoke exec smoke | 20,321,304 bytes / 19.38 MiB | 18,218,536 bytes / 17.37 MiB | n/a | 17,004 |
-| Storage-engine smoke | 20,371,808 bytes / 19.43 MiB | 18,268,080 bytes / 17.42 MiB | n/a | 17,004 |
+| MariaDB embedded archive | 32,048,256 bytes / 30.56 MiB | n/a | 691 | n/a |
+| MariaDB storage-smoke archive | 32,162,624 bytes / 30.67 MiB | n/a | 693 | n/a |
+| Embedded open-close smoke | 19,449,072 bytes / 18.55 MiB | 17,573,744 bytes / 16.76 MiB | n/a | 16,806 |
+| Embedded exec smoke | 19,448,904 bytes / 18.55 MiB | 17,573,592 bytes / 16.76 MiB | n/a | 16,806 |
+| Storage-smoke open-close smoke | 19,473,520 bytes / 18.57 MiB | 17,590,784 bytes / 16.78 MiB | n/a | 16,806 |
+| Storage-smoke exec smoke | 19,473,352 bytes / 18.57 MiB | 17,590,616 bytes / 16.78 MiB | n/a | 16,806 |
+| Storage-engine smoke | 19,523,792 bytes / 18.62 MiB | 17,640,144 bytes / 16.82 MiB | n/a | 16,806 |
 
 ## Offline Build Caveat
 
@@ -149,6 +161,6 @@ fully offline builds become a requirement.
 
 ## Follow-Up
 
-Use this baseline as the comparison point for later profile changes. Each
-future trimming slice should record the size report, cache options, and
-compatibility rationale.
+Use this profile as the comparison point for later profile changes. Each future
+trimming slice should record the size report, cache options, and compatibility
+rationale.

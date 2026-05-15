@@ -23,6 +23,7 @@ static void test_callback_abort(void);
 static void test_syntax_error_diagnostics(void);
 static void test_server_surfaces_are_disabled(void);
 static void assert_variable_value(mylite_db *db, const char *name, const char *value);
+static void assert_variable_value_or_missing(mylite_db *db, const char *name, const char *value);
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static int select_callback(void *ctx, int column_count, char **values, char **column_names);
 static int abort_callback(void *ctx, int column_count, char **values, char **column_names);
@@ -108,7 +109,7 @@ static void test_server_surfaces_are_disabled(void) {
 
     assert_variable_value(db, "skip_networking", "ON");
     assert_variable_value(db, "log_bin", "OFF");
-    assert_variable_value(db, "performance_schema", "OFF");
+    assert_variable_value_or_missing(db, "performance_schema", "OFF");
 
     assert_exec_fails(db, "CREATE USER 'mylite_probe'@'localhost' IDENTIFIED BY 'secret'");
     assert_exec_fails(db, "GRANT SELECT ON *.* TO 'mylite_probe'@'localhost'");
@@ -143,6 +144,24 @@ static void assert_variable_value(mylite_db *db, const char *name, const char *v
         fprintf(stderr, "variable not found or duplicate: %s rows=%d\n", name, ctx.rows);
     }
     assert(ctx.rows == 1);
+}
+
+static void assert_variable_value_or_missing(mylite_db *db, const char *name, const char *value) {
+    variable_context ctx = {
+        .name = name,
+        .value = value,
+        .rows = 0,
+    };
+    char sql[128];
+    const int written = snprintf(sql, sizeof(sql), "SHOW VARIABLES LIKE '%s'", name);
+
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert(mylite_exec(db, sql, variable_callback, &ctx, NULL) == MYLITE_OK);
+    if (ctx.rows > 1) {
+        fprintf(stderr, "variable duplicate: %s rows=%d\n", name, ctx.rows);
+    }
+    assert(ctx.rows == 0 || ctx.rows == 1);
 }
 
 static void assert_exec_fails(mylite_db *db, const char *sql) {

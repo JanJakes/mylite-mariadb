@@ -84,8 +84,8 @@ comparison suites and broader application-schema suites remain planned.
 | Events and scheduler | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server scheduler is not part of the core embedded profile; event activation and event DDL are rejected by MyLite SQL policy |
 | Users, grants, and password auth | ➖&nbsp;Out&nbsp;of&nbsp;scope | Local embedded file ownership replaces server account management; account SQL is rejected by MyLite SQL policy |
 | Replication and binlog | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server topology feature, not core library behavior; binlog is disabled at startup and representative replication/binlog SQL is rejected |
-| Dynamic plugin installation | ➖&nbsp;Out&nbsp;of&nbsp;scope | Core startup uses a MyLite-owned plugin directory and representative plugin-install SQL is rejected |
-| Performance schema | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server instrumentation tables are disabled in the embedded runtime profile |
+| Dynamic plugin installation | ➖&nbsp;Out&nbsp;of&nbsp;scope | Dynamic plugin support is compiled out of the default embedded profile, core startup uses a MyLite-owned plugin directory, and representative plugin-install SQL is rejected |
+| Performance schema | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server instrumentation tables are disabled or compiled out in the default embedded runtime profile |
 
 ## Rows, Indexes, And Constraints
 

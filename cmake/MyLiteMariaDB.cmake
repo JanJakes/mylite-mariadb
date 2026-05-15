@@ -15,6 +15,7 @@ set(MYLITE_MARIADB_CHARSETS_DIR
 )
 
 set(MYLITE_MARIADB_HAS_MYLITE_SE OFF)
+set(MYLITE_MARIADB_HAS_PERFSCHEMA ON)
 if(EXISTS "${MYLITE_MARIADB_BUILD_DIR}/CMakeCache.txt")
   file(STRINGS
     "${MYLITE_MARIADB_BUILD_DIR}/CMakeCache.txt"
@@ -23,6 +24,15 @@ if(EXISTS "${MYLITE_MARIADB_BUILD_DIR}/CMakeCache.txt")
   )
   if(mylite_mariadb_mylite_se_cache)
     set(MYLITE_MARIADB_HAS_MYLITE_SE ON)
+  endif()
+
+  file(STRINGS
+    "${MYLITE_MARIADB_BUILD_DIR}/CMakeCache.txt"
+    mylite_mariadb_perfschema_cache
+    REGEX "^PLUGIN_PERFSCHEMA:.*=(NO|OFF|FALSE|0)$"
+  )
+  if(mylite_mariadb_perfschema_cache)
+    set(MYLITE_MARIADB_HAS_PERFSCHEMA OFF)
   endif()
 endif()
 
@@ -84,6 +94,7 @@ function(mylite_link_mariadb_embedded target)
     target_compile_definitions("${target}" PRIVATE
       MYLITE_WITH_MARIADB_EMBEDDED=0
       MYLITE_MARIADB_HAS_MYLITE_SE=0
+      MYLITE_MARIADB_HAS_PERFSCHEMA=0
     )
     return()
   endif()
@@ -94,10 +105,16 @@ function(mylite_link_mariadb_embedded target)
   else()
     set(mylite_mariadb_has_mylite_se_define 0)
   endif()
+  if(MYLITE_MARIADB_HAS_PERFSCHEMA)
+    set(mylite_mariadb_has_perfschema_define 1)
+  else()
+    set(mylite_mariadb_has_perfschema_define 0)
+  endif()
 
   target_compile_definitions("${target}" PRIVATE
     MYLITE_WITH_MARIADB_EMBEDDED=1
     MYLITE_MARIADB_HAS_MYLITE_SE=${mylite_mariadb_has_mylite_se_define}
+    MYLITE_MARIADB_HAS_PERFSCHEMA=${mylite_mariadb_has_perfschema_define}
     MYLITE_MARIADB_MESSAGES_DIR="${MYLITE_MARIADB_MESSAGES_DIR}"
     MYLITE_MARIADB_CHARSETS_DIR="${MYLITE_MARIADB_CHARSETS_DIR}"
   )
