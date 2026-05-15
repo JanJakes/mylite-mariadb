@@ -71,6 +71,7 @@ class ha_mylite: public handler
   uint index_cursor_number;
   ulonglong current_row_id;
   uint duplicate_key_index;
+  bool discard_rows;
 
   Mylite_share *get_share();
   void clear_scan_rows();

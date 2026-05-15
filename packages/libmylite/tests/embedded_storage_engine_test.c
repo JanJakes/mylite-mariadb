@@ -137,6 +137,7 @@ typedef struct catalog_table_context {
 } catalog_table_context;
 
 static void test_show_engines_reports_mylite(void);
+static void test_blackhole_engine_routes_to_mylite(void);
 static void test_memory_database_has_empty_mylite_discovery(void);
 static void test_schema_namespaces(void);
 static void test_prepared_schema_namespaces(void);
@@ -305,6 +306,7 @@ static void remove_tree_entry(const char *path);
 
 int main(void) {
     test_show_engines_reports_mylite();
+    test_blackhole_engine_routes_to_mylite();
     test_memory_database_has_empty_mylite_discovery();
     test_schema_namespaces();
     test_prepared_schema_namespaces();
@@ -362,6 +364,71 @@ static void test_show_engines_reports_mylite(void) {
     assert(ctx.supported_mylite);
 
     assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_blackhole_engine_routes_to_mylite(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    unsigned long long row_count = 0ULL;
+    char *show_create = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE blackhole_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL, "
+        "KEY title_key (title)"
+        ") ENGINE=BLACKHOLE"
+    );
+    assert(mylite_storage_table_exists(filename, "app", "blackhole_posts") == MYLITE_STORAGE_OK);
+    assert_catalog_table_count(filename, "app", 1U);
+    assert_catalog_table_metadata(filename, "app", "blackhole_posts", "BLACKHOLE", "MYLITE");
+    show_create = capture_show_create_table(db, "blackhole_posts");
+    assert(strstr(show_create, "ENGINE=BLACKHOLE") != NULL);
+    free(show_create);
+    assert_exec_succeeds(db, "INSERT INTO blackhole_posts VALUES (1, 'first'), (2, 'second')");
+    assert(
+        mylite_storage_count_rows(filename, "app", "blackhole_posts", &row_count) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(row_count == 0ULL);
+    assert_query_single_value(db, "SELECT COUNT(*) FROM blackhole_posts", "0");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM blackhole_posts FORCE INDEX (title_key) WHERE title = 'first'",
+        "0"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE app");
+    assert_catalog_table_metadata(filename, "app", "blackhole_posts", "BLACKHOLE", "MYLITE");
+    show_create = capture_show_create_table(db, "blackhole_posts");
+    assert(strstr(show_create, "ENGINE=BLACKHOLE") != NULL);
+    free(show_create);
+    row_count = 0ULL;
+    assert(
+        mylite_storage_count_rows(filename, "app", "blackhole_posts", &row_count) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(row_count == 0ULL);
+    assert_query_single_value(db, "SELECT COUNT(*) FROM blackhole_posts", "0");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM blackhole_posts FORCE INDEX (title_key) WHERE title = 'second'",
+        "0"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
     free(filename);
     remove_tree(root);
     free(root);

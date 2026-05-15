@@ -47,7 +47,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `large-value` | `embedded-dev` | `compat-large-value` | Prepared statement large-value segment reads |
 | `warning` | `embedded-dev` | `compat-warning` | Warning counts and structured `SHOW WARNINGS` rows |
 | `sql-comparison` | `embedded-dev` | `compat-sql-comparison` | MariaDB baseline SQL API comparison |
-| `storage-engine` | `storage-smoke-dev` | `compat-storage-engine` | Static handler registration and SQL storage-engine smoke |
+| `storage-engine` | `storage-smoke-dev` | `compat-storage-engine` | Static handler registration, routed engine metadata, and BLACKHOLE row-discard smoke |
 | `sidecar` | `storage-smoke-dev` | `compat-sidecar` | Forbidden durable sidecar gates |
 | `routed-ddl-dml` | `storage-smoke-dev` | `compat-routed-ddl-dml` | Routed direct/prepared schema namespaces, directory-free file-backed `CREATE DATABASE`, catalog-backed `CREATE DATABASE` existence options, table and index DDL, ordinary `CREATE TABLE IF NOT EXISTS`, column ALTER existence-option skips, index DDL existence-option skips, index rename existence-option skips, index ignorability, non-CHECK primary/unique constraint DDL including primary-key add/drop/re-add and failed ADD UNIQUE rollback, CHECK constraint existence-option skips, indexed table/index rename, table-DDL `IF EXISTS` skips, failed table-DDL rollback, temporary LIKE/CTAS isolation, shadowing, and OR REPLACE, online/in-place ALTER rejection, `CREATE TABLE ... SELECT` duplicate modes, plain/LIKE/CTAS OR REPLACE, truncate, and DML smoke |
 | `application-schema` | `storage-smoke-dev` | `compat-application-schema` | WordPress-shaped core schema, WordPress installer DDL and seed fixtures, collation restart matrix, and prefix-index smoke |

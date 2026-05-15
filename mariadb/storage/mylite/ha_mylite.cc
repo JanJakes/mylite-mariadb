@@ -83,6 +83,7 @@ static int mylite_copy_lex_string(const LEX_CSTRING *value, char *out_value,
 static int mylite_copy_string(const char *value, char *out_value,
                               size_t out_value_size);
 static bool mylite_supported_engine_request(const char *engine_name);
+static bool mylite_discards_rows_engine_request(const char *engine_name);
 static bool mylite_engine_name_equals(const char *engine_name,
                                       const char *expected_engine_name);
 static int mylite_begin_statement_checkpoint(THD *thd,
@@ -584,7 +585,7 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
    index_row_size(0), index_row_count(0),
    index_row_index(0), index_blob_payloads_size(0),
    index_cursor_number(MAX_KEY), current_row_id(0),
-   duplicate_key_index((uint) -1)
+   duplicate_key_index((uint) -1), discard_rows(false)
 {
   storage_schema_name[0]= '\0';
   storage_table_name[0]= '\0';
@@ -671,6 +672,11 @@ int ha_mylite::build_index_cursor(uint index_number)
   if (index_number >= table->s->keys ||
       !mylite_key_is_supported(table->key_info + index_number))
     DBUG_RETURN(HA_ERR_UNSUPPORTED);
+  if (discard_rows)
+  {
+    index_cursor_number= index_number;
+    DBUG_RETURN(0);
+  }
 
   const char *primary_file= mylite_primary_file_path();
   if (!primary_file)
@@ -975,6 +981,7 @@ int ha_mylite::open(const char *name, int, uint)
     if (engine_name_error)
       DBUG_RETURN(engine_name_error);
     display_engine_name_lex.length= strlen(display_engine_name);
+    discard_rows= mylite_discards_rows_engine_request(display_engine_name);
   }
 
   if (!(share= get_share()))
@@ -996,6 +1003,7 @@ int ha_mylite::close(void)
   clear_scan_rows();
   clear_index_cursor();
   clear_record_blob_payloads();
+  discard_rows= false;
   DBUG_RETURN(0);
 }
 
@@ -1105,6 +1113,8 @@ int ha_mylite::rnd_init(bool scan)
   clear_scan_rows();
   if (!scan)
     DBUG_RETURN(0);
+  if (discard_rows)
+    DBUG_RETURN(0);
 
   const char *primary_file= mylite_primary_file_path();
   if (!primary_file)
@@ -1171,6 +1181,8 @@ int ha_mylite::rnd_next(uchar *buf)
 int ha_mylite::rnd_pos(uchar *buf, uchar *pos)
 {
   DBUG_ENTER("ha_mylite::rnd_pos");
+  if (discard_rows)
+    DBUG_RETURN(HA_ERR_END_OF_FILE);
 
   const char *primary_file= mylite_primary_file_path();
   if (!primary_file)
@@ -1250,6 +1262,13 @@ int ha_mylite::info(uint flag)
   stats.data_file_length= 0;
   stats.index_file_length= 0;
   stats.auto_increment_value= 0;
+  if (discard_rows)
+  {
+    stats.block_size= 8192;
+    if (flag & HA_STATUS_AUTO)
+      stats.auto_increment_value= 1;
+    DBUG_RETURN(0);
+  }
 
   const char *primary_file= mylite_primary_file_path();
   if (!primary_file)
@@ -1364,6 +1383,8 @@ int ha_mylite::write_row(const uchar *buf)
 
   if (!mylite_table_supports_row_write(table))
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+  if (discard_rows)
+    DBUG_RETURN(table->next_number_field ? update_auto_increment() : 0);
 
   const char *primary_file= mylite_primary_file_path();
   if (!primary_file)
@@ -1434,6 +1455,8 @@ int ha_mylite::update_row(const uchar *, const uchar *new_data)
 
   duplicate_key_index= (uint) -1;
 
+  if (discard_rows)
+    DBUG_RETURN(HA_ERR_WRONG_COMMAND);
   if (!mylite_table_supports_row_lifecycle(table))
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
   if (current_row_id == 0)
@@ -1503,6 +1526,8 @@ int ha_mylite::delete_row(const uchar *)
 {
   DBUG_ENTER("ha_mylite::delete_row");
 
+  if (discard_rows)
+    DBUG_RETURN(HA_ERR_WRONG_COMMAND);
   if (!mylite_table_supports_row_lifecycle(table))
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
   if (current_row_id == 0)
@@ -1526,6 +1551,15 @@ int ha_mylite::truncate()
 {
   DBUG_ENTER("ha_mylite::truncate");
 
+  if (discard_rows)
+  {
+    clear_scan_rows();
+    clear_index_cursor();
+    clear_record_blob_payloads();
+    current_row_id= 0;
+    duplicate_key_index= (uint) -1;
+    DBUG_RETURN(0);
+  }
   if (!mylite_table_supports_row_lifecycle(table))
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
 
@@ -1582,6 +1616,12 @@ int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info
     DBUG_RETURN(engine_name_error);
   if (!mylite_supported_engine_request(requested_engine_name))
     DBUG_RETURN(HA_ERR_UNSUPPORTED);
+  const bool requested_engine_discards_rows=
+    mylite_discards_rows_engine_request(requested_engine_name);
+  if (requested_engine_discards_rows &&
+      mylite_copy_string(requested_engine_name, display_engine_name,
+                         sizeof(display_engine_name)))
+    DBUG_RETURN(HA_ERR_UNSUPPORTED);
 
   const uchar *frm= NULL;
   size_t frm_len= 0;
@@ -1602,6 +1642,11 @@ int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info
   form->s->free_frm_image(frm);
   if (result != MYLITE_STORAGE_OK)
     DBUG_RETURN(mylite_storage_to_handler_error(result));
+  if (requested_engine_discards_rows)
+  {
+    discard_rows= true;
+    display_engine_name_lex.length= strlen(display_engine_name);
+  }
 
   if (mylite_auto_increment_field(form) &&
       create_info->auto_increment_value != 0ULL)
@@ -1826,7 +1871,13 @@ static bool mylite_supported_engine_request(const char *engine_name)
          mylite_engine_name_equals(engine_name, MYLITE_STORAGE_ENGINE_NAME) ||
          mylite_engine_name_equals(engine_name, "InnoDB") ||
          mylite_engine_name_equals(engine_name, "MyISAM") ||
-         mylite_engine_name_equals(engine_name, "Aria");
+         mylite_engine_name_equals(engine_name, "Aria") ||
+         mylite_discards_rows_engine_request(engine_name);
+}
+
+static bool mylite_discards_rows_engine_request(const char *engine_name)
+{
+  return mylite_engine_name_equals(engine_name, "BLACKHOLE");
 }
 
 static bool mylite_engine_name_equals(const char *engine_name,

@@ -4,9 +4,9 @@
 
 MyLite can store and rediscover explicit `ENGINE=MYLITE` table-definition
 metadata, but application DDL usually asks for no engine, `InnoDB`, `MyISAM`,
-or `Aria`. The next storage slice needs those requests to resolve to the
-MyLite handler without reviving MariaDB engine sidecars, while still preserving
-which engine the application requested.
+`Aria`, or selected zero-file engines. The next storage slice needs those
+requests to resolve to the MyLite handler without reviving MariaDB engine
+sidecars, while still preserving which engine the application requested.
 
 This slice implements the first metadata-only routing policy for file-backed
 embedded MyLite runtimes.
@@ -15,22 +15,25 @@ embedded MyLite runtimes.
 
 - Route no-engine/default-engine DDL to MyLite for file-backed `libmylite`
   opens when the static MyLite storage engine is present.
-- Route explicit `ENGINE=MYLITE`, `ENGINE=InnoDB`, `ENGINE=MyISAM`, and
-  `ENGINE=Aria` table creation to the MyLite handler.
+- Route explicit `ENGINE=MYLITE`, `ENGINE=InnoDB`, `ENGINE=MyISAM`,
+  `ENGINE=Aria`, and follow-up `ENGINE=BLACKHOLE` table creation to the MyLite
+  handler.
 - Record the requested engine name separately from the effective MyLite engine
   in the MyLite catalog.
 - Reject unsupported explicit engine requests after MariaDB routes them to the
   MyLite handler, before publishing catalog metadata.
 - Keep row DML, `DROP`, `RENAME`, `ALTER`, partitioning, and real InnoDB
-  foreign-key semantics unsupported.
+  foreign-key semantics outside the first routing slice; later slices cover
+  durable rows and BLACKHOLE row discard.
 - Keep `:memory:` opens outside this routing policy because they do not have a
   primary MyLite file for durable catalog publication.
 
 ## Non-Goals
 
 - Do not implement row storage or index storage.
-- Do not claim full InnoDB, MyISAM, or Aria semantics. This slice only routes
-  table-definition metadata where MyLite can safely persist the definition.
+- Do not claim full InnoDB, MyISAM, Aria, or native BLACKHOLE semantics. This
+  slice only routes table definitions where MyLite can safely persist the
+  definition, with BLACKHOLE row-discard behavior covered by a later slice.
 - Do not enable ordinary MariaDB durable sidecars as compatibility fallbacks.
 - Do not add a server daemon policy or wire-protocol behavior.
 - Do not make dynamic external engines user-selectable in the core embedded
@@ -76,7 +79,8 @@ engine:
 - if `ENGINE=` was omitted, record `DEFAULT`;
 - if `ENGINE=` was present, read the original parsed engine token from
   `Storage_engine_name`;
-- allow `DEFAULT`, `MYLITE`, `InnoDB`, `MyISAM`, and `Aria`;
+- allow `DEFAULT`, `MYLITE`, `InnoDB`, `MyISAM`, `Aria`, and follow-up
+  `BLACKHOLE`;
 - reject every other explicit engine before calling MyLite storage.
 
 For accepted requests, store:
@@ -99,10 +103,11 @@ unsupported engines into the MyLite catalog.
 ## Compatibility Impact
 
 Compatibility remains partial. Applications can create metadata-only tables
-using omitted/default engine requests and common `InnoDB`, `MyISAM`, or `Aria`
-clauses, then rediscover those tables after reopen. Any statement that needs
-rows, indexes, transactions, foreign keys, or catalog-changing DDL still fails
-or remains unsupported as documented.
+using omitted/default engine requests and common `InnoDB`, `MyISAM`, `Aria`, or
+BLACKHOLE clauses, then rediscover those tables after reopen. BLACKHOLE accepts
+and discards row writes after the dedicated follow-up slice. Other statements
+that need rows, indexes, transactions, foreign keys, or catalog-changing DDL
+still fail or remain unsupported as documented.
 
 Unsupported engine requests should fail explicitly instead of silently becoming
 MyLite tables.
@@ -137,7 +142,8 @@ Implemented. File-backed embedded connections configure the session default and
 enforced storage engine to MyLite, clear `NO_ENGINE_SUBSTITUTION` through the
 session SQL mode, and rely on the MyLite handler whitelist before catalog
 publication. The storage API exposes requested/effective engine metadata for
-tests and later routing code.
+tests and later routing code. Follow-up BLACKHOLE support extends the whitelist
+with row-discard behavior while keeping MEMORY/HEAP planned.
 
 ## Storage-Engine Routing Impact
 
@@ -148,7 +154,8 @@ metadata-safe requests:
 - `ENGINE=MYLITE`,
 - `ENGINE=InnoDB`,
 - `ENGINE=MyISAM`,
-- `ENGINE=Aria`.
+- `ENGINE=Aria`,
+- `ENGINE=BLACKHOLE` with row-discard behavior.
 
 Other engines are not accepted until a slice documents their semantics.
 
@@ -172,12 +179,13 @@ No new dependency is introduced.
 1. Add a storage API test for reading requested/effective engine names from a
    catalog table-definition record.
 2. Extend storage-engine smoke coverage so omitted engine, explicit
-   `ENGINE=MYLITE`, `ENGINE=InnoDB`, `ENGINE=MyISAM`, and `ENGINE=Aria` create
-   metadata-only MyLite tables and rediscover them after reopen.
+   `ENGINE=MYLITE`, `ENGINE=InnoDB`, `ENGINE=MyISAM`, `ENGINE=Aria`, and
+   follow-up `ENGINE=BLACKHOLE` create routed MyLite tables and rediscover them
+   after reopen.
 3. Assert each routed table stores the requested engine and effective `MYLITE`
    engine in the catalog.
 4. Assert an unsupported explicit engine such as `ENGINE=MEMORY` fails and does
-   not publish a catalog record.
+   not publish a catalog record until its volatile row semantics are designed.
 5. Reuse the sidecar scanner to prove routed DDL leaves no known MariaDB
    durable sidecars after close/reopen.
 6. Run dev, embedded, and storage-smoke presets plus format, format-check,
