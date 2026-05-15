@@ -110,9 +110,9 @@ The first compatibility evidence targets partial writes that were observable
 before this slice: multi-row inserts that fail after a prior row write, CHECK
 constraint failures after an earlier row write, and unique-key update failures
 after a prior replacement row/index publication. Follow-up storage-smoke
-coverage extends the same checkpoint evidence to representative failed OR
-REPLACE replacement paths and representative failed multi-table DROP/RENAME
-paths.
+coverage extends the same checkpoint evidence to representative direct and
+prepared failed `REPLACE` row-DML, failed OR REPLACE replacement paths, and
+representative failed multi-table DROP/RENAME paths.
 
 ## Single-File And Embedded-Lifecycle Impact
 

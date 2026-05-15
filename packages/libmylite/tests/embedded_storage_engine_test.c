@@ -1107,6 +1107,7 @@ static void test_create_table_persists_catalog_metadata(void) {
     single_value_context generated_deleted_title_key = {.expected_value = "4"};
     single_value_context rollback_count = {.expected_value = "1"};
     mylite_stmt *rollback_update = NULL;
+    mylite_stmt *rollback_replace = NULL;
     char *errmsg = NULL;
 
     assert_exec_succeeds(db, "CREATE DATABASE app");
@@ -1606,6 +1607,95 @@ static void test_create_table_persists_catalog_metadata(void) {
     );
     assert(errmsg == NULL);
     assert(rollback_count.rows == 1);
+    assert_exec_fails(
+        db,
+        "REPLACE INTO rollback_posts VALUES "
+        "(2, 'direct-replaced', 2), "
+        "(4, 'direct-bad', 6)"
+    );
+    rollback_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM rollback_posts FORCE INDEX (title) "
+            "WHERE title = 'direct-replaced'",
+            single_value_callback,
+            &rollback_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rollback_count.rows == 1);
+    rollback_count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM rollback_posts FORCE INDEX (title) "
+            "WHERE id = 2 AND title = 'second'",
+            single_value_callback,
+            &rollback_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rollback_count.rows == 1);
+    assert(
+        mylite_prepare(
+            db,
+            "REPLACE INTO rollback_posts VALUES (3, ?, 3), (5, ?, 6)",
+            MYLITE_NUL_TERMINATED,
+            &rollback_replace,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(rollback_replace != NULL);
+    assert(
+        mylite_bind_text(
+            rollback_replace,
+            1U,
+            "prepared-replaced",
+            MYLITE_NUL_TERMINATED,
+            MYLITE_STATIC
+        ) == MYLITE_OK
+    );
+    assert(
+        mylite_bind_text(
+            rollback_replace,
+            2U,
+            "prepared-bad",
+            MYLITE_NUL_TERMINATED,
+            MYLITE_STATIC
+        ) == MYLITE_OK
+    );
+    assert(mylite_step(rollback_replace) == MYLITE_ERROR);
+    assert(strstr(mylite_errmsg(db), "CONSTRAINT") != NULL);
+    assert(mylite_finalize(rollback_replace) == MYLITE_OK);
+    rollback_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM rollback_posts FORCE INDEX (title) "
+            "WHERE title = 'prepared-replaced'",
+            single_value_callback,
+            &rollback_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rollback_count.rows == 1);
+    rollback_count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM rollback_posts FORCE INDEX (title) "
+            "WHERE id = 3 AND title = 'third'",
+            single_value_callback,
+            &rollback_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rollback_count.rows == 1);
     assert(
         mylite_exec(
             db,
@@ -2004,6 +2094,45 @@ static void test_create_table_persists_catalog_metadata(void) {
         mylite_exec(
             db,
             "SELECT COUNT(*) FROM rollback_posts WHERE id = 3 AND title = 'third'",
+            single_value_callback,
+            &rollback_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rollback_count.rows == 1);
+    rollback_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM rollback_posts FORCE INDEX (title) "
+            "WHERE title = 'direct-replaced'",
+            single_value_callback,
+            &rollback_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rollback_count.rows == 1);
+    rollback_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM rollback_posts FORCE INDEX (title) "
+            "WHERE title = 'prepared-replaced'",
+            single_value_callback,
+            &rollback_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rollback_count.rows == 1);
+    rollback_count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM rollback_posts FORCE INDEX (title) "
+            "WHERE id = 2 AND title = 'second'",
             single_value_callback,
             &rollback_count,
             &errmsg

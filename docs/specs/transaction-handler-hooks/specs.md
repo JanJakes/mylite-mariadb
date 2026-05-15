@@ -169,8 +169,9 @@ transaction glue and one storage API helper.
 
 - Add storage API coverage for active checkpoint detection.
 - Update storage-smoke row-DML rollback coverage so direct `INSERT`, `UPDATE`,
-  `DELETE`, `REPLACE`, or `LOAD` paths prove rollback through the handler
-  transaction hook, not the outer `libmylite` wrapper.
+  and representative direct/prepared `REPLACE` paths prove rollback through the
+  handler transaction hook, not the outer `libmylite` wrapper. `DELETE` and
+  `LOAD` remain follow-up paths because they need separate failure shapes.
 - Add prepared row-DML rollback coverage in the storage-engine smoke tests.
 - Keep transaction-control rejection tests passing.
 - Keep DDL rollback and sidecar lifecycle tests passing.
