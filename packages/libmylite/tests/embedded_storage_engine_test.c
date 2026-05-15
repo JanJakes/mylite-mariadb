@@ -140,6 +140,7 @@ static void test_non_table_object_policy(void);
 static void test_transaction_and_foreign_key_policies(void);
 static void test_create_table_persists_catalog_metadata(void);
 static void test_alter_table_rebuilds_keyless_rows(void);
+static void test_generated_column_alter_ddl(void);
 static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
 static void test_blob_text_prefix_indexes(void);
@@ -259,6 +260,7 @@ int main(void) {
     test_transaction_and_foreign_key_policies();
     test_create_table_persists_catalog_metadata();
     test_alter_table_rebuilds_keyless_rows();
+    test_generated_column_alter_ddl();
     test_indexed_rows();
     test_standalone_index_ddl();
     test_blob_text_prefix_indexes();
@@ -1788,6 +1790,146 @@ static void test_alter_table_rebuilds_keyless_rows(void) {
     assert_exec_fails(db, "SELECT reopened_status FROM alter_posts");
     assert_catalog_table_count(filename, "app", 1U);
     assert_catalog_table_metadata(filename, "app", "alter_posts", "InnoDB", "MYLITE");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_generated_column_alter_ddl(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    single_value_context title_len = {.expected_value = "5"};
+    single_value_context label = {.expected_value = "draft-1"};
+    single_value_context modified_title_len = {.expected_value = "6"};
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE generated_alter_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO generated_alter_posts VALUES (1, 'draft')");
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE generated_alter_posts "
+        "ADD COLUMN title_len INT AS (CHAR_LENGTH(title)) VIRTUAL, "
+        "ADD COLUMN label VARCHAR(80) AS (CONCAT(title, '-', id)) STORED, "
+        "ALGORITHM=COPY"
+    );
+    assert_catalog_table_count(filename, "app", 1U);
+    assert_catalog_table_metadata(filename, "app", "generated_alter_posts", "InnoDB", "MYLITE");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT title_len FROM generated_alter_posts WHERE id = 1",
+            single_value_callback,
+            &title_len,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(title_len.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT label FROM generated_alter_posts WHERE id = 1",
+            single_value_callback,
+            &label,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(label.rows == 1);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    title_len = (single_value_context){.expected_value = "5"};
+    label = (single_value_context){.expected_value = "draft-1"};
+    db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "app");
+    assert_exec_succeeds(db, "USE app");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT title_len FROM generated_alter_posts WHERE id = 1",
+            single_value_callback,
+            &title_len,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(title_len.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT label FROM generated_alter_posts WHERE id = 1",
+            single_value_callback,
+            &label,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(label.rows == 1);
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE generated_alter_posts "
+        "MODIFY COLUMN title_len INT AS (CHAR_LENGTH(title) + 1) VIRTUAL, "
+        "ALGORITHM=COPY"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SELECT title_len FROM generated_alter_posts WHERE id = 1",
+            single_value_callback,
+            &modified_title_len,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(modified_title_len.rows == 1);
+    assert_exec_succeeds(db, "ALTER TABLE generated_alter_posts DROP COLUMN label, ALGORITHM=COPY");
+    assert_exec_fails(db, "SELECT label FROM generated_alter_posts");
+    modified_title_len = (single_value_context){.expected_value = "6"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT title_len FROM generated_alter_posts WHERE id = 1",
+            single_value_callback,
+            &modified_title_len,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(modified_title_len.rows == 1);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    modified_title_len = (single_value_context){.expected_value = "6"};
+    db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_fails(db, "SELECT label FROM generated_alter_posts");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT title_len FROM generated_alter_posts WHERE id = 1",
+            single_value_callback,
+            &modified_title_len,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(modified_title_len.rows == 1);
+    assert_catalog_table_count(filename, "app", 1U);
+    assert_catalog_table_metadata(filename, "app", "generated_alter_posts", "InnoDB", "MYLITE");
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 

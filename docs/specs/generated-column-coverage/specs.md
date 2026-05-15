@@ -9,9 +9,10 @@ the `.mylite` file.
 
 This moved generated columns from planned to partial support for `VIRTUAL` and
 `STORED` columns under basic `CREATE TABLE`, insert, update, and close/reopen
-behavior. Later generated-column-index slices expand the covered subset to
-ordinary secondary and unique indexes on scalar generated columns, including
-supported copy-rebuild generated-index DDL.
+behavior. Later generated-column slices expand the covered subset to
+copy-rebuild generated-column add/modify/drop and ordinary secondary and unique
+indexes on scalar generated columns, including supported copy-rebuild
+generated-index DDL.
 
 ## Non-Goals
 
@@ -56,12 +57,12 @@ capability flags. MyLite supports basic generated columns by advertising
 generated persistent values as part of the row buffer, and letting MariaDB
 compute non-stored virtual values after reads.
 
-Follow-up generated-column-index slices reuse MariaDB key tuple generation for
-ordinary secondary and unique indexes on scalar virtual or stored generated
-columns, including supported ALTER-backed and standalone generated-index DDL.
-Expression/hidden generated indexes and generated primary keys remain
-unsupported so the compatibility matrix does not overstate generated/expression
-index support.
+Follow-up generated-column slices cover copy-rebuild add/modify/drop for
+generated columns and reuse MariaDB key tuple generation for ordinary secondary
+and unique indexes on scalar virtual or stored generated columns, including
+supported ALTER-backed and standalone generated-index DDL. Expression/hidden
+generated indexes and generated primary keys remain unsupported so the
+compatibility matrix does not overstate generated/expression index support.
 
 ## Design
 
@@ -106,6 +107,8 @@ unchanged for practical purposes.
 - Storage-engine smoke verifies ordinary generated-column indexes for
   forced-index reads, duplicate checks, update maintenance, generated-index DDL,
   and close/reopen.
+- Storage-engine smoke verifies copy-rebuild generated-column add, modify, and
+  drop DDL.
 - Add a compatibility harness group for generated columns.
 - Run formatting, tidy, configured CTest presets, the named harness report, and
   `git diff --check`.
@@ -118,6 +121,8 @@ unchanged for practical purposes.
   and after close/reopen.
 - Ordinary generated-column secondary and unique indexes, including supported
   generated-index DDL paths, work before and after close/reopen.
+- Copy-rebuild generated-column add, modify, and drop DDL works before and
+  after close/reopen.
 - Compatibility docs and roadmap mark generated columns as partial rather than
   planned.
 - The compatibility harness can run the generated-column evidence by name.
@@ -125,9 +130,8 @@ unchanged for practical purposes.
 ## Risks And Open Questions
 
 - Broader expression classes, SQL-mode-sensitive expressions, generated
-  columns with BLOB/TEXT payloads, `ALTER TABLE ADD/DROP/MODIFY` generated
-  columns, CTAS, dump/import, prepared diagnostics, and rollback remain
-  uncovered.
+  columns with BLOB/TEXT payloads, CTAS, dump/import, prepared diagnostics, and
+  rollback remain uncovered.
 - Generated primary keys, expression/hidden generated indexes, generated
   BLOB/TEXT key payloads, and broader expression matrices need separate specs
   before support is claimed.
