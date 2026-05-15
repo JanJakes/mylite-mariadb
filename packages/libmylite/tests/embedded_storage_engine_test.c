@@ -59,6 +59,12 @@ typedef struct auto_row_context {
     int found_reopened;
 } auto_row_context;
 
+typedef struct id_sequence_context {
+    int rows;
+    int expected_count;
+    const char **expected_ids;
+} id_sequence_context;
+
 typedef struct catalog_table_context {
     unsigned count;
 } catalog_table_context;
@@ -67,6 +73,7 @@ static void test_show_engines_reports_mylite(void);
 static void test_memory_database_has_empty_mylite_discovery(void);
 static void test_create_table_persists_catalog_metadata(void);
 static void test_alter_table_rebuilds_keyless_rows(void);
+static void test_indexed_rows(void);
 static void assert_exec_succeeds(mylite_db *db, const char *sql);
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_catalog_table_count(
@@ -90,6 +97,7 @@ static int blob_row_callback(void *ctx, int column_count, char **values, char **
 static int mutable_row_callback(void *ctx, int column_count, char **values, char **column_names);
 static int alter_row_callback(void *ctx, int column_count, char **values, char **column_names);
 static int auto_row_callback(void *ctx, int column_count, char **values, char **column_names);
+static int id_sequence_callback(void *ctx, int column_count, char **values, char **column_names);
 static int catalog_table_callback(void *ctx, const char *schema_name, const char *table_name);
 static mylite_db *open_database(const char *root, char **filename);
 static mylite_db *open_database_with_filename(const char *root, const char *filename);
@@ -111,6 +119,7 @@ int main(void) {
     test_memory_database_has_empty_mylite_discovery();
     test_create_table_persists_catalog_metadata();
     test_alter_table_rebuilds_keyless_rows();
+    test_indexed_rows();
     return 0;
 }
 
@@ -279,8 +288,6 @@ static void test_create_table_persists_catalog_metadata(void) {
         "DELETE FROM mutable_posts WHERE id IN (1, 4) ORDER BY title DESC LIMIT 1"
     );
     assert_exec_succeeds(db, "DELETE FROM mutable_posts WHERE id = 1");
-    assert_exec_fails(db, "UPDATE auto_posts SET title = 'changed' WHERE id = 1");
-    assert_exec_fails(db, "DELETE FROM auto_posts WHERE id = 1");
     assert_exec_succeeds(db, "INSERT INTO drop_posts VALUES (7, 'old')");
     assert(
         mylite_exec(
@@ -351,13 +358,7 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert(auto_rows.found_first);
     assert(auto_rows.found_manual);
     assert(auto_rows.found_after_manual);
-    assert(
-        mylite_exec(db, "INSERT INTO innodb_posts VALUES (1, 'draft')", NULL, NULL, &errmsg) !=
-        MYLITE_OK
-    );
-    assert(errmsg != NULL);
-    mylite_free(errmsg);
-    errmsg = NULL;
+    assert_exec_succeeds(db, "INSERT INTO innodb_posts VALUES (1, 'draft')");
     assert_exec_succeeds(db, "DROP TABLE drop_posts");
     assert(mylite_storage_table_exists(filename, "app", "drop_posts") == MYLITE_STORAGE_NOTFOUND);
     assert_catalog_table_count(filename, "app", 10U);
@@ -416,7 +417,7 @@ static void test_create_table_persists_catalog_metadata(void) {
         mylite_exec(db, "SELECT * FROM innodb_posts", row_callback, &rows, &errmsg) == MYLITE_OK
     );
     assert(errmsg == NULL);
-    assert(rows.rows == 0);
+    assert(rows.rows == 1);
     assert(
         mylite_exec(
             db,
@@ -557,7 +558,12 @@ static void test_alter_table_rebuilds_keyless_rows(void) {
         db,
         "ALTER TABLE alter_posts ADD COLUMN blocked INT NULL, ALGORITHM=COPY, LOCK=NONE"
     );
-    assert_exec_fails(db, "ALTER TABLE alter_posts ADD PRIMARY KEY (id), ALGORITHM=COPY");
+    assert_exec_succeeds(db, "ALTER TABLE alter_posts ADD PRIMARY KEY (id), ALGORITHM=COPY");
+    assert_exec_fails(
+        db,
+        "INSERT INTO alter_posts (id, headline, status, notes) VALUES (1, 'duplicate', 'draft', "
+        "NULL)"
+    );
     assert_catalog_table_count(filename, "app", 1U);
     assert_catalog_table_metadata(filename, "app", "alter_posts", "InnoDB", "MYLITE");
 
@@ -603,6 +609,199 @@ static void test_alter_table_rebuilds_keyless_rows(void) {
     assert(tables.rows == 1);
     assert_catalog_table_count(filename, "app", 1U);
     assert_catalog_table_metadata(filename, "app", "alter_posts", "InnoDB", "MYLITE");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_indexed_rows(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    table_context rows = {0};
+    table_context news_rows = {0};
+    table_context alter_rows = {0};
+    table_context reopened_rows = {0};
+    const char *score_desc_ids[] = {"3", "2", "1"};
+    id_sequence_context score_desc = {
+        .expected_count = 3,
+        .expected_ids = score_desc_ids,
+    };
+    const char *nullable_ids[] = {"1", "2"};
+    id_sequence_context nullable_sequence = {
+        .expected_count = 2,
+        .expected_ids = nullable_ids,
+    };
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE indexed_posts ("
+        "id INT NOT NULL, "
+        "slug VARCHAR(32) NOT NULL, "
+        "category VARCHAR(32) NULL, "
+        "score INT NOT NULL, "
+        "PRIMARY KEY (id), "
+        "UNIQUE KEY slug_key (slug), "
+        "KEY category_key (category), "
+        "KEY score_key (score)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE nullable_unique_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "code INT NULL UNIQUE"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE alter_index_posts (id INT NOT NULL, slug VARCHAR(32) NOT NULL) "
+        "ENGINE=InnoDB"
+    );
+    assert_exec_fails(
+        db,
+        "CREATE TABLE blob_index_posts (id INT NOT NULL, body TEXT, KEY body_key (body(8))) "
+        "ENGINE=InnoDB"
+    );
+    assert_catalog_table_count(filename, "app", 3U);
+
+    assert_exec_succeeds(db, "INSERT INTO indexed_posts VALUES (1, 'alpha', 'news', 10)");
+    assert_exec_succeeds(db, "INSERT INTO indexed_posts VALUES (2, 'beta', NULL, 20)");
+    assert_exec_succeeds(db, "INSERT INTO indexed_posts VALUES (3, 'gamma', 'news', 30)");
+    assert_exec_fails(db, "INSERT INTO indexed_posts VALUES (1, 'duplicate-id', 'news', 40)");
+    assert_exec_fails(db, "INSERT INTO indexed_posts VALUES (4, 'beta', 'tech', 40)");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM indexed_posts FORCE INDEX (PRIMARY) WHERE id = 2 AND slug = 'beta'",
+            row_callback,
+            &rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM indexed_posts FORCE INDEX (category_key) WHERE category = 'news'",
+            row_callback,
+            &news_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(news_rows.rows == 2);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM indexed_posts FORCE INDEX (score_key) ORDER BY score DESC",
+            id_sequence_callback,
+            &score_desc,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(score_desc.rows == 3);
+
+    assert_exec_succeeds(
+        db,
+        "UPDATE indexed_posts SET slug = 'beta-updated', category = 'tech', score = 25 "
+        "WHERE slug = 'beta'"
+    );
+    rows = (table_context){0};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM indexed_posts FORCE INDEX (slug_key) "
+            "WHERE slug = 'beta-updated' AND category = 'tech' AND score = 25",
+            row_callback,
+            &rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(rows.rows == 1);
+    assert_exec_succeeds(db, "DELETE FROM indexed_posts WHERE category = 'news' AND id = 1");
+    news_rows = (table_context){0};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM indexed_posts FORCE INDEX (category_key) WHERE category = 'news'",
+            row_callback,
+            &news_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(news_rows.rows == 1);
+
+    assert_exec_succeeds(db, "INSERT INTO nullable_unique_posts VALUES (1, NULL)");
+    assert_exec_succeeds(db, "INSERT INTO nullable_unique_posts VALUES (2, NULL)");
+    assert_exec_succeeds(db, "INSERT INTO nullable_unique_posts VALUES (3, 7)");
+    assert_exec_fails(db, "INSERT INTO nullable_unique_posts VALUES (4, 7)");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM nullable_unique_posts WHERE code IS NULL ORDER BY id",
+            id_sequence_callback,
+            &nullable_sequence,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(nullable_sequence.rows == 2);
+
+    assert_exec_succeeds(db, "INSERT INTO alter_index_posts VALUES (1, 'first')");
+    assert_exec_succeeds(db, "INSERT INTO alter_index_posts VALUES (2, 'second')");
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE alter_index_posts ADD PRIMARY KEY (id), "
+        "ADD UNIQUE KEY slug_key (slug), ALGORITHM=COPY"
+    );
+    assert_exec_fails(db, "INSERT INTO alter_index_posts VALUES (2, 'duplicate-id')");
+    assert_exec_fails(db, "INSERT INTO alter_index_posts VALUES (3, 'second')");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM alter_index_posts FORCE INDEX (PRIMARY) "
+            "WHERE id = 2 AND slug = 'second'",
+            row_callback,
+            &alter_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(alter_rows.rows == 1);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM indexed_posts FORCE INDEX (slug_key) "
+            "WHERE slug = 'beta-updated'",
+            row_callback,
+            &reopened_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_rows.rows == 1);
+    assert_catalog_table_count(filename, "app", 3U);
+    assert_catalog_table_metadata(filename, "app", "indexed_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "nullable_unique_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "alter_index_posts", "InnoDB", "MYLITE");
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
@@ -885,6 +1084,19 @@ static int auto_row_callback(void *ctx, int column_count, char **values, char **
 
     assert(0);
     return 1;
+}
+
+static int id_sequence_callback(void *ctx, int column_count, char **values, char **column_names) {
+    id_sequence_context *sequence_ctx = (id_sequence_context *)ctx;
+    (void)column_names;
+
+    assert(column_count == 1);
+    assert(values[0] != NULL);
+    assert(sequence_ctx->expected_ids != NULL);
+    assert(sequence_ctx->rows < sequence_ctx->expected_count);
+    assert(strcmp(values[0], sequence_ctx->expected_ids[sequence_ctx->rows]) == 0);
+    ++sequence_ctx->rows;
+    return 0;
 }
 
 static int catalog_table_callback(void *ctx, const char *schema_name, const char *table_name) {

@@ -25,6 +25,7 @@
 #include "ha_mylite.h"
 #include "field.h"
 #include "handler.h"
+#include "key.h"
 #include "sql_class.h"
 #include "sql_cmd.h"
 
@@ -62,12 +63,18 @@ static int mylite_table_name_from_path(const char *path, char *out_schema_name,
                                        size_t out_table_name_size);
 static bool mylite_table_supports_row_write(TABLE *table);
 static bool mylite_table_supports_row_lifecycle(TABLE *table);
-static bool mylite_table_uses_supported_auto_increment_key(TABLE *table);
+static bool mylite_table_supports_indexes(TABLE *table);
+static bool mylite_key_is_supported(const KEY *key);
 static Field *mylite_auto_increment_field(TABLE *table);
 static int mylite_prepare_row_payload(TABLE *table, const uchar *buf,
                                       const uchar **out_payload,
                                       size_t *out_payload_size,
                                       uchar **out_owned_payload);
+static int mylite_prepare_index_entries(
+  TABLE *table, const uchar *buf, mylite_storage_index_entry **out_entries,
+  size_t *out_entry_count, uchar **out_key_storage);
+static void mylite_free_index_entries(mylite_storage_index_entry *entries,
+                                      uchar *key_storage);
 static int mylite_prepare_scan_rows(TABLE *table,
                                     const mylite_storage_rowset *rowset,
                                     uchar **out_rows,
@@ -79,15 +86,40 @@ static int mylite_prepare_scan_rows(TABLE *table,
 static ulonglong mylite_first_auto_increment_value(ulonglong next_value,
                                                    ulonglong offset,
                                                    ulonglong increment);
-static int mylite_check_duplicate_auto_increment_value(const char *primary_file,
-                                                       const char *schema_name,
-                                                       const char *table_name,
-                                                       TABLE *table,
-                                                       uint *out_duplicate_key);
+static int mylite_check_duplicate_keys(
+  const char *primary_file, const char *schema_name, const char *table_name,
+  TABLE *table, const mylite_storage_index_entry *index_entries,
+  size_t index_entry_count, const uchar *buf, ulonglong skip_row_id,
+  uint *out_duplicate_key);
+static bool mylite_unique_key_allows_duplicate_null(TABLE *table,
+                                                    const KEY *key,
+                                                    const uchar *buf);
 static int mylite_advance_auto_increment_from_row(const char *primary_file,
                                                   const char *schema_name,
                                                   const char *table_name,
                                                   TABLE *table);
+static int mylite_find_index_entry(TABLE *table,
+                                   const Mylite_index_cursor_entry *entries,
+                                   size_t entry_count, const uchar *keys,
+                                   uint index_number, const uchar *key,
+                                   uint key_length,
+                                   enum ha_rkey_function find_flag,
+                                   size_t *out_entry_index);
+static int mylite_compare_key_tuple(TABLE *table, uint index_number,
+                                    const uchar *left_key,
+                                    size_t left_key_size,
+                                    const uchar *right_key,
+                                    size_t right_key_size,
+                                    uint key_length, int *out_cmp);
+static int mylite_sort_index_entries(TABLE *table, uint index_number,
+                                     const uchar *keys,
+                                     Mylite_index_cursor_entry *entries,
+                                     size_t entry_count);
+static int mylite_compare_index_entries(TABLE *table, uint index_number,
+                                        const uchar *keys,
+                                        const Mylite_index_cursor_entry *left,
+                                        const Mylite_index_cursor_entry *right,
+                                        int *out_cmp);
 static int mylite_storage_to_handler_error(mylite_storage_result result);
 static bool mylite_table_has_blob_fields(TABLE *table);
 static int mylite_serialize_blob_row(TABLE *table, const uchar *buf,
@@ -304,9 +336,12 @@ static int mylite_storage_to_handler_error(mylite_storage_result result)
 ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
   :handler(hton, table_arg), share(NULL), scan_rows(NULL),
    scan_blob_payloads(NULL), scan_row_ids(NULL),
-   position_blob_payloads(NULL), scan_row_size(0), scan_row_count(0),
-   scan_row_index(0), scan_blob_payloads_size(0),
-   position_blob_payloads_size(0), current_row_id(0),
+   position_blob_payloads(NULL), index_rows(NULL), index_blob_payloads(NULL),
+   index_keys(NULL), index_entries(NULL), scan_row_size(0),
+   scan_row_count(0), scan_row_index(0), scan_blob_payloads_size(0),
+   position_blob_payloads_size(0), index_row_size(0), index_row_count(0),
+   index_row_index(0), index_blob_payloads_size(0),
+   index_cursor_number(MAX_KEY), current_row_id(0),
    duplicate_key_index((uint) -1)
 {
   storage_schema_name[0]= '\0';
@@ -317,6 +352,7 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
 ha_mylite::~ha_mylite()
 {
   clear_scan_rows();
+  clear_index_cursor();
 }
 
 void ha_mylite::clear_scan_rows()
@@ -337,6 +373,23 @@ void ha_mylite::clear_scan_rows()
   current_row_id= 0;
 }
 
+void ha_mylite::clear_index_cursor()
+{
+  mylite_storage_free(index_rows);
+  mylite_storage_free(index_blob_payloads);
+  mylite_storage_free(index_keys);
+  mylite_storage_free(index_entries);
+  index_rows= NULL;
+  index_blob_payloads= NULL;
+  index_keys= NULL;
+  index_entries= NULL;
+  index_row_size= 0;
+  index_row_count= 0;
+  index_row_index= 0;
+  index_blob_payloads_size= 0;
+  index_cursor_number= MAX_KEY;
+}
+
 const char *ha_mylite::storage_schema() const
 {
   return storage_schema_name[0] ? storage_schema_name : table->s->db.str;
@@ -345,6 +398,199 @@ const char *ha_mylite::storage_schema() const
 const char *ha_mylite::storage_table() const
 {
   return storage_table_name[0] ? storage_table_name : table->s->table_name.str;
+}
+
+ulong ha_mylite::index_flags(uint index_number, uint, bool) const
+{
+  TABLE_SHARE *share= table ? table->s : table_share;
+  if (!share || index_number >= share->keys ||
+      !mylite_key_is_supported(share->key_info + index_number))
+    return 0;
+
+  return HA_READ_NEXT | HA_READ_PREV | HA_READ_ORDER | HA_READ_RANGE;
+}
+
+int ha_mylite::build_index_cursor(uint index_number)
+{
+  DBUG_ENTER("ha_mylite::build_index_cursor");
+
+  clear_index_cursor();
+  if (index_number >= table->s->keys ||
+      !mylite_key_is_supported(table->key_info + index_number))
+    DBUG_RETURN(HA_ERR_UNSUPPORTED);
+
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    DBUG_RETURN(HA_ERR_NO_CONNECTION);
+
+  mylite_storage_index_entryset entryset= {sizeof(entryset), NULL, 0, 0};
+  mylite_storage_result storage_result=
+    mylite_storage_read_index_entries(primary_file, storage_schema(),
+                                      storage_table(), index_number,
+                                      &entryset);
+  if (storage_result != MYLITE_STORAGE_OK)
+    DBUG_RETURN(mylite_storage_to_handler_error(storage_result));
+
+  if (entryset.entry_count == 0)
+  {
+    mylite_storage_free_index_entryset(&entryset);
+    index_cursor_number= index_number;
+    DBUG_RETURN(0);
+  }
+  if (!entryset.key_offsets || !entryset.key_sizes || !entryset.row_ids ||
+      !entryset.keys || table->s->reclength == 0 ||
+      entryset.entry_count > SIZE_MAX / table->s->reclength ||
+      entryset.entry_count > SIZE_MAX / sizeof(Mylite_index_cursor_entry))
+  {
+    mylite_storage_free_index_entryset(&entryset);
+    DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
+  }
+
+  KEY *key_info= table->key_info + index_number;
+  size_t blob_payloads_size= 0;
+  for (size_t i= 0; i < entryset.entry_count; ++i)
+  {
+    if (entryset.key_sizes[i] != key_info->key_length ||
+        entryset.key_offsets[i] > entryset.key_bytes ||
+        entryset.key_sizes[i] > entryset.key_bytes - entryset.key_offsets[i])
+    {
+      mylite_storage_free_index_entryset(&entryset);
+      DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
+    }
+
+    uchar *row_payload= NULL;
+    size_t row_payload_size= 0;
+    storage_result=
+      mylite_storage_read_row(primary_file, storage_schema(), storage_table(),
+                              entryset.row_ids[i], &row_payload,
+                              &row_payload_size);
+    if (storage_result != MYLITE_STORAGE_OK)
+    {
+      mylite_storage_free_index_entryset(&entryset);
+      DBUG_RETURN(mylite_storage_to_handler_error(storage_result));
+    }
+
+    size_t row_blob_payloads_size= 0;
+    int error= mylite_scan_stored_row(table, row_payload, row_payload_size,
+                                      &row_blob_payloads_size);
+    mylite_storage_free(row_payload);
+    if (error)
+    {
+      mylite_storage_free_index_entryset(&entryset);
+      DBUG_RETURN(error);
+    }
+    if (row_blob_payloads_size > SIZE_MAX - blob_payloads_size)
+    {
+      mylite_storage_free_index_entryset(&entryset);
+      DBUG_RETURN(HA_ERR_RECORD_FILE_FULL);
+    }
+    blob_payloads_size+= row_blob_payloads_size;
+  }
+
+  const size_t rows_size= entryset.entry_count * table->s->reclength;
+  uchar *rows= static_cast<uchar *>(malloc(rows_size));
+  Mylite_index_cursor_entry *entries= static_cast<Mylite_index_cursor_entry *>(
+    malloc(entryset.entry_count * sizeof(Mylite_index_cursor_entry)));
+  uchar *blob_payloads= NULL;
+  if (blob_payloads_size > 0)
+    blob_payloads= static_cast<uchar *>(malloc(blob_payloads_size));
+  if (!rows || !entries || (blob_payloads_size > 0 && !blob_payloads))
+  {
+    free(rows);
+    free(entries);
+    free(blob_payloads);
+    mylite_storage_free_index_entryset(&entryset);
+    DBUG_RETURN(HA_ERR_OUT_OF_MEM);
+  }
+
+  size_t blob_payloads_used= 0;
+  for (size_t i= 0; i < entryset.entry_count; ++i)
+  {
+    uchar *row_payload= NULL;
+    size_t row_payload_size= 0;
+    storage_result=
+      mylite_storage_read_row(primary_file, storage_schema(), storage_table(),
+                              entryset.row_ids[i], &row_payload,
+                              &row_payload_size);
+    if (storage_result != MYLITE_STORAGE_OK)
+    {
+      free(rows);
+      free(entries);
+      free(blob_payloads);
+      mylite_storage_free_index_entryset(&entryset);
+      DBUG_RETURN(mylite_storage_to_handler_error(storage_result));
+    }
+
+    uchar *out_row= rows + (i * table->s->reclength);
+    int error= mylite_copy_stored_row_to_scan(table, row_payload,
+                                              row_payload_size, out_row,
+                                              blob_payloads,
+                                              &blob_payloads_used);
+    mylite_storage_free(row_payload);
+    if (error)
+    {
+      free(rows);
+      free(entries);
+      free(blob_payloads);
+      mylite_storage_free_index_entryset(&entryset);
+      DBUG_RETURN(error);
+    }
+    entries[i].key_offset= entryset.key_offsets[i];
+    entries[i].key_size= entryset.key_sizes[i];
+    entries[i].row_offset= i * table->s->reclength;
+    entries[i].row_id= entryset.row_ids[i];
+  }
+  if (blob_payloads_used != blob_payloads_size)
+  {
+    free(rows);
+    free(entries);
+    free(blob_payloads);
+    mylite_storage_free_index_entryset(&entryset);
+    DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
+  }
+
+  int error= mylite_sort_index_entries(table, index_number, entryset.keys,
+                                       entries, entryset.entry_count);
+  if (error)
+  {
+    free(rows);
+    free(entries);
+    free(blob_payloads);
+    mylite_storage_free_index_entryset(&entryset);
+    DBUG_RETURN(error);
+  }
+
+  index_rows= rows;
+  index_blob_payloads= blob_payloads;
+  index_keys= entryset.keys;
+  index_entries= entries;
+  index_row_size= table->s->reclength;
+  index_row_count= entryset.entry_count;
+  index_blob_payloads_size= blob_payloads_size;
+  index_cursor_number= index_number;
+  entryset.keys= NULL;
+  mylite_storage_free_index_entryset(&entryset);
+  DBUG_RETURN(0);
+}
+
+int ha_mylite::read_index_cursor_row(uchar *buf, size_t row_index)
+{
+  DBUG_ENTER("ha_mylite::read_index_cursor_row");
+  if (row_index >= index_row_count || !index_entries || !index_rows)
+    DBUG_RETURN(HA_ERR_END_OF_FILE);
+
+  const Mylite_index_cursor_entry *entry= index_entries + row_index;
+  if (index_row_size != 0 && index_row_count > SIZE_MAX / index_row_size)
+    DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
+  const size_t rows_size= index_row_count * index_row_size;
+  if (entry->row_offset > rows_size ||
+      index_row_size > rows_size - entry->row_offset)
+    DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
+
+  memcpy(buf, index_rows + entry->row_offset, index_row_size);
+  index_row_index= row_index;
+  current_row_id= entry->row_id;
+  DBUG_RETURN(0);
 }
 
 int ha_mylite::open(const char *name, int, uint)
@@ -370,7 +616,107 @@ int ha_mylite::close(void)
 {
   DBUG_ENTER("ha_mylite::close");
   clear_scan_rows();
+  clear_index_cursor();
   DBUG_RETURN(0);
+}
+
+int ha_mylite::index_init(uint idx, bool)
+{
+  DBUG_ENTER("ha_mylite::index_init");
+  DBUG_RETURN(build_index_cursor(idx));
+}
+
+int ha_mylite::index_end()
+{
+  DBUG_ENTER("ha_mylite::index_end");
+  clear_index_cursor();
+  DBUG_RETURN(0);
+}
+
+int ha_mylite::index_read_map(uchar *buf, const uchar *key,
+                              key_part_map keypart_map,
+                              enum ha_rkey_function find_flag)
+{
+  DBUG_ENTER("ha_mylite::index_read_map");
+  if (index_cursor_number != active_index)
+  {
+    const int error= build_index_cursor(active_index);
+    if (error)
+      DBUG_RETURN(error);
+  }
+  if (!key)
+    DBUG_RETURN(index_first(buf));
+
+  const uint key_length= calculate_key_len(table, active_index, key,
+                                           keypart_map);
+  size_t entry_index= 0;
+  const int error=
+    mylite_find_index_entry(table, index_entries, index_row_count, index_keys,
+                            active_index, key, key_length, find_flag,
+                            &entry_index);
+  if (error)
+    DBUG_RETURN(error);
+
+  DBUG_RETURN(read_index_cursor_row(buf, entry_index));
+}
+
+int ha_mylite::index_read_idx_map(uchar *buf, uint index, const uchar *key,
+                                  key_part_map keypart_map,
+                                  enum ha_rkey_function find_flag)
+{
+  DBUG_ENTER("ha_mylite::index_read_idx_map");
+
+  int error= build_index_cursor(index);
+  if (error)
+    DBUG_RETURN(error);
+  if (!key)
+    DBUG_RETURN(index_first(buf));
+
+  const uint key_length= calculate_key_len(table, index, key, keypart_map);
+  size_t entry_index= 0;
+  error=
+    mylite_find_index_entry(table, index_entries, index_row_count, index_keys,
+                            index, key, key_length, find_flag, &entry_index);
+  if (error)
+    DBUG_RETURN(error);
+
+  DBUG_RETURN(read_index_cursor_row(buf, entry_index));
+}
+
+int ha_mylite::index_next(uchar *buf)
+{
+  DBUG_ENTER("ha_mylite::index_next");
+  if (index_row_count == 0 || index_row_index + 1 >= index_row_count)
+    DBUG_RETURN(HA_ERR_END_OF_FILE);
+
+  DBUG_RETURN(read_index_cursor_row(buf, index_row_index + 1));
+}
+
+int ha_mylite::index_prev(uchar *buf)
+{
+  DBUG_ENTER("ha_mylite::index_prev");
+  if (index_row_count == 0 || index_row_index == 0)
+    DBUG_RETURN(HA_ERR_END_OF_FILE);
+
+  DBUG_RETURN(read_index_cursor_row(buf, index_row_index - 1));
+}
+
+int ha_mylite::index_first(uchar *buf)
+{
+  DBUG_ENTER("ha_mylite::index_first");
+  if (index_row_count == 0)
+    DBUG_RETURN(HA_ERR_END_OF_FILE);
+
+  DBUG_RETURN(read_index_cursor_row(buf, 0));
+}
+
+int ha_mylite::index_last(uchar *buf)
+{
+  DBUG_ENTER("ha_mylite::index_last");
+  if (index_row_count == 0)
+    DBUG_RETURN(HA_ERR_END_OF_FILE);
+
+  DBUG_RETURN(read_index_cursor_row(buf, index_row_count - 1));
 }
 
 int ha_mylite::rnd_init(bool scan)
@@ -583,11 +929,23 @@ int ha_mylite::write_row(const uchar *buf)
       DBUG_RETURN(error);
   }
 
+  mylite_storage_index_entry *index_entries= NULL;
+  uchar *index_key_storage= NULL;
+  size_t index_entry_count= 0;
+  int error= mylite_prepare_index_entries(table, buf, &index_entries,
+                                          &index_entry_count,
+                                          &index_key_storage);
+  if (error)
+    DBUG_RETURN(error);
+
   uint duplicate_key= (uint) -1;
-  int error= mylite_check_duplicate_auto_increment_value(
-    primary_file, storage_schema(), storage_table(), table, &duplicate_key);
+  error= mylite_check_duplicate_keys(primary_file, storage_schema(),
+                                     storage_table(), table, index_entries,
+                                     index_entry_count, buf, 0ULL,
+                                     &duplicate_key);
   if (error)
   {
+    mylite_free_index_entries(index_entries, index_key_storage);
     duplicate_key_index= duplicate_key;
     DBUG_RETURN(error);
   }
@@ -595,7 +953,10 @@ int ha_mylite::write_row(const uchar *buf)
   error= mylite_advance_auto_increment_from_row(primary_file, storage_schema(),
                                                 storage_table(), table);
   if (error)
+  {
+    mylite_free_index_entries(index_entries, index_key_storage);
     DBUG_RETURN(error);
+  }
 
   const uchar *row_payload= NULL;
   size_t row_payload_size= 0;
@@ -603,18 +964,28 @@ int ha_mylite::write_row(const uchar *buf)
   error= mylite_prepare_row_payload(table, buf, &row_payload,
                                     &row_payload_size, &owned_row_payload);
   if (error)
+  {
+    mylite_free_index_entries(index_entries, index_key_storage);
     DBUG_RETURN(error);
+  }
 
+  unsigned long long row_id= 0ULL;
   const mylite_storage_result result=
-    mylite_storage_append_row(primary_file, storage_schema(), storage_table(),
-                              row_payload, row_payload_size);
+    mylite_storage_append_row_with_index_entries(
+      primary_file, storage_schema(), storage_table(), row_payload,
+      row_payload_size, index_entries, index_entry_count, &row_id);
   mylite_storage_free(owned_row_payload);
+  mylite_free_index_entries(index_entries, index_key_storage);
+  if (result == MYLITE_STORAGE_OK)
+    current_row_id= row_id;
   DBUG_RETURN(mylite_storage_to_handler_error(result));
 }
 
 int ha_mylite::update_row(const uchar *, const uchar *new_data)
 {
   DBUG_ENTER("ha_mylite::update_row");
+
+  duplicate_key_index= (uint) -1;
 
   if (!mylite_table_supports_row_lifecycle(table))
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
@@ -625,21 +996,55 @@ int ha_mylite::update_row(const uchar *, const uchar *new_data)
   if (!primary_file)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
 
-  const uchar *row_payload= NULL;
-  size_t row_payload_size= 0;
-  uchar *owned_row_payload= NULL;
-  int error= mylite_prepare_row_payload(table, new_data, &row_payload,
-                                        &row_payload_size,
-                                        &owned_row_payload);
+  mylite_storage_index_entry *index_entries= NULL;
+  uchar *index_key_storage= NULL;
+  size_t index_entry_count= 0;
+  int error= mylite_prepare_index_entries(table, new_data, &index_entries,
+                                          &index_entry_count,
+                                          &index_key_storage);
   if (error)
     DBUG_RETURN(error);
 
+  uint duplicate_key= (uint) -1;
+  error= mylite_check_duplicate_keys(primary_file, storage_schema(),
+                                     storage_table(), table, index_entries,
+                                     index_entry_count, new_data,
+                                     current_row_id,
+                                     &duplicate_key);
+  if (error)
+  {
+    mylite_free_index_entries(index_entries, index_key_storage);
+    duplicate_key_index= duplicate_key;
+    DBUG_RETURN(error);
+  }
+
+  error= mylite_advance_auto_increment_from_row(primary_file, storage_schema(),
+                                                storage_table(), table);
+  if (error)
+  {
+    mylite_free_index_entries(index_entries, index_key_storage);
+    DBUG_RETURN(error);
+  }
+
+  const uchar *row_payload= NULL;
+  size_t row_payload_size= 0;
+  uchar *owned_row_payload= NULL;
+  error= mylite_prepare_row_payload(table, new_data, &row_payload,
+                                    &row_payload_size, &owned_row_payload);
+  if (error)
+  {
+    mylite_free_index_entries(index_entries, index_key_storage);
+    DBUG_RETURN(error);
+  }
+
   unsigned long long new_row_id= 0ULL;
   const mylite_storage_result result=
-    mylite_storage_update_row(primary_file, storage_schema(), storage_table(),
-                              current_row_id, row_payload, row_payload_size,
-                              &new_row_id);
+    mylite_storage_update_row_with_index_entries(
+      primary_file, storage_schema(), storage_table(), current_row_id,
+      row_payload, row_payload_size, index_entries, index_entry_count,
+      &new_row_id);
   mylite_storage_free(owned_row_payload);
+  mylite_free_index_entries(index_entries, index_key_storage);
   if (result != MYLITE_STORAGE_OK)
     DBUG_RETURN(mylite_storage_to_handler_error(result));
 
@@ -926,28 +1331,42 @@ static int mylite_table_name_from_path(const char *path, char *out_schema_name,
 
 static bool mylite_table_supports_row_write(TABLE *table)
 {
-  if (table->s->keys == 0 && !mylite_auto_increment_field(table))
-    return true;
-
-  return mylite_table_uses_supported_auto_increment_key(table);
+  return table->s->keys == 0 || mylite_table_supports_indexes(table);
 }
 
 static bool mylite_table_supports_row_lifecycle(TABLE *table)
 {
-  return table->s->keys == 0 && !mylite_auto_increment_field(table);
+  return mylite_table_supports_row_write(table);
 }
 
-static bool mylite_table_uses_supported_auto_increment_key(TABLE *table)
+static bool mylite_table_supports_indexes(TABLE *table)
 {
-  Field *auto_field= mylite_auto_increment_field(table);
-  if (!auto_field || table->s->keys != 1 ||
-      table->s->next_number_index >= table->s->keys ||
-      table->s->next_number_keypart != 0)
+  for (uint i= 0; i < table->s->keys; ++i)
+  {
+    if (!mylite_key_is_supported(table->key_info + i))
+      return false;
+  }
+
+  return true;
+}
+
+static bool mylite_key_is_supported(const KEY *key)
+{
+  if (!key || key->key_length == 0 ||
+      (key->algorithm != HA_KEY_ALG_UNDEF &&
+       key->algorithm != HA_KEY_ALG_BTREE) ||
+      (key->flags & (HA_FULLTEXT_legacy | HA_SPATIAL_legacy |
+                     HA_GENERATED_KEY | HA_UNIQUE_HASH)))
     return false;
 
-  KEY *key= table->key_info + table->s->next_number_index;
-  return (key->flags & HA_NOSAME) && key->user_defined_key_parts == 1 &&
-         key->key_part[0].fieldnr == auto_field->field_index + 1;
+  for (uint i= 0; i < key->user_defined_key_parts; ++i)
+  {
+    const KEY_PART_INFO *key_part= key->key_part + i;
+    if (!key_part->field || (key_part->key_part_flag & HA_BLOB_PART))
+      return false;
+  }
+
+  return true;
 }
 
 static Field *mylite_auto_increment_field(TABLE *table)
@@ -975,6 +1394,68 @@ static int mylite_prepare_row_payload(TABLE *table, const uchar *buf,
 
   *out_payload= *out_owned_payload;
   return 0;
+}
+
+static int mylite_prepare_index_entries(
+  TABLE *table, const uchar *buf, mylite_storage_index_entry **out_entries,
+  size_t *out_entry_count, uchar **out_key_storage)
+{
+  *out_entries= NULL;
+  *out_entry_count= 0;
+  *out_key_storage= NULL;
+
+  if (table->s->keys == 0)
+    return 0;
+  if (!mylite_table_supports_indexes(table))
+    return HA_ERR_UNSUPPORTED;
+
+  size_t key_storage_size= 0;
+  for (uint i= 0; i < table->s->keys; ++i)
+  {
+    if (table->key_info[i].key_length > SIZE_MAX - key_storage_size)
+      return HA_ERR_RECORD_FILE_FULL;
+    key_storage_size+= table->key_info[i].key_length;
+  }
+  if (key_storage_size == 0)
+    return HA_ERR_UNSUPPORTED;
+  const size_t key_count= table->s->keys;
+  if (key_count > SIZE_MAX / sizeof(mylite_storage_index_entry))
+    return HA_ERR_RECORD_FILE_FULL;
+
+  mylite_storage_index_entry *entries=
+    static_cast<mylite_storage_index_entry *>(
+      malloc(key_count * sizeof(mylite_storage_index_entry)));
+  uchar *key_storage= static_cast<uchar *>(malloc(key_storage_size));
+  if (!entries || !key_storage)
+  {
+    free(entries);
+    free(key_storage);
+    return HA_ERR_OUT_OF_MEM;
+  }
+
+  size_t key_offset= 0;
+  for (uint i= 0; i < table->s->keys; ++i)
+  {
+    KEY *key_info= table->key_info + i;
+    key_copy(key_storage + key_offset, buf, key_info, 0);
+    entries[i].size= sizeof(entries[i]);
+    entries[i].index_number= i;
+    entries[i].key= key_storage + key_offset;
+    entries[i].key_size= key_info->key_length;
+    key_offset+= key_info->key_length;
+  }
+
+  *out_entries= entries;
+  *out_entry_count= table->s->keys;
+  *out_key_storage= key_storage;
+  return 0;
+}
+
+static void mylite_free_index_entries(mylite_storage_index_entry *entries,
+                                      uchar *key_storage)
+{
+  free(entries);
+  free(key_storage);
 }
 
 static int mylite_prepare_scan_rows(TABLE *table,
@@ -1103,59 +1584,74 @@ static ulonglong mylite_first_auto_increment_value(ulonglong next_value,
   return offset + (steps * increment);
 }
 
-static int mylite_check_duplicate_auto_increment_value(const char *primary_file,
-                                                       const char *schema_name,
-                                                       const char *table_name,
-                                                       TABLE *table,
-                                                       uint *out_duplicate_key)
+static int mylite_check_duplicate_keys(
+  const char *primary_file, const char *schema_name, const char *table_name,
+  TABLE *table, const mylite_storage_index_entry *index_entries,
+  size_t index_entry_count, const uchar *buf, ulonglong skip_row_id,
+  uint *out_duplicate_key)
 {
-  if (!mylite_auto_increment_field(table))
+  *out_duplicate_key= (uint) -1;
+  if (table->s->keys == 0)
     return 0;
+  if (index_entry_count != table->s->keys)
+    return HA_ERR_CRASHED_ON_USAGE;
 
-  mylite_storage_rowset rowset= {sizeof(rowset), NULL, 0, 0};
-  mylite_storage_result result=
-    mylite_storage_read_rows(primary_file, schema_name, table_name, &rowset);
-  if (result != MYLITE_STORAGE_OK)
-    return mylite_storage_to_handler_error(result);
-
-  uchar *rows= NULL;
-  uchar *blob_payloads= NULL;
-  ulonglong *row_ids= NULL;
-  size_t row_size= 0;
-  size_t row_count= 0;
-  size_t blob_payloads_size= 0;
-  int error= mylite_prepare_scan_rows(table, &rowset, &rows, &row_size,
-                                      &row_count, &row_ids, &blob_payloads,
-                                      &blob_payloads_size);
-  mylite_storage_free_rowset(&rowset);
-  if (error)
+  for (uint i= 0; i < table->s->keys; ++i)
   {
-    mylite_storage_free(rows);
-    mylite_storage_free(row_ids);
-    mylite_storage_free(blob_payloads);
-    return error;
-  }
-  (void) blob_payloads_size;
+    KEY *key_info= table->key_info + i;
+    if (!(key_info->flags & HA_NOSAME) ||
+        mylite_unique_key_allows_duplicate_null(table, key_info, buf))
+      continue;
 
-  Field *auto_field= mylite_auto_increment_field(table);
-  const longlong value= auto_field->val_int();
-  for (size_t i= 0; i < row_count; ++i)
-  {
-    memcpy(table->record[1], rows + (i * row_size), row_size);
-    if (auto_field->val_int_offset(table->s->rec_buff_length) == value)
+    mylite_storage_index_entryset entryset= {sizeof(entryset), NULL, 0, 0};
+    const mylite_storage_result storage_result=
+      mylite_storage_read_index_entries(primary_file, schema_name, table_name,
+                                        i, &entryset);
+    if (storage_result != MYLITE_STORAGE_OK)
+      return mylite_storage_to_handler_error(storage_result);
+
+    for (size_t j= 0; j < entryset.entry_count; ++j)
     {
-      mylite_storage_free(rows);
-      mylite_storage_free(row_ids);
-      mylite_storage_free(blob_payloads);
-      *out_duplicate_key= table->s->next_number_index;
-      return HA_ERR_FOUND_DUPP_KEY;
+      if (entryset.row_ids[j] == skip_row_id)
+        continue;
+      if (entryset.key_sizes[j] != index_entries[i].key_size)
+      {
+        mylite_storage_free_index_entryset(&entryset);
+        return HA_ERR_CRASHED_ON_USAGE;
+      }
+
+      const uchar *entry_key= entryset.keys + entryset.key_offsets[j];
+      if (!key_buf_cmp(key_info, key_info->user_defined_key_parts, entry_key,
+                       index_entries[i].key))
+      {
+        mylite_storage_free_index_entryset(&entryset);
+        *out_duplicate_key= i;
+        return HA_ERR_FOUND_DUPP_KEY;
+      }
     }
+
+    mylite_storage_free_index_entryset(&entryset);
   }
 
-  mylite_storage_free(rows);
-  mylite_storage_free(row_ids);
-  mylite_storage_free(blob_payloads);
   return 0;
+}
+
+static bool mylite_unique_key_allows_duplicate_null(TABLE *table,
+                                                    const KEY *key,
+                                                    const uchar *buf)
+{
+  if (!(key->flags & HA_NULL_PART_KEY) || (key->flags & HA_NULL_ARE_EQUAL))
+    return false;
+
+  const my_ptrdiff_t row_offset= buf - table->record[0];
+  for (uint i= 0; i < key->user_defined_key_parts; ++i)
+  {
+    const KEY_PART_INFO *key_part= key->key_part + i;
+    if (key_part->null_bit && key_part->field->is_real_null(row_offset))
+      return true;
+  }
+
+  return false;
 }
 
 static int mylite_advance_auto_increment_from_row(const char *primary_file,
@@ -1179,6 +1675,174 @@ static int mylite_advance_auto_increment_from_row(const char *primary_file,
     mylite_storage_advance_auto_increment(primary_file, schema_name, table_name,
                                           value + 1ULL);
   return mylite_storage_to_handler_error(result);
+}
+
+static int mylite_find_index_entry(TABLE *table,
+                                   const Mylite_index_cursor_entry *entries,
+                                   size_t entry_count, const uchar *keys,
+                                   uint index_number, const uchar *key,
+                                   uint key_length,
+                                   enum ha_rkey_function find_flag,
+                                   size_t *out_entry_index)
+{
+  if (!entries || !keys)
+    return HA_ERR_KEY_NOT_FOUND;
+
+  bool found= false;
+  size_t found_index= 0;
+  for (size_t i= 0; i < entry_count; ++i)
+  {
+    int cmp= 0;
+    int error=
+      mylite_compare_key_tuple(table, index_number, keys + entries[i].key_offset,
+                               entries[i].key_size, key, key_length,
+                               key_length, &cmp);
+    if (error)
+      return error;
+
+    switch (find_flag) {
+    case HA_READ_KEY_EXACT:
+    case HA_READ_PREFIX:
+      if (cmp == 0)
+      {
+        *out_entry_index= i;
+        return 0;
+      }
+      break;
+    case HA_READ_KEY_OR_NEXT:
+      if (cmp >= 0)
+      {
+        *out_entry_index= i;
+        return 0;
+      }
+      break;
+    case HA_READ_AFTER_KEY:
+      if (cmp > 0)
+      {
+        *out_entry_index= i;
+        return 0;
+      }
+      break;
+    case HA_READ_KEY_OR_PREV:
+      if (cmp <= 0)
+      {
+        found= true;
+        found_index= i;
+      }
+      else if (found)
+        i= entry_count;
+      break;
+    case HA_READ_BEFORE_KEY:
+      if (cmp < 0)
+      {
+        found= true;
+        found_index= i;
+      }
+      else if (found)
+        i= entry_count;
+      break;
+    case HA_READ_PREFIX_LAST:
+      if (cmp == 0)
+      {
+        found= true;
+        found_index= i;
+      }
+      else if (found)
+        i= entry_count;
+      break;
+    case HA_READ_PREFIX_LAST_OR_PREV:
+      if (cmp <= 0)
+      {
+        found= true;
+        found_index= i;
+      }
+      else if (found)
+        i= entry_count;
+      break;
+    default:
+      return HA_ERR_UNSUPPORTED;
+    }
+  }
+
+  if (found)
+  {
+    *out_entry_index= found_index;
+    return 0;
+  }
+
+  return HA_ERR_KEY_NOT_FOUND;
+}
+
+static int mylite_compare_key_tuple(TABLE *table, uint index_number,
+                                    const uchar *left_key,
+                                    size_t left_key_size,
+                                    const uchar *right_key,
+                                    size_t right_key_size,
+                                    uint key_length, int *out_cmp)
+{
+  if (index_number >= table->s->keys || !left_key || !right_key ||
+      key_length > left_key_size || key_length > right_key_size)
+    return HA_ERR_CRASHED_ON_USAGE;
+
+  *out_cmp= key_tuple_cmp(table->key_info[index_number].key_part, left_key,
+                          right_key, key_length);
+  return 0;
+}
+
+static int mylite_sort_index_entries(TABLE *table, uint index_number,
+                                     const uchar *keys,
+                                     Mylite_index_cursor_entry *entries,
+                                     size_t entry_count)
+{
+  for (size_t i= 1; i < entry_count; ++i)
+  {
+    Mylite_index_cursor_entry value= entries[i];
+    size_t j= i;
+    while (j > 0)
+    {
+      int cmp= 0;
+      const int error=
+        mylite_compare_index_entries(table, index_number, keys, entries + j - 1,
+                                     &value, &cmp);
+      if (error)
+        return error;
+      if (cmp <= 0)
+        break;
+
+      entries[j]= entries[j - 1];
+      --j;
+    }
+    entries[j]= value;
+  }
+
+  return 0;
+}
+
+static int mylite_compare_index_entries(TABLE *table, uint index_number,
+                                        const uchar *keys,
+                                        const Mylite_index_cursor_entry *left,
+                                        const Mylite_index_cursor_entry *right,
+                                        int *out_cmp)
+{
+  KEY *key_info= table->key_info + index_number;
+  int cmp= 0;
+  int error= mylite_compare_key_tuple(table, index_number,
+                                      keys + left->key_offset, left->key_size,
+                                      keys + right->key_offset,
+                                      right->key_size, key_info->key_length,
+                                      &cmp);
+  if (error)
+    return error;
+  if (cmp == 0)
+  {
+    if (left->row_id < right->row_id)
+      cmp= -1;
+    else if (left->row_id > right->row_id)
+      cmp= 1;
+  }
+
+  *out_cmp= cmp;
+  return 0;
 }
 
 static bool mylite_table_has_blob_fields(TABLE *table)

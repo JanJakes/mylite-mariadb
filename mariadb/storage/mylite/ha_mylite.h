@@ -35,6 +35,14 @@ public:
   }
 };
 
+struct Mylite_index_cursor_entry
+{
+  size_t key_offset;
+  size_t key_size;
+  size_t row_offset;
+  ulonglong row_id;
+};
+
 class ha_mylite: public handler
 {
   THR_LOCK_DATA lock;
@@ -43,6 +51,10 @@ class ha_mylite: public handler
   unsigned char *scan_blob_payloads;
   ulonglong *scan_row_ids;
   unsigned char *position_blob_payloads;
+  unsigned char *index_rows;
+  unsigned char *index_blob_payloads;
+  unsigned char *index_keys;
+  Mylite_index_cursor_entry *index_entries;
   char storage_schema_name[NAME_LEN + 1];
   char storage_table_name[NAME_LEN + 1];
   size_t scan_row_size;
@@ -50,13 +62,21 @@ class ha_mylite: public handler
   size_t scan_row_index;
   size_t scan_blob_payloads_size;
   size_t position_blob_payloads_size;
+  size_t index_row_size;
+  size_t index_row_count;
+  size_t index_row_index;
+  size_t index_blob_payloads_size;
+  uint index_cursor_number;
   ulonglong current_row_id;
   uint duplicate_key_index;
 
   Mylite_share *get_share();
   void clear_scan_rows();
+  void clear_index_cursor();
   const char *storage_schema() const;
   const char *storage_table() const;
+  int build_index_cursor(uint index_number);
+  int read_index_cursor_row(uchar *buf, size_t row_index);
 
 public:
   ha_mylite(handlerton *hton, TABLE_SHARE *table_arg);
@@ -64,14 +84,11 @@ public:
 
   ulonglong table_flags() const override
   {
-    return HA_NO_TRANSACTIONS | HA_REC_NOT_IN_SEQ | HA_BINLOG_STMT_CAPABLE |
-           HA_NO_ONLINE_ALTER;
+    return HA_NO_TRANSACTIONS | HA_NULL_IN_KEY | HA_REC_NOT_IN_SEQ |
+           HA_BINLOG_STMT_CAPABLE | HA_NO_ONLINE_ALTER;
   }
 
-  ulong index_flags(uint, uint, bool) const override
-  {
-    return 0;
-  }
+  ulong index_flags(uint index_number, uint part, bool all_parts) const override;
 
   uint max_supported_keys() const override
   {
@@ -85,6 +102,17 @@ public:
 
   int open(const char *name, int mode, uint test_if_locked) override;
   int close(void) override;
+  int index_init(uint idx, bool sorted) override;
+  int index_end() override;
+  int index_read_map(uchar *buf, const uchar *key, key_part_map keypart_map,
+                     enum ha_rkey_function find_flag) override;
+  int index_read_idx_map(uchar *buf, uint index, const uchar *key,
+                         key_part_map keypart_map,
+                         enum ha_rkey_function find_flag) override;
+  int index_next(uchar *buf) override;
+  int index_prev(uchar *buf) override;
+  int index_first(uchar *buf) override;
+  int index_last(uchar *buf) override;
   int rnd_init(bool scan) override;
   int rnd_end(void) override;
   int rnd_next(uchar *buf) override;

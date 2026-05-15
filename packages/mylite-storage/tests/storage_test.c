@@ -11,6 +11,33 @@
 
 #include <mylite/storage.h>
 
+typedef struct index_entries_test_context {
+    const char *filename;
+    const unsigned char *row_1;
+    size_t row_1_size;
+    const unsigned char *row_2;
+    size_t row_2_size;
+    const unsigned char *updated_row_1;
+    size_t updated_row_1_size;
+    const mylite_storage_index_entry *row_1_entries;
+    size_t row_1_entry_count;
+    const mylite_storage_index_entry *row_2_entries;
+    size_t row_2_entry_count;
+    const mylite_storage_index_entry *update_entries;
+    size_t update_entry_count;
+    const unsigned char *key_1;
+    size_t key_1_size;
+    const unsigned char *key_2;
+    size_t key_2_size;
+    const unsigned char *key_9;
+    size_t key_9_size;
+    const unsigned char *title_u;
+    size_t title_u_size;
+    unsigned long long row_1_id;
+    unsigned long long row_2_id;
+    unsigned long long updated_row_1_id;
+} index_entries_test_context;
+
 static void test_capabilities(void);
 static void test_create_empty_database(void);
 static void test_missing_file(void);
@@ -23,10 +50,19 @@ static void test_store_large_table_definition(void);
 static void test_append_and_read_rows(void);
 static void test_append_and_read_large_row_payload(void);
 static void test_update_and_delete_rows(void);
+static void test_index_entries(void);
+static void append_index_entry_test_rows(index_entries_test_context *ctx);
+static void assert_primary_index_entries_after_insert(const index_entries_test_context *ctx);
+static void update_index_entry_test_row(index_entries_test_context *ctx);
+static void assert_primary_index_entries_after_update(const index_entries_test_context *ctx);
+static void delete_index_entry_test_row(const index_entries_test_context *ctx);
+static void assert_secondary_index_entries_after_delete(const index_entries_test_context *ctx);
+static void assert_index_entry_test_live_rows(const index_entries_test_context *ctx);
 static void test_autoincrement_state(void);
 static void test_rejects_corrupt_row_page(void);
 static void test_rejects_corrupt_row_payload_page(void);
 static void test_rejects_corrupt_row_state_page(void);
+static void test_rejects_corrupt_index_entry_page(void);
 static void test_rejects_corrupt_autoincrement_page(void);
 static void test_drop_table_definition(void);
 static void test_rename_table_definition(void);
@@ -45,6 +81,13 @@ static void assert_row_equals(
     unsigned long long row_id,
     const unsigned char *expected_row,
     size_t expected_row_size
+);
+static void assert_index_entry(
+    const mylite_storage_index_entryset *index_entries,
+    size_t entry_index,
+    unsigned long long row_id,
+    const unsigned char *key,
+    size_t key_size
 );
 static void flip_file_byte(const char *path, long offset);
 static void write_header_format_version(const char *path, unsigned value);
@@ -69,10 +112,12 @@ int main(void) {
     test_append_and_read_rows();
     test_append_and_read_large_row_payload();
     test_update_and_delete_rows();
+    test_index_entries();
     test_autoincrement_state();
     test_rejects_corrupt_row_page();
     test_rejects_corrupt_row_payload_page();
     test_rejects_corrupt_row_state_page();
+    test_rejects_corrupt_index_entry_page();
     test_rejects_corrupt_autoincrement_page();
     test_drop_table_definition();
     test_rename_table_definition();
@@ -92,6 +137,7 @@ static void test_capabilities(void) {
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_AUTOINCREMENT) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_BLOB_TEXT_ROWS) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_ROW_LIFECYCLE) != 0U);
+    assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_INDEX_ENTRIES) != 0U);
 }
 
 static void test_create_empty_database(void) {
@@ -522,6 +568,207 @@ static void test_update_and_delete_rows(void) {
     free(root);
 }
 
+static void test_index_entries(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row_1[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    static const unsigned char row_2[] = {0x00U, 0x02U, 'd', 'e', 'f'};
+    static const unsigned char updated_row_1[] = {0x00U, 0x09U, 'u', 'p', 'd'};
+    static const unsigned char key_1[] = {0x01U};
+    static const unsigned char key_2[] = {0x02U};
+    static const unsigned char key_9[] = {0x09U};
+    static const unsigned char title_a[] = {'a'};
+    static const unsigned char title_d[] = {'d'};
+    static const unsigned char title_u[] = {'u'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "index-entries.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_index_entry row_1_entries[] = {
+        {.size = sizeof(row_1_entries[0]),
+         .index_number = 0U,
+         .key = key_1,
+         .key_size = sizeof(key_1)},
+        {.size = sizeof(row_1_entries[1]),
+         .index_number = 1U,
+         .key = title_a,
+         .key_size = sizeof(title_a)},
+    };
+    mylite_storage_index_entry row_2_entries[] = {
+        {.size = sizeof(row_2_entries[0]),
+         .index_number = 0U,
+         .key = key_2,
+         .key_size = sizeof(key_2)},
+        {.size = sizeof(row_2_entries[1]),
+         .index_number = 1U,
+         .key = title_d,
+         .key_size = sizeof(title_d)},
+    };
+    mylite_storage_index_entry update_entries[] = {
+        {.size = sizeof(update_entries[0]),
+         .index_number = 0U,
+         .key = key_9,
+         .key_size = sizeof(key_9)},
+        {.size = sizeof(update_entries[1]),
+         .index_number = 1U,
+         .key = title_u,
+         .key_size = sizeof(title_u)},
+    };
+    index_entries_test_context ctx = {
+        .filename = filename,
+        .row_1 = row_1,
+        .row_1_size = sizeof(row_1),
+        .row_2 = row_2,
+        .row_2_size = sizeof(row_2),
+        .updated_row_1 = updated_row_1,
+        .updated_row_1_size = sizeof(updated_row_1),
+        .row_1_entries = row_1_entries,
+        .row_1_entry_count = sizeof(row_1_entries) / sizeof(row_1_entries[0]),
+        .row_2_entries = row_2_entries,
+        .row_2_entry_count = sizeof(row_2_entries) / sizeof(row_2_entries[0]),
+        .update_entries = update_entries,
+        .update_entry_count = sizeof(update_entries) / sizeof(update_entries[0]),
+        .key_1 = key_1,
+        .key_1_size = sizeof(key_1),
+        .key_2 = key_2,
+        .key_2_size = sizeof(key_2),
+        .key_9 = key_9,
+        .key_9_size = sizeof(key_9),
+        .title_u = title_u,
+        .title_u_size = sizeof(title_u),
+    };
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    append_index_entry_test_rows(&ctx);
+    assert_primary_index_entries_after_insert(&ctx);
+    update_index_entry_test_row(&ctx);
+    assert_primary_index_entries_after_update(&ctx);
+    delete_index_entry_test_row(&ctx);
+    assert_secondary_index_entries_after_delete(&ctx);
+    assert_index_entry_test_live_rows(&ctx);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void append_index_entry_test_rows(index_entries_test_context *ctx) {
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            ctx->filename,
+            "app",
+            "posts",
+            ctx->row_1,
+            ctx->row_1_size,
+            ctx->row_1_entries,
+            ctx->row_1_entry_count,
+            &ctx->row_1_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(ctx->row_1_id == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 1ULL);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            ctx->filename,
+            "app",
+            "posts",
+            ctx->row_2,
+            ctx->row_2_size,
+            ctx->row_2_entries,
+            ctx->row_2_entry_count,
+            &ctx->row_2_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(ctx->row_2_id == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 4ULL);
+}
+
+static void assert_primary_index_entries_after_insert(const index_entries_test_context *ctx) {
+    mylite_storage_index_entryset index_entries = {
+        .size = sizeof(index_entries),
+    };
+
+    assert(
+        mylite_storage_read_index_entries(ctx->filename, "app", "posts", 0U, &index_entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(index_entries.entry_count == 2U);
+    assert(index_entries.key_bytes == ctx->key_1_size + ctx->key_2_size);
+    assert_index_entry(&index_entries, 0U, ctx->row_1_id, ctx->key_1, ctx->key_1_size);
+    assert_index_entry(&index_entries, 1U, ctx->row_2_id, ctx->key_2, ctx->key_2_size);
+    mylite_storage_free_index_entryset(&index_entries);
+}
+
+static void update_index_entry_test_row(index_entries_test_context *ctx) {
+    assert(
+        mylite_storage_update_row_with_index_entries(
+            ctx->filename,
+            "app",
+            "posts",
+            ctx->row_1_id,
+            ctx->updated_row_1,
+            ctx->updated_row_1_size,
+            ctx->update_entries,
+            ctx->update_entry_count,
+            &ctx->updated_row_1_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(ctx->updated_row_1_id == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 7ULL);
+}
+
+static void assert_primary_index_entries_after_update(const index_entries_test_context *ctx) {
+    mylite_storage_index_entryset index_entries = {
+        .size = sizeof(index_entries),
+    };
+
+    assert(
+        mylite_storage_read_index_entries(ctx->filename, "app", "posts", 0U, &index_entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(index_entries.entry_count == 2U);
+    assert_index_entry(&index_entries, 0U, ctx->row_2_id, ctx->key_2, ctx->key_2_size);
+    assert_index_entry(&index_entries, 1U, ctx->updated_row_1_id, ctx->key_9, ctx->key_9_size);
+    mylite_storage_free_index_entryset(&index_entries);
+}
+
+static void delete_index_entry_test_row(const index_entries_test_context *ctx) {
+    assert(
+        mylite_storage_delete_row(ctx->filename, "app", "posts", ctx->row_2_id) == MYLITE_STORAGE_OK
+    );
+}
+
+static void assert_secondary_index_entries_after_delete(const index_entries_test_context *ctx) {
+    mylite_storage_index_entryset index_entries = {
+        .size = sizeof(index_entries),
+    };
+
+    assert(
+        mylite_storage_read_index_entries(ctx->filename, "app", "posts", 1U, &index_entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(index_entries.entry_count == 1U);
+    assert_index_entry(&index_entries, 0U, ctx->updated_row_1_id, ctx->title_u, ctx->title_u_size);
+    mylite_storage_free_index_entryset(&index_entries);
+}
+
+static void assert_index_entry_test_live_rows(const index_entries_test_context *ctx) {
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+
+    assert(mylite_storage_read_rows(ctx->filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
+    assert(rows.row_count == 1U);
+    assert(rows.row_ids[0] == ctx->updated_row_1_id);
+    assert(memcmp(rows.rows, ctx->updated_row_1, ctx->updated_row_1_size) == 0);
+    mylite_storage_free_rowset(&rows);
+}
+
 static void test_autoincrement_state(void) {
     static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
     static const unsigned char row[] = {0x00U, 0x01U, 'a', 'b', 'c'};
@@ -712,6 +959,69 @@ static void test_rejects_corrupt_row_state_page(void) {
     assert(
         mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_CORRUPT
     );
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_rejects_corrupt_index_entry_page(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    static const unsigned char key[] = {0x01U};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "corrupt-index-entry-page.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_index_entry index_entry = {
+        .size = sizeof(index_entry),
+        .index_number = 0U,
+        .key = key,
+        .key_size = sizeof(key),
+    };
+    mylite_storage_index_entryset entries = {
+        .size = sizeof(entries),
+    };
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+    unsigned long long row_id = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row,
+            sizeof(row),
+            &index_entry,
+            1U,
+            &row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(row_id == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 1ULL);
+
+    flip_file_byte(
+        filename,
+        (long)((MYLITE_STORAGE_FORMAT_PAGE_SIZE * 4U) + MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET)
+    );
+    assert(
+        mylite_storage_read_index_entries(filename, "app", "posts", 0U, &entries) ==
+        MYLITE_STORAGE_CORRUPT
+    );
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
+    assert(rows.row_count == 1U);
+    mylite_storage_free_rowset(&rows);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
@@ -995,6 +1305,20 @@ static void assert_row_equals(
     assert(stored_row_size == expected_row_size);
     assert(memcmp(stored_row, expected_row, expected_row_size) == 0);
     mylite_storage_free(stored_row);
+}
+
+static void assert_index_entry(
+    const mylite_storage_index_entryset *index_entries,
+    size_t entry_index,
+    unsigned long long row_id,
+    const unsigned char *key,
+    size_t key_size
+) {
+    assert(index_entries->row_ids[entry_index] == row_id);
+    assert(index_entries->key_sizes[entry_index] == key_size);
+    assert(
+        memcmp(index_entries->keys + index_entries->key_offsets[entry_index], key, key_size) == 0
+    );
 }
 
 static void flip_file_byte(const char *path, long offset) {

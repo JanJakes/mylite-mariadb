@@ -56,15 +56,17 @@ The initial handler is opt-in. It is disabled in the default embedded baseline
 and covered by a separate storage smoke build. That build verifies the
 `MYLITE` row from `SHOW ENGINES`, explicit `CREATE TABLE ... ENGINE=MYLITE`
 stores metadata in the primary `.mylite` catalog, and catalog discovery works
-after close/reopen. Keyless routed tables support row inserts, full scans,
-updates, and deletes from the primary file, including BLOB/TEXT payloads.
-`DROP TABLE` removes catalog metadata for routed tables. Simple `RENAME TABLE`
-updates catalog identity while preserving table ids and row pages. The narrow
-single-column autoincrement key path is supported for insert and full-scan
-workloads, including BLOB/TEXT payload rows. General keyed update/delete,
-indexes, online `ALTER`, and in-place `ALTER` still reject until later slices
-define those paths. Keyless copy `ALTER` rebuilds use MariaDB's table-copy path
-and append rebuilt table definitions and rows inside the primary file.
+after close/reopen. Routed tables support row inserts, full scans, updates, and
+deletes from the primary file, including BLOB/TEXT payloads. Supported
+primary, unique, and secondary indexes append durable index-entry pages and
+serve ordered handler cursors from MariaDB key tuples. `DROP TABLE` removes
+catalog metadata for routed tables. Simple `RENAME TABLE` updates catalog
+identity while preserving table ids, row pages, and index-entry pages. Copy
+`ALTER` rebuilds use MariaDB's table-copy path and append rebuilt table
+definitions, rows, and supported index entries inside the primary file. Online
+`ALTER`, in-place `ALTER`, transaction-aware index maintenance, truncate,
+free-space reclamation, and unsupported index classes still reject or remain
+planned until those slices define the paths.
 
 ## File Layout
 
@@ -95,17 +97,22 @@ The header stores:
 The current implementation writes page 0 as a fixed-size, little-endian,
 checksummed header and page 1 as a catalog root. Explicit MyLite table
 definitions are stored as catalog records plus checksummed definition blob
-pages. Keyless row inserts append checksummed row pages tagged by catalog table
-id; non-BLOB rows store raw MariaDB record images, while BLOB/TEXT rows store a
+pages. Row inserts append checksummed row pages tagged by catalog table id;
+non-BLOB rows store raw MariaDB record images, while BLOB/TEXT rows store a
 durable handler-owned row payload that replaces process pointers with value
 bytes. Large row payloads spill into checksummed row-payload blob pages inside
-the primary file. Keyless update/delete appends checksummed row-state pages that
-hide deleted or superseded row page ids; replacement row payloads are appended
-as new row pages. Table scans validate those pages, filter hidden row ids, and
+the primary file. Update/delete appends checksummed row-state pages that hide
+deleted or superseded row page ids; replacement row payloads are appended as
+new row pages. Table scans validate those pages, filter hidden row ids, and
 reconstruct MariaDB row buffers before returning them to the SQL layer.
 Autoincrement tables append checksummed state pages keyed by catalog table id so
 generated values survive close/reopen and dropped table ids do not leak into
-recreated tables. Indexes and transaction state are still planned slices.
+recreated tables. Supported primary, unique, and secondary indexes append
+checksummed index-entry pages containing the catalog table id, MariaDB key
+number, row page id, and MariaDB key-tuple bytes. Handler index reads build
+ordered in-memory cursors from live index entries and compare keys with
+MariaDB's key helpers. Transaction state, recovery state, free-space metadata,
+and B-tree-style index navigation are still planned slices.
 
 The catalog stores:
 
@@ -145,19 +152,22 @@ engine requests, explicit `ENGINE=MYLITE`, and metadata-safe `ENGINE=InnoDB`,
 requested engine name and the effective `MYLITE` engine. Unsupported explicit
 engine requests fail before catalog publication. `DROP TABLE` removes the live
 catalog record and increments the catalog generation without deleting external
-MariaDB sidecars. Dropped table-definition blobs and row pages remain orphaned
-inside the primary file until free-space management exists; new table ids are
-allocated above both live catalog records and existing row pages so
-drop/recreate does not expose old rows. Simple `RENAME TABLE` rewrites the
-catalog record identity while preserving table id, requested/effective engine
-metadata, and the stored table-definition blob reference, so existing keyless
-row pages move with the renamed table. Copy `ALTER` rebuilds let MariaDB create
-a temporary MyLite table, copy rows through `ha_write_row()`, rename the old
-table to a backup, rename the rebuilt table to the final name, and drop the
-backup catalog record. This preserves requested engine metadata for implicit
-rebuilds and records explicit supported engine requests on engine rebuilds.
-`LOCK=NONE` copy ALTER, in-place ALTER, and index rebuild paths remain planned
-until MyLite has locking, recovery, and index storage.
+MariaDB sidecars. Dropped table-definition blobs, row pages, and index-entry
+pages remain orphaned inside the primary file until free-space management
+exists; new table ids are allocated above both live catalog records and
+existing row pages so drop/recreate does not expose old rows. Simple
+`RENAME TABLE` rewrites the catalog record identity while preserving table id,
+requested/effective engine metadata, and the stored table-definition blob
+reference, so existing row and index-entry pages move with the renamed table.
+Copy `ALTER` rebuilds let MariaDB create a temporary MyLite table, copy rows
+through `ha_write_row()`, rename the old table to a backup, rename the rebuilt
+table to the final name, and drop the backup catalog record. This preserves
+requested engine metadata for implicit rebuilds and records explicit supported
+engine requests on engine rebuilds.
+Supported key additions on copy `ALTER` rebuild through the same table-copy
+path and publish rebuilt rows with matching index-entry pages. `LOCK=NONE` copy
+ALTER, in-place ALTER, unsupported index rebuilds, and transactional DDL
+rollback remain planned until MyLite has locking and recovery.
 
 ## Schemas And System Surfaces
 
@@ -186,24 +196,30 @@ row format should preserve enough MariaDB record layout information to avoid
 inventing a parallel SQL type system. Over time, the storage format can move
 toward typed native encodings when there is a compatibility and size benefit.
 
-Current row support is intentionally narrow. For tables without declared keys
-or autoincrement columns, `write_row()` stores a durable MyLite row payload in
-an append-only row page, `rnd_next()` reads those payloads back during full
-table scans, `position()` stores the row page id as the handler row reference,
-and `rnd_pos()` reopens a live row by that id for sorted update/delete paths.
-`update_row()` appends a replacement row and a row-state page that hides the old
-row id; `delete_row()` appends a row-state page that hides the current row id.
-Nullable fixed and variable fields are covered because the stored record image
-includes MariaDB's null bitmap. BLOB/TEXT fields are serialized as
+Current row support is append-only. `write_row()` stores a durable MyLite row
+payload in a row page, `rnd_next()` reads those payloads back during full table
+scans, `position()` stores the row page id as the handler row reference, and
+`rnd_pos()` reopens a live row by that id for sorted update/delete paths.
+`update_row()` appends a replacement row, a row-state page that hides the old
+row id, and replacement index entries for supported keys. `delete_row()`
+appends a row-state page that hides the current row id; stale index entries
+remain on disk until compaction exists but are filtered through the row-state
+map. Nullable fixed and variable fields are covered because the stored record
+image includes MariaDB's null bitmap. BLOB/TEXT fields are serialized as
 length-prefixed value bytes, not process pointers, and large payloads use
-primary-file overflow pages. Tables whose only key is the single
-`AUTO_INCREMENT` column can insert and scan rows through the same payload path;
-MyLite stores the durable next value in append-only state pages and performs a
-scan-based duplicate check for that narrow key shape. Keyed update/delete still
-rejects, because MyLite cannot claim MySQL/MariaDB duplicate-key, ordering,
-index-access, or index-maintenance behavior until the index slice implements it.
-Copy `ALTER` rebuilds are supported for table shapes that remain writable by
-the current row writer. Truncate remains planned.
+primary-file overflow pages.
+
+Supported primary, unique, and secondary keys use MariaDB key tuples generated
+from the row buffer. The handler rejects unsupported key classes before table
+publication, including FULLTEXT, SPATIAL, generated, hash, and BLOB/TEXT-prefix
+keys. Duplicate checks read live index entries, use MariaDB key comparison, and
+preserve nullable unique-key semantics. Ordered index reads build in-memory
+cursors from live index entries and then reconstruct row buffers from row
+pages. This provides correct indexed insert, lookup, update, delete, reopen,
+and copy `ALTER` behavior for the supported shapes, but it is not the final
+performance structure. Truncate, B-tree pages, free-space reclamation,
+transaction rollback, recovery, and transaction-aware index maintenance remain
+planned.
 
 The storage engine must support:
 

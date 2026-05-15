@@ -16,6 +16,7 @@ extern "C" {
 #define MYLITE_STORAGE_CAPABILITY_AUTOINCREMENT 0x00000010U
 #define MYLITE_STORAGE_CAPABILITY_BLOB_TEXT_ROWS 0x00000020U
 #define MYLITE_STORAGE_CAPABILITY_ROW_LIFECYCLE 0x00000040U
+#define MYLITE_STORAGE_CAPABILITY_INDEX_ENTRIES 0x00000080U
 
 typedef enum mylite_storage_result { /* NOLINT(performance-enum-size): C ABI enum. */
                                      MYLITE_STORAGE_OK = 0,
@@ -76,6 +77,23 @@ typedef struct mylite_storage_rowset {
     unsigned long long *row_ids;
 } mylite_storage_rowset;
 
+typedef struct mylite_storage_index_entry {
+    size_t size;
+    unsigned index_number;
+    const unsigned char *key;
+    size_t key_size;
+} mylite_storage_index_entry;
+
+typedef struct mylite_storage_index_entryset {
+    size_t size;
+    unsigned char *keys;
+    size_t key_bytes;
+    size_t entry_count;
+    size_t *key_offsets;
+    size_t *key_sizes;
+    unsigned long long *row_ids;
+} mylite_storage_index_entryset;
+
 typedef int (*mylite_storage_table_callback)(
     void *ctx,
     const char *schema_name,
@@ -130,6 +148,16 @@ mylite_storage_result mylite_storage_append_row(
     const unsigned char *row,
     size_t row_size
 );
+mylite_storage_result mylite_storage_append_row_with_index_entries(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    const unsigned char *row,
+    size_t row_size,
+    const mylite_storage_index_entry *index_entries,
+    size_t index_entry_count,
+    unsigned long long *out_row_id
+);
 mylite_storage_result mylite_storage_read_rows(
     const char *filename,
     const char *schema_name,
@@ -159,11 +187,29 @@ mylite_storage_result mylite_storage_update_row(
     size_t row_size,
     unsigned long long *out_new_row_id
 );
+mylite_storage_result mylite_storage_update_row_with_index_entries(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long row_id,
+    const unsigned char *row,
+    size_t row_size,
+    const mylite_storage_index_entry *index_entries,
+    size_t index_entry_count,
+    unsigned long long *out_new_row_id
+);
 mylite_storage_result mylite_storage_delete_row(
     const char *filename,
     const char *schema_name,
     const char *table_name,
     unsigned long long row_id
+);
+mylite_storage_result mylite_storage_read_index_entries(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    mylite_storage_index_entryset *out_entries
 );
 mylite_storage_result mylite_storage_read_auto_increment(
     const char *filename,
@@ -185,6 +231,7 @@ mylite_storage_result mylite_storage_list_tables(
 );
 void mylite_storage_free(void *ptr);
 void mylite_storage_free_rowset(mylite_storage_rowset *rowset);
+void mylite_storage_free_index_entryset(mylite_storage_index_entryset *entryset);
 
 #ifdef __cplusplus
 }

@@ -28,12 +28,12 @@ not in a MariaDB datadir or existing engine sidecars.
 | 5 | SQL execution API | 🟡&nbsp;In&nbsp;progress | Add direct execution, prepared statements, bindings, columns, warnings, affected rows, and insert ids. Direct execution is implemented; prepared statements and typed values remain. |
 | 6 | Storage engine skeleton | ✅&nbsp;Done | Register a static MyLite storage engine with controlled handler smoke coverage. |
 | 7 | File header and empty catalog | ✅&nbsp;Done | Create/open a valid `.mylite` file with a versioned header and empty catalog. |
-| 8 | MyLite metadata DDL and discovery | 🟡&nbsp;In&nbsp;progress | Store routed table definitions in the catalog and discover them without durable `.frm` sidecars. Create/discovery, `DROP TABLE`, simple `RENAME TABLE`, and keyless copy `ALTER` rebuilds are implemented; general indexed DDL remains. |
+| 8 | MyLite metadata DDL and discovery | 🟡&nbsp;In&nbsp;progress | Store routed table definitions in the catalog and discover them without durable `.frm` sidecars. Create/discovery, `DROP TABLE`, simple `RENAME TABLE`, copy `ALTER` rebuilds, and supported keyed rebuilds are implemented; broader schema objects remain. |
 | 9 | Sidecar lifecycle gates | ✅&nbsp;Done | Detect known MariaDB durable engine sidecars around metadata DDL, close/reopen, and failed-create cleanup. |
 | 10 | Engine routing policy | ✅&nbsp;Done | Record requested engine vs. effective MyLite engine and route omitted/default, `InnoDB`, `MyISAM`, and `Aria` metadata where safe. |
-| 11 | Row and index storage | 🟡&nbsp;In&nbsp;progress | Keyless table insert, full-scan, update/delete, copy rebuild, NULL values, BLOB/TEXT overflow payloads, and the narrow single-column autoincrement key insert path are implemented; primary/secondary indexes and general uniqueness remain. |
-| 12 | Copy `ALTER` rebuilds | ✅&nbsp;Done | Table-copy rebuild support works over current keyless row lifecycle before index metadata multiplies DDL rebuild cases. |
-| 13 | Primary and secondary indexes | ⚪&nbsp;Planned | Add ordered access paths, duplicate checks, nullable-key semantics, and index maintenance for insert/update/delete. |
+| 11 | Row and index storage | 🟡&nbsp;In&nbsp;progress | Table insert, full-scan, update/delete, copy rebuild, NULL values, BLOB/TEXT overflow payloads, autoincrement state, and supported primary/unique/secondary index entries are implemented; truncate, BLOB/TEXT indexes, compaction, and transactional index maintenance remain. |
+| 12 | Copy `ALTER` rebuilds | ✅&nbsp;Done | Table-copy rebuild support works over the current row and supported index lifecycle. |
+| 13 | Primary and secondary indexes | ✅&nbsp;Done | Add append-only index-entry pages, ordered handler cursors, duplicate checks, nullable unique-key semantics, and index maintenance for supported insert/update/delete paths. |
 | 14 | Transactions and recovery | ⚪&nbsp;Planned | Add atomic publication, rollback, savepoints, crash recovery, checksums, and companion-file lifecycle tests. |
 | 15 | Locking and concurrency | ⚪&nbsp;Planned | Add safe file locks, multiple-reader behavior, and a storage design that preserves concurrent writer goals. |
 | 16 | Compatibility harness | ⚪&nbsp;Planned | Run embedded lifecycle, sidecar detection, MariaDB comparison, crash/reopen, and application-query coverage in repeatable groups. |
