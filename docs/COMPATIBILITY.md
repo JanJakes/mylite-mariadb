@@ -17,9 +17,10 @@ for drop-in application expectations.
 Compatibility evidence is grouped by the local harness documented in
 [Compatibility Harness](architecture/compatibility-harness.md). The initial
 groups cover public API validation, storage, crash recovery, locking, embedded
-lifecycle, direct SQL, storage-engine smoke, sidecar gates, routed DDL/DML, and
-initial application-schema smoke, and server-surface policy. MariaDB MTR
-comparison suites and broader application-schema suites remain planned.
+lifecycle, direct SQL, prepared statements, storage-engine smoke, sidecar gates,
+routed DDL/DML, initial application-schema smoke, and server-surface policy.
+MariaDB MTR comparison suites and broader application-schema suites remain
+planned.
 
 ## Baseline
 
@@ -37,11 +38,11 @@ comparison suites and broader application-schema suites remain planned.
 | --- | --- | --- |
 | Open and close a database file | 🟡&nbsp;Partial | Implemented for local files with a temporary MariaDB runtime directory that is removed on final close |
 | Direct SQL execution | 🟡&nbsp;Partial | `mylite_exec()` executes controlled one-shot SQL with textual result callbacks in embedded builds |
-| Prepared statements | ⚪&nbsp;Planned | Reusable statements with 1-based parameter binding |
-| Binary-safe values | ⚪&nbsp;Planned | Explicit BLOB/TEXT byte counts; no NUL-terminated-value assumptions |
+| Prepared statements | 🟡&nbsp;Partial | Reusable embedded statements with 1-based scalar parameter binding, row stepping, reset/finalize ownership, and MariaDB diagnostics |
+| Binary-safe values | 🟡&nbsp;Partial | Prepared statements expose explicit TEXT/BLOB byte counts and BLOB values with embedded NUL bytes; richer typed metadata and streaming large values remain planned |
 | Diagnostics | 🟡&nbsp;Partial | Open handles expose stable MyLite result codes, MariaDB errno, SQLSTATE, and message text |
 | Warnings | ⚪&nbsp;Planned | MariaDB-compatible warning counts and structured warning access |
-| Affected rows and insert ids | 🟡&nbsp;Partial | Successful direct execution exposes affected rows for non-result statements and the last insert id |
+| Affected rows and insert ids | 🟡&nbsp;Partial | Successful direct and prepared execution expose affected rows for non-result statements and the last insert id |
 | Raw `MYSQL *` as primary API | ➖&nbsp;Out&nbsp;of&nbsp;scope | Available only through a deliberate compatibility adapter |
 
 ## Engine Routing

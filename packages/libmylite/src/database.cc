@@ -43,6 +43,124 @@ constexpr const char *k_sqlstate_ok = "00000";
 constexpr const char *k_sqlstate_general = "HY000";
 constexpr const char *k_not_an_error = "not an error";
 constexpr const char *k_bad_db_handle = "bad database handle";
+#if MYLITE_WITH_MARIADB_EMBEDDED
+constexpr unsigned long k_initial_column_buffer_size = 256;
+#endif
+
+enum class BoundValueKind : unsigned char {
+    Null,
+    Int64,
+    UInt64,
+    Double,
+    Text,
+    Blob,
+};
+
+bool is_custom_destructor(mylite_destructor destructor);
+
+// NOLINTBEGIN(misc-non-private-member-variables-in-classes)
+struct BoundValue {
+    BoundValue() = default;
+    BoundValue(const BoundValue &) = delete;
+    BoundValue &operator=(const BoundValue &) = delete;
+
+    BoundValue(BoundValue &&other) noexcept {
+        move_from(other);
+    }
+
+    BoundValue &operator=(BoundValue &&other) noexcept {
+        if (this != &other) {
+            release();
+            move_from(other);
+        }
+        return *this;
+    }
+
+    ~BoundValue() {
+        release();
+    }
+
+    void reset_to_null() {
+        release();
+        kind = BoundValueKind::Null;
+        int64_value = 0;
+        uint64_value = 0;
+        double_value = 0.0;
+        borrowed_data = nullptr;
+        owned_data.clear();
+        length = 0;
+        mysql_length = 0;
+        mysql_is_null = true;
+    }
+
+    void release() {
+        if (is_custom_destructor(destructor) && destructor_arg != nullptr) {
+            destructor(destructor_arg);
+        }
+        destructor = MYLITE_STATIC;
+        destructor_arg = nullptr;
+    }
+
+    void move_from(BoundValue &other) noexcept {
+        kind = other.kind;
+        int64_value = other.int64_value;
+        uint64_value = other.uint64_value;
+        double_value = other.double_value;
+        borrowed_data = other.borrowed_data;
+        owned_data = std::move(other.owned_data);
+        length = other.length;
+        mysql_length = other.mysql_length;
+        mysql_is_null = other.mysql_is_null;
+        destructor = other.destructor;
+        destructor_arg = other.destructor_arg;
+
+        other.kind = BoundValueKind::Null;
+        other.borrowed_data = nullptr;
+        other.length = 0;
+        other.mysql_length = 0;
+        other.mysql_is_null = true;
+        other.destructor = MYLITE_STATIC;
+        other.destructor_arg = nullptr;
+    }
+
+    BoundValueKind kind = BoundValueKind::Null;
+    long long int64_value = 0;
+    unsigned long long uint64_value = 0;
+    double double_value = 0.0;
+    const void *borrowed_data = nullptr;
+    std::vector<unsigned char> owned_data;
+    std::size_t length = 0;
+    unsigned long mysql_length = 0;
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    my_bool mysql_is_null = true;
+#else
+    bool mysql_is_null = true;
+#endif
+    mylite_destructor destructor = MYLITE_STATIC;
+    void *destructor_arg = nullptr;
+};
+
+// NOLINTEND(misc-non-private-member-variables-in-classes)
+
+#if MYLITE_WITH_MARIADB_EMBEDDED
+struct ColumnInfo {
+    std::string name;
+    enum enum_field_types type = MYSQL_TYPE_NULL;
+    unsigned int flags = 0;
+};
+
+struct ColumnValue {
+    mylite_value_type type = MYLITE_TYPE_NULL;
+    long long int64_value = 0;
+    unsigned long long uint64_value = 0;
+    double double_value = 0.0;
+    std::vector<unsigned char> bytes;
+    unsigned long mysql_length = 0;
+    unsigned long buffer_length = 0;
+    my_bool mysql_is_null = true;
+    my_bool mysql_error = 0;
+};
+#endif
 
 struct RuntimeState {
     std::mutex mutex;
@@ -69,7 +187,23 @@ struct mylite_db {
     std::string errmsg = k_not_an_error;
     long long changes = 0;
     unsigned long long last_insert_id = 0;
+    unsigned active_statements = 0;
     bool connected = false;
+};
+
+struct mylite_stmt {
+    mylite_db *database = nullptr;
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    MYSQL_STMT *statement = nullptr;
+    std::vector<ColumnInfo> columns;
+    std::vector<MYSQL_BIND> parameter_binds;
+    std::vector<MYSQL_BIND> result_binds;
+    std::vector<ColumnValue> values;
+#endif
+    std::vector<BoundValue> parameters;
+    bool executed = false;
+    bool done = false;
+    bool has_current_row = false;
 };
 
 namespace {
@@ -102,8 +236,28 @@ int exec_impl(
     void *ctx,
     char **errmsg
 );
+int prepare_impl(
+    mylite_db *database,
+    const char *sql,
+    std::size_t sql_len,
+    mylite_stmt **out_stmt,
+    const char **tail
+);
 #if MYLITE_WITH_MARIADB_EMBEDDED
-bool is_server_surface_sql(const char *sql);
+int initialize_statement_metadata(mylite_stmt &statement);
+int bind_statement_parameters(mylite_stmt &statement);
+int execute_statement(mylite_stmt &statement);
+int fetch_statement_row(mylite_stmt &statement);
+int bind_statement_results(mylite_stmt &statement);
+int fetch_truncated_column(mylite_stmt &statement, unsigned column);
+void clear_current_row(mylite_stmt &statement);
+bool is_variable_column_type(mylite_value_type type);
+const void *bound_value_data(const BoundValue &value);
+enum enum_field_types bound_value_type(const BoundValue &value);
+mylite_value_type map_column_type(const ColumnInfo &column);
+mylite_value_type map_mariadb_type(enum enum_field_types type, unsigned int flags);
+bool is_unsigned_column(unsigned int flags);
+bool is_server_surface_sql(std::string_view sql);
 std::string_view skip_sql_leading_noise(std::string_view sql);
 std::string_view pop_sql_token(std::string_view &sql);
 bool sql_token_equals(std::string_view token, const char *keyword);
@@ -125,15 +279,25 @@ std::vector<char *> mutable_arguments(std::vector<std::string> &arguments);
 #endif
 void remove_directory_if_present(const std::filesystem::path &directory);
 int copy_error_message(mylite_db &database, char **errmsg);
-#if MYLITE_WITH_MARIADB_EMBEDDED
 void set_ok(mylite_db &database);
-#endif
 void set_error(mylite_db &database, int code, const char *message);
 #if MYLITE_WITH_MARIADB_EMBEDDED
 void set_mariadb_error(mylite_db &database);
+void set_mariadb_statement_error(mylite_stmt &statement);
 #endif
 const char *safe_c_str(const std::string &value);
 bool has_config_field(const mylite_open_config *config, std::size_t field_end);
+int bind_parameter_index(mylite_stmt *statement, unsigned index);
+int bind_bytes(
+    mylite_stmt *statement,
+    unsigned index,
+    BoundValueKind kind,
+    const void *value,
+    std::size_t value_len,
+    mylite_destructor destructor
+);
+bool is_transient_destructor(mylite_destructor destructor);
+void reset_statement_bindings(mylite_stmt &statement);
 
 } // namespace
 
@@ -155,6 +319,11 @@ int mylite_close(mylite_db *database) {
         return MYLITE_OK;
     }
 
+    if (database->active_statements > 0U) {
+        set_error(*database, MYLITE_BUSY, "database has active statements");
+        return MYLITE_BUSY;
+    }
+
     close_connection(*database);
     release_runtime();
     delete database;
@@ -169,6 +338,323 @@ int mylite_exec(
     char **errmsg
 ) {
     return exec_impl(database, sql, callback, ctx, errmsg);
+}
+
+int mylite_prepare(
+    mylite_db *database,
+    const char *sql,
+    std::size_t sql_len,
+    mylite_stmt **out_stmt,
+    const char **tail
+) {
+    return prepare_impl(database, sql, sql_len, out_stmt, tail);
+}
+
+int mylite_step(mylite_stmt *statement) {
+    if (statement == nullptr) {
+        return MYLITE_MISUSE;
+    }
+
+#if !MYLITE_WITH_MARIADB_EMBEDDED
+    set_error(*statement->database, MYLITE_ERROR, "MariaDB embedded backend is not enabled");
+    return MYLITE_ERROR;
+#else
+    try {
+        if (statement->done) {
+            return MYLITE_DONE;
+        }
+
+        if (!statement->executed) {
+            return execute_statement(*statement);
+        }
+
+        return fetch_statement_row(*statement);
+    } catch (const std::bad_alloc &) {
+        set_error(*statement->database, MYLITE_NOMEM, "statement allocation failed");
+        return MYLITE_NOMEM;
+    }
+#endif
+}
+
+int mylite_reset(mylite_stmt *statement) {
+    if (statement == nullptr) {
+        return MYLITE_MISUSE;
+    }
+
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (statement->statement != nullptr && statement->executed) {
+        mysql_stmt_free_result(statement->statement);
+        if (mysql_stmt_reset(statement->statement) != 0) {
+            set_mariadb_statement_error(*statement);
+            return MYLITE_ERROR;
+        }
+    }
+#endif
+
+    statement->executed = false;
+    statement->done = false;
+    statement->has_current_row = false;
+    reset_statement_bindings(*statement);
+    if (statement->database != nullptr) {
+        set_ok(*statement->database);
+    }
+    return MYLITE_OK;
+}
+
+int mylite_finalize(mylite_stmt *statement) {
+    if (statement == nullptr) {
+        return MYLITE_OK;
+    }
+
+    mylite_db *database = statement->database;
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (statement->statement != nullptr) {
+        if (statement->executed && !statement->columns.empty()) {
+            mysql_stmt_free_result(statement->statement);
+        }
+        mysql_stmt_close(statement->statement);
+        statement->statement = nullptr;
+    }
+#endif
+    delete statement;
+
+    if (database != nullptr && database->active_statements > 0U) {
+        --database->active_statements;
+    }
+    if (database != nullptr) {
+        set_ok(*database);
+    }
+    return MYLITE_OK;
+}
+
+unsigned mylite_bind_parameter_count(mylite_stmt *statement) {
+    return statement != nullptr ? static_cast<unsigned>(statement->parameters.size()) : 0U;
+}
+
+int mylite_clear_bindings(mylite_stmt *statement) {
+    if (statement == nullptr) {
+        return MYLITE_MISUSE;
+    }
+    reset_statement_bindings(*statement);
+    if (statement->database != nullptr) {
+        set_ok(*statement->database);
+    }
+    return MYLITE_OK;
+}
+
+int mylite_bind_null(mylite_stmt *statement, unsigned index) {
+    const int parameter = bind_parameter_index(statement, index);
+    if (parameter < 0) {
+        return MYLITE_MISUSE;
+    }
+    statement->parameters[static_cast<std::size_t>(parameter)].reset_to_null();
+    set_ok(*statement->database);
+    return MYLITE_OK;
+}
+
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
+int mylite_bind_int64(mylite_stmt *statement, unsigned index, long long value) {
+    const int parameter = bind_parameter_index(statement, index);
+    if (parameter < 0) {
+        return MYLITE_MISUSE;
+    }
+
+    BoundValue &bound = statement->parameters[static_cast<std::size_t>(parameter)];
+    bound.reset_to_null();
+    bound.kind = BoundValueKind::Int64;
+    bound.int64_value = value;
+    bound.mysql_is_null = false;
+    set_ok(*statement->database);
+    return MYLITE_OK;
+}
+
+int mylite_bind_uint64(mylite_stmt *statement, unsigned index, unsigned long long value) {
+    const int parameter = bind_parameter_index(statement, index);
+    if (parameter < 0) {
+        return MYLITE_MISUSE;
+    }
+
+    BoundValue &bound = statement->parameters[static_cast<std::size_t>(parameter)];
+    bound.reset_to_null();
+    bound.kind = BoundValueKind::UInt64;
+    bound.uint64_value = value;
+    bound.mysql_is_null = false;
+    set_ok(*statement->database);
+    return MYLITE_OK;
+}
+
+int mylite_bind_double(mylite_stmt *statement, unsigned index, double value) {
+    const int parameter = bind_parameter_index(statement, index);
+    if (parameter < 0) {
+        return MYLITE_MISUSE;
+    }
+
+    BoundValue &bound = statement->parameters[static_cast<std::size_t>(parameter)];
+    bound.reset_to_null();
+    bound.kind = BoundValueKind::Double;
+    bound.double_value = value;
+    bound.mysql_is_null = false;
+    set_ok(*statement->database);
+    return MYLITE_OK;
+}
+
+// NOLINTEND(bugprone-easily-swappable-parameters)
+
+int mylite_bind_text(
+    mylite_stmt *statement,
+    unsigned index,
+    const char *value,
+    std::size_t value_len,
+    mylite_destructor destructor
+) {
+    if (value_len == MYLITE_NUL_TERMINATED) {
+        if (value == nullptr) {
+            if (statement != nullptr && statement->database != nullptr) {
+                set_error(*statement->database, MYLITE_MISUSE, "NUL-terminated text is NULL");
+            }
+            return MYLITE_MISUSE;
+        }
+        value_len = std::strlen(value);
+    }
+    return bind_bytes(statement, index, BoundValueKind::Text, value, value_len, destructor);
+}
+
+int mylite_bind_blob(
+    mylite_stmt *statement,
+    unsigned index,
+    const void *value,
+    std::size_t value_len,
+    mylite_destructor destructor
+) {
+    if (value_len == MYLITE_NUL_TERMINATED) {
+        if (statement != nullptr && statement->database != nullptr) {
+            set_error(*statement->database, MYLITE_MISUSE, "BLOB length must be explicit");
+        }
+        return MYLITE_MISUSE;
+    }
+    return bind_bytes(statement, index, BoundValueKind::Blob, value, value_len, destructor);
+}
+
+unsigned mylite_column_count(mylite_stmt *statement) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    return statement != nullptr ? static_cast<unsigned>(statement->columns.size()) : 0U;
+#else
+    (void)statement;
+    return 0U;
+#endif
+}
+
+const char *mylite_column_name(mylite_stmt *statement, unsigned column) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (statement == nullptr || column >= statement->columns.size()) {
+        return nullptr;
+    }
+    return statement->columns[column].name.c_str();
+#else
+    (void)statement;
+    (void)column;
+    return nullptr;
+#endif
+}
+
+mylite_value_type mylite_column_type(mylite_stmt *statement, unsigned column) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (statement == nullptr || !statement->has_current_row || column >= statement->values.size()) {
+        return MYLITE_TYPE_NULL;
+    }
+    return statement->values[column].type;
+#else
+    (void)statement;
+    (void)column;
+    return MYLITE_TYPE_NULL;
+#endif
+}
+
+long long mylite_column_int64(mylite_stmt *statement, unsigned column) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (statement == nullptr || !statement->has_current_row || column >= statement->values.size()) {
+        return 0;
+    }
+    return statement->values[column].int64_value;
+#else
+    (void)statement;
+    (void)column;
+    return 0;
+#endif
+}
+
+unsigned long long mylite_column_uint64(mylite_stmt *statement, unsigned column) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (statement == nullptr || !statement->has_current_row || column >= statement->values.size()) {
+        return 0U;
+    }
+    return statement->values[column].uint64_value;
+#else
+    (void)statement;
+    (void)column;
+    return 0U;
+#endif
+}
+
+double mylite_column_double(mylite_stmt *statement, unsigned column) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (statement == nullptr || !statement->has_current_row || column >= statement->values.size()) {
+        return 0.0;
+    }
+    return statement->values[column].double_value;
+#else
+    (void)statement;
+    (void)column;
+    return 0.0;
+#endif
+}
+
+const char *mylite_column_text(mylite_stmt *statement, unsigned column) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (statement == nullptr || !statement->has_current_row || column >= statement->values.size()) {
+        return nullptr;
+    }
+    const ColumnValue &value = statement->values[column];
+    if (value.type != MYLITE_TYPE_TEXT || value.mysql_is_null != 0) {
+        return nullptr;
+    }
+    return reinterpret_cast<const char *>(value.bytes.data());
+#else
+    (void)statement;
+    (void)column;
+    return nullptr;
+#endif
+}
+
+const void *mylite_column_blob(mylite_stmt *statement, unsigned column) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (statement == nullptr || !statement->has_current_row || column >= statement->values.size()) {
+        return nullptr;
+    }
+    const ColumnValue &value = statement->values[column];
+    if (!is_variable_column_type(value.type) || value.mysql_is_null != 0) {
+        return nullptr;
+    }
+    return value.bytes.data();
+#else
+    (void)statement;
+    (void)column;
+    return nullptr;
+#endif
+}
+
+std::size_t mylite_column_bytes(mylite_stmt *statement, unsigned column) {
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (statement == nullptr || !statement->has_current_row || column >= statement->values.size()) {
+        return 0U;
+    }
+    const ColumnValue &value = statement->values[column];
+    return value.mysql_is_null != 0 ? 0U : static_cast<std::size_t>(value.mysql_length);
+#else
+    (void)statement;
+    (void)column;
+    return 0U;
+#endif
 }
 
 int mylite_errcode(mylite_db *database) {
@@ -330,7 +816,7 @@ int exec_impl(
     return copy_error_message(*database, errmsg);
 #else
     set_ok(*database);
-    if (is_server_surface_sql(sql)) {
+    if (is_server_surface_sql(std::string_view(sql))) {
         set_error(*database, MYLITE_ERROR, "unsupported server-oriented SQL surface");
         return copy_error_message(*database, errmsg);
     }
@@ -358,7 +844,427 @@ int exec_impl(
 #endif
 }
 
+int prepare_impl(
+    mylite_db *database,
+    const char *sql,
+    std::size_t sql_len,
+    mylite_stmt **out_stmt,
+    const char **tail
+) {
+    if (out_stmt == nullptr) {
+        return MYLITE_MISUSE;
+    }
+    *out_stmt = nullptr;
+    if (tail != nullptr) {
+        *tail = nullptr;
+    }
+
+    if (database == nullptr || sql == nullptr) {
+        return MYLITE_MISUSE;
+    }
+
+    if (sql_len == MYLITE_NUL_TERMINATED) {
+        sql_len = std::strlen(sql);
+    }
+    if (sql_len > static_cast<std::size_t>(ULONG_MAX)) {
+        set_error(*database, MYLITE_MISUSE, "SQL text is too large");
+        return MYLITE_MISUSE;
+    }
+
+#if !MYLITE_WITH_MARIADB_EMBEDDED
+    set_error(*database, MYLITE_ERROR, "MariaDB embedded backend is not enabled");
+    return MYLITE_ERROR;
+#else
+    set_ok(*database);
+    if (is_server_surface_sql(std::string_view(sql, sql_len))) {
+        set_error(*database, MYLITE_ERROR, "unsupported server-oriented SQL surface");
+        return MYLITE_ERROR;
+    }
+
+    try {
+        std::unique_ptr<mylite_stmt> statement(new mylite_stmt());
+        statement->database = database;
+        statement->statement = mysql_stmt_init(&database->mysql);
+        if (statement->statement == nullptr) {
+            set_error(*database, MYLITE_NOMEM, "statement allocation failed");
+            return MYLITE_NOMEM;
+        }
+
+        if (mysql_stmt_prepare(statement->statement, sql, static_cast<unsigned long>(sql_len)) !=
+            0) {
+            set_mariadb_statement_error(*statement);
+            mysql_stmt_close(statement->statement);
+            statement->statement = nullptr;
+            return MYLITE_ERROR;
+        }
+
+        const unsigned long parameter_count = mysql_stmt_param_count(statement->statement);
+        if (parameter_count > static_cast<unsigned long>(UINT_MAX)) {
+            mysql_stmt_close(statement->statement);
+            statement->statement = nullptr;
+            set_error(*database, MYLITE_ERROR, "statement has too many parameters");
+            return MYLITE_ERROR;
+        }
+        statement->parameters.resize(parameter_count);
+
+        const int metadata_result = initialize_statement_metadata(*statement);
+        if (metadata_result != MYLITE_OK) {
+            mysql_stmt_close(statement->statement);
+            statement->statement = nullptr;
+            return metadata_result;
+        }
+
+        ++database->active_statements;
+        if (tail != nullptr) {
+            *tail = sql + sql_len;
+        }
+        *out_stmt = statement.release();
+        return MYLITE_OK;
+    } catch (const std::bad_alloc &) {
+        set_error(*database, MYLITE_NOMEM, "statement allocation failed");
+        return MYLITE_NOMEM;
+    }
+#endif
+}
+
 #if MYLITE_WITH_MARIADB_EMBEDDED
+int initialize_statement_metadata(mylite_stmt &statement) {
+    const unsigned field_count = mysql_stmt_field_count(statement.statement);
+    if (field_count == 0U) {
+        return MYLITE_OK;
+    }
+
+    MYSQL_RES *metadata = mysql_stmt_result_metadata(statement.statement);
+    if (metadata == nullptr) {
+        set_mariadb_statement_error(statement);
+        return MYLITE_ERROR;
+    }
+
+    MYSQL_FIELD *fields = mysql_fetch_fields(metadata);
+    if (fields == nullptr) {
+        mysql_free_result(metadata);
+        set_mariadb_statement_error(statement);
+        return MYLITE_ERROR;
+    }
+
+    try {
+        statement.columns.reserve(field_count);
+        statement.values.resize(field_count);
+        for (unsigned i = 0; i < field_count; ++i) {
+            statement.columns.push_back(
+                ColumnInfo{
+                    fields[i].name != nullptr ? fields[i].name : "",
+                    fields[i].type,
+                    fields[i].flags,
+                }
+            );
+        }
+    } catch (const std::bad_alloc &) {
+        mysql_free_result(metadata);
+        set_error(*statement.database, MYLITE_NOMEM, "statement metadata allocation failed");
+        return MYLITE_NOMEM;
+    }
+
+    mysql_free_result(metadata);
+    return MYLITE_OK;
+}
+
+int bind_statement_parameters(mylite_stmt &statement) {
+    const std::size_t parameter_count = statement.parameters.size();
+    if (parameter_count == 0U) {
+        return MYLITE_OK;
+    }
+
+    statement.parameter_binds.assign(parameter_count, MYSQL_BIND{});
+    for (std::size_t i = 0; i < parameter_count; ++i) {
+        BoundValue &value = statement.parameters[i];
+        value.mysql_length = static_cast<unsigned long>(value.length);
+        value.mysql_is_null = value.kind == BoundValueKind::Null ? 1 : 0;
+
+        MYSQL_BIND &bind = statement.parameter_binds[i];
+        bind.buffer_type = bound_value_type(value);
+        bind.buffer = const_cast<void *>(bound_value_data(value));
+        bind.length = &value.mysql_length;
+        bind.is_null = &value.mysql_is_null;
+        bind.buffer_length = value.mysql_length;
+        bind.is_unsigned = value.kind == BoundValueKind::UInt64 ? 1 : 0;
+    }
+
+    if (mysql_stmt_bind_param(statement.statement, statement.parameter_binds.data()) != 0) {
+        set_mariadb_statement_error(statement);
+        return MYLITE_ERROR;
+    }
+    return MYLITE_OK;
+}
+
+int execute_statement(mylite_stmt &statement) {
+    set_ok(*statement.database);
+    clear_current_row(statement);
+
+    const int bind_result = bind_statement_parameters(statement);
+    if (bind_result != MYLITE_OK) {
+        return bind_result;
+    }
+
+    if (mysql_stmt_execute(statement.statement) != 0) {
+        set_mariadb_statement_error(statement);
+        return MYLITE_ERROR;
+    }
+
+    statement.executed = true;
+    statement.database->changes = 0;
+    statement.database->last_insert_id =
+        static_cast<unsigned long long>(mysql_stmt_insert_id(statement.statement));
+
+    if (statement.columns.empty()) {
+        const my_ulonglong affected_rows = mysql_stmt_affected_rows(statement.statement);
+        statement.database->changes =
+            affected_rows == static_cast<my_ulonglong>(-1)
+                ? 0
+                : static_cast<long long>(
+                      std::min<my_ulonglong>(affected_rows, static_cast<my_ulonglong>(LLONG_MAX))
+                  );
+        statement.done = true;
+        return MYLITE_DONE;
+    }
+
+    const int result_bind_result = bind_statement_results(statement);
+    if (result_bind_result != MYLITE_OK) {
+        return result_bind_result;
+    }
+    return fetch_statement_row(statement);
+}
+
+int fetch_statement_row(mylite_stmt &statement) {
+    clear_current_row(statement);
+    const int fetch_result = mysql_stmt_fetch(statement.statement);
+
+    if (fetch_result == MYSQL_NO_DATA) {
+        statement.done = true;
+        return MYLITE_DONE;
+    }
+    if (fetch_result != 0 && fetch_result != MYSQL_DATA_TRUNCATED) {
+        set_mariadb_statement_error(statement);
+        return MYLITE_ERROR;
+    }
+
+    for (unsigned i = 0; i < statement.values.size(); ++i) {
+        if (statement.values[i].mysql_error != 0) {
+            const int column_result = fetch_truncated_column(statement, i);
+            if (column_result != MYLITE_OK) {
+                return column_result;
+            }
+        }
+    }
+
+    for (unsigned i = 0; i < statement.values.size(); ++i) {
+        ColumnValue &value = statement.values[i];
+        value.type =
+            value.mysql_is_null != 0 ? MYLITE_TYPE_NULL : map_column_type(statement.columns[i]);
+        if (value.type == MYLITE_TYPE_TEXT) {
+            if (value.bytes.size() <= value.mysql_length) {
+                value.bytes.resize(static_cast<std::size_t>(value.mysql_length) + 1U);
+            }
+            value.bytes[static_cast<std::size_t>(value.mysql_length)] = '\0';
+        }
+    }
+
+    statement.has_current_row = true;
+    return MYLITE_ROW;
+}
+
+int bind_statement_results(mylite_stmt &statement) {
+    statement.result_binds.assign(statement.columns.size(), MYSQL_BIND{});
+    for (std::size_t i = 0; i < statement.columns.size(); ++i) {
+        ColumnValue &value = statement.values[i];
+        const mylite_value_type type = map_column_type(statement.columns[i]);
+        value.type = type;
+        value.mysql_length = 0;
+        value.mysql_is_null = false;
+        value.mysql_error = 0;
+
+        MYSQL_BIND &bind = statement.result_binds[i];
+        bind.length = &value.mysql_length;
+        bind.is_null = &value.mysql_is_null;
+        bind.error = &value.mysql_error;
+
+        switch (type) {
+        case MYLITE_TYPE_INT64:
+            bind.buffer_type = MYSQL_TYPE_LONGLONG;
+            bind.buffer = &value.int64_value;
+            break;
+        case MYLITE_TYPE_UINT64:
+            bind.buffer_type = MYSQL_TYPE_LONGLONG;
+            bind.buffer = &value.uint64_value;
+            bind.is_unsigned = 1;
+            break;
+        case MYLITE_TYPE_DOUBLE:
+            bind.buffer_type = MYSQL_TYPE_DOUBLE;
+            bind.buffer = &value.double_value;
+            break;
+        case MYLITE_TYPE_BLOB:
+        case MYLITE_TYPE_TEXT:
+            value.buffer_length = k_initial_column_buffer_size;
+            value.bytes.assign(
+                static_cast<std::size_t>(value.buffer_length) +
+                    (type == MYLITE_TYPE_TEXT ? 1U : 0U),
+                0
+            );
+            bind.buffer_type = type == MYLITE_TYPE_BLOB ? MYSQL_TYPE_BLOB : MYSQL_TYPE_STRING;
+            bind.buffer = value.bytes.data();
+            bind.buffer_length = value.buffer_length;
+            break;
+        case MYLITE_TYPE_NULL:
+            bind.buffer_type = MYSQL_TYPE_NULL;
+            break;
+        }
+    }
+
+    if (mysql_stmt_bind_result(statement.statement, statement.result_binds.data()) != 0) {
+        set_mariadb_statement_error(statement);
+        return MYLITE_ERROR;
+    }
+    return MYLITE_OK;
+}
+
+int fetch_truncated_column(mylite_stmt &statement, unsigned column) {
+    ColumnValue &value = statement.values[column];
+    const mylite_value_type type = map_column_type(statement.columns[column]);
+    if (!is_variable_column_type(type)) {
+        set_error(*statement.database, MYLITE_ERROR, "numeric column truncated during fetch");
+        return MYLITE_ERROR;
+    }
+
+    value.buffer_length = value.mysql_length;
+    value.bytes.assign(
+        static_cast<std::size_t>(value.buffer_length) + (type == MYLITE_TYPE_TEXT ? 1U : 0U),
+        0
+    );
+    value.mysql_error = 0;
+
+    MYSQL_BIND bind = {};
+    bind.buffer_type = type == MYLITE_TYPE_BLOB ? MYSQL_TYPE_BLOB : MYSQL_TYPE_STRING;
+    bind.buffer = value.bytes.data();
+    bind.buffer_length = value.buffer_length;
+    bind.length = &value.mysql_length;
+    bind.is_null = &value.mysql_is_null;
+    bind.error = &value.mysql_error;
+
+    if (mysql_stmt_fetch_column(statement.statement, &bind, column, 0) != 0) {
+        set_mariadb_statement_error(statement);
+        return MYLITE_ERROR;
+    }
+
+    statement.result_binds[column].buffer = value.bytes.data();
+    statement.result_binds[column].buffer_length = value.buffer_length;
+    return MYLITE_OK;
+}
+
+void clear_current_row(mylite_stmt &statement) {
+    statement.has_current_row = false;
+    for (ColumnValue &value : statement.values) {
+        value.type = MYLITE_TYPE_NULL;
+        value.mysql_length = 0;
+        value.mysql_is_null = true;
+        value.mysql_error = 0;
+    }
+}
+
+bool is_variable_column_type(mylite_value_type type) {
+    return type == MYLITE_TYPE_TEXT || type == MYLITE_TYPE_BLOB;
+}
+
+const void *bound_value_data(const BoundValue &value) {
+    static const unsigned char empty_value = 0;
+    switch (value.kind) {
+    case BoundValueKind::Int64:
+        return &value.int64_value;
+    case BoundValueKind::UInt64:
+        return &value.uint64_value;
+    case BoundValueKind::Double:
+        return &value.double_value;
+    case BoundValueKind::Null:
+    case BoundValueKind::Text:
+    case BoundValueKind::Blob:
+        break;
+    }
+    if (!value.owned_data.empty()) {
+        return value.owned_data.data();
+    }
+    if (value.borrowed_data != nullptr) {
+        return value.borrowed_data;
+    }
+    return &empty_value;
+}
+
+enum enum_field_types bound_value_type(const BoundValue &value) {
+    switch (value.kind) {
+    case BoundValueKind::Null:
+        return MYSQL_TYPE_NULL;
+    case BoundValueKind::Int64:
+    case BoundValueKind::UInt64:
+        return MYSQL_TYPE_LONGLONG;
+    case BoundValueKind::Double:
+        return MYSQL_TYPE_DOUBLE;
+    case BoundValueKind::Text:
+        return MYSQL_TYPE_STRING;
+    case BoundValueKind::Blob:
+        return MYSQL_TYPE_BLOB;
+    }
+    return MYSQL_TYPE_NULL;
+}
+
+mylite_value_type map_column_type(const ColumnInfo &column) {
+    return map_mariadb_type(column.type, column.flags);
+}
+
+mylite_value_type map_mariadb_type(enum enum_field_types type, unsigned int flags) {
+    switch (type) {
+    case MYSQL_TYPE_TINY:
+    case MYSQL_TYPE_SHORT:
+    case MYSQL_TYPE_LONG:
+    case MYSQL_TYPE_LONGLONG:
+    case MYSQL_TYPE_INT24:
+    case MYSQL_TYPE_YEAR:
+        return is_unsigned_column(flags) ? MYLITE_TYPE_UINT64 : MYLITE_TYPE_INT64;
+    case MYSQL_TYPE_FLOAT:
+    case MYSQL_TYPE_DOUBLE:
+        return MYLITE_TYPE_DOUBLE;
+    case MYSQL_TYPE_TINY_BLOB:
+    case MYSQL_TYPE_MEDIUM_BLOB:
+    case MYSQL_TYPE_LONG_BLOB:
+    case MYSQL_TYPE_BLOB:
+    case MYSQL_TYPE_GEOMETRY:
+        return MYLITE_TYPE_BLOB;
+    case MYSQL_TYPE_NULL:
+        return MYLITE_TYPE_NULL;
+    case MYSQL_TYPE_DECIMAL:
+    case MYSQL_TYPE_TIMESTAMP:
+    case MYSQL_TYPE_DATE:
+    case MYSQL_TYPE_TIME:
+    case MYSQL_TYPE_DATETIME:
+    case MYSQL_TYPE_NEWDATE:
+    case MYSQL_TYPE_VARCHAR:
+    case MYSQL_TYPE_BIT:
+    case MYSQL_TYPE_TIMESTAMP2:
+    case MYSQL_TYPE_DATETIME2:
+    case MYSQL_TYPE_TIME2:
+    case MYSQL_TYPE_BLOB_COMPRESSED:
+    case MYSQL_TYPE_VARCHAR_COMPRESSED:
+    case MYSQL_TYPE_NEWDECIMAL:
+    case MYSQL_TYPE_ENUM:
+    case MYSQL_TYPE_SET:
+    case MYSQL_TYPE_VAR_STRING:
+    case MYSQL_TYPE_STRING:
+        return MYLITE_TYPE_TEXT;
+    }
+    return MYLITE_TYPE_TEXT;
+}
+
+bool is_unsigned_column(unsigned int flags) {
+    return (flags & UNSIGNED_FLAG) != 0U;
+}
+
 int store_and_emit_result(
     mylite_db &database,
     mylite_exec_callback callback,
@@ -402,7 +1308,7 @@ int store_and_emit_result(
     return MYLITE_OK;
 }
 
-bool is_server_surface_sql(const char *sql) {
+bool is_server_surface_sql(std::string_view sql) {
     std::string_view rest = skip_sql_leading_noise(sql);
     const std::string_view first = pop_sql_token(rest);
     const std::string_view second = pop_sql_token(rest);
@@ -833,7 +1739,82 @@ int copy_error_message(mylite_db &database, char **errmsg) {
     return database.errcode;
 }
 
-#if MYLITE_WITH_MARIADB_EMBEDDED
+int bind_parameter_index(mylite_stmt *statement, unsigned index) {
+    if (statement == nullptr || statement->database == nullptr) {
+        return -1;
+    }
+    if (index == 0U || index > statement->parameters.size()) {
+        set_error(*statement->database, MYLITE_MISUSE, "invalid bind parameter index");
+        return -1;
+    }
+    return static_cast<int>(index - 1U);
+}
+
+int bind_bytes(
+    mylite_stmt *statement,
+    unsigned index,
+    BoundValueKind kind,
+    const void *value,
+    std::size_t value_len,
+    mylite_destructor destructor
+) {
+    const int parameter = bind_parameter_index(statement, index);
+    if (parameter < 0) {
+        return MYLITE_MISUSE;
+    }
+
+    if (value == nullptr && value_len != 0U) {
+        set_error(*statement->database, MYLITE_MISUSE, "non-empty bind value is NULL");
+        return MYLITE_MISUSE;
+    }
+    if (value_len > static_cast<std::size_t>(ULONG_MAX)) {
+        set_error(*statement->database, MYLITE_MISUSE, "bind value is too large");
+        return MYLITE_MISUSE;
+    }
+
+    try {
+        BoundValue &bound = statement->parameters[static_cast<std::size_t>(parameter)];
+        bound.reset_to_null();
+        bound.kind = kind;
+        bound.length = value_len;
+        bound.mysql_length = static_cast<unsigned long>(value_len);
+        bound.mysql_is_null = false;
+
+        if (is_transient_destructor(destructor)) {
+            if (value_len > 0U) {
+                const auto *begin = static_cast<const unsigned char *>(value);
+                bound.owned_data.assign(begin, begin + value_len);
+            }
+        } else {
+            bound.borrowed_data = value;
+            if (is_custom_destructor(destructor)) {
+                bound.destructor = destructor;
+                bound.destructor_arg = const_cast<void *>(value);
+            }
+        }
+    } catch (const std::bad_alloc &) {
+        set_error(*statement->database, MYLITE_NOMEM, "bind value allocation failed");
+        return MYLITE_NOMEM;
+    }
+
+    set_ok(*statement->database);
+    return MYLITE_OK;
+}
+
+bool is_custom_destructor(mylite_destructor destructor) {
+    return destructor != MYLITE_STATIC && !is_transient_destructor(destructor);
+}
+
+bool is_transient_destructor(mylite_destructor destructor) {
+    return destructor == MYLITE_TRANSIENT; // NOLINT(performance-no-int-to-ptr)
+}
+
+void reset_statement_bindings(mylite_stmt &statement) {
+    for (BoundValue &parameter : statement.parameters) {
+        parameter.reset_to_null();
+    }
+}
+
 void set_ok(mylite_db &database) {
     database.errcode = MYLITE_OK;
     database.extended_errcode = MYLITE_OK;
@@ -841,7 +1822,6 @@ void set_ok(mylite_db &database) {
     database.sqlstate = k_sqlstate_ok;
     database.errmsg = k_not_an_error;
 }
-#endif
 
 void set_error(mylite_db &database, int code, const char *message) {
     database.errcode = code;
@@ -858,6 +1838,15 @@ void set_mariadb_error(mylite_db &database) {
     database.mariadb_errno = mysql_errno(&database.mysql);
     database.sqlstate = mysql_sqlstate(&database.mysql);
     database.errmsg = mysql_error(&database.mysql);
+}
+
+void set_mariadb_statement_error(mylite_stmt &statement) {
+    mylite_db &database = *statement.database;
+    database.errcode = MYLITE_ERROR;
+    database.extended_errcode = MYLITE_ERROR;
+    database.mariadb_errno = mysql_stmt_errno(statement.statement);
+    database.sqlstate = mysql_stmt_sqlstate(statement.statement);
+    database.errmsg = mysql_stmt_error(statement.statement);
 }
 #endif
 

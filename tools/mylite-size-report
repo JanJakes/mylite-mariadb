@@ -58,11 +58,17 @@ write_report() {
     "Embedded exec smoke" \
     "${embedded_build_dir}/packages/libmylite/mylite_embedded_exec_test"
   append_linked_row \
+    "Embedded statement smoke" \
+    "${embedded_build_dir}/packages/libmylite/mylite_embedded_statement_test"
+  append_linked_row \
     "Storage-smoke open-close smoke" \
     "${storage_build_dir}/packages/libmylite/mylite_embedded_open_close_test"
   append_linked_row \
     "Storage-smoke exec smoke" \
     "${storage_build_dir}/packages/libmylite/mylite_embedded_exec_test"
+  append_linked_row \
+    "Storage-smoke statement smoke" \
+    "${storage_build_dir}/packages/libmylite/mylite_embedded_statement_test"
   append_linked_row \
     "Storage-engine smoke" \
     "${storage_build_dir}/packages/libmylite/mylite_embedded_storage_engine_test"

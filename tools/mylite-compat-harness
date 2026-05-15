@@ -2,7 +2,7 @@
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-all_groups="public-api storage-core crash-recovery locking embedded-lifecycle direct-sql storage-engine sidecar routed-ddl-dml application-schema server-surface"
+all_groups="public-api storage-core crash-recovery locking embedded-lifecycle direct-sql prepared-statement storage-engine sidecar routed-ddl-dml application-schema server-surface"
 
 usage() {
   cat <<EOF
@@ -38,6 +38,9 @@ group_spec() {
       ;;
     direct-sql)
       echo "embedded-dev|compat-direct-sql|Direct SQL execution through the public libmylite API"
+      ;;
+    prepared-statement)
+      echo "embedded-dev|compat-prepared-statement|Prepared statements, typed bindings, and binary-safe column access"
       ;;
     storage-engine)
       echo "storage-smoke-dev|compat-storage-engine|Static MyLite handler registration and SQL storage-engine smoke"

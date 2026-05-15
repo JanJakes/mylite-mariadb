@@ -167,6 +167,13 @@ Return values:
 `sql_len == MYLITE_NUL_TERMINATED` means `sql` is NUL-terminated. `tail`, when
 non-NULL, receives the first uncompiled byte.
 
+Initial implementation status: prepared statements run through MariaDB's
+embedded `MYSQL_STMT` API. The implementation supports one statement per
+prepare call, 1-based scalar parameter binding, row stepping, reset/finalize
+ownership, affected rows, insert ids, MariaDB diagnostics, and binary-safe
+text/BLOB column reads. Multi-result execution, rich metadata, warnings, array
+binding, and streaming large values remain planned.
+
 ## Bindings
 
 Bind indexes are 1-based.
@@ -202,6 +209,10 @@ int mylite_bind_blob(
 finalized. `MYLITE_TRANSIENT` copies bytes before the call returns. A custom
 destructor is called after MyLite no longer needs the input.
 
+The current implementation clears bindings on `mylite_reset()`, so callers
+should rebind before the next execution. This keeps borrowed `MYLITE_STATIC`
+input lifetimes explicit.
+
 Typed date, time, decimal, JSON, and geometry bindings can be added without
 forcing those values through text.
 
@@ -231,6 +242,12 @@ size_t mylite_column_bytes(mylite_stmt *stmt, unsigned column);
 
 Column indexes are 0-based. Column values are valid until the next
 `mylite_step()`, `mylite_reset()`, or `mylite_finalize()` on that statement.
+
+The current implementation maps MariaDB integer result fields to signed or
+unsigned 64-bit values, float/double fields to double, BLOB-family fields to
+BLOB, and string/date/time/decimal fields to TEXT. TEXT values are
+NUL-terminated for `mylite_column_text()`, but `mylite_column_bytes()` remains
+the authoritative byte count.
 
 MariaDB exposes richer type metadata than this primary value classification.
 Later metadata APIs should expose original MariaDB field type, charset,

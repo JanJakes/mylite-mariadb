@@ -73,6 +73,21 @@ typedef int (*mylite_exec_callback)(
     char **column_names
 );
 
+typedef void (*mylite_destructor)(void *);
+
+typedef enum mylite_value_type { /* NOLINT(performance-enum-size): C ABI enum. */
+                                 MYLITE_TYPE_NULL = 0,
+                                 MYLITE_TYPE_INT64 = 1,
+                                 MYLITE_TYPE_UINT64 = 2,
+                                 MYLITE_TYPE_DOUBLE = 3,
+                                 MYLITE_TYPE_TEXT = 4,
+                                 MYLITE_TYPE_BLOB = 5
+} mylite_value_type;
+
+#define MYLITE_NUL_TERMINATED ((size_t)-1)
+#define MYLITE_STATIC ((mylite_destructor)0)
+#define MYLITE_TRANSIENT ((mylite_destructor)(-1))
+
 MYLITE_API const char *mylite_version(void);
 MYLITE_API int mylite_open(const char *filename, mylite_db **out_db);
 MYLITE_API int mylite_open_v2(
@@ -89,6 +104,48 @@ MYLITE_API int mylite_exec(
     void *ctx,
     char **errmsg
 );
+
+MYLITE_API int mylite_prepare(
+    mylite_db *database,
+    const char *sql,
+    size_t sql_len,
+    mylite_stmt **out_stmt,
+    const char **tail
+);
+MYLITE_API int mylite_step(mylite_stmt *statement);
+MYLITE_API int mylite_reset(mylite_stmt *statement);
+MYLITE_API int mylite_finalize(mylite_stmt *statement);
+
+MYLITE_API unsigned mylite_bind_parameter_count(mylite_stmt *statement);
+MYLITE_API int mylite_clear_bindings(mylite_stmt *statement);
+MYLITE_API int mylite_bind_null(mylite_stmt *statement, unsigned index);
+MYLITE_API int mylite_bind_int64(mylite_stmt *statement, unsigned index, long long value);
+MYLITE_API int mylite_bind_uint64(mylite_stmt *statement, unsigned index, unsigned long long value);
+MYLITE_API int mylite_bind_double(mylite_stmt *statement, unsigned index, double value);
+MYLITE_API int mylite_bind_text(
+    mylite_stmt *statement,
+    unsigned index,
+    const char *value,
+    size_t value_len,
+    mylite_destructor destructor
+);
+MYLITE_API int mylite_bind_blob(
+    mylite_stmt *statement,
+    unsigned index,
+    const void *value,
+    size_t value_len,
+    mylite_destructor destructor
+);
+
+MYLITE_API unsigned mylite_column_count(mylite_stmt *statement);
+MYLITE_API const char *mylite_column_name(mylite_stmt *statement, unsigned column);
+MYLITE_API mylite_value_type mylite_column_type(mylite_stmt *statement, unsigned column);
+MYLITE_API long long mylite_column_int64(mylite_stmt *statement, unsigned column);
+MYLITE_API unsigned long long mylite_column_uint64(mylite_stmt *statement, unsigned column);
+MYLITE_API double mylite_column_double(mylite_stmt *statement, unsigned column);
+MYLITE_API const char *mylite_column_text(mylite_stmt *statement, unsigned column);
+MYLITE_API const void *mylite_column_blob(mylite_stmt *statement, unsigned column);
+MYLITE_API size_t mylite_column_bytes(mylite_stmt *statement, unsigned column);
 
 MYLITE_API int mylite_errcode(mylite_db *database);
 MYLITE_API int mylite_extended_errcode(mylite_db *database);
