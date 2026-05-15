@@ -27,12 +27,14 @@ static void test_non_table_objects_are_rejected(void);
 static void test_transaction_control_is_rejected(void);
 static void test_locking_sql_is_rejected(void);
 static void test_foreign_key_policy_is_rejected(void);
+static void test_partition_policy_is_rejected(void);
 static void assert_variable_value(mylite_db *db, const char *name, const char *value);
 static void assert_variable_value_or_missing(mylite_db *db, const char *name, const char *value);
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_non_table_object_exec_fails(mylite_db *db, const char *sql);
 static void assert_transaction_control_exec_fails(mylite_db *db, const char *sql);
 static void assert_locking_sql_exec_fails(mylite_db *db, const char *sql);
+static void assert_partition_exec_fails(mylite_db *db, const char *sql);
 static void assert_foreign_key_exec_fails(mylite_db *db, const char *sql);
 static int select_callback(void *ctx, int column_count, char **values, char **column_names);
 static int abort_callback(void *ctx, int column_count, char **values, char **column_names);
@@ -54,6 +56,7 @@ int main(void) {
     test_transaction_control_is_rejected();
     test_locking_sql_is_rejected();
     test_foreign_key_policy_is_rejected();
+    test_partition_policy_is_rejected();
     return 0;
 }
 
@@ -352,6 +355,41 @@ static void test_foreign_key_policy_is_rejected(void) {
     free(root);
 }
 
+static void test_partition_policy_is_rejected(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "USE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(
+            db,
+            "CREATE TEMPORARY TABLE partition_comment ("
+            "id INT COMMENT 'PARTITION BY HASH (id)', partition_label VARCHAR(16))",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+
+    assert_partition_exec_fails(
+        db,
+        "CREATE TABLE partitioned_probe (id INT NOT NULL PRIMARY KEY) "
+        "PARTITION BY HASH (id) PARTITIONS 2"
+    );
+    assert_partition_exec_fails(
+        db,
+        "ALTER TABLE partition_comment ADD PARTITION (PARTITION p1 VALUES LESS THAN (10))"
+    );
+    assert_partition_exec_fails(db, "ALTER TABLE partition_comment REMOVE PARTITIONING");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
 static void assert_variable_value(mylite_db *db, const char *name, const char *value) {
     variable_context ctx = {
         .name = name,
@@ -433,6 +471,18 @@ static void assert_locking_sql_exec_fails(mylite_db *db, const char *sql) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "SQL locking") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_partition_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "partition") != NULL);
     mylite_free(errmsg);
 }
 

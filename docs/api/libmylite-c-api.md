@@ -415,6 +415,8 @@ the embedded library model:
 - dynamic plugin installation,
 - external durable storage engines,
 - foreign-key DDL until referential metadata and enforcement exist,
+- partition DDL until partition metadata, partition routing, and per-partition
+  lifecycle semantics exist,
 - filesystem-backed views, triggers, routines, and sequences until they have
   MyLite catalog storage,
 - SQL locking statements and named-lock functions until MyLite has real table,
@@ -426,9 +428,10 @@ the embedded library model:
 
 Representative account, event, plugin, replication, binlog, view, trigger,
 routine, package, sequence, `CALL`, transaction-control, autocommit-control,
-SQL locking, named-lock, and foreign-key DDL commands are rejected before
-MariaDB execution with stable MyLite errors. Other unsupported surfaces should
-fail with stable MyLite result codes and MariaDB diagnostics where possible.
+SQL locking, named-lock, partition, and foreign-key DDL commands are rejected
+before MariaDB execution with stable MyLite errors. Other unsupported surfaces
+should fail with stable MyLite result codes and MariaDB diagnostics where
+possible.
 
 ## Compatibility Adapter
 

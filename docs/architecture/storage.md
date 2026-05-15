@@ -84,6 +84,9 @@ catalog-only reopen without a rehydrated runtime schema directory.
 Foreign-key DDL is rejected at the `libmylite` boundary until MyLite has
 catalog metadata, enforcement, locking, recovery, and transaction-aware checks
 for referential constraints.
+Partition DDL is rejected at the same boundary until MyLite has partition
+metadata, partition-to-primary-file routing, per-partition catalog lifecycle,
+and partition-aware row and index maintenance.
 Basic CHECK constraints are kept inside the MariaDB table-definition image and
 evaluated by MariaDB before MyLite handler writes. Supported copy
 `ALTER TABLE` paths can add and drop named table-level CHECK constraints
@@ -320,11 +323,12 @@ The storage engine must support:
 - truncate,
 - table rebuilds for copy `ALTER`.
 
-FULLTEXT, SPATIAL, generated-column indexes, and foreign-key enforcement need
-explicit storage designs before support is claimed. Current `libmylite` entry
-points reject foreign-key DDL before MariaDB execution; unsupported index
-classes, including generated-column, FULLTEXT, and SPATIAL indexes, reject
-through handler capability checks before catalog publication.
+FULLTEXT, SPATIAL, generated-column indexes, foreign-key enforcement, and
+partitioned tables need explicit storage designs before support is claimed.
+Current `libmylite` entry points reject foreign-key and partition DDL before
+MariaDB execution; unsupported index classes, including generated-column,
+FULLTEXT, and SPATIAL indexes, reject through handler capability checks before
+catalog publication.
 
 ## Transactions And Recovery
 

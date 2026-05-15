@@ -85,12 +85,12 @@ if(BUILD_TESTING)
     add_test(NAME libmylite.embedded-exec COMMAND mylite_embedded_exec_test)
     set_tests_properties(
       libmylite.embedded-exec
-      PROPERTIES LABELS "compat-direct-sql;compat-embedded-lifecycle;compat-server-surface;compat-transaction;compat-locking;compat-foreign-key"
+      PROPERTIES LABELS "compat-direct-sql;compat-embedded-lifecycle;compat-server-surface;compat-transaction;compat-locking;compat-partition;compat-foreign-key"
     )
     add_test(NAME libmylite.embedded-statement COMMAND mylite_embedded_statement_test)
     set_tests_properties(
       libmylite.embedded-statement
-      PROPERTIES LABELS "compat-prepared-statement;compat-column-metadata;compat-large-value;compat-embedded-lifecycle;compat-public-api;compat-server-surface;compat-transaction;compat-locking;compat-foreign-key"
+      PROPERTIES LABELS "compat-prepared-statement;compat-column-metadata;compat-large-value;compat-embedded-lifecycle;compat-public-api;compat-server-surface;compat-transaction;compat-locking;compat-partition;compat-foreign-key"
     )
     add_test(NAME libmylite.embedded-warning COMMAND mylite_embedded_warning_test)
     set_tests_properties(
@@ -125,7 +125,7 @@ if(BUILD_TESTING)
       set_tests_properties(
         libmylite.embedded-storage-engine
         PROPERTIES LABELS
-          "compat-storage-engine;compat-sidecar;compat-routed-ddl-dml;compat-application-schema;compat-server-surface;compat-transaction;compat-transaction-hooks;compat-statement-rollback;compat-locking;compat-foreign-key;compat-check-constraint;compat-generated-column;compat-unsupported-index"
+          "compat-storage-engine;compat-sidecar;compat-routed-ddl-dml;compat-application-schema;compat-server-surface;compat-transaction;compat-transaction-hooks;compat-statement-rollback;compat-locking;compat-partition;compat-foreign-key;compat-check-constraint;compat-generated-column;compat-unsupported-index"
       )
     endif()
 

@@ -34,6 +34,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `transaction` | `storage-smoke-dev` | `compat-transaction` | SQL transaction-control rejection until full transaction support exists |
 | `transaction-hooks` | `storage-smoke-dev` | `compat-transaction-hooks` | MariaDB statement transaction hook integration |
 | `statement-rollback` | `storage-smoke-dev` | `compat-statement-rollback` | Failed statement rollback for routed MyLite storage |
+| `partition` | `storage-smoke-dev` | `compat-partition` | Partition DDL rejection until partition metadata and routing exist |
 | `foreign-key` | `storage-smoke-dev` | `compat-foreign-key` | Foreign-key DDL rejection until catalog metadata and enforcement exist |
 | `check-constraint` | `storage-smoke-dev` | `compat-check-constraint` | CHECK constraint enforcement on routed tables |
 | `generated-column` | `storage-smoke-dev` | `compat-generated-column` | Generated column read/write and generated-index rejection |
