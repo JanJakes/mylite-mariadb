@@ -188,6 +188,7 @@ static void create_collation_matrix_table(mylite_db *db, const collation_restart
 static void assert_collation_matrix_table(mylite_db *db, const collation_restart_case *test_case);
 static void assert_wordpress_catalog_metadata(const char *filename);
 static void assert_wordpress_installer_catalog_metadata(const char *filename);
+static void assert_wordpress_installer_seed_data(mylite_db *db);
 static void assert_table_collation(
     mylite_db *db,
     const char *schema_name,
@@ -195,6 +196,12 @@ static void assert_table_collation(
     const char *expected_collation
 );
 static void exec_sql_fixture(mylite_db *db, const char *fixture_name);
+static int sql_fixture_cursor_is_separator(
+    char **cursor,
+    int *quote,
+    int *line_comment,
+    int *escaped
+);
 static void exec_sql_statement_if_present(mylite_db *db, const char *statement);
 static int is_sql_statement_empty(const char *statement);
 static char *read_text_file(const char *path);
@@ -3453,7 +3460,9 @@ static void test_wordpress_installer_schema_fixture(void) {
     );
     assert_exec_succeeds(db, "USE wordpress_install");
     exec_sql_fixture(db, "wordpress-6.9.4-single-site-schema.sql");
+    exec_sql_fixture(db, "wordpress-6.9.4-single-site-seed.sql");
     assert_wordpress_installer_catalog_metadata(filename);
+    assert_wordpress_installer_seed_data(db);
     assert_table_collation(db, "wordpress_install", "wp_posts", "utf8mb4_unicode_ci");
     assert_table_collation(db, "wordpress_install", "wp_termmeta", "utf8mb4_unicode_ci");
 
@@ -3463,6 +3472,7 @@ static void test_wordpress_installer_schema_fixture(void) {
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "USE wordpress_install");
     assert_wordpress_installer_catalog_metadata(filename);
+    assert_wordpress_installer_seed_data(db);
     assert_table_collation(db, "wordpress_install", "wp_posts", "utf8mb4_unicode_ci");
     assert_table_collation(db, "wordpress_install", "wp_termmeta", "utf8mb4_unicode_ci");
     assert(mylite_close(db) == MYLITE_OK);
@@ -3546,6 +3556,148 @@ static void assert_wordpress_installer_catalog_metadata(const char *filename) {
     assert_catalog_table_metadata(filename, "wordpress_install", "wp_posts", "DEFAULT", "MYLITE");
 }
 
+static void assert_wordpress_installer_seed_data(mylite_db *db) {
+    single_value_context blogname = {
+        .expected_value = "MyLite Fixture",
+    };
+    single_value_context db_version = {
+        .expected_value = "60717",
+    };
+    single_value_context admin_email = {
+        .expected_value = "admin@example.test",
+    };
+    single_value_context admin_capabilities = {
+        .expected_value = "a:1:{s:13:\"administrator\";b:1;}",
+    };
+    single_value_context widget_block = {
+        .expected_value = "a:1:{i:2;a:1:{s:7:\"content\";s:19:\"<!-- wp:search /-->\";}}",
+    };
+    single_value_context term_slug = {
+        .expected_value = "uncategorized",
+    };
+    single_value_context post_title = {
+        .expected_value = "Hello world!",
+    };
+    single_value_context comment_author = {
+        .expected_value = "A WordPress Commenter",
+    };
+    single_value_context page_template = {
+        .expected_value = "default",
+    };
+    char *errmsg = NULL;
+
+    assert(
+        mylite_exec(
+            db,
+            "SELECT option_value FROM wp_options FORCE INDEX (option_name) "
+            "WHERE option_name = 'blogname'",
+            single_value_callback,
+            &blogname,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(blogname.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT option_value FROM wp_options FORCE INDEX (option_name) "
+            "WHERE option_name = 'db_version'",
+            single_value_callback,
+            &db_version,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(db_version.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT user_email FROM wp_users FORCE INDEX (user_login_key) "
+            "WHERE user_login = 'admin'",
+            single_value_callback,
+            &admin_email,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(admin_email.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT meta_value FROM wp_usermeta FORCE INDEX (meta_key) "
+            "WHERE meta_key = 'wp_capabilities'",
+            single_value_callback,
+            &admin_capabilities,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(admin_capabilities.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT option_value FROM wp_options FORCE INDEX (option_name) "
+            "WHERE option_name = 'widget_block'",
+            single_value_callback,
+            &widget_block,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(widget_block.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT t.slug FROM wp_terms t "
+            "JOIN wp_term_taxonomy tt ON tt.term_id = t.term_id "
+            "JOIN wp_term_relationships tr ON tr.term_taxonomy_id = tt.term_taxonomy_id "
+            "WHERE tr.object_id = 1 AND tt.taxonomy = 'category'",
+            single_value_callback,
+            &term_slug,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(term_slug.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT post_title FROM wp_posts FORCE INDEX (post_name) "
+            "WHERE post_name = 'hello-world'",
+            single_value_callback,
+            &post_title,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(post_title.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT comment_author FROM wp_comments FORCE INDEX (comment_post_ID) "
+            "WHERE comment_post_ID = 1",
+            single_value_callback,
+            &comment_author,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(comment_author.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT meta_value FROM wp_postmeta FORCE INDEX (post_id) "
+            "WHERE post_id = 2 AND meta_key = '_wp_page_template'",
+            single_value_callback,
+            &page_template,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(page_template.rows == 1);
+}
+
 static void assert_table_collation(
     mylite_db *db,
     const char *schema_name,
@@ -3577,9 +3729,12 @@ static void exec_sql_fixture(mylite_db *db, const char *fixture_name) {
     char *path = path_join(MYLITE_TEST_FIXTURE_DIR, fixture_name);
     char *sql = read_text_file(path);
     char *statement_start = sql;
+    int quote = 0;
+    int line_comment = 0;
+    int escaped = 0;
 
     for (char *cursor = sql; *cursor != '\0'; ++cursor) {
-        if (*cursor != ';') {
+        if (!sql_fixture_cursor_is_separator(&cursor, &quote, &line_comment, &escaped)) {
             continue;
         }
 
@@ -3591,6 +3746,63 @@ static void exec_sql_fixture(mylite_db *db, const char *fixture_name) {
 
     free(sql);
     free(path);
+}
+
+static int sql_fixture_cursor_is_separator(
+    char **cursor,
+    int *quote,
+    int *line_comment,
+    int *escaped
+) {
+    assert(cursor != NULL);
+    assert(*cursor != NULL);
+    assert(quote != NULL);
+    assert(line_comment != NULL);
+    assert(escaped != NULL);
+
+    char *current = *cursor;
+
+    if (*line_comment) {
+        if (*current == '\n' || *current == '\r') {
+            *line_comment = 0;
+        }
+        return 0;
+    }
+
+    if (*quote != 0) {
+        if (*escaped) {
+            *escaped = 0;
+            return 0;
+        }
+        if (*current == '\\' && current[1] != '\0') {
+            *escaped = 1;
+            return 0;
+        }
+        if (*current == *quote) {
+            if (current[1] == *quote) {
+                *cursor = current + 1;
+                return 0;
+            }
+            *quote = 0;
+        }
+        return 0;
+    }
+
+    if (*current == '-' && current[1] == '-' && isspace((unsigned char)current[2])) {
+        *line_comment = 1;
+        return 0;
+    }
+    if (*current == '#') {
+        *line_comment = 1;
+        return 0;
+    }
+    if (*current == '\'' || *current == '"') {
+        *quote = *current;
+        *escaped = 0;
+        return 0;
+    }
+
+    return *current == ';';
 }
 
 static void exec_sql_statement_if_present(mylite_db *db, const char *statement) {

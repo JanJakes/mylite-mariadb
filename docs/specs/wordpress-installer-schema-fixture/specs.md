@@ -73,7 +73,8 @@ installer-DDL fixture rather than replacing the row-behavior smoke.
 ## Non-Goals
 
 - Running WordPress PHP or WP-CLI.
-- Seeding installer options, roles, users, or posts.
+- Seeding installer options, roles, users, or posts; these are covered by the
+  separate WordPress installer seed fixture.
 - Multisite global tables.
 - Plugin tables, migrations, or upgrade paths.
 - Broad charset/collation matrix coverage beyond the fixture default.

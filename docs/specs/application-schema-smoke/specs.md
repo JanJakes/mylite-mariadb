@@ -33,14 +33,15 @@ MariaDB base: `mariadb-11.8.6`
 
 The smoke uses a WordPress-shaped subset rather than a full WordPress runtime
 install. Later BLOB/TEXT prefix-index, WordPress core schema expansion,
-embedded-restart charset, and WordPress installer schema fixture slices
+embedded-restart charset, WordPress installer schema fixture, and WordPress
+installer seed fixture slices
 broadened application-schema coverage with wider `varchar` and
 `text`/`longtext` columns, users, usermeta, terms, taxonomy relationships,
 comments, commentmeta, links, representative `utf8mb4_unicode_ci` defaults, a
-pinned single-site installer DDL fixture, and a small collation restart/index
-matrix. Exhaustive charset/collation semantics, multisite, plugin tables, and
-full runtime install still need broader support than this smoke should hide
-inside one test.
+pinned single-site installer DDL fixture, representative installer seed data,
+and a small collation restart/index matrix. Exhaustive charset/collation
+semantics, multisite, plugin tables, and full runtime install still need broader
+support than this smoke should hide inside one test.
 
 ## Design
 
@@ -80,14 +81,13 @@ storage-engine smoke label carrying this test.
 
 ## Non-Goals
 
-- Full WordPress runtime installer compatibility beyond the versioned DDL
-  fixture.
+- Full WordPress runtime installer compatibility beyond the versioned DDL and
+  seed fixtures.
 - Exhaustive character set, collation, and index-length edge cases beyond the
   representative smoke paths.
 - Foreign keys or referential enforcement; WordPress itself does not depend on
   database-enforced foreign keys for these core relationships.
-- Installer option-data seeding, multisite, plugin tables, migrations, or
-  WP-CLI.
+- Multisite, plugin tables, migrations, or WP-CLI.
 
 ## Compatibility Impact
 
@@ -123,7 +123,7 @@ durable `.frm`, InnoDB, MyISAM, Aria, binlog, and relay-log companions.
 ## Risks
 
 - The current smoke still separates row/query behavior from the versioned
-  WordPress installer DDL fixture. Full WordPress runtime install coverage would
+  WordPress installer fixtures. Full WordPress runtime install coverage would
   make the result look more complete than it is.
 - The test still lives in one broad storage-engine smoke binary. Future
   application suites should move into narrower fixtures once the harness grows
