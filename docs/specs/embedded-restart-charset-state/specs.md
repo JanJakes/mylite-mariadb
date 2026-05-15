@@ -55,7 +55,9 @@ This keeps the fork delta small:
 The storage-engine smoke also gets a focused regression test that creates a
 `utf8mb4_unicode_ci` database and indexed table, closes the runtime, reopens the
 same `.mylite` file multiple times, checks duplicate-key behavior, and performs
-an indexed lookup through the UCA comparator.
+an indexed lookup through the UCA comparator. A later collation matrix extends
+that restart/index shape to selected utf8mb4 and latin1 collations without
+claiming exhaustive collation semantics.
 
 ## Affected Subsystems
 
@@ -127,5 +129,5 @@ GPL-2.0-only project license.
 
 - Other MariaDB process-global subsystems may still have embedded restart state
   that only appears under broader application-schema coverage.
-- The smoke covers one representative UCA collation. A broader charset and
-  collation matrix remains future compatibility work.
+- The smoke covers a small representative matrix. Exhaustive charset and
+  collation semantics remain future compatibility work.

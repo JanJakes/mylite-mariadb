@@ -118,6 +118,12 @@ typedef struct wordpress_join_context {
     int rows;
 } wordpress_join_context;
 
+typedef struct collation_restart_case {
+    const char *table_name;
+    const char *character_set_name;
+    const char *collation_name;
+} collation_restart_case;
+
 typedef struct catalog_table_context {
     unsigned count;
     const char *expected_schema_name;
@@ -129,6 +135,7 @@ static void test_schema_namespaces(void);
 static void test_prepared_schema_namespaces(void);
 static void test_schema_options(void);
 static void test_utf8mb4_unicode_ci_survives_restart(void);
+static void test_collation_restart_matrix(void);
 static void test_non_table_object_policy(void);
 static void test_transaction_and_foreign_key_policies(void);
 static void test_create_table_persists_catalog_metadata(void);
@@ -172,6 +179,13 @@ static void assert_catalog_table_metadata(
     const char *requested_engine_name,
     const char *effective_engine_name
 );
+static void assert_collation_matrix_catalog_metadata(
+    const char *filename,
+    const collation_restart_case *cases,
+    size_t case_count
+);
+static void create_collation_matrix_table(mylite_db *db, const collation_restart_case *test_case);
+static void assert_collation_matrix_table(mylite_db *db, const collation_restart_case *test_case);
 static void assert_wordpress_catalog_metadata(const char *filename);
 static void assert_wordpress_installer_catalog_metadata(const char *filename);
 static void assert_table_collation(
@@ -231,6 +245,7 @@ int main(void) {
     test_prepared_schema_namespaces();
     test_schema_options();
     test_utf8mb4_unicode_ci_survives_restart();
+    test_collation_restart_matrix();
     test_non_table_object_policy();
     test_transaction_and_foreign_key_policies();
     test_create_table_persists_catalog_metadata();
@@ -478,6 +493,151 @@ static void test_utf8mb4_unicode_ci_survives_restart(void) {
     free(filename);
     remove_tree(root);
     free(root);
+}
+
+static void test_collation_restart_matrix(void) {
+    const collation_restart_case cases[] = {
+        {
+            .table_name = "collation_utf8mb4_general_ci",
+            .character_set_name = "utf8mb4",
+            .collation_name = "utf8mb4_general_ci",
+        },
+        {
+            .table_name = "collation_utf8mb4_bin",
+            .character_set_name = "utf8mb4",
+            .collation_name = "utf8mb4_bin",
+        },
+        {
+            .table_name = "collation_utf8mb4_unicode_ci",
+            .character_set_name = "utf8mb4",
+            .collation_name = "utf8mb4_unicode_ci",
+        },
+        {
+            .table_name = "collation_utf8mb4_unicode_520_ci",
+            .character_set_name = "utf8mb4",
+            .collation_name = "utf8mb4_unicode_520_ci",
+        },
+        {
+            .table_name = "collation_latin1_swedish_ci",
+            .character_set_name = "latin1",
+            .collation_name = "latin1_swedish_ci",
+        },
+    };
+    const size_t case_count = sizeof(cases) / sizeof(cases[0]);
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE collation_matrix");
+    assert_exec_succeeds(db, "USE collation_matrix");
+    for (size_t i = 0; i < case_count; ++i) {
+        create_collation_matrix_table(db, cases + i);
+    }
+    assert_collation_matrix_catalog_metadata(filename, cases, case_count);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    for (unsigned round = 0; round < 2; ++round) {
+        db = open_database_with_filename(root, filename);
+        assert_exec_succeeds(db, "USE collation_matrix");
+        assert_collation_matrix_catalog_metadata(filename, cases, case_count);
+        for (size_t i = 0; i < case_count; ++i) {
+            assert_collation_matrix_table(db, cases + i);
+        }
+        assert(mylite_close(db) == MYLITE_OK);
+        assert_no_durable_sidecars(root, "storage-engine.mylite");
+    }
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void assert_collation_matrix_catalog_metadata(
+    const char *filename,
+    const collation_restart_case *cases,
+    size_t case_count
+) {
+    assert_catalog_table_count(filename, "collation_matrix", (unsigned)case_count);
+    for (size_t i = 0; i < case_count; ++i) {
+        assert_catalog_table_metadata(
+            filename,
+            "collation_matrix",
+            cases[i].table_name,
+            "InnoDB",
+            "MYLITE"
+        );
+    }
+}
+
+static void create_collation_matrix_table(mylite_db *db, const collation_restart_case *test_case) {
+    char sql[640];
+    int written = snprintf(
+        sql,
+        sizeof(sql),
+        "CREATE TABLE %s ("
+        "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, "
+        "name VARCHAR(191) NOT NULL, "
+        "slug VARCHAR(191) NOT NULL, "
+        "PRIMARY KEY (id), "
+        "UNIQUE KEY name_key (name), "
+        "KEY slug_key (slug)"
+        ") ENGINE=InnoDB DEFAULT CHARACTER SET %s COLLATE %s",
+        test_case->table_name,
+        test_case->character_set_name,
+        test_case->collation_name
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_exec_succeeds(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "INSERT INTO %s (name, slug) VALUES ('Cafe', 'cafe'), ('Resume', 'resume')",
+        test_case->table_name
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_exec_succeeds(db, sql);
+}
+
+static void assert_collation_matrix_table(mylite_db *db, const collation_restart_case *test_case) {
+    char sql[320];
+    single_value_context slug = {
+        .expected_value = "resume",
+    };
+    char *errmsg = NULL;
+
+    assert_table_collation(
+        db,
+        "collation_matrix",
+        test_case->table_name,
+        test_case->collation_name
+    );
+
+    int written = snprintf(
+        sql,
+        sizeof(sql),
+        "INSERT INTO %s (name, slug) VALUES ('Resume', 'duplicate')",
+        test_case->table_name
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_exec_fails(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT slug FROM %s FORCE INDEX (name_key) WHERE name = 'Resume'",
+        test_case->table_name
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert(mylite_exec(db, sql, single_value_callback, &slug, &errmsg) == MYLITE_OK);
+    assert(errmsg == NULL);
+    assert(slug.rows == 1);
 }
 
 static void test_non_table_object_policy(void) {

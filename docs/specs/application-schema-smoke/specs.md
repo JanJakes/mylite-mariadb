@@ -36,10 +36,11 @@ install. Later BLOB/TEXT prefix-index, WordPress core schema expansion,
 embedded-restart charset, and WordPress installer schema fixture slices
 broadened application-schema coverage with wider `varchar` and
 `text`/`longtext` columns, users, usermeta, terms, taxonomy relationships,
-comments, commentmeta, links, representative `utf8mb4_unicode_ci` defaults, and
-a pinned single-site installer DDL fixture. A broad charset/collation matrix,
-multisite, plugin tables, and full runtime install still need broader support
-than this smoke should hide inside one test.
+comments, commentmeta, links, representative `utf8mb4_unicode_ci` defaults, a
+pinned single-site installer DDL fixture, and a small collation restart/index
+matrix. Exhaustive charset/collation semantics, multisite, plugin tables, and
+full runtime install still need broader support than this smoke should hide
+inside one test.
 
 ## Design
 
@@ -81,8 +82,8 @@ storage-engine smoke label carrying this test.
 
 - Full WordPress runtime installer compatibility beyond the versioned DDL
   fixture.
-- Broad character set, collation, and index-length edge cases beyond the
-  representative `utf8mb4_unicode_ci` path.
+- Exhaustive character set, collation, and index-length edge cases beyond the
+  representative smoke paths.
 - Foreign keys or referential enforcement; WordPress itself does not depend on
   database-enforced foreign keys for these core relationships.
 - Installer option-data seeding, multisite, plugin tables, migrations, or
