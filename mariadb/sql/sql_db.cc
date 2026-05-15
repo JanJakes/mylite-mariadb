@@ -67,6 +67,10 @@ static void mysql_change_db_impl(THD *thd,
                                  CHARSET_INFO *new_db_charset);
 static bool mysql_rm_db_internal(THD *thd, const Lex_ident_db &db,
                                  bool if_exists, bool silent);
+static int mysql_create_mylite_db(THD *thd, const Lex_ident_db &db,
+                                  const DDL_options_st &options,
+                                  Schema_specification_st *create_info,
+                                  bool silent);
 static bool mysql_alter_mylite_db(THD *thd, const Lex_ident_db &db,
                                   Schema_specification_st *create_info);
 static bool mysql_rm_mylite_db(THD *thd, const Lex_ident_db &db,
@@ -783,6 +787,11 @@ mysql_create_db_internal(THD *thd, const Lex_ident_db &db,
   path_len= build_table_filename(path, sizeof(path) - 1, db.str, "", "", 0);
   path[path_len-1]= 0;                    // Remove last '/' from path
 
+  if (mylite_schema_hooks_active() && mylite_schema_exists(db.str) &&
+      !mylite_runtime_schema_dir_exists(db.str))
+    DBUG_RETURN(mysql_create_mylite_db(thd, db, options, create_info,
+                                       silent));
+
   long affected_rows= 1;
   if (!mysql_file_stat(key_file_misc, path, &stat_info, MYF(0)))
   {
@@ -891,6 +900,72 @@ not_silent:
         These DDL methods and logging are protected with the exclusive
         metadata lock on the schema
       */
+      if (mysql_bin_log.write(&qinfo))
+        DBUG_RETURN(-1);
+    }
+    my_ok(thd, affected_rows);
+  }
+
+  DBUG_RETURN(0);
+}
+
+static int mysql_create_mylite_db(THD *thd, const Lex_ident_db &db,
+                                  const DDL_options_st &options,
+                                  Schema_specification_st *create_info,
+                                  bool silent)
+{
+  DBUG_ENTER("mysql_create_mylite_db");
+
+  long affected_rows= 1;
+  if (options.or_replace())
+  {
+    if (mysql_rm_mylite_db(thd, db, false, true))
+      DBUG_RETURN(1);
+    thd->get_stmt_da()->reset_diagnostics_area();
+    affected_rows= 2;
+  }
+  else if (options.if_not_exists())
+  {
+    push_warning_printf(thd, Sql_condition::WARN_LEVEL_NOTE,
+                        ER_DB_CREATE_EXISTS, ER_THD(thd, ER_DB_CREATE_EXISTS),
+                        db.str);
+    affected_rows= 0;
+    goto not_silent;
+  }
+  else
+  {
+    my_error(ER_DB_CREATE_EXISTS, MYF(0), db.str);
+    DBUG_RETURN(-1);
+  }
+
+  if (mylite_schema_store_options(db.str, create_info) !=
+      MYLITE_SCHEMA_HOOK_OK)
+  {
+    my_error(ER_UNKNOWN_ERROR, MYF(0));
+    DBUG_RETURN(1);
+  }
+
+  backup_log_info ddl_log;
+  bzero(&ddl_log, sizeof(ddl_log));
+  ddl_log.query=                   { C_STRING_WITH_LEN("CREATE") };
+  ddl_log.org_storage_engine_name= { C_STRING_WITH_LEN("DATABASE") };
+  ddl_log.org_database=     db;
+  backup_log_ddl(&ddl_log);
+
+not_silent:
+  if (!silent)
+  {
+    char *query= thd->query();
+    uint query_length= thd->query_length();
+    DBUG_ASSERT(query);
+
+    if (mysql_bin_log.is_open())
+    {
+      int errcode= query_error_code(thd, TRUE);
+      Query_log_event qinfo(thd, query, query_length, FALSE, TRUE,
+                            /* suppress_use */ TRUE, errcode);
+      qinfo.db=     db.str;
+      qinfo.db_len= (uint32) db.length;
       if (mysql_bin_log.write(&qinfo))
         DBUG_RETURN(-1);
     }

@@ -140,6 +140,7 @@ static void test_memory_database_has_empty_mylite_discovery(void);
 static void test_schema_namespaces(void);
 static void test_prepared_schema_namespaces(void);
 static void test_schema_options(void);
+static void test_create_database_existence_options(void);
 static void test_utf8mb4_unicode_ci_survives_restart(void);
 static void test_collation_restart_matrix(void);
 static void test_non_table_object_policy(void);
@@ -185,12 +186,14 @@ static void assert_prepared_fails(mylite_db *db, const char *sql);
 static void assert_prepared_fails_with_message(mylite_db *db, const char *sql, const char *message);
 static void assert_schema_options(
     mylite_db *db,
+    const char *schema_name,
     const char *expected_character_set,
     const char *expected_collation,
     const char *expected_comment
 );
 static void assert_show_create_schema(
     mylite_db *db,
+    const char *schema_name,
     const char *expected_character_set,
     const char *expected_collation
 );
@@ -301,6 +304,7 @@ int main(void) {
     test_schema_namespaces();
     test_prepared_schema_namespaces();
     test_schema_options();
+    test_create_database_existence_options();
     test_utf8mb4_unicode_ci_survives_restart();
     test_collation_restart_matrix();
     test_non_table_object_policy();
@@ -463,8 +467,8 @@ static void test_schema_options(void) {
         "CREATE DATABASE option_app DEFAULT CHARACTER SET latin1 COLLATE latin1_bin "
         "COMMENT 'first comment'"
     );
-    assert_schema_options(db, "latin1", "latin1_bin", "first comment");
-    assert_show_create_schema(db, "latin1", "latin1_bin");
+    assert_schema_options(db, "option_app", "latin1", "latin1_bin", "first comment");
+    assert_show_create_schema(db, "option_app", "latin1", "latin1_bin");
     assert(
         mylite_storage_read_schema_definition(filename, "option_app", &metadata) ==
         MYLITE_STORAGE_OK
@@ -481,8 +485,8 @@ static void test_schema_options(void) {
         "ALTER DATABASE option_app DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin "
         "COMMENT 'updated ''comment'"
     );
-    assert_schema_options(db, "utf8mb4", "utf8mb4_bin", "updated 'comment");
-    assert_show_create_schema(db, "utf8mb4", "utf8mb4_bin");
+    assert_schema_options(db, "option_app", "utf8mb4", "utf8mb4_bin", "updated 'comment");
+    assert_show_create_schema(db, "option_app", "utf8mb4", "utf8mb4_bin");
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
@@ -490,20 +494,99 @@ static void test_schema_options(void) {
     db = open_database_with_filename(root, filename);
     assert_no_runtime_schema_directory(root, "option_app");
     assert_exec_succeeds(db, "USE option_app");
-    assert_schema_options(db, "utf8mb4", "utf8mb4_bin", "updated 'comment");
-    assert_show_create_schema(db, "utf8mb4", "utf8mb4_bin");
+    assert_schema_options(db, "option_app", "utf8mb4", "utf8mb4_bin", "updated 'comment");
+    assert_show_create_schema(db, "option_app", "utf8mb4", "utf8mb4_bin");
     assert_exec_succeeds(
         db,
         "ALTER DATABASE option_app DEFAULT CHARACTER SET latin1 COLLATE latin1_bin "
         "COMMENT 'reopened comment'"
     );
-    assert_schema_options(db, "latin1", "latin1_bin", "reopened comment");
-    assert_show_create_schema(db, "latin1", "latin1_bin");
+    assert_schema_options(db, "option_app", "latin1", "latin1_bin", "reopened comment");
+    assert_show_create_schema(db, "option_app", "latin1", "latin1_bin");
     assert_exec_succeeds(db, "DROP DATABASE option_app");
     assert(mylite_storage_schema_exists(filename, "option_app") == MYLITE_STORAGE_NOTFOUND);
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_create_database_existence_options(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    table_context tables = {0};
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(
+        db,
+        "CREATE DATABASE replace_schema DEFAULT CHARACTER SET latin1 COLLATE latin1_bin "
+        "COMMENT 'old comment'"
+    );
+    assert_exec_succeeds(db, "USE replace_schema");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(64) NOT NULL, "
+        "UNIQUE KEY slug_key (slug)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO posts VALUES (1, 'old-post')");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "replace_schema");
+    assert_exec_fails(db, "CREATE DATABASE replace_schema");
+    assert_no_runtime_schema_directory(root, "replace_schema");
+    assert_catalog_table_count(filename, "replace_schema", 1U);
+    assert_exec_succeeds(db, "USE replace_schema");
+    assert_query_single_value(db, "SELECT slug FROM posts WHERE id = 1", "old-post");
+
+    assert_exec_succeeds(
+        db,
+        "CREATE DATABASE IF NOT EXISTS replace_schema "
+        "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin COMMENT 'ignored comment'"
+    );
+    assert_warning_message_contains(db, "replace_schema");
+    assert_no_runtime_schema_directory(root, "replace_schema");
+    assert_schema_options(db, "replace_schema", "latin1", "latin1_bin", "old comment");
+    assert_query_single_value(db, "SELECT slug FROM posts FORCE INDEX (slug_key)", "old-post");
+
+    assert_exec_succeeds(
+        db,
+        "CREATE OR REPLACE DATABASE replace_schema "
+        "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin COMMENT 'replacement comment'"
+    );
+    assert_no_runtime_schema_directory(root, "replace_schema");
+    assert(mylite_storage_schema_exists(filename, "replace_schema") == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_table_exists(filename, "replace_schema", "posts") == MYLITE_STORAGE_NOTFOUND
+    );
+    assert_query_single_value(db, "SELECT COALESCE(DATABASE(), '')", "");
+    assert_schema_options(db, "replace_schema", "utf8mb4", "utf8mb4_bin", "replacement comment");
+    assert_exec_succeeds(db, "USE replace_schema");
+    assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
+    assert(errmsg == NULL);
+    assert(tables.rows == 0);
+    assert_exec_fails(db, "SELECT COUNT(*) FROM posts");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "replace_schema");
+    assert_exec_succeeds(db, "USE replace_schema");
+    assert_schema_options(db, "replace_schema", "utf8mb4", "utf8mb4_bin", "replacement comment");
+    tables = (table_context){0};
+    assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
+    assert(errmsg == NULL);
+    assert(tables.rows == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
     free(filename);
     remove_tree(root);
     free(root);
@@ -7811,6 +7894,7 @@ static void assert_prepared_fails_with_message(
 
 static void assert_schema_options(
     mylite_db *db,
+    const char *schema_name,
     const char *expected_character_set,
     const char *expected_collation,
     const char *expected_comment
@@ -7820,24 +7904,26 @@ static void assert_schema_options(
         .expected_collation = expected_collation,
         .expected_comment = expected_comment,
     };
+    char sql[512];
     char *errmsg = NULL;
-
-    assert(
-        mylite_exec(
-            db,
-            "SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME, SCHEMA_COMMENT "
-            "FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME='option_app'",
-            schema_option_callback,
-            &options,
-            &errmsg
-        ) == MYLITE_OK
+    const int written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME, SCHEMA_COMMENT "
+        "FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME='%s'",
+        schema_name
     );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+
+    assert(mylite_exec(db, sql, schema_option_callback, &options, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
     assert(options.rows == 1);
 }
 
 static void assert_show_create_schema(
     mylite_db *db,
+    const char *schema_name,
     const char *expected_character_set,
     const char *expected_collation
 ) {
@@ -7845,17 +7931,13 @@ static void assert_show_create_schema(
         .expected_character_set = expected_character_set,
         .expected_collation = expected_collation,
     };
+    char sql[256];
     char *errmsg = NULL;
+    const int written = snprintf(sql, sizeof(sql), "SHOW CREATE DATABASE %s", schema_name);
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
 
-    assert(
-        mylite_exec(
-            db,
-            "SHOW CREATE DATABASE option_app",
-            show_create_schema_callback,
-            &show_create,
-            &errmsg
-        ) == MYLITE_OK
-    );
+    assert(mylite_exec(db, sql, show_create_schema_callback, &show_create, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
     assert(show_create.rows == 1);
 }

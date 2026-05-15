@@ -337,9 +337,9 @@ The current implementation keeps newly-created schema directories as transient
 runtime state when MariaDB's active table-DDL paths still need them, but
 file-backed reopen no longer reconstructs those directories from the catalog.
 SQL-layer hooks answer schema existence, schema/table listing, option reads,
-and no-directory schema alter/drop paths from catalog records. Final
-filesystem-free hooks for all schema DDL and non-table database objects remain
-planned.
+catalog-backed `CREATE DATABASE` existence options, and no-directory schema
+alter/drop paths from catalog records. Fully directory-free initial schema
+creation and non-table database objects remain planned.
 
 Views, triggers, routines, packages, sequences, and routine invocation are
 rejected by the current `libmylite` SQL policy before MariaDB can publish
