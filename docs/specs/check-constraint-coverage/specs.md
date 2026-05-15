@@ -53,8 +53,9 @@ MariaDB before the MyLite handler writes rows.
 This slice marks CHECK constraints as partial support: covered for basic
 column-level and table-level constraints on routed base tables. Later coverage
 adds named table-level CHECK add/drop ALTER, failed ADD CHECK rollback over
-incompatible existing rows, and explicit CHECK-constrained CTAS targets, while
-broader expression, broader dump/export, and rollback cases remain planned.
+incompatible existing rows, explicit CHECK-constrained CTAS targets, and a
+representative deterministic expression matrix, while exhaustive expression,
+broader dump/export, and rollback cases remain planned.
 
 ## Design
 
@@ -116,10 +117,10 @@ behavior plus MyLite catalog persistence.
 
 ## Risks And Open Questions
 
-- Complex deterministic functions, JSON-specific checks, strict-mode warning
-  interactions, `IGNORE`, `LOAD DATA`, and prepared-statement-specific
-  diagnostics need later coverage. Explicit CHECK-constrained CTAS targets and
-  failed ADD CHECK rollback over incompatible existing rows are covered by
-  follow-up slices.
+- Exhaustive deterministic functions, JSON-specific checks, strict-mode warning
+  interactions, `IGNORE`, `LOAD DATA`, and MTR-scale expression comparison need
+  later coverage. Explicit CHECK-constrained CTAS targets, failed ADD CHECK
+  rollback over incompatible existing rows, and a representative deterministic
+  expression matrix are covered by follow-up slices.
 - Failed statements still depend on current non-transactional rollback limits
   outside this slice.

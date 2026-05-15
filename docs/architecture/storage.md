@@ -230,8 +230,9 @@ Failed ADD CHECK copy ALTER over incompatible existing rows restores visible
 pre-statement catalog and row state through the existing statement checkpoint.
 Prepared execution diagnostics are covered for representative CHECK failures.
 Representative dump-style fixture import is covered for CHECK definitions.
-Broader CHECK expression, broader failed ALTER rollback, broader dump/export,
-and transaction rollback coverage remains planned.
+Representative deterministic CHECK expression matrices are covered. Exhaustive
+CHECK expression, broader failed ALTER rollback, broader dump/export, and
+transaction rollback coverage remains planned.
 Basic virtual and stored generated columns follow the same catalog-backed
 table-definition path, including supported copy ALTER add/modify/drop
 operations, CTAS projections from generated source columns, and generated
@@ -247,11 +248,12 @@ publication. Unbounded unique BLOB/TEXT keys that MariaDB represents as hidden
 long-unique hash metadata reject before catalog publication, including generated
 BLOB/TEXT columns. MariaDB 11.8 does not expose MySQL-style base-table
 expression key-part syntax; full BLOB/TEXT index support, MySQL-style
-expression-index compatibility, and broader expression matrices remain planned.
+expression-index compatibility, and exhaustive expression matrices remain planned.
 Prepared execution diagnostics are covered for representative generated-column
 unique-key failures.
 Representative dump-style fixture import is covered for generated-column
 definitions and generated-column indexes.
+Representative deterministic generated-column expression matrices are covered.
 The same create-time key-shape gate rejects FULLTEXT, SPATIAL, and long-unique
 hash indexes before catalog publication; MyLite must not publish a table
 definition whose index class cannot be maintained by the current storage

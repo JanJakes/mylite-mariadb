@@ -71,8 +71,9 @@ then verifies:
 ## Compatibility Impact
 
 CHECK and generated-column support remain partial, but representative
-dump-style import is now covered for supported routed table shapes. Broader
-dump/export compatibility and expression matrices remain planned.
+dump-style import is now covered for supported routed table shapes. A
+representative deterministic expression matrix is covered separately; broader
+dump/export compatibility and exhaustive expression matrices remain planned.
 
 ## DDL Metadata Routing Impact
 

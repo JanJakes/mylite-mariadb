@@ -148,6 +148,7 @@ static void test_blob_text_prefix_indexes(void);
 static void test_create_table_like(void);
 static void test_create_table_select(void);
 static void test_constraint_generated_dump_fixture(void);
+static void test_constraint_generated_expression_matrix(void);
 static void test_truncate_table_lifecycle(void);
 static void test_wordpress_shaped_schema(void);
 static void test_wordpress_installer_schema_fixture(void);
@@ -201,6 +202,7 @@ static void assert_table_collation(
     const char *table_name,
     const char *expected_collation
 );
+static void assert_query_single_value(mylite_db *db, const char *sql, const char *expected_value);
 static void exec_sql_fixture(mylite_db *db, const char *fixture_name);
 static int sql_fixture_cursor_is_separator(
     char **cursor,
@@ -271,6 +273,7 @@ int main(void) {
     test_create_table_like();
     test_create_table_select();
     test_constraint_generated_dump_fixture();
+    test_constraint_generated_expression_matrix();
     test_truncate_table_lifecycle();
     test_wordpress_shaped_schema();
     test_wordpress_installer_schema_fixture();
@@ -4110,6 +4113,203 @@ static void test_constraint_generated_dump_fixture(void) {
     free(filename);
     remove_tree(root);
     free(root);
+}
+
+static void test_constraint_generated_expression_matrix(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE expression_matrix");
+    assert_exec_succeeds(db, "USE expression_matrix");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE expression_posts ("
+        "id int NOT NULL,"
+        "title varchar(64) NOT NULL,"
+        "subtitle varchar(64) DEFAULT NULL,"
+        "status varchar(16) NOT NULL,"
+        "rating int NOT NULL,"
+        "bonus int NOT NULL DEFAULT 0,"
+        "slug varchar(96) AS (LOWER(REPLACE(title, ' ', '-'))) VIRTUAL,"
+        "display_title varchar(129) AS "
+        "(CONCAT(title, COALESCE(CONCAT(': ', subtitle), ''))) STORED,"
+        "score_total int AS (rating + bonus) STORED,"
+        "status_rank int AS "
+        "(CASE WHEN status = 'published' THEN 1 ELSE 0 END) VIRTUAL,"
+        "PRIMARY KEY (id),"
+        "UNIQUE KEY slug_unique (slug),"
+        "KEY score_total_key (score_total),"
+        "CONSTRAINT rating_window CHECK (rating BETWEEN 0 AND 10),"
+        "CONSTRAINT score_window CHECK (rating + bonus BETWEEN 0 AND 15),"
+        "CONSTRAINT status_choice CHECK (status IN ('draft', 'published')),"
+        "CONSTRAINT trimmed_title CHECK (title = TRIM(title) AND CHAR_LENGTH(title) > 0),"
+        "CONSTRAINT subtitle_window CHECK "
+        "(subtitle IS NULL OR CHAR_LENGTH(subtitle) <= 32)"
+        ") ENGINE=InnoDB"
+    );
+    assert_catalog_table_count(filename, "expression_matrix", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "expression_matrix",
+        "expression_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO expression_posts (id, title, subtitle, status, rating, bonus) VALUES "
+        "(1, 'Alpha Post', NULL, 'draft', 4, 1),"
+        "(2, 'Beta Post', 'Launch', 'published', 9, 3)"
+    );
+    assert_query_single_value(db, "SELECT slug FROM expression_posts WHERE id = 1", "alpha-post");
+    assert_query_single_value(
+        db,
+        "SELECT display_title FROM expression_posts WHERE id = 2",
+        "Beta Post: Launch"
+    );
+    assert_query_single_value(db, "SELECT score_total FROM expression_posts WHERE id = 2", "12");
+    assert_query_single_value(db, "SELECT status_rank FROM expression_posts WHERE id = 1", "0");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM expression_posts FORCE INDEX (slug_unique) WHERE slug = 'alpha-post'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM expression_posts FORCE INDEX (score_total_key) WHERE score_total = 12",
+        "2"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO expression_posts (id, title, subtitle, status, rating, bonus) "
+        "VALUES (3, 'Bad Rating', NULL, 'draft', 11, 0)",
+        "CONSTRAINT"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO expression_posts (id, title, subtitle, status, rating, bonus) "
+        "VALUES (3, 'Bad Score', NULL, 'draft', 9, 9)",
+        "CONSTRAINT"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO expression_posts (id, title, subtitle, status, rating, bonus) "
+        "VALUES (3, 'Bad Status', NULL, 'archived', 4, 1)",
+        "CONSTRAINT"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO expression_posts (id, title, subtitle, status, rating, bonus) "
+        "VALUES (3, ' Bad Title ', NULL, 'draft', 4, 1)",
+        "CONSTRAINT"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "UPDATE expression_posts SET bonus = 20 WHERE id = 2",
+        "CONSTRAINT"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO expression_posts (id, title, subtitle, status, rating, bonus) "
+        "VALUES (3, 'Alpha Post', NULL, 'draft', 5, 1)",
+        "Duplicate"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "UPDATE expression_posts "
+        "SET title = 'Gamma Post', subtitle = 'Review', status = 'published', rating = 5, "
+        "bonus = 2 "
+        "WHERE id = 1"
+    );
+    assert_query_single_value(db, "SELECT slug FROM expression_posts WHERE id = 1", "gamma-post");
+    assert_query_single_value(
+        db,
+        "SELECT display_title FROM expression_posts WHERE id = 1",
+        "Gamma Post: Review"
+    );
+    assert_query_single_value(db, "SELECT score_total FROM expression_posts WHERE id = 1", "7");
+    assert_query_single_value(db, "SELECT status_rank FROM expression_posts WHERE id = 1", "1");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM expression_posts FORCE INDEX (slug_unique) "
+        "WHERE slug = 'alpha-post'",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM expression_posts FORCE INDEX (slug_unique) WHERE slug = 'gamma-post'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM expression_posts FORCE INDEX (score_total_key) WHERE score_total = 7",
+        "1"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE expression_matrix");
+    assert_catalog_table_count(filename, "expression_matrix", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "expression_matrix",
+        "expression_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_query_single_value(db, "SELECT slug FROM expression_posts WHERE id = 1", "gamma-post");
+    assert_query_single_value(
+        db,
+        "SELECT display_title FROM expression_posts WHERE id = 1",
+        "Gamma Post: Review"
+    );
+    assert_query_single_value(db, "SELECT score_total FROM expression_posts WHERE id = 2", "12");
+    assert_query_single_value(db, "SELECT status_rank FROM expression_posts WHERE id = 2", "1");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM expression_posts FORCE INDEX (slug_unique) WHERE slug = 'gamma-post'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM expression_posts FORCE INDEX (score_total_key) WHERE score_total = 12",
+        "2"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO expression_posts (id, title, subtitle, status, rating, bonus) "
+        "VALUES (4, 'Delta Post', 'This subtitle is intentionally too long', "
+        "'draft', 4, 1)",
+        "CONSTRAINT"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO expression_posts (id, title, subtitle, status, rating, bonus) "
+        "VALUES (4, 'Gamma Post', NULL, 'draft', 5, 1)",
+        "Duplicate"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void assert_query_single_value(mylite_db *db, const char *sql, const char *expected_value) {
+    single_value_context value = {
+        .expected_value = expected_value,
+    };
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, single_value_callback, &value, &errmsg) == MYLITE_OK);
+    assert(errmsg == NULL);
+    assert(value.rows == 1);
 }
 
 static void test_truncate_table_lifecycle(void) {

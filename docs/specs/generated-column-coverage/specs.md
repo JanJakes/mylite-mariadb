@@ -21,7 +21,7 @@ added through standalone copy-rebuild index DDL.
 - Implement a MyLite-native generated-column expression evaluator.
 - Support foreign keys, FULLTEXT, SPATIAL, expression indexes, or generated
   primary keys.
-- Add broad expression, `ALTER`, CTAS, broader dump/export,
+- Add exhaustive expression, `ALTER`, CTAS, broader dump/export,
   prepared-statement, or MTR coverage.
 - Implement SQL rollback for generated-column writes.
 
@@ -144,8 +144,8 @@ unchanged for practical purposes.
 
 ## Risks And Open Questions
 
-- Broader expression classes, SQL-mode-sensitive expressions, broader
+- Exhaustive expression classes, SQL-mode-sensitive expressions, broader
   dump/export, and rollback remain uncovered.
 - Expression/hidden generated indexes, generated full/oversized BLOB/TEXT key
-  payloads, and broader expression matrices need separate specs before support
-  is claimed.
+  payloads, and exhaustive expression matrices need separate specs before
+  support is claimed.
