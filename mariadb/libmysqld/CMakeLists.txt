@@ -111,9 +111,15 @@ ELSE()
 ENDIF()
 
 OPTION(MYLITE_WITH_PROCEDURE_ANALYSE "Build PROCEDURE ANALYSE SELECT procedure" ON)
-IF(MYLITE_WITH_PROCEDURE_ANALYSE)
+OPTION(MYLITE_WITH_SELECT_PROCEDURE_RUNTIME "Build SELECT PROCEDURE clause runtime" ON)
+IF(NOT MYLITE_WITH_SELECT_PROCEDURE_RUNTIME)
+  SET(MYLITE_SELECT_PROCEDURE_SOURCE mylite_select_procedure_stub.cc)
+  SET(MYLITE_PROCEDURE_ANALYSE_SOURCE)
+ELSEIF(MYLITE_WITH_PROCEDURE_ANALYSE)
+  SET(MYLITE_SELECT_PROCEDURE_SOURCE ../sql/procedure.cc)
   SET(MYLITE_PROCEDURE_ANALYSE_SOURCE ../sql/sql_analyse.cc)
 ELSE()
+  SET(MYLITE_SELECT_PROCEDURE_SOURCE ../sql/procedure.cc)
   SET(MYLITE_PROCEDURE_ANALYSE_SOURCE mylite_procedure_analyse_stub.cc)
 ENDIF()
 
@@ -148,7 +154,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/opt_sargable_left.cc
            ../sql/opt_sum.cc
            ../sql/opt_vcol_substitution.cc
-           ../sql/parse_file.cc ../sql/procedure.cc ../sql/protocol.cc 
+           ../sql/parse_file.cc ${MYLITE_SELECT_PROCEDURE_SOURCE} ../sql/protocol.cc
            ../sql/records.cc ../sql/repl_failsafe.cc ../sql/rpl_filter.cc
            ../sql/rpl_record.cc ../sql/des_key_file.cc
            ../sql/rpl_injector.cc ../sql/set_var.cc ../sql/spatial.cc 

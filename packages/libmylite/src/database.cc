@@ -338,6 +338,7 @@ std::string_view pop_sql_set_assignment(std::string_view &sql);
 bool sql_set_assignment_targets_variable(std::string_view &assignment, const char *keyword);
 bool is_non_table_object_sql(std::string_view sql);
 bool is_procedure_analyse_sql(std::string_view sql);
+bool is_select_procedure_sql(std::string_view sql);
 bool is_transaction_control_sql(std::string_view sql);
 bool is_locking_sql(std::string_view sql);
 bool is_online_alter_sql(std::string_view sql);
@@ -2037,6 +2038,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_procedure_analyse_sql(sql)) {
         return "unsupported PROCEDURE ANALYSE SQL clause";
     }
+    if (is_select_procedure_sql(sql)) {
+        return "unsupported SELECT PROCEDURE SQL clause";
+    }
     if (is_transaction_control_sql(sql)) {
         return "unsupported SQL transaction control";
     }
@@ -2400,6 +2404,31 @@ bool is_procedure_analyse_sql(std::string_view sql) {
 
         if (sql_token_equals(procedure_name, "ANALYSE") &&
             sql_next_non_noise_is(after_procedure, '(')) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool is_select_procedure_sql(std::string_view sql) {
+    std::string_view scan = sql;
+    std::string_view token;
+    if (!pop_sql_scanned_token(scan, token) || !sql_token_equals(token, "SELECT")) {
+        return false;
+    }
+
+    while (pop_sql_scanned_token(scan, token)) {
+        if (!sql_token_equals(token, "PROCEDURE")) {
+            continue;
+        }
+
+        std::string_view after_procedure = scan;
+        std::string_view procedure_name;
+        if (!pop_sql_scanned_token(after_procedure, procedure_name)) {
+            return false;
+        }
+
+        if (!procedure_name.empty() && sql_next_non_noise_is(after_procedure, '(')) {
             return true;
         }
     }

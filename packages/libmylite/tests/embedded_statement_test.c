@@ -411,6 +411,21 @@ static void test_prepare_diagnostics(void) {
     assert(
         mylite_prepare(
             db,
+            "SELECT ? PROCEDURE unknown_procedure()",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_ERROR
+    );
+    assert(stmt == NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), "SELECT PROCEDURE") != NULL);
+
+    assert(
+        mylite_prepare(
+            db,
             "LOAD DATA INFILE '/tmp/mylite-load.csv' INTO TABLE blocked_load",
             MYLITE_NUL_TERMINATED,
             &stmt,

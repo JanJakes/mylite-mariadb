@@ -43,6 +43,7 @@ static void assert_variable_value_or_missing(mylite_db *db, const char *name, co
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_help_command_exec_fails(mylite_db *db, const char *sql);
 static void assert_procedure_analyse_exec_fails(mylite_db *db, const char *sql);
+static void assert_select_procedure_exec_fails(mylite_db *db, const char *sql);
 static void assert_server_utility_exec_fails(mylite_db *db, const char *sql);
 static void assert_gis_sql_function_exec_fails(mylite_db *db, const char *sql);
 static void assert_sformat_sql_function_exec_fails(mylite_db *db, const char *sql);
@@ -252,6 +253,7 @@ static void test_procedure_analyse_is_rejected(void) {
 
     assert_procedure_analyse_exec_fails(db, "SELECT 1 PROCEDURE ANALYSE()");
     assert_procedure_analyse_exec_fails(db, "SELECT 1 PROCEDURE analyse(10, 2000)");
+    assert_select_procedure_exec_fails(db, "SELECT 1 PROCEDURE unknown_procedure()");
     assert(
         mylite_exec(db, "SELECT 'PROCEDURE ANALYSE()' AS procedure_text", NULL, NULL, NULL) ==
         MYLITE_OK
@@ -769,6 +771,18 @@ static void assert_procedure_analyse_exec_fails(mylite_db *db, const char *sql) 
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "PROCEDURE ANALYSE") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_select_procedure_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "SELECT PROCEDURE") != NULL);
     mylite_free(errmsg);
 }
 
