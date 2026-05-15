@@ -169,6 +169,13 @@ struct ColumnValue {
     my_bool mysql_error = 0;
     bool bytes_complete = false;
 };
+
+struct SchemaDefinition {
+    std::string name;
+    std::string default_character_set_name;
+    std::string default_collation_name;
+    std::string comment;
+};
 #endif
 
 struct StoredWarning {
@@ -288,10 +295,20 @@ int rehydrate_schema_directories(mylite_db &database);
 int sync_schema_catalog(mylite_db &database);
 bool is_schema_catalog_sql(std::string_view sql);
 int collect_storage_schema(void *ctx, const char *schema_name);
-int load_runtime_schema_names(mylite_db &database, std::vector<std::string> &out_names);
+int load_runtime_schema_definitions(
+    mylite_db &database,
+    std::vector<SchemaDefinition> &out_definitions
+);
 bool is_system_schema(std::string_view schema_name);
-bool has_schema_name(const std::vector<std::string> &schemas, const std::string &schema_name);
+bool has_schema_name(const std::vector<SchemaDefinition> &schemas, const std::string &schema_name);
+int schema_create_sql(
+    mylite_db &database,
+    const SchemaDefinition &definition,
+    std::string &out_sql
+);
+bool is_schema_option_identifier(std::string_view identifier);
 std::string quote_identifier(std::string_view identifier);
+std::string quote_string_literal(std::string_view value);
 #  endif
 int store_and_emit_result(
     mylite_db &database,
@@ -1902,7 +1919,40 @@ int rehydrate_schema_directories(mylite_db &database) {
     }
 
     for (const std::string &schema_name : schema_names) {
-        const std::string sql = "CREATE DATABASE IF NOT EXISTS " + quote_identifier(schema_name);
+        SchemaDefinition definition;
+        definition.name = schema_name;
+        mylite_storage_schema_metadata metadata = {};
+        metadata.size = sizeof(metadata);
+        storage_result = mylite_storage_read_schema_definition(
+            database.filename.c_str(),
+            schema_name.c_str(),
+            &metadata
+        );
+        if (storage_result == MYLITE_STORAGE_OK) {
+            try {
+                definition.default_character_set_name = metadata.default_character_set_name;
+                definition.default_collation_name = metadata.default_collation_name;
+                definition.comment = metadata.schema_comment;
+            } catch (const std::bad_alloc &) {
+                mylite_storage_free(metadata.default_character_set_name);
+                mylite_storage_free(metadata.default_collation_name);
+                mylite_storage_free(metadata.schema_comment);
+                set_error(database, MYLITE_NOMEM, "schema metadata allocation failed");
+                return MYLITE_NOMEM;
+            }
+            mylite_storage_free(metadata.default_character_set_name);
+            mylite_storage_free(metadata.default_collation_name);
+            mylite_storage_free(metadata.schema_comment);
+        } else if (storage_result != MYLITE_STORAGE_NOTFOUND) {
+            set_error(database, map_storage_result(storage_result), "schema catalog read failed");
+            return database.errcode;
+        }
+
+        std::string sql;
+        const int sql_result = schema_create_sql(database, definition, sql);
+        if (sql_result != MYLITE_OK) {
+            return sql_result;
+        }
         if (mysql_query(&database.mysql, sql.c_str()) != 0) {
             set_mariadb_error(database);
             return MYLITE_ERROR;
@@ -1912,15 +1962,21 @@ int rehydrate_schema_directories(mylite_db &database) {
 }
 
 int sync_schema_catalog(mylite_db &database) {
-    std::vector<std::string> runtime_schema_names;
-    int result = load_runtime_schema_names(database, runtime_schema_names);
+    std::vector<SchemaDefinition> runtime_schemas;
+    int result = load_runtime_schema_definitions(database, runtime_schemas);
     if (result != MYLITE_OK) {
         return result;
     }
 
-    for (const std::string &schema_name : runtime_schema_names) {
+    for (const SchemaDefinition &schema : runtime_schemas) {
+        mylite_storage_schema_definition definition = {};
+        definition.size = sizeof(definition);
+        definition.schema_name = schema.name.c_str();
+        definition.default_character_set_name = schema.default_character_set_name.c_str();
+        definition.default_collation_name = schema.default_collation_name.c_str();
+        definition.schema_comment = schema.comment.c_str();
         const mylite_storage_result storage_result =
-            mylite_storage_store_schema(database.filename.c_str(), schema_name.c_str());
+            mylite_storage_store_schema_definition(database.filename.c_str(), &definition);
         if (storage_result != MYLITE_STORAGE_OK) {
             set_error(database, map_storage_result(storage_result), "schema catalog write failed");
             return database.errcode;
@@ -1939,7 +1995,7 @@ int sync_schema_catalog(mylite_db &database) {
     }
 
     for (const std::string &schema_name : catalog_schema_names) {
-        if (has_schema_name(runtime_schema_names, schema_name)) {
+        if (has_schema_name(runtime_schemas, schema_name)) {
             continue;
         }
         storage_result = mylite_storage_drop_schema(database.filename.c_str(), schema_name.c_str());
@@ -1965,7 +2021,8 @@ bool is_schema_catalog_sql(std::string_view sql) {
         second = pop_sql_token(rest);
     }
 
-    return (sql_token_equals(first, "CREATE") || sql_token_equals(first, "DROP")) &&
+    return (sql_token_equals(first, "CREATE") || sql_token_equals(first, "DROP") ||
+            sql_token_equals(first, "ALTER")) &&
            (sql_token_equals(second, "DATABASE") || sql_token_equals(second, "SCHEMA"));
 }
 
@@ -1979,8 +2036,15 @@ int collect_storage_schema(void *ctx, const char *schema_name) {
     return 0;
 }
 
-int load_runtime_schema_names(mylite_db &database, std::vector<std::string> &out_names) {
-    if (mysql_query(&database.mysql, "SHOW DATABASES") != 0) {
+int load_runtime_schema_definitions(
+    mylite_db &database,
+    std::vector<SchemaDefinition> &out_definitions
+) {
+    if (mysql_query(
+            &database.mysql,
+            "SELECT SCHEMA_NAME, DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME, "
+            "SCHEMA_COMMENT FROM INFORMATION_SCHEMA.SCHEMATA"
+        ) != 0) {
         set_mariadb_error(database);
         return MYLITE_ERROR;
     }
@@ -1998,15 +2062,23 @@ int load_runtime_schema_names(mylite_db &database, std::vector<std::string> &out
         for (MYSQL_ROW row = mysql_fetch_row(result); row != nullptr;
              row = mysql_fetch_row(result)) {
             unsigned long *lengths = mysql_fetch_lengths(result);
-            if (lengths == nullptr || row[0] == nullptr) {
+            if (lengths == nullptr || row[0] == nullptr || row[1] == nullptr || row[2] == nullptr ||
+                row[3] == nullptr) {
                 mysql_free_result(result);
-                set_error(database, MYLITE_ERROR, "malformed SHOW DATABASES result");
+                set_error(database, MYLITE_ERROR, "malformed INFORMATION_SCHEMA.SCHEMATA result");
                 return MYLITE_ERROR;
             }
 
             std::string_view schema_name(row[0], static_cast<std::size_t>(lengths[0]));
             if (!is_system_schema(schema_name)) {
-                out_names.emplace_back(schema_name);
+                out_definitions.emplace_back(
+                    SchemaDefinition{
+                        std::string(schema_name),
+                        std::string(row[1], static_cast<std::size_t>(lengths[1])),
+                        std::string(row[2], static_cast<std::size_t>(lengths[2])),
+                        std::string(row[3], static_cast<std::size_t>(lengths[3])),
+                    }
+                );
             }
         }
     } catch (const std::bad_alloc &) {
@@ -2032,8 +2104,55 @@ bool is_system_schema(std::string_view schema_name) {
            sql_token_equals(schema_name, "sys");
 }
 
-bool has_schema_name(const std::vector<std::string> &schemas, const std::string &schema_name) {
-    return std::find(schemas.begin(), schemas.end(), schema_name) != schemas.end();
+bool has_schema_name(const std::vector<SchemaDefinition> &schemas, const std::string &schema_name) {
+    return std::find_if(
+               schemas.begin(),
+               schemas.end(),
+               [&schema_name](const SchemaDefinition &schema) { return schema.name == schema_name; }
+           ) != schemas.end();
+}
+
+int schema_create_sql(
+    mylite_db &database,
+    const SchemaDefinition &definition,
+    std::string &out_sql
+) {
+    try {
+        out_sql = "CREATE DATABASE IF NOT EXISTS " + quote_identifier(definition.name);
+        if (!definition.default_character_set_name.empty()) {
+            if (!is_schema_option_identifier(definition.default_character_set_name)) {
+                set_error(database, MYLITE_ERROR, "invalid schema character set name");
+                return MYLITE_ERROR;
+            }
+            out_sql += " DEFAULT CHARACTER SET ";
+            out_sql += definition.default_character_set_name;
+        }
+        if (!definition.default_collation_name.empty()) {
+            if (!is_schema_option_identifier(definition.default_collation_name)) {
+                set_error(database, MYLITE_ERROR, "invalid schema collation name");
+                return MYLITE_ERROR;
+            }
+            out_sql += " COLLATE ";
+            out_sql += definition.default_collation_name;
+        }
+        if (!definition.comment.empty()) {
+            out_sql += " COMMENT ";
+            out_sql += quote_string_literal(definition.comment);
+        }
+    } catch (const std::bad_alloc &) {
+        set_error(database, MYLITE_NOMEM, "schema SQL allocation failed");
+        return MYLITE_NOMEM;
+    }
+    return MYLITE_OK;
+}
+
+bool is_schema_option_identifier(std::string_view identifier) {
+    if (identifier.empty()) {
+        return false;
+    }
+    return std::all_of(identifier.begin(), identifier.end(), [](char ch) {
+        return std::isalnum(static_cast<unsigned char>(ch)) != 0 || ch == '_';
+    });
 }
 
 std::string quote_identifier(std::string_view identifier) {
@@ -2047,6 +2166,20 @@ std::string quote_identifier(std::string_view identifier) {
         }
     }
     quoted.push_back('`');
+    return quoted;
+}
+
+std::string quote_string_literal(std::string_view value) {
+    std::string quoted;
+    quoted.reserve(value.size() + 2U);
+    quoted.push_back('\'');
+    for (char ch : value) {
+        if (ch == '\'' || ch == '\\') {
+            quoted.push_back(ch);
+        }
+        quoted.push_back(ch);
+    }
+    quoted.push_back('\'');
     return quoted;
 }
 #  endif

@@ -203,14 +203,15 @@ index_id  -> table_id + index name
 ```
 
 No persistent directory is created for a schema. `CREATE DATABASE`,
-`DROP DATABASE`, `USE`, table-name resolution, and information schema listing
-are represented as catalog namespaces. The current implementation keeps
-MariaDB's SQL-layer directory checks intact by reconstructing transient
-runtime directories from the catalog on file-backed open and by syncing
-successful direct and prepared `CREATE/DROP DATABASE` and
-`CREATE/DROP SCHEMA` statements back to schema records. Schema default charset,
-collation, comments, and a final SQL-layer hook that removes the transient
-directory bridge remain planned.
+`DROP DATABASE`, `ALTER DATABASE`, `USE`, table-name resolution, and
+information schema listing are represented as catalog namespaces. Schema
+records store the schema name plus the default character set, default
+collation, and schema comment that MariaDB would otherwise keep in `db.opt`.
+The current implementation keeps MariaDB's SQL-layer directory checks intact by
+reconstructing transient runtime directories from the catalog on file-backed
+open and by syncing successful direct and prepared schema create, alter, and
+drop statements back to schema records. A final SQL-layer hook that removes the
+transient directory bridge remains planned.
 
 The default embedded profile does not expose server account administration,
 dynamic plugin installation, replication metadata, or the event scheduler.

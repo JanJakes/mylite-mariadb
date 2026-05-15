@@ -270,6 +270,14 @@ static void test_schema_records(void) {
         .definition = definition,
         .definition_size = sizeof(definition),
     };
+    mylite_storage_schema_definition schema_definition = {
+        .size = sizeof(schema_definition),
+        .schema_name = "app",
+        .default_character_set_name = "latin1",
+        .default_collation_name = "latin1_bin",
+        .schema_comment = "application schema",
+    };
+    mylite_storage_schema_metadata schema_metadata = {0};
     schema_list_capture schemas = {
         .app_schema = "app",
         .blog_schema = "blog",
@@ -284,6 +292,19 @@ static void test_schema_records(void) {
     assert(mylite_storage_store_schema(filename, "app") == MYLITE_STORAGE_OK);
     assert(mylite_storage_store_schema(filename, "app") == MYLITE_STORAGE_OK);
     assert(mylite_storage_schema_exists(filename, "app") == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_store_schema_definition(filename, &schema_definition) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_read_schema_definition(filename, "app", &schema_metadata) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(strcmp(schema_metadata.default_character_set_name, "latin1") == 0);
+    assert(strcmp(schema_metadata.default_collation_name, "latin1_bin") == 0);
+    assert(strcmp(schema_metadata.schema_comment, "application schema") == 0);
+    mylite_storage_free(schema_metadata.default_character_set_name);
+    mylite_storage_free(schema_metadata.default_collation_name);
+    mylite_storage_free(schema_metadata.schema_comment);
     assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
     assert(mylite_storage_schema_exists(filename, "blog") == MYLITE_STORAGE_OK);
     assert(mylite_storage_list_schemas(filename, collect_schema, &schemas) == MYLITE_STORAGE_OK);

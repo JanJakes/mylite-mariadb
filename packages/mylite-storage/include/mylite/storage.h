@@ -72,6 +72,21 @@ typedef struct mylite_storage_table_metadata {
     char *effective_engine_name;
 } mylite_storage_table_metadata;
 
+typedef struct mylite_storage_schema_definition {
+    size_t size;
+    const char *schema_name;
+    const char *default_character_set_name;
+    const char *default_collation_name;
+    const char *schema_comment;
+} mylite_storage_schema_definition;
+
+typedef struct mylite_storage_schema_metadata {
+    size_t size;
+    char *default_character_set_name;
+    char *default_collation_name;
+    char *schema_comment;
+} mylite_storage_schema_metadata;
+
 typedef struct mylite_storage_rowset {
     size_t size;
     unsigned char *rows;
@@ -119,8 +134,17 @@ mylite_storage_result mylite_storage_store_table_definition(
     const mylite_storage_table_definition *definition
 );
 mylite_storage_result mylite_storage_store_schema(const char *filename, const char *schema_name);
+mylite_storage_result mylite_storage_store_schema_definition(
+    const char *filename,
+    const mylite_storage_schema_definition *definition
+);
 mylite_storage_result mylite_storage_drop_schema(const char *filename, const char *schema_name);
 mylite_storage_result mylite_storage_schema_exists(const char *filename, const char *schema_name);
+mylite_storage_result mylite_storage_read_schema_definition(
+    const char *filename,
+    const char *schema_name,
+    mylite_storage_schema_metadata *out_metadata
+);
 mylite_storage_result mylite_storage_read_table_definition(
     const char *filename,
     const char *schema_name,

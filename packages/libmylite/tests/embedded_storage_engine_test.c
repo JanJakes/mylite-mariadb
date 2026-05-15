@@ -25,6 +25,13 @@ typedef struct schema_context {
     int found_empty_blog;
 } schema_context;
 
+typedef struct schema_option_context {
+    int rows;
+    const char *expected_character_set;
+    const char *expected_collation;
+    const char *expected_comment;
+} schema_option_context;
+
 typedef struct post_row_context {
     int rows;
     int found_draft;
@@ -93,6 +100,7 @@ static void test_show_engines_reports_mylite(void);
 static void test_memory_database_has_empty_mylite_discovery(void);
 static void test_schema_namespaces(void);
 static void test_prepared_schema_namespaces(void);
+static void test_schema_options(void);
 static void test_create_table_persists_catalog_metadata(void);
 static void test_alter_table_rebuilds_keyless_rows(void);
 static void test_indexed_rows(void);
@@ -105,6 +113,12 @@ static void test_wordpress_shaped_schema(void);
 static void assert_exec_succeeds(mylite_db *db, const char *sql);
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_prepared_succeeds(mylite_db *db, const char *sql);
+static void assert_schema_options(
+    mylite_db *db,
+    const char *expected_character_set,
+    const char *expected_collation,
+    const char *expected_comment
+);
 static void assert_catalog_table_count(
     const char *filename,
     const char *schema_name,
@@ -119,6 +133,7 @@ static void assert_catalog_table_metadata(
 );
 static int engine_callback(void *ctx, int column_count, char **values, char **column_names);
 static int schema_callback(void *ctx, int column_count, char **values, char **column_names);
+static int schema_option_callback(void *ctx, int column_count, char **values, char **column_names);
 static int table_callback(void *ctx, int column_count, char **values, char **column_names);
 static int row_callback(void *ctx, int column_count, char **values, char **column_names);
 static int post_row_callback(void *ctx, int column_count, char **values, char **column_names);
@@ -152,6 +167,7 @@ int main(void) {
     test_memory_database_has_empty_mylite_discovery();
     test_schema_namespaces();
     test_prepared_schema_namespaces();
+    test_schema_options();
     test_create_table_persists_catalog_metadata();
     test_alter_table_rebuilds_keyless_rows();
     test_indexed_rows();
@@ -271,6 +287,52 @@ static void test_prepared_schema_namespaces(void) {
     assert_prepared_succeeds(db, "DROP SCHEMA prepared_app");
     assert(mylite_storage_schema_exists(filename, "prepared_app") == MYLITE_STORAGE_NOTFOUND);
     assert_exec_fails(db, "USE prepared_app");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_schema_options(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    mylite_storage_schema_metadata metadata = {0};
+
+    assert_exec_succeeds(
+        db,
+        "CREATE DATABASE option_app DEFAULT CHARACTER SET latin1 COLLATE latin1_bin "
+        "COMMENT 'first comment'"
+    );
+    assert_schema_options(db, "latin1", "latin1_bin", "first comment");
+    assert(
+        mylite_storage_read_schema_definition(filename, "option_app", &metadata) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(strcmp(metadata.default_character_set_name, "latin1") == 0);
+    assert(strcmp(metadata.default_collation_name, "latin1_bin") == 0);
+    assert(strcmp(metadata.schema_comment, "first comment") == 0);
+    mylite_storage_free(metadata.default_character_set_name);
+    mylite_storage_free(metadata.default_collation_name);
+    mylite_storage_free(metadata.schema_comment);
+
+    assert_exec_succeeds(
+        db,
+        "ALTER DATABASE option_app DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin "
+        "COMMENT 'updated ''comment'"
+    );
+    assert_schema_options(db, "utf8mb4", "utf8mb4_bin", "updated 'comment");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE option_app");
+    assert_schema_options(db, "utf8mb4", "utf8mb4_bin", "updated 'comment");
+    assert_exec_succeeds(db, "DROP DATABASE option_app");
+    assert(mylite_storage_schema_exists(filename, "option_app") == MYLITE_STORAGE_NOTFOUND);
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
@@ -2119,6 +2181,33 @@ static void assert_prepared_succeeds(mylite_db *db, const char *sql) {
     assert(mylite_finalize(stmt) == MYLITE_OK);
 }
 
+static void assert_schema_options(
+    mylite_db *db,
+    const char *expected_character_set,
+    const char *expected_collation,
+    const char *expected_comment
+) {
+    schema_option_context options = {
+        .expected_character_set = expected_character_set,
+        .expected_collation = expected_collation,
+        .expected_comment = expected_comment,
+    };
+    char *errmsg = NULL;
+
+    assert(
+        mylite_exec(
+            db,
+            "SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME, SCHEMA_COMMENT "
+            "FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME='option_app'",
+            schema_option_callback,
+            &options,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(options.rows == 1);
+}
+
 static void assert_catalog_table_count(
     const char *filename,
     const char *schema_name,
@@ -2188,6 +2277,21 @@ static int schema_callback(void *ctx, int column_count, char **values, char **co
         schema_ctx->found_empty_blog = 1;
         ++schema_ctx->rows;
     }
+    return 0;
+}
+
+static int schema_option_callback(void *ctx, int column_count, char **values, char **column_names) {
+    schema_option_context *option_ctx = (schema_option_context *)ctx;
+    (void)column_names;
+
+    assert(column_count == 3);
+    assert(values[0] != NULL);
+    assert(values[1] != NULL);
+    assert(values[2] != NULL);
+    assert(strcmp(values[0], option_ctx->expected_character_set) == 0);
+    assert(strcmp(values[1], option_ctx->expected_collation) == 0);
+    assert(strcmp(values[2], option_ctx->expected_comment) == 0);
+    ++option_ctx->rows;
     return 0;
 }
 

@@ -102,12 +102,13 @@ when the `embedded-dev` CMake preset enables it. MyLite passes owned startup
 options, ignores ambient option files with `--no-defaults`, creates a temporary
 runtime directory for MariaDB bootstrap files, and removes that directory on the
 final close. Current storage-engine smoke builds persist schema namespace
-records, table-definition metadata, rows, autoincrement state, supported
-indexes, and rollback-journal publication state in the primary `.mylite` file.
-File-backed opens rehydrate transient MariaDB schema directories from the
-catalog before user SQL runs; broader schema options, SQL transactions, and
-savepoints remain planned. Existing-file opens preserve storage lock conflicts
-as `MYLITE_BUSY` before starting the embedded runtime.
+records with default character set, collation, and comment options,
+table-definition metadata, rows, autoincrement state, supported indexes, and
+rollback-journal publication state in the primary `.mylite` file. File-backed
+opens rehydrate transient MariaDB schema directories from the catalog before
+user SQL runs; SQL transactions and savepoints remain planned. Existing-file
+opens preserve storage lock conflicts as `MYLITE_BUSY` before starting the
+embedded runtime.
 
 ## Direct Execution
 
@@ -138,8 +139,9 @@ MariaDB connection in `embedded-dev` builds, returns text result rows, preserves
 SQL `NULL` values as `NULL` callback entries, and populates MariaDB diagnostics
 on query failure. File-backed MyLite storage-engine builds support catalog
 schema namespaces for successful direct `CREATE/DROP DATABASE` and
-`CREATE/DROP SCHEMA` statements, routed `CREATE TABLE` metadata,
-catalog-backed `DROP TABLE` and simple
+`CREATE/DROP SCHEMA` statements, including `ALTER DATABASE` / `ALTER SCHEMA`
+updates to default character set, collation, and comment options, routed
+`CREATE TABLE` metadata, catalog-backed `DROP TABLE` and simple
 `RENAME TABLE`, keyless copy `ALTER` rebuilds, and keyless `INSERT` plus
 full-scan `SELECT` over persisted MyLite row pages.
 
@@ -178,9 +180,10 @@ ownership, affected rows, insert ids, MariaDB diagnostics, warnings after
 completed execution and selected failed execution paths, and binary-safe
 text/BLOB column reads. File-backed MyLite storage-engine builds synchronize
 successful prepared `CREATE/DROP DATABASE` and `CREATE/DROP SCHEMA` statements
-with the schema namespace catalog. Multi-result execution, parameter metadata,
-array binding, streaming parameter binding, and direct-execution large-value
-streaming remain planned.
+plus prepared `ALTER DATABASE` / `ALTER SCHEMA` option changes with the schema
+namespace catalog. Multi-result execution, parameter metadata, array binding,
+streaming parameter binding, and direct-execution large-value streaming remain
+planned.
 
 ## Bindings
 
