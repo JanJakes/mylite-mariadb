@@ -680,6 +680,10 @@ static void reset_compiled_collations(void)
     if (snapshot->charset)
       *snapshot->charset= snapshot->value;
   }
+#ifdef HAVE_UCA_COLLATIONS
+  my_uca1400_reset_collation_cache();
+#endif
+  default_charset_info= &my_charset_latin1;
 }
 
 

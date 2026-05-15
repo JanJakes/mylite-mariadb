@@ -58,9 +58,10 @@ MariaDB 11.8.6 needed four narrow embedded-restart fixes for repeated
   participant counters, savepoint allocation size, and DDL recovery state after
   plugin shutdown so the next `mysql_server_init()` starts from a fresh handler
   registry.
-- `mariadb/mysys/charset.c` restores compiled charset definitions after charset
-  teardown so UCA collations such as `utf8mb4_unicode_ci` do not retain stale
-  ready state across embedded restarts.
+- `mariadb/mysys/charset.c` restores compiled charset definitions, resets the
+  UCA 1400 shared tailored-weight cache, and restores the default charset
+  pointer after charset teardown so UCA collations do not retain stale state
+  across embedded restarts.
 
 ## Metadata And Discovery
 

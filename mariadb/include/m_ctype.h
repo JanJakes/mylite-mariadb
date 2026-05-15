@@ -1586,6 +1586,7 @@ my_bool my_cs_can_be_contraction_head(CHARSET_INFO *cs, my_wc_t wc);
 my_bool my_cs_can_be_contraction_tail(CHARSET_INFO *cs, my_wc_t wc);
 const uint16 *my_cs_contraction2_weight(CHARSET_INFO *cs, my_wc_t wc1,
                                          my_wc_t wc2);
+void my_uca1400_reset_collation_cache(void);
 
 /* declarations for simple charsets */
 extern int  my_strnncoll_simple(CHARSET_INFO *, const uchar *, size_t,

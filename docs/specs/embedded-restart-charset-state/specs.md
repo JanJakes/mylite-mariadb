@@ -5,8 +5,10 @@
 MyLite repeatedly starts and stops MariaDB's embedded runtime inside one process.
 MariaDB's charset registry is mostly process-global state, and UCA collations
 such as `utf8mb4_unicode_ci` mutate compiled `CHARSET_INFO` definitions during
-initialization. Embedded shutdown frees the once-allocated charset data, but the
-compiled charset structs can still look ready on the next startup.
+initialization. UCA 1400 collations also cache shared tailored weight data in
+static process-global arrays. Embedded shutdown frees the once-allocated charset
+data, but the compiled charset structs and UCA 1400 cache entries can still look
+ready on the next startup.
 
 The observed failure was a storage-smoke crash after reopening a file-backed
 database and using a `utf8mb4_unicode_ci` secondary index. The comparator reached
@@ -26,6 +28,9 @@ MariaDB base: `mariadb-11.8.6`
 - `mariadb/mysys/charset.c` `free_charsets()` resets the pthread-once guard and
   frees the charset-name hash, but upstream does not restore mutated compiled
   charset structs.
+- `mariadb/strings/ctype-uca1400.c` stores shared tailored UCA 1400 weight data
+  in `my_uca1400_info_tailored`. Entries in that cache point into the
+  once-allocator and must not survive `my_once_free()`.
 - `mariadb/mysys/my_init.c` `my_end()` calls `free_charsets()` before
   `my_once_free()`, so UCA objects allocated from the once allocator cannot be
   reused after embedded shutdown.
@@ -42,8 +47,11 @@ MariaDB base: `mariadb-11.8.6`
 
 Snapshot each compiled charset definition the first time MariaDB registers it,
 then restore those snapshots from `free_charsets()` before the next embedded
-startup can reuse the compiled globals. The reset deliberately happens in
-`mysys/charset.c`, beside the registry and initialization lifecycle it repairs.
+startup can reuse the compiled globals. The same teardown resets the UCA 1400
+shared tailored-weight cache and restores `default_charset_info` to the compiled
+latin1 fallback so startup code cannot read a freed dynamic default collation.
+The reset deliberately happens from `mysys/charset.c`, beside the registry and
+initialization lifecycle it repairs.
 
 This keeps the fork delta small:
 
@@ -62,6 +70,7 @@ claiming exhaustive collation semantics.
 ## Affected Subsystems
 
 - MariaDB `mysys` charset registry initialization and teardown.
+- MariaDB UCA 1400 shared tailored-weight cache.
 - MariaDB embedded runtime restart through `mysql_server_init()` /
   `mysql_server_end()`.
 - MyLite storage-engine smoke coverage for indexed string keys.
@@ -96,9 +105,9 @@ None.
 
 ## Binary-Size Impact
 
-Expected impact is negligible: one static snapshot array and two small helper
-functions in `mysys/charset.c`. The size report must still be refreshed after
-the final build.
+Expected impact is negligible: one static snapshot array and small helper
+functions in `mysys/charset.c` and `strings/ctype-uca1400.c`. The size report
+must still be refreshed after the final build.
 
 ## License Or Dependency Impact
 
@@ -119,6 +128,8 @@ GPL-2.0-only project license.
 
 - Repeated same-process embedded restarts do not leave compiled UCA collations in
   a stale ready state.
+- Repeated same-process embedded restarts do not reuse freed UCA 1400 tailored
+  weight cache entries while initializing fulltext stopwords.
 - The focused `utf8mb4_unicode_ci` indexed lookup and duplicate-key regression
   passes after several close/reopen cycles.
 - WordPress-shaped storage-smoke tables retain `utf8mb4_unicode_ci` metadata
