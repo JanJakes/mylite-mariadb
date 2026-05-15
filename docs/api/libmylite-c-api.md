@@ -432,6 +432,8 @@ the embedded library model:
 - `LOAD_FILE()` and `SELECT ... INTO OUTFILE` / `DUMPFILE` host-file SQL I/O,
 - SQL `HELP`,
 - `SELECT ... PROCEDURE`, including `PROCEDURE ANALYSE()`,
+- stored-program compiler/runtime surfaces behind routines, triggers,
+  packages, events, compound statements, and `CALL`,
 - server utility functions such as `BENCHMARK()`, `SLEEP()`, `UUID_SHORT()`,
   `MASTER_POS_WAIT()`, and `MASTER_GTID_WAIT()`,
 - Oracle SQL mode,
@@ -447,7 +449,9 @@ routine, package, sequence, `CALL`, transaction-control, autocommit-control,
 SQL locking, named-lock, SQL `HELP`, `SELECT ... PROCEDURE`, SQL file-I/O,
 server utility function, Oracle SQL mode, XML SQL function, GIS SQL function,
 SFORMAT SQL function, partition, and foreign-key DDL commands are rejected
-before MariaDB execution with stable MyLite errors. Other unsupported surfaces
+before MariaDB execution with stable MyLite errors. The default embedded profile
+also links fail-closed stubs for stored-program runtime symbols that retained
+MariaDB parser or cleanup paths still reference. Other unsupported surfaces
 should fail with stable MyLite result codes and MariaDB diagnostics where
 possible.
 

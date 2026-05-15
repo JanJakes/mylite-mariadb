@@ -123,6 +123,8 @@ ELSE()
   SET(MYLITE_PROCEDURE_ANALYSE_SOURCE mylite_procedure_analyse_stub.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_STORED_PROGRAM_RUNTIME "Build stored program compiler and runtime" ON)
+
 OPTION(MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS "Compile embedded SQL with C++ exceptions" ON)
 
 SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc 
@@ -239,6 +241,16 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ${MYSYS_LIBWRAP_SOURCE}
 )
 
+IF(NOT MYLITE_WITH_STORED_PROGRAM_RUNTIME)
+  LIST(REMOVE_ITEM SQL_EMBEDDED_SOURCES
+    ../sql/sp.cc
+    ../sql/sp_cache.cc
+    ../sql/sp_head.cc
+    ../sql/sp_instr.cc
+    ../sql/sp_pcontext.cc
+    ../sql/sp_rcontext.cc)
+  LIST(APPEND SQL_EMBEDDED_SOURCES mylite_stored_program_runtime_stub.cc)
+ENDIF()
 
 ADD_CONVENIENCE_LIBRARY(sql_embedded ${SQL_EMBEDDED_SOURCES})
 IF(NOT MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS)

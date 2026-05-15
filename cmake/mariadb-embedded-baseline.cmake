@@ -71,5 +71,8 @@ set(MYLITE_WITH_PROCEDURE_ANALYSE OFF CACHE BOOL "Omit PROCEDURE ANALYSE impleme
 # MyLite rejects SELECT PROCEDURE clauses before MariaDB execution.
 set(MYLITE_WITH_SELECT_PROCEDURE_RUNTIME OFF CACHE BOOL "Omit SELECT PROCEDURE runtime" FORCE)
 
+# MyLite rejects stored routine, trigger, event, and package runtime surfaces.
+set(MYLITE_WITH_STORED_PROGRAM_RUNTIME OFF CACHE BOOL "Omit stored program runtime" FORCE)
+
 # MyLite's embedded SQL profile has no retained C++ exception users.
 set(MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS OFF CACHE BOOL "Enable embedded SQL C++ exceptions" FORCE)

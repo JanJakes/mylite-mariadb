@@ -73,6 +73,9 @@ Add `compat-server-surface` coverage:
   explicit unsupported surface.
 - MyLite SQL-policy rejection for the `SELECT ... PROCEDURE` clause, including
   `PROCEDURE ANALYSE()`, as a follow-up explicit unsupported surface.
+- MyLite SQL-policy rejection for views, triggers, routines, packages,
+  sequences, and `CALL`, backed by a fail-closed stored-program runtime stub as
+  a follow-up explicit unsupported surface.
 - MyLite SQL-policy rejection for Oracle SQL mode as a follow-up explicit
   unsupported surface.
 - MyLite SQL-policy rejection for XML SQL functions as a follow-up explicit
@@ -122,8 +125,9 @@ size-profile slices now use these explicit unsupported surfaces to remove
 unreachable LOAD execution, host-file SQL I/O, server utility function paths,
 the Oracle SQL mode parser, XML SQL functions, GIS SQL functions, SFORMAT, and
 the full SQL `HELP`, `PROCEDURE ANALYSE()`, and generic SELECT procedure
-runtime implementations from the default embedded profile, and to compile
-retained embedded SQL C++ sources without exceptions.
+runtime implementations, plus the full stored-program compiler/runtime objects,
+from the default embedded profile, and to compile retained embedded SQL C++
+sources without exceptions.
 
 ## Test Plan
 
