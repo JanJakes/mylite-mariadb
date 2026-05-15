@@ -41,9 +41,9 @@ partition DDL rejection, online and in-place ALTER rejection, MariaDB statement
 transaction hook integration, busy-timeout lock waits, SQL locking policy
 rejection, failed
 statement rollback, initial application-schema smoke,
-unsupported server, SQL file-I/O, server utility function, Oracle SQL mode, XML
-SQL function, GIS SQL function, SFORMAT SQL function, SQL HELP command, SELECT
-PROCEDURE, stored-program runtime stubbing, dynamic UDF runtime, and
+unsupported server, binlog/replication, SQL file-I/O, server utility function, Oracle
+SQL mode, XML SQL function, GIS SQL function, SFORMAT SQL function, SQL HELP
+command, SELECT PROCEDURE, stored-program runtime stubbing, dynamic UDF runtime, and
 non-table-object policies, and representative `SHOW CREATE TABLE` round-trip
 export/import.
 The opt-in embedded MTR smoke runner covers MariaDB bootstrap and scalar
@@ -130,7 +130,7 @@ application-schema suites remain planned.
 | Dynamic UDFs | ➖&nbsp;Out&nbsp;of&nbsp;scope | Dynamic user-defined function registration, `mysql.func` lookup, external library loading, and UDF execution are not part of the embedded profile; direct and prepared `CREATE FUNCTION ... SONAME` calls are rejected before MariaDB execution, the default embedded profile omits `sql_udf.cc` and UDF item construction/execution bodies, and ordinary native-function plus stored-function resolution remains unchanged |
 | Events and scheduler | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server scheduler is not part of the core embedded profile; event activation and event DDL are rejected by MyLite SQL policy |
 | Users, grants, and password auth | ➖&nbsp;Out&nbsp;of&nbsp;scope | Local embedded file ownership replaces server account management; account SQL is rejected by MyLite SQL policy |
-| Replication and binlog | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server topology feature, not core library behavior; binlog is disabled at startup and representative replication/binlog SQL is rejected |
+| Replication and binlog | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server topology feature, not core library behavior; binlog is disabled at startup, representative replication/binlog SQL is rejected, and the default embedded profile omits `rpl_record.cc`, mandatory binlog plugin registration, and binlog transaction, row-event, GTID-state, event-write, and table-map execution bodies behind no-op guards; retained event/GTID objects still exist where shared MariaDB code references them |
 | Dynamic plugin installation | ➖&nbsp;Out&nbsp;of&nbsp;scope | Dynamic plugin support is compiled out of the default embedded profile, core startup uses a MyLite-owned plugin directory, and representative plugin-install SQL is rejected |
 | Performance schema | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server instrumentation tables are disabled or compiled out in the default embedded runtime profile |
 

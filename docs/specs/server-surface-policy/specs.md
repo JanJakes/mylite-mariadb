@@ -79,6 +79,9 @@ Add `compat-server-surface` coverage:
 - MyLite SQL-policy rejection for dynamic UDF DDL, backed by omitted UDF lookup,
   registration, and execution runtime as a follow-up explicit unsupported
   surface.
+- Embedded binlog transaction, row-event, GTID-state, event-write, and
+  table-map entry points compiled to no-ops as a follow-up explicit unsupported
+  surface trim.
 - MyLite SQL-policy rejection for Oracle SQL mode as a follow-up explicit
   unsupported surface.
 - MyLite SQL-policy rejection for XML SQL functions as a follow-up explicit
@@ -129,8 +132,9 @@ unreachable LOAD execution, host-file SQL I/O, server utility function paths,
 the Oracle SQL mode parser, XML SQL functions, GIS SQL functions, SFORMAT, and
 the full SQL `HELP`, `PROCEDURE ANALYSE()`, and generic SELECT procedure
 runtime implementations, plus the full stored-program compiler/runtime objects,
-and dynamic UDF runtime, from the default embedded profile, and to compile
-retained embedded SQL C++ sources without exceptions.
+dynamic UDF runtime, and binary-log transaction/event core, from the default
+embedded profile, and to compile retained embedded SQL C++ sources without
+exceptions.
 
 ## Test Plan
 

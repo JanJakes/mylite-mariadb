@@ -77,5 +77,8 @@ set(MYLITE_WITH_STORED_PROGRAM_RUNTIME OFF CACHE BOOL "Omit stored program runti
 # MyLite rejects dynamic UDF registration and library loading.
 set(MYLITE_WITH_UDF_RUNTIME OFF CACHE BOOL "Omit UDF lookup and execution runtime" FORCE)
 
+# MyLite starts with --skip-log-bin and rejects replication/binlog SQL.
+set(MYLITE_WITH_BINLOG_CORE OFF CACHE BOOL "Omit binary log transaction and event core" FORCE)
+
 # MyLite's embedded SQL profile has no retained C++ exception users.
 set(MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS OFF CACHE BOOL "Enable embedded SQL C++ exceptions" FORCE)

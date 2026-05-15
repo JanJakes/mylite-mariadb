@@ -6116,7 +6116,12 @@ void THD::reset_sub_statement_state(Sub_statement_state *backup,
   if ((backup->option_bits & OPTION_BIN_LOG) &&
        is_update_query(lex->sql_command) &&
        !is_current_stmt_binlog_format_row())
+  {
+#if !defined(EMBEDDED_LIBRARY) || !defined(MYLITE_WITH_BINLOG_CORE) || \
+    MYLITE_WITH_BINLOG_CORE
     mysql_bin_log.start_union_events(this, this->query_id);
+#endif
+  }
 
   /* Disable result sets */
   client_capabilities &= ~CLIENT_MULTI_RESULTS;
@@ -6189,7 +6194,10 @@ void THD::restore_sub_statement_state(Sub_statement_state *backup)
   if (binlog_evt_union.do_union != backup->do_union)
   {
     DBUG_ASSERT(!backup->do_union);
+#if !defined(EMBEDDED_LIBRARY) || !defined(MYLITE_WITH_BINLOG_CORE) || \
+    MYLITE_WITH_BINLOG_CORE
     mysql_bin_log.stop_union_events(this);
+#endif
   }
 
   /*
@@ -7365,10 +7373,15 @@ exit:;
 
 bool THD::binlog_table_should_be_logged(const LEX_CSTRING *db)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return false;
+#else
   return (mysql_bin_log.is_open() &&
           (variables.option_bits & OPTION_BIN_LOG) &&
           (wsrep_binlog_format(variables.binlog_format) != BINLOG_FORMAT_STMT ||
            binlog_filter->db_ok(db->str)));
+#endif
 }
 
 /* Declare in unnamed namespace. */
@@ -7499,6 +7512,10 @@ int THD::binlog_write_row(TABLE* table, Event_log *bin_log,
                           binlog_cache_data *cache_data, bool is_trans,
                           uchar const *record)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return 0;
+#else
   /*
     Pack records into format for transfer. We are allocating more
     memory than needed, but that doesn't matter.
@@ -7524,6 +7541,7 @@ int THD::binlog_write_row(TABLE* table, Event_log *bin_log,
     return HA_ERR_OUT_OF_MEM;
 
   return ev->add_row_data(row_data, len);
+#endif
 }
 
 int THD::binlog_update_row(TABLE* table,  Event_log *bin_log,
@@ -7532,6 +7550,10 @@ int THD::binlog_update_row(TABLE* table,  Event_log *bin_log,
                            const uchar *before_record,
                            const uchar *after_record)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return 0;
+#else
   /**
     Save a reference to the original read bitmaps
     We will need this to restore the bitmaps at the end as
@@ -7593,6 +7615,7 @@ int THD::binlog_update_row(TABLE* table,  Event_log *bin_log,
                                       table->write_set);
   return error;
 
+#endif
 }
 
 int THD::binlog_delete_row(TABLE* table, Event_log *bin_log,
@@ -7600,6 +7623,10 @@ int THD::binlog_delete_row(TABLE* table, Event_log *bin_log,
                            enum_binlog_row_image row_image,
                            uchar const *record)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return 0;
+#else
   /**
     Save a reference to the original read bitmaps
     We will need this to restore the bitmaps at the end as
@@ -7648,6 +7675,7 @@ int THD::binlog_delete_row(TABLE* table, Event_log *bin_log,
                                       table->write_set);
 
   return error;
+#endif
 }
 
 
@@ -7715,6 +7743,10 @@ void binlog_prepare_row_images(TABLE *table, enum_binlog_row_image row_image)
 
 int THD::binlog_flush_pending_rows_event(bool stmt_end, bool is_transactional)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return 0;
+#else
   DBUG_ENTER("THD::binlog_flush_pending_rows_event");
   /*
     We shall flush the pending event even if we are not in row-based
@@ -7739,6 +7771,7 @@ int THD::binlog_flush_pending_rows_event(bool stmt_end, bool is_transactional)
     ::binlog_flush_pending_rows_event(this, stmt_end, is_transactional,
                                       mysql_bin_log.as_event_log(), cache);
   DBUG_RETURN(error);
+#endif
 }
 
 
@@ -8003,6 +8036,10 @@ int THD::binlog_query(THD::enum_binlog_query_type qtype, char const *query_arg,
                       ulong query_len, bool is_trans, bool direct, 
                       bool suppress_use, int errcode)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return -1;
+#else
   DBUG_ENTER("THD::binlog_query");
   DBUG_PRINT("enter", ("qtype: %s  query: '%-.*s'",
                        show_query_type(qtype), (int) query_len, query_arg));
@@ -8130,6 +8167,7 @@ int THD::binlog_query(THD::enum_binlog_query_type qtype, char const *query_arg,
     DBUG_ASSERT(qtype < QUERY_TYPE_COUNT);
   }
   DBUG_RETURN(0);
+#endif
 }
 
 
@@ -8151,6 +8189,10 @@ int THD::binlog_query(THD::enum_binlog_query_type qtype, char const *query_arg,
 
 bool THD::binlog_current_query_unfiltered()
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return false;
+#else
   if (!mysql_bin_log.is_open())
     return 0;
 
@@ -8161,6 +8203,7 @@ bool THD::binlog_current_query_unfiltered()
                       /* direct */       FALSE,
                       /* suppress_use */ FALSE,
                       /* Error */        0) > 0;
+#endif
 }
 
 
