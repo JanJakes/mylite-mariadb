@@ -3032,6 +3032,12 @@ static void test_create_table_select(void) {
     single_value_context reopened_count = {
         .expected_value = "3",
     };
+    single_value_context generated_title_len = {
+        .expected_value = "5",
+    };
+    single_value_context generated_label = {
+        .expected_value = "draft-1",
+    };
     table_context failed_tables = {0};
     table_context body_rows = {0};
     table_context reopened_body_rows = {0};
@@ -3098,10 +3104,31 @@ static void test_create_table_select(void) {
         ") ENGINE=InnoDB "
         "SELECT id, slug, body, payload FROM ctas_source_posts"
     );
-    assert_catalog_table_count(filename, "app", 3U);
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE ctas_generated_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL, "
+        "title_len INT AS (CHAR_LENGTH(title)) VIRTUAL, "
+        "label VARCHAR(80) AS (CONCAT(title, '-', id)) STORED"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO ctas_generated_source (id, title) VALUES "
+        "(1, 'draft'), (2, 'published')"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE ctas_generated_projection ENGINE=InnoDB AS "
+        "SELECT id, title_len, label FROM ctas_generated_source WHERE id = 1"
+    );
+    assert_catalog_table_count(filename, "app", 5U);
     assert_catalog_table_metadata(filename, "app", "ctas_source_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_default_constants", "DEFAULT", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_indexed_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "ctas_generated_source", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "ctas_generated_projection", "InnoDB", "MYLITE");
 
     assert(
         mylite_exec(
@@ -3149,6 +3176,28 @@ static void test_create_table_select(void) {
     );
     assert(errmsg == NULL);
     assert(body_rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT title_len FROM ctas_generated_projection WHERE id = 1",
+            single_value_callback,
+            &generated_title_len,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_title_len.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT label FROM ctas_generated_projection WHERE id = 1",
+            single_value_callback,
+            &generated_label,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_label.rows == 1);
 
     assert_exec_fails(
         db,
@@ -3176,11 +3225,16 @@ static void test_create_table_select(void) {
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
     db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "app");
     assert_exec_succeeds(db, "USE app");
-    assert_catalog_table_count(filename, "app", 3U);
+    generated_title_len = (single_value_context){.expected_value = "5"};
+    generated_label = (single_value_context){.expected_value = "draft-1"};
+    assert_catalog_table_count(filename, "app", 5U);
     assert_catalog_table_metadata(filename, "app", "ctas_source_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_default_constants", "DEFAULT", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_indexed_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "ctas_generated_source", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "ctas_generated_projection", "InnoDB", "MYLITE");
     assert(
         mylite_exec(
             db,
@@ -3204,6 +3258,28 @@ static void test_create_table_select(void) {
     );
     assert(errmsg == NULL);
     assert(reopened_body_rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT title_len FROM ctas_generated_projection WHERE id = 1",
+            single_value_callback,
+            &generated_title_len,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_title_len.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT label FROM ctas_generated_projection WHERE id = 1",
+            single_value_callback,
+            &generated_label,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_label.rows == 1);
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 

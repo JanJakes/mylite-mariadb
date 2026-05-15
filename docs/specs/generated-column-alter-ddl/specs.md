@@ -55,7 +55,7 @@ No MyLite expression evaluator is introduced. The supported path is:
 ## Non-Goals
 
 - Online, instant, in-place, or lock-free generated-column ALTER.
-- Generated columns in CTAS or dump/import fixtures.
+- Generated-column target definitions in CTAS or dump/import fixtures.
 - Exhaustive generated expression compatibility.
 - Generated BLOB/TEXT payload matrices.
 - Transaction rollback or crash recovery for interrupted ALTER beyond current

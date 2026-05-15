@@ -45,6 +45,8 @@ MariaDB base: `mariadb-11.8.6`
 - Explicit supported target engines such as `ENGINE=InnoDB`, plus no-explicit
   engine targets routed to effective `MYLITE`.
 - CTAS with derived columns, BLOB/TEXT expressions, and existing source rows.
+- CTAS projections that read virtual and stored generated columns from
+  MyLite-routed source tables into ordinary target columns.
 - CTAS with an explicit supported target key declaration before `SELECT`, so
   inserts exercise duplicate checks and index-entry publication.
 - Close/reopen metadata, row visibility, forced-index reads, and durable-sidecar
@@ -56,8 +58,9 @@ MariaDB base: `mariadb-11.8.6`
   written before failed CTAS abort.
 - `CREATE OR REPLACE ... SELECT`, `CREATE TEMPORARY TABLE ... SELECT`, `IGNORE`
   / `REPLACE` CTAS, and lock-table edge cases.
-- CTAS from views, information schema, generated columns, foreign keys,
-  partitions, unsupported indexes, or server-only sources.
+- Generated-column definitions on CTAS targets, CTAS from views, information
+  schema, foreign keys, partitions, unsupported indexes, or server-only
+  sources.
 - SQL transaction commit/rollback, savepoints, or transaction-aware index
   maintenance.
 
@@ -126,6 +129,8 @@ unless handler fixes are needed; update size measurements after verification.
   - explicit `ENGINE=InnoDB` CTAS requested/effective metadata;
   - no-engine CTAS requested `DEFAULT` metadata;
   - BLOB/TEXT payloads selected into the target;
+  - virtual and stored generated source columns projected into ordinary target
+    columns;
   - explicit target primary/unique/secondary indexes before `SELECT`;
   - duplicate-key checks and forced-index reads after CTAS;
   - close/reopen metadata and rows;
@@ -138,8 +143,8 @@ unless handler fixes are needed; update size measurements after verification.
 - Supported successful CTAS statements create MyLite catalog records and insert
   SELECT result rows.
 - Target metadata records the requested engine correctly.
-- CTAS target rows, BLOB/TEXT payloads, autoincrement values, and supported
-  indexes survive close/reopen.
+- CTAS target rows, BLOB/TEXT payloads, generated-source projections,
+  autoincrement values, and supported indexes survive close/reopen.
 - Failed CTAS duplicate-key abort removes the target catalog metadata before
   the statement returns an error.
 - Compatibility, roadmap, and storage architecture docs describe CTAS as
@@ -156,8 +161,8 @@ entry points:
   indexes writes result rows through `ha_mylite::write_row()`.
 - Storage-engine smoke covers selected BLOB/TEXT payloads, duplicate-key checks
   after CTAS, duplicate-key CTAS abort target cleanup, autoincrement
-  advancement from copied rows, forced-index reads, close/reopen metadata and
-  rows, and durable-sidecar gates.
+  advancement from copied rows, generated-source projections, forced-index
+  reads, close/reopen metadata and rows, and durable-sidecar gates.
 
 ## Risks And Open Questions
 
@@ -167,3 +172,5 @@ entry points:
 - CTAS can derive many SQL types from expressions. This slice should cover
   representative supported types and leave broad type-matrix comparison to a
   later MariaDB/MTR-scale compatibility effort.
+- Generated-column definitions on CTAS targets need separate syntax and storage
+  evidence before MyLite claims that DDL shape.

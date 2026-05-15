@@ -10,9 +10,9 @@ the `.mylite` file.
 This moved generated columns from planned to partial support for `VIRTUAL` and
 `STORED` columns under basic `CREATE TABLE`, insert, update, and close/reopen
 behavior. Later generated-column slices expand the covered subset to
-copy-rebuild generated-column add/modify/drop and ordinary secondary and unique
-indexes on scalar generated columns, including supported copy-rebuild
-generated-index DDL.
+CTAS projections from generated source columns, copy-rebuild generated-column
+add/modify/drop, and ordinary secondary and unique indexes on scalar generated
+columns, including supported copy-rebuild generated-index DDL.
 
 ## Non-Goals
 
@@ -109,6 +109,8 @@ unchanged for practical purposes.
   and close/reopen.
 - Storage-engine smoke verifies copy-rebuild generated-column add, modify, and
   drop DDL.
+- Storage-engine smoke verifies CTAS projections from virtual and stored
+  generated source columns into ordinary target columns.
 - Add a compatibility harness group for generated columns.
 - Run formatting, tidy, configured CTest presets, the named harness report, and
   `git diff --check`.
@@ -123,6 +125,8 @@ unchanged for practical purposes.
   generated-index DDL paths, work before and after close/reopen.
 - Copy-rebuild generated-column add, modify, and drop DDL works before and
   after close/reopen.
+- CTAS projections from virtual and stored generated source columns materialize
+  expected values before and after close/reopen.
 - Compatibility docs and roadmap mark generated columns as partial rather than
   planned.
 - The compatibility harness can run the generated-column evidence by name.
@@ -130,8 +134,8 @@ unchanged for practical purposes.
 ## Risks And Open Questions
 
 - Broader expression classes, SQL-mode-sensitive expressions, generated
-  columns with BLOB/TEXT payloads, CTAS, dump/import, prepared diagnostics, and
-  rollback remain uncovered.
+  columns with BLOB/TEXT payloads, generated target CTAS definitions,
+  dump/import, prepared diagnostics, and rollback remain uncovered.
 - Generated primary keys, expression/hidden generated indexes, generated
   BLOB/TEXT key payloads, and broader expression matrices need separate specs
   before support is claimed.

@@ -213,10 +213,12 @@ state, and records the source requested engine with effective `MYLITE` when the
 statement has no explicit engine.
 Successful supported `CREATE TABLE ... SELECT` uses MariaDB's `select_create`
 path to derive or open the target definition and then inserts result rows
-through MyLite's normal `write_row()` path. Duplicate-key CTAS abort follows
-MariaDB's target-drop path and removes target catalog metadata; the current
-statement checkpoint restores pre-statement MyLite header/catalog visibility
-for covered failed file-backed statements.
+through MyLite's normal `write_row()` path, including projections that read
+virtual and stored generated columns from MyLite source tables into ordinary
+target columns. Duplicate-key CTAS abort follows MariaDB's target-drop path and
+removes target catalog metadata; the current statement checkpoint restores
+pre-statement MyLite header/catalog visibility for covered failed file-backed
+statements.
 Basic column-level and named table-level CHECK constraints survive close/reopen
 because they are stored in the catalog-backed table-definition image. MariaDB
 enforces those checks before insert/update handler calls unless
@@ -227,12 +229,13 @@ rollback, CTAS, dump-import, prepared-diagnostic, and rollback coverage remains
 planned.
 Basic virtual and stored generated columns follow the same catalog-backed
 table-definition path, including supported copy ALTER add/modify/drop
-operations. Ordinary secondary and unique indexes on scalar virtual or stored
-generated columns use the same MariaDB-generated key tuples as supported
-base-column indexes, including initial definitions and supported copy-rebuild
-add, drop, rename, and standalone index DDL paths. Generated primary keys,
-expression/hidden generated indexes, BLOB/TEXT generated key payloads, and
-broader expression matrices remain planned.
+operations and CTAS projections from generated source columns. Ordinary
+secondary and unique indexes on scalar virtual or stored generated columns use
+the same MariaDB-generated key tuples as supported base-column indexes,
+including initial definitions and supported copy-rebuild add, drop, rename, and
+standalone index DDL paths. Generated primary keys, expression/hidden generated
+indexes, generated target CTAS definitions, BLOB/TEXT generated key payloads,
+and broader expression matrices remain planned.
 The same create-time key-shape gate rejects FULLTEXT and SPATIAL indexes before
 catalog publication; MyLite must not publish a table definition whose index
 class cannot be maintained by the current storage format.
