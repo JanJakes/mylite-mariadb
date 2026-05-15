@@ -263,17 +263,20 @@ durable source, and new same-name temporary CTAS over a durable source. A
 repeated same-name temporary CTAS replacement that also reads the same SQL name
 hits MariaDB's temporary-table reopen guard and remains a tracked compatibility
 edge case rather than a MyLite storage claim.
-Successful representative `CREATE OR REPLACE TABLE ... LIKE` and
-`CREATE OR REPLACE TABLE ... SELECT` statements use MariaDB's drop-then-create
-flow: MyLite removes the old catalog record, publishes the replacement
-definition, writes replacement rows and indexes where applicable, and verifies
-close/reopen visibility. Representative failed OR REPLACE rollback covers
-self-LIKE rejection, unsupported replacement definitions, and duplicate-key
-replacement CTAS while preserving old target metadata, rows, indexes, and
-autoincrement state through the existing statement checkpoint. Representative
-failed multi-table DROP/RENAME rollback preserves original target metadata,
-rows, and indexes through the same checkpoint; broader locking, temporary-table
-edge cases, and SQL transaction/savepoint semantics remain planned.
+Successful representative plain `CREATE OR REPLACE TABLE`,
+`CREATE OR REPLACE TABLE ... LIKE`, and
+`CREATE OR REPLACE TABLE ... SELECT` statements use MariaDB's
+drop-then-create flow: MyLite removes the old catalog record, publishes the
+replacement definition, writes replacement rows and indexes where applicable,
+and verifies close/reopen visibility. The plain replacement coverage verifies
+old rows, old indexes, and old autoincrement state are not SQL-visible after
+replacement. Representative failed OR REPLACE rollback covers self-LIKE
+rejection, unsupported replacement definitions, and duplicate-key replacement
+CTAS while preserving old target metadata, rows, indexes, and autoincrement
+state through the existing statement checkpoint. Representative failed
+multi-table DROP/RENAME rollback preserves original target metadata, rows, and
+indexes through the same checkpoint; broader locking, temporary-table edge
+cases, and SQL transaction/savepoint semantics remain planned.
 Basic column-level and named table-level CHECK constraints survive close/reopen
 because they are stored in the catalog-backed table-definition image. MariaDB
 enforces those checks before insert/update handler calls unless

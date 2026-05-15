@@ -5798,9 +5798,30 @@ static void test_create_or_replace_table(void) {
     char *root = make_temp_root();
     char *filename = NULL;
     mylite_db *db = open_database(root, &filename);
+    table_context old_plain_index_rows = {0};
+    table_context plain_primary_index_rows = {0};
+    table_context reopened_old_plain_index_rows = {0};
+    char *errmsg = NULL;
 
     assert_exec_succeeds(db, "CREATE DATABASE replace_app");
     assert_exec_succeeds(db, "USE replace_app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE replace_plain_target ("
+        "id INT NOT NULL AUTO_INCREMENT, "
+        "old_slug VARCHAR(32) NOT NULL, "
+        "body LONGTEXT NULL, "
+        "PRIMARY KEY (id), "
+        "UNIQUE KEY old_slug_key (old_slug), "
+        "KEY old_body_prefix (body(8))"
+        ") ENGINE=MyISAM"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO replace_plain_target (old_slug, body) VALUES "
+        "('old-plain-alpha', 'old plain body one'), "
+        "('old-plain-beta', 'old plain body two')"
+    );
     assert_exec_succeeds(
         db,
         "CREATE TABLE replace_like_source ("
@@ -5848,7 +5869,14 @@ static void test_create_or_replace_table(void) {
         ") ENGINE=MyISAM"
     );
     assert_exec_succeeds(db, "INSERT INTO replace_ctas_target VALUES (99, 'old-ctas-target')");
-    assert_catalog_table_count(filename, "replace_app", 4U);
+    assert_catalog_table_count(filename, "replace_app", 5U);
+    assert_catalog_table_metadata(
+        filename,
+        "replace_app",
+        "replace_plain_target",
+        "MyISAM",
+        "MYLITE"
+    );
     assert_catalog_table_metadata(
         filename,
         "replace_app",
@@ -5859,9 +5887,76 @@ static void test_create_or_replace_table(void) {
 
     assert_exec_succeeds(
         db,
+        "CREATE OR REPLACE TABLE replace_plain_target ("
+        "id INT NOT NULL AUTO_INCREMENT, "
+        "slug VARCHAR(32) NOT NULL, "
+        "body LONGTEXT NULL, "
+        "PRIMARY KEY (id), "
+        "UNIQUE KEY slug_key (slug), "
+        "KEY body_prefix (body(8))"
+        ") ENGINE=InnoDB"
+    );
+    assert_catalog_table_count(filename, "replace_app", 5U);
+    assert_catalog_table_metadata(
+        filename,
+        "replace_app",
+        "replace_plain_target",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM replace_plain_target", "0");
+    assert_exec_fails(db, "SELECT old_slug FROM replace_plain_target");
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM replace_plain_target WHERE Key_name = 'old_slug_key'",
+            table_callback,
+            &old_plain_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(old_plain_index_rows.rows == 0);
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM replace_plain_target WHERE Key_name = 'PRIMARY'",
+            table_callback,
+            &plain_primary_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(plain_primary_index_rows.rows == 1);
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO replace_plain_target (slug, body) VALUES "
+        "('new-plain-alpha', 'new plain body one'), "
+        "('new-plain-beta', 'new plain body two')"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO replace_plain_target (slug, body) VALUES "
+        "('new-plain-alpha', 'duplicate plain body')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM replace_plain_target FORCE INDEX (slug_key) "
+        "WHERE slug = 'new-plain-alpha'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM replace_plain_target FORCE INDEX (body_prefix) "
+        "WHERE body = 'new plain body two'",
+        "2"
+    );
+
+    assert_exec_succeeds(
+        db,
         "CREATE OR REPLACE TABLE replace_like_target LIKE replace_like_source"
     );
-    assert_catalog_table_count(filename, "replace_app", 4U);
+    assert_catalog_table_count(filename, "replace_app", 5U);
     assert_catalog_table_metadata(
         filename,
         "replace_app",
@@ -5912,7 +6007,7 @@ static void test_create_or_replace_table(void) {
         ") ENGINE=InnoDB "
         "SELECT id, slug, body FROM replace_ctas_source WHERE id <= 2"
     );
-    assert_catalog_table_count(filename, "replace_app", 4U);
+    assert_catalog_table_count(filename, "replace_app", 5U);
     assert_catalog_table_metadata(
         filename,
         "replace_app",
@@ -5944,7 +6039,14 @@ static void test_create_or_replace_table(void) {
     db = open_database_with_filename(root, filename);
     assert_no_runtime_schema_directory(root, "replace_app");
     assert_exec_succeeds(db, "USE replace_app");
-    assert_catalog_table_count(filename, "replace_app", 4U);
+    assert_catalog_table_count(filename, "replace_app", 5U);
+    assert_catalog_table_metadata(
+        filename,
+        "replace_app",
+        "replace_plain_target",
+        "InnoDB",
+        "MYLITE"
+    );
     assert_catalog_table_metadata(
         filename,
         "replace_app",
@@ -5959,8 +6061,27 @@ static void test_create_or_replace_table(void) {
         "InnoDB",
         "MYLITE"
     );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM replace_plain_target", "2");
     assert_query_single_value(db, "SELECT COUNT(*) FROM replace_like_target", "1");
     assert_query_single_value(db, "SELECT COUNT(*) FROM replace_ctas_target", "2");
+    assert_exec_fails(db, "SELECT old_slug FROM replace_plain_target");
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM replace_plain_target WHERE Key_name = 'old_slug_key'",
+            table_callback,
+            &reopened_old_plain_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_old_plain_index_rows.rows == 0);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM replace_plain_target FORCE INDEX (slug_key) "
+        "WHERE slug = 'new-plain-beta'",
+        "2"
+    );
     assert_query_single_value(
         db,
         "SELECT id FROM replace_like_target FORCE INDEX (slug_key) "

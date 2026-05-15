@@ -140,6 +140,8 @@ test code unless handler fixes are needed.
 
 Implemented in storage-engine smoke coverage:
 
+- The `plain-create-or-replace-table` follow-up slice covers successful plain
+  `CREATE OR REPLACE TABLE target (...)` replacement over an old routed target.
 - `CREATE OR REPLACE TABLE target LIKE source` replaces an old routed target,
   preserves the source requested-engine metadata, resets target rows and
   autoincrement state, and keeps supported unique and secondary indexes usable.
