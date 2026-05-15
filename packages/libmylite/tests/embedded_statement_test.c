@@ -469,6 +469,31 @@ static void test_prepare_diagnostics(void) {
     assert(strstr(mylite_errmsg(db), "server utility") != NULL);
 
     assert(
+        mylite_prepare(db, "SET sql_mode='ORACLE'", MYLITE_NUL_TERMINATED, &stmt, NULL) ==
+        MYLITE_ERROR
+    );
+    assert(stmt == NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), "Oracle SQL mode") != NULL);
+
+    assert(
+        mylite_prepare(
+            db,
+            "SET SESSION sql_mode='ANSI,ORACLE'",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_ERROR
+    );
+    assert(stmt == NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), "Oracle SQL mode") != NULL);
+
+    assert(
         mylite_prepare(
             db,
             "SELECT ? INTO DUMPFILE '/tmp/mylite-out.bin'",

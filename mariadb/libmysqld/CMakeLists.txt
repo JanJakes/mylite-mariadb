@@ -33,17 +33,26 @@ SET(GEN_SOURCES
 ${CMAKE_BINARY_DIR}/sql/sql_yacc.hh
 ${CMAKE_BINARY_DIR}/sql/yy_mariadb.cc
 ${CMAKE_BINARY_DIR}/sql/yy_oracle.hh
-${CMAKE_BINARY_DIR}/sql/yy_oracle.cc
 ${CMAKE_BINARY_DIR}/sql/lex_hash.h
 )
 
 SET_SOURCE_FILES_PROPERTIES(${GEN_SOURCES} PROPERTIES GENERATED TRUE)
 
+OPTION(MYLITE_WITH_ORACLE_SQL_MODE "Build Oracle SQL mode parser" ON)
+IF(MYLITE_WITH_ORACLE_SQL_MODE)
+  SET(MYLITE_ORACLE_PARSER_SOURCE ${CMAKE_BINARY_DIR}/sql/yy_oracle.cc)
+  SET_SOURCE_FILES_PROPERTIES(${MYLITE_ORACLE_PARSER_SOURCE} PROPERTIES GENERATED TRUE)
+ELSE()
+  SET(MYLITE_ORACLE_PARSER_SOURCE ../sql/mylite_oracle_parser_disabled.cc)
+ENDIF()
+
 IF(CMAKE_C_COMPILER_ID MATCHES "Clang" AND
    NOT CMAKE_C_COMPILER_VERSION VERSION_LESS "13.0.0")
- ADD_COMPILE_FLAGS(
-   ${CMAKE_BINARY_DIR}/sql/yy_mariadb.cc
-   ${CMAKE_BINARY_DIR}/sql/yy_oracle.cc
+ SET(MYLITE_GENERATED_PARSER_SOURCES ${CMAKE_BINARY_DIR}/sql/yy_mariadb.cc)
+ IF(MYLITE_WITH_ORACLE_SQL_MODE)
+   LIST(APPEND MYLITE_GENERATED_PARSER_SOURCES ${CMAKE_BINARY_DIR}/sql/yy_oracle.cc)
+ ENDIF()
+ ADD_COMPILE_FLAGS(${MYLITE_GENERATED_PARSER_SOURCES}
    COMPILE_FLAGS "-Wno-unused-but-set-variable")
 ENDIF()
 
@@ -178,6 +187,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/json_table.cc
            ../sql/opt_histogram_json.cc
            ../sql/sp_instr.cc
+           ${MYLITE_ORACLE_PARSER_SOURCE}
            ${GEN_SOURCES}
            ${MYSYS_LIBWRAP_SOURCE}
 )

@@ -328,6 +328,10 @@ bool is_server_surface_sql(std::string_view sql);
 bool is_file_import_sql(std::string_view sql);
 bool is_file_export_sql(std::string_view sql);
 bool is_server_utility_function_sql(std::string_view sql);
+bool is_oracle_sql_mode_sql(std::string_view sql);
+bool sql_set_assignment_has_oracle_sql_mode(std::string_view assignment);
+std::string_view pop_sql_set_assignment(std::string_view &sql);
+bool sql_set_assignment_targets_variable(std::string_view &assignment, const char *keyword);
 bool is_non_table_object_sql(std::string_view sql);
 bool is_transaction_control_sql(std::string_view sql);
 bool is_locking_sql(std::string_view sql);
@@ -341,6 +345,8 @@ bool sql_tokens_contain_file_export_marker(std::string_view sql);
 bool sql_tokens_contain_server_utility_function(std::string_view sql);
 bool sql_tokens_contain_locking_marker(std::string_view sql);
 bool sql_tokens_contain_named_lock_function(std::string_view sql);
+bool sql_span_contains_token(std::string_view sql, const char *keyword);
+bool sql_quoted_span_contains_token(std::string_view &sql, char quote, const char *keyword);
 bool sql_tokens_contain_online_alter_marker(std::string_view sql);
 bool sql_tokens_contain_partition_marker(std::string_view sql);
 bool sql_tokens_contain_foreign_key_marker(std::string_view sql);
@@ -2001,6 +2007,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_server_utility_function_sql(sql)) {
         return "unsupported server utility SQL function";
     }
+    if (is_oracle_sql_mode_sql(sql)) {
+        return "unsupported Oracle SQL mode";
+    }
     if (is_non_table_object_sql(sql)) {
         return "unsupported non-table database object SQL surface";
     }
@@ -2103,6 +2112,203 @@ bool is_file_export_sql(std::string_view sql) {
 
 bool is_server_utility_function_sql(std::string_view sql) {
     return sql_tokens_contain_server_utility_function(sql);
+}
+
+bool is_oracle_sql_mode_sql(std::string_view sql) {
+    std::string_view rest = skip_sql_leading_noise(sql);
+    const std::string_view first = pop_sql_token(rest);
+    if (!sql_token_equals(first, "SET")) {
+        return false;
+    }
+
+    while (!skip_sql_leading_noise(rest).empty()) {
+        if (sql_set_assignment_has_oracle_sql_mode(pop_sql_set_assignment(rest))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool sql_set_assignment_has_oracle_sql_mode(std::string_view assignment) {
+    if (!sql_set_assignment_targets_variable(assignment, "SQL_MODE")) {
+        return false;
+    }
+    return sql_span_contains_token(assignment, "ORACLE");
+}
+
+std::string_view pop_sql_set_assignment(std::string_view &sql) {
+    sql = skip_sql_leading_noise(sql);
+    if (!sql.empty() && sql.front() == ',') {
+        sql.remove_prefix(1);
+        sql = skip_sql_leading_noise(sql);
+    }
+
+    const std::string_view assignment = sql;
+    std::string_view scan = sql;
+    unsigned paren_depth = 0;
+    while (!scan.empty()) {
+        if (scan.front() == '\'' || scan.front() == '"' || scan.front() == '`') {
+            skip_sql_quoted_span(scan, scan.front());
+            continue;
+        }
+
+        if (scan.size() >= 2U && scan[0] == '-' && scan[1] == '-') {
+            const std::size_t newline = scan.find('\n');
+            if (newline == std::string_view::npos) {
+                scan = {};
+                break;
+            }
+            scan.remove_prefix(newline + 1U);
+            continue;
+        }
+
+        if (scan.front() == '#') {
+            const std::size_t newline = scan.find('\n');
+            if (newline == std::string_view::npos) {
+                scan = {};
+                break;
+            }
+            scan.remove_prefix(newline + 1U);
+            continue;
+        }
+
+        if (scan.size() >= 2U && scan[0] == '/' && scan[1] == '*') {
+            const std::size_t end = scan.find("*/");
+            if (end == std::string_view::npos) {
+                scan = {};
+                break;
+            }
+            scan.remove_prefix(end + 2U);
+            continue;
+        }
+
+        if (scan.front() == '(') {
+            ++paren_depth;
+            scan.remove_prefix(1);
+            continue;
+        }
+
+        if (scan.front() == ')' && paren_depth > 0U) {
+            --paren_depth;
+            scan.remove_prefix(1);
+            continue;
+        }
+
+        if ((scan.front() == ',' && paren_depth == 0U) || scan.front() == ';') {
+            const std::size_t assignment_size =
+                static_cast<std::size_t>(scan.data() - assignment.data());
+            sql = scan.front() == ',' ? scan.substr(1U) : std::string_view();
+            return assignment.substr(0, assignment_size);
+        }
+
+        scan.remove_prefix(1);
+    }
+
+    sql = {};
+    return assignment;
+}
+
+bool sql_set_assignment_targets_variable(std::string_view &assignment, const char *keyword) {
+    assignment = skip_sql_leading_noise(assignment);
+    if (assignment.empty()) {
+        return false;
+    }
+
+    if (assignment.front() == '@') {
+        assignment.remove_prefix(1);
+        if (assignment.empty() || assignment.front() != '@') {
+            return false;
+        }
+        assignment.remove_prefix(1);
+    }
+
+    std::string_view token = pop_sql_token_after_separators(assignment);
+    if (sql_token_equals(token, "GLOBAL") || sql_token_equals(token, "LOCAL") ||
+        sql_token_equals(token, "SESSION")) {
+        token = pop_sql_token_after_separators(assignment);
+    }
+
+    return sql_token_equals(token, keyword);
+}
+
+bool sql_span_contains_token(std::string_view sql, const char *keyword) {
+    for (;;) {
+        sql = skip_sql_leading_noise(sql);
+        if (sql.empty()) {
+            return false;
+        }
+
+        if (sql.front() == '\'' || sql.front() == '"') {
+            if (sql_quoted_span_contains_token(sql, sql.front(), keyword)) {
+                return true;
+            }
+            continue;
+        }
+
+        if (sql.front() == '`') {
+            skip_sql_quoted_span(sql, sql.front());
+            continue;
+        }
+
+        if (std::isalnum(static_cast<unsigned char>(sql.front())) != 0 || sql.front() == '_') {
+            const std::size_t token_end = sql.find_first_not_of(
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+            );
+            const std::string_view token =
+                token_end == std::string_view::npos ? sql : sql.substr(0, token_end);
+            if (sql_token_equals(token, keyword)) {
+                return true;
+            }
+            if (token_end == std::string_view::npos) {
+                return false;
+            }
+            sql.remove_prefix(token_end);
+            continue;
+        }
+
+        sql.remove_prefix(1);
+    }
+}
+
+bool sql_quoted_span_contains_token(std::string_view &sql, char quote, const char *keyword) {
+    sql.remove_prefix(1);
+    while (!sql.empty()) {
+        if (std::isalnum(static_cast<unsigned char>(sql.front())) != 0 || sql.front() == '_') {
+            const std::size_t token_end = sql.find_first_not_of(
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+            );
+            const std::string_view token =
+                token_end == std::string_view::npos ? sql : sql.substr(0, token_end);
+            if (sql_token_equals(token, keyword)) {
+                return true;
+            }
+            if (token_end == std::string_view::npos) {
+                sql = {};
+                return false;
+            }
+            sql.remove_prefix(token_end);
+            continue;
+        }
+
+        const char current = sql.front();
+        sql.remove_prefix(1);
+
+        if (current == '\\') {
+            if (!sql.empty()) {
+                sql.remove_prefix(1);
+            }
+            continue;
+        }
+
+        if (current == quote) {
+            if (!sql.empty() && sql.front() == quote) {
+                sql.remove_prefix(1);
+                continue;
+            }
+            return false;
+        }
+    }
+    return false;
 }
 
 bool is_non_table_object_sql(std::string_view sql) {

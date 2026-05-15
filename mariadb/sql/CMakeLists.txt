@@ -112,9 +112,16 @@ ELSE()
   ADD_DEFINITIONS(-DMYLITE_WITH_SERVER_UTILITY_FUNCTIONS=0)
 ENDIF()
 
+OPTION(MYLITE_WITH_ORACLE_SQL_MODE "Build Oracle SQL mode parser" ON)
+IF(MYLITE_WITH_ORACLE_SQL_MODE)
+  SET(MYLITE_ORACLE_PARSER_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/yy_oracle.cc)
+ELSE()
+  SET(MYLITE_ORACLE_PARSER_SOURCE mylite_oracle_parser_disabled.cc)
+ENDIF()
+
 SET (SQL_SOURCE
                ${CMAKE_CURRENT_BINARY_DIR}/yy_mariadb.cc
-               ${CMAKE_CURRENT_BINARY_DIR}/yy_oracle.cc
+               ${MYLITE_ORACLE_PARSER_SOURCE}
               ../sql-common/client.c
                cset_narrowing.cc
                compat56.cc derror.cc des_key_file.cc
@@ -227,8 +234,11 @@ IF(have_CXX__Wno_unused_but_set_variable)
     # Avoid excessive compile time on RHEL8 aarch64
     SET(ARM_OLD_GCC_FLAGS -fno-strict-aliasing)
   ENDIF()
-  ADD_COMPILE_FLAGS(${CMAKE_CURRENT_BINARY_DIR}/yy_mariadb.cc
-    ${CMAKE_CURRENT_BINARY_DIR}/yy_oracle.cc
+  SET(MYLITE_GENERATED_PARSER_SOURCES ${CMAKE_CURRENT_BINARY_DIR}/yy_mariadb.cc)
+  IF(MYLITE_WITH_ORACLE_SQL_MODE)
+    LIST(APPEND MYLITE_GENERATED_PARSER_SOURCES ${CMAKE_CURRENT_BINARY_DIR}/yy_oracle.cc)
+  ENDIF()
+  ADD_COMPILE_FLAGS(${MYLITE_GENERATED_PARSER_SOURCES}
     COMPILE_FLAGS "${ARM_OLD_GCC_FLAGS} -Wno-unused-but-set-variable")
 ENDIF()
 

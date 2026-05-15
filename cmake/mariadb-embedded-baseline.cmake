@@ -49,3 +49,6 @@ set(MYLITE_WITH_SQL_FILE_IO OFF CACHE BOOL "Omit host-file SQL I/O support" FORC
 
 # MyLite rejects server utility functions before MariaDB execution.
 set(MYLITE_WITH_SERVER_UTILITY_FUNCTIONS OFF CACHE BOOL "Omit server utility SQL functions" FORCE)
+
+# MyLite rejects Oracle SQL mode before MariaDB execution.
+set(MYLITE_WITH_ORACLE_SQL_MODE OFF CACHE BOOL "Omit Oracle SQL mode parser" FORCE)
