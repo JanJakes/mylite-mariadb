@@ -5,13 +5,16 @@
 Cover MariaDB-compatible column-level existence options for routed copy
 `ALTER TABLE` DDL. `ADD COLUMN IF NOT EXISTS` should skip existing columns with
 warnings and add missing columns through MyLite's copy-rebuild path.
+`MODIFY COLUMN IF EXISTS` and `CHANGE COLUMN IF EXISTS` should skip missing
+columns with warnings and rebuild existing columns without losing rows, indexes,
+or catalog metadata.
 `DROP COLUMN IF EXISTS` should skip missing columns with warnings and drop
 existing columns without losing rows, indexes, or catalog metadata.
 
 ## Non-Goals
 
-- Do not cover every `CHANGE COLUMN IF EXISTS` or `MODIFY COLUMN IF EXISTS`
-  shape in this slice.
+- Do not exhaust every type, default, nullability, or rename matrix for
+  `CHANGE COLUMN IF EXISTS` and `MODIFY COLUMN IF EXISTS`.
 - Do not add online/in-place column DDL; MyLite still rejects online and
   in-place ALTER requests.
 - Do not cover generated columns, CHECK constraints, foreign keys, partitions,
@@ -43,25 +46,28 @@ This slice covers partial MariaDB compatibility for routed copy
 
 - duplicate column adds are warning-producing no-ops;
 - missing column adds rebuild the table definition and rows through MyLite;
+- missing column modify/change requests are warning-producing no-ops;
+- existing column modify/change requests rebuild the table definition and rows
+  while preserving supported index access paths;
 - missing column drops are warning-producing no-ops;
 - existing column drops rebuild the table definition and rows without the
   dropped column;
 - close/reopen discovery sees the committed column state.
 
-The behavior remains partial because change/modify variants, generated-column
-edge cases, CHECK/foreign-key interactions, online/in-place algorithms, and
-broader rollback matrices remain separate work.
+The behavior remains partial because generated-column edge cases,
+CHECK/foreign-key interactions, online/in-place algorithms, exhaustive
+change/modify matrices, and broader rollback matrices remain separate work.
 
 ## Design
 
 No production code change is expected. MariaDB filters skipped existence-option
 items before executing the ALTER. MyLite handles the remaining supported column
-adds and drops through its existing copy-rebuild path.
+adds, drops, modifies, and changes through its existing copy-rebuild path.
 
 The MyLite-specific risk is rebuild publication. The test must prove that
-skipped duplicate adds and skipped missing drops leave the table unchanged,
-while actual adds and drops preserve existing rows and supported indexes before
-and after close/reopen.
+skipped duplicate adds, missing modifies/changes, and missing drops leave the
+table unchanged, while actual adds, modifies, changes, and drops preserve
+existing rows and supported indexes before and after close/reopen.
 
 ## Affected Subsystems
 
@@ -73,9 +79,9 @@ and after close/reopen.
 
 ## DDL Metadata Routing Impact
 
-Supported column adds and drops append a rebuilt table definition inside the
-MyLite catalog. Skipped existence-option operations do not publish a new
-definition.
+Supported column adds, drops, modifies, and changes append a rebuilt table
+definition inside the MyLite catalog. Skipped existence-option operations do not
+publish a new definition.
 
 ## Single-File And Lifecycle Impact
 
@@ -99,10 +105,19 @@ dependency changes.
    missing column.
 4. Add storage-engine smoke coverage for `DROP COLUMN IF EXISTS` dropping the
    added column.
-5. Assert warnings contain the skipped column names, row values and supported
+5. Add storage-engine smoke coverage for `MODIFY COLUMN IF EXISTS` skipping a
+   missing column.
+6. Add storage-engine smoke coverage for `MODIFY COLUMN IF EXISTS` widening an
+   existing indexed column.
+7. Add storage-engine smoke coverage for `CHANGE COLUMN IF EXISTS` skipping a
+   missing column.
+8. Add storage-engine smoke coverage for `CHANGE COLUMN IF EXISTS` renaming an
+   existing indexed column.
+9. Assert warnings contain the skipped column names, row values and supported
    index reads survive each operation, dropped columns are unavailable after
-   close/reopen, and durable sidecar gates pass.
-6. Run format, focused storage-smoke tests, harness reports, clang-tidy, and
+   close/reopen, renamed columns are available after close/reopen, and durable
+   sidecar gates pass.
+10. Run format, focused storage-smoke tests, harness reports, clang-tidy, and
    the `dev`, `embedded-dev`, and `storage-smoke-dev` gates.
 
 ## Acceptance Criteria
@@ -116,6 +131,15 @@ dependency changes.
   leaves the table unchanged.
 - Existing `DROP COLUMN IF EXISTS subtitle` succeeds and the dropped column is
   unavailable after close/reopen.
+- Missing `MODIFY COLUMN IF EXISTS missing_title` succeeds with a warning and
+  leaves the table unchanged.
+- Existing `MODIFY COLUMN IF EXISTS title ...` succeeds, widens the column, and
+  preserves supported index reads.
+- Missing `CHANGE COLUMN IF EXISTS missing_headline ...` succeeds with a warning
+  and leaves the table unchanged.
+- Existing `CHANGE COLUMN IF EXISTS title headline ...` succeeds, the old column
+  name becomes unavailable, and the renamed column plus supported index reads
+  survive close/reopen.
 - Docs and compatibility matrices describe this as partial routed copy ALTER
   column existence-option support.
 
@@ -123,5 +147,5 @@ dependency changes.
 
 - This slice intentionally asserts warning message contents rather than exact
   MariaDB warning levels or ordering.
-- `CHANGE/MODIFY COLUMN IF EXISTS` should get separate coverage if application
-  migrations need those spellings.
+- Additional type, default, nullability, and generated-column matrices remain
+  future compatibility work.

@@ -2128,6 +2128,83 @@ static void test_column_alter_if_exists(void) {
         "2"
     );
 
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE column_posts "
+        "MODIFY COLUMN IF EXISTS missing_title VARCHAR(96) NOT NULL, ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "missing_title");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM column_posts FORCE INDEX (title_key) WHERE title = 'Beta title'",
+        "2"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE column_posts "
+        "MODIFY COLUMN IF EXISTS title VARCHAR(96) NOT NULL, ALGORITHM=COPY"
+    );
+    assert_exec_succeeds(
+        db,
+        "UPDATE column_posts SET title = "
+        "'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789plus' WHERE id = 1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM column_posts FORCE INDEX (title_key) WHERE title = "
+        "'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789plus'",
+        "1"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE column_posts "
+        "CHANGE COLUMN IF EXISTS missing_headline headline VARCHAR(96) NOT NULL, "
+        "ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "missing_headline");
+    assert_exec_fails(db, "SELECT headline FROM column_posts");
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE column_posts "
+        "CHANGE COLUMN IF EXISTS title headline VARCHAR(96) NOT NULL, ALGORITHM=COPY"
+    );
+    assert_exec_fails(db, "SELECT title FROM column_posts");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM column_posts FORCE INDEX (title_key) WHERE headline = "
+        "'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789plus'",
+        "1"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE column_posts "
+        "MODIFY COLUMN IF EXISTS title VARCHAR(128) NOT NULL, ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "title");
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE column_posts "
+        "MODIFY COLUMN IF EXISTS headline VARCHAR(128) NOT NULL, ALGORITHM=COPY"
+    );
+    assert_exec_succeeds(
+        db,
+        "UPDATE column_posts SET headline = "
+        "'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzA"
+        "BCDEFGHIJKL' "
+        "WHERE id = 2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM column_posts FORCE INDEX (title_key) WHERE headline = "
+        "'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzA"
+        "BCDEFGHIJKL'",
+        "2"
+    );
+
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
@@ -2137,11 +2214,20 @@ static void test_column_alter_if_exists(void) {
     assert_catalog_table_count(filename, "column_if_exists", 1U);
     assert_catalog_table_metadata(filename, "column_if_exists", "column_posts", "InnoDB", "MYLITE");
     assert_exec_fails(db, "SELECT subtitle FROM column_posts");
+    assert_exec_fails(db, "SELECT title FROM column_posts");
     assert_query_single_value(db, "SELECT COUNT(*) FROM column_posts", "2");
     assert_query_single_value(
         db,
-        "SELECT id FROM column_posts FORCE INDEX (title_key) WHERE title = 'Alpha title'",
+        "SELECT id FROM column_posts FORCE INDEX (title_key) WHERE headline = "
+        "'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789plus'",
         "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM column_posts FORCE INDEX (title_key) WHERE headline = "
+        "'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzA"
+        "BCDEFGHIJKL'",
+        "2"
     );
     assert_query_single_value(
         db,
