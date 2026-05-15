@@ -139,7 +139,7 @@ small curated embedded MTR subset:
 
 ```sh
 tools/mylite-mtr-harness list
-tools/mylite-mtr-harness run main.1st
+tools/mylite-mtr-harness run
 ```
 
 See [docs/architecture/monorepo.md](docs/architecture/monorepo.md) for the

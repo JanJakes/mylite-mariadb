@@ -42,8 +42,9 @@ rejection, failed
 statement rollback, initial application-schema smoke,
 unsupported server/non-table-object policy, and representative
 `SHOW CREATE TABLE` round-trip export/import.
-MariaDB MTR comparison suites and broader application-schema suites remain
-planned.
+The opt-in embedded MTR smoke runner covers MariaDB bootstrap and scalar
+CAST/CONVERT behavior, while MariaDB MTR comparison suites and broader
+application-schema suites remain planned.
 
 ## Baseline
 

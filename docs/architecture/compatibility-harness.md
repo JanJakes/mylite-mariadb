@@ -62,10 +62,11 @@ compatibility cases. MyLite should not run MTR blindly as the primary local
 signal yet: current MyLite behavior is embedded, file-owned, and intentionally
 excludes server surfaces that many upstream suites assume. The opt-in
 `tools/mylite-mtr-harness` runner proves the embedded MTR path with a tiny
-curated upstream smoke test, but it remains outside the default compatibility
-groups because it builds `mariadbd` and several upstream client/support tools.
-Broader MTR integration should be a separate comparison slice with explicit
-include lists, expected unsupported surfaces, and stable result normalization.
+curated upstream smoke list covering bootstrap and scalar CAST/CONVERT behavior,
+but it remains outside the default compatibility groups because it builds
+`mariadbd` and several upstream client/support tools. Broader MTR integration
+should be a separate comparison slice with explicit include lists, expected
+unsupported surfaces, and stable result normalization.
 
 ## Maintenance Rules
 

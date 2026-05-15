@@ -7,7 +7,7 @@ not run any MariaDB MTR cases. MTR is MariaDB's native SQL compatibility test
 runner, so MyLite needs a small, proven entry point before broader MTR-scale
 comparison work can be planned honestly.
 
-This slice adds an opt-in smoke runner for a curated embedded MTR test. It is
+This slice adds an opt-in smoke runner for curated embedded MTR tests. It is
 intentionally separate from the default MyLite compatibility harness because
 MTR preparation builds `mariadbd` and several upstream client/support tools.
 
@@ -27,6 +27,13 @@ MariaDB base: `mariadb-11.8.6`
   MyISAM/Aria utility tools, `perror`, `mariadb-tzinfo-to-sql`, and `replace`.
 - Verified command:
   `tools/mylite-mtr-harness run main.1st`.
+- `mariadb/mysql-test/main/cast.test` exercises MariaDB scalar CAST/CONVERT
+  semantics, temporal precision conversion, numeric overflow and truncation
+  warnings, character-set conversion, and result metadata through a mix of
+  result-only and temporary-table statements without requiring a daemon-only
+  test prelude.
+- Verified command:
+  `tools/mylite-mtr-harness run main.cast`.
 
 ## Design
 
@@ -40,6 +47,7 @@ Add `tools/mylite-mtr-harness` with two commands:
 The default curated list is intentionally tiny:
 
 - `main.1st`.
+- `main.cast`.
 
 This establishes a working MTR path while avoiding a false claim that MyLite has
 meaningful MTR-scale coverage.
@@ -80,16 +88,17 @@ artifacts, not default MyLite linked-library artifacts.
 ## Test And Verification Plan
 
 - `tools/mylite-mtr-harness list`.
-- `tools/mylite-mtr-harness run main.1st`.
+- `tools/mylite-mtr-harness run`.
 - Existing first-party format, tidy, dev, embedded, and storage-smoke checks
   should continue passing because the runner does not change production code.
 
 ## Acceptance Criteria
 
-- The runner lists `main.1st`.
+- The runner lists `main.1st` and `main.cast`.
 - The runner builds the required MTR support targets from a fresh enough
   `build/mariadb-embedded` tree.
-- `main.1st` passes under `mariadb-test-run.pl --embedded-server`.
+- `main.1st` and `main.cast` pass under
+  `mariadb-test-run.pl --embedded-server`.
 - Documentation states that this is opt-in smoke coverage, not full MTR-scale
   comparison.
 

@@ -4,7 +4,7 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_dir="${BUILD_DIR:-"${root_dir}/build/mariadb-embedded"}"
 mtr_build_thread="${MTR_BUILD_THREAD:-auto}"
-default_tests=(main.1st)
+default_tests=(main.1st main.cast)
 
 usage() {
   cat <<EOF
