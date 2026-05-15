@@ -164,6 +164,7 @@ static void assert_catalog_table_metadata(
     const char *requested_engine_name,
     const char *effective_engine_name
 );
+static void assert_wordpress_catalog_metadata(const char *filename);
 static int engine_callback(void *ctx, int column_count, char **values, char **column_names);
 static int schema_callback(void *ctx, int column_count, char **values, char **column_names);
 static int schema_option_callback(void *ctx, int column_count, char **values, char **column_names);
@@ -2479,6 +2480,27 @@ static void test_wordpress_shaped_schema(void) {
     single_value_context post_title = {
         .expected_value = "Hello world",
     };
+    single_value_context user_display_name = {
+        .expected_value = "admin",
+    };
+    single_value_context user_capabilities = {
+        .expected_value = "a:1:{s:13:\"administrator\";b:1;}",
+    };
+    single_value_context term_slug = {
+        .expected_value = "uncategorized",
+    };
+    single_value_context comment_content_length = {
+        .expected_value = "160",
+    };
+    single_value_context commentmeta_value = {
+        .expected_value = "5",
+    };
+    single_value_context link_name = {
+        .expected_value = "MyLite",
+    };
+    single_value_context deleted_commentmeta_count = {
+        .expected_value = "0",
+    };
     wordpress_post_context published_post = {
         .expected_status = "publish",
     };
@@ -2535,10 +2557,132 @@ static void test_wordpress_shaped_schema(void) {
         "KEY meta_key (meta_key(191))"
         ") ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 3U);
-    assert_catalog_table_metadata(filename, "app", "wp_options", "InnoDB", "MYLITE");
-    assert_catalog_table_metadata(filename, "app", "wp_posts", "InnoDB", "MYLITE");
-    assert_catalog_table_metadata(filename, "app", "wp_postmeta", "InnoDB", "MYLITE");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE wp_users ("
+        "ID BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, "
+        "user_login VARCHAR(60) NOT NULL DEFAULT '', "
+        "user_pass VARCHAR(255) NOT NULL DEFAULT '', "
+        "user_nicename VARCHAR(50) NOT NULL DEFAULT '', "
+        "user_email VARCHAR(100) NOT NULL DEFAULT '', "
+        "user_url VARCHAR(100) NOT NULL DEFAULT '', "
+        "user_registered DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00', "
+        "user_activation_key VARCHAR(255) NOT NULL DEFAULT '', "
+        "user_status INT NOT NULL DEFAULT 0, "
+        "display_name VARCHAR(250) NOT NULL DEFAULT '', "
+        "PRIMARY KEY (ID), "
+        "KEY user_login_key (user_login), "
+        "KEY user_nicename (user_nicename), "
+        "KEY user_email (user_email)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE wp_usermeta ("
+        "umeta_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, "
+        "user_id BIGINT UNSIGNED NOT NULL DEFAULT 0, "
+        "meta_key VARCHAR(255) NULL, "
+        "meta_value LONGTEXT NULL, "
+        "PRIMARY KEY (umeta_id), "
+        "KEY user_id (user_id), "
+        "KEY meta_key (meta_key(191))"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE wp_terms ("
+        "term_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, "
+        "name VARCHAR(200) NOT NULL DEFAULT '', "
+        "slug VARCHAR(200) NOT NULL DEFAULT '', "
+        "term_group BIGINT NOT NULL DEFAULT 0, "
+        "PRIMARY KEY (term_id), "
+        "KEY slug (slug(191)), "
+        "KEY name (name(191))"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE wp_term_taxonomy ("
+        "term_taxonomy_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, "
+        "term_id BIGINT UNSIGNED NOT NULL DEFAULT 0, "
+        "taxonomy VARCHAR(32) NOT NULL DEFAULT '', "
+        "description LONGTEXT NOT NULL, "
+        "parent BIGINT UNSIGNED NOT NULL DEFAULT 0, "
+        "count BIGINT NOT NULL DEFAULT 0, "
+        "PRIMARY KEY (term_taxonomy_id), "
+        "UNIQUE KEY term_id_taxonomy (term_id, taxonomy), "
+        "KEY taxonomy (taxonomy)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE wp_term_relationships ("
+        "object_id BIGINT UNSIGNED NOT NULL DEFAULT 0, "
+        "term_taxonomy_id BIGINT UNSIGNED NOT NULL DEFAULT 0, "
+        "term_order INT NOT NULL DEFAULT 0, "
+        "PRIMARY KEY (object_id, term_taxonomy_id), "
+        "KEY term_taxonomy_id (term_taxonomy_id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE wp_comments ("
+        "comment_ID BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, "
+        "comment_post_ID BIGINT UNSIGNED NOT NULL DEFAULT 0, "
+        "comment_author TINYTEXT NOT NULL, "
+        "comment_author_email VARCHAR(100) NOT NULL DEFAULT '', "
+        "comment_author_url VARCHAR(200) NOT NULL DEFAULT '', "
+        "comment_author_IP VARCHAR(100) NOT NULL DEFAULT '', "
+        "comment_date DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00', "
+        "comment_date_gmt DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00', "
+        "comment_content TEXT NOT NULL, "
+        "comment_karma INT NOT NULL DEFAULT 0, "
+        "comment_approved VARCHAR(20) NOT NULL DEFAULT '1', "
+        "comment_agent VARCHAR(255) NOT NULL DEFAULT '', "
+        "comment_type VARCHAR(20) NOT NULL DEFAULT 'comment', "
+        "comment_parent BIGINT UNSIGNED NOT NULL DEFAULT 0, "
+        "user_id BIGINT UNSIGNED NOT NULL DEFAULT 0, "
+        "PRIMARY KEY (comment_ID), "
+        "KEY comment_post_ID (comment_post_ID), "
+        "KEY comment_approved_date_gmt (comment_approved, comment_date_gmt), "
+        "KEY comment_date_gmt (comment_date_gmt), "
+        "KEY comment_parent (comment_parent), "
+        "KEY comment_author_email (comment_author_email(10))"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE wp_commentmeta ("
+        "meta_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, "
+        "comment_id BIGINT UNSIGNED NOT NULL DEFAULT 0, "
+        "meta_key VARCHAR(255) NULL, "
+        "meta_value LONGTEXT NULL, "
+        "PRIMARY KEY (meta_id), "
+        "KEY comment_id (comment_id), "
+        "KEY meta_key (meta_key(191))"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE wp_links ("
+        "link_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, "
+        "link_url VARCHAR(255) NOT NULL DEFAULT '', "
+        "link_name VARCHAR(255) NOT NULL DEFAULT '', "
+        "link_image VARCHAR(255) NOT NULL DEFAULT '', "
+        "link_target VARCHAR(25) NOT NULL DEFAULT '', "
+        "link_description VARCHAR(255) NOT NULL DEFAULT '', "
+        "link_visible VARCHAR(20) NOT NULL DEFAULT 'Y', "
+        "link_owner BIGINT UNSIGNED NOT NULL DEFAULT 1, "
+        "link_rating INT NOT NULL DEFAULT 0, "
+        "link_updated DATETIME NOT NULL DEFAULT '0000-00-00 00:00:00', "
+        "link_rel VARCHAR(255) NOT NULL DEFAULT '', "
+        "link_notes MEDIUMTEXT NOT NULL, "
+        "link_rss VARCHAR(255) NOT NULL DEFAULT '', "
+        "PRIMARY KEY (link_id), "
+        "KEY link_visible (link_visible)"
+        ") ENGINE=InnoDB"
+    );
+    assert_wordpress_catalog_metadata(filename);
 
     assert_exec_succeeds(
         db,
@@ -2567,6 +2711,64 @@ static void test_wordpress_shaped_schema(void) {
         "INSERT INTO wp_postmeta (post_id, meta_key, meta_value) VALUES "
         "(1, '_thumbnail_id', '42'), "
         "(1, '_edit_lock', '1760000000:1')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_users ("
+        "user_login, user_pass, user_nicename, user_email, user_url, user_registered, "
+        "user_activation_key, user_status, display_name"
+        ") VALUES ("
+        "'admin', '$P$hash', 'admin', 'admin@example.test', 'https://example.test', "
+        "'2026-05-14 11:00:00', '', 0, 'admin'"
+        ")"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_usermeta (user_id, meta_key, meta_value) VALUES "
+        "(1, 'wp_capabilities', 'a:1:{s:13:\"administrator\";b:1;}'), "
+        "(1, 'wp_user_level', '10')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_terms (name, slug, term_group) VALUES "
+        "('Uncategorized', 'uncategorized', 0)"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_term_taxonomy (term_id, taxonomy, description, parent, count) VALUES "
+        "(1, 'category', 'Default category', 0, 1)"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_term_relationships (object_id, term_taxonomy_id, term_order) VALUES "
+        "(1, 1, 0)"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_comments ("
+        "comment_post_ID, comment_author, comment_author_email, comment_author_url, "
+        "comment_author_IP, comment_date, comment_date_gmt, comment_content, "
+        "comment_karma, comment_approved, comment_agent, comment_type, comment_parent, user_id"
+        ") VALUES ("
+        "1, 'Jan', 'jan@example.test', '', '127.0.0.1', "
+        "'2026-05-14 12:10:00', '2026-05-14 10:10:00', REPEAT('comment ', 20), "
+        "0, '1', 'mylite-test', 'comment', 0, 1"
+        ")"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_commentmeta (comment_id, meta_key, meta_value) VALUES "
+        "(1, '_rating', '5')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_links ("
+        "link_url, link_name, link_image, link_target, link_description, link_visible, "
+        "link_owner, link_rating, link_updated, link_rel, link_notes, link_rss"
+        ") VALUES ("
+        "'https://mylite.example', 'MyLite', '', '', 'Embedded database', 'Y', "
+        "1, 0, '2026-05-14 12:20:00', '', 'link notes', ''"
+        ")"
     );
 
     assert(
@@ -2642,6 +2844,80 @@ static void test_wordpress_shaped_schema(void) {
     );
     assert(errmsg == NULL);
     assert(joined_postmeta.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT display_name FROM wp_users FORCE INDEX (user_login_key) "
+            "WHERE user_login = 'admin'",
+            single_value_callback,
+            &user_display_name,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(user_display_name.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT meta_value FROM wp_usermeta FORCE INDEX (user_id) "
+            "WHERE user_id = 1 AND meta_key = 'wp_capabilities'",
+            single_value_callback,
+            &user_capabilities,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(user_capabilities.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT t.slug FROM wp_terms t "
+            "JOIN wp_term_taxonomy tt ON tt.term_id = t.term_id "
+            "JOIN wp_term_relationships tr ON tr.term_taxonomy_id = tt.term_taxonomy_id "
+            "WHERE tr.object_id = 1 AND tt.taxonomy = 'category'",
+            single_value_callback,
+            &term_slug,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(term_slug.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT LENGTH(comment_content) FROM wp_comments FORCE INDEX (comment_post_ID) "
+            "WHERE comment_post_ID = 1",
+            single_value_callback,
+            &comment_content_length,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(comment_content_length.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT meta_value FROM wp_commentmeta FORCE INDEX (comment_id) "
+            "WHERE comment_id = 1 AND meta_key = '_rating'",
+            single_value_callback,
+            &commentmeta_value,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(commentmeta_value.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT link_name FROM wp_links FORCE INDEX (link_visible) "
+            "WHERE link_visible = 'Y'",
+            single_value_callback,
+            &link_name,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(link_name.rows == 1);
 
     assert_exec_succeeds(
         db,
@@ -2652,7 +2928,9 @@ static void test_wordpress_shaped_schema(void) {
         db,
         "UPDATE wp_posts SET post_status = 'draft' WHERE post_name = 'hello-world'"
     );
+    assert_exec_succeeds(db, "UPDATE wp_users SET display_name = 'Jan Admin' WHERE ID = 1");
     assert_exec_succeeds(db, "DELETE FROM wp_postmeta WHERE meta_key = '_edit_lock'");
+    assert_exec_succeeds(db, "DELETE FROM wp_commentmeta WHERE meta_key = '_rating'");
     assert(
         mylite_exec(
             db,
@@ -2664,6 +2942,17 @@ static void test_wordpress_shaped_schema(void) {
     );
     assert(errmsg == NULL);
     assert(deleted_meta.rows == 0);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM wp_commentmeta WHERE meta_key = '_rating'",
+            single_value_callback,
+            &deleted_commentmeta_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(deleted_commentmeta_count.rows == 1);
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
@@ -2683,12 +2972,27 @@ static void test_wordpress_shaped_schema(void) {
     postmeta_value = (single_value_context){
         .expected_value = "42",
     };
+    user_display_name = (single_value_context){
+        .expected_value = "Jan Admin",
+    };
+    user_capabilities = (single_value_context){
+        .expected_value = "a:1:{s:13:\"administrator\";b:1;}",
+    };
+    term_slug = (single_value_context){
+        .expected_value = "uncategorized",
+    };
+    comment_content_length = (single_value_context){
+        .expected_value = "160",
+    };
+    link_name = (single_value_context){
+        .expected_value = "MyLite",
+    };
+    deleted_commentmeta_count = (single_value_context){
+        .expected_value = "0",
+    };
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "USE app");
-    assert_catalog_table_count(filename, "app", 3U);
-    assert_catalog_table_metadata(filename, "app", "wp_options", "InnoDB", "MYLITE");
-    assert_catalog_table_metadata(filename, "app", "wp_posts", "InnoDB", "MYLITE");
-    assert_catalog_table_metadata(filename, "app", "wp_postmeta", "InnoDB", "MYLITE");
+    assert_wordpress_catalog_metadata(filename);
     assert(
         mylite_exec(
             db,
@@ -2748,12 +3052,100 @@ static void test_wordpress_shaped_schema(void) {
     );
     assert(errmsg == NULL);
     assert(postmeta_value.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT display_name FROM wp_users FORCE INDEX (user_login_key) "
+            "WHERE user_login = 'admin'",
+            single_value_callback,
+            &user_display_name,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(user_display_name.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT meta_value FROM wp_usermeta FORCE INDEX (meta_key) "
+            "WHERE meta_key = 'wp_capabilities'",
+            single_value_callback,
+            &user_capabilities,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(user_capabilities.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT t.slug FROM wp_terms t "
+            "JOIN wp_term_taxonomy tt ON tt.term_id = t.term_id "
+            "JOIN wp_term_relationships tr ON tr.term_taxonomy_id = tt.term_taxonomy_id "
+            "WHERE tr.object_id = 1 AND tt.taxonomy = 'category'",
+            single_value_callback,
+            &term_slug,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(term_slug.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT LENGTH(comment_content) FROM wp_comments FORCE INDEX (comment_post_ID) "
+            "WHERE comment_post_ID = 1",
+            single_value_callback,
+            &comment_content_length,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(comment_content_length.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT link_name FROM wp_links FORCE INDEX (link_visible) "
+            "WHERE link_visible = 'Y'",
+            single_value_callback,
+            &link_name,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(link_name.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM wp_commentmeta WHERE meta_key = '_rating'",
+            single_value_callback,
+            &deleted_commentmeta_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(deleted_commentmeta_count.rows == 1);
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
     free(filename);
     remove_tree(root);
     free(root);
+}
+
+static void assert_wordpress_catalog_metadata(const char *filename) {
+    assert_catalog_table_count(filename, "app", 11U);
+    assert_catalog_table_metadata(filename, "app", "wp_options", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "wp_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "wp_postmeta", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "wp_users", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "wp_usermeta", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "wp_terms", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "wp_term_taxonomy", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "wp_term_relationships", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "wp_comments", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "wp_commentmeta", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "wp_links", "InnoDB", "MYLITE");
 }
 
 static void assert_exec_succeeds(mylite_db *db, const char *sql) {

@@ -34,8 +34,10 @@ MariaDB base: `mariadb-11.8.6`
 The smoke uses a WordPress-shaped subset rather than an exact current WordPress
 installer dump. Exact WordPress schema import, charset/collation variants, and
 plugin tables need broader support than this first slice should hide inside one
-test. A later BLOB/TEXT prefix-index slice broadened this smoke with prefix
-indexes on wider `varchar` and `text`/`longtext` columns.
+test. Later BLOB/TEXT prefix-index and WordPress core schema expansion slices
+broadened this smoke with prefix indexes on wider `varchar` and
+`text`/`longtext` columns, plus users, usermeta, terms, taxonomy
+relationships, comments, commentmeta, and links.
 
 ## Design
 
@@ -59,8 +61,10 @@ storage-engine smoke label carrying this test.
 
 ## Supported Scope
 
-- WordPress-shaped core table DDL for `wp_options`, `wp_posts`, and
-  `wp_postmeta`.
+- WordPress-shaped core table DDL for `wp_options`, `wp_posts`,
+  `wp_postmeta`, `wp_users`, `wp_usermeta`, `wp_terms`,
+  `wp_term_taxonomy`, `wp_term_relationships`, `wp_comments`,
+  `wp_commentmeta`, and `wp_links`.
 - Routed `ENGINE=InnoDB` catalog metadata and effective `MYLITE` engine.
 - Autoincrement `bigint unsigned` ids.
 - WordPress-shaped `text`/`longtext` DDL, with `longtext`, `varchar`,
@@ -74,7 +78,7 @@ storage-engine smoke label carrying this test.
 - Character set, collation, and index-length edge cases.
 - Foreign keys or referential enforcement; WordPress itself does not depend on
   database-enforced foreign keys for these core relationships.
-- Multisite, users, comments, terms, plugin tables, migrations, or WP-CLI.
+- Multisite, exact installer import, plugin tables, migrations, or WP-CLI.
 
 ## Compatibility Impact
 
