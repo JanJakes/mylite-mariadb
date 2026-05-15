@@ -150,6 +150,7 @@ static void test_transaction_and_foreign_key_policies(void);
 static void test_create_table_persists_catalog_metadata(void);
 static void test_check_constraint_if_exists(void);
 static void test_non_check_constraint_ddl(void);
+static void test_primary_key_alter_ddl(void);
 static void test_create_table_if_not_exists(void);
 static void test_alter_table_rebuilds_keyless_rows(void);
 static void test_column_alter_if_exists(void);
@@ -316,6 +317,7 @@ int main(void) {
     test_create_table_persists_catalog_metadata();
     test_check_constraint_if_exists();
     test_non_check_constraint_ddl();
+    test_primary_key_alter_ddl();
     test_create_table_if_not_exists();
     test_alter_table_rebuilds_keyless_rows();
     test_column_alter_if_exists();
@@ -2249,6 +2251,188 @@ static void test_non_check_constraint_ddl(void) {
         "constraint_posts",
         "InnoDB",
         "MYLITE"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_primary_key_alter_ddl(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    table_context primary_index_rows = {0};
+    table_context duplicate_primary_index_rows = {0};
+    table_context reopened_primary_index_rows = {0};
+    table_context dropped_primary_index_rows = {0};
+    table_context failed_readd_primary_index_rows = {0};
+    table_context readded_primary_index_rows = {0};
+    table_context final_primary_index_rows = {0};
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE primary_key_alter");
+    assert_exec_succeeds(db, "USE primary_key_alter");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE pk_posts ("
+        "id INT NOT NULL, "
+        "slug VARCHAR(64) NOT NULL, "
+        "category VARCHAR(64) NOT NULL, "
+        "KEY category_key (category)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO pk_posts VALUES "
+        "(1, 'alpha', 'news'), "
+        "(2, 'beta', 'tech')"
+    );
+    assert_catalog_table_count(filename, "primary_key_alter", 1U);
+    assert_catalog_table_metadata(filename, "primary_key_alter", "pk_posts", "InnoDB", "MYLITE");
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE pk_posts ADD CONSTRAINT posts_pk PRIMARY KEY (id), ALGORITHM=COPY"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM pk_posts WHERE Key_name = 'PRIMARY'",
+            table_callback,
+            &primary_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(primary_index_rows.rows == 1);
+    assert_exec_fails(db, "INSERT INTO pk_posts VALUES (1, 'duplicate-id', 'news')");
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM pk_posts FORCE INDEX (PRIMARY) WHERE id = 2",
+        "beta"
+    );
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE pk_posts ADD CONSTRAINT posts_pk PRIMARY KEY IF NOT EXISTS (id), "
+        "ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "primary key");
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM pk_posts WHERE Key_name = 'PRIMARY'",
+            table_callback,
+            &duplicate_primary_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(duplicate_primary_index_rows.rows == 1);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE primary_key_alter");
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM pk_posts WHERE Key_name = 'PRIMARY'",
+            table_callback,
+            &reopened_primary_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_primary_index_rows.rows == 1);
+    assert_exec_fails(db, "INSERT INTO pk_posts VALUES (1, 'duplicate-id', 'news')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM pk_posts FORCE INDEX (category_key) WHERE category = 'news'",
+        "1"
+    );
+
+    assert_exec_succeeds(db, "ALTER TABLE pk_posts DROP PRIMARY KEY, ALGORITHM=COPY");
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM pk_posts WHERE Key_name = 'PRIMARY'",
+            table_callback,
+            &dropped_primary_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(dropped_primary_index_rows.rows == 0);
+    assert_exec_fails(db, "SELECT slug FROM pk_posts FORCE INDEX (PRIMARY) WHERE id = 1");
+    assert_exec_succeeds(db, "INSERT INTO pk_posts VALUES (1, 'alpha-copy', 'news')");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM pk_posts WHERE id = 1", "2");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM pk_posts FORCE INDEX (category_key) WHERE category = 'news'",
+        "2"
+    );
+
+    assert_exec_fails(db, "ALTER TABLE pk_posts ADD PRIMARY KEY (id), ALGORITHM=COPY");
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM pk_posts WHERE Key_name = 'PRIMARY'",
+            table_callback,
+            &failed_readd_primary_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(failed_readd_primary_index_rows.rows == 0);
+    assert_query_single_value(db, "SELECT COUNT(*) FROM pk_posts WHERE id = 1", "2");
+
+    assert_exec_succeeds(db, "DELETE FROM pk_posts WHERE slug = 'alpha-copy'");
+    assert_exec_succeeds(db, "ALTER TABLE pk_posts ADD PRIMARY KEY (id), ALGORITHM=COPY");
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM pk_posts WHERE Key_name = 'PRIMARY'",
+            table_callback,
+            &readded_primary_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(readded_primary_index_rows.rows == 1);
+    assert_exec_fails(db, "INSERT INTO pk_posts VALUES (2, 'duplicate-beta', 'tech')");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE primary_key_alter");
+    assert_catalog_table_count(filename, "primary_key_alter", 1U);
+    assert_catalog_table_metadata(filename, "primary_key_alter", "pk_posts", "InnoDB", "MYLITE");
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM pk_posts WHERE Key_name = 'PRIMARY'",
+            table_callback,
+            &final_primary_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(final_primary_index_rows.rows == 1);
+    assert_query_single_value(db, "SELECT COUNT(*) FROM pk_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM pk_posts FORCE INDEX (PRIMARY) WHERE id = 1",
+        "alpha"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM pk_posts FORCE INDEX (category_key) WHERE category = 'tech'",
+        "2"
     );
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
@@ -6960,6 +7144,20 @@ static void assert_warning_message_contains(mylite_db *db, const char *expected_
     }
 
     fprintf(stderr, "Missing warning containing: %s\n", expected_message);
+    for (unsigned index = 0U; index < warning_count; ++index) {
+        mylite_warning_level level = MYLITE_WARNING_NOTE;
+        unsigned code = 0U;
+        const char *message = NULL;
+        assert(mylite_warning(db, index, &level, &code, &message) == MYLITE_OK);
+        fprintf(
+            stderr,
+            "Warning %u: level=%u code=%u message=%s\n",
+            index,
+            (unsigned)level,
+            code,
+            message != NULL ? message : "(null)"
+        );
+    }
     assert(0);
 }
 

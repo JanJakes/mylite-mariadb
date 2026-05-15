@@ -151,6 +151,9 @@ Implemented:
   `DROP CONSTRAINT author_unique` are covered after close/reopen.
 - The test proves the dropped unique constraint stops enforcing duplicates and
   that a later added unique constraint survives another close/reopen cycle.
+- The `primary-key-alter-ddl` follow-up slice covers primary-key add/drop/re-add
+  through copy ALTER, including duplicate `ADD PRIMARY KEY IF NOT EXISTS`
+  warnings and failed re-add over duplicate rows.
 
 No MariaDB source, public API, storage file-format, dependency, license, or
 binary-size change was required.
