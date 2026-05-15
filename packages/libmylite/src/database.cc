@@ -328,11 +328,13 @@ bool is_server_surface_sql(std::string_view sql);
 bool is_non_table_object_sql(std::string_view sql);
 bool is_transaction_control_sql(std::string_view sql);
 bool is_locking_sql(std::string_view sql);
+bool is_online_alter_sql(std::string_view sql);
 bool is_partition_sql(std::string_view sql);
 bool is_foreign_key_sql(std::string_view sql);
 bool is_non_table_object_keyword(std::string_view token);
 bool is_set_transaction_control_sql(std::string_view sql);
 bool sql_tokens_contain_locking_marker(std::string_view sql);
+bool sql_tokens_contain_online_alter_marker(std::string_view sql);
 bool sql_tokens_contain_partition_marker(std::string_view sql);
 bool sql_tokens_contain_foreign_key_marker(std::string_view sql);
 std::string_view skip_sql_leading_noise(std::string_view sql);
@@ -1989,6 +1991,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_locking_sql(sql)) {
         return "unsupported SQL locking surface";
     }
+    if (is_online_alter_sql(sql)) {
+        return "unsupported online ALTER SQL surface";
+    }
     if (is_partition_sql(sql)) {
         return "unsupported partition SQL surface";
     }
@@ -2163,6 +2168,58 @@ bool sql_tokens_contain_locking_marker(std::string_view sql) {
             sql_token_equals(token, "RELEASE_ALL_LOCKS") ||
             sql_token_equals(token, "IS_FREE_LOCK") || sql_token_equals(token, "IS_USED_LOCK")) {
             return true;
+        }
+    }
+    return false;
+}
+
+bool is_online_alter_sql(std::string_view sql) {
+    std::string_view rest = skip_sql_leading_noise(sql);
+    std::string_view token = pop_sql_token(rest);
+    if (!sql_token_equals(token, "ALTER")) {
+        return false;
+    }
+
+    token = pop_sql_token(rest);
+    if (sql_token_equals(token, "IGNORE")) {
+        token = pop_sql_token(rest);
+    }
+
+    if (sql_token_equals(token, "ONLINE")) {
+        return true;
+    }
+    if (sql_token_equals(token, "OFFLINE")) {
+        token = pop_sql_token(rest);
+    }
+
+    if (!sql_token_equals(token, "TABLE")) {
+        return false;
+    }
+
+    return sql_tokens_contain_online_alter_marker(rest);
+}
+
+bool sql_tokens_contain_online_alter_marker(std::string_view sql) {
+    std::string_view token;
+    while (pop_sql_scanned_token(sql, token)) {
+        if (sql_token_equals(token, "ALGORITHM")) {
+            std::string_view after_algorithm = sql;
+            std::string_view next;
+            if (!pop_sql_scanned_token(after_algorithm, next)) {
+                continue;
+            }
+            if (sql_token_equals(next, "INPLACE") || sql_token_equals(next, "INSTANT") ||
+                sql_token_equals(next, "NOCOPY")) {
+                return true;
+            }
+        }
+
+        if (sql_token_equals(token, "LOCK")) {
+            std::string_view after_lock = sql;
+            std::string_view next;
+            if (pop_sql_scanned_token(after_lock, next) && sql_token_equals(next, "NONE")) {
+                return true;
+            }
         }
     }
     return false;

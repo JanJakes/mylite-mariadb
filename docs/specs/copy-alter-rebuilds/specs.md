@@ -62,6 +62,9 @@ The implementation should rely on MariaDB's copy path:
 The handler must advertise `HA_NO_ONLINE_ALTER`. MyLite does not yet have
 transaction, online-change-log, locking, or recovery support, so `LOCK=NONE`
 must fail explicitly instead of appearing to support online DDL.
+The `online-alter-policy` slice rejects representative `LOCK=NONE`,
+`ALTER ONLINE TABLE`, and `ALGORITHM=INPLACE` / `INSTANT` / `NOCOPY` requests
+through the MyLite SQL policy before MariaDB execution.
 
 `ha_mylite::create()` should reject unsupported target table shapes before
 catalog publication. This prevents `ALTER ... ADD PRIMARY KEY` or other general
@@ -84,8 +87,8 @@ engine remains `MYLITE`.
 
 ## Non-Goals
 
-- `LOCK=NONE` or online copy ALTER.
-- In-place, instant, or no-copy ALTER algorithms.
+- Implementing `LOCK=NONE` or online copy ALTER.
+- Implementing in-place, instant, or no-copy ALTER algorithms.
 - Adding primary, unique, secondary, FULLTEXT, SPATIAL, or generated-column
   indexes.
 - Foreign keys, triggers, check-constraint expansion, and general generated
@@ -135,7 +138,7 @@ metadata across rebuilds so `ENGINE=InnoDB` remains recorded as requested
   - explicit same-engine rebuild with `ENGINE=InnoDB`,
   - BLOB/TEXT and NULL row values before and after close/reopen,
   - requested/effective engine metadata after ALTER,
-  - `LOCK=NONE` failure through the handler's online ALTER gates,
+  - online/in-place ALTER rejection through the MyLite SQL policy,
   - unsupported index rebuild failure with no temporary catalog leak,
   - no forbidden durable sidecars.
 - Run normal dev, embedded, storage-smoke, format, diff, tidy, and MariaDB
@@ -150,7 +153,7 @@ metadata across rebuilds so `ENGINE=InnoDB` remains recorded as requested
   engine requests.
 - Unsupported indexed rebuilds fail before publishing a live MyLite catalog
   table.
-- `LOCK=NONE` copy ALTER fails explicitly.
+- Representative online/in-place ALTER requests fail explicitly.
 - Compatibility, roadmap, and storage docs describe partial ALTER support and
   remaining limits.
 

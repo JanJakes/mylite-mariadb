@@ -81,6 +81,9 @@ algorithm before MariaDB's in-place ALTER preparation can write temporary
 yet. Storage-smoke coverage includes representative default-algorithm column,
 index, standalone-index, CHECK, and autoincrement ALTER operations after
 catalog-only reopen without a rehydrated runtime schema directory.
+Representative online and in-place ALTER requests, including `LOCK=NONE`,
+`ALTER ONLINE TABLE`, and `ALGORITHM=INPLACE` / `INSTANT` / `NOCOPY`, are
+rejected by the MyLite SQL policy before MariaDB execution.
 Foreign-key DDL is rejected at the `libmylite` boundary until MyLite has
 catalog metadata, enforcement, locking, recovery, and transaction-aware checks
 for referential constraints.
@@ -204,9 +207,10 @@ Supported key additions on copy `ALTER` rebuild through the same table-copy
 path and publish rebuilt rows with matching index-entry pages. Representative
 default-algorithm copy ALTER paths after catalog-only reopen cover column
 add/drop/rename, ALTER-backed index add/drop, standalone index create/drop, and
-autoincrement metadata updates. `LOCK=NONE` copy ALTER, in-place ALTER,
-unsupported index rebuilds, and transactional DDL rollback remain planned until
-MyLite has locking and recovery.
+autoincrement metadata updates. `LOCK=NONE` and in-place/instant/no-copy ALTER
+requests are explicitly rejected until MyLite has online DDL and lock
+integration. Unsupported index rebuilds and transactional DDL rollback remain
+planned until MyLite has locking and recovery.
 `CREATE TABLE ... LIKE` clones supported routed source table definitions through
 MariaDB's normal LIKE path, does not copy rows, resets target autoincrement
 state, and records the source requested engine with effective `MYLITE` when the

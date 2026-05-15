@@ -26,6 +26,7 @@ static void test_server_surfaces_are_disabled(void);
 static void test_non_table_objects_are_rejected(void);
 static void test_transaction_control_is_rejected(void);
 static void test_locking_sql_is_rejected(void);
+static void test_online_alter_policy_is_rejected(void);
 static void test_foreign_key_policy_is_rejected(void);
 static void test_partition_policy_is_rejected(void);
 static void assert_variable_value(mylite_db *db, const char *name, const char *value);
@@ -34,6 +35,7 @@ static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_non_table_object_exec_fails(mylite_db *db, const char *sql);
 static void assert_transaction_control_exec_fails(mylite_db *db, const char *sql);
 static void assert_locking_sql_exec_fails(mylite_db *db, const char *sql);
+static void assert_online_alter_exec_fails(mylite_db *db, const char *sql);
 static void assert_partition_exec_fails(mylite_db *db, const char *sql);
 static void assert_foreign_key_exec_fails(mylite_db *db, const char *sql);
 static int select_callback(void *ctx, int column_count, char **values, char **column_names);
@@ -55,6 +57,7 @@ int main(void) {
     test_non_table_objects_are_rejected();
     test_transaction_control_is_rejected();
     test_locking_sql_is_rejected();
+    test_online_alter_policy_is_rejected();
     test_foreign_key_policy_is_rejected();
     test_partition_policy_is_rejected();
     return 0;
@@ -286,6 +289,58 @@ static void test_locking_sql_is_rejected(void) {
     free(root);
 }
 
+static void test_online_alter_policy_is_rejected(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "USE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(
+            db,
+            "CREATE TEMPORARY TABLE online_alter_probe (id INT NOT NULL PRIMARY KEY)",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+
+    assert_online_alter_exec_fails(
+        db,
+        "ALTER ONLINE TABLE online_alter_probe ADD COLUMN blocked_online INT"
+    );
+    assert_online_alter_exec_fails(
+        db,
+        "ALTER TABLE online_alter_probe ADD COLUMN blocked_inplace INT, ALGORITHM=INPLACE"
+    );
+    assert_online_alter_exec_fails(
+        db,
+        "ALTER TABLE online_alter_probe ADD COLUMN blocked_instant INT, ALGORITHM=INSTANT"
+    );
+    assert_online_alter_exec_fails(
+        db,
+        "ALTER TABLE online_alter_probe ADD COLUMN blocked_nocopy INT, ALGORITHM=NOCOPY"
+    );
+    assert_online_alter_exec_fails(
+        db,
+        "ALTER OFFLINE TABLE online_alter_probe ADD COLUMN blocked_offline_inplace INT, "
+        "ALGORITHM=INPLACE"
+    );
+    assert_online_alter_exec_fails(
+        db,
+        "ALTER TABLE online_alter_probe ADD COLUMN blocked_lock INT, LOCK=NONE"
+    );
+    assert(
+        mylite_exec(db, "SELECT 'ALGORITHM=INPLACE' AS quoted_text", NULL, NULL, NULL) == MYLITE_OK
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_foreign_key_policy_is_rejected(void) {
     char *root = make_temp_root();
     char *filename = NULL;
@@ -471,6 +526,18 @@ static void assert_locking_sql_exec_fails(mylite_db *db, const char *sql) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "SQL locking") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_online_alter_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "online ALTER") != NULL);
     mylite_free(errmsg);
 }
 

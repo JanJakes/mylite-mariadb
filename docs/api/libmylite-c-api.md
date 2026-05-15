@@ -421,6 +421,8 @@ the embedded library model:
   MyLite catalog storage,
 - SQL locking statements and named-lock functions until MyLite has real table,
   row, named-lock, and transaction-aware lock semantics,
+- online and in-place ALTER forms until MyLite has online DDL and lock
+  integration,
 - server audit plugins,
 - network-protocol `LOAD DATA LOCAL`,
 - event scheduler,

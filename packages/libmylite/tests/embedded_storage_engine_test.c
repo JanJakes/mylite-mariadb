@@ -170,6 +170,7 @@ static void assert_exec_fails_with_message(mylite_db *db, const char *sql, const
 static void assert_non_table_object_exec_fails(mylite_db *db, const char *sql);
 static void assert_transaction_control_exec_fails(mylite_db *db, const char *sql);
 static void assert_locking_sql_exec_fails(mylite_db *db, const char *sql);
+static void assert_online_alter_exec_fails(mylite_db *db, const char *sql);
 static void assert_partition_exec_fails(mylite_db *db, const char *sql);
 static void assert_foreign_key_exec_fails(mylite_db *db, const char *sql);
 static void assert_prepared_succeeds(mylite_db *db, const char *sql);
@@ -735,6 +736,26 @@ static void test_transaction_and_foreign_key_policies(void) {
     assert_locking_sql_exec_fails(db, "SELECT id FROM posts FOR UPDATE");
     assert_locking_sql_exec_fails(db, "SELECT id FROM posts LOCK IN SHARE MODE");
     assert_locking_sql_exec_fails(db, "SELECT GET_LOCK('mylite-lock', 1)");
+    assert_online_alter_exec_fails(db, "ALTER ONLINE TABLE posts ADD COLUMN blocked_online INT");
+    assert_online_alter_exec_fails(
+        db,
+        "ALTER TABLE posts ADD COLUMN blocked_inplace INT, ALGORITHM=INPLACE"
+    );
+    assert_online_alter_exec_fails(
+        db,
+        "ALTER TABLE posts ADD COLUMN blocked_instant INT, ALGORITHM=INSTANT"
+    );
+    assert_online_alter_exec_fails(
+        db,
+        "ALTER TABLE posts ADD COLUMN blocked_nocopy INT, ALGORITHM=NOCOPY"
+    );
+    assert_online_alter_exec_fails(
+        db,
+        "ALTER OFFLINE TABLE posts ADD COLUMN blocked_offline_inplace INT, ALGORITHM=INPLACE"
+    );
+    assert_online_alter_exec_fails(db, "ALTER TABLE posts ADD COLUMN blocked_lock INT, LOCK=NONE");
+    assert_catalog_table_count(filename, "app", 1U);
+    assert_catalog_table_metadata(filename, "app", "posts", "InnoDB", "MYLITE");
     assert_exec_succeeds(db, "SELECT 'FOR UPDATE' AS quoted_text");
     assert_partition_exec_fails(
         db,
@@ -747,7 +768,15 @@ static void test_transaction_and_foreign_key_policies(void) {
     assert_partition_exec_fails(db, "ALTER TABLE posts PARTITION BY HASH (id) PARTITIONS 2");
     assert_partition_exec_fails(db, "ALTER TABLE posts REMOVE PARTITIONING");
     assert_catalog_table_count(filename, "app", 1U);
-    assert_exec_succeeds(db, "INSERT INTO posts VALUES (1, 'autocommit')");
+    assert_exec_succeeds(db, "ALTER TABLE posts ADD COLUMN copy_ok INT NULL, ALGORITHM=COPY");
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE posts ADD COLUMN algorithm_note VARCHAR(32) DEFAULT 'ALGORITHM=INPLACE', "
+        "ALGORITHM=COPY"
+    );
+    assert_catalog_table_count(filename, "app", 1U);
+    assert_catalog_table_metadata(filename, "app", "posts", "InnoDB", "MYLITE");
+    assert_exec_succeeds(db, "INSERT INTO posts (id, title) VALUES (1, 'autocommit')");
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM posts", single_value_callback, &count, NULL) ==
         MYLITE_OK
@@ -1725,7 +1754,7 @@ static void test_alter_table_rebuilds_keyless_rows(void) {
     assert_catalog_table_count(filename, "app", 1U);
     assert_catalog_table_metadata(filename, "app", "alter_posts", "InnoDB", "MYLITE");
 
-    assert_exec_fails(
+    assert_online_alter_exec_fails(
         db,
         "ALTER TABLE alter_posts ADD COLUMN blocked INT NULL, ALGORITHM=COPY, LOCK=NONE"
     );
@@ -6503,6 +6532,21 @@ static void assert_locking_sql_exec_fails(mylite_db *db, const char *sql) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "SQL locking") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_online_alter_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+    const int result = mylite_exec(db, sql, NULL, NULL, &errmsg);
+    if (result == MYLITE_OK) {
+        fprintf(stderr, "SQL unexpectedly succeeded: %s\n", sql);
+    }
+    assert(result == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "online ALTER") != NULL);
     mylite_free(errmsg);
 }
 
