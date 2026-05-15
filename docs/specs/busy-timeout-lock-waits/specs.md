@@ -130,6 +130,8 @@ scoped timeout glue.
 - Add embedded open tests proving `mylite_open_v2()` honors
   `busy_timeout_ms`.
 - Add public API coverage for `mylite_busy_timeout()`.
+- Add storage-smoke SQL coverage proving `mylite_busy_timeout()` applies to
+  later routed MyLite writes.
 - Run format, tidy, first-party tests, embedded tests, storage-smoke tests, the
   locking compatibility group, and whitespace checks.
 

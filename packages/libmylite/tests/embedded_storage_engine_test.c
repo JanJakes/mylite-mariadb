@@ -7,8 +7,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/file.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
+
+typedef struct timed_lock_request {
+    int operation;
+    unsigned milliseconds;
+} timed_lock_request;
+
+static const unsigned k_busy_timeout_release_ms = 50U;
+static const unsigned k_busy_timeout_wait_ms = 1000U;
+static const useconds_t k_microseconds_per_millisecond = 1000U;
 
 typedef struct engine_context {
     int rows;
@@ -174,6 +185,8 @@ static int catalog_table_callback(void *ctx, const char *schema_name, const char
 static mylite_db *open_database(const char *root, char **filename);
 static mylite_db *open_database_with_filename(const char *root, const char *filename);
 static mylite_open_config open_config(const char *runtime_root);
+static pid_t hold_test_lock_for(const char *filename, timed_lock_request request);
+static void wait_test_lock_child(pid_t pid);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static void assert_no_durable_sidecars(const char *root, const char *primary_name);
@@ -672,7 +685,17 @@ static void test_create_table_persists_catalog_metadata(void) {
         MYLITE_STORAGE_NOTFOUND
     );
     assert_catalog_table_count(filename, "app", 14U);
+    assert(mylite_busy_timeout(db, k_busy_timeout_wait_ms) == MYLITE_OK);
+    pid_t child = hold_test_lock_for(
+        filename,
+        (timed_lock_request){
+            .operation = LOCK_EX,
+            .milliseconds = k_busy_timeout_release_ms,
+        }
+    );
     assert_exec_succeeds(db, "INSERT INTO row_posts VALUES (1, 'draft')");
+    wait_test_lock_child(child);
+    assert(mylite_busy_timeout(db, 0U) == MYLITE_OK);
     assert_exec_succeeds(db, "INSERT INTO row_posts VALUES (2, 'published')");
     assert_exec_succeeds(db, "INSERT INTO nullable_posts VALUES (1, NULL, NULL)");
     assert_exec_succeeds(db, "INSERT INTO nullable_posts VALUES (2, 'filled', 42)");
@@ -3199,6 +3222,43 @@ static mylite_open_config open_config(const char *runtime_root) {
         .temp_directory = runtime_root,
     };
     return config;
+}
+
+static pid_t hold_test_lock_for(const char *filename, timed_lock_request request) {
+    int ready_pipe[2];
+    assert(pipe(ready_pipe) == 0);
+
+    const pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        close(ready_pipe[0]);
+        FILE *file = fopen(filename, "r+b");
+        if (file == NULL || flock(fileno(file), request.operation) != 0) {
+            _exit(2);
+        }
+        const unsigned char ready = 1U;
+        if (write(ready_pipe[1], &ready, sizeof(ready)) != (ssize_t)sizeof(ready)) {
+            _exit(3);
+        }
+        usleep((useconds_t)request.milliseconds * k_microseconds_per_millisecond);
+        fclose(file);
+        close(ready_pipe[1]);
+        _exit(0);
+    }
+
+    close(ready_pipe[1]);
+    unsigned char ready = 0U;
+    assert(read(ready_pipe[0], &ready, sizeof(ready)) == (ssize_t)sizeof(ready));
+    assert(ready == 1U);
+    close(ready_pipe[0]);
+    return pid;
+}
+
+static void wait_test_lock_child(pid_t pid) {
+    int status = 0;
+    assert(waitpid(pid, &status, 0) == pid);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
 }
 
 static char *make_temp_root(void) {

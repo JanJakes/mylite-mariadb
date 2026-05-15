@@ -38,7 +38,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `check-constraint` | `storage-smoke-dev` | `compat-check-constraint` | CHECK constraint enforcement on routed tables |
 | `generated-column` | `storage-smoke-dev` | `compat-generated-column` | Generated column read/write and generated-index rejection |
 | `unsupported-index` | `storage-smoke-dev` | `compat-unsupported-index` | Unsupported generated-column, FULLTEXT, and SPATIAL index rejection |
-| `locking` | `dev` | `compat-locking` | Primary-file lock conflicts and busy timeouts |
+| `locking` | `storage-smoke-dev` | `compat-locking` | Primary-file lock conflicts and busy timeouts |
 | `embedded-lifecycle` | `embedded-dev` | `compat-embedded-lifecycle` | Embedded runtime open/close, direct execution, and cleanup |
 | `direct-sql` | `embedded-dev` | `compat-direct-sql` | `mylite_exec()` SQL execution |
 | `prepared-statement` | `embedded-dev` | `compat-prepared-statement` | Prepared statements, typed bindings, and binary-safe column access |
