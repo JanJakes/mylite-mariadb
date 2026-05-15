@@ -144,9 +144,11 @@ schema namespaces for successful direct `CREATE/DROP DATABASE` and
 updates to default character set, collation, and comment options, routed
 `CREATE TABLE` metadata, catalog-backed `DROP TABLE` and simple
 `RENAME TABLE`, keyless copy `ALTER` rebuilds, and keyless `INSERT` plus
-full-scan `SELECT` over persisted MyLite row pages. Foreign-key DDL is
-rejected before execution until MyLite has referential metadata and
-enforcement.
+full-scan `SELECT` over persisted MyLite row pages. Basic CHECK constraints on
+routed table definitions are enforced by MariaDB before MyLite handler writes,
+and those definitions survive close/reopen through the MyLite catalog.
+Foreign-key DDL is rejected before execution until MyLite has referential
+metadata and enforcement.
 
 ## Prepared Statements
 

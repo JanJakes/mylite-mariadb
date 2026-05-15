@@ -78,6 +78,9 @@ records when no transient runtime schema directory exists.
 Foreign-key DDL is rejected at the `libmylite` boundary until MyLite has
 catalog metadata, enforcement, locking, recovery, and transaction-aware checks
 for referential constraints.
+Basic CHECK constraints are kept inside the MariaDB table-definition image and
+evaluated by MariaDB before MyLite handler writes; MyLite does not implement a
+separate constraint-expression evaluator.
 
 ## File Layout
 
@@ -194,6 +197,11 @@ through MyLite's normal `write_row()` path. Duplicate-key CTAS abort follows
 MariaDB's target-drop path and removes target catalog metadata, but pages
 written before abort remain orphaned until SQL rollback, DDL undo, and
 compaction are implemented.
+Basic column-level and named table-level CHECK constraints survive close/reopen
+because they are stored in the catalog-backed table-definition image. MariaDB
+enforces those checks before insert/update handler calls unless
+`check_constraint_checks=OFF` is set. Broader CHECK expression, ALTER, CTAS,
+dump-import, prepared-diagnostic, and rollback coverage remains planned.
 
 ## Schemas And System Surfaces
 
