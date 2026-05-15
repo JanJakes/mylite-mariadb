@@ -55,7 +55,8 @@ MariaDB base: `mariadb-11.8.6`
   behavior.
 - Broader temporary-table edge cases beyond the representative catalog
   isolation covered by `temporary-table-catalog-isolation`.
-- `CREATE OR REPLACE TABLE ... LIKE` lock-table edge cases.
+- Broader `CREATE OR REPLACE TABLE ... LIKE` edge cases beyond the
+  representative successful replacement covered by `create-or-replace-table`.
 - Cloning views, information-schema tables, partitions, foreign keys, triggers,
   or unsupported index classes.
 - SQL rollback, savepoints, or transaction-aware DDL rollback.
@@ -82,8 +83,8 @@ only routing metadata and single-file publication.
 `CREATE TABLE ... LIKE` moves from planned to partial for supported routed base
 tables. Representative temporary-table catalog isolation is covered by a
 follow-up slice. It remains partial because unsupported source objects, broader
-temporary-table variants, foreign keys, partitions, and SQL rollback need
-separate slices.
+temporary-table variants, broader OR REPLACE variants, failed replacement
+rollback, foreign keys, partitions, and SQL rollback need separate slices.
 
 ## DDL Metadata Routing Impact
 
@@ -153,12 +154,15 @@ Implemented in the MyLite handler and storage-engine smoke:
 - The `temporary-table-catalog-isolation` slice covers representative
   `CREATE TEMPORARY TABLE ... LIKE` behavior and verifies the SQL-visible
   temporary name does not become a durable user-schema catalog table.
+- The `create-or-replace-table` slice covers representative successful
+  `CREATE OR REPLACE TABLE ... LIKE` replacement over routed MyLite tables.
 
 ## Risks And Open Questions
 
 - `CREATE TABLE ... LIKE` has separate temporary-table and `OR REPLACE`
   branches in MariaDB. Representative temporary catalog isolation is covered,
-  but broader lock-table and temporary lifecycle matrices remain.
+  and representative successful OR REPLACE is covered, but broader lock-table,
+  temporary lifecycle, and failed replacement matrices remain.
 - Source-table selection in the MyLite handler must match MariaDB's `LEX`
   layout for `CREATE TABLE ... LIKE`; using the target table would silently
   store the wrong requested-engine metadata.

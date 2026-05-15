@@ -225,6 +225,12 @@ keeping SQL-visible temporary names out of the durable user schema catalog.
 Storage-smoke coverage verifies the temporary tables are usable during the
 session, are cleaned up after `DROP TEMPORARY TABLE`, and are gone after
 close/reopen.
+Successful representative `CREATE OR REPLACE TABLE ... LIKE` and
+`CREATE OR REPLACE TABLE ... SELECT` statements use MariaDB's drop-then-create
+flow: MyLite removes the old catalog record, publishes the replacement
+definition, writes replacement rows and indexes where applicable, and verifies
+close/reopen visibility. Failed replacement rollback remains broader DDL
+rollback work.
 Basic column-level and named table-level CHECK constraints survive close/reopen
 because they are stored in the catalog-backed table-definition image. MariaDB
 enforces those checks before insert/update handler calls unless

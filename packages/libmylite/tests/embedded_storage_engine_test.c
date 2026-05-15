@@ -155,6 +155,7 @@ static void test_blob_text_prefix_indexes(void);
 static void test_create_table_like(void);
 static void test_create_table_select(void);
 static void test_temporary_table_catalog_isolation(void);
+static void test_create_or_replace_table(void);
 static void test_constraint_generated_dump_fixture(void);
 static void test_show_create_table_round_trip(void);
 static void test_constraint_generated_expression_matrix(void);
@@ -290,6 +291,7 @@ int main(void) {
     test_create_table_like();
     test_create_table_select();
     test_temporary_table_catalog_isolation();
+    test_create_or_replace_table();
     test_constraint_generated_dump_fixture();
     test_show_create_table_round_trip();
     test_constraint_generated_expression_matrix();
@@ -4129,6 +4131,193 @@ static void test_temporary_table_catalog_isolation(void) {
     assert_exec_fails(db, "SELECT COUNT(*) FROM temp_like_posts");
     assert_exec_fails(db, "SELECT COUNT(*) FROM temp_select_posts");
     assert_catalog_table_count(filename, "tmp", 0U);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_create_or_replace_table(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE replace_app");
+    assert_exec_succeeds(db, "USE replace_app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE replace_like_source ("
+        "id INT NOT NULL AUTO_INCREMENT, "
+        "slug VARCHAR(32) NOT NULL, "
+        "body LONGTEXT NULL, "
+        "PRIMARY KEY (id), "
+        "UNIQUE KEY slug_key (slug), "
+        "KEY body_prefix (body(8))"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE replace_like_target ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(32) NOT NULL, "
+        "body LONGTEXT NULL"
+        ") ENGINE=MyISAM"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO replace_like_target VALUES "
+        "(99, 'old-like-target', 'old target body')"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE replace_ctas_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(32) NOT NULL, "
+        "body LONGTEXT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO replace_ctas_source VALUES "
+        "(1, 'ctas-alpha', 'ctas body one'), "
+        "(2, 'ctas-beta', 'ctas body two'), "
+        "(3, 'ctas-gamma', 'ctas body three')"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE replace_ctas_target ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(32) NOT NULL"
+        ") ENGINE=MyISAM"
+    );
+    assert_exec_succeeds(db, "INSERT INTO replace_ctas_target VALUES (99, 'old-ctas-target')");
+    assert_catalog_table_count(filename, "replace_app", 4U);
+    assert_catalog_table_metadata(
+        filename,
+        "replace_app",
+        "replace_like_target",
+        "MyISAM",
+        "MYLITE"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE OR REPLACE TABLE replace_like_target LIKE replace_like_source"
+    );
+    assert_catalog_table_count(filename, "replace_app", 4U);
+    assert_catalog_table_metadata(
+        filename,
+        "replace_app",
+        "replace_like_source",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "replace_app",
+        "replace_like_target",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM replace_like_target", "0");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO replace_like_target (slug, body) VALUES "
+        "('new-like-target', 'new target body')"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO replace_like_target (slug, body) VALUES "
+        "('new-like-target', 'duplicate target body')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM replace_like_target FORCE INDEX (slug_key) "
+        "WHERE slug = 'new-like-target'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM replace_like_target FORCE INDEX (body_prefix) "
+        "WHERE body = 'new target body'",
+        "1"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE OR REPLACE TABLE replace_ctas_target ("
+        "id INT NOT NULL, "
+        "slug VARCHAR(32) NOT NULL, "
+        "body LONGTEXT NULL, "
+        "PRIMARY KEY (id), "
+        "UNIQUE KEY slug_key (slug), "
+        "KEY body_prefix (body(8))"
+        ") ENGINE=InnoDB "
+        "SELECT id, slug, body FROM replace_ctas_source WHERE id <= 2"
+    );
+    assert_catalog_table_count(filename, "replace_app", 4U);
+    assert_catalog_table_metadata(
+        filename,
+        "replace_app",
+        "replace_ctas_target",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM replace_ctas_target", "2");
+    assert_exec_fails(
+        db,
+        "INSERT INTO replace_ctas_target VALUES "
+        "(4, 'ctas-alpha', 'duplicate slug')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM replace_ctas_target FORCE INDEX (slug_key) WHERE slug = 'ctas-beta'",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM replace_ctas_target FORCE INDEX (body_prefix) "
+        "WHERE body = 'ctas body one'",
+        "1"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "replace_app");
+    assert_exec_succeeds(db, "USE replace_app");
+    assert_catalog_table_count(filename, "replace_app", 4U);
+    assert_catalog_table_metadata(
+        filename,
+        "replace_app",
+        "replace_like_target",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "replace_app",
+        "replace_ctas_target",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM replace_like_target", "1");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM replace_ctas_target", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM replace_like_target FORCE INDEX (slug_key) "
+        "WHERE slug = 'new-like-target'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM replace_ctas_target FORCE INDEX (body_prefix) "
+        "WHERE body = 'ctas body two'",
+        "2"
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
