@@ -355,8 +355,9 @@ MyLite avoids forcing callers into raw MariaDB handles.
 Initial implementation status: direct and prepared execution update the last
 insert id after successful statements and report affected rows for successful
 non-result statements. Direct execution covers temporary-table
-insert/update/delete effects, prepared execution covers parameterized insert
-effects, and result-producing statements report zero changed rows.
+insert/update/delete effects, prepared execution covers parameterized
+insert/update/delete effects, and result-producing statements report zero
+changed rows.
 
 ## Memory Ownership
 

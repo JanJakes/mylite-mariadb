@@ -11,6 +11,7 @@
 
 static void test_scalar_select(void);
 static void test_table_roundtrip(void);
+static void test_statement_effects(void);
 static void test_segment_reads(void);
 static void test_reset_reuse_and_destructors(void);
 static void test_finalize_before_drain(void);
@@ -31,6 +32,7 @@ static int destructor_calls = 0;
 int main(void) {
     test_scalar_select();
     test_table_roundtrip();
+    test_statement_effects();
     test_segment_reads();
     test_reset_reuse_and_destructors();
     test_finalize_before_drain();
@@ -139,6 +141,83 @@ static void test_table_roundtrip(void) {
     assert(mylite_column_type(select, 2U) == MYLITE_TYPE_BLOB);
     assert(mylite_column_bytes(select, 2U) == sizeof(payload));
     assert(memcmp(mylite_column_blob(select, 2U), payload, sizeof(payload)) == 0);
+    assert(mylite_step(select) == MYLITE_DONE);
+    assert(mylite_finalize(select) == MYLITE_OK);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_statement_effects(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    mylite_stmt *insert = NULL;
+    mylite_stmt *update = NULL;
+    mylite_stmt *delete_stmt = NULL;
+    mylite_stmt *select = NULL;
+
+    assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "USE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(
+            db,
+            "CREATE TEMPORARY TABLE prepared_effects ("
+            "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
+            "name VARCHAR(32),"
+            "qty INT NOT NULL)",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+
+    insert = prepare_statement(db, "INSERT INTO prepared_effects(name, qty) VALUES (?, ?), (?, ?)");
+    assert(
+        mylite_bind_text(insert, 1U, "alpha", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(insert, 2U, 1) == MYLITE_OK);
+    assert(mylite_bind_text(insert, 3U, "beta", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK);
+    assert(mylite_bind_int64(insert, 4U, 2) == MYLITE_OK);
+    assert(mylite_step(insert) == MYLITE_DONE);
+    assert(mylite_changes(db) == 2);
+    assert(mylite_last_insert_id(db) == 1U);
+    assert(mylite_finalize(insert) == MYLITE_OK);
+
+    update = prepare_statement(db, "UPDATE prepared_effects SET qty = qty + ? WHERE qty >= ?");
+    assert(mylite_bind_int64(update, 1U, 10) == MYLITE_OK);
+    assert(mylite_bind_int64(update, 2U, 2) == MYLITE_OK);
+    assert(mylite_step(update) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_finalize(update) == MYLITE_OK);
+
+    delete_stmt = prepare_statement(db, "DELETE FROM prepared_effects WHERE qty < ?");
+    assert(mylite_bind_int64(delete_stmt, 1U, 5) == MYLITE_OK);
+    assert(mylite_step(delete_stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_finalize(delete_stmt) == MYLITE_OK);
+
+    insert = prepare_statement(db, "INSERT INTO prepared_effects(name, qty) VALUES (?, ?)");
+    assert(
+        mylite_bind_text(insert, 1U, "gamma", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(insert, 2U, 3) == MYLITE_OK);
+    assert(mylite_step(insert) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_last_insert_id(db) == 3U);
+    assert(mylite_finalize(insert) == MYLITE_OK);
+
+    select = prepare_statement(db, "SELECT id, name, qty FROM prepared_effects ORDER BY id");
+    assert(mylite_step(select) == MYLITE_ROW);
+    assert(mylite_column_uint64(select, 0U) == 2U);
+    assert(strcmp(mylite_column_text(select, 1U), "beta") == 0);
+    assert(mylite_column_int64(select, 2U) == 12);
+    assert(mylite_step(select) == MYLITE_ROW);
+    assert(mylite_column_uint64(select, 0U) == 3U);
+    assert(strcmp(mylite_column_text(select, 1U), "gamma") == 0);
+    assert(mylite_column_int64(select, 2U) == 3);
     assert(mylite_step(select) == MYLITE_DONE);
     assert(mylite_finalize(select) == MYLITE_OK);
 

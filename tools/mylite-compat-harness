@@ -64,7 +64,7 @@ group_spec() {
       echo "embedded-dev|compat-direct-sql|Direct SQL execution and statement effects through the public libmylite API"
       ;;
     prepared-statement)
-      echo "embedded-dev|compat-prepared-statement|Prepared statements, typed bindings, and binary-safe column access"
+      echo "embedded-dev|compat-prepared-statement|Prepared statements, typed bindings, binary-safe column access, and statement effects"
       ;;
     column-metadata)
       echo "embedded-dev|compat-column-metadata|Prepared statement column metadata"
