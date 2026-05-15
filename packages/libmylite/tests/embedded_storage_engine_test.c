@@ -154,6 +154,7 @@ static void test_standalone_index_ddl(void);
 static void test_blob_text_prefix_indexes(void);
 static void test_create_table_like(void);
 static void test_create_table_select(void);
+static void test_create_table_select_duplicate_modes(void);
 static void test_temporary_table_catalog_isolation(void);
 static void test_create_or_replace_table(void);
 static void test_failed_create_or_replace_rollback(void);
@@ -291,6 +292,7 @@ int main(void) {
     test_blob_text_prefix_indexes();
     test_create_table_like();
     test_create_table_select();
+    test_create_table_select_duplicate_modes();
     test_temporary_table_catalog_isolation();
     test_create_or_replace_table();
     test_failed_create_or_replace_rollback();
@@ -4038,6 +4040,148 @@ static void test_create_table_select(void) {
     );
     assert(errmsg == NULL);
     assert(reopened_checked_rows.rows == 1);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_create_table_select_duplicate_modes(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE ctas_duplicate_modes");
+    assert_exec_succeeds(db, "USE ctas_duplicate_modes");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE ctas_duplicate_source ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(32) NOT NULL, "
+        "body LONGTEXT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO ctas_duplicate_source VALUES "
+        "(1, 'alpha', 'body one'), "
+        "(2, 'alpha', 'body two'), "
+        "(3, 'beta', 'body three')"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE ctas_ignore_posts ("
+        "id INT NOT NULL, "
+        "slug VARCHAR(32) NOT NULL, "
+        "body LONGTEXT NULL, "
+        "PRIMARY KEY (id), "
+        "UNIQUE KEY slug_key (slug), "
+        "KEY body_prefix (body(8))"
+        ") ENGINE=InnoDB IGNORE "
+        "SELECT id, slug, body FROM ctas_duplicate_source ORDER BY id"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE ctas_replace_posts ("
+        "id INT NOT NULL, "
+        "slug VARCHAR(32) NOT NULL, "
+        "body LONGTEXT NULL, "
+        "PRIMARY KEY (id), "
+        "UNIQUE KEY slug_key (slug), "
+        "KEY body_prefix (body(8))"
+        ") ENGINE=InnoDB REPLACE "
+        "SELECT id, slug, body FROM ctas_duplicate_source ORDER BY id"
+    );
+    assert_catalog_table_count(filename, "ctas_duplicate_modes", 3U);
+    assert_catalog_table_metadata(
+        filename,
+        "ctas_duplicate_modes",
+        "ctas_duplicate_source",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "ctas_duplicate_modes",
+        "ctas_ignore_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "ctas_duplicate_modes",
+        "ctas_replace_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+
+    assert_query_single_value(db, "SELECT COUNT(*) FROM ctas_ignore_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM ctas_ignore_posts FORCE INDEX (slug_key) WHERE slug = 'alpha'",
+        "1"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM ctas_ignore_posts WHERE id = 2", "0");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM ctas_ignore_posts FORCE INDEX (body_prefix) "
+        "WHERE body = 'body three'",
+        "3"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM ctas_replace_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM ctas_replace_posts FORCE INDEX (slug_key) WHERE slug = 'alpha'",
+        "2"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM ctas_replace_posts WHERE id = 1", "0");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM ctas_replace_posts FORCE INDEX (body_prefix) "
+        "WHERE body = 'body two'",
+        "2"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "ctas_duplicate_modes");
+    assert_exec_succeeds(db, "USE ctas_duplicate_modes");
+    assert_catalog_table_count(filename, "ctas_duplicate_modes", 3U);
+    assert_catalog_table_metadata(
+        filename,
+        "ctas_duplicate_modes",
+        "ctas_ignore_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "ctas_duplicate_modes",
+        "ctas_replace_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM ctas_ignore_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM ctas_ignore_posts FORCE INDEX (slug_key) WHERE slug = 'alpha'",
+        "1"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM ctas_replace_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM ctas_replace_posts FORCE INDEX (slug_key) WHERE slug = 'alpha'",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM ctas_replace_posts FORCE INDEX (body_prefix) "
+        "WHERE body = 'body three'",
+        "3"
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 

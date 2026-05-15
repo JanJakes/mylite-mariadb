@@ -49,6 +49,8 @@ MariaDB base: `mariadb-11.8.6`
   MyLite-routed source tables into ordinary target columns.
 - CTAS with an explicit supported target key declaration before `SELECT`, so
   inserts exercise duplicate checks and index-entry publication.
+- Representative `CREATE TABLE ... IGNORE SELECT` and
+  `CREATE TABLE ... REPLACE SELECT` over deterministic ordered inputs.
 - Close/reopen metadata, row visibility, forced-index reads, and durable-sidecar
   gates.
 
@@ -56,7 +58,7 @@ MariaDB base: `mariadb-11.8.6`
 
 - Physical rollback of row, overflow, index-entry, or autoincrement pages
   written before failed CTAS abort.
-- `IGNORE` / `REPLACE` CTAS and lock-table edge cases.
+- Broader duplicate-mode CTAS matrices and lock-table edge cases.
 - Broader `CREATE OR REPLACE ... SELECT` edge cases beyond the representative
   successful replacement covered by `create-or-replace-table`.
 - Broader temporary CTAS edge cases beyond the representative catalog
@@ -91,12 +93,12 @@ CTAS target preservation; broader transaction/DDL cleanup remains separate.
 
 `CREATE TABLE ... SELECT` moves from planned to partial for supported routed
 table shapes. Explicit CHECK-constrained targets, representative temporary CTAS
-catalog isolation, representative successful OR REPLACE CTAS, and representative
-failed replacement CTAS rollback are covered by follow-up slices. It remains
-partial because physical rollback of pages written before failed CTAS abort,
-`IGNORE` / `REPLACE`, broader temporary-table CTAS, foreign keys, partitions,
-unsupported source objects, broader failed replacement variants, and SQL
-rollback remain planned.
+catalog isolation, representative successful OR REPLACE CTAS, representative
+failed replacement CTAS rollback, and representative duplicate-mode CTAS are
+covered by follow-up slices. It remains partial because physical rollback of
+pages written before failed CTAS abort, broader duplicate-mode matrices, broader
+temporary-table CTAS, foreign keys, partitions, unsupported source objects,
+broader failed replacement variants, and SQL rollback remain planned.
 
 ## DDL Metadata Routing Impact
 
@@ -141,6 +143,8 @@ unless handler fixes are needed; update size measurements after verification.
   - explicit generated target definitions;
   - explicit CHECK-constrained target definitions;
   - explicit target primary/unique/secondary indexes before `SELECT`;
+  - representative `IGNORE` and `REPLACE` duplicate-mode CTAS over supported
+    indexed targets;
   - duplicate-key checks and forced-index reads after CTAS;
   - close/reopen metadata and rows;
   - durable-sidecar gates.
@@ -155,6 +159,8 @@ unless handler fixes are needed; update size measurements after verification.
 - CTAS target rows, BLOB/TEXT payloads, generated-source projections,
   generated target definitions, autoincrement values, and supported indexes
   survive close/reopen.
+- Representative `IGNORE` and `REPLACE` CTAS duplicate handling survives
+  close/reopen for supported indexed targets.
 - Failed CTAS duplicate-key abort removes the target catalog metadata before
   the statement returns an error.
 - Compatibility, roadmap, and storage architecture docs describe CTAS as
@@ -181,6 +187,10 @@ entry points:
   `CREATE OR REPLACE TABLE ... SELECT` replacement over routed MyLite tables.
 - The `failed-create-or-replace-rollback` slice covers representative failed
   duplicate-key replacement CTAS preserving the old routed target.
+- The `create-table-select-duplicate-modes` slice covers representative
+  `CREATE TABLE ... IGNORE SELECT` and `CREATE TABLE ... REPLACE SELECT`
+  duplicate handling for supported indexed targets and deterministic ordered
+  SELECT input.
 
 ## Risks And Open Questions
 
@@ -194,3 +204,6 @@ entry points:
 - Generated-column definitions on CTAS targets are covered for the explicit
   base-column projection shape; broader target-expression matrices remain
   planned.
+- Duplicate-mode CTAS row selection is order-sensitive in MariaDB; MyLite's
+  representative coverage uses ordered input and leaves broader unordered and
+  multi-unique-key conflict matrices planned.

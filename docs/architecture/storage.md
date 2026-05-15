@@ -219,6 +219,10 @@ target columns. Duplicate-key CTAS abort follows MariaDB's target-drop path and
 removes target catalog metadata; the current statement checkpoint restores
 pre-statement MyLite header/catalog visibility for covered failed file-backed
 statements.
+Representative `CREATE TABLE ... IGNORE SELECT` and
+`CREATE TABLE ... REPLACE SELECT` coverage follows MariaDB's CTAS duplicate
+mode handling over supported MyLite primary, unique, and secondary indexes with
+deterministic ordered SELECT input.
 Representative user temporary `CREATE TABLE ... LIKE` and
 `CREATE TABLE ... SELECT` paths use MariaDB's temporary-table lifecycle while
 keeping SQL-visible temporary names out of the durable user schema catalog.
