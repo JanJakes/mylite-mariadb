@@ -10,9 +10,8 @@ directory. Existing catalog-only schemas must be visible to plain
 
 ## Non-Goals
 
-- Do not make initial `CREATE DATABASE` fully filesystem-free; active
-  connections may still use MyLite-owned transient schema directories for the
-  first create.
+- Do not make initial `CREATE DATABASE` fully filesystem-free in this slice;
+  `docs/specs/directory-free-create-database/specs.md` covers that follow-up.
 - Do not add `CREATE OR REPLACE SCHEMA` syntax coverage unless MariaDB already
   accepts it through the same parser path.
 - Do not implement transactional schema DDL, savepoint rollback, views,
@@ -52,9 +51,9 @@ Covered by this slice:
   drops existing MyLite catalog schema contents, stores the new schema options,
   leaves no runtime schema directory, and survives close/reopen.
 
-The support claim remains partial because initial schema creation still uses
-the transient MariaDB directory path during the active connection, and broader
-database-object cataloging plus transactional schema DDL remain planned.
+The support claim remains partial because broader database-object cataloging
+and transactional schema DDL remain planned. Initial file-backed schema creation
+is covered by `docs/specs/directory-free-create-database/specs.md`.
 
 ## Proposed Design
 
@@ -75,7 +74,9 @@ runtime schema path is built:
    catalog-backed create path.
 
 Missing schemas continue through MariaDB's existing directory-backed create path
-and are synchronized into the MyLite catalog by `libmylite` after execution.
+in this slice and are synchronized into the MyLite catalog by `libmylite` after
+execution. The follow-up directory-free create slice removes that temporary
+path for file-backed MyLite sessions.
 
 ## Affected Subsystems
 
@@ -168,7 +169,7 @@ Measured rebuilt MariaDB embedded archive sizes:
 
 ## Risks And Unresolved Questions
 
-- Initial `CREATE DATABASE` still creates a transient runtime schema directory
-  until a later slice removes that active-connection dependency.
+- Initial `CREATE DATABASE` was left to a follow-up slice and is now covered by
+  `docs/specs/directory-free-create-database/specs.md`.
 - Failed schema replacement rollback stays bounded to the existing outer
   statement checkpoint and is not full transactional DDL.

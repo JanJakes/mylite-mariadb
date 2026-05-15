@@ -333,13 +333,10 @@ No persistent directory is created for a schema. `CREATE DATABASE`,
 information schema listing are represented as catalog namespaces. Schema
 records store the schema name plus the default character set, default
 collation, and schema comment that MariaDB would otherwise keep in `db.opt`.
-The current implementation keeps newly-created schema directories as transient
-runtime state when MariaDB's active table-DDL paths still need them, but
-file-backed reopen no longer reconstructs those directories from the catalog.
-SQL-layer hooks answer schema existence, schema/table listing, option reads,
-catalog-backed `CREATE DATABASE` existence options, and no-directory schema
-alter/drop paths from catalog records. Fully directory-free initial schema
-creation and non-table database objects remain planned.
+SQL-layer hooks answer file-backed initial schema creation, schema existence,
+schema/table listing, option reads, catalog-backed `CREATE DATABASE` existence
+options, and no-directory schema alter/drop paths from catalog records.
+Non-table database objects remain planned.
 
 Views, triggers, routines, packages, sequences, and routine invocation are
 rejected by the current `libmylite` SQL policy before MariaDB can publish

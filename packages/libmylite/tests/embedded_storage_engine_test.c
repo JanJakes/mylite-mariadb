@@ -51,6 +51,7 @@ typedef struct schema_option_context {
 
 typedef struct show_create_schema_context {
     int rows;
+    const char *expected_schema_name;
     const char *expected_character_set;
     const char *expected_collation;
 } show_create_schema_context;
@@ -141,6 +142,7 @@ static void test_schema_namespaces(void);
 static void test_prepared_schema_namespaces(void);
 static void test_schema_options(void);
 static void test_create_database_existence_options(void);
+static void test_directory_free_create_database(void);
 static void test_utf8mb4_unicode_ci_survives_restart(void);
 static void test_collation_restart_matrix(void);
 static void test_non_table_object_policy(void);
@@ -305,6 +307,7 @@ int main(void) {
     test_prepared_schema_namespaces();
     test_schema_options();
     test_create_database_existence_options();
+    test_directory_free_create_database();
     test_utf8mb4_unicode_ci_survives_restart();
     test_collation_restart_matrix();
     test_non_table_object_policy();
@@ -584,6 +587,120 @@ static void test_create_database_existence_options(void) {
     assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
     assert(tables.rows == 0);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_directory_free_create_database(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    table_context tables = {0};
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(
+        db,
+        "CREATE DATABASE direct_schema DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin "
+        "COMMENT 'direct comment'"
+    );
+    assert(mylite_changes(db) == 1);
+    assert(mylite_storage_schema_exists(filename, "direct_schema") == MYLITE_STORAGE_OK);
+    assert_no_runtime_schema_directory(root, "direct_schema");
+    assert_schema_options(db, "direct_schema", "utf8mb4", "utf8mb4_bin", "direct comment");
+    assert_show_create_schema(db, "direct_schema", "utf8mb4", "utf8mb4_bin");
+    assert_query_single_value(
+        db,
+        "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA "
+        "WHERE SCHEMA_NAME='direct_schema'",
+        "direct_schema"
+    );
+    assert_exec_succeeds(db, "USE direct_schema");
+    assert_no_runtime_schema_directory(root, "direct_schema");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(64) NOT NULL, "
+        "UNIQUE KEY slug_key (slug)"
+        ") ENGINE=InnoDB"
+    );
+    assert_catalog_table_count(filename, "direct_schema", 1U);
+    assert_catalog_table_metadata(filename, "direct_schema", "posts", "InnoDB", "MYLITE");
+    assert_no_runtime_schema_directory(root, "direct_schema");
+    assert_exec_succeeds(db, "INSERT INTO posts VALUES (1, 'catalog-only')");
+    assert_query_single_value(db, "SELECT slug FROM posts FORCE INDEX (slug_key)", "catalog-only");
+
+    assert_exec_succeeds(
+        db,
+        "CREATE SCHEMA alias_schema DEFAULT CHARACTER SET latin1 COLLATE latin1_bin "
+        "COMMENT 'alias comment'"
+    );
+    assert(mylite_storage_schema_exists(filename, "alias_schema") == MYLITE_STORAGE_OK);
+    assert_no_runtime_schema_directory(root, "alias_schema");
+    assert_schema_options(db, "alias_schema", "latin1", "latin1_bin", "alias comment");
+
+    assert_exec_succeeds(
+        db,
+        "CREATE DATABASE IF NOT EXISTS optional_schema "
+        "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT 'optional comment'"
+    );
+    assert(mylite_warning_count(db) == 0U);
+    assert_no_runtime_schema_directory(root, "optional_schema");
+    assert_schema_options(
+        db,
+        "optional_schema",
+        "utf8mb4",
+        "utf8mb4_unicode_ci",
+        "optional comment"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE OR REPLACE DATABASE replace_missing "
+        "DEFAULT CHARACTER SET latin1 COLLATE latin1_swedish_ci COMMENT 'replace missing'"
+    );
+    assert(mylite_changes(db) == 1);
+    assert_no_runtime_schema_directory(root, "replace_missing");
+    assert_schema_options(db, "replace_missing", "latin1", "latin1_swedish_ci", "replace missing");
+
+    assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
+    assert(errmsg == NULL);
+    assert(tables.rows == 1);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "direct_schema");
+    assert_no_runtime_schema_directory(root, "alias_schema");
+    assert_no_runtime_schema_directory(root, "optional_schema");
+    assert_no_runtime_schema_directory(root, "replace_missing");
+    assert_exec_succeeds(db, "USE direct_schema");
+    assert_schema_options(db, "direct_schema", "utf8mb4", "utf8mb4_bin", "direct comment");
+    assert_show_create_schema(db, "direct_schema", "utf8mb4", "utf8mb4_bin");
+    tables = (table_context){0};
+    assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
+    assert(errmsg == NULL);
+    assert(tables.rows == 1);
+    assert_catalog_table_count(filename, "direct_schema", 1U);
+    assert_catalog_table_metadata(filename, "direct_schema", "posts", "InnoDB", "MYLITE");
+    assert_query_single_value(db, "SELECT slug FROM posts FORCE INDEX (slug_key)", "catalog-only");
+    assert_exec_succeeds(db, "USE alias_schema");
+    assert_schema_options(db, "alias_schema", "latin1", "latin1_bin", "alias comment");
+    assert_exec_succeeds(db, "USE optional_schema");
+    assert_schema_options(
+        db,
+        "optional_schema",
+        "utf8mb4",
+        "utf8mb4_unicode_ci",
+        "optional comment"
+    );
+    assert_exec_succeeds(db, "USE replace_missing");
+    assert_schema_options(db, "replace_missing", "latin1", "latin1_swedish_ci", "replace missing");
+
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
@@ -7928,6 +8045,7 @@ static void assert_show_create_schema(
     const char *expected_collation
 ) {
     show_create_schema_context show_create = {
+        .expected_schema_name = schema_name,
         .expected_character_set = expected_character_set,
         .expected_collation = expected_collation,
     };
@@ -8078,7 +8196,8 @@ static int show_create_schema_callback(
     (void)column_names;
 
     assert(column_count == 2);
-    assert(values[0] != NULL && strcmp(values[0], "option_app") == 0);
+    assert(show_create_ctx->expected_schema_name != NULL);
+    assert(values[0] != NULL && strcmp(values[0], show_create_ctx->expected_schema_name) == 0);
     assert(values[1] != NULL);
     assert(strstr(values[1], show_create_ctx->expected_character_set) != NULL);
     assert(strstr(values[1], show_create_ctx->expected_collation) != NULL);

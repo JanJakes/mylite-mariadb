@@ -70,7 +70,7 @@ static bool mysql_rm_db_internal(THD *thd, const Lex_ident_db &db,
 static int mysql_create_mylite_db(THD *thd, const Lex_ident_db &db,
                                   const DDL_options_st &options,
                                   Schema_specification_st *create_info,
-                                  bool silent);
+                                  bool silent, bool schema_exists);
 static bool mysql_alter_mylite_db(THD *thd, const Lex_ident_db &db,
                                   Schema_specification_st *create_info);
 static bool mysql_rm_mylite_db(THD *thd, const Lex_ident_db &db,
@@ -787,10 +787,12 @@ mysql_create_db_internal(THD *thd, const Lex_ident_db &db,
   path_len= build_table_filename(path, sizeof(path) - 1, db.str, "", "", 0);
   path[path_len-1]= 0;                    // Remove last '/' from path
 
-  if (mylite_schema_hooks_active() && mylite_schema_exists(db.str) &&
-      !mylite_runtime_schema_dir_exists(db.str))
+  if (mylite_schema_hooks_active() && !mylite_runtime_schema_dir_exists(db.str))
+  {
+    bool schema_exists= mylite_schema_exists(db.str);
     DBUG_RETURN(mysql_create_mylite_db(thd, db, options, create_info,
-                                       silent));
+                                       silent, schema_exists));
+  }
 
   long affected_rows= 1;
   if (!mysql_file_stat(key_file_misc, path, &stat_info, MYF(0)))
@@ -912,19 +914,19 @@ not_silent:
 static int mysql_create_mylite_db(THD *thd, const Lex_ident_db &db,
                                   const DDL_options_st &options,
                                   Schema_specification_st *create_info,
-                                  bool silent)
+                                  bool silent, bool schema_exists)
 {
   DBUG_ENTER("mysql_create_mylite_db");
 
   long affected_rows= 1;
-  if (options.or_replace())
+  if (schema_exists && options.or_replace())
   {
     if (mysql_rm_mylite_db(thd, db, false, true))
       DBUG_RETURN(1);
     thd->get_stmt_da()->reset_diagnostics_area();
     affected_rows= 2;
   }
-  else if (options.if_not_exists())
+  else if (schema_exists && options.if_not_exists())
   {
     push_warning_printf(thd, Sql_condition::WARN_LEVEL_NOTE,
                         ER_DB_CREATE_EXISTS, ER_THD(thd, ER_DB_CREATE_EXISTS),
@@ -932,7 +934,7 @@ static int mysql_create_mylite_db(THD *thd, const Lex_ident_db &db,
     affected_rows= 0;
     goto not_silent;
   }
-  else
+  else if (schema_exists)
   {
     my_error(ER_DB_CREATE_EXISTS, MYF(0), db.str);
     DBUG_RETURN(-1);

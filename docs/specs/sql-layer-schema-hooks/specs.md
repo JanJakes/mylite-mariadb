@@ -50,10 +50,9 @@ Base authority: MariaDB 11.8.6, initial import ref
   - database listing for `SHOW DATABASES` and `INFORMATION_SCHEMA.SCHEMATA`,
   - table listing when the database directory is absent.
 - Stop `libmylite` from rehydrating schema directories on file-backed open.
-- Keep active-runtime `CREATE DATABASE` on MariaDB's directory path for now
-  because copy-style table DDL still uses that transient directory during the
-  same connection. The directory remains MyLite-owned runtime state and is
-  removed on close.
+- A later directory-free create slice routes file-backed initial
+  `CREATE DATABASE` through the same catalog hooks once table DDL no longer
+  needs that transient directory during the active connection.
 - Keep the existing direct/prepared schema sync path as a conservative
   compatibility belt until broader raw MariaDB adapter paths exist.
 
@@ -76,10 +75,10 @@ Covered in this slice:
 - No-directory `ALTER DATABASE` and `DROP DATABASE` publish through the catalog
   hooks.
 
-Still planned:
+Still planned after this slice:
 
-- Fully filesystem-free schema creation and all filesystem-oriented object paths
-  for views, triggers, routines, and other non-table objects.
+- Fully filesystem-free object paths for views, triggers, routines, and other
+  non-table objects.
 - SQL transaction rollback semantics for schema DDL.
 - Raw MariaDB C API adapter coverage outside the primary `libmylite` API.
 
@@ -91,10 +90,10 @@ Schema DDL starts publishing through the same MyLite catalog APIs used by
 ## Single-File And Embedded Lifecycle
 
 Durable schema state remains in the primary `.mylite` file. MyLite no longer
-creates transient schema directories during file-backed open. Newly-created
-schemas can still have transient active-runtime directories until remaining
-table-DDL and non-table object paths stop depending on them. The runtime datadir
-still exists for MariaDB bootstrap state and server-owned system schemas.
+creates transient schema directories during file-backed open. A later
+directory-free create slice extends the same catalog-backed path to initial
+file-backed schema creation. The runtime datadir still exists for MariaDB
+bootstrap state and server-owned system schemas.
 
 ## Public API And File Format
 
@@ -147,8 +146,9 @@ No dependency is introduced. Changes are GPL-2.0-compatible MariaDB fork code.
 
 - MariaDB still has many object-specific filesystem paths. This slice covers the
   schema and table-discovery layer, not views, triggers, routines, or events.
-- `CREATE DATABASE` still uses a transient runtime schema directory during the
-  active connection, because some MariaDB table-DDL paths still rely on it.
+- This slice originally left initial `CREATE DATABASE` on the transient
+  runtime directory path; `docs/specs/directory-free-create-database/specs.md`
+  covers the follow-up removal for file-backed schema creation.
 - `DROP DATABASE` affected-row counts may need a later compatibility pass once
   broader object metadata is catalog-backed.
 - The hook registry is a fork-local interface; it should stay narrow to avoid
