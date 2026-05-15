@@ -32,6 +32,21 @@
 static HASH charset_name_hash;
 
 /*
+  Compiled charset globals are mutable during initialization. Embedded shutdown
+  frees their allocated state, so restore their original definitions on restart.
+*/
+typedef struct st_compiled_charset_snapshot
+{
+  struct charset_info_st *charset;
+  struct charset_info_st value;
+} COMPILED_CHARSET_SNAPSHOT;
+
+static COMPILED_CHARSET_SNAPSHOT compiled_charset_snapshots[MY_ALL_CHARSETS_SIZE];
+
+static void remember_compiled_collation(struct charset_info_st *cs);
+static void reset_compiled_collations(void);
+
+/*
   The code below implements this functionality:
   
     - Initializing charset related structures
@@ -600,6 +615,7 @@ CHARSET_INFO *default_charset_info = &my_charset_latin1;
 int add_compiled_collation(struct charset_info_st *cs)
 {
   DBUG_ASSERT(cs->number < array_elements(all_charsets));
+  remember_compiled_collation(cs);
   all_charsets[cs->number]= cs;
   cs->state|= MY_CS_AVAILABLE;
   if ((my_hash_insert(&charset_name_hash, (uchar*) cs)))
@@ -629,6 +645,7 @@ int add_compiled_collation(struct charset_info_st *cs)
 void add_compiled_extra_collation(struct charset_info_st *cs)
 {
   DBUG_ASSERT(cs->number < array_elements(all_charsets));
+  remember_compiled_collation(cs);
   all_charsets[cs->number]= cs;
   cs->state|= MY_CS_AVAILABLE;
   if ((my_hash_insert(&charset_name_hash, (uchar*) cs)))
@@ -637,6 +654,31 @@ void add_compiled_extra_collation(struct charset_info_st *cs)
                                                       (uchar*) cs->cs_name.str,
                                                       cs->cs_name.length);
     cs->cs_name= org->cs_name;
+  }
+}
+
+static void remember_compiled_collation(struct charset_info_st *cs)
+{
+  if (!cs || !(cs->state & MY_CS_COMPILED) ||
+      cs->number >= array_elements(compiled_charset_snapshots))
+    return;
+
+  COMPILED_CHARSET_SNAPSHOT *snapshot=
+    compiled_charset_snapshots + cs->number;
+  if (snapshot->charset)
+    return;
+
+  snapshot->charset= cs;
+  snapshot->value= *cs;
+}
+
+static void reset_compiled_collations(void)
+{
+  for (size_t i= 0; i < array_elements(compiled_charset_snapshots); ++i)
+  {
+    COMPILED_CHARSET_SNAPSHOT *snapshot= compiled_charset_snapshots + i;
+    if (snapshot->charset)
+      *snapshot->charset= snapshot->value;
   }
 }
 
@@ -736,6 +778,7 @@ static void init_available_charsets(void)
 
 void free_charsets(void)
 {
+  reset_compiled_collations();
   charsets_initialized= charsets_template;
   my_hash_free(&charset_name_hash);
 }

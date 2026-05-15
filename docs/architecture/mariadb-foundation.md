@@ -47,7 +47,7 @@ application DDL; application `ENGINE=InnoDB` requests are routed to MyLite in
 storage-engine builds. The startup flag only avoids non-final InnoDB sidecars in
 the embedded bootstrap runtime.
 
-MariaDB 11.8.6 needed three narrow embedded-restart fixes for repeated
+MariaDB 11.8.6 needed four narrow embedded-restart fixes for repeated
 `mylite_open()` / `mylite_close()` tests in one process:
 
 - `mariadb/sql/mysqld.cc` restores the embedded scheduler pointers after
@@ -58,6 +58,9 @@ MariaDB 11.8.6 needed three narrow embedded-restart fixes for repeated
   participant counters, savepoint allocation size, and DDL recovery state after
   plugin shutdown so the next `mysql_server_init()` starts from a fresh handler
   registry.
+- `mariadb/mysys/charset.c` restores compiled charset definitions after charset
+  teardown so UCA collations such as `utf8mb4_unicode_ci` do not retain stale
+  ready state across embedded restarts.
 
 ## Metadata And Discovery
 
@@ -135,6 +138,11 @@ Source anchors at import commit `9bfea48ce1214cc4470f6f6f8a4e30352cef84e7`:
   `tabledef_version`, and `HA_ERR_TABLE_DEF_CHANGED`.
 - `sql/table.h`: `TABLE_SHARE::init_from_binary_frm_image()` and
   `TABLE_SHARE::init_from_sql_statement_string()`.
+- `mysys/charset.c`: compiled charset registration, lazy charset readiness,
+  and `free_charsets()` teardown.
+- `mysys/my_init.c`: `my_end()` charset and once-allocator shutdown order.
+- `strings/ctype-uca.c` and `strings/ctype-uca.inl`: UCA collation
+  initialization and comparison handlers.
 
 Supporting documentation:
 

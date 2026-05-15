@@ -32,19 +32,22 @@ MariaDB base: `mariadb-11.8.6`
   <https://codex.wordpress.org/Database_Description>.
 
 The smoke uses a WordPress-shaped subset rather than an exact current WordPress
-installer dump. Exact WordPress schema import, charset/collation variants, and
-plugin tables need broader support than this first slice should hide inside one
+installer dump. Exact WordPress schema import, a broad charset/collation matrix,
+and plugin tables need broader support than this slice should hide inside one
 test. Later BLOB/TEXT prefix-index and WordPress core schema expansion slices
 broadened this smoke with prefix indexes on wider `varchar` and
 `text`/`longtext` columns, plus users, usermeta, terms, taxonomy
-relationships, comments, commentmeta, and links.
+relationships, comments, commentmeta, and links. The current smoke now uses
+representative `utf8mb4_unicode_ci` defaults and checks table collation metadata
+before and after reopen.
 
 ## Design
 
 Extend the opt-in `storage-smoke-dev` embedded storage-engine test with a new
 application-schema case:
 
-- create `wp_options`, `wp_posts`, and `wp_postmeta` with `ENGINE=InnoDB`;
+- create `wp_options`, `wp_posts`, and `wp_postmeta` with `ENGINE=InnoDB` and
+  `utf8mb4_unicode_ci` defaults;
 - cover supported prefix key shapes, including `meta_key(191)` on
   `varchar(255)` and a bounded `text` prefix index;
 - insert option, post, and postmeta rows with `bigint unsigned`, `datetime`,
@@ -71,11 +74,14 @@ storage-engine smoke label carrying this test.
   `datetime`, and integer row values checked by queries.
 - Secondary index lookup and a simple join over persisted rows.
 - Close/reopen durability and sidecar gates.
+- Representative `utf8mb4_unicode_ci` database/table defaults and
+  information-schema table-collation checks across reopen.
 
 ## Non-Goals
 
 - Full WordPress installer compatibility.
-- Character set, collation, and index-length edge cases.
+- Broad character set, collation, and index-length edge cases beyond the
+  representative `utf8mb4_unicode_ci` path.
 - Foreign keys or referential enforcement; WordPress itself does not depend on
   database-enforced foreign keys for these core relationships.
 - Multisite, exact installer import, plugin tables, migrations, or WP-CLI.
@@ -103,6 +109,8 @@ durable `.frm`, InnoDB, MyISAM, Aria, binlog, and relay-log companions.
 
 - The WordPress-shaped smoke creates and reopens all routed tables without
   durable sidecars.
+- Representative WordPress-shaped tables retain `utf8mb4_unicode_ci` collation
+  metadata across close/reopen.
 - Queries prove option, post, postmeta, update, delete, secondary-index, and join
   behavior.
 - The compatibility harness exposes the new `application-schema` group.

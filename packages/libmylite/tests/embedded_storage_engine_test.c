@@ -122,6 +122,7 @@ static void test_memory_database_has_empty_mylite_discovery(void);
 static void test_schema_namespaces(void);
 static void test_prepared_schema_namespaces(void);
 static void test_schema_options(void);
+static void test_utf8mb4_unicode_ci_survives_restart(void);
 static void test_non_table_object_policy(void);
 static void test_transaction_and_foreign_key_policies(void);
 static void test_create_table_persists_catalog_metadata(void);
@@ -165,6 +166,12 @@ static void assert_catalog_table_metadata(
     const char *effective_engine_name
 );
 static void assert_wordpress_catalog_metadata(const char *filename);
+static void assert_table_collation(
+    mylite_db *db,
+    const char *schema_name,
+    const char *table_name,
+    const char *expected_collation
+);
 static int engine_callback(void *ctx, int column_count, char **values, char **column_names);
 static int schema_callback(void *ctx, int column_count, char **values, char **column_names);
 static int schema_option_callback(void *ctx, int column_count, char **values, char **column_names);
@@ -211,6 +218,7 @@ int main(void) {
     test_schema_namespaces();
     test_prepared_schema_namespaces();
     test_schema_options();
+    test_utf8mb4_unicode_ci_survives_restart();
     test_non_table_object_policy();
     test_transaction_and_foreign_key_policies();
     test_create_table_persists_catalog_metadata();
@@ -394,6 +402,66 @@ static void test_schema_options(void) {
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_utf8mb4_unicode_ci_survives_restart(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(
+        db,
+        "CREATE DATABASE unicode_app DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    );
+    assert_exec_succeeds(db, "USE unicode_app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE terms ("
+        "id BIGINT NOT NULL AUTO_INCREMENT, "
+        "name VARCHAR(191) NOT NULL, "
+        "slug VARCHAR(191) NOT NULL, "
+        "PRIMARY KEY (id), "
+        "UNIQUE KEY name_key (name), "
+        "KEY slug_key (slug)"
+        ") ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    );
+    assert_table_collation(db, "unicode_app", "terms", "utf8mb4_unicode_ci");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO terms (name, slug) VALUES ('Cafe', 'cafe'), ('Resume', 'resume')"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    for (unsigned i = 0; i < 3; ++i) {
+        single_value_context slug = {
+            .expected_value = "resume",
+        };
+
+        db = open_database_with_filename(root, filename);
+        assert_exec_succeeds(db, "USE unicode_app");
+        assert_table_collation(db, "unicode_app", "terms", "utf8mb4_unicode_ci");
+        assert_exec_fails(db, "INSERT INTO terms (name, slug) VALUES ('Resume', 'duplicate')");
+        assert(
+            mylite_exec(
+                db,
+                "SELECT slug FROM terms FORCE INDEX (name_key) WHERE name = 'Resume'",
+                single_value_callback,
+                &slug,
+                &errmsg
+            ) == MYLITE_OK
+        );
+        assert(errmsg == NULL);
+        assert(slug.rows == 1);
+        assert(mylite_close(db) == MYLITE_OK);
+        assert_no_durable_sidecars(root, "storage-engine.mylite");
+    }
+
     free(filename);
     remove_tree(root);
     free(root);
@@ -2508,7 +2576,10 @@ static void test_wordpress_shaped_schema(void) {
     table_context deleted_meta = {0};
     char *errmsg = NULL;
 
-    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE DATABASE app DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    );
     assert_exec_succeeds(db, "USE app");
     assert_exec_succeeds(
         db,
@@ -2520,7 +2591,7 @@ static void test_wordpress_shaped_schema(void) {
         "PRIMARY KEY (option_id), "
         "UNIQUE KEY option_name (option_name), "
         "KEY autoload (autoload)"
-        ") ENGINE=InnoDB"
+        ") ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
     );
     assert_exec_succeeds(
         db,
@@ -2543,7 +2614,7 @@ static void test_wordpress_shaped_schema(void) {
         "KEY type_status_date (post_type, post_status, post_date, ID), "
         "KEY post_parent (post_parent), "
         "KEY post_author (post_author)"
-        ") ENGINE=InnoDB"
+        ") ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
     );
     assert_exec_succeeds(
         db,
@@ -2555,7 +2626,7 @@ static void test_wordpress_shaped_schema(void) {
         "PRIMARY KEY (meta_id), "
         "KEY post_id (post_id), "
         "KEY meta_key (meta_key(191))"
-        ") ENGINE=InnoDB"
+        ") ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
     );
     assert_exec_succeeds(
         db,
@@ -2574,7 +2645,7 @@ static void test_wordpress_shaped_schema(void) {
         "KEY user_login_key (user_login), "
         "KEY user_nicename (user_nicename), "
         "KEY user_email (user_email)"
-        ") ENGINE=InnoDB"
+        ") ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
     );
     assert_exec_succeeds(
         db,
@@ -2586,7 +2657,7 @@ static void test_wordpress_shaped_schema(void) {
         "PRIMARY KEY (umeta_id), "
         "KEY user_id (user_id), "
         "KEY meta_key (meta_key(191))"
-        ") ENGINE=InnoDB"
+        ") ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
     );
     assert_exec_succeeds(
         db,
@@ -2598,7 +2669,7 @@ static void test_wordpress_shaped_schema(void) {
         "PRIMARY KEY (term_id), "
         "KEY slug (slug(191)), "
         "KEY name (name(191))"
-        ") ENGINE=InnoDB"
+        ") ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
     );
     assert_exec_succeeds(
         db,
@@ -2612,7 +2683,7 @@ static void test_wordpress_shaped_schema(void) {
         "PRIMARY KEY (term_taxonomy_id), "
         "UNIQUE KEY term_id_taxonomy (term_id, taxonomy), "
         "KEY taxonomy (taxonomy)"
-        ") ENGINE=InnoDB"
+        ") ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
     );
     assert_exec_succeeds(
         db,
@@ -2622,7 +2693,7 @@ static void test_wordpress_shaped_schema(void) {
         "term_order INT NOT NULL DEFAULT 0, "
         "PRIMARY KEY (object_id, term_taxonomy_id), "
         "KEY term_taxonomy_id (term_taxonomy_id)"
-        ") ENGINE=InnoDB"
+        ") ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
     );
     assert_exec_succeeds(
         db,
@@ -2648,7 +2719,7 @@ static void test_wordpress_shaped_schema(void) {
         "KEY comment_date_gmt (comment_date_gmt), "
         "KEY comment_parent (comment_parent), "
         "KEY comment_author_email (comment_author_email(10))"
-        ") ENGINE=InnoDB"
+        ") ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
     );
     assert_exec_succeeds(
         db,
@@ -2660,7 +2731,7 @@ static void test_wordpress_shaped_schema(void) {
         "PRIMARY KEY (meta_id), "
         "KEY comment_id (comment_id), "
         "KEY meta_key (meta_key(191))"
-        ") ENGINE=InnoDB"
+        ") ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
     );
     assert_exec_succeeds(
         db,
@@ -2680,9 +2751,11 @@ static void test_wordpress_shaped_schema(void) {
         "link_rss VARCHAR(255) NOT NULL DEFAULT '', "
         "PRIMARY KEY (link_id), "
         "KEY link_visible (link_visible)"
-        ") ENGINE=InnoDB"
+        ") ENGINE=InnoDB DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
     );
     assert_wordpress_catalog_metadata(filename);
+    assert_table_collation(db, "app", "wp_posts", "utf8mb4_unicode_ci");
+    assert_table_collation(db, "app", "wp_comments", "utf8mb4_unicode_ci");
 
     assert_exec_succeeds(
         db,
@@ -2993,6 +3066,8 @@ static void test_wordpress_shaped_schema(void) {
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "USE app");
     assert_wordpress_catalog_metadata(filename);
+    assert_table_collation(db, "app", "wp_posts", "utf8mb4_unicode_ci");
+    assert_table_collation(db, "app", "wp_comments", "utf8mb4_unicode_ci");
     assert(
         mylite_exec(
             db,
@@ -3146,6 +3221,33 @@ static void assert_wordpress_catalog_metadata(const char *filename) {
     assert_catalog_table_metadata(filename, "app", "wp_comments", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "wp_commentmeta", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "wp_links", "InnoDB", "MYLITE");
+}
+
+static void assert_table_collation(
+    mylite_db *db,
+    const char *schema_name,
+    const char *table_name,
+    const char *expected_collation
+) {
+    char sql[320];
+    const int written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT TABLE_COLLATION FROM INFORMATION_SCHEMA.TABLES "
+        "WHERE TABLE_SCHEMA='%s' AND TABLE_NAME='%s'",
+        schema_name,
+        table_name
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+
+    single_value_context table_collation = {
+        .expected_value = expected_collation,
+    };
+    char *errmsg = NULL;
+    assert(mylite_exec(db, sql, single_value_callback, &table_collation, &errmsg) == MYLITE_OK);
+    assert(errmsg == NULL);
+    assert(table_collation.rows == 1);
 }
 
 static void assert_exec_succeeds(mylite_db *db, const char *sql) {
