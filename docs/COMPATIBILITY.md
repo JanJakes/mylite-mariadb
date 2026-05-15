@@ -21,7 +21,7 @@ lifecycle, direct SQL, prepared statements, column metadata, large value reads,
 warnings, MariaDB baseline SQL API comparison, storage-engine smoke, sidecar
 gates, routed DDL/DML including schema namespaces, `CREATE TABLE ... LIKE`,
 and `CREATE TABLE ... SELECT`, initial application-schema smoke, and
-server-surface policy. MariaDB MTR comparison suites and broader
+unsupported server/non-table-object policy. MariaDB MTR comparison suites and broader
 application-schema suites remain planned.
 
 ## Baseline
@@ -85,7 +85,7 @@ application-schema suites remain planned.
 | `CREATE TABLE ... LIKE` | 🟡&nbsp;Partial | Clone supported MyLite-routed table definitions without copying source rows, preserve source requested-engine metadata when no explicit engine is specified, reset target autoincrement state, and cover cloned supported indexes before and after close/reopen; temporary-table variants, unsupported source objects, foreign keys, partitions, and SQL rollback remain planned |
 | `CREATE TABLE ... SELECT` | 🟡&nbsp;Partial | Successful supported CTAS creates MyLite catalog metadata and inserts SELECT result rows through the normal handler write path, including no-engine and explicit `ENGINE=InnoDB` targets, BLOB/TEXT payloads, autoincrement state, supported indexes, close/reopen visibility, and sidecar gates; duplicate-key CTAS abort removes target catalog metadata, while physical page rollback, temporary CTAS, `OR REPLACE`, `IGNORE` / `REPLACE`, unsupported source objects, foreign keys, partitions, and SQL rollback remain planned |
 | Schemas/databases | 🟡&nbsp;Partial | Direct and prepared `CREATE DATABASE` / `CREATE SCHEMA` store catalog namespace records with default character set, collation, and comment options, file-backed reopen uses SQL-layer catalog hooks so `USE`, `SHOW DATABASES`, `SHOW TABLES`, `SHOW CREATE DATABASE`, information-schema schema options, and table resolution work without rehydrated runtime schema directories, and direct and prepared `DROP DATABASE` / `DROP SCHEMA` remove covered catalog metadata; fully filesystem-free schema DDL, non-table objects, and SQL rollback remain planned |
-| Views, triggers, and routines | ⚪&nbsp;Planned | Catalog-backed persistent objects after table DDL is stable |
+| Views, triggers, and routines | 🟡&nbsp;Partial | Catalog-backed persistent objects remain planned after table DDL is stable; current `libmylite` entry points reject representative view, trigger, routine, package, sequence, and `CALL` statements before MariaDB can publish filesystem or server-table metadata |
 | Events and scheduler | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server scheduler is not part of the core embedded profile; event activation and event DDL are rejected by MyLite SQL policy |
 | Users, grants, and password auth | ➖&nbsp;Out&nbsp;of&nbsp;scope | Local embedded file ownership replaces server account management; account SQL is rejected by MyLite SQL policy |
 | Replication and binlog | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server topology feature, not core library behavior; binlog is disabled at startup and representative replication/binlog SQL is rejected |

@@ -310,6 +310,21 @@ static void test_prepare_diagnostics(void) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(strstr(mylite_errmsg(db), "server-oriented") != NULL);
 
+    assert(
+        mylite_prepare(
+            db,
+            "CREATE VIEW blocked_view AS SELECT 1",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_ERROR
+    );
+    assert(stmt == NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), "non-table database object") != NULL);
+
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);
     remove_tree(root);

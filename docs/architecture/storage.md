@@ -215,6 +215,11 @@ and no-directory schema alter/drop paths from catalog records. Final
 filesystem-free hooks for all schema DDL and non-table database objects remain
 planned.
 
+Views, triggers, routines, packages, sequences, and routine invocation are
+rejected by the current `libmylite` SQL policy before MariaDB can publish
+filesystem-backed or server-table-backed metadata. Catalog-backed persistence
+for those object classes requires a separate format and execution design.
+
 The default embedded profile does not expose server account administration,
 dynamic plugin installation, replication metadata, or the event scheduler.
 `information_schema` remains virtual. Any required `mysql.*` system surface

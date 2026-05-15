@@ -286,7 +286,10 @@ mylite_value_type map_mariadb_type(enum enum_field_types type, unsigned int flag
 bool is_unsigned_column(unsigned int flags);
 mylite_warning_level map_warning_level(const char *level);
 std::string field_string(const char *value, unsigned int length);
+const char *unsupported_sql_surface_message(std::string_view sql);
 bool is_server_surface_sql(std::string_view sql);
+bool is_non_table_object_sql(std::string_view sql);
+bool is_non_table_object_keyword(std::string_view token);
 std::string_view skip_sql_leading_noise(std::string_view sql);
 std::string_view pop_sql_token(std::string_view &sql);
 bool sql_token_equals(std::string_view token, const char *keyword);
@@ -1120,8 +1123,8 @@ int exec_impl(
 #else
     set_ok(*database);
     clear_warnings(*database);
-    if (is_server_surface_sql(std::string_view(sql))) {
-        set_error(*database, MYLITE_ERROR, "unsupported server-oriented SQL surface");
+    if (const char *unsupported_message = unsupported_sql_surface_message(std::string_view(sql))) {
+        set_error(*database, MYLITE_ERROR, unsupported_message);
         return copy_error_message(*database, errmsg);
     }
 
@@ -1199,8 +1202,9 @@ int prepare_impl(
 #else
     set_ok(*database);
     clear_warnings(*database);
-    if (is_server_surface_sql(std::string_view(sql, sql_len))) {
-        set_error(*database, MYLITE_ERROR, "unsupported server-oriented SQL surface");
+    if (const char *unsupported_message =
+            unsupported_sql_surface_message(std::string_view(sql, sql_len))) {
+        set_error(*database, MYLITE_ERROR, unsupported_message);
         return MYLITE_ERROR;
     }
 
@@ -1773,6 +1777,16 @@ int store_and_emit_result(
     return MYLITE_OK;
 }
 
+const char *unsupported_sql_surface_message(std::string_view sql) {
+    if (is_server_surface_sql(sql)) {
+        return "unsupported server-oriented SQL surface";
+    }
+    if (is_non_table_object_sql(sql)) {
+        return "unsupported non-table database object SQL surface";
+    }
+    return nullptr;
+}
+
 bool is_server_surface_sql(std::string_view sql) {
     std::string_view rest = skip_sql_leading_noise(sql);
     const std::string_view first = pop_sql_token(rest);
@@ -1825,6 +1839,38 @@ bool is_server_surface_sql(std::string_view sql) {
     return sql_token_equals(first, "SHOW") &&
            (sql_token_equals(second, "MASTER") || sql_token_equals(second, "SLAVE") ||
             sql_token_equals(second, "REPLICA"));
+}
+
+bool is_non_table_object_sql(std::string_view sql) {
+    std::string_view rest = skip_sql_leading_noise(sql);
+    const std::string_view first = pop_sql_token(rest);
+    std::string_view second = pop_sql_token(rest);
+    const std::string_view third = pop_sql_token(rest);
+
+    if (sql_token_equals(first, "CALL")) {
+        return true;
+    }
+
+    if (sql_token_equals(first, "CREATE")) {
+        if (sql_token_equals(second, "OR") && sql_token_equals(third, "REPLACE")) {
+            second = pop_sql_token(rest);
+        }
+        return is_non_table_object_keyword(second) || sql_token_equals(second, "DEFINER") ||
+               sql_token_equals(second, "ALGORITHM") || sql_token_equals(second, "SQL");
+    }
+
+    if (sql_token_equals(first, "ALTER") || sql_token_equals(first, "DROP")) {
+        return is_non_table_object_keyword(second);
+    }
+
+    return sql_token_equals(first, "SHOW") && sql_token_equals(second, "CREATE") &&
+           is_non_table_object_keyword(third);
+}
+
+bool is_non_table_object_keyword(std::string_view token) {
+    return sql_token_equals(token, "VIEW") || sql_token_equals(token, "TRIGGER") ||
+           sql_token_equals(token, "PROCEDURE") || sql_token_equals(token, "FUNCTION") ||
+           sql_token_equals(token, "PACKAGE") || sql_token_equals(token, "SEQUENCE");
 }
 
 std::string_view skip_sql_leading_noise(std::string_view sql) {

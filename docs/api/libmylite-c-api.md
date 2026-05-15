@@ -392,15 +392,17 @@ the embedded library model:
 - Galera/wsrep,
 - dynamic plugin installation,
 - external durable storage engines,
+- filesystem-backed views, triggers, routines, and sequences until they have
+  MyLite catalog storage,
 - server audit plugins,
 - network-protocol `LOAD DATA LOCAL`,
 - event scheduler,
 - performance schema.
 
-Representative account, event, plugin, replication, and binlog commands are
-rejected before MariaDB execution with stable MyLite errors. Other unsupported
-surfaces should fail with stable MyLite result codes and MariaDB diagnostics
-where possible.
+Representative account, event, plugin, replication, binlog, view, trigger,
+routine, package, sequence, and `CALL` commands are rejected before MariaDB
+execution with stable MyLite errors. Other unsupported surfaces should fail with
+stable MyLite result codes and MariaDB diagnostics where possible.
 
 ## Compatibility Adapter
 

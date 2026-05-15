@@ -22,9 +22,11 @@ static void test_select_callback(void);
 static void test_callback_abort(void);
 static void test_syntax_error_diagnostics(void);
 static void test_server_surfaces_are_disabled(void);
+static void test_non_table_objects_are_rejected(void);
 static void assert_variable_value(mylite_db *db, const char *name, const char *value);
 static void assert_variable_value_or_missing(mylite_db *db, const char *name, const char *value);
 static void assert_exec_fails(mylite_db *db, const char *sql);
+static void assert_non_table_object_exec_fails(mylite_db *db, const char *sql);
 static int select_callback(void *ctx, int column_count, char **values, char **column_names);
 static int abort_callback(void *ctx, int column_count, char **values, char **column_names);
 static int variable_callback(void *ctx, int column_count, char **values, char **column_names);
@@ -40,6 +42,7 @@ int main(void) {
     test_callback_abort();
     test_syntax_error_diagnostics();
     test_server_surfaces_are_disabled();
+    test_non_table_objects_are_rejected();
     return 0;
 }
 
@@ -128,6 +131,33 @@ static void test_server_surfaces_are_disabled(void) {
     free(root);
 }
 
+static void test_non_table_objects_are_rejected(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "USE app", NULL, NULL, NULL) == MYLITE_OK);
+
+    assert_non_table_object_exec_fails(db, "CREATE VIEW blocked_view AS SELECT 1");
+    assert_non_table_object_exec_fails(db, "CREATE OR REPLACE VIEW blocked_view AS SELECT 1");
+    assert_non_table_object_exec_fails(
+        db,
+        "CREATE TRIGGER blocked_trigger BEFORE INSERT ON missing_table "
+        "FOR EACH ROW SET @mylite_blocked = 1"
+    );
+    assert_non_table_object_exec_fails(db, "CREATE PROCEDURE blocked_proc() SELECT 1");
+    assert_non_table_object_exec_fails(db, "CREATE FUNCTION blocked_func() RETURNS INT RETURN 1");
+    assert_non_table_object_exec_fails(db, "CALL blocked_proc()");
+    assert_non_table_object_exec_fails(db, "DROP VIEW blocked_view");
+    assert_non_table_object_exec_fails(db, "CREATE SEQUENCE blocked_seq");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
 static void assert_variable_value(mylite_db *db, const char *name, const char *value) {
     variable_context ctx = {
         .name = name,
@@ -173,6 +203,18 @@ static void assert_exec_fails(mylite_db *db, const char *sql) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "server-oriented") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_non_table_object_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "non-table database object") != NULL);
     mylite_free(errmsg);
 }
 
