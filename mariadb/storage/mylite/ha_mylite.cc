@@ -1445,9 +1445,9 @@ int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info
     if (thd->lex->alter_info.requested_lock ==
         Alter_info::ALTER_TABLE_LOCK_NONE)
       DBUG_RETURN(HA_ERR_UNSUPPORTED);
-    if (!mylite_table_supports_row_write(form))
-      DBUG_RETURN(HA_ERR_UNSUPPORTED);
   }
+  if (!mylite_table_supports_row_write(form))
+    DBUG_RETURN(HA_ERR_UNSUPPORTED);
 
   char requested_engine_name[NAME_LEN + 1];
   int engine_name_error=
@@ -1741,6 +1741,8 @@ static bool mylite_key_is_supported(const KEY *key)
   {
     const KEY_PART_INFO *key_part= key->key_part + i;
     if (!key_part->field)
+      return false;
+    if (key_part->field->vcol_info)
       return false;
     if ((key_part->key_part_flag & HA_BLOB_PART) && key_part->length == 0)
       return false;

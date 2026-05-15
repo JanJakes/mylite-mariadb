@@ -121,7 +121,7 @@ if(BUILD_TESTING)
       set_tests_properties(
         libmylite.embedded-storage-engine
         PROPERTIES LABELS
-          "compat-storage-engine;compat-sidecar;compat-routed-ddl-dml;compat-application-schema;compat-server-surface;compat-transaction;compat-foreign-key;compat-check-constraint"
+          "compat-storage-engine;compat-sidecar;compat-routed-ddl-dml;compat-application-schema;compat-server-surface;compat-transaction;compat-foreign-key;compat-check-constraint;compat-generated-column"
       )
     endif()
 

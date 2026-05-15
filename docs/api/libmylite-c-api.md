@@ -147,6 +147,9 @@ updates to default character set, collation, and comment options, routed
 full-scan `SELECT` over persisted MyLite row pages. Basic CHECK constraints on
 routed table definitions are enforced by MariaDB before MyLite handler writes,
 and those definitions survive close/reopen through the MyLite catalog.
+Basic unindexed generated columns use MariaDB's generated-column evaluation,
+with virtual values computed from restored row buffers and stored values kept
+in normal MyLite row payloads.
 Foreign-key DDL is rejected before execution until MyLite has referential
 metadata and enforcement.
 

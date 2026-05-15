@@ -512,6 +512,8 @@ static void test_create_table_persists_catalog_metadata(void) {
     auto_row_context auto_rows = {0};
     single_value_context checked_rating = {.expected_value = "4"};
     single_value_context checked_disabled_rating = {.expected_value = "7"};
+    single_value_context generated_title_len = {.expected_value = "5"};
+    single_value_context generated_label = {.expected_value = "draft-1"};
     char *errmsg = NULL;
 
     assert_exec_succeeds(db, "CREATE DATABASE app");
@@ -569,6 +571,15 @@ static void test_create_table_persists_catalog_metadata(void) {
         "CONSTRAINT rating_max CHECK (rating <= 5)"
         ") ENGINE=InnoDB"
     );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE generated_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL, "
+        "title_len INT AS (CHAR_LENGTH(title)) VIRTUAL, "
+        "label VARCHAR(80) AS (CONCAT(title, '-', id)) STORED"
+        ") ENGINE=InnoDB"
+    );
     assert(mylite_storage_table_exists(filename, "app", "default_posts") == MYLITE_STORAGE_OK);
     assert(mylite_storage_table_exists(filename, "app", "explicit_posts") == MYLITE_STORAGE_OK);
     assert(mylite_storage_table_exists(filename, "app", "innodb_posts") == MYLITE_STORAGE_OK);
@@ -581,7 +592,8 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert(mylite_storage_table_exists(filename, "app", "mutable_posts") == MYLITE_STORAGE_OK);
     assert(mylite_storage_table_exists(filename, "app", "drop_posts") == MYLITE_STORAGE_OK);
     assert(mylite_storage_table_exists(filename, "app", "checked_posts") == MYLITE_STORAGE_OK);
-    assert_catalog_table_count(filename, "app", 12U);
+    assert(mylite_storage_table_exists(filename, "app", "generated_posts") == MYLITE_STORAGE_OK);
+    assert_catalog_table_count(filename, "app", 13U);
     assert_catalog_table_metadata(filename, "app", "default_posts", "DEFAULT", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "explicit_posts", "MYLITE", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "innodb_posts", "InnoDB", "MYLITE");
@@ -594,20 +606,34 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert_catalog_table_metadata(filename, "app", "mutable_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "drop_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "checked_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "generated_posts", "InnoDB", "MYLITE");
     assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
-    assert(tables.rows == 12);
+    assert(tables.rows == 13);
     assert_exec_fails(
         db,
         "CREATE TABLE memory_posts (id INT PRIMARY KEY, title VARCHAR(255)) ENGINE=MEMORY"
     );
     assert(mylite_storage_table_exists(filename, "app", "memory_posts") == MYLITE_STORAGE_NOTFOUND);
-    assert_catalog_table_count(filename, "app", 12U);
+    assert_catalog_table_count(filename, "app", 13U);
     assert_exec_fails(
         db,
         "CREATE TABLE innodb_posts (id INT PRIMARY KEY, title VARCHAR(255)) ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 12U);
+    assert_catalog_table_count(filename, "app", 13U);
+    assert_exec_fails(
+        db,
+        "CREATE TABLE generated_index_posts ("
+        "base INT NOT NULL, "
+        "doubled INT AS (base * 2) VIRTUAL, "
+        "KEY doubled_key (doubled)"
+        ") ENGINE=InnoDB"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "generated_index_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_catalog_table_count(filename, "app", 13U);
     assert_exec_succeeds(db, "INSERT INTO row_posts VALUES (1, 'draft')");
     assert_exec_succeeds(db, "INSERT INTO row_posts VALUES (2, 'published')");
     assert_exec_succeeds(db, "INSERT INTO nullable_posts VALUES (1, NULL, NULL)");
@@ -632,6 +658,54 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert_exec_succeeds(db, "SET check_constraint_checks=OFF");
     assert_exec_succeeds(db, "INSERT INTO checked_posts VALUES (2, 7)");
     assert_exec_succeeds(db, "SET check_constraint_checks=ON");
+    assert_exec_succeeds(db, "INSERT INTO generated_posts (id, title) VALUES (1, 'draft')");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT title_len FROM generated_posts WHERE id = 1",
+            single_value_callback,
+            &generated_title_len,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_title_len.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT label FROM generated_posts WHERE id = 1",
+            single_value_callback,
+            &generated_label,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_label.rows == 1);
+    assert_exec_succeeds(db, "UPDATE generated_posts SET title = 'published' WHERE id = 1");
+    generated_title_len = (single_value_context){.expected_value = "9"};
+    generated_label = (single_value_context){.expected_value = "published-1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT title_len FROM generated_posts WHERE id = 1",
+            single_value_callback,
+            &generated_title_len,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_title_len.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT label FROM generated_posts WHERE id = 1",
+            single_value_callback,
+            &generated_label,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_label.rows == 1);
     assert(
         mylite_exec(
             db,
@@ -737,12 +811,12 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert_exec_succeeds(db, "INSERT INTO innodb_posts VALUES (1, 'draft')");
     assert_exec_succeeds(db, "DROP TABLE drop_posts");
     assert(mylite_storage_table_exists(filename, "app", "drop_posts") == MYLITE_STORAGE_NOTFOUND);
-    assert_catalog_table_count(filename, "app", 11U);
+    assert_catalog_table_count(filename, "app", 12U);
     assert_exec_succeeds(
         db,
         "CREATE TABLE drop_posts (id INT NOT NULL, title VARCHAR(255) NOT NULL) ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 12U);
+    assert_catalog_table_count(filename, "app", 13U);
     assert(
         mylite_exec(db, "SELECT id, title FROM drop_posts", row_callback, &drop_rows, &errmsg) ==
         MYLITE_OK
@@ -751,7 +825,7 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert(drop_rows.rows == 0);
     assert_exec_succeeds(db, "DROP TABLE aria_posts");
     assert(mylite_storage_table_exists(filename, "app", "aria_posts") == MYLITE_STORAGE_NOTFOUND);
-    assert_catalog_table_count(filename, "app", 11U);
+    assert_catalog_table_count(filename, "app", 12U);
     assert_exec_succeeds(db, "RENAME TABLE row_posts TO renamed_row_posts");
     assert(mylite_storage_table_exists(filename, "app", "row_posts") == MYLITE_STORAGE_NOTFOUND);
     assert(mylite_storage_table_exists(filename, "app", "renamed_row_posts") == MYLITE_STORAGE_OK);
@@ -772,7 +846,7 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert_exec_succeeds(db, "RENAME TABLE myisam_posts TO renamed_posts");
     assert(mylite_storage_table_exists(filename, "app", "myisam_posts") == MYLITE_STORAGE_NOTFOUND);
     assert(mylite_storage_table_exists(filename, "app", "renamed_posts") == MYLITE_STORAGE_OK);
-    assert_catalog_table_count(filename, "app", 11U);
+    assert_catalog_table_count(filename, "app", 12U);
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
@@ -785,11 +859,13 @@ static void test_create_table_persists_catalog_metadata(void) {
     auto_rows = (auto_row_context){0};
     checked_rating = (single_value_context){.expected_value = "4"};
     checked_disabled_rating = (single_value_context){.expected_value = "7"};
+    generated_title_len = (single_value_context){.expected_value = "9"};
+    generated_label = (single_value_context){.expected_value = "published-1"};
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "USE app");
     assert(mylite_exec(db, "SHOW TABLES", table_callback, &tables, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
-    assert(tables.rows == 11);
+    assert(tables.rows == 12);
     assert(
         mylite_exec(db, "SELECT * FROM innodb_posts", row_callback, &rows, &errmsg) == MYLITE_OK
     );
@@ -890,12 +966,34 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert(errmsg == NULL);
     assert(checked_disabled_rating.rows == 1);
     assert(
+        mylite_exec(
+            db,
+            "SELECT title_len FROM generated_posts WHERE id = 1",
+            single_value_callback,
+            &generated_title_len,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_title_len.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT label FROM generated_posts WHERE id = 1",
+            single_value_callback,
+            &generated_label,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_label.rows == 1);
+    assert(
         mylite_exec(db, "SELECT id, title FROM drop_posts", row_callback, &drop_rows, &errmsg) ==
         MYLITE_OK
     );
     assert(errmsg == NULL);
     assert(drop_rows.rows == 0);
-    assert_catalog_table_count(filename, "app", 11U);
+    assert_catalog_table_count(filename, "app", 12U);
     assert_catalog_table_metadata(filename, "app", "innodb_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "renamed_row_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "renamed_posts", "MyISAM", "MYLITE");
@@ -905,6 +1003,7 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert_catalog_table_metadata(filename, "app", "mutable_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "drop_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "checked_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "generated_posts", "InnoDB", "MYLITE");
     assert(mylite_storage_table_exists(filename, "app", "row_posts") == MYLITE_STORAGE_NOTFOUND);
     assert(mylite_storage_table_exists(filename, "app", "myisam_posts") == MYLITE_STORAGE_NOTFOUND);
     assert(mylite_storage_table_exists(filename, "app", "aria_posts") == MYLITE_STORAGE_NOTFOUND);

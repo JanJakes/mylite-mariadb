@@ -81,6 +81,10 @@ for referential constraints.
 Basic CHECK constraints are kept inside the MariaDB table-definition image and
 evaluated by MariaDB before MyLite handler writes; MyLite does not implement a
 separate constraint-expression evaluator.
+Basic unindexed generated columns are also routed through MariaDB's virtual
+column machinery. MyLite advertises generated-column support to MariaDB, stores
+persistent generated values in normal row payloads, and restores base row
+buffers so MariaDB can compute non-stored virtual values after reads.
 
 ## File Layout
 
@@ -202,6 +206,11 @@ because they are stored in the catalog-backed table-definition image. MariaDB
 enforces those checks before insert/update handler calls unless
 `check_constraint_checks=OFF` is set. Broader CHECK expression, ALTER, CTAS,
 dump-import, prepared-diagnostic, and rollback coverage remains planned.
+Basic unindexed virtual and stored generated columns follow the same
+catalog-backed table-definition path. Generated-column indexes remain
+unsupported: the handler rejects generated-field key parts before catalog
+publication, leaving generated/expression index support for a later storage and
+recovery design.
 
 ## Schemas And System Surfaces
 
@@ -293,8 +302,9 @@ The storage engine must support:
 
 FULLTEXT, SPATIAL, generated-column indexes, and foreign-key enforcement need
 explicit storage designs before support is claimed. Current `libmylite` entry
-points reject foreign-key DDL before MariaDB execution; other unsupported index
-classes reject through handler capability checks.
+points reject foreign-key DDL before MariaDB execution; unsupported index
+classes, including generated-column indexes, reject through handler capability
+checks before catalog publication.
 
 ## Transactions And Recovery
 
