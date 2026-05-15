@@ -59,9 +59,12 @@ statement, metadata, and warning behavior against a raw MariaDB embedded
 runtime. MariaDB's MTR remains the long-term source for broad upstream
 compatibility cases. MyLite should not run MTR blindly as the primary local
 signal yet: current MyLite behavior is embedded, file-owned, and intentionally
-excludes server surfaces that many upstream suites assume. MTR integration
-should be a separate comparison slice with explicit include lists, expected
-unsupported surfaces, and stable result normalization.
+excludes server surfaces that many upstream suites assume. The opt-in
+`tools/mylite-mtr-harness` runner proves the embedded MTR path with a tiny
+curated upstream smoke test, but it remains outside the default compatibility
+groups because it builds `mariadbd` and several upstream client/support tools.
+Broader MTR integration should be a separate comparison slice with explicit
+include lists, expected unsupported surfaces, and stable result normalization.
 
 ## Maintenance Rules
 

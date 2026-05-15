@@ -1,0 +1,102 @@
+# MTR Smoke Harness
+
+## Problem
+
+The compatibility harness groups MyLite-owned CTest coverage, but it still does
+not run any MariaDB MTR cases. MTR is MariaDB's native SQL compatibility test
+runner, so MyLite needs a small, proven entry point before broader MTR-scale
+comparison work can be planned honestly.
+
+This slice adds an opt-in smoke runner for a curated embedded MTR test. It is
+intentionally separate from the default MyLite compatibility harness because
+MTR preparation builds `mariadbd` and several upstream client/support tools.
+
+## Source Findings
+
+MariaDB base: `mariadb-11.8.6`
+(`9bfea48ce1214cc4470f6f6f8a4e30352cef84e7`).
+
+- `mariadb/mysql-test/mariadb-test-run.pl` is MariaDB's MTR entry point.
+- `mariadb/mysql-test/CMakeLists.txt` defines the upstream embedded MTR command
+  with `--embedded-server`, `--skip-rpl`, and `MTR_BUILD_THREAD`.
+- The out-of-source build wrapper produces
+  `build/mariadb-embedded/mysql-test/mariadb-test-run.pl`.
+- A real embedded smoke run of `main.1st` requires more than
+  `libmariadbd.a`: MTR probes for `mariadbd`, `mariadb-test-embedded`,
+  `mariadb-client-test-embedded`, `my_safe_process`, common client binaries,
+  MyISAM/Aria utility tools, `perror`, `mariadb-tzinfo-to-sql`, and `replace`.
+- Verified command:
+  `tools/mylite-mtr-harness run main.1st`.
+
+## Design
+
+Add `tools/mylite-mtr-harness` with two commands:
+
+- `list` prints the curated smoke test list;
+- `run [suite.test...]` builds the required MariaDB MTR support targets under
+  `build/mariadb-embedded` and runs each selected test with
+  `mariadb-test-run.pl --embedded-server --skip-rpl`.
+
+The default curated list is intentionally tiny:
+
+- `main.1st`.
+
+This establishes a working MTR path while avoiding a false claim that MyLite has
+meaningful MTR-scale coverage.
+
+## Supported Scope
+
+- MariaDB embedded MTR smoke runner.
+- Curated upstream baseline test execution.
+- Reuse of the existing MariaDB 11.8.6 embedded build directory.
+
+## Non-Goals
+
+- Running MTR against MyLite storage-engine routing.
+- Adding MTR to the default `tools/mylite-compat-harness run` group set.
+- Broad SQL result normalization, flaky-test quarantine, parallel MTR shards,
+  or CI dashboard integration.
+- External daemon comparison.
+
+## Compatibility Impact
+
+The project gains its first executable MTR entry point, but compatibility status
+does not move beyond partial. The roadmap should describe this as initial
+embedded MTR smoke coverage, with MTR-scale comparison still planned.
+
+## Single-File And Embedded-Lifecycle Impact
+
+No MyLite file format or runtime behavior changes. The smoke runner exercises
+MariaDB's embedded baseline under `build/mariadb-embedded/mysql-test/var`, not
+MyLite `.mylite` storage.
+
+## Build, Size, And Dependencies
+
+No new dependency is added. The runner is a Bash script. The build impact
+is significant when first run because it builds `mariadbd` and upstream MTR
+client/support tools in the existing MariaDB build tree; these are test
+artifacts, not default MyLite linked-library artifacts.
+
+## Test And Verification Plan
+
+- `tools/mylite-mtr-harness list`.
+- `tools/mylite-mtr-harness run main.1st`.
+- Existing first-party format, tidy, dev, embedded, and storage-smoke checks
+  should continue passing because the runner does not change production code.
+
+## Acceptance Criteria
+
+- The runner lists `main.1st`.
+- The runner builds the required MTR support targets from a fresh enough
+  `build/mariadb-embedded` tree.
+- `main.1st` passes under `mariadb-test-run.pl --embedded-server`.
+- Documentation states that this is opt-in smoke coverage, not full MTR-scale
+  comparison.
+
+## Risks And Open Questions
+
+- Building MTR prerequisites materially increases local build size. Use
+  `rm -rf build/mariadb-embedded` or `rm -rf build` to reclaim it.
+- The first curated test does not exercise MyLite storage; a later slice should
+  decide how to compare MTR cases against MyLite's embedded API and routed
+  storage without introducing daemon-only behavior into the core library.

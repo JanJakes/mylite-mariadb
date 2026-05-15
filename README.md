@@ -134,6 +134,14 @@ tools/mylite-compat-harness run public-api storage-core
 tools/mylite-compat-harness report embedded-lifecycle sidecar routed-ddl-dml
 ```
 
+The opt-in MariaDB MTR smoke runner builds extra upstream test tools and runs a
+small curated embedded MTR subset:
+
+```sh
+tools/mylite-mtr-harness list
+tools/mylite-mtr-harness run main.1st
+```
+
 See [docs/architecture/monorepo.md](docs/architecture/monorepo.md) for the
 repository layout and import discipline.
 

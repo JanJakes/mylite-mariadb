@@ -1,0 +1,141 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+build_dir="${BUILD_DIR:-"${root_dir}/build/mariadb-embedded"}"
+mtr_build_thread="${MTR_BUILD_THREAD:-auto}"
+default_tests=(main.1st)
+
+usage() {
+  cat <<EOF
+Usage: tools/mylite-mtr-harness [list|run] [suite.test...]
+
+Commands:
+  list       Show curated MariaDB MTR smoke tests.
+  run        Build the MTR smoke prerequisites and run selected tests.
+             Defaults to the curated smoke list.
+
+Environment:
+  BUILD_DIR          MariaDB build directory. Defaults to build/mariadb-embedded.
+  MTR_BUILD_THREAD  MTR build thread/port block. Defaults to auto.
+EOF
+}
+
+mtr_targets=(
+  libmariadbd.a
+  mariadbd
+  mariadb-test-embedded
+  mariadb-client-test-embedded
+  my_safe_process
+  mariadb-admin
+  mariadb
+  mariadb-plugin
+  mariadb-conv
+  mariadb-check
+  mariadb-dump
+  mariadb-slap
+  mariadb-import
+  mariadb-show
+  mariadb-binlog
+  mariadb-upgrade
+  my_print_defaults
+  myisamlog
+  myisamchk
+  myisampack
+  myisam_ftdump
+  aria_chk
+  aria_pack
+  perror
+  mariadb-tzinfo-to-sql
+  replace
+)
+
+require_command() {
+  local command_name="$1"
+
+  if ! command -v "${command_name}" >/dev/null 2>&1; then
+    echo "Missing required command: ${command_name}" >&2
+    exit 1
+  fi
+}
+
+list_tests() {
+  local test_name
+
+  for test_name in "${default_tests[@]}"; do
+    echo "${test_name}"
+  done
+}
+
+prepare_mtr_build() {
+  local archive="${build_dir}/libmysqld/libmariadbd.a"
+  local target
+
+  if [ -f "${archive}" ] && [ -f "${build_dir}/CMakeCache.txt" ]; then
+    BUILD_DIR="${build_dir}" "${root_dir}/tools/mariadb-embedded-build" build
+  else
+    BUILD_DIR="${build_dir}" "${root_dir}/tools/mariadb-embedded-build" all
+  fi
+
+  for target in "${mtr_targets[@]}"; do
+    cmake --build "${build_dir}" --target "${target}"
+  done
+}
+
+run_tests() {
+  local tests=("$@")
+  local test_name
+  local suite_name
+  local case_name
+
+  if [ "${#tests[@]}" -eq 0 ]; then
+    tests=("${default_tests[@]}")
+  fi
+
+  prepare_mtr_build
+
+  for test_name in "${tests[@]}"; do
+    if [[ "${test_name}" != *.* ]]; then
+      echo "Expected suite.test name, got: ${test_name}" >&2
+      exit 1
+    fi
+
+    suite_name="${test_name%%.*}"
+    case_name="${test_name#*.}"
+    (
+      cd "${build_dir}/mysql-test"
+      MTR_BUILD_THREAD="${mtr_build_thread}" \
+        perl ./mariadb-test-run.pl \
+          --embedded-server \
+          --skip-rpl \
+          --force \
+          --suite="${suite_name}" \
+          --do-test="${case_name}" \
+          --max-test-fail=1
+    )
+  done
+}
+
+require_command cmake
+require_command perl
+
+command_name="${1:-run}"
+if [ "$#" -gt 0 ]; then
+  shift
+fi
+
+case "${command_name}" in
+  list)
+    list_tests
+    ;;
+  run)
+    run_tests "$@"
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    usage >&2
+    exit 1
+    ;;
+esac
