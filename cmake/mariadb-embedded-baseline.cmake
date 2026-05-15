@@ -6,6 +6,23 @@
 
 set(CMAKE_BUILD_TYPE "Release" CACHE STRING "MariaDB embedded profile build type" FORCE)
 
+if(APPLE)
+  set(
+    CMAKE_C_FLAGS
+    "-Wno-nullability-completeness"
+    CACHE STRING
+    "Suppress Apple SDK nullability warnings in MariaDB embedded builds"
+    FORCE
+  )
+  set(
+    CMAKE_CXX_FLAGS
+    "-Wno-nullability-completeness"
+    CACHE STRING
+    "Suppress Apple SDK nullability warnings in MariaDB embedded builds"
+    FORCE
+  )
+endif()
+
 set(UPDATE_SUBMODULES OFF CACHE BOOL "Do not fetch MariaDB submodules during configure" FORCE)
 set(WITH_EMBEDDED_SERVER ON CACHE BOOL "Build MariaDB's embedded server library" FORCE)
 set(WITH_UNIT_TESTS OFF CACHE BOOL "Skip MariaDB upstream unit-test targets in the profile" FORCE)

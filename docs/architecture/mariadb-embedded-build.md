@@ -14,6 +14,9 @@ tools/mariadb-embedded-build all
 The wrapper configures MariaDB with
 `cmake/mariadb-embedded-baseline.cmake`, builds only the `libmariadbd.a` target,
 and reports archive size evidence. It does not update MariaDB submodules.
+On macOS, it prefers `/Library/Developer/CommandLineTools` when that developer
+directory is installed and `DEVELOPER_DIR` is not already set, keeping the C and
+C++ SDK headers from the same toolchain.
 
 ## Profile
 
@@ -39,6 +42,11 @@ import intentionally omits `wsrep-lib` and `storage/maria/libmarias3`.
 Dynamic plugins, socket authentication, feedback, Performance Schema, and
 thread-pool info are disabled because they are server-administration surfaces,
 not core MyLite embedded runtime behavior.
+
+On macOS, the profile also sets `CMAKE_C_FLAGS` and `CMAKE_CXX_FLAGS` to
+`-Wno-nullability-completeness`. That keeps MariaDB's warning-as-error profile
+compatible with recent macOS SDK headers without changing MyLite runtime
+behavior.
 
 ## Measurement
 
