@@ -21,6 +21,10 @@
 
 /* This file defines all string functions */
 
+#ifndef MYLITE_WITH_SFORMAT_SQL_FUNCTION
+#define MYLITE_WITH_SFORMAT_SQL_FUNCTION 1
+#endif
+
 extern size_t username_char_length;
 
 class Item_str_func :public Item_func
@@ -796,6 +800,7 @@ protected:
   { return get_item_copy<Item_func_substr>(thd, this); }
 };
 
+#if MYLITE_WITH_SFORMAT_SQL_FUNCTION
 class Item_func_sformat :public Item_str_func
 {
   String *val_arg;
@@ -812,6 +817,7 @@ public:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_sformat>(thd, this); }
 };
+#endif
 
 class Item_func_substr_oracle :public Item_func_substr
 {

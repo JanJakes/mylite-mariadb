@@ -96,6 +96,15 @@ ELSE()
   SET(MYLITE_GIS_SQL_FUNCTION_SOURCES ../sql/mylite_gis_sql_functions_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_SFORMAT_SQL_FUNCTION "Build SFORMAT SQL function" ON)
+IF(MYLITE_WITH_SFORMAT_SQL_FUNCTION)
+  ADD_DEFINITIONS(-DMYLITE_WITH_SFORMAT_SQL_FUNCTION=1)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_SFORMAT_SQL_FUNCTION=0)
+ENDIF()
+
+OPTION(MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS "Compile embedded SQL with C++ exceptions" ON)
+
 SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc 
            libmysql.c ../sql-common/errmsg.c
            ../sql-common/client.c
@@ -212,12 +221,15 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
 
 
 ADD_CONVENIENCE_LIBRARY(sql_embedded ${SQL_EMBEDDED_SOURCES})
+IF(NOT MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS)
+  TARGET_COMPILE_OPTIONS(sql_embedded PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>)
+ENDIF()
 DTRACE_INSTRUMENT(sql_embedded)
 ADD_DEPENDENCIES(sql_embedded GenError GenServerSource)
 IF(TARGET pcre2)
   ADD_DEPENDENCIES(sql_embedded pcre2)
 ENDIF()
-IF(TARGET libfmt)
+IF(MYLITE_WITH_SFORMAT_SQL_FUNCTION AND TARGET libfmt)
   ADD_DEPENDENCIES(sql_embedded libfmt)
 ENDIF()
 TARGET_LINK_LIBRARIES(sql_embedded LINK_PRIVATE tpool ${CRC32_LIBRARY})

@@ -25,6 +25,7 @@ static void test_syntax_error_diagnostics(void);
 static void test_server_surfaces_are_disabled(void);
 static void test_server_utility_functions_are_rejected(void);
 static void test_gis_sql_functions_are_rejected(void);
+static void test_sformat_sql_function_is_rejected(void);
 static void test_xml_sql_functions_are_rejected(void);
 static void test_oracle_sql_mode_is_rejected(void);
 static void test_file_import_policy_is_rejected(void);
@@ -40,6 +41,7 @@ static void assert_variable_value_or_missing(mylite_db *db, const char *name, co
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_server_utility_exec_fails(mylite_db *db, const char *sql);
 static void assert_gis_sql_function_exec_fails(mylite_db *db, const char *sql);
+static void assert_sformat_sql_function_exec_fails(mylite_db *db, const char *sql);
 static void assert_xml_sql_function_exec_fails(mylite_db *db, const char *sql);
 static void assert_oracle_sql_mode_exec_fails(mylite_db *db, const char *sql);
 static void assert_file_import_exec_fails(mylite_db *db, const char *sql);
@@ -68,6 +70,7 @@ int main(void) {
     test_server_surfaces_are_disabled();
     test_server_utility_functions_are_rejected();
     test_gis_sql_functions_are_rejected();
+    test_sformat_sql_function_is_rejected();
     test_xml_sql_functions_are_rejected();
     test_oracle_sql_mode_is_rejected();
     test_file_import_policy_is_rejected();
@@ -261,6 +264,24 @@ static void test_gis_sql_functions_are_rejected(void) {
             NULL,
             NULL
         ) == MYLITE_OK
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_sformat_sql_function_is_rejected(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_sformat_sql_function_exec_fails(db, "SELECT SFORMAT('The answer is {}.', 42)");
+    assert_sformat_sql_function_exec_fails(db, "SELECT sformat('{}', 'value')");
+    assert(
+        mylite_exec(db, "SELECT 'SFORMAT(' AS sformat_text, FORMAT(1234.5, 1)", NULL, NULL, NULL) ==
+        MYLITE_OK
     );
 
     assert(mylite_close(db) == MYLITE_OK);
@@ -708,6 +729,18 @@ static void assert_gis_sql_function_exec_fails(mylite_db *db, const char *sql) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "GIS SQL function") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_sformat_sql_function_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "SFORMAT SQL function") != NULL);
     mylite_free(errmsg);
 }
 

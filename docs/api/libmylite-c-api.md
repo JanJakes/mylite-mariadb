@@ -436,16 +436,17 @@ the embedded library model:
 - XML SQL functions `EXTRACTVALUE()` and `UPDATEXML()`,
 - GIS SQL functions such as `ST_AsText()`, `ST_GeomFromText()`,
   `ST_Contains()`, `PointFromText()`, `Point()`, and `X()`,
+- MariaDB-specific `SFORMAT()` SQL function,
 - event scheduler,
 - performance schema.
 
 Representative account, event, plugin, replication, binlog, view, trigger,
 routine, package, sequence, `CALL`, transaction-control, autocommit-control,
 SQL locking, named-lock, SQL file-I/O, server utility function, Oracle SQL
-mode, XML SQL function, GIS SQL function, partition, and foreign-key DDL
-commands are rejected before MariaDB execution with stable MyLite errors. Other
-unsupported surfaces should fail with stable MyLite result codes and MariaDB
-diagnostics where possible.
+mode, XML SQL function, GIS SQL function, SFORMAT SQL function, partition, and
+foreign-key DDL commands are rejected before MariaDB execution with stable
+MyLite errors. Other unsupported surfaces should fail with stable MyLite result
+codes and MariaDB diagnostics where possible.
 
 ## Compatibility Adapter
 
