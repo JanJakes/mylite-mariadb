@@ -53,8 +53,9 @@ MariaDB base: `mariadb-11.8.6`
 
 - `CREATE TABLE ... SELECT`, which has separate row-copy and statement rollback
   behavior.
-- Broader temporary-table edge cases beyond the representative catalog
-  isolation covered by `temporary-table-catalog-isolation`.
+- Broader temporary-table variants beyond the representative catalog isolation
+  and shadowing covered by `temporary-table-catalog-isolation` and
+  `temporary-table-shadowing`.
 - Broader `CREATE OR REPLACE TABLE ... LIKE` edge cases beyond the
   representative successful replacement covered by `create-or-replace-table`.
 - Cloning views, information-schema tables, partitions, foreign keys, triggers,
@@ -81,12 +82,12 @@ only routing metadata and single-file publication.
 ## Compatibility Impact
 
 `CREATE TABLE ... LIKE` moves from planned to partial for supported routed base
-tables. Representative temporary-table catalog isolation is covered by a
-follow-up slice, and representative failed self-LIKE OR REPLACE target
-preservation is covered by `failed-create-or-replace-rollback`. It remains
-partial because unsupported source objects, broader temporary-table variants,
-broader OR REPLACE variants, foreign keys, partitions, and SQL rollback need
-separate slices.
+tables. Representative temporary-table catalog isolation and same-name
+shadowing are covered by follow-up slices, and representative failed self-LIKE
+OR REPLACE target preservation is covered by
+`failed-create-or-replace-rollback`. It remains partial because unsupported
+source objects, broader temporary-table variants, broader OR REPLACE variants,
+foreign keys, partitions, and SQL rollback need separate slices.
 
 ## DDL Metadata Routing Impact
 
@@ -156,6 +157,9 @@ Implemented in the MyLite handler and storage-engine smoke:
 - The `temporary-table-catalog-isolation` slice covers representative
   `CREATE TEMPORARY TABLE ... LIKE` behavior and verifies the SQL-visible
   temporary name does not become a durable user-schema catalog table.
+- The `temporary-table-shadowing` slice covers representative temporary LIKE
+  same-name shadowing of a durable table, including durable row/index
+  visibility after `DROP TEMPORARY TABLE` and close/reopen.
 - The `create-or-replace-table` slice covers representative successful
   `CREATE OR REPLACE TABLE ... LIKE` replacement over routed MyLite tables.
 - The `failed-create-or-replace-rollback` slice covers representative failed
@@ -164,9 +168,10 @@ Implemented in the MyLite handler and storage-engine smoke:
 ## Risks And Open Questions
 
 - `CREATE TABLE ... LIKE` has separate temporary-table and `OR REPLACE`
-  branches in MariaDB. Representative temporary catalog isolation is covered,
-  and representative successful OR REPLACE is covered, but broader lock-table,
-  temporary lifecycle, and broader failed replacement matrices remain.
+  branches in MariaDB. Representative temporary catalog isolation and shadowing
+  are covered, and representative successful OR REPLACE is covered, but broader
+  lock-table, temporary lifecycle, and broader failed replacement matrices
+  remain.
 - Source-table selection in the MyLite handler must match MariaDB's `LEX`
   layout for `CREATE TABLE ... LIKE`; using the target table would silently
   store the wrong requested-engine metadata.

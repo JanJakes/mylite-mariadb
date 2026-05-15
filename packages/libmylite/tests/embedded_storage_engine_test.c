@@ -4204,7 +4204,8 @@ static void test_temporary_table_catalog_isolation(void) {
         "slug VARCHAR(32) NOT NULL, "
         "body LONGTEXT NULL, "
         "PRIMARY KEY (id), "
-        "UNIQUE KEY slug_key (slug)"
+        "UNIQUE KEY slug_key (slug), "
+        "KEY body_prefix (body(8))"
         ") ENGINE=InnoDB"
     );
     assert_exec_succeeds(
@@ -4251,6 +4252,67 @@ static void test_temporary_table_catalog_isolation(void) {
     assert_catalog_table_count(filename, "temp_isolation", 1U);
     assert_catalog_table_count(filename, "tmp", 0U);
 
+    assert_exec_succeeds(db, "CREATE TABLE shadow_like_posts LIKE source_posts");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO shadow_like_posts (slug, body) VALUES "
+        "('durable-shadow-like', 'durable shadow like body')"
+    );
+    assert_catalog_table_count(filename, "temp_isolation", 2U);
+    assert_catalog_table_metadata(
+        filename,
+        "temp_isolation",
+        "shadow_like_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+
+    assert_exec_succeeds(db, "CREATE TEMPORARY TABLE shadow_like_posts LIKE source_posts");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO shadow_like_posts (slug, body) VALUES "
+        "('temp-shadow-like', 'temporary shadow like body')"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM shadow_like_posts", "1");
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM shadow_like_posts WHERE id = 1",
+        "temp-shadow-like"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM shadow_like_posts FORCE INDEX (body_prefix) "
+        "WHERE body = 'temporary shadow like body'",
+        "1"
+    );
+    assert_catalog_table_count(filename, "temp_isolation", 2U);
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TEMPORARY TABLE source_posts AS "
+        "SELECT id, slug, body FROM source_posts WHERE id = 2"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM source_posts", "1");
+    assert_query_single_value(db, "SELECT slug FROM source_posts WHERE id = 2", "source-beta");
+    assert_catalog_table_count(filename, "temp_isolation", 2U);
+
+    assert_exec_succeeds(db, "DROP TEMPORARY TABLE shadow_like_posts, source_posts");
+    assert_catalog_table_count(filename, "temp_isolation", 2U);
+    assert_catalog_table_count(filename, "tmp", 0U);
+    assert_query_single_value(db, "SELECT COUNT(*) FROM source_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM shadow_like_posts FORCE INDEX (slug_key) "
+        "WHERE slug = 'durable-shadow-like'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM shadow_like_posts FORCE INDEX (body_prefix) "
+        "WHERE body = 'durable shadow like body'",
+        "1"
+    );
+
     assert_exec_succeeds(db, "CREATE TEMPORARY TABLE temp_close_posts LIKE source_posts");
     assert_exec_succeeds(
         db,
@@ -4262,7 +4324,7 @@ static void test_temporary_table_catalog_isolation(void) {
         mylite_storage_table_exists(filename, "temp_isolation", "temp_close_posts") ==
         MYLITE_STORAGE_NOTFOUND
     );
-    assert_catalog_table_count(filename, "temp_isolation", 1U);
+    assert_catalog_table_count(filename, "temp_isolation", 2U);
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_catalog_table_count(filename, "tmp", 0U);
@@ -4271,11 +4333,24 @@ static void test_temporary_table_catalog_isolation(void) {
     db = open_database_with_filename(root, filename);
     assert_no_runtime_schema_directory(root, "temp_isolation");
     assert_exec_succeeds(db, "USE temp_isolation");
-    assert_catalog_table_count(filename, "temp_isolation", 1U);
+    assert_catalog_table_count(filename, "temp_isolation", 2U);
     assert_catalog_table_metadata(filename, "temp_isolation", "source_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(
+        filename,
+        "temp_isolation",
+        "shadow_like_posts",
+        "InnoDB",
+        "MYLITE"
+    );
     assert_query_single_value(db, "SELECT COUNT(*) FROM source_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM shadow_like_posts WHERE id = 1",
+        "durable-shadow-like"
+    );
     assert_exec_fails(db, "SELECT COUNT(*) FROM temp_like_posts");
     assert_exec_fails(db, "SELECT COUNT(*) FROM temp_select_posts");
+    assert_exec_fails(db, "SELECT COUNT(*) FROM temp_close_posts");
     assert_catalog_table_count(filename, "tmp", 0U);
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
@@ -6520,6 +6595,15 @@ static void assert_catalog_table_count(
         mylite_storage_list_tables(filename, schema_name, catalog_table_callback, &ctx) ==
         MYLITE_STORAGE_OK
     );
+    if (ctx.count != count) {
+        fprintf(
+            stderr,
+            "Catalog table count mismatch for schema %s: expected %u, got %u\n",
+            schema_name,
+            count,
+            ctx.count
+        );
+    }
     assert(ctx.count == count);
 }
 

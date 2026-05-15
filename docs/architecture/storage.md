@@ -227,8 +227,9 @@ Representative user temporary `CREATE TABLE ... LIKE` and
 `CREATE TABLE ... SELECT` paths use MariaDB's temporary-table lifecycle while
 keeping SQL-visible temporary names out of the durable user schema catalog.
 Storage-smoke coverage verifies the temporary tables are usable during the
-session, are cleaned up after `DROP TEMPORARY TABLE`, and are gone after
-close/reopen.
+session, same-name temporary tables shadow durable base tables until
+`DROP TEMPORARY TABLE`, durable tables become visible again after the temporary
+drop, and temporary tables are gone after close/reopen.
 Successful representative `CREATE OR REPLACE TABLE ... LIKE` and
 `CREATE OR REPLACE TABLE ... SELECT` statements use MariaDB's drop-then-create
 flow: MyLite removes the old catalog record, publishes the replacement

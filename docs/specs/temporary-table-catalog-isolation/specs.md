@@ -44,6 +44,8 @@ MariaDB base: `mariadb-11.8.6`
   source table.
 - `CREATE TEMPORARY TABLE temp AS SELECT ...` over a supported MyLite-routed
   source table.
+- Same-session temporary table shadowing of a durable MyLite-routed table with
+  the same SQL-visible name for representative LIKE and CTAS paths.
 - Temporary row insert/read behavior sufficient to prove the temp table is
   usable during the session.
 - MyLite catalog isolation for SQL-visible temporary table names in the user
@@ -74,7 +76,9 @@ temporary-table executor:
    the temporary names.
 4. Rely on explicit `DROP TEMPORARY TABLE` and MariaDB close cleanup to remove
    any live temporary storage-identity records through `ha_mylite::delete_table`.
-5. Keep close/reopen discovery limited to the original base table.
+5. Let MariaDB temporary-table name resolution shadow same-named durable base
+   tables while the temporary table exists.
+6. Keep close/reopen discovery limited to durable base tables.
 
 This is intentionally a lifecycle coverage slice. A later temp-storage slice
 can replace temporary handler records with a dedicated non-durable table store
@@ -85,7 +89,8 @@ fork maintenance cost.
 
 `CREATE TEMPORARY TABLE ... LIKE` and supported temporary CTAS move from
 planned to partial. The support claim is limited to representative MyLite-routed
-source tables and basic row visibility during the creating session.
+source tables, basic row visibility during the creating session, and
+representative temporary-table shadowing.
 
 ## DDL Metadata Routing Impact
 
@@ -128,6 +133,9 @@ test code unless handler fixes are needed.
   - inserts and reads rows from the temporary LIKE table;
   - creates `CREATE TEMPORARY TABLE temp_select AS SELECT ... FROM source`;
   - verifies CTAS rows are visible during the session;
+  - creates same-name temporary LIKE and CTAS tables that shadow durable tables;
+  - verifies SQL resolves to temporary rows while the temporary tables exist and
+    durable rows after `DROP TEMPORARY TABLE`;
   - verifies neither temporary SQL-visible name exists in the durable user
     schema catalog;
   - drops both temporary tables and verifies no temporary storage-identity
@@ -144,7 +152,9 @@ test code unless handler fixes are needed.
 - Supported temporary `LIKE` and CTAS statements succeed in file-backed MyLite
   storage-smoke coverage.
 - Temporary rows are readable during the creating session.
-- The durable user schema catalog contains only the base source table.
+- The durable user schema catalog contains only durable base tables.
+- Same-name temporary LIKE and CTAS tables shadow durable base tables only until
+  `DROP TEMPORARY TABLE`.
 - Temporary tables are not visible after close/reopen.
 - Compatibility, roadmap, and related specs stop listing the covered temporary
   variants as completely planned.
@@ -157,6 +167,9 @@ Implemented in storage-engine smoke coverage:
   `ENGINE=InnoDB` source shape and supports temporary insert/read operations.
 - `CREATE TEMPORARY TABLE temp_select AS SELECT ...` copies representative
   source rows into a session-local temporary target.
+- Same-name temporary LIKE and CTAS tables shadow durable tables during the
+  session, then durable rows and indexes become visible again after
+  `DROP TEMPORARY TABLE`.
 - The SQL-visible temporary names never appear as durable user-schema catalog
   records, explicit `DROP TEMPORARY TABLE` and close-time cleanup remove live
   temporary storage records from the runtime temp namespace, and close/reopen

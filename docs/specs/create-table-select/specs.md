@@ -61,8 +61,9 @@ MariaDB base: `mariadb-11.8.6`
 - Broader duplicate-mode CTAS matrices and lock-table edge cases.
 - Broader `CREATE OR REPLACE ... SELECT` edge cases beyond the representative
   successful replacement covered by `create-or-replace-table`.
-- Broader temporary CTAS edge cases beyond the representative catalog
-  isolation covered by `temporary-table-catalog-isolation`.
+- Broader temporary CTAS variants beyond the representative catalog isolation
+  and shadowing covered by `temporary-table-catalog-isolation` and
+  `temporary-table-shadowing`.
 - Generated-column definitions on CTAS targets, CTAS from views, information
   schema, foreign keys, partitions, unsupported indexes, or server-only
   sources.
@@ -94,11 +95,12 @@ CTAS target preservation; broader transaction/DDL cleanup remains separate.
 `CREATE TABLE ... SELECT` moves from planned to partial for supported routed
 table shapes. Explicit CHECK-constrained targets, representative temporary CTAS
 catalog isolation, representative successful OR REPLACE CTAS, representative
-failed replacement CTAS rollback, and representative duplicate-mode CTAS are
-covered by follow-up slices. It remains partial because physical rollback of
-pages written before failed CTAS abort, broader duplicate-mode matrices, broader
-temporary-table CTAS, foreign keys, partitions, unsupported source objects,
-broader failed replacement variants, and SQL rollback remain planned.
+failed replacement CTAS rollback, representative duplicate-mode CTAS, and
+representative temporary CTAS shadowing are covered by follow-up slices. It
+remains partial because physical rollback of pages written before failed CTAS
+abort, broader duplicate-mode matrices, broader temporary-table CTAS, foreign
+keys, partitions, unsupported source objects, broader failed replacement
+variants, and SQL rollback remain planned.
 
 ## DDL Metadata Routing Impact
 
@@ -183,6 +185,9 @@ entry points:
 - The `temporary-table-catalog-isolation` slice covers representative
   `CREATE TEMPORARY TABLE ... AS SELECT` behavior and verifies the SQL-visible
   temporary name does not become a durable user-schema catalog table.
+- The `temporary-table-shadowing` slice covers representative temporary CTAS
+  same-name shadowing over a durable source table, including durable row
+  visibility after `DROP TEMPORARY TABLE` and close/reopen.
 - The `create-or-replace-table` slice covers representative successful
   `CREATE OR REPLACE TABLE ... SELECT` replacement over routed MyLite tables.
 - The `failed-create-or-replace-rollback` slice covers representative failed
@@ -207,3 +212,6 @@ entry points:
 - Duplicate-mode CTAS row selection is order-sensitive in MariaDB; MyLite's
   representative coverage uses ordered input and leaves broader unordered and
   multi-unique-key conflict matrices planned.
+- Temporary CTAS same-name source handling is covered for one durable source
+  shape; broader lock-table, replacement, and unsupported-source matrices
+  remain planned.
