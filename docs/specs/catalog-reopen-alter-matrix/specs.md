@@ -76,7 +76,8 @@ Covered reopened operations:
 - In-place, instant, online, or metadata-only ALTER support.
 - Failed ALTER rollback beyond the current statement-checkpoint coverage.
 - Foreign-key, partition, FULLTEXT, SPATIAL, expression/hidden generated-index,
-  generated-primary-key, or unsupported BLOB/TEXT index ALTER support.
+  or unsupported BLOB/TEXT index ALTER support. Generated primary-key ALTER
+  follows MariaDB's SQL-layer rejection policy.
 - A separate standalone-index implementation outside MariaDB's ALTER path.
 
 ## Compatibility Impact

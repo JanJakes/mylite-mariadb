@@ -63,8 +63,9 @@ Follow-up generated-column slices cover copy-rebuild add/modify/drop for
 generated columns and reuse MariaDB key tuple generation for ordinary secondary
 and unique indexes on scalar virtual or stored generated columns, including
 supported ALTER-backed and standalone generated-index DDL. Expression/hidden
-generated indexes and generated primary keys remain unsupported so the
-compatibility matrix does not overstate generated/expression index support.
+generated indexes remain unsupported, and generated primary-key DDL inherits
+MariaDB's SQL-layer rejection, so the compatibility matrix does not overstate
+generated/expression index support.
 
 ## Design
 
@@ -144,6 +145,6 @@ unchanged for practical purposes.
 - Broader expression classes, SQL-mode-sensitive expressions, generated
   target CTAS definitions, dump/import, prepared diagnostics, and rollback
   remain uncovered.
-- Generated primary keys, expression/hidden generated indexes, generated
-  full/oversized BLOB/TEXT key payloads, and broader expression matrices need
-  separate specs before support is claimed.
+- Expression/hidden generated indexes, generated full/oversized BLOB/TEXT key
+  payloads, and broader expression matrices need separate specs before support
+  is claimed.

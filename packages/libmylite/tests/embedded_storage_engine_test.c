@@ -141,6 +141,7 @@ static void test_transaction_and_foreign_key_policies(void);
 static void test_create_table_persists_catalog_metadata(void);
 static void test_alter_table_rebuilds_keyless_rows(void);
 static void test_generated_column_alter_ddl(void);
+static void test_generated_primary_key_policy(void);
 static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
 static void test_blob_text_prefix_indexes(void);
@@ -261,6 +262,7 @@ int main(void) {
     test_create_table_persists_catalog_metadata();
     test_alter_table_rebuilds_keyless_rows();
     test_generated_column_alter_ddl();
+    test_generated_primary_key_policy();
     test_indexed_rows();
     test_standalone_index_ddl();
     test_blob_text_prefix_indexes();
@@ -1930,6 +1932,108 @@ static void test_generated_column_alter_ddl(void) {
     assert(modified_title_len.rows == 1);
     assert_catalog_table_count(filename, "app", 1U);
     assert_catalog_table_metadata(filename, "app", "generated_alter_posts", "InnoDB", "MYLITE");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_generated_primary_key_policy(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    single_value_context title = {.expected_value = "draft"};
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_fails_with_message(
+        db,
+        "CREATE TABLE generated_primary_create_posts ("
+        "title VARCHAR(64) NOT NULL, "
+        "slug VARCHAR(80) AS (CONCAT(title, '-slug')) STORED, "
+        "PRIMARY KEY (slug)"
+        ") ENGINE=InnoDB",
+        "Primary key cannot be defined upon a generated column"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "generated_primary_create_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_catalog_table_count(filename, "app", 0U);
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE generated_primary_alter_posts ("
+        "id INT NOT NULL, "
+        "title VARCHAR(64) NOT NULL, "
+        "slug VARCHAR(80) AS (CONCAT(title, '-slug')) STORED"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO generated_primary_alter_posts (id, title) VALUES (1, 'draft')"
+    );
+    assert_catalog_table_count(filename, "app", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "app",
+        "generated_primary_alter_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "ALTER TABLE generated_primary_alter_posts ADD PRIMARY KEY (slug), ALGORITHM=COPY",
+        "Primary key cannot be defined upon a generated column"
+    );
+    assert_catalog_table_count(filename, "app", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "app",
+        "generated_primary_alter_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SELECT title FROM generated_primary_alter_posts WHERE slug = 'draft-slug'",
+            single_value_callback,
+            &title,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(title.rows == 1);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    title = (single_value_context){.expected_value = "draft"};
+    db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "app");
+    assert_exec_succeeds(db, "USE app");
+    assert_catalog_table_count(filename, "app", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "app",
+        "generated_primary_alter_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SELECT title FROM generated_primary_alter_posts WHERE slug = 'draft-slug'",
+            single_value_callback,
+            &title,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(title.rows == 1);
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 

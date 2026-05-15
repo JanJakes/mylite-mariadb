@@ -44,8 +44,9 @@ prefix key image fits the current MyLite index-entry page.
 - Full-length unbounded generated BLOB/TEXT indexes.
 - Oversized generated key images that exceed the current MyLite index-entry
   page limit.
-- Generated primary keys, expression/hidden generated indexes, FULLTEXT,
-  SPATIAL, hash, vector, or foreign-key indexes.
+- Expression/hidden generated indexes, FULLTEXT, SPATIAL, hash, vector, or
+  foreign-key indexes. Generated primary keys follow MariaDB's SQL-layer
+  rejection policy.
 - Online or default-algorithm generated BLOB/TEXT prefix index DDL.
 - SQL rollback, savepoints, crash recovery beyond current statement
   checkpointing, or broad generated expression matrices.
@@ -70,8 +71,8 @@ Generated-column support expands to generated BLOB/TEXT values and bounded
 generated BLOB/TEXT prefix indexes declared in initial DDL. A follow-up slice
 extends the same key class to standalone copy-rebuild index DDL. The area
 remains partial because full or oversized generated BLOB/TEXT indexes,
-generated primary keys, expression/hidden indexes, SQL rollback, and broad
-expression matrices remain planned.
+expression/hidden indexes, SQL rollback, and broad expression matrices remain
+planned; generated primary keys follow MariaDB's SQL-layer rejection policy.
 
 ## DDL Metadata Routing Impact
 

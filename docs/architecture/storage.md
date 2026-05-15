@@ -236,7 +236,8 @@ including initial definitions and supported copy-rebuild add, drop, rename, and
 standalone index DDL paths. Bounded generated BLOB/TEXT prefix indexes declared
 in initial table definitions or added through standalone copy-rebuild index DDL
 use the same generated-value and BLOB/TEXT prefix key-image paths. Generated
-primary keys, expression/hidden generated indexes, generated target CTAS
+primary-key DDL inherits MariaDB's SQL-layer rejection before catalog
+publication. Expression/hidden generated indexes, generated target CTAS
 definitions, full or oversized BLOB/TEXT generated key payloads, and broader
 expression matrices remain planned.
 The same create-time key-shape gate rejects FULLTEXT and SPATIAL indexes before
@@ -335,9 +336,10 @@ The storage engine must support:
 - truncate,
 - table rebuilds for copy `ALTER`.
 
-FULLTEXT, SPATIAL, expression/hidden generated indexes, generated primary keys,
-foreign-key enforcement, and partitioned tables need explicit storage designs
-before support is claimed.
+FULLTEXT, SPATIAL, expression/hidden generated indexes, foreign-key
+enforcement, and partitioned tables need explicit storage designs before
+support is claimed. Generated primary keys follow MariaDB's SQL-layer rejection
+policy.
 Current `libmylite` entry points reject foreign-key and partition DDL before
 MariaDB execution; unsupported FULLTEXT and SPATIAL indexes reject through
 handler capability checks before catalog publication.

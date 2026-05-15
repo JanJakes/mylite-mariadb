@@ -37,8 +37,8 @@ generated-value, BLOB/TEXT-prefix key image, and catalog publication paths.
 
 - Online, instant, in-place, or lock-free index DDL.
 - Full or oversized generated BLOB/TEXT key payloads.
-- Generated primary keys, expression/hidden indexes, FULLTEXT, SPATIAL, hash,
-  vector, or foreign-key indexes.
+- Expression/hidden indexes, FULLTEXT, SPATIAL, hash, vector, or foreign-key
+  indexes. Generated primary keys follow MariaDB's SQL-layer rejection policy.
 - SQL rollback, savepoints, crash recovery beyond current statement
   checkpointing, or broad generated expression matrices.
 
@@ -59,9 +59,9 @@ The standalone DDL path should compose existing pieces:
 ## Compatibility Impact
 
 Generated BLOB/TEXT prefix support expands from initial DDL to standalone
-copy-rebuild index DDL. Online DDL, full/oversized key payloads, generated
-primary keys, expression/hidden generated indexes, and transaction-aware DDL
-rollback remain planned.
+copy-rebuild index DDL. Online DDL, full/oversized key payloads,
+expression/hidden generated indexes, and transaction-aware DDL rollback remain
+planned; generated primary keys follow MariaDB's SQL-layer rejection policy.
 
 ## DDL Metadata Routing Impact
 

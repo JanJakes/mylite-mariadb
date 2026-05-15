@@ -48,10 +48,11 @@ unindexed generated columns to ordinary secondary and unique indexes on scalar
 virtual or stored generated columns. The follow-up generated-column-index DDL
 slice extends the same key support to copy-rebuild add, drop, rename, and
 standalone index DDL. MyLite still does not claim expression indexes, generated
-primary keys, full or oversized generated BLOB/TEXT key payloads, foreign-key
-interactions, or broad SQL-mode-sensitive expression coverage. A follow-up
-generated BLOB/TEXT prefix slice covers bounded generated prefix key payloads
-declared in initial DDL, and a later DDL slice covers standalone copy-rebuild
+primary-key support beyond MariaDB's inherited rejection, full or oversized
+generated BLOB/TEXT key payloads, foreign-key interactions, or broad
+SQL-mode-sensitive expression coverage. A follow-up generated BLOB/TEXT prefix
+slice covers bounded generated prefix key payloads declared in initial DDL, and
+a later DDL slice covers standalone copy-rebuild
 generated prefix index creation/drop.
 
 ## Design
@@ -76,7 +77,7 @@ indexes:
 
 ## Non-Goals
 
-- Generated primary keys.
+- Generated primary keys, which MariaDB rejects before handler publication.
 - Expression indexes backed by hidden generated keys.
 - FULLTEXT, SPATIAL, hash, vector, or long-hash indexes.
 - Full or oversized generated BLOB/TEXT key payloads.
@@ -130,7 +131,7 @@ small handler capability refinement plus tests and docs.
   old row becomes non-live.
 - Existing unsupported index classes still reject before catalog publication.
 - Compatibility docs and roadmap distinguish generated-column index support from
-  broader expression-index and generated-primary-key work.
+  broader expression-index work and generated-primary-key rejection.
 
 ## Risks And Open Questions
 

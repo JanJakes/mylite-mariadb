@@ -8,14 +8,14 @@ publication, and track that behavior as compatibility evidence.
 This slice covers initial `CREATE TABLE` rejection for FULLTEXT and SPATIAL
 index definitions on routed `ENGINE=InnoDB` tables. Generated-column secondary
 and unique indexes are covered by the later generated-column-index slice, while
-expression/hidden generated indexes and generated primary keys remain
-unsupported.
+expression/hidden generated indexes remain unsupported and generated primary
+keys inherit MariaDB's SQL-layer rejection.
 
 ## Non-Goals
 
 - Implement FULLTEXT or SPATIAL access paths.
-- Implement expression/hidden generated, generated-primary-key, hash, vector,
-  or oversized multi-page index keys.
+- Implement expression/hidden generated, hash, vector, or oversized multi-page
+  index keys. Generated primary keys follow MariaDB's SQL-layer rejection.
 - Add broad optimizer or MTR comparison coverage.
 - Change supported primary, unique, secondary, or bounded BLOB/TEXT prefix
   index behavior.
@@ -99,6 +99,7 @@ No new dependencies, no format change, and no meaningful binary-size impact.
 
 - Standalone `CREATE INDEX` coverage for unsupported classes remains narrower
   than initial `CREATE TABLE` coverage.
-- FULLTEXT, SPATIAL, expression/hidden generated, generated-primary-key, hash,
-  vector, and oversized index support each need explicit physical design,
-  recovery behavior, and optimizer coverage before support can be claimed.
+- FULLTEXT, SPATIAL, expression/hidden generated, hash, vector, and oversized
+  index support each need explicit physical design, recovery behavior, and
+  optimizer coverage before support can be claimed. Generated primary keys
+  remain governed by MariaDB's SQL-layer rejection.

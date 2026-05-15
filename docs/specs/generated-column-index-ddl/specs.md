@@ -36,8 +36,9 @@ initial `CREATE TABLE` declarations to supported copy-rebuild index DDL:
 - `ALTER TABLE ... RENAME INDEX ..., ALGORITHM=COPY`,
 - standalone `DROP INDEX`.
 
-Online, instant, in-place, hidden expression indexes, generated primary keys,
-foreign keys, and transactional DDL rollback remain planned.
+Online, instant, in-place, hidden expression indexes, foreign keys, and
+transactional DDL rollback remain planned. Generated primary-key DDL follows
+MariaDB's SQL-layer rejection policy.
 
 ## Design
 
@@ -55,7 +56,7 @@ No new storage format is needed. MyLite relies on MariaDB's copy-rebuild path:
 ## Non-Goals
 
 - Online, instant, in-place, or lock-free index DDL.
-- Generated primary keys.
+- Generated primary keys, which MariaDB rejects before handler publication.
 - Expression indexes backed by hidden generated columns.
 - FULLTEXT, SPATIAL, hash, vector, long-hash, or oversized/full BLOB/TEXT
   indexes.
@@ -95,7 +96,8 @@ InnoDB, MyISAM, Aria, binlog, relay-log, or plugin-owned sidecars.
 - Dropped generated indexes disappear from `SHOW INDEX` and `FORCE INDEX` while
   rows remain readable.
 - Compatibility docs and roadmap distinguish generated-index DDL support from
-  online DDL, generated primary keys, and expression/hidden generated indexes.
+  online DDL, generated-primary-key rejection, and expression/hidden generated
+  indexes.
 
 ## Risks And Open Questions
 
