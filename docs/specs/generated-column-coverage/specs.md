@@ -7,14 +7,14 @@ can compute generated values through its existing virtual-column machinery and
 MyLite can persist the MariaDB table-definition image plus stored row buffers in
 the `.mylite` file.
 
-This moves generated columns from planned to partial support for unindexed
-`VIRTUAL` and `STORED` columns under basic `CREATE TABLE`, insert, update, and
-close/reopen behavior.
+This moved generated columns from planned to partial support for `VIRTUAL` and
+`STORED` columns under basic `CREATE TABLE`, insert, update, and close/reopen
+behavior. A later generated-column-index slice expands the covered subset to
+ordinary secondary and unique indexes on scalar generated columns.
 
 ## Non-Goals
 
 - Implement a MyLite-native generated-column expression evaluator.
-- Support indexes on generated columns.
 - Support foreign keys, FULLTEXT, SPATIAL, expression indexes, or generated
   primary keys.
 - Add broad expression, `ALTER`, CTAS, dump-import, prepared-statement, or MTR
@@ -50,29 +50,30 @@ close/reopen behavior.
 ## Compatibility Impact
 
 Generated columns are SQL-layer expression semantics plus storage-engine
-capability flags. MyLite can support basic unindexed generated columns by
-advertising `HA_CAN_VIRTUAL_COLUMNS`, preserving MariaDB table-definition
-metadata, storing generated persistent values as part of the row buffer, and
-letting MariaDB compute non-stored virtual values after reads.
+capability flags. MyLite supports basic generated columns by advertising
+`HA_CAN_VIRTUAL_COLUMNS`, preserving MariaDB table-definition metadata, storing
+generated persistent values as part of the row buffer, and letting MariaDB
+compute non-stored virtual values after reads.
 
-Generated-column indexes are not covered by this slice. MyLite rejects key
-parts backed by generated fields before catalog publication so the compatibility
-matrix does not overstate generated/expression index support.
+The follow-up generated-column-index slice reuses MariaDB key tuple generation
+for ordinary secondary and unique indexes on scalar virtual or stored generated
+columns. Expression/hidden generated indexes and generated primary keys remain
+unsupported so the compatibility matrix does not overstate generated/expression
+index support.
 
 ## Design
 
 - Add `HA_CAN_VIRTUAL_COLUMNS` to the MyLite handler table flags.
 - Apply the existing key-shape support gate to initial `CREATE TABLE` as well
   as copy `ALTER` paths.
-- Reject any key part whose field has `vcol_info`, keeping generated-column
-  indexes unsupported until index semantics and recovery are specified.
 - Add storage-engine smoke coverage for a routed `ENGINE=InnoDB` table with:
   - one ordinary primary key,
   - one ordinary base column,
-  - one unindexed virtual generated column,
-  - one unindexed stored generated column.
+  - virtual generated columns,
+  - one stored generated column,
+  - ordinary secondary and unique generated-column indexes.
 - Verify insert, update, full-scan read, close/reopen persistence, and
-  generated-index DDL rejection without catalog publication.
+  generated-index reads and duplicate checks.
 
 ## File Lifecycle
 
@@ -100,8 +101,8 @@ unchanged for practical purposes.
   columns.
 - Storage-engine smoke verifies generated values after insert and update.
 - Storage-engine smoke verifies generated values after close/reopen.
-- Storage-engine smoke rejects an index on a generated column and verifies no
-  catalog record is published.
+- Storage-engine smoke verifies ordinary generated-column indexes for
+  forced-index reads, duplicate checks, update maintenance, and close/reopen.
 - Add a compatibility harness group for generated columns.
 - Run formatting, tidy, configured CTest presets, the named harness report, and
   `git diff --check`.
@@ -112,7 +113,8 @@ unchanged for practical purposes.
   base row buffers before and after close/reopen.
 - Basic unindexed stored generated columns persist in MyLite row payloads before
   and after close/reopen.
-- Generated-column indexes fail before MyLite catalog publication.
+- Ordinary generated-column secondary and unique indexes work before and after
+  close/reopen.
 - Compatibility docs and roadmap mark generated columns as partial rather than
   planned.
 - The compatibility harness can run the generated-column evidence by name.
@@ -123,6 +125,6 @@ unchanged for practical purposes.
   columns with BLOB/TEXT payloads, `ALTER TABLE ADD/DROP/MODIFY` generated
   columns, CTAS, dump/import, prepared diagnostics, and rollback remain
   uncovered.
-- The generated-index rejection path is intentionally conservative. Supporting
-  generated-column indexes later needs its own spec covering key image
-  generation, update/delete maintenance, recovery, and optimizer behavior.
+- Generated primary keys, expression/hidden generated indexes, generated
+  BLOB/TEXT key payloads, and broader expression matrices need separate specs
+  before support is claimed.

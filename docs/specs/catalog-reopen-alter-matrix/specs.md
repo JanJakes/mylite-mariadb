@@ -75,8 +75,8 @@ Covered reopened operations:
 - Exhaustive coverage for every MariaDB ALTER clause.
 - In-place, instant, online, or metadata-only ALTER support.
 - Failed ALTER rollback beyond the current statement-checkpoint coverage.
-- Foreign-key, partition, FULLTEXT, SPATIAL, generated-index, expression-index,
-  or unsupported BLOB/TEXT index ALTER support.
+- Foreign-key, partition, FULLTEXT, SPATIAL, expression/hidden generated-index,
+  generated-primary-key, or unsupported BLOB/TEXT index ALTER support.
 - A separate standalone-index implementation outside MariaDB's ALTER path.
 
 ## Compatibility Impact

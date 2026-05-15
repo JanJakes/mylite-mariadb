@@ -37,8 +37,8 @@ first-party preset. Storage-engine groups use the opt-in
 | `partition` | `storage-smoke-dev` | `compat-partition` | Partition DDL rejection until partition metadata and routing exist |
 | `foreign-key` | `storage-smoke-dev` | `compat-foreign-key` | Foreign-key DDL rejection until catalog metadata and enforcement exist |
 | `check-constraint` | `storage-smoke-dev` | `compat-check-constraint` | CHECK constraint enforcement on routed tables |
-| `generated-column` | `storage-smoke-dev` | `compat-generated-column` | Generated column read/write and generated-index rejection |
-| `unsupported-index` | `storage-smoke-dev` | `compat-unsupported-index` | Unsupported generated-column, FULLTEXT, and SPATIAL index rejection |
+| `generated-column` | `storage-smoke-dev` | `compat-generated-column` | Generated column read/write and generated-column index coverage |
+| `unsupported-index` | `storage-smoke-dev` | `compat-unsupported-index` | Unsupported FULLTEXT and SPATIAL index rejection |
 | `locking` | `storage-smoke-dev` | `compat-locking` | Primary-file lock conflicts, busy timeouts, and SQL locking policy |
 | `embedded-lifecycle` | `embedded-dev` | `compat-embedded-lifecycle` | Embedded runtime open/close, direct execution, and cleanup |
 | `direct-sql` | `embedded-dev` | `compat-direct-sql` | `mylite_exec()` SQL execution and statement effects |

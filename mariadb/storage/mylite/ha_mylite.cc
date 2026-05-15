@@ -1904,8 +1904,6 @@ static bool mylite_key_is_supported(const KEY *key)
     const KEY_PART_INFO *key_part= key->key_part + i;
     if (!key_part->field)
       return false;
-    if (key_part->field->vcol_info)
-      return false;
     if ((key_part->key_part_flag & HA_BLOB_PART) && key_part->length == 0)
       return false;
   }

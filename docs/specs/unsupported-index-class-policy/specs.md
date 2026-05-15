@@ -5,14 +5,17 @@
 Make unsupported MyLite index classes fail explicitly before catalog
 publication, and track that behavior as compatibility evidence.
 
-This slice covers initial `CREATE TABLE` rejection for generated-column,
-FULLTEXT, and SPATIAL index definitions on routed `ENGINE=InnoDB` tables.
+This slice covers initial `CREATE TABLE` rejection for FULLTEXT and SPATIAL
+index definitions on routed `ENGINE=InnoDB` tables. Generated-column secondary
+and unique indexes are covered by the later generated-column-index slice, while
+expression/hidden generated indexes and generated primary keys remain
+unsupported.
 
 ## Non-Goals
 
 - Implement FULLTEXT or SPATIAL access paths.
-- Implement generated-column indexes.
-- Implement expression, hash, vector, or oversized multi-page index keys.
+- Implement expression/hidden generated, generated-primary-key, hash, vector,
+  or oversized multi-page index keys.
 - Add broad optimizer or MTR comparison coverage.
 - Change supported primary, unique, secondary, or bounded BLOB/TEXT prefix
   index behavior.
@@ -27,7 +30,7 @@ FULLTEXT, and SPATIAL index definitions on routed `ENGINE=InnoDB` tables.
   calling the storage engine `create()` method.
 - `mariadb/storage/mylite/ha_mylite.cc`: `ha_mylite::create()` now applies the
   same key-shape gate used by copy `ALTER`, and `mylite_key_is_supported()`
-  rejects FULLTEXT, SPATIAL, generated-field, hash, unsupported algorithm,
+  rejects FULLTEXT, SPATIAL, hidden generated, hash, unsupported algorithm,
   oversized, and unbounded BLOB/TEXT key shapes.
 - MariaDB documentation describes FULLTEXT and SPATIAL indexes as index classes
   with storage-engine-specific implementation requirements:
@@ -53,9 +56,9 @@ Use the existing MyLite key-shape gate as the storage-engine boundary:
   catalog is updated,
 - failed creates leave no table catalog record and no durable sidecars.
 
-Generated-column indexes are covered by the generated-column slice; this slice
-adds explicit FULLTEXT and SPATIAL create-time coverage and groups the policy in
-the compatibility harness.
+Generated-column indexes were expanded by the generated-column-index slice;
+this slice keeps explicit FULLTEXT and SPATIAL create-time coverage and groups
+the unsupported-index policy in the compatibility harness.
 
 ## File Lifecycle
 
@@ -74,7 +77,6 @@ No new dependencies, no format change, and no meaningful binary-size impact.
 
 ## Test Plan
 
-- Storage-engine smoke rejects `CREATE TABLE` with a generated-column index.
 - Storage-engine smoke rejects `CREATE TABLE` with a FULLTEXT index.
 - Storage-engine smoke rejects `CREATE TABLE` with a SPATIAL index.
 - Each failed DDL verifies no MyLite catalog record exists and catalog table
@@ -85,17 +87,18 @@ No new dependencies, no format change, and no meaningful binary-size impact.
 
 ## Acceptance Criteria
 
-- Generated-column, FULLTEXT, and SPATIAL indexes reject before catalog
-  publication on routed tables.
+- FULLTEXT and SPATIAL indexes reject before catalog publication on routed
+  tables.
 - Supported ordinary indexes remain covered by existing storage smoke tests.
 - Compatibility docs and roadmap describe unsupported index-class rejection as
-  partial compatibility policy, not implemented index support.
+  partial compatibility policy, while generated-column index support is tracked
+  separately.
 - The compatibility harness can run the unsupported-index evidence by name.
 
 ## Risks And Open Questions
 
 - Standalone `CREATE INDEX` coverage for unsupported classes remains narrower
   than initial `CREATE TABLE` coverage.
-- FULLTEXT, SPATIAL, generated/expression, hash, vector, and oversized index
-  support each need explicit physical design, recovery behavior, and optimizer
-  coverage before support can be claimed.
+- FULLTEXT, SPATIAL, expression/hidden generated, generated-primary-key, hash,
+  vector, and oversized index support each need explicit physical design,
+  recovery behavior, and optimizer coverage before support can be claimed.

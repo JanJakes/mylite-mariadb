@@ -92,10 +92,11 @@ evaluated by MariaDB before MyLite handler writes. Supported copy
 `ALTER TABLE` paths can add and drop named table-level CHECK constraints
 through the same definition bridge; MyLite does not implement a separate
 constraint-expression evaluator.
-Basic unindexed generated columns are also routed through MariaDB's virtual
-column machinery. MyLite advertises generated-column support to MariaDB, stores
-persistent generated values in normal row payloads, and restores base row
-buffers so MariaDB can compute non-stored virtual values after reads.
+Basic generated columns are also routed through MariaDB's virtual column
+machinery. MyLite advertises generated-column support to MariaDB, stores
+persistent generated values in normal row payloads, restores base row buffers so
+MariaDB can compute non-stored virtual values after reads, and stores ordinary
+generated-column secondary/unique key tuples in MyLite index-entry pages.
 
 ## File Layout
 
@@ -223,11 +224,12 @@ named table-level CHECK additions and drops, including dropping an ALTER-added
 CHECK after catalog-only close/reopen. Broader CHECK expression, failed ALTER
 rollback, CTAS, dump-import, prepared-diagnostic, and rollback coverage remains
 planned.
-Basic unindexed virtual and stored generated columns follow the same
-catalog-backed table-definition path. Generated-column indexes remain
-unsupported: the handler rejects generated-field key parts before catalog
-publication, leaving generated/expression index support for a later storage and
-recovery design.
+Basic virtual and stored generated columns follow the same catalog-backed
+table-definition path. Ordinary secondary and unique indexes on
+scalar virtual or stored generated columns use the same MariaDB-generated key
+tuples as supported base-column indexes. Generated primary keys,
+expression/hidden generated indexes, BLOB/TEXT generated key payloads, and
+broader expression matrices remain planned.
 The same create-time key-shape gate rejects FULLTEXT and SPATIAL indexes before
 catalog publication; MyLite must not publish a table definition whose index
 class cannot be maintained by the current storage format.
@@ -299,7 +301,8 @@ Supported primary, unique, and secondary keys use MariaDB key tuples generated
 from the row buffer. Bounded BLOB/TEXT prefix indexes are supported by storing
 MariaDB's normal variable-length key image, not row-buffer process pointers.
 The handler rejects unsupported key classes before table publication, including
-FULLTEXT, SPATIAL, generated, hash, and oversized or unbounded BLOB/TEXT keys.
+FULLTEXT, SPATIAL, hidden generated, hash, and oversized or unbounded BLOB/TEXT
+keys.
 Duplicate checks read live index entries, use MariaDB key comparison, and
 preserve nullable unique-key semantics. Ordered index reads build in-memory
 cursors from live index entries and then reconstruct row buffers from row
@@ -323,12 +326,12 @@ The storage engine must support:
 - truncate,
 - table rebuilds for copy `ALTER`.
 
-FULLTEXT, SPATIAL, generated-column indexes, foreign-key enforcement, and
-partitioned tables need explicit storage designs before support is claimed.
+FULLTEXT, SPATIAL, expression/hidden generated indexes, generated primary keys,
+foreign-key enforcement, and partitioned tables need explicit storage designs
+before support is claimed.
 Current `libmylite` entry points reject foreign-key and partition DDL before
-MariaDB execution; unsupported index classes, including generated-column,
-FULLTEXT, and SPATIAL indexes, reject through handler capability checks before
-catalog publication.
+MariaDB execution; unsupported FULLTEXT and SPATIAL indexes reject through
+handler capability checks before catalog publication.
 
 ## Transactions And Recovery
 

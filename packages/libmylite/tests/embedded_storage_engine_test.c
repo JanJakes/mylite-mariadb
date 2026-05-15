@@ -800,6 +800,11 @@ static void test_create_table_persists_catalog_metadata(void) {
     single_value_context checked_disabled_rating = {.expected_value = "7"};
     single_value_context generated_title_len = {.expected_value = "5"};
     single_value_context generated_label = {.expected_value = "draft-1"};
+    single_value_context generated_title_len_index = {.expected_value = "1"};
+    single_value_context generated_label_index = {.expected_value = "1"};
+    single_value_context generated_old_label_index = {.expected_value = "1"};
+    single_value_context generated_reused_title_key = {.expected_value = "3"};
+    single_value_context generated_deleted_title_key = {.expected_value = "4"};
     single_value_context rollback_count = {.expected_value = "1"};
     char *errmsg = NULL;
 
@@ -863,8 +868,12 @@ static void test_create_table_persists_catalog_metadata(void) {
         "CREATE TABLE generated_posts ("
         "id INT NOT NULL PRIMARY KEY, "
         "title VARCHAR(64) NOT NULL, "
+        "title_key VARCHAR(80) AS (CONCAT(title, '-key')) VIRTUAL, "
         "title_len INT AS (CHAR_LENGTH(title)) VIRTUAL, "
-        "label VARCHAR(80) AS (CONCAT(title, '-', id)) STORED"
+        "label VARCHAR(80) AS (CONCAT(title, '-', id)) STORED, "
+        "UNIQUE KEY title_key_unique (title_key), "
+        "KEY title_len_key (title_len), "
+        "KEY label_key (label)"
         ") ENGINE=InnoDB"
     );
     assert_exec_succeeds(
@@ -916,19 +925,6 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert_exec_fails(
         db,
         "CREATE TABLE innodb_posts (id INT PRIMARY KEY, title VARCHAR(255)) ENGINE=InnoDB"
-    );
-    assert_catalog_table_count(filename, "app", 14U);
-    assert_exec_fails(
-        db,
-        "CREATE TABLE generated_index_posts ("
-        "base INT NOT NULL, "
-        "doubled INT AS (base * 2) VIRTUAL, "
-        "KEY doubled_key (doubled)"
-        ") ENGINE=InnoDB"
-    );
-    assert(
-        mylite_storage_table_exists(filename, "app", "generated_index_posts") ==
-        MYLITE_STORAGE_NOTFOUND
     );
     assert_catalog_table_count(filename, "app", 14U);
     assert_exec_fails(
@@ -1031,9 +1027,35 @@ static void test_create_table_persists_catalog_metadata(void) {
     );
     assert(errmsg == NULL);
     assert(generated_label.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_posts FORCE INDEX (title_len_key) "
+            "WHERE title_len = 5 AND id = 1",
+            single_value_callback,
+            &generated_title_len_index,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_title_len_index.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_posts FORCE INDEX (label_key) WHERE label = 'draft-1'",
+            single_value_callback,
+            &generated_label_index,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_label_index.rows == 1);
+    assert_exec_fails(db, "INSERT INTO generated_posts (id, title) VALUES (2, 'draft')");
     assert_exec_succeeds(db, "UPDATE generated_posts SET title = 'published' WHERE id = 1");
     generated_title_len = (single_value_context){.expected_value = "9"};
     generated_label = (single_value_context){.expected_value = "published-1"};
+    generated_title_len_index = (single_value_context){.expected_value = "1"};
+    generated_label_index = (single_value_context){.expected_value = "1"};
     assert(
         mylite_exec(
             db,
@@ -1056,6 +1078,53 @@ static void test_create_table_persists_catalog_metadata(void) {
     );
     assert(errmsg == NULL);
     assert(generated_label.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_posts FORCE INDEX (title_len_key) "
+            "WHERE title_len = 9 AND id = 1",
+            single_value_callback,
+            &generated_title_len_index,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_title_len_index.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_posts FORCE INDEX (label_key) WHERE label = 'published-1'",
+            single_value_callback,
+            &generated_label_index,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_label_index.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_posts FORCE INDEX (label_key) WHERE label = 'draft-1'",
+            single_value_callback,
+            &generated_old_label_index,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_old_label_index.rows == 0);
+    assert_exec_succeeds(db, "INSERT INTO generated_posts (id, title) VALUES (3, 'draft')");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_posts FORCE INDEX (title_key_unique) "
+            "WHERE title_key = 'draft-key'",
+            single_value_callback,
+            &generated_reused_title_key,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_reused_title_key.rows == 1);
     assert_exec_succeeds(db, "INSERT INTO rollback_posts VALUES (1, 'first', 1)");
     assert_exec_fails(db, "INSERT INTO rollback_posts VALUES (2, 'second', 2), (3, 'second', 3)");
     assert(
@@ -1296,6 +1365,10 @@ static void test_create_table_persists_catalog_metadata(void) {
     checked_disabled_rating = (single_value_context){.expected_value = "7"};
     generated_title_len = (single_value_context){.expected_value = "9"};
     generated_label = (single_value_context){.expected_value = "published-1"};
+    generated_title_len_index = (single_value_context){.expected_value = "1"};
+    generated_label_index = (single_value_context){.expected_value = "1"};
+    generated_reused_title_key = (single_value_context){.expected_value = "3"};
+    generated_deleted_title_key = (single_value_context){.expected_value = "4"};
     rollback_count = (single_value_context){.expected_value = "3"};
     db = open_database_with_filename(root, filename);
     assert_no_runtime_schema_directory(root, "app");
@@ -1431,6 +1504,55 @@ static void test_create_table_persists_catalog_metadata(void) {
     );
     assert(errmsg == NULL);
     assert(generated_label.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_posts FORCE INDEX (title_len_key) "
+            "WHERE title_len = 9 AND id = 1",
+            single_value_callback,
+            &generated_title_len_index,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_title_len_index.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_posts FORCE INDEX (label_key) WHERE label = 'published-1'",
+            single_value_callback,
+            &generated_label_index,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_label_index.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_posts FORCE INDEX (title_key_unique) "
+            "WHERE title_key = 'draft-key'",
+            single_value_callback,
+            &generated_reused_title_key,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_reused_title_key.rows == 1);
+    assert_exec_succeeds(db, "DELETE FROM generated_posts WHERE id = 3");
+    assert_exec_succeeds(db, "INSERT INTO generated_posts (id, title) VALUES (4, 'draft')");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM generated_posts FORCE INDEX (title_key_unique) "
+            "WHERE title_key = 'draft-key'",
+            single_value_callback,
+            &generated_deleted_title_key,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_deleted_title_key.rows == 1);
     assert(
         mylite_exec(
             db,
