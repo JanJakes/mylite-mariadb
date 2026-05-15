@@ -36,7 +36,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `statement-rollback` | `storage-smoke-dev` | `compat-statement-rollback` | Failed statement rollback for routed MyLite storage |
 | `partition` | `storage-smoke-dev` | `compat-partition` | Partition DDL rejection until partition metadata and routing exist |
 | `foreign-key` | `storage-smoke-dev` | `compat-foreign-key` | Foreign-key DDL rejection until catalog metadata and enforcement exist |
-| `check-constraint` | `storage-smoke-dev` | `compat-check-constraint` | CHECK constraint enforcement on routed tables |
+| `check-constraint` | `storage-smoke-dev` | `compat-check-constraint` | CHECK constraint enforcement on routed tables and CTAS targets |
 | `generated-column` | `storage-smoke-dev` | `compat-generated-column` | Generated column read/write, CTAS projection, ALTER, BLOB/TEXT prefix, and generated-column index coverage |
 | `unsupported-index` | `storage-smoke-dev` | `compat-unsupported-index` | Unsupported FULLTEXT, SPATIAL, and long-unique index rejection |
 | `locking` | `storage-smoke-dev` | `compat-locking` | Primary-file lock conflicts, busy timeouts, and SQL locking policy |

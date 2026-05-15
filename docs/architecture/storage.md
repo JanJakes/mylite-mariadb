@@ -224,9 +224,10 @@ because they are stored in the catalog-backed table-definition image. MariaDB
 enforces those checks before insert/update handler calls unless
 `check_constraint_checks=OFF` is set. Supported copy `ALTER TABLE` paths cover
 named table-level CHECK additions and drops, including dropping an ALTER-added
-CHECK after catalog-only close/reopen. Broader CHECK expression, failed ALTER
-rollback, CTAS, dump-import, prepared-diagnostic, and rollback coverage remains
-planned.
+CHECK after catalog-only close/reopen. Supported CTAS paths cover explicit
+CHECK-constrained target definitions and CHECK-violation target cleanup.
+Broader CHECK expression, failed ALTER rollback, dump-import,
+prepared-diagnostic, and rollback coverage remains planned.
 Basic virtual and stored generated columns follow the same catalog-backed
 table-definition path, including supported copy ALTER add/modify/drop
 operations and CTAS projections from generated source columns. Ordinary

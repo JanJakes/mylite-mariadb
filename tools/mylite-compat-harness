@@ -46,7 +46,7 @@ group_spec() {
       echo "storage-smoke-dev|compat-foreign-key|Foreign-key DDL rejection policy"
       ;;
     check-constraint)
-      echo "storage-smoke-dev|compat-check-constraint|CHECK constraint enforcement"
+      echo "storage-smoke-dev|compat-check-constraint|CHECK constraint enforcement and CTAS target coverage"
       ;;
     generated-column)
       echo "storage-smoke-dev|compat-generated-column|Generated column coverage"

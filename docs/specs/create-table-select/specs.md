@@ -4,7 +4,7 @@
 
 MyLite now supports routed table creation, table cloning, row writes, supported
 indexes, BLOB/TEXT payloads, and close/reopen discovery, but
-`CREATE TABLE ... SELECT` remains planned. CTAS is common in schema migration,
+`CREATE TABLE ... SELECT` needs explicit coverage. CTAS is common in schema migration,
 reporting, and application setup flows. The first MyLite support should prove
 successful CTAS over supported routed table shapes without claiming full
 transactional failure semantics.
@@ -86,10 +86,11 @@ mid-statement failure remains a separate transaction/DDL cleanup slice.
 ## Compatibility Impact
 
 `CREATE TABLE ... SELECT` moves from planned to partial for supported routed
-table shapes. It remains partial because physical rollback of pages written
-before failed CTAS abort, temporary-table CTAS, `OR REPLACE`, `IGNORE` /
-`REPLACE`, foreign keys, partitions, unsupported source objects, and SQL
-rollback remain planned.
+table shapes. Explicit CHECK-constrained targets are covered by a follow-up
+slice. It remains partial because physical rollback of pages written before
+failed CTAS abort, temporary-table CTAS, `OR REPLACE`, `IGNORE` / `REPLACE`,
+foreign keys, partitions, unsupported source objects, and SQL rollback remain
+planned.
 
 ## DDL Metadata Routing Impact
 
@@ -131,6 +132,7 @@ unless handler fixes are needed; update size measurements after verification.
   - BLOB/TEXT payloads selected into the target;
   - virtual and stored generated source columns projected into ordinary target
     columns;
+  - explicit CHECK-constrained target definitions;
   - explicit target primary/unique/secondary indexes before `SELECT`;
   - duplicate-key checks and forced-index reads after CTAS;
   - close/reopen metadata and rows;
@@ -161,8 +163,9 @@ entry points:
   indexes writes result rows through `ha_mylite::write_row()`.
 - Storage-engine smoke covers selected BLOB/TEXT payloads, duplicate-key checks
   after CTAS, duplicate-key CTAS abort target cleanup, autoincrement
-  advancement from copied rows, generated-source projections, forced-index
-  reads, close/reopen metadata and rows, and durable-sidecar gates.
+  advancement from copied rows, generated-source projections, explicit
+  CHECK-constrained target definitions, forced-index reads, close/reopen
+  metadata and rows, and durable-sidecar gates.
 
 ## Risks And Open Questions
 

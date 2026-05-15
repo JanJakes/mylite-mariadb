@@ -3529,9 +3529,14 @@ static void test_create_table_select(void) {
     single_value_context generated_label = {
         .expected_value = "draft-1",
     };
+    single_value_context checked_rating = {
+        .expected_value = "4",
+    };
+    table_context failed_check_tables = {0};
     table_context failed_tables = {0};
     table_context body_rows = {0};
     table_context reopened_body_rows = {0};
+    table_context reopened_checked_rows = {0};
     char *errmsg = NULL;
 
     assert_exec_succeeds(db, "CREATE DATABASE app");
@@ -3576,6 +3581,27 @@ static void test_create_table_select(void) {
     assert(errmsg == NULL);
     assert(failed_tables.rows == 0);
     assert_catalog_table_count(filename, "app", 1U);
+    assert_exec_fails(
+        db,
+        "CREATE TABLE ctas_failed_check_posts ("
+        "id INT NOT NULL, "
+        "rating INT NOT NULL CHECK (rating >= 0), "
+        "CONSTRAINT rating_limit CHECK (rating <= 5)"
+        ") ENGINE=InnoDB "
+        "SELECT 1 AS id, 6 AS rating"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW TABLES LIKE 'ctas_failed_check_posts'",
+            table_callback,
+            &failed_check_tables,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(failed_check_tables.rows == 0);
+    assert_catalog_table_count(filename, "app", 1U);
 
     assert_exec_succeeds(
         db,
@@ -3614,12 +3640,22 @@ static void test_create_table_select(void) {
         "CREATE TABLE ctas_generated_projection ENGINE=InnoDB AS "
         "SELECT id, title_len, label FROM ctas_generated_source WHERE id = 1"
     );
-    assert_catalog_table_count(filename, "app", 5U);
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE ctas_checked_posts ("
+        "id INT NOT NULL, "
+        "rating INT NOT NULL CHECK (rating >= 0), "
+        "CONSTRAINT rating_limit CHECK (rating <= 5)"
+        ") ENGINE=InnoDB "
+        "SELECT 1 AS id, 4 AS rating"
+    );
+    assert_catalog_table_count(filename, "app", 6U);
     assert_catalog_table_metadata(filename, "app", "ctas_source_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_default_constants", "DEFAULT", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_indexed_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_generated_source", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_generated_projection", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "ctas_checked_posts", "InnoDB", "MYLITE");
 
     assert(
         mylite_exec(
@@ -3689,6 +3725,17 @@ static void test_create_table_select(void) {
     );
     assert(errmsg == NULL);
     assert(generated_label.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT rating FROM ctas_checked_posts WHERE id = 1",
+            single_value_callback,
+            &checked_rating,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(checked_rating.rows == 1);
 
     assert_exec_fails(
         db,
@@ -3700,6 +3747,8 @@ static void test_create_table_select(void) {
         "INSERT INTO ctas_indexed_posts (slug, body, payload) VALUES "
         "('source-gamma', 'source body three', UNHEX('070809'))"
     );
+    assert_exec_fails(db, "INSERT INTO ctas_checked_posts VALUES (2, -1)");
+    assert_exec_fails(db, "INSERT INTO ctas_checked_posts VALUES (3, 6)");
     assert(
         mylite_exec(
             db,
@@ -3720,12 +3769,13 @@ static void test_create_table_select(void) {
     assert_exec_succeeds(db, "USE app");
     generated_title_len = (single_value_context){.expected_value = "5"};
     generated_label = (single_value_context){.expected_value = "draft-1"};
-    assert_catalog_table_count(filename, "app", 5U);
+    assert_catalog_table_count(filename, "app", 6U);
     assert_catalog_table_metadata(filename, "app", "ctas_source_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_default_constants", "DEFAULT", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_indexed_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_generated_source", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_generated_projection", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "ctas_checked_posts", "InnoDB", "MYLITE");
     assert(
         mylite_exec(
             db,
@@ -3771,6 +3821,18 @@ static void test_create_table_select(void) {
     );
     assert(errmsg == NULL);
     assert(generated_label.rows == 1);
+    assert_exec_fails(db, "INSERT INTO ctas_checked_posts VALUES (4, 7)");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM ctas_checked_posts WHERE rating = 4",
+            row_callback,
+            &reopened_checked_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_checked_rows.rows == 1);
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
