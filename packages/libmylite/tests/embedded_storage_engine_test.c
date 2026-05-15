@@ -1655,7 +1655,10 @@ static void test_indexed_rows(void) {
     table_context rows = {0};
     table_context news_rows = {0};
     table_context alter_rows = {0};
+    table_context renamed_slug_rows = {0};
+    table_context renamed_category_rows = {0};
     table_context reopened_rows = {0};
+    table_context reopened_renamed_slug_rows = {0};
     const char *score_desc_ids[] = {"3", "2", "1"};
     id_sequence_context score_desc = {
         .expected_count = 3,
@@ -1695,7 +1698,17 @@ static void test_indexed_rows(void) {
         "CREATE TABLE alter_index_posts (id INT NOT NULL, slug VARCHAR(32) NOT NULL) "
         "ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 3U);
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE rename_index_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(32) NOT NULL, "
+        "category VARCHAR(32) NOT NULL, "
+        "UNIQUE KEY slug_key (slug), "
+        "KEY category_key (category)"
+        ") ENGINE=InnoDB"
+    );
+    assert_catalog_table_count(filename, "app", 4U);
 
     assert_exec_succeeds(db, "INSERT INTO indexed_posts VALUES (1, 'alpha', 'news', 10)");
     assert_exec_succeeds(db, "INSERT INTO indexed_posts VALUES (2, 'beta', NULL, 20)");
@@ -1786,6 +1799,8 @@ static void test_indexed_rows(void) {
 
     assert_exec_succeeds(db, "INSERT INTO alter_index_posts VALUES (1, 'first')");
     assert_exec_succeeds(db, "INSERT INTO alter_index_posts VALUES (2, 'second')");
+    assert_exec_succeeds(db, "INSERT INTO rename_index_posts VALUES (1, 'alpha', 'news')");
+    assert_exec_succeeds(db, "INSERT INTO rename_index_posts VALUES (2, 'beta', 'tech')");
     assert_exec_succeeds(
         db,
         "ALTER TABLE alter_index_posts ADD PRIMARY KEY (id), "
@@ -1805,6 +1820,38 @@ static void test_indexed_rows(void) {
     );
     assert(errmsg == NULL);
     assert(alter_rows.rows == 1);
+    assert_exec_succeeds(db, "RENAME TABLE rename_index_posts TO renamed_index_posts");
+    assert(
+        mylite_storage_table_exists(filename, "app", "rename_index_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "renamed_index_posts") == MYLITE_STORAGE_OK
+    );
+    assert_exec_fails(db, "SELECT id FROM rename_index_posts");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM renamed_index_posts FORCE INDEX (slug_key) WHERE slug = 'beta'",
+            row_callback,
+            &renamed_slug_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(renamed_slug_rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM renamed_index_posts FORCE INDEX (category_key) WHERE category = 'news'",
+            row_callback,
+            &renamed_category_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(renamed_category_rows.rows == 1);
+    assert_exec_fails(db, "INSERT INTO renamed_index_posts VALUES (3, 'beta', 'duplicate')");
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
@@ -1823,10 +1870,23 @@ static void test_indexed_rows(void) {
     );
     assert(errmsg == NULL);
     assert(reopened_rows.rows == 1);
-    assert_catalog_table_count(filename, "app", 3U);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM renamed_index_posts FORCE INDEX (slug_key) WHERE slug = 'beta'",
+            row_callback,
+            &reopened_renamed_slug_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_renamed_slug_rows.rows == 1);
+    assert_exec_fails(db, "SELECT id FROM rename_index_posts");
+    assert_catalog_table_count(filename, "app", 4U);
     assert_catalog_table_metadata(filename, "app", "indexed_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "nullable_unique_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "alter_index_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "renamed_index_posts", "InnoDB", "MYLITE");
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 

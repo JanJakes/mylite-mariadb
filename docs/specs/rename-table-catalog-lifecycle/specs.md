@@ -10,8 +10,9 @@ durable sidecar files.
 
 ## Non-Goals
 
-- Do not implement `ALTER TABLE`, truncate, update, delete-row, indexes,
-  high-level index rename handling, or free-space reclamation.
+- Do not implement `ALTER TABLE`, truncate, update, delete-row,
+  `ALTER TABLE ... RENAME INDEX`, high-level index rename handling, or
+  free-space reclamation.
 - Do not rewrite table-definition blob pages unless tests prove MariaDB needs
   the stored definition image changed for simple renames.
 - Do not add transactional DDL, crash recovery, or concurrent writer support.
@@ -32,9 +33,8 @@ durable sidecar files.
   every file returned by `bas_ext()`, which is not a valid MyLite final storage
   model.
 - `mariadb/sql/sql_table.cc:5611-5650` may rename high-level indexes after the
-  base table rename. MyLite has no index storage yet, so this slice covers
-  simple routed-table renames and keeps high-level index rename behavior
-  explicit.
+  base table rename. MyLite treats ordinary table renames as catalog identity
+  updates; SQL-level index rename behavior remains explicit separate work.
 - `mariadb/sql/sql_table.cc:5674-5691` reports handler rename failures as
   `ER_ERROR_ON_RENAME` except `HA_ERR_WRONG_COMMAND`, which becomes a generic
   "ALTER TABLE" not-supported message in this path.
@@ -48,8 +48,9 @@ or risk exposing the wrong row set.
 
 `RENAME TABLE` becomes partial support for simple MyLite-routed base-table
 renames. It updates table discovery, `SHOW TABLES`, and direct `SELECT` access
-so the old name disappears and the new name sees the same rows. Cross-schema
-renames are catalog namespace updates when MariaDB accepts the statement.
+so the old name disappears and the new name sees the same rows and supported
+indexes. Cross-schema renames are catalog namespace updates when MariaDB accepts
+the statement.
 
 Existing target names must fail rather than overwrite catalog records.
 Unsupported explicit engines still fail before catalog publication.
@@ -162,7 +163,8 @@ Implemented in the storage package and MyLite handler:
   old-name absence, duplicate target failure, missing source failure, preserved
   metadata, and list-table updates.
 - Storage-engine smoke coverage checks SQL `RENAME TABLE`, row preservation,
-  catalog absence at old names, close/reopen discovery, and no durable sidecars.
+  catalog absence at old names, supported indexed lookups and duplicate checks,
+  close/reopen discovery, and no durable sidecars.
 
 ## Risks And Open Questions
 
@@ -171,5 +173,5 @@ Implemented in the storage package and MyLite handler:
 - MariaDB's stored table-definition image may contain edge-case identity data
   for quoted identifiers or unusual object types; smoke tests will validate the
   simple base-table path.
-- High-level index rename paths are not covered until MyLite index storage
-  exists.
+- SQL-level index renames remain separate from preserving existing indexes
+  across a base-table rename.
