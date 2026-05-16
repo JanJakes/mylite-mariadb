@@ -1,5 +1,12 @@
 # Transaction Restart Control
 
+Status note: this slice kept transaction modifiers out of scope. The later
+[Transaction Modifier Control](../transaction-modifier-control/specs.md) slice
+adds bounded direct `START TRANSACTION READ WRITE`, `AND CHAIN`,
+`AND NO CHAIN`, and `NO RELEASE` support while leaving read-only transactions,
+consistent snapshots, release completion, isolation variables, completion-type
+defaults, XA, and transactional DDL unsupported.
+
 ## Problem
 
 MyLite supports direct row-DML transactions through `BEGIN`,

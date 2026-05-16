@@ -1,5 +1,10 @@
 # Quoted Savepoint Names
 
+Status note: this slice kept transaction modifiers out of scope. The later
+[Transaction Modifier Control](../transaction-modifier-control/specs.md) slice
+adds bounded direct modifier support; prepared transaction-start/completion
+modifiers remain unsupported.
+
 ## Problem
 
 MyLite supports direct and prepared savepoint-control statements inside bounded
@@ -66,7 +71,7 @@ backticks. Compatibility remains partial:
 - Execution outside an active file-backed MyLite transaction still fails.
 - Handler-level savepoint hooks and full transactional engine semantics remain
   planned.
-- MEMORY/HEAP row savepoints, transactional DDL, isolation, XA, and
+- MEMORY/HEAP row savepoints, transactional DDL, isolation, XA, and unsupported
   transaction modifiers remain unsupported.
 
 ## DDL Metadata Routing Impact

@@ -1178,8 +1178,14 @@ static void test_transaction_and_foreign_key_policies(void) {
     );
 
     assert_transaction_control_exec_fails(db, "SAVEPOINT mylite_probe");
-    assert_transaction_control_exec_fails(db, "COMMIT AND CHAIN");
-    assert_transaction_control_exec_fails(db, "START TRANSACTION READ WRITE");
+    assert_exec_succeeds(db, "START TRANSACTION READ WRITE");
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_exec_succeeds(db, "COMMIT AND CHAIN");
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_transaction_control_exec_fails(db, "START TRANSACTION READ ONLY");
+    assert_transaction_control_exec_fails(db, "COMMIT RELEASE");
+    assert_transaction_control_exec_fails(db, "SET completion_type=CHAIN");
+    assert_transaction_control_exec_fails(db, "SET transaction_isolation='READ-COMMITTED'");
     assert_transaction_control_exec_fails(db, "SET GLOBAL autocommit=0");
     assert_exec_succeeds(db, "SET autocommit=DEFAULT");
     assert_locking_sql_exec_fails(db, "LOCK TABLES posts WRITE");
@@ -1536,6 +1542,92 @@ static void test_row_dml_transactions(void) {
     );
     assert(zero_count.rows == 1);
 
+    assert_exec_succeeds(db, "START TRANSACTION READ WRITE");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (30, 'read-write-committed')");
+    assert_exec_succeeds(db, "COMMIT AND NO CHAIN NO RELEASE");
+    count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE id = 30 AND title = 'read-write-committed'",
+            single_value_callback,
+            &count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(count.rows == 1);
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (31, 'rollback-no-chain')");
+    assert_exec_succeeds(db, "ROLLBACK AND NO CHAIN NO RELEASE");
+    zero_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE title = 'rollback-no-chain'",
+            single_value_callback,
+            &zero_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(zero_count.rows == 1);
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (32, 'commit-chain-before')");
+    assert_exec_succeeds(db, "COMMIT AND CHAIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (33, 'commit-chain-after')");
+    assert_exec_succeeds(db, "ROLLBACK");
+    count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE id = 32 AND title = 'commit-chain-before'",
+            single_value_callback,
+            &count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(count.rows == 1);
+    zero_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE title = 'commit-chain-after'",
+            single_value_callback,
+            &zero_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(zero_count.rows == 1);
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (34, 'rollback-chain-before')");
+    assert_exec_succeeds(db, "ROLLBACK AND CHAIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (35, 'rollback-chain-after')");
+    assert_exec_succeeds(db, "COMMIT");
+    zero_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE title = 'rollback-chain-before'",
+            single_value_callback,
+            &zero_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(zero_count.rows == 1);
+    count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE id = 35 AND title = 'rollback-chain-after'",
+            single_value_callback,
+            &count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(count.rows == 1);
+
     assert_exec_succeeds(db, "BEGIN");
     assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (6, 'savepoint-before')");
     assert_exec_succeeds(db, "SAVEPOINT mylite_sp");
@@ -1849,7 +1941,7 @@ static void test_row_dml_transactions(void) {
         ) == MYLITE_OK
     );
     assert(zero_count.rows == 1);
-    count = (single_value_context){.expected_value = "11"};
+    count = (single_value_context){.expected_value = "14"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
         MYLITE_OK
@@ -1874,7 +1966,7 @@ static void test_row_dml_transactions(void) {
         ) == MYLITE_OK
     );
     assert(zero_count.rows == 1);
-    count = (single_value_context){.expected_value = "11"};
+    count = (single_value_context){.expected_value = "14"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
         MYLITE_OK
@@ -1885,7 +1977,7 @@ static void test_row_dml_transactions(void) {
     assert_transaction_crash_recovery(root, filename);
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "USE tx_app");
-    count = (single_value_context){.expected_value = "11"};
+    count = (single_value_context){.expected_value = "14"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
         MYLITE_OK

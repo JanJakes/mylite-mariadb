@@ -1,5 +1,12 @@
 # Prepared Savepoint Control
 
+Status note: the later
+[Transaction Modifier Control](../transaction-modifier-control/specs.md) slice
+adds bounded direct transaction-start and completion modifier support. Prepared
+`BEGIN`, `COMMIT`, `ROLLBACK`, `SET autocommit`, and transaction-start or
+completion modifiers remain unsupported; prepared savepoint control remains the
+only prepared transaction-control surface.
+
 ## Problem
 
 MyLite supports direct `SAVEPOINT`, `ROLLBACK TO [SAVEPOINT]`, and
@@ -88,7 +95,7 @@ Compatibility remains partial:
 - Handler-level savepoint hooks and fully transactional engine flags remain
   planned.
 - MEMORY/HEAP volatile-row savepoints, transactional DDL, isolation, XA, and
-  transaction modifiers remain unsupported.
+  unsupported transaction modifiers remain unsupported.
 
 ## DDL Metadata Routing Impact
 

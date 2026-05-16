@@ -489,6 +489,12 @@ rolls it back before closing the embedded MariaDB connection.
 Repeating direct `BEGIN` or `START TRANSACTION` while a direct transaction is
 active commits the previous outer checkpoint and opens a new one, matching
 MariaDB's transaction restart behavior for this bounded row-DML scope.
+`START TRANSACTION READ WRITE` follows the same direct transaction-start path.
+`COMMIT` and `ROLLBACK` completion modifiers support `AND CHAIN` by finishing
+the current outer checkpoint and immediately opening a new one; `AND NO CHAIN`
+and `NO RELEASE` are accepted explicit no-op completion modifiers. `RELEASE`,
+`READ ONLY`, `WITH CONSISTENT SNAPSHOT`, `completion_type` defaults, and
+transaction isolation or read-only variable changes remain unsupported.
 Direct savepoint control is handled by `libmylite` before MariaDB execution
 for the same bounded transaction scope: simple unquoted and backtick-quoted
 `SAVEPOINT` names open nested storage checkpoint frames,
@@ -510,10 +516,10 @@ pages, and catalog records appended after the checkpoint are no longer visible.
 This is still partial SQL transaction support. The MyLite handler still
 advertises non-transactional engine flags. Public `libmylite` SQL entry points
 continue to reject SQL-mode-sensitive double-quoted savepoint names, global or
-multi-assignment autocommit changes, `SET TRANSACTION`, XA, transaction
-modifiers, and DDL inside active direct transactions. Handler-level savepoint
-hooks, transactional DDL, isolation, WAL/checkpoint, and transactional
-engine-flag support remain planned.
+multi-assignment autocommit changes, `SET TRANSACTION`, unsupported transaction
+modifiers and transaction variables, XA, and DDL inside active direct
+transactions. Handler-level savepoint hooks, transactional DDL, isolation,
+WAL/checkpoint, and transactional engine-flag support remain planned.
 
 The storage design must preserve the full write-concurrency goal. Early
 milestones may use coarse locks for correctness, but the page, transaction,
