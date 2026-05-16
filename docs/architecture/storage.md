@@ -519,6 +519,11 @@ savepoint active, and `RELEASE SAVEPOINT` commits the target and later nested
 frames while preserving changes. Prepared savepoint-control statements use the
 same MyLite-owned checkpoint path and can be prepared before an active
 transaction, but execution requires an active file-backed MyLite transaction.
+Read-only transaction enforcement rejects direct and prepared durable MyLite
+row writes before MariaDB execution, but permits simple single-target row DML
+when the target name is tracked as a session-local temporary table. Temporary
+DDL inside active transactions remains under the broader transactional DDL
+rejection policy.
 
 Checkpoints save the committed header and catalog root pages while holding the
 primary-file exclusive lock; storage APIs in the same thread borrow that locked
@@ -536,9 +541,9 @@ duplicate autocommit changes, unsupported `SET TRANSACTION` forms, unsupported
 transaction modifiers, global or duplicate transaction variables, release
 completion defaults, XA, and direct or prepared DDL inside active direct
 transactions.
-Handler-level savepoint hooks, table-kind-aware read-only temporary-table
-exceptions, transactional DDL, isolation, WAL/checkpoint, and transactional
-engine-flag support remain planned.
+Handler-level savepoint hooks, temporary DDL inside active transactions,
+transactional DDL, isolation, WAL/checkpoint, and transactional engine-flag
+support remain planned.
 
 The storage design must preserve the full write-concurrency goal. Early
 milestones may use coarse locks for correctness, but the page, transaction,

@@ -125,10 +125,10 @@ variable assignments, and session
 `SET completion_type=NO_CHAIN/0/DEFAULT/CHAIN/1` forms are accepted for the
 current bounded transaction scope. Isolation controls and isolation variables
 are accepted as compatibility setup SQL, not as a storage-isolation guarantee.
-Read-only transactions reject direct and prepared MyLite storage writes;
-`CHAIN` makes later plain direct `COMMIT` and `ROLLBACK` use the same chained
-behavior as explicit `AND CHAIN`, while explicit `AND NO CHAIN` still
-overrides it.
+Read-only transactions reject direct and prepared durable MyLite storage writes
+while allowing simple row DML against tracked temporary tables. `CHAIN` makes
+later plain direct `COMMIT` and `ROLLBACK` use the same chained behavior as
+explicit `AND CHAIN`, while explicit `AND NO CHAIN` still overrides it.
 Direct `SAVEPOINT`,
 `ROLLBACK TO [SAVEPOINT]`, and `RELEASE SAVEPOINT` support simple unquoted and
 backtick-quoted savepoint names inside active bounded row-DML transactions, and

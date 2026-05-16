@@ -1348,6 +1348,80 @@ static void test_row_dml_transactions(void) {
         ") ENGINE=InnoDB"
     );
 
+    assert_exec_succeeds(
+        db,
+        "CREATE TEMPORARY TABLE tx_temp ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO tx_temp VALUES (1, 'temporary-before')");
+    assert_exec_succeeds(db, "START TRANSACTION READ ONLY");
+    assert_exec_fails_with_message(
+        db,
+        "UPDATE tx_temp JOIN tx_posts ON tx_posts.id = tx_temp.id "
+        "SET tx_posts.title = 'read-only-join'",
+        "read-only transaction"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "DELETE tx_posts FROM tx_temp JOIN tx_posts ON tx_posts.id = tx_temp.id",
+        "read-only transaction"
+    );
+    assert_exec_succeeds(db, "INSERT INTO tx_temp VALUES (2, 'temporary-insert')");
+    assert_exec_succeeds(db, "UPDATE tx_temp SET title = 'temporary-updated' WHERE id = 1");
+    assert_exec_succeeds(db, "REPLACE INTO tx_temp VALUES (2, 'temporary-replaced')");
+    assert_exec_succeeds(db, "DELETE FROM tx_temp WHERE id = 1");
+    assert_prepared_succeeds(db, "INSERT INTO tx_temp VALUES (3, 'prepared-temporary')");
+    assert_exec_succeeds(db, "COMMIT");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM tx_temp", "2");
+    assert_query_single_value(db, "SELECT title FROM tx_temp WHERE id = 2", "temporary-replaced");
+    assert_query_single_value(db, "SELECT title FROM tx_temp WHERE id = 3", "prepared-temporary");
+    assert_exec_succeeds(db, "DROP TEMPORARY TABLE tx_temp");
+    assert_exec_succeeds(
+        db,
+        "CREATE TEMPORARY TABLE tx_temp ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "DROP TEMPORARY TABLE tx_app.tx_temp");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE tx_temp ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "START TRANSACTION READ ONLY");
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO tx_temp VALUES (4, 'durable-after-temporary')",
+        "read-only transaction"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+
+    assert_prepared_succeeds(
+        db,
+        "CREATE TEMPORARY TABLE tx_temp ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "START TRANSACTION READ ONLY");
+    assert_prepared_succeeds(db, "INSERT INTO tx_temp VALUES (5, 'prepared-lifecycle')");
+    assert_exec_succeeds(db, "COMMIT");
+    assert_query_single_value(db, "SELECT title FROM tx_temp WHERE id = 5", "prepared-lifecycle");
+    assert_prepared_succeeds(db, "DROP TEMPORARY TABLE tx_temp");
+    assert_exec_succeeds(db, "START TRANSACTION READ ONLY");
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO tx_temp VALUES (6, 'durable-after-prepared-temporary')",
+        "read-only transaction"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_exec_succeeds(db, "DROP TABLE tx_temp");
+
     assert_exec_succeeds(db, "START TRANSACTION READ ONLY");
     zero_count = (single_value_context){.expected_value = "0"};
     assert(

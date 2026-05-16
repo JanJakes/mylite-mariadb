@@ -257,6 +257,7 @@ struct mylite_db {
     std::string errmsg = k_not_an_error;
     unsigned warning_count = 0;
     std::vector<StoredWarning> warnings;
+    std::vector<std::string> temporary_tables;
     long long changes = 0;
     unsigned long long last_insert_id = 0;
     unsigned active_statements = 0;
@@ -272,6 +273,7 @@ struct mylite_db {
 
 struct mylite_stmt {
     mylite_db *database = nullptr;
+    std::string sql;
 #if MYLITE_WITH_MARIADB_EMBEDDED
     MYSQL_STMT *statement = nullptr;
     std::vector<ColumnInfo> columns;
@@ -537,6 +539,19 @@ int sync_schema_catalog(mylite_db &database);
 bool is_schema_catalog_sql(std::string_view sql);
 bool is_storage_outer_checkpoint_sql(std::string_view sql);
 bool is_row_dml_checkpoint_sql(std::string_view sql);
+bool row_dml_targets_tracked_temporary_table(const mylite_db &database, std::string_view sql);
+void apply_temporary_table_lifecycle(mylite_db &database, std::string_view sql);
+bool create_temporary_table_name(std::string_view sql, std::string *out_name);
+bool drop_table_names(std::string_view sql, std::vector<std::string> *out_names);
+bool row_dml_target_table_name(std::string_view sql, std::string *out_name);
+bool pop_sql_table_reference_name(std::string_view &sql, std::string *out_name);
+bool pop_sql_drop_table_name(std::string_view &sql, std::string *out_name);
+bool pop_sql_identifier_name(std::string_view &sql, std::string *out_name);
+bool skip_optional_sql_token(std::string_view &sql, const char *keyword);
+std::string normalized_sql_identifier(std::string_view identifier);
+bool has_tracked_temporary_table(const mylite_db &database, const std::string &name);
+void remember_temporary_table(mylite_db &database, std::string name);
+void forget_temporary_table(mylite_db &database, const std::string &name);
 int collect_storage_schema(void *ctx, const char *schema_name);
 int load_runtime_schema_definitions(
     mylite_db &database,
@@ -1441,7 +1456,8 @@ int exec_impl(
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
     if (database->transaction_active && database->transaction_read_only &&
         transaction_control == TransactionControlKind::None &&
-        is_row_dml_checkpoint_sql(std::string_view(sql))) {
+        is_row_dml_checkpoint_sql(std::string_view(sql)) &&
+        !row_dml_targets_tracked_temporary_table(*database, std::string_view(sql))) {
         set_error(*database, MYLITE_ERROR, "unsupported read-only transaction write SQL surface");
         return copy_error_message(*database, errmsg);
     }
@@ -1526,6 +1542,7 @@ int exec_impl(
             return copy_error_message(*database, errmsg);
         }
     }
+    apply_temporary_table_lifecycle(*database, std::string_view(sql));
     checkpoint_result = checkpoint.commit(*database);
     if (checkpoint_result != MYLITE_OK) {
         return copy_error_message(*database, errmsg);
@@ -1684,6 +1701,7 @@ int prepare_impl(
     try {
         std::unique_ptr<mylite_stmt> statement(new mylite_stmt());
         statement->database = database;
+        statement->sql.assign(sql, sql_len);
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
         if (prepared_savepoint_control) {
             statement->prepared_transaction_control = transaction_control;
@@ -1846,7 +1864,8 @@ int execute_statement(mylite_stmt &statement) {
         return MYLITE_ERROR;
     }
     if (statement.database->transaction_active && statement.database->transaction_read_only &&
-        statement.writes_storage) {
+        statement.writes_storage &&
+        !row_dml_targets_tracked_temporary_table(*statement.database, statement.sql)) {
         set_error(
             *statement.database,
             MYLITE_ERROR,
@@ -1922,6 +1941,7 @@ int execute_statement(mylite_stmt &statement) {
                 return sync_result;
             }
         }
+        apply_temporary_table_lifecycle(*statement.database, statement.sql);
         checkpoint_result = checkpoint.commit(*statement.database);
         if (checkpoint_result != MYLITE_OK) {
             return checkpoint_result;
@@ -5328,6 +5348,218 @@ bool is_row_dml_checkpoint_sql(std::string_view sql) {
 
     return sql_token_equals(first, "INSERT") || sql_token_equals(first, "UPDATE") ||
            sql_token_equals(first, "DELETE") || sql_token_equals(first, "REPLACE");
+}
+
+bool row_dml_targets_tracked_temporary_table(const mylite_db &database, std::string_view sql) {
+    std::string name;
+    return row_dml_target_table_name(sql, &name) && has_tracked_temporary_table(database, name);
+}
+
+void apply_temporary_table_lifecycle(mylite_db &database, std::string_view sql) {
+    std::string name;
+    if (create_temporary_table_name(sql, &name)) {
+        remember_temporary_table(database, std::move(name));
+        return;
+    }
+
+    std::vector<std::string> names;
+    if (!drop_table_names(sql, &names)) {
+        return;
+    }
+    for (const std::string &drop_name : names) {
+        forget_temporary_table(database, drop_name);
+    }
+}
+
+bool create_temporary_table_name(std::string_view sql, std::string *out_name) {
+    std::string_view rest = skip_sql_leading_noise(sql);
+    if (!sql_token_equals(pop_sql_token(rest), "CREATE")) {
+        return false;
+    }
+
+    if (skip_optional_sql_token(rest, "OR")) {
+        if (!skip_optional_sql_token(rest, "REPLACE")) {
+            return false;
+        }
+    }
+    if (!skip_optional_sql_token(rest, "TEMPORARY")) {
+        return false;
+    }
+    if (!skip_optional_sql_token(rest, "TABLE")) {
+        return false;
+    }
+    if (skip_optional_sql_token(rest, "IF")) {
+        if (!skip_optional_sql_token(rest, "NOT") || !skip_optional_sql_token(rest, "EXISTS")) {
+            return false;
+        }
+    }
+    return pop_sql_table_reference_name(rest, out_name);
+}
+
+bool drop_table_names(std::string_view sql, std::vector<std::string> *out_names) {
+    std::string_view rest = skip_sql_leading_noise(sql);
+    if (!sql_token_equals(pop_sql_token(rest), "DROP")) {
+        return false;
+    }
+
+    skip_optional_sql_token(rest, "TEMPORARY");
+    if (!skip_optional_sql_token(rest, "TABLE")) {
+        return false;
+    }
+    if (skip_optional_sql_token(rest, "IF") && !skip_optional_sql_token(rest, "EXISTS")) {
+        return false;
+    }
+
+    for (;;) {
+        std::string name;
+        if (!pop_sql_drop_table_name(rest, &name)) {
+            return !out_names->empty();
+        }
+        out_names->push_back(std::move(name));
+
+        rest = skip_sql_leading_noise(rest);
+        if (rest.empty() || rest.front() != ',') {
+            return true;
+        }
+        rest.remove_prefix(1);
+    }
+}
+
+bool row_dml_target_table_name(std::string_view sql, std::string *out_name) {
+    std::string_view rest = skip_sql_leading_noise(sql);
+    const std::string_view first = pop_sql_token(rest);
+
+    if (sql_token_equals(first, "INSERT")) {
+        skip_optional_sql_token(rest, "LOW_PRIORITY");
+        skip_optional_sql_token(rest, "DELAYED");
+        skip_optional_sql_token(rest, "HIGH_PRIORITY");
+        skip_optional_sql_token(rest, "IGNORE");
+        skip_optional_sql_token(rest, "INTO");
+        return pop_sql_table_reference_name(rest, out_name);
+    }
+
+    if (sql_token_equals(first, "REPLACE")) {
+        skip_optional_sql_token(rest, "LOW_PRIORITY");
+        skip_optional_sql_token(rest, "DELAYED");
+        skip_optional_sql_token(rest, "INTO");
+        return pop_sql_table_reference_name(rest, out_name);
+    }
+
+    if (sql_token_equals(first, "UPDATE")) {
+        skip_optional_sql_token(rest, "LOW_PRIORITY");
+        skip_optional_sql_token(rest, "IGNORE");
+        if (!pop_sql_table_reference_name(rest, out_name)) {
+            return false;
+        }
+        return skip_optional_sql_token(rest, "SET");
+    }
+
+    if (sql_token_equals(first, "DELETE")) {
+        skip_optional_sql_token(rest, "LOW_PRIORITY");
+        skip_optional_sql_token(rest, "QUICK");
+        skip_optional_sql_token(rest, "IGNORE");
+        if (!skip_optional_sql_token(rest, "FROM")) {
+            return false;
+        }
+        if (!pop_sql_table_reference_name(rest, out_name)) {
+            return false;
+        }
+        const std::string_view tail = skip_sql_leading_noise(rest);
+        if (sql_rest_is_statement_end(tail)) {
+            return true;
+        }
+        std::string_view next = tail;
+        const std::string_view token = pop_sql_token(next);
+        return sql_token_equals(token, "WHERE") || sql_token_equals(token, "ORDER") ||
+               sql_token_equals(token, "LIMIT");
+    }
+
+    return false;
+}
+
+bool pop_sql_table_reference_name(std::string_view &sql, std::string *out_name) {
+    std::string first;
+    if (!pop_sql_identifier_name(sql, &first)) {
+        return false;
+    }
+
+    std::string_view after_first = sql;
+    if (consume_sql_reference_dot(after_first)) {
+        return false;
+    }
+
+    *out_name = std::move(first);
+    return true;
+}
+
+bool pop_sql_drop_table_name(std::string_view &sql, std::string *out_name) {
+    std::string first;
+    if (!pop_sql_identifier_name(sql, &first)) {
+        return false;
+    }
+
+    std::string_view after_first = sql;
+    if (!consume_sql_reference_dot(after_first)) {
+        *out_name = std::move(first);
+        return true;
+    }
+
+    std::string second;
+    if (!pop_sql_identifier_name(after_first, &second)) {
+        return false;
+    }
+    if (consume_sql_reference_dot(after_first)) {
+        return false;
+    }
+
+    sql = after_first;
+    *out_name = std::move(second);
+    return true;
+}
+
+bool pop_sql_identifier_name(std::string_view &sql, std::string *out_name) {
+    std::string_view token;
+    if (!pop_sql_identifier_token(sql, token)) {
+        return false;
+    }
+    *out_name = normalized_sql_identifier(token);
+    return true;
+}
+
+bool skip_optional_sql_token(std::string_view &sql, const char *keyword) {
+    std::string_view candidate = skip_sql_leading_noise(sql);
+    if (!sql_token_equals(pop_sql_token(candidate), keyword)) {
+        return false;
+    }
+    sql = candidate;
+    return true;
+}
+
+std::string normalized_sql_identifier(std::string_view identifier) {
+    std::string normalized;
+    normalized.reserve(identifier.size());
+    for (const char ch : identifier) {
+        normalized.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+    }
+    return normalized;
+}
+
+bool has_tracked_temporary_table(const mylite_db &database, const std::string &name) {
+    return std::find(database.temporary_tables.begin(), database.temporary_tables.end(), name) !=
+           database.temporary_tables.end();
+}
+
+void remember_temporary_table(mylite_db &database, std::string name) {
+    if (!has_tracked_temporary_table(database, name)) {
+        database.temporary_tables.push_back(std::move(name));
+    }
+}
+
+void forget_temporary_table(mylite_db &database, const std::string &name) {
+    database.temporary_tables.erase(
+        std::remove(database.temporary_tables.begin(), database.temporary_tables.end(), name),
+        database.temporary_tables.end()
+    );
 }
 
 int collect_storage_schema(void *ctx, const char *schema_name) {

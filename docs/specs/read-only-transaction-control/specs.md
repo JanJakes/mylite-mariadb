@@ -115,7 +115,9 @@ Explicit read-write controls continue to opt into writeable transactions.
 Compatibility remains partial:
 
 - isolation levels and consistent snapshots are still unsupported,
-- read-only temporary-table write exceptions are not modeled yet,
+- read-only temporary-table write exceptions are covered by the later
+  [Read-Only Temporary Row DML](../read-only-temporary-row-dml/specs.md)
+  slice for simple tracked row-DML targets only,
 - handler-level read-only optimization and fully transactional engine flags
   remain planned,
 - transaction read-only system-variable assignments remain explicit policy
@@ -191,15 +193,15 @@ session flags, and tests.
   behavior match MariaDB's documented/source-backed transaction
   characteristic flow for the supported bounded scope.
 - Docs and compatibility tables describe read-only transaction support without
-  claiming isolation, consistent snapshot, temporary-table exceptions, release
-  completion, or fully transactional engine flags.
+  claiming isolation, consistent snapshot, temporary DDL in active
+  transactions, release completion, or fully transactional engine flags.
 
 ## Risks And Unresolved Questions
 
 - MyLite still uses conservative SQL scanning rather than MariaDB's parsed
   `LEX` / `set_var` state. Suspicious transaction-control forms remain
   rejected rather than partially interpreted.
-- The read-only write policy is top-level statement based. It intentionally
-  does not yet distinguish durable MyLite base tables from temporary tables.
+- The later read-only temporary row-DML slice keeps the read-only write policy
+  bounded to simple tracked temporary table targets.
 - When future work adds isolation or consistent snapshots, the transaction
   characteristic state should be shared rather than duplicated.
