@@ -62,6 +62,9 @@ set(MYLITE_WITH_GIS_SQL_FUNCTIONS OFF CACHE BOOL "Omit GIS SQL functions" FORCE)
 # MyLite rejects SFORMAT() before MariaDB execution.
 set(MYLITE_WITH_SFORMAT_SQL_FUNCTION OFF CACHE BOOL "Omit SFORMAT SQL function" FORCE)
 
+# MyLite rejects JSON_SCHEMA_VALID() before MariaDB execution.
+set(MYLITE_WITH_JSON_SCHEMA_VALID OFF CACHE BOOL "Omit JSON schema validation SQL function" FORCE)
+
 # MyLite rejects HELP before MariaDB execution.
 set(MYLITE_WITH_HELP_COMMAND OFF CACHE BOOL "Omit SQL HELP command" FORCE)
 

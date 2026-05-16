@@ -103,6 +103,15 @@ ELSE()
   ADD_DEFINITIONS(-DMYLITE_WITH_SFORMAT_SQL_FUNCTION=0)
 ENDIF()
 
+OPTION(MYLITE_WITH_JSON_SCHEMA_VALID "Build JSON_SCHEMA_VALID SQL function" ON)
+IF(MYLITE_WITH_JSON_SCHEMA_VALID)
+  ADD_DEFINITIONS(-DMYLITE_WITH_JSON_SCHEMA_VALID=1)
+  SET(MYLITE_JSON_SCHEMA_SOURCE ../sql/json_schema.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_JSON_SCHEMA_VALID=0)
+  SET(MYLITE_JSON_SCHEMA_SOURCE)
+ENDIF()
+
 OPTION(MYLITE_WITH_HELP_COMMAND "Build SQL HELP command" ON)
 IF(MYLITE_WITH_HELP_COMMAND)
   SET(MYLITE_HELP_COMMAND_SOURCE ../sql/sql_help.cc)
@@ -166,7 +175,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ${MYLITE_GIS_SQL_FUNCTION_SOURCES} ../sql/item_row.cc ../sql/item_strfunc.cc
            ../sql/item_subselect.cc ../sql/item_sum.cc ../sql/item_timefunc.cc 
            ${MYLITE_XML_SQL_FUNCTION_SOURCE} ../sql/item_jsonfunc.cc
-           ../sql/json_schema.cc ../sql/json_schema_helper.cc
+           ${MYLITE_JSON_SCHEMA_SOURCE} ../sql/json_schema_helper.cc
            ../sql/key.cc ../sql/lock.cc ../sql/log.cc ../sql/log_cache.cc
            ../sql/log_event.cc ../sql/log_event_server.cc 
            ../sql/mf_iocache.cc ../sql/my_decimal.cc 

@@ -55,6 +55,10 @@
 #define MYLITE_WITH_SFORMAT_SQL_FUNCTION 1
 #endif
 
+#ifndef MYLITE_WITH_JSON_SCHEMA_VALID
+#define MYLITE_WITH_JSON_SCHEMA_VALID 1
+#endif
+
 
 extern "C" const uchar *get_native_fct_hash_key(const void *buff,
                                                 size_t *length, my_bool)
@@ -1498,6 +1502,7 @@ protected:
   virtual ~Create_func_json_overlaps() {}
 };
 
+#if MYLITE_WITH_JSON_SCHEMA_VALID
 class Create_func_json_schema_valid: public Create_func_arg2
 {
 public:
@@ -1509,6 +1514,7 @@ protected:
   Create_func_json_schema_valid() {}
   virtual ~Create_func_json_schema_valid() {}
 };
+#endif
 
 class Create_func_json_key_value : public Create_func_arg2
 {
@@ -4908,6 +4914,7 @@ Create_func_last_insert_id::create_native(THD *thd, const LEX_CSTRING *name,
   return func;
 }
 
+#if MYLITE_WITH_JSON_SCHEMA_VALID
 Create_func_json_schema_valid Create_func_json_schema_valid::s_singleton;
 
 Item*
@@ -4916,6 +4923,7 @@ Create_func_json_schema_valid::create_2_arg(THD *thd, Item *arg1, Item *arg2)
   status_var_increment(thd->status_var.feature_json);
   return new (thd->mem_root) Item_func_json_schema_valid(thd, arg1, arg2);
 }
+#endif
 
 Create_func_json_key_value Create_func_json_key_value::s_singleton;
 
@@ -6520,7 +6528,9 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("JSON_OVERLAPS") }, BUILDER(Create_func_json_overlaps)},
   { { STRING_WITH_LEN("JSON_REMOVE") }, BUILDER(Create_func_json_remove)},
   { { STRING_WITH_LEN("JSON_REPLACE") }, BUILDER(Create_func_json_replace)},
+#if MYLITE_WITH_JSON_SCHEMA_VALID
   { { STRING_WITH_LEN("JSON_SCHEMA_VALID") }, BUILDER(Create_func_json_schema_valid)},
+#endif
   { { STRING_WITH_LEN("JSON_SET") }, BUILDER(Create_func_json_set)},
   { { STRING_WITH_LEN("JSON_SEARCH") }, BUILDER(Create_func_json_search)},
   { { STRING_WITH_LEN("JSON_TYPE") }, BUILDER(Create_func_json_type)},

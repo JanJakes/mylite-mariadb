@@ -25,7 +25,15 @@
 #include "item_strfunc.h"      // Item_str_func
 #include "item_sum.h"
 #include "sql_type_json.h"
+#ifndef MYLITE_WITH_JSON_SCHEMA_VALID
+#define MYLITE_WITH_JSON_SCHEMA_VALID 1
+#endif
+#if !MYLITE_WITH_JSON_SCHEMA_VALID
+#include "sql_class.h"
+#endif
+#if MYLITE_WITH_JSON_SCHEMA_VALID
 #include "json_schema.h"
+#endif
 
 class json_path_with_flags
 {
@@ -872,6 +880,7 @@ public:
   { return get_item_copy<Item_func_json_overlaps>(thd, this); }
 };
 
+#if MYLITE_WITH_JSON_SCHEMA_VALID
 class Item_func_json_schema_valid: public Item_bool_func
 {
   String tmp_js;
@@ -899,6 +908,7 @@ public:
   { return get_item_copy<Item_func_json_schema_valid>(thd, this); }
   void cleanup() override;
 };
+#endif
 
 class Item_func_json_key_value: public Item_json_func,
                             public Json_path_extractor

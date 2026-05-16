@@ -19,6 +19,9 @@
 #include "sql_class.h"
 #include "item.h"
 #include "sql_parse.h" // For check_stack_overrun
+#ifndef MYLITE_WITH_JSON_SCHEMA_VALID
+#define MYLITE_WITH_JSON_SCHEMA_VALID 1
+#endif
 #include "json_schema_helper.h"
 
 static bool get_current_value(json_engine_t *, const uchar *&, size_t &);
@@ -4977,6 +4980,7 @@ bool Item_func_json_overlaps::fix_length_and_dec(THD *thd)
   return Item_bool_func::fix_length_and_dec(thd);
 }
 
+#if MYLITE_WITH_JSON_SCHEMA_VALID
 bool Item_func_json_schema_valid::val_bool()
 {
   json_engine_t ve;
@@ -5111,6 +5115,7 @@ void Item_func_json_schema_valid::cleanup()
 
   DBUG_VOID_RETURN;
 }
+#endif
 
 
 bool Item_func_json_key_value::get_key_value(json_engine_t *je, String *str)

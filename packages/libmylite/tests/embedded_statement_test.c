@@ -582,6 +582,28 @@ static void test_prepare_diagnostics(void) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(strstr(mylite_errmsg(db), "SFORMAT SQL function") != NULL);
 
+    assert_prepare_fails_with_message(
+        db,
+        "SELECT JSON_SCHEMA_VALID('{}', '{}')",
+        "JSON_SCHEMA_VALID"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "SELECT json_schema_valid('{\"type\":\"number\"}', ?)",
+        "JSON_SCHEMA_VALID"
+    );
+
+    stmt = prepare_statement(db, "SELECT JSON_VALID(?)");
+    assert(
+        mylite_bind_text(stmt, 1U, "{\"ok\": true}", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+        MYLITE_OK
+    );
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(stmt, 0U) == 1);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+
     assert(
         mylite_prepare(db, "SELECT EXTRACTVALUE(?, '/a')", MYLITE_NUL_TERMINATED, &stmt, NULL) ==
         MYLITE_ERROR

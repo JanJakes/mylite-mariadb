@@ -137,6 +137,15 @@ ELSE()
   ADD_DEFINITIONS(-DMYLITE_WITH_SFORMAT_SQL_FUNCTION=0)
 ENDIF()
 
+OPTION(MYLITE_WITH_JSON_SCHEMA_VALID "Build JSON_SCHEMA_VALID SQL function" ON)
+IF(MYLITE_WITH_JSON_SCHEMA_VALID)
+  ADD_DEFINITIONS(-DMYLITE_WITH_JSON_SCHEMA_VALID=1)
+  SET(MYLITE_JSON_SCHEMA_SOURCE json_schema.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_JSON_SCHEMA_VALID=0)
+  SET(MYLITE_JSON_SCHEMA_SOURCE)
+ENDIF()
+
 OPTION(MYLITE_WITH_MYISAM_MAINTENANCE "Build MyISAM table maintenance support" ON)
 IF(MYLITE_WITH_MYISAM_MAINTENANCE)
   ADD_DEFINITIONS(-DMYLITE_WITH_MYISAM_MAINTENANCE=1)
@@ -226,7 +235,7 @@ SET (SQL_SOURCE
                opt_index_cond_pushdown.cc opt_subselect.cc
                opt_table_elimination.cc sql_expression_cache.cc
                my_apc.cc mf_iocache_encr.cc item_jsonfunc.cc
-               my_json_writer.cc json_schema.cc json_schema_helper.cc
+               my_json_writer.cc ${MYLITE_JSON_SCHEMA_SOURCE} json_schema_helper.cc
                rpl_gtid.cc gtid_index.cc rpl_parallel.cc
                semisync.cc semisync_master.cc semisync_slave.cc
                semisync_master_ack_receiver.cc

@@ -332,6 +332,7 @@ bool is_file_export_sql(std::string_view sql);
 bool is_server_utility_function_sql(std::string_view sql);
 bool is_gis_sql_function_sql(std::string_view sql);
 bool is_sformat_sql_function_sql(std::string_view sql);
+bool is_json_schema_valid_sql(std::string_view sql);
 bool is_xml_sql_function_sql(std::string_view sql);
 bool is_oracle_sql_mode_sql(std::string_view sql);
 bool sql_set_assignment_has_oracle_sql_mode(std::string_view assignment);
@@ -352,6 +353,7 @@ bool sql_tokens_contain_file_export_marker(std::string_view sql);
 bool sql_tokens_contain_server_utility_function(std::string_view sql);
 bool sql_tokens_contain_gis_sql_function(std::string_view sql);
 bool sql_tokens_contain_sformat_sql_function(std::string_view sql);
+bool sql_tokens_contain_json_schema_valid_function(std::string_view sql);
 bool sql_tokens_contain_xml_sql_function(std::string_view sql);
 bool sql_tokens_contain_locking_marker(std::string_view sql);
 bool sql_tokens_contain_named_lock_function(std::string_view sql);
@@ -2030,6 +2032,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_sformat_sql_function_sql(sql)) {
         return "unsupported SFORMAT SQL function";
     }
+    if (is_json_schema_valid_sql(sql)) {
+        return "unsupported JSON_SCHEMA_VALID SQL function";
+    }
     if (is_xml_sql_function_sql(sql)) {
         return "unsupported XML SQL function";
     }
@@ -2182,6 +2187,10 @@ bool is_gis_sql_function_sql(std::string_view sql) {
 
 bool is_sformat_sql_function_sql(std::string_view sql) {
     return sql_tokens_contain_sformat_sql_function(sql);
+}
+
+bool is_json_schema_valid_sql(std::string_view sql) {
+    return sql_tokens_contain_json_schema_valid_function(sql);
 }
 
 bool is_xml_sql_function_sql(std::string_view sql) {
@@ -2560,6 +2569,20 @@ bool sql_tokens_contain_sformat_sql_function(std::string_view sql) {
         }
 
         if (sql_token_equals(token, "SFORMAT")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool sql_tokens_contain_json_schema_valid_function(std::string_view sql) {
+    std::string_view token;
+    while (pop_sql_scanned_token(sql, token)) {
+        if (!sql_next_non_noise_is(sql, '(')) {
+            continue;
+        }
+
+        if (sql_token_equals(token, "JSON_SCHEMA_VALID")) {
             return true;
         }
     }

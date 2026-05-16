@@ -29,6 +29,7 @@ static void test_procedure_analyse_is_rejected(void);
 static void test_server_utility_functions_are_rejected(void);
 static void test_gis_sql_functions_are_rejected(void);
 static void test_sformat_sql_function_is_rejected(void);
+static void test_json_schema_valid_sql_function_is_rejected(void);
 static void test_xml_sql_functions_are_rejected(void);
 static void test_oracle_sql_mode_is_rejected(void);
 static void test_file_import_policy_is_rejected(void);
@@ -49,6 +50,7 @@ static void assert_select_procedure_exec_fails(mylite_db *db, const char *sql);
 static void assert_server_utility_exec_fails(mylite_db *db, const char *sql);
 static void assert_gis_sql_function_exec_fails(mylite_db *db, const char *sql);
 static void assert_sformat_sql_function_exec_fails(mylite_db *db, const char *sql);
+static void assert_json_schema_valid_exec_fails(mylite_db *db, const char *sql);
 static void assert_xml_sql_function_exec_fails(mylite_db *db, const char *sql);
 static void assert_oracle_sql_mode_exec_fails(mylite_db *db, const char *sql);
 static void assert_file_import_exec_fails(mylite_db *db, const char *sql);
@@ -81,6 +83,7 @@ int main(void) {
     test_server_utility_functions_are_rejected();
     test_gis_sql_functions_are_rejected();
     test_sformat_sql_function_is_rejected();
+    test_json_schema_valid_sql_function_is_rejected();
     test_xml_sql_functions_are_rejected();
     test_oracle_sql_mode_is_rejected();
     test_file_import_policy_is_rejected();
@@ -357,6 +360,33 @@ static void test_sformat_sql_function_is_rejected(void) {
     assert(
         mylite_exec(db, "SELECT 'SFORMAT(' AS sformat_text, FORMAT(1234.5, 1)", NULL, NULL, NULL) ==
         MYLITE_OK
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_json_schema_valid_sql_function_is_rejected(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_json_schema_valid_exec_fails(db, "SELECT JSON_SCHEMA_VALID('{}', '{}')");
+    assert_json_schema_valid_exec_fails(
+        db,
+        "SELECT json_schema_valid('{\"type\":\"number\"}', '3')"
+    );
+    assert_json_schema_valid_exec_fails(db, "/*! SELECT JSON_SCHEMA_VALID('{}', '{}') */");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT 'JSON_SCHEMA_VALID(' AS quoted_text, JSON_VALID('{\"ok\": true}')",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
     );
 
     assert(mylite_close(db) == MYLITE_OK);
@@ -868,6 +898,18 @@ static void assert_sformat_sql_function_exec_fails(mylite_db *db, const char *sq
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "SFORMAT SQL function") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_json_schema_valid_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "JSON_SCHEMA_VALID") != NULL);
     mylite_free(errmsg);
 }
 

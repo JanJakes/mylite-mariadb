@@ -44,7 +44,12 @@
 #include "sql_base.h"
 #include "sql_test.h"     // mysql_print_status
 #include "item_create.h"  // item_create_cleanup, item_create_init
+#ifndef MYLITE_WITH_JSON_SCHEMA_VALID
+#define MYLITE_WITH_JSON_SCHEMA_VALID 1
+#endif
+#if MYLITE_WITH_JSON_SCHEMA_VALID
 #include "json_schema.h"
+#endif
 #include "sql_servers.h"  // servers_free, servers_init
 #include "init.h"         // unireg_init
 #include "derror.h"       // init_errmessage
@@ -2011,7 +2016,9 @@ static void clean_up(bool print_message)
   item_func_sleep_free();
   lex_free();				/* Free some memory */
   item_create_cleanup();
+#if MYLITE_WITH_JSON_SCHEMA_VALID
   cleanup_json_schema_keyword_hash();
+#endif
   tdc_start_shutdown();
 #ifdef HAVE_REPLICATION
   semi_sync_master_deinit();
@@ -4288,7 +4295,9 @@ static int init_common_variables()
   if (item_create_init())
     return 1;
   item_init();
+#if MYLITE_WITH_JSON_SCHEMA_VALID
   setup_json_schema_keyword_hash();
+#endif
   /*
     Process a comma-separated character set list and choose
     the first available character set. This is mostly for
