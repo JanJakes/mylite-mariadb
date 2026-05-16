@@ -29,6 +29,7 @@ static const useconds_t k_microseconds_per_millisecond = 1000U;
 typedef struct engine_context {
     int rows;
     int found_mylite;
+    int found_sequence;
     int supported_mylite;
 } engine_context;
 
@@ -364,6 +365,14 @@ static void test_show_engines_reports_mylite(void) {
     assert(ctx.rows > 0);
     assert(ctx.found_mylite);
     assert(ctx.supported_mylite);
+    assert(!ctx.found_sequence);
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(db, "CREATE TABLE seq_1_to_10 (seq INT NOT NULL PRIMARY KEY)");
+    assert_catalog_table_metadata(filename, "app", "seq_1_to_10", "DEFAULT", "MYLITE");
+    assert_exec_succeeds(db, "INSERT INTO seq_1_to_10 VALUES (42)");
+    assert_query_single_value(db, "SELECT seq FROM seq_1_to_10", "42");
 
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);
@@ -9303,7 +9312,16 @@ static int engine_callback(void *ctx, int column_count, char **values, char **co
     assert(column_count >= 2);
     ++engine_ctx->rows;
 
-    if (values[0] == NULL || strcmp(values[0], "MYLITE") != 0) {
+    if (values[0] == NULL) {
+        return 0;
+    }
+
+    if (strcmp(values[0], "SEQUENCE") == 0) {
+        engine_ctx->found_sequence = 1;
+        return 0;
+    }
+
+    if (strcmp(values[0], "MYLITE") != 0) {
         return 0;
     }
 

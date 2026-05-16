@@ -54,6 +54,7 @@ MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS=OFF
 PLUGIN_AUTH_SOCKET=NO
 PLUGIN_FEEDBACK=NO
 PLUGIN_PERFSCHEMA=NO
+PLUGIN_SEQUENCE=NO
 PLUGIN_THREAD_POOL_INFO=NO
 ```
 
@@ -63,7 +64,8 @@ Dynamic plugins, LOAD file import, SQL host-file I/O, server utility SQL
 functions, Oracle SQL mode parsing, XML SQL functions, GIS SQL functions, the
 MariaDB-specific `SFORMAT()` SQL function, JSON schema validation, the
 `JSON_TABLE` table-function runtime, dynamic-column packed BLOB runtime, SQL
-`HANDLER` command runtime, SQL sequence runtime, SQL `HELP`,
+`HANDLER` command runtime, SQL sequence runtime, virtual `SEQUENCE` storage
+engine, SQL `HELP`,
 `PROCEDURE ANALYSE()`, generic SELECT procedure runtime, stored-program runtime,
 dynamic UDF lookup/execution, binary-log transaction, event-write, and
 event-root core, native MyISAM table-maintenance and key-cache administration,
@@ -74,9 +76,10 @@ compatibility, legacy XML helper, spatial-function, MariaDB-specific
 formatting, schema validation, table-function projection, packed semi-structured
 BLOB handling, direct storage-engine cursor, unsupported sequence object/value
 state, help-table lookup, result-set analysis, SELECT result-set extension hook,
-unsupported non-table object, dynamic extension, server topology, engine-file
-maintenance, or server/client file surfaces, not core MyLite embedded runtime
-behavior. The retained `sql_embedded` C++ sources are also compiled with
+catalog-bypassing generated virtual tables, unsupported non-table objects,
+dynamic extension, server topology, engine-file maintenance, or server/client
+file surfaces, not core MyLite embedded runtime behavior. The retained
+`sql_embedded` C++ sources are also compiled with
 `-fno-exceptions`; the flag is not applied to first-party MyLite code or to all
 MariaDB targets.
 
@@ -98,8 +101,8 @@ current MyLite embedded profile patches applied.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 27,226,016 bytes / 25.96 MiB |
-| Archive members | 673 |
+| Archive size | 27,180,040 bytes / 25.92 MiB |
+| Archive members | 672 |
 
 The build found system OpenSSL 3.6.2, zlib, Curses, CURL, GSSAPI, BZip2, LZ4,
 LibLZMA, LZO, PCRE2, and Zstandard support on this machine.
@@ -153,6 +156,12 @@ bytes and removed two archive members. The disabled profile now replaces
 rejects direct and prepared sequence value surfaces before MariaDB execution,
 and leaves ordinary `AUTO_INCREMENT` available.
 
+The virtual sequence storage-engine trim reduced the default archive by a
+further 45,976 bytes and removed one archive member. The disabled profile now
+sets `PLUGIN_SEQUENCE=NO`, omits `sequence.cc`, stops advertising `SEQUENCE`
+through `SHOW ENGINES`, and leaves ordinary catalog-backed tables, including
+tables whose names resemble `seq_1_to_10`, under MyLite storage routing.
+
 ## Enabled Surface
 
 The profile keeps the MariaDB components needed by the current embedded
@@ -196,6 +205,7 @@ The profile explicitly disables:
 - MariaDB dynamic-column packed BLOB runtime and SQL functions
 - top-level SQL `HANDLER` command runtime
 - SQL sequence runtime and hidden SQL_SEQUENCE storage-engine wrapper
+- virtual `SEQUENCE` storage engine
 - SQL `HELP` command help-table implementation
 - `PROCEDURE ANALYSE()` result-set analysis implementation
 - generic SELECT procedure runtime

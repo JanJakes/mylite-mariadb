@@ -39,6 +39,7 @@ set(PLUGIN_S3 "NO" CACHE STRING "Disable Aria S3 support for the embedded profil
 set(PLUGIN_AUTH_SOCKET "NO" CACHE STRING "Disable server socket authentication plugin" FORCE)
 set(PLUGIN_FEEDBACK "NO" CACHE STRING "Disable server feedback plugin" FORCE)
 set(PLUGIN_PERFSCHEMA "NO" CACHE STRING "Disable Performance Schema storage engine" FORCE)
+set(PLUGIN_SEQUENCE "NO" CACHE STRING "Disable virtual SEQUENCE storage engine" FORCE)
 set(PLUGIN_THREAD_POOL_INFO "NO" CACHE STRING "Disable server thread-pool info plugin" FORCE)
 
 # MyLite rejects LOAD DATA and LOAD XML before MariaDB execution.

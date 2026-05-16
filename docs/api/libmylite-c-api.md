@@ -156,7 +156,10 @@ Basic unindexed generated columns use MariaDB's generated-column evaluation,
 with virtual values computed from restored row buffers and stored values kept
 in normal MyLite row payloads.
 Foreign-key DDL is rejected before execution until MyLite has referential
-metadata and enforcement.
+metadata and enforcement. SQL sequence object/value surfaces are rejected, and
+the default embedded profile does not register MariaDB's virtual `SEQUENCE`
+storage engine, so magic generated tables such as `seq_1_to_10` are unavailable
+outside ordinary catalog-backed user tables.
 
 ## Prepared Statements
 
