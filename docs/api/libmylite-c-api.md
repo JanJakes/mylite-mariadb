@@ -121,7 +121,8 @@ Direct `START TRANSACTION READ ONLY`, `START TRANSACTION READ WRITE`,
 `SET TRANSACTION READ ONLY`, `SET TRANSACTION READ WRITE`, session
 `SET TRANSACTION READ ONLY` / `READ WRITE`, direct/session
 `SET TRANSACTION ISOLATION LEVEL ...`, transaction read-only and isolation
-variable assignments, and session
+variable assignments including duplicate supported assignment lists where the
+final value wins, and session
 `SET completion_type=NO_CHAIN/0/DEFAULT/CHAIN/1` forms are accepted for the
 current bounded transaction scope, including duplicate supported
 `completion_type` assignments where the final assignment wins. Isolation
@@ -139,9 +140,9 @@ session has `ANSI_QUOTES` enabled. The same savepoint-control statements can be
 prepared and reused for file-backed MyLite transactions. Global
 autocommit-control statements, duplicate autocommit assignments,
 `WITH CONSISTENT SNAPSHOT`, `RELEASE` completion, `completion_type=RELEASE/2`,
-global or duplicate transaction variable assignments, XA, and direct or
-prepared DDL inside an active transaction remain unsupported until the storage
-and catalog transaction design is broader.
+global transaction variable assignments, duplicate `SET TRANSACTION`
+characteristics, XA, and direct or prepared DDL inside an active transaction
+remain unsupported until the storage and catalog transaction design is broader.
 Existing-file opens preserve storage lock conflicts as
 `MYLITE_BUSY` before starting the embedded runtime.
 
@@ -548,7 +549,7 @@ the embedded library model:
 Representative account, event, plugin, replication, binlog, view, trigger,
 routine, package, sequence, `CALL`, UDF `CREATE FUNCTION ... SONAME`,
 global or duplicate autocommit-control, unsupported transaction-variable `SET`
-lists, unsupported transaction-control, release completion defaults, XA,
+forms, unsupported transaction-control, release completion defaults, XA,
 SQL locking,
 named-lock, SQL `HELP`, SQL `HANDLER`, `SELECT ... PROCEDURE`, SQL file-I/O,
 table-maintenance/key-cache administration, statement profiling, external

@@ -13,9 +13,13 @@ slice accepts direct read-write/no-chain SET controls, and the later
 [Completion Type Chain Control](../completion-type-chain-control/specs.md)
 slice accepts chained completion defaults. The later
 [Read-Only Transaction Control](../read-only-transaction-control/specs.md)
-slice accepts bounded direct read-only access mode. Global or duplicate
-autocommit changes, unsupported transaction-variable `SET` lists, unsupported
-transaction modifiers, XA, and transactional DDL remain rejected; the later
+slice accepts bounded direct read-only access mode. The later
+[Transaction Variable Control](../transaction-variable-control/specs.md) and
+[Transaction Variable Duplicate Control](../transaction-variable-duplicate-control/specs.md)
+slices accept supported transaction variable `SET` forms, including duplicate
+supported assignments. Global or duplicate autocommit changes, global
+transaction variables, unsupported transaction modifiers, XA, and
+transactional DDL remain rejected; the later
 [Prepared Transactional DDL Policy](../prepared-transactional-ddl-policy/specs.md)
 slice makes the prepared execution path enforce the same active-transaction DDL
 policy as direct SQL. The later
@@ -33,9 +37,9 @@ statement while MyLite table writes still publish outside a SQL transaction.
 
 This slice rejected explicit SQL transaction-control surfaces through the
 public MyLite SQL entry points until later work added bounded direct row-DML
-transaction surfaces. Savepoints, global or duplicate autocommit changes,
-unsupported transaction-variable `SET` lists, unsupported transaction
-modifiers, XA, and transactional DDL remain rejected.
+transaction surfaces. At that slice point, savepoints, global or duplicate
+autocommit changes, transaction-variable `SET` lists, transaction modifiers,
+XA, and transactional DDL remained rejected.
 
 ## Source Findings
 

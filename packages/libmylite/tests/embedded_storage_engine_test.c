@@ -1924,6 +1924,25 @@ static void test_row_dml_transactions(void) {
     assert_exec_succeeds(db, "ROLLBACK");
     assert_exec_succeeds(db, "SET transaction_read_only=0");
 
+    assert_exec_succeeds(
+        db,
+        "SET transaction_isolation='READ-COMMITTED', tx_isolation='SERIALIZABLE'"
+    );
+    assert_exec_succeeds(db, "SET transaction_read_only=1, tx_read_only=0");
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (59, 'duplicate-variable-read-write')");
+    assert_exec_succeeds(db, "ROLLBACK");
+
+    assert_exec_succeeds(db, "SET tx_read_only=0, transaction_read_only=1");
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO tx_posts VALUES (59, 'duplicate-variable-read-only')",
+        "read-only transaction"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_exec_succeeds(db, "SET transaction_read_only=0");
+
     assert_exec_succeeds(db, "SET @@transaction_read_only=1");
     assert_exec_succeeds(db, "BEGIN");
     assert_exec_fails_with_message(

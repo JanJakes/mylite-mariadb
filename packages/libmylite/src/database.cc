@@ -3799,7 +3799,6 @@ TransactionControlKind direct_set_assignment_transaction_control_kind(std::strin
     TransactionControlKind result = TransactionControlKind::None;
     bool autocommit_seen = false;
     bool transaction_access_mode_seen = false;
-    bool transaction_isolation_seen = false;
 
     while (!skip_sql_leading_noise(sql).empty()) {
         std::string_view assignment = pop_sql_set_assignment(sql);
@@ -3842,24 +3841,19 @@ TransactionControlKind direct_set_assignment_transaction_control_kind(std::strin
             return TransactionControlKind::Unsupported;
         }
         if (is_transaction_access_mode_characteristic_control(transaction_characteristic_result)) {
-            if (transaction_access_mode_seen) {
-                return TransactionControlKind::Unsupported;
-            }
             if (autocommit_seen) {
                 return TransactionControlKind::Unsupported;
             }
             transaction_access_mode_seen = true;
-            if (result == TransactionControlKind::None) {
+            if (result == TransactionControlKind::None ||
+                is_transaction_access_mode_characteristic_control(result)) {
                 result = transaction_characteristic_result;
             }
             continue;
         }
         if (is_transaction_isolation_characteristic_control(transaction_characteristic_result)) {
-            if (transaction_isolation_seen) {
-                return TransactionControlKind::Unsupported;
-            }
-            transaction_isolation_seen = true;
-            if (result == TransactionControlKind::None) {
+            if (result == TransactionControlKind::None ||
+                is_transaction_isolation_characteristic_control(result)) {
                 result = transaction_characteristic_result;
             }
             continue;

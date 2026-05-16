@@ -511,7 +511,7 @@ completion default so later plain direct `COMMIT` and `ROLLBACK` follow the
 final supported assignment in a `SET` list, while explicit `AND NO CHAIN`
 overrides chained defaults. `RELEASE`, `WITH CONSISTENT SNAPSHOT`,
 `completion_type=RELEASE/2`, global transaction variables, and duplicate
-transaction variable assignments remain unsupported.
+`SET TRANSACTION` characteristics remain unsupported.
 Direct savepoint control is handled by `libmylite` before MariaDB execution
 for the same bounded transaction scope: case-insensitive simple unquoted,
 backtick-quoted, and ANSI_QUOTES double-quoted `SAVEPOINT` names open nested
@@ -539,8 +539,8 @@ pages, and catalog records appended after the checkpoint are no longer visible.
 This is still partial SQL transaction support. The MyLite handler still
 advertises non-transactional engine flags. Public `libmylite` SQL entry points
 continue to reject global or duplicate autocommit changes, unsupported
-`SET TRANSACTION` forms, unsupported transaction modifiers, global or duplicate
-transaction variables, release completion defaults, XA, and direct or prepared
+`SET TRANSACTION` forms, unsupported transaction modifiers, global transaction
+variables, release completion defaults, XA, and direct or prepared
 DDL inside active direct transactions.
 Handler-level savepoint hooks, temporary DDL inside active transactions,
 transactional DDL, isolation, WAL/checkpoint, and transactional engine-flag

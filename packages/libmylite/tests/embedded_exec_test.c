@@ -1484,11 +1484,28 @@ static void test_transaction_control_policy(void) {
         "SET @@DEFAULT.transaction_isolation='READ-COMMITTED'"
     );
     assert_transaction_control_exec_fails(db, "SET transaction_read_only=2");
+    assert(
+        mylite_exec(
+            db,
+            "SET transaction_isolation='READ-COMMITTED', tx_isolation='SERIALIZABLE'",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(
+        mylite_exec(db, "SET transaction_read_only=1, tx_read_only=0", NULL, NULL, NULL) ==
+        MYLITE_OK
+    );
+    assert(
+        mylite_exec(db, "SET tx_read_only=0, transaction_read_only=1", NULL, NULL, NULL) ==
+        MYLITE_OK
+    );
+    assert(mylite_exec(db, "SET transaction_read_only=0", NULL, NULL, NULL) == MYLITE_OK);
     assert_transaction_control_exec_fails(
         db,
-        "SET transaction_isolation='READ-COMMITTED', tx_isolation='SERIALIZABLE'"
+        "SET transaction_read_only=1, @@global.tx_read_only=0"
     );
-    assert_transaction_control_exec_fails(db, "SET transaction_read_only=1, tx_read_only=0");
     assert_transaction_control_exec_fails(
         db,
         "SET transaction_isolation='READ-COMMITTED'; SELECT 1"

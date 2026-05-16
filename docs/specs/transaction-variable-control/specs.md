@@ -1,5 +1,11 @@
 # Transaction Variable Control
 
+Status note: the later
+[Transaction Variable Duplicate Control](../transaction-variable-duplicate-control/specs.md)
+slice accepts duplicate supported transaction variable assignments with the
+final assignment winning. Global transaction variables and prepared
+transaction-variable control remain unsupported.
+
 ## Problem
 
 MyLite accepts direct/session `SET TRANSACTION` access-mode and isolation-level
