@@ -332,6 +332,7 @@ bool is_optimizer_trace_sql(std::string_view sql);
 bool is_table_maintenance_sql(std::string_view sql);
 bool is_sql_handler_command_sql(std::string_view sql);
 bool is_help_command_sql(std::string_view sql);
+bool is_static_show_info_sql(std::string_view sql);
 bool is_file_import_sql(std::string_view sql);
 bool is_file_export_sql(std::string_view sql);
 bool is_server_utility_function_sql(std::string_view sql);
@@ -2057,6 +2058,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_help_command_sql(sql)) {
         return "unsupported HELP SQL command";
     }
+    if (is_static_show_info_sql(sql)) {
+        return "unsupported static SHOW information SQL surface";
+    }
     if (is_file_import_sql(sql)) {
         return "unsupported SQL file import surface";
     }
@@ -2303,6 +2307,19 @@ bool is_help_command_sql(std::string_view sql) {
     std::string_view rest = sql;
     std::string_view first;
     return pop_sql_scanned_token(rest, first) && sql_token_equals(first, "HELP");
+}
+
+bool is_static_show_info_sql(std::string_view sql) {
+    std::string_view rest = sql;
+    std::string_view first;
+    std::string_view second;
+    if (!pop_sql_scanned_token(rest, first) || !sql_token_equals(first, "SHOW") ||
+        !pop_sql_scanned_token(rest, second)) {
+        return false;
+    }
+
+    return sql_token_equals(second, "AUTHORS") || sql_token_equals(second, "CONTRIBUTORS") ||
+           sql_token_equals(second, "PRIVILEGES");
 }
 
 bool is_file_import_sql(std::string_view sql) {

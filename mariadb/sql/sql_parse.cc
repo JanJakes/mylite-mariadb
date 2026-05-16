@@ -95,6 +95,10 @@
 
 #include "my_json_writer.h" 
 
+#ifndef MYLITE_WITH_STATIC_SHOW_INFO
+#define MYLITE_WITH_STATIC_SHOW_INFO 1
+#endif
+
 #define FLAGSTR(V,F) ((V)&(F)?#F" ":"")
 
 #ifdef WITH_ARIA_STORAGE_ENGINE
@@ -4869,13 +4873,28 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
                 lex->verbose);
     break;
   case SQLCOM_SHOW_AUTHORS:
+#if MYLITE_WITH_STATIC_SHOW_INFO
     res= mysqld_show_authors(thd);
+#else
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+             "static SHOW information in MyLite embedded profile");
+#endif
     break;
   case SQLCOM_SHOW_CONTRIBUTORS:
+#if MYLITE_WITH_STATIC_SHOW_INFO
     res= mysqld_show_contributors(thd);
+#else
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+             "static SHOW information in MyLite embedded profile");
+#endif
     break;
   case SQLCOM_SHOW_PRIVILEGES:
+#if MYLITE_WITH_STATIC_SHOW_INFO
     res= mysqld_show_privileges(thd);
+#else
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+             "static SHOW information in MyLite embedded profile");
+#endif
     break;
   case SQLCOM_SHOW_ENGINE_LOGS:
 #ifdef DONT_ALLOW_SHOW_COMMANDS

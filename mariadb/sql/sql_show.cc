@@ -51,8 +51,13 @@
 #include "sql_servers.h"
 #include "sql_repl.h"                       // rpl_load_gtid_state
 #include "rpl_mi.h"                         // master_info_index
+#ifndef MYLITE_WITH_STATIC_SHOW_INFO
+#define MYLITE_WITH_STATIC_SHOW_INFO 1
+#endif
+#if MYLITE_WITH_STATIC_SHOW_INFO
 #include "authors.h"
 #include "contributors.h"
+#endif
 #include "sql_partition.h"
 #include "optimizer_defaults.h"
 #ifdef HAVE_EVENT_SCHEDULER
@@ -440,6 +445,7 @@ end:
 ** If you can update it, you get to be in it :)
 ***************************************************************************/
 
+#if MYLITE_WITH_STATIC_SHOW_INFO
 bool mysqld_show_authors(THD *thd)
 {
   List<Item> field_list;
@@ -474,6 +480,7 @@ bool mysqld_show_authors(THD *thd)
   my_eof(thd);
   DBUG_RETURN(FALSE);
 }
+#endif
 
 
 /***************************************************************************
@@ -481,6 +488,7 @@ bool mysqld_show_authors(THD *thd)
 ** Please get permission before updating
 ***************************************************************************/
 
+#if MYLITE_WITH_STATIC_SHOW_INFO
 bool mysqld_show_contributors(THD *thd)
 {
   List<Item> field_list;
@@ -516,12 +524,14 @@ bool mysqld_show_contributors(THD *thd)
   my_eof(thd);
   DBUG_RETURN(FALSE);
 }
+#endif
 
 
 /***************************************************************************
  List all privileges supported
 ***************************************************************************/
 
+#if MYLITE_WITH_STATIC_SHOW_INFO
 struct show_privileges_st {
   const char *privilege;
   const char *context;
@@ -613,6 +623,7 @@ bool mysqld_show_privileges(THD *thd)
   my_eof(thd);
   DBUG_RETURN(FALSE);
 }
+#endif
 
 
 /** Hash of LEX_STRINGs used to search for ignored db directories. */

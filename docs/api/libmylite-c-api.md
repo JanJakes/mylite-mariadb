@@ -167,6 +167,8 @@ available. MariaDB statement profiling surfaces such as `SHOW PROFILE`,
 `INFORMATION_SCHEMA.PROFILING` are rejected as server observability. MariaDB
 optimizer trace surfaces such as optimizer-trace system-variable assignment
 and `INFORMATION_SCHEMA.OPTIMIZER_TRACE` are rejected as server diagnostics.
+MariaDB static server-information statements such as `SHOW AUTHORS`,
+`SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES` are rejected as server metadata.
 MariaDB foreign-server metadata statements such as `CREATE SERVER` and
 `SHOW CREATE SERVER` are rejected as remote-engine/server metadata. MariaDB
 external backup statements such as `BACKUP STAGE`, `BACKUP LOCK`, and
@@ -464,6 +466,8 @@ the embedded library model:
   profiling system-variable assignment, and `INFORMATION_SCHEMA.PROFILING`,
 - optimizer trace diagnostics such as optimizer-trace system-variable
   assignment and `INFORMATION_SCHEMA.OPTIMIZER_TRACE`,
+- static SHOW information such as `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and
+  `SHOW PRIVILEGES`,
 - SQL `HANDLER` commands,
 - SQL `HELP`,
 - `SELECT ... PROCEDURE`, including `PROCEDURE ANALYSE()`,
@@ -489,11 +493,12 @@ routine, package, sequence, `CALL`, UDF `CREATE FUNCTION ... SONAME`,
 transaction-control, autocommit-control, SQL locking, named-lock, SQL `HELP`,
 SQL `HANDLER`, `SELECT ... PROCEDURE`, SQL file-I/O,
 table-maintenance/key-cache administration, statement profiling, external
-backup SQL, query cache administration, optimizer trace, server utility
-function, Oracle SQL mode, XML SQL function, GIS SQL function, SFORMAT SQL
-function, JSON schema validation function, JSON table function, dynamic column
-function, SQL sequence value surface, partition, and foreign-key DDL commands
-are rejected before MariaDB execution with stable MyLite errors. The default
+backup SQL, query cache administration, optimizer trace, static SHOW
+information, server utility function, Oracle SQL mode, XML SQL function, GIS
+SQL function, SFORMAT SQL function, JSON schema validation function, JSON table
+function, dynamic column function, SQL sequence value surface, partition, and
+foreign-key DDL commands are rejected before MariaDB execution with stable
+MyLite errors. The default
 embedded profile also links fail-closed stubs for stored-program runtime
 symbols that retained MariaDB parser or cleanup paths still reference, omits
 dynamic UDF lookup/execution bodies, omits unsupported binlog event-root and
