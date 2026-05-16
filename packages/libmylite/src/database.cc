@@ -337,6 +337,7 @@ bool is_json_schema_valid_sql(std::string_view sql);
 bool is_json_table_sql(std::string_view sql);
 bool is_dynamic_column_sql(std::string_view sql);
 bool is_sequence_sql(std::string_view sql);
+bool is_user_statistics_sql(std::string_view sql);
 bool is_xml_sql_function_sql(std::string_view sql);
 bool is_oracle_sql_mode_sql(std::string_view sql);
 bool sql_set_assignment_has_oracle_sql_mode(std::string_view assignment);
@@ -362,6 +363,10 @@ bool sql_tokens_contain_json_table_function(std::string_view sql);
 bool sql_tokens_contain_dynamic_column_function(std::string_view sql);
 bool sql_token_is_dynamic_column_function(std::string_view token);
 bool sql_tokens_contain_sequence_value_surface(std::string_view sql);
+bool sql_tokens_contain_user_statistics_information_schema_table(std::string_view sql);
+bool sql_token_is_user_statistics_table(std::string_view token);
+bool pop_sql_identifier_token(std::string_view &sql, std::string_view &out_token);
+bool consume_sql_reference_dot(std::string_view &sql);
 bool sql_tokens_contain_xml_sql_function(std::string_view sql);
 bool sql_tokens_contain_locking_marker(std::string_view sql);
 bool sql_tokens_contain_named_lock_function(std::string_view sql);
@@ -2056,6 +2061,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_sequence_sql(sql)) {
         return "unsupported SQL sequence surface";
     }
+    if (is_user_statistics_sql(sql)) {
+        return "unsupported user-statistics SQL surface";
+    }
     if (is_xml_sql_function_sql(sql)) {
         return "unsupported XML SQL function";
     }
@@ -2229,6 +2237,39 @@ bool is_dynamic_column_sql(std::string_view sql) {
 
 bool is_sequence_sql(std::string_view sql) {
     return sql_tokens_contain_sequence_value_surface(sql);
+}
+
+bool is_user_statistics_sql(std::string_view sql) {
+    std::string_view rest = sql;
+    std::string_view token;
+    if (!pop_sql_scanned_token(rest, token)) {
+        return false;
+    }
+
+    if (sql_token_equals(token, "SHOW")) {
+        return pop_sql_scanned_token(rest, token) && sql_token_is_user_statistics_table(token);
+    }
+
+    if (sql_token_equals(token, "FLUSH")) {
+        while (pop_sql_scanned_token(rest, token)) {
+            if (sql_token_is_user_statistics_table(token)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    if (sql_token_equals(token, "SET")) {
+        while (!skip_sql_leading_noise(rest).empty()) {
+            std::string_view assignment = pop_sql_set_assignment(rest);
+            if (sql_set_assignment_targets_variable(assignment, "USERSTAT")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    return sql_tokens_contain_user_statistics_information_schema_table(sql);
 }
 
 bool is_xml_sql_function_sql(std::string_view sql) {
@@ -2687,6 +2728,94 @@ bool sql_tokens_contain_sequence_value_surface(std::string_view sql) {
         }
     }
     return false;
+}
+
+bool sql_token_is_user_statistics_table(std::string_view token) {
+    return sql_token_equals(token, "CLIENT_STATISTICS") ||
+           sql_token_equals(token, "INDEX_STATISTICS") ||
+           sql_token_equals(token, "TABLE_STATISTICS") ||
+           sql_token_equals(token, "USER_STATISTICS");
+}
+
+bool sql_tokens_contain_user_statistics_information_schema_table(std::string_view sql) {
+    std::string_view token;
+    while (!sql.empty()) {
+        if (!pop_sql_identifier_token(sql, token)) {
+            if (!sql.empty()) {
+                sql.remove_prefix(1);
+            }
+            continue;
+        }
+
+        if (!sql_token_equals(token, "INFORMATION_SCHEMA")) {
+            continue;
+        }
+
+        std::string_view after_schema = sql;
+        if (!consume_sql_reference_dot(after_schema)) {
+            continue;
+        }
+        if (pop_sql_identifier_token(after_schema, token) &&
+            sql_token_is_user_statistics_table(token)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool pop_sql_identifier_token(std::string_view &sql, std::string_view &out_token) {
+    for (;;) {
+        sql = skip_sql_leading_noise(sql);
+        if (sql.empty()) {
+            out_token = {};
+            return false;
+        }
+
+        if (sql.front() == '\'' || sql.front() == '"') {
+            skip_sql_quoted_span(sql, sql.front());
+            continue;
+        }
+
+        if (sql.front() == '`') {
+            sql.remove_prefix(1);
+            const std::size_t token_end = sql.find('`');
+            if (token_end == std::string_view::npos) {
+                sql = {};
+                out_token = {};
+                return false;
+            }
+            out_token = sql.substr(0, token_end);
+            sql.remove_prefix(token_end + 1U);
+            return true;
+        }
+
+        if (std::isalnum(static_cast<unsigned char>(sql.front())) == 0 && sql.front() != '_') {
+            out_token = {};
+            return false;
+        }
+
+        const std::size_t token_end = sql.find_first_not_of(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+        );
+        if (token_end == std::string_view::npos) {
+            out_token = sql;
+            sql = {};
+            return true;
+        }
+
+        out_token = sql.substr(0, token_end);
+        sql.remove_prefix(token_end);
+        return true;
+    }
+}
+
+bool consume_sql_reference_dot(std::string_view &sql) {
+    sql = skip_sql_leading_noise(sql);
+    if (sql.empty() || sql.front() != '.') {
+        return false;
+    }
+    sql.remove_prefix(1);
+    return true;
 }
 
 bool sql_tokens_contain_xml_sql_function(std::string_view sql) {

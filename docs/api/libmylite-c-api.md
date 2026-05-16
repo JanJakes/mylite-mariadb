@@ -159,7 +159,10 @@ Foreign-key DDL is rejected before execution until MyLite has referential
 metadata and enforcement. SQL sequence object/value surfaces are rejected, and
 the default embedded profile does not register MariaDB's virtual `SEQUENCE`
 storage engine, so magic generated tables such as `seq_1_to_10` are unavailable
-outside ordinary catalog-backed user tables.
+outside ordinary catalog-backed user tables. MariaDB user-statistics
+information-schema surfaces and `userstat` system-variable assignments are
+rejected as server observability, while ordinary SQL user variables remain
+available.
 
 ## Prepared Statements
 

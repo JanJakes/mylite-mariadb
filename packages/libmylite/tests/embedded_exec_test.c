@@ -34,6 +34,7 @@ static void test_json_schema_valid_sql_function_is_rejected(void);
 static void test_json_table_function_is_rejected(void);
 static void test_dynamic_column_functions_are_rejected(void);
 static void test_sequence_sql_is_rejected(void);
+static void test_user_statistics_sql_is_rejected(void);
 static void test_xml_sql_functions_are_rejected(void);
 static void test_oracle_sql_mode_is_rejected(void);
 static void test_file_import_policy_is_rejected(void);
@@ -59,6 +60,7 @@ static void assert_json_schema_valid_exec_fails(mylite_db *db, const char *sql);
 static void assert_json_table_exec_fails(mylite_db *db, const char *sql);
 static void assert_dynamic_column_exec_fails(mylite_db *db, const char *sql);
 static void assert_sequence_exec_fails(mylite_db *db, const char *sql);
+static void assert_user_statistics_exec_fails(mylite_db *db, const char *sql);
 static void assert_xml_sql_function_exec_fails(mylite_db *db, const char *sql);
 static void assert_oracle_sql_mode_exec_fails(mylite_db *db, const char *sql);
 static void assert_file_import_exec_fails(mylite_db *db, const char *sql);
@@ -96,6 +98,7 @@ int main(void) {
     test_json_table_function_is_rejected();
     test_dynamic_column_functions_are_rejected();
     test_sequence_sql_is_rejected();
+    test_user_statistics_sql_is_rejected();
     test_xml_sql_functions_are_rejected();
     test_oracle_sql_mode_is_rejected();
     test_file_import_policy_is_rejected();
@@ -508,6 +511,46 @@ static void test_sequence_sql_is_rejected(void) {
             db,
             "SELECT 'NEXTVAL(blocked_sequence)' AS nextval_text, "
             "'NEXT VALUE FOR blocked_sequence' AS next_value_text",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_user_statistics_sql_is_rejected(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_user_statistics_exec_fails(db, "SHOW USER_STATISTICS");
+    assert_user_statistics_exec_fails(db, "SHOW CLIENT_STATISTICS");
+    assert_user_statistics_exec_fails(db, "SHOW INDEX_STATISTICS");
+    assert_user_statistics_exec_fails(db, "SHOW TABLE_STATISTICS");
+    assert_user_statistics_exec_fails(db, "FLUSH USER_STATISTICS");
+    assert_user_statistics_exec_fails(db, "FLUSH CLIENT_STATISTICS");
+    assert_user_statistics_exec_fails(db, "FLUSH TABLE_STATISTICS, INDEX_STATISTICS");
+    assert_user_statistics_exec_fails(db, "SET userstat=1");
+    assert_user_statistics_exec_fails(db, "SET GLOBAL userstat=1");
+    assert_user_statistics_exec_fails(db, "SET SESSION userstat=1");
+    assert_user_statistics_exec_fails(db, "SET @@global.userstat=1");
+    assert_user_statistics_exec_fails(db, "SELECT * FROM INFORMATION_SCHEMA.USER_STATISTICS");
+    assert_user_statistics_exec_fails(db, "SELECT * FROM information_schema.table_statistics");
+    assert_user_statistics_exec_fails(db, "SELECT * FROM `information_schema`.`USER_STATISTICS`");
+    assert(mylite_exec(db, "SET @userstat=1", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(db, "SELECT 'USER_STATISTICS' AS user_statistics_text", NULL, NULL, NULL) ==
+        MYLITE_OK
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SELECT 'INFORMATION_SCHEMA.USER_STATISTICS' AS user_statistics_text",
             NULL,
             NULL,
             NULL
@@ -1083,6 +1126,18 @@ static void assert_sequence_exec_fails(mylite_db *db, const char *sql) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "SQL sequence") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_user_statistics_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "user-statistics") != NULL);
     mylite_free(errmsg);
 }
 

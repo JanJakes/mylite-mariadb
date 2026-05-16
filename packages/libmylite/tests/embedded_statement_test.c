@@ -618,6 +618,20 @@ static void test_prepare_diagnostics(void) {
     assert_prepare_fails_with_message(db, "SELECT NEXT VALUE FOR blocked_sequence", "SQL sequence");
     assert_prepare_fails_with_message(db, "SELECT NEXTVAL(blocked_sequence)", "SQL sequence");
     assert_prepare_fails_with_message(db, "SELECT SETVAL(blocked_sequence, ?)", "SQL sequence");
+    assert_prepare_fails_with_message(db, "SHOW USER_STATISTICS", "user-statistics");
+    assert_prepare_fails_with_message(db, "FLUSH TABLE_STATISTICS", "user-statistics");
+    assert_prepare_fails_with_message(db, "SET userstat=1", "user-statistics");
+    assert_prepare_fails_with_message(db, "SET GLOBAL userstat=1", "user-statistics");
+    assert_prepare_fails_with_message(
+        db,
+        "SELECT * FROM INFORMATION_SCHEMA.USER_STATISTICS",
+        "user-statistics"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "SELECT * FROM `information_schema`.`USER_STATISTICS`",
+        "user-statistics"
+    );
 
     stmt = prepare_statement(db, "SELECT JSON_VALID(?)");
     assert(

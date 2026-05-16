@@ -56,6 +56,7 @@ PLUGIN_FEEDBACK=NO
 PLUGIN_PERFSCHEMA=NO
 PLUGIN_SEQUENCE=NO
 PLUGIN_THREAD_POOL_INFO=NO
+PLUGIN_USERSTAT=NO
 ```
 
 `WITH_WSREP=OFF` and `PLUGIN_S3=NO` are required because the initial MariaDB
@@ -69,8 +70,8 @@ engine, SQL `HELP`,
 `PROCEDURE ANALYSE()`, generic SELECT procedure runtime, stored-program runtime,
 dynamic UDF lookup/execution, binary-log transaction, event-write, and
 event-root core, native MyISAM table-maintenance and key-cache administration,
-socket authentication, feedback, Performance Schema, and thread-pool info are
-disabled
+socket authentication, feedback, Performance Schema, thread-pool info, and the
+user-statistics plugin are disabled
 because they are server-administration, blocking utility, Oracle
 compatibility, legacy XML helper, spatial-function, MariaDB-specific
 formatting, schema validation, table-function projection, packed semi-structured
@@ -78,8 +79,8 @@ BLOB handling, direct storage-engine cursor, unsupported sequence object/value
 state, help-table lookup, result-set analysis, SELECT result-set extension hook,
 catalog-bypassing generated virtual tables, unsupported non-table objects,
 dynamic extension, server topology, engine-file maintenance, or server/client
-file surfaces, not core MyLite embedded runtime behavior. The retained
-`sql_embedded` C++ sources are also compiled with
+file and server-observability surfaces, not core MyLite embedded runtime
+behavior. The retained `sql_embedded` C++ sources are also compiled with
 `-fno-exceptions`; the flag is not applied to first-party MyLite code or to all
 MariaDB targets.
 
@@ -101,8 +102,8 @@ current MyLite embedded profile patches applied.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 27,180,040 bytes / 25.92 MiB |
-| Archive members | 672 |
+| Archive size | 27,160,192 bytes / 25.90 MiB |
+| Archive members | 671 |
 
 The build found system OpenSSL 3.6.2, zlib, Curses, CURL, GSSAPI, BZip2, LZ4,
 LibLZMA, LZO, PCRE2, and Zstandard support on this machine.
@@ -162,6 +163,13 @@ sets `PLUGIN_SEQUENCE=NO`, omits `sequence.cc`, stops advertising `SEQUENCE`
 through `SHOW ENGINES`, and leaves ordinary catalog-backed tables, including
 tables whose names resemble `seq_1_to_10`, under MyLite storage routing.
 
+The user-statistics plugin trim reduced the default archive by a further
+19,848 bytes and removed one archive member. The disabled profile now sets
+`PLUGIN_USERSTAT=NO`, omits `userstat.cc`, rejects direct and prepared
+user-statistics `SHOW`, `FLUSH`, `userstat` system-variable assignment, and
+`INFORMATION_SCHEMA` statistics-table surfaces before MariaDB execution, and
+leaves ordinary SQL user variables available.
+
 ## Enabled Surface
 
 The profile keeps the MariaDB components needed by the current embedded
@@ -174,8 +182,7 @@ static embedded server library and static embedded engines/plugins such as:
 - InnoDB
 - MyISAM and MRG_MyISAM
 - partition support
-- selected compatibility helpers such as type handlers, user variables, and
-  userstat
+- selected compatibility helpers such as type handlers and user variables
 
 Some configured module metadata remains visible even when the
 `libmariadbd.a` target does not build the module into the embedded archive.
@@ -221,6 +228,7 @@ The profile explicitly disables:
 - feedback plugin
 - Performance Schema
 - thread-pool info plugin
+- user-statistics plugin
 
 After the storage-engine skeleton slice, MariaDB configure also discovers
 `MYLITE_SE` and leaves it disabled by default. Opt-in handler smoke builds use
@@ -247,11 +255,11 @@ Measured on 2026-05-16 with the same host and toolchain as the default profile:
 | Field | Value |
 | --- | --- |
 | Archive | `build/mariadb-mylite-storage-smoke/libmysqld/libmariadbd.a` |
-| Archive size | 27,406,592 bytes / 26.14 MiB |
-| Archive members | 676 |
+| Archive size | 27,340,776 bytes / 26.07 MiB |
+| Archive members | 674 |
 
-This is 101,160 bytes smaller than the previous SQL HANDLER trim
-storage-smoke archive and removes two archive members.
+This is 19,848 bytes smaller than the previous virtual sequence storage-engine
+trim storage-smoke archive and removes one archive member.
 
 This smoke path now covers static plugin registration, current routed schema
 namespaces and DDL/DML, BLACKHOLE row-discard routing, MEMORY/HEAP volatile-row
