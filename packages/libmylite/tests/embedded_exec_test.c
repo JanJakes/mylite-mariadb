@@ -305,6 +305,7 @@ static void test_server_surfaces_are_disabled(void) {
     assert_engine_missing(db, "InnoDB");
     assert_engine_missing(db, "MyISAM");
     assert_engine_missing(db, "MRG_MyISAM");
+    assert_engine_missing(db, "partition");
 
     assert_exec_fails(db, "CREATE USER 'mylite_probe'@'localhost' IDENTIFIED BY 'secret'");
     assert_exec_fails(db, "GRANT SELECT ON *.* TO 'mylite_probe'@'localhost'");

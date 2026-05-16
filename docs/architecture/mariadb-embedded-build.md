@@ -134,8 +134,8 @@ The opt-in MariaDB MTR smoke runner uses a separate
 `cmake/mariadb-mtr-smoke.cmake` profile and `build/mariadb-mtr-smoke`
 directory. That profile inherits the embedded baseline and re-enables only the
 view, stored-program, trigger, and binlog system-variable runtime pieces needed
-for MTR bootstrap; it keeps native InnoDB, MyISAM, and MRG_MyISAM disabled and
-runs with Aria as the default storage engine.
+for MTR bootstrap; it keeps native InnoDB, MyISAM, MRG_MyISAM, and partition
+disabled and runs with Aria as the default storage engine.
 
 ## Measurement
 
@@ -150,8 +150,8 @@ current MyLite embedded profile patches applied.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 21,020,816 bytes / 20.05 MiB |
-| Archive members | 481 |
+| Archive size | 20,699,784 bytes / 19.74 MiB |
+| Archive members | 480 |
 
 The build found system OpenSSL 3.6.2, Curses, CURL, GSSAPI, BZip2, LZ4,
 LibLZMA, LZO, PCRE2, and Zstandard support on this machine. MariaDB server
@@ -223,6 +223,13 @@ handler/runtime members such as `ha_innodb.cc`, `handler0alter.cc`,
 `fil0fil.cc`, `fsp0fsp.cc`, and `log0log.cc`, makes MyLite omit the InnoDB
 startup option when native InnoDB is absent, and keeps ordinary routed
 `ENGINE=InnoDB` DDL/DML covered through MyLite storage.
+
+The native partition engine trim reduced the default archive by a further
+321,032 bytes and removed one archive member. The disabled profile now sets
+`PLUGIN_PARTITION=NO`, omits native `partition` plugin registration and the
+`ha_partition.cc` handler wrapper from the embedded archive, keeps parser-side
+partition syntax available for explicit MyLite rejection, and leaves real
+partition metadata, pruning, and per-partition storage routing planned.
 
 The JSON schema validation trim reduced the default archive by a further
 104,760 bytes and removed one archive member. The disabled profile now omits
@@ -399,7 +406,6 @@ static embedded server library and static embedded engines/plugins such as:
 - Aria
 - CSV
 - HEAP/MEMORY
-- partition support
 - selected compatibility helpers such as type handlers and user variables
 
 Some configured module metadata remains visible even when the
@@ -461,6 +467,8 @@ The profile explicitly disables:
   archive members, and native-MyISAM-only system variables
 - native InnoDB storage-engine registration, native handler/runtime archive
   members, tablespaces, redo, undo, and native InnoDB dictionary state
+- native partition storage-engine wrapper registration and handler archive
+  member
 - `mysql.servers` foreign-server metadata cache
 - external backup SQL runtime for `BACKUP STAGE` / `BACKUP LOCK`
 - query cache runtime and administration
@@ -508,8 +516,8 @@ Measured on 2026-05-16 with the same host and toolchain as the default profile:
 | Field | Value |
 | --- | --- |
 | Archive | `build/mariadb-mylite-storage-smoke/libmysqld/libmariadbd.a` |
-| Archive size | 21,216,208 bytes / 20.23 MiB |
-| Archive members | 484 |
+| Archive size | 20,895,184 bytes / 19.93 MiB |
+| Archive members | 483 |
 
 The opt-in archive also replaces `event_parse_data.cc.o` with
 `mylite_event_parse_data_disabled.cc.o`, `log_event_server.cc.o` with
@@ -519,7 +527,8 @@ The opt-in archive also replaces `event_parse_data.cc.o` with
 `vector_mhnsw.cc.o` with `mylite_vector_sql_runtime_disabled.cc.o`; its total
 size includes the current static MyLite handler objects, omits native MyISAM
 and MRG_MyISAM engine members, omits native InnoDB engine members, and should
-be compared only against matching storage-smoke sources.
+omits the native partition handler wrapper, and should be compared only against
+matching storage-smoke sources.
 
 This smoke path now covers static plugin registration, current routed schema
 namespaces and DDL/DML, BLACKHOLE row-discard routing, MEMORY/HEAP volatile-row
@@ -544,19 +553,19 @@ outputs:
 
 | Artifact | Size | Stripped Size | Members | Global Symbols |
 | --- | ---: | ---: | ---: | ---: |
-| MariaDB embedded archive | 21,020,816 bytes / 20.05 MiB | n/a | 481 | n/a |
-| MariaDB storage-smoke archive | 21,216,208 bytes / 20.23 MiB | n/a | 484 | n/a |
-| Embedded open-close smoke | 14,125,776 bytes / 13.47 MiB | 12,934,464 bytes / 12.34 MiB | n/a | 15,000 |
-| Embedded exec smoke | 14,212,104 bytes / 13.55 MiB | 13,017,208 bytes / 12.41 MiB | n/a | 15,000 |
-| Embedded statement smoke | 14,175,584 bytes / 13.52 MiB | 12,983,936 bytes / 12.38 MiB | n/a | 15,000 |
-| Embedded warning smoke | 14,125,408 bytes / 13.47 MiB | 12,934,256 bytes / 12.34 MiB | n/a | 15,000 |
-| Embedded comparison smoke | 14,232,208 bytes / 13.57 MiB | 12,985,024 bytes / 12.38 MiB | n/a | 15,002 |
-| Storage-smoke open-close smoke | 14,263,232 bytes / 13.60 MiB | 13,018,512 bytes / 12.42 MiB | n/a | 15,000 |
-| Storage-smoke exec smoke | 14,349,496 bytes / 13.68 MiB | 13,101,176 bytes / 12.49 MiB | n/a | 15,000 |
-| Storage-smoke statement smoke | 14,313,008 bytes / 13.65 MiB | 13,067,952 bytes / 12.46 MiB | n/a | 15,000 |
-| Storage-smoke warning smoke | 14,279,392 bytes / 13.62 MiB | 13,034,816 bytes / 12.43 MiB | n/a | 15,000 |
-| Storage-smoke comparison smoke | 14,363,168 bytes / 13.70 MiB | 13,069,056 bytes / 12.46 MiB | n/a | 15,002 |
-| Storage-engine smoke | 14,598,880 bytes / 13.92 MiB | 13,349,536 bytes / 12.73 MiB | n/a | 15,000 |
+| MariaDB embedded archive | 20,699,784 bytes / 19.74 MiB | n/a | 480 | n/a |
+| MariaDB storage-smoke archive | 20,895,184 bytes / 19.93 MiB | n/a | 483 | n/a |
+| Embedded open-close smoke | 13,914,400 bytes / 13.27 MiB | 12,755,344 bytes / 12.16 MiB | n/a | 14,897 |
+| Embedded exec smoke | 14,000,600 bytes / 13.35 MiB | 12,837,944 bytes / 12.24 MiB | n/a | 14,897 |
+| Embedded statement smoke | 13,964,096 bytes / 13.32 MiB | 12,804,688 bytes / 12.21 MiB | n/a | 14,897 |
+| Embedded warning smoke | 13,914,048 bytes / 13.27 MiB | 12,755,136 bytes / 12.16 MiB | n/a | 14,897 |
+| Embedded comparison smoke | 14,020,848 bytes / 13.37 MiB | 12,805,952 bytes / 12.21 MiB | n/a | 14,899 |
+| Storage-smoke open-close smoke | 14,051,840 bytes / 13.40 MiB | 12,839,360 bytes / 12.24 MiB | n/a | 14,897 |
+| Storage-smoke exec smoke | 14,138,104 bytes / 13.48 MiB | 12,922,024 bytes / 12.32 MiB | n/a | 14,897 |
+| Storage-smoke statement smoke | 14,101,664 bytes / 13.45 MiB | 12,888,816 bytes / 12.29 MiB | n/a | 14,897 |
+| Storage-smoke warning smoke | 14,068,000 bytes / 13.42 MiB | 12,855,664 bytes / 12.26 MiB | n/a | 14,897 |
+| Storage-smoke comparison smoke | 14,151,808 bytes / 13.50 MiB | 12,889,888 bytes / 12.29 MiB | n/a | 14,899 |
+| Storage-engine smoke | 14,370,896 bytes / 13.71 MiB | 13,153,760 bytes / 12.54 MiB | n/a | 14,897 |
 
 ## Offline Build Caveat
 
