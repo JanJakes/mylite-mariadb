@@ -190,9 +190,20 @@ ELSE()
   SET(MYLITE_BACKUP_RUNTIME_SOURCE ../sql/mylite_backup_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_QUERY_CACHE_RUNTIME "Build query cache runtime" ON)
+IF(MYLITE_WITH_QUERY_CACHE_RUNTIME)
+  ADD_DEFINITIONS(-DMYLITE_WITH_QUERY_CACHE_RUNTIME=1)
+  SET(MYLITE_QUERY_CACHE_SOURCE ../sql/sql_cache.cc)
+  SET(MYLITE_EMBEDDED_QUERY_CACHE_SOURCE emb_qcache.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_QUERY_CACHE_RUNTIME=0)
+  SET(MYLITE_QUERY_CACHE_SOURCE ../sql/mylite_query_cache_disabled.cc)
+  SET(MYLITE_EMBEDDED_QUERY_CACHE_SOURCE)
+ENDIF()
+
 OPTION(MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS "Compile embedded SQL with C++ exceptions" ON)
 
-SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc 
+SET(SQL_EMBEDDED_SOURCES ${MYLITE_EMBEDDED_QUERY_CACHE_SOURCE} libmysqld.c lib_sql.cc
            libmysql.c ../sql-common/errmsg.c
            ../sql-common/client.c
            ../sql/cset_narrowing.cc
@@ -227,7 +238,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/rpl_injector.cc ../sql/set_var.cc ../sql/spatial.cc 
            ../sql/sp_cache.cc ../sql/sp.cc ../sql/sp_head.cc 
            ../sql/sp_pcontext.cc ../sql/sp_rcontext.cc ../sql/sql_acl.cc 
-           ${MYLITE_PROCEDURE_ANALYSE_SOURCE} ../sql/sql_base.cc ../sql/sql_cache.cc
+           ${MYLITE_PROCEDURE_ANALYSE_SOURCE} ../sql/sql_base.cc ${MYLITE_QUERY_CACHE_SOURCE}
            ../sql/sql_class.cc ../sql/sql_crypt.cc ../sql/sql_cursor.cc 
            ../sql/sql_db.cc ../sql/sql_delete.cc ../sql/sql_derived.cc 
            ../sql/sql_do.cc ../sql/sql_error.cc ${MYLITE_SQL_HANDLER_SOURCE}

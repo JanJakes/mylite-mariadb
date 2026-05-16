@@ -106,5 +106,8 @@ set(MYLITE_WITH_FOREIGN_SERVER_METADATA OFF CACHE BOOL "Omit mysql.servers metad
 # MyLite rejects external backup-tool SQL and uses file-owned recovery.
 set(MYLITE_WITH_BACKUP_RUNTIME OFF CACHE BOOL "Omit external backup SQL runtime" FORCE)
 
+# MyLite reports no server-global query cache and rejects cache administration.
+set(MYLITE_WITH_QUERY_CACHE_RUNTIME OFF CACHE BOOL "Omit query cache runtime" FORCE)
+
 # MyLite's embedded SQL profile has no retained C++ exception users.
 set(MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS OFF CACHE BOOL "Enable embedded SQL C++ exceptions" FORCE)

@@ -48,6 +48,7 @@ command, SQL sequence value surface, virtual sequence storage engine, SQL HELP c
 table-maintenance/key-cache administration, user-statistics,
 foreign-server metadata,
 external backup SQL,
+query cache administration,
 stored-program runtime stubbing,
 dynamic UDF runtime, and non-table-object policies, and representative
 `SHOW CREATE TABLE` round-trip export/import.
@@ -149,6 +150,7 @@ application-schema suites remain planned.
 | User statistics | ➖&nbsp;Out&nbsp;of&nbsp;scope | MariaDB's user-statistics information-schema plugin is a server-observability surface, not core embedded file-owned behavior; the default embedded profile omits `userstat.cc`, direct/prepared `SHOW *_STATISTICS`, `FLUSH *_STATISTICS`, `userstat` system-variable assignment, and `INFORMATION_SCHEMA` user-statistics table access are rejected before MariaDB execution, and ordinary SQL user variables such as `@userstat` remain available |
 | Foreign-server metadata | ➖&nbsp;Out&nbsp;of&nbsp;scope | MariaDB's `mysql.servers` cache is global remote-engine metadata, not MyLite file-owned application table state; the default embedded profile replaces `sql_servers.cc` with `mylite_sql_servers_disabled.cc`, embedded startup does not read `mysql.servers`, and direct/prepared `CREATE SERVER`, `CREATE OR REPLACE SERVER`, `ALTER SERVER`, `DROP SERVER`, and `SHOW CREATE SERVER` are rejected before MariaDB execution |
 | External backup SQL | ➖&nbsp;Out&nbsp;of&nbsp;scope | MariaDB's `BACKUP STAGE`, `BACKUP LOCK`, and `BACKUP UNLOCK` statements coordinate external physical backup tools against a datadir and engine-owned table files, not MyLite's file-owned embedded API; the default embedded profile replaces `backup.cc` with `mylite_backup_disabled.cc`, direct/prepared backup commands are rejected before MariaDB execution, and retained DDL backup hooks are no-ops so ordinary DDL remains available |
+| Query cache | ➖&nbsp;Out&nbsp;of&nbsp;scope | MariaDB's query cache is a server-global `SELECT` result cache, not durable file-owned MyLite behavior; the default embedded profile replaces `sql_cache.cc` with `mylite_query_cache_disabled.cc`, omits `emb_qcache.cc`, reports `have_query_cache=NO`, rejects direct/prepared `FLUSH QUERY CACHE`, `RESET QUERY CACHE`, and query-cache system-variable assignment before MariaDB execution, and leaves ordinary `SELECT`, `SELECT SQL_CACHE`, and `SELECT SQL_NO_CACHE` available as uncached execution paths |
 
 ## Rows, Indexes, And Constraints
 

@@ -4982,6 +4982,7 @@ static int init_server_components()
   if (tdc_init() || hostname_cache_init())
     unireg_abort(1);
 
+#if MYLITE_WITH_QUERY_CACHE_RUNTIME
   query_cache_set_min_res_unit(query_cache_min_res_unit);
   query_cache_result_size_limit(query_cache_limit);
   /* if we set size of QC non zero in config then probably we want it ON */
@@ -4994,6 +4995,13 @@ static int init_server_components()
   query_cache_init();
   DBUG_ASSERT(query_cache_size < ULONG_MAX);
   query_cache_resize((ulong)query_cache_size);
+#else
+  query_cache_size= 0;
+  query_cache_limit= 0;
+  query_cache_min_res_unit= 0;
+  global_system_variables.query_cache_type= 0;
+  query_cache_init();
+#endif
   my_rnd_init(&sql_rand,(ulong) server_start_time,(ulong) server_start_time/2);
   setup_fpu();
   init_thr_lock();
@@ -8148,7 +8156,11 @@ static int mysql_init_variables(void)
 #else
   have_dlopen=SHOW_OPTION_NO;
 #endif
+#if MYLITE_WITH_QUERY_CACHE_RUNTIME
   have_query_cache=SHOW_OPTION_YES;
+#else
+  have_query_cache=SHOW_OPTION_NO;
+#endif
   have_geometry=SHOW_OPTION_YES;
   have_rtree_keys=SHOW_OPTION_YES;
 #ifdef HAVE_CRYPT

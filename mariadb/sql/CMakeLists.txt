@@ -188,6 +188,15 @@ ELSE()
   SET(MYLITE_BACKUP_RUNTIME_SOURCE mylite_backup_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_QUERY_CACHE_RUNTIME "Build query cache runtime" ON)
+IF(MYLITE_WITH_QUERY_CACHE_RUNTIME)
+  ADD_DEFINITIONS(-DMYLITE_WITH_QUERY_CACHE_RUNTIME=1)
+  SET(MYLITE_QUERY_CACHE_SOURCE sql_cache.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_QUERY_CACHE_RUNTIME=0)
+  SET(MYLITE_QUERY_CACHE_SOURCE mylite_query_cache_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_ORACLE_SQL_MODE "Build Oracle SQL mode parser" ON)
 IF(MYLITE_WITH_ORACLE_SQL_MODE)
   SET(MYLITE_ORACLE_PARSER_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/yy_oracle.cc)
@@ -229,7 +238,7 @@ SET (SQL_SOURCE
                set_var.cc
                slave.cc sp.cc sp_cache.cc sp_head.cc sp_pcontext.cc
                sp_rcontext.cc spatial.cc sql_acl.cc sql_analyse.cc sql_base.cc
-               sql_cache.cc sql_class.cc sql_client.cc sql_crypt.cc
+               ${MYLITE_QUERY_CACHE_SOURCE} sql_class.cc sql_client.cc sql_crypt.cc
                sql_cursor.cc sql_db.cc sql_delete.cc sql_derived.cc
                sql_digest.cc sql_do.cc
                sql_error.cc ${MYLITE_SQL_HANDLER_SOURCE} sql_get_diagnostics.cc

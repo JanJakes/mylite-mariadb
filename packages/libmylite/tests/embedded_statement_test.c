@@ -423,6 +423,15 @@ static void test_prepare_diagnostics(void) {
     assert_prepare_fails_with_message(db, "BACKUP STAGE BLOCK_COMMIT", "external backup");
     assert_prepare_fails_with_message(db, "BACKUP LOCK backup_probe", "external backup");
     assert_prepare_fails_with_message(db, "BACKUP UNLOCK", "external backup");
+    assert_prepare_fails_with_message(db, "FLUSH QUERY CACHE", "query-cache");
+    assert_prepare_fails_with_message(db, "RESET QUERY CACHE", "query-cache");
+    assert_prepare_fails_with_message(db, "SET query_cache_type=ON", "query-cache");
+    assert_prepare_fails_with_message(db, "SET GLOBAL query_cache_size=1048576", "query-cache");
+    assert_prepare_fails_with_message(
+        db,
+        "SET STATEMENT query_cache_type=ON FOR SELECT 1",
+        "query-cache"
+    );
 
     assert_prepare_fails_with_message(db, "CHECK TABLE maintenance_probe", "table-maintenance");
     assert_prepare_fails_with_message(db, "ANALYZE TABLE maintenance_probe", "table-maintenance");

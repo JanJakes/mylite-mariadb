@@ -326,6 +326,7 @@ std::string field_string(const char *value, unsigned int length);
 const char *unsupported_sql_surface_message(std::string_view sql);
 bool is_server_surface_sql(std::string_view sql);
 bool is_backup_sql(std::string_view sql);
+bool is_query_cache_sql(std::string_view sql);
 bool is_table_maintenance_sql(std::string_view sql);
 bool is_sql_handler_command_sql(std::string_view sql);
 bool is_help_command_sql(std::string_view sql);
@@ -342,6 +343,8 @@ bool is_user_statistics_sql(std::string_view sql);
 bool is_xml_sql_function_sql(std::string_view sql);
 bool is_oracle_sql_mode_sql(std::string_view sql);
 bool sql_set_assignment_has_oracle_sql_mode(std::string_view assignment);
+std::string_view sql_set_statement_assignment_span(std::string_view sql);
+bool sql_set_assignment_targets_query_cache_variable(std::string_view assignment);
 std::string_view pop_sql_set_assignment(std::string_view &sql);
 bool sql_set_assignment_targets_variable(std::string_view &assignment, const char *keyword);
 bool is_non_table_object_sql(std::string_view sql);
@@ -2029,6 +2032,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_backup_sql(sql)) {
         return "unsupported external backup SQL surface";
     }
+    if (is_query_cache_sql(sql)) {
+        return "unsupported query-cache SQL surface";
+    }
     if (is_table_maintenance_sql(sql)) {
         return "unsupported table-maintenance SQL surface";
     }
@@ -2166,6 +2172,47 @@ bool is_server_surface_sql(std::string_view sql) {
 bool is_backup_sql(std::string_view sql) {
     std::string_view first;
     return pop_sql_scanned_token(sql, first) && sql_token_equals(first, "BACKUP");
+}
+
+bool is_query_cache_sql(std::string_view sql) {
+    std::string_view token;
+    if (!pop_sql_scanned_token(sql, token)) {
+        return false;
+    }
+
+    if (sql_token_equals(token, "FLUSH")) {
+        if (!pop_sql_scanned_token(sql, token)) {
+            return false;
+        }
+        if (sql_token_equals(token, "LOCAL") || sql_token_equals(token, "NO_WRITE_TO_BINLOG")) {
+            if (!pop_sql_scanned_token(sql, token)) {
+                return false;
+            }
+        }
+        if (!sql_token_equals(token, "QUERY")) {
+            return false;
+        }
+        return pop_sql_scanned_token(sql, token) && sql_token_equals(token, "CACHE");
+    }
+
+    if (sql_token_equals(token, "RESET")) {
+        return pop_sql_scanned_token(sql, token) && sql_token_equals(token, "QUERY") &&
+               pop_sql_scanned_token(sql, token) && sql_token_equals(token, "CACHE");
+    }
+
+    if (sql_token_equals(token, "SET")) {
+        std::string_view maybe_statement = sql;
+        if (pop_sql_scanned_token(maybe_statement, token) && sql_token_equals(token, "STATEMENT")) {
+            sql = sql_set_statement_assignment_span(maybe_statement);
+        }
+        while (!skip_sql_leading_noise(sql).empty()) {
+            if (sql_set_assignment_targets_query_cache_variable(pop_sql_set_assignment(sql))) {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 bool is_table_maintenance_sql(std::string_view sql) {
@@ -2313,6 +2360,99 @@ bool sql_set_assignment_has_oracle_sql_mode(std::string_view assignment) {
         return false;
     }
     return sql_span_contains_token(assignment, "ORACLE");
+}
+
+std::string_view sql_set_statement_assignment_span(std::string_view sql) {
+    const std::string_view assignments = sql;
+    std::string_view scan = sql;
+    unsigned paren_depth = 0;
+
+    while (!scan.empty()) {
+        if (scan.front() == '\'' || scan.front() == '"' || scan.front() == '`') {
+            skip_sql_quoted_span(scan, scan.front());
+            continue;
+        }
+
+        if (scan.size() >= 2U && scan[0] == '-' && scan[1] == '-') {
+            const std::size_t newline = scan.find('\n');
+            if (newline == std::string_view::npos) {
+                break;
+            }
+            scan.remove_prefix(newline + 1U);
+            continue;
+        }
+
+        if (scan.front() == '#') {
+            const std::size_t newline = scan.find('\n');
+            if (newline == std::string_view::npos) {
+                break;
+            }
+            scan.remove_prefix(newline + 1U);
+            continue;
+        }
+
+        if (scan.size() >= 2U && scan[0] == '/' && scan[1] == '*') {
+            const std::size_t end = scan.find("*/");
+            if (end == std::string_view::npos) {
+                break;
+            }
+            scan.remove_prefix(end + 2U);
+            continue;
+        }
+
+        if (scan.front() == '(') {
+            ++paren_depth;
+            scan.remove_prefix(1);
+            continue;
+        }
+
+        if (scan.front() == ')' && paren_depth > 0U) {
+            --paren_depth;
+            scan.remove_prefix(1);
+            continue;
+        }
+
+        if (paren_depth == 0U &&
+            (std::isalnum(static_cast<unsigned char>(scan.front())) != 0 || scan.front() == '_')) {
+            const std::size_t token_end = scan.find_first_not_of(
+                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
+            );
+            const std::size_t token_size =
+                token_end == std::string_view::npos ? scan.size() : token_end;
+            const std::string_view token = scan.substr(0, token_size);
+            if (sql_token_equals(token, "FOR")) {
+                const std::size_t assignment_size =
+                    static_cast<std::size_t>(scan.data() - assignments.data());
+                return assignments.substr(0, assignment_size);
+            }
+            scan.remove_prefix(token_size);
+            continue;
+        }
+
+        scan.remove_prefix(1);
+    }
+
+    return assignments;
+}
+
+bool sql_set_assignment_targets_query_cache_variable(std::string_view assignment) {
+    constexpr const char *k_query_cache_variables[] = {
+        "QUERY_CACHE_LIMIT",
+        "QUERY_CACHE_MIN_RES_UNIT",
+        "QUERY_CACHE_SIZE",
+        "QUERY_CACHE_STRIP_COMMENTS",
+        "QUERY_CACHE_TYPE",
+        "QUERY_CACHE_WLOCK_INVALIDATE",
+    };
+
+    for (const char *variable : k_query_cache_variables) {
+        std::string_view candidate = assignment;
+        if (sql_set_assignment_targets_variable(candidate, variable)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 std::string_view pop_sql_set_assignment(std::string_view &sql) {

@@ -24,6 +24,7 @@ static void test_callback_abort(void);
 static void test_syntax_error_diagnostics(void);
 static void test_server_surfaces_are_disabled(void);
 static void test_backup_sql_is_rejected(void);
+static void test_query_cache_sql_is_rejected(void);
 static void test_table_maintenance_sql_is_rejected(void);
 static void test_sql_handler_commands_are_rejected(void);
 static void test_help_command_is_rejected(void);
@@ -50,6 +51,7 @@ static void assert_variable_value(mylite_db *db, const char *name, const char *v
 static void assert_variable_value_or_missing(mylite_db *db, const char *name, const char *value);
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_backup_exec_fails(mylite_db *db, const char *sql);
+static void assert_query_cache_exec_fails(mylite_db *db, const char *sql);
 static void assert_table_maintenance_exec_fails(mylite_db *db, const char *sql);
 static void assert_sql_handler_exec_fails(mylite_db *db, const char *sql);
 static void assert_help_command_exec_fails(mylite_db *db, const char *sql);
@@ -90,6 +92,7 @@ int main(void) {
     test_syntax_error_diagnostics();
     test_server_surfaces_are_disabled();
     test_backup_sql_is_rejected();
+    test_query_cache_sql_is_rejected();
     test_table_maintenance_sql_is_rejected();
     test_sql_handler_commands_are_rejected();
     test_help_command_is_rejected();
@@ -300,6 +303,47 @@ static void test_backup_sql_is_rejected(void) {
             db,
             "SELECT 'BACKUP STAGE START' AS backup_stage_text, "
             "'BACKUP LOCK backup_probe' AS backup_lock_text",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_query_cache_sql_is_rejected(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_variable_value(db, "have_query_cache", "NO");
+    assert_variable_value(db, "query_cache_type", "OFF");
+    assert_variable_value(db, "query_cache_size", "0");
+
+    assert(mylite_exec(db, "SELECT SQL_CACHE 1 AS cache_hint", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(db, "SELECT SQL_NO_CACHE 1 AS no_cache_hint", NULL, NULL, NULL) == MYLITE_OK
+    );
+
+    assert_query_cache_exec_fails(db, "FLUSH QUERY CACHE");
+    assert_query_cache_exec_fails(db, "FLUSH NO_WRITE_TO_BINLOG QUERY CACHE");
+    assert_query_cache_exec_fails(db, "RESET QUERY CACHE");
+    assert_query_cache_exec_fails(db, "SET query_cache_type=ON");
+    assert_query_cache_exec_fails(db, "SET GLOBAL query_cache_size=1048576");
+    assert_query_cache_exec_fails(db, "SET @@GLOBAL.query_cache_size=1048576");
+    assert_query_cache_exec_fails(db, "SET SESSION query_cache_wlock_invalidate=ON");
+    assert_query_cache_exec_fails(db, "SET STATEMENT query_cache_type=ON FOR SELECT 1");
+    assert_query_cache_exec_fails(db, "/*! RESET QUERY CACHE */");
+    assert_query_cache_exec_fails(db, "/*!50600 FLUSH QUERY CACHE */");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT 'RESET QUERY CACHE' AS reset_cache_text, "
+            "'SET query_cache_type=ON' AS query_cache_type_text",
             NULL,
             NULL,
             NULL
@@ -1059,6 +1103,18 @@ static void assert_backup_exec_fails(mylite_db *db, const char *sql) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "external backup") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_query_cache_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "query-cache") != NULL);
     mylite_free(errmsg);
 }
 
