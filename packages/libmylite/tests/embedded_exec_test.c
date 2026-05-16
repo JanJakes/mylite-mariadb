@@ -37,6 +37,7 @@ static void test_table_maintenance_sql_is_rejected(void);
 static void test_sql_handler_commands_are_rejected(void);
 static void test_help_command_is_rejected(void);
 static void test_static_show_info_is_rejected(void);
+static void test_status_metadata_is_empty(void);
 static void test_processlist_metadata_is_rejected(void);
 static void test_routine_metadata_is_empty(void);
 static void test_procedure_analyse_is_rejected(void);
@@ -116,6 +117,7 @@ int main(void) {
     test_sql_handler_commands_are_rejected();
     test_help_command_is_rejected();
     test_static_show_info_is_rejected();
+    test_status_metadata_is_empty();
     test_processlist_metadata_is_rejected();
     test_routine_metadata_is_empty();
     test_procedure_analyse_is_rejected();
@@ -532,6 +534,77 @@ static void test_static_show_info_is_rejected(void) {
             NULL
         ) == MYLITE_OK
     );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_status_metadata_is_empty(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    int session_status_rows = 0;
+    int explicit_session_status_rows = 0;
+    int global_status_rows = 0;
+    int local_status_rows = 0;
+    scalar_context global_status_count = {
+        .column_name = "status_count",
+        .value = "0",
+        .rows = 0,
+    };
+    scalar_context session_status_count = {
+        .column_name = "status_count",
+        .value = "0",
+        .rows = 0,
+    };
+
+    assert(
+        mylite_exec(db, "SHOW STATUS", count_only_callback, &session_status_rows, NULL) == MYLITE_OK
+    );
+    assert(session_status_rows == 0);
+    assert(
+        mylite_exec(
+            db,
+            "SHOW SESSION STATUS",
+            count_only_callback,
+            &explicit_session_status_rows,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(explicit_session_status_rows == 0);
+    assert(
+        mylite_exec(db, "SHOW GLOBAL STATUS", count_only_callback, &global_status_rows, NULL) ==
+        MYLITE_OK
+    );
+    assert(global_status_rows == 0);
+    assert(
+        mylite_exec(db, "SHOW LOCAL STATUS", count_only_callback, &local_status_rows, NULL) ==
+        MYLITE_OK
+    );
+    assert(local_status_rows == 0);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) AS status_count FROM INFORMATION_SCHEMA.GLOBAL_STATUS",
+            scalar_callback,
+            &global_status_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(global_status_count.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) AS status_count FROM INFORMATION_SCHEMA.SESSION_STATUS",
+            scalar_callback,
+            &session_status_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(session_status_count.rows == 1);
+    assert(mylite_exec(db, "SHOW VARIABLES LIKE 'version'", NULL, NULL, NULL) == MYLITE_OK);
 
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);

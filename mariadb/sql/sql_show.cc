@@ -54,6 +54,9 @@
 #ifndef MYLITE_WITH_STATIC_SHOW_INFO
 #define MYLITE_WITH_STATIC_SHOW_INFO 1
 #endif
+#ifndef MYLITE_WITH_STATUS_METADATA
+#define MYLITE_WITH_STATUS_METADATA 1
+#endif
 #ifndef MYLITE_WITH_PROCESSLIST_METADATA
 #define MYLITE_WITH_PROCESSLIST_METADATA 1
 #endif
@@ -2925,7 +2928,8 @@ static const char *thread_state_info(THD *tmp)
   return "";
 }
 
-#if !MYLITE_WITH_PROCESSLIST_METADATA || !MYLITE_WITH_ROUTINE_METADATA
+#if !MYLITE_WITH_STATUS_METADATA || !MYLITE_WITH_PROCESSLIST_METADATA || \
+    !MYLITE_WITH_ROUTINE_METADATA
 static int mylite_fill_empty_schema_table(THD *, TABLE_LIST *, COND *)
 {
   return 0;
@@ -3598,8 +3602,10 @@ int fill_schema_processlist(THD* thd, TABLE_LIST* tables, COND* cond)
 *****************************************************************************/
 
 DYNAMIC_ARRAY all_status_vars;
-static bool status_vars_inited= 0;
 ulonglong status_var_array_version= 0;
+
+#if MYLITE_WITH_STATUS_METADATA
+static bool status_vars_inited= 0;
 
 C_MODE_START
 static int show_var_cmp(const void *var1, const void *var2)
@@ -3776,6 +3782,28 @@ void remove_status_vars(SHOW_VAR *list)
     shrink_var_array(&all_status_vars);
   }
 }
+#else
+int add_status_vars(SHOW_VAR *)
+{
+  return 0;
+}
+
+void init_status_vars()
+{
+}
+
+void reset_status_vars()
+{
+}
+
+void free_status_vars()
+{
+}
+
+void remove_status_vars(SHOW_VAR *)
+{
+}
+#endif
 
 /* Current version of the all_status_vars.  */
 ulonglong get_status_vars_version(void)
@@ -8788,6 +8816,7 @@ int fill_i_s_sql_functions(THD *thd, TABLE_LIST *tables, COND *cond)
 }
 
 
+#if MYLITE_WITH_STATUS_METADATA
 int fill_status(THD *thd, TABLE_LIST *tables, COND *cond)
 {
   DBUG_ENTER("fill_status");
@@ -8834,6 +8863,7 @@ int fill_status(THD *thd, TABLE_LIST *tables, COND *cond)
   mysql_rwlock_unlock(&LOCK_all_status_vars);
   DBUG_RETURN(res);
 }
+#endif
 
 
 /*
@@ -10918,7 +10948,11 @@ ST_SCHEMA_TABLE schema_tables[]=
   {"FILES"_Lex_ident_i_s_table, Show::files_fields_info, 0,
    hton_fill_schema_table, 0, 0, -1, -1, 0, 0},
   {"GLOBAL_STATUS"_Lex_ident_i_s_table, Show::variables_fields_info, 0,
+#if MYLITE_WITH_STATUS_METADATA
    fill_status, make_old_format, 0, 0, -1, 0, 0},
+#else
+   mylite_fill_empty_schema_table, make_old_format, 0, 0, -1, 0, 0},
+#endif
   {"GLOBAL_VARIABLES"_Lex_ident_i_s_table, Show::variables_fields_info, 0,
    fill_variables, make_old_format, 0, 0, -1, 0, 0},
   {"KEYWORDS"_Lex_ident_i_s_table, Show::keywords_field_info, 0,
@@ -10979,7 +11013,11 @@ ST_SCHEMA_TABLE schema_tables[]=
   {"SEQUENCES"_Lex_ident_i_s_table, Show::sequence_fields_info, 0,
    get_all_tables, make_old_format, get_schema_sequence_record, 1, 2, 0, 0},
   {"SESSION_STATUS"_Lex_ident_i_s_table, Show::variables_fields_info, 0,
+#if MYLITE_WITH_STATUS_METADATA
    fill_status, make_old_format, 0, 0, -1, 0, 0},
+#else
+   mylite_fill_empty_schema_table, make_old_format, 0, 0, -1, 0, 0},
+#endif
   {"SESSION_VARIABLES"_Lex_ident_i_s_table, Show::variables_fields_info, 0,
    fill_variables, make_old_format, 0, 0, -1, 0, 0},
   {"STATISTICS"_Lex_ident_i_s_table, Show::stat_fields_info, 0,

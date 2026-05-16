@@ -16,6 +16,7 @@ static void test_segment_reads(void);
 static void test_reset_reuse_and_destructors(void);
 static void test_finalize_before_drain(void);
 static void test_close_rejects_active_statement(void);
+static void test_status_metadata_is_empty(void);
 static void test_prepare_diagnostics(void);
 static void test_invalid_indexes(void);
 static void assert_prepare_fails_with_message(mylite_db *db, const char *sql, const char *message);
@@ -38,6 +39,7 @@ int main(void) {
     test_reset_reuse_and_destructors();
     test_finalize_before_drain();
     test_close_rejects_active_statement();
+    test_status_metadata_is_empty();
     test_prepare_diagnostics();
     test_invalid_indexes();
     return 0;
@@ -357,6 +359,56 @@ static void test_close_rejects_active_statement(void) {
     assert(mylite_errcode(db) == MYLITE_BUSY);
     assert(strstr(mylite_errmsg(db), "active statements") != NULL);
     assert(mylite_finalize(stmt) == MYLITE_OK);
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_status_metadata_is_empty(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    mylite_stmt *stmt = NULL;
+
+    stmt = prepare_statement(db, "SHOW STATUS");
+    assert(mylite_column_count(stmt) == 2U);
+    assert(strcmp(mylite_column_name(stmt, 0U), "Variable_name") == 0);
+    assert(strcmp(mylite_column_name(stmt, 1U), "Value") == 0);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+
+    stmt = prepare_statement(db, "SHOW SESSION STATUS");
+    assert(mylite_column_count(stmt) == 2U);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+
+    stmt = prepare_statement(db, "SHOW GLOBAL STATUS");
+    assert(mylite_column_count(stmt) == 2U);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+
+    stmt = prepare_statement(
+        db,
+        "SELECT COUNT(*) AS status_count FROM INFORMATION_SCHEMA.GLOBAL_STATUS"
+    );
+    assert(mylite_column_count(stmt) == 1U);
+    assert(strcmp(mylite_column_name(stmt, 0U), "status_count") == 0);
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(stmt, 0U) == 0);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+
+    stmt = prepare_statement(
+        db,
+        "SELECT COUNT(*) AS status_count FROM INFORMATION_SCHEMA.SESSION_STATUS"
+    );
+    assert(mylite_column_count(stmt) == 1U);
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(stmt, 0U) == 0);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);
     remove_tree(root);

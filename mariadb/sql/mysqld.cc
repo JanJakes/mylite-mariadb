@@ -47,6 +47,9 @@
 #ifndef MYLITE_WITH_JSON_SCHEMA_VALID
 #define MYLITE_WITH_JSON_SCHEMA_VALID 1
 #endif
+#ifndef MYLITE_WITH_STATUS_METADATA
+#define MYLITE_WITH_STATUS_METADATA 1
+#endif
 #if MYLITE_WITH_JSON_SCHEMA_VALID
 #include "json_schema.h"
 #endif
@@ -7051,6 +7054,7 @@ struct my_option my_long_options[]=
 #endif
 };
 
+#if MYLITE_WITH_STATUS_METADATA
 static int show_queries(THD *thd, SHOW_VAR *var, void *,
                         system_status_var *, enum_var_type)
 {
@@ -7872,6 +7876,11 @@ SHOW_VAR status_vars[]= {
 #endif
   {NullS, NullS, SHOW_LONG}
 };
+#else
+SHOW_VAR status_vars[]= {
+  {NullS, NullS, SHOW_LONG}
+};
+#endif
 
 static bool add_terminator(DYNAMIC_ARRAY *options)
 {

@@ -468,6 +468,10 @@ the embedded library model:
   assignment and `INFORMATION_SCHEMA.OPTIMIZER_TRACE`,
 - static SHOW information such as `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and
   `SHOW PRIVILEGES`,
+- status metadata such as `SHOW STATUS`, `SHOW GLOBAL STATUS`,
+  `SHOW SESSION STATUS`, `INFORMATION_SCHEMA.GLOBAL_STATUS`, and
+  `INFORMATION_SCHEMA.SESSION_STATUS`; these surfaces are queryable but return
+  no rows in the default embedded profile,
 - process-list metadata such as `SHOW PROCESSLIST` and
   `SHOW FULL PROCESSLIST`; `INFORMATION_SCHEMA.PROCESSLIST` is queryable but
   returns no rows in the default embedded profile,

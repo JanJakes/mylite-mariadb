@@ -116,6 +116,9 @@ set(MYLITE_WITH_OPTIMIZER_TRACE OFF CACHE BOOL "Omit optimizer trace runtime" FO
 # MyLite rejects static server-information SHOW commands before MariaDB execution.
 set(MYLITE_WITH_STATIC_SHOW_INFO OFF CACHE BOOL "Omit static SHOW information producers" FORCE)
 
+# MyLite does not publish server-global status counters in the core embedded API.
+set(MYLITE_WITH_STATUS_METADATA OFF CACHE BOOL "Omit status metadata producers" FORCE)
+
 # MyLite rejects daemon-style process-list SHOW commands before MariaDB execution.
 set(MYLITE_WITH_PROCESSLIST_METADATA OFF CACHE BOOL "Omit process-list metadata producers" FORCE)
 

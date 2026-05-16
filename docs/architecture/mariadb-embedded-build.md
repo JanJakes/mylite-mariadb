@@ -81,8 +81,8 @@ event-root core, native MyISAM table-maintenance and key-cache administration,
 foreign-server metadata cache, socket authentication, feedback, Performance
 Schema, thread-pool info, the user-statistics plugin, external backup-tool
 SQL runtime, the server-global query cache runtime, statement profiling,
-optimizer trace diagnostics, static SHOW information producers, and
-process-list metadata producers are disabled
+optimizer trace diagnostics, static SHOW information producers, status
+metadata producers, and process-list metadata producers are disabled
 because they are server-administration, blocking utility, Oracle
 compatibility, legacy XML helper, spatial-function, MariaDB-specific
 formatting, schema validation, table-function projection, packed semi-structured
@@ -92,7 +92,8 @@ catalog-bypassing generated virtual tables, unsupported non-table objects,
 dynamic extension, server topology, engine-file maintenance, or server/client
 file, foreign-server metadata, server-observability, external physical backup,
 server-global result-cache, session profiling, optimizer diagnostics,
-static server-metadata, or process/session introspection surfaces, not core
+static server-metadata, server status, or process/session introspection
+surfaces, not core
 MyLite embedded runtime behavior. Routine metadata scans of `mysql.proc` are
 also disabled until MyLite has a catalog-backed routine design.
 The retained `sql_embedded` C++ sources are
@@ -233,6 +234,15 @@ The static SHOW information trim reduced the default archive by a further
 prepared access before MariaDB execution, and leaves ordinary supported
 `SHOW VARIABLES` and diagnostic surfaces available.
 
+The status metadata trim reduced the default archive by a further 24,144 bytes
+with the same member count. The disabled profile now sets
+`MYLITE_WITH_STATUS_METADATA=OFF`, compiles out the large `SHOW STATUS`
+publication table and dynamic status-variable registry, leaves
+`INFORMATION_SCHEMA.GLOBAL_STATUS` and `INFORMATION_SCHEMA.SESSION_STATUS`
+visible with zero rows, and makes `SHOW STATUS`, `SHOW GLOBAL STATUS`, and
+`SHOW SESSION STATUS` return empty result sets while ordinary `SHOW VARIABLES`
+remains available.
+
 The process-list metadata trim reduced the default archive by a further
 40,712 bytes with the same member count. The disabled profile now sets
 `MYLITE_WITH_PROCESSLIST_METADATA=OFF`, compiles out the `SHOW PROCESSLIST`
@@ -308,6 +318,9 @@ The profile explicitly disables:
 - optimizer trace diagnostics
 - static `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES`
   information producers
+- status metadata producers for `SHOW STATUS`,
+  `INFORMATION_SCHEMA.GLOBAL_STATUS`, and
+  `INFORMATION_SCHEMA.SESSION_STATUS` rows
 - process-list metadata producers for `SHOW PROCESSLIST`,
   `SHOW FULL PROCESSLIST`, and `INFORMATION_SCHEMA.PROCESSLIST` rows
 - routine metadata producers for `SHOW PROCEDURE STATUS`,
@@ -345,10 +358,10 @@ Measured on 2026-05-16 with the same host and toolchain as the default profile:
 | Field | Value |
 | --- | --- |
 | Archive | `build/mariadb-mylite-storage-smoke/libmysqld/libmariadbd.a` |
-| Archive size | 27,107,272 bytes / 25.85 MiB |
+| Archive size | 27,083,128 bytes / 25.83 MiB |
 | Archive members | 673 |
 
-This is 14,208 bytes smaller than the previous process-list metadata trim
+This is 24,144 bytes smaller than the previous routine metadata trim
 storage-smoke archive with the same member count.
 
 This smoke path now covers static plugin registration, current routed schema
@@ -374,19 +387,19 @@ outputs:
 
 | Artifact | Size | Stripped Size | Members | Global Symbols |
 | --- | ---: | ---: | ---: | ---: |
-| MariaDB embedded archive | 26,926,688 bytes / 25.68 MiB | n/a | 670 | n/a |
-| MariaDB storage-smoke archive | 27,107,272 bytes / 25.85 MiB | n/a | 673 | n/a |
-| Embedded open-close smoke | 17,252,480 bytes / 16.45 MiB | 15,596,352 bytes / 14.87 MiB | n/a | 15,302 |
-| Embedded exec smoke | 17,304,968 bytes / 16.50 MiB | 15,645,848 bytes / 14.92 MiB | n/a | 15,302 |
-| Embedded statement smoke | 17,285,280 bytes / 16.48 MiB | 15,629,168 bytes / 14.91 MiB | n/a | 15,302 |
-| Embedded warning smoke | 17,252,112 bytes / 16.45 MiB | 15,596,128 bytes / 14.87 MiB | n/a | 15,302 |
-| Embedded comparison smoke | 17,375,360 bytes / 16.57 MiB | 15,663,440 bytes / 14.94 MiB | n/a | 15,304 |
-| Storage-smoke open-close smoke | 17,364,128 bytes / 16.56 MiB | 15,679,696 bytes / 14.95 MiB | n/a | 15,302 |
-| Storage-smoke exec smoke | 17,400,088 bytes / 16.59 MiB | 15,712,680 bytes / 14.98 MiB | n/a | 15,302 |
-| Storage-smoke statement smoke | 17,396,928 bytes / 16.59 MiB | 15,712,512 bytes / 14.98 MiB | n/a | 15,302 |
-| Storage-smoke warning smoke | 17,363,760 bytes / 16.56 MiB | 15,679,472 bytes / 14.95 MiB | n/a | 15,302 |
-| Storage-smoke comparison smoke | 17,449,472 bytes / 16.64 MiB | 15,713,616 bytes / 14.99 MiB | n/a | 15,304 |
-| Storage-engine smoke | 17,616,304 bytes / 16.80 MiB | 15,927,616 bytes / 15.19 MiB | n/a | 15,302 |
+| MariaDB embedded archive | 26,902,544 bytes / 25.66 MiB | n/a | 670 | n/a |
+| MariaDB storage-smoke archive | 27,083,128 bytes / 25.83 MiB | n/a | 673 | n/a |
+| Embedded open-close smoke | 17,234,256 bytes / 16.44 MiB | 15,579,712 bytes / 14.86 MiB | n/a | 15,301 |
+| Embedded exec smoke | 17,286,792 bytes / 16.49 MiB | 15,629,208 bytes / 14.91 MiB | n/a | 15,301 |
+| Embedded statement smoke | 17,283,616 bytes / 16.48 MiB | 15,629,040 bytes / 14.91 MiB | n/a | 15,301 |
+| Embedded warning smoke | 17,250,400 bytes / 16.45 MiB | 15,596,000 bytes / 14.87 MiB | n/a | 15,301 |
+| Embedded comparison smoke | 17,357,136 bytes / 16.55 MiB | 15,646,800 bytes / 14.92 MiB | n/a | 15,303 |
+| Storage-smoke open-close smoke | 17,345,904 bytes / 16.54 MiB | 15,663,056 bytes / 14.94 MiB | n/a | 15,301 |
+| Storage-smoke exec smoke | 17,398,440 bytes / 16.59 MiB | 15,712,552 bytes / 14.98 MiB | n/a | 15,301 |
+| Storage-smoke statement smoke | 17,378,752 bytes / 16.57 MiB | 15,695,872 bytes / 14.97 MiB | n/a | 15,301 |
+| Storage-smoke warning smoke | 17,345,536 bytes / 16.54 MiB | 15,662,832 bytes / 14.94 MiB | n/a | 15,301 |
+| Storage-smoke comparison smoke | 17,447,760 bytes / 16.64 MiB | 15,713,488 bytes / 14.99 MiB | n/a | 15,303 |
+| Storage-engine smoke | 17,614,624 bytes / 16.80 MiB | 15,927,488 bytes / 15.19 MiB | n/a | 15,301 |
 
 ## Offline Build Caveat
 
