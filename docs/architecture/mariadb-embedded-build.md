@@ -73,10 +73,13 @@ MYLITE_WITH_ROUTINE_METADATA=OFF
 MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS=OFF
 PLUGIN_AUTH_SOCKET=NO
 PLUGIN_FEEDBACK=NO
+PLUGIN_INNOBASE=NO
 PLUGIN_PERFSCHEMA=NO
 PLUGIN_SEQUENCE=NO
 PLUGIN_THREAD_POOL_INFO=NO
 PLUGIN_USERSTAT=NO
+WITH_INNODB_AHI=OFF
+WITH_INNODB_ROOT_GUESS=OFF
 ```
 
 `WITH_WSREP=OFF` and `PLUGIN_S3=NO` are required because the initial MariaDB
@@ -101,7 +104,7 @@ Schema, thread-pool info, the user-statistics plugin, external backup-tool
 SQL runtime, the server-global query cache runtime, statement profiling,
 optimizer trace diagnostics, static SHOW information producers, status
 metadata producers, process-list metadata producers, and zlib-backed SQL,
-protocol, binlog, column, and InnoDB page compression are disabled
+protocol, binlog, and compressed-column storage are disabled
 because they are server-administration, blocking utility, Oracle
 compatibility, legacy XML helper, spatial-function, vector-search,
 MariaDB-specific formatting, schema validation, table-function projection, packed semi-structured
@@ -109,8 +112,8 @@ BLOB handling, direct storage-engine cursor, unsupported sequence object/value
 state, help-table lookup, result-set analysis, SELECT result-set extension hook,
 catalog-bypassing generated virtual tables, unsupported non-table objects,
 view and trigger sidecar metadata, dynamic extension, server topology,
-engine-file maintenance, native external table files, or server/client file,
-foreign-server metadata,
+engine-file maintenance, native external table files, native InnoDB
+tablespace/redo/undo runtime, or server/client file, foreign-server metadata,
 server-observability, external physical backup, server-global result-cache,
 session profiling, optimizer diagnostics, static server-metadata, server status,
 process/session introspection, external compression, or host dynamic-loader
@@ -131,8 +134,8 @@ The opt-in MariaDB MTR smoke runner uses a separate
 `cmake/mariadb-mtr-smoke.cmake` profile and `build/mariadb-mtr-smoke`
 directory. That profile inherits the embedded baseline and re-enables only the
 view, stored-program, trigger, and binlog system-variable runtime pieces needed
-for MTR bootstrap; it keeps native MyISAM and MRG_MyISAM disabled and runs with
-Aria as the default storage engine.
+for MTR bootstrap; it keeps native InnoDB, MyISAM, and MRG_MyISAM disabled and
+runs with Aria as the default storage engine.
 
 ## Measurement
 
@@ -147,8 +150,8 @@ current MyLite embedded profile patches applied.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 25,996,816 bytes / 24.79 MiB |
-| Archive members | 596 |
+| Archive size | 21,020,816 bytes / 20.05 MiB |
+| Archive members | 481 |
 
 The build found system OpenSSL 3.6.2, Curses, CURL, GSSAPI, BZip2, LZ4,
 LibLZMA, LZO, PCRE2, and Zstandard support on this machine. MariaDB server
@@ -210,6 +213,16 @@ sets `MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE=OFF` and
 available bootstrap default, omits native-MyISAM-only system variables such as
 `concurrent_insert`, `delay_key_write`, and `flush`, and keeps ordinary routed
 `ENGINE=MyISAM` DDL/DML covered through MyLite storage.
+
+The native InnoDB engine trim reduced the default archive by a further
+4,976,000 bytes and removed 115 archive members. The disabled profile now sets
+`PLUGIN_INNOBASE=NO`, `WITH_INNODB_AHI=OFF`, and
+`WITH_INNODB_ROOT_GUESS=OFF`, omits native `innobase` plugin registration and
+handler/runtime members such as `ha_innodb.cc`, `handler0alter.cc`,
+`srv0start.cc`, `trx0trx.cc`, `row0mysql.cc`, `dict0dict.cc`, `buf0buf.cc`,
+`fil0fil.cc`, `fsp0fsp.cc`, and `log0log.cc`, makes MyLite omit the InnoDB
+startup option when native InnoDB is absent, and keeps ordinary routed
+`ENGINE=InnoDB` DDL/DML covered through MyLite storage.
 
 The JSON schema validation trim reduced the default archive by a further
 104,760 bytes and removed one archive member. The disabled profile now omits
@@ -345,8 +358,8 @@ view runtime baseline with the same member count. The disabled profile now
 sets `MYLITE_WITH_ZLIB_COMPRESSION=OFF` and `WITH_ZLIB=none`, reports
 `have_compress=NO`, returns `NULL` from `COMPRESS()` and `UNCOMPRESS()`,
 rejects compressed column DDL with an explicit unsupported diagnostic, compiles
-retained binlog and InnoDB zlib compression branches as fail-closed no-zlib
-paths, and makes first-party linked embedded smoke binaries stop linking
+retained binlog and compressed-column paths as fail-closed no-zlib paths, and
+makes first-party linked embedded smoke binaries stop linking
 `/usr/lib/libz.1.dylib`.
 
 The dynamic plugin loading trim reduced the default archive by a further
@@ -386,7 +399,6 @@ static embedded server library and static embedded engines/plugins such as:
 - Aria
 - CSV
 - HEAP/MEMORY
-- InnoDB
 - partition support
 - selected compatibility helpers such as type handlers and user variables
 
@@ -427,8 +439,7 @@ The profile explicitly disables:
 - generic SELECT procedure runtime
 - view runtime and view `.frm` sidecar metadata helpers
 - zlib-backed SQL `COMPRESS()` / `UNCOMPRESS()`, protocol compression, binlog
-  compression, storage-engine-independent compressed columns, and retained
-  InnoDB zlib page/compressed-page paths
+  compression, and storage-engine-independent compressed columns
 - host dynamic-loader probes and `dlopen()` / `dlsym()` / `dladdr()` plugin
   loading paths
 - stored routine, event, package, and stored-program instruction runtime
@@ -448,6 +459,8 @@ The profile explicitly disables:
   preload administration
 - native MyISAM and MRG_MyISAM storage-engine registration, native engine
   archive members, and native-MyISAM-only system variables
+- native InnoDB storage-engine registration, native handler/runtime archive
+  members, tablespaces, redo, undo, and native InnoDB dictionary state
 - `mysql.servers` foreign-server metadata cache
 - external backup SQL runtime for `BACKUP STAGE` / `BACKUP LOCK`
 - query cache runtime and administration
@@ -495,8 +508,8 @@ Measured on 2026-05-16 with the same host and toolchain as the default profile:
 | Field | Value |
 | --- | --- |
 | Archive | `build/mariadb-mylite-storage-smoke/libmysqld/libmariadbd.a` |
-| Archive size | 26,192,208 bytes / 24.98 MiB |
-| Archive members | 599 |
+| Archive size | 21,216,208 bytes / 20.23 MiB |
+| Archive members | 484 |
 
 The opt-in archive also replaces `event_parse_data.cc.o` with
 `mylite_event_parse_data_disabled.cc.o`, `log_event_server.cc.o` with
@@ -505,8 +518,8 @@ The opt-in archive also replaces `event_parse_data.cc.o` with
 `mylite_rpl_filter_disabled.cc.o`, and replaces `item_vectorfunc.cc.o` /
 `vector_mhnsw.cc.o` with `mylite_vector_sql_runtime_disabled.cc.o`; its total
 size includes the current static MyLite handler objects, omits native MyISAM
-and MRG_MyISAM engine members, and should be compared only against matching
-storage-smoke sources.
+and MRG_MyISAM engine members, omits native InnoDB engine members, and should
+be compared only against matching storage-smoke sources.
 
 This smoke path now covers static plugin registration, current routed schema
 namespaces and DDL/DML, BLACKHOLE row-discard routing, MEMORY/HEAP volatile-row
@@ -531,19 +544,19 @@ outputs:
 
 | Artifact | Size | Stripped Size | Members | Global Symbols |
 | --- | ---: | ---: | ---: | ---: |
-| MariaDB embedded archive | 25,996,816 bytes / 24.79 MiB | n/a | 596 | n/a |
-| MariaDB storage-smoke archive | 26,192,208 bytes / 24.98 MiB | n/a | 599 | n/a |
-| Embedded open-close smoke | 16,868,384 bytes / 16.09 MiB | 15,255,584 bytes / 14.55 MiB | n/a | 15,062 |
-| Embedded exec smoke | 16,954,536 bytes / 16.17 MiB | 15,338,136 bytes / 14.63 MiB | n/a | 15,062 |
-| Embedded statement smoke | 16,918,064 bytes / 16.13 MiB | 15,304,928 bytes / 14.60 MiB | n/a | 15,062 |
-| Embedded warning smoke | 16,884,528 bytes / 16.10 MiB | 15,271,872 bytes / 14.56 MiB | n/a | 15,062 |
-| Embedded comparison smoke | 16,991,264 bytes / 16.20 MiB | 15,322,672 bytes / 14.61 MiB | n/a | 15,064 |
-| Storage-smoke open-close smoke | 17,021,632 bytes / 16.23 MiB | 15,355,680 bytes / 14.64 MiB | n/a | 15,062 |
-| Storage-smoke exec smoke | 17,091,256 bytes / 16.30 MiB | 15,421,704 bytes / 14.71 MiB | n/a | 15,062 |
-| Storage-smoke statement smoke | 17,071,312 bytes / 16.28 MiB | 15,405,008 bytes / 14.69 MiB | n/a | 15,062 |
-| Storage-smoke warning smoke | 17,021,248 bytes / 16.23 MiB | 15,355,456 bytes / 14.64 MiB | n/a | 15,062 |
-| Storage-smoke comparison smoke | 17,104,848 bytes / 16.31 MiB | 15,389,616 bytes / 14.68 MiB | n/a | 15,064 |
-| Storage-engine smoke | 17,323,760 bytes / 16.52 MiB | 15,653,184 bytes / 14.93 MiB | n/a | 15,062 |
+| MariaDB embedded archive | 21,020,816 bytes / 20.05 MiB | n/a | 481 | n/a |
+| MariaDB storage-smoke archive | 21,216,208 bytes / 20.23 MiB | n/a | 484 | n/a |
+| Embedded open-close smoke | 14,125,776 bytes / 13.47 MiB | 12,934,464 bytes / 12.34 MiB | n/a | 15,000 |
+| Embedded exec smoke | 14,212,104 bytes / 13.55 MiB | 13,017,208 bytes / 12.41 MiB | n/a | 15,000 |
+| Embedded statement smoke | 14,175,584 bytes / 13.52 MiB | 12,983,936 bytes / 12.38 MiB | n/a | 15,000 |
+| Embedded warning smoke | 14,125,408 bytes / 13.47 MiB | 12,934,256 bytes / 12.34 MiB | n/a | 15,000 |
+| Embedded comparison smoke | 14,232,208 bytes / 13.57 MiB | 12,985,024 bytes / 12.38 MiB | n/a | 15,002 |
+| Storage-smoke open-close smoke | 14,263,232 bytes / 13.60 MiB | 13,018,512 bytes / 12.42 MiB | n/a | 15,000 |
+| Storage-smoke exec smoke | 14,349,496 bytes / 13.68 MiB | 13,101,176 bytes / 12.49 MiB | n/a | 15,000 |
+| Storage-smoke statement smoke | 14,313,008 bytes / 13.65 MiB | 13,067,952 bytes / 12.46 MiB | n/a | 15,000 |
+| Storage-smoke warning smoke | 14,279,392 bytes / 13.62 MiB | 13,034,816 bytes / 12.43 MiB | n/a | 15,000 |
+| Storage-smoke comparison smoke | 14,363,168 bytes / 13.70 MiB | 13,069,056 bytes / 12.46 MiB | n/a | 15,002 |
+| Storage-engine smoke | 14,598,880 bytes / 13.92 MiB | 13,349,536 bytes / 12.73 MiB | n/a | 15,000 |
 
 ## Offline Build Caveat
 

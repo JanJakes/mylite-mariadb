@@ -94,13 +94,15 @@ Runtime startup uses MyLite-owned arguments:
 - `--skip-grant-tables`
 - `--skip-networking`
 - `--default-storage-engine=Aria`
-- `--innodb=OFF`
 - explicit message and character-set directories from the MariaDB build/source
 
-`--default-storage-engine=Aria` and `--innodb=OFF` are bootstrap choices. They
-avoid non-final InnoDB and native MyISAM sidecars in open/close and SQL smoke
-tests; they do not resolve the compatibility requirement to route InnoDB- and
-MyISAM-shaped application DDL to MyLite storage.
+`--default-storage-engine=Aria` is a bootstrap choice. When the referenced
+embedded archive registers native InnoDB, MyLite also passes `--innodb=OFF`.
+The default embedded profile omits native InnoDB and therefore omits that
+startup option. These choices avoid non-final InnoDB and native MyISAM sidecars
+in open/close and SQL smoke tests; they do not resolve the compatibility
+requirement to route InnoDB- and MyISAM-shaped application DDL to MyLite
+storage.
 
 MariaDB embedded restart required two narrow fork patches:
 
@@ -126,9 +128,9 @@ bootstrap debt. The user-provided `.mylite` path is the product boundary and
 must not silently become a MariaDB datadir.
 
 The implemented bootstrap removes the temporary runtime directory on the final
-close. With InnoDB disabled, MariaDB still creates Aria control/log files during
-startup; those files remain confined to the temporary runtime directory and are
-not durable MyLite state.
+close. With native InnoDB omitted, MariaDB still creates Aria control/log files
+during startup; those files remain confined to the temporary runtime directory
+and are not durable MyLite state.
 
 Once the storage engine and catalog exist, durable metadata and table state must
 move into the `.mylite` file and this bootstrap layer should stop creating any

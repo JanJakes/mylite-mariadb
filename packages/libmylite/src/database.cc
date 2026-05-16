@@ -40,6 +40,10 @@
 #  define MYLITE_MARIADB_HAS_PERFSCHEMA 1
 #endif
 
+#ifndef MYLITE_MARIADB_HAS_INNOBASE
+#  define MYLITE_MARIADB_HAS_INNOBASE 1
+#endif
+
 namespace {
 
 constexpr unsigned k_known_open_flags = MYLITE_OPEN_READONLY | MYLITE_OPEN_READWRITE |
@@ -6198,13 +6202,15 @@ std::vector<std::string> runtime_arguments(
         "--skip-log-bin",
         "--skip-networking",
         "--default-storage-engine=Aria",
-        "--innodb=OFF",
 #  if MYLITE_MARIADB_HAS_PERFSCHEMA
         "--performance-schema=OFF",
 #  endif
         "--lc-messages-dir=" MYLITE_MARIADB_MESSAGES_DIR,
         "--character-sets-dir=" MYLITE_MARIADB_CHARSETS_DIR,
     };
+#  if MYLITE_MARIADB_HAS_INNOBASE
+    arguments.push_back("--innodb=OFF");
+#  endif
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
     if (primary_filename != ":memory:") {
         arguments.push_back("--mylite-primary-file=" + primary_filename);

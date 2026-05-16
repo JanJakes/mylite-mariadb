@@ -47,6 +47,11 @@ set(PLUGIN_SEQUENCE "NO" CACHE STRING "Disable virtual SEQUENCE storage engine" 
 set(PLUGIN_THREAD_POOL_INFO "NO" CACHE STRING "Disable server thread-pool info plugin" FORCE)
 set(PLUGIN_USERSTAT "NO" CACHE STRING "Disable server user-statistics plugin" FORCE)
 
+# MyLite routes ENGINE=InnoDB to MyLite storage and does not expose native InnoDB files.
+set(PLUGIN_INNOBASE "NO" CACHE STRING "Disable native InnoDB storage engine" FORCE)
+set(WITH_INNODB_AHI OFF CACHE BOOL "Disable InnoDB adaptive hash index support" FORCE)
+set(WITH_INNODB_ROOT_GUESS OFF CACHE BOOL "Disable InnoDB root-guess cache support" FORCE)
+
 # MyLite rejects LOAD DATA and LOAD XML before MariaDB execution.
 set(MYLITE_WITH_LOAD_DATA OFF CACHE BOOL "Omit LOAD DATA/XML execution support" FORCE)
 

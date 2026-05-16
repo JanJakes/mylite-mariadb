@@ -55,6 +55,7 @@ mtr_required_cache_entries=(
   "MYLITE_WITH_BINLOG_SYSVARS:BOOL=ON"
   "MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE:BOOL=OFF"
   "MYLITE_WITH_NATIVE_MYISAMMRG_STORAGE_ENGINE:BOOL=OFF"
+  "PLUGIN_INNOBASE:STRING=NO"
 )
 
 require_command() {
@@ -138,7 +139,6 @@ run_tests() {
           --skip-rpl \
           --force \
           --mysqld=--default-storage-engine=Aria \
-          --mysqld=--innodb=OFF \
           --suite="${suite_name}" \
           --do-test="${case_name}" \
           --max-test-fail=1

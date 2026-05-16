@@ -25,6 +25,10 @@
 #  define MYLITE_MARIADB_HAS_PERFSCHEMA 1
 #endif
 
+#ifndef MYLITE_MARIADB_HAS_INNOBASE
+#  define MYLITE_MARIADB_HAS_INNOBASE 1
+#endif
+
 namespace {
 
 struct Cell {
@@ -790,10 +794,12 @@ std::vector<std::string> raw_runtime_arguments(const std::filesystem::path &runt
         "--skip-log-bin",
         "--skip-networking",
         "--default-storage-engine=Aria",
-        "--innodb=OFF",
         std::string("--lc-messages-dir=") + MYLITE_MARIADB_MESSAGES_DIR,
         std::string("--character-sets-dir=") + MYLITE_MARIADB_CHARSETS_DIR,
     };
+#if MYLITE_MARIADB_HAS_INNOBASE
+    arguments.push_back("--innodb=OFF");
+#endif
 #if MYLITE_MARIADB_HAS_PERFSCHEMA
     arguments.push_back("--performance-schema=OFF");
 #endif

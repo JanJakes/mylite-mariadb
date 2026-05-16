@@ -219,6 +219,9 @@ built-ins remain available. Zlib-backed compression is disabled in the default
 embedded profile: `have_compress` reports `NO`, `COMPRESS()` and
 `UNCOMPRESS()` return `NULL`, and compressed column DDL is rejected with
 ordinary MyLite/MariaDB diagnostics.
+Native InnoDB is not registered in the default embedded profile, but
+file-backed storage-engine builds still route application `ENGINE=InnoDB` DDL
+to MyLite storage.
 
 ## Prepared Statements
 
@@ -508,8 +511,9 @@ the embedded library model:
   `BACKUP UNLOCK`,
 - query cache administration such as `FLUSH QUERY CACHE`,
   `RESET QUERY CACHE`, and query-cache system-variable assignment,
-- zlib-backed SQL, protocol, binlog, column, and retained InnoDB
-  page/compressed-page compression,
+- zlib-backed SQL, protocol, binlog, and compressed-column storage,
+- native InnoDB storage-engine runtime and its tablespaces, redo, undo, and
+  dictionary state,
 - statement profiling such as `SHOW PROFILE`, `SHOW PROFILES`,
   profiling system-variable assignment, and `INFORMATION_SCHEMA.PROFILING`,
 - optimizer trace diagnostics such as optimizer-trace system-variable
@@ -573,9 +577,10 @@ MyLite errors. The default
 embedded profile also links fail-closed stubs for stored-program runtime
 symbols that retained MariaDB parser or cleanup paths still reference, omits
 dynamic UDF lookup/execution bodies, omits unsupported binlog event-root,
-log-event server runtime, replication GTID-state runtime, and MyISAM
-maintenance source objects, omits native MyISAM and MRG_MyISAM engine
-registration and disabled binlog/replication plus native-MyISAM-only
+log-event server runtime, replication GTID-state runtime, MyISAM maintenance
+source objects, and native InnoDB engine objects, omits native InnoDB, MyISAM,
+and MRG_MyISAM engine registration and disabled binlog/replication plus
+native-MyISAM-only
 system-variable registration, omits the JSON schema-validation source object,
 replaces replication filter runtime, JSON table-function execution,
 dynamic-column packed BLOB runtime, SQL handler command execution, SQL sequence
