@@ -1043,7 +1043,11 @@ typedef ulong		myf;	/* Type of MyFlags in my_funcs */
 #define NO_EMBEDDED_ACCESS_CHECKS
 #endif
 
-#ifdef _WIN32
+#ifndef MYLITE_WITH_DYNAMIC_PLUGIN_LOADING
+#define MYLITE_WITH_DYNAMIC_PLUGIN_LOADING 1
+#endif
+
+#if defined(_WIN32) && MYLITE_WITH_DYNAMIC_PLUGIN_LOADING
 #define dlsym(lib, name) (void*)GetProcAddress((HMODULE)lib, name)
 #define dlopen(libname, unused) LoadLibraryEx(libname, NULL, 0)
 #define RTLD_DEFAULT GetModuleHandle(NULL)
@@ -1074,7 +1078,7 @@ static inline char *dlerror(void)
 #ifndef HAVE_DLADDR
 #define dladdr(A, B) 0
 /* Dummy definition in case we're missing dladdr() */
-typedef struct { const char *dli_fname, dli_fbase; } Dl_info;
+typedef struct { const char *dli_fname; void *dli_fbase; } Dl_info;
 #endif
 #else
 #define dlerror() "No support for dynamic loading (static build?)"
@@ -1083,7 +1087,7 @@ typedef struct { const char *dli_fname, dli_fbase; } Dl_info;
 #define dlclose(A) 0
 #define dladdr(A, B) 0
 /* Dummy definition in case we're missing dladdr() */
-typedef struct { const char *dli_fname, dli_fbase; } Dl_info;
+typedef struct { const char *dli_fname; void *dli_fbase; } Dl_info;
 #endif
 
 /*

@@ -59,7 +59,7 @@ void my_setup_stacktrace(void);
 # define my_setup_stacktrace()
 #endif /* ! (defined(HAVE_STACKTRACE) || defined(HAVE_BACKTRACE)) */
 
-#ifndef _WIN32
+#if !defined(_WIN32) && defined(HAVE_DLOPEN) && defined(HAVE_DLADDR)
 #define MY_ADDR_RESOLVE_FORK
 #endif
 

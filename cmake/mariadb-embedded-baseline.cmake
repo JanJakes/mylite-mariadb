@@ -30,6 +30,9 @@ set(WITH_SSL "system" CACHE STRING "Use the host OpenSSL installation" FORCE)
 set(WITHOUT_DYNAMIC_PLUGINS ON CACHE BOOL "Disable host dynamic plugin support" FORCE)
 set(ENABLED_PROFILING OFF CACHE BOOL "Disable session statement profiling" FORCE)
 
+# MyLite rejects dynamic plugin install/uninstall SQL and does not load host plugin libraries.
+set(MYLITE_WITH_DYNAMIC_PLUGIN_LOADING OFF CACHE BOOL "Omit dynamic plugin loading" FORCE)
+
 # These components require optional submodule payloads that are intentionally not
 # included in the initial import.
 set(WITH_WSREP OFF CACHE BOOL "Disable Galera/wsrep support for the embedded profile" FORCE)

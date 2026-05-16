@@ -137,6 +137,7 @@
 #cmakedefine HAVE_DLADDR 1
 #cmakedefine HAVE_DLERROR 1
 #cmakedefine HAVE_DLOPEN 1
+#cmakedefine01 MYLITE_WITH_DYNAMIC_PLUGIN_LOADING
 #cmakedefine HAVE_FCHMOD 1
 #cmakedefine HAVE_FCNTL 1
 #cmakedefine HAVE_FDATASYNC 1

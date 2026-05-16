@@ -176,7 +176,11 @@ external backup statements such as `BACKUP STAGE`, `BACKUP LOCK`, and
 cache administration such as `FLUSH QUERY CACHE`, `RESET QUERY CACHE`, and
 query-cache system-variable assignment is rejected while ordinary
 `SELECT SQL_CACHE` and `SELECT SQL_NO_CACHE` remain accepted as uncached
-compatibility hints. Zlib-backed compression is disabled in the default
+compatibility hints. Dynamic plugin loading is disabled in the default
+embedded profile: `have_dynamic_loading` reports `NO`, dynamic-loader probes
+are cleared from the generated MariaDB configuration, and plugin
+install/uninstall SQL is rejected before MariaDB execution while static
+built-ins remain available. Zlib-backed compression is disabled in the default
 embedded profile: `have_compress` reports `NO`, `COMPRESS()` and
 `UNCOMPRESS()` return `NULL`, and compressed column DDL is rejected with
 ordinary MyLite/MariaDB diagnostics.
@@ -438,7 +442,7 @@ the embedded library model:
 - network users and authentication,
 - replication and binlog,
 - Galera/wsrep,
-- dynamic plugin installation,
+- dynamic plugin installation and loading,
 - dynamic UDF registration, loading, lookup, and execution,
 - external durable storage engines,
 - foreign-key DDL until referential metadata and enforcement exist,
@@ -525,9 +529,10 @@ dynamic UDF lookup/execution bodies, omits unsupported binlog event-root and
 MyISAM maintenance source objects, omits the JSON schema-validation source
 object, replaces JSON table-function execution, dynamic-column packed BLOB
 runtime, SQL handler command execution, SQL sequence runtime, external backup
-command execution, query cache runtime, and zlib-backed compression with
-fail-closed or disabled stubs, and compiles embedded binlog transaction and
-event-write entry points to no-ops. Other unsupported surfaces should fail with
+command execution, query cache runtime, zlib-backed compression, and dynamic
+plugin loading with fail-closed or disabled stubs/configuration, and compiles
+embedded binlog transaction and event-write entry points to no-ops. Other
+unsupported surfaces should fail with
 stable MyLite result codes and MariaDB diagnostics where possible.
 
 ## Compatibility Adapter

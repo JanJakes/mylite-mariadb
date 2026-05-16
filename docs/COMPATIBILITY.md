@@ -44,7 +44,8 @@ statement rollback, initial application-schema smoke,
 unsupported server, binlog/replication, SQL file-I/O, server utility function, Oracle
 SQL mode, XML SQL function, GIS SQL function, SFORMAT SQL function, JSON schema
 validation function, JSON table function, dynamic column function, SQL HANDLER
-command, SQL sequence value surface, virtual sequence storage engine, SQL HELP command, SELECT PROCEDURE,
+command, SQL sequence value surface, virtual sequence storage engine, dynamic
+plugin loading, SQL HELP command, SELECT PROCEDURE,
 table-maintenance/key-cache administration, user-statistics,
 statement profiling,
 optimizer trace,
@@ -152,7 +153,7 @@ application-schema suites remain planned.
 | Events and scheduler | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server scheduler is not part of the core embedded profile; event activation and event DDL are rejected by MyLite SQL policy |
 | Users, grants, and password auth | ➖&nbsp;Out&nbsp;of&nbsp;scope | Local embedded file ownership replaces server account management; account SQL is rejected by MyLite SQL policy |
 | Replication and binlog | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server topology feature, not core library behavior; binlog is disabled at startup, representative replication/binlog SQL is rejected, and the default embedded profile omits `gtid_index.cc`, `log_event.cc`, `rpl_injector.cc`, `rpl_record.cc`, mandatory binlog plugin registration, and binlog transaction, row-event, GTID-state, event-write, table-map, open/recovery, GTID-index, incident, cache-write, and temporary-table binlog execution bodies behind no-op guards; retained `log_event_server.cc` and `rpl_gtid.cc` archive objects remain where shared MariaDB code references them, but ordinary linked first-party embedded tests resolve the SQL string-rendering root from a MyLite stub |
-| Dynamic plugin installation | ➖&nbsp;Out&nbsp;of&nbsp;scope | Dynamic plugin support is compiled out of the default embedded profile, core startup uses a MyLite-owned plugin directory, and representative plugin-install SQL is rejected |
+| Dynamic plugin installation/loading | ➖&nbsp;Out&nbsp;of&nbsp;scope | Dynamic plugin loading is compiled out of the default embedded profile: generated embedded configuration clears `HAVE_DLOPEN`, `HAVE_DLADDR`, `HAVE_DLERROR`, and `HAVE_DLFCN_H`, `have_dynamic_loading` reports `NO`, static built-ins remain available, core startup uses a MyLite-owned empty plugin directory, and representative direct/prepared plugin install/uninstall SQL is rejected before MariaDB execution |
 | Performance schema | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server instrumentation tables are disabled or compiled out in the default embedded runtime profile |
 | User statistics | ➖&nbsp;Out&nbsp;of&nbsp;scope | MariaDB's user-statistics information-schema plugin is a server-observability surface, not core embedded file-owned behavior; the default embedded profile omits `userstat.cc`, direct/prepared `SHOW *_STATISTICS`, `FLUSH *_STATISTICS`, `userstat` system-variable assignment, and `INFORMATION_SCHEMA` user-statistics table access are rejected before MariaDB execution, and ordinary SQL user variables such as `@userstat` remain available |
 | Statement profiling | ➖&nbsp;Out&nbsp;of&nbsp;scope | MariaDB's statement profiling is a session observability surface, not core embedded file-owned behavior; the default embedded profile builds with `ENABLED_PROFILING=OFF`, reports `have_profiling=NO`, and direct/prepared `SHOW PROFILE`, `SHOW PROFILES`, profiling system-variable assignment, and `INFORMATION_SCHEMA.PROFILING` access are rejected before MariaDB execution |

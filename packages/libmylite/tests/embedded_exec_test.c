@@ -279,6 +279,7 @@ static void test_server_surfaces_are_disabled(void) {
 
     assert_variable_value(db, "skip_networking", "ON");
     assert_variable_value(db, "log_bin", "OFF");
+    assert_variable_value(db, "have_dynamic_loading", "NO");
     assert_variable_value_or_missing(db, "performance_schema", "OFF");
 
     assert_exec_fails(db, "CREATE USER 'mylite_probe'@'localhost' IDENTIFIED BY 'secret'");
@@ -287,7 +288,10 @@ static void test_server_surfaces_are_disabled(void) {
     assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "USE app", NULL, NULL, NULL) == MYLITE_OK);
     assert_exec_fails(db, "CREATE EVENT mylite_probe_event ON SCHEDULE EVERY 1 SECOND DO SELECT 1");
+    assert_exec_fails(db, "INSTALL PLUGIN mylite_probe SONAME 'mylite_probe.so'");
     assert_exec_fails(db, "INSTALL SONAME 'mylite_probe'");
+    assert_exec_fails(db, "UNINSTALL PLUGIN mylite_probe");
+    assert_exec_fails(db, "UNINSTALL SONAME 'mylite_probe'");
     assert_exec_fails(db, "BINLOG 'AAAA'");
     assert_exec_fails(db, "CHANGE MASTER TO MASTER_HOST='example.test'");
     assert_exec_fails(db, "SHOW MASTER STATUS");

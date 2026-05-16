@@ -33,6 +33,7 @@ WITH_ZLIB=none
 PLUGIN_S3=NO
 WITHOUT_DYNAMIC_PLUGINS=ON
 ENABLED_PROFILING=OFF
+MYLITE_WITH_DYNAMIC_PLUGIN_LOADING=OFF
 MYLITE_WITH_LOAD_DATA=OFF
 MYLITE_WITH_SQL_FILE_IO=OFF
 MYLITE_WITH_SERVER_UTILITY_FUNCTIONS=OFF
@@ -74,7 +75,7 @@ PLUGIN_USERSTAT=NO
 
 `WITH_WSREP=OFF` and `PLUGIN_S3=NO` are required because the initial MariaDB
 import intentionally omits `wsrep-lib` and `storage/maria/libmarias3`.
-Dynamic plugins, LOAD file import, SQL host-file I/O, server utility SQL
+Dynamic plugin loading, LOAD file import, SQL host-file I/O, server utility SQL
 functions, Oracle SQL mode parsing, XML SQL functions, GIS SQL functions, the
 MariaDB-specific `SFORMAT()` SQL function, JSON schema validation, the
 `JSON_TABLE` table-function runtime, dynamic-column packed BLOB runtime, SQL
@@ -101,7 +102,8 @@ view and trigger sidecar metadata, dynamic extension, server topology,
 engine-file maintenance, or server/client file, foreign-server metadata,
 server-observability, external physical backup, server-global result-cache,
 session profiling, optimizer diagnostics, static server-metadata, server status,
-process/session introspection, or external compression surfaces, not core
+process/session introspection, external compression, or host dynamic-loader
+surfaces, not core
 MyLite embedded runtime behavior. Routine metadata scans of `mysql.proc` are
 also disabled until MyLite has a catalog-backed routine design.
 The retained `sql_embedded` C++ sources are
@@ -127,7 +129,7 @@ current MyLite embedded profile patches applied.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,798,600 bytes / 25.56 MiB |
+| Archive size | 26,782,496 bytes / 25.54 MiB |
 | Archive members | 670 |
 
 The build found system OpenSSL 3.6.2, Curses, CURL, GSSAPI, BZip2, LZ4,
@@ -294,6 +296,17 @@ retained binlog and InnoDB zlib compression branches as fail-closed no-zlib
 paths, and makes first-party linked embedded smoke binaries stop linking
 `/usr/lib/libz.1.dylib`.
 
+The dynamic plugin loading trim reduced the default archive by a further
+16,104 bytes with the same member count. The disabled profile now sets
+`MYLITE_WITH_DYNAMIC_PLUGIN_LOADING=OFF`, clears `HAVE_DLOPEN`,
+`HAVE_DLADDR`, `HAVE_DLERROR`, and `HAVE_DLFCN_H` in the generated embedded
+configuration, emits `MYLITE_WITH_DYNAMIC_PLUGIN_LOADING=0` so platform
+loader shims stay disabled, reports `have_dynamic_loading=NO`, keeps direct
+and prepared plugin install/uninstall SQL rejected before MariaDB execution,
+compiles the dynamic-loader branches in `sql_plugin.cc` and fork-based
+`dladdr()` stack symbol resolution out of the embedded profile, and leaves
+static built-in plugin registration intact.
+
 ## Enabled Surface
 
 The profile keeps the MariaDB components needed by the current embedded
@@ -320,7 +333,7 @@ The profile explicitly disables:
 - WSREP/Galera
 - Aria S3 support
 - MariaDB upstream unit-test targets
-- dynamic plugin support
+- dynamic plugin loading and install/uninstall runtime
 - LOAD DATA / LOAD XML execution support
 - host-file SQL I/O support for `LOAD_FILE()` and `SELECT ... INTO OUTFILE` /
   `DUMPFILE`
@@ -344,6 +357,8 @@ The profile explicitly disables:
 - zlib-backed SQL `COMPRESS()` / `UNCOMPRESS()`, protocol compression, binlog
   compression, storage-engine-independent compressed columns, and retained
   InnoDB zlib page/compressed-page paths
+- host dynamic-loader probes and `dlopen()` / `dlsym()` / `dladdr()` plugin
+  loading paths
 - stored routine, event, package, and stored-program instruction runtime
 - trigger runtime and `.TRG` / `.TRN` sidecar metadata helpers
 - dynamic UDF lookup, registration, and execution runtime
@@ -398,10 +413,10 @@ Measured on 2026-05-16 with the same host and toolchain as the default profile:
 | Field | Value |
 | --- | --- |
 | Archive | `build/mariadb-mylite-storage-smoke/libmysqld/libmariadbd.a` |
-| Archive size | 26,979,184 bytes / 25.73 MiB |
+| Archive size | 26,963,080 bytes / 25.71 MiB |
 | Archive members | 673 |
 
-This is 43,656 bytes smaller than the previous view runtime trim
+This is 16,104 bytes smaller than the previous zlib compression trim
 storage-smoke archive with the same member count.
 
 This smoke path now covers static plugin registration, current routed schema
@@ -427,19 +442,19 @@ outputs:
 
 | Artifact | Size | Stripped Size | Members | Global Symbols |
 | --- | ---: | ---: | ---: | ---: |
-| MariaDB embedded archive | 26,798,600 bytes / 25.56 MiB | n/a | 670 | n/a |
-| MariaDB storage-smoke archive | 26,979,184 bytes / 25.73 MiB | n/a | 673 | n/a |
-| Embedded open-close smoke | 17,175,792 bytes / 16.38 MiB | 15,526,960 bytes / 14.81 MiB | n/a | 15,276 |
-| Embedded exec smoke | 17,245,032 bytes / 16.45 MiB | 15,592,984 bytes / 14.87 MiB | n/a | 15,276 |
-| Embedded statement smoke | 17,225,312 bytes / 16.43 MiB | 15,576,288 bytes / 14.85 MiB | n/a | 15,276 |
-| Embedded warning smoke | 17,191,936 bytes / 16.40 MiB | 15,543,248 bytes / 14.82 MiB | n/a | 15,276 |
-| Embedded comparison smoke | 17,298,672 bytes / 16.50 MiB | 15,594,048 bytes / 14.87 MiB | n/a | 15,278 |
-| Storage-smoke open-close smoke | 17,270,928 bytes / 16.47 MiB | 15,593,776 bytes / 14.87 MiB | n/a | 15,276 |
-| Storage-smoke exec smoke | 17,323,656 bytes / 16.52 MiB | 15,643,304 bytes / 14.92 MiB | n/a | 15,276 |
-| Storage-smoke statement smoke | 17,303,936 bytes / 16.50 MiB | 15,626,608 bytes / 14.90 MiB | n/a | 15,276 |
-| Storage-smoke warning smoke | 17,270,560 bytes / 16.47 MiB | 15,593,568 bytes / 14.87 MiB | n/a | 15,276 |
-| Storage-smoke comparison smoke | 17,372,784 bytes / 16.57 MiB | 15,644,224 bytes / 14.92 MiB | n/a | 15,278 |
-| Storage-engine smoke | 17,556,128 bytes / 16.74 MiB | 15,874,736 bytes / 15.14 MiB | n/a | 15,276 |
+| MariaDB embedded archive | 26,782,496 bytes / 25.54 MiB | n/a | 670 | n/a |
+| MariaDB storage-smoke archive | 26,963,080 bytes / 25.71 MiB | n/a | 673 | n/a |
+| Embedded open-close smoke | 17,174,816 bytes / 16.38 MiB | 15,526,720 bytes / 14.81 MiB | n/a | 15,275 |
+| Embedded exec smoke | 17,227,544 bytes / 16.43 MiB | 15,576,216 bytes / 14.85 MiB | n/a | 15,275 |
+| Embedded statement smoke | 17,207,872 bytes / 16.41 MiB | 15,559,536 bytes / 14.84 MiB | n/a | 15,275 |
+| Embedded warning smoke | 17,174,448 bytes / 16.38 MiB | 15,526,496 bytes / 14.81 MiB | n/a | 15,275 |
+| Embedded comparison smoke | 17,281,184 bytes / 16.48 MiB | 15,577,296 bytes / 14.86 MiB | n/a | 15,277 |
+| Storage-smoke open-close smoke | 17,253,424 bytes / 16.45 MiB | 15,577,024 bytes / 14.86 MiB | n/a | 15,275 |
+| Storage-smoke exec smoke | 17,322,664 bytes / 16.52 MiB | 15,643,032 bytes / 14.92 MiB | n/a | 15,275 |
+| Storage-smoke statement smoke | 17,303,008 bytes / 16.50 MiB | 15,626,368 bytes / 14.90 MiB | n/a | 15,275 |
+| Storage-smoke warning smoke | 17,269,568 bytes / 16.47 MiB | 15,593,328 bytes / 14.87 MiB | n/a | 15,275 |
+| Storage-smoke comparison smoke | 17,355,296 bytes / 16.55 MiB | 15,627,472 bytes / 14.90 MiB | n/a | 15,277 |
+| Storage-engine smoke | 17,538,624 bytes / 16.73 MiB | 15,857,984 bytes / 15.12 MiB | n/a | 15,275 |
 
 ## Offline Build Caveat
 

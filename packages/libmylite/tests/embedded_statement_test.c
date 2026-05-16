@@ -17,6 +17,7 @@ static void test_reset_reuse_and_destructors(void);
 static void test_finalize_before_drain(void);
 static void test_close_rejects_active_statement(void);
 static void test_status_metadata_is_empty(void);
+static void test_dynamic_plugin_loading_is_disabled(void);
 static void test_zlib_compression_is_disabled(void);
 static void test_view_metadata_is_empty(void);
 static void test_trigger_metadata_is_empty(void);
@@ -43,6 +44,7 @@ int main(void) {
     test_finalize_before_drain();
     test_close_rejects_active_statement();
     test_status_metadata_is_empty();
+    test_dynamic_plugin_loading_is_disabled();
     test_zlib_compression_is_disabled();
     test_view_metadata_is_empty();
     test_trigger_metadata_is_empty();
@@ -414,6 +416,36 @@ static void test_status_metadata_is_empty(void) {
     assert(mylite_column_int64(stmt, 0U) == 0);
     assert(mylite_step(stmt) == MYLITE_DONE);
     assert(mylite_finalize(stmt) == MYLITE_OK);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_dynamic_plugin_loading_is_disabled(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    mylite_stmt *stmt =
+        prepare_statement(db, "SELECT @@have_dynamic_loading AS have_dynamic_loading");
+
+    assert(mylite_column_count(stmt) == 1U);
+    assert(strcmp(mylite_column_name(stmt, 0U), "have_dynamic_loading") == 0);
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(mylite_column_type(stmt, 0U) == MYLITE_TYPE_TEXT);
+    assert(strcmp(mylite_column_text(stmt, 0U), "NO") == 0);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+
+    assert_prepare_fails_with_message(
+        db,
+        "INSTALL PLUGIN mylite_probe SONAME 'mylite_probe.so'",
+        "server-oriented"
+    );
+    assert_prepare_fails_with_message(db, "INSTALL SONAME 'mylite_probe'", "server-oriented");
+    assert_prepare_fails_with_message(db, "UNINSTALL PLUGIN mylite_probe", "server-oriented");
+    assert_prepare_fails_with_message(db, "UNINSTALL SONAME 'mylite_probe'", "server-oriented");
 
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);
