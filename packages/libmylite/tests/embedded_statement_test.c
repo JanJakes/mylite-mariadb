@@ -1016,10 +1016,17 @@ static void test_prepare_diagnostics(void) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
     assert_prepare_fails_with_message(db, "START TRANSACTION READ WRITE", "transaction control");
+    assert_prepare_fails_with_message(db, "START TRANSACTION READ ONLY", "transaction control");
     assert_prepare_fails_with_message(db, "SET TRANSACTION READ WRITE", "transaction control");
+    assert_prepare_fails_with_message(db, "SET TRANSACTION READ ONLY", "transaction control");
     assert_prepare_fails_with_message(
         db,
         "SET SESSION TRANSACTION READ WRITE",
+        "transaction control"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "SET SESSION TRANSACTION READ ONLY",
         "transaction control"
     );
 

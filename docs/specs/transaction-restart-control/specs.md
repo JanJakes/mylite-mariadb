@@ -7,9 +7,11 @@ adds bounded direct `START TRANSACTION READ WRITE`, `AND CHAIN`,
 [Transaction SET No-Op Control](../transaction-set-noop-control/specs.md)
 slice accepts direct read-write/no-chain SET controls, and the later
 [Completion Type Chain Control](../completion-type-chain-control/specs.md)
-slice accepts chained completion defaults. Read-only transactions, consistent
-snapshots, release completion, isolation variables, release completion
-defaults, XA, and transactional DDL remain unsupported.
+slice accepts chained completion defaults, and the later
+[Read-Only Transaction Control](../read-only-transaction-control/specs.md)
+slice accepts bounded direct read-only access mode. Consistent snapshots,
+release completion, isolation variables, release completion defaults, XA, and
+transactional DDL remain unsupported.
 
 ## Problem
 

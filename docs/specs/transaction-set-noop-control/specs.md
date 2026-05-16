@@ -4,6 +4,10 @@ Status note: the later
 [Completion Type Chain Control](../completion-type-chain-control/specs.md)
 slice accepts session `SET completion_type=CHAIN/1` and mirrors chained plain
 `COMMIT` / `ROLLBACK`. Release completion defaults remain unsupported.
+The later
+[Read-Only Transaction Control](../read-only-transaction-control/specs.md)
+slice accepts direct read-only transaction access-mode controls and rejects
+MyLite storage writes while the read-only characteristic is active.
 
 ## Problem
 
@@ -15,10 +19,10 @@ not require new MyLite storage semantics, but rejecting them is stricter than
 MariaDB and blocks harmless session setup.
 
 This slice accepts only direct read-write/no-chain controls that are no-ops for
-MyLite's current row-DML transaction scope. Read-only access modes, isolation
-changes, chain/release completion defaults, global changes, `SET STATEMENT`,
-prepared forms, XA, and DDL inside active direct transactions remain
-unsupported.
+MyLite's current row-DML transaction scope. At this slice point, read-only
+access modes, isolation changes, chain/release completion defaults, global
+changes, `SET STATEMENT`, prepared forms, XA, and DDL inside active direct
+transactions remained unsupported.
 
 ## Source Findings
 
@@ -67,7 +71,8 @@ Reject before MariaDB execution:
 
 - `SET GLOBAL TRANSACTION ...` and global `completion_type` assignments,
   because they mutate process-global defaults.
-- `SET TRANSACTION READ ONLY` and all isolation clauses.
+- `SET TRANSACTION READ ONLY` and all isolation clauses. A later read-only
+  transaction-control slice accepts the read-only access-mode subset.
 - `SET completion_type=CHAIN`, `SET completion_type=RELEASE`, numeric
   chain/release values, duplicate `completion_type` assignments, and
   semicolon-chained no-op controls.
@@ -92,9 +97,11 @@ transaction state.
 
 Applications can issue explicit read-write transaction defaults and no-chain
 completion defaults without leaving MyLite's supported transaction semantics.
-MyLite still does not claim read-only transactions, isolation levels, chained
-completion defaults, release completion defaults, XA, transactional DDL, or
-fully transactional handler flags.
+At this slice point, MyLite still did not claim read-only transactions,
+isolation levels, chained completion defaults, release completion defaults, XA,
+transactional DDL, or fully transactional handler flags. Later
+transaction-control slices add chained completion defaults and bounded
+read-only access mode.
 
 ## DDL Metadata Routing Impact
 

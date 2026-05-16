@@ -11,9 +11,11 @@ with ordinary non-transaction assignments. The later
 [Transaction SET No-Op Control](../transaction-set-noop-control/specs.md)
 slice accepts direct read-write/no-chain SET controls, and the later
 [Completion Type Chain Control](../completion-type-chain-control/specs.md)
-slice accepts chained completion defaults. Global or duplicate autocommit
-changes, unsupported transaction-variable `SET` lists, unsupported transaction
-modifiers, XA, and transactional DDL remain rejected.
+slice accepts chained completion defaults. The later
+[Read-Only Transaction Control](../read-only-transaction-control/specs.md)
+slice accepts bounded direct read-only access mode. Global or duplicate
+autocommit changes, unsupported transaction-variable `SET` lists, unsupported
+transaction modifiers, XA, and transactional DDL remain rejected.
 
 ## Problem
 

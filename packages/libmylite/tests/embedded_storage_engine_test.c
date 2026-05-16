@@ -1182,7 +1182,8 @@ static void test_transaction_and_foreign_key_policies(void) {
     assert_exec_succeeds(db, "ROLLBACK");
     assert_exec_succeeds(db, "COMMIT AND CHAIN");
     assert_exec_succeeds(db, "ROLLBACK");
-    assert_transaction_control_exec_fails(db, "START TRANSACTION READ ONLY");
+    assert_exec_succeeds(db, "START TRANSACTION READ ONLY");
+    assert_exec_succeeds(db, "ROLLBACK");
     assert_transaction_control_exec_fails(db, "COMMIT RELEASE");
     assert_exec_succeeds(db, "SET completion_type=CHAIN");
     assert_exec_succeeds(db, "SET completion_type=DEFAULT");
@@ -1310,6 +1311,7 @@ static void test_row_dml_transactions(void) {
     char *filename = NULL;
     mylite_db *db = open_database(root, &filename);
     mylite_stmt *rollback_update = NULL;
+    mylite_stmt *read_only_insert = NULL;
     mylite_stmt *prepared_savepoint = NULL;
     mylite_stmt *prepared_rollback = NULL;
     mylite_stmt *prepared_release = NULL;
@@ -1327,9 +1329,94 @@ static void test_row_dml_transactions(void) {
         ") ENGINE=InnoDB"
     );
 
+    assert_exec_succeeds(db, "START TRANSACTION READ ONLY");
+    zero_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts",
+            single_value_callback,
+            &zero_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(zero_count.rows == 1);
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO tx_posts VALUES (46, 'read-only-direct')",
+        "read-only transaction"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+
+    assert_exec_succeeds(db, "SET TRANSACTION READ ONLY");
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_fails_with_message(
+        db,
+        "UPDATE tx_posts SET title = 'read-only-update' WHERE id = 1",
+        "read-only transaction"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (46, 'one-shot-reset-write')");
+    assert_exec_succeeds(db, "ROLLBACK");
+
+    assert_exec_succeeds(db, "SET SESSION TRANSACTION READ ONLY");
+    assert_exec_succeeds(db, "START TRANSACTION READ WRITE");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (46, 'read-write-override')");
+    assert_exec_succeeds(db, "COMMIT");
+    assert_exec_succeeds(db, "SET SESSION TRANSACTION READ WRITE");
+    count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE id = 46 AND title = 'read-write-override'",
+            single_value_callback,
+            &count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(count.rows == 1);
+
+    assert_exec_succeeds(db, "SET SESSION TRANSACTION READ ONLY");
+    assert_exec_succeeds(db, "SET autocommit=0");
+    assert_exec_fails_with_message(
+        db,
+        "DELETE FROM tx_posts WHERE id = 46",
+        "read-only transaction"
+    );
+    assert_exec_succeeds(db, "SET autocommit=1");
+    assert_exec_succeeds(db, "SET SESSION TRANSACTION READ WRITE");
+
+    assert_exec_succeeds(db, "START TRANSACTION READ ONLY");
+    assert_exec_succeeds(db, "COMMIT AND CHAIN");
+    assert_exec_fails_with_message(
+        db,
+        "REPLACE INTO tx_posts VALUES (47, 'read-only-chain')",
+        "read-only transaction"
+    );
+    assert_exec_succeeds(db, "ROLLBACK AND NO CHAIN");
+
+    assert(
+        mylite_prepare(
+            db,
+            "INSERT INTO tx_posts VALUES (48, 'prepared-read-only')",
+            MYLITE_NUL_TERMINATED,
+            &read_only_insert,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(read_only_insert != NULL);
+    assert_exec_succeeds(db, "START TRANSACTION READ ONLY");
+    assert(mylite_step(read_only_insert) == MYLITE_ERROR);
+    assert(strstr(mylite_errmsg(db), "read-only transaction") != NULL);
+    assert(mylite_finalize(read_only_insert) == MYLITE_OK);
+    assert_exec_succeeds(db, "ROLLBACK");
+
     assert_exec_succeeds(db, "BEGIN");
     assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (1, 'committed')");
     assert_exec_succeeds(db, "COMMIT");
+    count = (single_value_context){.expected_value = "1"};
     assert(
         mylite_exec(
             db,
@@ -1344,6 +1431,7 @@ static void test_row_dml_transactions(void) {
     assert_exec_succeeds(db, "BEGIN WORK");
     assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (2, 'rolled-back')");
     assert_exec_succeeds(db, "ROLLBACK WORK");
+    zero_count = (single_value_context){.expected_value = "0"};
     assert(
         mylite_exec(
             db,
@@ -1669,7 +1757,12 @@ static void test_row_dml_transactions(void) {
     assert_transaction_control_exec_fails(db, "SET GLOBAL autocommit=0");
     assert_exec_succeeds(db, "SET autocommit=0, completion_type=CHAIN");
     assert_exec_succeeds(db, "SET completion_type=DEFAULT");
-    assert_transaction_control_exec_fails(db, "SET TRANSACTION READ ONLY");
+    assert_exec_succeeds(db, "SET TRANSACTION READ ONLY");
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO tx_posts VALUES (49, 'autocommit-read-only')",
+        "read-only transaction"
+    );
     assert_exec_succeeds(db, "SET autocommit=ON");
 
     assert_exec_succeeds(db, "BEGIN");
@@ -2117,7 +2210,7 @@ static void test_row_dml_transactions(void) {
         ) == MYLITE_OK
     );
     assert(zero_count.rows == 1);
-    count = (single_value_context){.expected_value = "21"};
+    count = (single_value_context){.expected_value = "22"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
         MYLITE_OK
@@ -2142,7 +2235,7 @@ static void test_row_dml_transactions(void) {
         ) == MYLITE_OK
     );
     assert(zero_count.rows == 1);
-    count = (single_value_context){.expected_value = "21"};
+    count = (single_value_context){.expected_value = "22"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
         MYLITE_OK
@@ -2153,7 +2246,7 @@ static void test_row_dml_transactions(void) {
     assert_transaction_crash_recovery(root, filename);
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "USE tx_app");
-    count = (single_value_context){.expected_value = "21"};
+    count = (single_value_context){.expected_value = "22"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
         MYLITE_OK

@@ -13,7 +13,9 @@ bookkeeping.
 This slice supports direct session `completion_type=CHAIN/1` for bounded
 row-DML transactions. It keeps `completion_type=RELEASE/2`, global changes,
 `SET STATEMENT`, prepared forms, read-only/isolation changes, XA, and DDL
-inside active direct transactions unsupported.
+inside active direct transactions unsupported at this slice point. A later
+read-only transaction-control slice accepts bounded direct read-only access
+mode.
 
 ## Source Findings
 
@@ -70,9 +72,10 @@ Applications that set `completion_type=CHAIN` get MariaDB-compatible chaining
 for plain direct `COMMIT` and `ROLLBACK` inside MyLite's bounded row-DML
 transaction scope. Explicit `AND NO CHAIN` overrides the session default.
 
-Compatibility remains partial: release completion defaults, read-only
-transactions, isolation levels, XA, transactional DDL, handler-level savepoint
-hooks, and fully transactional engine flags remain unsupported.
+Compatibility remains partial: release completion defaults, isolation levels,
+XA, transactional DDL, handler-level savepoint hooks, and fully transactional
+engine flags remain unsupported. Bounded read-only access mode is handled by a
+later slice.
 
 ## DDL Metadata Routing Impact
 
@@ -93,7 +96,7 @@ is exposed through direct SQL execution.
 
 The behavior applies to routed durable MyLite row storage, including
 `ENGINE=InnoDB` requests that resolve to MyLite. It does not add native InnoDB
-release, isolation, or read-only semantics.
+release or isolation semantics.
 
 ## Wire Protocol Or Integration Impact
 
@@ -133,7 +136,7 @@ one session flag, and tests.
   chained-statement forms remain explicit unsupported transaction-control
   surfaces.
 - Docs and compatibility tables describe chain default support without
-  claiming release, isolation, or read-only semantics.
+  claiming release or isolation semantics.
 
 ## Risks And Unresolved Questions
 
@@ -141,5 +144,5 @@ one session flag, and tests.
   `set_var` list. Suspicious transaction-control targets remain rejected.
 - Supporting `completion_type=RELEASE` would require a product decision about
   how embedded file-owned handles represent server connection release.
-- If future work supports read-only or isolation defaults, completion chaining
-  must preserve those characteristics when opening the chained transaction.
+- Later read-only access-mode work must preserve the active access mode when
+  opening a chained transaction; isolation defaults remain future work.

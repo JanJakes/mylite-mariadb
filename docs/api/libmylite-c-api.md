@@ -117,21 +117,24 @@ explicit `START TRANSACTION READ WRITE`, `COMMIT` / `ROLLBACK` `AND CHAIN`,
 `AND NO CHAIN`, and `NO RELEASE` forms for the same bounded scope, including
 nested statement rollback for covered failed direct and prepared row-DML
 statements and transaction-journal recovery after an unclean process exit.
-Direct `SET TRANSACTION READ WRITE` and session
+Direct `START TRANSACTION READ ONLY`, `START TRANSACTION READ WRITE`,
+`SET TRANSACTION READ ONLY`, `SET TRANSACTION READ WRITE`, session
+`SET TRANSACTION READ ONLY` / `READ WRITE`, and session
 `SET completion_type=NO_CHAIN/0/DEFAULT/CHAIN/1` forms are accepted for the
-current read-write transaction scope. `CHAIN` makes later plain direct
-`COMMIT` and `ROLLBACK` use the same chained behavior as explicit
-`AND CHAIN`, while explicit `AND NO CHAIN` still overrides it.
+current bounded transaction scope. Read-only transactions reject direct and
+prepared MyLite storage writes; `CHAIN` makes later plain direct `COMMIT` and
+`ROLLBACK` use the same chained behavior as explicit `AND CHAIN`, while
+explicit `AND NO CHAIN` still overrides it.
 Direct `SAVEPOINT`,
 `ROLLBACK TO [SAVEPOINT]`, and `RELEASE SAVEPOINT` support simple unquoted and
 backtick-quoted savepoint names inside active bounded row-DML transactions, and
 the same savepoint-control statements can be prepared and reused for
 file-backed MyLite transactions. SQL-mode-sensitive double-quoted savepoint
 names, global autocommit-control statements, duplicate autocommit assignments,
-`READ ONLY`, `WITH CONSISTENT SNAPSHOT`, `RELEASE` completion,
-`completion_type=RELEASE/2`, transaction isolation or read-only variables, XA,
-and DDL inside an active transaction remain unsupported until the storage and
-catalog transaction design is broader.
+`WITH CONSISTENT SNAPSHOT`, `RELEASE` completion, `completion_type=RELEASE/2`,
+transaction isolation or read-only variables, XA, and DDL inside an active
+transaction remain unsupported until the storage and catalog transaction design
+is broader.
 Existing-file opens preserve storage lock conflicts as
 `MYLITE_BUSY` before starting the embedded runtime.
 

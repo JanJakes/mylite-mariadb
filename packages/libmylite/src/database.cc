@@ -198,6 +198,8 @@ RuntimeState g_runtime;
 enum class TransactionControlKind : unsigned char {
     None,
     Begin,
+    BeginReadOnly,
+    BeginReadWrite,
     Commit,
     CommitNoChain,
     CommitAndChain,
@@ -211,7 +213,10 @@ enum class TransactionControlKind : unsigned char {
     SetAutocommitOn,
     SetCompletionTypeNoChain,
     SetCompletionTypeChain,
-    Noop,
+    SetNextTransactionReadOnly,
+    SetNextTransactionReadWrite,
+    SetSessionTransactionReadOnly,
+    SetSessionTransactionReadWrite,
     Unsupported,
 };
 
@@ -247,6 +252,10 @@ struct mylite_db {
     unsigned active_statements = 0;
     bool connected = false;
     bool transaction_active = false;
+    bool transaction_read_only = false;
+    bool transaction_read_only_default = false;
+    bool transaction_read_only_next = false;
+    bool transaction_read_only_next_set = false;
     bool autocommit_disabled = false;
     bool completion_type_chain = false;
 };
@@ -267,6 +276,7 @@ struct mylite_stmt {
     TransactionControlKind prepared_transaction_control = TransactionControlKind::None;
     std::string prepared_transaction_control_name;
     bool sync_schema_catalog_after_execute = false;
+    bool writes_storage = false;
     bool uses_statement_checkpoint = false;
     bool uses_transaction_statement_checkpoint = false;
 };
@@ -445,9 +455,14 @@ bool direct_set_completion_type_chain_default(std::string_view sql, bool *out_ch
 bool sql_token_is_completion_type_no_chain(std::string_view token);
 bool sql_token_is_completion_type_chain(std::string_view token);
 bool sql_set_assignment_targets_transaction_variable(std::string_view assignment);
+bool is_begin_transaction_control(TransactionControlKind kind);
 bool is_completion_transaction_control(TransactionControlKind kind);
 bool is_savepoint_transaction_control(TransactionControlKind kind);
 bool is_chained_completion_transaction_control(TransactionControlKind kind);
+bool transaction_start_read_only(const mylite_db &database, TransactionControlKind kind);
+void mark_transaction_started(mylite_db &database, bool read_only);
+void mark_transaction_completed(mylite_db &database);
+void apply_transaction_characteristics_control(mylite_db &database, TransactionControlKind kind);
 bool sql_token_is_autocommit_off(std::string_view token);
 bool sql_token_is_autocommit_on(std::string_view token);
 bool sql_has_statement_tail_after_semicolon(std::string_view sql);
@@ -1394,6 +1409,12 @@ int exec_impl(
 #  endif
     }
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
+    if (database->transaction_active && database->transaction_read_only &&
+        transaction_control == TransactionControlKind::None &&
+        is_row_dml_checkpoint_sql(std::string_view(sql))) {
+        set_error(*database, MYLITE_ERROR, "unsupported read-only transaction write SQL surface");
+        return copy_error_message(*database, errmsg);
+    }
     if (database->transaction_active && transaction_control == TransactionControlKind::None &&
         is_storage_outer_checkpoint_sql(std::string_view(sql))) {
         set_error(*database, MYLITE_ERROR, "unsupported transactional DDL SQL surface");
@@ -1484,12 +1505,14 @@ int exec_impl(
     if (direct_set_completion_type_chain_default(std::string_view(sql), &completion_type_chain)) {
         database->completion_type_chain = completion_type_chain;
     }
+    apply_transaction_characteristics_control(*database, transaction_control);
 
-    if (transaction_control == TransactionControlKind::Begin) {
+    if (is_begin_transaction_control(transaction_control)) {
+        const bool read_only = transaction_start_read_only(*database, transaction_control);
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
         if (database->transaction_active) {
             const int finish_result = finish_direct_transaction(*database, true);
-            database->transaction_active = false;
+            mark_transaction_completed(*database);
             if (finish_result != MYLITE_OK) {
                 return copy_error_message(*database, errmsg);
             }
@@ -1500,7 +1523,7 @@ int exec_impl(
             return copy_error_message(*database, errmsg);
         }
 #  endif
-        database->transaction_active = true;
+        mark_transaction_started(*database, read_only);
     } else if (
         is_completion_transaction_control(transaction_control) ||
         is_chained_completion_transaction_control(transaction_control)
@@ -1509,12 +1532,14 @@ int exec_impl(
                            ((transaction_control == TransactionControlKind::Commit ||
                              transaction_control == TransactionControlKind::Rollback) &&
                             database->completion_type_chain);
+        const bool restart_read_only =
+            chain ? database->transaction_read_only
+                  : transaction_start_read_only(*database, TransactionControlKind::Begin);
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
         const bool commit = transaction_control == TransactionControlKind::Commit ||
                             transaction_control == TransactionControlKind::CommitNoChain ||
                             transaction_control == TransactionControlKind::CommitAndChain;
         const int transaction_result = finish_direct_transaction(*database, commit);
-        database->transaction_active = false;
         if (transaction_result != MYLITE_OK) {
             return copy_error_message(*database, errmsg);
         }
@@ -1525,8 +1550,12 @@ int exec_impl(
             }
         }
 #  endif
-        database->transaction_active = database->autocommit_disabled || chain;
+        mark_transaction_completed(*database);
+        if (database->autocommit_disabled || chain) {
+            mark_transaction_started(*database, restart_read_only);
+        }
     } else if (transaction_control == TransactionControlKind::SetAutocommitOff) {
+        const bool read_only = transaction_start_read_only(*database, transaction_control);
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
         if (!database->transaction_active) {
             const int transaction_result = begin_direct_transaction(*database);
@@ -1537,18 +1566,20 @@ int exec_impl(
         }
 #  endif
         database->autocommit_disabled = true;
-        database->transaction_active = true;
+        if (!database->transaction_active) {
+            mark_transaction_started(*database, read_only);
+        }
     } else if (transaction_control == TransactionControlKind::SetAutocommitOn) {
         if (database->autocommit_disabled) {
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
             const int transaction_result = finish_direct_transaction(*database, true);
-            database->transaction_active = false;
+            mark_transaction_completed(*database);
             if (transaction_result != MYLITE_OK) {
                 return copy_error_message(*database, errmsg);
             }
 #  endif
             database->autocommit_disabled = false;
-            database->transaction_active = false;
+            mark_transaction_completed(*database);
         }
     }
     return MYLITE_OK;
@@ -1633,6 +1664,8 @@ int prepare_impl(
             *out_stmt = statement.release();
             return MYLITE_OK;
         }
+        statement->writes_storage =
+            is_storage_outer_checkpoint_sql(sql_view) || is_row_dml_checkpoint_sql(sql_view);
         statement->sync_schema_catalog_after_execute =
             database->filename != ":memory:" && is_schema_catalog_sql(sql_view);
         statement->uses_statement_checkpoint =
@@ -1774,6 +1807,15 @@ int execute_statement(mylite_stmt &statement) {
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
     if (statement.prepared_transaction_control != TransactionControlKind::None) {
         return execute_prepared_savepoint_control(statement);
+    }
+    if (statement.database->transaction_active && statement.database->transaction_read_only &&
+        statement.writes_storage) {
+        set_error(
+            *statement.database,
+            MYLITE_ERROR,
+            "unsupported read-only transaction write SQL surface"
+        );
+        return MYLITE_ERROR;
     }
 #  endif
 
@@ -3410,19 +3452,29 @@ TransactionControlKind direct_start_transaction_control_kind(std::string_view sq
         return TransactionControlKind::Begin;
     }
 
+    bool read_only = false;
+    bool read_write = false;
     for (;;) {
         const std::string_view read_token = pop_sql_token(sql);
         if (!sql_token_equals(read_token, "READ")) {
             return TransactionControlKind::Unsupported;
         }
         const std::string_view mode_token = pop_sql_token(sql);
-        if (!sql_token_equals(mode_token, "WRITE")) {
+        if (sql_token_equals(mode_token, "ONLY")) {
+            read_only = true;
+        } else if (sql_token_equals(mode_token, "WRITE")) {
+            read_write = true;
+        } else {
+            return TransactionControlKind::Unsupported;
+        }
+        if (read_only && read_write) {
             return TransactionControlKind::Unsupported;
         }
 
         sql = skip_sql_leading_noise(sql);
         if (sql_rest_is_statement_end(sql)) {
-            return TransactionControlKind::Begin;
+            return read_only ? TransactionControlKind::BeginReadOnly
+                             : TransactionControlKind::BeginReadWrite;
         }
         if (sql.empty() || sql.front() != ',') {
             return TransactionControlKind::Unsupported;
@@ -3604,10 +3656,12 @@ TransactionControlKind direct_set_transaction_characteristics_control_kind(
     std::string_view rest = skip_sql_leading_noise(sql);
     std::string_view token = pop_sql_token(rest);
     bool global = false;
+    bool session_scope = false;
 
     if (sql_token_equals(token, "GLOBAL") || sql_token_equals(token, "LOCAL") ||
         sql_token_equals(token, "SESSION")) {
         global = sql_token_equals(token, "GLOBAL");
+        session_scope = !global;
         token = pop_sql_token(rest);
     }
 
@@ -3621,12 +3675,21 @@ TransactionControlKind direct_set_transaction_characteristics_control_kind(
     if (!sql_token_equals(pop_sql_token(rest), "READ")) {
         return TransactionControlKind::Unsupported;
     }
-    if (!sql_token_equals(pop_sql_token(rest), "WRITE")) {
+    const std::string_view mode = pop_sql_token(rest);
+    if (sql_token_equals(mode, "ONLY")) {
+        return sql_rest_is_statement_end(rest)
+                   ? (session_scope ? TransactionControlKind::SetSessionTransactionReadOnly
+                                    : TransactionControlKind::SetNextTransactionReadOnly)
+                   : TransactionControlKind::Unsupported;
+    }
+    if (!sql_token_equals(mode, "WRITE")) {
         return TransactionControlKind::Unsupported;
     }
 
-    return sql_rest_is_statement_end(rest) ? TransactionControlKind::Noop
-                                           : TransactionControlKind::Unsupported;
+    return sql_rest_is_statement_end(rest)
+               ? (session_scope ? TransactionControlKind::SetSessionTransactionReadWrite
+                                : TransactionControlKind::SetNextTransactionReadWrite)
+               : TransactionControlKind::Unsupported;
 }
 
 TransactionControlKind direct_set_assignment_transaction_control_kind(std::string_view sql) {
@@ -3846,6 +3909,11 @@ bool sql_set_assignment_targets_transaction_variable(std::string_view assignment
     return false;
 }
 
+bool is_begin_transaction_control(TransactionControlKind kind) {
+    return kind == TransactionControlKind::Begin || kind == TransactionControlKind::BeginReadOnly ||
+           kind == TransactionControlKind::BeginReadWrite;
+}
+
 bool is_completion_transaction_control(TransactionControlKind kind) {
     return kind == TransactionControlKind::Commit ||
            kind == TransactionControlKind::CommitNoChain ||
@@ -3862,6 +3930,56 @@ bool is_savepoint_transaction_control(TransactionControlKind kind) {
 bool is_chained_completion_transaction_control(TransactionControlKind kind) {
     return kind == TransactionControlKind::CommitAndChain ||
            kind == TransactionControlKind::RollbackAndChain;
+}
+
+bool transaction_start_read_only(const mylite_db &database, TransactionControlKind kind) {
+    if (kind == TransactionControlKind::BeginReadOnly) {
+        return true;
+    }
+    if (kind == TransactionControlKind::BeginReadWrite) {
+        return false;
+    }
+    return database.transaction_read_only_next_set ? database.transaction_read_only_next
+                                                   : database.transaction_read_only_default;
+}
+
+void mark_transaction_started(mylite_db &database, bool read_only) {
+    database.transaction_active = true;
+    database.transaction_read_only = read_only;
+    database.transaction_read_only_next = false;
+    database.transaction_read_only_next_set = false;
+}
+
+void mark_transaction_completed(mylite_db &database) {
+    database.transaction_active = false;
+    database.transaction_read_only = database.transaction_read_only_default;
+    database.transaction_read_only_next = false;
+    database.transaction_read_only_next_set = false;
+}
+
+void apply_transaction_characteristics_control(mylite_db &database, TransactionControlKind kind) {
+    if (kind == TransactionControlKind::SetNextTransactionReadOnly ||
+        kind == TransactionControlKind::SetNextTransactionReadWrite) {
+        const bool read_only = kind == TransactionControlKind::SetNextTransactionReadOnly;
+        if (database.transaction_active) {
+            database.transaction_read_only = read_only;
+            return;
+        }
+        database.transaction_read_only_next = read_only;
+        database.transaction_read_only_next_set = true;
+        return;
+    }
+
+    if (kind == TransactionControlKind::SetSessionTransactionReadOnly ||
+        kind == TransactionControlKind::SetSessionTransactionReadWrite) {
+        database.transaction_read_only_default =
+            kind == TransactionControlKind::SetSessionTransactionReadOnly;
+        database.transaction_read_only_next = false;
+        database.transaction_read_only_next_set = false;
+        if (!database.transaction_active) {
+            database.transaction_read_only = database.transaction_read_only_default;
+        }
+    }
 }
 
 bool sql_token_is_autocommit_off(std::string_view token) {

@@ -490,18 +490,21 @@ rolls it back before closing the embedded MariaDB connection.
 Repeating direct `BEGIN` or `START TRANSACTION` while a direct transaction is
 active commits the previous outer checkpoint and opens a new one, matching
 MariaDB's transaction restart behavior for this bounded row-DML scope.
-`START TRANSACTION READ WRITE` follows the same direct transaction-start path.
-`COMMIT` and `ROLLBACK` completion modifiers support `AND CHAIN` by finishing
-the current outer checkpoint and immediately opening a new one; `AND NO CHAIN`
-and `NO RELEASE` are accepted explicit no-op completion modifiers. Direct
-session `SET completion_type=CHAIN/1` mirrors the MariaDB completion default
-so later plain direct `COMMIT` and `ROLLBACK` chain, while explicit
-`AND NO CHAIN` overrides it. `RELEASE`, `READ ONLY`,
+`START TRANSACTION READ WRITE` follows the same direct transaction-start path,
+and `START TRANSACTION READ ONLY` starts a read-only MyLite transaction that
+rejects direct and prepared MyLite storage writes. Direct `SET TRANSACTION`
+and `SET SESSION` / `SET LOCAL TRANSACTION` `READ ONLY` / `READ WRITE` forms
+mirror MariaDB's one-shot and session access-mode defaults after MariaDB
+accepts the statement. `COMMIT` and `ROLLBACK` completion modifiers support
+`AND CHAIN` by finishing the current outer checkpoint and immediately opening
+a new one; chained completion preserves the current read-only/read-write
+access mode, while non-chained completion resets one-shot access mode to the
+session default. `AND NO CHAIN` and `NO RELEASE` are accepted explicit no-op
+completion modifiers. Direct session `SET completion_type=CHAIN/1` mirrors the
+MariaDB completion default so later plain direct `COMMIT` and `ROLLBACK`
+chain, while explicit `AND NO CHAIN` overrides it. `RELEASE`,
 `WITH CONSISTENT SNAPSHOT`, `completion_type=RELEASE/2`, and transaction
-isolation or read-only variable changes remain unsupported. Direct
-`SET TRANSACTION READ WRITE` and session
-`SET completion_type=NO_CHAIN/0/DEFAULT` are accepted as read-write/no-chain
-defaults for the same bounded scope.
+isolation or read-only variable changes remain unsupported.
 Direct savepoint control is handled by `libmylite` before MariaDB execution
 for the same bounded transaction scope: simple unquoted and backtick-quoted
 `SAVEPOINT` names open nested storage checkpoint frames,
@@ -526,8 +529,9 @@ continue to reject SQL-mode-sensitive double-quoted savepoint names, global or
 duplicate autocommit changes, unsupported `SET TRANSACTION` forms, unsupported
 transaction modifiers and transaction variables, release completion defaults,
 XA, and DDL inside active direct transactions. Handler-level
-savepoint hooks, transactional DDL, isolation, WAL/checkpoint, and
-transactional engine-flag support remain planned.
+savepoint hooks, table-kind-aware read-only temporary-table exceptions,
+transactional DDL, isolation, WAL/checkpoint, and transactional engine-flag
+support remain planned.
 
 The storage design must preserve the full write-concurrency goal. Early
 milestones may use coarse locks for correctness, but the page, transaction,

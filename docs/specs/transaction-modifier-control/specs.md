@@ -7,8 +7,11 @@ slice accepts direct `SET TRANSACTION READ WRITE` and session
 bounded read-write, no-chain transaction scope. The later
 [Completion Type Chain Control](../completion-type-chain-control/specs.md)
 slice accepts session `SET completion_type=CHAIN/1` and mirrors chained plain
-completion. Release completion defaults, read-only access mode, isolation
-changes, global defaults, and prepared transaction control remain unsupported.
+completion. The later
+[Read-Only Transaction Control](../read-only-transaction-control/specs.md)
+slice accepts bounded direct read-only access mode. Release completion
+defaults, isolation changes, global defaults, and prepared transaction control
+remain unsupported.
 
 ## Problem
 
@@ -64,7 +67,8 @@ that maps cleanly to the current MyLite storage checkpoint model:
   exactly like plain `START TRANSACTION`. Repeated `READ WRITE` options in the
   same option list are treated as the same explicit read-write request.
 - `START TRANSACTION READ ONLY`, `WITH CONSISTENT SNAPSHOT`, and mixed or
-  unknown start options remain unsupported.
+  unknown start options remain unsupported at this slice point. A later
+  read-only transaction-control slice accepts the read-only access-mode subset.
 - `COMMIT AND CHAIN` commits the current outer MyLite checkpoint and immediately
   opens a new outer checkpoint, regardless of `autocommit` mode.
 - `ROLLBACK AND CHAIN` rolls back the current outer MyLite checkpoint and

@@ -1293,6 +1293,15 @@ static void test_transaction_control_policy(void) {
     assert(mylite_exec(db, "SET TRANSACTION READ WRITE", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "SET SESSION TRANSACTION READ WRITE", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "SET LOCAL TRANSACTION READ WRITE", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "START TRANSACTION READ ONLY", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "ROLLBACK", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SET TRANSACTION READ ONLY", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "BEGIN", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "ROLLBACK", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SET SESSION TRANSACTION READ ONLY", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "START TRANSACTION", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "ROLLBACK", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SET LOCAL TRANSACTION READ WRITE", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "SET completion_type=NO_CHAIN", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "SET @@completion_type=0", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "SET SESSION completion_type=DEFAULT", NULL, NULL, NULL) == MYLITE_OK);
@@ -1317,7 +1326,6 @@ static void test_transaction_control_policy(void) {
     assert(mylite_exec(db, "BEGIN", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "ROLLBACK AND CHAIN NO RELEASE", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "COMMIT NO RELEASE", NULL, NULL, NULL) == MYLITE_OK);
-    assert_transaction_control_exec_fails(db, "START TRANSACTION READ ONLY");
     assert_transaction_control_exec_fails(db, "START TRANSACTION WITH CONSISTENT SNAPSHOT");
     assert_transaction_control_exec_fails(db, "START TRANSACTION READ WRITE, READ ONLY");
     assert_transaction_control_exec_fails(db, "COMMIT RELEASE");
@@ -1353,7 +1361,7 @@ static void test_transaction_control_policy(void) {
         "SET STATEMENT completion_type=NO_CHAIN FOR SELECT 1"
     );
     assert_transaction_control_exec_fails(db, "SET GLOBAL TRANSACTION READ WRITE");
-    assert_transaction_control_exec_fails(db, "SET TRANSACTION READ ONLY");
+    assert_transaction_control_exec_fails(db, "SET GLOBAL TRANSACTION READ ONLY");
     assert_transaction_control_exec_fails(db, "SET TRANSACTION READ WRITE, READ ONLY");
     assert_transaction_control_exec_fails(db, "SET GLOBAL completion_type=NO_CHAIN");
     assert_transaction_control_exec_fails(db, "SET @@global.completion_type=0");
@@ -1935,7 +1943,11 @@ static void assert_non_table_object_exec_fails(mylite_db *db, const char *sql) {
 static void assert_transaction_control_exec_fails(mylite_db *db, const char *sql) {
     char *errmsg = NULL;
 
-    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    const int result = mylite_exec(db, sql, NULL, NULL, &errmsg);
+    if (result == MYLITE_OK) {
+        fprintf(stderr, "SQL unexpectedly succeeded: %s\n", sql);
+    }
+    assert(result == MYLITE_ERROR);
     assert(mylite_errcode(db) == MYLITE_ERROR);
     assert(mylite_mariadb_errno(db) == 0U);
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
