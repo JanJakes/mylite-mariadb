@@ -453,10 +453,10 @@ XML SQL function, GIS SQL function, SFORMAT SQL function, partition, and
 foreign-key DDL commands are rejected before MariaDB execution with stable
 MyLite errors. The default embedded profile also links fail-closed stubs for
 stored-program runtime symbols that retained MariaDB parser or cleanup paths
-still reference, omits dynamic UDF lookup/execution bodies, and compiles
-embedded binlog transaction and event-write entry points to no-ops. Other
-unsupported surfaces should fail with stable MyLite result codes and MariaDB
-diagnostics where possible.
+still reference, omits dynamic UDF lookup/execution bodies, omits unsupported
+binlog event-root source objects, and compiles embedded binlog transaction and
+event-write entry points to no-ops. Other unsupported surfaces should fail with
+stable MyLite result codes and MariaDB diagnostics where possible.
 
 ## Compatibility Adapter
 

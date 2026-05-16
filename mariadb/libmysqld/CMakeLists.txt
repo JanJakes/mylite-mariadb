@@ -271,7 +271,15 @@ IF(NOT MYLITE_WITH_UDF_RUNTIME)
 ENDIF()
 
 IF(NOT MYLITE_WITH_BINLOG_CORE)
-  LIST(REMOVE_ITEM SQL_EMBEDDED_SOURCES ../sql/rpl_record.cc)
+  LIST(REMOVE_ITEM SQL_EMBEDDED_SOURCES
+    ../sql/gtid_index.cc
+    ../sql/log_event.cc
+    ../sql/rpl_injector.cc
+    ../sql/rpl_record.cc)
+  # Keep the no-binlog stub before log_event_server.cc in the archive so
+  # static links resolve shared SQL rendering helpers without loading event
+  # serialization code.
+  LIST(INSERT SQL_EMBEDDED_SOURCES 0 mylite_log_event_core_stub.cc)
 ENDIF()
 
 ADD_CONVENIENCE_LIBRARY(sql_embedded ${SQL_EMBEDDED_SOURCES})

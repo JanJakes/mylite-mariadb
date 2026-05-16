@@ -2014,6 +2014,10 @@ static inline int
 binlog_commit_flush_stmt_cache(THD *thd, bool all,
                                binlog_cache_mngr *cache_mngr)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return 0;
+#else
   DBUG_ENTER("binlog_commit_flush_stmt_cache");
 #ifdef WITH_WSREP
   if (thd->wsrep_mysql_replicated > 0)
@@ -2028,6 +2032,7 @@ binlog_commit_flush_stmt_cache(THD *thd, bool all,
   Query_log_event end_evt(thd, STRING_WITH_LEN("COMMIT"),
                           FALSE, TRUE, TRUE, 0);
   DBUG_RETURN(binlog_flush_cache(thd, cache_mngr, &end_evt, all, TRUE, FALSE));
+#endif
 }
 
 
@@ -2054,6 +2059,10 @@ static inline int
 binlog_commit_flush_trx_cache(THD *thd, bool all, binlog_cache_mngr *cache_mngr,
                               bool ro_1pc)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return 0;
+#else
   DBUG_ENTER("binlog_commit_flush_trx_cache");
 
   const char query[]= "XA COMMIT ";
@@ -2074,6 +2083,7 @@ binlog_commit_flush_trx_cache(THD *thd, bool all, binlog_cache_mngr *cache_mngr,
   Query_log_event end_evt(thd, buf, buflen, TRUE, TRUE, TRUE, 0);
 
   DBUG_RETURN(binlog_flush_cache(thd, cache_mngr, &end_evt, all, FALSE, TRUE, ro_1pc));
+#endif
 }
 
 
@@ -2090,6 +2100,10 @@ static inline int
 binlog_rollback_flush_trx_cache(THD *thd, bool all,
                                 binlog_cache_mngr *cache_mngr)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return 0;
+#else
   const char query[]= "XA ROLLBACK ";
   const size_t q_len= sizeof(query) - 1; // do not count trailing 0
   char buf[q_len + ser_buf_size]= "ROLLBACK";
@@ -2105,6 +2119,7 @@ binlog_rollback_flush_trx_cache(THD *thd, bool all,
   Query_log_event end_evt(thd, buf, buflen, TRUE, TRUE, TRUE, 0);
 
   return (binlog_flush_cache(thd, cache_mngr, &end_evt, all, FALSE, TRUE));
+#endif
 }
 
 /**
@@ -2328,6 +2343,10 @@ static bool trans_cannot_safely_rollback(THD *thd, bool all)
 static int binlog_commit_flush_xa_prepare(THD *thd, bool all,
                                           binlog_cache_mngr *cache_mngr)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return 0;
+#else
   XID *xid= thd->transaction->xid_state.get_xid();
   {
     // todo assert wsrep_simulate || is_open()
@@ -2361,6 +2380,7 @@ static int binlog_commit_flush_xa_prepare(THD *thd, bool all,
   XA_prepare_log_event end_evt(thd, xid, FALSE);
 
   return (binlog_flush_cache(thd, cache_mngr, &end_evt, all, TRUE, TRUE));
+#endif
 }
 
 
@@ -2734,6 +2754,10 @@ Event_log::check_cache_error(THD *thd, binlog_cache_data *cache_data)
 
 static int binlog_savepoint_set(THD *thd, void *sv)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return 0;
+#else
   int error= 1;
   DBUG_ENTER("binlog_savepoint_set");
 
@@ -2763,10 +2787,15 @@ static int binlog_savepoint_set(THD *thd, void *sv)
     binlog_trans_log_savepos(thd, (my_off_t*) sv);
 
   DBUG_RETURN(error);
+#endif
 }
 
 static int binlog_savepoint_rollback(THD *thd, void *sv)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return 0;
+#else
   DBUG_ENTER("binlog_savepoint_rollback");
 
   /*
@@ -2806,6 +2835,7 @@ static int binlog_savepoint_rollback(THD *thd, void *sv)
     thd->reset_binlog_for_next_statement();
 
   DBUG_RETURN(0);
+#endif
 }
 
 
@@ -3794,6 +3824,27 @@ void MYSQL_BIN_LOG::stop_background_thread()
 void MYSQL_BIN_LOG::cleanup()
 {
   DBUG_ENTER("cleanup");
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  if (inited)
+  {
+    inited= 0;
+    mysql_mutex_destroy(&LOCK_log);
+    mysql_mutex_destroy(&LOCK_index);
+    mysql_mutex_destroy(&LOCK_xid_list);
+    mysql_mutex_destroy(&LOCK_binlog_background_thread);
+    mysql_mutex_destroy(&LOCK_binlog_end_pos);
+    mysql_cond_destroy(&COND_relay_log_updated);
+    mysql_cond_destroy(&COND_bin_log_updated);
+    mysql_cond_destroy(&COND_queue_busy);
+    mysql_cond_destroy(&COND_xid_list);
+    mysql_cond_destroy(&COND_binlog_background_thread);
+    mysql_cond_destroy(&COND_binlog_background_thread_end);
+  }
+  if (!is_relay_log)
+    rpl_global_gtid_binlog_state.free();
+  DBUG_VOID_RETURN;
+#else
   if (inited)
   {
     xid_count_per_binlog *b;
@@ -3843,6 +3894,7 @@ void MYSQL_BIN_LOG::cleanup()
   if (!is_relay_log)
     rpl_global_gtid_binlog_state.free();
   DBUG_VOID_RETURN;
+#endif
 }
 
 
@@ -3939,6 +3991,10 @@ bool MYSQL_BIN_LOG::open_index_file(const char *index_file_name_arg,
 
 bool Event_log::open(enum cache_type io_cache_type_arg)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return false;
+#else
   bool error= init_io_cache(&log_file, -1, LOG_BIN_IO_SIZE, io_cache_type_arg,
                             0, 0, MYF(MY_WME | MY_NABP | MY_WAIT_IF_FULL));
 
@@ -3951,6 +4007,7 @@ bool Event_log::open(enum cache_type io_cache_type_arg)
                                                   false, true, false);
   status_var_add(current_thd->status_var.binlog_bytes_written, bytes_written);
   return bytes_written < 0;
+#endif
 }
 
 longlong
@@ -3958,6 +4015,10 @@ Event_log::write_description_event(enum_binlog_checksum_alg checksum_alg,
                                    bool encrypt, bool dont_set_created,
                                    bool is_relay_log)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return 0;
+#else
   Format_description_log_event s(BINLOG_VERSION, NULL, checksum_alg);
   /*
     don't set LOG_EVENT_BINLOG_IN_USE_F for SEQ_READ_APPEND io_cache
@@ -3999,6 +4060,7 @@ Event_log::write_description_event(enum_binlog_checksum_alg checksum_alg,
     }
   }
   return (longlong)s.data_written;
+#endif
 }
 
 
@@ -4028,6 +4090,10 @@ bool MYSQL_BIN_LOG::open(const char *log_name,
   xid_count_per_binlog *new_xid_list_entry= NULL, *b;
   DBUG_ENTER("MYSQL_BIN_LOG::open");
 
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  DBUG_RETURN(0);
+#else
   mysql_mutex_assert_owner(&LOCK_log);
 
   if (!is_relay_log)
@@ -4413,6 +4479,7 @@ err:
     delete new_xid_list_entry;
   close(LOG_CLOSE_INDEX);
   DBUG_RETURN(1);
+#endif
 }
 
 
@@ -4817,6 +4884,8 @@ bool MYSQL_BIN_LOG::reset_logs(THD *thd, bool create_new_log,
 
   for (;;)
   {
+#if !defined(EMBEDDED_LIBRARY) || !defined(MYLITE_WITH_BINLOG_CORE) || \
+    MYLITE_WITH_BINLOG_CORE
     /* Delete any GTID index file. */
     char buf[Gtid_index_base::GTID_INDEX_FILENAME_MAX_SIZE];
     Gtid_index_base::make_gtid_index_file_name(buf, sizeof(buf),
@@ -4837,6 +4906,7 @@ bool MYSQL_BIN_LOG::reset_logs(THD *thd, bool create_new_log,
       }
       my_errno= 0;
     }
+#endif
 
     /* Delete the binlog file. */
     if (unlikely((error= my_delete(linfo.log_file_name, MYF(0)))))
@@ -5350,7 +5420,10 @@ int MYSQL_BIN_LOG::purge_index_entry(THD *thd, ulonglong *reclaimed_space,
   int error= 0;
   LOG_INFO log_info;
   LOG_INFO check_log_info;
+#if !defined(EMBEDDED_LIBRARY) || !defined(MYLITE_WITH_BINLOG_CORE) || \
+    MYLITE_WITH_BINLOG_CORE
   char buf[Gtid_index_base::GTID_INDEX_FILENAME_MAX_SIZE];
+#endif
 
   DBUG_ASSERT(my_b_inited(&purge_index_file));
 
@@ -5384,6 +5457,8 @@ int MYSQL_BIN_LOG::purge_index_entry(THD *thd, ulonglong *reclaimed_space,
     /* Get rid of the trailing '\n' */
     log_info.log_file_name[length-1]= 0;
 
+#if !defined(EMBEDDED_LIBRARY) || !defined(MYLITE_WITH_BINLOG_CORE) || \
+    MYLITE_WITH_BINLOG_CORE
     Gtid_index_base::make_gtid_index_file_name(buf, sizeof(buf),
                                                log_info.log_file_name);
     if (my_delete(buf, MYF(0)))
@@ -5401,6 +5476,7 @@ int MYSQL_BIN_LOG::purge_index_entry(THD *thd, ulonglong *reclaimed_space,
       }
       my_errno= 0;
     }
+#endif
 
     if (unlikely(!mysql_file_stat(m_key_file_log, log_info.log_file_name, &s,
                                   MYF(0))))
@@ -5879,6 +5955,10 @@ done:
 
 ulonglong MYSQL_BIN_LOG::get_binlog_space_total()
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return 0;
+#else
   ulonglong used_space= 0;
   mysql_mutex_lock(&LOCK_log);
   /* Get position in current log file */
@@ -5888,6 +5968,7 @@ ulonglong MYSQL_BIN_LOG::get_binlog_space_total()
   used_space+= binlog_space_total;
   mysql_mutex_unlock(&LOCK_index);
   return used_space;
+#endif
 }
 
 bool
@@ -6190,18 +6271,32 @@ end:
 bool Event_log::write_event(Log_event *ev, binlog_cache_data *data,
                             IO_CACHE *file)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return false;
+#else
   return write_event(ev, ev->select_checksum_alg(data), data, file);
+#endif
 }
 
 bool MYSQL_BIN_LOG::write_event(Log_event *ev)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return false;
+#else
   return write_event(ev, ev->select_checksum_alg(NULL), 0, &log_file);
+#endif
 }
 
 bool Event_log::write_event(Log_event *ev,
                             enum_binlog_checksum_alg checksum_alg,
                             binlog_cache_data *cache_data, IO_CACHE *file)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return false;
+#else
   Log_event_writer writer(file, cache_data, checksum_alg, &crypto);
   if (crypto.scheme && file == &log_file)
   {
@@ -6209,6 +6304,7 @@ bool Event_log::write_event(Log_event *ev,
     writer.set_encrypted_writer();
   }
   return writer.write(ev);
+#endif
 }
 
 bool MYSQL_BIN_LOG::append(Log_event *ev,
@@ -6756,6 +6852,10 @@ void THD::binlog_prepare_for_row_logging()
 
 bool THD::binlog_write_annotated_row(bool use_trans_cache)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return false;
+#else
   DBUG_ENTER("THD::binlog_write_annotated_row");
 
   if (!(IF_WSREP(!wsrep_fragments_certified_for_stmt(this), true) &&
@@ -6784,6 +6884,7 @@ bool THD::binlog_write_annotated_row(bool use_trans_cache)
       lex->stmt_accessed_table(LEX::STMT_WRITES_NON_TRANS_TABLE))
     cache_data->set_incident();
   DBUG_RETURN(1);
+#endif
 }
 
 
@@ -7087,6 +7188,10 @@ Event_log::flush_and_set_pending_rows_event(THD *thd, Rows_log_event* event,
                                             binlog_cache_data *cache_data,
                                             bool is_transactional)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return 0;
+#else
   DBUG_ENTER("Event_log::flush_and_set_pending_rows_event(event)");
   DBUG_ASSERT(WSREP_EMULATE_BINLOG(thd) || is_open());
   DBUG_PRINT("enter", ("event: %p", event));
@@ -7140,6 +7245,7 @@ Event_log::flush_and_set_pending_rows_event(THD *thd, Rows_log_event* event,
   cache_data->set_pending(event);
 
   DBUG_RETURN(0);
+#endif
 }
 
 /*
@@ -7883,6 +7989,10 @@ err:
 void
 MYSQL_BIN_LOG::update_gtid_index(uint32 offset, rpl_gtid gtid)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return;
+#else
   if (!unlikely(gtid_index))
     return;
 
@@ -7902,6 +8012,7 @@ MYSQL_BIN_LOG::update_gtid_index(uint32 offset, rpl_gtid gtid)
                                                   gtid_list, gtid_count))
       my_free(gtid_list);
   }
+#endif
 }
 
 int error_log_print(enum loglevel level, const char *format,
@@ -8236,6 +8347,10 @@ end:
 */
 static int do_delete_gtid_domain(DYNAMIC_ARRAY *domain_drop_lex)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return 0;
+#else
   int rc= 0;
   Gtid_list_log_event *glev= NULL;
   char buf[FN_REFLEN];
@@ -8282,6 +8397,7 @@ end:
   delete glev;
 
   return rc;
+#endif
 }
 
 /**
@@ -8393,6 +8509,10 @@ int Event_log::write_cache_raw(THD *thd, IO_CACHE *cache)
 
 int Event_log::write_cache(THD *thd, binlog_cache_data *cache_data)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return 0;
+#else
   IO_CACHE *cache= &cache_data->cache_log;
   DBUG_ENTER("Event_log::write_cache");
 
@@ -8527,6 +8647,7 @@ end:
                   { DBUG_SET("-d,simulate_file_write_error"); });
   status_var_add(thd->status_var.binlog_bytes_written, writer.bytes_written);
   DBUG_RETURN(err);
+#endif
 }
 
 /*
@@ -8564,6 +8685,10 @@ int query_error_code(THD *thd, bool not_killed)
 
 bool MYSQL_BIN_LOG::write_incident_already_locked(THD *thd)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return false;
+#else
   uint error= 0;
   DBUG_ENTER("MYSQL_BIN_LOG::write_incident_already_locked");
   Incident incident= INCIDENT_LOST_EVENTS;
@@ -8576,11 +8701,16 @@ bool MYSQL_BIN_LOG::write_incident_already_locked(THD *thd)
   }
 
   DBUG_RETURN(error);
+#endif
 }
 
 
 bool MYSQL_BIN_LOG::write_incident(THD *thd)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return false;
+#else
   uint error= 0;
   my_off_t offset;
   bool check_purge= false;
@@ -8639,12 +8769,17 @@ bool MYSQL_BIN_LOG::write_incident(THD *thd)
   }
 
   DBUG_RETURN(error);
+#endif
 }
 
 void
 MYSQL_BIN_LOG::
 write_binlog_checkpoint_event_already_locked(const char *name_arg, uint len)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return;
+#else
   my_off_t offset;
   bool err;
   Binlog_checkpoint_log_event ev(name_arg, len);
@@ -8680,6 +8815,7 @@ write_binlog_checkpoint_event_already_locked(const char *name_arg, uint len)
   mysql_mutex_lock(&LOCK_commit_ordered);
   last_commit_pos_offset= offset;
   mysql_mutex_unlock(&LOCK_commit_ordered);
+#endif
 }
 
 
@@ -11739,6 +11875,10 @@ TC_LOG_BINLOG::commit_checkpoint_notify(void *cookie)
 pthread_handler_t
 binlog_background_thread(void *arg __attribute__((unused)))
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return 0;
+#else
   bool stop;
   Binlog_background_job *queue, *next;
   Binlog_background_job *freelist= nullptr;
@@ -11914,6 +12054,7 @@ binlog_background_thread(void *arg __attribute__((unused)))
   mysql_mutex_unlock(&mysql_bin_log.LOCK_binlog_background_thread);
 
   DBUG_RETURN(0);
+#endif
 }
 
 #ifdef HAVE_PSI_INTERFACE
@@ -12615,6 +12756,10 @@ int TC_LOG_BINLOG::recover(LOG_INFO *linfo, const char *last_log_name,
                            IO_CACHE *first_log,
                            Format_description_log_event *fdle, bool do_xa)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return 0;
+#else
   Log_event *ev= NULL;
   Gtid_index_writer *gtid_index_recover= NULL;
   HASH xids, ddl_log_ids;
@@ -12908,6 +13053,7 @@ err1:
                   "or delete (or rename) binary log and start serverwith "
                   "--tc-heuristic-recover={commit|rollback}");
   DBUG_RETURN(1);
+#endif
 }
 
 
@@ -12926,6 +13072,10 @@ err1:
 Gtid_index_writer *
 MYSQL_BIN_LOG::recover_gtid_index_start(const char *base_name, my_off_t offset)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return nullptr;
+#else
   char buf[Gtid_index_base::GTID_INDEX_FILENAME_MAX_SIZE];
 
   Gtid_index_base::make_gtid_index_file_name(buf, sizeof(buf), base_name);
@@ -12944,6 +13094,7 @@ MYSQL_BIN_LOG::recover_gtid_index_start(const char *base_name, my_off_t offset)
                           (uint32)opt_binlog_gtid_index_page_size,
                           (my_off_t)opt_binlog_gtid_index_span_min);
   return gi;
+#endif
 }
 
 
@@ -12961,10 +13112,15 @@ MYSQL_BIN_LOG::recover_gtid_index_process(Gtid_index_writer *gi,
                                           my_off_t offset,
                                           const rpl_gtid *gtid)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return;
+#else
   if (gi)
   {
     gi->process_gtid((uint32)offset, gtid);
   }
+#endif
 }
 
 
@@ -12978,11 +13134,16 @@ MYSQL_BIN_LOG::recover_gtid_index_process(Gtid_index_writer *gi,
 void
 MYSQL_BIN_LOG::recover_gtid_index_end(Gtid_index_writer *gi)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return;
+#else
   if (gi)
   {
     gi->close();
     delete gi;
   }
+#endif
 }
 
 
@@ -12996,6 +13157,10 @@ MYSQL_BIN_LOG::recover_gtid_index_end(Gtid_index_writer *gi)
 void
 MYSQL_BIN_LOG::recover_gtid_index_abort(Gtid_index_writer *gi)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return;
+#else
   if (gi)
   {
     char buf[Gtid_index_base::GTID_INDEX_FILENAME_MAX_SIZE];
@@ -13007,12 +13172,17 @@ MYSQL_BIN_LOG::recover_gtid_index_abort(Gtid_index_writer *gi)
     delete(gi);
     my_delete(buf, MYF(0));
   }
+#endif
 }
 
 
 int
 MYSQL_BIN_LOG::do_binlog_recovery(const char *opt_name, bool do_xa_recovery)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  return 0;
+#else
   LOG_INFO log_info;
   const char *errmsg;
   IO_CACHE    log;
@@ -13112,6 +13282,7 @@ MYSQL_BIN_LOG::do_binlog_recovery(const char *opt_name, bool do_xa_recovery)
   mysql_file_close(file, MYF(MY_WME));
 
   return error;
+#endif
 }
 
 
@@ -13289,6 +13460,11 @@ TC_LOG_BINLOG::set_status_variables(THD *thd)
 const char *
 get_gtid_list_event(IO_CACHE *cache, Gtid_list_log_event **out_gtid_list)
 {
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_BINLOG_CORE) && \
+    !MYLITE_WITH_BINLOG_CORE
+  *out_gtid_list= NULL;
+  return NULL;
+#else
   Format_description_log_event init_fdle(BINLOG_VERSION);
   Format_description_log_event *fdle;
   Log_event *ev;
@@ -13345,6 +13521,7 @@ get_gtid_list_event(IO_CACHE *cache, Gtid_list_log_event **out_gtid_list)
   delete fdle;
   *out_gtid_list= static_cast<Gtid_list_log_event *>(ev);
   return errormsg;
+#endif
 }
 
 /*

@@ -1988,9 +1988,15 @@ static void clean_up(bool print_message)
 
   logger.cleanup_base();
 
+#if !defined(EMBEDDED_LIBRARY) || !defined(MYLITE_WITH_BINLOG_CORE) || \
+    MYLITE_WITH_BINLOG_CORE
   injector::free_instance();
+#endif
   mysql_bin_log.cleanup();
+#if !defined(EMBEDDED_LIBRARY) || !defined(MYLITE_WITH_BINLOG_CORE) || \
+    MYLITE_WITH_BINLOG_CORE
   Gtid_index_writer::gtid_index_cleanup();
+#endif
 
   my_tz_free();
   my_dboptions_cache_free();
@@ -4026,7 +4032,10 @@ static int init_common_variables()
     inited before MY_INIT(). So we do it here.
   */
   mysql_bin_log.init_pthread_objects();
+#if !defined(EMBEDDED_LIBRARY) || !defined(MYLITE_WITH_BINLOG_CORE) || \
+    MYLITE_WITH_BINLOG_CORE
   Gtid_index_writer::gtid_index_init();
+#endif
 
 #if LONG_SIZE == 4
   /* TODO: remove this when my_time_t is 64 bit compatible */

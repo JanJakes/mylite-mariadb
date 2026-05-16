@@ -1426,6 +1426,8 @@ bool THD::log_events_and_free_tmp_shares()
 
       if (at_least_one_create_logged)
       {
+#if !defined(EMBEDDED_LIBRARY) || !defined(MYLITE_WITH_BINLOG_CORE) || \
+    MYLITE_WITH_BINLOG_CORE
         clear_error();
         CHARSET_INFO *cs_save= variables.character_set_client;
         variables.character_set_client= system_charset_info;
@@ -1460,6 +1462,7 @@ bool THD::log_events_and_free_tmp_shares()
         }
 
         get_stmt_da()->set_overwrite_status(false);
+#endif
       }
       variables.pseudo_thread_id= save_pseudo_thread_id;
       used = (used & ~THREAD_SPECIFIC_USED) | save_thread_specific_used;
