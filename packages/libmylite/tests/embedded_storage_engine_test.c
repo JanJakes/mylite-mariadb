@@ -1461,7 +1461,7 @@ static void test_row_dml_transactions(void) {
         "ALTER TABLE tx_posts ADD COLUMN blocked_tx_ddl INT",
         "transactional DDL"
     );
-    assert_transaction_control_exec_fails(db, "BEGIN");
+    assert_exec_succeeds(db, "BEGIN");
     assert_transaction_control_exec_fails(db, "SAVEPOINT mylite_probe");
     assert_transaction_control_exec_fails(db, "ROLLBACK TO SAVEPOINT mylite_probe");
     assert_transaction_control_exec_fails(db, "RELEASE SAVEPOINT mylite_probe");
@@ -1469,7 +1469,35 @@ static void test_row_dml_transactions(void) {
     assert_exec_succeeds(db, "ROLLBACK");
 
     assert_exec_succeeds(db, "BEGIN");
-    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (5, 'close-rollback')");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (5, 'restart-committed')");
+    assert_exec_succeeds(db, "START TRANSACTION");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (6, 'restart-rolled-back')");
+    assert_exec_succeeds(db, "ROLLBACK");
+    count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE id = 5 AND title = 'restart-committed'",
+            single_value_callback,
+            &count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(count.rows == 1);
+    zero_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE title = 'restart-rolled-back'",
+            single_value_callback,
+            &zero_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(zero_count.rows == 1);
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (6, 'close-rollback')");
     assert(mylite_close(db) == MYLITE_OK);
 
     db = open_database_with_filename(root, filename);
@@ -1485,7 +1513,7 @@ static void test_row_dml_transactions(void) {
         ) == MYLITE_OK
     );
     assert(zero_count.rows == 1);
-    count = (single_value_context){.expected_value = "4"};
+    count = (single_value_context){.expected_value = "5"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
         MYLITE_OK
@@ -1493,7 +1521,7 @@ static void test_row_dml_transactions(void) {
     assert(count.rows == 1);
 
     assert_exec_succeeds(db, "SET autocommit=0");
-    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (5, 'autocommit-close-rollback')");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (6, 'autocommit-close-rollback')");
     assert(mylite_close(db) == MYLITE_OK);
 
     db = open_database_with_filename(root, filename);
@@ -1509,7 +1537,7 @@ static void test_row_dml_transactions(void) {
         ) == MYLITE_OK
     );
     assert(zero_count.rows == 1);
-    count = (single_value_context){.expected_value = "4"};
+    count = (single_value_context){.expected_value = "5"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
         MYLITE_OK

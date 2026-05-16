@@ -106,7 +106,8 @@ records with default character set, collation, and comment options,
 table-definition metadata, rows, autoincrement state, supported indexes, and
 rollback-journal publication state in the primary `.mylite` file. File-backed
 opens answer schema and table discovery from the catalog when no transient
-MariaDB schema directory exists. Direct `BEGIN`, `COMMIT`, `ROLLBACK`, and
+MariaDB schema directory exists. Direct `BEGIN`, `COMMIT`, `ROLLBACK`,
+transaction restart through repeated direct `BEGIN` / `START TRANSACTION`, and
 supported direct session `SET autocommit=0/1` forms support row-DML
 transactions over routed MyLite tables, including nested statement rollback for
 covered failed direct and prepared row-DML statements. Savepoints,

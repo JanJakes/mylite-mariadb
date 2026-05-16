@@ -1,5 +1,11 @@
 # Autocommit Row-DML Transactions
 
+Status note: the later
+[Transaction Restart Control](../transaction-restart-control/specs.md) slice
+aligns `BEGIN` / `START TRANSACTION` inside an active autocommit-disabled
+transaction with MariaDB's commit-current/start-new behavior for the same
+bounded checkpoint scope.
+
 ## Problem
 
 MyLite now supports direct `BEGIN`, `COMMIT`, and `ROLLBACK` for bounded

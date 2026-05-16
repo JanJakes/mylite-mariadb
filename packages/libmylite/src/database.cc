@@ -1297,10 +1297,6 @@ int exec_impl(
         set_error(*database, MYLITE_ERROR, "unsupported SQL transaction control");
         return copy_error_message(*database, errmsg);
     }
-    if (transaction_control == TransactionControlKind::Begin && database->transaction_active) {
-        set_error(*database, MYLITE_ERROR, "unsupported nested SQL transaction control");
-        return copy_error_message(*database, errmsg);
-    }
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
     if (database->transaction_active && transaction_control == TransactionControlKind::None &&
         is_storage_outer_checkpoint_sql(std::string_view(sql))) {
@@ -1390,6 +1386,13 @@ int exec_impl(
 #  endif
     if (transaction_control == TransactionControlKind::Begin) {
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
+        if (database->transaction_active) {
+            const int finish_result = finish_direct_transaction(*database, true);
+            database->transaction_active = false;
+            if (finish_result != MYLITE_OK) {
+                return copy_error_message(*database, errmsg);
+            }
+        }
         const int transaction_result = begin_direct_transaction(*database);
         if (transaction_result != MYLITE_OK) {
             mysql_query(&database->mysql, "ROLLBACK");

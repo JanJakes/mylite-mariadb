@@ -1266,7 +1266,7 @@ static void test_transaction_control_policy(void) {
     mylite_db *db = open_database(root, &filename);
 
     assert(mylite_exec(db, "BEGIN", NULL, NULL, NULL) == MYLITE_OK);
-    assert_transaction_control_exec_fails(db, "START TRANSACTION");
+    assert(mylite_exec(db, "START TRANSACTION", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "ROLLBACK", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "START TRANSACTION", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "COMMIT", NULL, NULL, NULL) == MYLITE_OK);
@@ -1274,7 +1274,7 @@ static void test_transaction_control_policy(void) {
     assert(mylite_exec(db, "COMMIT WORK", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "ROLLBACK WORK", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "SET autocommit=0", NULL, NULL, NULL) == MYLITE_OK);
-    assert_transaction_control_exec_fails(db, "START TRANSACTION");
+    assert(mylite_exec(db, "START TRANSACTION", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "ROLLBACK", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "SET @@session.autocommit=1", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "SET SESSION autocommit=OFF", NULL, NULL, NULL) == MYLITE_OK);

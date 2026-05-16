@@ -4,7 +4,10 @@ Status note: this slice added direct `BEGIN`, `COMMIT`, and `ROLLBACK` support
 for bounded row-DML transactions. The later
 [Autocommit Row-DML Transactions](../autocommit-row-dml-transactions/specs.md)
 slice adds supported direct session `SET autocommit=0/1` forms for the same
-checkpoint-backed scope.
+checkpoint-backed scope. The later
+[Transaction Restart Control](../transaction-restart-control/specs.md) slice
+aligns repeated direct `BEGIN` / `START TRANSACTION` with MariaDB's
+commit-current/start-new behavior.
 
 ## Problem
 

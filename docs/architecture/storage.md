@@ -482,6 +482,9 @@ an outer `libmylite` checkpoint is active. `COMMIT` or `SET autocommit=1`
 releases the outer checkpoint, `ROLLBACK`
 restores it, and closing a database handle with an active direct transaction
 rolls it back before closing the embedded MariaDB connection.
+Repeating direct `BEGIN` or `START TRANSACTION` while a direct transaction is
+active commits the previous outer checkpoint and opens a new one, matching
+MariaDB's transaction restart behavior for this bounded row-DML scope.
 
 Checkpoints save the committed header and catalog root pages while holding the
 primary-file exclusive lock; storage APIs in the same thread borrow that locked
