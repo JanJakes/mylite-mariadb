@@ -139,6 +139,13 @@ ELSE()
   SET(MYLITE_VECTOR_SQL_RUNTIME_SOURCES mylite_vector_sql_runtime_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_RPL_FILTER_RUNTIME "Build replication filter runtime" ON)
+IF(MYLITE_WITH_RPL_FILTER_RUNTIME)
+  SET(MYLITE_RPL_FILTER_SOURCE rpl_filter.cc)
+ELSE()
+  SET(MYLITE_RPL_FILTER_SOURCE mylite_rpl_filter_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_ZLIB_COMPRESSION "Build zlib-backed compression helpers" ON)
 IF(MYLITE_WITH_ZLIB_COMPRESSION)
   SET(MYLITE_FIELD_COMP_SOURCE field_comp.cc)
@@ -298,7 +305,7 @@ SET (SQL_SOURCE
                opt_sum.cc
                opt_vcol_substitution.cc
                ../sql-common/pack.c parse_file.cc password.c procedure.cc
-               protocol.cc records.cc repl_failsafe.cc rpl_filter.cc
+               protocol.cc records.cc repl_failsafe.cc ${MYLITE_RPL_FILTER_SOURCE}
                session_tracker.cc
                set_var.cc
                slave.cc sp.cc sp_cache.cc sp_head.cc sp_pcontext.cc

@@ -478,7 +478,7 @@ The core file-owned API rejects or omits server-owned features that do not fit
 the embedded library model:
 
 - network users and authentication,
-- replication and binlog,
+- replication, binlog, and replication/binlog filter assignments,
 - Galera/wsrep,
 - dynamic plugin installation and loading,
 - dynamic UDF registration, loading, lookup, and execution,
@@ -552,8 +552,9 @@ the embedded library model:
 - event scheduler,
 - performance schema.
 
-Representative account, event, plugin, replication, binlog, view, trigger,
-routine, package, sequence, `CALL`, UDF `CREATE FUNCTION ... SONAME`,
+Representative account, event, plugin, replication, binlog,
+replication/binlog filter assignment, view, trigger, routine, package,
+sequence, `CALL`, UDF `CREATE FUNCTION ... SONAME`,
 global or duplicate autocommit-control, parameterized or otherwise unsupported
 transaction-control `SET` forms, unsupported transaction-control, release
 completion defaults, XA,
@@ -572,7 +573,7 @@ symbols that retained MariaDB parser or cleanup paths still reference, omits
 dynamic UDF lookup/execution bodies, omits unsupported binlog event-root,
 log-event server runtime, replication GTID-state runtime, and MyISAM
 maintenance source objects, omits the JSON schema-validation source object,
-replaces JSON table-function execution,
+replaces replication filter runtime, JSON table-function execution,
 dynamic-column packed BLOB runtime, SQL handler command execution, SQL sequence
 runtime, external backup command execution, query cache runtime, zlib-backed
 compression, vector SQL and MHNSW runtime, and dynamic plugin loading with

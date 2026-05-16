@@ -211,6 +211,13 @@ ELSE()
   ADD_DEFINITIONS(-DMYLITE_WITH_BINLOG_CORE=0)
 ENDIF()
 
+OPTION(MYLITE_WITH_RPL_FILTER_RUNTIME "Build replication filter runtime" ON)
+IF(MYLITE_WITH_RPL_FILTER_RUNTIME)
+  SET(MYLITE_RPL_FILTER_SOURCE ../sql/rpl_filter.cc)
+ELSE()
+  SET(MYLITE_RPL_FILTER_SOURCE ../sql/mylite_rpl_filter_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_MYISAM_MAINTENANCE "Build MyISAM table maintenance support" ON)
 IF(MYLITE_WITH_MYISAM_MAINTENANCE)
   ADD_DEFINITIONS(-DMYLITE_WITH_MYISAM_MAINTENANCE=1)
@@ -310,7 +317,7 @@ SET(SQL_EMBEDDED_SOURCES ${MYLITE_EMBEDDED_QUERY_CACHE_SOURCE} libmysqld.c lib_s
            ../sql/opt_sum.cc
            ../sql/opt_vcol_substitution.cc
            ../sql/parse_file.cc ${MYLITE_SELECT_PROCEDURE_SOURCE} ../sql/protocol.cc
-           ../sql/records.cc ../sql/repl_failsafe.cc ../sql/rpl_filter.cc
+           ../sql/records.cc ../sql/repl_failsafe.cc ${MYLITE_RPL_FILTER_SOURCE}
            ../sql/rpl_record.cc ../sql/des_key_file.cc
            ../sql/rpl_injector.cc ../sql/set_var.cc ../sql/spatial.cc 
            ../sql/sp_cache.cc ../sql/sp.cc ../sql/sp_head.cc 

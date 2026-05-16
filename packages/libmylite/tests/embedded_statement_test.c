@@ -794,6 +794,13 @@ static void test_prepare_diagnostics(void) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(strstr(mylite_errmsg(db), "server utility") != NULL);
 
+    assert_prepare_fails_with_message(db, "SET GLOBAL replicate_do_db = ?", "replication filter");
+    assert_prepare_fails_with_message(
+        db,
+        "SET @@global.binlog_ignore_db = ?",
+        "replication filter"
+    );
+
     assert(
         mylite_prepare(db, "SELECT ST_AsText(?)", MYLITE_NUL_TERMINATED, &stmt, NULL) ==
         MYLITE_ERROR

@@ -82,6 +82,7 @@ static void assert_static_show_info_exec_fails(mylite_db *db, const char *sql);
 static void assert_processlist_metadata_exec_fails(mylite_db *db, const char *sql);
 static void assert_procedure_analyse_exec_fails(mylite_db *db, const char *sql);
 static void assert_select_procedure_exec_fails(mylite_db *db, const char *sql);
+static void assert_replication_filter_exec_fails(mylite_db *db, const char *sql);
 static void assert_server_utility_exec_fails(mylite_db *db, const char *sql);
 static void assert_gis_sql_function_exec_fails(mylite_db *db, const char *sql);
 static void assert_vector_sql_function_exec_fails(mylite_db *db, const char *sql);
@@ -298,6 +299,12 @@ static void test_server_surfaces_are_disabled(void) {
     assert_exec_fails(db, "BINLOG 'AAAA'");
     assert_exec_fails(db, "CHANGE MASTER TO MASTER_HOST='example.test'");
     assert_exec_fails(db, "SHOW MASTER STATUS");
+    assert_replication_filter_exec_fails(db, "SET GLOBAL replicate_do_db = 'app'");
+    assert_replication_filter_exec_fails(db, "SET @@global.binlog_ignore_db = 'mysql'");
+    assert_replication_filter_exec_fails(
+        db,
+        "SET sql_mode = '', replicate_rewrite_db = 'source->target'"
+    );
     assert_exec_fails(
         db,
         "CREATE SERVER mylite_probe_server "
@@ -1835,6 +1842,18 @@ static void assert_exec_fails(mylite_db *db, const char *sql) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "server-oriented") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_replication_filter_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "replication filter") != NULL);
     mylite_free(errmsg);
 }
 

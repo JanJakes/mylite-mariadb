@@ -441,6 +441,7 @@ bool pop_sql_savepoint_name(std::string_view &sql, std::string *out_name, bool a
 bool pop_sql_delimited_identifier_name(std::string_view &sql, char quote, std::string *out_name);
 bool is_server_surface_sql(std::string_view sql);
 bool is_backup_sql(std::string_view sql);
+bool is_replication_filter_sql(std::string_view sql);
 bool is_query_cache_sql(std::string_view sql);
 bool is_statement_profiling_sql(std::string_view sql);
 bool is_optimizer_trace_sql(std::string_view sql);
@@ -466,6 +467,7 @@ bool sql_set_assignment_has_oracle_sql_mode(std::string_view assignment);
 std::string_view sql_set_assignment_policy_span(std::string_view sql);
 std::string_view sql_set_statement_assignment_span(std::string_view sql);
 bool sql_set_assignment_targets_query_cache_variable(std::string_view assignment);
+bool sql_set_assignment_targets_replication_filter_variable(std::string_view assignment);
 bool sql_set_assignment_targets_statement_profiling_variable(std::string_view assignment);
 bool sql_set_assignment_targets_optimizer_trace_variable(std::string_view assignment);
 std::string_view pop_sql_set_assignment(std::string_view &sql);
@@ -2697,6 +2699,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_backup_sql(sql)) {
         return "unsupported external backup SQL surface";
     }
+    if (is_replication_filter_sql(sql)) {
+        return "unsupported replication filter SQL surface";
+    }
     if (is_query_cache_sql(sql)) {
         return "unsupported query-cache SQL surface";
     }
@@ -2849,6 +2854,22 @@ bool is_server_surface_sql(std::string_view sql) {
 bool is_backup_sql(std::string_view sql) {
     std::string_view first;
     return pop_sql_scanned_token(sql, first) && sql_token_equals(first, "BACKUP");
+}
+
+bool is_replication_filter_sql(std::string_view sql) {
+    std::string_view token;
+    if (!pop_sql_scanned_token(sql, token) || !sql_token_equals(token, "SET")) {
+        return false;
+    }
+
+    sql = sql_set_assignment_policy_span(sql);
+    while (!skip_sql_leading_noise(sql).empty()) {
+        if (sql_set_assignment_targets_replication_filter_variable(pop_sql_set_assignment(sql))) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 bool is_query_cache_sql(std::string_view sql) {
@@ -3209,6 +3230,29 @@ bool sql_set_assignment_targets_query_cache_variable(std::string_view assignment
     };
 
     for (const char *variable : k_query_cache_variables) {
+        std::string_view candidate = assignment;
+        if (sql_set_assignment_targets_variable(candidate, variable)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool sql_set_assignment_targets_replication_filter_variable(std::string_view assignment) {
+    constexpr const char *k_replication_filter_variables[] = {
+        "BINLOG_DO_DB",
+        "BINLOG_IGNORE_DB",
+        "REPLICATE_DO_DB",
+        "REPLICATE_DO_TABLE",
+        "REPLICATE_IGNORE_DB",
+        "REPLICATE_IGNORE_TABLE",
+        "REPLICATE_REWRITE_DB",
+        "REPLICATE_WILD_DO_TABLE",
+        "REPLICATE_WILD_IGNORE_TABLE",
+    };
+
+    for (const char *variable : k_replication_filter_variables) {
         std::string_view candidate = assignment;
         if (sql_set_assignment_targets_variable(candidate, variable)) {
             return true;
