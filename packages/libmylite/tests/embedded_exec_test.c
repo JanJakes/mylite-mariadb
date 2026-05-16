@@ -1392,6 +1392,7 @@ static void test_transaction_control_policy(void) {
     assert_transaction_control_exec_fails(db, "COMMIT AND CHAIN RELEASE");
     assert_transaction_control_exec_fails(db, "SAVEPOINT mylite_probe");
     assert_transaction_control_exec_fails(db, "SAVEPOINT `quoted probe`");
+    assert_transaction_control_exec_fails(db, "SAVEPOINT \"double probe\"");
     assert_transaction_control_exec_fails(db, "SAVEPOINT ``");
     assert_transaction_control_exec_fails(db, "SAVEPOINT `unterminated");
     assert_transaction_control_exec_fails(db, "SAVEPOINT `quoted probe`; SELECT 1");
@@ -1409,6 +1410,18 @@ static void test_transaction_control_policy(void) {
     assert(mylite_exec(db, "ROLLBACK TO `quoted ``probe`", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "RELEASE SAVEPOINT `quoted ``probe`", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "ROLLBACK", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SET sql_mode='ANSI_QUOTES'", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "BEGIN", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SAVEPOINT \"double \"\"probe\"", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(db, "ROLLBACK TO SAVEPOINT \"double \"\"probe\"", NULL, NULL, NULL) == MYLITE_OK
+    );
+    assert(mylite_exec(db, "ROLLBACK TO \"double \"\"probe\"", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(db, "RELEASE SAVEPOINT \"double \"\"probe\"", NULL, NULL, NULL) == MYLITE_OK
+    );
+    assert(mylite_exec(db, "ROLLBACK", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SET sql_mode=''", NULL, NULL, NULL) == MYLITE_OK);
     assert_transaction_control_exec_fails(db, "SET GLOBAL autocommit=0");
     assert_transaction_control_exec_fails(db, "SET GLOBAL autocommit=DEFAULT");
     assert_transaction_control_exec_fails(db, "SET @@global.autocommit=0");

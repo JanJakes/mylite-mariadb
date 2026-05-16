@@ -1056,6 +1056,12 @@ static void test_prepare_diagnostics(void) {
     assert_prepare_savepoint_control_policy(db, "SAVEPOINT `quoted ``probe`");
     assert_prepare_savepoint_control_policy(db, "ROLLBACK TO SAVEPOINT `quoted ``probe`");
     assert_prepare_savepoint_control_policy(db, "RELEASE SAVEPOINT `quoted ``probe`");
+    assert_prepare_fails_with_message(db, "SAVEPOINT \"double probe\"", "transaction control");
+    assert(mylite_exec(db, "SET sql_mode='ANSI_QUOTES'", NULL, NULL, NULL) == MYLITE_OK);
+    assert_prepare_savepoint_control_policy(db, "SAVEPOINT \"double \"\"probe\"");
+    assert_prepare_savepoint_control_policy(db, "ROLLBACK TO SAVEPOINT \"double \"\"probe\"");
+    assert_prepare_savepoint_control_policy(db, "RELEASE SAVEPOINT \"double \"\"probe\"");
+    assert(mylite_exec(db, "SET sql_mode=''", NULL, NULL, NULL) == MYLITE_OK);
 
     assert(
         mylite_prepare(db, "SET autocommit=0", MYLITE_NUL_TERMINATED, &stmt, NULL) == MYLITE_ERROR

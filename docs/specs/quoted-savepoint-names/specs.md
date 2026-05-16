@@ -3,7 +3,9 @@
 Status note: this slice kept transaction modifiers out of scope. The later
 [Transaction Modifier Control](../transaction-modifier-control/specs.md) slice
 adds bounded direct modifier support; prepared transaction-start/completion
-modifiers remain unsupported.
+modifiers remain unsupported. The later
+[Double-Quoted Savepoint Names](../double-quoted-savepoint-names/specs.md)
+slice adds SQL-mode-aware double-quoted savepoint identifiers.
 
 ## Problem
 
@@ -67,7 +69,7 @@ Applications can use backtick-quoted savepoint names in the current bounded
 row-DML transaction scope, including names that contain spaces or escaped
 backticks. Compatibility remains partial:
 
-- SQL-mode-sensitive double-quoted identifiers remain unsupported.
+- SQL-mode-sensitive double-quoted identifiers are covered by a later slice.
 - Execution outside an active file-backed MyLite transaction still fails.
 - Handler-level savepoint hooks and full transactional engine semantics remain
   planned.
@@ -134,5 +136,5 @@ tests.
 - Savepoint name comparison remains byte-for-byte on the decoded identifier.
   If MariaDB applies additional collation or case folding to savepoint names,
   a later compatibility slice should align the comparison behavior.
-- Double-quoted identifiers depend on SQL mode and are deliberately deferred
-  until MyLite has a broader SQL-mode-aware identifier parser.
+- Double-quoted identifiers depend on SQL mode and are covered by the later
+  double-quoted savepoint names slice.

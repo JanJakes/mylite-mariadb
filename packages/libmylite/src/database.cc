@@ -375,6 +375,7 @@ int bind_statement_results(mylite_stmt &statement);
 int fetch_truncated_column(mylite_stmt &statement, unsigned column);
 int materialize_column_value(mylite_stmt &statement, unsigned column);
 int capture_warnings(mylite_db &database, unsigned warning_count, bool force_query = false);
+bool mylite_session_ansi_quotes(const mylite_db &database);
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
 int execute_prepared_savepoint_control(mylite_stmt &statement);
 int begin_direct_transaction(mylite_db &database);
@@ -402,7 +403,7 @@ bool is_unsigned_column(unsigned int flags);
 mylite_warning_level map_warning_level(const char *level);
 std::string field_string(const char *value, unsigned int length);
 const char *unsupported_sql_surface_message(std::string_view sql);
-TransactionControlKind direct_transaction_control_kind(std::string_view sql);
+TransactionControlKind direct_transaction_control_kind(std::string_view sql, bool ansi_quotes);
 TransactionControlKind direct_start_transaction_control_kind(std::string_view sql);
 TransactionControlKind direct_completion_transaction_control_kind(
     std::string_view sql,
@@ -419,10 +420,12 @@ TransactionControlKind direct_set_transaction_characteristics_control_kind(
 bool direct_savepoint_control_name(
     std::string_view sql,
     TransactionControlKind kind,
-    std::string &out_name
+    std::string &out_name,
+    bool ansi_quotes
 );
 #  endif
-bool pop_sql_savepoint_name(std::string_view &sql, std::string *out_name);
+bool pop_sql_savepoint_name(std::string_view &sql, std::string *out_name, bool ansi_quotes);
+bool pop_sql_delimited_identifier_name(std::string_view &sql, char quote, std::string *out_name);
 bool is_server_surface_sql(std::string_view sql);
 bool is_backup_sql(std::string_view sql);
 bool is_query_cache_sql(std::string_view sql);
@@ -1413,8 +1416,9 @@ int exec_impl(
     StorageBusyTimeoutScope busy_timeout(database->busy_timeout_ms);
     set_ok(*database);
     clear_warnings(*database);
+    const bool ansi_quotes = mylite_session_ansi_quotes(*database);
     const TransactionControlKind transaction_control =
-        direct_transaction_control_kind(std::string_view(sql));
+        direct_transaction_control_kind(std::string_view(sql), ansi_quotes);
     if (transaction_control == TransactionControlKind::Unsupported) {
         set_error(*database, MYLITE_ERROR, "unsupported SQL transaction control");
         return copy_error_message(*database, errmsg);
@@ -1432,7 +1436,8 @@ int exec_impl(
                 parsed_savepoint_name = direct_savepoint_control_name(
                     std::string_view(sql),
                     transaction_control,
-                    savepoint_name
+                    savepoint_name,
+                    ansi_quotes
                 );
             } catch (const std::bad_alloc &) {
                 set_error(*database, MYLITE_NOMEM, "savepoint allocation failed");
@@ -1669,7 +1674,9 @@ int prepare_impl(
     set_ok(*database);
     clear_warnings(*database);
     const std::string_view sql_view(sql, sql_len);
-    const TransactionControlKind transaction_control = direct_transaction_control_kind(sql_view);
+    const bool ansi_quotes = mylite_session_ansi_quotes(*database);
+    const TransactionControlKind transaction_control =
+        direct_transaction_control_kind(sql_view, ansi_quotes);
     if (transaction_control == TransactionControlKind::Unsupported) {
         set_error(*database, MYLITE_ERROR, "unsupported SQL transaction control");
         return MYLITE_ERROR;
@@ -1679,8 +1686,12 @@ int prepare_impl(
     bool prepared_savepoint_control = false;
     if (is_savepoint_transaction_control(transaction_control)) {
         try {
-            prepared_savepoint_control =
-                direct_savepoint_control_name(sql_view, transaction_control, savepoint_name);
+            prepared_savepoint_control = direct_savepoint_control_name(
+                sql_view,
+                transaction_control,
+                savepoint_name,
+                ansi_quotes
+            );
         } catch (const std::bad_alloc &) {
             set_error(*database, MYLITE_NOMEM, "savepoint allocation failed");
             return MYLITE_NOMEM;
@@ -2460,6 +2471,10 @@ int capture_warnings(mylite_db &database, unsigned warning_count, bool force_que
     return MYLITE_OK;
 }
 
+bool mylite_session_ansi_quotes(const mylite_db &database) {
+    return (database.mysql.server_status & SERVER_STATUS_ANSI_QUOTES) != 0U;
+}
+
 void clear_current_row(mylite_stmt &statement) {
     statement.has_current_row = false;
     for (ColumnValue &value : statement.values) {
@@ -2698,9 +2713,6 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     }
     if (is_select_procedure_sql(sql)) {
         return "unsupported SELECT PROCEDURE SQL clause";
-    }
-    if (direct_transaction_control_kind(sql) == TransactionControlKind::Unsupported) {
-        return "unsupported SQL transaction control";
     }
     if (is_locking_sql(sql)) {
         return "unsupported SQL locking surface";
@@ -3420,7 +3432,7 @@ bool is_select_procedure_sql(std::string_view sql) {
     return false;
 }
 
-TransactionControlKind direct_transaction_control_kind(std::string_view sql) {
+TransactionControlKind direct_transaction_control_kind(std::string_view sql, bool ansi_quotes) {
     std::string_view rest = skip_sql_leading_noise(sql);
     const std::string_view first = pop_sql_token(rest);
     std::string_view after_first = rest;
@@ -3456,7 +3468,7 @@ TransactionControlKind direct_transaction_control_kind(std::string_view sql) {
             if (!sql_token_equals(savepoint_keyword, "SAVEPOINT")) {
                 savepoint_rest = rest;
             }
-            return pop_sql_savepoint_name(savepoint_rest, nullptr) &&
+            return pop_sql_savepoint_name(savepoint_rest, nullptr, ansi_quotes) &&
                            sql_rest_is_statement_end(savepoint_rest)
                        ? TransactionControlKind::RollbackToSavepoint
                        : TransactionControlKind::Unsupported;
@@ -3471,7 +3483,7 @@ TransactionControlKind direct_transaction_control_kind(std::string_view sql) {
 
     if (sql_token_equals(first, "SAVEPOINT")) {
         std::string_view savepoint_rest = after_first;
-        return pop_sql_savepoint_name(savepoint_rest, nullptr) &&
+        return pop_sql_savepoint_name(savepoint_rest, nullptr, ansi_quotes) &&
                        sql_rest_is_statement_end(savepoint_rest)
                    ? TransactionControlKind::Savepoint
                    : TransactionControlKind::Unsupported;
@@ -3492,7 +3504,7 @@ TransactionControlKind direct_transaction_control_kind(std::string_view sql) {
         if (!sql_token_equals(second, "SAVEPOINT")) {
             return TransactionControlKind::None;
         }
-        return pop_sql_savepoint_name(rest, nullptr) && sql_rest_is_statement_end(rest)
+        return pop_sql_savepoint_name(rest, nullptr, ansi_quotes) && sql_rest_is_statement_end(rest)
                    ? TransactionControlKind::ReleaseSavepoint
                    : TransactionControlKind::Unsupported;
     }
@@ -3601,14 +3613,16 @@ TransactionControlKind direct_completion_transaction_control_kind(
 bool direct_savepoint_control_name(
     std::string_view sql,
     TransactionControlKind kind,
-    std::string &out_name
+    std::string &out_name,
+    bool ansi_quotes
 ) {
     out_name.clear();
     std::string_view rest = skip_sql_leading_noise(sql);
     const std::string_view first = pop_sql_token(rest);
 
     if (kind == TransactionControlKind::Savepoint && sql_token_equals(first, "SAVEPOINT")) {
-        return pop_sql_savepoint_name(rest, &out_name) && sql_rest_is_statement_end(rest);
+        return pop_sql_savepoint_name(rest, &out_name, ansi_quotes) &&
+               sql_rest_is_statement_end(rest);
     }
 
     if (kind == TransactionControlKind::RollbackToSavepoint &&
@@ -3621,7 +3635,7 @@ bool direct_savepoint_control_name(
         if (!sql_token_equals(savepoint_keyword, "SAVEPOINT")) {
             savepoint_rest = rest;
         }
-        return pop_sql_savepoint_name(savepoint_rest, &out_name) &&
+        return pop_sql_savepoint_name(savepoint_rest, &out_name, ansi_quotes) &&
                sql_rest_is_statement_end(savepoint_rest);
     }
 
@@ -3629,14 +3643,15 @@ bool direct_savepoint_control_name(
         if (!sql_token_equals(pop_sql_token(rest), "SAVEPOINT")) {
             return false;
         }
-        return pop_sql_savepoint_name(rest, &out_name) && sql_rest_is_statement_end(rest);
+        return pop_sql_savepoint_name(rest, &out_name, ansi_quotes) &&
+               sql_rest_is_statement_end(rest);
     }
 
     return false;
 }
 #  endif
 
-bool pop_sql_savepoint_name(std::string_view &sql, std::string *out_name) {
+bool pop_sql_savepoint_name(std::string_view &sql, std::string *out_name, bool ansi_quotes) {
     sql = skip_sql_leading_noise(sql);
     if (sql.empty()) {
         return false;
@@ -3646,28 +3661,35 @@ bool pop_sql_savepoint_name(std::string_view &sql, std::string *out_name) {
         out_name->clear();
     }
 
-    if (sql.front() != '`') {
-        const std::string_view token = pop_sql_token(sql);
-        if (token.empty()) {
-            return false;
-        }
-        if (out_name != nullptr) {
-            out_name->assign(token);
-        }
-        return true;
+    if (sql.front() == '`') {
+        return pop_sql_delimited_identifier_name(sql, '`', out_name);
+    }
+    if (ansi_quotes && sql.front() == '"') {
+        return pop_sql_delimited_identifier_name(sql, '"', out_name);
     }
 
+    const std::string_view token = pop_sql_token(sql);
+    if (token.empty()) {
+        return false;
+    }
+    if (out_name != nullptr) {
+        out_name->assign(token);
+    }
+    return true;
+}
+
+bool pop_sql_delimited_identifier_name(std::string_view &sql, char quote, std::string *out_name) {
     sql.remove_prefix(1);
     bool has_character = false;
     while (!sql.empty()) {
         const char current = sql.front();
         sql.remove_prefix(1);
-        if (current == '`') {
-            if (!sql.empty() && sql.front() == '`') {
+        if (current == quote) {
+            if (!sql.empty() && sql.front() == quote) {
                 sql.remove_prefix(1);
                 has_character = true;
                 if (out_name != nullptr) {
-                    out_name->push_back('`');
+                    out_name->push_back(quote);
                 }
                 continue;
             }
