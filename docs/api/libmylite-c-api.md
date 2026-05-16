@@ -130,16 +130,16 @@ while allowing simple row DML against tracked temporary tables. `CHAIN` makes
 later plain direct `COMMIT` and `ROLLBACK` use the same chained behavior as
 explicit `AND CHAIN`, while explicit `AND NO CHAIN` still overrides it.
 Direct `SAVEPOINT`,
-`ROLLBACK TO [SAVEPOINT]`, and `RELEASE SAVEPOINT` support simple unquoted and
-backtick-quoted savepoint names inside active bounded row-DML transactions.
-Double-quoted savepoint names are also supported when the session has
-`ANSI_QUOTES` enabled. The same savepoint-control statements can be prepared
-and reused for file-backed MyLite transactions. Global autocommit-control
-statements, duplicate autocommit assignments, `WITH CONSISTENT SNAPSHOT`,
-`RELEASE` completion, `completion_type=RELEASE/2`, global or duplicate
-transaction variable assignments, XA, and direct or prepared DDL inside an
-active transaction remain unsupported until the storage and catalog transaction
-design is broader.
+`ROLLBACK TO [SAVEPOINT]`, and `RELEASE SAVEPOINT` support case-insensitive
+simple unquoted and backtick-quoted savepoint names inside active bounded
+row-DML transactions. Double-quoted savepoint names are also supported when the
+session has `ANSI_QUOTES` enabled. The same savepoint-control statements can be
+prepared and reused for file-backed MyLite transactions. Global
+autocommit-control statements, duplicate autocommit assignments,
+`WITH CONSISTENT SNAPSHOT`, `RELEASE` completion, `completion_type=RELEASE/2`,
+global or duplicate transaction variable assignments, XA, and direct or
+prepared DDL inside an active transaction remain unsupported until the storage
+and catalog transaction design is broader.
 Existing-file opens preserve storage lock conflicts as
 `MYLITE_BUSY` before starting the embedded runtime.
 

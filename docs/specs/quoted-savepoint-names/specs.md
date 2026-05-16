@@ -5,7 +5,9 @@ Status note: this slice kept transaction modifiers out of scope. The later
 adds bounded direct modifier support; prepared transaction-start/completion
 modifiers remain unsupported. The later
 [Double-Quoted Savepoint Names](../double-quoted-savepoint-names/specs.md)
-slice adds SQL-mode-aware double-quoted savepoint identifiers.
+slice adds SQL-mode-aware double-quoted savepoint identifiers, and the later
+[Case-Insensitive Savepoint Names](../case-insensitive-savepoint-names/specs.md)
+slice aligns savepoint lookup with MariaDB's case-insensitive comparison.
 
 ## Problem
 
@@ -53,8 +55,10 @@ Extend the `libmylite` savepoint-control parser:
   statement-ending whitespace, comments, or one trailing semicolon.
 - Continue rejecting unsupported savepoint syntax before MariaDB execution.
 
-The parsed name is stored as `std::string` before execution. The existing
-checkpoint stack continues to compare stored savepoint names byte-for-byte.
+The parsed name is stored as `std::string` before execution. At this slice
+point, the checkpoint stack still compares stored savepoint names
+byte-for-byte; a later slice aligns lookup with MariaDB's case-insensitive
+savepoint identifier comparison.
 
 ## Affected Subsystems
 
@@ -133,8 +137,8 @@ tests.
 
 ## Risks And Unresolved Questions
 
-- Savepoint name comparison remains byte-for-byte on the decoded identifier.
-  If MariaDB applies additional collation or case folding to savepoint names,
-  a later compatibility slice should align the comparison behavior.
+- Savepoint name comparison remains byte-for-byte on the decoded identifier in
+  this slice and is covered by the later case-insensitive savepoint names
+  slice.
 - Double-quoted identifiers depend on SQL mode and are covered by the later
   double-quoted savepoint names slice.

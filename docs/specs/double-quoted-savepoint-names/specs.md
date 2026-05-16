@@ -115,9 +115,9 @@ helper and tests.
 
 ## Risks And Open Questions
 
-- Savepoint names remain byte-for-byte decoded identifier strings. A later
-  compatibility slice should revisit this if MariaDB applies additional
-  collation or case-folding behavior to savepoint-name lookup.
+- Savepoint-name lookup remains byte-for-byte at this slice point. The later
+  [Case-Insensitive Savepoint Names](../case-insensitive-savepoint-names/specs.md)
+  slice aligns lookup with MariaDB's savepoint identifier comparison.
 - Handler-level savepoint hooks still require a deeper storage checkpoint
   design that can model non-LIFO release and duplicate savepoint replacement
   without corrupting MyLite's checkpoint stack.

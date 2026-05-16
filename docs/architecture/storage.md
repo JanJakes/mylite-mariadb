@@ -512,9 +512,9 @@ overrides it. `RELEASE`, `WITH CONSISTENT SNAPSHOT`,
 `completion_type=RELEASE/2`, global transaction variables, and duplicate
 transaction variable assignments remain unsupported.
 Direct savepoint control is handled by `libmylite` before MariaDB execution
-for the same bounded transaction scope: simple unquoted, backtick-quoted, and
-ANSI_QUOTES double-quoted `SAVEPOINT` names open nested storage checkpoint
-frames,
+for the same bounded transaction scope: case-insensitive simple unquoted,
+backtick-quoted, and ANSI_QUOTES double-quoted `SAVEPOINT` names open nested
+storage checkpoint frames,
 `ROLLBACK TO [SAVEPOINT]` restores the target snapshot and keeps the target
 savepoint active, and `RELEASE SAVEPOINT` commits the target and later nested
 frames while preserving changes. Prepared savepoint-control statements use the

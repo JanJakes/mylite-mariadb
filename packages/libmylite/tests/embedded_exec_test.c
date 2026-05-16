@@ -1410,6 +1410,12 @@ static void test_transaction_control_policy(void) {
     assert(mylite_exec(db, "ROLLBACK TO `quoted ``probe`", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "RELEASE SAVEPOINT `quoted ``probe`", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "ROLLBACK", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "BEGIN", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SAVEPOINT Case_Probe", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "ROLLBACK TO SAVEPOINT case_probe", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "ROLLBACK TO CASE_PROBE", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "RELEASE SAVEPOINT case_probe", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "ROLLBACK", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "SET sql_mode='ANSI_QUOTES'", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "BEGIN", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "SAVEPOINT \"double \"\"probe\"", NULL, NULL, NULL) == MYLITE_OK);

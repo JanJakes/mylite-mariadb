@@ -19,6 +19,12 @@
 #include <vector>
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
+#  include <my_global.h>
+#endif
+
+// m_ctype.h depends on MariaDB server typedefs from my_global.h.
+#if MYLITE_WITH_MARIADB_EMBEDDED
+#  include <m_ctype.h>
 #  include <mysql.h>
 #endif
 
@@ -390,6 +396,7 @@ int rollback_to_direct_savepoint(mylite_db &database, std::string_view name);
 int release_direct_savepoint(mylite_db &database, std::string_view name);
 int finish_direct_savepoints(mylite_db &database, bool commit);
 std::size_t find_direct_savepoint(const mylite_db &database, std::string_view name);
+bool direct_savepoint_names_equal(std::string_view left, std::string_view right);
 int finish_direct_savepoint_frame(mylite_db &database, std::size_t index, bool commit);
 int begin_direct_savepoint_frame(mylite_db &database, std::string_view name);
 #  endif
@@ -2122,7 +2129,7 @@ int set_direct_savepoint(mylite_db &database, std::string_view name) {
     const std::string_view replacement_name = database.savepoints[replacement_index].name;
     for (std::size_t index = replacement_index; index > 0U; --index) {
         DirectSavepoint &candidate = database.savepoints[index - 1U];
-        if (candidate.active && candidate.name == replacement_name) {
+        if (candidate.active && direct_savepoint_names_equal(candidate.name, replacement_name)) {
             candidate.active = false;
             break;
         }
@@ -2191,11 +2198,16 @@ int finish_direct_savepoints(mylite_db &database, bool commit) {
 std::size_t find_direct_savepoint(const mylite_db &database, std::string_view name) {
     for (std::size_t index = database.savepoints.size(); index > 0U; --index) {
         const DirectSavepoint &candidate = database.savepoints[index - 1U];
-        if (candidate.active && candidate.name == name) {
+        if (candidate.active && direct_savepoint_names_equal(candidate.name, name)) {
             return index - 1U;
         }
     }
     return database.savepoints.size();
+}
+
+bool direct_savepoint_names_equal(std::string_view left, std::string_view right) {
+    return my_charset_utf8mb3_general1400_as_ci
+               .strnncoll(left.data(), left.size(), right.data(), right.size()) == 0;
 }
 
 int finish_direct_savepoint_frame(mylite_db &database, std::size_t index, bool commit) {

@@ -5,7 +5,8 @@ Status note: the later
 adds bounded direct transaction-start and completion modifier support. Prepared
 `BEGIN`, `COMMIT`, `ROLLBACK`, `SET autocommit`, and transaction-start or
 completion modifiers remain unsupported; prepared savepoint control remains the
-only prepared transaction-control surface.
+only prepared transaction-control surface. Later quoted-name slices add
+SQL-mode-aware double-quoted identifiers and case-insensitive savepoint lookup.
 
 ## Problem
 
@@ -69,8 +70,7 @@ MariaDB-backed MyLite storage engine is available:
   non-existent prepared handle.
 
 Prepared `BEGIN`, `COMMIT`, `ROLLBACK`, `SET autocommit`, `SET TRANSACTION`,
-XA, SQL-mode-sensitive double-quoted savepoint names, and transaction
-modifiers remain policy failures.
+XA, and transaction modifiers remain policy failures.
 
 ## Affected Subsystems
 
@@ -166,6 +166,5 @@ statement branch and stored savepoint names.
   than MariaDB handler hooks. This is correct for the current non-transactional
   handler flags, but it remains a compatibility bridge until handler-level
   savepoint hooks can be implemented honestly.
-- SQL-mode-sensitive double-quoted identifiers remain outside the current
-  savepoint parser. They should be addressed with a broader SQL-mode-aware
-  identifier parsing slice rather than special-casing prepared statements only.
+- SQL-mode-sensitive double-quoted identifiers and case-insensitive lookup are
+  covered by later quoted-name slices rather than this prepared-statement slice.
