@@ -162,8 +162,11 @@ storage engine, so magic generated tables such as `seq_1_to_10` are unavailable
 outside ordinary catalog-backed user tables. MariaDB user-statistics
 information-schema surfaces and `userstat` system-variable assignments are
 rejected as server observability, while ordinary SQL user variables remain
-available. MariaDB foreign-server metadata statements such as `CREATE SERVER`
-and `SHOW CREATE SERVER` are rejected as remote-engine/server metadata. MariaDB
+available. MariaDB statement profiling surfaces such as `SHOW PROFILE`,
+`SHOW PROFILES`, profiling system-variable assignment, and
+`INFORMATION_SCHEMA.PROFILING` are rejected as server observability. MariaDB
+foreign-server metadata statements such as `CREATE SERVER` and
+`SHOW CREATE SERVER` are rejected as remote-engine/server metadata. MariaDB
 external backup statements such as `BACKUP STAGE`, `BACKUP LOCK`, and
 `BACKUP UNLOCK` are rejected as datadir backup-tool coordination. MariaDB query
 cache administration such as `FLUSH QUERY CACHE`, `RESET QUERY CACHE`, and
@@ -455,6 +458,8 @@ the embedded library model:
   `BACKUP UNLOCK`,
 - query cache administration such as `FLUSH QUERY CACHE`,
   `RESET QUERY CACHE`, and query-cache system-variable assignment,
+- statement profiling such as `SHOW PROFILE`, `SHOW PROFILES`,
+  profiling system-variable assignment, and `INFORMATION_SCHEMA.PROFILING`,
 - SQL `HANDLER` commands,
 - SQL `HELP`,
 - `SELECT ... PROCEDURE`, including `PROCEDURE ANALYSE()`,
@@ -479,12 +484,12 @@ Representative account, event, plugin, replication, binlog, view, trigger,
 routine, package, sequence, `CALL`, UDF `CREATE FUNCTION ... SONAME`,
 transaction-control, autocommit-control, SQL locking, named-lock, SQL `HELP`,
 SQL `HANDLER`, `SELECT ... PROCEDURE`, SQL file-I/O,
-table-maintenance/key-cache administration, external backup SQL, query cache
-administration, server utility function, Oracle SQL mode, XML SQL function, GIS
-SQL function, SFORMAT SQL function, JSON schema validation function, JSON table
-function, dynamic column function, SQL sequence value surface, partition, and
-foreign-key DDL commands are rejected before MariaDB execution with stable
-MyLite errors. The default
+table-maintenance/key-cache administration, statement profiling, external
+backup SQL, query cache administration, server utility function, Oracle SQL
+mode, XML SQL function, GIS SQL function, SFORMAT SQL function, JSON schema
+validation function, JSON table function, dynamic column function, SQL sequence
+value surface, partition, and foreign-key DDL commands are rejected before
+MariaDB execution with stable MyLite errors. The default
 embedded profile also links fail-closed stubs for stored-program runtime
 symbols that retained MariaDB parser or cleanup paths still reference, omits
 dynamic UDF lookup/execution bodies, omits unsupported binlog event-root and

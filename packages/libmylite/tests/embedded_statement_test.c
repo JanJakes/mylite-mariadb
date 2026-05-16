@@ -432,6 +432,14 @@ static void test_prepare_diagnostics(void) {
         "SET STATEMENT query_cache_type=ON FOR SELECT 1",
         "query-cache"
     );
+    assert_prepare_fails_with_message(db, "SHOW PROFILE", "statement-profiling");
+    assert_prepare_fails_with_message(db, "SHOW PROFILES", "statement-profiling");
+    assert_prepare_fails_with_message(db, "SET profiling=1", "statement-profiling");
+    assert_prepare_fails_with_message(
+        db,
+        "SELECT * FROM INFORMATION_SCHEMA.PROFILING",
+        "statement-profiling"
+    );
 
     assert_prepare_fails_with_message(db, "CHECK TABLE maintenance_probe", "table-maintenance");
     assert_prepare_fails_with_message(db, "ANALYZE TABLE maintenance_probe", "table-maintenance");

@@ -28,6 +28,7 @@ set(WITH_EMBEDDED_SERVER ON CACHE BOOL "Build MariaDB's embedded server library"
 set(WITH_UNIT_TESTS OFF CACHE BOOL "Skip MariaDB upstream unit-test targets in the profile" FORCE)
 set(WITH_SSL "system" CACHE STRING "Use the host OpenSSL installation" FORCE)
 set(WITHOUT_DYNAMIC_PLUGINS ON CACHE BOOL "Disable host dynamic plugin support" FORCE)
+set(ENABLED_PROFILING OFF CACHE BOOL "Disable session statement profiling" FORCE)
 
 # These components require optional submodule payloads that are intentionally not
 # included in the initial import.

@@ -25,6 +25,7 @@ static void test_syntax_error_diagnostics(void);
 static void test_server_surfaces_are_disabled(void);
 static void test_backup_sql_is_rejected(void);
 static void test_query_cache_sql_is_rejected(void);
+static void test_statement_profiling_sql_is_rejected(void);
 static void test_table_maintenance_sql_is_rejected(void);
 static void test_sql_handler_commands_are_rejected(void);
 static void test_help_command_is_rejected(void);
@@ -52,6 +53,7 @@ static void assert_variable_value_or_missing(mylite_db *db, const char *name, co
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_backup_exec_fails(mylite_db *db, const char *sql);
 static void assert_query_cache_exec_fails(mylite_db *db, const char *sql);
+static void assert_statement_profiling_exec_fails(mylite_db *db, const char *sql);
 static void assert_table_maintenance_exec_fails(mylite_db *db, const char *sql);
 static void assert_sql_handler_exec_fails(mylite_db *db, const char *sql);
 static void assert_help_command_exec_fails(mylite_db *db, const char *sql);
@@ -93,6 +95,7 @@ int main(void) {
     test_server_surfaces_are_disabled();
     test_backup_sql_is_rejected();
     test_query_cache_sql_is_rejected();
+    test_statement_profiling_sql_is_rejected();
     test_table_maintenance_sql_is_rejected();
     test_sql_handler_commands_are_rejected();
     test_help_command_is_rejected();
@@ -344,6 +347,39 @@ static void test_query_cache_sql_is_rejected(void) {
             db,
             "SELECT 'RESET QUERY CACHE' AS reset_cache_text, "
             "'SET query_cache_type=ON' AS query_cache_type_text",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_statement_profiling_sql_is_rejected(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_variable_value(db, "have_profiling", "NO");
+
+    assert_statement_profiling_exec_fails(db, "SHOW PROFILE");
+    assert_statement_profiling_exec_fails(db, "SHOW PROFILE CPU FOR QUERY 1");
+    assert_statement_profiling_exec_fails(db, "SHOW PROFILES");
+    assert_statement_profiling_exec_fails(db, "SET profiling=1");
+    assert_statement_profiling_exec_fails(db, "SET GLOBAL profiling_history_size=25");
+    assert_statement_profiling_exec_fails(db, "SET @@session.profiling_history_size=25");
+    assert_statement_profiling_exec_fails(db, "SET STATEMENT profiling=1 FOR SELECT 1");
+    assert_statement_profiling_exec_fails(db, "SELECT * FROM INFORMATION_SCHEMA.PROFILING");
+    assert_statement_profiling_exec_fails(db, "SELECT * FROM `information_schema`.`PROFILING`");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT 'SHOW PROFILE' AS profile_text, "
+            "'INFORMATION_SCHEMA.PROFILING' AS profiling_table_text",
             NULL,
             NULL,
             NULL
@@ -1115,6 +1151,18 @@ static void assert_query_cache_exec_fails(mylite_db *db, const char *sql) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "query-cache") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_statement_profiling_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "statement-profiling") != NULL);
     mylite_free(errmsg);
 }
 
