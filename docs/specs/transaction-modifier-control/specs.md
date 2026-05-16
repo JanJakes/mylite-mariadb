@@ -9,9 +9,11 @@ bounded read-write, no-chain transaction scope. The later
 slice accepts session `SET completion_type=CHAIN/1` and mirrors chained plain
 completion. The later
 [Read-Only Transaction Control](../read-only-transaction-control/specs.md)
-slice accepts bounded direct read-only access mode. Release completion
-defaults, global defaults, and prepared transaction control remain unsupported;
-the later
+slice accepts bounded direct read-only access mode. The later
+[Completion-Type Duplicate Control](../completion-type-duplicate-control/specs.md)
+slice accepts duplicate supported `completion_type` assignments with the final
+assignment winning. Release completion defaults, global defaults, and prepared
+transaction control remain unsupported; the later
 [Transaction Isolation Control](../transaction-isolation-control/specs.md)
 slice accepts direct/session isolation controls as compatibility setup SQL
 without claiming storage isolation semantics.

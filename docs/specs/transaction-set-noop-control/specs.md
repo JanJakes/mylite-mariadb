@@ -5,6 +5,10 @@ Status note: the later
 slice accepts session `SET completion_type=CHAIN/1` and mirrors chained plain
 `COMMIT` / `ROLLBACK`. Release completion defaults remain unsupported.
 The later
+[Completion-Type Duplicate Control](../completion-type-duplicate-control/specs.md)
+slice accepts duplicate supported `completion_type` assignments with the final
+assignment winning.
+The later
 [Read-Only Transaction Control](../read-only-transaction-control/specs.md)
 slice accepts direct read-only transaction access-mode controls and rejects
 MyLite storage writes while the read-only characteristic is active.

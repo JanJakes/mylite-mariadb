@@ -3798,7 +3798,6 @@ TransactionControlKind direct_set_assignment_transaction_control_kind(std::strin
     const bool has_statement_tail = sql_has_statement_tail_after_semicolon(sql);
     TransactionControlKind result = TransactionControlKind::None;
     bool autocommit_seen = false;
-    bool completion_type_seen = false;
     bool transaction_access_mode_seen = false;
     bool transaction_isolation_seen = false;
 
@@ -3829,11 +3828,9 @@ TransactionControlKind direct_set_assignment_transaction_control_kind(std::strin
         }
         if (completion_type_result == TransactionControlKind::SetCompletionTypeNoChain ||
             completion_type_result == TransactionControlKind::SetCompletionTypeChain) {
-            if (completion_type_seen) {
-                return TransactionControlKind::Unsupported;
-            }
-            completion_type_seen = true;
-            if (result == TransactionControlKind::None) {
+            if (result == TransactionControlKind::None ||
+                result == TransactionControlKind::SetCompletionTypeNoChain ||
+                result == TransactionControlKind::SetCompletionTypeChain) {
                 result = completion_type_result;
             }
             continue;
@@ -4056,19 +4053,20 @@ bool direct_set_completion_type_chain_default(std::string_view sql, bool *out_ch
         return false;
     }
 
+    bool found = false;
     while (!skip_sql_leading_noise(rest).empty()) {
         const TransactionControlKind completion_type_result =
             completion_type_assignment_control_kind(pop_sql_set_assignment(rest));
         if (completion_type_result == TransactionControlKind::SetCompletionTypeNoChain) {
             *out_chain = false;
-            return true;
+            found = true;
         }
         if (completion_type_result == TransactionControlKind::SetCompletionTypeChain) {
             *out_chain = true;
-            return true;
+            found = true;
         }
     }
-    return false;
+    return found;
 }
 
 bool transaction_assignment_targets_variable(

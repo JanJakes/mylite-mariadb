@@ -1841,6 +1841,65 @@ static void test_row_dml_transactions(void) {
     assert(zero_count.rows == 1);
     assert_exec_succeeds(db, "SET completion_type=DEFAULT");
 
+    assert_exec_succeeds(db, "SET completion_type=CHAIN, completion_type=NO_CHAIN");
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (57, 'completion-duplicate-no-chain')");
+    assert_exec_succeeds(db, "COMMIT");
+    assert_exec_succeeds(db, "DROP TABLE IF EXISTS duplicate_no_chain_probe");
+    count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts "
+            "WHERE id = 57 AND title = 'completion-duplicate-no-chain'",
+            single_value_callback,
+            &count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(count.rows == 1);
+    assert_exec_succeeds(db, "DELETE FROM tx_posts WHERE id = 57");
+
+    assert_exec_succeeds(db, "SET completion_type=NO_CHAIN, completion_type=CHAIN");
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO tx_posts VALUES (57, 'completion-duplicate-chain-before')"
+    );
+    assert_exec_succeeds(db, "COMMIT");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO tx_posts VALUES (58, 'completion-duplicate-chain-after')"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_exec_succeeds(db, "ROLLBACK AND NO CHAIN");
+    count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts "
+            "WHERE id = 57 AND title = 'completion-duplicate-chain-before'",
+            single_value_callback,
+            &count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(count.rows == 1);
+    zero_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts "
+            "WHERE id = 58 AND title = 'completion-duplicate-chain-after'",
+            single_value_callback,
+            &zero_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(zero_count.rows == 1);
+    assert_exec_succeeds(db, "DELETE FROM tx_posts WHERE id = 57");
+    assert_exec_succeeds(db, "SET completion_type=DEFAULT");
+
     assert_exec_succeeds(db, "SET TRANSACTION ISOLATION LEVEL READ COMMITTED, READ ONLY");
     assert_exec_succeeds(db, "BEGIN");
     assert_exec_fails_with_message(

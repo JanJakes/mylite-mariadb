@@ -1456,7 +1456,23 @@ static void test_transaction_control_policy(void) {
     assert_transaction_control_exec_fails(db, "SET GLOBAL completion_type=NO_CHAIN");
     assert_transaction_control_exec_fails(db, "SET @@global.completion_type=0");
     assert_transaction_control_exec_fails(db, "SET completion_type=2");
-    assert_transaction_control_exec_fails(db, "SET completion_type=NO_CHAIN, completion_type=0");
+    assert_transaction_control_exec_fails(db, "SET completion_type=CHAIN, completion_type=RELEASE");
+    assert(
+        mylite_exec(db, "SET completion_type=CHAIN, completion_type=NO_CHAIN", NULL, NULL, NULL) ==
+        MYLITE_OK
+    );
+    assert(mylite_exec(db, "BEGIN", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "COMMIT", NULL, NULL, NULL) == MYLITE_OK);
+    assert_transaction_control_exec_fails(db, "SAVEPOINT completion_type_probe");
+    assert(
+        mylite_exec(db, "SET completion_type=NO_CHAIN, completion_type=CHAIN", NULL, NULL, NULL) ==
+        MYLITE_OK
+    );
+    assert(mylite_exec(db, "BEGIN", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "COMMIT", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SAVEPOINT completion_type_probe", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "ROLLBACK AND NO CHAIN", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SET completion_type=DEFAULT", NULL, NULL, NULL) == MYLITE_OK);
     assert_transaction_control_exec_fails(db, "SET completion_type=NO_CHAIN; SELECT 1");
     assert_transaction_control_exec_fails(db, "SET GLOBAL transaction_isolation='READ-COMMITTED'");
     assert_transaction_control_exec_fails(db, "SET @@global.tx_isolation='READ-COMMITTED'");

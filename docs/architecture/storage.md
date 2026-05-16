@@ -506,9 +506,10 @@ immediately opening a new one; chained completion preserves the current
 read-only/read-write access mode, while non-chained completion resets one-shot
 access mode to the session default. `AND NO CHAIN` and `NO RELEASE` are
 accepted explicit no-op completion modifiers. Direct session
-`SET completion_type=CHAIN/1` mirrors the MariaDB completion default so later
-plain direct `COMMIT` and `ROLLBACK` chain, while explicit `AND NO CHAIN`
-overrides it. `RELEASE`, `WITH CONSISTENT SNAPSHOT`,
+`SET completion_type=NO_CHAIN/0/DEFAULT/CHAIN/1` mirrors the MariaDB
+completion default so later plain direct `COMMIT` and `ROLLBACK` follow the
+final supported assignment in a `SET` list, while explicit `AND NO CHAIN`
+overrides chained defaults. `RELEASE`, `WITH CONSISTENT SNAPSHOT`,
 `completion_type=RELEASE/2`, global transaction variables, and duplicate
 transaction variable assignments remain unsupported.
 Direct savepoint control is handled by `libmylite` before MariaDB execution

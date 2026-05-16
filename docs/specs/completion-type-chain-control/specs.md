@@ -1,5 +1,10 @@
 # Completion Type Chain Control
 
+Status note: the later
+[Completion-Type Duplicate Control](../completion-type-duplicate-control/specs.md)
+slice accepts duplicate supported session `completion_type` assignments with
+the final assignment winning. Release completion defaults remain unsupported.
+
 ## Problem
 
 MyLite now accepts direct session `completion_type=NO_CHAIN/0/DEFAULT` as a
