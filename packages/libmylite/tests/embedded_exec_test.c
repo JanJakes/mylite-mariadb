@@ -1293,6 +1293,42 @@ static void test_transaction_control_policy(void) {
     assert(mylite_exec(db, "SET TRANSACTION READ WRITE", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "SET SESSION TRANSACTION READ WRITE", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "SET LOCAL TRANSACTION READ WRITE", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(db, "SET TRANSACTION ISOLATION LEVEL READ COMMITTED", NULL, NULL, NULL) ==
+        MYLITE_OK
+    );
+    assert(
+        mylite_exec(db, "SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE", NULL, NULL, NULL) ==
+        MYLITE_OK
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SET LOCAL TRANSACTION ISOLATION LEVEL REPEATABLE READ",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED, READ WRITE",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SET TRANSACTION READ ONLY, ISOLATION LEVEL SERIALIZABLE",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_exec(db, "ROLLBACK", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "START TRANSACTION READ ONLY", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "ROLLBACK", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "SET TRANSACTION READ ONLY", NULL, NULL, NULL) == MYLITE_OK);
@@ -1362,7 +1398,19 @@ static void test_transaction_control_policy(void) {
     );
     assert_transaction_control_exec_fails(db, "SET GLOBAL TRANSACTION READ WRITE");
     assert_transaction_control_exec_fails(db, "SET GLOBAL TRANSACTION READ ONLY");
+    assert_transaction_control_exec_fails(
+        db,
+        "SET GLOBAL TRANSACTION ISOLATION LEVEL READ COMMITTED"
+    );
     assert_transaction_control_exec_fails(db, "SET TRANSACTION READ WRITE, READ ONLY");
+    assert_transaction_control_exec_fails(
+        db,
+        "SET TRANSACTION ISOLATION LEVEL READ COMMITTED, ISOLATION LEVEL SERIALIZABLE"
+    );
+    assert_transaction_control_exec_fails(
+        db,
+        "SET TRANSACTION ISOLATION LEVEL READ COMMITTED; SELECT 1"
+    );
     assert_transaction_control_exec_fails(db, "SET GLOBAL completion_type=NO_CHAIN");
     assert_transaction_control_exec_fails(db, "SET @@global.completion_type=0");
     assert_transaction_control_exec_fails(db, "SET completion_type=2");
@@ -1398,7 +1446,6 @@ static void test_transaction_control_policy(void) {
     );
     assert_transaction_control_exec_fails(db, "SET autocommit=0; SELECT 1");
     assert_transaction_control_exec_fails(db, "SET autocommit=DEFAULT; SELECT 1");
-    assert_transaction_control_exec_fails(db, "SET TRANSACTION ISOLATION LEVEL READ COMMITTED");
     assert_transaction_control_exec_fails(db, "XA START 'mylite-xid'");
     assert(
         mylite_exec(db, "SET @mylite_transaction_label='transaction'", NULL, NULL, NULL) ==

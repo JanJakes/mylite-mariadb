@@ -15,7 +15,9 @@ row-DML transactions. It keeps `completion_type=RELEASE/2`, global changes,
 `SET STATEMENT`, prepared forms, read-only/isolation changes, XA, and DDL
 inside active direct transactions unsupported at this slice point. A later
 read-only transaction-control slice accepts bounded direct read-only access
-mode.
+mode, and a later transaction isolation-control slice accepts direct/session
+`SET TRANSACTION ISOLATION LEVEL ...` forms as compatibility setup SQL without
+claiming storage isolation semantics.
 
 ## Source Findings
 

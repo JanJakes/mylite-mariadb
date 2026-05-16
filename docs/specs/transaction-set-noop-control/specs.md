@@ -8,6 +8,10 @@ The later
 [Read-Only Transaction Control](../read-only-transaction-control/specs.md)
 slice accepts direct read-only transaction access-mode controls and rejects
 MyLite storage writes while the read-only characteristic is active.
+The later
+[Transaction Isolation Control](../transaction-isolation-control/specs.md)
+slice accepts direct/session `SET TRANSACTION ISOLATION LEVEL ...` forms as
+compatibility setup SQL without claiming storage isolation semantics.
 
 ## Problem
 
@@ -20,7 +24,7 @@ MariaDB and blocks harmless session setup.
 
 This slice accepts only direct read-write/no-chain controls that are no-ops for
 MyLite's current row-DML transaction scope. At this slice point, read-only
-access modes, isolation changes, chain/release completion defaults, global
+access modes, isolation controls, chain/release completion defaults, global
 changes, `SET STATEMENT`, prepared forms, XA, and DDL inside active direct
 transactions remained unsupported.
 

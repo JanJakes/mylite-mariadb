@@ -11,9 +11,12 @@ scope it already owns and must reject writes while the read-only characteristic
 is active.
 
 This slice supports direct read-only transaction access mode for MyLite storage
-transactions. It keeps isolation-level changes, `WITH CONSISTENT SNAPSHOT`,
-transaction read-only system-variable assignments, XA, release completion, and
-transactional DDL beyond the existing explicit rejection out of scope.
+transactions. It keeps `WITH CONSISTENT SNAPSHOT`, transaction isolation or
+read-only system-variable assignments, XA, release completion, and
+transactional DDL beyond the existing explicit rejection out of scope. The
+later [Transaction Isolation Control](../transaction-isolation-control/specs.md)
+slice accepts direct/session isolation controls as compatibility setup SQL
+without claiming storage isolation semantics.
 
 ## Source Findings
 

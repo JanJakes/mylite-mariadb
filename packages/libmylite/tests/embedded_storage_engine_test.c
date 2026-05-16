@@ -1192,7 +1192,14 @@ static void test_transaction_and_foreign_key_policies(void) {
     assert_transaction_control_exec_fails(db, "COMMIT RELEASE");
     assert_exec_succeeds(db, "SET completion_type=CHAIN");
     assert_exec_succeeds(db, "SET completion_type=DEFAULT");
+    assert_exec_succeeds(db, "SET TRANSACTION ISOLATION LEVEL READ COMMITTED");
+    assert_exec_succeeds(db, "SET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE");
+    assert_exec_succeeds(db, "SET LOCAL TRANSACTION ISOLATION LEVEL REPEATABLE READ");
     assert_transaction_control_exec_fails(db, "SET transaction_isolation='READ-COMMITTED'");
+    assert_transaction_control_exec_fails(
+        db,
+        "SET GLOBAL TRANSACTION ISOLATION LEVEL READ COMMITTED"
+    );
     assert_transaction_control_exec_fails(db, "SET GLOBAL autocommit=0");
     assert_exec_succeeds(db, "SET autocommit=DEFAULT");
     assert_locking_sql_exec_fails(db, "LOCK TABLES posts WRITE");
@@ -1753,6 +1760,20 @@ static void test_row_dml_transactions(void) {
     );
     assert(zero_count.rows == 1);
     assert_exec_succeeds(db, "SET completion_type=DEFAULT");
+
+    assert_exec_succeeds(db, "SET TRANSACTION ISOLATION LEVEL READ COMMITTED, READ ONLY");
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO tx_posts VALUES (50, 'isolation-read-only')",
+        "read-only transaction"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+
+    assert_exec_succeeds(db, "SET TRANSACTION READ WRITE, ISOLATION LEVEL REPEATABLE READ");
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (50, 'isolation-read-write')");
+    assert_exec_succeeds(db, "ROLLBACK");
 
     assert(
         mylite_prepare(

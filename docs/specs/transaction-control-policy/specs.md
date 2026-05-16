@@ -18,7 +18,10 @@ autocommit changes, unsupported transaction-variable `SET` lists, unsupported
 transaction modifiers, XA, and transactional DDL remain rejected; the later
 [Prepared Transactional DDL Policy](../prepared-transactional-ddl-policy/specs.md)
 slice makes the prepared execution path enforce the same active-transaction DDL
-policy as direct SQL.
+policy as direct SQL. The later
+[Transaction Isolation Control](../transaction-isolation-control/specs.md)
+slice accepts direct/session `SET TRANSACTION ISOLATION LEVEL ...` forms as
+compatibility setup SQL without claiming storage isolation semantics.
 
 ## Problem
 

@@ -10,8 +10,11 @@ slice accepts session `SET completion_type=CHAIN/1` and mirrors chained plain
 completion. The later
 [Read-Only Transaction Control](../read-only-transaction-control/specs.md)
 slice accepts bounded direct read-only access mode. Release completion
-defaults, isolation changes, global defaults, and prepared transaction control
-remain unsupported.
+defaults, global defaults, and prepared transaction control remain unsupported;
+the later
+[Transaction Isolation Control](../transaction-isolation-control/specs.md)
+slice accepts direct/session isolation controls as compatibility setup SQL
+without claiming storage isolation semantics.
 
 ## Problem
 

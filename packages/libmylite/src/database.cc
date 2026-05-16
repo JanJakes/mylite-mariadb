@@ -215,8 +215,10 @@ enum class TransactionControlKind : unsigned char {
     SetCompletionTypeChain,
     SetNextTransactionReadOnly,
     SetNextTransactionReadWrite,
+    SetNextTransactionIsolation,
     SetSessionTransactionReadOnly,
     SetSessionTransactionReadWrite,
+    SetSessionTransactionIsolation,
     Unsupported,
 };
 
@@ -456,6 +458,10 @@ bool direct_set_completion_type_chain_default(std::string_view sql, bool *out_ch
 bool sql_token_is_completion_type_no_chain(std::string_view token);
 bool sql_token_is_completion_type_chain(std::string_view token);
 bool sql_set_assignment_targets_transaction_variable(std::string_view assignment);
+bool pop_transaction_access_mode(std::string_view &sql, bool *out_read_only);
+bool pop_transaction_isolation_level(std::string_view &sql);
+TransactionControlKind transaction_access_mode_control_kind(bool session_scope, bool read_only);
+TransactionControlKind transaction_isolation_control_kind(bool session_scope);
 bool is_begin_transaction_control(TransactionControlKind kind);
 bool is_completion_transaction_control(TransactionControlKind kind);
 bool is_savepoint_transaction_control(TransactionControlKind kind);
@@ -3679,24 +3685,35 @@ TransactionControlKind direct_set_transaction_characteristics_control_kind(
         return TransactionControlKind::Unsupported;
     }
 
-    if (!sql_token_equals(pop_sql_token(rest), "READ")) {
-        return TransactionControlKind::Unsupported;
-    }
-    const std::string_view mode = pop_sql_token(rest);
-    if (sql_token_equals(mode, "ONLY")) {
-        return sql_rest_is_statement_end(rest)
-                   ? (session_scope ? TransactionControlKind::SetSessionTransactionReadOnly
-                                    : TransactionControlKind::SetNextTransactionReadOnly)
-                   : TransactionControlKind::Unsupported;
-    }
-    if (!sql_token_equals(mode, "WRITE")) {
-        return TransactionControlKind::Unsupported;
+    bool saw_access_mode = false;
+    bool saw_isolation_level = false;
+    bool read_only = false;
+    for (;;) {
+        std::string_view candidate = rest;
+        bool candidate_read_only = false;
+        if (!saw_access_mode && pop_transaction_access_mode(candidate, &candidate_read_only)) {
+            saw_access_mode = true;
+            read_only = candidate_read_only;
+            rest = candidate;
+        } else if (!saw_isolation_level && pop_transaction_isolation_level(candidate)) {
+            saw_isolation_level = true;
+            rest = candidate;
+        } else {
+            return TransactionControlKind::Unsupported;
+        }
+
+        rest = skip_sql_leading_noise(rest);
+        if (sql_rest_is_statement_end(rest)) {
+            break;
+        }
+        if (rest.empty() || rest.front() != ',') {
+            return TransactionControlKind::Unsupported;
+        }
+        rest.remove_prefix(1);
     }
 
-    return sql_rest_is_statement_end(rest)
-               ? (session_scope ? TransactionControlKind::SetSessionTransactionReadWrite
-                                : TransactionControlKind::SetNextTransactionReadWrite)
-               : TransactionControlKind::Unsupported;
+    return saw_access_mode ? transaction_access_mode_control_kind(session_scope, read_only)
+                           : transaction_isolation_control_kind(session_scope);
 }
 
 TransactionControlKind direct_set_assignment_transaction_control_kind(std::string_view sql) {
@@ -3914,6 +3931,69 @@ bool sql_set_assignment_targets_transaction_variable(std::string_view assignment
         }
     }
     return false;
+}
+
+bool pop_transaction_access_mode(std::string_view &sql, bool *out_read_only) {
+    std::string_view candidate = skip_sql_leading_noise(sql);
+    if (!sql_token_equals(pop_sql_token(candidate), "READ")) {
+        return false;
+    }
+    const std::string_view mode = pop_sql_token(candidate);
+    if (sql_token_equals(mode, "ONLY")) {
+        *out_read_only = true;
+    } else if (sql_token_equals(mode, "WRITE")) {
+        *out_read_only = false;
+    } else {
+        return false;
+    }
+    sql = candidate;
+    return true;
+}
+
+bool pop_transaction_isolation_level(std::string_view &sql) {
+    std::string_view candidate = skip_sql_leading_noise(sql);
+    if (!sql_token_equals(pop_sql_token(candidate), "ISOLATION")) {
+        return false;
+    }
+    if (!sql_token_equals(pop_sql_token(candidate), "LEVEL")) {
+        return false;
+    }
+
+    const std::string_view first = pop_sql_token(candidate);
+    if (sql_token_equals(first, "READ")) {
+        const std::string_view second = pop_sql_token(candidate);
+        if (!sql_token_equals(second, "UNCOMMITTED") && !sql_token_equals(second, "COMMITTED")) {
+            return false;
+        }
+        sql = candidate;
+        return true;
+    }
+    if (sql_token_equals(first, "REPEATABLE")) {
+        if (!sql_token_equals(pop_sql_token(candidate), "READ")) {
+            return false;
+        }
+        sql = candidate;
+        return true;
+    }
+    if (sql_token_equals(first, "SERIALIZABLE")) {
+        sql = candidate;
+        return true;
+    }
+    return false;
+}
+
+TransactionControlKind transaction_access_mode_control_kind(bool session_scope, bool read_only) {
+    if (read_only) {
+        return session_scope ? TransactionControlKind::SetSessionTransactionReadOnly
+                             : TransactionControlKind::SetNextTransactionReadOnly;
+    }
+    return session_scope ? TransactionControlKind::SetSessionTransactionReadWrite
+                         : TransactionControlKind::SetNextTransactionReadWrite;
+}
+
+TransactionControlKind transaction_isolation_control_kind(bool session_scope) {
+    return session_scope ? TransactionControlKind::SetSessionTransactionIsolation
+                         : TransactionControlKind::SetNextTransactionIsolation;
 }
 
 bool is_begin_transaction_control(TransactionControlKind kind) {

@@ -1021,6 +1021,11 @@ static void test_prepare_diagnostics(void) {
     assert_prepare_fails_with_message(db, "SET TRANSACTION READ ONLY", "transaction control");
     assert_prepare_fails_with_message(
         db,
+        "SET TRANSACTION ISOLATION LEVEL READ COMMITTED",
+        "transaction control"
+    );
+    assert_prepare_fails_with_message(
+        db,
         "SET SESSION TRANSACTION READ WRITE",
         "transaction control"
     );

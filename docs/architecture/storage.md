@@ -495,16 +495,19 @@ and `START TRANSACTION READ ONLY` starts a read-only MyLite transaction that
 rejects direct and prepared MyLite storage writes. Direct `SET TRANSACTION`
 and `SET SESSION` / `SET LOCAL TRANSACTION` `READ ONLY` / `READ WRITE` forms
 mirror MariaDB's one-shot and session access-mode defaults after MariaDB
-accepts the statement. `COMMIT` and `ROLLBACK` completion modifiers support
-`AND CHAIN` by finishing the current outer checkpoint and immediately opening
-a new one; chained completion preserves the current read-only/read-write
-access mode, while non-chained completion resets one-shot access mode to the
-session default. `AND NO CHAIN` and `NO RELEASE` are accepted explicit no-op
-completion modifiers. Direct session `SET completion_type=CHAIN/1` mirrors the
-MariaDB completion default so later plain direct `COMMIT` and `ROLLBACK`
-chain, while explicit `AND NO CHAIN` overrides it. `RELEASE`,
-`WITH CONSISTENT SNAPSHOT`, `completion_type=RELEASE/2`, and transaction
-isolation or read-only variable changes remain unsupported.
+accepts the statement. Direct/session `SET TRANSACTION ISOLATION LEVEL ...`
+forms are accepted as compatibility setup SQL after MariaDB validates them, but
+do not yet imply MyLite storage isolation guarantees. `COMMIT` and `ROLLBACK`
+completion modifiers support `AND CHAIN` by finishing the current outer
+checkpoint and immediately opening a new one; chained completion preserves the
+current read-only/read-write access mode, while non-chained completion resets
+one-shot access mode to the session default. `AND NO CHAIN` and `NO RELEASE`
+are accepted explicit no-op completion modifiers. Direct session
+`SET completion_type=CHAIN/1` mirrors the MariaDB completion default so later
+plain direct `COMMIT` and `ROLLBACK` chain, while explicit `AND NO CHAIN`
+overrides it. `RELEASE`, `WITH CONSISTENT SNAPSHOT`,
+`completion_type=RELEASE/2`, and transaction isolation or read-only variable
+changes remain unsupported.
 Direct savepoint control is handled by `libmylite` before MariaDB execution
 for the same bounded transaction scope: simple unquoted and backtick-quoted
 `SAVEPOINT` names open nested storage checkpoint frames,
