@@ -166,7 +166,8 @@ removes MariaDB-derived source objects from the disabled embedded profile only.
 - `log_event_server.cc` and `rpl_gtid.cc` remained in the archive after this
   slice. The follow-up log-event server trim removes `log_event_server.cc` by
   splitting retained SQL string rendering from disabled event-class symbols.
-  `rpl_gtid.cc` still requires a separate GTID-state stub boundary.
+  The follow-up RPL GTID state trim removes `rpl_gtid.cc` by keeping retained
+  no-binlog GTID lifecycle symbols empty.
 
 ## Verification Results
 
@@ -211,7 +212,8 @@ Passed on 2026-05-15:
 - This slice left `log_event_server.cc` as follow-up work because it provided
   event serialization helpers and shared SQL string-rendering code used by
   retained paths. The later log-event server trim handles that boundary.
-- `rpl_gtid.cc` owns global GTID state used by retained system variables and
-  no-binlog stubs. Removing it is intentionally out of scope for this slice.
+- This slice left `rpl_gtid.cc` as follow-up work because it owned global GTID
+  state used by retained no-binlog lifecycle paths. The later RPL GTID state
+  trim handles that boundary.
 - `MYSQL_BIN_LOG::cleanup()` is shutdown-sensitive; the disabled path must only
   skip cleanup for objects that the disabled startup/open paths never allocate.

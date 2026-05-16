@@ -131,7 +131,7 @@ current MyLite embedded profile patches applied.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,674,872 bytes / 25.44 MiB |
+| Archive size | 26,610,000 bytes / 25.38 MiB |
 | Archive members | 670 |
 
 The build found system OpenSSL 3.6.2, Curses, CURL, GSSAPI, BZip2, LZ4,
@@ -143,20 +143,25 @@ archive and linked first-party embedded smoke binaries do not link libz.
 The binlog event-root trim reduced the default archive by 146,128 bytes from
 the previous no-binlog transaction/event-core baseline and removed two archive
 members. The disabled profile now omits `gtid_index.cc`, `log_event.cc`,
-`log_event_server.cc`, `rpl_injector.cc`, and `rpl_record.cc`, skips the
-mandatory binlog plugin registration, and compiles embedded binlog transaction,
-row-event, GTID-state, event-write, table-map, open/recovery, GTID-index,
-incident, cache-write, temporary-table binlog entry points, and retained SQL
-`BINLOG` event parsing to no-ops or fail-closed stubs. `rpl_gtid.cc` remains in
-the archive because retained MariaDB code still references GTID state, but
-ordinary SQL string rendering resolves from `mylite_log_event_core_stub.cc`,
-while disabled log-event class symbols live in
-`mylite_log_event_server_disabled.cc`.
+`log_event_server.cc`, `rpl_gtid.cc`, `rpl_injector.cc`, and `rpl_record.cc`,
+skips the mandatory binlog plugin registration, and compiles embedded binlog
+transaction, row-event, GTID-state, event-write, table-map, open/recovery,
+GTID-index, incident, cache-write, temporary-table binlog entry points, retained
+SQL `BINLOG` event parsing, and retained binlog GTID state lifecycle to no-ops
+or fail-closed stubs. Ordinary SQL string rendering resolves from
+`mylite_log_event_core_stub.cc`, disabled log-event class symbols live in
+`mylite_log_event_server_disabled.cc`, and disabled binlog GTID state lifecycle
+symbols live in `mylite_rpl_gtid_disabled.cc`.
 
 The log-event server trim reduced the default archive by a further 102,088
 bytes without changing the linked first-party embedded smoke binary sizes. The
 archive now contains `mylite_log_event_server_disabled.cc.o` instead of
 `log_event_server.cc.o`.
+
+The RPL GTID state trim reduced the default archive by a further 64,872 bytes
+and reduced the linked first-party embedded smoke binaries by roughly 50 KiB
+each. The archive now contains `mylite_rpl_gtid_disabled.cc.o` instead of
+`rpl_gtid.cc.o`.
 
 The MyISAM maintenance trim reduced the default archive by a further 87,712
 bytes and removed three archive members. The disabled profile now omits
@@ -383,6 +388,7 @@ The profile explicitly disables:
   no-binlog profile
 - server-side binary-log event replay and serialization through
   `log_event_server.cc`
+- replication GTID state runtime through `rpl_gtid.cc`
 - native MyISAM table maintenance, repair, key-cache assignment, and key
   preload administration
 - `mysql.servers` foreign-server metadata cache
@@ -432,13 +438,14 @@ Measured on 2026-05-16 with the same host and toolchain as the default profile:
 | Field | Value |
 | --- | --- |
 | Archive | `build/mariadb-mylite-storage-smoke/libmysqld/libmariadbd.a` |
-| Archive size | 26,870,264 bytes / 25.63 MiB |
+| Archive size | 26,805,392 bytes / 25.56 MiB |
 | Archive members | 673 |
 
 The opt-in archive also replaces `event_parse_data.cc.o` with
-`mylite_event_parse_data_disabled.cc.o` and `log_event_server.cc.o` with
-`mylite_log_event_server_disabled.cc.o`; its total size includes the current
-static MyLite handler objects and should be compared only against matching
+`mylite_event_parse_data_disabled.cc.o`, `log_event_server.cc.o` with
+`mylite_log_event_server_disabled.cc.o`, and `rpl_gtid.cc.o` with
+`mylite_rpl_gtid_disabled.cc.o`; its total size includes the current static
+MyLite handler objects and should be compared only against matching
 storage-smoke sources.
 
 This smoke path now covers static plugin registration, current routed schema
@@ -464,19 +471,19 @@ outputs:
 
 | Artifact | Size | Stripped Size | Members | Global Symbols |
 | --- | ---: | ---: | ---: | ---: |
-| MariaDB embedded archive | 26,674,872 bytes / 25.44 MiB | n/a | 670 | n/a |
-| MariaDB storage-smoke archive | 26,870,264 bytes / 25.63 MiB | n/a | 673 | n/a |
-| Embedded open-close smoke | 17,195,984 bytes / 16.40 MiB | 15,542,416 bytes / 14.82 MiB | n/a | 15,266 |
-| Embedded exec smoke | 17,265,208 bytes / 16.47 MiB | 15,608,440 bytes / 14.89 MiB | n/a | 15,266 |
-| Embedded statement smoke | 17,245,664 bytes / 16.45 MiB | 15,591,760 bytes / 14.87 MiB | n/a | 15,266 |
-| Embedded warning smoke | 17,195,600 bytes / 16.40 MiB | 15,542,208 bytes / 14.82 MiB | n/a | 15,266 |
-| Embedded comparison smoke | 17,302,352 bytes / 16.50 MiB | 15,593,008 bytes / 14.87 MiB | n/a | 15,268 |
-| Storage-smoke open-close smoke | 17,332,704 bytes / 16.53 MiB | 15,626,000 bytes / 14.90 MiB | n/a | 15,266 |
-| Storage-smoke exec smoke | 17,418,456 bytes / 16.61 MiB | 15,708,520 bytes / 14.98 MiB | n/a | 15,266 |
-| Storage-smoke statement smoke | 17,382,400 bytes / 16.58 MiB | 15,675,344 bytes / 14.95 MiB | n/a | 15,266 |
-| Storage-smoke warning smoke | 17,332,336 bytes / 16.53 MiB | 15,625,776 bytes / 14.90 MiB | n/a | 15,266 |
-| Storage-smoke comparison smoke | 17,432,448 bytes / 16.62 MiB | 15,676,432 bytes / 14.95 MiB | n/a | 15,268 |
-| Storage-engine smoke | 17,667,872 bytes / 16.85 MiB | 15,956,544 bytes / 15.22 MiB | n/a | 15,266 |
+| MariaDB embedded archive | 26,610,000 bytes / 25.38 MiB | n/a | 670 | n/a |
+| MariaDB storage-smoke archive | 26,805,392 bytes / 25.56 MiB | n/a | 673 | n/a |
+| Embedded open-close smoke | 17,145,552 bytes / 16.35 MiB | 15,495,552 bytes / 14.78 MiB | n/a | 15,138 |
+| Embedded exec smoke | 17,214,792 bytes / 16.42 MiB | 15,561,576 bytes / 14.84 MiB | n/a | 15,138 |
+| Embedded statement smoke | 17,195,248 bytes / 16.40 MiB | 15,544,896 bytes / 14.82 MiB | n/a | 15,138 |
+| Embedded warning smoke | 17,145,184 bytes / 16.35 MiB | 15,495,328 bytes / 14.78 MiB | n/a | 15,138 |
+| Embedded comparison smoke | 17,251,936 bytes / 16.45 MiB | 15,546,144 bytes / 14.83 MiB | n/a | 15,140 |
+| Storage-smoke open-close smoke | 17,282,288 bytes / 16.48 MiB | 15,579,136 bytes / 14.86 MiB | n/a | 15,138 |
+| Storage-smoke exec smoke | 17,368,024 bytes / 16.56 MiB | 15,661,656 bytes / 14.94 MiB | n/a | 15,138 |
+| Storage-smoke statement smoke | 17,331,984 bytes / 16.53 MiB | 15,628,480 bytes / 14.90 MiB | n/a | 15,138 |
+| Storage-smoke warning smoke | 17,298,432 bytes / 16.50 MiB | 15,595,424 bytes / 14.87 MiB | n/a | 15,138 |
+| Storage-smoke comparison smoke | 17,382,032 bytes / 16.58 MiB | 15,629,584 bytes / 14.91 MiB | n/a | 15,140 |
+| Storage-engine smoke | 17,617,456 bytes / 16.80 MiB | 15,909,696 bytes / 15.17 MiB | n/a | 15,138 |
 
 ## Offline Build Caveat
 

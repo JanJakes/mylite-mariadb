@@ -116,9 +116,10 @@ bytes, and its stripped size dropped from 16,087,712 bytes to 16,052,560
 bytes. This was a narrower win than the historical branch result because the
 baseline at the time still kept `log_event.cc`, `log_event_server.cc`,
 `rpl_gtid.cc`, and `gtid_index.cc` in the archive; retained MariaDB code still
-referenced those objects. Follow-up binlog event-root and log-event server
-trims now remove `gtid_index.cc`, `log_event.cc`, `log_event_server.cc`,
-`rpl_injector.cc`, and `rpl_record.cc` from the disabled profile.
+referenced those objects. Follow-up binlog event-root, log-event server, and
+RPL GTID state trims now remove `gtid_index.cc`, `log_event.cc`,
+`log_event_server.cc`, `rpl_gtid.cc`, `rpl_injector.cc`, and `rpl_record.cc`
+from the disabled profile.
 
 ## License And Dependency Impact
 

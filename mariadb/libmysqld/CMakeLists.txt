@@ -406,9 +406,11 @@ IF(NOT MYLITE_WITH_BINLOG_CORE)
     ../sql/log_event.cc
     ../sql/log_event_server.cc
     ../sql/rpl_injector.cc
+    ../sql/rpl_gtid.cc
     ../sql/rpl_record.cc)
   LIST(INSERT SQL_EMBEDDED_SOURCES 0 mylite_log_event_core_stub.cc)
   LIST(APPEND SQL_EMBEDDED_SOURCES mylite_log_event_server_disabled.cc)
+  LIST(APPEND SQL_EMBEDDED_SOURCES mylite_rpl_gtid_disabled.cc)
 ENDIF()
 
 ADD_CONVENIENCE_LIBRARY(sql_embedded ${SQL_EMBEDDED_SOURCES})
