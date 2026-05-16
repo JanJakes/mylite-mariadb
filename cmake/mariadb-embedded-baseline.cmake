@@ -95,6 +95,9 @@ set(MYLITE_WITH_STORED_PROGRAM_RUNTIME OFF CACHE BOOL "Omit stored program runti
 # MyLite rejects trigger DDL and does not use .TRG/.TRN metadata files.
 set(MYLITE_WITH_TRIGGER_RUNTIME OFF CACHE BOOL "Omit trigger runtime and sidecar metadata" FORCE)
 
+# MyLite rejects persistent views and does not use view .frm metadata files.
+set(MYLITE_WITH_VIEW_RUNTIME OFF CACHE BOOL "Omit view runtime and sidecar metadata" FORCE)
+
 # MyLite rejects dynamic UDF registration and library loading.
 set(MYLITE_WITH_UDF_RUNTIME OFF CACHE BOOL "Omit UDF lookup and execution runtime" FORCE)
 

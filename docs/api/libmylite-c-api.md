@@ -478,6 +478,8 @@ the embedded library model:
 - SQL `HANDLER` commands,
 - SQL `HELP`,
 - `SELECT ... PROCEDURE`, including `PROCEDURE ANALYSE()`,
+- view runtime and metadata surfaces; `INFORMATION_SCHEMA.VIEWS` is queryable
+  but returns no rows until MyLite has catalog-backed view metadata,
 - stored-program compiler/runtime surfaces behind routines, packages, events,
   compound statements, and `CALL`; routine status and routine
   information-schema metadata are queryable but return no rows until MyLite has

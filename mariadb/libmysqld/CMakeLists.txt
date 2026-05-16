@@ -133,6 +133,13 @@ ELSE()
   SET(MYLITE_TRIGGER_RUNTIME_SOURCE ../sql/mylite_sql_trigger_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_VIEW_RUNTIME "Build view runtime and sidecar metadata" ON)
+IF(MYLITE_WITH_VIEW_RUNTIME)
+  SET(MYLITE_VIEW_RUNTIME_SOURCE ../sql/sql_view.cc)
+ELSE()
+  SET(MYLITE_VIEW_RUNTIME_SOURCE ../sql/mylite_sql_view_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_SEQUENCE_RUNTIME "Build SQL sequence runtime" ON)
 IF(MYLITE_WITH_SEQUENCE_RUNTIME)
   SET(MYLITE_SEQUENCE_SOURCES ../sql/sql_sequence.cc ../sql/ha_sequence.cc)
@@ -304,7 +311,7 @@ SET(SQL_EMBEDDED_SOURCES ${MYLITE_EMBEDDED_QUERY_CACHE_SOURCE} libmysqld.c lib_s
            ../sql/sql_table.cc ../sql/sql_test.cc
            ../sql/ddl_log.cc ../sql/item_vectorfunc.cc
            ${MYLITE_TRIGGER_RUNTIME_SOURCE} ../sql/sql_udf.cc ../sql/sql_union.cc
-           ../sql/sql_update.cc ../sql/sql_view.cc ../sql/sql_profile.cc
+           ../sql/sql_update.cc ${MYLITE_VIEW_RUNTIME_SOURCE} ../sql/sql_profile.cc
            ../sql/strfunc.cc ../sql/table.cc ../sql/thr_malloc.cc
            ../sql/sql_time.cc ../sql/tztime.cc ../sql/uniques.cc ../sql/unireg.cc
            ../sql/partition_info.cc ../sql/sql_connect.cc 

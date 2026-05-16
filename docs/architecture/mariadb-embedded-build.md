@@ -48,6 +48,8 @@ MYLITE_WITH_HELP_COMMAND=OFF
 MYLITE_WITH_PROCEDURE_ANALYSE=OFF
 MYLITE_WITH_SELECT_PROCEDURE_RUNTIME=OFF
 MYLITE_WITH_STORED_PROGRAM_RUNTIME=OFF
+MYLITE_WITH_TRIGGER_RUNTIME=OFF
+MYLITE_WITH_VIEW_RUNTIME=OFF
 MYLITE_WITH_UDF_RUNTIME=OFF
 MYLITE_WITH_BINLOG_CORE=OFF
 MYLITE_WITH_MYISAM_MAINTENANCE=OFF
@@ -56,6 +58,7 @@ MYLITE_WITH_BACKUP_RUNTIME=OFF
 MYLITE_WITH_QUERY_CACHE_RUNTIME=OFF
 MYLITE_WITH_OPTIMIZER_TRACE=OFF
 MYLITE_WITH_STATIC_SHOW_INFO=OFF
+MYLITE_WITH_STATUS_METADATA=OFF
 MYLITE_WITH_PROCESSLIST_METADATA=OFF
 MYLITE_WITH_ROUTINE_METADATA=OFF
 MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS=OFF
@@ -76,9 +79,10 @@ MariaDB-specific `SFORMAT()` SQL function, JSON schema validation, the
 `HANDLER` command runtime, SQL sequence runtime, virtual `SEQUENCE` storage
 engine, SQL `HELP`,
 `PROCEDURE ANALYSE()`, generic SELECT procedure runtime, stored-program runtime,
-file-backed trigger runtime and metadata helpers, dynamic UDF lookup/execution,
-binary-log transaction, event-write, and event-root core, native MyISAM
-table-maintenance and key-cache administration,
+file-backed view runtime and metadata helpers, file-backed trigger runtime and
+metadata helpers, dynamic UDF lookup/execution, binary-log transaction,
+event-write, and event-root core, native MyISAM table-maintenance and key-cache
+administration,
 foreign-server metadata cache, socket authentication, feedback, Performance
 Schema, thread-pool info, the user-statistics plugin, external backup-tool
 SQL runtime, the server-global query cache runtime, statement profiling,
@@ -90,8 +94,8 @@ formatting, schema validation, table-function projection, packed semi-structured
 BLOB handling, direct storage-engine cursor, unsupported sequence object/value
 state, help-table lookup, result-set analysis, SELECT result-set extension hook,
 catalog-bypassing generated virtual tables, unsupported non-table objects,
-trigger sidecar metadata, dynamic extension, server topology, engine-file
-maintenance, or server/client file, foreign-server metadata,
+view and trigger sidecar metadata, dynamic extension, server topology,
+engine-file maintenance, or server/client file, foreign-server metadata,
 server-observability, external physical backup, server-global result-cache,
 session profiling, optimizer diagnostics, static server-metadata, server status,
 or process/session introspection surfaces, not core
@@ -267,6 +271,14 @@ execution, leaves `SHOW TRIGGERS` and `INFORMATION_SCHEMA.TRIGGERS` visible
 with zero rows, and makes table open, DROP, RENAME, ALTER, and DML paths behave
 as if no triggers are present.
 
+The view runtime trim reduced the default archive by 22,576 bytes from the
+trigger runtime baseline with the same member count. The disabled profile now
+sets `MYLITE_WITH_VIEW_RUNTIME=OFF`, replaces `sql_view.cc` with
+`mylite_sql_view_disabled.cc`, keeps view DDL rejected before MariaDB
+execution, leaves `INFORMATION_SCHEMA.VIEWS` visible with zero rows, and
+preserves the derived-table and CTE projection-name helpers that are still
+needed outside persistent views.
+
 ## Enabled Surface
 
 The profile keeps the MariaDB components needed by the current embedded
@@ -313,6 +325,7 @@ The profile explicitly disables:
 - SQL `HELP` command help-table implementation
 - `PROCEDURE ANALYSE()` result-set analysis implementation
 - generic SELECT procedure runtime
+- view runtime and view `.frm` sidecar metadata helpers
 - stored routine, event, package, and stored-program instruction runtime
 - trigger runtime and `.TRG` / `.TRN` sidecar metadata helpers
 - dynamic UDF lookup, registration, and execution runtime
@@ -367,10 +380,10 @@ Measured on 2026-05-16 with the same host and toolchain as the default profile:
 | Field | Value |
 | --- | --- |
 | Archive | `build/mariadb-mylite-storage-smoke/libmysqld/libmariadbd.a` |
-| Archive size | 27,045,408 bytes / 25.79 MiB |
+| Archive size | 27,022,840 bytes / 25.77 MiB |
 | Archive members | 673 |
 
-This is 37,720 bytes smaller than the previous status metadata trim
+This is 22,568 bytes smaller than the previous trigger runtime trim
 storage-smoke archive with the same member count.
 
 This smoke path now covers static plugin registration, current routed schema
@@ -396,19 +409,19 @@ outputs:
 
 | Artifact | Size | Stripped Size | Members | Global Symbols |
 | --- | ---: | ---: | ---: | ---: |
-| MariaDB embedded archive | 26,864,832 bytes / 25.62 MiB | n/a | 670 | n/a |
-| MariaDB storage-smoke archive | 27,045,408 bytes / 25.79 MiB | n/a | 673 | n/a |
-| Embedded open-close smoke | 17,214,624 bytes / 16.42 MiB | 15,561,808 bytes / 14.84 MiB | n/a | 15,291 |
-| Embedded exec smoke | 17,267,176 bytes / 16.47 MiB | 15,611,304 bytes / 14.89 MiB | n/a | 15,291 |
-| Embedded statement smoke | 17,264,048 bytes / 16.46 MiB | 15,611,120 bytes / 14.89 MiB | n/a | 15,291 |
-| Embedded warning smoke | 17,230,768 bytes / 16.43 MiB | 15,578,096 bytes / 14.86 MiB | n/a | 15,291 |
-| Embedded comparison smoke | 17,337,488 bytes / 16.53 MiB | 15,628,928 bytes / 14.90 MiB | n/a | 15,293 |
-| Storage-smoke open-close smoke | 17,309,760 bytes / 16.51 MiB | 15,628,624 bytes / 14.90 MiB | n/a | 15,291 |
-| Storage-smoke exec smoke | 17,362,312 bytes / 16.56 MiB | 15,678,136 bytes / 14.95 MiB | n/a | 15,291 |
-| Storage-smoke statement smoke | 17,342,656 bytes / 16.54 MiB | 15,661,440 bytes / 14.94 MiB | n/a | 15,291 |
-| Storage-smoke warning smoke | 17,309,392 bytes / 16.51 MiB | 15,628,416 bytes / 14.90 MiB | n/a | 15,291 |
-| Storage-smoke comparison smoke | 17,411,600 bytes / 16.60 MiB | 15,679,104 bytes / 14.95 MiB | n/a | 15,293 |
-| Storage-engine smoke | 17,594,960 bytes / 16.78 MiB | 15,909,616 bytes / 15.17 MiB | n/a | 15,291 |
+| MariaDB embedded archive | 26,842,256 bytes / 25.60 MiB | n/a | 670 | n/a |
+| MariaDB storage-smoke archive | 27,022,840 bytes / 25.77 MiB | n/a | 673 | n/a |
+| Embedded open-close smoke | 17,214,320 bytes / 16.42 MiB | 15,561,680 bytes / 14.84 MiB | n/a | 15,290 |
+| Embedded exec smoke | 17,266,920 bytes / 16.47 MiB | 15,611,176 bytes / 14.89 MiB | n/a | 15,290 |
+| Embedded statement smoke | 17,247,264 bytes / 16.45 MiB | 15,594,496 bytes / 14.87 MiB | n/a | 15,290 |
+| Embedded warning smoke | 17,213,952 bytes / 16.42 MiB | 15,561,456 bytes / 14.84 MiB | n/a | 15,290 |
+| Embedded comparison smoke | 17,320,656 bytes / 16.52 MiB | 15,612,288 bytes / 14.89 MiB | n/a | 15,292 |
+| Storage-smoke open-close smoke | 17,292,944 bytes / 16.49 MiB | 15,611,984 bytes / 14.89 MiB | n/a | 15,290 |
+| Storage-smoke exec smoke | 17,345,544 bytes / 16.54 MiB | 15,661,496 bytes / 14.94 MiB | n/a | 15,290 |
+| Storage-smoke statement smoke | 17,342,400 bytes / 16.54 MiB | 15,661,328 bytes / 14.94 MiB | n/a | 15,290 |
+| Storage-smoke warning smoke | 17,309,072 bytes / 16.51 MiB | 15,628,288 bytes / 14.90 MiB | n/a | 15,290 |
+| Storage-smoke comparison smoke | 17,394,768 bytes / 16.59 MiB | 15,662,464 bytes / 14.94 MiB | n/a | 15,292 |
+| Storage-engine smoke | 17,578,144 bytes / 16.76 MiB | 15,892,944 bytes / 15.16 MiB | n/a | 15,290 |
 
 ## Offline Build Caveat
 
