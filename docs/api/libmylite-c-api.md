@@ -478,10 +478,13 @@ the embedded library model:
 - SQL `HANDLER` commands,
 - SQL `HELP`,
 - `SELECT ... PROCEDURE`, including `PROCEDURE ANALYSE()`,
-- stored-program compiler/runtime surfaces behind routines, triggers,
-  packages, events, compound statements, and `CALL`; routine status and
-  routine information-schema metadata are queryable but return no rows until
-  MyLite has catalog-backed routine metadata,
+- stored-program compiler/runtime surfaces behind routines, packages, events,
+  compound statements, and `CALL`; routine status and routine
+  information-schema metadata are queryable but return no rows until MyLite has
+  catalog-backed routine metadata,
+- trigger runtime and metadata surfaces; `SHOW TRIGGERS` and
+  `INFORMATION_SCHEMA.TRIGGERS` are queryable but return no rows until MyLite
+  has catalog-backed trigger metadata,
 - server utility functions such as `BENCHMARK()`, `SLEEP()`, `UUID_SHORT()`,
   `MASTER_POS_WAIT()`, and `MASTER_GTID_WAIT()`,
 - Oracle SQL mode,

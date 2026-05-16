@@ -54,6 +54,7 @@ static void test_oracle_sql_mode_is_rejected(void);
 static void test_file_import_policy_is_rejected(void);
 static void test_file_export_policy_is_rejected(void);
 static void test_non_table_objects_are_rejected(void);
+static void test_trigger_metadata_is_empty(void);
 static void test_transaction_control_is_rejected(void);
 static void test_locking_sql_is_rejected(void);
 static void test_online_alter_policy_is_rejected(void);
@@ -134,6 +135,7 @@ int main(void) {
     test_file_import_policy_is_rejected();
     test_file_export_policy_is_rejected();
     test_non_table_objects_are_rejected();
+    test_trigger_metadata_is_empty();
     test_transaction_control_is_rejected();
     test_locking_sql_is_rejected();
     test_online_alter_policy_is_rejected();
@@ -1108,6 +1110,40 @@ static void test_non_table_objects_are_rejected(void) {
     assert_non_table_object_exec_fails(db, "SHOW CREATE FUNCTION blocked_func");
     assert_non_table_object_exec_fails(db, "DROP VIEW blocked_view");
     assert_non_table_object_exec_fails(db, "CREATE SEQUENCE blocked_seq");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_trigger_metadata_is_empty(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    int show_trigger_rows = 0;
+    scalar_context trigger_count = {
+        .column_name = "trigger_count",
+        .value = "0",
+        .rows = 0,
+    };
+
+    assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "USE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(db, "SHOW TRIGGERS", count_only_callback, &show_trigger_rows, NULL) == MYLITE_OK
+    );
+    assert(show_trigger_rows == 0);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) AS trigger_count FROM INFORMATION_SCHEMA.TRIGGERS",
+            scalar_callback,
+            &trigger_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(trigger_count.rows == 1);
 
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);

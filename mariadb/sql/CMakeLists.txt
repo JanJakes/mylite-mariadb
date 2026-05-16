@@ -160,6 +160,13 @@ ELSE()
   SET(MYLITE_SQL_HANDLER_SOURCE mylite_sql_handler_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_TRIGGER_RUNTIME "Build trigger runtime and sidecar metadata" ON)
+IF(MYLITE_WITH_TRIGGER_RUNTIME)
+  SET(MYLITE_TRIGGER_RUNTIME_SOURCE sql_trigger.cc)
+ELSE()
+  SET(MYLITE_TRIGGER_RUNTIME_SOURCE mylite_sql_trigger_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_SEQUENCE_RUNTIME "Build SQL sequence runtime" ON)
 IF(MYLITE_WITH_SEQUENCE_RUNTIME)
   SET(MYLITE_SEQUENCE_SOURCE sql_sequence.cc)
@@ -286,7 +293,7 @@ SET (SQL_SOURCE
                sql_repl.cc sql_select.cc sql_show.cc sql_state.c
                group_by_handler.cc derived_handler.cc select_handler.cc
                sql_statistics.cc sql_string.cc lex_string.h
-               sql_table.cc sql_test.cc sql_trigger.cc sql_udf.cc sql_union.cc
+               sql_table.cc sql_test.cc ${MYLITE_TRIGGER_RUNTIME_SOURCE} sql_udf.cc sql_union.cc
                ddl_log.cc ddl_log.h
                sql_update.cc sql_view.cc strfunc.cc table.cc thr_malloc.cc
                sql_time.cc tztime.cc unireg.cc ${MYLITE_XML_SQL_FUNCTION_SOURCE}
