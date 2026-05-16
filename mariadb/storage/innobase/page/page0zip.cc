@@ -29,7 +29,11 @@ Created June 2005 by Marko Makela
 #include "fsp0types.h"
 #include "page0page.h"
 #include "buf0checksum.h"
+#ifdef HAVE_COMPRESS
 #include "zlib.h"
+#else
+#include "mylite_zlib_disabled.h"
+#endif
 #include "span.h"
 
 using st_::span;

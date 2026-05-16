@@ -54,7 +54,9 @@
 #include "rpl_utility.h"
 #include "rpl_constants.h"
 #include "sql_digest.h"
+#ifdef HAVE_COMPRESS
 #include "zlib.h"
+#endif
 #include "myisampack.h"
 #include <algorithm>
 
@@ -286,9 +288,14 @@ char *str_to_hex(char *to, const uchar *from, size_t len)
 
 uint32 binlog_get_compress_len(uint32 len)
 {
+#ifdef HAVE_COMPRESS
     /* 5 for the begin content, 1 reserved for a '\0'*/
     return ALIGN_SIZE((BINLOG_COMPRESSED_HEADER_LEN + BINLOG_COMPRESSED_ORIGINAL_LENGTH_MAX_BYTES) 
                         + compressBound(len) + 1);
+#else
+    (void) len;
+    return 0;
+#endif
 }
 
 /**
@@ -304,6 +311,7 @@ uint32 binlog_get_compress_len(uint32 len)
 */
 int binlog_buf_compress(const uchar *src, uchar *dst, uint32 len, uint32 *comlen)
 {
+#ifdef HAVE_COMPRESS
   uchar lenlen;
   if (len & 0xFF000000)
   {
@@ -341,6 +349,13 @@ int binlog_buf_compress(const uchar *src, uchar *dst, uint32 len, uint32 *comlen
   }
   *comlen= (uint32)tmplen + BINLOG_COMPRESSED_HEADER_LEN + lenlen;
   return 0;
+#else
+  (void) src;
+  (void) dst;
+  (void) len;
+  (void) comlen;
+  return 1;
+#endif
 }
 
 /**
@@ -604,6 +619,7 @@ uint32 binlog_get_uncompress_len(const uchar *buf)
 int binlog_buf_uncompress(const uchar *src, uchar *dst, uint32 len,
                           uint32 *newlen)
 {
+#ifdef HAVE_COMPRESS
   if ((src[0] & 0x80) == 0)
     return 1;
 
@@ -627,6 +643,13 @@ int binlog_buf_uncompress(const uchar *src, uchar *dst, uint32 len,
   DBUG_ASSERT(*newlen == (uint32)buflen);
   *newlen= (uint32)buflen;
   return 0;
+#else
+  (void) src;
+  (void) dst;
+  (void) len;
+  (void) newlen;
+  return 1;
+#endif
 }
 
 

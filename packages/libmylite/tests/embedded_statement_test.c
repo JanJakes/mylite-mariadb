@@ -17,6 +17,7 @@ static void test_reset_reuse_and_destructors(void);
 static void test_finalize_before_drain(void);
 static void test_close_rejects_active_statement(void);
 static void test_status_metadata_is_empty(void);
+static void test_zlib_compression_is_disabled(void);
 static void test_view_metadata_is_empty(void);
 static void test_trigger_metadata_is_empty(void);
 static void test_prepare_diagnostics(void);
@@ -42,6 +43,7 @@ int main(void) {
     test_finalize_before_drain();
     test_close_rejects_active_statement();
     test_status_metadata_is_empty();
+    test_zlib_compression_is_disabled();
     test_view_metadata_is_empty();
     test_trigger_metadata_is_empty();
     test_prepare_diagnostics();
@@ -412,6 +414,56 @@ static void test_status_metadata_is_empty(void) {
     assert(mylite_column_int64(stmt, 0U) == 0);
     assert(mylite_step(stmt) == MYLITE_DONE);
     assert(mylite_finalize(stmt) == MYLITE_OK);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_zlib_compression_is_disabled(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    mylite_stmt *stmt = NULL;
+
+    stmt = prepare_statement(db, "SELECT @@have_compress AS have_compress");
+    assert(mylite_column_count(stmt) == 1U);
+    assert(strcmp(mylite_column_name(stmt, 0U), "have_compress") == 0);
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(mylite_column_type(stmt, 0U) == MYLITE_TYPE_TEXT);
+    assert(strcmp(mylite_column_text(stmt, 0U), "NO") == 0);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+
+    stmt = prepare_statement(
+        db,
+        "SELECT COMPRESS(?) AS compressed_value, UNCOMPRESS(?) AS uncompressed_value"
+    );
+    assert(mylite_bind_text(stmt, 1U, "abc", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK);
+    assert(mylite_bind_text(stmt, 2U, "abc", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(mylite_column_type(stmt, 0U) == MYLITE_TYPE_NULL);
+    assert(mylite_column_type(stmt, 1U) == MYLITE_TYPE_NULL);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+
+    assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "USE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_prepare(
+            db,
+            "CREATE TEMPORARY TABLE compressed_columns (body TEXT COMPRESSED)",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_ERROR
+    );
+    assert(stmt == NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) != 0U);
+    assert(strcmp(mylite_sqlstate(db), "00000") != 0);
+    assert(strstr(mylite_errmsg(db), "zlib column compression") != NULL);
 
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);

@@ -87,7 +87,9 @@ Created 2/16/1996 Heikki Tuuri
 #include "row0mysql.h"
 #include "btr0pcur.h"
 #include "ibuf0ibuf.h"
+#ifdef HAVE_COMPRESS
 #include "zlib.h"
+#endif
 #include "log.h"
 
 /** Log sequence number at shutdown */
@@ -1331,7 +1333,12 @@ dberr_t srv_start(bool create_new_db)
 	ib::info() << "!!!!!!!! UNIV_DEBUG switched on !!!!!!!!!";
 #endif
 
-	ib::info() << "Compressed tables use zlib " ZLIB_VERSION
+	ib::info() <<
+#ifdef HAVE_COMPRESS
+	      "Compressed tables use zlib " ZLIB_VERSION
+#else
+	      "Compressed tables are disabled in the MyLite embedded profile"
+#endif
 #ifdef UNIV_ZIP_DEBUG
 	      " with validation"
 #endif /* UNIV_ZIP_DEBUG */

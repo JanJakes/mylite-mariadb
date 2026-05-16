@@ -34,7 +34,11 @@ Completed 2011/7/10 Sunny and Jimmy Yang
 #include "ut0wqueue.h"
 #include "srv0start.h"
 #include "ut0list.h"
+#ifdef HAVE_COMPRESS
 #include "zlib.h"
+#else
+#include "mylite_zlib_disabled.h"
+#endif
 #include "fts0opt.h"
 #include "fts0vlc.h"
 #include "wsrep.h"

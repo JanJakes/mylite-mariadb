@@ -96,6 +96,13 @@ ELSE()
   SET(MYLITE_GIS_SQL_FUNCTION_SOURCES ../sql/mylite_gis_sql_functions_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_ZLIB_COMPRESSION "Build zlib-backed compression helpers" ON)
+IF(MYLITE_WITH_ZLIB_COMPRESSION)
+  SET(MYLITE_FIELD_COMP_SOURCE ../sql/field_comp.cc)
+ELSE()
+  SET(MYLITE_FIELD_COMP_SOURCE ../sql/mylite_field_comp_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_SFORMAT_SQL_FUNCTION "Build SFORMAT SQL function" ON)
 IF(MYLITE_WITH_SFORMAT_SQL_FUNCTION)
   ADD_DEFINITIONS(-DMYLITE_WITH_SFORMAT_SQL_FUNCTION=1)
@@ -259,7 +266,7 @@ SET(SQL_EMBEDDED_SOURCES ${MYLITE_EMBEDDED_QUERY_CACHE_SOURCE} libmysqld.c lib_s
            ../sql-common/my_user.c ../sql-common/pack.c
            ../sql-common/client_plugin.c
            ../sql/password.c ../sql/discover.cc ../sql/derror.cc 
-           ../sql/field.cc ../sql/field_conv.cc ../sql/field_comp.cc
+           ../sql/field.cc ../sql/field_conv.cc ${MYLITE_FIELD_COMP_SOURCE}
            ../sql/filesort_utils.cc ../sql/sql_digest.cc
            ../sql/filesort.cc ../sql/grant.cc
            ../sql/gstream.cc ../sql/slave.cc

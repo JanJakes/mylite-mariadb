@@ -16,6 +16,7 @@ set(MYLITE_MARIADB_CHARSETS_DIR
 
 set(MYLITE_MARIADB_HAS_MYLITE_SE OFF)
 set(MYLITE_MARIADB_HAS_PERFSCHEMA ON)
+set(MYLITE_MARIADB_WITH_ZLIB_COMPRESSION ON)
 if(EXISTS "${MYLITE_MARIADB_BUILD_DIR}/CMakeCache.txt")
   file(STRINGS
     "${MYLITE_MARIADB_BUILD_DIR}/CMakeCache.txt"
@@ -33,6 +34,15 @@ if(EXISTS "${MYLITE_MARIADB_BUILD_DIR}/CMakeCache.txt")
   )
   if(mylite_mariadb_perfschema_cache)
     set(MYLITE_MARIADB_HAS_PERFSCHEMA OFF)
+  endif()
+
+  file(STRINGS
+    "${MYLITE_MARIADB_BUILD_DIR}/CMakeCache.txt"
+    mylite_mariadb_zlib_compression_cache
+    REGEX "^(MYLITE_WITH_ZLIB_COMPRESSION:.*=(NO|OFF|FALSE|0)|WITH_ZLIB:.*=none)$"
+  )
+  if(mylite_mariadb_zlib_compression_cache)
+    set(MYLITE_MARIADB_WITH_ZLIB_COMPRESSION OFF)
   endif()
 endif()
 
@@ -64,7 +74,9 @@ function(mylite_add_mariadb_embedded_target)
   find_package(OpenSSL REQUIRED)
   find_package(PkgConfig REQUIRED)
   find_package(Threads REQUIRED)
-  find_package(ZLIB REQUIRED)
+  if(MYLITE_MARIADB_WITH_ZLIB_COMPRESSION)
+    find_package(ZLIB REQUIRED)
+  endif()
   pkg_check_modules(MYLITE_PCRE2 REQUIRED IMPORTED_TARGET libpcre2-8)
 
   if(NOT TARGET MyLite::MariaDBEmbedded)
@@ -81,8 +93,10 @@ function(mylite_add_mariadb_embedded_target)
       OpenSSL::SSL
       PkgConfig::MYLITE_PCRE2
       Threads::Threads
-      ZLIB::ZLIB
     )
+    if(MYLITE_MARIADB_WITH_ZLIB_COMPRESSION)
+      target_link_libraries(mylite_mariadb_embedded INTERFACE ZLIB::ZLIB)
+    endif()
     if(NOT APPLE)
       target_link_libraries(mylite_mariadb_embedded INTERFACE dl m)
     endif()

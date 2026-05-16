@@ -11330,6 +11330,12 @@ bool Column_definition::has_default_expression()
 
 bool Column_definition::set_compressed(const char *method)
 {
+#ifndef HAVE_COMPRESS
+  (void) method;
+  my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+           "zlib column compression in the MyLite embedded profile");
+  return true;
+#else
   if (!method || !strcmp(method, zlib_compression_method->name))
   {
     unireg_check= Field::TMYSQL_COMPRESSED;
@@ -11338,6 +11344,7 @@ bool Column_definition::set_compressed(const char *method)
   }
   my_error(ER_UNKNOWN_COMPRESSION_METHOD, MYF(0), method);
   return true;
+#endif
 }
 
 

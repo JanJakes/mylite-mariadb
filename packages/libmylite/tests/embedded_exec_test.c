@@ -24,6 +24,11 @@ typedef struct scalar_context {
     int rows;
 } scalar_context;
 
+typedef struct nullable_scalar_context {
+    const char *column_name;
+    int rows;
+} nullable_scalar_context;
+
 static void test_select_callback(void);
 static void test_statement_effects(void);
 static void test_callback_abort(void);
@@ -42,6 +47,7 @@ static void test_processlist_metadata_is_rejected(void);
 static void test_routine_metadata_is_empty(void);
 static void test_procedure_analyse_is_rejected(void);
 static void test_server_utility_functions_are_rejected(void);
+static void test_zlib_compression_is_disabled(void);
 static void test_gis_sql_functions_are_rejected(void);
 static void test_sformat_sql_function_is_rejected(void);
 static void test_json_schema_valid_sql_function_is_rejected(void);
@@ -95,6 +101,12 @@ static void assert_partition_exec_fails(mylite_db *db, const char *sql);
 static void assert_foreign_key_exec_fails(mylite_db *db, const char *sql);
 static int select_callback(void *ctx, int column_count, char **values, char **column_names);
 static int scalar_callback(void *ctx, int column_count, char **values, char **column_names);
+static int nullable_scalar_callback(
+    void *ctx,
+    int column_count,
+    char **values,
+    char **column_names
+);
 static int abort_callback(void *ctx, int column_count, char **values, char **column_names);
 static int count_only_callback(void *ctx, int column_count, char **values, char **column_names);
 static int variable_callback(void *ctx, int column_count, char **values, char **column_names);
@@ -124,6 +136,7 @@ int main(void) {
     test_routine_metadata_is_empty();
     test_procedure_analyse_is_rejected();
     test_server_utility_functions_are_rejected();
+    test_zlib_compression_is_disabled();
     test_gis_sql_functions_are_rejected();
     test_sformat_sql_function_is_rejected();
     test_json_schema_valid_sql_function_is_rejected();
@@ -746,6 +759,66 @@ static void test_server_utility_functions_are_rejected(void) {
     assert_server_utility_exec_fails(db, "SELECT MASTER_GTID_WAIT('0-1-1', 1)");
     assert(mylite_exec(db, "SELECT 'SLEEP(' AS quoted_text", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "SELECT VERSION()", NULL, NULL, NULL) == MYLITE_OK);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_zlib_compression_is_disabled(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    nullable_scalar_context compressed_value = {
+        .column_name = "compressed_value",
+        .rows = 0,
+    };
+    nullable_scalar_context uncompressed_value = {
+        .column_name = "uncompressed_value",
+        .rows = 0,
+    };
+    char *errmsg = NULL;
+
+    assert_variable_value(db, "have_compress", "NO");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COMPRESS('abc') AS compressed_value",
+            nullable_scalar_callback,
+            &compressed_value,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(compressed_value.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT UNCOMPRESS('abc') AS uncompressed_value",
+            nullable_scalar_callback,
+            &uncompressed_value,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(uncompressed_value.rows == 1);
+
+    assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "USE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(
+            db,
+            "CREATE TEMPORARY TABLE compressed_columns (body TEXT COMPRESSED)",
+            NULL,
+            NULL,
+            &errmsg
+        ) == MYLITE_ERROR
+    );
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "zlib column compression") != NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) != 0U);
+    assert(strcmp(mylite_sqlstate(db), "00000") != 0);
+    mylite_free(errmsg);
 
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);
@@ -1819,6 +1892,21 @@ static int scalar_callback(void *ctx, int column_count, char **values, char **co
     assert(strcmp(column_names[0], scalar_ctx->column_name) == 0);
     assert(values[0] != NULL);
     assert(strcmp(values[0], scalar_ctx->value) == 0);
+    ++scalar_ctx->rows;
+    return 0;
+}
+
+static int nullable_scalar_callback(
+    void *ctx,
+    int column_count,
+    char **values,
+    char **column_names
+) {
+    nullable_scalar_context *scalar_ctx = (nullable_scalar_context *)ctx;
+
+    assert(column_count == 1);
+    assert(strcmp(column_names[0], scalar_ctx->column_name) == 0);
+    assert(values[0] == NULL);
     ++scalar_ctx->rows;
     return 0;
 }

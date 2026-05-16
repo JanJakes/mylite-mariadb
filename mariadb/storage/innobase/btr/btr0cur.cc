@@ -56,7 +56,11 @@ Created 10/16/1994 Heikki Tuuri
 #include "row0row.h"
 #include "srv0srv.h"
 #include "lock0lock.h"
+#ifdef HAVE_COMPRESS
 #include "zlib.h"
+#else
+#include "mylite_zlib_disabled.h"
+#endif
 #include "srv0start.h"
 #include "mysql_com.h"
 #include "dict0stats.h"

@@ -47,7 +47,9 @@ Updated 14/02/2015
 #include "trx0sys.h"
 #include "row0mysql.h"
 #include "buf0lru.h"
+#ifdef HAVE_COMPRESS
 #include "zlib.h"
+#endif
 #include "row0mysql.h"
 #include "lz4.h"
 #include "lzo/lzo1x.h"
@@ -80,6 +82,7 @@ static ulint fil_page_compress_low(
 		return 0;
 
 	case PAGE_ZLIB_ALGORITHM:
+#ifdef HAVE_COMPRESS
 		{
 			ulong len = uLong(write_size);
 			if (Z_OK == compress2(
@@ -88,6 +91,7 @@ static ulint fil_page_compress_low(
 				return len;
 			}
 		}
+#endif
 		break;
 
 	case PAGE_LZ4_ALGORITHM:
@@ -399,6 +403,7 @@ static bool fil_page_decompress_low(
 			    << comp_algo;
 		return false;
 	case PAGE_ZLIB_ALGORITHM:
+#ifdef HAVE_COMPRESS
 		{
 			uLong len = srv_page_size;
 			return (Z_OK == uncompress(tmp_buf, &len,
@@ -406,6 +411,9 @@ static bool fil_page_decompress_low(
 					       uLong(actual_size))
 				&& len == srv_page_size);
 		}
+#else
+		return false;
+#endif
 
 	case PAGE_LZ4_ALGORITHM:
 		return LZ4_decompress_safe(

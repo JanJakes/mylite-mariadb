@@ -176,7 +176,10 @@ external backup statements such as `BACKUP STAGE`, `BACKUP LOCK`, and
 cache administration such as `FLUSH QUERY CACHE`, `RESET QUERY CACHE`, and
 query-cache system-variable assignment is rejected while ordinary
 `SELECT SQL_CACHE` and `SELECT SQL_NO_CACHE` remain accepted as uncached
-compatibility hints.
+compatibility hints. Zlib-backed compression is disabled in the default
+embedded profile: `have_compress` reports `NO`, `COMPRESS()` and
+`UNCOMPRESS()` return `NULL`, and compressed column DDL is rejected with
+ordinary MyLite/MariaDB diagnostics.
 
 ## Prepared Statements
 
@@ -462,6 +465,8 @@ the embedded library model:
   `BACKUP UNLOCK`,
 - query cache administration such as `FLUSH QUERY CACHE`,
   `RESET QUERY CACHE`, and query-cache system-variable assignment,
+- zlib-backed SQL, protocol, binlog, column, and retained InnoDB
+  page/compressed-page compression,
 - statement profiling such as `SHOW PROFILE`, `SHOW PROFILES`,
   profiling system-variable assignment, and `INFORMATION_SCHEMA.PROFILING`,
 - optimizer trace diagnostics such as optimizer-trace system-variable
@@ -508,8 +513,8 @@ transaction-control, autocommit-control, SQL locking, named-lock, SQL `HELP`,
 SQL `HANDLER`, `SELECT ... PROCEDURE`, SQL file-I/O,
 table-maintenance/key-cache administration, statement profiling, external
 backup SQL, query cache administration, optimizer trace, static SHOW
-information, process-list metadata, server utility function, Oracle SQL mode,
-XML SQL function, GIS
+information, process-list metadata, zlib compression, server utility function,
+Oracle SQL mode, XML SQL function, GIS
 SQL function, SFORMAT SQL function, JSON schema validation function, JSON table
 function, dynamic column function, SQL sequence value surface, partition, and
 foreign-key DDL commands are rejected before MariaDB execution with stable
@@ -520,10 +525,10 @@ dynamic UDF lookup/execution bodies, omits unsupported binlog event-root and
 MyISAM maintenance source objects, omits the JSON schema-validation source
 object, replaces JSON table-function execution, dynamic-column packed BLOB
 runtime, SQL handler command execution, SQL sequence runtime, external backup
-command execution, and query cache runtime with fail-closed or disabled stubs,
-and compiles embedded binlog transaction and event-write entry points to
-no-ops. Other unsupported surfaces should fail with stable MyLite result codes
-and MariaDB diagnostics where possible.
+command execution, query cache runtime, and zlib-backed compression with
+fail-closed or disabled stubs, and compiles embedded binlog transaction and
+event-write entry points to no-ops. Other unsupported surfaces should fail with
+stable MyLite result codes and MariaDB diagnostics where possible.
 
 ## Compatibility Adapter
 

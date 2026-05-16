@@ -130,6 +130,13 @@ ELSE()
   SET(MYLITE_GIS_SQL_FUNCTION_SOURCES mylite_gis_sql_functions_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_ZLIB_COMPRESSION "Build zlib-backed compression helpers" ON)
+IF(MYLITE_WITH_ZLIB_COMPRESSION)
+  SET(MYLITE_FIELD_COMP_SOURCE field_comp.cc)
+ELSE()
+  SET(MYLITE_FIELD_COMP_SOURCE mylite_field_comp_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_SFORMAT_SQL_FUNCTION "Build SFORMAT SQL function" ON)
 IF(MYLITE_WITH_SFORMAT_SQL_FUNCTION)
   ADD_DEFINITIONS(-DMYLITE_WITH_SFORMAT_SQL_FUNCTION=1)
@@ -260,7 +267,7 @@ SET (SQL_SOURCE
                cset_narrowing.cc
                compat56.cc derror.cc des_key_file.cc
                discover.cc ../sql-common/errmsg.c
-               field.cc field_conv.cc field_comp.cc
+               field.cc field_conv.cc ${MYLITE_FIELD_COMP_SOURCE}
                filesort_utils.cc
                filesort.cc gstream.cc
                signal_handler.cc

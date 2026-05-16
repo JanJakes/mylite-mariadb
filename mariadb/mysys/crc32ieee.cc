@@ -16,15 +16,33 @@
 
 #include <my_global.h>
 #include <my_sys.h>
+#ifdef HAVE_COMPRESS
 #include <zlib.h>
+#endif
 
 /* TODO: remove this once zlib adds inherent support for hardware accelerated
 crc32 for all architectures. */
+#ifdef HAVE_COMPRESS
 static unsigned int my_crc32_zlib(unsigned int crc, const void *data,
                                   size_t len)
 {
   return (unsigned int) crc32(crc, (const Bytef *)data, (unsigned int) len);
 }
+#else
+static unsigned int my_crc32_software(unsigned int crc, const void *data,
+                                      size_t len)
+{
+  const unsigned char *ptr= static_cast<const unsigned char *>(data);
+  crc^= 0xffffffffU;
+  while (len--)
+  {
+    crc^= *ptr++;
+    for (uint bit= 0; bit < 8; bit++)
+      crc= (crc >> 1) ^ (0xedb88320U & (0U - (crc & 1U)));
+  }
+  return crc ^ 0xffffffffU;
+}
+#endif
 
 typedef unsigned int (*my_crc32_t)(unsigned int, const void *, size_t);
 
@@ -45,7 +63,11 @@ static my_crc32_t init_crc32()
   if (crc32_aarch64_available())
     return crc32_aarch64;
 #endif
+#ifdef HAVE_COMPRESS
   return my_crc32_zlib;
+#else
+  return my_crc32_software;
+#endif
 }
 
 static const my_crc32_t my_checksum_func= init_crc32();
