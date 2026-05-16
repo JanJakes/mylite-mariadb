@@ -277,6 +277,7 @@ struct mylite_stmt {
     std::string prepared_transaction_control_name;
     bool sync_schema_catalog_after_execute = false;
     bool writes_storage = false;
+    bool uses_storage_outer_checkpoint = false;
     bool uses_statement_checkpoint = false;
     bool uses_transaction_statement_checkpoint = false;
 };
@@ -1664,14 +1665,16 @@ int prepare_impl(
             *out_stmt = statement.release();
             return MYLITE_OK;
         }
-        statement->writes_storage =
-            is_storage_outer_checkpoint_sql(sql_view) || is_row_dml_checkpoint_sql(sql_view);
+        const bool storage_outer_checkpoint_sql = is_storage_outer_checkpoint_sql(sql_view);
+        const bool row_dml_checkpoint_sql = is_row_dml_checkpoint_sql(sql_view);
+        statement->writes_storage = storage_outer_checkpoint_sql || row_dml_checkpoint_sql;
+        statement->uses_storage_outer_checkpoint = storage_outer_checkpoint_sql;
         statement->sync_schema_catalog_after_execute =
             database->filename != ":memory:" && is_schema_catalog_sql(sql_view);
         statement->uses_statement_checkpoint =
-            database->filename != ":memory:" && is_storage_outer_checkpoint_sql(sql_view);
+            database->filename != ":memory:" && storage_outer_checkpoint_sql;
         statement->uses_transaction_statement_checkpoint =
-            database->filename != ":memory:" && is_row_dml_checkpoint_sql(sql_view);
+            database->filename != ":memory:" && row_dml_checkpoint_sql;
 #  endif
         statement->statement = mysql_stmt_init(&database->mysql);
         if (statement->statement == nullptr) {
@@ -1807,6 +1810,10 @@ int execute_statement(mylite_stmt &statement) {
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
     if (statement.prepared_transaction_control != TransactionControlKind::None) {
         return execute_prepared_savepoint_control(statement);
+    }
+    if (statement.database->transaction_active && statement.uses_storage_outer_checkpoint) {
+        set_error(*statement.database, MYLITE_ERROR, "unsupported transactional DDL SQL surface");
+        return MYLITE_ERROR;
     }
     if (statement.database->transaction_active && statement.database->transaction_read_only &&
         statement.writes_storage) {

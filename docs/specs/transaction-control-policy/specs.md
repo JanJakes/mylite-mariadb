@@ -15,7 +15,10 @@ slice accepts chained completion defaults. The later
 [Read-Only Transaction Control](../read-only-transaction-control/specs.md)
 slice accepts bounded direct read-only access mode. Global or duplicate
 autocommit changes, unsupported transaction-variable `SET` lists, unsupported
-transaction modifiers, XA, and transactional DDL remain rejected.
+transaction modifiers, XA, and transactional DDL remain rejected; the later
+[Prepared Transactional DDL Policy](../prepared-transactional-ddl-policy/specs.md)
+slice makes the prepared execution path enforce the same active-transaction DDL
+policy as direct SQL.
 
 ## Problem
 

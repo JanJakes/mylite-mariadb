@@ -528,10 +528,10 @@ advertises non-transactional engine flags. Public `libmylite` SQL entry points
 continue to reject SQL-mode-sensitive double-quoted savepoint names, global or
 duplicate autocommit changes, unsupported `SET TRANSACTION` forms, unsupported
 transaction modifiers and transaction variables, release completion defaults,
-XA, and DDL inside active direct transactions. Handler-level
-savepoint hooks, table-kind-aware read-only temporary-table exceptions,
-transactional DDL, isolation, WAL/checkpoint, and transactional engine-flag
-support remain planned.
+XA, and direct or prepared DDL inside active direct transactions.
+Handler-level savepoint hooks, table-kind-aware read-only temporary-table
+exceptions, transactional DDL, isolation, WAL/checkpoint, and transactional
+engine-flag support remain planned.
 
 The storage design must preserve the full write-concurrency goal. Early
 milestones may use coarse locks for correctness, but the page, transaction,

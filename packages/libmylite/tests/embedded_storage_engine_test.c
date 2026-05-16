@@ -195,6 +195,11 @@ static void assert_foreign_key_exec_fails(mylite_db *db, const char *sql);
 static void assert_prepared_succeeds(mylite_db *db, const char *sql);
 static void assert_prepared_fails(mylite_db *db, const char *sql);
 static void assert_prepared_fails_with_message(mylite_db *db, const char *sql, const char *message);
+static void assert_prepared_policy_fails_with_message(
+    mylite_db *db,
+    mylite_stmt *stmt,
+    const char *message
+);
 static void assert_schema_options(
     mylite_db *db,
     const char *schema_name,
@@ -1312,6 +1317,7 @@ static void test_row_dml_transactions(void) {
     mylite_db *db = open_database(root, &filename);
     mylite_stmt *rollback_update = NULL;
     mylite_stmt *read_only_insert = NULL;
+    mylite_stmt *prepared_tx_ddl = NULL;
     mylite_stmt *prepared_savepoint = NULL;
     mylite_stmt *prepared_rollback = NULL;
     mylite_stmt *prepared_release = NULL;
@@ -1747,6 +1753,22 @@ static void test_row_dml_transactions(void) {
     );
     assert(zero_count.rows == 1);
     assert_exec_succeeds(db, "SET completion_type=DEFAULT");
+
+    assert(
+        mylite_prepare(
+            db,
+            "ALTER TABLE tx_posts ADD COLUMN blocked_prepared_tx_ddl INT",
+            MYLITE_NUL_TERMINATED,
+            &prepared_tx_ddl,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(prepared_tx_ddl != NULL);
+    assert_exec_succeeds(db, "BEGIN");
+    assert_prepared_policy_fails_with_message(db, prepared_tx_ddl, "transactional DDL");
+    assert(mylite_finalize(prepared_tx_ddl) == MYLITE_OK);
+    prepared_tx_ddl = NULL;
+    assert_exec_succeeds(db, "ROLLBACK");
 
     assert_exec_succeeds(db, "SET SESSION autocommit=OFF");
     assert_exec_fails_with_message(
@@ -10216,6 +10238,22 @@ static void assert_prepared_fails_with_message(
     assert(warning_message != NULL);
     assert(strstr(warning_message, message) != NULL);
     assert(mylite_finalize(stmt) == MYLITE_OK);
+}
+
+static void assert_prepared_policy_fails_with_message(
+    mylite_db *db,
+    mylite_stmt *stmt,
+    const char *message
+) {
+    const int step_result = mylite_step(stmt);
+    if (step_result != MYLITE_ERROR) {
+        fprintf(stderr, "Prepared SQL unexpectedly succeeded\n");
+    }
+    assert(step_result == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), message) != NULL);
 }
 
 static void assert_schema_options(

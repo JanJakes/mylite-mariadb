@@ -132,9 +132,9 @@ the same savepoint-control statements can be prepared and reused for
 file-backed MyLite transactions. SQL-mode-sensitive double-quoted savepoint
 names, global autocommit-control statements, duplicate autocommit assignments,
 `WITH CONSISTENT SNAPSHOT`, `RELEASE` completion, `completion_type=RELEASE/2`,
-transaction isolation or read-only variables, XA, and DDL inside an active
-transaction remain unsupported until the storage and catalog transaction design
-is broader.
+transaction isolation or read-only variables, XA, and direct or prepared DDL
+inside an active transaction remain unsupported until the storage and catalog
+transaction design is broader.
 Existing-file opens preserve storage lock conflicts as
 `MYLITE_BUSY` before starting the embedded runtime.
 

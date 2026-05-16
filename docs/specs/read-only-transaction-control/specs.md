@@ -119,9 +119,10 @@ Compatibility remains partial:
 ## DDL Metadata Routing Impact
 
 No DDL metadata format changes are introduced. Storage DDL remains rejected
-inside active direct MyLite transactions; in a read-only transaction the same
-write policy also rejects storage DDL before MariaDB can publish catalog
-changes.
+inside active direct MyLite transactions; the later
+[Prepared Transactional DDL Policy](../prepared-transactional-ddl-policy/specs.md)
+applies the same active-transaction DDL policy to prepared execution before
+MariaDB can publish catalog changes.
 
 ## Single-File And Embedded Lifecycle
 
