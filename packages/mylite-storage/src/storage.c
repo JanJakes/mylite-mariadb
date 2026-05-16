@@ -135,6 +135,7 @@ struct mylite_storage_statement {
     unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     int owns_file;
+    int owns_transaction_journal;
 };
 
 typedef mylite_storage_result (*mylite_storage_row_page_callback)(
@@ -151,8 +152,11 @@ static void encode_header_page(unsigned char *page, const mylite_storage_header 
 static void initialize_empty_catalog_page(unsigned char *page);
 static void update_catalog_checksum(unsigned char *page);
 static char *recovery_journal_path(const char *filename);
-static mylite_storage_result recover_pending_journal(const char *filename);
-static mylite_storage_result recover_pending_journal_locked(FILE *file, const char *filename);
+static char *transaction_journal_path(const char *filename);
+static char *journal_path_with_suffix(const char *filename, const char *suffix, size_t suffix_size);
+static mylite_storage_result recover_pending_journals(const char *filename);
+static mylite_storage_result recover_pending_journals_locked(FILE *file, const char *filename);
+static mylite_storage_result recover_pending_journal_locked(FILE *file, char *journal_filename);
 static mylite_storage_result read_recovery_journal(
     FILE *journal_file,
     mylite_storage_recovery_journal *out_journal,
@@ -173,7 +177,20 @@ static mylite_storage_result begin_recovery_journal(
     const mylite_storage_header *header,
     int include_catalog
 );
+static mylite_storage_result begin_transaction_journal(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header
+);
+static mylite_storage_result begin_journal_at_path(
+    FILE *file,
+    char *journal_filename,
+    const mylite_storage_header *header,
+    int include_catalog
+);
 static mylite_storage_result finish_recovery_journal(FILE *file, const char *filename);
+static mylite_storage_result finish_transaction_journal(FILE *file, const char *filename);
+static mylite_storage_result finish_journal_at_path(FILE *file, char *journal_filename);
 static void encode_recovery_journal_header(
     unsigned char *page,
     const mylite_storage_recovery_journal *journal
@@ -199,6 +216,17 @@ static mylite_storage_result open_existing_file_for_update(const char *filename,
 static mylite_storage_result close_existing_file(FILE *file);
 static mylite_storage_statement *active_statement_for(const char *filename);
 static int active_statement_has_file(FILE *file);
+static mylite_storage_result begin_checkpoint(
+    const char *filename,
+    mylite_storage_statement **out_statement,
+    int durable_transaction
+);
+static mylite_storage_result initialize_checkpoint_statement(
+    mylite_storage_statement *statement,
+    const char *filename,
+    mylite_storage_statement *parent
+);
+static mylite_storage_result read_checkpoint_snapshot(mylite_storage_statement *statement);
 static mylite_storage_result close_statement(mylite_storage_statement *statement);
 static void free_statement(mylite_storage_statement *statement);
 static char *copy_filename(const char *filename);
@@ -591,15 +619,15 @@ mylite_storage_capabilities mylite_storage_get_capabilities(void) {
     mylite_storage_capabilities capabilities = {
         .size = sizeof(capabilities),
         .format_version = MYLITE_STORAGE_FORMAT_VERSION,
-        .flags = MYLITE_STORAGE_CAPABILITY_FILE_HEADER | MYLITE_STORAGE_CAPABILITY_EMPTY_CATALOG |
-                 MYLITE_STORAGE_CAPABILITY_TABLE_DEFINITIONS |
-                 MYLITE_STORAGE_CAPABILITY_TABLE_ROWS | MYLITE_STORAGE_CAPABILITY_AUTOINCREMENT |
-                 MYLITE_STORAGE_CAPABILITY_BLOB_TEXT_ROWS |
-                 MYLITE_STORAGE_CAPABILITY_ROW_LIFECYCLE | MYLITE_STORAGE_CAPABILITY_INDEX_ENTRIES |
-                 MYLITE_STORAGE_CAPABILITY_RECOVERY_JOURNAL | MYLITE_STORAGE_CAPABILITY_FILE_LOCKS |
-                 MYLITE_STORAGE_CAPABILITY_TRUNCATE | MYLITE_STORAGE_CAPABILITY_SCHEMAS |
-                 MYLITE_STORAGE_CAPABILITY_STATEMENT_CHECKPOINTS |
-                 MYLITE_STORAGE_CAPABILITY_BUSY_TIMEOUT,
+        .flags =
+            MYLITE_STORAGE_CAPABILITY_FILE_HEADER | MYLITE_STORAGE_CAPABILITY_EMPTY_CATALOG |
+            MYLITE_STORAGE_CAPABILITY_TABLE_DEFINITIONS | MYLITE_STORAGE_CAPABILITY_TABLE_ROWS |
+            MYLITE_STORAGE_CAPABILITY_AUTOINCREMENT | MYLITE_STORAGE_CAPABILITY_BLOB_TEXT_ROWS |
+            MYLITE_STORAGE_CAPABILITY_ROW_LIFECYCLE | MYLITE_STORAGE_CAPABILITY_INDEX_ENTRIES |
+            MYLITE_STORAGE_CAPABILITY_RECOVERY_JOURNAL | MYLITE_STORAGE_CAPABILITY_FILE_LOCKS |
+            MYLITE_STORAGE_CAPABILITY_TRUNCATE | MYLITE_STORAGE_CAPABILITY_SCHEMAS |
+            MYLITE_STORAGE_CAPABILITY_STATEMENT_CHECKPOINTS |
+            MYLITE_STORAGE_CAPABILITY_BUSY_TIMEOUT | MYLITE_STORAGE_CAPABILITY_TRANSACTION_JOURNAL,
     };
 
     return capabilities;
@@ -2141,83 +2169,14 @@ mylite_storage_result mylite_storage_begin_statement(
     const char *filename,
     mylite_storage_statement **out_statement
 ) {
-    if (filename == NULL || filename[0] == '\0' || out_statement == NULL) {
-        return MYLITE_STORAGE_MISUSE;
-    }
-    *out_statement = NULL;
-    mylite_storage_statement *parent = active_statement;
-    if (parent != NULL && active_statement_for(filename) == NULL) {
-        return MYLITE_STORAGE_MISUSE;
-    }
+    return begin_checkpoint(filename, out_statement, 0);
+}
 
-    mylite_storage_statement *statement =
-        (mylite_storage_statement *)calloc(1U, sizeof(*statement));
-    if (statement == NULL) {
-        return MYLITE_STORAGE_NOMEM;
-    }
-
-    statement->filename = copy_filename(filename);
-    if (statement->filename == NULL) {
-        free(statement);
-        return MYLITE_STORAGE_NOMEM;
-    }
-
-    statement->parent = parent;
-    if (parent != NULL) {
-        statement->file = parent->file;
-        statement->owns_file = 0;
-    } else {
-        errno = 0;
-        statement->file = fopen(filename, "r+b");
-        if (statement->file == NULL) {
-            mylite_storage_result result =
-                errno == ENOENT ? MYLITE_STORAGE_NOTFOUND : MYLITE_STORAGE_IOERR;
-            free_statement(statement);
-            return result;
-        }
-        statement->owns_file = 1;
-
-        mylite_storage_result lock_result = lock_file(statement->file, LOCK_EX);
-        if (lock_result == MYLITE_STORAGE_OK) {
-            lock_result = recover_pending_journal_locked(statement->file, filename);
-        }
-        if (lock_result != MYLITE_STORAGE_OK) {
-            free_statement(statement);
-            return lock_result;
-        }
-    }
-
-    mylite_storage_result result = MYLITE_STORAGE_OK;
-    if (result == MYLITE_STORAGE_OK) {
-        result = read_page_at(
-            statement->file,
-            MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
-            MYLITE_STORAGE_FORMAT_PAGE_SIZE,
-            statement->header_page
-        );
-    }
-    if (result == MYLITE_STORAGE_OK) {
-        result = decode_header_page(statement->header_page, &statement->header);
-    }
-    if (result == MYLITE_STORAGE_OK) {
-        result = read_page_at(
-            statement->file,
-            statement->header.catalog_root_page,
-            statement->header.page_size,
-            statement->catalog_page
-        );
-    }
-    if (result == MYLITE_STORAGE_OK) {
-        result = validate_catalog_root_bytes(statement->catalog_page, &statement->header);
-    }
-    if (result != MYLITE_STORAGE_OK) {
-        free_statement(statement);
-        return result;
-    }
-
-    active_statement = statement;
-    *out_statement = statement;
-    return MYLITE_STORAGE_OK;
+mylite_storage_result mylite_storage_begin_transaction(
+    const char *filename,
+    mylite_storage_statement **out_statement
+) {
+    return begin_checkpoint(filename, out_statement, 1);
 }
 
 int mylite_storage_statement_active(const char *filename) {
@@ -2235,6 +2194,14 @@ unsigned mylite_storage_busy_timeout(void) {
 mylite_storage_result mylite_storage_commit_statement(mylite_storage_statement *statement) {
     if (statement == NULL || active_statement != statement) {
         return MYLITE_STORAGE_MISUSE;
+    }
+
+    if (statement->owns_transaction_journal) {
+        const mylite_storage_result journal_result =
+            finish_transaction_journal(statement->file, statement->filename);
+        if (journal_result != MYLITE_STORAGE_OK) {
+            return journal_result;
+        }
     }
 
     active_statement = statement->parent;
@@ -2265,11 +2232,116 @@ mylite_storage_result mylite_storage_rollback_statement(mylite_storage_statement
     if (result == MYLITE_STORAGE_OK) {
         result = flush_file(statement->file);
     }
+    if (result == MYLITE_STORAGE_OK && statement->owns_transaction_journal) {
+        result = finish_transaction_journal(statement->file, statement->filename);
+    }
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
 
     active_statement = statement->parent;
     mylite_storage_result close_result = close_statement(statement);
     free_statement(statement);
-    return result == MYLITE_STORAGE_OK ? close_result : result;
+    return close_result;
+}
+
+static mylite_storage_result begin_checkpoint(
+    const char *filename,
+    mylite_storage_statement **out_statement,
+    int durable_transaction
+) {
+    if (filename == NULL || filename[0] == '\0' || out_statement == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+    *out_statement = NULL;
+    mylite_storage_statement *parent = active_statement;
+    if (parent != NULL && active_statement_for(filename) == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+    if (durable_transaction && parent != NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    mylite_storage_statement *statement =
+        (mylite_storage_statement *)calloc(1U, sizeof(*statement));
+    if (statement == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    statement->filename = copy_filename(filename);
+    if (statement->filename == NULL) {
+        free(statement);
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    mylite_storage_result result = initialize_checkpoint_statement(statement, filename, parent);
+    if (result == MYLITE_STORAGE_OK) {
+        result = read_checkpoint_snapshot(statement);
+    }
+    if (result == MYLITE_STORAGE_OK && durable_transaction) {
+        result = begin_transaction_journal(statement->file, filename, &statement->header);
+        if (result == MYLITE_STORAGE_OK) {
+            statement->owns_transaction_journal = 1;
+        }
+    }
+    if (result != MYLITE_STORAGE_OK) {
+        free_statement(statement);
+        return result;
+    }
+
+    active_statement = statement;
+    *out_statement = statement;
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result initialize_checkpoint_statement(
+    mylite_storage_statement *statement,
+    const char *filename,
+    mylite_storage_statement *parent
+) {
+    statement->parent = parent;
+    if (parent != NULL) {
+        statement->file = parent->file;
+        statement->owns_file = 0;
+        return MYLITE_STORAGE_OK;
+    }
+
+    errno = 0;
+    statement->file = fopen(filename, "r+b");
+    if (statement->file == NULL) {
+        return errno == ENOENT ? MYLITE_STORAGE_NOTFOUND : MYLITE_STORAGE_IOERR;
+    }
+    statement->owns_file = 1;
+
+    mylite_storage_result result = lock_file(statement->file, LOCK_EX);
+    if (result == MYLITE_STORAGE_OK) {
+        result = recover_pending_journals_locked(statement->file, filename);
+    }
+    return result;
+}
+
+static mylite_storage_result read_checkpoint_snapshot(mylite_storage_statement *statement) {
+    mylite_storage_result result = read_page_at(
+        statement->file,
+        MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
+        MYLITE_STORAGE_FORMAT_PAGE_SIZE,
+        statement->header_page
+    );
+    if (result == MYLITE_STORAGE_OK) {
+        result = decode_header_page(statement->header_page, &statement->header);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = read_page_at(
+            statement->file,
+            statement->header.catalog_root_page,
+            statement->header.page_size,
+            statement->catalog_page
+        );
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = validate_catalog_root_bytes(statement->catalog_page, &statement->header);
+    }
+    return result;
 }
 
 void mylite_storage_free(void *ptr) {
@@ -2448,31 +2520,54 @@ static void update_catalog_checksum(unsigned char *page) {
 
 static char *recovery_journal_path(const char *filename) {
     static const char suffix[] = "-journal";
+    return journal_path_with_suffix(filename, suffix, sizeof(suffix));
+}
+
+static char *transaction_journal_path(const char *filename) {
+    static const char suffix[] = "-transaction-journal";
+    return journal_path_with_suffix(filename, suffix, sizeof(suffix));
+}
+
+static char *journal_path_with_suffix(
+    const char *filename,
+    const char *suffix,
+    size_t suffix_size
+) {
     const size_t filename_size = strlen(filename);
-    if (filename_size > SIZE_MAX - sizeof(suffix)) {
+    if (filename_size > SIZE_MAX - suffix_size) {
         return NULL;
     }
 
-    char *journal_filename = (char *)malloc(filename_size + sizeof(suffix));
+    char *journal_filename = (char *)malloc(filename_size + suffix_size);
     if (journal_filename == NULL) {
         return NULL;
     }
 
     memcpy(journal_filename, filename, filename_size);
-    memcpy(journal_filename + filename_size, suffix, sizeof(suffix));
+    memcpy(journal_filename + filename_size, suffix, suffix_size);
     return journal_filename;
 }
 
-static mylite_storage_result recover_pending_journal(const char *filename) {
+static mylite_storage_result recover_pending_journals(const char *filename) {
     char *journal_filename = recovery_journal_path(filename);
     if (journal_filename == NULL) {
         return MYLITE_STORAGE_NOMEM;
     }
+    char *transaction_filename = transaction_journal_path(filename);
+    if (transaction_filename == NULL) {
+        free(journal_filename);
+        return MYLITE_STORAGE_NOMEM;
+    }
 
-    int exists = 0;
-    mylite_storage_result result = path_exists(journal_filename, &exists);
+    int journal_exists = 0;
+    int transaction_exists = 0;
+    mylite_storage_result result = path_exists(journal_filename, &journal_exists);
+    if (result == MYLITE_STORAGE_OK) {
+        result = path_exists(transaction_filename, &transaction_exists);
+    }
     free(journal_filename);
-    if (result != MYLITE_STORAGE_OK || !exists) {
+    free(transaction_filename);
+    if (result != MYLITE_STORAGE_OK || (!journal_exists && !transaction_exists)) {
         return result;
     }
 
@@ -2484,7 +2579,7 @@ static mylite_storage_result recover_pending_journal(const char *filename) {
 
     result = lock_file(file, LOCK_EX);
     if (result == MYLITE_STORAGE_OK) {
-        result = recover_pending_journal_locked(file, filename);
+        result = recover_pending_journals_locked(file, filename);
     }
     if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
@@ -2492,19 +2587,32 @@ static mylite_storage_result recover_pending_journal(const char *filename) {
     return result;
 }
 
-static mylite_storage_result recover_pending_journal_locked(FILE *file, const char *filename) {
+static mylite_storage_result recover_pending_journals_locked(FILE *file, const char *filename) {
     char *journal_filename = recovery_journal_path(filename);
     if (journal_filename == NULL) {
         return MYLITE_STORAGE_NOMEM;
     }
+    mylite_storage_result result = recover_pending_journal_locked(file, journal_filename);
+    free(journal_filename);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
 
+    journal_filename = transaction_journal_path(filename);
+    if (journal_filename == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+    result = recover_pending_journal_locked(file, journal_filename);
+    free(journal_filename);
+    return result;
+}
+
+static mylite_storage_result recover_pending_journal_locked(FILE *file, char *journal_filename) {
     errno = 0;
     FILE *journal_file = fopen(journal_filename, "rb");
     if (journal_file == NULL) {
-        free(journal_filename);
         return errno == ENOENT ? MYLITE_STORAGE_OK : MYLITE_STORAGE_IOERR;
     }
-
     mylite_storage_result result = MYLITE_STORAGE_OK;
     mylite_storage_recovery_journal journal = {0};
     unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
@@ -2523,8 +2631,6 @@ static mylite_storage_result recover_pending_journal_locked(FILE *file, const ch
     if (result == MYLITE_STORAGE_OK) {
         result = flush_parent_directory(journal_filename);
     }
-
-    free(journal_filename);
     return result;
 }
 
@@ -2582,13 +2688,34 @@ static mylite_storage_result begin_recovery_journal(
     const mylite_storage_header *header,
     int include_catalog
 ) {
-    if (header->page_size != MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
-        return MYLITE_STORAGE_UNSUPPORTED;
-    }
-
     char *journal_filename = recovery_journal_path(filename);
     if (journal_filename == NULL) {
         return MYLITE_STORAGE_NOMEM;
+    }
+    return begin_journal_at_path(file, journal_filename, header, include_catalog);
+}
+
+static mylite_storage_result begin_transaction_journal(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header
+) {
+    char *journal_filename = transaction_journal_path(filename);
+    if (journal_filename == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+    return begin_journal_at_path(file, journal_filename, header, 1);
+}
+
+static mylite_storage_result begin_journal_at_path(
+    FILE *file,
+    char *journal_filename,
+    const mylite_storage_header *header,
+    int include_catalog
+) {
+    if (header->page_size != MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+        free(journal_filename);
+        return MYLITE_STORAGE_UNSUPPORTED;
     }
 
     mylite_storage_result result = MYLITE_STORAGE_OK;
@@ -2653,7 +2780,18 @@ static mylite_storage_result finish_recovery_journal(FILE *file, const char *fil
     if (journal_filename == NULL) {
         return MYLITE_STORAGE_NOMEM;
     }
+    return finish_journal_at_path(file, journal_filename);
+}
 
+static mylite_storage_result finish_transaction_journal(FILE *file, const char *filename) {
+    char *journal_filename = transaction_journal_path(filename);
+    if (journal_filename == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+    return finish_journal_at_path(file, journal_filename);
+}
+
+static mylite_storage_result finish_journal_at_path(FILE *file, char *journal_filename) {
     mylite_storage_result result = flush_file(file);
     if (result == MYLITE_STORAGE_OK && remove(journal_filename) != 0) {
         result = MYLITE_STORAGE_IOERR;
@@ -2922,7 +3060,7 @@ static mylite_storage_result open_existing_file(const char *filename, FILE **out
         return MYLITE_STORAGE_OK;
     }
 
-    mylite_storage_result result = recover_pending_journal(filename);
+    mylite_storage_result result = recover_pending_journals(filename);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
@@ -2958,7 +3096,7 @@ static mylite_storage_result open_existing_file_for_update(const char *filename,
 
     mylite_storage_result result = lock_file(file, LOCK_EX);
     if (result == MYLITE_STORAGE_OK) {
-        result = recover_pending_journal_locked(file, filename);
+        result = recover_pending_journals_locked(file, filename);
     }
     if (result != MYLITE_STORAGE_OK) {
         close_existing_file(file);

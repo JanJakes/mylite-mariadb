@@ -104,13 +104,15 @@ runtime directory for MariaDB bootstrap files, and removes that directory on the
 final close. Current storage-engine smoke builds persist schema namespace
 records with default character set, collation, and comment options,
 table-definition metadata, rows, autoincrement state, supported indexes, and
-rollback-journal publication state in the primary `.mylite` file. File-backed
-opens answer schema and table discovery from the catalog when no transient
-MariaDB schema directory exists. Direct `BEGIN`, `COMMIT`, `ROLLBACK`,
+rollback-journal and transaction-journal publication state in the primary
+`.mylite` file. File-backed opens answer schema and table discovery from the
+catalog when no transient MariaDB schema directory exists. Direct `BEGIN`,
+`COMMIT`, `ROLLBACK`,
 transaction restart through repeated direct `BEGIN` / `START TRANSACTION`, and
 supported direct session `SET autocommit=0/1` forms support row-DML
 transactions over routed MyLite tables, including nested statement rollback for
-covered failed direct and prepared row-DML statements. Direct `SAVEPOINT`,
+covered failed direct and prepared row-DML statements and transaction-journal
+recovery after an unclean process exit. Direct `SAVEPOINT`,
 `ROLLBACK TO [SAVEPOINT]`, and `RELEASE SAVEPOINT` support simple unquoted
 savepoint names inside active bounded row-DML transactions. Prepared savepoint
 statements, quoted savepoint names, multi-assignment or global
@@ -434,7 +436,8 @@ The public API exposes MyLite concepts, not raw `my.cnf` option names.
 - Handles opened on the same file coordinate through the shared file runtime.
 - Cooperating storage opens use primary-file advisory locks to reject unsafe
   cross-process readers, writers, and recovery with busy errors after the
-  configured busy timeout expires.
+  configured busy timeout expires; pending rollback and transaction journals are
+  recovered while holding that lock.
 - Full cross-process multi-writer behavior and SQL table, row, named-lock, and
   transaction lock integration remain planned.
 

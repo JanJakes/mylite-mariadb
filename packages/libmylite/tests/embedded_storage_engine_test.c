@@ -25,6 +25,7 @@ typedef struct timed_lock_request {
 static const unsigned k_busy_timeout_release_ms = 50U;
 static const unsigned k_busy_timeout_wait_ms = 1000U;
 static const useconds_t k_microseconds_per_millisecond = 1000U;
+static const char *g_test_program_path = NULL;
 
 typedef struct engine_context {
     int rows;
@@ -186,6 +187,7 @@ static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_exec_fails_with_message(mylite_db *db, const char *sql, const char *message);
 static void assert_non_table_object_exec_fails(mylite_db *db, const char *sql);
 static void assert_transaction_control_exec_fails(mylite_db *db, const char *sql);
+static void assert_transaction_crash_recovery(const char *root, const char *filename);
 static void assert_locking_sql_exec_fails(mylite_db *db, const char *sql);
 static void assert_online_alter_exec_fails(mylite_db *db, const char *sql);
 static void assert_partition_exec_fails(mylite_db *db, const char *sql);
@@ -291,11 +293,18 @@ static int wordpress_join_callback(void *ctx, int column_count, char **values, c
 static int catalog_table_callback(void *ctx, const char *schema_name, const char *table_name);
 static mylite_db *open_database(const char *root, char **filename);
 static mylite_db *open_database_with_filename(const char *root, const char *filename);
+static mylite_db *open_database_with_runtime_name(
+    const char *root,
+    const char *filename,
+    const char *runtime_name
+);
 static mylite_open_config open_config(const char *runtime_root);
+static void run_transaction_crash_child(const char *root, const char *filename);
 static pid_t hold_test_lock_for(const char *filename, timed_lock_request request);
 static void wait_test_lock_child(pid_t pid);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
+static char *transaction_journal_path(const char *filename);
 static void assert_no_durable_sidecars(const char *root, const char *primary_name);
 static void assert_no_runtime_schema_directory(const char *root, const char *schema_name);
 static void assert_no_forbidden_sidecars(const char *path);
@@ -307,7 +316,14 @@ static int is_directory_empty(const char *path);
 static void remove_tree(const char *path);
 static void remove_tree_entry(const char *path);
 
-int main(void) {
+int main(int argc, char **argv) {
+    if (argc == 4 && strcmp(argv[1], "--transaction-crash-child") == 0) {
+        run_transaction_crash_child(argv[2], argv[3]);
+    }
+
+    assert(argc == 1);
+    g_test_program_path = argv[0];
+
     test_show_engines_reports_mylite();
     test_blackhole_engine_routes_to_mylite();
     test_memory_engine_routes_to_mylite();
@@ -1657,6 +1673,17 @@ static void test_row_dml_transactions(void) {
         ) == MYLITE_OK
     );
     assert(zero_count.rows == 1);
+    count = (single_value_context){.expected_value = "8"};
+    assert(
+        mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
+        MYLITE_OK
+    );
+    assert(count.rows == 1);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_transaction_crash_recovery(root, filename);
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE tx_app");
     count = (single_value_context){.expected_value = "8"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
@@ -9454,6 +9481,52 @@ static void assert_transaction_control_exec_fails(mylite_db *db, const char *sql
     mylite_free(errmsg);
 }
 
+static void assert_transaction_crash_recovery(const char *root, const char *filename) {
+    char *transaction_journal_filename = transaction_journal_path(filename);
+    char *child_runtime_root = path_join(root, "crash-runtime");
+    const pid_t pid = fork();
+    assert(pid >= 0);
+
+    if (pid == 0) {
+        execl(
+            g_test_program_path,
+            g_test_program_path,
+            "--transaction-crash-child",
+            root,
+            filename,
+            (char *)NULL
+        );
+        _exit(127);
+    }
+
+    int status = 0;
+    assert(waitpid(pid, &status, 0) == pid);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
+    assert(access(transaction_journal_filename, F_OK) == 0);
+
+    mylite_db *db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE tx_app");
+    single_value_context zero_count = {.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE title = 'crash-rolled-back'",
+            single_value_callback,
+            &zero_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(zero_count.rows == 1);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert(access(transaction_journal_filename, F_OK) != 0);
+    assert(errno == ENOENT);
+
+    remove_tree_entry(child_runtime_root);
+    free(child_runtime_root);
+    free(transaction_journal_filename);
+}
+
 static void assert_locking_sql_exec_fails(mylite_db *db, const char *sql) {
     char *errmsg = NULL;
     const int result = mylite_exec(db, sql, NULL, NULL, &errmsg);
@@ -10127,11 +10200,20 @@ static mylite_db *open_database(const char *root, char **filename) {
 }
 
 static mylite_db *open_database_with_filename(const char *root, const char *filename) {
-    char *runtime_root = path_join(root, "runtime");
+    return open_database_with_runtime_name(root, filename, "runtime");
+}
+
+static mylite_db *open_database_with_runtime_name(
+    const char *root,
+    const char *filename,
+    const char *runtime_name
+) {
+    char *runtime_root = path_join(root, runtime_name);
     mylite_open_config config = open_config(runtime_root);
     mylite_db *db = NULL;
 
     if (mkdir(runtime_root, 0700) != 0) {
+        assert(errno == EEXIST);
         assert(is_directory_empty(runtime_root));
     }
     assert(
@@ -10151,6 +10233,27 @@ static mylite_open_config open_config(const char *runtime_root) {
         .temp_directory = runtime_root,
     };
     return config;
+}
+
+static void run_transaction_crash_child(const char *root, const char *filename) {
+    mylite_db *db = open_database_with_runtime_name(root, filename, "crash-runtime");
+
+    if (mylite_exec(db, "USE tx_app", NULL, NULL, NULL) != MYLITE_OK) {
+        _exit(2);
+    }
+    if (mylite_exec(db, "BEGIN", NULL, NULL, NULL) != MYLITE_OK) {
+        _exit(3);
+    }
+    if (mylite_exec(
+            db,
+            "INSERT INTO tx_posts VALUES (99, 'crash-rolled-back')",
+            NULL,
+            NULL,
+            NULL
+        ) != MYLITE_OK) {
+        _exit(4);
+    }
+    _exit(0);
 }
 
 static pid_t hold_test_lock_for(const char *filename, timed_lock_request request) {
@@ -10208,6 +10311,16 @@ static char *path_join(const char *directory, const char *name) {
     memcpy(path, directory, directory_len);
     path[directory_len] = '/';
     memcpy(path + directory_len + 1U, name, name_len + 1U);
+    return path;
+}
+
+static char *transaction_journal_path(const char *filename) {
+    static const char suffix[] = "-transaction-journal";
+    const size_t filename_len = strlen(filename);
+    char *path = (char *)malloc(filename_len + sizeof(suffix));
+    assert(path != NULL);
+    memcpy(path, filename, filename_len);
+    memcpy(path + filename_len, suffix, sizeof(suffix));
     return path;
 }
 
@@ -10312,7 +10425,10 @@ static int has_suffix(const char *value, const char *suffix) {
 
 static int is_directory_empty(const char *path) {
     DIR *directory = opendir(path);
-    assert(directory != NULL);
+    if (directory == NULL) {
+        fprintf(stderr, "expected directory is missing: %s (errno=%d)\n", path, errno);
+        return 0;
+    }
 
     int count = 0;
     for (struct dirent *entry = readdir(directory); entry != NULL; entry = readdir(directory)) {

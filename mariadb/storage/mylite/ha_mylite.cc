@@ -2056,7 +2056,7 @@ static int mylite_begin_transaction_checkpoint(THD *thd,
     return 0;
 
   mylite_storage_result result=
-    mylite_storage_begin_statement(primary_file, &ctx->transaction);
+    mylite_storage_begin_transaction(primary_file, &ctx->transaction);
   return mylite_storage_to_handler_error(result);
 }
 

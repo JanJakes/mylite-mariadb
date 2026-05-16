@@ -157,8 +157,11 @@ checksummed index-entry pages containing the catalog table id, MariaDB key
 number, row page id, and MariaDB key-tuple bytes. Handler index reads build
 ordered in-memory cursors from live index entries and compare keys with
 MariaDB's key helpers. Current mutating publication paths are protected by a
-rollback journal before the header or catalog root page is overwritten.
-Transaction state, free-space metadata, and B-tree-style index navigation are
+rollback journal before the header or catalog root page is overwritten. Active
+file-backed direct row-DML transactions create a transient transaction journal
+with the transaction-start header and catalog root pages; recovery applies any
+ordinary rollback journal first, then the transaction journal. Richer
+transaction state, free-space metadata, and B-tree-style index navigation are
 still planned slices.
 
 The catalog stores:
@@ -494,7 +497,10 @@ changes.
 
 Checkpoints save the committed header and catalog root pages while holding the
 primary-file exclusive lock; storage APIs in the same thread borrow that locked
-descriptor. If MariaDB reports statement failure, MyLite restores the saved
+descriptor. File-backed outer direct transactions also publish
+`<database>.mylite-transaction-journal`, remove it as the durable commit point,
+and use it to restore transaction-start visibility after an unclean process
+exit. If MariaDB reports statement failure, MyLite restores the saved
 catalog/header pages so rows, row-state pages, index entries, autoincrement
 pages, and catalog records appended after the checkpoint are no longer visible.
 

@@ -28,10 +28,10 @@ group_spec() {
       echo "dev|compat-storage|Primary-file storage format, catalog, row, index, and mutation coverage"
       ;;
     crash-recovery)
-      echo "dev|compat-crash-recovery|Rollback-journal recovery and corrupt-journal coverage"
+      echo "dev|compat-crash-recovery|Rollback-journal, transaction-journal, and corrupt-journal coverage"
       ;;
     transaction)
-      echo "storage-smoke-dev|compat-transaction|Direct row-DML transaction commit/rollback, supported session autocommit mode, direct savepoint rollback/release, and unsupported transaction-control policy"
+      echo "storage-smoke-dev|compat-transaction|Direct row-DML transaction commit/rollback, supported session autocommit mode, direct savepoint rollback/release, active transaction crash recovery, and unsupported transaction-control policy"
       ;;
     transaction-hooks)
       echo "storage-smoke-dev|compat-transaction-hooks|MariaDB statement transaction hook integration"

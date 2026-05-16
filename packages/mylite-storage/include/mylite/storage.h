@@ -24,6 +24,7 @@ extern "C" {
 #define MYLITE_STORAGE_CAPABILITY_SCHEMAS 0x00000800U
 #define MYLITE_STORAGE_CAPABILITY_STATEMENT_CHECKPOINTS 0x00001000U
 #define MYLITE_STORAGE_CAPABILITY_BUSY_TIMEOUT 0x00002000U
+#define MYLITE_STORAGE_CAPABILITY_TRANSACTION_JOURNAL 0x00004000U
 
 typedef enum mylite_storage_result { /* NOLINT(performance-enum-size): C ABI enum. */
                                      MYLITE_STORAGE_OK = 0,
@@ -284,6 +285,10 @@ mylite_storage_result mylite_storage_list_schemas(
     void *ctx
 );
 mylite_storage_result mylite_storage_begin_statement(
+    const char *filename,
+    mylite_storage_statement **out_statement
+);
+mylite_storage_result mylite_storage_begin_transaction(
     const char *filename,
     mylite_storage_statement **out_statement
 );

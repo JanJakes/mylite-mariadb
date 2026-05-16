@@ -1848,8 +1848,10 @@ int begin_direct_transaction(mylite_db &database) {
         return MYLITE_OK;
     }
 
-    const mylite_storage_result result =
-        mylite_storage_begin_statement(database.filename.c_str(), &database.transaction_statement);
+    const mylite_storage_result result = mylite_storage_begin_transaction(
+        database.filename.c_str(),
+        &database.transaction_statement
+    );
     if (result != MYLITE_STORAGE_OK) {
         set_error(database, map_storage_result(result), "transaction checkpoint failed");
         return database.errcode;
