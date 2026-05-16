@@ -113,10 +113,12 @@ Current measured impact from the dynamic UDF runtime baseline:
 
 The linked open-close smoke dropped from 17,780,512 bytes to 17,744,048
 bytes, and its stripped size dropped from 16,087,712 bytes to 16,052,560
-bytes. This is a narrower win than the historical branch result because the
-current baseline keeps `log_event.cc`, `log_event_server.cc`, `rpl_gtid.cc`,
-and `gtid_index.cc` in the archive; retained MariaDB code still references
-those objects.
+bytes. This was a narrower win than the historical branch result because the
+baseline at the time still kept `log_event.cc`, `log_event_server.cc`,
+`rpl_gtid.cc`, and `gtid_index.cc` in the archive; retained MariaDB code still
+referenced those objects. Follow-up binlog event-root and log-event server
+trims now remove `gtid_index.cc`, `log_event.cc`, `log_event_server.cc`,
+`rpl_injector.cc`, and `rpl_record.cc` from the disabled profile.
 
 ## License And Dependency Impact
 

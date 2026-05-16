@@ -131,7 +131,7 @@ current MyLite embedded profile patches applied.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,776,960 bytes / 25.54 MiB |
+| Archive size | 26,674,872 bytes / 25.44 MiB |
 | Archive members | 670 |
 
 The build found system OpenSSL 3.6.2, Curses, CURL, GSSAPI, BZip2, LZ4,
@@ -143,14 +143,20 @@ archive and linked first-party embedded smoke binaries do not link libz.
 The binlog event-root trim reduced the default archive by 146,128 bytes from
 the previous no-binlog transaction/event-core baseline and removed two archive
 members. The disabled profile now omits `gtid_index.cc`, `log_event.cc`,
-`rpl_injector.cc`, and `rpl_record.cc`, skips the mandatory binlog plugin
-registration, and compiles embedded binlog transaction, row-event, GTID-state,
-event-write, table-map, open/recovery, GTID-index, incident, cache-write, and
-temporary-table binlog entry points to no-ops. `log_event_server.cc` and
-`rpl_gtid.cc` remain in the archive because retained MariaDB code still
-references shared helpers and GTID state, but linked first-party embedded test
-binaries resolve the ordinary SQL string-rendering root from
-`mylite_log_event_core_stub.cc` instead of loading `log_event_server.cc.o`.
+`log_event_server.cc`, `rpl_injector.cc`, and `rpl_record.cc`, skips the
+mandatory binlog plugin registration, and compiles embedded binlog transaction,
+row-event, GTID-state, event-write, table-map, open/recovery, GTID-index,
+incident, cache-write, temporary-table binlog entry points, and retained SQL
+`BINLOG` event parsing to no-ops or fail-closed stubs. `rpl_gtid.cc` remains in
+the archive because retained MariaDB code still references GTID state, but
+ordinary SQL string rendering resolves from `mylite_log_event_core_stub.cc`,
+while disabled log-event class symbols live in
+`mylite_log_event_server_disabled.cc`.
+
+The log-event server trim reduced the default archive by a further 102,088
+bytes without changing the linked first-party embedded smoke binary sizes. The
+archive now contains `mylite_log_event_server_disabled.cc.o` instead of
+`log_event_server.cc.o`.
 
 The MyISAM maintenance trim reduced the default archive by a further 87,712
 bytes and removed three archive members. The disabled profile now omits
@@ -375,6 +381,8 @@ The profile explicitly disables:
 - dynamic UDF lookup, registration, and execution runtime
 - binary-log transaction, event-write, and event-root core for the embedded
   no-binlog profile
+- server-side binary-log event replay and serialization through
+  `log_event_server.cc`
 - native MyISAM table maintenance, repair, key-cache assignment, and key
   preload administration
 - `mysql.servers` foreign-server metadata cache
@@ -424,11 +432,12 @@ Measured on 2026-05-16 with the same host and toolchain as the default profile:
 | Field | Value |
 | --- | --- |
 | Archive | `build/mariadb-mylite-storage-smoke/libmysqld/libmariadbd.a` |
-| Archive size | 26,972,352 bytes / 25.72 MiB |
+| Archive size | 26,870,264 bytes / 25.63 MiB |
 | Archive members | 673 |
 
 The opt-in archive also replaces `event_parse_data.cc.o` with
-`mylite_event_parse_data_disabled.cc.o`; its total size includes the current
+`mylite_event_parse_data_disabled.cc.o` and `log_event_server.cc.o` with
+`mylite_log_event_server_disabled.cc.o`; its total size includes the current
 static MyLite handler objects and should be compared only against matching
 storage-smoke sources.
 
@@ -455,8 +464,8 @@ outputs:
 
 | Artifact | Size | Stripped Size | Members | Global Symbols |
 | --- | ---: | ---: | ---: | ---: |
-| MariaDB embedded archive | 26,776,960 bytes / 25.54 MiB | n/a | 670 | n/a |
-| MariaDB storage-smoke archive | 26,972,352 bytes / 25.72 MiB | n/a | 673 | n/a |
+| MariaDB embedded archive | 26,674,872 bytes / 25.44 MiB | n/a | 670 | n/a |
+| MariaDB storage-smoke archive | 26,870,264 bytes / 25.63 MiB | n/a | 673 | n/a |
 | Embedded open-close smoke | 17,195,984 bytes / 16.40 MiB | 15,542,416 bytes / 14.82 MiB | n/a | 15,266 |
 | Embedded exec smoke | 17,265,208 bytes / 16.47 MiB | 15,608,440 bytes / 14.89 MiB | n/a | 15,266 |
 | Embedded statement smoke | 17,245,664 bytes / 16.45 MiB | 15,591,760 bytes / 14.87 MiB | n/a | 15,266 |

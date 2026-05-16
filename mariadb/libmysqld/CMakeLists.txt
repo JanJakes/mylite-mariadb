@@ -56,6 +56,11 @@ IF(CMAKE_C_COMPILER_ID MATCHES "Clang" AND
    COMPILE_FLAGS "-Wno-unused-but-set-variable")
 ENDIF()
 
+IF(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  ADD_COMPILE_FLAGS(mylite_log_event_server_disabled.cc
+    COMPILE_FLAGS "-Wno-inconsistent-missing-override")
+ENDIF()
+
 OPTION(MYLITE_WITH_LOAD_DATA "Build LOAD DATA and LOAD XML execution support" ON)
 IF(MYLITE_WITH_LOAD_DATA)
   SET(MYLITE_LOAD_DATA_SOURCE ../sql/sql_load.cc)
@@ -399,12 +404,11 @@ IF(NOT MYLITE_WITH_BINLOG_CORE)
   LIST(REMOVE_ITEM SQL_EMBEDDED_SOURCES
     ../sql/gtid_index.cc
     ../sql/log_event.cc
+    ../sql/log_event_server.cc
     ../sql/rpl_injector.cc
     ../sql/rpl_record.cc)
-  # Keep the no-binlog stub before log_event_server.cc in the archive so
-  # static links resolve shared SQL rendering helpers without loading event
-  # serialization code.
   LIST(INSERT SQL_EMBEDDED_SOURCES 0 mylite_log_event_core_stub.cc)
+  LIST(APPEND SQL_EMBEDDED_SOURCES mylite_log_event_server_disabled.cc)
 ENDIF()
 
 ADD_CONVENIENCE_LIBRARY(sql_embedded ${SQL_EMBEDDED_SOURCES})

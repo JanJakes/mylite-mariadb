@@ -566,13 +566,14 @@ foreign-key DDL commands are rejected before MariaDB execution with stable
 MyLite errors. The default
 embedded profile also links fail-closed stubs for stored-program runtime
 symbols that retained MariaDB parser or cleanup paths still reference, omits
-dynamic UDF lookup/execution bodies, omits unsupported binlog event-root and
-MyISAM maintenance source objects, omits the JSON schema-validation source
-object, replaces JSON table-function execution, dynamic-column packed BLOB
-runtime, SQL handler command execution, SQL sequence runtime, external backup
-command execution, query cache runtime, zlib-backed compression, and dynamic
-plugin loading with fail-closed or disabled stubs/configuration, and compiles
-embedded binlog transaction and event-write entry points to no-ops. Other
+dynamic UDF lookup/execution bodies, omits unsupported binlog event-root,
+log-event server runtime, and MyISAM maintenance source objects, omits the JSON
+schema-validation source object, replaces JSON table-function execution,
+dynamic-column packed BLOB runtime, SQL handler command execution, SQL sequence
+runtime, external backup command execution, query cache runtime, zlib-backed
+compression, and dynamic plugin loading with fail-closed or disabled
+stubs/configuration, and compiles embedded binlog transaction and event-write
+entry points to no-ops. Other
 unsupported surfaces should fail with
 stable MyLite result codes and MariaDB diagnostics where possible.
 

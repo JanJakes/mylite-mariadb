@@ -123,12 +123,13 @@ Measured on 2026-05-15 after implementation:
 | Default embedded | 27,607,216 bytes / 26.33 MiB | 679 | -146,128 bytes / -2 members |
 | Storage-smoke | 27,787,792 bytes / 26.50 MiB | 682 | -146,128 bytes / -2 members |
 
-The disabled embedded archives contain `mylite_log_event_core_stub.cc.o` and
-`log_event_server.cc.o`, but omit `gtid_index.cc.o`, `log_event.cc.o`,
-`rpl_injector.cc.o`, and `rpl_record.cc.o`. The stub is inserted before
-`log_event_server.cc.o` so Darwin's static archive member selection resolves
-the ordinary SQL string-rendering root from the stub in first-party embedded
-test links.
+At the time of this slice, the disabled embedded archives contained
+`mylite_log_event_core_stub.cc.o` and `log_event_server.cc.o`, but omitted
+`gtid_index.cc.o`, `log_event.cc.o`, `rpl_injector.cc.o`, and
+`rpl_record.cc.o`. The follow-up log-event server trim now replaces
+`log_event_server.cc.o` with `mylite_log_event_server_disabled.cc.o` while
+keeping the ordinary SQL string-rendering root in
+`mylite_log_event_core_stub.cc.o`.
 
 ## License And Dependency Impact
 
@@ -162,9 +163,10 @@ removes MariaDB-derived source objects from the disabled embedded profile only.
 - `mariadb/sql/temporary_tables.cc` keeps temporary-table cleanup but skips the
   no-binlog cleanup-event write that would otherwise construct
   `Query_log_event`.
-- `log_event_server.cc` and `rpl_gtid.cc` remain in the archive. Removing them
-  requires a separate stub boundary because retained shared code still exposes
-  SQL string rendering and GTID state roots.
+- `log_event_server.cc` and `rpl_gtid.cc` remained in the archive after this
+  slice. The follow-up log-event server trim removes `log_event_server.cc` by
+  splitting retained SQL string rendering from disabled event-class symbols.
+  `rpl_gtid.cc` still requires a separate GTID-state stub boundary.
 
 ## Verification Results
 
@@ -202,14 +204,13 @@ Passed on 2026-05-15:
 - The diff is guarded to the MyLite embedded profile and preserves the normal
   MariaDB SQL target.
 - Documentation records the exact boundary, including retained event or GTID
-  objects that could not be removed safely.
+  objects that could not be removed safely in this slice.
 
 ## Risks And Unresolved Questions
 
-- `log_event_server.cc` still provides event serialization helpers and shared
-  SQL string-rendering code used by retained paths. Linked first-party
-  embedded tests avoid loading it for `append_query_string()`, but removing it
-  from the archive requires a larger stub and belongs in a follow-up.
+- This slice left `log_event_server.cc` as follow-up work because it provided
+  event serialization helpers and shared SQL string-rendering code used by
+  retained paths. The later log-event server trim handles that boundary.
 - `rpl_gtid.cc` owns global GTID state used by retained system variables and
   no-binlog stubs. Removing it is intentionally out of scope for this slice.
 - `MYSQL_BIN_LOG::cleanup()` is shutdown-sensitive; the disabled path must only
