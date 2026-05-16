@@ -1157,6 +1157,16 @@ static void test_prepare_diagnostics(void) {
     assert(mylite_mariadb_errno(db) == 0U);
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(strstr(mylite_errmsg(db), "online ALTER") != NULL);
+    assert_prepare_fails_with_message(
+        db,
+        "CREATE TABLE csv_prepare (id INT NOT NULL PRIMARY KEY) ENGINE=CSV",
+        "CSV storage engine"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "ALTER TABLE online_alter_prepare ENGINE = CSV",
+        "CSV storage engine"
+    );
 
     assert(
         mylite_prepare(

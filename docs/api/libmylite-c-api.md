@@ -517,6 +517,7 @@ the embedded library model:
 - native InnoDB storage-engine runtime and its tablespaces, redo, undo, and
   dictionary state,
 - native CSV storage-engine runtime and `.CSV` / `.CSM` table files,
+- explicit `ENGINE=CSV` table creation and engine-change requests,
 - native partition storage-engine wrapper runtime,
 - statement profiling such as `SHOW PROFILE`, `SHOW PROFILES`,
   profiling system-variable assignment, and `INFORMATION_SCHEMA.PROFILING`,
@@ -576,7 +577,8 @@ information, process-list metadata, zlib compression, server utility function,
 Oracle SQL mode, XML SQL function, GIS SQL function, vector SQL function,
 SFORMAT SQL function, JSON schema validation function, JSON table function,
 dynamic column function, SQL sequence value surface, partition, and
-foreign-key DDL commands are rejected before MariaDB execution with stable
+foreign-key DDL commands, plus explicit `ENGINE=CSV` table creation and
+engine-change requests, are rejected before MariaDB execution with stable
 MyLite errors. The default
 embedded profile also links fail-closed stubs for stored-program runtime
 symbols that retained MariaDB parser or cleanup paths still reference, omits

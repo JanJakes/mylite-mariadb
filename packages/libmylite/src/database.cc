@@ -483,6 +483,7 @@ bool is_procedure_analyse_sql(std::string_view sql);
 bool is_select_procedure_sql(std::string_view sql);
 bool is_locking_sql(std::string_view sql);
 bool is_online_alter_sql(std::string_view sql);
+bool is_csv_engine_request_sql(std::string_view sql);
 bool is_partition_sql(std::string_view sql);
 bool is_foreign_key_sql(std::string_view sql);
 bool is_non_table_object_keyword(std::string_view token);
@@ -550,6 +551,7 @@ bool sql_token_is_vector_sql_function(std::string_view token);
 bool sql_span_contains_token(std::string_view sql, const char *keyword);
 bool sql_quoted_span_contains_token(std::string_view &sql, char quote, const char *keyword);
 bool sql_tokens_contain_online_alter_marker(std::string_view sql);
+bool sql_tokens_contain_csv_engine_request(std::string_view sql);
 bool sql_tokens_contain_partition_marker(std::string_view sql);
 bool sql_tokens_contain_foreign_key_marker(std::string_view sql);
 std::string_view skip_sql_leading_noise(std::string_view sql);
@@ -2788,6 +2790,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     }
     if (is_online_alter_sql(sql)) {
         return "unsupported online ALTER SQL surface";
+    }
+    if (is_csv_engine_request_sql(sql)) {
+        return "unsupported CSV storage engine";
     }
     if (is_partition_sql(sql)) {
         return "unsupported partition SQL surface";
@@ -5205,6 +5210,69 @@ bool sql_tokens_contain_online_alter_marker(std::string_view sql) {
             if (pop_sql_scanned_token(after_lock, next) && sql_token_equals(next, "NONE")) {
                 return true;
             }
+        }
+    }
+    return false;
+}
+
+bool is_csv_engine_request_sql(std::string_view sql) {
+    std::string_view rest = sql;
+    std::string_view token;
+    if (!pop_sql_scanned_token(rest, token)) {
+        return false;
+    }
+
+    if (sql_token_equals(token, "CREATE")) {
+        if (!pop_sql_scanned_token(rest, token)) {
+            return false;
+        }
+        if (sql_token_equals(token, "OR")) {
+            if (!pop_sql_scanned_token(rest, token) || !sql_token_equals(token, "REPLACE") ||
+                !pop_sql_scanned_token(rest, token)) {
+                return false;
+            }
+        }
+        if (sql_token_equals(token, "TEMPORARY")) {
+            if (!pop_sql_scanned_token(rest, token)) {
+                return false;
+            }
+        }
+        return sql_token_equals(token, "TABLE") && sql_tokens_contain_csv_engine_request(rest);
+    }
+
+    if (sql_token_equals(token, "ALTER")) {
+        if (!pop_sql_scanned_token(rest, token)) {
+            return false;
+        }
+        if (sql_token_equals(token, "IGNORE") || sql_token_equals(token, "ONLINE") ||
+            sql_token_equals(token, "OFFLINE")) {
+            if (!pop_sql_scanned_token(rest, token)) {
+                return false;
+            }
+        }
+        return sql_token_equals(token, "TABLE") && sql_tokens_contain_csv_engine_request(rest);
+    }
+
+    return false;
+}
+
+bool sql_tokens_contain_csv_engine_request(std::string_view sql) {
+    std::string_view token;
+    while (pop_sql_scanned_token(sql, token)) {
+        if (!sql_token_equals(token, "ENGINE")) {
+            continue;
+        }
+
+        std::string_view value_span = skip_sql_leading_noise(sql);
+        if (value_span.empty() || value_span.front() != '=') {
+            continue;
+        }
+        value_span.remove_prefix(1);
+
+        std::string_view engine_name;
+        if (pop_sql_scanned_token(value_span, engine_name) &&
+            sql_token_equals(engine_name, "CSV")) {
+            return true;
         }
     }
     return false;
