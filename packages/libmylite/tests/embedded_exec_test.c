@@ -62,7 +62,7 @@ static void test_file_export_policy_is_rejected(void);
 static void test_non_table_objects_are_rejected(void);
 static void test_view_metadata_is_empty(void);
 static void test_trigger_metadata_is_empty(void);
-static void test_transaction_control_is_rejected(void);
+static void test_transaction_control_policy(void);
 static void test_locking_sql_is_rejected(void);
 static void test_online_alter_policy_is_rejected(void);
 static void test_foreign_key_policy_is_rejected(void);
@@ -151,7 +151,7 @@ int main(void) {
     test_non_table_objects_are_rejected();
     test_view_metadata_is_empty();
     test_trigger_metadata_is_empty();
-    test_transaction_control_is_rejected();
+    test_transaction_control_policy();
     test_locking_sql_is_rejected();
     test_online_alter_policy_is_rejected();
     test_foreign_key_policy_is_rejected();
@@ -1260,15 +1260,21 @@ static void test_trigger_metadata_is_empty(void) {
     free(root);
 }
 
-static void test_transaction_control_is_rejected(void) {
+static void test_transaction_control_policy(void) {
     char *root = make_temp_root();
     char *filename = NULL;
     mylite_db *db = open_database(root, &filename);
 
-    assert_transaction_control_exec_fails(db, "BEGIN");
+    assert(mylite_exec(db, "BEGIN", NULL, NULL, NULL) == MYLITE_OK);
     assert_transaction_control_exec_fails(db, "START TRANSACTION");
-    assert_transaction_control_exec_fails(db, "COMMIT");
-    assert_transaction_control_exec_fails(db, "ROLLBACK");
+    assert(mylite_exec(db, "ROLLBACK", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "START TRANSACTION", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "COMMIT", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "BEGIN WORK", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "COMMIT WORK", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "ROLLBACK WORK", NULL, NULL, NULL) == MYLITE_OK);
+    assert_transaction_control_exec_fails(db, "COMMIT AND CHAIN");
+    assert_transaction_control_exec_fails(db, "START TRANSACTION READ WRITE");
     assert_transaction_control_exec_fails(db, "SAVEPOINT mylite_probe");
     assert_transaction_control_exec_fails(db, "ROLLBACK TO SAVEPOINT mylite_probe");
     assert_transaction_control_exec_fails(db, "RELEASE SAVEPOINT mylite_probe");

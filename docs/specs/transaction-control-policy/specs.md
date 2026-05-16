@@ -1,5 +1,11 @@
 # Transaction Control Policy
 
+Status note: this slice was the earlier fail-closed policy. The later
+[Row-DML Transactions](../row-dml-transactions/specs.md) slice allows direct
+`BEGIN`, `COMMIT`, and `ROLLBACK` for bounded row-DML transactions while
+keeping savepoints, autocommit mode changes, transaction modifiers, XA, and
+transactional DDL rejected.
+
 ## Problem
 
 MyLite has storage-level rollback-journal recovery for individual publication
@@ -8,9 +14,10 @@ Accepting `BEGIN`, `ROLLBACK`, savepoints, or `SET autocommit=0` would be
 misleading for routed `ENGINE=InnoDB` workloads: MariaDB can accept the control
 statement while MyLite table writes still publish outside a SQL transaction.
 
-This slice rejects explicit SQL transaction-control surfaces through the public
-MyLite SQL entry points until MyLite has real commit, rollback, and savepoint
-integration.
+This slice rejected explicit SQL transaction-control surfaces through the
+public MyLite SQL entry points until later work added a bounded direct
+row-DML transaction surface. Savepoints, autocommit mode changes, transaction
+modifiers, XA, and transactional DDL remain rejected.
 
 ## Source Findings
 
@@ -53,11 +60,13 @@ Base authority: MariaDB 11.8.6, initial import ref
 
 ## Compatibility Impact
 
-SQL transaction control remains unsupported, but it becomes explicit and
-test-backed. This is intentionally less permissive than MariaDB's behavior with
-non-transactional engines because MyLite routes `ENGINE=InnoDB` to the MyLite
-handler and must not imply InnoDB rollback semantics until the handler is
-transaction-aware.
+This earlier slice made SQL transaction control explicit and test-backed
+instead of accidentally permissive. Later row-DML transaction work allows plain
+direct `BEGIN`, `COMMIT`, and `ROLLBACK` for a bounded MyLite-owned checkpoint
+scope, but the broader policy remains intentionally less permissive than
+MariaDB's behavior with non-transactional engines because MyLite routes
+`ENGINE=InnoDB` to the MyLite handler and must not imply full InnoDB rollback
+semantics until the handler is transaction-aware.
 
 ## DDL Metadata Routing Impact
 
@@ -85,8 +94,8 @@ be allowed.
 ## Wire Protocol Or Integration Impact
 
 Future wire-protocol integrations over the public MyLite core should inherit
-this policy. A raw MariaDB adapter needs an equivalent gate or real transaction
-integration before it becomes supported.
+the later bounded row-DML transaction policy. A raw MariaDB adapter needs an
+equivalent gate or real transaction integration before it becomes supported.
 
 ## Binary-Size Impact
 

@@ -106,11 +106,12 @@ records with default character set, collation, and comment options,
 table-definition metadata, rows, autoincrement state, supported indexes, and
 rollback-journal publication state in the primary `.mylite` file. File-backed
 opens answer schema and table discovery from the catalog when no transient
-MariaDB schema directory exists. Explicit SQL transaction control is rejected
-until MyLite has full transaction support; covered failed file-backed
-statements roll back MyLite-visible storage changes through statement
-checkpoints, with row-DML checkpoints driven by MariaDB statement transaction
-hooks while multi-statement rollback and savepoints remain planned.
+MariaDB schema directory exists. Direct `BEGIN`, `COMMIT`, and `ROLLBACK`
+support row-DML transactions over routed MyLite tables, including nested
+statement rollback for covered failed direct and prepared row-DML statements.
+Savepoints, autocommit-control statements, transaction modifiers, XA, and DDL
+inside an active transaction remain unsupported until the storage and catalog
+transaction design is broader.
 Existing-file opens preserve storage lock conflicts as
 `MYLITE_BUSY` before starting the embedded runtime.
 
@@ -513,8 +514,8 @@ the embedded library model:
 
 Representative account, event, plugin, replication, binlog, view, trigger,
 routine, package, sequence, `CALL`, UDF `CREATE FUNCTION ... SONAME`,
-transaction-control, autocommit-control, SQL locking, named-lock, SQL `HELP`,
-SQL `HANDLER`, `SELECT ... PROCEDURE`, SQL file-I/O,
+savepoint, autocommit-control, transaction-modifier, XA, SQL locking,
+named-lock, SQL `HELP`, SQL `HANDLER`, `SELECT ... PROCEDURE`, SQL file-I/O,
 table-maintenance/key-cache administration, statement profiling, external
 backup SQL, query cache administration, optimizer trace, static SHOW
 information, process-list metadata, zlib compression, server utility function,

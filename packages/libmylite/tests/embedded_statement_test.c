@@ -1015,6 +1015,20 @@ static void test_prepare_diagnostics(void) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
 
+    assert(mylite_prepare(db, "BEGIN", MYLITE_NUL_TERMINATED, &stmt, NULL) == MYLITE_ERROR);
+    assert(stmt == NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
+
+    assert(mylite_prepare(db, "COMMIT", MYLITE_NUL_TERMINATED, &stmt, NULL) == MYLITE_ERROR);
+    assert(stmt == NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
+
     assert(
         mylite_prepare(db, "SELECT 1 FOR UPDATE", MYLITE_NUL_TERMINATED, &stmt, NULL) ==
         MYLITE_ERROR

@@ -130,9 +130,11 @@ typedef struct mylite_storage_recovery_journal {
 struct mylite_storage_statement {
     FILE *file;
     char *filename;
+    struct mylite_storage_statement *parent;
     mylite_storage_header header;
     unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    int owns_file;
 };
 
 typedef mylite_storage_result (*mylite_storage_row_page_callback)(
@@ -196,6 +198,7 @@ static mylite_storage_result open_existing_file(const char *filename, FILE **out
 static mylite_storage_result open_existing_file_for_update(const char *filename, FILE **out_file);
 static mylite_storage_result close_existing_file(FILE *file);
 static mylite_storage_statement *active_statement_for(const char *filename);
+static int active_statement_has_file(FILE *file);
 static mylite_storage_result close_statement(mylite_storage_statement *statement);
 static void free_statement(mylite_storage_statement *statement);
 static char *copy_filename(const char *filename);
@@ -2142,7 +2145,8 @@ mylite_storage_result mylite_storage_begin_statement(
         return MYLITE_STORAGE_MISUSE;
     }
     *out_statement = NULL;
-    if (active_statement != NULL) {
+    mylite_storage_statement *parent = active_statement;
+    if (parent != NULL && active_statement_for(filename) == NULL) {
         return MYLITE_STORAGE_MISUSE;
     }
 
@@ -2158,19 +2162,32 @@ mylite_storage_result mylite_storage_begin_statement(
         return MYLITE_STORAGE_NOMEM;
     }
 
-    errno = 0;
-    statement->file = fopen(filename, "r+b");
-    if (statement->file == NULL) {
-        mylite_storage_result result =
-            errno == ENOENT ? MYLITE_STORAGE_NOTFOUND : MYLITE_STORAGE_IOERR;
-        free_statement(statement);
-        return result;
+    statement->parent = parent;
+    if (parent != NULL) {
+        statement->file = parent->file;
+        statement->owns_file = 0;
+    } else {
+        errno = 0;
+        statement->file = fopen(filename, "r+b");
+        if (statement->file == NULL) {
+            mylite_storage_result result =
+                errno == ENOENT ? MYLITE_STORAGE_NOTFOUND : MYLITE_STORAGE_IOERR;
+            free_statement(statement);
+            return result;
+        }
+        statement->owns_file = 1;
+
+        mylite_storage_result lock_result = lock_file(statement->file, LOCK_EX);
+        if (lock_result == MYLITE_STORAGE_OK) {
+            lock_result = recover_pending_journal_locked(statement->file, filename);
+        }
+        if (lock_result != MYLITE_STORAGE_OK) {
+            free_statement(statement);
+            return lock_result;
+        }
     }
 
-    mylite_storage_result result = lock_file(statement->file, LOCK_EX);
-    if (result == MYLITE_STORAGE_OK) {
-        result = recover_pending_journal_locked(statement->file, filename);
-    }
+    mylite_storage_result result = MYLITE_STORAGE_OK;
     if (result == MYLITE_STORAGE_OK) {
         result = read_page_at(
             statement->file,
@@ -2220,7 +2237,7 @@ mylite_storage_result mylite_storage_commit_statement(mylite_storage_statement *
         return MYLITE_STORAGE_MISUSE;
     }
 
-    active_statement = NULL;
+    active_statement = statement->parent;
     mylite_storage_result result = close_statement(statement);
     free_statement(statement);
     return result;
@@ -2249,7 +2266,7 @@ mylite_storage_result mylite_storage_rollback_statement(mylite_storage_statement
         result = flush_file(statement->file);
     }
 
-    active_statement = NULL;
+    active_statement = statement->parent;
     mylite_storage_result close_result = close_statement(statement);
     free_statement(statement);
     return result == MYLITE_STORAGE_OK ? close_result : result;
@@ -2955,7 +2972,7 @@ static mylite_storage_result open_existing_file_for_update(const char *filename,
 static mylite_storage_result close_existing_file(FILE *file) {
 #ifndef __clang_analyzer__
     /* Statement-owned handles stay open until checkpoint commit or rollback. */
-    if (active_statement != NULL && file == active_statement->file) {
+    if (active_statement_has_file(file)) {
         clearerr(file);
         return MYLITE_STORAGE_OK;
     }
@@ -2964,14 +2981,34 @@ static mylite_storage_result close_existing_file(FILE *file) {
 }
 
 static mylite_storage_statement *active_statement_for(const char *filename) {
-    if (active_statement == NULL || filename == NULL) {
+    if (filename == NULL) {
         return NULL;
     }
-    return strcmp(active_statement->filename, filename) == 0 ? active_statement : NULL;
+
+    for (mylite_storage_statement *statement = active_statement; statement != NULL;
+         statement = statement->parent) {
+        if (strcmp(statement->filename, filename) == 0) {
+            return statement;
+        }
+    }
+    return NULL;
+}
+
+static int active_statement_has_file(FILE *file) {
+    if (file == NULL) {
+        return 0;
+    }
+    for (mylite_storage_statement *statement = active_statement; statement != NULL;
+         statement = statement->parent) {
+        if (statement->file == file) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static mylite_storage_result close_statement(mylite_storage_statement *statement) {
-    if (statement->file == NULL) {
+    if (statement->file == NULL || !statement->owns_file) {
         return MYLITE_STORAGE_OK;
     }
 
@@ -2985,7 +3022,7 @@ static void free_statement(mylite_storage_statement *statement) {
         return;
     }
 
-    if (statement->file != NULL) {
+    if (statement->file != NULL && statement->owns_file) {
         fclose(statement->file);
     }
     free(statement->filename);

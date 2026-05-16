@@ -1,5 +1,13 @@
 # Transaction Handler Hooks
 
+Status note: the later
+[Row-DML Transactions](../row-dml-transactions/specs.md) slice keeps the
+autocommit handler-hook path but adds a `libmylite`-owned outer checkpoint for
+direct row-DML transactions. Direct `BEGIN`, `COMMIT`, and `ROLLBACK` are now
+covered for that bounded scope; savepoints, autocommit mode changes, XA,
+transaction modifiers, transactional DDL, and transactional engine flags remain
+planned or rejected.
+
 ## Problem
 
 MyLite now has a storage checkpoint that can restore the statement-start

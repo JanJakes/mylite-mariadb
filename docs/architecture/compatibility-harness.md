@@ -31,7 +31,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `public-api` | `dev` | `compat-public-api` | C API argument validation and version surface |
 | `storage-core` | `dev` | `compat-storage` | Primary file, catalog, rows, indexes, and mutations |
 | `crash-recovery` | `dev` | `compat-crash-recovery` | Rollback-journal recovery and corrupt-journal handling |
-| `transaction` | `storage-smoke-dev` | `compat-transaction` | SQL transaction-control rejection until full transaction support exists |
+| `transaction` | `storage-smoke-dev` | `compat-transaction` | Direct row-DML transaction commit/rollback plus unsupported transaction-control policy |
 | `transaction-hooks` | `storage-smoke-dev` | `compat-transaction-hooks` | MariaDB statement transaction hook integration |
 | `statement-rollback` | `storage-smoke-dev` | `compat-statement-rollback` | Failed statement rollback for routed MyLite storage, including prepared row-DML, representative row `REPLACE`, OR REPLACE replacement, and table-DDL failures |
 | `partition` | `storage-smoke-dev` | `compat-partition` | Partition DDL rejection until partition metadata and routing exist |

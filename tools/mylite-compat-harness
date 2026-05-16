@@ -31,7 +31,7 @@ group_spec() {
       echo "dev|compat-crash-recovery|Rollback-journal recovery and corrupt-journal coverage"
       ;;
     transaction)
-      echo "storage-smoke-dev|compat-transaction|SQL transaction-control policy"
+      echo "storage-smoke-dev|compat-transaction|Direct row-DML transaction commit/rollback and unsupported transaction-control policy"
       ;;
     transaction-hooks)
       echo "storage-smoke-dev|compat-transaction-hooks|MariaDB statement transaction hook integration"

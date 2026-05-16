@@ -88,9 +88,12 @@ static bool mylite_discards_rows_engine_request(const char *engine_name);
 static bool mylite_uses_volatile_rows_engine_request(const char *engine_name);
 static bool mylite_engine_name_equals(const char *engine_name,
                                       const char *expected_engine_name);
+static int mylite_begin_transaction_checkpoint(THD *thd,
+                                               const char *primary_file);
 static int mylite_begin_statement_checkpoint(THD *thd,
                                              const char *primary_file);
 static int mylite_finish_statement_checkpoint(THD *thd, bool commit);
+static int mylite_finish_transaction_checkpoint(THD *thd, bool commit);
 static struct Mylite_trx_context *mylite_trx_context(THD *thd, bool create);
 static int mylite_table_name_from_path(const char *path, char *out_schema_name,
                                        size_t out_schema_name_size,
@@ -260,6 +263,9 @@ static int mylite_close_connection(THD *thd)
   DBUG_ENTER("mylite_close_connection");
 
   int error= mylite_finish_statement_checkpoint(thd, false);
+  int transaction_error= mylite_finish_transaction_checkpoint(thd, false);
+  if (!error)
+    error= transaction_error;
   Mylite_trx_context *ctx= mylite_trx_context(thd, false);
   if (ctx)
   {
@@ -270,16 +276,32 @@ static int mylite_close_connection(THD *thd)
   DBUG_RETURN(error);
 }
 
-static int mylite_commit(THD *thd, bool)
+static int mylite_commit(THD *thd, bool all)
 {
   DBUG_ENTER("mylite_commit");
-  DBUG_RETURN(mylite_finish_statement_checkpoint(thd, true));
+
+  int error= mylite_finish_statement_checkpoint(thd, true);
+  if (all)
+  {
+    int transaction_error= mylite_finish_transaction_checkpoint(thd, true);
+    if (!error)
+      error= transaction_error;
+  }
+  DBUG_RETURN(error);
 }
 
-static int mylite_rollback(THD *thd, bool)
+static int mylite_rollback(THD *thd, bool all)
 {
   DBUG_ENTER("mylite_rollback");
-  DBUG_RETURN(mylite_finish_statement_checkpoint(thd, false));
+
+  int error= mylite_finish_statement_checkpoint(thd, false);
+  if (all)
+  {
+    int transaction_error= mylite_finish_transaction_checkpoint(thd, false);
+    if (!error)
+      error= transaction_error;
+  }
+  DBUG_RETURN(error);
 }
 
 Mylite_share *ha_mylite::get_share()
@@ -316,6 +338,7 @@ struct Mylite_discover_context
 
 struct Mylite_trx_context
 {
+  mylite_storage_statement *transaction;
   mylite_storage_statement *statement;
 };
 
@@ -1348,6 +1371,15 @@ int ha_mylite::external_lock(THD *thd, int lock_type)
   if (!primary_file)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
 
+  if (thd_test_options(thd, OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN) &&
+      !mylite_storage_statement_active(primary_file))
+  {
+    int transaction_error= mylite_begin_transaction_checkpoint(thd,
+                                                              primary_file);
+    if (transaction_error)
+      DBUG_RETURN(transaction_error);
+  }
+
   int error= mylite_begin_statement_checkpoint(thd, primary_file);
   if (error)
     DBUG_RETURN(error);
@@ -2014,6 +2046,20 @@ static bool mylite_engine_name_equals(const char *engine_name,
   return my_strcasecmp_latin1(engine_name, expected_engine_name) == 0;
 }
 
+static int mylite_begin_transaction_checkpoint(THD *thd,
+                                               const char *primary_file)
+{
+  Mylite_trx_context *ctx= mylite_trx_context(thd, true);
+  if (!ctx)
+    return HA_ERR_OUT_OF_MEM;
+  if (ctx->transaction)
+    return 0;
+
+  mylite_storage_result result=
+    mylite_storage_begin_statement(primary_file, &ctx->transaction);
+  return mylite_storage_to_handler_error(result);
+}
+
 static int mylite_begin_statement_checkpoint(THD *thd,
                                              const char *primary_file)
 {
@@ -2044,6 +2090,22 @@ static int mylite_finish_statement_checkpoint(THD *thd, bool commit)
     result= mylite_storage_commit_statement(statement);
   else
     result= mylite_storage_rollback_statement(statement);
+  return mylite_storage_to_handler_error(result);
+}
+
+static int mylite_finish_transaction_checkpoint(THD *thd, bool commit)
+{
+  Mylite_trx_context *ctx= mylite_trx_context(thd, false);
+  if (!ctx || !ctx->transaction)
+    return 0;
+
+  mylite_storage_statement *transaction= ctx->transaction;
+  ctx->transaction= NULL;
+  mylite_storage_result result;
+  if (commit)
+    result= mylite_storage_commit_statement(transaction);
+  else
+    result= mylite_storage_rollback_statement(transaction);
   return mylite_storage_to_handler_error(result);
 }
 

@@ -1,5 +1,11 @@
 # Transactions And Recovery
 
+Status note: this slice introduced rollback-journal publication and recovery.
+Later slices added statement rollback checkpoints, MariaDB statement hook
+integration, and bounded direct row-DML transactions. Savepoints, autocommit
+mode changes, transaction modifiers, XA, transactional DDL, and fully
+transactional engine flags remain outside the implemented scope.
+
 ## Problem
 
 MyLite now publishes catalog, row, row-state, autoincrement, and index-entry
@@ -77,11 +83,14 @@ reclamation exists, but they are not part of the committed logical database.
 
 ## Compatibility Impact
 
-Atomic commit and crash recovery move from planned to partial. Rollback and
-savepoints remain planned because MariaDB's SQL transaction hooks are still not
-implemented and MyLite continues to advertise `HA_NO_TRANSACTIONS`; public
-MyLite entry points reject explicit transaction control rather than claiming
-rollback behavior.
+Atomic commit and crash recovery move from planned to partial. At this slice's
+point in history, rollback and savepoints remained planned because MariaDB's
+SQL transaction hooks were not yet implemented and MyLite continued to
+advertise `HA_NO_TRANSACTIONS`; public MyLite entry points rejected explicit
+transaction control rather than claiming rollback behavior. Later slices added
+statement rollback checkpoints and bounded direct row-DML transaction
+checkpoints, but savepoints and fully transactional engine flags remain
+planned.
 
 `ENGINE=InnoDB`, `ENGINE=MyISAM`, and `ENGINE=Aria` requests that route to
 MyLite get the same MyLite recovery behavior. They do not use durable

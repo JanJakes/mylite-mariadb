@@ -1,5 +1,11 @@
 # Statement Rollback Checkpoints
 
+Status note: the later
+[Row-DML Transactions](../row-dml-transactions/specs.md) slice allows direct
+`BEGIN`, `COMMIT`, and `ROLLBACK` for bounded row-DML transactions. Savepoints,
+autocommit mode changes, transaction modifiers, XA, and transactional DDL
+remain rejected.
+
 ## Problem
 
 MyLite storage currently commits each append-only row, row-state, index,

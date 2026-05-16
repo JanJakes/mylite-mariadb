@@ -39,9 +39,11 @@ Prepared row DML should follow the same failed-statement visibility rule as
 direct row DML: if a prepared update fails on a later duplicate-key conflict,
 no earlier row or index updates from that statement remain visible.
 
-This remains partial compatibility. MyLite still rejects explicit transaction
-control and does not claim savepoints, isolation levels, or crash-safe logical
-undo for failed statements interrupted mid-rollback.
+This remains partial compatibility. MyLite now covers direct row-DML
+transactions in a later slice, but still rejects savepoints, autocommit mode
+changes, transaction modifiers, XA, transactional DDL, and does not claim
+isolation levels or crash-safe logical undo for failed statements interrupted
+mid-rollback.
 
 ## Design
 

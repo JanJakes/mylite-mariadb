@@ -150,6 +150,7 @@ static void test_utf8mb4_unicode_ci_survives_restart(void);
 static void test_collation_restart_matrix(void);
 static void test_non_table_object_policy(void);
 static void test_transaction_and_foreign_key_policies(void);
+static void test_row_dml_transactions(void);
 static void test_create_table_persists_catalog_metadata(void);
 static void test_check_constraint_if_exists(void);
 static void test_non_check_constraint_ddl(void);
@@ -320,6 +321,7 @@ int main(void) {
     test_collation_restart_matrix();
     test_non_table_object_policy();
     test_transaction_and_foreign_key_policies();
+    test_row_dml_transactions();
     test_create_table_persists_catalog_metadata();
     test_check_constraint_if_exists();
     test_non_check_constraint_ddl();
@@ -1159,10 +1161,10 @@ static void test_transaction_and_foreign_key_policies(void) {
         "CREATE TABLE posts (id INT PRIMARY KEY, title VARCHAR(64)) ENGINE=InnoDB"
     );
 
-    assert_transaction_control_exec_fails(db, "START TRANSACTION");
     assert_transaction_control_exec_fails(db, "SET autocommit=0");
     assert_transaction_control_exec_fails(db, "SAVEPOINT mylite_probe");
-    assert_transaction_control_exec_fails(db, "ROLLBACK");
+    assert_transaction_control_exec_fails(db, "COMMIT AND CHAIN");
+    assert_transaction_control_exec_fails(db, "START TRANSACTION READ WRITE");
     assert_locking_sql_exec_fails(db, "LOCK TABLES posts WRITE");
     assert_locking_sql_exec_fails(db, "UNLOCK TABLES");
     assert_locking_sql_exec_fails(db, "SELECT id FROM posts FOR UPDATE");
@@ -1271,6 +1273,171 @@ static void test_transaction_and_foreign_key_policies(void) {
     );
     assert(errmsg == NULL);
     assert(child_count.rows == 1);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_row_dml_transactions(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    mylite_stmt *rollback_update = NULL;
+    single_value_context count = {.expected_value = "1"};
+    single_value_context zero_count = {.expected_value = "0"};
+
+    assert_exec_succeeds(db, "CREATE DATABASE tx_app");
+    assert_exec_succeeds(db, "USE tx_app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE tx_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL, "
+        "UNIQUE KEY title_key (title)"
+        ") ENGINE=InnoDB"
+    );
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (1, 'committed')");
+    assert_exec_succeeds(db, "COMMIT");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE id = 1 AND title = 'committed'",
+            single_value_callback,
+            &count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(count.rows == 1);
+
+    assert_exec_succeeds(db, "BEGIN WORK");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (2, 'rolled-back')");
+    assert_exec_succeeds(db, "ROLLBACK WORK");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE title = 'rolled-back'",
+            single_value_callback,
+            &zero_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(zero_count.rows == 1);
+
+    assert_exec_succeeds(db, "START TRANSACTION");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (2, 'second')");
+    assert_exec_fails(db, "INSERT INTO tx_posts VALUES (3, 'duplicate'), (4, 'duplicate')");
+    zero_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE title = 'duplicate'",
+            single_value_callback,
+            &zero_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(zero_count.rows == 1);
+    count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE id = 2 AND title = 'second'",
+            single_value_callback,
+            &count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(count.rows == 1);
+    assert_exec_succeeds(db, "COMMIT");
+
+    assert_exec_succeeds(db, "START TRANSACTION");
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE tx_posts SET title=? WHERE id IN (1, 2) ORDER BY id",
+            MYLITE_NUL_TERMINATED,
+            &rollback_update,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(rollback_update != NULL);
+    assert(
+        mylite_bind_text(
+            rollback_update,
+            1U,
+            "prepared-duplicate",
+            MYLITE_NUL_TERMINATED,
+            MYLITE_STATIC
+        ) == MYLITE_OK
+    );
+    assert(mylite_step(rollback_update) == MYLITE_ERROR);
+    assert(mylite_finalize(rollback_update) == MYLITE_OK);
+    zero_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE title = 'prepared-duplicate'",
+            single_value_callback,
+            &zero_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(zero_count.rows == 1);
+    count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE id = 1 AND title = 'committed'",
+            single_value_callback,
+            &count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(count.rows == 1);
+    assert_exec_succeeds(db, "ROLLBACK");
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_fails_with_message(
+        db,
+        "ALTER TABLE tx_posts ADD COLUMN blocked_tx_ddl INT",
+        "transactional DDL"
+    );
+    assert_transaction_control_exec_fails(db, "BEGIN");
+    assert_transaction_control_exec_fails(db, "SAVEPOINT mylite_probe");
+    assert_transaction_control_exec_fails(db, "ROLLBACK TO SAVEPOINT mylite_probe");
+    assert_transaction_control_exec_fails(db, "RELEASE SAVEPOINT mylite_probe");
+    assert_transaction_control_exec_fails(db, "SET autocommit=0");
+    assert_transaction_control_exec_fails(db, "XA START 'mylite-xid'");
+    assert_exec_succeeds(db, "ROLLBACK");
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (5, 'close-rollback')");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE tx_app");
+    zero_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE title = 'close-rollback'",
+            single_value_callback,
+            &zero_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(zero_count.rows == 1);
+    count = (single_value_context){.expected_value = "2"};
+    assert(
+        mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
+        MYLITE_OK
+    );
+    assert(count.rows == 1);
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");

@@ -195,11 +195,22 @@ struct RuntimeState {
 
 RuntimeState g_runtime;
 
+enum class TransactionControlKind : unsigned char {
+    None,
+    Begin,
+    Commit,
+    Rollback,
+    Unsupported,
+};
+
 } // namespace
 
 struct mylite_db {
 #if MYLITE_WITH_MARIADB_EMBEDDED
     MYSQL mysql = {};
+#endif
+#if MYLITE_WITH_MARIADB_EMBEDDED && MYLITE_MARIADB_HAS_MYLITE_SE
+    mylite_storage_statement *transaction_statement = nullptr;
 #endif
     std::string filename;
     unsigned busy_timeout_ms = 0;
@@ -214,6 +225,7 @@ struct mylite_db {
     unsigned long long last_insert_id = 0;
     unsigned active_statements = 0;
     bool connected = false;
+    bool transaction_active = false;
 };
 
 struct mylite_stmt {
@@ -231,6 +243,7 @@ struct mylite_stmt {
     bool has_current_row = false;
     bool sync_schema_catalog_after_execute = false;
     bool uses_statement_checkpoint = false;
+    bool uses_transaction_statement_checkpoint = false;
 };
 
 namespace {
@@ -314,6 +327,10 @@ int bind_statement_results(mylite_stmt &statement);
 int fetch_truncated_column(mylite_stmt &statement, unsigned column);
 int materialize_column_value(mylite_stmt &statement, unsigned column);
 int capture_warnings(mylite_db &database, unsigned warning_count, bool force_query = false);
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+int begin_direct_transaction(mylite_db &database);
+int finish_direct_transaction(mylite_db &database, bool commit);
+#  endif
 void clear_current_row(mylite_stmt &statement);
 bool is_variable_column_type(mylite_value_type type);
 const void *bound_value_data(const BoundValue &value);
@@ -324,6 +341,7 @@ bool is_unsigned_column(unsigned int flags);
 mylite_warning_level map_warning_level(const char *level);
 std::string field_string(const char *value, unsigned int length);
 const char *unsupported_sql_surface_message(std::string_view sql);
+TransactionControlKind direct_transaction_control_kind(std::string_view sql);
 bool is_server_surface_sql(std::string_view sql);
 bool is_backup_sql(std::string_view sql);
 bool is_query_cache_sql(std::string_view sql);
@@ -357,13 +375,13 @@ bool sql_set_assignment_targets_variable(std::string_view &assignment, const cha
 bool is_non_table_object_sql(std::string_view sql);
 bool is_procedure_analyse_sql(std::string_view sql);
 bool is_select_procedure_sql(std::string_view sql);
-bool is_transaction_control_sql(std::string_view sql);
 bool is_locking_sql(std::string_view sql);
 bool is_online_alter_sql(std::string_view sql);
 bool is_partition_sql(std::string_view sql);
 bool is_foreign_key_sql(std::string_view sql);
 bool is_non_table_object_keyword(std::string_view token);
 bool is_set_transaction_control_sql(std::string_view sql);
+bool sql_rest_is_statement_end(std::string_view sql);
 bool sql_tokens_contain_file_import_function(std::string_view sql);
 bool sql_tokens_contain_file_export_marker(std::string_view sql);
 bool sql_tokens_contain_server_utility_function(std::string_view sql);
@@ -403,6 +421,7 @@ bool sql_token_equals(std::string_view token, const char *keyword);
 int sync_schema_catalog(mylite_db &database);
 bool is_schema_catalog_sql(std::string_view sql);
 bool is_storage_outer_checkpoint_sql(std::string_view sql);
+bool is_row_dml_checkpoint_sql(std::string_view sql);
 int collect_storage_schema(void *ctx, const char *schema_name);
 int load_runtime_schema_definitions(
     mylite_db &database,
@@ -477,6 +496,22 @@ int mylite_close(mylite_db *database) {
         set_error(*database, MYLITE_BUSY, "database has active statements");
         return MYLITE_BUSY;
     }
+
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    if (database->transaction_active && mysql_query(&database->mysql, "ROLLBACK") != 0) {
+        set_mariadb_error(*database);
+        return MYLITE_ERROR;
+    }
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+    if (database->transaction_active) {
+        const int transaction_result = finish_direct_transaction(*database, false);
+        if (transaction_result != MYLITE_OK) {
+            return transaction_result;
+        }
+    }
+#  endif
+    database->transaction_active = false;
+#endif
 
     close_connection(*database);
     release_runtime();
@@ -1247,6 +1282,23 @@ int exec_impl(
     StorageBusyTimeoutScope busy_timeout(database->busy_timeout_ms);
     set_ok(*database);
     clear_warnings(*database);
+    const TransactionControlKind transaction_control =
+        direct_transaction_control_kind(std::string_view(sql));
+    if (transaction_control == TransactionControlKind::Unsupported) {
+        set_error(*database, MYLITE_ERROR, "unsupported SQL transaction control");
+        return copy_error_message(*database, errmsg);
+    }
+    if (transaction_control == TransactionControlKind::Begin && database->transaction_active) {
+        set_error(*database, MYLITE_ERROR, "unsupported nested SQL transaction control");
+        return copy_error_message(*database, errmsg);
+    }
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+    if (database->transaction_active && transaction_control == TransactionControlKind::None &&
+        is_storage_outer_checkpoint_sql(std::string_view(sql))) {
+        set_error(*database, MYLITE_ERROR, "unsupported transactional DDL SQL surface");
+        return copy_error_message(*database, errmsg);
+    }
+#  endif
     if (const char *unsupported_message = unsupported_sql_surface_message(std::string_view(sql))) {
         set_error(*database, MYLITE_ERROR, unsupported_message);
         return copy_error_message(*database, errmsg);
@@ -1255,7 +1307,9 @@ int exec_impl(
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
     StorageStatementCheckpoint checkpoint;
     const bool checkpoint_enabled =
-        database->filename != ":memory:" && is_storage_outer_checkpoint_sql(std::string_view(sql));
+        database->filename != ":memory:" &&
+        (is_storage_outer_checkpoint_sql(std::string_view(sql)) ||
+         (database->transaction_active && is_row_dml_checkpoint_sql(std::string_view(sql))));
     int checkpoint_result = checkpoint.begin(*database, checkpoint_enabled);
     if (checkpoint_result != MYLITE_OK) {
         return copy_error_message(*database, errmsg);
@@ -1325,6 +1379,30 @@ int exec_impl(
         return copy_error_message(*database, errmsg);
     }
 #  endif
+    if (transaction_control == TransactionControlKind::Begin) {
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        const int transaction_result = begin_direct_transaction(*database);
+        if (transaction_result != MYLITE_OK) {
+            mysql_query(&database->mysql, "ROLLBACK");
+            return copy_error_message(*database, errmsg);
+        }
+#  endif
+        database->transaction_active = true;
+    } else if (
+        transaction_control == TransactionControlKind::Commit ||
+        transaction_control == TransactionControlKind::Rollback
+    ) {
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        const int transaction_result = finish_direct_transaction(
+            *database,
+            transaction_control == TransactionControlKind::Commit
+        );
+        if (transaction_result != MYLITE_OK) {
+            return copy_error_message(*database, errmsg);
+        }
+#  endif
+        database->transaction_active = false;
+    }
     return MYLITE_OK;
 #endif
 }
@@ -1363,6 +1441,11 @@ int prepare_impl(
     StorageBusyTimeoutScope busy_timeout(database->busy_timeout_ms);
     set_ok(*database);
     clear_warnings(*database);
+    if (direct_transaction_control_kind(std::string_view(sql, sql_len)) !=
+        TransactionControlKind::None) {
+        set_error(*database, MYLITE_ERROR, "unsupported SQL transaction control");
+        return MYLITE_ERROR;
+    }
     if (const char *unsupported_message =
             unsupported_sql_surface_message(std::string_view(sql, sql_len))) {
         set_error(*database, MYLITE_ERROR, unsupported_message);
@@ -1379,6 +1462,9 @@ int prepare_impl(
         statement->uses_statement_checkpoint =
             database->filename != ":memory:" &&
             is_storage_outer_checkpoint_sql(std::string_view(sql, sql_len));
+        statement->uses_transaction_statement_checkpoint =
+            database->filename != ":memory:" &&
+            is_row_dml_checkpoint_sql(std::string_view(sql, sql_len));
 #  endif
         statement->statement = mysql_stmt_init(&database->mysql);
         if (statement->statement == nullptr) {
@@ -1518,8 +1604,10 @@ int execute_statement(mylite_stmt &statement) {
 
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
     StorageStatementCheckpoint checkpoint;
-    int checkpoint_result =
-        checkpoint.begin(*statement.database, statement.uses_statement_checkpoint);
+    const bool checkpoint_enabled =
+        statement.uses_statement_checkpoint ||
+        (statement.database->transaction_active && statement.uses_transaction_statement_checkpoint);
+    int checkpoint_result = checkpoint.begin(*statement.database, checkpoint_enabled);
     if (checkpoint_result != MYLITE_OK) {
         return checkpoint_result;
     }
@@ -1648,6 +1736,40 @@ int StorageStatementCheckpoint::rollback(mylite_db &database) {
     const mylite_storage_result result = mylite_storage_rollback_statement(statement);
     if (result != MYLITE_STORAGE_OK) {
         set_error(database, map_storage_result(result), "statement rollback failed");
+        return database.errcode;
+    }
+    return MYLITE_OK;
+}
+
+int begin_direct_transaction(mylite_db &database) {
+    if (database.filename == ":memory:" || database.transaction_statement != nullptr) {
+        return MYLITE_OK;
+    }
+
+    const mylite_storage_result result =
+        mylite_storage_begin_statement(database.filename.c_str(), &database.transaction_statement);
+    if (result != MYLITE_STORAGE_OK) {
+        set_error(database, map_storage_result(result), "transaction checkpoint failed");
+        return database.errcode;
+    }
+    return MYLITE_OK;
+}
+
+int finish_direct_transaction(mylite_db &database, bool commit) {
+    if (database.transaction_statement == nullptr) {
+        return MYLITE_OK;
+    }
+
+    mylite_storage_statement *transaction = database.transaction_statement;
+    database.transaction_statement = nullptr;
+    const mylite_storage_result result = commit ? mylite_storage_commit_statement(transaction)
+                                                : mylite_storage_rollback_statement(transaction);
+    if (result != MYLITE_STORAGE_OK) {
+        set_error(
+            database,
+            map_storage_result(result),
+            commit ? "transaction checkpoint commit failed" : "transaction rollback failed"
+        );
         return database.errcode;
     }
     return MYLITE_OK;
@@ -2110,7 +2232,7 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_select_procedure_sql(sql)) {
         return "unsupported SELECT PROCEDURE SQL clause";
     }
-    if (is_transaction_control_sql(sql)) {
+    if (direct_transaction_control_kind(sql) == TransactionControlKind::Unsupported) {
         return "unsupported SQL transaction control";
     }
     if (is_locking_sql(sql)) {
@@ -2831,27 +2953,64 @@ bool is_select_procedure_sql(std::string_view sql) {
     return false;
 }
 
-bool is_transaction_control_sql(std::string_view sql) {
+TransactionControlKind direct_transaction_control_kind(std::string_view sql) {
     std::string_view rest = skip_sql_leading_noise(sql);
     const std::string_view first = pop_sql_token(rest);
     std::string_view after_first = rest;
     const std::string_view second = pop_sql_token(rest);
 
-    if (sql_token_equals(first, "BEGIN") || sql_token_equals(first, "COMMIT") ||
-        sql_token_equals(first, "ROLLBACK") || sql_token_equals(first, "SAVEPOINT") ||
-        sql_token_equals(first, "XA")) {
-        return true;
+    if (sql_token_equals(first, "BEGIN")) {
+        if (second.empty()) {
+            return sql_rest_is_statement_end(after_first) ? TransactionControlKind::Begin
+                                                          : TransactionControlKind::Unsupported;
+        }
+        return sql_token_equals(second, "WORK") && sql_rest_is_statement_end(rest)
+                   ? TransactionControlKind::Begin
+                   : TransactionControlKind::Unsupported;
+    }
+
+    if (sql_token_equals(first, "COMMIT")) {
+        if (second.empty()) {
+            return sql_rest_is_statement_end(after_first) ? TransactionControlKind::Commit
+                                                          : TransactionControlKind::Unsupported;
+        }
+        return sql_token_equals(second, "WORK") && sql_rest_is_statement_end(rest)
+                   ? TransactionControlKind::Commit
+                   : TransactionControlKind::Unsupported;
+    }
+
+    if (sql_token_equals(first, "ROLLBACK")) {
+        if (second.empty()) {
+            return sql_rest_is_statement_end(after_first) ? TransactionControlKind::Rollback
+                                                          : TransactionControlKind::Unsupported;
+        }
+        return sql_token_equals(second, "WORK") && sql_rest_is_statement_end(rest)
+                   ? TransactionControlKind::Rollback
+                   : TransactionControlKind::Unsupported;
+    }
+
+    if (sql_token_equals(first, "SAVEPOINT") || sql_token_equals(first, "XA")) {
+        return TransactionControlKind::Unsupported;
     }
 
     if (sql_token_equals(first, "START")) {
-        return sql_token_equals(second, "TRANSACTION");
+        if (!sql_token_equals(second, "TRANSACTION")) {
+            return TransactionControlKind::None;
+        }
+        return sql_rest_is_statement_end(rest) ? TransactionControlKind::Begin
+                                               : TransactionControlKind::Unsupported;
     }
 
     if (sql_token_equals(first, "RELEASE")) {
-        return sql_token_equals(second, "SAVEPOINT");
+        return sql_token_equals(second, "SAVEPOINT") ? TransactionControlKind::Unsupported
+                                                     : TransactionControlKind::None;
     }
 
-    return sql_token_equals(first, "SET") && is_set_transaction_control_sql(after_first);
+    if (sql_token_equals(first, "SET") && is_set_transaction_control_sql(after_first)) {
+        return TransactionControlKind::Unsupported;
+    }
+
+    return TransactionControlKind::None;
 }
 
 bool is_set_transaction_control_sql(std::string_view sql) {
@@ -2867,6 +3026,19 @@ bool is_set_transaction_control_sql(std::string_view sql) {
 
     const std::string_view second = pop_sql_token_after_separators(sql);
     return sql_token_equals(second, "AUTOCOMMIT") || sql_token_equals(second, "TRANSACTION");
+}
+
+bool sql_rest_is_statement_end(std::string_view sql) {
+    sql = skip_sql_leading_noise(sql);
+    if (sql.empty()) {
+        return true;
+    }
+    if (sql.front() != ';') {
+        return false;
+    }
+
+    sql.remove_prefix(1);
+    return skip_sql_leading_noise(sql).empty();
 }
 
 bool sql_tokens_contain_file_import_function(std::string_view sql) {
@@ -3844,6 +4016,14 @@ bool is_storage_outer_checkpoint_sql(std::string_view sql) {
     return sql_token_equals(first, "CREATE") || sql_token_equals(first, "ALTER") ||
            sql_token_equals(first, "DROP") || sql_token_equals(first, "RENAME") ||
            sql_token_equals(first, "TRUNCATE");
+}
+
+bool is_row_dml_checkpoint_sql(std::string_view sql) {
+    std::string_view rest = skip_sql_leading_noise(sql);
+    const std::string_view first = pop_sql_token(rest);
+
+    return sql_token_equals(first, "INSERT") || sql_token_equals(first, "UPDATE") ||
+           sql_token_equals(first, "DELETE") || sql_token_equals(first, "REPLACE");
 }
 
 int collect_storage_schema(void *ctx, const char *schema_name) {
