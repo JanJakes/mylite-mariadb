@@ -68,6 +68,9 @@ set(MYLITE_WITH_JSON_SCHEMA_VALID OFF CACHE BOOL "Omit JSON schema validation SQ
 # MyLite rejects JSON_TABLE() before MariaDB execution.
 set(MYLITE_WITH_JSON_TABLE OFF CACHE BOOL "Omit JSON_TABLE table function runtime" FORCE)
 
+# MyLite rejects dynamic-column SQL functions before MariaDB execution.
+set(MYLITE_WITH_DYNAMIC_COLUMNS OFF CACHE BOOL "Omit dynamic-column packed BLOB runtime" FORCE)
+
 # MyLite rejects HELP before MariaDB execution.
 set(MYLITE_WITH_HELP_COMMAND OFF CACHE BOOL "Omit SQL HELP command" FORCE)
 

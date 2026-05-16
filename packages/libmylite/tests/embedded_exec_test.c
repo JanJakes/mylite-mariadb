@@ -31,6 +31,7 @@ static void test_gis_sql_functions_are_rejected(void);
 static void test_sformat_sql_function_is_rejected(void);
 static void test_json_schema_valid_sql_function_is_rejected(void);
 static void test_json_table_function_is_rejected(void);
+static void test_dynamic_column_functions_are_rejected(void);
 static void test_xml_sql_functions_are_rejected(void);
 static void test_oracle_sql_mode_is_rejected(void);
 static void test_file_import_policy_is_rejected(void);
@@ -53,6 +54,7 @@ static void assert_gis_sql_function_exec_fails(mylite_db *db, const char *sql);
 static void assert_sformat_sql_function_exec_fails(mylite_db *db, const char *sql);
 static void assert_json_schema_valid_exec_fails(mylite_db *db, const char *sql);
 static void assert_json_table_exec_fails(mylite_db *db, const char *sql);
+static void assert_dynamic_column_exec_fails(mylite_db *db, const char *sql);
 static void assert_xml_sql_function_exec_fails(mylite_db *db, const char *sql);
 static void assert_oracle_sql_mode_exec_fails(mylite_db *db, const char *sql);
 static void assert_file_import_exec_fails(mylite_db *db, const char *sql);
@@ -87,6 +89,7 @@ int main(void) {
     test_sformat_sql_function_is_rejected();
     test_json_schema_valid_sql_function_is_rejected();
     test_json_table_function_is_rejected();
+    test_dynamic_column_functions_are_rejected();
     test_xml_sql_functions_are_rejected();
     test_oracle_sql_mode_is_rejected();
     test_file_import_policy_is_rejected();
@@ -419,6 +422,36 @@ static void test_json_table_function_is_rejected(void) {
         mylite_exec(
             db,
             "SELECT 'JSON_TABLE(' AS quoted_text, JSON_EXTRACT('{\"ok\": true}', '$.ok')",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_dynamic_column_functions_are_rejected(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_dynamic_column_exec_fails(db, "SELECT COLUMN_CREATE('color', 'blue')");
+    assert_dynamic_column_exec_fails(db, "SELECT column_get('', 'color' AS CHAR(16))");
+    assert_dynamic_column_exec_fails(db, "SELECT COLUMN_ADD('', 'size', 'XL')");
+    assert_dynamic_column_exec_fails(db, "SELECT COLUMN_DELETE('', 'size')");
+    assert_dynamic_column_exec_fails(db, "SELECT COLUMN_CHECK('')");
+    assert_dynamic_column_exec_fails(db, "SELECT COLUMN_EXISTS('', 'size')");
+    assert_dynamic_column_exec_fails(db, "SELECT COLUMN_JSON('')");
+    assert_dynamic_column_exec_fails(db, "SELECT COLUMN_LIST('')");
+    assert_dynamic_column_exec_fails(db, "/*! SELECT COLUMN_CREATE('commented', 'value') */");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT 'COLUMN_CREATE(' AS quoted_text, JSON_VALID('{\"ok\": true}')",
             NULL,
             NULL,
             NULL
@@ -958,6 +991,18 @@ static void assert_json_table_exec_fails(mylite_db *db, const char *sql) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "JSON_TABLE") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_dynamic_column_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "dynamic column") != NULL);
     mylite_free(errmsg);
 }
 

@@ -602,6 +602,12 @@ static void test_prepare_diagnostics(void) {
         "SELECT * FROM json_table(?, '$[*]' COLUMNS (value INT PATH '$')) AS jt",
         "JSON_TABLE"
     );
+    assert_prepare_fails_with_message(db, "SELECT COLUMN_CREATE('color', ?)", "dynamic column");
+    assert_prepare_fails_with_message(
+        db,
+        "SELECT column_get(?, 'color' AS CHAR(16))",
+        "dynamic column"
+    );
 
     stmt = prepare_statement(db, "SELECT JSON_VALID(?)");
     assert(

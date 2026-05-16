@@ -448,6 +448,7 @@ the embedded library model:
 - MariaDB-specific `SFORMAT()` SQL function,
 - `JSON_SCHEMA_VALID()` SQL function,
 - `JSON_TABLE()` table function,
+- MariaDB dynamic-column SQL functions,
 - event scheduler,
 - performance schema.
 
@@ -457,16 +458,16 @@ transaction-control, autocommit-control, SQL locking, named-lock, SQL `HELP`,
 `SELECT ... PROCEDURE`, SQL file-I/O, table-maintenance/key-cache
 administration, server utility function, Oracle SQL mode, XML SQL function, GIS
 SQL function, SFORMAT SQL function, JSON schema validation function, JSON table
-function, partition, and foreign-key DDL commands are rejected before MariaDB
-execution with stable MyLite errors. The default
+function, dynamic column function, partition, and foreign-key DDL commands are
+rejected before MariaDB execution with stable MyLite errors. The default
 embedded profile also links fail-closed stubs for stored-program runtime
 symbols that retained MariaDB parser or cleanup paths still reference, omits
 dynamic UDF lookup/execution bodies, omits unsupported binlog event-root and
 MyISAM maintenance source objects, omits the JSON schema-validation source
-object, replaces JSON table-function execution with a fail-closed stub, and
-compiles embedded binlog transaction and event-write entry points to no-ops.
-Other unsupported surfaces should fail with stable MyLite result codes and
-MariaDB diagnostics where possible.
+object, replaces JSON table-function execution and dynamic-column packed BLOB
+runtime with fail-closed stubs, and compiles embedded binlog transaction and
+event-write entry points to no-ops. Other unsupported surfaces should fail with
+stable MyLite result codes and MariaDB diagnostics where possible.
 
 ## Compatibility Adapter
 
