@@ -592,6 +592,16 @@ static void test_prepare_diagnostics(void) {
         "SELECT json_schema_valid('{\"type\":\"number\"}', ?)",
         "JSON_SCHEMA_VALID"
     );
+    assert_prepare_fails_with_message(
+        db,
+        "SELECT * FROM JSON_TABLE('[1,2]', '$[*]' COLUMNS (value INT PATH '$')) AS jt",
+        "JSON_TABLE"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "SELECT * FROM json_table(?, '$[*]' COLUMNS (value INT PATH '$')) AS jt",
+        "JSON_TABLE"
+    );
 
     stmt = prepare_statement(db, "SELECT JSON_VALID(?)");
     assert(

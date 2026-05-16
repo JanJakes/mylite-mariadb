@@ -39,6 +39,7 @@ MYLITE_WITH_XML_SQL_FUNCTIONS=OFF
 MYLITE_WITH_GIS_SQL_FUNCTIONS=OFF
 MYLITE_WITH_SFORMAT_SQL_FUNCTION=OFF
 MYLITE_WITH_JSON_SCHEMA_VALID=OFF
+MYLITE_WITH_JSON_TABLE=OFF
 MYLITE_WITH_HELP_COMMAND=OFF
 MYLITE_WITH_PROCEDURE_ANALYSE=OFF
 MYLITE_WITH_SELECT_PROCEDURE_RUNTIME=OFF
@@ -57,20 +58,21 @@ PLUGIN_THREAD_POOL_INFO=NO
 import intentionally omits `wsrep-lib` and `storage/maria/libmarias3`.
 Dynamic plugins, LOAD file import, SQL host-file I/O, server utility SQL
 functions, Oracle SQL mode parsing, XML SQL functions, GIS SQL functions, the
-MariaDB-specific `SFORMAT()` SQL function, JSON schema validation, SQL `HELP`,
-`PROCEDURE ANALYSE()`, generic SELECT procedure runtime, stored-program
-runtime, dynamic UDF lookup/execution, binary-log transaction, event-write, and
-event-root core, native MyISAM table-maintenance and key-cache administration,
-socket authentication, feedback, Performance Schema, and thread-pool info are
+MariaDB-specific `SFORMAT()` SQL function, JSON schema validation, the
+`JSON_TABLE` table-function runtime, SQL `HELP`, `PROCEDURE ANALYSE()`, generic
+SELECT procedure runtime, stored-program runtime, dynamic UDF lookup/execution,
+binary-log transaction, event-write, and event-root core, native MyISAM
+table-maintenance and key-cache administration, socket authentication,
+feedback, Performance Schema, and thread-pool info are
 disabled
 because they are server-administration, blocking utility, Oracle
 compatibility, legacy XML helper, spatial-function, MariaDB-specific
-formatting, schema validation, help-table lookup, result-set analysis, SELECT
-result-set extension hook, unsupported non-table object, dynamic extension,
-server topology, engine-file maintenance, or server/client file surfaces, not
-core MyLite embedded runtime behavior. The retained `sql_embedded` C++ sources
-are also compiled with `-fno-exceptions`; the flag is not applied to
-first-party MyLite code or to all MariaDB targets.
+formatting, schema validation, table-function projection, help-table lookup,
+result-set analysis, SELECT result-set extension hook, unsupported non-table
+object, dynamic extension, server topology, engine-file maintenance, or
+server/client file surfaces, not core MyLite embedded runtime behavior. The
+retained `sql_embedded` C++ sources are also compiled with `-fno-exceptions`;
+the flag is not applied to first-party MyLite code or to all MariaDB targets.
 
 On macOS, the profile also sets `CMAKE_C_FLAGS` and `CMAKE_CXX_FLAGS` to
 `-Wno-nullability-completeness`. That keeps MariaDB's warning-as-error profile
@@ -90,7 +92,7 @@ current MyLite embedded profile patches applied.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 27,414,744 bytes / 26.14 MiB |
+| Archive size | 27,370,344 bytes / 26.10 MiB |
 | Archive members | 675 |
 
 The build found system OpenSSL 3.6.2, zlib, Curses, CURL, GSSAPI, BZip2, LZ4,
@@ -121,6 +123,12 @@ The JSON schema validation trim reduced the default archive by a further
 `json_schema.cc`, rejects direct and prepared `JSON_SCHEMA_VALID()` calls before
 MariaDB execution, and retains `json_schema_helper.cc` because ordinary JSON
 functions use its hash-key helper.
+
+The JSON table-function trim reduced the default archive by a further 44,400
+bytes with the same member count. The disabled profile now replaces
+`json_table.cc` with a MyLite disabled stub, rejects direct and prepared
+`JSON_TABLE(...)` calls before MariaDB execution, and leaves ordinary JSON
+scalar/path helpers available.
 
 ## Enabled Surface
 
@@ -161,6 +169,7 @@ The profile explicitly disables:
   `ST_Contains()`, `PointFromText()`, `Point()`, and `X()`
 - MariaDB-specific `SFORMAT()` SQL function
 - `JSON_SCHEMA_VALID()` SQL function and schema-validator keyword runtime
+- `JSON_TABLE()` table-function runtime
 - SQL `HELP` command help-table implementation
 - `PROCEDURE ANALYSE()` result-set analysis implementation
 - generic SELECT procedure runtime
@@ -202,11 +211,11 @@ Measured on 2026-05-16 with the same host and toolchain as the default profile:
 | Field | Value |
 | --- | --- |
 | Archive | `build/mariadb-mylite-storage-smoke/libmysqld/libmariadbd.a` |
-| Archive size | 27,595,328 bytes / 26.32 MiB |
+| Archive size | 27,550,928 bytes / 26.27 MiB |
 | Archive members | 678 |
 
-This is 104,760 bytes smaller than the previous MyISAM-maintenance-trim
-storage-smoke archive and removes one archive member.
+This is 44,400 bytes smaller than the previous JSON-schema-validation-trim
+storage-smoke archive with the same archive member count.
 
 This smoke path now covers static plugin registration, current routed schema
 namespaces and DDL/DML, BLACKHOLE row-discard routing, MEMORY/HEAP volatile-row
@@ -231,19 +240,19 @@ outputs:
 
 | Artifact | Size | Stripped Size | Members | Global Symbols |
 | --- | ---: | ---: | ---: | ---: |
-| MariaDB embedded archive | 27,414,744 bytes / 26.14 MiB | n/a | 675 | n/a |
-| MariaDB storage-smoke archive | 27,595,328 bytes / 26.32 MiB | n/a | 678 | n/a |
-| Embedded open-close smoke | 17,457,408 bytes / 16.65 MiB | 15,790,960 bytes / 15.06 MiB | n/a | 15,421 |
-| Embedded exec smoke | 17,492,088 bytes / 16.68 MiB | 15,823,896 bytes / 15.09 MiB | n/a | 15,421 |
-| Embedded statement smoke | 17,490,208 bytes / 16.68 MiB | 15,823,760 bytes / 15.09 MiB | n/a | 15,421 |
-| Embedded warning smoke | 17,457,040 bytes / 16.65 MiB | 15,790,736 bytes / 15.06 MiB | n/a | 15,421 |
-| Embedded comparison smoke | 17,563,776 bytes / 16.75 MiB | 15,841,520 bytes / 15.11 MiB | n/a | 15,423 |
-| Storage-smoke open-close smoke | 17,552,576 bytes / 16.74 MiB | 15,857,776 bytes / 15.12 MiB | n/a | 15,421 |
-| Storage-smoke exec smoke | 17,570,712 bytes / 16.76 MiB | 15,874,200 bytes / 15.14 MiB | n/a | 15,421 |
-| Storage-smoke statement smoke | 17,568,832 bytes / 16.75 MiB | 15,874,080 bytes / 15.14 MiB | n/a | 15,421 |
-| Storage-smoke warning smoke | 17,552,176 bytes / 16.74 MiB | 15,857,568 bytes / 15.12 MiB | n/a | 15,421 |
-| Storage-smoke comparison smoke | 17,637,888 bytes / 16.82 MiB | 15,891,712 bytes / 15.16 MiB | n/a | 15,423 |
-| Storage-engine smoke | 17,804,752 bytes / 16.98 MiB | 16,105,696 bytes / 15.36 MiB | n/a | 15,421 |
+| MariaDB embedded archive | 27,370,344 bytes / 26.10 MiB | n/a | 675 | n/a |
+| MariaDB storage-smoke archive | 27,550,928 bytes / 26.27 MiB | n/a | 678 | n/a |
+| Embedded open-close smoke | 17,438,288 bytes / 16.63 MiB | 15,772,912 bytes / 15.04 MiB | n/a | 15,408 |
+| Embedded exec smoke | 17,473,064 bytes / 16.66 MiB | 15,805,880 bytes / 15.07 MiB | n/a | 15,408 |
+| Embedded statement smoke | 17,471,104 bytes / 16.66 MiB | 15,805,744 bytes / 15.07 MiB | n/a | 15,408 |
+| Embedded warning smoke | 17,454,448 bytes / 16.65 MiB | 15,789,232 bytes / 15.06 MiB | n/a | 15,408 |
+| Embedded comparison smoke | 17,561,184 bytes / 16.75 MiB | 15,840,048 bytes / 15.11 MiB | n/a | 15,410 |
+| Storage-smoke open-close smoke | 17,533,424 bytes / 16.72 MiB | 15,839,776 bytes / 15.11 MiB | n/a | 15,408 |
+| Storage-smoke exec smoke | 17,568,168 bytes / 16.75 MiB | 15,872,712 bytes / 15.14 MiB | n/a | 15,408 |
+| Storage-smoke statement smoke | 17,566,240 bytes / 16.75 MiB | 15,872,592 bytes / 15.14 MiB | n/a | 15,408 |
+| Storage-smoke warning smoke | 17,533,056 bytes / 16.72 MiB | 15,839,568 bytes / 15.11 MiB | n/a | 15,408 |
+| Storage-smoke comparison smoke | 17,635,296 bytes / 16.82 MiB | 15,890,240 bytes / 15.15 MiB | n/a | 15,410 |
+| Storage-engine smoke | 17,802,112 bytes / 16.98 MiB | 16,104,224 bytes / 15.36 MiB | n/a | 15,408 |
 
 ## Offline Build Caveat
 

@@ -146,6 +146,13 @@ ELSE()
   SET(MYLITE_JSON_SCHEMA_SOURCE)
 ENDIF()
 
+OPTION(MYLITE_WITH_JSON_TABLE "Build JSON_TABLE table function runtime" ON)
+IF(MYLITE_WITH_JSON_TABLE)
+  SET(MYLITE_JSON_TABLE_SOURCE json_table.cc)
+ELSE()
+  SET(MYLITE_JSON_TABLE_SOURCE mylite_json_table_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_MYISAM_MAINTENANCE "Build MyISAM table maintenance support" ON)
 IF(MYLITE_WITH_MYISAM_MAINTENANCE)
   ADD_DEFINITIONS(-DMYLITE_WITH_MYISAM_MAINTENANCE=1)
@@ -255,7 +262,7 @@ SET (SQL_SOURCE
                optimizer_costs.h optimizer_defaults.h
                opt_trace.cc
                table_cache.cc encryption.cc temporary_tables.cc
-               json_table.cc
+               ${MYLITE_JSON_TABLE_SOURCE}
                proxy_protocol.cc backup.cc xa.cc
                socketpair.c socketpair.h
                opt_vcol_substitution.h

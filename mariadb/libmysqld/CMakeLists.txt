@@ -112,6 +112,13 @@ ELSE()
   SET(MYLITE_JSON_SCHEMA_SOURCE)
 ENDIF()
 
+OPTION(MYLITE_WITH_JSON_TABLE "Build JSON_TABLE table function runtime" ON)
+IF(MYLITE_WITH_JSON_TABLE)
+  SET(MYLITE_JSON_TABLE_SOURCE ../sql/json_table.cc)
+ELSE()
+  SET(MYLITE_JSON_TABLE_SOURCE ../sql/mylite_json_table_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_HELP_COMMAND "Build SQL HELP command" ON)
 IF(MYLITE_WITH_HELP_COMMAND)
   SET(MYLITE_HELP_COMMAND_SOURCE ../sql/sql_help.cc)
@@ -263,7 +270,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/item_vers.cc
            ../sql/opt_trace.cc
            ../sql/xa.cc
-           ../sql/json_table.cc
+           ${MYLITE_JSON_TABLE_SOURCE}
            ../sql/opt_histogram_json.cc
            ../sql/sp_instr.cc
            ${MYLITE_ORACLE_PARSER_SOURCE}

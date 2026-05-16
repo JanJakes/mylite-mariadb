@@ -65,6 +65,9 @@ set(MYLITE_WITH_SFORMAT_SQL_FUNCTION OFF CACHE BOOL "Omit SFORMAT SQL function" 
 # MyLite rejects JSON_SCHEMA_VALID() before MariaDB execution.
 set(MYLITE_WITH_JSON_SCHEMA_VALID OFF CACHE BOOL "Omit JSON schema validation SQL function" FORCE)
 
+# MyLite rejects JSON_TABLE() before MariaDB execution.
+set(MYLITE_WITH_JSON_TABLE OFF CACHE BOOL "Omit JSON_TABLE table function runtime" FORCE)
+
 # MyLite rejects HELP before MariaDB execution.
 set(MYLITE_WITH_HELP_COMMAND OFF CACHE BOOL "Omit SQL HELP command" FORCE)
 
