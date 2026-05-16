@@ -244,6 +244,21 @@ static void test_server_surfaces_are_disabled(void) {
     assert_exec_fails(db, "BINLOG 'AAAA'");
     assert_exec_fails(db, "CHANGE MASTER TO MASTER_HOST='example.test'");
     assert_exec_fails(db, "SHOW MASTER STATUS");
+    assert_exec_fails(
+        db,
+        "CREATE SERVER mylite_probe_server "
+        "FOREIGN DATA WRAPPER mysql "
+        "OPTIONS (USER 'remote', HOST 'localhost', DATABASE 'app')"
+    );
+    assert_exec_fails(
+        db,
+        "CREATE OR REPLACE SERVER mylite_probe_server "
+        "FOREIGN DATA WRAPPER mysql "
+        "OPTIONS (USER 'remote', HOST 'localhost', DATABASE 'app')"
+    );
+    assert_exec_fails(db, "ALTER SERVER mylite_probe_server OPTIONS (HOST '127.0.0.1')");
+    assert_exec_fails(db, "DROP SERVER IF EXISTS mylite_probe_server");
+    assert_exec_fails(db, "SHOW CREATE SERVER mylite_probe_server");
 
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);
@@ -976,7 +991,11 @@ static void assert_variable_value_or_missing(mylite_db *db, const char *name, co
 static void assert_exec_fails(mylite_db *db, const char *sql) {
     char *errmsg = NULL;
 
-    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    const int rc = mylite_exec(db, sql, NULL, NULL, &errmsg);
+    if (rc != MYLITE_ERROR) {
+        fprintf(stderr, "expected failure for SQL: %s\n", sql);
+    }
+    assert(rc == MYLITE_ERROR);
     assert(mylite_errcode(db) == MYLITE_ERROR);
     assert(mylite_mariadb_errno(db) == 0U);
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);

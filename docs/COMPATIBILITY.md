@@ -46,6 +46,7 @@ SQL mode, XML SQL function, GIS SQL function, SFORMAT SQL function, JSON schema
 validation function, JSON table function, dynamic column function, SQL HANDLER
 command, SQL sequence value surface, virtual sequence storage engine, SQL HELP command, SELECT PROCEDURE,
 table-maintenance/key-cache administration, user-statistics,
+foreign-server metadata,
 stored-program runtime stubbing,
 dynamic UDF runtime, and non-table-object policies, and representative
 `SHOW CREATE TABLE` round-trip export/import.
@@ -145,6 +146,7 @@ application-schema suites remain planned.
 | Dynamic plugin installation | ➖&nbsp;Out&nbsp;of&nbsp;scope | Dynamic plugin support is compiled out of the default embedded profile, core startup uses a MyLite-owned plugin directory, and representative plugin-install SQL is rejected |
 | Performance schema | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server instrumentation tables are disabled or compiled out in the default embedded runtime profile |
 | User statistics | ➖&nbsp;Out&nbsp;of&nbsp;scope | MariaDB's user-statistics information-schema plugin is a server-observability surface, not core embedded file-owned behavior; the default embedded profile omits `userstat.cc`, direct/prepared `SHOW *_STATISTICS`, `FLUSH *_STATISTICS`, `userstat` system-variable assignment, and `INFORMATION_SCHEMA` user-statistics table access are rejected before MariaDB execution, and ordinary SQL user variables such as `@userstat` remain available |
+| Foreign-server metadata | ➖&nbsp;Out&nbsp;of&nbsp;scope | MariaDB's `mysql.servers` cache is global remote-engine metadata, not MyLite file-owned application table state; the default embedded profile replaces `sql_servers.cc` with `mylite_sql_servers_disabled.cc`, embedded startup does not read `mysql.servers`, and direct/prepared `CREATE SERVER`, `CREATE OR REPLACE SERVER`, `ALTER SERVER`, `DROP SERVER`, and `SHOW CREATE SERVER` are rejected before MariaDB execution |
 
 ## Rows, Indexes, And Constraints
 

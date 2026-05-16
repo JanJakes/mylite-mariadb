@@ -50,6 +50,7 @@ MYLITE_WITH_STORED_PROGRAM_RUNTIME=OFF
 MYLITE_WITH_UDF_RUNTIME=OFF
 MYLITE_WITH_BINLOG_CORE=OFF
 MYLITE_WITH_MYISAM_MAINTENANCE=OFF
+MYLITE_WITH_FOREIGN_SERVER_METADATA=OFF
 MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS=OFF
 PLUGIN_AUTH_SOCKET=NO
 PLUGIN_FEEDBACK=NO
@@ -70,8 +71,8 @@ engine, SQL `HELP`,
 `PROCEDURE ANALYSE()`, generic SELECT procedure runtime, stored-program runtime,
 dynamic UDF lookup/execution, binary-log transaction, event-write, and
 event-root core, native MyISAM table-maintenance and key-cache administration,
-socket authentication, feedback, Performance Schema, thread-pool info, and the
-user-statistics plugin are disabled
+foreign-server metadata cache, socket authentication, feedback, Performance
+Schema, thread-pool info, and the user-statistics plugin are disabled
 because they are server-administration, blocking utility, Oracle
 compatibility, legacy XML helper, spatial-function, MariaDB-specific
 formatting, schema validation, table-function projection, packed semi-structured
@@ -79,8 +80,9 @@ BLOB handling, direct storage-engine cursor, unsupported sequence object/value
 state, help-table lookup, result-set analysis, SELECT result-set extension hook,
 catalog-bypassing generated virtual tables, unsupported non-table objects,
 dynamic extension, server topology, engine-file maintenance, or server/client
-file and server-observability surfaces, not core MyLite embedded runtime
-behavior. The retained `sql_embedded` C++ sources are also compiled with
+file, foreign-server metadata, and server-observability surfaces, not core
+MyLite embedded runtime behavior. The retained `sql_embedded` C++ sources are
+also compiled with
 `-fno-exceptions`; the flag is not applied to first-party MyLite code or to all
 MariaDB targets.
 
@@ -102,7 +104,7 @@ current MyLite embedded profile patches applied.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 27,160,192 bytes / 25.90 MiB |
+| Archive size | 27,143,408 bytes / 25.89 MiB |
 | Archive members | 671 |
 
 The build found system OpenSSL 3.6.2, zlib, Curses, CURL, GSSAPI, BZip2, LZ4,
@@ -170,6 +172,15 @@ user-statistics `SHOW`, `FLUSH`, `userstat` system-variable assignment, and
 `INFORMATION_SCHEMA` statistics-table surfaces before MariaDB execution, and
 leaves ordinary SQL user variables available.
 
+The foreign-server metadata trim reduced the default archive by a further
+16,784 bytes with the same member count. The disabled profile now sets
+`MYLITE_WITH_FOREIGN_SERVER_METADATA=OFF`, replaces `sql_servers.cc` with
+`mylite_sql_servers_disabled.cc`, prevents embedded startup from reading
+`mysql.servers`, rejects direct and prepared `CREATE SERVER`,
+`CREATE OR REPLACE SERVER`, `ALTER SERVER`, `DROP SERVER`, and
+`SHOW CREATE SERVER` before MariaDB execution, and leaves ordinary supported
+engine routing unchanged.
+
 ## Enabled Surface
 
 The profile keeps the MariaDB components needed by the current embedded
@@ -223,6 +234,7 @@ The profile explicitly disables:
   no-binlog profile
 - native MyISAM table maintenance, repair, key-cache assignment, and key
   preload administration
+- `mysql.servers` foreign-server metadata cache
 - C++ exception support in retained `sql_embedded` C++ compilation
 - socket authentication
 - feedback plugin
@@ -255,11 +267,11 @@ Measured on 2026-05-16 with the same host and toolchain as the default profile:
 | Field | Value |
 | --- | --- |
 | Archive | `build/mariadb-mylite-storage-smoke/libmysqld/libmariadbd.a` |
-| Archive size | 27,340,776 bytes / 26.07 MiB |
+| Archive size | 27,323,992 bytes / 26.06 MiB |
 | Archive members | 674 |
 
-This is 19,848 bytes smaller than the previous virtual sequence storage-engine
-trim storage-smoke archive and removes one archive member.
+This is 16,784 bytes smaller than the previous user-statistics plugin trim
+storage-smoke archive with the same member count.
 
 This smoke path now covers static plugin registration, current routed schema
 namespaces and DDL/DML, BLACKHOLE row-discard routing, MEMORY/HEAP volatile-row

@@ -162,7 +162,8 @@ storage engine, so magic generated tables such as `seq_1_to_10` are unavailable
 outside ordinary catalog-backed user tables. MariaDB user-statistics
 information-schema surfaces and `userstat` system-variable assignments are
 rejected as server observability, while ordinary SQL user variables remain
-available.
+available. MariaDB foreign-server metadata statements such as `CREATE SERVER`
+and `SHOW CREATE SERVER` are rejected as remote-engine/server metadata.
 
 ## Prepared Statements
 

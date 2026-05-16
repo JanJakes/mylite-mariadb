@@ -2102,6 +2102,7 @@ bool is_server_surface_sql(std::string_view sql) {
     const std::string_view first = pop_sql_token(rest);
     const std::string_view second = pop_sql_token(rest);
     const std::string_view third = pop_sql_token(rest);
+    const std::string_view fourth = pop_sql_token(rest);
 
     if (sql_token_equals(first, "BINLOG") || sql_token_equals(first, "GRANT") ||
         sql_token_equals(first, "REVOKE")) {
@@ -2109,6 +2110,9 @@ bool is_server_surface_sql(std::string_view sql) {
     }
 
     if (sql_token_equals(first, "CREATE")) {
+        if (sql_token_equals(second, "OR") && sql_token_equals(third, "REPLACE")) {
+            return sql_token_equals(fourth, "SERVER");
+        }
         return sql_token_equals(second, "USER") || sql_token_equals(second, "ROLE") ||
                sql_token_equals(second, "EVENT") || sql_token_equals(second, "SERVER");
     }
@@ -2132,6 +2136,12 @@ bool is_server_surface_sql(std::string_view sql) {
                (sql_token_equals(second, "GLOBAL") && sql_token_equals(third, "EVENT_SCHEDULER"));
     }
 
+    if (sql_token_equals(first, "SHOW")) {
+        return (sql_token_equals(second, "CREATE") && sql_token_equals(third, "SERVER")) ||
+               sql_token_equals(second, "MASTER") || sql_token_equals(second, "SLAVE") ||
+               sql_token_equals(second, "REPLICA");
+    }
+
     if (sql_token_equals(first, "INSTALL") || sql_token_equals(first, "UNINSTALL")) {
         return sql_token_equals(second, "PLUGIN") || sql_token_equals(second, "SONAME");
     }
@@ -2146,9 +2156,7 @@ bool is_server_surface_sql(std::string_view sql) {
                sql_token_equals(second, "REPLICA");
     }
 
-    return sql_token_equals(first, "SHOW") &&
-           (sql_token_equals(second, "MASTER") || sql_token_equals(second, "SLAVE") ||
-            sql_token_equals(second, "REPLICA"));
+    return false;
 }
 
 bool is_table_maintenance_sql(std::string_view sql) {

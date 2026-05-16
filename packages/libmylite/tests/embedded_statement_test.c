@@ -390,6 +390,36 @@ static void test_prepare_diagnostics(void) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(strstr(mylite_errmsg(db), "server-oriented") != NULL);
 
+    assert_prepare_fails_with_message(
+        db,
+        "CREATE SERVER mylite_probe_server "
+        "FOREIGN DATA WRAPPER mysql "
+        "OPTIONS (USER 'remote', HOST 'localhost', DATABASE 'app')",
+        "server-oriented"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "CREATE OR REPLACE SERVER mylite_probe_server "
+        "FOREIGN DATA WRAPPER mysql "
+        "OPTIONS (USER 'remote', HOST 'localhost', DATABASE 'app')",
+        "server-oriented"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "ALTER SERVER mylite_probe_server OPTIONS (HOST '127.0.0.1')",
+        "server-oriented"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "DROP SERVER IF EXISTS mylite_probe_server",
+        "server-oriented"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "SHOW CREATE SERVER mylite_probe_server",
+        "server-oriented"
+    );
+
     assert_prepare_fails_with_message(db, "CHECK TABLE maintenance_probe", "table-maintenance");
     assert_prepare_fails_with_message(db, "ANALYZE TABLE maintenance_probe", "table-maintenance");
     assert_prepare_fails_with_message(

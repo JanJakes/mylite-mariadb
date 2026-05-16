@@ -100,5 +100,8 @@ set(MYLITE_WITH_BINLOG_CORE OFF CACHE BOOL "Omit binary log transaction and even
 # MyLite rejects server-style MyISAM table maintenance and key-cache admin SQL.
 set(MYLITE_WITH_MYISAM_MAINTENANCE OFF CACHE BOOL "Omit MyISAM maintenance admin runtime" FORCE)
 
+# MyLite rejects foreign-server metadata SQL and does not use mysql.servers.
+set(MYLITE_WITH_FOREIGN_SERVER_METADATA OFF CACHE BOOL "Omit mysql.servers metadata cache" FORCE)
+
 # MyLite's embedded SQL profile has no retained C++ exception users.
 set(MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS OFF CACHE BOOL "Enable embedded SQL C++ exceptions" FORCE)

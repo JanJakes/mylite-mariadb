@@ -176,6 +176,13 @@ ELSE()
   ADD_DEFINITIONS(-DMYLITE_WITH_MYISAM_MAINTENANCE=0)
 ENDIF()
 
+OPTION(MYLITE_WITH_FOREIGN_SERVER_METADATA "Build mysql.servers foreign-server metadata cache" ON)
+IF(MYLITE_WITH_FOREIGN_SERVER_METADATA)
+  SET(MYLITE_FOREIGN_SERVER_METADATA_SOURCE ../sql/sql_servers.cc)
+ELSE()
+  SET(MYLITE_FOREIGN_SERVER_METADATA_SOURCE ../sql/mylite_sql_servers_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS "Compile embedded SQL with C++ exceptions" ON)
 
 SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc 
@@ -229,7 +236,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/debug_sync.cc ../sql/debug.cc
            ../sql/opt_table_elimination.cc
            ../sql/sql_prepare.cc ../sql/sql_rename.cc ../sql/sql_repl.cc 
-           ../sql/sql_select.cc ../sql/sql_servers.cc
+           ../sql/sql_select.cc ${MYLITE_FOREIGN_SERVER_METADATA_SOURCE}
            ../sql/group_by_handler.cc ../sql/derived_handler.cc
            ../sql/select_handler.cc
            ../sql/sql_show.cc ../sql/sql_state.c 
