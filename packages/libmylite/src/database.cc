@@ -556,6 +556,7 @@ int sync_schema_catalog(mylite_db &database);
 bool is_schema_catalog_sql(std::string_view sql);
 bool is_storage_outer_checkpoint_sql(std::string_view sql);
 bool is_row_dml_checkpoint_sql(std::string_view sql);
+bool is_temporary_table_ddl_sql(std::string_view sql);
 bool row_dml_targets_tracked_temporary_table(const mylite_db &database, std::string_view sql);
 void apply_temporary_table_lifecycle(mylite_db &database, std::string_view sql);
 bool create_temporary_table_name(std::string_view sql, std::string *out_name);
@@ -1480,8 +1481,11 @@ int exec_impl(
         set_error(*database, MYLITE_ERROR, "unsupported read-only transaction write SQL surface");
         return copy_error_message(*database, errmsg);
     }
+    const bool temporary_table_ddl = is_temporary_table_ddl_sql(std::string_view(sql));
+    const bool storage_outer_checkpoint_sql =
+        is_storage_outer_checkpoint_sql(std::string_view(sql)) && !temporary_table_ddl;
     if (database->transaction_active && transaction_control == TransactionControlKind::None &&
-        is_storage_outer_checkpoint_sql(std::string_view(sql))) {
+        storage_outer_checkpoint_sql) {
         set_error(*database, MYLITE_ERROR, "unsupported transactional DDL SQL surface");
         return copy_error_message(*database, errmsg);
     }
@@ -1495,7 +1499,7 @@ int exec_impl(
     StorageStatementCheckpoint checkpoint;
     const bool checkpoint_enabled =
         database->filename != ":memory:" &&
-        (is_storage_outer_checkpoint_sql(std::string_view(sql)) ||
+        (storage_outer_checkpoint_sql ||
          (database->transaction_active && is_row_dml_checkpoint_sql(std::string_view(sql))));
     int checkpoint_result = checkpoint.begin(*database, checkpoint_enabled);
     if (checkpoint_result != MYLITE_OK) {
@@ -1664,7 +1668,9 @@ int prepare_impl(
             *out_stmt = statement.release();
             return MYLITE_OK;
         }
-        const bool storage_outer_checkpoint_sql = is_storage_outer_checkpoint_sql(sql_view);
+        const bool temporary_table_ddl = is_temporary_table_ddl_sql(sql_view);
+        const bool storage_outer_checkpoint_sql =
+            is_storage_outer_checkpoint_sql(sql_view) && !temporary_table_ddl;
         const bool row_dml_checkpoint_sql = is_row_dml_checkpoint_sql(sql_view);
         statement->writes_storage = storage_outer_checkpoint_sql || row_dml_checkpoint_sql;
         statement->uses_storage_outer_checkpoint = storage_outer_checkpoint_sql;
@@ -5414,6 +5420,24 @@ bool is_row_dml_checkpoint_sql(std::string_view sql) {
 
     return sql_token_equals(first, "INSERT") || sql_token_equals(first, "UPDATE") ||
            sql_token_equals(first, "DELETE") || sql_token_equals(first, "REPLACE");
+}
+
+bool is_temporary_table_ddl_sql(std::string_view sql) {
+    std::string_view rest = skip_sql_leading_noise(sql);
+    const std::string_view first = pop_sql_token(rest);
+
+    if (sql_token_equals(first, "CREATE")) {
+        if (skip_optional_sql_token(rest, "OR") && !skip_optional_sql_token(rest, "REPLACE")) {
+            return false;
+        }
+        return skip_optional_sql_token(rest, "TEMPORARY") && skip_optional_sql_token(rest, "TABLE");
+    }
+
+    if (sql_token_equals(first, "DROP")) {
+        return skip_optional_sql_token(rest, "TEMPORARY") && skip_optional_sql_token(rest, "TABLE");
+    }
+
+    return false;
 }
 
 bool row_dml_targets_tracked_temporary_table(const mylite_db &database, std::string_view sql) {

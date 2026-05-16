@@ -66,6 +66,8 @@ static int mylite_schema_hook_list_tables(const char *schema_name,
                                           void *ctx);
 static int mylite_schema_hook_add_table(void *ctx, const char *,
                                         const char *table_name);
+static bool mylite_is_user_temporary_table_share(const TABLE_SHARE *share);
+static bool mylite_current_command_creates_user_temporary_table();
 static int mylite_requested_engine_name(const char *primary_file,
                                         HA_CREATE_INFO *create_info,
                                         char *out_name, size_t out_name_size);
@@ -554,6 +556,19 @@ static int mylite_schema_hook_add_table(void *ctx, const char *,
   return table_list->callback(table_list->ctx, table_name);
 }
 
+static bool mylite_is_user_temporary_table_share(const TABLE_SHARE *share)
+{
+  return share && (share->tmp_table == TRANSACTIONAL_TMP_TABLE ||
+                   share->tmp_table == NON_TRANSACTIONAL_TMP_TABLE);
+}
+
+static bool mylite_current_command_creates_user_temporary_table()
+{
+  THD *thd= current_thd;
+  return thd && thd->lex && thd->lex->sql_command == SQLCOM_CREATE_TABLE &&
+         thd->lex->create_info.tmp_table();
+}
+
 static int mylite_storage_to_handler_error(mylite_storage_result result)
 {
   switch (result) {
@@ -1011,18 +1026,37 @@ int ha_mylite::open(const char *name, int, uint)
   if (path_error)
     DBUG_RETURN(path_error);
 
+  const bool user_temporary_table=
+    mylite_is_user_temporary_table_share(table_share) ||
+    (table_share && table_share->tmp_table == INTERNAL_TMP_TABLE &&
+     mylite_current_command_creates_user_temporary_table());
+  if (user_temporary_table &&
+      (mylite_copy_string(table_share->db.str, storage_schema_name,
+                          sizeof(storage_schema_name)) ||
+       mylite_copy_string(table_share->table_name.str, storage_table_name,
+                          sizeof(storage_table_name))))
+    DBUG_RETURN(HA_ERR_UNSUPPORTED);
+
   const char *primary_file= mylite_primary_file_path();
   if (primary_file)
   {
-    const int engine_name_error=
-      mylite_display_engine_name(primary_file, storage_schema_name,
-                                 storage_table_name, display_engine_name,
-                                 sizeof(display_engine_name));
-    if (engine_name_error)
-      DBUG_RETURN(engine_name_error);
-    display_engine_name_lex.length= strlen(display_engine_name);
-    discard_rows= mylite_discards_rows_engine_request(display_engine_name);
-    volatile_rows= mylite_uses_volatile_rows_engine_request(display_engine_name);
+    if (user_temporary_table)
+    {
+      volatile_rows= true;
+      display_engine_name_lex.length= strlen(display_engine_name);
+    }
+    else
+    {
+      const int engine_name_error=
+        mylite_display_engine_name(primary_file, storage_schema_name,
+                                   storage_table_name, display_engine_name,
+                                   sizeof(display_engine_name));
+      if (engine_name_error)
+        DBUG_RETURN(engine_name_error);
+      display_engine_name_lex.length= strlen(display_engine_name);
+      discard_rows= mylite_discards_rows_engine_request(display_engine_name);
+      volatile_rows= mylite_uses_volatile_rows_engine_request(display_engine_name);
+    }
   }
 
   if (!(share= get_share()))
@@ -1721,6 +1755,10 @@ int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info
                                               sizeof(table_name));
   if (path_error)
     DBUG_RETURN(path_error);
+  char alias_schema_name[NAME_LEN + 1];
+  char alias_table_name[NAME_LEN + 1];
+  strcpy(alias_schema_name, schema_name);
+  strcpy(alias_table_name, table_name);
 
   THD *thd= current_thd;
   if (thd && thd->lex && thd->lex->sql_command == SQLCOM_ALTER_TABLE)
@@ -1745,47 +1783,67 @@ int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info
     mylite_discards_rows_engine_request(requested_engine_name);
   const bool requested_engine_uses_volatile_rows=
     mylite_uses_volatile_rows_engine_request(requested_engine_name);
+  const bool temporary_table= create_info && create_info->tmp_table();
+  if (temporary_table &&
+      (mylite_copy_string(form->s->db.str, schema_name, sizeof(schema_name)) ||
+       mylite_copy_string(form->s->table_name.str, table_name, sizeof(table_name))))
+    DBUG_RETURN(HA_ERR_UNSUPPORTED);
+  const bool use_volatile_rows=
+    temporary_table || requested_engine_uses_volatile_rows;
   if (requested_engine_uses_volatile_rows && mylite_table_has_blob_fields(form))
     DBUG_RETURN(HA_ERR_UNSUPPORTED);
-  if (requested_engine_discards_rows &&
+  if (!temporary_table && requested_engine_discards_rows &&
       mylite_copy_string(requested_engine_name, display_engine_name,
                          sizeof(display_engine_name)))
     DBUG_RETURN(HA_ERR_UNSUPPORTED);
-  if (requested_engine_uses_volatile_rows &&
+  if (!temporary_table && requested_engine_uses_volatile_rows &&
       mylite_copy_string(requested_engine_name, display_engine_name,
                          sizeof(display_engine_name)))
     DBUG_RETURN(HA_ERR_UNSUPPORTED);
 
-  const uchar *frm= NULL;
-  size_t frm_len= 0;
-  if (form->s->read_frm_image(&frm, &frm_len))
-    DBUG_RETURN(HA_ERR_GENERIC);
+  if (!temporary_table)
+  {
+    const uchar *frm= NULL;
+    size_t frm_len= 0;
+    if (form->s->read_frm_image(&frm, &frm_len))
+      DBUG_RETURN(HA_ERR_GENERIC);
 
-  const mylite_storage_table_definition definition= {
-    sizeof(definition),
-    schema_name,
-    table_name,
-    requested_engine_name,
-    MYLITE_STORAGE_ENGINE_NAME,
-    frm,
-    frm_len
-  };
-  const mylite_storage_result result=
-    mylite_storage_store_table_definition(primary_file, &definition);
-  form->s->free_frm_image(frm);
-  if (result != MYLITE_STORAGE_OK)
-    DBUG_RETURN(mylite_storage_to_handler_error(result));
-  if (requested_engine_discards_rows)
+    const mylite_storage_table_definition definition= {
+      sizeof(definition),
+      schema_name,
+      table_name,
+      requested_engine_name,
+      MYLITE_STORAGE_ENGINE_NAME,
+      frm,
+      frm_len
+    };
+    const mylite_storage_result result=
+      mylite_storage_store_table_definition(primary_file, &definition);
+    form->s->free_frm_image(frm);
+    if (result != MYLITE_STORAGE_OK)
+      DBUG_RETURN(mylite_storage_to_handler_error(result));
+  }
+
+  if (!temporary_table && requested_engine_discards_rows)
   {
     discard_rows= true;
     display_engine_name_lex.length= strlen(display_engine_name);
   }
-  if (requested_engine_uses_volatile_rows)
+  if (use_volatile_rows)
   {
     const mylite_storage_result volatile_result=
       mylite_volatile_create_table(primary_file, schema_name, table_name);
     if (volatile_result != MYLITE_STORAGE_OK)
       DBUG_RETURN(mylite_storage_to_handler_error(volatile_result));
+    if (temporary_table)
+    {
+      const mylite_storage_result alias_result=
+        mylite_volatile_register_table_alias(primary_file, alias_schema_name,
+                                             alias_table_name, schema_name,
+                                             table_name);
+      if (alias_result != MYLITE_STORAGE_OK)
+        DBUG_RETURN(mylite_storage_to_handler_error(alias_result));
+    }
     volatile_rows= true;
     display_engine_name_lex.length= strlen(display_engine_name);
   }
@@ -1793,7 +1851,7 @@ int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info
   if (mylite_auto_increment_field(form) &&
       create_info->auto_increment_value != 0ULL)
   {
-    const mylite_storage_result auto_result= requested_engine_uses_volatile_rows ?
+    const mylite_storage_result auto_result= use_volatile_rows ?
       mylite_volatile_set_auto_increment(primary_file, schema_name, table_name,
                                          create_info->auto_increment_value) :
       mylite_storage_set_auto_increment(primary_file, schema_name, table_name,
@@ -1821,10 +1879,34 @@ int ha_mylite::delete_table(const char *name)
   if (path_error)
     DBUG_RETURN(path_error);
 
-  const mylite_storage_result result=
-    mylite_storage_drop_table(primary_file, schema_name, table_name);
-  if (result != MYLITE_STORAGE_OK)
-    DBUG_RETURN(mylite_storage_to_handler_error(result));
+  const bool user_temporary_table=
+    mylite_is_user_temporary_table_share(table_share);
+  if (user_temporary_table &&
+      (mylite_copy_string(table_share->db.str, schema_name, sizeof(schema_name)) ||
+       mylite_copy_string(table_share->table_name.str, table_name, sizeof(table_name))))
+    DBUG_RETURN(HA_ERR_UNSUPPORTED);
+
+  THD *thd= current_thd;
+  if (user_temporary_table && thd && thd->lex &&
+      (thd->lex->sql_command == SQLCOM_ROLLBACK ||
+       thd->lex->sql_command == SQLCOM_ROLLBACK_TO_SAVEPOINT))
+    DBUG_RETURN(0);
+
+  if (!user_temporary_table)
+  {
+    const mylite_storage_result alias_result=
+      mylite_volatile_drop_table_alias(primary_file, schema_name, table_name);
+    if (alias_result == MYLITE_STORAGE_OK)
+      DBUG_RETURN(0);
+    if (alias_result != MYLITE_STORAGE_NOTFOUND)
+      DBUG_RETURN(mylite_storage_to_handler_error(alias_result));
+
+    const mylite_storage_result result=
+      mylite_storage_drop_table(primary_file, schema_name, table_name);
+    if (result != MYLITE_STORAGE_OK)
+      DBUG_RETURN(mylite_storage_to_handler_error(result));
+  }
+
   const mylite_storage_result volatile_result=
     mylite_volatile_drop_table(primary_file, schema_name, table_name);
   DBUG_RETURN(mylite_storage_to_handler_error(volatile_result));

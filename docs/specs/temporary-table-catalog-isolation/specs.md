@@ -33,10 +33,13 @@ MariaDB base: `mariadb-11.8.6`
   the opened temporary target table in `create_info->table` for temporary
   CTAS, then `select_create::prepare()` removes it temporarily from the THD
   temporary-table list while reading source tables.
-- `mariadb/storage/mylite/ha_mylite.cc:ha_mylite::create()` publishes any
-  supported handler create path through `mylite_storage_store_table_definition`.
-  For temporary-table paths this uses MariaDB's temporary storage identity,
-  not the SQL-visible user table name.
+- `mariadb/storage/mylite/ha_mylite.cc:ha_mylite::create()` originally
+  published any supported handler create path through
+  `mylite_storage_store_table_definition`. The later
+  [Temporary DDL Transactions](../temporary-ddl-transactions/specs.md) slice
+  moves user temporary table rows and indexes to MyLite's process-local
+  volatile store while keeping MariaDB's temporary storage identity hidden from
+  the SQL-visible user catalog.
 
 ## Scope
 
@@ -53,8 +56,7 @@ MariaDB base: `mariadb-11.8.6`
 
 ## Non-Goals
 
-- New storage file-format primitives for a dedicated in-memory temp-table
-  store.
+- Broader temporary-table grammar beyond the covered representative paths.
 - Claiming full temp-table compatibility for all column types, indexes,
   broader `OR REPLACE` variants, `IGNORE` / `REPLACE`, locks, views,
   partitions, or foreign keys.
@@ -73,17 +75,17 @@ temporary-table executor:
    `ha_mylite::create()` through the existing MariaDB create paths.
 3. Treat the handler's temporary storage identity as session-local runtime
    state. The SQL-visible user schema must not gain durable catalog records for
-   the temporary names.
+   the temporary names, and current MyLite temporary rows live in the
+   process-local volatile table store.
 4. Rely on explicit `DROP TEMPORARY TABLE` and MariaDB close cleanup to remove
    any live temporary storage-identity records through `ha_mylite::delete_table`.
 5. Let MariaDB temporary-table name resolution shadow same-named durable base
    tables while the temporary table exists.
 6. Keep close/reopen discovery limited to durable base tables.
 
-This is intentionally a lifecycle coverage slice. A later temp-storage slice
-can replace temporary handler records with a dedicated non-durable table store
-if the current normal create/drop path proves too much file churn or too much
-fork maintenance cost.
+This is intentionally a lifecycle coverage slice. The later temporary DDL
+transaction slice replaces temporary row/index primary-file storage with the
+existing volatile table store; broader compatibility remains future work.
 
 ## Compatibility Impact
 
@@ -179,10 +181,9 @@ Implemented in storage-engine smoke coverage:
 
 ## Risks And Unresolved Questions
 
-- The current handler may still use ordinary primary-file pages for temporary
-  storage identities while the table is open. That is acceptable for this
-  partial support slice only if live catalog cleanup is verified; a dedicated
-  non-durable temp store remains a possible future improvement.
+- User temporary rows now use the process-local volatile table store. This
+  remains partial support; broader temporary-table grammar and resolved-metadata
+  transactional-DDL policy remain future work.
 - MariaDB temporary table storage identities are implementation details. Tests
   should only depend on the current MyLite runtime temp namespace when checking
   cleanup, and broader platform path variants remain a future compatibility

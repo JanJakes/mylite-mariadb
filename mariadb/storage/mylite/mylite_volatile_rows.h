@@ -25,6 +25,13 @@ mylite_storage_result mylite_volatile_create_table(
   const char *primary_file, const char *schema_name, const char *table_name);
 mylite_storage_result mylite_volatile_drop_table(
   const char *primary_file, const char *schema_name, const char *table_name);
+mylite_storage_result mylite_volatile_register_table_alias(
+  const char *primary_file, const char *alias_schema_name,
+  const char *alias_table_name, const char *target_schema_name,
+  const char *target_table_name);
+mylite_storage_result mylite_volatile_drop_table_alias(
+  const char *primary_file, const char *alias_schema_name,
+  const char *alias_table_name);
 mylite_storage_result mylite_volatile_rename_table(
   const char *primary_file, const char *old_schema_name,
   const char *old_table_name, const char *new_schema_name,

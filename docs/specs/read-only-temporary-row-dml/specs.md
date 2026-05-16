@@ -10,9 +10,10 @@ workflows inside read-only transactions; MyLite should not block those when the
 target is a tracked user temporary table.
 
 This slice allows direct and prepared row DML targeting an existing tracked
-temporary table while a read-only MyLite transaction is active. It keeps
-temporary DDL inside active transactions out of scope because MyLite's
-transactional DDL policy is still deliberately conservative.
+temporary table while a read-only MyLite transaction is active. Temporary DDL
+inside active transactions was later covered by
+[Temporary DDL Transactions](../temporary-ddl-transactions/specs.md), while
+durable transactional DDL remains deliberately conservative.
 
 ## Source Findings
 
@@ -58,8 +59,10 @@ MariaDB base: `mariadb-11.8.6`
 - Store prepared SQL text so the read-only execution gate can evaluate the
   current temporary-table state at `mylite_step()` time instead of freezing
   the decision at prepare time.
-- Keep temporary DDL inside active direct transactions rejected by the existing
-  transactional DDL policy.
+- Keep durable DDL inside active direct transactions rejected by the existing
+  transactional DDL policy. The
+  [Temporary DDL Transactions](../temporary-ddl-transactions/specs.md) slice
+  covers explicit temporary table create/drop inside active transactions.
 
 ## Affected Subsystems
 
@@ -73,7 +76,8 @@ MariaDB base: `mariadb-11.8.6`
 Applications can use session-local temporary tables for row writes inside
 read-only transactions without disabling MyLite's durable table protection.
 This is partial compatibility: only simple single-target temporary row DML is
-accepted, and temporary DDL inside active transactions remains unsupported.
+accepted; explicit temporary table create/drop inside active transactions is
+covered separately.
 
 ## DDL Metadata Routing Impact
 

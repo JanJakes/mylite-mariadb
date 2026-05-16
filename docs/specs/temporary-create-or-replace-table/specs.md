@@ -13,8 +13,8 @@ rewrite the durable table.
   foreign keys, unsupported indexes, or all duplicate-mode CTAS variants.
 - Durable `CREATE OR REPLACE TABLE` behavior, which is covered by
   `create-or-replace-table` and `failed-create-or-replace-rollback`.
-- SQL transaction, savepoint, or rollback semantics for temporary replacement.
-- Public API, file-format, or dedicated non-durable temp-store changes.
+- Broader savepoint or rollback semantics for temporary replacement.
+- Public API or file-format changes.
 
 ## Source Findings
 
@@ -69,11 +69,11 @@ publishes or deletes durable catalog records.
 
 ## File Lifecycle
 
-Temporary replacements may use MyLite temporary storage identities while open,
-but they must not create durable user-schema catalog records for the temporary
-SQL-visible names. They must not introduce forbidden MariaDB sidecars. Durable
-same-name tables must remain in the primary `.mylite` file and become visible
-again after `DROP TEMPORARY TABLE`.
+Temporary replacements use MyLite's process-local volatile table store while
+open, and they must not create durable user-schema catalog records for the
+temporary SQL-visible names. They must not introduce forbidden MariaDB sidecars.
+Durable same-name tables must remain in the primary `.mylite` file and become
+visible again after `DROP TEMPORARY TABLE`.
 
 ## Embedded Lifecycle And API
 

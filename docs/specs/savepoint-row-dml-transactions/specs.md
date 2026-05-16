@@ -154,7 +154,8 @@ savepoint frame vector and direct SQL policy parsing.
   - missing savepoint diagnostics,
   - full transaction rollback after savepoints,
   - close-time rollback with savepoints active,
-  - continued rejection of DDL inside active transactions with savepoints.
+  - continued rejection of durable DDL inside active transactions with
+    savepoints.
 - Run dev, embedded, storage-smoke, transaction harness groups, formatting,
   tidy, shell syntax, and whitespace checks.
 

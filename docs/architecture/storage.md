@@ -526,9 +526,11 @@ same MyLite-owned checkpoint path and can be prepared before an active
 transaction, but execution requires an active file-backed MyLite transaction.
 Read-only transaction enforcement rejects direct and prepared durable MyLite
 row writes before MariaDB execution, but permits simple single-target row DML
-when the target name is tracked as a session-local temporary table. Temporary
-DDL inside active transactions remains under the broader transactional DDL
-rejection policy.
+when the target name is tracked as a session-local temporary table. Explicit
+direct and prepared `CREATE TEMPORARY TABLE` and `DROP TEMPORARY TABLE`
+statements can execute inside active direct transactions because user
+temporary-table rows, indexes, and autoincrement state live in process-local
+volatile MyLite storage rather than durable primary-file pages.
 
 Checkpoints save the committed header and catalog root pages while holding the
 primary-file exclusive lock; storage APIs in the same thread borrow that locked
@@ -545,10 +547,9 @@ continue to reject global or duplicate autocommit changes, unsupported
 `SET TRANSACTION` forms, unsupported transaction modifiers, global transaction
 variables, parameterized transaction-control `SET` values, prepared
 transaction-start/completion statements, release completion defaults, XA, and
-direct or prepared DDL inside active direct transactions.
-Handler-level savepoint hooks, temporary DDL inside active transactions,
-transactional DDL, isolation, WAL/checkpoint, and transactional engine-flag
-support remain planned.
+durable direct or prepared DDL inside active direct transactions.
+Handler-level savepoint hooks, durable transactional DDL, isolation,
+WAL/checkpoint, and transactional engine-flag support remain planned.
 
 The storage design must preserve the full write-concurrency goal. Early
 milestones may use coarse locks for correctness, but the page, transaction,
@@ -559,8 +560,9 @@ and lock manager designs must not bake in single-writer-only assumptions.
 Temporary tables, query spill files, and recovery companions are storage policy,
 not violations of the primary-file model.
 
-- User temporary tables start as session-local state and do not publish durable
-  catalog entries.
+- User temporary tables start as session-local state, do not publish durable
+  catalog entries, and store rows plus indexes in MyLite's process-local
+  volatile table store.
 - Internal temporary spill may use MyLite-owned temporary files.
 - Strict no-temp-file modes may exist, but they trade off query limits and
   performance.

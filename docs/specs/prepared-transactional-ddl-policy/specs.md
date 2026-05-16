@@ -8,9 +8,11 @@ Prepared statements currently classify storage DDL for statement checkpoints,
 but they do not reject prepared DDL when execution happens inside an active
 direct transaction. That lets the prepared API bypass the direct SQL policy.
 
-This slice makes prepared storage DDL execution fail with the same MyLite
-transactional-DDL diagnostic used by direct SQL. It does not add transactional
-DDL semantics.
+This slice makes prepared durable storage DDL execution fail with the same
+MyLite transactional-DDL diagnostic used by direct SQL. It does not add durable
+transactional DDL semantics. Explicit temporary table create/drop inside active
+transactions was later covered by
+[Temporary DDL Transactions](../temporary-ddl-transactions/specs.md).
 
 ## Source Findings
 
@@ -43,8 +45,9 @@ MariaDB base: `mariadb-11.8.6`
 - Keep prepared DDL preparable when it is otherwise supported by MyLite. The
   transaction policy belongs at execution time because a statement may be
   prepared before the active transaction starts.
-- Store a prepared-statement flag for SQL that MyLite classifies as storage
-  outer-checkpoint work: `CREATE`, `ALTER`, `DROP`, `RENAME`, and `TRUNCATE`.
+- Store a prepared-statement flag for SQL that MyLite classifies as durable
+  storage outer-checkpoint work: `CREATE`, `ALTER`, `DROP`, `RENAME`, and
+  `TRUNCATE`, excluding explicit temporary table create/drop.
 - In `mylite_step()`, before parameter binding and before MariaDB execution,
   reject those prepared statements when the owning handle has an active direct
   MyLite transaction.
@@ -62,14 +65,15 @@ MariaDB base: `mariadb-11.8.6`
 ## Compatibility Impact
 
 MyLite becomes stricter and more internally consistent. Applications that
-prepare DDL outside a transaction can still execute it outside a transaction.
-Applications that execute prepared DDL after `BEGIN`, `START TRANSACTION`,
-`SET autocommit=0`, or an active savepoint now receive the same MyLite policy
-error that direct SQL receives.
+prepare durable DDL outside a transaction can still execute it outside a
+transaction. Applications that execute prepared durable DDL after `BEGIN`,
+`START TRANSACTION`, `SET autocommit=0`, or an active savepoint now receive the
+same MyLite policy error that direct SQL receives.
 
-This remains less permissive than MariaDB's implicit-commit DDL behavior. That
-is intentional until MyLite can prove transactional DDL or explicitly model
-implicit transaction boundary effects for the embedded single-file runtime.
+This remains less permissive than MariaDB's implicit-commit durable DDL
+behavior. That is intentional until MyLite can prove transactional DDL or
+explicitly model implicit transaction boundary effects for the embedded
+single-file runtime.
 
 ## DDL Metadata Routing Impact
 
@@ -116,12 +120,12 @@ statement flag and a small execution check.
 
 ## Acceptance Criteria
 
-- Prepared storage DDL execution fails while a direct MyLite transaction is
-  active.
+- Prepared durable storage DDL execution fails while a direct MyLite
+  transaction is active.
 - The rejection happens even when the statement was prepared before the
   transaction started.
-- Prepared storage DDL remains allowed outside the active direct transaction
-  policy.
+- Prepared durable storage DDL remains allowed outside the active direct
+  transaction policy.
 - Docs describe direct and prepared transactional-DDL policy consistently
   without claiming transactional DDL support.
 
@@ -131,6 +135,6 @@ statement flag and a small execution check.
   MariaDB's parsed `LEX` command flags. Suspicious forms should remain rejected
   or handled by existing unsupported-surface gates until MyLite moves this
   policy closer to parsed MariaDB command state.
-- Full implicit-commit DDL compatibility is a separate design problem because
-  it would need precise storage checkpoint publication and rollback semantics
-  across direct and prepared APIs.
+- Full implicit-commit durable DDL compatibility is a separate design problem
+  because it would need precise storage checkpoint publication and rollback
+  semantics across direct and prepared APIs.

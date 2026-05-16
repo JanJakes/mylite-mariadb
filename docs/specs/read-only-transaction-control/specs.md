@@ -13,7 +13,7 @@ is active.
 This slice supports direct read-only transaction access mode for MyLite storage
 transactions. It keeps `WITH CONSISTENT SNAPSHOT`, transaction isolation or
 read-only system-variable assignments, XA, release completion, and
-transactional DDL beyond the existing explicit rejection out of scope. The
+durable transactional DDL beyond the existing explicit rejection out of scope. The
 later [Transaction Isolation Control](../transaction-isolation-control/specs.md)
 slice accepts direct/session isolation controls as compatibility setup SQL
 without claiming storage isolation semantics. The later
@@ -196,8 +196,8 @@ session flags, and tests.
   behavior match MariaDB's documented/source-backed transaction
   characteristic flow for the supported bounded scope.
 - Docs and compatibility tables describe read-only transaction support without
-  claiming isolation, consistent snapshot, temporary DDL in active
-  transactions, release completion, or fully transactional engine flags.
+  claiming isolation, consistent snapshot, durable transactional DDL, release
+  completion, or fully transactional engine flags.
 
 ## Risks And Unresolved Questions
 

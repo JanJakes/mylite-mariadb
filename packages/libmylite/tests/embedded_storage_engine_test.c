@@ -1422,6 +1422,59 @@ static void test_row_dml_transactions(void) {
     assert_exec_succeeds(db, "ROLLBACK");
     assert_exec_succeeds(db, "DROP TABLE tx_temp");
 
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (40, 'active-temp-source')");
+    assert_exec_succeeds(
+        db,
+        "CREATE TEMPORARY TABLE tx_active_temp ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO tx_active_temp VALUES (1, 'active-temp-row')");
+    assert_prepared_succeeds(
+        db,
+        "CREATE TEMPORARY TABLE tx_active_prepared ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_prepared_succeeds(
+        db,
+        "INSERT INTO tx_active_prepared VALUES (2, 'active-prepared-temp-row')"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TEMPORARY TABLE tx_active_ctas AS "
+        "SELECT id, title FROM tx_posts WHERE id = 40"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM tx_posts WHERE id = 40", "0");
+    assert_query_single_value(
+        db,
+        "SELECT title FROM tx_active_temp WHERE id = 1",
+        "active-temp-row"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT title FROM tx_active_prepared WHERE id = 2",
+        "active-prepared-temp-row"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT title FROM tx_active_ctas WHERE id = 40",
+        "active-temp-source"
+    );
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "DROP TEMPORARY TABLE tx_active_temp");
+    assert_prepared_succeeds(db, "DROP TEMPORARY TABLE tx_active_prepared");
+    assert_exec_succeeds(db, "DROP TEMPORARY TABLE tx_active_ctas");
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_exec_fails_with_message(db, "SELECT COUNT(*) FROM tx_active_temp", "doesn't exist");
+    assert_exec_fails_with_message(db, "SELECT COUNT(*) FROM tx_active_prepared", "doesn't exist");
+    assert_exec_fails_with_message(db, "SELECT COUNT(*) FROM tx_active_ctas", "doesn't exist");
+
     assert_exec_succeeds(db, "START TRANSACTION READ ONLY");
     zero_count = (single_value_context){.expected_value = "0"};
     assert(
@@ -9187,7 +9240,11 @@ static void assert_query_single_value(mylite_db *db, const char *sql, const char
     };
     char *errmsg = NULL;
 
-    assert(mylite_exec(db, sql, single_value_callback, &value, &errmsg) == MYLITE_OK);
+    const int result = mylite_exec(db, sql, single_value_callback, &value, &errmsg);
+    if (result != MYLITE_OK) {
+        fprintf(stderr, "Query failed: %s\n%s\n", sql, errmsg != NULL ? errmsg : "(no error)");
+    }
+    assert(result == MYLITE_OK);
     assert(errmsg == NULL);
     assert(value.rows == 1);
 }

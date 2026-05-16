@@ -12,9 +12,9 @@ after `DROP TEMPORARY TABLE` and after close/reopen.
 - Exhaustive temporary-table compatibility for all column types, locks,
   triggers, views, partitions, foreign keys, broader `OR REPLACE` variants, or
   duplicate modes.
-- Dedicated non-durable temporary storage outside the current MyLite temporary
+- Broader temporary-table compatibility beyond the current MyLite temporary
   handler lifecycle.
-- SQL transaction, savepoint, or rollback semantics for temporary-table DDL.
+- SQL savepoint or broader rollback semantics for temporary-table DDL.
 - Public `libmylite` API or file-format changes.
 
 ## Source Findings
@@ -119,9 +119,9 @@ and documentation unless a handler fix is required.
 
 ## Risks And Open Questions
 
-- The current temporary implementation may still append primary-file pages for
-  temporary storage identities. This slice only proves SQL-visible shadowing and
-  cleanup; physical reclamation remains a compaction concern.
+- User temporary rows now use MyLite's process-local volatile table store. This
+  slice only proves SQL-visible shadowing and cleanup; broader temporary-table
+  grammar remains future work.
 - Temporary CTAS self-reference behavior is subtle because MariaDB temporarily
   hides the new target while reading sources. This slice covers shadowing a
   durable source name, not all self-reference variants.
