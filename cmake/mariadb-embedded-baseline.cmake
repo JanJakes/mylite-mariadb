@@ -98,6 +98,9 @@ set(MYLITE_WITH_SELECT_PROCEDURE_RUNTIME OFF CACHE BOOL "Omit SELECT PROCEDURE r
 # MyLite rejects stored routine, trigger, event, and package runtime surfaces.
 set(MYLITE_WITH_STORED_PROGRAM_RUNTIME OFF CACHE BOOL "Omit stored program runtime" FORCE)
 
+# MyLite rejects event DDL and does not validate event scheduler parse data.
+set(MYLITE_WITH_EVENT_PARSE_DATA_VALIDATION OFF CACHE BOOL "Omit event parse-data validation" FORCE)
+
 # MyLite rejects trigger DDL and does not use .TRG/.TRN metadata files.
 set(MYLITE_WITH_TRIGGER_RUNTIME OFF CACHE BOOL "Omit trigger runtime and sidecar metadata" FORCE)
 

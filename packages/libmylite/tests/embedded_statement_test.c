@@ -979,6 +979,11 @@ static void test_prepare_diagnostics(void) {
     assert(strstr(mylite_errmsg(db), "non-table database object") != NULL);
     assert_prepare_fails_with_message(
         db,
+        "CREATE EVENT blocked_event ON SCHEDULE EVERY 1 SECOND DO SELECT 1",
+        "server-oriented"
+    );
+    assert_prepare_fails_with_message(
+        db,
         "SHOW CREATE VIEW blocked_view",
         "non-table database object"
     );

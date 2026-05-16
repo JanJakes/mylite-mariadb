@@ -176,6 +176,13 @@ ENDIF()
 
 OPTION(MYLITE_WITH_STORED_PROGRAM_RUNTIME "Build stored program compiler and runtime" ON)
 
+OPTION(MYLITE_WITH_EVENT_PARSE_DATA_VALIDATION "Build event parse-data validation" ON)
+IF(MYLITE_WITH_EVENT_PARSE_DATA_VALIDATION)
+  SET(MYLITE_EVENT_PARSE_DATA_SOURCE ../sql/event_parse_data.cc)
+ELSE()
+  SET(MYLITE_EVENT_PARSE_DATA_SOURCE mylite_event_parse_data_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_UDF_RUNTIME "Build UDF lookup and execution runtime" ON)
 IF(MYLITE_WITH_UDF_RUNTIME)
   ADD_DEFINITIONS(-DMYLITE_WITH_UDF_RUNTIME=1)
@@ -324,7 +331,7 @@ SET(SQL_EMBEDDED_SOURCES ${MYLITE_EMBEDDED_QUERY_CACHE_SOURCE} libmysqld.c lib_s
            ../sql/partition_info.cc ../sql/sql_connect.cc 
            ../sql/scheduler.cc ../sql/sql_audit.cc
            ../sql/sql_alter.cc ../sql/sql_partition_admin.cc
-           ../sql/event_parse_data.cc
+           ${MYLITE_EVENT_PARSE_DATA_SOURCE}
            ../sql/sql_signal.cc
            ../sql/sys_vars.cc ../sql/vector_mhnsw.cc
            ${CMAKE_BINARY_DIR}/sql/sql_builtin.cc
