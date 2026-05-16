@@ -7,6 +7,11 @@ transaction with MariaDB's commit-current/start-new behavior for the same
 bounded checkpoint scope. The later
 [Savepoint Row-DML Transactions](../savepoint-row-dml-transactions/specs.md)
 slice adds direct savepoints for the same bounded row-DML transaction scope.
+The later
+[Autocommit Default Control](../autocommit-default-control/specs.md) slice
+maps supported direct session `SET autocommit=DEFAULT` forms to the same
+autocommit-on commit path, matching MariaDB 11.8.6's `DEFAULT(TRUE)`
+definition.
 
 ## Problem
 

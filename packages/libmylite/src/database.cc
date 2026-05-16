@@ -3481,6 +3481,9 @@ TransactionControlKind autocommit_assignment_control_kind(std::string_view assig
     if (sql_token_is_autocommit_on(value)) {
         return TransactionControlKind::SetAutocommitOn;
     }
+    if (sql_token_equals(value, "DEFAULT")) {
+        return TransactionControlKind::SetAutocommitOn;
+    }
     return TransactionControlKind::Unsupported;
 }
 

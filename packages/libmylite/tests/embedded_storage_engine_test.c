@@ -1181,7 +1181,7 @@ static void test_transaction_and_foreign_key_policies(void) {
     assert_transaction_control_exec_fails(db, "COMMIT AND CHAIN");
     assert_transaction_control_exec_fails(db, "START TRANSACTION READ WRITE");
     assert_transaction_control_exec_fails(db, "SET GLOBAL autocommit=0");
-    assert_transaction_control_exec_fails(db, "SET autocommit=DEFAULT");
+    assert_exec_succeeds(db, "SET autocommit=DEFAULT");
     assert_locking_sql_exec_fails(db, "LOCK TABLES posts WRITE");
     assert_locking_sql_exec_fails(db, "UNLOCK TABLES");
     assert_locking_sql_exec_fails(db, "SELECT id FROM posts FOR UPDATE");
@@ -1457,6 +1457,22 @@ static void test_row_dml_transactions(void) {
         mylite_exec(
             db,
             "SELECT COUNT(*) FROM tx_posts WHERE id = 4 AND title = 'autocommit-on-commit'",
+            single_value_callback,
+            &count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(count.rows == 1);
+
+    assert_exec_succeeds(db, "SET autocommit=0");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (22, 'autocommit-default-commit')");
+    assert_exec_succeeds(db, "SET autocommit=DEFAULT");
+    count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts "
+            "WHERE id = 22 AND title = 'autocommit-default-commit'",
             single_value_callback,
             &count,
             NULL
@@ -1751,7 +1767,7 @@ static void test_row_dml_transactions(void) {
         ) == MYLITE_OK
     );
     assert(zero_count.rows == 1);
-    count = (single_value_context){.expected_value = "10"};
+    count = (single_value_context){.expected_value = "11"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
         MYLITE_OK
@@ -1776,7 +1792,7 @@ static void test_row_dml_transactions(void) {
         ) == MYLITE_OK
     );
     assert(zero_count.rows == 1);
-    count = (single_value_context){.expected_value = "10"};
+    count = (single_value_context){.expected_value = "11"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
         MYLITE_OK
@@ -1787,7 +1803,7 @@ static void test_row_dml_transactions(void) {
     assert_transaction_crash_recovery(root, filename);
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "USE tx_app");
-    count = (single_value_context){.expected_value = "10"};
+    count = (single_value_context){.expected_value = "11"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
         MYLITE_OK

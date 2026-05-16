@@ -109,7 +109,7 @@ rollback-journal and transaction-journal publication state in the primary
 catalog when no transient MariaDB schema directory exists. Direct `BEGIN`,
 `COMMIT`, `ROLLBACK`,
 transaction restart through repeated direct `BEGIN` / `START TRANSACTION`, and
-supported direct session `SET autocommit=0/1` forms support row-DML
+supported direct session `SET autocommit=0/1/DEFAULT` forms support row-DML
 transactions over routed MyLite tables, including nested statement rollback for
 covered failed direct and prepared row-DML statements and transaction-journal
 recovery after an unclean process exit. Direct `SAVEPOINT`,

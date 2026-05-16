@@ -475,9 +475,10 @@ paths that do not reliably enter `external_lock()` keep the outer `libmylite`
 checkpoint before MariaDB execution.
 
 Direct `libmylite` `BEGIN` / `COMMIT` / `ROLLBACK` and supported direct
-session `SET autocommit=0/1` support is limited to row-DML transactions over
-routed MyLite tables. `libmylite` opens an outer storage checkpoint for the
-direct transaction. Row-DML statements inside that transaction use
+session `SET autocommit=0/1/DEFAULT` support is limited to row-DML
+transactions over routed MyLite tables. `libmylite` opens an outer storage
+checkpoint for the direct transaction. Row-DML statements inside that
+transaction use
 `libmylite`-owned nested statement checkpoints so failed direct or prepared
 statements can roll back their own partial writes while preserving earlier
 transaction changes; the handler skips duplicate statement checkpoints while
