@@ -2950,6 +2950,19 @@ static void test_create_table_persists_catalog_metadata(void) {
         MYLITE_STORAGE_NOTFOUND
     );
     assert_catalog_table_count(filename, "app", 14U);
+    assert_exec_fails(
+        db,
+        "CREATE TABLE vector_index_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "embedding VECTOR(3) NOT NULL, "
+        "VECTOR KEY embedding_vector (embedding)"
+        ") ENGINE=InnoDB"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "vector_index_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_catalog_table_count(filename, "app", 14U);
     assert(mylite_busy_timeout(db, k_busy_timeout_wait_ms) == MYLITE_OK);
     pid_t child = hold_test_lock_for(
         filename,

@@ -540,6 +540,9 @@ the embedded library model:
 - XML SQL functions `EXTRACTVALUE()` and `UPDATEXML()`,
 - GIS SQL functions such as `ST_AsText()`, `ST_GeomFromText()`,
   `ST_Contains()`, `PointFromText()`, `Point()`, and `X()`,
+- vector SQL functions such as `VEC_FromText()`, `VEC_ToText()`,
+  `VEC_DISTANCE()`, `VEC_DISTANCE_EUCLIDEAN()`, and
+  `VEC_DISTANCE_COSINE()`,
 - MariaDB-specific `SFORMAT()` SQL function,
 - `JSON_SCHEMA_VALID()` SQL function,
 - `JSON_TABLE()` table function,
@@ -559,9 +562,9 @@ named-lock, SQL `HELP`, SQL `HANDLER`, `SELECT ... PROCEDURE`, SQL file-I/O,
 table-maintenance/key-cache administration, statement profiling, external
 backup SQL, query cache administration, optimizer trace, static SHOW
 information, process-list metadata, zlib compression, server utility function,
-Oracle SQL mode, XML SQL function, GIS
-SQL function, SFORMAT SQL function, JSON schema validation function, JSON table
-function, dynamic column function, SQL sequence value surface, partition, and
+Oracle SQL mode, XML SQL function, GIS SQL function, vector SQL function,
+SFORMAT SQL function, JSON schema validation function, JSON table function,
+dynamic column function, SQL sequence value surface, partition, and
 foreign-key DDL commands are rejected before MariaDB execution with stable
 MyLite errors. The default
 embedded profile also links fail-closed stubs for stored-program runtime
@@ -572,9 +575,9 @@ maintenance source objects, omits the JSON schema-validation source object,
 replaces JSON table-function execution,
 dynamic-column packed BLOB runtime, SQL handler command execution, SQL sequence
 runtime, external backup command execution, query cache runtime, zlib-backed
-compression, and dynamic plugin loading with fail-closed or disabled
-stubs/configuration, and compiles embedded binlog transaction and event-write
-entry points to no-ops. Other
+compression, vector SQL and MHNSW runtime, and dynamic plugin loading with
+fail-closed or disabled stubs/configuration, and compiles embedded binlog
+transaction and event-write entry points to no-ops. Other
 unsupported surfaces should fail with
 stable MyLite result codes and MariaDB diagnostics where possible.
 

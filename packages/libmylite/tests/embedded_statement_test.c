@@ -833,6 +833,24 @@ static void test_prepare_diagnostics(void) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(strstr(mylite_errmsg(db), "GIS SQL function") != NULL);
 
+    assert_prepare_fails_with_message(db, "SELECT VEC_FromText(?)", "vector SQL function");
+    assert_prepare_fails_with_message(db, "SELECT VEC_ToText(?)", "vector SQL function");
+    assert_prepare_fails_with_message(
+        db,
+        "SELECT VEC_DISTANCE(?, X'0000803F')",
+        "vector SQL function"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "SELECT VEC_DISTANCE_EUCLIDEAN(?, X'0000803F')",
+        "vector SQL function"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "SELECT VEC_DISTANCE_COSINE(?, X'0000803F')",
+        "vector SQL function"
+    );
+
     assert(
         mylite_prepare(db, "SELECT SFORMAT(?, ?)", MYLITE_NUL_TERMINATED, &stmt, NULL) ==
         MYLITE_ERROR

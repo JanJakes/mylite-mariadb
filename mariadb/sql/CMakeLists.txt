@@ -130,6 +130,15 @@ ELSE()
   SET(MYLITE_GIS_SQL_FUNCTION_SOURCES mylite_gis_sql_functions_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_VECTOR_SQL_RUNTIME "Build vector SQL functions and MHNSW runtime" ON)
+IF(MYLITE_WITH_VECTOR_SQL_RUNTIME)
+  ADD_DEFINITIONS(-DMYLITE_WITH_VECTOR_SQL_RUNTIME=1)
+  SET(MYLITE_VECTOR_SQL_RUNTIME_SOURCES item_vectorfunc.cc vector_mhnsw.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_VECTOR_SQL_RUNTIME=0)
+  SET(MYLITE_VECTOR_SQL_RUNTIME_SOURCES mylite_vector_sql_runtime_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_ZLIB_COMPRESSION "Build zlib-backed compression helpers" ON)
 IF(MYLITE_WITH_ZLIB_COMPRESSION)
   SET(MYLITE_FIELD_COMP_SOURCE field_comp.cc)
@@ -271,7 +280,7 @@ SET (SQL_SOURCE
                filesort_utils.cc
                filesort.cc gstream.cc
                signal_handler.cc
-               handler.cc item_vectorfunc.cc
+               handler.cc ${MYLITE_VECTOR_SQL_RUNTIME_SOURCES}
                hostname.cc init.cc item.cc item_buff.cc item_cmpfunc.cc
                item_create.cc item_func.cc ${MYLITE_GIS_SQL_FUNCTION_SOURCES} item_row.cc
                item_strfunc.cc item_subselect.cc item_sum.cc item_timefunc.cc
@@ -281,7 +290,7 @@ SET (SQL_SOURCE
                mf_iocache.cc my_decimal.cc
                mysqld.cc net_serv.cc  keycaches.cc
                ../sql-common/client_plugin.c
-               opt_range.cc vector_mhnsw.cc
+               opt_range.cc
                opt_group_by_cardinality.cc
                opt_rewrite_date_cmp.cc
                opt_rewrite_remove_casefold.cc

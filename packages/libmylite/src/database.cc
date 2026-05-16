@@ -453,6 +453,7 @@ bool is_file_import_sql(std::string_view sql);
 bool is_file_export_sql(std::string_view sql);
 bool is_server_utility_function_sql(std::string_view sql);
 bool is_gis_sql_function_sql(std::string_view sql);
+bool is_vector_sql_function_sql(std::string_view sql);
 bool is_sformat_sql_function_sql(std::string_view sql);
 bool is_json_schema_valid_sql(std::string_view sql);
 bool is_json_table_sql(std::string_view sql);
@@ -520,6 +521,7 @@ bool sql_tokens_contain_file_import_function(std::string_view sql);
 bool sql_tokens_contain_file_export_marker(std::string_view sql);
 bool sql_tokens_contain_server_utility_function(std::string_view sql);
 bool sql_tokens_contain_gis_sql_function(std::string_view sql);
+bool sql_tokens_contain_vector_sql_function(std::string_view sql);
 bool sql_tokens_contain_sformat_sql_function(std::string_view sql);
 bool sql_tokens_contain_json_schema_valid_function(std::string_view sql);
 bool sql_tokens_contain_json_table_function(std::string_view sql);
@@ -536,6 +538,7 @@ bool sql_tokens_contain_xml_sql_function(std::string_view sql);
 bool sql_tokens_contain_locking_marker(std::string_view sql);
 bool sql_tokens_contain_named_lock_function(std::string_view sql);
 bool sql_token_is_gis_sql_function(std::string_view token);
+bool sql_token_is_vector_sql_function(std::string_view token);
 bool sql_span_contains_token(std::string_view sql, const char *keyword);
 bool sql_quoted_span_contains_token(std::string_view &sql, char quote, const char *keyword);
 bool sql_tokens_contain_online_alter_marker(std::string_view sql);
@@ -2730,6 +2733,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_gis_sql_function_sql(sql)) {
         return "unsupported GIS SQL function";
     }
+    if (is_vector_sql_function_sql(sql)) {
+        return "unsupported vector SQL function";
+    }
     if (is_sformat_sql_function_sql(sql)) {
         return "unsupported SFORMAT SQL function";
     }
@@ -3025,6 +3031,10 @@ bool is_server_utility_function_sql(std::string_view sql) {
 
 bool is_gis_sql_function_sql(std::string_view sql) {
     return sql_tokens_contain_gis_sql_function(sql);
+}
+
+bool is_vector_sql_function_sql(std::string_view sql) {
+    return sql_tokens_contain_vector_sql_function(sql);
 }
 
 bool is_sformat_sql_function_sql(std::string_view sql) {
@@ -4488,6 +4498,20 @@ bool sql_tokens_contain_gis_sql_function(std::string_view sql) {
     return false;
 }
 
+bool sql_tokens_contain_vector_sql_function(std::string_view sql) {
+    std::string_view token;
+    while (pop_sql_scanned_token(sql, token)) {
+        if (!sql_next_non_noise_is(sql, '(')) {
+            continue;
+        }
+
+        if (sql_token_is_vector_sql_function(token)) {
+            return true;
+        }
+    }
+    return false;
+}
+
 bool sql_tokens_contain_sformat_sql_function(std::string_view sql) {
     std::string_view token;
     while (pop_sql_scanned_token(sql, token)) {
@@ -4903,6 +4927,13 @@ bool sql_token_is_gis_sql_function(std::string_view token) {
         }
     }
     return false;
+}
+
+bool sql_token_is_vector_sql_function(std::string_view token) {
+    return sql_token_equals(token, "VEC_DISTANCE") ||
+           sql_token_equals(token, "VEC_DISTANCE_COSINE") ||
+           sql_token_equals(token, "VEC_DISTANCE_EUCLIDEAN") ||
+           sql_token_equals(token, "VEC_FROMTEXT") || sql_token_equals(token, "VEC_TOTEXT");
 }
 
 bool is_locking_sql(std::string_view sql) {

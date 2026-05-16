@@ -101,6 +101,15 @@ ELSE()
   SET(MYLITE_GIS_SQL_FUNCTION_SOURCES ../sql/mylite_gis_sql_functions_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_VECTOR_SQL_RUNTIME "Build vector SQL functions and MHNSW runtime" ON)
+IF(MYLITE_WITH_VECTOR_SQL_RUNTIME)
+  ADD_DEFINITIONS(-DMYLITE_WITH_VECTOR_SQL_RUNTIME=1)
+  SET(MYLITE_VECTOR_SQL_RUNTIME_SOURCES ../sql/item_vectorfunc.cc ../sql/vector_mhnsw.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_VECTOR_SQL_RUNTIME=0)
+  SET(MYLITE_VECTOR_SQL_RUNTIME_SOURCES ../sql/mylite_vector_sql_runtime_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_ZLIB_COMPRESSION "Build zlib-backed compression helpers" ON)
 IF(MYLITE_WITH_ZLIB_COMPRESSION)
   SET(MYLITE_FIELD_COMP_SOURCE ../sql/field_comp.cc)
@@ -328,7 +337,7 @@ SET(SQL_EMBEDDED_SOURCES ${MYLITE_EMBEDDED_QUERY_CACHE_SOURCE} libmysqld.c lib_s
            ../sql/sql_show.cc ../sql/sql_state.c 
            ../sql/sql_statistics.cc ../sql/sql_string.cc
            ../sql/sql_table.cc ../sql/sql_test.cc
-           ../sql/ddl_log.cc ../sql/item_vectorfunc.cc
+           ../sql/ddl_log.cc ${MYLITE_VECTOR_SQL_RUNTIME_SOURCES}
            ${MYLITE_TRIGGER_RUNTIME_SOURCE} ../sql/sql_udf.cc ../sql/sql_union.cc
            ../sql/sql_update.cc ${MYLITE_VIEW_RUNTIME_SOURCE} ../sql/sql_profile.cc
            ../sql/strfunc.cc ../sql/table.cc ../sql/thr_malloc.cc
@@ -338,7 +347,7 @@ SET(SQL_EMBEDDED_SOURCES ${MYLITE_EMBEDDED_QUERY_CACHE_SOURCE} libmysqld.c lib_s
            ../sql/sql_alter.cc ../sql/sql_partition_admin.cc
            ${MYLITE_EVENT_PARSE_DATA_SOURCE}
            ../sql/sql_signal.cc
-           ../sql/sys_vars.cc ../sql/vector_mhnsw.cc
+           ../sql/sys_vars.cc
            ${CMAKE_BINARY_DIR}/sql/sql_builtin.cc
            ../sql/mdl.cc ../sql/transaction.cc
            ../sql/sql_join_cache.cc

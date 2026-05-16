@@ -80,6 +80,7 @@ No new dependencies, no format change, and no meaningful binary-size impact.
 
 - Storage-engine smoke rejects `CREATE TABLE` with a FULLTEXT index.
 - Storage-engine smoke rejects `CREATE TABLE` with a SPATIAL index.
+- Storage-engine smoke rejects `CREATE TABLE` with a vector index.
 - Each failed DDL verifies no MyLite catalog record exists and catalog table
   counts remain unchanged.
 - Add a compatibility harness group for unsupported index classes.
@@ -88,8 +89,8 @@ No new dependencies, no format change, and no meaningful binary-size impact.
 
 ## Acceptance Criteria
 
-- FULLTEXT and SPATIAL indexes reject before catalog publication on routed
-  tables.
+- FULLTEXT, SPATIAL, and vector indexes reject before catalog publication on
+  routed tables.
 - Supported ordinary indexes remain covered by existing storage smoke tests.
 - Compatibility docs and roadmap describe unsupported index-class rejection as
   partial compatibility policy, while generated-column index support is tracked
@@ -100,6 +101,8 @@ No new dependencies, no format change, and no meaningful binary-size impact.
 
 - Standalone `CREATE INDEX` coverage for unsupported classes remains narrower
   than initial `CREATE TABLE` coverage.
+- Standalone vector-index DDL coverage remains narrower than initial
+  `CREATE TABLE` coverage.
 - FULLTEXT, SPATIAL, MySQL-style expression, hidden generated, hash, vector,
   and oversized index support each need explicit physical design, recovery
   behavior, and optimizer coverage before support can be claimed. Generated

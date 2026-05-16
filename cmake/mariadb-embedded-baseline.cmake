@@ -68,6 +68,9 @@ set(MYLITE_WITH_ZLIB_COMPRESSION OFF CACHE BOOL "Omit zlib-backed compression he
 # MyLite rejects GIS SQL functions before MariaDB execution.
 set(MYLITE_WITH_GIS_SQL_FUNCTIONS OFF CACHE BOOL "Omit GIS SQL functions" FORCE)
 
+# MyLite rejects vector SQL functions and vector indexes before MariaDB execution.
+set(MYLITE_WITH_VECTOR_SQL_RUNTIME OFF CACHE BOOL "Omit vector SQL and MHNSW runtime" FORCE)
+
 # MyLite rejects SFORMAT() before MariaDB execution.
 set(MYLITE_WITH_SFORMAT_SQL_FUNCTION OFF CACHE BOOL "Omit SFORMAT SQL function" FORCE)
 
