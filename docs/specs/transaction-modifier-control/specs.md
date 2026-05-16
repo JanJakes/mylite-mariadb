@@ -4,9 +4,11 @@ Status note: the later
 [Transaction SET No-Op Control](../transaction-set-noop-control/specs.md)
 slice accepts direct `SET TRANSACTION READ WRITE` and session
 `SET completion_type=NO_CHAIN/0/DEFAULT` as no-op controls for the same
-bounded read-write, no-chain transaction scope. Chain/release completion
-defaults, read-only access mode, isolation changes, global defaults, and
-prepared transaction control remain unsupported.
+bounded read-write, no-chain transaction scope. The later
+[Completion Type Chain Control](../completion-type-chain-control/specs.md)
+slice accepts session `SET completion_type=CHAIN/1` and mirrors chained plain
+completion. Release completion defaults, read-only access mode, isolation
+changes, global defaults, and prepared transaction control remain unsupported.
 
 ## Problem
 
@@ -174,9 +176,9 @@ No dependency is added. The binary-size impact is negligible.
   `ROLLBACK AND CHAIN` can leave the embedded session in an error state. This is
   the same I/O-failure class as plain direct commit or rollback after MariaDB
   has accepted the statement.
-- Chain/release completion-default support would require MyLite to mirror
-  `@@session.completion_type` in direct transaction bookkeeping. This slice
-  rejected those variable changes; the later Transaction SET No-Op Control
-  slice accepts only the no-chain/default subset.
+- Release completion-default support requires an embedded handle-lifecycle
+  decision. This slice rejected completion variable changes; later transaction
+  SET slices accept the no-chain/default subset and the chained plain
+  completion subset.
 - Read-only transactions and consistent snapshots need a broader storage and
   isolation design before they can be supported honestly.

@@ -9,9 +9,11 @@ slice allows supported direct session `SET autocommit=0/1` forms. The later
 allows one supported session autocommit assignment inside direct `SET` lists
 with ordinary non-transaction assignments. The later
 [Transaction SET No-Op Control](../transaction-set-noop-control/specs.md)
-slice accepts direct read-write/no-chain SET controls. Global or duplicate
-autocommit changes, unsupported transaction-variable `SET` lists, unsupported
-transaction modifiers, XA, and transactional DDL remain rejected.
+slice accepts direct read-write/no-chain SET controls, and the later
+[Completion Type Chain Control](../completion-type-chain-control/specs.md)
+slice accepts chained completion defaults. Global or duplicate autocommit
+changes, unsupported transaction-variable `SET` lists, unsupported transaction
+modifiers, XA, and transactional DDL remain rejected.
 
 ## Problem
 

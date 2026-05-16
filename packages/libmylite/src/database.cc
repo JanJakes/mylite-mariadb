@@ -199,14 +199,18 @@ enum class TransactionControlKind : unsigned char {
     None,
     Begin,
     Commit,
+    CommitNoChain,
     CommitAndChain,
     Rollback,
+    RollbackNoChain,
     RollbackAndChain,
     Savepoint,
     RollbackToSavepoint,
     ReleaseSavepoint,
     SetAutocommitOff,
     SetAutocommitOn,
+    SetCompletionTypeNoChain,
+    SetCompletionTypeChain,
     Noop,
     Unsupported,
 };
@@ -244,6 +248,7 @@ struct mylite_db {
     bool connected = false;
     bool transaction_active = false;
     bool autocommit_disabled = false;
+    bool completion_type_chain = false;
 };
 
 struct mylite_stmt {
@@ -379,6 +384,7 @@ TransactionControlKind direct_start_transaction_control_kind(std::string_view sq
 TransactionControlKind direct_completion_transaction_control_kind(
     std::string_view sql,
     TransactionControlKind plain_kind,
+    TransactionControlKind no_chain_kind,
     TransactionControlKind chained_kind
 );
 TransactionControlKind direct_set_transaction_control_kind(std::string_view sql);
@@ -435,8 +441,11 @@ bool is_non_table_object_keyword(std::string_view token);
 TransactionControlKind direct_set_assignment_transaction_control_kind(std::string_view sql);
 TransactionControlKind autocommit_assignment_control_kind(std::string_view assignment);
 TransactionControlKind completion_type_assignment_control_kind(std::string_view assignment);
+bool direct_set_completion_type_chain_default(std::string_view sql, bool *out_chain);
 bool sql_token_is_completion_type_no_chain(std::string_view token);
+bool sql_token_is_completion_type_chain(std::string_view token);
 bool sql_set_assignment_targets_transaction_variable(std::string_view assignment);
+bool is_completion_transaction_control(TransactionControlKind kind);
 bool is_savepoint_transaction_control(TransactionControlKind kind);
 bool is_chained_completion_transaction_control(TransactionControlKind kind);
 bool sql_token_is_autocommit_off(std::string_view token);
@@ -1471,6 +1480,11 @@ int exec_impl(
         return copy_error_message(*database, errmsg);
     }
 #  endif
+    bool completion_type_chain = false;
+    if (direct_set_completion_type_chain_default(std::string_view(sql), &completion_type_chain)) {
+        database->completion_type_chain = completion_type_chain;
+    }
+
     if (transaction_control == TransactionControlKind::Begin) {
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
         if (database->transaction_active) {
@@ -1488,13 +1502,16 @@ int exec_impl(
 #  endif
         database->transaction_active = true;
     } else if (
-        transaction_control == TransactionControlKind::Commit ||
-        transaction_control == TransactionControlKind::Rollback ||
+        is_completion_transaction_control(transaction_control) ||
         is_chained_completion_transaction_control(transaction_control)
     ) {
-        const bool chain = is_chained_completion_transaction_control(transaction_control);
+        const bool chain = is_chained_completion_transaction_control(transaction_control) ||
+                           ((transaction_control == TransactionControlKind::Commit ||
+                             transaction_control == TransactionControlKind::Rollback) &&
+                            database->completion_type_chain);
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
         const bool commit = transaction_control == TransactionControlKind::Commit ||
+                            transaction_control == TransactionControlKind::CommitNoChain ||
                             transaction_control == TransactionControlKind::CommitAndChain;
         const int transaction_result = finish_direct_transaction(*database, commit);
         database->transaction_active = false;
@@ -3324,6 +3341,7 @@ TransactionControlKind direct_transaction_control_kind(std::string_view sql) {
         return direct_completion_transaction_control_kind(
             after_first,
             TransactionControlKind::Commit,
+            TransactionControlKind::CommitNoChain,
             TransactionControlKind::CommitAndChain
         );
     }
@@ -3347,6 +3365,7 @@ TransactionControlKind direct_transaction_control_kind(std::string_view sql) {
         return direct_completion_transaction_control_kind(
             after_first,
             TransactionControlKind::Rollback,
+            TransactionControlKind::RollbackNoChain,
             TransactionControlKind::RollbackAndChain
         );
     }
@@ -3415,6 +3434,7 @@ TransactionControlKind direct_start_transaction_control_kind(std::string_view sq
 TransactionControlKind direct_completion_transaction_control_kind(
     std::string_view sql,
     TransactionControlKind plain_kind,
+    TransactionControlKind no_chain_kind,
     TransactionControlKind chained_kind
 ) {
     if (sql_rest_is_statement_end(sql)) {
@@ -3443,6 +3463,7 @@ TransactionControlKind direct_completion_transaction_control_kind(
             if (!sql_token_equals(token, "CHAIN")) {
                 return TransactionControlKind::Unsupported;
             }
+            plain_kind = no_chain_kind;
         } else {
             return TransactionControlKind::Unsupported;
         }
@@ -3638,13 +3659,14 @@ TransactionControlKind direct_set_assignment_transaction_control_kind(std::strin
         if (completion_type_result == TransactionControlKind::Unsupported) {
             return TransactionControlKind::Unsupported;
         }
-        if (completion_type_result == TransactionControlKind::Noop) {
+        if (completion_type_result == TransactionControlKind::SetCompletionTypeNoChain ||
+            completion_type_result == TransactionControlKind::SetCompletionTypeChain) {
             if (completion_type_seen) {
                 return TransactionControlKind::Unsupported;
             }
             completion_type_seen = true;
             if (result == TransactionControlKind::None) {
-                result = TransactionControlKind::Noop;
+                result = completion_type_result;
             }
             continue;
         }
@@ -3762,14 +3784,47 @@ TransactionControlKind completion_type_assignment_control_kind(std::string_view 
         return TransactionControlKind::Unsupported;
     }
     if (sql_token_is_completion_type_no_chain(value)) {
-        return TransactionControlKind::Noop;
+        return TransactionControlKind::SetCompletionTypeNoChain;
+    }
+    if (sql_token_is_completion_type_chain(value)) {
+        return TransactionControlKind::SetCompletionTypeChain;
     }
     return TransactionControlKind::Unsupported;
+}
+
+bool direct_set_completion_type_chain_default(std::string_view sql, bool *out_chain) {
+    std::string_view rest = skip_sql_leading_noise(sql);
+    if (!sql_token_equals(pop_sql_token(rest), "SET")) {
+        return false;
+    }
+
+    std::string_view statement_check = skip_sql_leading_noise(rest);
+    if (sql_token_equals(pop_sql_token(statement_check), "STATEMENT")) {
+        return false;
+    }
+
+    while (!skip_sql_leading_noise(rest).empty()) {
+        const TransactionControlKind completion_type_result =
+            completion_type_assignment_control_kind(pop_sql_set_assignment(rest));
+        if (completion_type_result == TransactionControlKind::SetCompletionTypeNoChain) {
+            *out_chain = false;
+            return true;
+        }
+        if (completion_type_result == TransactionControlKind::SetCompletionTypeChain) {
+            *out_chain = true;
+            return true;
+        }
+    }
+    return false;
 }
 
 bool sql_token_is_completion_type_no_chain(std::string_view token) {
     return token == "0" || sql_token_equals(token, "NO_CHAIN") ||
            sql_token_equals(token, "DEFAULT");
+}
+
+bool sql_token_is_completion_type_chain(std::string_view token) {
+    return token == "1" || sql_token_equals(token, "CHAIN");
 }
 
 bool sql_set_assignment_targets_transaction_variable(std::string_view assignment) {
@@ -3789,6 +3844,13 @@ bool sql_set_assignment_targets_transaction_variable(std::string_view assignment
         }
     }
     return false;
+}
+
+bool is_completion_transaction_control(TransactionControlKind kind) {
+    return kind == TransactionControlKind::Commit ||
+           kind == TransactionControlKind::CommitNoChain ||
+           kind == TransactionControlKind::Rollback ||
+           kind == TransactionControlKind::RollbackNoChain;
 }
 
 bool is_savepoint_transaction_control(TransactionControlKind kind) {

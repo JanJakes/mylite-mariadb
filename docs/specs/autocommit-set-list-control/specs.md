@@ -10,10 +10,10 @@ MariaDB and blocks useful transaction flows even though MyLite can mirror the
 autocommit state after MariaDB accepts the full statement.
 
 Global autocommit changes, duplicate autocommit assignments, transaction
-isolation/read-only variables, chain/release `completion_type` defaults,
-unsupported `SET TRANSACTION` forms, and semicolon-chained statements remain
-unsupported. A later transaction SET no-op slice allows no-chain
-`completion_type` assignments in direct `SET` lists.
+isolation/read-only variables, release `completion_type` defaults, unsupported
+`SET TRANSACTION` forms, and semicolon-chained statements remain unsupported.
+Later transaction SET slices allow no-chain and chain `completion_type`
+assignments in direct `SET` lists.
 
 ## Source Findings
 
@@ -43,9 +43,9 @@ MariaDB base: `mariadb-11.8.6`
 Relax `libmylite`'s direct autocommit-control parser:
 
 - Accept one supported session autocommit assignment anywhere in a `SET` list
-  when every other assignment is not a transaction-control assignment. A later
-  transaction SET no-op slice also allows supported no-chain `completion_type`
-  assignments in the same direct list.
+  when every other assignment is not a transaction-control assignment. Later
+  transaction SET slices also allow supported no-chain and chain
+  `completion_type` assignments in the same direct list.
 - Preserve all supported autocommit spellings:
   - `autocommit`, `SESSION autocommit`, `LOCAL autocommit`,
     `@@autocommit`, and `@@session.autocommit`,
@@ -140,8 +140,7 @@ tests.
 - MyLite still uses lightweight SQL scanning rather than MariaDB's parsed
   `set_var` list. The scanner is deliberately conservative: suspicious
   transaction-control targets are rejected rather than partially interpreted.
-- Supporting chain/release `completion_type` defaults would require MyLite to
-  mirror that session variable when classifying later plain `COMMIT` and
-  `ROLLBACK` statements.
+- Supporting release `completion_type` defaults requires an embedded
+  handle-lifecycle decision.
 - Read-only and isolation variables need a broader storage and concurrency
   design before they can be supported honestly.

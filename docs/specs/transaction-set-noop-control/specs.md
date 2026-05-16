@@ -1,5 +1,10 @@
 # Transaction SET No-Op Control
 
+Status note: the later
+[Completion Type Chain Control](../completion-type-chain-control/specs.md)
+slice accepts session `SET completion_type=CHAIN/1` and mirrors chained plain
+`COMMIT` / `ROLLBACK`. Release completion defaults remain unsupported.
+
 ## Problem
 
 MyLite supports bounded direct row-DML transactions, but it still rejects every

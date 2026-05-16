@@ -493,12 +493,15 @@ MariaDB's transaction restart behavior for this bounded row-DML scope.
 `START TRANSACTION READ WRITE` follows the same direct transaction-start path.
 `COMMIT` and `ROLLBACK` completion modifiers support `AND CHAIN` by finishing
 the current outer checkpoint and immediately opening a new one; `AND NO CHAIN`
-and `NO RELEASE` are accepted explicit no-op completion modifiers. `RELEASE`,
-`READ ONLY`, `WITH CONSISTENT SNAPSHOT`, chained or release `completion_type`
-defaults, and transaction isolation or read-only variable changes remain
-unsupported. Direct `SET TRANSACTION READ WRITE` and session
-`SET completion_type=NO_CHAIN/0/DEFAULT` forms are accepted as no-op controls
-for the current read-write, no-chain default transaction scope.
+and `NO RELEASE` are accepted explicit no-op completion modifiers. Direct
+session `SET completion_type=CHAIN/1` mirrors the MariaDB completion default
+so later plain direct `COMMIT` and `ROLLBACK` chain, while explicit
+`AND NO CHAIN` overrides it. `RELEASE`, `READ ONLY`,
+`WITH CONSISTENT SNAPSHOT`, `completion_type=RELEASE/2`, and transaction
+isolation or read-only variable changes remain unsupported. Direct
+`SET TRANSACTION READ WRITE` and session
+`SET completion_type=NO_CHAIN/0/DEFAULT` are accepted as read-write/no-chain
+defaults for the same bounded scope.
 Direct savepoint control is handled by `libmylite` before MariaDB execution
 for the same bounded transaction scope: simple unquoted and backtick-quoted
 `SAVEPOINT` names open nested storage checkpoint frames,
@@ -521,8 +524,8 @@ This is still partial SQL transaction support. The MyLite handler still
 advertises non-transactional engine flags. Public `libmylite` SQL entry points
 continue to reject SQL-mode-sensitive double-quoted savepoint names, global or
 duplicate autocommit changes, unsupported `SET TRANSACTION` forms, unsupported
-transaction modifiers and transaction variables, chain/release completion
-defaults, XA, and DDL inside active direct transactions. Handler-level
+transaction modifiers and transaction variables, release completion defaults,
+XA, and DDL inside active direct transactions. Handler-level
 savepoint hooks, transactional DDL, isolation, WAL/checkpoint, and
 transactional engine-flag support remain planned.
 
