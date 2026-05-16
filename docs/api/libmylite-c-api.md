@@ -110,10 +110,13 @@ MariaDB schema directory exists. Direct `BEGIN`, `COMMIT`, `ROLLBACK`,
 transaction restart through repeated direct `BEGIN` / `START TRANSACTION`, and
 supported direct session `SET autocommit=0/1` forms support row-DML
 transactions over routed MyLite tables, including nested statement rollback for
-covered failed direct and prepared row-DML statements. Savepoints,
-multi-assignment or global autocommit-control statements, transaction
-modifiers, XA, and DDL inside an active transaction remain unsupported until
-the storage and catalog transaction design is broader.
+covered failed direct and prepared row-DML statements. Direct `SAVEPOINT`,
+`ROLLBACK TO [SAVEPOINT]`, and `RELEASE SAVEPOINT` support simple unquoted
+savepoint names inside active bounded row-DML transactions. Prepared savepoint
+statements, quoted savepoint names, multi-assignment or global
+autocommit-control statements, transaction modifiers, XA, and DDL inside an
+active transaction remain unsupported until the storage and catalog transaction
+design is broader.
 Existing-file opens preserve storage lock conflicts as
 `MYLITE_BUSY` before starting the embedded runtime.
 
@@ -516,8 +519,8 @@ the embedded library model:
 
 Representative account, event, plugin, replication, binlog, view, trigger,
 routine, package, sequence, `CALL`, UDF `CREATE FUNCTION ... SONAME`,
-savepoint, global or multi-assignment autocommit-control,
-transaction-modifier, XA, SQL locking,
+global or multi-assignment autocommit-control, transaction-modifier, XA,
+prepared savepoint-control, SQL locking,
 named-lock, SQL `HELP`, SQL `HANDLER`, `SELECT ... PROCEDURE`, SQL file-I/O,
 table-maintenance/key-cache administration, statement profiling, external
 backup SQL, query cache administration, optimizer trace, static SHOW

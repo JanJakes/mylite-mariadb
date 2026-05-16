@@ -106,8 +106,10 @@ No dependency is added. The binary-size impact is negligible.
   transaction succeeds.
 - Add storage-smoke coverage proving row DML before the restart commits, while
   row DML after the restart rolls back with the new transaction.
-- Keep unsupported transaction modifiers, savepoints, XA, and DDL inside active
-  transactions rejected.
+- Keep unsupported transaction modifiers, XA, and DDL inside active
+  transactions rejected. Savepoints are covered by the later
+  [Savepoint Row-DML Transactions](../savepoint-row-dml-transactions/specs.md)
+  slice.
 - Run dev, embedded, storage-smoke, transaction harness groups, formatting,
   tidy, shell syntax, and whitespace checks.
 

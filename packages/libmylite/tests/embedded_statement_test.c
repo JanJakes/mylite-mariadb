@@ -1030,6 +1030,41 @@ static void test_prepare_diagnostics(void) {
     assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
 
     assert(
+        mylite_prepare(db, "SAVEPOINT mylite_probe", MYLITE_NUL_TERMINATED, &stmt, NULL) ==
+        MYLITE_ERROR
+    );
+    assert(stmt == NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
+
+    assert(
+        mylite_prepare(
+            db,
+            "ROLLBACK TO SAVEPOINT mylite_probe",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_ERROR
+    );
+    assert(stmt == NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
+
+    assert(
+        mylite_prepare(db, "RELEASE SAVEPOINT mylite_probe", MYLITE_NUL_TERMINATED, &stmt, NULL) ==
+        MYLITE_ERROR
+    );
+    assert(stmt == NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
+
+    assert(
         mylite_prepare(db, "SET autocommit=0", MYLITE_NUL_TERMINATED, &stmt, NULL) == MYLITE_ERROR
     );
     assert(stmt == NULL);

@@ -4,7 +4,9 @@ Status note: the later
 [Transaction Restart Control](../transaction-restart-control/specs.md) slice
 aligns `BEGIN` / `START TRANSACTION` inside an active autocommit-disabled
 transaction with MariaDB's commit-current/start-new behavior for the same
-bounded checkpoint scope.
+bounded checkpoint scope. The later
+[Savepoint Row-DML Transactions](../savepoint-row-dml-transactions/specs.md)
+slice adds direct savepoints for the same bounded row-DML transaction scope.
 
 ## Problem
 
@@ -15,9 +17,9 @@ blocks common application transaction flows even though the storage checkpoint
 model can support the same row-DML scope.
 
 This slice adds direct `SET autocommit=0` / `SET autocommit=1` support for the
-same bounded transaction surface. It does not add savepoints, isolation-level
-changes, transaction modifiers, XA, transactional DDL, or transactional engine
-flags.
+same bounded transaction surface. It does not add isolation-level changes,
+transaction modifiers, XA, transactional DDL, or transactional engine flags.
+Savepoints were deferred to the later savepoint slice.
 
 ## Source Findings
 
@@ -65,7 +67,8 @@ Extend the direct `libmylite` transaction-control policy:
   now, because MariaDB can evaluate expressions in the same statement and
   commits at statement end.
 - Keep global autocommit changes, `SET TRANSACTION`, isolation-level changes,
-  transaction modifiers, XA, and savepoints rejected.
+  transaction modifiers, and XA rejected. Savepoints were deferred to the later
+  savepoint slice.
 
 `libmylite` owns a new `autocommit_disabled` session flag. When direct
 `SET autocommit=0` succeeds in MariaDB, `libmylite` opens an outer MyLite
@@ -159,9 +162,9 @@ policy parsing, and tests.
   - failed direct and prepared row-DML statements inside autocommit-disabled
     transactions,
   - close-time rollback while autocommit is disabled,
-  - continued rejection of savepoints, transaction modifiers, XA, global
-    autocommit changes, multi-assignment autocommit changes, and DDL inside the
-    active transaction.
+  - continued rejection of transaction modifiers, XA, global autocommit
+    changes, multi-assignment autocommit changes, and DDL inside the active
+    transaction.
 - Run dev, embedded, storage-smoke, transaction harness groups, formatting,
   tidy, shell syntax, and whitespace checks.
 

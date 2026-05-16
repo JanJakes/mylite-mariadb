@@ -200,10 +200,21 @@ enum class TransactionControlKind : unsigned char {
     Begin,
     Commit,
     Rollback,
+    Savepoint,
+    RollbackToSavepoint,
+    ReleaseSavepoint,
     SetAutocommitOff,
     SetAutocommitOn,
     Unsupported,
 };
+
+#if MYLITE_WITH_MARIADB_EMBEDDED && MYLITE_MARIADB_HAS_MYLITE_SE
+struct DirectSavepoint {
+    std::string name;
+    mylite_storage_statement *statement = nullptr;
+    bool active = true;
+};
+#endif
 
 } // namespace
 
@@ -213,6 +224,7 @@ struct mylite_db {
 #endif
 #if MYLITE_WITH_MARIADB_EMBEDDED && MYLITE_MARIADB_HAS_MYLITE_SE
     mylite_storage_statement *transaction_statement = nullptr;
+    std::vector<DirectSavepoint> savepoints;
 #endif
     std::string filename;
     unsigned busy_timeout_ms = 0;
@@ -333,6 +345,18 @@ int capture_warnings(mylite_db &database, unsigned warning_count, bool force_que
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
 int begin_direct_transaction(mylite_db &database);
 int finish_direct_transaction(mylite_db &database, bool commit);
+int execute_direct_savepoint_control(
+    mylite_db &database,
+    TransactionControlKind kind,
+    std::string_view name
+);
+int set_direct_savepoint(mylite_db &database, std::string_view name);
+int rollback_to_direct_savepoint(mylite_db &database, std::string_view name);
+int release_direct_savepoint(mylite_db &database, std::string_view name);
+int finish_direct_savepoints(mylite_db &database, bool commit);
+std::size_t find_direct_savepoint(const mylite_db &database, std::string_view name);
+int finish_direct_savepoint_frame(mylite_db &database, std::size_t index, bool commit);
+int begin_direct_savepoint_frame(mylite_db &database, std::string_view name);
 #  endif
 void clear_current_row(mylite_stmt &statement);
 bool is_variable_column_type(mylite_value_type type);
@@ -345,6 +369,13 @@ mylite_warning_level map_warning_level(const char *level);
 std::string field_string(const char *value, unsigned int length);
 const char *unsupported_sql_surface_message(std::string_view sql);
 TransactionControlKind direct_transaction_control_kind(std::string_view sql);
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+bool direct_savepoint_control_name(
+    std::string_view sql,
+    TransactionControlKind kind,
+    std::string_view &out_name
+);
+#  endif
 bool is_server_surface_sql(std::string_view sql);
 bool is_backup_sql(std::string_view sql);
 bool is_query_cache_sql(std::string_view sql);
@@ -386,6 +417,7 @@ bool is_non_table_object_keyword(std::string_view token);
 TransactionControlKind direct_set_autocommit_control_kind(std::string_view sql);
 TransactionControlKind autocommit_assignment_control_kind(std::string_view assignment);
 bool is_set_transaction_control_sql(std::string_view sql);
+bool is_savepoint_transaction_control(TransactionControlKind kind);
 bool sql_token_is_autocommit_off(std::string_view token);
 bool sql_token_is_autocommit_on(std::string_view token);
 bool sql_has_statement_tail_after_semicolon(std::string_view sql);
@@ -1297,6 +1329,33 @@ int exec_impl(
         set_error(*database, MYLITE_ERROR, "unsupported SQL transaction control");
         return copy_error_message(*database, errmsg);
     }
+    if (is_savepoint_transaction_control(transaction_control)) {
+        if (!database->transaction_active) {
+            set_error(*database, MYLITE_ERROR, "unsupported savepoint transaction control");
+            return copy_error_message(*database, errmsg);
+        }
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        if (database->filename != ":memory:") {
+            std::string_view savepoint_name;
+            if (!direct_savepoint_control_name(
+                    std::string_view(sql),
+                    transaction_control,
+                    savepoint_name
+                )) {
+                set_error(*database, MYLITE_ERROR, "unsupported savepoint transaction control");
+                return copy_error_message(*database, errmsg);
+            }
+            const int savepoint_result =
+                execute_direct_savepoint_control(*database, transaction_control, savepoint_name);
+            if (savepoint_result != MYLITE_OK) {
+                return copy_error_message(*database, errmsg);
+            }
+            database->changes = 0;
+            database->last_insert_id = 0;
+            return MYLITE_OK;
+        }
+#  endif
+    }
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
     if (database->transaction_active && transaction_control == TransactionControlKind::None &&
         is_storage_outer_checkpoint_sql(std::string_view(sql))) {
@@ -1799,6 +1858,11 @@ int begin_direct_transaction(mylite_db &database) {
 }
 
 int finish_direct_transaction(mylite_db &database, bool commit) {
+    const int savepoint_result = finish_direct_savepoints(database, commit);
+    if (savepoint_result != MYLITE_OK) {
+        return savepoint_result;
+    }
+
     if (database.transaction_statement == nullptr) {
         return MYLITE_OK;
     }
@@ -1814,6 +1878,164 @@ int finish_direct_transaction(mylite_db &database, bool commit) {
             commit ? "transaction checkpoint commit failed" : "transaction rollback failed"
         );
         return database.errcode;
+    }
+    return MYLITE_OK;
+}
+
+int execute_direct_savepoint_control(
+    mylite_db &database,
+    TransactionControlKind kind,
+    std::string_view name
+) {
+    if (kind == TransactionControlKind::Savepoint) {
+        return set_direct_savepoint(database, name);
+    }
+    if (kind == TransactionControlKind::RollbackToSavepoint) {
+        return rollback_to_direct_savepoint(database, name);
+    }
+    if (kind == TransactionControlKind::ReleaseSavepoint) {
+        return release_direct_savepoint(database, name);
+    }
+    return MYLITE_OK;
+}
+
+int set_direct_savepoint(mylite_db &database, std::string_view name) {
+    const int result = begin_direct_savepoint_frame(database, name);
+    if (result != MYLITE_OK) {
+        return result;
+    }
+
+    const std::size_t replacement_index = database.savepoints.size() - 1U;
+    const std::string_view replacement_name = database.savepoints[replacement_index].name;
+    for (std::size_t index = replacement_index; index > 0U; --index) {
+        DirectSavepoint &candidate = database.savepoints[index - 1U];
+        if (candidate.active && candidate.name == replacement_name) {
+            candidate.active = false;
+            break;
+        }
+    }
+    return MYLITE_OK;
+}
+
+int rollback_to_direct_savepoint(mylite_db &database, std::string_view name) {
+    const std::size_t target = find_direct_savepoint(database, name);
+    if (target == database.savepoints.size()) {
+        set_error(database, MYLITE_ERROR, "savepoint transaction control target not found");
+        return MYLITE_ERROR;
+    }
+
+    std::string savepoint_name;
+    try {
+        savepoint_name = database.savepoints[target].name;
+    } catch (const std::bad_alloc &) {
+        set_error(database, MYLITE_NOMEM, "savepoint allocation failed");
+        return MYLITE_NOMEM;
+    }
+
+    while (database.savepoints.size() > target + 1U) {
+        const int result =
+            finish_direct_savepoint_frame(database, database.savepoints.size() - 1U, false);
+        if (result != MYLITE_OK) {
+            return result;
+        }
+    }
+
+    const int rollback_result = finish_direct_savepoint_frame(database, target, false);
+    if (rollback_result != MYLITE_OK) {
+        return rollback_result;
+    }
+    return begin_direct_savepoint_frame(database, savepoint_name);
+}
+
+int release_direct_savepoint(mylite_db &database, std::string_view name) {
+    const std::size_t target = find_direct_savepoint(database, name);
+    if (target == database.savepoints.size()) {
+        set_error(database, MYLITE_ERROR, "savepoint transaction control target not found");
+        return MYLITE_ERROR;
+    }
+
+    while (database.savepoints.size() > target) {
+        const int result =
+            finish_direct_savepoint_frame(database, database.savepoints.size() - 1U, true);
+        if (result != MYLITE_OK) {
+            return result;
+        }
+    }
+    return MYLITE_OK;
+}
+
+int finish_direct_savepoints(mylite_db &database, bool commit) {
+    while (!database.savepoints.empty()) {
+        const int result =
+            finish_direct_savepoint_frame(database, database.savepoints.size() - 1U, commit);
+        if (result != MYLITE_OK) {
+            return result;
+        }
+    }
+    return MYLITE_OK;
+}
+
+std::size_t find_direct_savepoint(const mylite_db &database, std::string_view name) {
+    for (std::size_t index = database.savepoints.size(); index > 0U; --index) {
+        const DirectSavepoint &candidate = database.savepoints[index - 1U];
+        if (candidate.active && candidate.name == name) {
+            return index - 1U;
+        }
+    }
+    return database.savepoints.size();
+}
+
+int finish_direct_savepoint_frame(mylite_db &database, std::size_t index, bool commit) {
+    if (index + 1U != database.savepoints.size()) {
+        set_error(database, MYLITE_MISUSE, "savepoint checkpoint order mismatch");
+        return MYLITE_MISUSE;
+    }
+
+    mylite_storage_statement *statement = database.savepoints.back().statement;
+    database.savepoints.pop_back();
+    if (statement == nullptr) {
+        return MYLITE_OK;
+    }
+
+    const mylite_storage_result result = commit ? mylite_storage_commit_statement(statement)
+                                                : mylite_storage_rollback_statement(statement);
+    if (result != MYLITE_STORAGE_OK) {
+        set_error(
+            database,
+            map_storage_result(result),
+            commit ? "savepoint checkpoint commit failed" : "savepoint rollback failed"
+        );
+        return database.errcode;
+    }
+    return MYLITE_OK;
+}
+
+int begin_direct_savepoint_frame(mylite_db &database, std::string_view name) {
+    DirectSavepoint savepoint;
+    try {
+        savepoint.name = std::string(name);
+    } catch (const std::bad_alloc &) {
+        set_error(database, MYLITE_NOMEM, "savepoint allocation failed");
+        return MYLITE_NOMEM;
+    }
+
+    if (database.filename != ":memory:") {
+        const mylite_storage_result result =
+            mylite_storage_begin_statement(database.filename.c_str(), &savepoint.statement);
+        if (result != MYLITE_STORAGE_OK) {
+            set_error(database, map_storage_result(result), "savepoint checkpoint failed");
+            return database.errcode;
+        }
+    }
+
+    try {
+        database.savepoints.push_back(std::move(savepoint));
+    } catch (const std::bad_alloc &) {
+        if (savepoint.statement != nullptr) {
+            mylite_storage_rollback_statement(savepoint.statement);
+        }
+        set_error(database, MYLITE_NOMEM, "savepoint allocation failed");
+        return MYLITE_NOMEM;
     }
     return MYLITE_OK;
 }
@@ -3027,12 +3249,27 @@ TransactionControlKind direct_transaction_control_kind(std::string_view sql) {
             return sql_rest_is_statement_end(after_first) ? TransactionControlKind::Rollback
                                                           : TransactionControlKind::Unsupported;
         }
+        if (sql_token_equals(second, "TO")) {
+            std::string_view savepoint = pop_sql_token(rest);
+            if (sql_token_equals(savepoint, "SAVEPOINT")) {
+                savepoint = pop_sql_token(rest);
+            }
+            return !savepoint.empty() && sql_rest_is_statement_end(rest)
+                       ? TransactionControlKind::RollbackToSavepoint
+                       : TransactionControlKind::Unsupported;
+        }
         return sql_token_equals(second, "WORK") && sql_rest_is_statement_end(rest)
                    ? TransactionControlKind::Rollback
                    : TransactionControlKind::Unsupported;
     }
 
-    if (sql_token_equals(first, "SAVEPOINT") || sql_token_equals(first, "XA")) {
+    if (sql_token_equals(first, "SAVEPOINT")) {
+        return !second.empty() && sql_rest_is_statement_end(rest)
+                   ? TransactionControlKind::Savepoint
+                   : TransactionControlKind::Unsupported;
+    }
+
+    if (sql_token_equals(first, "XA")) {
         return TransactionControlKind::Unsupported;
     }
 
@@ -3045,8 +3282,13 @@ TransactionControlKind direct_transaction_control_kind(std::string_view sql) {
     }
 
     if (sql_token_equals(first, "RELEASE")) {
-        return sql_token_equals(second, "SAVEPOINT") ? TransactionControlKind::Unsupported
-                                                     : TransactionControlKind::None;
+        if (!sql_token_equals(second, "SAVEPOINT")) {
+            return TransactionControlKind::None;
+        }
+        const std::string_view savepoint = pop_sql_token(rest);
+        return !savepoint.empty() && sql_rest_is_statement_end(rest)
+                   ? TransactionControlKind::ReleaseSavepoint
+                   : TransactionControlKind::Unsupported;
     }
 
     if (sql_token_equals(first, "SET")) {
@@ -3062,6 +3304,45 @@ TransactionControlKind direct_transaction_control_kind(std::string_view sql) {
 
     return TransactionControlKind::None;
 }
+
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+bool direct_savepoint_control_name(
+    std::string_view sql,
+    TransactionControlKind kind,
+    std::string_view &out_name
+) {
+    out_name = {};
+    std::string_view rest = skip_sql_leading_noise(sql);
+    const std::string_view first = pop_sql_token(rest);
+
+    if (kind == TransactionControlKind::Savepoint && sql_token_equals(first, "SAVEPOINT")) {
+        out_name = pop_sql_token(rest);
+        return !out_name.empty() && sql_rest_is_statement_end(rest);
+    }
+
+    if (kind == TransactionControlKind::RollbackToSavepoint &&
+        sql_token_equals(first, "ROLLBACK")) {
+        if (!sql_token_equals(pop_sql_token(rest), "TO")) {
+            return false;
+        }
+        out_name = pop_sql_token(rest);
+        if (sql_token_equals(out_name, "SAVEPOINT")) {
+            out_name = pop_sql_token(rest);
+        }
+        return !out_name.empty() && sql_rest_is_statement_end(rest);
+    }
+
+    if (kind == TransactionControlKind::ReleaseSavepoint && sql_token_equals(first, "RELEASE")) {
+        if (!sql_token_equals(pop_sql_token(rest), "SAVEPOINT")) {
+            return false;
+        }
+        out_name = pop_sql_token(rest);
+        return !out_name.empty() && sql_rest_is_statement_end(rest);
+    }
+
+    return false;
+}
+#  endif
 
 TransactionControlKind direct_set_autocommit_control_kind(std::string_view sql) {
     const bool has_statement_tail = sql_has_statement_tail_after_semicolon(sql);
@@ -3163,6 +3444,12 @@ bool is_set_transaction_control_sql(std::string_view sql) {
 
     const std::string_view second = pop_sql_token_after_separators(sql);
     return sql_token_equals(second, "AUTOCOMMIT") || sql_token_equals(second, "TRANSACTION");
+}
+
+bool is_savepoint_transaction_control(TransactionControlKind kind) {
+    return kind == TransactionControlKind::Savepoint ||
+           kind == TransactionControlKind::RollbackToSavepoint ||
+           kind == TransactionControlKind::ReleaseSavepoint;
 }
 
 bool sql_token_is_autocommit_off(std::string_view token) {

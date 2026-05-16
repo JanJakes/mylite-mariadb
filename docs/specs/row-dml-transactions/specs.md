@@ -111,9 +111,12 @@ Public SQL policy rules:
 - Direct `mylite_exec()` allows plain `BEGIN`, `BEGIN WORK`,
   `START TRANSACTION`, `COMMIT`, `COMMIT WORK`, `ROLLBACK`, and
   `ROLLBACK WORK`.
-- Direct `mylite_exec()` continues to reject savepoints, rollback-to-savepoint,
-  `SET autocommit`, `SET TRANSACTION`, XA, transaction modifiers such as
-  `COMMIT AND CHAIN`, and prepared transaction-control statements.
+- Direct `mylite_exec()` continues to reject `SET autocommit`,
+  `SET TRANSACTION`, XA, transaction modifiers such as `COMMIT AND CHAIN`, and
+  prepared transaction-control statements. Savepoints were outside this slice
+  and are covered by the later
+  [Savepoint Row-DML Transactions](../savepoint-row-dml-transactions/specs.md)
+  slice.
 - Transactional DDL remains rejected while a direct transaction is active.
   MySQL/MariaDB DDL has implicit-commit semantics, and MyLite still needs a
   catalog/metadata transaction design before allowing DDL inside explicit
