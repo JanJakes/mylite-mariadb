@@ -1290,6 +1290,19 @@ static void test_transaction_control_policy(void) {
     assert(mylite_exec(db, "SET LOCAL autocommit=FALSE", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "SET LOCAL autocommit=DEFAULT", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "SET autocommit=ON", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SET TRANSACTION READ WRITE", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SET SESSION TRANSACTION READ WRITE", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SET LOCAL TRANSACTION READ WRITE", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SET completion_type=NO_CHAIN", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SET @@completion_type=0", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SET SESSION completion_type=DEFAULT", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(db, "SET sql_mode='', completion_type=NO_CHAIN", NULL, NULL, NULL) == MYLITE_OK
+    );
+    assert(
+        mylite_exec(db, "SET completion_type=NO_CHAIN, autocommit=0", NULL, NULL, NULL) == MYLITE_OK
+    );
+    assert(mylite_exec(db, "SET autocommit=ON", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "START TRANSACTION READ WRITE", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "COMMIT AND NO CHAIN", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "BEGIN", NULL, NULL, NULL) == MYLITE_OK);
@@ -1331,6 +1344,18 @@ static void test_transaction_control_policy(void) {
     assert_transaction_control_exec_fails(db, "SET @@completion_type=RELEASE");
     assert_transaction_control_exec_fails(db, "SET sql_mode='', completion_type=CHAIN");
     assert_transaction_control_exec_fails(db, "SET STATEMENT completion_type=CHAIN FOR SELECT 1");
+    assert_transaction_control_exec_fails(
+        db,
+        "SET STATEMENT completion_type=NO_CHAIN FOR SELECT 1"
+    );
+    assert_transaction_control_exec_fails(db, "SET GLOBAL TRANSACTION READ WRITE");
+    assert_transaction_control_exec_fails(db, "SET TRANSACTION READ ONLY");
+    assert_transaction_control_exec_fails(db, "SET TRANSACTION READ WRITE, READ ONLY");
+    assert_transaction_control_exec_fails(db, "SET GLOBAL completion_type=NO_CHAIN");
+    assert_transaction_control_exec_fails(db, "SET @@global.completion_type=0");
+    assert_transaction_control_exec_fails(db, "SET completion_type=1");
+    assert_transaction_control_exec_fails(db, "SET completion_type=NO_CHAIN, completion_type=0");
+    assert_transaction_control_exec_fails(db, "SET completion_type=NO_CHAIN; SELECT 1");
     assert_transaction_control_exec_fails(db, "SET transaction_isolation='READ-COMMITTED'");
     assert_transaction_control_exec_fails(db, "SET transaction_read_only=1");
     assert(mylite_exec(db, "SET autocommit=0, sql_mode='ANSI'", NULL, NULL, NULL) == MYLITE_OK);

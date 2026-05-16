@@ -4,8 +4,8 @@ Status note: the later
 [Autocommit SET-List Control](../autocommit-set-list-control/specs.md) slice
 allows one supported session autocommit assignment, including `DEFAULT`, inside
 a direct `SET` list with ordinary non-transaction assignments. Global,
-duplicate, transaction-variable, prepared, and semicolon-chained forms remain
-unsupported.
+duplicate, unsupported transaction-variable, prepared, and semicolon-chained
+forms remain unsupported.
 
 ## Problem
 
@@ -71,8 +71,8 @@ mode, matching the MariaDB default for this base line.
 Compatibility remains partial:
 
 - Prepared autocommit-control statements remain rejected.
-- Global and duplicate autocommit changes, transaction-variable `SET` lists,
-  and prepared autocommit control remain rejected.
+- Global and duplicate autocommit changes, unsupported transaction-variable
+  `SET` lists, and prepared autocommit control remain rejected.
 - `SET TRANSACTION`, isolation-level changes, transaction modifiers, XA, and
   transactional DDL remain unsupported.
 

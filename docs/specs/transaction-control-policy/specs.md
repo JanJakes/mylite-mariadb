@@ -7,9 +7,11 @@ later [Autocommit Row-DML Transactions](../autocommit-row-dml-transactions/specs
 slice allows supported direct session `SET autocommit=0/1` forms. The later
 [Autocommit SET-List Control](../autocommit-set-list-control/specs.md) slice
 allows one supported session autocommit assignment inside direct `SET` lists
-with ordinary non-transaction assignments. Savepoints, global or duplicate
-autocommit changes, transaction-variable `SET` lists, transaction modifiers,
-XA, and transactional DDL remain rejected.
+with ordinary non-transaction assignments. The later
+[Transaction SET No-Op Control](../transaction-set-noop-control/specs.md)
+slice accepts direct read-write/no-chain SET controls. Global or duplicate
+autocommit changes, unsupported transaction-variable `SET` lists, unsupported
+transaction modifiers, XA, and transactional DDL remain rejected.
 
 ## Problem
 
@@ -22,8 +24,8 @@ statement while MyLite table writes still publish outside a SQL transaction.
 This slice rejected explicit SQL transaction-control surfaces through the
 public MyLite SQL entry points until later work added bounded direct row-DML
 transaction surfaces. Savepoints, global or duplicate autocommit changes,
-transaction-variable `SET` lists, transaction modifiers, XA, and transactional
-DDL remain rejected.
+unsupported transaction-variable `SET` lists, unsupported transaction
+modifiers, XA, and transactional DDL remain rejected.
 
 ## Source Findings
 

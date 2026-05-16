@@ -10,9 +10,9 @@ slice adds supported direct session `SET autocommit=0/1` forms, and the later
 [Autocommit SET-List Control](../autocommit-set-list-control/specs.md) slice
 allows one supported session autocommit assignment inside direct `SET` lists
 with ordinary non-transaction assignments. Savepoints, global or duplicate
-autocommit changes, transaction-variable `SET` lists, XA, transaction
-modifiers, transactional DDL, and transactional engine flags remain planned or
-rejected.
+autocommit changes, unsupported transaction-variable `SET` lists, XA,
+transaction modifiers, transactional DDL, and transactional engine flags remain
+planned or rejected.
 
 ## Problem
 

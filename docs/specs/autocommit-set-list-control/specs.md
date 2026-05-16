@@ -10,8 +10,10 @@ MariaDB and blocks useful transaction flows even though MyLite can mirror the
 autocommit state after MariaDB accepts the full statement.
 
 Global autocommit changes, duplicate autocommit assignments, transaction
-isolation/read-only variables, `completion_type`, `SET TRANSACTION`, and
-semicolon-chained statements remain unsupported.
+isolation/read-only variables, chain/release `completion_type` defaults,
+unsupported `SET TRANSACTION` forms, and semicolon-chained statements remain
+unsupported. A later transaction SET no-op slice allows no-chain
+`completion_type` assignments in direct `SET` lists.
 
 ## Source Findings
 
@@ -41,7 +43,9 @@ MariaDB base: `mariadb-11.8.6`
 Relax `libmylite`'s direct autocommit-control parser:
 
 - Accept one supported session autocommit assignment anywhere in a `SET` list
-  when every other assignment is not a transaction-control assignment.
+  when every other assignment is not a transaction-control assignment. A later
+  transaction SET no-op slice also allows supported no-chain `completion_type`
+  assignments in the same direct list.
 - Preserve all supported autocommit spellings:
   - `autocommit`, `SESSION autocommit`, `LOCAL autocommit`,
     `@@autocommit`, and `@@session.autocommit`,
@@ -51,7 +55,7 @@ Relax `libmylite`'s direct autocommit-control parser:
 - Reject duplicate autocommit assignments in the same `SET` statement.
 - Reject global autocommit assignment, `completion_type`, transaction
   isolation/read-only variables, `SET TRANSACTION`, and semicolon-chained
-  statements before MariaDB execution.
+  statements before MariaDB execution at this slice point.
 - Keep prepared autocommit-control statements rejected.
 
 Execution reuses the existing `SetAutocommitOff` and `SetAutocommitOn`
@@ -108,7 +112,7 @@ tests.
 - Extend direct SQL policy tests to accept supported session autocommit
   assignments mixed with ordinary session/user-variable assignments.
 - Keep duplicate, global, transaction-variable, prepared, and semicolon-chained
-  forms rejected with transaction-control diagnostics.
+  forms rejected with transaction-control diagnostics at this slice point.
 - Add storage-smoke coverage proving:
   - `SET autocommit=0, sql_mode='ANSI'` opens a rollbackable row-DML
     transaction,
@@ -125,8 +129,9 @@ tests.
 - Other ordinary assignments in the same list are left to MariaDB's normal
   validation and execution.
 - MyLite mirrors autocommit state only after MariaDB reports success.
-- Global, duplicate, transaction-variable, prepared, and chained-statement
-  forms remain explicit unsupported transaction-control surfaces.
+- Global, duplicate, unsupported transaction-variable, prepared, and
+  chained-statement forms remain explicit unsupported transaction-control
+  surfaces at this slice point.
 - Docs and compatibility tables describe multi-assignment support without
   claiming global autocommit or isolation semantics.
 
@@ -135,7 +140,8 @@ tests.
 - MyLite still uses lightweight SQL scanning rather than MariaDB's parsed
   `set_var` list. The scanner is deliberately conservative: suspicious
   transaction-control targets are rejected rather than partially interpreted.
-- Supporting `completion_type` would require MyLite to mirror that session
-  variable when classifying later plain `COMMIT` and `ROLLBACK` statements.
+- Supporting chain/release `completion_type` defaults would require MyLite to
+  mirror that session variable when classifying later plain `COMMIT` and
+  `ROLLBACK` statements.
 - Read-only and isolation variables need a broader storage and concurrency
   design before they can be supported honestly.

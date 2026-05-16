@@ -117,16 +117,19 @@ explicit `START TRANSACTION READ WRITE`, `COMMIT` / `ROLLBACK` `AND CHAIN`,
 `AND NO CHAIN`, and `NO RELEASE` forms for the same bounded scope, including
 nested statement rollback for covered failed direct and prepared row-DML
 statements and transaction-journal recovery after an unclean process exit.
+Direct `SET TRANSACTION READ WRITE` and session
+`SET completion_type=NO_CHAIN/0/DEFAULT` forms are accepted as no-op controls
+for the current read-write, no-chain default transaction scope.
 Direct `SAVEPOINT`,
 `ROLLBACK TO [SAVEPOINT]`, and `RELEASE SAVEPOINT` support simple unquoted and
 backtick-quoted savepoint names inside active bounded row-DML transactions, and
 the same savepoint-control statements can be prepared and reused for
 file-backed MyLite transactions. SQL-mode-sensitive double-quoted savepoint
 names, global autocommit-control statements, duplicate autocommit assignments,
-`READ ONLY`, `WITH CONSISTENT SNAPSHOT`, `RELEASE` completion,
-`completion_type` defaults, transaction isolation or read-only variables, XA,
-and DDL inside an active transaction remain unsupported until the storage and
-catalog transaction design is broader.
+`READ ONLY`, `WITH CONSISTENT SNAPSHOT`, `RELEASE` completion, chained or
+release `completion_type` defaults, transaction isolation or read-only
+variables, XA, and DDL inside an active transaction remain unsupported until
+the storage and catalog transaction design is broader.
 Existing-file opens preserve storage lock conflicts as
 `MYLITE_BUSY` before starting the embedded runtime.
 
@@ -532,8 +535,9 @@ the embedded library model:
 
 Representative account, event, plugin, replication, binlog, view, trigger,
 routine, package, sequence, `CALL`, UDF `CREATE FUNCTION ... SONAME`,
-global or duplicate autocommit-control, transaction-variable `SET` lists,
-unsupported transaction-control, XA, SQL locking,
+global or duplicate autocommit-control, unsupported transaction-variable `SET`
+lists, unsupported transaction-control, unsupported completion defaults, XA,
+SQL locking,
 named-lock, SQL `HELP`, SQL `HANDLER`, `SELECT ... PROCEDURE`, SQL file-I/O,
 table-maintenance/key-cache administration, statement profiling, external
 backup SQL, query cache administration, optimizer trace, static SHOW

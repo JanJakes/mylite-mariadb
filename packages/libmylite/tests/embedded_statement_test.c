@@ -1016,6 +1016,12 @@ static void test_prepare_diagnostics(void) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
     assert_prepare_fails_with_message(db, "START TRANSACTION READ WRITE", "transaction control");
+    assert_prepare_fails_with_message(db, "SET TRANSACTION READ WRITE", "transaction control");
+    assert_prepare_fails_with_message(
+        db,
+        "SET SESSION TRANSACTION READ WRITE",
+        "transaction control"
+    );
 
     assert(mylite_prepare(db, "BEGIN", MYLITE_NUL_TERMINATED, &stmt, NULL) == MYLITE_ERROR);
     assert(stmt == NULL);
@@ -1047,6 +1053,7 @@ static void test_prepare_diagnostics(void) {
     assert(mylite_mariadb_errno(db) == 0U);
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
+    assert_prepare_fails_with_message(db, "SET completion_type=NO_CHAIN", "transaction control");
     assert_prepare_fails_with_message(db, "SET completion_type=CHAIN", "transaction control");
     assert_prepare_fails_with_message(
         db,

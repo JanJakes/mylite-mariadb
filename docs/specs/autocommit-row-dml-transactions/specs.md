@@ -16,7 +16,7 @@ The later
 [Autocommit SET-List Control](../autocommit-set-list-control/specs.md) slice
 allows one supported session autocommit assignment inside a direct `SET` list
 with ordinary non-transaction assignments, while keeping global, duplicate, and
-transaction-variable forms unsupported.
+unsupported transaction-variable forms rejected.
 
 ## Problem
 

@@ -3,9 +3,11 @@
 Status note: this slice kept transaction modifiers out of scope. The later
 [Transaction Modifier Control](../transaction-modifier-control/specs.md) slice
 adds bounded direct `START TRANSACTION READ WRITE`, `AND CHAIN`,
-`AND NO CHAIN`, and `NO RELEASE` support while leaving read-only transactions,
-consistent snapshots, release completion, isolation variables, completion-type
-defaults, XA, and transactional DDL unsupported.
+`AND NO CHAIN`, and `NO RELEASE` support, and the later
+[Transaction SET No-Op Control](../transaction-set-noop-control/specs.md)
+slice accepts direct read-write/no-chain SET controls. Read-only transactions,
+consistent snapshots, release completion, isolation variables, chained/release
+completion defaults, XA, and transactional DDL remain unsupported.
 
 ## Problem
 

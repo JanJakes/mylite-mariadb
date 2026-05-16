@@ -1531,6 +1531,56 @@ static void test_row_dml_transactions(void) {
     );
     assert(count.rows == 1);
 
+    assert_exec_succeeds(db, "SET TRANSACTION READ WRITE");
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (38, 'set-transaction-read-write')");
+    assert_exec_succeeds(db, "COMMIT");
+    count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts "
+            "WHERE id = 38 AND title = 'set-transaction-read-write'",
+            single_value_callback,
+            &count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(count.rows == 1);
+
+    assert_exec_succeeds(db, "SET completion_type=NO_CHAIN");
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (39, 'completion-no-chain')");
+    assert_exec_succeeds(db, "COMMIT");
+    assert_exec_succeeds(db, "DROP TABLE IF EXISTS no_chain_probe");
+    count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE id = 39 AND title = 'completion-no-chain'",
+            single_value_callback,
+            &count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(count.rows == 1);
+
+    assert_exec_succeeds(db, "SET completion_type=NO_CHAIN, autocommit=0");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (40, 'completion-autocommit-list')");
+    assert_exec_succeeds(db, "COMMIT");
+    assert_exec_succeeds(db, "SET autocommit=1");
+    count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE id = 40 AND title = 'completion-autocommit-list'",
+            single_value_callback,
+            &count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(count.rows == 1);
+
     assert_exec_succeeds(db, "SET SESSION autocommit=OFF");
     assert_exec_fails_with_message(
         db,
@@ -1539,6 +1589,7 @@ static void test_row_dml_transactions(void) {
     );
     assert_transaction_control_exec_fails(db, "SET GLOBAL autocommit=0");
     assert_transaction_control_exec_fails(db, "SET autocommit=0, completion_type=CHAIN");
+    assert_transaction_control_exec_fails(db, "SET TRANSACTION READ ONLY");
     assert_exec_succeeds(db, "SET autocommit=ON");
 
     assert_exec_succeeds(db, "BEGIN");
@@ -1986,7 +2037,7 @@ static void test_row_dml_transactions(void) {
         ) == MYLITE_OK
     );
     assert(zero_count.rows == 1);
-    count = (single_value_context){.expected_value = "16"};
+    count = (single_value_context){.expected_value = "19"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
         MYLITE_OK
@@ -2011,7 +2062,7 @@ static void test_row_dml_transactions(void) {
         ) == MYLITE_OK
     );
     assert(zero_count.rows == 1);
-    count = (single_value_context){.expected_value = "16"};
+    count = (single_value_context){.expected_value = "19"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
         MYLITE_OK
@@ -2022,7 +2073,7 @@ static void test_row_dml_transactions(void) {
     assert_transaction_crash_recovery(root, filename);
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "USE tx_app");
-    count = (single_value_context){.expected_value = "16"};
+    count = (single_value_context){.expected_value = "19"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
         MYLITE_OK
