@@ -1,5 +1,10 @@
 # Savepoint Row-DML Transactions
 
+Status note: this slice added direct savepoint control. The later
+[Prepared Savepoint Control](../prepared-savepoint-control/specs.md) slice
+adds prepared `SAVEPOINT`, `ROLLBACK TO [SAVEPOINT]`, and
+`RELEASE SAVEPOINT` for the same bounded file-backed transaction scope.
+
 ## Problem
 
 MyLite now supports bounded direct row-DML transactions through direct

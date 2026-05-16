@@ -1303,6 +1303,9 @@ static void test_row_dml_transactions(void) {
     char *filename = NULL;
     mylite_db *db = open_database(root, &filename);
     mylite_stmt *rollback_update = NULL;
+    mylite_stmt *prepared_savepoint = NULL;
+    mylite_stmt *prepared_rollback = NULL;
+    mylite_stmt *prepared_release = NULL;
     single_value_context count = {.expected_value = "1"};
     single_value_context zero_count = {.expected_value = "0"};
 
@@ -1572,6 +1575,106 @@ static void test_row_dml_transactions(void) {
     );
     assert(count.rows == 1);
 
+    assert(
+        mylite_prepare(
+            db,
+            "SAVEPOINT prepared_sp",
+            MYLITE_NUL_TERMINATED,
+            &prepared_savepoint,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(
+        mylite_prepare(
+            db,
+            "ROLLBACK TO SAVEPOINT prepared_sp",
+            MYLITE_NUL_TERMINATED,
+            &prepared_rollback,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(
+        mylite_prepare(
+            db,
+            "RELEASE SAVEPOINT prepared_sp",
+            MYLITE_NUL_TERMINATED,
+            &prepared_release,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_bind_parameter_count(prepared_savepoint) == 0U);
+    assert(mylite_column_count(prepared_savepoint) == 0U);
+    assert(mylite_step(prepared_savepoint) == MYLITE_ERROR);
+    assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
+    assert(mylite_reset(prepared_savepoint) == MYLITE_OK);
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (20, 'prepared-savepoint-before')");
+    assert(mylite_step(prepared_savepoint) == MYLITE_DONE);
+    assert(mylite_step(prepared_savepoint) == MYLITE_DONE);
+    assert(mylite_reset(prepared_savepoint) == MYLITE_OK);
+    assert(mylite_step(prepared_savepoint) == MYLITE_DONE);
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (21, 'prepared-savepoint-after')");
+    assert(mylite_step(prepared_rollback) == MYLITE_DONE);
+    zero_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE title = 'prepared-savepoint-after'",
+            single_value_callback,
+            &zero_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(zero_count.rows == 1);
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (21, 'prepared-savepoint-second')");
+    assert(mylite_reset(prepared_rollback) == MYLITE_OK);
+    assert(mylite_step(prepared_rollback) == MYLITE_DONE);
+    zero_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE title = 'prepared-savepoint-second'",
+            single_value_callback,
+            &zero_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(zero_count.rows == 1);
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (21, 'prepared-savepoint-release')");
+    assert(mylite_step(prepared_release) == MYLITE_DONE);
+    assert_exec_succeeds(db, "COMMIT");
+    count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts "
+            "WHERE id = 20 AND title = 'prepared-savepoint-before'",
+            single_value_callback,
+            &count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(count.rows == 1);
+    count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts "
+            "WHERE id = 21 AND title = 'prepared-savepoint-release'",
+            single_value_callback,
+            &count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(count.rows == 1);
+    assert(mylite_finalize(prepared_savepoint) == MYLITE_OK);
+    assert(mylite_finalize(prepared_rollback) == MYLITE_OK);
+    assert(mylite_finalize(prepared_release) == MYLITE_OK);
+    prepared_savepoint = NULL;
+    prepared_rollback = NULL;
+    prepared_release = NULL;
+
     assert_exec_succeeds(db, "BEGIN");
     assert_exec_succeeds(db, "SAVEPOINT duplicate_sp");
     assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (8, 'duplicate-before')");
@@ -1648,7 +1751,7 @@ static void test_row_dml_transactions(void) {
         ) == MYLITE_OK
     );
     assert(zero_count.rows == 1);
-    count = (single_value_context){.expected_value = "8"};
+    count = (single_value_context){.expected_value = "10"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
         MYLITE_OK
@@ -1673,7 +1776,7 @@ static void test_row_dml_transactions(void) {
         ) == MYLITE_OK
     );
     assert(zero_count.rows == 1);
-    count = (single_value_context){.expected_value = "8"};
+    count = (single_value_context){.expected_value = "10"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
         MYLITE_OK
@@ -1684,7 +1787,7 @@ static void test_row_dml_transactions(void) {
     assert_transaction_crash_recovery(root, filename);
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "USE tx_app");
-    count = (single_value_context){.expected_value = "8"};
+    count = (single_value_context){.expected_value = "10"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
         MYLITE_OK

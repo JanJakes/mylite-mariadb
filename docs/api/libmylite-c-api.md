@@ -114,8 +114,9 @@ transactions over routed MyLite tables, including nested statement rollback for
 covered failed direct and prepared row-DML statements and transaction-journal
 recovery after an unclean process exit. Direct `SAVEPOINT`,
 `ROLLBACK TO [SAVEPOINT]`, and `RELEASE SAVEPOINT` support simple unquoted
-savepoint names inside active bounded row-DML transactions. Prepared savepoint
-statements, quoted savepoint names, multi-assignment or global
+savepoint names inside active bounded row-DML transactions, and the same
+savepoint-control statements can be prepared and reused for file-backed MyLite
+transactions. Quoted savepoint names, multi-assignment or global
 autocommit-control statements, transaction modifiers, XA, and DDL inside an
 active transaction remain unsupported until the storage and catalog transaction
 design is broader.
@@ -221,12 +222,14 @@ Return values:
 `sql_len == MYLITE_NUL_TERMINATED` means `sql` is NUL-terminated. `tail`, when
 non-NULL, receives the first uncompiled byte.
 
-Initial implementation status: prepared statements run through MariaDB's
-embedded `MYSQL_STMT` API. The implementation supports one statement per
-prepare call, 1-based scalar parameter binding, row stepping, reset/finalize
-ownership, parameter counts, affected rows, insert ids, MariaDB diagnostics,
-warnings after completed execution and selected failed execution paths, and
-binary-safe text/BLOB column reads. File-backed MyLite storage-engine builds synchronize
+Initial implementation status: ordinary prepared statements run through
+MariaDB's embedded `MYSQL_STMT` API; MyLite-owned prepared savepoint-control
+statements use the direct transaction checkpoint path. The implementation
+supports one statement per prepare call, 1-based scalar parameter binding, row
+stepping, reset/finalize ownership, parameter counts, affected rows, insert
+ids, MariaDB diagnostics, warnings after completed execution and selected
+failed execution paths, and binary-safe text/BLOB column reads. File-backed
+MyLite storage-engine builds synchronize
 successful prepared `CREATE/DROP DATABASE` and `CREATE/DROP SCHEMA` statements
 plus prepared `ALTER DATABASE` / `ALTER SCHEMA` option changes with the schema
 namespace catalog. Rich parameter metadata is not exposed on the current
@@ -523,7 +526,7 @@ the embedded library model:
 Representative account, event, plugin, replication, binlog, view, trigger,
 routine, package, sequence, `CALL`, UDF `CREATE FUNCTION ... SONAME`,
 global or multi-assignment autocommit-control, transaction-modifier, XA,
-prepared savepoint-control, SQL locking,
+SQL locking,
 named-lock, SQL `HELP`, SQL `HANDLER`, `SELECT ... PROCEDURE`, SQL file-I/O,
 table-maintenance/key-cache administration, statement profiling, external
 backup SQL, query cache administration, optimizer trace, static SHOW

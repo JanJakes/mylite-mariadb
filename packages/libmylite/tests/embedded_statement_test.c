@@ -24,6 +24,7 @@ static void test_trigger_metadata_is_empty(void);
 static void test_prepare_diagnostics(void);
 static void test_invalid_indexes(void);
 static void assert_prepare_fails_with_message(mylite_db *db, const char *sql, const char *message);
+static void assert_prepare_savepoint_control_policy(mylite_db *db, const char *sql);
 static mylite_stmt *prepare_statement(mylite_db *db, const char *sql);
 static mylite_db *open_database(const char *root, char **filename);
 static char *make_temp_root(void);
@@ -1029,40 +1030,9 @@ static void test_prepare_diagnostics(void) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
 
-    assert(
-        mylite_prepare(db, "SAVEPOINT mylite_probe", MYLITE_NUL_TERMINATED, &stmt, NULL) ==
-        MYLITE_ERROR
-    );
-    assert(stmt == NULL);
-    assert(mylite_errcode(db) == MYLITE_ERROR);
-    assert(mylite_mariadb_errno(db) == 0U);
-    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
-    assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
-
-    assert(
-        mylite_prepare(
-            db,
-            "ROLLBACK TO SAVEPOINT mylite_probe",
-            MYLITE_NUL_TERMINATED,
-            &stmt,
-            NULL
-        ) == MYLITE_ERROR
-    );
-    assert(stmt == NULL);
-    assert(mylite_errcode(db) == MYLITE_ERROR);
-    assert(mylite_mariadb_errno(db) == 0U);
-    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
-    assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
-
-    assert(
-        mylite_prepare(db, "RELEASE SAVEPOINT mylite_probe", MYLITE_NUL_TERMINATED, &stmt, NULL) ==
-        MYLITE_ERROR
-    );
-    assert(stmt == NULL);
-    assert(mylite_errcode(db) == MYLITE_ERROR);
-    assert(mylite_mariadb_errno(db) == 0U);
-    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
-    assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
+    assert_prepare_savepoint_control_policy(db, "SAVEPOINT mylite_probe");
+    assert_prepare_savepoint_control_policy(db, "ROLLBACK TO SAVEPOINT mylite_probe");
+    assert_prepare_savepoint_control_policy(db, "RELEASE SAVEPOINT mylite_probe");
 
     assert(
         mylite_prepare(db, "SET autocommit=0", MYLITE_NUL_TERMINATED, &stmt, NULL) == MYLITE_ERROR
@@ -1186,6 +1156,30 @@ static void assert_prepare_fails_with_message(mylite_db *db, const char *sql, co
     assert(mylite_mariadb_errno(db) == 0U);
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(strstr(mylite_errmsg(db), message) != NULL);
+}
+
+static void assert_prepare_savepoint_control_policy(mylite_db *db, const char *sql) {
+    mylite_stmt *stmt = NULL;
+    const int prepare_result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, NULL);
+    if (prepare_result == MYLITE_ERROR) {
+        assert(stmt == NULL);
+        assert(mylite_errcode(db) == MYLITE_ERROR);
+        assert(mylite_mariadb_errno(db) == 0U);
+        assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+        assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
+        return;
+    }
+
+    assert(prepare_result == MYLITE_OK);
+    assert(stmt != NULL);
+    assert(mylite_bind_parameter_count(stmt) == 0U);
+    assert(mylite_column_count(stmt) == 0U);
+    assert(mylite_step(stmt) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
 }
 
 static mylite_stmt *prepare_statement(mylite_db *db, const char *sql) {

@@ -256,6 +256,8 @@ struct mylite_stmt {
     bool executed = false;
     bool done = false;
     bool has_current_row = false;
+    TransactionControlKind prepared_transaction_control = TransactionControlKind::None;
+    std::string prepared_transaction_control_name;
     bool sync_schema_catalog_after_execute = false;
     bool uses_statement_checkpoint = false;
     bool uses_transaction_statement_checkpoint = false;
@@ -343,6 +345,7 @@ int fetch_truncated_column(mylite_stmt &statement, unsigned column);
 int materialize_column_value(mylite_stmt &statement, unsigned column);
 int capture_warnings(mylite_db &database, unsigned warning_count, bool force_query = false);
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
+int execute_prepared_savepoint_control(mylite_stmt &statement);
 int begin_direct_transaction(mylite_db &database);
 int finish_direct_transaction(mylite_db &database, bool commit);
 int execute_direct_savepoint_control(
@@ -1543,13 +1546,25 @@ int prepare_impl(
     StorageBusyTimeoutScope busy_timeout(database->busy_timeout_ms);
     set_ok(*database);
     clear_warnings(*database);
-    if (direct_transaction_control_kind(std::string_view(sql, sql_len)) !=
-        TransactionControlKind::None) {
+    const std::string_view sql_view(sql, sql_len);
+    const TransactionControlKind transaction_control = direct_transaction_control_kind(sql_view);
+    if (transaction_control == TransactionControlKind::Unsupported) {
         set_error(*database, MYLITE_ERROR, "unsupported SQL transaction control");
         return MYLITE_ERROR;
     }
-    if (const char *unsupported_message =
-            unsupported_sql_surface_message(std::string_view(sql, sql_len))) {
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+    std::string_view savepoint_name;
+    const bool prepared_savepoint_control =
+        is_savepoint_transaction_control(transaction_control) &&
+        direct_savepoint_control_name(sql_view, transaction_control, savepoint_name);
+#  else
+    const bool prepared_savepoint_control = false;
+#  endif
+    if (transaction_control != TransactionControlKind::None && !prepared_savepoint_control) {
+        set_error(*database, MYLITE_ERROR, "unsupported SQL transaction control");
+        return MYLITE_ERROR;
+    }
+    if (const char *unsupported_message = unsupported_sql_surface_message(sql_view)) {
         set_error(*database, MYLITE_ERROR, unsupported_message);
         return MYLITE_ERROR;
     }
@@ -1558,15 +1573,22 @@ int prepare_impl(
         std::unique_ptr<mylite_stmt> statement(new mylite_stmt());
         statement->database = database;
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
+        if (prepared_savepoint_control) {
+            statement->prepared_transaction_control = transaction_control;
+            statement->prepared_transaction_control_name = std::string(savepoint_name);
+            ++database->active_statements;
+            if (tail != nullptr) {
+                *tail = sql + sql_len;
+            }
+            *out_stmt = statement.release();
+            return MYLITE_OK;
+        }
         statement->sync_schema_catalog_after_execute =
-            database->filename != ":memory:" &&
-            is_schema_catalog_sql(std::string_view(sql, sql_len));
+            database->filename != ":memory:" && is_schema_catalog_sql(sql_view);
         statement->uses_statement_checkpoint =
-            database->filename != ":memory:" &&
-            is_storage_outer_checkpoint_sql(std::string_view(sql, sql_len));
+            database->filename != ":memory:" && is_storage_outer_checkpoint_sql(sql_view);
         statement->uses_transaction_statement_checkpoint =
-            database->filename != ":memory:" &&
-            is_row_dml_checkpoint_sql(std::string_view(sql, sql_len));
+            database->filename != ":memory:" && is_row_dml_checkpoint_sql(sql_view);
 #  endif
         statement->statement = mysql_stmt_init(&database->mysql);
         if (statement->statement == nullptr) {
@@ -1699,6 +1721,12 @@ int execute_statement(mylite_stmt &statement) {
     clear_warnings(*statement.database);
     clear_current_row(statement);
 
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+    if (statement.prepared_transaction_control != TransactionControlKind::None) {
+        return execute_prepared_savepoint_control(statement);
+    }
+#  endif
+
     const int bind_result = bind_statement_parameters(statement);
     if (bind_result != MYLITE_OK) {
         return bind_result;
@@ -1793,6 +1821,29 @@ int execute_statement(mylite_stmt &statement) {
 }
 
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
+int execute_prepared_savepoint_control(mylite_stmt &statement) {
+    mylite_db &database = *statement.database;
+    if (!database.transaction_active || database.filename == ":memory:") {
+        set_error(database, MYLITE_ERROR, "unsupported savepoint transaction control");
+        return MYLITE_ERROR;
+    }
+
+    const int result = execute_direct_savepoint_control(
+        database,
+        statement.prepared_transaction_control,
+        statement.prepared_transaction_control_name
+    );
+    if (result != MYLITE_OK) {
+        return result;
+    }
+
+    statement.executed = true;
+    statement.done = true;
+    database.changes = 0;
+    database.last_insert_id = 0;
+    return MYLITE_DONE;
+}
+
 StorageStatementCheckpoint::~StorageStatementCheckpoint() {
     if (statement_ != nullptr) {
         mylite_storage_commit_statement(statement_);
