@@ -41,10 +41,10 @@ no earlier row or index updates from that statement remain visible.
 
 This remains partial compatibility. MyLite now covers direct row-DML
 transactions and supported direct session autocommit mode in later slices, but
-still rejects savepoints, global or multi-assignment autocommit changes,
-transaction modifiers, XA, transactional DDL, and does not claim isolation
-levels or crash-safe logical undo for failed statements interrupted
-mid-rollback.
+still rejects savepoints, global or duplicate autocommit changes,
+transaction-variable `SET` lists, transaction modifiers, XA, transactional
+DDL, and does not claim isolation levels or crash-safe logical undo for failed
+statements interrupted mid-rollback.
 
 ## Design
 

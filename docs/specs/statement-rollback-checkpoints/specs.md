@@ -4,9 +4,12 @@ Status note: the later
 [Row-DML Transactions](../row-dml-transactions/specs.md) slice allows direct
 `BEGIN`, `COMMIT`, and `ROLLBACK` for bounded row-DML transactions. The later
 [Autocommit Row-DML Transactions](../autocommit-row-dml-transactions/specs.md)
-slice adds supported direct session `SET autocommit=0/1` forms; savepoints,
-global or multi-assignment autocommit changes, transaction modifiers, XA, and
-transactional DDL remain rejected.
+slice adds supported direct session `SET autocommit=0/1` forms, and the later
+[Autocommit SET-List Control](../autocommit-set-list-control/specs.md) slice
+allows one supported session autocommit assignment inside direct `SET` lists
+with ordinary non-transaction assignments. Savepoints, global or duplicate
+autocommit changes, transaction-variable `SET` lists, transaction modifiers,
+XA, and transactional DDL remain rejected.
 
 ## Problem
 

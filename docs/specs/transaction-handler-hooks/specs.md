@@ -6,9 +6,13 @@ autocommit handler-hook path but adds a `libmylite`-owned outer checkpoint for
 direct row-DML transactions. Direct `BEGIN`, `COMMIT`, and `ROLLBACK` are now
 covered for that bounded scope, and the later
 [Autocommit Row-DML Transactions](../autocommit-row-dml-transactions/specs.md)
-slice adds supported direct session `SET autocommit=0/1` forms; savepoints,
-global or multi-assignment autocommit changes, XA, transaction modifiers,
-transactional DDL, and transactional engine flags remain planned or rejected.
+slice adds supported direct session `SET autocommit=0/1` forms, and the later
+[Autocommit SET-List Control](../autocommit-set-list-control/specs.md) slice
+allows one supported session autocommit assignment inside direct `SET` lists
+with ordinary non-transaction assignments. Savepoints, global or duplicate
+autocommit changes, transaction-variable `SET` lists, XA, transaction
+modifiers, transactional DDL, and transactional engine flags remain planned or
+rejected.
 
 ## Problem
 

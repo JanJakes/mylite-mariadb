@@ -1486,6 +1486,51 @@ static void test_row_dml_transactions(void) {
     );
     assert(count.rows == 1);
 
+    assert_exec_succeeds(db, "SET autocommit=0, sql_mode='ANSI'");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (36, 'autocommit-list-rollback')");
+    assert_exec_succeeds(db, "ROLLBACK");
+    zero_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE title = 'autocommit-list-rollback'",
+            single_value_callback,
+            &zero_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(zero_count.rows == 1);
+
+    assert_exec_succeeds(db, "SET sql_mode='', autocommit=0");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (36, 'autocommit-list-commit')");
+    assert_exec_succeeds(db, "SET @mylite_autocommit_label='commit', autocommit=1");
+    count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE id = 36 AND title = 'autocommit-list-commit'",
+            single_value_callback,
+            &count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(count.rows == 1);
+
+    assert_exec_succeeds(db, "SET autocommit=0, @mylite_autocommit_label='default'");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (37, 'autocommit-list-default')");
+    assert_exec_succeeds(db, "SET sql_mode='', autocommit=DEFAULT");
+    count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE id = 37 AND title = 'autocommit-list-default'",
+            single_value_callback,
+            &count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(count.rows == 1);
+
     assert_exec_succeeds(db, "SET SESSION autocommit=OFF");
     assert_exec_fails_with_message(
         db,
@@ -1493,7 +1538,7 @@ static void test_row_dml_transactions(void) {
         "transactional DDL"
     );
     assert_transaction_control_exec_fails(db, "SET GLOBAL autocommit=0");
-    assert_transaction_control_exec_fails(db, "SET autocommit=0, sql_mode='ANSI'");
+    assert_transaction_control_exec_fails(db, "SET autocommit=0, completion_type=CHAIN");
     assert_exec_succeeds(db, "SET autocommit=ON");
 
     assert_exec_succeeds(db, "BEGIN");
@@ -1941,7 +1986,7 @@ static void test_row_dml_transactions(void) {
         ) == MYLITE_OK
     );
     assert(zero_count.rows == 1);
-    count = (single_value_context){.expected_value = "14"};
+    count = (single_value_context){.expected_value = "16"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
         MYLITE_OK
@@ -1966,7 +2011,7 @@ static void test_row_dml_transactions(void) {
         ) == MYLITE_OK
     );
     assert(zero_count.rows == 1);
-    count = (single_value_context){.expected_value = "14"};
+    count = (single_value_context){.expected_value = "16"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
         MYLITE_OK
@@ -1977,7 +2022,7 @@ static void test_row_dml_transactions(void) {
     assert_transaction_crash_recovery(root, filename);
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "USE tx_app");
-    count = (single_value_context){.expected_value = "14"};
+    count = (single_value_context){.expected_value = "16"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
         MYLITE_OK

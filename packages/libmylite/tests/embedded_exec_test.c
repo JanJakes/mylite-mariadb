@@ -1333,8 +1333,27 @@ static void test_transaction_control_policy(void) {
     assert_transaction_control_exec_fails(db, "SET STATEMENT completion_type=CHAIN FOR SELECT 1");
     assert_transaction_control_exec_fails(db, "SET transaction_isolation='READ-COMMITTED'");
     assert_transaction_control_exec_fails(db, "SET transaction_read_only=1");
-    assert_transaction_control_exec_fails(db, "SET autocommit=0, sql_mode='ANSI'");
-    assert_transaction_control_exec_fails(db, "SET autocommit=DEFAULT, sql_mode='ANSI'");
+    assert(mylite_exec(db, "SET autocommit=0, sql_mode='ANSI'", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SET sql_mode='', autocommit=1", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(db, "SET SESSION sql_mode='ANSI', autocommit=OFF", NULL, NULL, NULL) ==
+        MYLITE_OK
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SET @mylite_transaction_label='transaction', autocommit=DEFAULT",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert_transaction_control_exec_fails(db, "SET autocommit=0, autocommit=1");
+    assert_transaction_control_exec_fails(db, "SET autocommit=0, completion_type=CHAIN");
+    assert_transaction_control_exec_fails(
+        db,
+        "SET autocommit=0, transaction_isolation='READ-COMMITTED'"
+    );
     assert_transaction_control_exec_fails(db, "SET autocommit=0; SELECT 1");
     assert_transaction_control_exec_fails(db, "SET autocommit=DEFAULT; SELECT 1");
     assert_transaction_control_exec_fails(db, "SET TRANSACTION ISOLATION LEVEL READ COMMITTED");

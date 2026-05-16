@@ -475,9 +475,10 @@ paths that do not reliably enter `external_lock()` keep the outer `libmylite`
 checkpoint before MariaDB execution.
 
 Direct `libmylite` `BEGIN` / `COMMIT` / `ROLLBACK` and supported direct
-session `SET autocommit=0/1/DEFAULT` support is limited to row-DML
-transactions over routed MyLite tables. `libmylite` opens an outer storage
-checkpoint for the direct transaction. Row-DML statements inside that
+session `SET autocommit=0/1/DEFAULT` support, including `SET` lists with one
+autocommit assignment plus ordinary non-transaction assignments, is limited to
+row-DML transactions over routed MyLite tables. `libmylite` opens an outer
+storage checkpoint for the direct transaction. Row-DML statements inside that
 transaction use
 `libmylite`-owned nested statement checkpoints so failed direct or prepared
 statements can roll back their own partial writes while preserving earlier
@@ -516,7 +517,7 @@ pages, and catalog records appended after the checkpoint are no longer visible.
 This is still partial SQL transaction support. The MyLite handler still
 advertises non-transactional engine flags. Public `libmylite` SQL entry points
 continue to reject SQL-mode-sensitive double-quoted savepoint names, global or
-multi-assignment autocommit changes, `SET TRANSACTION`, unsupported transaction
+duplicate autocommit changes, `SET TRANSACTION`, unsupported transaction
 modifiers and transaction variables, XA, and DDL inside active direct
 transactions. Handler-level savepoint hooks, transactional DDL, isolation,
 WAL/checkpoint, and transactional engine-flag support remain planned.

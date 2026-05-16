@@ -3555,7 +3555,6 @@ bool pop_sql_savepoint_name(std::string_view &sql, std::string *out_name) {
 TransactionControlKind direct_set_autocommit_control_kind(std::string_view sql) {
     const bool has_statement_tail = sql_has_statement_tail_after_semicolon(sql);
     TransactionControlKind result = TransactionControlKind::None;
-    unsigned assignment_count = 0;
 
     while (!skip_sql_leading_noise(sql).empty()) {
         std::string_view assignment = pop_sql_set_assignment(sql);
@@ -3563,13 +3562,15 @@ TransactionControlKind direct_set_autocommit_control_kind(std::string_view sql) 
             return result;
         }
 
-        ++assignment_count;
         const TransactionControlKind assignment_result =
             autocommit_assignment_control_kind(assignment);
         if (assignment_result == TransactionControlKind::Unsupported) {
             return TransactionControlKind::Unsupported;
         }
         if (assignment_result == TransactionControlKind::None) {
+            if (sql_set_assignment_targets_transaction_variable(assignment)) {
+                return TransactionControlKind::Unsupported;
+            }
             continue;
         }
         if (result != TransactionControlKind::None) {
@@ -3584,7 +3585,7 @@ TransactionControlKind direct_set_autocommit_control_kind(std::string_view sql) 
     if (has_statement_tail) {
         return TransactionControlKind::Unsupported;
     }
-    return assignment_count == 1U ? result : TransactionControlKind::Unsupported;
+    return result;
 }
 
 TransactionControlKind autocommit_assignment_control_kind(std::string_view assignment) {

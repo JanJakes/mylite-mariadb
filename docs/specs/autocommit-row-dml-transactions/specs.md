@@ -12,6 +12,11 @@ The later
 maps supported direct session `SET autocommit=DEFAULT` forms to the same
 autocommit-on commit path, matching MariaDB 11.8.6's `DEFAULT(TRUE)`
 definition.
+The later
+[Autocommit SET-List Control](../autocommit-set-list-control/specs.md) slice
+allows one supported session autocommit assignment inside a direct `SET` list
+with ordinary non-transaction assignments, while keeping global, duplicate, and
+transaction-variable forms unsupported.
 
 ## Problem
 
@@ -68,9 +73,12 @@ Extend the direct `libmylite` transaction-control policy:
   - `SET @@session.autocommit=1`
 - Treat `OFF` / `ON` and `FALSE` / `TRUE` as aliases for `0` / `1`.
 - Keep prepared autocommit-control statements rejected.
-- Keep multi-assignment `SET` statements that include autocommit rejected for
-  now, because MariaDB can evaluate expressions in the same statement and
-  commits at statement end.
+- At this slice point, keep multi-assignment `SET` statements that include
+  autocommit rejected, because MariaDB can evaluate expressions in the same
+  statement and commits at statement end. The later
+  [Autocommit SET-List Control](../autocommit-set-list-control/specs.md) slice
+  relaxes this for direct `SET` lists with one supported session autocommit
+  assignment and only ordinary non-transaction assignments.
 - Keep global autocommit changes, `SET TRANSACTION`, isolation-level changes,
   transaction modifiers, and XA rejected. Savepoints were deferred to the later
   savepoint slice.
@@ -168,8 +176,8 @@ policy parsing, and tests.
     transactions,
   - close-time rollback while autocommit is disabled,
   - continued rejection of transaction modifiers, XA, global autocommit
-    changes, multi-assignment autocommit changes, and DDL inside the active
-    transaction.
+    changes, multi-assignment autocommit changes at this slice point, and DDL
+    inside the active transaction.
 - Run dev, embedded, storage-smoke, transaction harness groups, formatting,
   tidy, shell syntax, and whitespace checks.
 
@@ -195,5 +203,6 @@ policy parsing, and tests.
 - Full MariaDB semantics for `START TRANSACTION` inside autocommit-disabled mode
   require implicit commit-and-new-transaction behavior, which is intentionally
   left for a later broader transaction slice.
-- Multi-assignment `SET` support needs more careful expression and implicit
-  commit ordering than this slice should absorb.
+- Multi-assignment `SET` support needed more careful expression and implicit
+  commit ordering than this slice should absorb; the later Autocommit SET-List
+  Control slice implements the bounded direct-session subset.

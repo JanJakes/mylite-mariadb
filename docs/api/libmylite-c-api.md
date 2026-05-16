@@ -109,8 +109,10 @@ rollback-journal and transaction-journal publication state in the primary
 catalog when no transient MariaDB schema directory exists. Direct `BEGIN`,
 `COMMIT`, `ROLLBACK`,
 transaction restart through repeated direct `BEGIN` / `START TRANSACTION`, and
-supported direct session `SET autocommit=0/1/DEFAULT` forms support row-DML
-transactions over routed MyLite tables. Direct transaction modifiers support
+supported direct session `SET autocommit=0/1/DEFAULT` forms, including `SET`
+lists that mix one autocommit assignment with ordinary non-transaction
+assignments, support row-DML transactions over routed MyLite tables. Direct
+transaction modifiers support
 explicit `START TRANSACTION READ WRITE`, `COMMIT` / `ROLLBACK` `AND CHAIN`,
 `AND NO CHAIN`, and `NO RELEASE` forms for the same bounded scope, including
 nested statement rollback for covered failed direct and prepared row-DML
@@ -120,11 +122,11 @@ Direct `SAVEPOINT`,
 backtick-quoted savepoint names inside active bounded row-DML transactions, and
 the same savepoint-control statements can be prepared and reused for
 file-backed MyLite transactions. SQL-mode-sensitive double-quoted savepoint
-names, multi-assignment or global autocommit-control statements, `READ ONLY`,
-`WITH CONSISTENT SNAPSHOT`, `RELEASE` completion, `completion_type` defaults,
-transaction isolation or read-only variables, XA, and DDL inside an active
-transaction remain unsupported until the storage and catalog transaction design
-is broader.
+names, global autocommit-control statements, duplicate autocommit assignments,
+`READ ONLY`, `WITH CONSISTENT SNAPSHOT`, `RELEASE` completion,
+`completion_type` defaults, transaction isolation or read-only variables, XA,
+and DDL inside an active transaction remain unsupported until the storage and
+catalog transaction design is broader.
 Existing-file opens preserve storage lock conflicts as
 `MYLITE_BUSY` before starting the embedded runtime.
 
@@ -530,8 +532,8 @@ the embedded library model:
 
 Representative account, event, plugin, replication, binlog, view, trigger,
 routine, package, sequence, `CALL`, UDF `CREATE FUNCTION ... SONAME`,
-global or multi-assignment autocommit-control, unsupported transaction-control,
-XA, SQL locking,
+global or duplicate autocommit-control, transaction-variable `SET` lists,
+unsupported transaction-control, XA, SQL locking,
 named-lock, SQL `HELP`, SQL `HANDLER`, `SELECT ... PROCEDURE`, SQL file-I/O,
 table-maintenance/key-cache administration, statement profiling, external
 backup SQL, query cache administration, optimizer trace, static SHOW

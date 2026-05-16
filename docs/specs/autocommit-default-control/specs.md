@@ -1,5 +1,12 @@
 # Autocommit Default Control
 
+Status note: the later
+[Autocommit SET-List Control](../autocommit-set-list-control/specs.md) slice
+allows one supported session autocommit assignment, including `DEFAULT`, inside
+a direct `SET` list with ordinary non-transaction assignments. Global,
+duplicate, transaction-variable, prepared, and semicolon-chained forms remain
+unsupported.
+
 ## Problem
 
 MyLite supports direct session `SET autocommit=0/1` forms for bounded
@@ -10,7 +17,8 @@ its configured default and should not require a separate application branch.
 This slice adds direct session `SET autocommit=DEFAULT` support by mapping it
 to MyLite's existing autocommit-on path. It does not add prepared autocommit
 control, multi-assignment `SET`, global autocommit changes, `SET TRANSACTION`,
-isolation levels, XA, or transaction modifiers.
+isolation levels, XA, or transaction modifiers. The later Autocommit SET-List
+Control slice adds the bounded direct-session `SET` list subset.
 
 ## Source Findings
 
@@ -39,7 +47,10 @@ Extend `libmylite`'s direct transaction-control parser:
   `SET SESSION autocommit=DEFAULT`, and `SET @@session.autocommit=DEFAULT`
   on the same single-assignment path.
 - Preserve rejection of global autocommit assignment, multi-assignment `SET`,
-  prepared autocommit control, and semicolon-chained statements.
+  prepared autocommit control, and semicolon-chained statements at this slice
+  point. The later Autocommit SET-List Control slice relaxes only direct
+  session `SET` lists with one supported autocommit assignment and ordinary
+  non-transaction assignments.
 
 Execution reuses the existing `SetAutocommitOn` branch: if an autocommit-
 disabled MyLite transaction is active, commit the outer checkpoint and clear
@@ -60,7 +71,8 @@ mode, matching the MariaDB default for this base line.
 Compatibility remains partial:
 
 - Prepared autocommit-control statements remain rejected.
-- Global and multi-assignment autocommit changes remain rejected.
+- Global and duplicate autocommit changes, transaction-variable `SET` lists,
+  and prepared autocommit control remain rejected.
 - `SET TRANSACTION`, isolation-level changes, transaction modifiers, XA, and
   transactional DDL remain unsupported.
 
@@ -101,7 +113,7 @@ tests.
 - Add storage-smoke coverage proving `SET autocommit=DEFAULT` commits an
   active row-DML transaction on a routed `ENGINE=InnoDB` table.
 - Continue rejecting global, multi-assignment, prepared, and
-  semicolon-chained autocommit control.
+  semicolon-chained autocommit control at this slice point.
 - Run dev, embedded, storage-smoke, transaction harness, formatting, tidy,
   shell syntax, and whitespace checks.
 
@@ -120,6 +132,7 @@ tests.
 - This relies on MariaDB 11.8.6's default autocommit value being `TRUE`. If a
   future base or MyLite profile changes that default, this parser mapping must
   be revisited.
-- Multi-assignment `SET` remains deliberately unsupported because MariaDB's
-  evaluation order and implicit-commit behavior require a broader statement
-  transaction design.
+- Multi-assignment `SET` remained deliberately unsupported in this slice
+  because MariaDB's evaluation order and implicit-commit behavior required a
+  broader statement transaction design. The later Autocommit SET-List Control
+  slice implements the bounded direct-session subset.
