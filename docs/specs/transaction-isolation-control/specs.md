@@ -56,9 +56,12 @@ MariaDB base: `mariadb-11.8.6`
     `SET LOCAL TRANSACTION`
   - one access mode plus one isolation level in either MariaDB-supported order.
 - Keep `SET GLOBAL TRANSACTION ...` rejected in the public MyLite SQL API.
-- Keep transaction isolation system-variable assignments rejected, including
-  `SET transaction_isolation=...`, `SET tx_isolation=...`, and mixed `SET`
-  lists targeting those variables.
+- Keep transaction isolation system-variable assignments rejected for this
+  slice. The later
+  [Transaction Variable Control](../transaction-variable-control/specs.md)
+  slice accepts bounded `transaction_isolation` and `tx_isolation`
+  assignments as compatibility setup SQL without claiming storage isolation
+  semantics.
 - Treat accepted isolation controls as MyLite no-ops after MariaDB accepts the
   SQL. If a supported access mode is present in the same statement, continue to
   mirror the read-only/read-write state exactly as the read-only transaction

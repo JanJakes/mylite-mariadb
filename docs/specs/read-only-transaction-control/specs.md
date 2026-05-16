@@ -90,10 +90,12 @@ Extend direct transaction-control state in `libmylite`:
   storage-DDL statements already recognized by MyLite's checkpoint policy.
   Temporary-table write exceptions remain out of scope until the policy is
   table-kind aware.
-- Keep `SET transaction_read_only=...`, `SET tx_read_only=...`, global
-  transaction defaults, isolation levels, consistent snapshots, mixed read-only
-  plus read-write starts, prepared transaction-control statements outside
-  existing savepoint support, XA, and release completion rejected.
+- Keep global transaction defaults, isolation levels, consistent snapshots,
+  mixed read-only plus read-write starts, prepared transaction-control
+  statements outside existing savepoint support, XA, and release completion
+  rejected. The later
+  [Transaction Variable Control](../transaction-variable-control/specs.md)
+  slice accepts bounded `transaction_read_only` and `tx_read_only` assignments.
 
 ## Affected Subsystems
 

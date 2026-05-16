@@ -17,7 +17,8 @@ inside active direct transactions unsupported at this slice point. A later
 read-only transaction-control slice accepts bounded direct read-only access
 mode, and a later transaction isolation-control slice accepts direct/session
 `SET TRANSACTION ISOLATION LEVEL ...` forms as compatibility setup SQL without
-claiming storage isolation semantics.
+claiming storage isolation semantics. A later transaction variable-control
+slice accepts bounded transaction read-only and isolation variable assignments.
 
 ## Source Findings
 

@@ -1072,6 +1072,7 @@ static void test_prepare_diagnostics(void) {
         "SET transaction_isolation='READ-COMMITTED'",
         "transaction control"
     );
+    assert_prepare_fails_with_message(db, "SET transaction_read_only=1", "transaction control");
 
     assert(
         mylite_prepare(db, "SELECT 1 FOR UPDATE", MYLITE_NUL_TERMINATED, &stmt, NULL) ==

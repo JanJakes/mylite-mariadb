@@ -120,13 +120,15 @@ statements and transaction-journal recovery after an unclean process exit.
 Direct `START TRANSACTION READ ONLY`, `START TRANSACTION READ WRITE`,
 `SET TRANSACTION READ ONLY`, `SET TRANSACTION READ WRITE`, session
 `SET TRANSACTION READ ONLY` / `READ WRITE`, direct/session
-`SET TRANSACTION ISOLATION LEVEL ...`, and session
+`SET TRANSACTION ISOLATION LEVEL ...`, transaction read-only and isolation
+variable assignments, and session
 `SET completion_type=NO_CHAIN/0/DEFAULT/CHAIN/1` forms are accepted for the
-current bounded transaction scope. Isolation controls are accepted as
-compatibility setup SQL, not as a storage-isolation guarantee. Read-only
-transactions reject direct and prepared MyLite storage writes; `CHAIN` makes
-later plain direct `COMMIT` and `ROLLBACK` use the same chained behavior as
-explicit `AND CHAIN`, while explicit `AND NO CHAIN` still overrides it.
+current bounded transaction scope. Isolation controls and isolation variables
+are accepted as compatibility setup SQL, not as a storage-isolation guarantee.
+Read-only transactions reject direct and prepared MyLite storage writes;
+`CHAIN` makes later plain direct `COMMIT` and `ROLLBACK` use the same chained
+behavior as explicit `AND CHAIN`, while explicit `AND NO CHAIN` still
+overrides it.
 Direct `SAVEPOINT`,
 `ROLLBACK TO [SAVEPOINT]`, and `RELEASE SAVEPOINT` support simple unquoted and
 backtick-quoted savepoint names inside active bounded row-DML transactions, and
@@ -134,9 +136,9 @@ the same savepoint-control statements can be prepared and reused for
 file-backed MyLite transactions. SQL-mode-sensitive double-quoted savepoint
 names, global autocommit-control statements, duplicate autocommit assignments,
 `WITH CONSISTENT SNAPSHOT`, `RELEASE` completion, `completion_type=RELEASE/2`,
-transaction isolation or read-only variables, XA, and direct or prepared DDL
-inside an active transaction remain unsupported until the storage and catalog
-transaction design is broader.
+global or duplicate transaction variable assignments, XA, and direct or
+prepared DDL inside an active transaction remain unsupported until the storage
+and catalog transaction design is broader.
 Existing-file opens preserve storage lock conflicts as
 `MYLITE_BUSY` before starting the embedded runtime.
 
