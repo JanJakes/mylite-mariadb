@@ -201,6 +201,13 @@ ELSE()
   SET(MYLITE_EMBEDDED_QUERY_CACHE_SOURCE)
 ENDIF()
 
+OPTION(MYLITE_WITH_OPTIMIZER_TRACE "Build optimizer trace runtime" ON)
+IF(MYLITE_WITH_OPTIMIZER_TRACE)
+  SET(MYLITE_OPTIMIZER_TRACE_SOURCE ../sql/opt_trace.cc)
+ELSE()
+  SET(MYLITE_OPTIMIZER_TRACE_SOURCE ../sql/mylite_opt_trace_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS "Compile embedded SQL with C++ exceptions" ON)
 
 SET(SQL_EMBEDDED_SOURCES ${MYLITE_EMBEDDED_QUERY_CACHE_SOURCE} libmysqld.c lib_sql.cc
@@ -307,7 +314,7 @@ SET(SQL_EMBEDDED_SOURCES ${MYLITE_EMBEDDED_QUERY_CACHE_SOURCE} libmysqld.c lib_s
            ../sql/opt_split.cc
            ../sql/rowid_filter.cc ../sql/rowid_filter.h
            ../sql/item_vers.cc
-           ../sql/opt_trace.cc
+           ${MYLITE_OPTIMIZER_TRACE_SOURCE}
            ../sql/xa.cc
            ${MYLITE_JSON_TABLE_SOURCE}
            ../sql/opt_histogram_json.cc

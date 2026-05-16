@@ -197,6 +197,13 @@ ELSE()
   SET(MYLITE_QUERY_CACHE_SOURCE mylite_query_cache_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_OPTIMIZER_TRACE "Build optimizer trace runtime" ON)
+IF(MYLITE_WITH_OPTIMIZER_TRACE)
+  SET(MYLITE_OPTIMIZER_TRACE_SOURCE opt_trace.cc)
+ELSE()
+  SET(MYLITE_OPTIMIZER_TRACE_SOURCE mylite_opt_trace_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_ORACLE_SQL_MODE "Build Oracle SQL mode parser" ON)
 IF(MYLITE_WITH_ORACLE_SQL_MODE)
   SET(MYLITE_ORACLE_PARSER_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/yy_oracle.cc)
@@ -297,7 +304,7 @@ SET (SQL_SOURCE
                opt_split.cc
                rowid_filter.cc rowid_filter.h
                optimizer_costs.h optimizer_defaults.h
-               opt_trace.cc
+               ${MYLITE_OPTIMIZER_TRACE_SOURCE}
                table_cache.cc encryption.cc temporary_tables.cc
                ${MYLITE_JSON_TABLE_SOURCE}
                proxy_protocol.cc ${MYLITE_BACKUP_RUNTIME_SOURCE} xa.cc

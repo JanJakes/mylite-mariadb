@@ -26,6 +26,7 @@ static void test_server_surfaces_are_disabled(void);
 static void test_backup_sql_is_rejected(void);
 static void test_query_cache_sql_is_rejected(void);
 static void test_statement_profiling_sql_is_rejected(void);
+static void test_optimizer_trace_sql_is_rejected(void);
 static void test_table_maintenance_sql_is_rejected(void);
 static void test_sql_handler_commands_are_rejected(void);
 static void test_help_command_is_rejected(void);
@@ -54,6 +55,7 @@ static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_backup_exec_fails(mylite_db *db, const char *sql);
 static void assert_query_cache_exec_fails(mylite_db *db, const char *sql);
 static void assert_statement_profiling_exec_fails(mylite_db *db, const char *sql);
+static void assert_optimizer_trace_exec_fails(mylite_db *db, const char *sql);
 static void assert_table_maintenance_exec_fails(mylite_db *db, const char *sql);
 static void assert_sql_handler_exec_fails(mylite_db *db, const char *sql);
 static void assert_help_command_exec_fails(mylite_db *db, const char *sql);
@@ -96,6 +98,7 @@ int main(void) {
     test_backup_sql_is_rejected();
     test_query_cache_sql_is_rejected();
     test_statement_profiling_sql_is_rejected();
+    test_optimizer_trace_sql_is_rejected();
     test_table_maintenance_sql_is_rejected();
     test_sql_handler_commands_are_rejected();
     test_help_command_is_rejected();
@@ -380,6 +383,40 @@ static void test_statement_profiling_sql_is_rejected(void) {
             db,
             "SELECT 'SHOW PROFILE' AS profile_text, "
             "'INFORMATION_SCHEMA.PROFILING' AS profiling_table_text",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_optimizer_trace_sql_is_rejected(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_variable_value(db, "optimizer_trace", "enabled=off");
+
+    assert_optimizer_trace_exec_fails(db, "SET optimizer_trace='enabled=on'");
+    assert_optimizer_trace_exec_fails(db, "SET @@session.optimizer_trace='enabled=on'");
+    assert_optimizer_trace_exec_fails(db, "SET optimizer_trace_max_mem_size=8192");
+    assert_optimizer_trace_exec_fails(
+        db,
+        "SET STATEMENT optimizer_trace='enabled=on' FOR SELECT 1"
+    );
+    assert_optimizer_trace_exec_fails(db, "SELECT * FROM INFORMATION_SCHEMA.OPTIMIZER_TRACE");
+    assert_optimizer_trace_exec_fails(db, "SELECT * FROM `information_schema`.`OPTIMIZER_TRACE`");
+    assert(mylite_exec(db, "EXPLAIN SELECT 1", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT 'SET optimizer_trace=1' AS trace_text, "
+            "'INFORMATION_SCHEMA.OPTIMIZER_TRACE' AS trace_table_text",
             NULL,
             NULL,
             NULL
@@ -1163,6 +1200,18 @@ static void assert_statement_profiling_exec_fails(mylite_db *db, const char *sql
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "statement-profiling") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_optimizer_trace_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "optimizer-trace") != NULL);
     mylite_free(errmsg);
 }
 

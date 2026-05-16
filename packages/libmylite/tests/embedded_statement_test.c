@@ -440,6 +440,12 @@ static void test_prepare_diagnostics(void) {
         "SELECT * FROM INFORMATION_SCHEMA.PROFILING",
         "statement-profiling"
     );
+    assert_prepare_fails_with_message(db, "SET optimizer_trace='enabled=on'", "optimizer-trace");
+    assert_prepare_fails_with_message(
+        db,
+        "SELECT * FROM INFORMATION_SCHEMA.OPTIMIZER_TRACE",
+        "optimizer-trace"
+    );
 
     assert_prepare_fails_with_message(db, "CHECK TABLE maintenance_probe", "table-maintenance");
     assert_prepare_fails_with_message(db, "ANALYZE TABLE maintenance_probe", "table-maintenance");
