@@ -18,6 +18,7 @@ static void test_finalize_before_drain(void);
 static void test_close_rejects_active_statement(void);
 static void test_prepare_diagnostics(void);
 static void test_invalid_indexes(void);
+static void assert_prepare_fails_with_message(mylite_db *db, const char *sql, const char *message);
 static mylite_stmt *prepare_statement(mylite_db *db, const char *sql);
 static mylite_db *open_database(const char *root, char **filename);
 static char *make_temp_root(void);
@@ -389,6 +390,36 @@ static void test_prepare_diagnostics(void) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(strstr(mylite_errmsg(db), "server-oriented") != NULL);
 
+    assert_prepare_fails_with_message(db, "CHECK TABLE maintenance_probe", "table-maintenance");
+    assert_prepare_fails_with_message(db, "ANALYZE TABLE maintenance_probe", "table-maintenance");
+    assert_prepare_fails_with_message(
+        db,
+        "ANALYZE LOCAL TABLE maintenance_probe",
+        "table-maintenance"
+    );
+    assert_prepare_fails_with_message(db, "OPTIMIZE TABLE maintenance_probe", "table-maintenance");
+    assert_prepare_fails_with_message(
+        db,
+        "OPTIMIZE NO_WRITE_TO_BINLOG TABLE maintenance_probe",
+        "table-maintenance"
+    );
+    assert_prepare_fails_with_message(db, "REPAIR TABLE maintenance_probe", "table-maintenance");
+    assert_prepare_fails_with_message(
+        db,
+        "REPAIR LOCAL TABLE maintenance_probe",
+        "table-maintenance"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "CACHE INDEX maintenance_probe IN keycache",
+        "table-maintenance"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "LOAD INDEX INTO CACHE maintenance_probe",
+        "table-maintenance"
+    );
+
     assert(
         mylite_prepare(db, "HELP 'contents'", MYLITE_NUL_TERMINATED, &stmt, NULL) == MYLITE_ERROR
     );
@@ -757,6 +788,17 @@ static void test_invalid_indexes(void) {
     free(filename);
     remove_tree(root);
     free(root);
+}
+
+static void assert_prepare_fails_with_message(mylite_db *db, const char *sql, const char *message) {
+    mylite_stmt *stmt = NULL;
+
+    assert(mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, NULL) == MYLITE_ERROR);
+    assert(stmt == NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), message) != NULL);
 }
 
 static mylite_stmt *prepare_statement(mylite_db *db, const char *sql) {

@@ -1000,6 +1000,9 @@ int ha_myisam::setup_vcols_for_repair(HA_CHECK *param)
 
 int ha_myisam::check(THD* thd, HA_CHECK_OPT* check_opt)
 {
+#if defined(EMBEDDED_LIBRARY) && !MYLITE_WITH_MYISAM_MAINTENANCE
+  return HA_ADMIN_NOT_IMPLEMENTED;
+#else
   if (!file) return HA_ADMIN_INTERNAL_ERROR;
   int error;
   HA_CHECK *param= thd->alloc<HA_CHECK>(1);
@@ -1100,6 +1103,7 @@ int ha_myisam::check(THD* thd, HA_CHECK_OPT* check_opt)
 
   thd_proc_info(thd, old_proc_info);
   return error ? HA_ADMIN_CORRUPT : HA_ADMIN_OK;
+#endif
 }
 
 
@@ -1111,6 +1115,9 @@ int ha_myisam::check(THD* thd, HA_CHECK_OPT* check_opt)
 
 int ha_myisam::analyze(THD *thd, HA_CHECK_OPT* check_opt)
 {
+#if defined(EMBEDDED_LIBRARY) && !MYLITE_WITH_MYISAM_MAINTENANCE
+  return HA_ADMIN_NOT_IMPLEMENTED;
+#else
   int error=0;
   HA_CHECK *param= thd->alloc<HA_CHECK>(1);
   MYISAM_SHARE* share = file->s;
@@ -1145,11 +1152,15 @@ int ha_myisam::analyze(THD *thd, HA_CHECK_OPT* check_opt)
     mi_mark_crashed(file);
 
   return error ? HA_ADMIN_CORRUPT : HA_ADMIN_OK;
+#endif
 }
 
 
 int ha_myisam::repair(THD* thd, HA_CHECK_OPT *check_opt)
 {
+#if defined(EMBEDDED_LIBRARY) && !MYLITE_WITH_MYISAM_MAINTENANCE
+  return HA_ADMIN_NOT_IMPLEMENTED;
+#else
   int error;
   HA_CHECK *param= thd->alloc<HA_CHECK>(1);
   ha_rows start_records;
@@ -1204,10 +1215,14 @@ int ha_myisam::repair(THD* thd, HA_CHECK_OPT *check_opt)
                           table->s->path.str);
   }
   return error;
+#endif
 }
 
 int ha_myisam::optimize(THD* thd, HA_CHECK_OPT *check_opt)
 {
+#if defined(EMBEDDED_LIBRARY) && !MYLITE_WITH_MYISAM_MAINTENANCE
+  return HA_ADMIN_NOT_IMPLEMENTED;
+#else
   int error;
   HA_CHECK *param= thd->alloc<HA_CHECK>(1);
 
@@ -1233,6 +1248,7 @@ int ha_myisam::optimize(THD* thd, HA_CHECK_OPT *check_opt)
   }
 
   return error;
+#endif
 }
 
 
@@ -1257,6 +1273,9 @@ C_MODE_END
 
 int ha_myisam::repair(THD *thd, HA_CHECK &param, bool do_optimize)
 {
+#if defined(EMBEDDED_LIBRARY) && !MYLITE_WITH_MYISAM_MAINTENANCE
+  return HA_ADMIN_NOT_IMPLEMENTED;
+#else
   int error=0;
   ulonglong local_testflag= param.testflag;
   bool optimize_done= !do_optimize, statistics_done=0;
@@ -1436,6 +1455,7 @@ int ha_myisam::repair(THD *thd, HA_CHECK &param, bool do_optimize)
     mi_lock_database(file,F_UNLCK);
   DBUG_RETURN(error ? HA_ADMIN_FAILED :
 	      !optimize_done ? HA_ADMIN_ALREADY_DONE : HA_ADMIN_OK);
+#endif
 }
 
 
@@ -1445,6 +1465,9 @@ int ha_myisam::repair(THD *thd, HA_CHECK &param, bool do_optimize)
 
 int ha_myisam::assign_to_keycache(THD* thd, HA_CHECK_OPT *check_opt)
 {
+#if defined(EMBEDDED_LIBRARY) && !MYLITE_WITH_MYISAM_MAINTENANCE
+  return HA_ADMIN_NOT_IMPLEMENTED;
+#else
   KEY_CACHE *new_key_cache= check_opt->key_cache;
   const char *errmsg= 0;
   char buf[STRING_BUFFER_USUAL_SIZE];
@@ -1486,6 +1509,7 @@ int ha_myisam::assign_to_keycache(THD* thd, HA_CHECK_OPT *check_opt)
     mi_check_print_error(param, "%s", errmsg);
   }
   DBUG_RETURN(error);
+#endif
 }
 
 
@@ -1495,6 +1519,9 @@ int ha_myisam::assign_to_keycache(THD* thd, HA_CHECK_OPT *check_opt)
 
 int ha_myisam::preload_keys(THD* thd, HA_CHECK_OPT *check_opt)
 {
+#if defined(EMBEDDED_LIBRARY) && !MYLITE_WITH_MYISAM_MAINTENANCE
+  return HA_ADMIN_NOT_IMPLEMENTED;
+#else
   int error;
   const char *errmsg;
   ulonglong map;
@@ -1552,6 +1579,7 @@ int ha_myisam::preload_keys(THD* thd, HA_CHECK_OPT *check_opt)
     mi_check_print_error(param, "%s", errmsg);
     DBUG_RETURN(error);
   }
+#endif
 }
 
 
@@ -1643,6 +1671,9 @@ int ha_myisam::enable_indexes(key_map map, bool persist)
   }
   else
   {
+#if defined(EMBEDDED_LIBRARY) && !MYLITE_WITH_MYISAM_MAINTENANCE
+    DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+#else
     THD *thd= table->in_use;
     int was_error= thd->is_error();
     HA_CHECK *param= thd->alloc<HA_CHECK>(1);
@@ -1702,6 +1733,7 @@ int ha_myisam::enable_indexes(key_map map, bool persist)
     }
     info(HA_STATUS_CONST);
     thd_proc_info(thd, save_proc_info);
+#endif
   }
   DBUG_RETURN(error);
 }
@@ -1771,6 +1803,14 @@ void ha_myisam::start_bulk_insert(ha_rows rows, uint flags)
   if (file->state->records == 0 && can_enable_indexes &&
       (!rows || rows >= MI_MIN_ROWS_TO_DISABLE_INDEXES))
   {
+#if defined(EMBEDDED_LIBRARY) && !MYLITE_WITH_MYISAM_MAINTENANCE
+    if (!file->bulk_insert &&
+        (!rows || rows >= MI_MIN_ROWS_TO_USE_BULK_INSERT))
+    {
+      mi_init_bulk_insert(file, (size_t) thd->variables.bulk_insert_buff_size,
+                          rows);
+    }
+#else
     if (file->open_flag & HA_OPEN_INTERNAL_TABLE)
     {
       file->update|= HA_STATE_CHANGED;
@@ -1812,6 +1852,7 @@ void ha_myisam::start_bulk_insert(ha_rows rows, uint flags)
         }
       }
     }
+#endif
   }
   else
   {
@@ -1883,6 +1924,9 @@ int ha_myisam::end_bulk_insert()
 
 bool ha_myisam::check_and_repair(THD *thd)
 {
+#if defined(EMBEDDED_LIBRARY) && !MYLITE_WITH_MYISAM_MAINTENANCE
+  return true;
+#else
   int error=0;
   int marked_crashed;
   HA_CHECK_OPT check_opt;
@@ -1926,6 +1970,7 @@ bool ha_myisam::check_and_repair(THD *thd)
   }
   thd->set_query(query_backup);
   DBUG_RETURN(error);
+#endif
 }
 
 bool ha_myisam::is_crashed() const

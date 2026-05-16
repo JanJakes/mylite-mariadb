@@ -325,6 +325,7 @@ mylite_warning_level map_warning_level(const char *level);
 std::string field_string(const char *value, unsigned int length);
 const char *unsupported_sql_surface_message(std::string_view sql);
 bool is_server_surface_sql(std::string_view sql);
+bool is_table_maintenance_sql(std::string_view sql);
 bool is_help_command_sql(std::string_view sql);
 bool is_file_import_sql(std::string_view sql);
 bool is_file_export_sql(std::string_view sql);
@@ -2008,6 +2009,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_server_surface_sql(sql)) {
         return "unsupported server-oriented SQL surface";
     }
+    if (is_table_maintenance_sql(sql)) {
+        return "unsupported table-maintenance SQL surface";
+    }
     if (is_help_command_sql(sql)) {
         return "unsupported HELP SQL command";
     }
@@ -2111,6 +2115,30 @@ bool is_server_surface_sql(std::string_view sql) {
     return sql_token_equals(first, "SHOW") &&
            (sql_token_equals(second, "MASTER") || sql_token_equals(second, "SLAVE") ||
             sql_token_equals(second, "REPLICA"));
+}
+
+bool is_table_maintenance_sql(std::string_view sql) {
+    std::string_view rest = skip_sql_leading_noise(sql);
+    const std::string_view first = pop_sql_token(rest);
+    std::string_view second = pop_sql_token(rest);
+    const bool is_table_maintenance_command =
+        sql_token_equals(first, "ANALYZE") || sql_token_equals(first, "CHECK") ||
+        sql_token_equals(first, "OPTIMIZE") || sql_token_equals(first, "REPAIR");
+
+    if (is_table_maintenance_command &&
+        (sql_token_equals(second, "LOCAL") || sql_token_equals(second, "NO_WRITE_TO_BINLOG"))) {
+        second = pop_sql_token(rest);
+    }
+
+    if (is_table_maintenance_command && sql_token_equals(second, "TABLE")) {
+        return true;
+    }
+
+    if (sql_token_equals(first, "CACHE")) {
+        return sql_token_equals(second, "INDEX");
+    }
+
+    return sql_token_equals(first, "LOAD") && sql_token_equals(second, "INDEX");
 }
 
 bool is_help_command_sql(std::string_view sql) {

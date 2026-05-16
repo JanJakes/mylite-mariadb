@@ -431,6 +431,10 @@ the embedded library model:
 - `LOAD DATA` / `LOAD XML` file import, including network-protocol
   `LOAD DATA LOCAL`,
 - `LOAD_FILE()` and `SELECT ... INTO OUTFILE` / `DUMPFILE` host-file SQL I/O,
+- table-maintenance and key-cache administration SQL such as `CHECK TABLE`,
+  `ANALYZE TABLE`, `OPTIMIZE TABLE`, `REPAIR TABLE`, their representative
+  `LOCAL` / `NO_WRITE_TO_BINLOG` forms, `CACHE INDEX`, and
+  `LOAD INDEX INTO CACHE`,
 - SQL `HELP`,
 - `SELECT ... PROCEDURE`, including `PROCEDURE ANALYSE()`,
 - stored-program compiler/runtime surfaces behind routines, triggers,
@@ -448,13 +452,14 @@ the embedded library model:
 Representative account, event, plugin, replication, binlog, view, trigger,
 routine, package, sequence, `CALL`, UDF `CREATE FUNCTION ... SONAME`,
 transaction-control, autocommit-control, SQL locking, named-lock, SQL `HELP`,
-`SELECT ... PROCEDURE`, SQL file-I/O, server utility function, Oracle SQL mode,
-XML SQL function, GIS SQL function, SFORMAT SQL function, partition, and
-foreign-key DDL commands are rejected before MariaDB execution with stable
-MyLite errors. The default embedded profile also links fail-closed stubs for
-stored-program runtime symbols that retained MariaDB parser or cleanup paths
-still reference, omits dynamic UDF lookup/execution bodies, omits unsupported
-binlog event-root source objects, and compiles embedded binlog transaction and
+`SELECT ... PROCEDURE`, SQL file-I/O, table-maintenance/key-cache
+administration, server utility function, Oracle SQL mode, XML SQL function, GIS
+SQL function, SFORMAT SQL function, partition, and foreign-key DDL commands are
+rejected before MariaDB execution with stable MyLite errors. The default
+embedded profile also links fail-closed stubs for stored-program runtime
+symbols that retained MariaDB parser or cleanup paths still reference, omits
+dynamic UDF lookup/execution bodies, omits unsupported binlog event-root and
+MyISAM maintenance source objects, and compiles embedded binlog transaction and
 event-write entry points to no-ops. Other unsupported surfaces should fail with
 stable MyLite result codes and MariaDB diagnostics where possible.
 

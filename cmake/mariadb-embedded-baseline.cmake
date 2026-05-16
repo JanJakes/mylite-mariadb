@@ -80,5 +80,8 @@ set(MYLITE_WITH_UDF_RUNTIME OFF CACHE BOOL "Omit UDF lookup and execution runtim
 # MyLite starts with --skip-log-bin and rejects replication/binlog SQL.
 set(MYLITE_WITH_BINLOG_CORE OFF CACHE BOOL "Omit binary log transaction and event core" FORCE)
 
+# MyLite rejects server-style MyISAM table maintenance and key-cache admin SQL.
+set(MYLITE_WITH_MYISAM_MAINTENANCE OFF CACHE BOOL "Omit MyISAM maintenance admin runtime" FORCE)
+
 # MyLite's embedded SQL profile has no retained C++ exception users.
 set(MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS OFF CACHE BOOL "Enable embedded SQL C++ exceptions" FORCE)

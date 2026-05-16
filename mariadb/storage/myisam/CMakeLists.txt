@@ -27,6 +27,17 @@ SET(MYISAM_SOURCES  ft_boolean_search.c ft_nlq_search.c ft_parser.c ft_static.c
 				rt_split.c sort.c sp_key.c mi_extrafunc.h myisamdef.h
 				rt_index.h mi_rkey.c)
 
+OPTION(MYLITE_WITH_MYISAM_MAINTENANCE "Build MyISAM table maintenance support" ON)
+IF(MYLITE_WITH_MYISAM_MAINTENANCE)
+  ADD_DEFINITIONS(-DMYLITE_WITH_MYISAM_MAINTENANCE=1)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_MYISAM_MAINTENANCE=0)
+  LIST(REMOVE_ITEM MYISAM_SOURCES
+    mi_check.c
+    mi_keycache.c
+    mi_preload.c)
+ENDIF()
+
 IF(CMAKE_SYSTEM_NAME MATCHES AIX)
   # Workaround linker bug on AIX
   SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-berok")
@@ -71,4 +82,3 @@ ENDIF()
 IF (MSVC)
   SET_TARGET_PROPERTIES(myisamchk myisampack PROPERTIES LINK_FLAGS "setargv.obj")
 ENDIF()
-

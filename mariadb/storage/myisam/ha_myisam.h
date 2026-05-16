@@ -21,6 +21,10 @@
 #include "handler.h"                            /* handler */
 #include "table.h"                              /* TABLE_SHARE */
 
+#ifndef MYLITE_WITH_MYISAM_MAINTENANCE
+#define MYLITE_WITH_MYISAM_MAINTENANCE 1
+#endif
+
 #define HA_RECOVER_DEFAULT	1	/* Automatic recover active */
 #define HA_RECOVER_BACKUP	2	/* Make a backupfile on recover */
 #define HA_RECOVER_FORCE	4	/* Recover even if we loose rows */
@@ -129,8 +133,12 @@ class ha_myisam final : public handler
   bool is_crashed() const override;
   bool auto_repair(int error) const override
   {
+#if defined(EMBEDDED_LIBRARY) && !MYLITE_WITH_MYISAM_MAINTENANCE
+    return false;
+#else
     return (myisam_recover_options != HA_RECOVER_OFF &&
             error == HA_ERR_CRASHED_ON_USAGE);
+#endif
   }
   int optimize(THD* thd, HA_CHECK_OPT* check_opt) override;
   int assign_to_keycache(THD* thd, HA_CHECK_OPT* check_opt) override;

@@ -91,6 +91,11 @@ Add `compat-server-surface` coverage:
   unsupported surface.
 - MyLite SQL-policy rejection for the MariaDB-specific `SFORMAT()` SQL function
   as a follow-up explicit unsupported surface.
+- MyLite SQL-policy rejection for table-maintenance and key-cache
+  administration SQL such as `CHECK TABLE`, `ANALYZE TABLE`, `OPTIMIZE TABLE`,
+  `REPAIR TABLE`, `CACHE INDEX`, and `LOAD INDEX INTO CACHE`, backed by omitted
+  native MyISAM check, repair, key-cache, and preload source objects as a
+  follow-up explicit unsupported surface.
 - Existing unsupported external-engine DDL smoke grouped under the same
   compatibility surface.
 
@@ -131,12 +136,13 @@ The original policy slice did not trim the archive directly. Follow-up
 size-profile slices now use these explicit unsupported surfaces to remove
 unreachable LOAD execution, host-file SQL I/O, server utility function paths,
 the Oracle SQL mode parser, XML SQL functions, GIS SQL functions, SFORMAT, and
-the full SQL `HELP`, `PROCEDURE ANALYSE()`, and generic SELECT procedure
-runtime implementations, plus the full stored-program compiler/runtime objects,
-dynamic UDF runtime, and binary-log transaction/event-root core including
-`gtid_index.cc`, `log_event.cc`, `rpl_injector.cc`, and `rpl_record.cc`, from
-the default embedded profile, and to compile retained embedded SQL C++ sources
-without exceptions.
+the full SQL `HELP`, `PROCEDURE ANALYSE()`, generic SELECT procedure runtime,
+stored-program compiler/runtime, dynamic UDF runtime, binary-log
+transaction/event-root core including `gtid_index.cc`, `log_event.cc`,
+`rpl_injector.cc`, and `rpl_record.cc`, and native MyISAM maintenance objects
+including `mi_check.c`, `mi_keycache.c`, and `mi_preload.c` from the default
+embedded profile, and to compile retained embedded SQL C++ sources without
+exceptions.
 
 ## Test Plan
 
