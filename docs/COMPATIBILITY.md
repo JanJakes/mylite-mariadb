@@ -53,8 +53,8 @@ function, JSON schema validation function, JSON table function, dynamic column f
 command, SQL sequence value surface, virtual sequence storage engine, dynamic
 plugin loading, SQL HELP command, SELECT PROCEDURE,
 table-maintenance/key-cache administration, native
-CSV/InnoDB/MyISAM/MRG/partition engine absence, CSV engine request rejection,
-user-statistics,
+CSV/InnoDB/MyISAM/MRG/partition engine absence, unsupported engine request
+rejection, user-statistics,
 statement profiling,
 optimizer trace,
 static SHOW information,
@@ -111,7 +111,7 @@ application-schema suites remain planned.
 | `ENGINE=MEMORY` / `ENGINE=HEAP` | 🟡&nbsp;Partial | DDL routes to MyLite and records the requested MEMORY/HEAP token; table metadata survives close/reopen, row contents and supported index entries are runtime-volatile and empty after embedded runtime shutdown/reopen, representative insert, full scan, forced B-tree-compatible index lookup, duplicate-key rejection, update/delete, truncate, and autoincrement reset are covered, and no durable MyLite row/index pages or MariaDB HEAP files are created; native MEMORY hash-index defaults, memory limits/accounting, BLOB/TEXT columns, replication/binlog behavior, and broader native parity remain unsupported or planned |
 | `ENGINE=CSV` | ➖&nbsp;Out&nbsp;of&nbsp;scope | Native CSV table files are not registered in the default embedded profile because `.CSV` and `.CSM` sidecars do not fit the single-primary-file runtime; direct and prepared `CREATE TABLE ... ENGINE=CSV` and `ALTER TABLE ... ENGINE=CSV` requests are rejected before MariaDB execution and before MyLite catalog publication |
 | `ENGINE=SEQUENCE` | ➖&nbsp;Out&nbsp;of&nbsp;scope | MariaDB's virtual generated-table `SEQUENCE` engine is not registered in the default embedded profile; MyLite does not auto-discover magic `seq_*_to_*` tables outside the catalog, while ordinary user tables with those names can be catalog-backed MyLite tables |
-| Dynamic external engines | ➖&nbsp;Out&nbsp;of&nbsp;scope | Other unsupported explicit engine requests fail before catalog publication |
+| Dynamic external engines | ➖&nbsp;Out&nbsp;of&nbsp;scope | Unsupported explicit engine requests such as `ENGINE=ARCHIVE` fail before MariaDB execution and before MyLite catalog publication |
 
 ## File Ownership
 

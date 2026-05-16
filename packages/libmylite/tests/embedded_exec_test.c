@@ -72,7 +72,7 @@ static void test_transaction_control_policy(void);
 static void test_locking_sql_is_rejected(void);
 static void test_online_alter_policy_is_rejected(void);
 static void test_foreign_key_policy_is_rejected(void);
-static void test_csv_engine_policy_is_rejected(void);
+static void test_unsupported_engine_policy_is_rejected(void);
 static void test_partition_policy_is_rejected(void);
 static void assert_variable_value(mylite_db *db, const char *name, const char *value);
 static void assert_variable_value_or_missing(mylite_db *db, const char *name, const char *value);
@@ -110,6 +110,7 @@ static void assert_transaction_control_exec_fails(mylite_db *db, const char *sql
 static void assert_locking_sql_exec_fails(mylite_db *db, const char *sql);
 static void assert_online_alter_exec_fails(mylite_db *db, const char *sql);
 static void assert_csv_engine_exec_fails(mylite_db *db, const char *sql);
+static void assert_unsupported_engine_exec_fails(mylite_db *db, const char *sql);
 static void assert_partition_exec_fails(mylite_db *db, const char *sql);
 static void assert_foreign_key_exec_fails(mylite_db *db, const char *sql);
 static int select_callback(void *ctx, int column_count, char **values, char **column_names);
@@ -171,7 +172,7 @@ int main(void) {
     test_locking_sql_is_rejected();
     test_online_alter_policy_is_rejected();
     test_foreign_key_policy_is_rejected();
-    test_csv_engine_policy_is_rejected();
+    test_unsupported_engine_policy_is_rejected();
     test_partition_policy_is_rejected();
     return 0;
 }
@@ -1789,7 +1790,7 @@ static void test_foreign_key_policy_is_rejected(void) {
     free(root);
 }
 
-static void test_csv_engine_policy_is_rejected(void) {
+static void test_unsupported_engine_policy_is_rejected(void) {
     char *root = make_temp_root();
     char *filename = NULL;
     mylite_db *db = open_database(root, &filename);
@@ -1800,7 +1801,7 @@ static void test_csv_engine_policy_is_rejected(void) {
         mylite_exec(
             db,
             "CREATE TABLE csv_comment ("
-            "id INT COMMENT 'ENGINE=CSV', engine_label VARCHAR(16))",
+            "id INT COMMENT 'ENGINE=CSV ENGINE=ARCHIVE', engine_label VARCHAR(16))",
             NULL,
             NULL,
             NULL
@@ -1815,7 +1816,20 @@ static void test_csv_engine_policy_is_rejected(void) {
         db,
         "CREATE TEMPORARY TABLE csv_temp_posts (id INT NOT NULL PRIMARY KEY) ENGINE = CSV"
     );
+    assert_csv_engine_exec_fails(
+        db,
+        "CREATE TEMPORARY TABLE csv_quoted_posts (id INT NOT NULL PRIMARY KEY) ENGINE='CSV'"
+    );
     assert_csv_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE=CSV");
+    assert_unsupported_engine_exec_fails(
+        db,
+        "CREATE TABLE archive_posts (id INT NOT NULL PRIMARY KEY) ENGINE=ARCHIVE"
+    );
+    assert_unsupported_engine_exec_fails(
+        db,
+        "CREATE TABLE archive_quoted_posts (id INT NOT NULL PRIMARY KEY) ENGINE='ARCHIVE'"
+    );
+    assert_unsupported_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE=ARCHIVE");
 
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);
@@ -2314,6 +2328,18 @@ static void assert_csv_engine_exec_fails(mylite_db *db, const char *sql) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "CSV storage engine") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_unsupported_engine_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "storage engine request") != NULL);
     mylite_free(errmsg);
 }
 

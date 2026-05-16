@@ -139,7 +139,7 @@ typedef struct catalog_table_context {
 } catalog_table_context;
 
 static void test_show_engines_reports_mylite(void);
-static void test_csv_engine_request_policy(void);
+static void test_unsupported_engine_request_policy(void);
 static void test_blackhole_engine_routes_to_mylite(void);
 static void test_memory_engine_routes_to_mylite(void);
 static void test_memory_database_has_empty_mylite_discovery(void);
@@ -192,6 +192,7 @@ static void assert_transaction_crash_recovery(const char *root, const char *file
 static void assert_locking_sql_exec_fails(mylite_db *db, const char *sql);
 static void assert_online_alter_exec_fails(mylite_db *db, const char *sql);
 static void assert_csv_engine_exec_fails(mylite_db *db, const char *sql);
+static void assert_unsupported_engine_exec_fails(mylite_db *db, const char *sql);
 static void assert_partition_exec_fails(mylite_db *db, const char *sql);
 static void assert_foreign_key_exec_fails(mylite_db *db, const char *sql);
 static void assert_prepared_succeeds(mylite_db *db, const char *sql);
@@ -332,7 +333,7 @@ int main(int argc, char **argv) {
     g_test_program_path = argv[0];
 
     test_show_engines_reports_mylite();
-    test_csv_engine_request_policy();
+    test_unsupported_engine_request_policy();
     test_blackhole_engine_routes_to_mylite();
     test_memory_engine_routes_to_mylite();
     test_memory_database_has_empty_mylite_discovery();
@@ -406,7 +407,7 @@ static void test_show_engines_reports_mylite(void) {
     free(root);
 }
 
-static void test_csv_engine_request_policy(void) {
+static void test_unsupported_engine_request_policy(void) {
     char *root = make_temp_root();
     char *filename = NULL;
     mylite_db *db = open_database(root, &filename);
@@ -416,7 +417,7 @@ static void test_csv_engine_request_policy(void) {
     assert_exec_succeeds(
         db,
         "CREATE TABLE csv_comment ("
-        "id INT NOT NULL PRIMARY KEY COMMENT 'ENGINE=CSV', "
+        "id INT NOT NULL PRIMARY KEY COMMENT 'ENGINE=CSV ENGINE=ARCHIVE', "
         "engine_label VARCHAR(16)"
         ") ENGINE=InnoDB"
     );
@@ -434,6 +435,24 @@ static void test_csv_engine_request_policy(void) {
         "CREATE TEMPORARY TABLE csv_temp_posts (id INT NOT NULL PRIMARY KEY) ENGINE = CSV"
     );
     assert_csv_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE=CSV");
+    assert_catalog_table_count(filename, "app", 1U);
+    assert_catalog_table_metadata(filename, "app", "csv_comment", "InnoDB", "MYLITE");
+    assert_unsupported_engine_exec_fails(
+        db,
+        "CREATE TABLE archive_posts (id INT NOT NULL PRIMARY KEY) ENGINE=ARCHIVE"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "archive_posts") == MYLITE_STORAGE_NOTFOUND
+    );
+    assert_unsupported_engine_exec_fails(
+        db,
+        "CREATE TABLE archive_quoted_posts (id INT NOT NULL PRIMARY KEY) ENGINE='ARCHIVE'"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "archive_quoted_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_unsupported_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE=ARCHIVE");
     assert_catalog_table_count(filename, "app", 1U);
     assert_catalog_table_metadata(filename, "app", "csv_comment", "InnoDB", "MYLITE");
 
@@ -10704,6 +10723,21 @@ static void assert_csv_engine_exec_fails(mylite_db *db, const char *sql) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "CSV storage engine") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_unsupported_engine_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+    const int result = mylite_exec(db, sql, NULL, NULL, &errmsg);
+    if (result == MYLITE_OK) {
+        fprintf(stderr, "SQL unexpectedly succeeded: %s\n", sql);
+    }
+    assert(result == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "storage engine request") != NULL);
     mylite_free(errmsg);
 }
 

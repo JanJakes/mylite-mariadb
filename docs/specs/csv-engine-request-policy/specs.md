@@ -57,3 +57,8 @@ Completed on 2026-05-16:
 - `cmake --build --preset dev --target tidy`
 - `bash -n tools/mariadb-embedded-build tools/mylite-mtr-harness tools/mylite-compat-harness tools/mylite-size-report`
 - `git diff --check`
+
+## Follow-Up
+
+The broader unsupported-engine request policy now generalizes this CSV-specific
+gate while preserving the CSV diagnostic.

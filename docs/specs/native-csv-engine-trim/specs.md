@@ -151,6 +151,6 @@ Completed on 2026-05-16:
 - Some upstream MTR suites assume CSV and source `include/have_csv.inc`; the
   current MyLite MTR smoke subset must stay curated until broader comparison
   infrastructure can select CSV-dependent tests conditionally.
-- Explicit `ENGINE=CSV` application DDL is handled by the separate CSV engine
-  request policy, which rejects it with a MyLite-owned diagnostic before
-  catalog publication.
+- Explicit `ENGINE=CSV` application DDL is handled by the engine request
+  policies, which reject it with a MyLite-owned diagnostic before catalog
+  publication.

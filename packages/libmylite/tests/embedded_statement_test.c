@@ -1167,6 +1167,21 @@ static void test_prepare_diagnostics(void) {
         "ALTER TABLE online_alter_prepare ENGINE = CSV",
         "CSV storage engine"
     );
+    assert_prepare_fails_with_message(
+        db,
+        "CREATE TABLE archive_prepare (id INT NOT NULL PRIMARY KEY) ENGINE=ARCHIVE",
+        "storage engine request"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "CREATE TABLE archive_quoted_prepare (id INT NOT NULL PRIMARY KEY) ENGINE='ARCHIVE'",
+        "storage engine request"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "ALTER TABLE online_alter_prepare ENGINE = ARCHIVE",
+        "storage engine request"
+    );
 
     assert(
         mylite_prepare(
