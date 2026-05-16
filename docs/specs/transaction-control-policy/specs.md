@@ -25,7 +25,11 @@ slice makes the prepared execution path enforce the same active-transaction DDL
 policy as direct SQL. The later
 [Transaction Isolation Control](../transaction-isolation-control/specs.md)
 slice accepts direct/session `SET TRANSACTION ISOLATION LEVEL ...` forms as
-compatibility setup SQL without claiming storage isolation semantics.
+compatibility setup SQL without claiming storage isolation semantics. The later
+[Prepared Transaction SET Control](../prepared-transaction-set-control/specs.md)
+slice allows MariaDB-preparable transaction `SET` controls through
+`mylite_prepare()` while keeping prepared transaction-start and completion
+commands rejected.
 
 ## Problem
 

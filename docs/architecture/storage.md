@@ -474,11 +474,11 @@ the checkpoint from MariaDB's statement commit/rollback hooks. DDL and catalog
 paths that do not reliably enter `external_lock()` keep the outer `libmylite`
 checkpoint before MariaDB execution.
 
-Direct `libmylite` `BEGIN` / `COMMIT` / `ROLLBACK` and supported direct
-session `SET autocommit=0/1/DEFAULT` support, including `SET` lists with one
-autocommit assignment plus ordinary non-transaction assignments, is limited to
-row-DML transactions over routed MyLite tables. `libmylite` opens an outer
-storage checkpoint for the direct transaction. Row-DML statements inside that
+Direct `libmylite` `BEGIN` / `COMMIT` / `ROLLBACK` and supported direct or
+prepared session `SET autocommit=0/1/DEFAULT` support, including `SET` lists
+with one autocommit assignment plus ordinary non-transaction assignments, is
+limited to row-DML transactions over routed MyLite tables. `libmylite` opens an
+outer storage checkpoint for the transaction. Row-DML statements inside that
 transaction use
 `libmylite`-owned nested statement checkpoints so failed direct or prepared
 statements can roll back their own partial writes while preserving earlier
@@ -492,26 +492,29 @@ active commits the previous outer checkpoint and opens a new one, matching
 MariaDB's transaction restart behavior for this bounded row-DML scope.
 `START TRANSACTION READ WRITE` follows the same direct transaction-start path,
 and `START TRANSACTION READ ONLY` starts a read-only MyLite transaction that
-rejects direct and prepared MyLite storage writes. Direct `SET TRANSACTION`
-and `SET SESSION` / `SET LOCAL TRANSACTION` `READ ONLY` / `READ WRITE` forms
-mirror MariaDB's one-shot and session access-mode defaults after MariaDB
-accepts the statement. Direct/session `SET TRANSACTION ISOLATION LEVEL ...`
-forms are accepted as compatibility setup SQL after MariaDB validates them, but
-do not yet imply MyLite storage isolation guarantees. Direct transaction
-read-only variable assignments mirror the same session-default or one-shot
-read-only state; direct isolation variable assignments are accepted as setup
-SQL without storage isolation semantics. `COMMIT` and `ROLLBACK` completion
+rejects direct and prepared MyLite storage writes. Direct and prepared
+`SET TRANSACTION` and `SET SESSION` / `SET LOCAL TRANSACTION` `READ ONLY` /
+`READ WRITE` forms mirror MariaDB's one-shot and session access-mode defaults
+after MariaDB accepts the statement. Direct and prepared session
+`SET TRANSACTION ISOLATION LEVEL ...` forms are accepted as compatibility setup
+SQL after MariaDB validates them, but do not yet imply MyLite storage isolation
+guarantees. Direct and prepared transaction read-only variable assignments
+mirror the same session-default or one-shot read-only state; isolation variable
+assignments are accepted as setup SQL without storage isolation semantics.
+`COMMIT` and `ROLLBACK` completion
 modifiers support `AND CHAIN` by finishing the current outer checkpoint and
 immediately opening a new one; chained completion preserves the current
 read-only/read-write access mode, while non-chained completion resets one-shot
 access mode to the session default. `AND NO CHAIN` and `NO RELEASE` are
-accepted explicit no-op completion modifiers. Direct session
+accepted explicit no-op completion modifiers. Direct and prepared session
 `SET completion_type=NO_CHAIN/0/DEFAULT/CHAIN/1` mirrors the MariaDB
 completion default so later plain direct `COMMIT` and `ROLLBACK` follow the
 final supported assignment in a `SET` list, while explicit `AND NO CHAIN`
 overrides chained defaults. `RELEASE`, `WITH CONSISTENT SNAPSHOT`,
-`completion_type=RELEASE/2`, global transaction variables, and duplicate
-`SET TRANSACTION` characteristics remain unsupported.
+`completion_type=RELEASE/2`, global transaction variables, parameterized
+transaction-control `SET` values, prepared transaction-start/completion
+statements, and duplicate `SET TRANSACTION` characteristics remain
+unsupported.
 Direct savepoint control is handled by `libmylite` before MariaDB execution
 for the same bounded transaction scope: case-insensitive simple unquoted,
 backtick-quoted, and ANSI_QUOTES double-quoted `SAVEPOINT` names open nested
@@ -540,8 +543,9 @@ This is still partial SQL transaction support. The MyLite handler still
 advertises non-transactional engine flags. Public `libmylite` SQL entry points
 continue to reject global or duplicate autocommit changes, unsupported
 `SET TRANSACTION` forms, unsupported transaction modifiers, global transaction
-variables, release completion defaults, XA, and direct or prepared
-DDL inside active direct transactions.
+variables, parameterized transaction-control `SET` values, prepared
+transaction-start/completion statements, release completion defaults, XA, and
+direct or prepared DDL inside active direct transactions.
 Handler-level savepoint hooks, temporary DDL inside active transactions,
 transactional DDL, isolation, WAL/checkpoint, and transactional engine-flag
 support remain planned.

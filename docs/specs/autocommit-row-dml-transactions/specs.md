@@ -16,7 +16,10 @@ The later
 [Autocommit SET-List Control](../autocommit-set-list-control/specs.md) slice
 allows one supported session autocommit assignment inside a direct `SET` list
 with ordinary non-transaction assignments, while keeping global, duplicate, and
-unsupported transaction-variable forms rejected.
+unsupported transaction-variable forms rejected. The later
+[Prepared Transaction SET Control](../prepared-transaction-set-control/specs.md)
+slice supports the same bounded autocommit controls through prepared
+statements.
 
 ## Problem
 
@@ -72,7 +75,7 @@ Extend the direct `libmylite` transaction-control policy:
   - `SET @@session.autocommit=0`
   - `SET @@session.autocommit=1`
 - Treat `OFF` / `ON` and `FALSE` / `TRUE` as aliases for `0` / `1`.
-- Keep prepared autocommit-control statements rejected.
+- Keep prepared autocommit-control statements rejected at this slice point.
 - At this slice point, keep multi-assignment `SET` statements that include
   autocommit rejected, because MariaDB can evaluate expressions in the same
   statement and commits at statement end. The later
@@ -167,7 +170,7 @@ policy parsing, and tests.
 ## Test And Verification Plan
 
 - Extend direct SQL policy tests to allow supported session autocommit forms and
-  continue rejecting prepared autocommit-control statements.
+  continue rejecting prepared autocommit-control statements at this slice point.
 - Add storage-smoke tests for:
   - `SET autocommit=0` + row DML + `ROLLBACK`,
   - `SET autocommit=0` + row DML + `COMMIT` with autocommit staying disabled,

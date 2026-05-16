@@ -109,29 +109,30 @@ rollback-journal and transaction-journal publication state in the primary
 catalog when no transient MariaDB schema directory exists. Direct `BEGIN`,
 `COMMIT`, `ROLLBACK`,
 transaction restart through repeated direct `BEGIN` / `START TRANSACTION`, and
-supported direct session `SET autocommit=0/1/DEFAULT` forms, including `SET`
-lists that mix one autocommit assignment with ordinary non-transaction
-assignments, support row-DML transactions over routed MyLite tables. Direct
+supported direct or prepared session `SET autocommit=0/1/DEFAULT` forms,
+including `SET` lists that mix one autocommit assignment with ordinary
+non-transaction assignments, support row-DML transactions over routed MyLite
+tables. Direct
 transaction modifiers support
 explicit `START TRANSACTION READ WRITE`, `COMMIT` / `ROLLBACK` `AND CHAIN`,
 `AND NO CHAIN`, and `NO RELEASE` forms for the same bounded scope, including
 nested statement rollback for covered failed direct and prepared row-DML
 statements and transaction-journal recovery after an unclean process exit.
-Direct `START TRANSACTION READ ONLY`, `START TRANSACTION READ WRITE`,
-`SET TRANSACTION READ ONLY`, `SET TRANSACTION READ WRITE`, session
-`SET TRANSACTION READ ONLY` / `READ WRITE`, direct/session
-`SET TRANSACTION ISOLATION LEVEL ...`, transaction read-only and isolation
-variable assignments including duplicate supported assignment lists where the
-final value wins, and session
+Direct `START TRANSACTION READ ONLY`, `START TRANSACTION READ WRITE`, direct
+and prepared `SET TRANSACTION READ ONLY`, `SET TRANSACTION READ WRITE`,
+session `SET TRANSACTION READ ONLY` / `READ WRITE`, direct and prepared
+session `SET TRANSACTION ISOLATION LEVEL ...`, transaction read-only and
+isolation variable assignments including duplicate supported assignment lists
+where the final value wins, and session
 `SET completion_type=NO_CHAIN/0/DEFAULT/CHAIN/1` forms are accepted for the
-current bounded transaction scope, including duplicate supported
-`completion_type` assignments where the final assignment wins. Isolation
-controls and isolation variables are accepted as compatibility setup SQL, not
-as a storage-isolation guarantee. Read-only transactions reject direct and
-prepared durable MyLite storage writes while allowing simple row DML against
-tracked temporary tables. `CHAIN` makes later plain direct `COMMIT` and
-`ROLLBACK` use the same chained behavior as explicit `AND CHAIN`, while
-explicit `AND NO CHAIN` still overrides it.
+current bounded transaction scope through direct and prepared execution,
+including duplicate supported `completion_type` assignments where the final
+assignment wins. Isolation controls and isolation variables are accepted as
+compatibility setup SQL, not as a storage-isolation guarantee. Read-only
+transactions reject direct and prepared durable MyLite storage writes while
+allowing simple row DML against tracked temporary tables. `CHAIN` makes later
+plain direct `COMMIT` and `ROLLBACK` use the same chained behavior as explicit
+`AND CHAIN`, while explicit `AND NO CHAIN` still overrides it.
 Direct `SAVEPOINT`,
 `ROLLBACK TO [SAVEPOINT]`, and `RELEASE SAVEPOINT` support case-insensitive
 simple unquoted and backtick-quoted savepoint names inside active bounded
@@ -139,10 +140,12 @@ row-DML transactions. Double-quoted savepoint names are also supported when the
 session has `ANSI_QUOTES` enabled. The same savepoint-control statements can be
 prepared and reused for file-backed MyLite transactions. Global
 autocommit-control statements, duplicate autocommit assignments,
-`WITH CONSISTENT SNAPSHOT`, `RELEASE` completion, `completion_type=RELEASE/2`,
-global transaction variable assignments, duplicate `SET TRANSACTION`
-characteristics, XA, and direct or prepared DDL inside an active transaction
-remain unsupported until the storage and catalog transaction design is broader.
+parameterized transaction-control `SET` values, prepared transaction-start or
+completion statements, `WITH CONSISTENT SNAPSHOT`, `RELEASE` completion,
+`completion_type=RELEASE/2`, global transaction variable assignments,
+duplicate `SET TRANSACTION` characteristics, XA, and direct or prepared DDL
+inside an active transaction remain unsupported until the storage and catalog
+transaction design is broader.
 Existing-file opens preserve storage lock conflicts as
 `MYLITE_BUSY` before starting the embedded runtime.
 
@@ -548,8 +551,9 @@ the embedded library model:
 
 Representative account, event, plugin, replication, binlog, view, trigger,
 routine, package, sequence, `CALL`, UDF `CREATE FUNCTION ... SONAME`,
-global or duplicate autocommit-control, unsupported transaction-variable `SET`
-forms, unsupported transaction-control, release completion defaults, XA,
+global or duplicate autocommit-control, parameterized or otherwise unsupported
+transaction-control `SET` forms, unsupported transaction-control, release
+completion defaults, XA,
 SQL locking,
 named-lock, SQL `HELP`, SQL `HANDLER`, `SELECT ... PROCEDURE`, SQL file-I/O,
 table-maintenance/key-cache administration, statement profiling, external

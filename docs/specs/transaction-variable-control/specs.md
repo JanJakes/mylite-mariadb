@@ -3,8 +3,10 @@
 Status note: the later
 [Transaction Variable Duplicate Control](../transaction-variable-duplicate-control/specs.md)
 slice accepts duplicate supported transaction variable assignments with the
-final assignment winning. Global transaction variables and prepared
-transaction-variable control remain unsupported.
+final assignment winning. The later
+[Prepared Transaction SET Control](../prepared-transaction-set-control/specs.md)
+slice accepts supported transaction-variable controls through prepared
+statements. Global transaction variables remain unsupported.
 
 ## Problem
 
@@ -63,7 +65,8 @@ MariaDB base: `mariadb-11.8.6`
 - Keep duplicate read-only or duplicate isolation variable assignments rejected
   in one direct `SET` statement to avoid hidden last-writer-wins state.
 - Keep `SET STATEMENT ... FOR ...` transaction-variable assignments rejected.
-- Keep prepared transaction-variable controls rejected before MariaDB prepare.
+- Keep prepared transaction-variable controls rejected before MariaDB prepare at
+  this slice point.
 - Let MariaDB validate isolation values. MyLite records no storage isolation
   state yet.
 - Mirror read-only variable assignments into the existing MyLite
@@ -141,8 +144,8 @@ assignment parser branches and tests.
   read-only/read-write state behavior for session defaults and one-shot next
   transactions.
 - Global controls, duplicate characteristics, invalid read-only values,
-  prepared transaction-control statements, and semicolon-chained forms remain
-  rejected.
+  prepared transaction-control statements at this slice point, and
+  semicolon-chained forms remain rejected.
 - Docs describe isolation variables as accepted compatibility setup SQL, not
   implemented storage isolation.
 

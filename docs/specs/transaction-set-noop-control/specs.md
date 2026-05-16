@@ -15,7 +15,10 @@ MyLite storage writes while the read-only characteristic is active.
 The later
 [Transaction Isolation Control](../transaction-isolation-control/specs.md)
 slice accepts direct/session `SET TRANSACTION ISOLATION LEVEL ...` forms as
-compatibility setup SQL without claiming storage isolation semantics.
+compatibility setup SQL without claiming storage isolation semantics. The later
+[Prepared Transaction SET Control](../prepared-transaction-set-control/specs.md)
+slice accepts the supported transaction `SET` controls through prepared
+statements.
 
 ## Problem
 
@@ -29,8 +32,8 @@ MariaDB and blocks harmless session setup.
 This slice accepts only direct read-write/no-chain controls that are no-ops for
 MyLite's current row-DML transaction scope. At this slice point, read-only
 access modes, isolation controls, chain/release completion defaults, global
-changes, `SET STATEMENT`, prepared forms, XA, and DDL inside active direct
-transactions remained unsupported.
+changes, `SET STATEMENT`, prepared forms at this slice point, XA, and DDL
+inside active direct transactions remained unsupported.
 
 ## Source Findings
 
@@ -149,7 +152,7 @@ tests.
   and no-chain/default `completion_type` forms.
 - Keep read-only/isolation `SET TRANSACTION`, global and duplicate
   `completion_type`, chain/release completion defaults, `SET STATEMENT`,
-  prepared forms, and semicolon-chained forms rejected.
+  prepared forms at this slice point, and semicolon-chained forms rejected.
 - Add storage-smoke coverage proving:
   - `SET TRANSACTION READ WRITE` before `BEGIN` still allows a routed
     `ENGINE=InnoDB` row-DML transaction to commit,

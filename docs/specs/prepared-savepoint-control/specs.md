@@ -3,9 +3,10 @@
 Status note: the later
 [Transaction Modifier Control](../transaction-modifier-control/specs.md) slice
 adds bounded direct transaction-start and completion modifier support. Prepared
-`BEGIN`, `COMMIT`, `ROLLBACK`, `SET autocommit`, and transaction-start or
-completion modifiers remain unsupported; prepared savepoint control remains the
-only prepared transaction-control surface. Later quoted-name slices add
+`BEGIN`, `COMMIT`, `ROLLBACK`, and transaction-start or completion modifiers
+remain unsupported. The later
+[Prepared Transaction SET Control](../prepared-transaction-set-control/specs.md)
+slice adds prepared `SET` transaction controls. Later quoted-name slices add
 SQL-mode-aware double-quoted identifiers and case-insensitive savepoint lookup.
 
 ## Problem
@@ -19,9 +20,10 @@ transaction surface.
 
 This slice adds prepared savepoint-control statements for the same bounded
 file-backed row-DML transaction scope. It does not add prepared `BEGIN`,
-`COMMIT`, `ROLLBACK`, `SET autocommit`, transaction modifiers, XA,
-handler-level savepoint hooks, transactional DDL, isolation, or transactional
-engine flags.
+`COMMIT`, `ROLLBACK`, transaction modifiers, XA, handler-level savepoint hooks,
+transactional DDL, isolation, or transactional engine flags. At this slice
+point, prepared transaction `SET` controls were still unsupported; the later
+prepared transaction SET slice narrows that gap.
 
 ## Source Findings
 
@@ -69,8 +71,10 @@ MariaDB-backed MyLite storage engine is available:
 - `mylite_finalize()` releases the statement without asking MariaDB to close a
   non-existent prepared handle.
 
-Prepared `BEGIN`, `COMMIT`, `ROLLBACK`, `SET autocommit`, `SET TRANSACTION`,
-XA, and transaction modifiers remain policy failures.
+At this slice point, prepared `BEGIN`, `COMMIT`, `ROLLBACK`,
+`SET autocommit`, `SET TRANSACTION`, XA, and transaction modifiers remained
+policy failures. The later prepared transaction SET slice keeps lifecycle
+controls rejected but supports bounded prepared transaction `SET` controls.
 
 ## Affected Subsystems
 

@@ -1943,6 +1943,91 @@ static void test_row_dml_transactions(void) {
     assert_exec_succeeds(db, "ROLLBACK");
     assert_exec_succeeds(db, "SET transaction_read_only=0");
 
+    assert_prepared_succeeds(db, "SET autocommit=0");
+    assert_prepared_succeeds(
+        db,
+        "INSERT INTO tx_posts VALUES (60, 'prepared-autocommit-rollback')"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts WHERE title = 'prepared-autocommit-rollback'",
+        "0"
+    );
+
+    assert_prepared_succeeds(db, "SET sql_mode='', autocommit=0");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (60, 'prepared-autocommit-commit')");
+    assert_prepared_succeeds(db, "SET autocommit=1");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts "
+        "WHERE id = 60 AND title = 'prepared-autocommit-commit'",
+        "1"
+    );
+    assert_exec_succeeds(db, "DELETE FROM tx_posts WHERE id = 60");
+
+    assert_prepared_succeeds(db, "SET autocommit=0, @mylite_prepared_autocommit='default'");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (61, 'prepared-autocommit-default')");
+    assert_prepared_succeeds(db, "SET autocommit=DEFAULT");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts "
+        "WHERE id = 61 AND title = 'prepared-autocommit-default'",
+        "1"
+    );
+    assert_exec_succeeds(db, "DELETE FROM tx_posts WHERE id = 61");
+
+    assert_prepared_succeeds(db, "SET completion_type=NO_CHAIN, completion_type=CHAIN");
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (62, 'prepared-completion-before')");
+    assert_exec_succeeds(db, "COMMIT");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (63, 'prepared-completion-after')");
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_exec_succeeds(db, "ROLLBACK AND NO CHAIN");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts "
+        "WHERE id = 62 AND title = 'prepared-completion-before'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts "
+        "WHERE id = 63 AND title = 'prepared-completion-after'",
+        "0"
+    );
+    assert_exec_succeeds(db, "DELETE FROM tx_posts WHERE id = 62");
+    assert_prepared_succeeds(db, "SET completion_type=DEFAULT");
+
+    assert_prepared_succeeds(db, "SET transaction_read_only=1, tx_read_only=0");
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (64, 'prepared-variable-read-write')");
+    assert_exec_succeeds(db, "ROLLBACK");
+
+    assert_prepared_succeeds(db, "SET tx_read_only=0, transaction_read_only=1");
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO tx_posts VALUES (64, 'prepared-variable-read-only')",
+        "read-only transaction"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_prepared_succeeds(db, "SET transaction_read_only=0");
+
+    assert_prepared_succeeds(db, "SET TRANSACTION READ ONLY");
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO tx_posts VALUES (65, 'prepared-set-transaction-read-only')",
+        "read-only transaction"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+
+    assert_prepared_succeeds(db, "SET TRANSACTION READ WRITE, ISOLATION LEVEL READ COMMITTED");
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (65, 'prepared-set-transaction-write')");
+    assert_exec_succeeds(db, "ROLLBACK");
+
     assert_exec_succeeds(db, "SET @@transaction_read_only=1");
     assert_exec_succeeds(db, "BEGIN");
     assert_exec_fails_with_message(

@@ -6,13 +6,18 @@ Allow direct session `SET` lists to assign supported transaction variables more
 than once, matching MariaDB's ordered variable-update behavior where later
 assignments determine the effective transaction read-only or isolation setup.
 
+Status note: the later
+[Prepared Transaction SET Control](../prepared-transaction-set-control/specs.md)
+slice allows these supported transaction-variable assignment lists through
+prepared statements as well.
+
 ## Non-Goals
 
 - Duplicate `SET TRANSACTION ...` access-mode or isolation clauses.
 - Duplicate autocommit assignments.
 - Global transaction-variable assignments.
 - `DEFAULT.variable` transaction-variable syntax.
-- Prepared transaction-variable control.
+- Prepared transaction-variable control at this slice point.
 - Real MyLite storage isolation guarantees.
 
 ## Source Findings
@@ -49,7 +54,8 @@ Change only direct `SET` assignment-list policy:
 - allow repeated supported transaction read-only variable assignments,
 - allow repeated supported transaction isolation variable assignments,
 - preserve rejection for global scope, `DEFAULT.variable`, invalid read-only
-  values, `SET STATEMENT`, prepared forms, and semicolon tails.
+  values, `SET STATEMENT`, prepared forms at this slice point, and semicolon
+  tails.
 
 After MariaDB accepts the whole statement, MyLite already walks the `SET` list
 and applies read-only assignments in order. That sequential application is kept

@@ -12,11 +12,14 @@ completion. The later
 slice accepts bounded direct read-only access mode. The later
 [Completion-Type Duplicate Control](../completion-type-duplicate-control/specs.md)
 slice accepts duplicate supported `completion_type` assignments with the final
-assignment winning. Release completion defaults, global defaults, and prepared
-transaction control remain unsupported; the later
+assignment winning. Release completion defaults and global defaults remain
+unsupported; the later
 [Transaction Isolation Control](../transaction-isolation-control/specs.md)
 slice accepts direct/session isolation controls as compatibility setup SQL
-without claiming storage isolation semantics.
+without claiming storage isolation semantics. The later
+[Prepared Transaction SET Control](../prepared-transaction-set-control/specs.md)
+slice supports MariaDB-preparable transaction `SET` controls while prepared
+transaction-start and completion commands remain unsupported.
 
 ## Problem
 

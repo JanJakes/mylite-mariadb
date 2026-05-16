@@ -293,6 +293,7 @@ struct mylite_stmt {
     bool has_current_row = false;
     TransactionControlKind prepared_transaction_control = TransactionControlKind::None;
     std::string prepared_transaction_control_name;
+    TransactionControlKind statement_transaction_control = TransactionControlKind::None;
     bool sync_schema_catalog_after_execute = false;
     bool writes_storage = false;
     bool uses_storage_outer_checkpoint = false;
@@ -376,6 +377,11 @@ int prepare_impl(
 int initialize_statement_metadata(mylite_stmt &statement);
 int bind_statement_parameters(mylite_stmt &statement);
 int execute_statement(mylite_stmt &statement);
+int apply_successful_transaction_control(
+    mylite_db &database,
+    std::string_view sql,
+    TransactionControlKind transaction_control
+);
 int fetch_statement_row(mylite_stmt &statement);
 int bind_statement_results(mylite_stmt &statement);
 int fetch_truncated_column(mylite_stmt &statement, unsigned column);
@@ -497,6 +503,7 @@ bool is_begin_transaction_control(TransactionControlKind kind);
 bool is_completion_transaction_control(TransactionControlKind kind);
 bool is_savepoint_transaction_control(TransactionControlKind kind);
 bool is_chained_completion_transaction_control(TransactionControlKind kind);
+bool is_preparable_transaction_set_control(TransactionControlKind kind);
 bool transaction_start_read_only(const mylite_db &database, TransactionControlKind kind);
 void mark_transaction_started(mylite_db &database, bool read_only);
 void mark_transaction_completed(mylite_db &database);
@@ -1560,87 +1567,10 @@ int exec_impl(
         return copy_error_message(*database, errmsg);
     }
 #  endif
-    bool completion_type_chain = false;
-    if (direct_set_completion_type_chain_default(std::string_view(sql), &completion_type_chain)) {
-        database->completion_type_chain = completion_type_chain;
-    }
-    apply_transaction_assignment_characteristics_control(*database, std::string_view(sql));
-    apply_transaction_characteristics_control(*database, transaction_control);
-
-    if (is_begin_transaction_control(transaction_control)) {
-        const bool read_only = transaction_start_read_only(*database, transaction_control);
-#  if MYLITE_MARIADB_HAS_MYLITE_SE
-        if (database->transaction_active) {
-            const int finish_result = finish_direct_transaction(*database, true);
-            mark_transaction_completed(*database);
-            if (finish_result != MYLITE_OK) {
-                return copy_error_message(*database, errmsg);
-            }
-        }
-        const int transaction_result = begin_direct_transaction(*database);
-        if (transaction_result != MYLITE_OK) {
-            mysql_query(&database->mysql, "ROLLBACK");
-            return copy_error_message(*database, errmsg);
-        }
-#  endif
-        mark_transaction_started(*database, read_only);
-    } else if (
-        is_completion_transaction_control(transaction_control) ||
-        is_chained_completion_transaction_control(transaction_control)
-    ) {
-        const bool chain = is_chained_completion_transaction_control(transaction_control) ||
-                           ((transaction_control == TransactionControlKind::Commit ||
-                             transaction_control == TransactionControlKind::Rollback) &&
-                            database->completion_type_chain);
-        const bool restart_read_only =
-            chain ? database->transaction_read_only
-                  : transaction_start_read_only(*database, TransactionControlKind::Begin);
-#  if MYLITE_MARIADB_HAS_MYLITE_SE
-        const bool commit = transaction_control == TransactionControlKind::Commit ||
-                            transaction_control == TransactionControlKind::CommitNoChain ||
-                            transaction_control == TransactionControlKind::CommitAndChain;
-        const int transaction_result = finish_direct_transaction(*database, commit);
-        if (transaction_result != MYLITE_OK) {
-            return copy_error_message(*database, errmsg);
-        }
-        if (database->autocommit_disabled || chain) {
-            const int restart_result = begin_direct_transaction(*database);
-            if (restart_result != MYLITE_OK) {
-                return copy_error_message(*database, errmsg);
-            }
-        }
-#  endif
-        mark_transaction_completed(*database);
-        if (database->autocommit_disabled || chain) {
-            mark_transaction_started(*database, restart_read_only);
-        }
-    } else if (transaction_control == TransactionControlKind::SetAutocommitOff) {
-        const bool read_only = transaction_start_read_only(*database, transaction_control);
-#  if MYLITE_MARIADB_HAS_MYLITE_SE
-        if (!database->transaction_active) {
-            const int transaction_result = begin_direct_transaction(*database);
-            if (transaction_result != MYLITE_OK) {
-                mysql_query(&database->mysql, "SET autocommit=1");
-                return copy_error_message(*database, errmsg);
-            }
-        }
-#  endif
-        database->autocommit_disabled = true;
-        if (!database->transaction_active) {
-            mark_transaction_started(*database, read_only);
-        }
-    } else if (transaction_control == TransactionControlKind::SetAutocommitOn) {
-        if (database->autocommit_disabled) {
-#  if MYLITE_MARIADB_HAS_MYLITE_SE
-            const int transaction_result = finish_direct_transaction(*database, true);
-            mark_transaction_completed(*database);
-            if (transaction_result != MYLITE_OK) {
-                return copy_error_message(*database, errmsg);
-            }
-#  endif
-            database->autocommit_disabled = false;
-            mark_transaction_completed(*database);
-        }
+    const int transaction_result =
+        apply_successful_transaction_control(*database, std::string_view(sql), transaction_control);
+    if (transaction_result != MYLITE_OK) {
+        return copy_error_message(*database, errmsg);
     }
     return MYLITE_OK;
 #endif
@@ -1707,7 +1637,8 @@ int prepare_impl(
 #  else
     const bool prepared_savepoint_control = false;
 #  endif
-    if (transaction_control != TransactionControlKind::None && !prepared_savepoint_control) {
+    if (transaction_control != TransactionControlKind::None && !prepared_savepoint_control &&
+        !is_preparable_transaction_set_control(transaction_control)) {
         set_error(*database, MYLITE_ERROR, "unsupported SQL transaction control");
         return MYLITE_ERROR;
     }
@@ -1720,6 +1651,8 @@ int prepare_impl(
         std::unique_ptr<mylite_stmt> statement(new mylite_stmt());
         statement->database = database;
         statement->sql.assign(sql, sql_len);
+        statement->statement_transaction_control =
+            prepared_savepoint_control ? TransactionControlKind::None : transaction_control;
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
         if (prepared_savepoint_control) {
             statement->prepared_transaction_control = transaction_control;
@@ -1965,6 +1898,14 @@ int execute_statement(mylite_stmt &statement) {
             return checkpoint_result;
         }
 #  endif
+        const int transaction_result = apply_successful_transaction_control(
+            *statement.database,
+            statement.sql,
+            statement.statement_transaction_control
+        );
+        if (transaction_result != MYLITE_OK) {
+            return transaction_result;
+        }
         return MYLITE_DONE;
     }
 
@@ -1985,6 +1926,96 @@ int execute_statement(mylite_stmt &statement) {
     }
 #  endif
     return fetch_statement_row(statement);
+}
+
+int apply_successful_transaction_control(
+    mylite_db &database,
+    std::string_view sql,
+    TransactionControlKind transaction_control
+) {
+    bool completion_type_chain = false;
+    if (direct_set_completion_type_chain_default(sql, &completion_type_chain)) {
+        database.completion_type_chain = completion_type_chain;
+    }
+    apply_transaction_assignment_characteristics_control(database, sql);
+    apply_transaction_characteristics_control(database, transaction_control);
+
+    if (is_begin_transaction_control(transaction_control)) {
+        const bool read_only = transaction_start_read_only(database, transaction_control);
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        if (database.transaction_active) {
+            const int finish_result = finish_direct_transaction(database, true);
+            mark_transaction_completed(database);
+            if (finish_result != MYLITE_OK) {
+                return finish_result;
+            }
+        }
+        const int transaction_result = begin_direct_transaction(database);
+        if (transaction_result != MYLITE_OK) {
+            mysql_query(&database.mysql, "ROLLBACK");
+            return transaction_result;
+        }
+#  endif
+        mark_transaction_started(database, read_only);
+    } else if (
+        is_completion_transaction_control(transaction_control) ||
+        is_chained_completion_transaction_control(transaction_control)
+    ) {
+        const bool chain = is_chained_completion_transaction_control(transaction_control) ||
+                           ((transaction_control == TransactionControlKind::Commit ||
+                             transaction_control == TransactionControlKind::Rollback) &&
+                            database.completion_type_chain);
+        const bool restart_read_only =
+            chain ? database.transaction_read_only
+                  : transaction_start_read_only(database, TransactionControlKind::Begin);
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        const bool commit = transaction_control == TransactionControlKind::Commit ||
+                            transaction_control == TransactionControlKind::CommitNoChain ||
+                            transaction_control == TransactionControlKind::CommitAndChain;
+        const int transaction_result = finish_direct_transaction(database, commit);
+        if (transaction_result != MYLITE_OK) {
+            return transaction_result;
+        }
+        if (database.autocommit_disabled || chain) {
+            const int restart_result = begin_direct_transaction(database);
+            if (restart_result != MYLITE_OK) {
+                return restart_result;
+            }
+        }
+#  endif
+        mark_transaction_completed(database);
+        if (database.autocommit_disabled || chain) {
+            mark_transaction_started(database, restart_read_only);
+        }
+    } else if (transaction_control == TransactionControlKind::SetAutocommitOff) {
+        const bool read_only = transaction_start_read_only(database, transaction_control);
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        if (!database.transaction_active) {
+            const int transaction_result = begin_direct_transaction(database);
+            if (transaction_result != MYLITE_OK) {
+                mysql_query(&database.mysql, "SET autocommit=1");
+                return transaction_result;
+            }
+        }
+#  endif
+        database.autocommit_disabled = true;
+        if (!database.transaction_active) {
+            mark_transaction_started(database, read_only);
+        }
+    } else if (transaction_control == TransactionControlKind::SetAutocommitOn) {
+        if (database.autocommit_disabled) {
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+            const int transaction_result = finish_direct_transaction(database, true);
+            mark_transaction_completed(database);
+            if (transaction_result != MYLITE_OK) {
+                return transaction_result;
+            }
+#  endif
+            database.autocommit_disabled = false;
+            mark_transaction_completed(database);
+        }
+    }
+    return MYLITE_OK;
 }
 
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
@@ -4250,6 +4281,15 @@ bool is_savepoint_transaction_control(TransactionControlKind kind) {
 bool is_chained_completion_transaction_control(TransactionControlKind kind) {
     return kind == TransactionControlKind::CommitAndChain ||
            kind == TransactionControlKind::RollbackAndChain;
+}
+
+bool is_preparable_transaction_set_control(TransactionControlKind kind) {
+    return kind == TransactionControlKind::SetAutocommitOff ||
+           kind == TransactionControlKind::SetAutocommitOn ||
+           kind == TransactionControlKind::SetCompletionTypeNoChain ||
+           kind == TransactionControlKind::SetCompletionTypeChain ||
+           is_transaction_access_mode_characteristic_control(kind) ||
+           is_transaction_isolation_characteristic_control(kind);
 }
 
 bool transaction_start_read_only(const mylite_db &database, TransactionControlKind kind) {

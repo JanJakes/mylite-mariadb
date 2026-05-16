@@ -16,7 +16,10 @@ read-only system-variable assignments, XA, release completion, and
 transactional DDL beyond the existing explicit rejection out of scope. The
 later [Transaction Isolation Control](../transaction-isolation-control/specs.md)
 slice accepts direct/session isolation controls as compatibility setup SQL
-without claiming storage isolation semantics.
+without claiming storage isolation semantics. The later
+[Prepared Transaction SET Control](../prepared-transaction-set-control/specs.md)
+slice accepts supported prepared transaction access-mode `SET` controls while
+prepared transaction-start commands remain unsupported.
 
 ## Source Findings
 
@@ -92,8 +95,8 @@ Extend direct transaction-control state in `libmylite`:
   table-kind aware.
 - Keep global transaction defaults, isolation levels, consistent snapshots,
   mixed read-only plus read-write starts, prepared transaction-control
-  statements outside existing savepoint support, XA, and release completion
-  rejected. The later
+  statements outside existing savepoint support rejected at this slice point,
+  XA, and release completion rejected. The later
   [Transaction Variable Control](../transaction-variable-control/specs.md)
   slice accepts bounded `transaction_read_only` and `tx_read_only` assignments.
 
@@ -165,8 +168,8 @@ session flags, and tests.
 
 - Extend direct SQL policy tests to accept read-only direct controls and keep
   isolation, consistent snapshot, global defaults, system-variable assignment,
-  mixed access modes, prepared transaction control, and semicolon-chained forms
-  rejected.
+  mixed access modes, prepared transaction control at this slice point, and
+  semicolon-chained forms rejected.
 - Add storage-smoke coverage proving:
   - `START TRANSACTION READ ONLY` allows reads but rejects direct row DML,
   - `SET TRANSACTION READ ONLY` applies to the next plain `BEGIN`,

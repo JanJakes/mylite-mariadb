@@ -3,7 +3,10 @@
 Status note: the later
 [Completion-Type Duplicate Control](../completion-type-duplicate-control/specs.md)
 slice accepts duplicate supported session `completion_type` assignments with
-the final assignment winning. Release completion defaults remain unsupported.
+the final assignment winning. The later
+[Prepared Transaction SET Control](../prepared-transaction-set-control/specs.md)
+slice accepts supported `completion_type` forms through prepared statements.
+Release completion defaults remain unsupported.
 
 ## Problem
 
@@ -17,8 +20,8 @@ bookkeeping.
 
 This slice supports direct session `completion_type=CHAIN/1` for bounded
 row-DML transactions. It keeps `completion_type=RELEASE/2`, global changes,
-`SET STATEMENT`, prepared forms, read-only/isolation changes, XA, and DDL
-inside active direct transactions unsupported at this slice point. A later
+`SET STATEMENT`, prepared forms at this slice point, read-only/isolation
+changes, XA, and DDL inside active direct transactions unsupported. A later
 read-only transaction-control slice accepts bounded direct read-only access
 mode, and a later transaction isolation-control slice accepts direct/session
 `SET TRANSACTION ISOLATION LEVEL ...` forms as compatibility setup SQL without
@@ -64,7 +67,8 @@ Extend the direct transaction-control parser and session state:
   on; explicit `AND NO CHAIN` never chains.
 - Keep `RELEASE` and `completion_type=RELEASE/2` rejected because embedded
   `libmylite` does not expose server connection-release semantics.
-- Keep prepared completion-type control rejected before MariaDB prepare.
+- Keep prepared completion-type control rejected before MariaDB prepare at
+  this slice point.
 
 ## Affected Subsystems
 
@@ -120,9 +124,9 @@ one session flag, and tests.
 ## Test And Verification Plan
 
 - Extend direct SQL policy tests to accept `completion_type=CHAIN/1` and keep
-  `RELEASE/2`, global, duplicate, prepared, `SET STATEMENT`, and
-  semicolon-chained forms rejected.
-- Keep prepared completion-type control rejected.
+  `RELEASE/2`, global, duplicate, prepared forms at this slice point,
+  `SET STATEMENT`, and semicolon-chained forms rejected.
+- Keep prepared completion-type control rejected at this slice point.
 - Add storage-smoke coverage proving:
   - `SET completion_type=CHAIN` makes plain `COMMIT` open a new active
     transaction that can later roll back,
@@ -140,9 +144,9 @@ one session flag, and tests.
 - Plain direct `COMMIT` and `ROLLBACK` chain when the mirrored flag is on.
 - Explicit `AND NO CHAIN` and `completion_type=NO_CHAIN/0/DEFAULT` keep or
   restore no-chain behavior.
-- `RELEASE/2`, global, duplicate, prepared, statement-scoped, and
-  chained-statement forms remain explicit unsupported transaction-control
-  surfaces.
+- `RELEASE/2`, global, duplicate, prepared forms at this slice point,
+  statement-scoped, and chained-statement forms remain explicit unsupported
+  transaction-control surfaces.
 - Docs and compatibility tables describe chain default support without
   claiming release or isolation semantics.
 

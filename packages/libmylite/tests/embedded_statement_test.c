@@ -24,6 +24,7 @@ static void test_trigger_metadata_is_empty(void);
 static void test_prepare_diagnostics(void);
 static void test_invalid_indexes(void);
 static void assert_prepare_fails_with_message(mylite_db *db, const char *sql, const char *message);
+static void assert_prepare_step_succeeds(mylite_db *db, const char *sql);
 static void assert_prepare_savepoint_control_policy(mylite_db *db, const char *sql);
 static mylite_stmt *prepare_statement(mylite_db *db, const char *sql);
 static mylite_db *open_database(const char *root, char **filename);
@@ -1017,23 +1018,12 @@ static void test_prepare_diagnostics(void) {
     assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
     assert_prepare_fails_with_message(db, "START TRANSACTION READ WRITE", "transaction control");
     assert_prepare_fails_with_message(db, "START TRANSACTION READ ONLY", "transaction control");
-    assert_prepare_fails_with_message(db, "SET TRANSACTION READ WRITE", "transaction control");
-    assert_prepare_fails_with_message(db, "SET TRANSACTION READ ONLY", "transaction control");
-    assert_prepare_fails_with_message(
-        db,
-        "SET TRANSACTION ISOLATION LEVEL READ COMMITTED",
-        "transaction control"
-    );
-    assert_prepare_fails_with_message(
-        db,
-        "SET SESSION TRANSACTION READ WRITE",
-        "transaction control"
-    );
-    assert_prepare_fails_with_message(
-        db,
-        "SET SESSION TRANSACTION READ ONLY",
-        "transaction control"
-    );
+    assert_prepare_step_succeeds(db, "SET TRANSACTION READ WRITE");
+    assert_prepare_step_succeeds(db, "SET TRANSACTION READ ONLY");
+    assert_prepare_step_succeeds(db, "SET TRANSACTION ISOLATION LEVEL READ COMMITTED");
+    assert_prepare_step_succeeds(db, "SET SESSION TRANSACTION READ WRITE");
+    assert_prepare_step_succeeds(db, "SET SESSION TRANSACTION READ ONLY");
+    assert_prepare_step_succeeds(db, "SET SESSION TRANSACTION READ WRITE");
 
     assert(mylite_prepare(db, "BEGIN", MYLITE_NUL_TERMINATED, &stmt, NULL) == MYLITE_ERROR);
     assert(stmt == NULL);
@@ -1063,22 +1053,31 @@ static void test_prepare_diagnostics(void) {
     assert_prepare_savepoint_control_policy(db, "RELEASE SAVEPOINT \"double \"\"probe\"");
     assert(mylite_exec(db, "SET sql_mode=''", NULL, NULL, NULL) == MYLITE_OK);
 
-    assert(
-        mylite_prepare(db, "SET autocommit=0", MYLITE_NUL_TERMINATED, &stmt, NULL) == MYLITE_ERROR
+    assert_prepare_step_succeeds(db, "SET autocommit=0");
+    assert_prepare_step_succeeds(db, "SET autocommit=1");
+    assert_prepare_step_succeeds(db, "SET autocommit=0, sql_mode='ANSI'");
+    assert_prepare_step_succeeds(db, "SET sql_mode='', autocommit=DEFAULT");
+    assert_prepare_step_succeeds(db, "SET completion_type=NO_CHAIN");
+    assert_prepare_step_succeeds(db, "SET completion_type=CHAIN");
+    assert_prepare_step_succeeds(db, "SET completion_type=CHAIN, completion_type=NO_CHAIN");
+    assert_prepare_step_succeeds(db, "SET completion_type=DEFAULT");
+    assert_prepare_step_succeeds(db, "SET transaction_isolation='READ-COMMITTED'");
+    assert_prepare_step_succeeds(
+        db,
+        "SET transaction_isolation='READ-COMMITTED', tx_isolation='SERIALIZABLE'"
     );
-    assert(stmt == NULL);
-    assert(mylite_errcode(db) == MYLITE_ERROR);
-    assert(mylite_mariadb_errno(db) == 0U);
-    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
-    assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
-    assert_prepare_fails_with_message(db, "SET completion_type=NO_CHAIN", "transaction control");
-    assert_prepare_fails_with_message(db, "SET completion_type=CHAIN", "transaction control");
+    assert_prepare_step_succeeds(db, "SET transaction_read_only=1");
+    assert_prepare_step_succeeds(db, "SET transaction_read_only=0");
+    assert_prepare_step_succeeds(db, "SET transaction_read_only=1, tx_read_only=0");
+    assert_prepare_fails_with_message(db, "SET GLOBAL autocommit=0", "transaction control");
+    assert_prepare_fails_with_message(db, "SET autocommit=0, autocommit=1", "transaction control");
+    assert_prepare_fails_with_message(db, "SET autocommit=?", "transaction control");
+    assert_prepare_fails_with_message(db, "SET transaction_read_only=?", "transaction control");
     assert_prepare_fails_with_message(
         db,
-        "SET transaction_isolation='READ-COMMITTED'",
+        "SET STATEMENT completion_type=CHAIN FOR SELECT 1",
         "transaction control"
     );
-    assert_prepare_fails_with_message(db, "SET transaction_read_only=1", "transaction control");
 
     assert(
         mylite_prepare(db, "SELECT 1 FOR UPDATE", MYLITE_NUL_TERMINATED, &stmt, NULL) ==
@@ -1193,6 +1192,26 @@ static void assert_prepare_fails_with_message(mylite_db *db, const char *sql, co
     assert(mylite_mariadb_errno(db) == 0U);
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(strstr(mylite_errmsg(db), message) != NULL);
+}
+
+static void assert_prepare_step_succeeds(mylite_db *db, const char *sql) {
+    mylite_stmt *stmt = NULL;
+    const int prepare_result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, NULL);
+    if (prepare_result != MYLITE_OK) {
+        fprintf(stderr, "Prepare failed: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(prepare_result == MYLITE_OK);
+    assert(stmt != NULL);
+    assert(mylite_bind_parameter_count(stmt) == 0U);
+    assert(mylite_column_count(stmt) == 0U);
+
+    const int step_result = mylite_step(stmt);
+    if (step_result != MYLITE_DONE) {
+        fprintf(stderr, "Prepared SQL failed: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(step_result == MYLITE_DONE);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
 }
 
 static void assert_prepare_savepoint_control_policy(mylite_db *db, const char *sql) {

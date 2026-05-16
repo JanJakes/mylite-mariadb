@@ -4,8 +4,10 @@ Status note: the later
 [Autocommit SET-List Control](../autocommit-set-list-control/specs.md) slice
 allows one supported session autocommit assignment, including `DEFAULT`, inside
 a direct `SET` list with ordinary non-transaction assignments. Global,
-duplicate, unsupported transaction-variable, prepared, and semicolon-chained
-forms remain unsupported.
+duplicate, unsupported transaction-variable, prepared forms at this slice point,
+and semicolon-chained forms remain unsupported. The later
+[Prepared Transaction SET Control](../prepared-transaction-set-control/specs.md)
+slice supports the bounded autocommit `SET` forms through prepared statements.
 
 ## Problem
 
@@ -16,9 +18,10 @@ its configured default and should not require a separate application branch.
 
 This slice adds direct session `SET autocommit=DEFAULT` support by mapping it
 to MyLite's existing autocommit-on path. It does not add prepared autocommit
-control, multi-assignment `SET`, global autocommit changes, `SET TRANSACTION`,
-isolation levels, XA, or transaction modifiers. The later Autocommit SET-List
-Control slice adds the bounded direct-session `SET` list subset.
+control at this slice point, multi-assignment `SET`, global autocommit changes,
+`SET TRANSACTION`, isolation levels, XA, or transaction modifiers. The later
+Autocommit SET-List Control slice adds the bounded direct-session `SET` list
+subset.
 
 ## Source Findings
 
@@ -70,9 +73,10 @@ mode, matching the MariaDB default for this base line.
 
 Compatibility remains partial:
 
-- Prepared autocommit-control statements remain rejected.
+- Prepared autocommit-control statements remain rejected at this slice point.
 - Global and duplicate autocommit changes, unsupported transaction-variable
-  `SET` lists, and prepared autocommit control remain rejected.
+  `SET` lists, and prepared autocommit control remain rejected at this slice
+  point.
 - `SET TRANSACTION`, isolation-level changes, transaction modifiers, XA, and
   transactional DDL remain unsupported.
 
@@ -112,8 +116,8 @@ tests.
 - Extend direct SQL policy tests for supported `DEFAULT` session spellings.
 - Add storage-smoke coverage proving `SET autocommit=DEFAULT` commits an
   active row-DML transaction on a routed `ENGINE=InnoDB` table.
-- Continue rejecting global, multi-assignment, prepared, and
-  semicolon-chained autocommit control at this slice point.
+- Continue rejecting global, multi-assignment, prepared forms at this slice
+  point, and semicolon-chained autocommit control.
 - Run dev, embedded, storage-smoke, transaction harness, formatting, tidy,
   shell syntax, and whitespace checks.
 

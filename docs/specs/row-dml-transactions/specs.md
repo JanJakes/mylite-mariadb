@@ -7,7 +7,10 @@ slice adds supported direct session `SET autocommit=0/1` forms for the same
 checkpoint-backed scope. The later
 [Transaction Restart Control](../transaction-restart-control/specs.md) slice
 aligns repeated direct `BEGIN` / `START TRANSACTION` with MariaDB's
-commit-current/start-new behavior.
+commit-current/start-new behavior. The later
+[Prepared Transaction SET Control](../prepared-transaction-set-control/specs.md)
+slice supports prepared transaction `SET` controls while prepared transaction
+start and completion commands remain rejected.
 
 ## Problem
 

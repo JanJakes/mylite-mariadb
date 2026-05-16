@@ -13,6 +13,11 @@ storage isolation semantics; the isolation level is treated as a compatibility
 control until storage locking, WAL/checkpoint, and transactional engine flags
 can prove real isolation behavior.
 
+Status note: the later
+[Prepared Transaction SET Control](../prepared-transaction-set-control/specs.md)
+slice allows the supported transaction `SET` isolation controls through
+prepared statements as well.
+
 ## Source Findings
 
 MariaDB base: `mariadb-11.8.6`
@@ -66,8 +71,9 @@ MariaDB base: `mariadb-11.8.6`
   SQL. If a supported access mode is present in the same statement, continue to
   mirror the read-only/read-write state exactly as the read-only transaction
   slice already does.
-- Keep prepared transaction-control statements rejected before MariaDB prepare,
-  except for the existing prepared savepoint-control support.
+- Keep prepared transaction-control statements rejected before MariaDB prepare
+  at this slice point, except for the existing prepared savepoint-control
+  support.
 
 ## Affected Subsystems
 
