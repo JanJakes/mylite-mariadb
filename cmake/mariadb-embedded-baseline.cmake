@@ -119,6 +119,9 @@ set(MYLITE_WITH_BINLOG_CORE OFF CACHE BOOL "Omit binary log transaction and even
 # MyLite rejects replication filters before MariaDB execution.
 set(MYLITE_WITH_RPL_FILTER_RUNTIME OFF CACHE BOOL "Omit replication filter runtime" FORCE)
 
+# MyLite rejects replication/binlog SQL and omits disabled topology variables.
+set(MYLITE_WITH_BINLOG_SYSVARS OFF CACHE BOOL "Build binlog and replication system variables" FORCE)
+
 # MyLite rejects server-style MyISAM table maintenance and key-cache admin SQL.
 set(MYLITE_WITH_MYISAM_MAINTENANCE OFF CACHE BOOL "Omit MyISAM maintenance admin runtime" FORCE)
 

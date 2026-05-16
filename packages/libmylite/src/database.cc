@@ -442,6 +442,7 @@ bool pop_sql_delimited_identifier_name(std::string_view &sql, char quote, std::s
 bool is_server_surface_sql(std::string_view sql);
 bool is_backup_sql(std::string_view sql);
 bool is_replication_filter_sql(std::string_view sql);
+bool is_binlog_replication_variable_sql(std::string_view sql);
 bool is_query_cache_sql(std::string_view sql);
 bool is_statement_profiling_sql(std::string_view sql);
 bool is_optimizer_trace_sql(std::string_view sql);
@@ -468,6 +469,7 @@ std::string_view sql_set_assignment_policy_span(std::string_view sql);
 std::string_view sql_set_statement_assignment_span(std::string_view sql);
 bool sql_set_assignment_targets_query_cache_variable(std::string_view assignment);
 bool sql_set_assignment_targets_replication_filter_variable(std::string_view assignment);
+bool sql_set_assignment_targets_binlog_replication_variable(std::string_view assignment);
 bool sql_set_assignment_targets_statement_profiling_variable(std::string_view assignment);
 bool sql_set_assignment_targets_optimizer_trace_variable(std::string_view assignment);
 std::string_view pop_sql_set_assignment(std::string_view &sql);
@@ -2702,6 +2704,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_replication_filter_sql(sql)) {
         return "unsupported replication filter SQL surface";
     }
+    if (is_binlog_replication_variable_sql(sql)) {
+        return "unsupported binlog/replication system variable";
+    }
     if (is_query_cache_sql(sql)) {
         return "unsupported query-cache SQL surface";
     }
@@ -2865,6 +2870,22 @@ bool is_replication_filter_sql(std::string_view sql) {
     sql = sql_set_assignment_policy_span(sql);
     while (!skip_sql_leading_noise(sql).empty()) {
         if (sql_set_assignment_targets_replication_filter_variable(pop_sql_set_assignment(sql))) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool is_binlog_replication_variable_sql(std::string_view sql) {
+    std::string_view token;
+    if (!pop_sql_scanned_token(sql, token) || !sql_token_equals(token, "SET")) {
+        return false;
+    }
+
+    sql = sql_set_assignment_policy_span(sql);
+    while (!skip_sql_leading_noise(sql).empty()) {
+        if (sql_set_assignment_targets_binlog_replication_variable(pop_sql_set_assignment(sql))) {
             return true;
         }
     }
@@ -3253,6 +3274,100 @@ bool sql_set_assignment_targets_replication_filter_variable(std::string_view ass
     };
 
     for (const char *variable : k_replication_filter_variables) {
+        std::string_view candidate = assignment;
+        if (sql_set_assignment_targets_variable(candidate, variable)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool sql_set_assignment_targets_binlog_replication_variable(std::string_view assignment) {
+    constexpr const char *k_binlog_replication_variables[] = {
+        "BINLOG_ALTER_TWO_PHASE",
+        "BINLOG_ANNOTATE_ROW_EVENTS",
+        "BINLOG_CACHE_SIZE",
+        "BINLOG_COMMIT_WAIT_COUNT",
+        "BINLOG_COMMIT_WAIT_USEC",
+        "BINLOG_DIRECT_NON_TRANSACTIONAL_UPDATES",
+        "BINLOG_EXPIRE_LOGS_SECONDS",
+        "BINLOG_FILE_CACHE_SIZE",
+        "BINLOG_FORMAT",
+        "BINLOG_GTID_INDEX",
+        "BINLOG_GTID_INDEX_PAGE_SIZE",
+        "BINLOG_GTID_INDEX_SPAN_MIN",
+        "BINLOG_LARGE_COMMIT_THRESHOLD",
+        "BINLOG_ROW_EVENT_MAX_SIZE",
+        "BINLOG_ROW_IMAGE",
+        "BINLOG_ROW_METADATA",
+        "BINLOG_SPACE_LIMIT",
+        "BINLOG_STMT_CACHE_SIZE",
+        "DEFAULT_MASTER_CONNECTION",
+        "DEBUG_BINLOG_FSYNC_SLEEP",
+        "EXPIRE_LOGS_DAYS",
+        "GTID_BINLOG_POS",
+        "GTID_BINLOG_STATE",
+        "GTID_CLEANUP_BATCH_SIZE",
+        "GTID_CURRENT_POS",
+        "GTID_DOMAIN_ID",
+        "GTID_IGNORE_DUPLICATES",
+        "GTID_POS_AUTO_ENGINES",
+        "GTID_SEQ_NO",
+        "GTID_SLAVE_POS",
+        "GTID_STRICT_MODE",
+        "LOG_BIN_BASENAME",
+        "LOG_BIN_COMPRESS",
+        "LOG_BIN_COMPRESS_MIN_LEN",
+        "LOG_BIN_INDEX",
+        "LOG_BIN_TRUST_FUNCTION_CREATORS",
+        "LOG_SLAVE_UPDATES",
+        "MASTER_VERIFY_CHECKSUM",
+        "MAX_BINLOG_CACHE_SIZE",
+        "MAX_BINLOG_SIZE",
+        "MAX_BINLOG_STMT_CACHE_SIZE",
+        "MAX_BINLOG_TOTAL_SIZE",
+        "MAX_RELAY_LOG_SIZE",
+        "PSEUDO_SLAVE_MODE",
+        "READ_BINLOG_SPEED_LIMIT",
+        "RELAY_LOG",
+        "RELAY_LOG_BASENAME",
+        "RELAY_LOG_INDEX",
+        "RELAY_LOG_INFO_FILE",
+        "RELAY_LOG_PURGE",
+        "RELAY_LOG_RECOVERY",
+        "RELAY_LOG_SPACE_LIMIT",
+        "REPLICATE_ANNOTATE_ROW_EVENTS",
+        "SKIP_PARALLEL_REPLICATION",
+        "SLAVE_ABORT_BLOCKING_TIMEOUT",
+        "SLAVE_COMPRESSED_PROTOCOL",
+        "SLAVE_CONNECTIONS_NEEDED_FOR_PURGE",
+        "SLAVE_DDL_EXEC_MODE",
+        "SLAVE_DOMAIN_PARALLEL_THREADS",
+        "SLAVE_EXEC_MODE",
+        "SLAVE_LOAD_TMPDIR",
+        "SLAVE_MAX_ALLOWED_PACKET",
+        "SLAVE_MAX_STATEMENT_TIME",
+        "SLAVE_NET_TIMEOUT",
+        "SLAVE_PARALLEL_MAX_QUEUED",
+        "SLAVE_PARALLEL_MODE",
+        "SLAVE_PARALLEL_THREADS",
+        "SLAVE_PARALLEL_WORKERS",
+        "SLAVE_RUN_TRIGGERS_FOR_RBR",
+        "SLAVE_SKIP_ERRORS",
+        "SLAVE_SQL_VERIFY_CHECKSUM",
+        "SLAVE_TRANSACTION_RETRIES",
+        "SLAVE_TRANSACTION_RETRY_ERRORS",
+        "SLAVE_TRANSACTION_RETRY_INTERVAL",
+        "SLAVE_TYPE_CONVERSIONS",
+        "SQL_SLAVE_SKIP_COUNTER",
+        "SYNC_BINLOG",
+        "SYNC_MASTER_INFO",
+        "SYNC_RELAY_LOG",
+        "SYNC_RELAY_LOG_INFO",
+    };
+
+    for (const char *variable : k_binlog_replication_variables) {
         std::string_view candidate = assignment;
         if (sql_set_assignment_targets_variable(candidate, variable)) {
             return true;

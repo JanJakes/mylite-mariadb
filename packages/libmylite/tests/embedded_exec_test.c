@@ -70,6 +70,7 @@ static void test_foreign_key_policy_is_rejected(void);
 static void test_partition_policy_is_rejected(void);
 static void assert_variable_value(mylite_db *db, const char *name, const char *value);
 static void assert_variable_value_or_missing(mylite_db *db, const char *name, const char *value);
+static void assert_variable_missing(mylite_db *db, const char *name);
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_backup_exec_fails(mylite_db *db, const char *sql);
 static void assert_query_cache_exec_fails(mylite_db *db, const char *sql);
@@ -83,6 +84,7 @@ static void assert_processlist_metadata_exec_fails(mylite_db *db, const char *sq
 static void assert_procedure_analyse_exec_fails(mylite_db *db, const char *sql);
 static void assert_select_procedure_exec_fails(mylite_db *db, const char *sql);
 static void assert_replication_filter_exec_fails(mylite_db *db, const char *sql);
+static void assert_binlog_replication_variable_exec_fails(mylite_db *db, const char *sql);
 static void assert_server_utility_exec_fails(mylite_db *db, const char *sql);
 static void assert_gis_sql_function_exec_fails(mylite_db *db, const char *sql);
 static void assert_vector_sql_function_exec_fails(mylite_db *db, const char *sql);
@@ -113,6 +115,7 @@ static int nullable_scalar_callback(
 static int abort_callback(void *ctx, int column_count, char **values, char **column_names);
 static int count_only_callback(void *ctx, int column_count, char **values, char **column_names);
 static int variable_callback(void *ctx, int column_count, char **values, char **column_names);
+static int variable_name_callback(void *ctx, int column_count, char **values, char **column_names);
 static mylite_db *open_database(const char *root, char **filename);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
@@ -285,6 +288,10 @@ static void test_server_surfaces_are_disabled(void) {
     assert_variable_value(db, "log_bin", "OFF");
     assert_variable_value(db, "have_dynamic_loading", "NO");
     assert_variable_value_or_missing(db, "performance_schema", "OFF");
+    assert_variable_missing(db, "binlog_format");
+    assert_variable_missing(db, "gtid_binlog_state");
+    assert_variable_missing(db, "relay_log");
+    assert_variable_missing(db, "replicate_do_db");
 
     assert_exec_fails(db, "CREATE USER 'mylite_probe'@'localhost' IDENTIFIED BY 'secret'");
     assert_exec_fails(db, "GRANT SELECT ON *.* TO 'mylite_probe'@'localhost'");
@@ -304,6 +311,12 @@ static void test_server_surfaces_are_disabled(void) {
     assert_replication_filter_exec_fails(
         db,
         "SET sql_mode = '', replicate_rewrite_db = 'source->target'"
+    );
+    assert_binlog_replication_variable_exec_fails(db, "SET binlog_format = ROW");
+    assert_binlog_replication_variable_exec_fails(db, "SET GLOBAL sync_binlog = 1");
+    assert_binlog_replication_variable_exec_fails(
+        db,
+        "SET sql_mode = '', @@session.gtid_domain_id = 7"
     );
     assert_exec_fails(
         db,
@@ -1822,11 +1835,29 @@ static void assert_variable_value_or_missing(mylite_db *db, const char *name, co
 
     assert(written > 0);
     assert((size_t)written < sizeof(sql));
-    assert(mylite_exec(db, sql, variable_callback, &ctx, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, sql, variable_name_callback, &ctx, NULL) == MYLITE_OK);
     if (ctx.rows > 1) {
         fprintf(stderr, "variable duplicate: %s rows=%d\n", name, ctx.rows);
     }
     assert(ctx.rows == 0 || ctx.rows == 1);
+}
+
+static void assert_variable_missing(mylite_db *db, const char *name) {
+    variable_context ctx = {
+        .name = name,
+        .value = "",
+        .rows = 0,
+    };
+    char sql[128];
+    const int written = snprintf(sql, sizeof(sql), "SHOW VARIABLES LIKE '%s'", name);
+
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert(mylite_exec(db, sql, variable_callback, &ctx, NULL) == MYLITE_OK);
+    if (ctx.rows != 0) {
+        fprintf(stderr, "variable unexpectedly present: %s rows=%d\n", name, ctx.rows);
+    }
+    assert(ctx.rows == 0);
 }
 
 static void assert_exec_fails(mylite_db *db, const char *sql) {
@@ -1854,6 +1885,18 @@ static void assert_replication_filter_exec_fails(mylite_db *db, const char *sql)
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "replication filter") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_binlog_replication_variable_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "binlog/replication system variable") != NULL);
     mylite_free(errmsg);
 }
 
@@ -2286,6 +2329,17 @@ static int variable_callback(void *ctx, int column_count, char **values, char **
     assert(values[1] != NULL);
     assert(strcmp(values[0], variable_ctx->name) == 0);
     assert(strcmp(values[1], variable_ctx->value) == 0);
+    ++variable_ctx->rows;
+    return 0;
+}
+
+static int variable_name_callback(void *ctx, int column_count, char **values, char **column_names) {
+    variable_context *variable_ctx = (variable_context *)ctx;
+    (void)column_names;
+
+    assert(column_count == 2);
+    assert(values[0] != NULL);
+    assert(strcmp(values[0], variable_ctx->name) == 0);
     ++variable_ctx->rows;
     return 0;
 }

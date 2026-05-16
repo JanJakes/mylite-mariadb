@@ -58,6 +58,7 @@ MYLITE_WITH_ZLIB_COMPRESSION=OFF
 MYLITE_WITH_UDF_RUNTIME=OFF
 MYLITE_WITH_BINLOG_CORE=OFF
 MYLITE_WITH_RPL_FILTER_RUNTIME=OFF
+MYLITE_WITH_BINLOG_SYSVARS=OFF
 MYLITE_WITH_MYISAM_MAINTENANCE=OFF
 MYLITE_WITH_FOREIGN_SERVER_METADATA=OFF
 MYLITE_WITH_BACKUP_RUNTIME=OFF
@@ -90,6 +91,7 @@ event parse-data validation, file-backed view runtime and metadata helpers,
 file-backed trigger runtime and metadata helpers, dynamic UDF lookup/execution,
 binary-log transaction,
 event-write, and event-root core, replication filter rule parsing and storage,
+binlog/replication system variables for disabled topology features,
 native MyISAM table-maintenance and key-cache
 administration,
 foreign-server metadata cache, socket authentication, feedback, Performance
@@ -135,7 +137,7 @@ current MyLite embedded profile patches applied.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,498,088 bytes / 25.27 MiB |
+| Archive size | 26,450,480 bytes / 25.23 MiB |
 | Archive members | 669 |
 
 The build found system OpenSSL 3.6.2, Curses, CURL, GSSAPI, BZip2, LZ4,
@@ -173,6 +175,14 @@ bytes with the same member count. The disabled profile now sets
 `mylite_rpl_filter_disabled.cc`, keeps retained MariaDB startup and table paths
 permissive with no configured filters, and rejects direct and prepared
 replication/binlog filter system-variable assignments before MariaDB execution.
+
+The binlog sysvar runtime trim reduced the default archive by a further 47,608
+bytes with the same member count. The disabled profile now sets
+`MYLITE_WITH_BINLOG_SYSVARS=OFF`, omits system-variable registration for
+disabled binlog, relay-log, GTID-binlog, and replication configuration, keeps
+low-risk compatibility indicators such as `log_bin=OFF`, `sql_log_bin`,
+`server_id`, and `encrypt_binlog`, and rejects direct and prepared
+assignments to removed binlog/replication variables before MariaDB execution.
 
 The MyISAM maintenance trim reduced the default archive by a further 87,712
 bytes and removed three archive members. The disabled profile now omits
@@ -413,6 +423,9 @@ The profile explicitly disables:
   `log_event_server.cc`
 - replication GTID state runtime through `rpl_gtid.cc`
 - replication filter runtime and rule storage through `rpl_filter.cc`
+- binlog, relay-log, GTID-binlog, and replication system-variable registration
+  for disabled topology features, while retaining compatibility indicators such
+  as `log_bin=OFF`, `sql_log_bin`, `server_id`, and `encrypt_binlog`
 - native MyISAM table maintenance, repair, key-cache assignment, and key
   preload administration
 - `mysql.servers` foreign-server metadata cache

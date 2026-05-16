@@ -800,6 +800,21 @@ static void test_prepare_diagnostics(void) {
         "SET @@global.binlog_ignore_db = ?",
         "replication filter"
     );
+    assert_prepare_fails_with_message(
+        db,
+        "SET STATEMENT binlog_format = ? FOR SELECT 1",
+        "binlog/replication system variable"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "SET GLOBAL sync_binlog = ?",
+        "binlog/replication system variable"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "SET @@session.gtid_domain_id = ?",
+        "binlog/replication system variable"
+    );
 
     assert(
         mylite_prepare(db, "SELECT ST_AsText(?)", MYLITE_NUL_TERMINATED, &stmt, NULL) ==
