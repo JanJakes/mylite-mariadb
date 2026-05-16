@@ -35,8 +35,9 @@ MariaDB base: `mariadb-11.8.6`
   `CREATE TABLE ... PARTITION BY ...` and representative partition-management
   `ALTER TABLE` forms before catalog publication.
 - A CSV trim probe with `PLUGIN_CSV=NO` did not disable CSV because
-  `mariadb/storage/csv/CMakeLists.txt` marks CSV `MANDATORY`; CSV is therefore
-  a separate, higher-risk upstream-derived patch and not part of this slice.
+  `mariadb/storage/csv/CMakeLists.txt` marks CSV `MANDATORY`; CSV therefore
+  needed a separate upstream-derived patch, now tracked by the native CSV
+  engine trim.
 
 ## Design
 
@@ -133,9 +134,8 @@ handler object from the disabled embedded profile.
   the SQL layer and MyLite uses explicit policy checks to reject unsupported
   DDL. Chasing every parser reference belongs to a later syntax-trim slice, if
   size evidence justifies it.
-- CSV remains a potential native sidecar surface, but it is mandatory in
-  upstream CMake and tied to log-table fallback behavior. It needs a separate
-  source patch and bootstrap review before removal.
+- Native CSV sidecars are handled by the separate native CSV engine trim; keep
+  both trims covered in future embedded-profile rebuilds.
 - Real partition support will need a separate storage design for table ids,
   per-partition row/index pages, pruning, copy ALTER, crash recovery, and lock
   behavior.

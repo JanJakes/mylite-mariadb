@@ -26,9 +26,10 @@ MariaDB base: `mariadb-11.8.6`
   `libmariadbd.a`: MTR probes for `mariadbd`, `mariadb-test-embedded`,
   `mariadb-client-test-embedded`, `my_safe_process`, common client binaries,
   Aria utility tools, `perror`, `mariadb-tzinfo-to-sql`, and `replace`.
-- The MyLite MTR smoke profile omits native InnoDB, MyISAM, MRG_MyISAM, and
-  partition. Its bootstrap-schema expectation is therefore
-  profile-specific and lives in
+- The MyLite MTR smoke profile omits native CSV, InnoDB, MyISAM, MRG_MyISAM,
+  and partition. Its bootstrap-schema expectation is therefore
+  profile-specific, omits CSV-backed `mysql.general_log` and `mysql.slow_log`,
+  and lives in
   `mariadb/mysql-test/suite/mylite/t/bootstrap_schema.test`.
 - Verified command:
   `tools/mylite-mtr-harness run mylite.bootstrap_schema`.

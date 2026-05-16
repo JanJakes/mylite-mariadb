@@ -52,8 +52,8 @@ SQL mode, XML SQL function, GIS SQL function, vector SQL function, SFORMAT SQL
 function, JSON schema validation function, JSON table function, dynamic column function, SQL HANDLER
 command, SQL sequence value surface, virtual sequence storage engine, dynamic
 plugin loading, SQL HELP command, SELECT PROCEDURE,
-table-maintenance/key-cache administration, native InnoDB/MyISAM/MRG/partition engine
-absence, user-statistics,
+table-maintenance/key-cache administration, native
+CSV/InnoDB/MyISAM/MRG/partition engine absence, user-statistics,
 statement profiling,
 optimizer trace,
 static SHOW information,
@@ -108,6 +108,7 @@ application-schema suites remain planned.
 | `ENGINE=Aria` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `Aria`; row insert, update/delete, truncate, copy `ALTER` rebuilds, `CREATE TABLE ... LIKE`, successful supported `CREATE TABLE ... SELECT`, BLOB/TEXT payloads, full scans, supported primary/unique/secondary indexes, bounded BLOB/TEXT prefix indexes, `DROP TABLE`, and simple `RENAME TABLE` are covered, while Aria data, index, and log files are never durable application storage |
 | `ENGINE=BLACKHOLE` | 🟡&nbsp;Partial | DDL routes to MyLite and records requested `BLACKHOLE`; table metadata survives close/reopen, row writes are accepted but discarded, full scans and supported index reads return no rows, and no MariaDB BLACKHOLE data or index files are created; native BLACKHOLE replication/binlog behavior and broad native index capability parity remain out of scope |
 | `ENGINE=MEMORY` / `ENGINE=HEAP` | 🟡&nbsp;Partial | DDL routes to MyLite and records the requested MEMORY/HEAP token; table metadata survives close/reopen, row contents and supported index entries are runtime-volatile and empty after embedded runtime shutdown/reopen, representative insert, full scan, forced B-tree-compatible index lookup, duplicate-key rejection, update/delete, truncate, and autoincrement reset are covered, and no durable MyLite row/index pages or MariaDB HEAP files are created; native MEMORY hash-index defaults, memory limits/accounting, BLOB/TEXT columns, replication/binlog behavior, and broader native parity remain unsupported or planned |
+| `ENGINE=CSV` | ➖&nbsp;Out&nbsp;of&nbsp;scope | Native CSV table files are not registered in the default embedded profile because `.CSV` and `.CSM` sidecars do not fit the single-primary-file runtime; applications that require CSV table-file compatibility need a later routing-policy decision and storage design |
 | `ENGINE=SEQUENCE` | ➖&nbsp;Out&nbsp;of&nbsp;scope | MariaDB's virtual generated-table `SEQUENCE` engine is not registered in the default embedded profile; MyLite does not auto-discover magic `seq_*_to_*` tables outside the catalog, while ordinary user tables with those names can be catalog-backed MyLite tables |
 | Dynamic external engines | ➖&nbsp;Out&nbsp;of&nbsp;scope | Other unsupported explicit engine requests fail before catalog publication |
 
@@ -120,6 +121,7 @@ application-schema suites remain planned.
 | Persistent InnoDB sidecars | ➖&nbsp;Out&nbsp;of&nbsp;scope | No `.ibd`, redo, undo, or independent tablespace files; the default embedded profile omits native InnoDB registration and runtime archive members, and metadata DDL smoke tests gate against known InnoDB sidecar names |
 | Persistent MyISAM sidecars | ➖&nbsp;Out&nbsp;of&nbsp;scope | No `.MYD`, `.MYI`, or MRG_MyISAM durable table files; the default embedded profile omits native MyISAM and MRG_MyISAM registration, and metadata DDL smoke tests gate against those sidecars |
 | Persistent Aria sidecars | ➖&nbsp;Out&nbsp;of&nbsp;scope | No `.MAI`, `.MAD`, `aria_log.*`, or Aria control state as application storage; metadata DDL smoke tests gate against those names |
+| Persistent CSV sidecars | ➖&nbsp;Out&nbsp;of&nbsp;scope | No native `.CSV`, `.CSM`, or CSV update files; the default embedded profile omits native CSV registration and handler archive members |
 | Persistent MEMORY/HEAP row files | ➖&nbsp;Out&nbsp;of&nbsp;scope | Routed MEMORY/HEAP tables store only durable table metadata in the primary `.mylite` file; row contents and supported index entries live in process memory and are cleared on embedded runtime shutdown |
 | MyLite-owned companions | 🟡&nbsp;Partial | Bootstrap uses a MyLite-owned temporary MariaDB runtime directory, rollback journals and transaction journals are transient recovery companions, user temporary table rows/indexes live in process-local volatile MyLite state, supported file-backed schema creation/discovery, catalog-backed `CREATE DATABASE` existence options, and representative default-algorithm copy `ALTER` paths route from catalog records without runtime schema directories, and the runtime directory must be empty after final close in storage-engine smoke tests |
 

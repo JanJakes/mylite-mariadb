@@ -302,6 +302,7 @@ static void test_server_surfaces_are_disabled(void) {
     assert_variable_missing(db, "concurrent_insert");
     assert_variable_missing(db, "delay_key_write");
     assert_variable_missing(db, "flush");
+    assert_engine_missing(db, "CSV");
     assert_engine_missing(db, "InnoDB");
     assert_engine_missing(db, "MyISAM");
     assert_engine_missing(db, "MRG_MyISAM");

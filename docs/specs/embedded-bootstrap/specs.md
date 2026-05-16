@@ -100,9 +100,10 @@ Runtime startup uses MyLite-owned arguments:
 embedded archive registers native InnoDB, MyLite also passes `--innodb=OFF`.
 The default embedded profile omits native InnoDB and therefore omits that
 startup option. These choices avoid non-final InnoDB sidecars, native MyISAM
-sidecars, and native partition wrapper routing in open/close and SQL smoke
-tests; they do not resolve the compatibility requirement to route InnoDB- and
-MyISAM-shaped application DDL or future partitioned tables to MyLite storage.
+sidecars, native CSV table files, and native partition wrapper routing in
+open/close and SQL smoke tests; they do not resolve the compatibility
+requirement to route InnoDB- and MyISAM-shaped application DDL or future
+partitioned tables to MyLite storage.
 
 MariaDB embedded restart required two narrow fork patches:
 

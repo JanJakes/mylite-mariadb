@@ -13,7 +13,6 @@ columns_priv
 db
 event
 func
-general_log
 global_priv
 gtid_slave_pos
 help_category
@@ -27,7 +26,6 @@ procs_priv
 proxies_priv
 roles_mapping
 servers
-slow_log
 table_stats
 tables_priv
 time_zone

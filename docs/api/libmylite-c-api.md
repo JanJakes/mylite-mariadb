@@ -221,9 +221,9 @@ embedded profile: `have_compress` reports `NO`, `COMPRESS()` and
 ordinary MyLite/MariaDB diagnostics.
 Native InnoDB is not registered in the default embedded profile, but
 file-backed storage-engine builds still route application `ENGINE=InnoDB` DDL
-to MyLite storage. Native partition is not registered either; partition DDL
-continues to fail before MariaDB execution until MyLite has partition metadata
-and routing.
+to MyLite storage. Native CSV and partition are not registered either; CSV
+table files remain unsupported, and partition DDL continues to fail before
+MariaDB execution until MyLite has partition metadata and routing.
 
 ## Prepared Statements
 
@@ -516,6 +516,7 @@ the embedded library model:
 - zlib-backed SQL, protocol, binlog, and compressed-column storage,
 - native InnoDB storage-engine runtime and its tablespaces, redo, undo, and
   dictionary state,
+- native CSV storage-engine runtime and `.CSV` / `.CSM` table files,
 - native partition storage-engine wrapper runtime,
 - statement profiling such as `SHOW PROFILE`, `SHOW PROFILES`,
   profiling system-variable assignment, and `INFORMATION_SCHEMA.PROFILING`,
@@ -581,8 +582,9 @@ embedded profile also links fail-closed stubs for stored-program runtime
 symbols that retained MariaDB parser or cleanup paths still reference, omits
 dynamic UDF lookup/execution bodies, omits unsupported binlog event-root,
 log-event server runtime, replication GTID-state runtime, MyISAM maintenance
-source objects, native InnoDB engine objects, and native partition wrapper
-objects, omits native InnoDB, MyISAM, MRG_MyISAM, and partition engine
+source objects, native InnoDB engine objects, native CSV engine objects, and
+native partition wrapper objects, omits native CSV, InnoDB, MyISAM,
+MRG_MyISAM, and partition engine
 registration and disabled binlog/replication plus native-MyISAM-only
 system-variable registration, omits the JSON schema-validation source object,
 replaces replication filter runtime, JSON table-function execution,

@@ -137,6 +137,9 @@ set(MYLITE_WITH_MYISAM_MAINTENANCE OFF CACHE BOOL "Omit MyISAM maintenance admin
 set(MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE OFF CACHE BOOL "Build native MyISAM storage engine" FORCE)
 set(MYLITE_WITH_NATIVE_MYISAMMRG_STORAGE_ENGINE OFF CACHE BOOL "Build native MRG_MyISAM storage engine" FORCE)
 
+# MyLite does not expose native CSV table files.
+set(MYLITE_WITH_CSV_STORAGE_ENGINE OFF CACHE BOOL "Build native CSV storage engine" FORCE)
+
 # MyLite rejects foreign-server metadata SQL and does not use mysql.servers.
 set(MYLITE_WITH_FOREIGN_SERVER_METADATA OFF CACHE BOOL "Omit mysql.servers metadata cache" FORCE)
 
