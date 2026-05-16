@@ -326,6 +326,7 @@ std::string field_string(const char *value, unsigned int length);
 const char *unsupported_sql_surface_message(std::string_view sql);
 bool is_server_surface_sql(std::string_view sql);
 bool is_table_maintenance_sql(std::string_view sql);
+bool is_sql_handler_command_sql(std::string_view sql);
 bool is_help_command_sql(std::string_view sql);
 bool is_file_import_sql(std::string_view sql);
 bool is_file_export_sql(std::string_view sql);
@@ -376,6 +377,7 @@ void skip_sql_quoted_span(std::string_view &sql, char quote);
 bool sql_next_non_noise_is(std::string_view sql, char expected);
 bool sql_starts_with_token(std::string_view sql, const char *keyword);
 std::size_t executable_sql_comment_prefix_size(std::string_view sql);
+void skip_executable_sql_comment_prefix(std::string_view &sql);
 bool sql_token_equals(std::string_view token, const char *keyword);
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
 int sync_schema_catalog(mylite_db &database);
@@ -2019,6 +2021,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_table_maintenance_sql(sql)) {
         return "unsupported table-maintenance SQL surface";
     }
+    if (is_sql_handler_command_sql(sql)) {
+        return "unsupported SQL HANDLER command";
+    }
     if (is_help_command_sql(sql)) {
         return "unsupported HELP SQL command";
     }
@@ -2155,6 +2160,11 @@ bool is_table_maintenance_sql(std::string_view sql) {
     }
 
     return sql_token_equals(first, "LOAD") && sql_token_equals(second, "INDEX");
+}
+
+bool is_sql_handler_command_sql(std::string_view sql) {
+    std::string_view first;
+    return pop_sql_scanned_token(sql, first) && sql_token_equals(first, "HANDLER");
 }
 
 bool is_help_command_sql(std::string_view sql) {
@@ -3151,7 +3161,7 @@ bool pop_sql_scanned_token(std::string_view &sql, std::string_view &out_token) {
         if (sql.size() >= 2U && sql[0] == '/' && sql[1] == '*') {
             const std::size_t executable_comment_prefix = executable_sql_comment_prefix_size(sql);
             if (executable_comment_prefix != 0U) {
-                sql.remove_prefix(executable_comment_prefix);
+                skip_executable_sql_comment_prefix(sql);
                 continue;
             }
 
@@ -3242,6 +3252,13 @@ std::size_t executable_sql_comment_prefix_size(std::string_view sql) {
         return 4U;
     }
     return 0U;
+}
+
+void skip_executable_sql_comment_prefix(std::string_view &sql) {
+    sql.remove_prefix(executable_sql_comment_prefix_size(sql));
+    while (!sql.empty() && std::isdigit(static_cast<unsigned char>(sql.front())) != 0) {
+        sql.remove_prefix(1);
+    }
 }
 
 bool sql_token_equals(std::string_view token, const char *keyword) {

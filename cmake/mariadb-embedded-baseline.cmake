@@ -71,6 +71,9 @@ set(MYLITE_WITH_JSON_TABLE OFF CACHE BOOL "Omit JSON_TABLE table function runtim
 # MyLite rejects dynamic-column SQL functions before MariaDB execution.
 set(MYLITE_WITH_DYNAMIC_COLUMNS OFF CACHE BOOL "Omit dynamic-column packed BLOB runtime" FORCE)
 
+# MyLite rejects top-level SQL HANDLER commands before MariaDB execution.
+set(MYLITE_WITH_SQL_HANDLER_COMMAND OFF CACHE BOOL "Omit SQL HANDLER command runtime" FORCE)
+
 # MyLite rejects HELP before MariaDB execution.
 set(MYLITE_WITH_HELP_COMMAND OFF CACHE BOOL "Omit SQL HELP command" FORCE)
 

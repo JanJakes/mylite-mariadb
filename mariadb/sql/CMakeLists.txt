@@ -153,6 +153,13 @@ ELSE()
   SET(MYLITE_JSON_TABLE_SOURCE mylite_json_table_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_SQL_HANDLER_COMMAND "Build SQL HANDLER command runtime" ON)
+IF(MYLITE_WITH_SQL_HANDLER_COMMAND)
+  SET(MYLITE_SQL_HANDLER_SOURCE sql_handler.cc)
+ELSE()
+  SET(MYLITE_SQL_HANDLER_SOURCE mylite_sql_handler_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_MYISAM_MAINTENANCE "Build MyISAM table maintenance support" ON)
 IF(MYLITE_WITH_MYISAM_MAINTENANCE)
   ADD_DEFINITIONS(-DMYLITE_WITH_MYISAM_MAINTENANCE=1)
@@ -204,7 +211,7 @@ SET (SQL_SOURCE
                sql_cache.cc sql_class.cc sql_client.cc sql_crypt.cc
                sql_cursor.cc sql_db.cc sql_delete.cc sql_derived.cc
                sql_digest.cc sql_do.cc
-               sql_error.cc sql_handler.cc sql_get_diagnostics.cc
+               sql_error.cc ${MYLITE_SQL_HANDLER_SOURCE} sql_get_diagnostics.cc
                sql_help.cc sql_insert.cc sql_lex.cc
                mylite_schema_hook.cc
                sql_list.cc ${MYLITE_LOAD_DATA_SOURCE} sql_manager.cc

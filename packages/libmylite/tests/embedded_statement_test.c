@@ -419,6 +419,13 @@ static void test_prepare_diagnostics(void) {
         "LOAD INDEX INTO CACHE maintenance_probe",
         "table-maintenance"
     );
+    assert_prepare_fails_with_message(db, "HANDLER no_such_table READ FIRST", "SQL HANDLER");
+    assert_prepare_fails_with_message(db, "handler no_such_table read next", "SQL HANDLER");
+    assert_prepare_fails_with_message(
+        db,
+        "/*!50600 HANDLER no_such_table READ FIRST */",
+        "SQL HANDLER"
+    );
 
     assert(
         mylite_prepare(db, "HELP 'contents'", MYLITE_NUL_TERMINATED, &stmt, NULL) == MYLITE_ERROR

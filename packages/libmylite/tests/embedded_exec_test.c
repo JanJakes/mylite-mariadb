@@ -24,6 +24,7 @@ static void test_callback_abort(void);
 static void test_syntax_error_diagnostics(void);
 static void test_server_surfaces_are_disabled(void);
 static void test_table_maintenance_sql_is_rejected(void);
+static void test_sql_handler_commands_are_rejected(void);
 static void test_help_command_is_rejected(void);
 static void test_procedure_analyse_is_rejected(void);
 static void test_server_utility_functions_are_rejected(void);
@@ -46,6 +47,7 @@ static void assert_variable_value(mylite_db *db, const char *name, const char *v
 static void assert_variable_value_or_missing(mylite_db *db, const char *name, const char *value);
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_table_maintenance_exec_fails(mylite_db *db, const char *sql);
+static void assert_sql_handler_exec_fails(mylite_db *db, const char *sql);
 static void assert_help_command_exec_fails(mylite_db *db, const char *sql);
 static void assert_procedure_analyse_exec_fails(mylite_db *db, const char *sql);
 static void assert_select_procedure_exec_fails(mylite_db *db, const char *sql);
@@ -82,6 +84,7 @@ int main(void) {
     test_syntax_error_diagnostics();
     test_server_surfaces_are_disabled();
     test_table_maintenance_sql_is_rejected();
+    test_sql_handler_commands_are_rejected();
     test_help_command_is_rejected();
     test_procedure_analyse_is_rejected();
     test_server_utility_functions_are_rejected();
@@ -264,6 +267,27 @@ static void test_table_maintenance_sql_is_rejected(void) {
             NULL,
             NULL
         ) == MYLITE_OK
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_sql_handler_commands_are_rejected(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_sql_handler_exec_fails(db, "HANDLER no_such_table OPEN");
+    assert_sql_handler_exec_fails(db, "HANDLER no_such_table READ FIRST");
+    assert_sql_handler_exec_fails(db, "HANDLER no_such_table CLOSE");
+    assert_sql_handler_exec_fails(db, "/*! HANDLER no_such_table READ FIRST */");
+    assert_sql_handler_exec_fails(db, "/*!50600 HANDLER no_such_table READ FIRST */");
+    assert(
+        mylite_exec(db, "SELECT 'HANDLER no_such_table OPEN' AS handler_text", NULL, NULL, NULL) ==
+        MYLITE_OK
     );
 
     assert(mylite_close(db) == MYLITE_OK);
@@ -895,6 +919,18 @@ static void assert_table_maintenance_exec_fails(mylite_db *db, const char *sql) 
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "table-maintenance") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_sql_handler_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "SQL HANDLER") != NULL);
     mylite_free(errmsg);
 }
 

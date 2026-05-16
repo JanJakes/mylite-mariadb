@@ -119,6 +119,13 @@ ELSE()
   SET(MYLITE_JSON_TABLE_SOURCE ../sql/mylite_json_table_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_SQL_HANDLER_COMMAND "Build SQL HANDLER command runtime" ON)
+IF(MYLITE_WITH_SQL_HANDLER_COMMAND)
+  SET(MYLITE_SQL_HANDLER_SOURCE ../sql/sql_handler.cc)
+ELSE()
+  SET(MYLITE_SQL_HANDLER_SOURCE ../sql/mylite_sql_handler_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_HELP_COMMAND "Build SQL HELP command" ON)
 IF(MYLITE_WITH_HELP_COMMAND)
   SET(MYLITE_HELP_COMMAND_SOURCE ../sql/sql_help.cc)
@@ -202,7 +209,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ${MYLITE_PROCEDURE_ANALYSE_SOURCE} ../sql/sql_base.cc ../sql/sql_cache.cc
            ../sql/sql_class.cc ../sql/sql_crypt.cc ../sql/sql_cursor.cc 
            ../sql/sql_db.cc ../sql/sql_delete.cc ../sql/sql_derived.cc 
-           ../sql/sql_do.cc ../sql/sql_error.cc ../sql/sql_handler.cc
+           ../sql/sql_do.cc ../sql/sql_error.cc ${MYLITE_SQL_HANDLER_SOURCE}
             ../sql/sql_get_diagnostics.cc
            ${MYLITE_HELP_COMMAND_SOURCE} ../sql/sql_insert.cc ../sql/datadict.cc
            ../sql/mylite_schema_hook.cc
