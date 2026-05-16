@@ -615,6 +615,9 @@ static void test_prepare_diagnostics(void) {
         "SELECT column_get(?, 'color' AS CHAR(16))",
         "dynamic column"
     );
+    assert_prepare_fails_with_message(db, "SELECT NEXT VALUE FOR blocked_sequence", "SQL sequence");
+    assert_prepare_fails_with_message(db, "SELECT NEXTVAL(blocked_sequence)", "SQL sequence");
+    assert_prepare_fails_with_message(db, "SELECT SETVAL(blocked_sequence, ?)", "SQL sequence");
 
     stmt = prepare_statement(db, "SELECT JSON_VALID(?)");
     assert(

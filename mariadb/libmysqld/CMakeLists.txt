@@ -126,6 +126,13 @@ ELSE()
   SET(MYLITE_SQL_HANDLER_SOURCE ../sql/mylite_sql_handler_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_SEQUENCE_RUNTIME "Build SQL sequence runtime" ON)
+IF(MYLITE_WITH_SEQUENCE_RUNTIME)
+  SET(MYLITE_SEQUENCE_SOURCES ../sql/sql_sequence.cc ../sql/ha_sequence.cc)
+ELSE()
+  SET(MYLITE_SEQUENCE_SOURCES ../sql/mylite_sql_sequence_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_HELP_COMMAND "Build SQL HELP command" ON)
 IF(MYLITE_WITH_HELP_COMMAND)
   SET(MYLITE_HELP_COMMAND_SOURCE ../sql/sql_help.cc)
@@ -267,8 +274,8 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/wsrep_dummy.cc ../sql/encryption.cc
            ../sql/item_windowfunc.cc ../sql/sql_window.cc
            ../sql/sql_cte.cc
-           ../sql/sql_sequence.cc ../sql/sql_sequence.h
-           ../sql/ha_sequence.cc ../sql/ha_sequence.h
+           ${MYLITE_SEQUENCE_SOURCES} ../sql/sql_sequence.h
+           ../sql/ha_sequence.h
            ../sql/temporary_tables.cc
            ../sql/proxy_protocol.cc ../sql/backup.cc
            ../sql/sql_tvc.cc ../sql/sql_tvc.h

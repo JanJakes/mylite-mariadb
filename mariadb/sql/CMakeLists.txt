@@ -160,6 +160,13 @@ ELSE()
   SET(MYLITE_SQL_HANDLER_SOURCE mylite_sql_handler_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_SEQUENCE_RUNTIME "Build SQL sequence runtime" ON)
+IF(MYLITE_WITH_SEQUENCE_RUNTIME)
+  SET(MYLITE_SEQUENCE_SOURCE sql_sequence.cc)
+ELSE()
+  SET(MYLITE_SEQUENCE_SOURCE mylite_sql_sequence_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_MYISAM_MAINTENANCE "Build MyISAM table maintenance support" ON)
 IF(MYLITE_WITH_MYISAM_MAINTENANCE)
   ADD_DEFINITIONS(-DMYLITE_WITH_MYISAM_MAINTENANCE=1)
@@ -262,7 +269,7 @@ SET (SQL_SOURCE
                item_windowfunc.cc sql_window.cc
 	       sql_cte.cc
                item_vers.cc
-               sql_sequence.cc sql_sequence.h ha_sequence.h
+               ${MYLITE_SEQUENCE_SOURCE} sql_sequence.h ha_sequence.h
                sql_tvc.cc sql_tvc.h
                opt_split.cc
                rowid_filter.cc rowid_filter.h
@@ -316,8 +323,10 @@ ENDIF()
 
 MYSQL_ADD_PLUGIN(partition ha_partition.cc STORAGE_ENGINE DEFAULT STATIC_ONLY
 RECOMPILE_FOR_EMBEDDED)
-MYSQL_ADD_PLUGIN(sql_sequence ha_sequence.cc STORAGE_ENGINE MANDATORY STATIC_ONLY
-RECOMPILE_FOR_EMBEDDED)
+IF(MYLITE_WITH_SEQUENCE_RUNTIME)
+  MYSQL_ADD_PLUGIN(sql_sequence ha_sequence.cc STORAGE_ENGINE MANDATORY STATIC_ONLY
+  RECOMPILE_FOR_EMBEDDED)
+ENDIF()
 MYSQL_ADD_PLUGIN(online_alter_log online_alter.cc STORAGE_ENGINE MANDATORY
 STATIC_ONLY NOT_EMBEDDED)
 

@@ -33,6 +33,7 @@ static void test_sformat_sql_function_is_rejected(void);
 static void test_json_schema_valid_sql_function_is_rejected(void);
 static void test_json_table_function_is_rejected(void);
 static void test_dynamic_column_functions_are_rejected(void);
+static void test_sequence_sql_is_rejected(void);
 static void test_xml_sql_functions_are_rejected(void);
 static void test_oracle_sql_mode_is_rejected(void);
 static void test_file_import_policy_is_rejected(void);
@@ -57,6 +58,7 @@ static void assert_sformat_sql_function_exec_fails(mylite_db *db, const char *sq
 static void assert_json_schema_valid_exec_fails(mylite_db *db, const char *sql);
 static void assert_json_table_exec_fails(mylite_db *db, const char *sql);
 static void assert_dynamic_column_exec_fails(mylite_db *db, const char *sql);
+static void assert_sequence_exec_fails(mylite_db *db, const char *sql);
 static void assert_xml_sql_function_exec_fails(mylite_db *db, const char *sql);
 static void assert_oracle_sql_mode_exec_fails(mylite_db *db, const char *sql);
 static void assert_file_import_exec_fails(mylite_db *db, const char *sql);
@@ -93,6 +95,7 @@ int main(void) {
     test_json_schema_valid_sql_function_is_rejected();
     test_json_table_function_is_rejected();
     test_dynamic_column_functions_are_rejected();
+    test_sequence_sql_is_rejected();
     test_xml_sql_functions_are_rejected();
     test_oracle_sql_mode_is_rejected();
     test_file_import_policy_is_rejected();
@@ -476,6 +479,35 @@ static void test_dynamic_column_functions_are_rejected(void) {
         mylite_exec(
             db,
             "SELECT 'COLUMN_CREATE(' AS quoted_text, JSON_VALID('{\"ok\": true}')",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_sequence_sql_is_rejected(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_sequence_exec_fails(db, "SELECT NEXT VALUE FOR blocked_sequence");
+    assert_sequence_exec_fails(db, "SELECT PREVIOUS VALUE FOR blocked_sequence");
+    assert_sequence_exec_fails(db, "SELECT NEXTVAL(blocked_sequence)");
+    assert_sequence_exec_fails(db, "SELECT LASTVAL(blocked_sequence)");
+    assert_sequence_exec_fails(db, "SELECT SETVAL(blocked_sequence, 1)");
+    assert_sequence_exec_fails(db, "/*! SELECT NEXTVAL(blocked_sequence) */");
+    assert_sequence_exec_fails(db, "/*!50600 SELECT SETVAL(blocked_sequence, 1) */");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT 'NEXTVAL(blocked_sequence)' AS nextval_text, "
+            "'NEXT VALUE FOR blocked_sequence' AS next_value_text",
             NULL,
             NULL,
             NULL
@@ -1039,6 +1071,18 @@ static void assert_dynamic_column_exec_fails(mylite_db *db, const char *sql) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "dynamic column") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_sequence_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "SQL sequence") != NULL);
     mylite_free(errmsg);
 }
 

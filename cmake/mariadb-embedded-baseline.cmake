@@ -74,6 +74,9 @@ set(MYLITE_WITH_DYNAMIC_COLUMNS OFF CACHE BOOL "Omit dynamic-column packed BLOB 
 # MyLite rejects top-level SQL HANDLER commands before MariaDB execution.
 set(MYLITE_WITH_SQL_HANDLER_COMMAND OFF CACHE BOOL "Omit SQL HANDLER command runtime" FORCE)
 
+# MyLite rejects sequence objects and sequence value functions before MariaDB execution.
+set(MYLITE_WITH_SEQUENCE_RUNTIME OFF CACHE BOOL "Omit SQL sequence runtime" FORCE)
+
 # MyLite rejects HELP before MariaDB execution.
 set(MYLITE_WITH_HELP_COMMAND OFF CACHE BOOL "Omit SQL HELP command" FORCE)
 

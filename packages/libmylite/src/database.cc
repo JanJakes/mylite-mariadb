@@ -336,6 +336,7 @@ bool is_sformat_sql_function_sql(std::string_view sql);
 bool is_json_schema_valid_sql(std::string_view sql);
 bool is_json_table_sql(std::string_view sql);
 bool is_dynamic_column_sql(std::string_view sql);
+bool is_sequence_sql(std::string_view sql);
 bool is_xml_sql_function_sql(std::string_view sql);
 bool is_oracle_sql_mode_sql(std::string_view sql);
 bool sql_set_assignment_has_oracle_sql_mode(std::string_view assignment);
@@ -360,6 +361,7 @@ bool sql_tokens_contain_json_schema_valid_function(std::string_view sql);
 bool sql_tokens_contain_json_table_function(std::string_view sql);
 bool sql_tokens_contain_dynamic_column_function(std::string_view sql);
 bool sql_token_is_dynamic_column_function(std::string_view token);
+bool sql_tokens_contain_sequence_value_surface(std::string_view sql);
 bool sql_tokens_contain_xml_sql_function(std::string_view sql);
 bool sql_tokens_contain_locking_marker(std::string_view sql);
 bool sql_tokens_contain_named_lock_function(std::string_view sql);
@@ -2051,6 +2053,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_dynamic_column_sql(sql)) {
         return "unsupported dynamic column SQL function";
     }
+    if (is_sequence_sql(sql)) {
+        return "unsupported SQL sequence surface";
+    }
     if (is_xml_sql_function_sql(sql)) {
         return "unsupported XML SQL function";
     }
@@ -2220,6 +2225,10 @@ bool is_json_table_sql(std::string_view sql) {
 
 bool is_dynamic_column_sql(std::string_view sql) {
     return sql_tokens_contain_dynamic_column_function(sql);
+}
+
+bool is_sequence_sql(std::string_view sql) {
+    return sql_tokens_contain_sequence_value_surface(sql);
 }
 
 bool is_xml_sql_function_sql(std::string_view sql) {
@@ -2651,6 +2660,33 @@ bool sql_token_is_dynamic_column_function(std::string_view token) {
            sql_token_equals(token, "COLUMN_CREATE") || sql_token_equals(token, "COLUMN_DELETE") ||
            sql_token_equals(token, "COLUMN_EXISTS") || sql_token_equals(token, "COLUMN_GET") ||
            sql_token_equals(token, "COLUMN_JSON") || sql_token_equals(token, "COLUMN_LIST");
+}
+
+bool sql_tokens_contain_sequence_value_surface(std::string_view sql) {
+    std::string_view token;
+    while (pop_sql_scanned_token(sql, token)) {
+        if (sql_token_equals(token, "NEXT") || sql_token_equals(token, "PREVIOUS")) {
+            std::string_view after_direction = sql;
+            std::string_view value_token;
+            std::string_view for_token;
+            if (pop_sql_scanned_token(after_direction, value_token) &&
+                sql_token_equals(value_token, "VALUE") &&
+                pop_sql_scanned_token(after_direction, for_token) &&
+                sql_token_equals(for_token, "FOR")) {
+                return true;
+            }
+        }
+
+        if (!sql_next_non_noise_is(sql, '(')) {
+            continue;
+        }
+
+        if (sql_token_equals(token, "NEXTVAL") || sql_token_equals(token, "LASTVAL") ||
+            sql_token_equals(token, "SETVAL")) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool sql_tokens_contain_xml_sql_function(std::string_view sql) {

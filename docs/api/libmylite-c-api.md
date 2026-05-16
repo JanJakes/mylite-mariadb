@@ -421,8 +421,11 @@ the embedded library model:
 - foreign-key DDL until referential metadata and enforcement exist,
 - partition DDL until partition metadata, partition routing, and per-partition
   lifecycle semantics exist,
-- filesystem-backed views, triggers, routines, and sequences until they have
-  MyLite catalog storage,
+- filesystem-backed views, triggers, and routines until they have MyLite
+  catalog storage,
+- sequence objects and sequence value surfaces such as `NEXT VALUE FOR`,
+  `PREVIOUS VALUE FOR`, `NEXTVAL()`, `LASTVAL()`, and `SETVAL()` until they
+  have MyLite catalog storage and durable value persistence,
 - SQL locking statements and named-lock functions until MyLite has real table,
   row, named-lock, and transaction-aware lock semantics,
 - online and in-place ALTER forms until MyLite has online DDL and lock
@@ -450,6 +453,8 @@ the embedded library model:
 - `JSON_SCHEMA_VALID()` SQL function,
 - `JSON_TABLE()` table function,
 - MariaDB dynamic-column SQL functions,
+- sequence value surfaces such as `NEXT VALUE FOR`, `PREVIOUS VALUE FOR`,
+  `NEXTVAL()`, `LASTVAL()`, and `SETVAL()`,
 - event scheduler,
 - performance schema.
 
@@ -459,18 +464,18 @@ transaction-control, autocommit-control, SQL locking, named-lock, SQL `HELP`,
 SQL `HANDLER`, `SELECT ... PROCEDURE`, SQL file-I/O,
 table-maintenance/key-cache administration, server utility function, Oracle SQL
 mode, XML SQL function, GIS SQL function, SFORMAT SQL function, JSON schema
-validation function, JSON table function, dynamic column function, partition,
-and foreign-key DDL commands are rejected before MariaDB execution with stable
-MyLite errors. The default
+validation function, JSON table function, dynamic column function, SQL
+sequence value surface, partition, and foreign-key DDL commands are rejected
+before MariaDB execution with stable MyLite errors. The default
 embedded profile also links fail-closed stubs for stored-program runtime
 symbols that retained MariaDB parser or cleanup paths still reference, omits
 dynamic UDF lookup/execution bodies, omits unsupported binlog event-root and
 MyISAM maintenance source objects, omits the JSON schema-validation source
 object, replaces JSON table-function execution, dynamic-column packed BLOB
-runtime, and SQL handler command execution with fail-closed stubs, and compiles
-embedded binlog transaction and event-write entry points to no-ops. Other
-unsupported surfaces should fail with stable MyLite result codes and MariaDB
-diagnostics where possible.
+runtime, SQL handler command execution, and SQL sequence runtime with
+fail-closed stubs, and compiles embedded binlog transaction and event-write
+entry points to no-ops. Other unsupported surfaces should fail with stable
+MyLite result codes and MariaDB diagnostics where possible.
 
 ## Compatibility Adapter
 
