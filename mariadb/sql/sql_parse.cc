@@ -98,6 +98,9 @@
 #ifndef MYLITE_WITH_STATIC_SHOW_INFO
 #define MYLITE_WITH_STATIC_SHOW_INFO 1
 #endif
+#ifndef MYLITE_WITH_PROCESSLIST_METADATA
+#define MYLITE_WITH_PROCESSLIST_METADATA 1
+#endif
 
 #define FLAGSTR(V,F) ((V)&(F)?#F" ":"")
 
@@ -2336,6 +2339,7 @@ dispatch_command_return dispatch_command(enum enum_server_command command, THD *
     my_ok(thd);				// Tell client we are alive
     break;
   case COM_PROCESS_INFO:
+#if MYLITE_WITH_PROCESSLIST_METADATA
     status_var_increment(thd->status_var.com_stat[SQLCOM_SHOW_PROCESSLIST]);
     if (!thd->security_ctx->priv_user[0] &&
         check_global_access(thd, PRIV_COM_PROCESS_INFO))
@@ -2344,6 +2348,10 @@ dispatch_command_return dispatch_command(enum enum_server_command command, THD *
     mysqld_list_processes(thd,
                      thd->security_ctx->master_access & PRIV_COM_PROCESS_INFO ?
                      NullS : thd->security_ctx->priv_user, 0);
+#else
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+             "process-list metadata in MyLite embedded profile");
+#endif
     break;
   case COM_PROCESS_KILL:
   {
@@ -4863,6 +4871,7 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
     break;
   }
   case SQLCOM_SHOW_PROCESSLIST:
+#if MYLITE_WITH_PROCESSLIST_METADATA
     if (!thd->security_ctx->priv_user[0] &&
         check_global_access(thd, PRIV_STMT_SHOW_PROCESSLIST))
       break;
@@ -4871,6 +4880,10 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
                  NullS :
                  thd->security_ctx->priv_user),
                 lex->verbose);
+#else
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+             "process-list metadata in MyLite embedded profile");
+#endif
     break;
   case SQLCOM_SHOW_AUTHORS:
 #if MYLITE_WITH_STATIC_SHOW_INFO

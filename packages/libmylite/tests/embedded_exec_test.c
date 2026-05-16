@@ -18,6 +18,12 @@ typedef struct variable_context {
     int rows;
 } variable_context;
 
+typedef struct scalar_context {
+    const char *column_name;
+    const char *value;
+    int rows;
+} scalar_context;
+
 static void test_select_callback(void);
 static void test_statement_effects(void);
 static void test_callback_abort(void);
@@ -31,6 +37,7 @@ static void test_table_maintenance_sql_is_rejected(void);
 static void test_sql_handler_commands_are_rejected(void);
 static void test_help_command_is_rejected(void);
 static void test_static_show_info_is_rejected(void);
+static void test_processlist_metadata_is_rejected(void);
 static void test_procedure_analyse_is_rejected(void);
 static void test_server_utility_functions_are_rejected(void);
 static void test_gis_sql_functions_are_rejected(void);
@@ -61,6 +68,7 @@ static void assert_table_maintenance_exec_fails(mylite_db *db, const char *sql);
 static void assert_sql_handler_exec_fails(mylite_db *db, const char *sql);
 static void assert_help_command_exec_fails(mylite_db *db, const char *sql);
 static void assert_static_show_info_exec_fails(mylite_db *db, const char *sql);
+static void assert_processlist_metadata_exec_fails(mylite_db *db, const char *sql);
 static void assert_procedure_analyse_exec_fails(mylite_db *db, const char *sql);
 static void assert_select_procedure_exec_fails(mylite_db *db, const char *sql);
 static void assert_server_utility_exec_fails(mylite_db *db, const char *sql);
@@ -82,6 +90,7 @@ static void assert_online_alter_exec_fails(mylite_db *db, const char *sql);
 static void assert_partition_exec_fails(mylite_db *db, const char *sql);
 static void assert_foreign_key_exec_fails(mylite_db *db, const char *sql);
 static int select_callback(void *ctx, int column_count, char **values, char **column_names);
+static int scalar_callback(void *ctx, int column_count, char **values, char **column_names);
 static int abort_callback(void *ctx, int column_count, char **values, char **column_names);
 static int variable_callback(void *ctx, int column_count, char **values, char **column_names);
 static mylite_db *open_database(const char *root, char **filename);
@@ -105,6 +114,7 @@ int main(void) {
     test_sql_handler_commands_are_rejected();
     test_help_command_is_rejected();
     test_static_show_info_is_rejected();
+    test_processlist_metadata_is_rejected();
     test_procedure_analyse_is_rejected();
     test_server_utility_functions_are_rejected();
     test_gis_sql_functions_are_rejected();
@@ -519,6 +529,41 @@ static void test_static_show_info_is_rejected(void) {
             NULL
         ) == MYLITE_OK
     );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_processlist_metadata_is_rejected(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    scalar_context processlist_count = {
+        .column_name = "process_count",
+        .value = "0",
+        .rows = 0,
+    };
+
+    assert_processlist_metadata_exec_fails(db, "SHOW PROCESSLIST");
+    assert_processlist_metadata_exec_fails(db, "SHOW FULL PROCESSLIST");
+    assert_processlist_metadata_exec_fails(db, "/*! SHOW PROCESSLIST */");
+    assert_processlist_metadata_exec_fails(db, "/*!50600 SHOW FULL PROCESSLIST */");
+    assert(
+        mylite_exec(db, "SELECT 'SHOW PROCESSLIST' AS processlist_text", NULL, NULL, NULL) ==
+        MYLITE_OK
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) AS process_count FROM INFORMATION_SCHEMA.PROCESSLIST",
+            scalar_callback,
+            &processlist_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(processlist_count.rows == 1);
 
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);
@@ -1293,6 +1338,18 @@ static void assert_static_show_info_exec_fails(mylite_db *db, const char *sql) {
     mylite_free(errmsg);
 }
 
+static void assert_processlist_metadata_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "process-list") != NULL);
+    mylite_free(errmsg);
+}
+
 static void assert_procedure_analyse_exec_fails(mylite_db *db, const char *sql) {
     char *errmsg = NULL;
 
@@ -1542,6 +1599,17 @@ static int select_callback(void *ctx, int column_count, char **values, char **co
     assert(strcmp(values[0], "1") == 0);
     assert(values[1] == NULL);
     ++select_ctx->rows;
+    return 0;
+}
+
+static int scalar_callback(void *ctx, int column_count, char **values, char **column_names) {
+    scalar_context *scalar_ctx = (scalar_context *)ctx;
+
+    assert(column_count == 1);
+    assert(strcmp(column_names[0], scalar_ctx->column_name) == 0);
+    assert(values[0] != NULL);
+    assert(strcmp(values[0], scalar_ctx->value) == 0);
+    ++scalar_ctx->rows;
     return 0;
 }
 

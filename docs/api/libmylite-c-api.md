@@ -468,6 +468,9 @@ the embedded library model:
   assignment and `INFORMATION_SCHEMA.OPTIMIZER_TRACE`,
 - static SHOW information such as `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and
   `SHOW PRIVILEGES`,
+- process-list metadata such as `SHOW PROCESSLIST` and
+  `SHOW FULL PROCESSLIST`; `INFORMATION_SCHEMA.PROCESSLIST` is queryable but
+  returns no rows in the default embedded profile,
 - SQL `HANDLER` commands,
 - SQL `HELP`,
 - `SELECT ... PROCEDURE`, including `PROCEDURE ANALYSE()`,
@@ -494,7 +497,7 @@ transaction-control, autocommit-control, SQL locking, named-lock, SQL `HELP`,
 SQL `HANDLER`, `SELECT ... PROCEDURE`, SQL file-I/O,
 table-maintenance/key-cache administration, statement profiling, external
 backup SQL, query cache administration, optimizer trace, static SHOW
-information, server utility function, Oracle SQL mode, XML SQL function, GIS
+information, process-list metadata, server utility function, Oracle SQL mode, XML SQL function, GIS
 SQL function, SFORMAT SQL function, JSON schema validation function, JSON table
 function, dynamic column function, SQL sequence value surface, partition, and
 foreign-key DDL commands are rejected before MariaDB execution with stable

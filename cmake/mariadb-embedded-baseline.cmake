@@ -116,5 +116,8 @@ set(MYLITE_WITH_OPTIMIZER_TRACE OFF CACHE BOOL "Omit optimizer trace runtime" FO
 # MyLite rejects static server-information SHOW commands before MariaDB execution.
 set(MYLITE_WITH_STATIC_SHOW_INFO OFF CACHE BOOL "Omit static SHOW information producers" FORCE)
 
+# MyLite rejects daemon-style process-list SHOW commands before MariaDB execution.
+set(MYLITE_WITH_PROCESSLIST_METADATA OFF CACHE BOOL "Omit process-list metadata producers" FORCE)
+
 # MyLite's embedded SQL profile has no retained C++ exception users.
 set(MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS OFF CACHE BOOL "Enable embedded SQL C++ exceptions" FORCE)

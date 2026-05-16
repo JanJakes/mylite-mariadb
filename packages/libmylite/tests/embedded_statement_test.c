@@ -448,6 +448,8 @@ static void test_prepare_diagnostics(void) {
     );
     assert_prepare_fails_with_message(db, "SHOW AUTHORS", "static SHOW information");
     assert_prepare_fails_with_message(db, "SHOW PRIVILEGES", "static SHOW information");
+    assert_prepare_fails_with_message(db, "SHOW PROCESSLIST", "process-list");
+    assert_prepare_fails_with_message(db, "SHOW FULL PROCESSLIST", "process-list");
 
     assert_prepare_fails_with_message(db, "CHECK TABLE maintenance_probe", "table-maintenance");
     assert_prepare_fails_with_message(db, "ANALYZE TABLE maintenance_probe", "table-maintenance");
