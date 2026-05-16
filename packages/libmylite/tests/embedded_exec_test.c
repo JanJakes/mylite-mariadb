@@ -38,6 +38,7 @@ static void test_sql_handler_commands_are_rejected(void);
 static void test_help_command_is_rejected(void);
 static void test_static_show_info_is_rejected(void);
 static void test_processlist_metadata_is_rejected(void);
+static void test_routine_metadata_is_empty(void);
 static void test_procedure_analyse_is_rejected(void);
 static void test_server_utility_functions_are_rejected(void);
 static void test_gis_sql_functions_are_rejected(void);
@@ -92,6 +93,7 @@ static void assert_foreign_key_exec_fails(mylite_db *db, const char *sql);
 static int select_callback(void *ctx, int column_count, char **values, char **column_names);
 static int scalar_callback(void *ctx, int column_count, char **values, char **column_names);
 static int abort_callback(void *ctx, int column_count, char **values, char **column_names);
+static int count_only_callback(void *ctx, int column_count, char **values, char **column_names);
 static int variable_callback(void *ctx, int column_count, char **values, char **column_names);
 static mylite_db *open_database(const char *root, char **filename);
 static char *make_temp_root(void);
@@ -115,6 +117,7 @@ int main(void) {
     test_help_command_is_rejected();
     test_static_show_info_is_rejected();
     test_processlist_metadata_is_rejected();
+    test_routine_metadata_is_empty();
     test_procedure_analyse_is_rejected();
     test_server_utility_functions_are_rejected();
     test_gis_sql_functions_are_rejected();
@@ -571,6 +574,70 @@ static void test_processlist_metadata_is_rejected(void) {
     free(root);
 }
 
+static void test_routine_metadata_is_empty(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    int procedure_status_rows = 0;
+    int function_status_rows = 0;
+    scalar_context routines_count = {
+        .column_name = "routine_count",
+        .value = "0",
+        .rows = 0,
+    };
+    scalar_context parameters_count = {
+        .column_name = "parameter_count",
+        .value = "0",
+        .rows = 0,
+    };
+
+    assert(
+        mylite_exec(
+            db,
+            "SHOW PROCEDURE STATUS LIKE 'blocked_proc'",
+            count_only_callback,
+            &procedure_status_rows,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(procedure_status_rows == 0);
+    assert(
+        mylite_exec(
+            db,
+            "SHOW FUNCTION STATUS LIKE 'blocked_func'",
+            count_only_callback,
+            &function_status_rows,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(function_status_rows == 0);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) AS routine_count FROM INFORMATION_SCHEMA.ROUTINES",
+            scalar_callback,
+            &routines_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(routines_count.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) AS parameter_count FROM INFORMATION_SCHEMA.PARAMETERS",
+            scalar_callback,
+            &parameters_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(parameters_count.rows == 1);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_procedure_analyse_is_rejected(void) {
     char *root = make_temp_root();
     char *filename = NULL;
@@ -964,6 +1031,8 @@ static void test_non_table_objects_are_rejected(void) {
         "CREATE FUNCTION blocked_udf RETURNS INTEGER SONAME 'blocked_udf.so'"
     );
     assert_non_table_object_exec_fails(db, "CALL blocked_proc()");
+    assert_non_table_object_exec_fails(db, "SHOW CREATE PROCEDURE blocked_proc");
+    assert_non_table_object_exec_fails(db, "SHOW CREATE FUNCTION blocked_func");
     assert_non_table_object_exec_fails(db, "DROP VIEW blocked_view");
     assert_non_table_object_exec_fails(db, "CREATE SEQUENCE blocked_seq");
 
@@ -1620,6 +1689,15 @@ static int abort_callback(void *ctx, int column_count, char **values, char **col
     (void)column_names;
     ++*callback_count;
     return 1;
+}
+
+static int count_only_callback(void *ctx, int column_count, char **values, char **column_names) {
+    int *row_count = (int *)ctx;
+    (void)column_count;
+    (void)values;
+    (void)column_names;
+    ++*row_count;
+    return 0;
 }
 
 static int variable_callback(void *ctx, int column_count, char **values, char **column_names) {

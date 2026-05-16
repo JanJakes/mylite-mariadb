@@ -119,5 +119,8 @@ set(MYLITE_WITH_STATIC_SHOW_INFO OFF CACHE BOOL "Omit static SHOW information pr
 # MyLite rejects daemon-style process-list SHOW commands before MariaDB execution.
 set(MYLITE_WITH_PROCESSLIST_METADATA OFF CACHE BOOL "Omit process-list metadata producers" FORCE)
 
+# MyLite rejects routine objects and returns empty routine metadata until it has a routine catalog.
+set(MYLITE_WITH_ROUTINE_METADATA OFF CACHE BOOL "Omit routine metadata producers" FORCE)
+
 # MyLite's embedded SQL profile has no retained C++ exception users.
 set(MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS OFF CACHE BOOL "Enable embedded SQL C++ exceptions" FORCE)

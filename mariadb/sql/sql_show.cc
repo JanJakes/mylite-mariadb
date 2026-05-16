@@ -57,6 +57,9 @@
 #ifndef MYLITE_WITH_PROCESSLIST_METADATA
 #define MYLITE_WITH_PROCESSLIST_METADATA 1
 #endif
+#ifndef MYLITE_WITH_ROUTINE_METADATA
+#define MYLITE_WITH_ROUTINE_METADATA 1
+#endif
 #if MYLITE_WITH_STATIC_SHOW_INFO
 #include "authors.h"
 #include "contributors.h"
@@ -2922,6 +2925,13 @@ static const char *thread_state_info(THD *tmp)
   return "";
 }
 
+#if !MYLITE_WITH_PROCESSLIST_METADATA || !MYLITE_WITH_ROUTINE_METADATA
+static int mylite_fill_empty_schema_table(THD *, TABLE_LIST *, COND *)
+{
+  return 0;
+}
+#endif
+
 
 #if MYLITE_WITH_PROCESSLIST_METADATA
 struct list_callback_arg
@@ -3580,11 +3590,6 @@ int fill_schema_processlist(THD* thd, TABLE_LIST* tables, COND* cond)
       server_threads.iterate(processlist_callback, &arg))
     DBUG_RETURN(1);
   DBUG_RETURN(0);
-}
-#else
-static int mylite_fill_empty_schema_table(THD *, TABLE_LIST *, COND *)
-{
-  return 0;
 }
 #endif
 
@@ -6958,6 +6963,7 @@ int fill_schema_coll_charset_app(THD *thd, TABLE_LIST *tables, COND *cond)
 }
 
 
+#if MYLITE_WITH_ROUTINE_METADATA
 static inline void copy_field_as_string(Field *to_field, Field *from_field)
 {
   char buff[MAX_FIELD_WIDTH];
@@ -7424,6 +7430,7 @@ err:
   thd->variables.sql_mode = sql_mode_was;
   DBUG_RETURN(res);
 }
+#endif
 
 
 static int get_schema_stat_record(THD *thd, TABLE_LIST *tables, TABLE *table,
@@ -10932,7 +10939,11 @@ ST_SCHEMA_TABLE schema_tables[]=
   {"OPTIMIZER_TRACE"_Lex_ident_i_s_table, Show::optimizer_trace_info, 0,
      fill_optimizer_trace_info, NULL, NULL, -1, -1, false, 0},
   {"PARAMETERS"_Lex_ident_i_s_table, Show::parameters_fields_info, 0,
+#if MYLITE_WITH_ROUTINE_METADATA
    fill_schema_proc, 0, 0, 1, 2, 0, 0},
+#else
+   mylite_fill_empty_schema_table, 0, 0, 1, 2, 0, 0},
+#endif
   {"PARTITIONS"_Lex_ident_i_s_table, Show::partitions_fields_info, 0,
    get_all_tables, 0, get_schema_partitions_record, 1, 2, 0,
    OPTIMIZE_I_S_TABLE|OPEN_TABLE_ONLY},
@@ -10955,7 +10966,11 @@ ST_SCHEMA_TABLE schema_tables[]=
    0, get_all_tables, 0, get_referential_constraints_record,
    1, 9, 0, OPTIMIZE_I_S_TABLE|OPEN_TABLE_ONLY},
   {"ROUTINES"_Lex_ident_i_s_table, Show::proc_fields_info, 0,
+#if MYLITE_WITH_ROUTINE_METADATA
    fill_schema_proc, make_proc_old_format, 0, 2, 3, 0, 0},
+#else
+   mylite_fill_empty_schema_table, make_proc_old_format, 0, 2, 3, 0, 0},
+#endif
   {"SCHEMATA"_Lex_ident_i_s_table, Show::schema_fields_info, 0,
    fill_schema_schemata, make_schemata_old_format, 0, 1, -1, 0, 0},
   {"SCHEMA_PRIVILEGES"_Lex_ident_i_s_table,

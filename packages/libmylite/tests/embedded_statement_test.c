@@ -784,6 +784,16 @@ static void test_prepare_diagnostics(void) {
     assert(mylite_mariadb_errno(db) == 0U);
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(strstr(mylite_errmsg(db), "non-table database object") != NULL);
+    assert_prepare_fails_with_message(
+        db,
+        "SHOW CREATE PROCEDURE blocked_proc",
+        "non-table database object"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "SHOW CREATE FUNCTION blocked_func",
+        "non-table database object"
+    );
 
     assert(
         mylite_prepare(

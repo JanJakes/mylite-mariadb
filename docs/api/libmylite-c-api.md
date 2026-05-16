@@ -475,7 +475,9 @@ the embedded library model:
 - SQL `HELP`,
 - `SELECT ... PROCEDURE`, including `PROCEDURE ANALYSE()`,
 - stored-program compiler/runtime surfaces behind routines, triggers,
-  packages, events, compound statements, and `CALL`,
+  packages, events, compound statements, and `CALL`; routine status and
+  routine information-schema metadata are queryable but return no rows until
+  MyLite has catalog-backed routine metadata,
 - server utility functions such as `BENCHMARK()`, `SLEEP()`, `UUID_SHORT()`,
   `MASTER_POS_WAIT()`, and `MASTER_GTID_WAIT()`,
 - Oracle SQL mode,
@@ -497,7 +499,8 @@ transaction-control, autocommit-control, SQL locking, named-lock, SQL `HELP`,
 SQL `HANDLER`, `SELECT ... PROCEDURE`, SQL file-I/O,
 table-maintenance/key-cache administration, statement profiling, external
 backup SQL, query cache administration, optimizer trace, static SHOW
-information, process-list metadata, server utility function, Oracle SQL mode, XML SQL function, GIS
+information, process-list metadata, server utility function, Oracle SQL mode,
+XML SQL function, GIS
 SQL function, SFORMAT SQL function, JSON schema validation function, JSON table
 function, dynamic column function, SQL sequence value surface, partition, and
 foreign-key DDL commands are rejected before MariaDB execution with stable

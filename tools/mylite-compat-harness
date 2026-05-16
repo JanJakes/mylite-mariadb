@@ -91,7 +91,7 @@ group_spec() {
       echo "storage-smoke-dev|compat-application-schema|WordPress-shaped schema, installer DDL/seed fixtures, and collation matrix"
       ;;
     server-surface)
-      echo "storage-smoke-dev|compat-server-surface|Unsupported server, binlog/replication, SQL HANDLER, SQL sequence values, virtual sequence storage engine, SQL HELP, SELECT PROCEDURE, SQL file-I/O, table-maintenance/key-cache administration, user-statistics, statement profiling, optimizer trace, static SHOW information, process-list metadata, foreign-server metadata, external backup SQL, query cache administration, server utility function, Oracle SQL mode, XML SQL function, GIS SQL function, SFORMAT SQL function, JSON schema validation function, JSON table function, dynamic column function, stored-program runtime, dynamic UDF runtime, and non-table object surface policy"
+      echo "storage-smoke-dev|compat-server-surface|Unsupported server, binlog/replication, SQL HANDLER, SQL sequence values, virtual sequence storage engine, SQL HELP, SELECT PROCEDURE, SQL file-I/O, table-maintenance/key-cache administration, user-statistics, statement profiling, optimizer trace, static SHOW information, process-list metadata, routine metadata, foreign-server metadata, external backup SQL, query cache administration, server utility function, Oracle SQL mode, XML SQL function, GIS SQL function, SFORMAT SQL function, JSON schema validation function, JSON table function, dynamic column function, stored-program runtime, dynamic UDF runtime, and non-table object surface policy"
       ;;
     *)
       echo "Unknown compatibility group: $1" >&2

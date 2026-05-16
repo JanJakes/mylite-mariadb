@@ -57,6 +57,7 @@ MYLITE_WITH_QUERY_CACHE_RUNTIME=OFF
 MYLITE_WITH_OPTIMIZER_TRACE=OFF
 MYLITE_WITH_STATIC_SHOW_INFO=OFF
 MYLITE_WITH_PROCESSLIST_METADATA=OFF
+MYLITE_WITH_ROUTINE_METADATA=OFF
 MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS=OFF
 PLUGIN_AUTH_SOCKET=NO
 PLUGIN_FEEDBACK=NO
@@ -92,7 +93,8 @@ dynamic extension, server topology, engine-file maintenance, or server/client
 file, foreign-server metadata, server-observability, external physical backup,
 server-global result-cache, session profiling, optimizer diagnostics,
 static server-metadata, or process/session introspection surfaces, not core
-MyLite embedded runtime behavior.
+MyLite embedded runtime behavior. Routine metadata scans of `mysql.proc` are
+also disabled until MyLite has a catalog-backed routine design.
 The retained `sql_embedded` C++ sources are
 also compiled with
 `-fno-exceptions`; the flag is not applied to first-party MyLite code or to all
@@ -238,6 +240,14 @@ and `INFORMATION_SCHEMA.PROCESSLIST` row producers, rejects direct and prepared
 `SHOW PROCESSLIST` and `SHOW FULL PROCESSLIST` before MariaDB execution, and
 leaves `INFORMATION_SCHEMA.PROCESSLIST` visible with zero rows.
 
+The routine metadata trim reduced the default archive by a further 14,208
+bytes with the same member count. The disabled profile now sets
+`MYLITE_WITH_ROUTINE_METADATA=OFF`, compiles out the `mysql.proc` scan helpers
+behind `INFORMATION_SCHEMA.ROUTINES` and `INFORMATION_SCHEMA.PARAMETERS`,
+leaves those schema tables visible with zero rows, and makes
+`SHOW PROCEDURE STATUS` and `SHOW FUNCTION STATUS` return empty result sets
+while routine objects remain unsupported.
+
 ## Enabled Surface
 
 The profile keeps the MariaDB components needed by the current embedded
@@ -300,6 +310,9 @@ The profile explicitly disables:
   information producers
 - process-list metadata producers for `SHOW PROCESSLIST`,
   `SHOW FULL PROCESSLIST`, and `INFORMATION_SCHEMA.PROCESSLIST` rows
+- routine metadata producers for `SHOW PROCEDURE STATUS`,
+  `SHOW FUNCTION STATUS`, `INFORMATION_SCHEMA.ROUTINES`, and
+  `INFORMATION_SCHEMA.PARAMETERS` rows
 - C++ exception support in retained `sql_embedded` C++ compilation
 - socket authentication
 - feedback plugin
@@ -332,10 +345,10 @@ Measured on 2026-05-16 with the same host and toolchain as the default profile:
 | Field | Value |
 | --- | --- |
 | Archive | `build/mariadb-mylite-storage-smoke/libmysqld/libmariadbd.a` |
-| Archive size | 27,121,480 bytes / 25.87 MiB |
+| Archive size | 27,107,272 bytes / 25.85 MiB |
 | Archive members | 673 |
 
-This is 40,712 bytes smaller than the previous static SHOW information trim
+This is 14,208 bytes smaller than the previous process-list metadata trim
 storage-smoke archive with the same member count.
 
 This smoke path now covers static plugin registration, current routed schema
@@ -361,19 +374,19 @@ outputs:
 
 | Artifact | Size | Stripped Size | Members | Global Symbols |
 | --- | ---: | ---: | ---: | ---: |
-| MariaDB embedded archive | 26,940,896 bytes / 25.69 MiB | n/a | 670 | n/a |
-| MariaDB storage-smoke archive | 27,121,480 bytes / 25.87 MiB | n/a | 673 | n/a |
-| Embedded open-close smoke | 17,270,448 bytes / 16.47 MiB | 15,613,520 bytes / 14.89 MiB | n/a | 15,306 |
-| Embedded exec smoke | 17,306,344 bytes / 16.50 MiB | 15,646,504 bytes / 14.92 MiB | n/a | 15,306 |
-| Embedded statement smoke | 17,303,264 bytes / 16.50 MiB | 15,646,336 bytes / 14.92 MiB | n/a | 15,306 |
-| Embedded warning smoke | 17,270,096 bytes / 16.47 MiB | 15,613,296 bytes / 14.89 MiB | n/a | 15,306 |
-| Embedded comparison smoke | 17,376,832 bytes / 16.57 MiB | 15,664,112 bytes / 14.94 MiB | n/a | 15,308 |
-| Storage-smoke open-close smoke | 17,365,584 bytes / 16.56 MiB | 15,680,336 bytes / 14.95 MiB | n/a | 15,306 |
-| Storage-smoke exec smoke | 17,417,992 bytes / 16.61 MiB | 15,729,848 bytes / 15.00 MiB | n/a | 15,306 |
-| Storage-smoke statement smoke | 17,398,400 bytes / 16.59 MiB | 15,713,168 bytes / 14.99 MiB | n/a | 15,306 |
-| Storage-smoke warning smoke | 17,365,232 bytes / 16.56 MiB | 15,680,128 bytes / 14.95 MiB | n/a | 15,306 |
-| Storage-smoke comparison smoke | 17,467,456 bytes / 16.66 MiB | 15,730,784 bytes / 15.00 MiB | n/a | 15,308 |
-| Storage-engine smoke | 17,634,288 bytes / 16.82 MiB | 15,944,800 bytes / 15.21 MiB | n/a | 15,306 |
+| MariaDB embedded archive | 26,926,688 bytes / 25.68 MiB | n/a | 670 | n/a |
+| MariaDB storage-smoke archive | 27,107,272 bytes / 25.85 MiB | n/a | 673 | n/a |
+| Embedded open-close smoke | 17,252,480 bytes / 16.45 MiB | 15,596,352 bytes / 14.87 MiB | n/a | 15,302 |
+| Embedded exec smoke | 17,304,968 bytes / 16.50 MiB | 15,645,848 bytes / 14.92 MiB | n/a | 15,302 |
+| Embedded statement smoke | 17,285,280 bytes / 16.48 MiB | 15,629,168 bytes / 14.91 MiB | n/a | 15,302 |
+| Embedded warning smoke | 17,252,112 bytes / 16.45 MiB | 15,596,128 bytes / 14.87 MiB | n/a | 15,302 |
+| Embedded comparison smoke | 17,375,360 bytes / 16.57 MiB | 15,663,440 bytes / 14.94 MiB | n/a | 15,304 |
+| Storage-smoke open-close smoke | 17,364,128 bytes / 16.56 MiB | 15,679,696 bytes / 14.95 MiB | n/a | 15,302 |
+| Storage-smoke exec smoke | 17,400,088 bytes / 16.59 MiB | 15,712,680 bytes / 14.98 MiB | n/a | 15,302 |
+| Storage-smoke statement smoke | 17,396,928 bytes / 16.59 MiB | 15,712,512 bytes / 14.98 MiB | n/a | 15,302 |
+| Storage-smoke warning smoke | 17,363,760 bytes / 16.56 MiB | 15,679,472 bytes / 14.95 MiB | n/a | 15,302 |
+| Storage-smoke comparison smoke | 17,449,472 bytes / 16.64 MiB | 15,713,616 bytes / 14.99 MiB | n/a | 15,304 |
+| Storage-engine smoke | 17,616,304 bytes / 16.80 MiB | 15,927,616 bytes / 15.19 MiB | n/a | 15,302 |
 
 ## Offline Build Caveat
 
