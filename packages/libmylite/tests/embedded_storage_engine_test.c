@@ -1591,6 +1591,37 @@ static void test_row_dml_transactions(void) {
     );
     assert(count.rows == 1);
 
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "SAVEPOINT `quoted sp`");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (23, 'quoted-savepoint-after')");
+    assert_exec_succeeds(db, "ROLLBACK TO SAVEPOINT `quoted sp`");
+    zero_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE title = 'quoted-savepoint-after'",
+            single_value_callback,
+            &zero_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(zero_count.rows == 1);
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (23, 'quoted-savepoint-second')");
+    assert_exec_succeeds(db, "ROLLBACK TO `quoted sp`");
+    zero_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE title = 'quoted-savepoint-second'",
+            single_value_callback,
+            &zero_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(zero_count.rows == 1);
+    assert_exec_succeeds(db, "RELEASE SAVEPOINT `quoted sp`");
+    assert_exec_succeeds(db, "ROLLBACK");
+
     assert(
         mylite_prepare(
             db,
@@ -1684,6 +1715,57 @@ static void test_row_dml_transactions(void) {
         ) == MYLITE_OK
     );
     assert(count.rows == 1);
+    assert(mylite_finalize(prepared_savepoint) == MYLITE_OK);
+    assert(mylite_finalize(prepared_rollback) == MYLITE_OK);
+    assert(mylite_finalize(prepared_release) == MYLITE_OK);
+    prepared_savepoint = NULL;
+    prepared_rollback = NULL;
+    prepared_release = NULL;
+
+    assert(
+        mylite_prepare(
+            db,
+            "SAVEPOINT `prepared quoted ``sp`",
+            MYLITE_NUL_TERMINATED,
+            &prepared_savepoint,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(
+        mylite_prepare(
+            db,
+            "ROLLBACK TO `prepared quoted ``sp`",
+            MYLITE_NUL_TERMINATED,
+            &prepared_rollback,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(
+        mylite_prepare(
+            db,
+            "RELEASE SAVEPOINT `prepared quoted ``sp`",
+            MYLITE_NUL_TERMINATED,
+            &prepared_release,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert_exec_succeeds(db, "BEGIN");
+    assert(mylite_step(prepared_savepoint) == MYLITE_DONE);
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (24, 'prepared-quoted-after')");
+    assert(mylite_step(prepared_rollback) == MYLITE_DONE);
+    zero_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE title = 'prepared-quoted-after'",
+            single_value_callback,
+            &zero_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(zero_count.rows == 1);
+    assert(mylite_step(prepared_release) == MYLITE_DONE);
+    assert_exec_succeeds(db, "ROLLBACK");
     assert(mylite_finalize(prepared_savepoint) == MYLITE_OK);
     assert(mylite_finalize(prepared_rollback) == MYLITE_OK);
     assert(mylite_finalize(prepared_release) == MYLITE_OK);

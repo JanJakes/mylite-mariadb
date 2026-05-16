@@ -62,7 +62,8 @@ MariaDB-backed MyLite storage engine is available:
   non-existent prepared handle.
 
 Prepared `BEGIN`, `COMMIT`, `ROLLBACK`, `SET autocommit`, `SET TRANSACTION`,
-XA, quoted savepoint names, and transaction modifiers remain policy failures.
+XA, SQL-mode-sensitive double-quoted savepoint names, and transaction
+modifiers remain policy failures.
 
 ## Affected Subsystems
 
@@ -80,8 +81,9 @@ and full transaction rollback still unwinds all savepoints.
 
 Compatibility remains partial:
 
-- Savepoint names are still limited to the current simple unquoted identifier
-  parser.
+- Savepoint names support the current simple unquoted parser, with
+  backtick-quoted identifiers added by the later
+  [Quoted Savepoint Names](../quoted-savepoint-names/specs.md) slice.
 - Execution outside an active file-backed MyLite transaction fails explicitly.
 - Handler-level savepoint hooks and fully transactional engine flags remain
   planned.
@@ -157,6 +159,6 @@ statement branch and stored savepoint names.
   than MariaDB handler hooks. This is correct for the current non-transactional
   handler flags, but it remains a compatibility bridge until handler-level
   savepoint hooks can be implemented honestly.
-- Quoted identifiers are still outside the current savepoint parser. They
-  should be addressed with a broader SQL identifier parsing slice rather than
-  special-casing prepared statements only.
+- SQL-mode-sensitive double-quoted identifiers remain outside the current
+  savepoint parser. They should be addressed with a broader SQL-mode-aware
+  identifier parsing slice rather than special-casing prepared statements only.

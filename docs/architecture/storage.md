@@ -490,13 +490,13 @@ Repeating direct `BEGIN` or `START TRANSACTION` while a direct transaction is
 active commits the previous outer checkpoint and opens a new one, matching
 MariaDB's transaction restart behavior for this bounded row-DML scope.
 Direct savepoint control is handled by `libmylite` before MariaDB execution
-for the same bounded transaction scope: simple unquoted `SAVEPOINT` names open
-nested storage checkpoint frames, `ROLLBACK TO [SAVEPOINT]` restores the
-target snapshot and keeps the target savepoint active, and
-`RELEASE SAVEPOINT` commits the target and later nested frames while preserving
-changes. Prepared savepoint-control statements use the same MyLite-owned
-checkpoint path and can be prepared before an active transaction, but execution
-requires an active file-backed MyLite transaction.
+for the same bounded transaction scope: simple unquoted and backtick-quoted
+`SAVEPOINT` names open nested storage checkpoint frames,
+`ROLLBACK TO [SAVEPOINT]` restores the target snapshot and keeps the target
+savepoint active, and `RELEASE SAVEPOINT` commits the target and later nested
+frames while preserving changes. Prepared savepoint-control statements use the
+same MyLite-owned checkpoint path and can be prepared before an active
+transaction, but execution requires an active file-backed MyLite transaction.
 
 Checkpoints save the committed header and catalog root pages while holding the
 primary-file exclusive lock; storage APIs in the same thread borrow that locked
@@ -509,11 +509,11 @@ pages, and catalog records appended after the checkpoint are no longer visible.
 
 This is still partial SQL transaction support. The MyLite handler still
 advertises non-transactional engine flags. Public `libmylite` SQL entry points
-continue to reject quoted savepoint names, global or multi-assignment
-autocommit changes, `SET TRANSACTION`, XA, transaction modifiers, and DDL
-inside active direct transactions. Handler-level savepoint hooks,
-transactional DDL, isolation, WAL/checkpoint, and
-transactional engine-flag support remain planned.
+continue to reject SQL-mode-sensitive double-quoted savepoint names, global or
+multi-assignment autocommit changes, `SET TRANSACTION`, XA, transaction
+modifiers, and DDL inside active direct transactions. Handler-level savepoint
+hooks, transactional DDL, isolation, WAL/checkpoint, and transactional
+engine-flag support remain planned.
 
 The storage design must preserve the full write-concurrency goal. Early
 milestones may use coarse locks for correctness, but the page, transaction,

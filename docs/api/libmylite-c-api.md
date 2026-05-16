@@ -113,13 +113,13 @@ supported direct session `SET autocommit=0/1/DEFAULT` forms support row-DML
 transactions over routed MyLite tables, including nested statement rollback for
 covered failed direct and prepared row-DML statements and transaction-journal
 recovery after an unclean process exit. Direct `SAVEPOINT`,
-`ROLLBACK TO [SAVEPOINT]`, and `RELEASE SAVEPOINT` support simple unquoted
-savepoint names inside active bounded row-DML transactions, and the same
-savepoint-control statements can be prepared and reused for file-backed MyLite
-transactions. Quoted savepoint names, multi-assignment or global
-autocommit-control statements, transaction modifiers, XA, and DDL inside an
-active transaction remain unsupported until the storage and catalog transaction
-design is broader.
+`ROLLBACK TO [SAVEPOINT]`, and `RELEASE SAVEPOINT` support simple unquoted and
+backtick-quoted savepoint names inside active bounded row-DML transactions, and
+the same savepoint-control statements can be prepared and reused for
+file-backed MyLite transactions. SQL-mode-sensitive double-quoted savepoint
+names, multi-assignment or global autocommit-control statements, transaction
+modifiers, XA, and DDL inside an active transaction remain unsupported until
+the storage and catalog transaction design is broader.
 Existing-file opens preserve storage lock conflicts as
 `MYLITE_BUSY` before starting the embedded runtime.
 

@@ -1033,6 +1033,9 @@ static void test_prepare_diagnostics(void) {
     assert_prepare_savepoint_control_policy(db, "SAVEPOINT mylite_probe");
     assert_prepare_savepoint_control_policy(db, "ROLLBACK TO SAVEPOINT mylite_probe");
     assert_prepare_savepoint_control_policy(db, "RELEASE SAVEPOINT mylite_probe");
+    assert_prepare_savepoint_control_policy(db, "SAVEPOINT `quoted ``probe`");
+    assert_prepare_savepoint_control_policy(db, "ROLLBACK TO SAVEPOINT `quoted ``probe`");
+    assert_prepare_savepoint_control_policy(db, "RELEASE SAVEPOINT `quoted ``probe`");
 
     assert(
         mylite_prepare(db, "SET autocommit=0", MYLITE_NUL_TERMINATED, &stmt, NULL) == MYLITE_ERROR

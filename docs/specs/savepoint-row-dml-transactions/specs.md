@@ -4,6 +4,8 @@ Status note: this slice added direct savepoint control. The later
 [Prepared Savepoint Control](../prepared-savepoint-control/specs.md) slice
 adds prepared `SAVEPOINT`, `ROLLBACK TO [SAVEPOINT]`, and
 `RELEASE SAVEPOINT` for the same bounded file-backed transaction scope.
+The later [Quoted Savepoint Names](../quoted-savepoint-names/specs.md) slice
+adds backtick-quoted identifiers on the same MyLite-owned savepoint path.
 
 ## Problem
 
@@ -75,9 +77,9 @@ the bounded MyLite transaction scope:
   rollback, and `SET autocommit=1` unwind all active and inactive savepoint
   frames before finishing the outer transaction checkpoint.
 
-The first savepoint slice supports simple unquoted savepoint identifiers through
-the MyLite direct SQL policy parser. Broader quoted identifier compatibility can
-be added later without changing the storage model.
+This first savepoint slice supports simple unquoted savepoint identifiers
+through the MyLite direct SQL policy parser. The later quoted-name slice adds
+backtick-quoted identifier compatibility without changing the storage model.
 
 ## Affected Subsystems
 
