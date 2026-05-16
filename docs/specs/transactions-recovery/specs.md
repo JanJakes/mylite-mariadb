@@ -2,9 +2,10 @@
 
 Status note: this slice introduced rollback-journal publication and recovery.
 Later slices added statement rollback checkpoints, MariaDB statement hook
-integration, and bounded direct row-DML transactions. Savepoints, autocommit
-mode changes, transaction modifiers, XA, transactional DDL, and fully
-transactional engine flags remain outside the implemented scope.
+integration, bounded direct row-DML transactions, and supported direct session
+autocommit mode. Savepoints, global or multi-assignment autocommit changes,
+transaction modifiers, XA, transactional DDL, and fully transactional engine
+flags remain outside the implemented scope.
 
 ## Problem
 

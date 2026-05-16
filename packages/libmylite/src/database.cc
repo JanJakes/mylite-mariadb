@@ -200,6 +200,8 @@ enum class TransactionControlKind : unsigned char {
     Begin,
     Commit,
     Rollback,
+    SetAutocommitOff,
+    SetAutocommitOn,
     Unsupported,
 };
 
@@ -226,6 +228,7 @@ struct mylite_db {
     unsigned active_statements = 0;
     bool connected = false;
     bool transaction_active = false;
+    bool autocommit_disabled = false;
 };
 
 struct mylite_stmt {
@@ -380,7 +383,12 @@ bool is_online_alter_sql(std::string_view sql);
 bool is_partition_sql(std::string_view sql);
 bool is_foreign_key_sql(std::string_view sql);
 bool is_non_table_object_keyword(std::string_view token);
+TransactionControlKind direct_set_autocommit_control_kind(std::string_view sql);
+TransactionControlKind autocommit_assignment_control_kind(std::string_view assignment);
 bool is_set_transaction_control_sql(std::string_view sql);
+bool sql_token_is_autocommit_off(std::string_view token);
+bool sql_token_is_autocommit_on(std::string_view token);
+bool sql_has_statement_tail_after_semicolon(std::string_view sql);
 bool sql_rest_is_statement_end(std::string_view sql);
 bool sql_tokens_contain_file_import_function(std::string_view sql);
 bool sql_tokens_contain_file_export_marker(std::string_view sql);
@@ -511,6 +519,7 @@ int mylite_close(mylite_db *database) {
     }
 #  endif
     database->transaction_active = false;
+    database->autocommit_disabled = false;
 #endif
 
     close_connection(*database);
@@ -1397,11 +1406,42 @@ int exec_impl(
             *database,
             transaction_control == TransactionControlKind::Commit
         );
+        database->transaction_active = false;
         if (transaction_result != MYLITE_OK) {
             return copy_error_message(*database, errmsg);
         }
+        if (database->autocommit_disabled) {
+            const int restart_result = begin_direct_transaction(*database);
+            if (restart_result != MYLITE_OK) {
+                return copy_error_message(*database, errmsg);
+            }
+        }
 #  endif
-        database->transaction_active = false;
+        database->transaction_active = database->autocommit_disabled;
+    } else if (transaction_control == TransactionControlKind::SetAutocommitOff) {
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        if (!database->transaction_active) {
+            const int transaction_result = begin_direct_transaction(*database);
+            if (transaction_result != MYLITE_OK) {
+                mysql_query(&database->mysql, "SET autocommit=1");
+                return copy_error_message(*database, errmsg);
+            }
+        }
+#  endif
+        database->autocommit_disabled = true;
+        database->transaction_active = true;
+    } else if (transaction_control == TransactionControlKind::SetAutocommitOn) {
+        if (database->autocommit_disabled) {
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+            const int transaction_result = finish_direct_transaction(*database, true);
+            database->transaction_active = false;
+            if (transaction_result != MYLITE_OK) {
+                return copy_error_message(*database, errmsg);
+            }
+#  endif
+            database->autocommit_disabled = false;
+            database->transaction_active = false;
+        }
     }
     return MYLITE_OK;
 #endif
@@ -3006,11 +3046,105 @@ TransactionControlKind direct_transaction_control_kind(std::string_view sql) {
                                                      : TransactionControlKind::None;
     }
 
-    if (sql_token_equals(first, "SET") && is_set_transaction_control_sql(after_first)) {
-        return TransactionControlKind::Unsupported;
+    if (sql_token_equals(first, "SET")) {
+        const TransactionControlKind autocommit_control =
+            direct_set_autocommit_control_kind(after_first);
+        if (autocommit_control != TransactionControlKind::None) {
+            return autocommit_control;
+        }
+        if (is_set_transaction_control_sql(after_first)) {
+            return TransactionControlKind::Unsupported;
+        }
     }
 
     return TransactionControlKind::None;
+}
+
+TransactionControlKind direct_set_autocommit_control_kind(std::string_view sql) {
+    const bool has_statement_tail = sql_has_statement_tail_after_semicolon(sql);
+    TransactionControlKind result = TransactionControlKind::None;
+    unsigned assignment_count = 0;
+
+    while (!skip_sql_leading_noise(sql).empty()) {
+        std::string_view assignment = pop_sql_set_assignment(sql);
+        if (skip_sql_leading_noise(assignment).empty()) {
+            return result;
+        }
+
+        ++assignment_count;
+        const TransactionControlKind assignment_result =
+            autocommit_assignment_control_kind(assignment);
+        if (assignment_result == TransactionControlKind::Unsupported) {
+            return TransactionControlKind::Unsupported;
+        }
+        if (assignment_result == TransactionControlKind::None) {
+            continue;
+        }
+        if (result != TransactionControlKind::None) {
+            return TransactionControlKind::Unsupported;
+        }
+        result = assignment_result;
+    }
+
+    if (result == TransactionControlKind::None) {
+        return TransactionControlKind::None;
+    }
+    if (has_statement_tail) {
+        return TransactionControlKind::Unsupported;
+    }
+    return assignment_count == 1U ? result : TransactionControlKind::Unsupported;
+}
+
+TransactionControlKind autocommit_assignment_control_kind(std::string_view assignment) {
+    assignment = skip_sql_leading_noise(assignment);
+    if (assignment.empty()) {
+        return TransactionControlKind::None;
+    }
+
+    bool system_variable = false;
+    if (assignment.front() == '@') {
+        assignment.remove_prefix(1);
+        if (assignment.empty() || assignment.front() != '@') {
+            return TransactionControlKind::None;
+        }
+        assignment.remove_prefix(1);
+        system_variable = true;
+    }
+
+    std::string_view token = pop_sql_token_after_separators(assignment);
+    if (sql_token_equals(token, "GLOBAL")) {
+        std::string_view next = pop_sql_token_after_separators(assignment);
+        return sql_token_equals(next, "AUTOCOMMIT") ? TransactionControlKind::Unsupported
+                                                    : TransactionControlKind::None;
+    }
+    if (sql_token_equals(token, "LOCAL") || sql_token_equals(token, "SESSION")) {
+        token = pop_sql_token_after_separators(assignment);
+    } else if (system_variable && !sql_token_equals(token, "AUTOCOMMIT")) {
+        return TransactionControlKind::None;
+    }
+
+    if (!sql_token_equals(token, "AUTOCOMMIT")) {
+        return TransactionControlKind::None;
+    }
+
+    assignment = skip_sql_leading_noise(assignment);
+    if (assignment.empty() || assignment.front() != '=') {
+        return TransactionControlKind::Unsupported;
+    }
+    assignment.remove_prefix(1);
+    assignment = skip_sql_leading_noise(assignment);
+
+    const std::string_view value = pop_sql_token(assignment);
+    if (value.empty() || !sql_rest_is_statement_end(assignment)) {
+        return TransactionControlKind::Unsupported;
+    }
+    if (sql_token_is_autocommit_off(value)) {
+        return TransactionControlKind::SetAutocommitOff;
+    }
+    if (sql_token_is_autocommit_on(value)) {
+        return TransactionControlKind::SetAutocommitOn;
+    }
+    return TransactionControlKind::Unsupported;
 }
 
 bool is_set_transaction_control_sql(std::string_view sql) {
@@ -3026,6 +3160,59 @@ bool is_set_transaction_control_sql(std::string_view sql) {
 
     const std::string_view second = pop_sql_token_after_separators(sql);
     return sql_token_equals(second, "AUTOCOMMIT") || sql_token_equals(second, "TRANSACTION");
+}
+
+bool sql_token_is_autocommit_off(std::string_view token) {
+    return sql_token_equals(token, "0") || sql_token_equals(token, "OFF") ||
+           sql_token_equals(token, "FALSE");
+}
+
+bool sql_token_is_autocommit_on(std::string_view token) {
+    return sql_token_equals(token, "1") || sql_token_equals(token, "ON") ||
+           sql_token_equals(token, "TRUE");
+}
+
+bool sql_has_statement_tail_after_semicolon(std::string_view sql) {
+    while (!sql.empty()) {
+        if (sql.front() == '\'' || sql.front() == '"' || sql.front() == '`') {
+            skip_sql_quoted_span(sql, sql.front());
+            continue;
+        }
+
+        if (sql.size() >= 2U && sql[0] == '-' && sql[1] == '-') {
+            const std::size_t newline = sql.find('\n');
+            if (newline == std::string_view::npos) {
+                return false;
+            }
+            sql.remove_prefix(newline + 1U);
+            continue;
+        }
+
+        if (sql.front() == '#') {
+            const std::size_t newline = sql.find('\n');
+            if (newline == std::string_view::npos) {
+                return false;
+            }
+            sql.remove_prefix(newline + 1U);
+            continue;
+        }
+
+        if (sql.size() >= 2U && sql[0] == '/' && sql[1] == '*') {
+            const std::size_t end = sql.find("*/");
+            if (end == std::string_view::npos) {
+                return false;
+            }
+            sql.remove_prefix(end + 2U);
+            continue;
+        }
+
+        if (sql.front() == ';') {
+            sql.remove_prefix(1);
+            return !skip_sql_leading_noise(sql).empty();
+        }
+        sql.remove_prefix(1);
+    }
+    return false;
 }
 
 bool sql_rest_is_statement_end(std::string_view sql) {

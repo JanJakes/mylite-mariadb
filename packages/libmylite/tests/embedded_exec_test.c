@@ -1273,14 +1273,24 @@ static void test_transaction_control_policy(void) {
     assert(mylite_exec(db, "BEGIN WORK", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "COMMIT WORK", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_exec(db, "ROLLBACK WORK", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SET autocommit=0", NULL, NULL, NULL) == MYLITE_OK);
+    assert_transaction_control_exec_fails(db, "START TRANSACTION");
+    assert(mylite_exec(db, "ROLLBACK", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SET @@session.autocommit=1", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SET SESSION autocommit=OFF", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SET LOCAL autocommit=TRUE", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SET @@autocommit=0", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "SET autocommit=ON", NULL, NULL, NULL) == MYLITE_OK);
     assert_transaction_control_exec_fails(db, "COMMIT AND CHAIN");
     assert_transaction_control_exec_fails(db, "START TRANSACTION READ WRITE");
     assert_transaction_control_exec_fails(db, "SAVEPOINT mylite_probe");
     assert_transaction_control_exec_fails(db, "ROLLBACK TO SAVEPOINT mylite_probe");
     assert_transaction_control_exec_fails(db, "RELEASE SAVEPOINT mylite_probe");
-    assert_transaction_control_exec_fails(db, "SET autocommit=0");
-    assert_transaction_control_exec_fails(db, "SET @@autocommit=0");
-    assert_transaction_control_exec_fails(db, "SET @@session.autocommit=0");
+    assert_transaction_control_exec_fails(db, "SET GLOBAL autocommit=0");
+    assert_transaction_control_exec_fails(db, "SET @@global.autocommit=0");
+    assert_transaction_control_exec_fails(db, "SET autocommit=DEFAULT");
+    assert_transaction_control_exec_fails(db, "SET autocommit=0, sql_mode='ANSI'");
+    assert_transaction_control_exec_fails(db, "SET autocommit=0; SELECT 1");
     assert_transaction_control_exec_fails(db, "SET TRANSACTION ISOLATION LEVEL READ COMMITTED");
     assert_transaction_control_exec_fails(db, "XA START 'mylite-xid'");
     assert(

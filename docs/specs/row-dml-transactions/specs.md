@@ -1,5 +1,11 @@
 # Row-DML Transactions
 
+Status note: this slice added direct `BEGIN`, `COMMIT`, and `ROLLBACK` support
+for bounded row-DML transactions. The later
+[Autocommit Row-DML Transactions](../autocommit-row-dml-transactions/specs.md)
+slice adds supported direct session `SET autocommit=0/1` forms for the same
+checkpoint-backed scope.
+
 ## Problem
 
 MyLite has statement checkpoints and MariaDB statement transaction hooks, but

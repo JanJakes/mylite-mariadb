@@ -471,14 +471,15 @@ the checkpoint from MariaDB's statement commit/rollback hooks. DDL and catalog
 paths that do not reliably enter `external_lock()` keep the outer `libmylite`
 checkpoint before MariaDB execution.
 
-Direct `libmylite` `BEGIN` / `COMMIT` / `ROLLBACK` support is limited to
-row-DML transactions over routed MyLite tables. `libmylite` opens an outer
-storage checkpoint for the direct transaction. Row-DML statements inside that
-transaction use `libmylite`-owned nested statement checkpoints so failed direct
-or prepared statements can roll back their own partial writes while preserving
-earlier transaction changes; the handler skips duplicate statement checkpoints
-while an outer `libmylite` checkpoint is active. `COMMIT` releases the outer
-checkpoint, `ROLLBACK`
+Direct `libmylite` `BEGIN` / `COMMIT` / `ROLLBACK` and supported direct
+session `SET autocommit=0/1` support is limited to row-DML transactions over
+routed MyLite tables. `libmylite` opens an outer storage checkpoint for the
+direct transaction. Row-DML statements inside that transaction use
+`libmylite`-owned nested statement checkpoints so failed direct or prepared
+statements can roll back their own partial writes while preserving earlier
+transaction changes; the handler skips duplicate statement checkpoints while
+an outer `libmylite` checkpoint is active. `COMMIT` or `SET autocommit=1`
+releases the outer checkpoint, `ROLLBACK`
 restores it, and closing a database handle with an active direct transaction
 rolls it back before closing the embedded MariaDB connection.
 
@@ -490,10 +491,11 @@ pages, and catalog records appended after the checkpoint are no longer visible.
 
 This is still partial SQL transaction support. The MyLite handler still
 advertises non-transactional engine flags. Public `libmylite` SQL entry points
-continue to reject savepoints, rollback-to-savepoint, `SET autocommit`,
-`SET TRANSACTION`, XA, transaction modifiers, and DDL inside active direct
-transactions. Full savepoint, autocommit-mode, transactional DDL, isolation,
-WAL/checkpoint, and transactional engine-flag support remains planned.
+continue to reject savepoints, rollback-to-savepoint, global or
+multi-assignment autocommit changes, `SET TRANSACTION`, XA, transaction
+modifiers, and DDL inside active direct transactions. Full savepoint,
+transactional DDL, isolation, WAL/checkpoint, and transactional engine-flag
+support remains planned.
 
 The storage design must preserve the full write-concurrency goal. Early
 milestones may use coarse locks for correctness, but the page, transaction,

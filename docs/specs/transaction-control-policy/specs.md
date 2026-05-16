@@ -2,9 +2,11 @@
 
 Status note: this slice was the earlier fail-closed policy. The later
 [Row-DML Transactions](../row-dml-transactions/specs.md) slice allows direct
-`BEGIN`, `COMMIT`, and `ROLLBACK` for bounded row-DML transactions while
-keeping savepoints, autocommit mode changes, transaction modifiers, XA, and
-transactional DDL rejected.
+`BEGIN`, `COMMIT`, and `ROLLBACK` for bounded row-DML transactions, and the
+later [Autocommit Row-DML Transactions](../autocommit-row-dml-transactions/specs.md)
+slice allows supported direct session `SET autocommit=0/1` forms. Savepoints,
+global or multi-assignment autocommit changes, transaction modifiers, XA, and
+transactional DDL remain rejected.
 
 ## Problem
 
@@ -15,9 +17,9 @@ misleading for routed `ENGINE=InnoDB` workloads: MariaDB can accept the control
 statement while MyLite table writes still publish outside a SQL transaction.
 
 This slice rejected explicit SQL transaction-control surfaces through the
-public MyLite SQL entry points until later work added a bounded direct
-row-DML transaction surface. Savepoints, autocommit mode changes, transaction
-modifiers, XA, and transactional DDL remain rejected.
+public MyLite SQL entry points until later work added bounded direct row-DML
+transaction surfaces. Savepoints, global or multi-assignment autocommit changes,
+transaction modifiers, XA, and transactional DDL remain rejected.
 
 ## Source Findings
 
@@ -63,10 +65,11 @@ Base authority: MariaDB 11.8.6, initial import ref
 This earlier slice made SQL transaction control explicit and test-backed
 instead of accidentally permissive. Later row-DML transaction work allows plain
 direct `BEGIN`, `COMMIT`, and `ROLLBACK` for a bounded MyLite-owned checkpoint
-scope, but the broader policy remains intentionally less permissive than
-MariaDB's behavior with non-transactional engines because MyLite routes
-`ENGINE=InnoDB` to the MyLite handler and must not imply full InnoDB rollback
-semantics until the handler is transaction-aware.
+scope, and later supported session autocommit forms use the same checkpoint
+scope. The broader policy remains intentionally less permissive than MariaDB's
+behavior with non-transactional engines because MyLite routes `ENGINE=InnoDB`
+to the MyLite handler and must not imply full InnoDB rollback semantics until
+the handler is transaction-aware.
 
 ## DDL Metadata Routing Impact
 

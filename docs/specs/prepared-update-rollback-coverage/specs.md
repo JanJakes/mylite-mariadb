@@ -40,9 +40,10 @@ direct row DML: if a prepared update fails on a later duplicate-key conflict,
 no earlier row or index updates from that statement remain visible.
 
 This remains partial compatibility. MyLite now covers direct row-DML
-transactions in a later slice, but still rejects savepoints, autocommit mode
-changes, transaction modifiers, XA, transactional DDL, and does not claim
-isolation levels or crash-safe logical undo for failed statements interrupted
+transactions and supported direct session autocommit mode in later slices, but
+still rejects savepoints, global or multi-assignment autocommit changes,
+transaction modifiers, XA, transactional DDL, and does not claim isolation
+levels or crash-safe logical undo for failed statements interrupted
 mid-rollback.
 
 ## Design

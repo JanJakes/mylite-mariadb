@@ -1161,10 +1161,11 @@ static void test_transaction_and_foreign_key_policies(void) {
         "CREATE TABLE posts (id INT PRIMARY KEY, title VARCHAR(64)) ENGINE=InnoDB"
     );
 
-    assert_transaction_control_exec_fails(db, "SET autocommit=0");
     assert_transaction_control_exec_fails(db, "SAVEPOINT mylite_probe");
     assert_transaction_control_exec_fails(db, "COMMIT AND CHAIN");
     assert_transaction_control_exec_fails(db, "START TRANSACTION READ WRITE");
+    assert_transaction_control_exec_fails(db, "SET GLOBAL autocommit=0");
+    assert_transaction_control_exec_fails(db, "SET autocommit=DEFAULT");
     assert_locking_sql_exec_fails(db, "LOCK TABLES posts WRITE");
     assert_locking_sql_exec_fails(db, "UNLOCK TABLES");
     assert_locking_sql_exec_fails(db, "SELECT id FROM posts FOR UPDATE");
@@ -1401,6 +1402,59 @@ static void test_row_dml_transactions(void) {
     assert(count.rows == 1);
     assert_exec_succeeds(db, "ROLLBACK");
 
+    assert_exec_succeeds(db, "SET autocommit=0");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (3, 'autocommit-rollback')");
+    assert_exec_succeeds(db, "ROLLBACK");
+    zero_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE title = 'autocommit-rollback'",
+            single_value_callback,
+            &zero_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(zero_count.rows == 1);
+
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (3, 'autocommit-commit')");
+    assert_exec_succeeds(db, "COMMIT");
+    count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE id = 3 AND title = 'autocommit-commit'",
+            single_value_callback,
+            &count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(count.rows == 1);
+
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (4, 'autocommit-on-commit')");
+    assert_exec_succeeds(db, "SET @@session.autocommit=1");
+    count = (single_value_context){.expected_value = "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE id = 4 AND title = 'autocommit-on-commit'",
+            single_value_callback,
+            &count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(count.rows == 1);
+
+    assert_exec_succeeds(db, "SET SESSION autocommit=OFF");
+    assert_exec_fails_with_message(
+        db,
+        "ALTER TABLE tx_posts ADD COLUMN blocked_autocommit_ddl INT",
+        "transactional DDL"
+    );
+    assert_transaction_control_exec_fails(db, "SET GLOBAL autocommit=0");
+    assert_transaction_control_exec_fails(db, "SET autocommit=0, sql_mode='ANSI'");
+    assert_exec_succeeds(db, "SET autocommit=ON");
+
     assert_exec_succeeds(db, "BEGIN");
     assert_exec_fails_with_message(
         db,
@@ -1411,7 +1465,6 @@ static void test_row_dml_transactions(void) {
     assert_transaction_control_exec_fails(db, "SAVEPOINT mylite_probe");
     assert_transaction_control_exec_fails(db, "ROLLBACK TO SAVEPOINT mylite_probe");
     assert_transaction_control_exec_fails(db, "RELEASE SAVEPOINT mylite_probe");
-    assert_transaction_control_exec_fails(db, "SET autocommit=0");
     assert_transaction_control_exec_fails(db, "XA START 'mylite-xid'");
     assert_exec_succeeds(db, "ROLLBACK");
 
@@ -1432,7 +1485,31 @@ static void test_row_dml_transactions(void) {
         ) == MYLITE_OK
     );
     assert(zero_count.rows == 1);
-    count = (single_value_context){.expected_value = "2"};
+    count = (single_value_context){.expected_value = "4"};
+    assert(
+        mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
+        MYLITE_OK
+    );
+    assert(count.rows == 1);
+
+    assert_exec_succeeds(db, "SET autocommit=0");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (5, 'autocommit-close-rollback')");
+    assert(mylite_close(db) == MYLITE_OK);
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE tx_app");
+    zero_count = (single_value_context){.expected_value = "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM tx_posts WHERE title = 'autocommit-close-rollback'",
+            single_value_callback,
+            &zero_count,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(zero_count.rows == 1);
+    count = (single_value_context){.expected_value = "4"};
     assert(
         mylite_exec(db, "SELECT COUNT(*) FROM tx_posts", single_value_callback, &count, NULL) ==
         MYLITE_OK
