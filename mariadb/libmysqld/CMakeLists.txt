@@ -183,6 +183,13 @@ ELSE()
   SET(MYLITE_FOREIGN_SERVER_METADATA_SOURCE ../sql/mylite_sql_servers_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_BACKUP_RUNTIME "Build external backup SQL runtime" ON)
+IF(MYLITE_WITH_BACKUP_RUNTIME)
+  SET(MYLITE_BACKUP_RUNTIME_SOURCE ../sql/backup.cc)
+ELSE()
+  SET(MYLITE_BACKUP_RUNTIME_SOURCE ../sql/mylite_backup_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_EMBEDDED_SQL_EXCEPTIONS "Compile embedded SQL with C++ exceptions" ON)
 
 SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc 
@@ -284,7 +291,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ${MYLITE_SEQUENCE_SOURCES} ../sql/sql_sequence.h
            ../sql/ha_sequence.h
            ../sql/temporary_tables.cc
-           ../sql/proxy_protocol.cc ../sql/backup.cc
+           ../sql/proxy_protocol.cc ${MYLITE_BACKUP_RUNTIME_SOURCE}
            ../sql/sql_tvc.cc ../sql/sql_tvc.h
            ../sql/opt_split.cc
            ../sql/rowid_filter.cc ../sql/rowid_filter.h

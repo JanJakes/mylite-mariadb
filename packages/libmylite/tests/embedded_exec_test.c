@@ -23,6 +23,7 @@ static void test_statement_effects(void);
 static void test_callback_abort(void);
 static void test_syntax_error_diagnostics(void);
 static void test_server_surfaces_are_disabled(void);
+static void test_backup_sql_is_rejected(void);
 static void test_table_maintenance_sql_is_rejected(void);
 static void test_sql_handler_commands_are_rejected(void);
 static void test_help_command_is_rejected(void);
@@ -48,6 +49,7 @@ static void test_partition_policy_is_rejected(void);
 static void assert_variable_value(mylite_db *db, const char *name, const char *value);
 static void assert_variable_value_or_missing(mylite_db *db, const char *name, const char *value);
 static void assert_exec_fails(mylite_db *db, const char *sql);
+static void assert_backup_exec_fails(mylite_db *db, const char *sql);
 static void assert_table_maintenance_exec_fails(mylite_db *db, const char *sql);
 static void assert_sql_handler_exec_fails(mylite_db *db, const char *sql);
 static void assert_help_command_exec_fails(mylite_db *db, const char *sql);
@@ -87,6 +89,7 @@ int main(void) {
     test_callback_abort();
     test_syntax_error_diagnostics();
     test_server_surfaces_are_disabled();
+    test_backup_sql_is_rejected();
     test_table_maintenance_sql_is_rejected();
     test_sql_handler_commands_are_rejected();
     test_help_command_is_rejected();
@@ -259,6 +262,49 @@ static void test_server_surfaces_are_disabled(void) {
     assert_exec_fails(db, "ALTER SERVER mylite_probe_server OPTIONS (HOST '127.0.0.1')");
     assert_exec_fails(db, "DROP SERVER IF EXISTS mylite_probe_server");
     assert_exec_fails(db, "SHOW CREATE SERVER mylite_probe_server");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_backup_sql_is_rejected(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "USE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(
+            db,
+            "CREATE TEMPORARY TABLE backup_probe (id INT NOT NULL PRIMARY KEY)",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+
+    assert_backup_exec_fails(db, "BACKUP STAGE START");
+    assert_backup_exec_fails(db, "BACKUP STAGE FLUSH");
+    assert_backup_exec_fails(db, "BACKUP STAGE BLOCK_DDL");
+    assert_backup_exec_fails(db, "BACKUP STAGE BLOCK_COMMIT");
+    assert_backup_exec_fails(db, "BACKUP STAGE END");
+    assert_backup_exec_fails(db, "BACKUP LOCK backup_probe");
+    assert_backup_exec_fails(db, "BACKUP UNLOCK");
+    assert_backup_exec_fails(db, "/*! BACKUP STAGE START */");
+    assert_backup_exec_fails(db, "/*!50600 BACKUP LOCK backup_probe */");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT 'BACKUP STAGE START' AS backup_stage_text, "
+            "'BACKUP LOCK backup_probe' AS backup_lock_text",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
 
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);
@@ -1001,6 +1047,18 @@ static void assert_exec_fails(mylite_db *db, const char *sql) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
     assert(strstr(errmsg, "server-oriented") != NULL);
+    mylite_free(errmsg);
+}
+
+static void assert_backup_exec_fails(mylite_db *db, const char *sql) {
+    char *errmsg = NULL;
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(errmsg != NULL);
+    assert(strstr(errmsg, "external backup") != NULL);
     mylite_free(errmsg);
 }
 

@@ -325,6 +325,7 @@ mylite_warning_level map_warning_level(const char *level);
 std::string field_string(const char *value, unsigned int length);
 const char *unsupported_sql_surface_message(std::string_view sql);
 bool is_server_surface_sql(std::string_view sql);
+bool is_backup_sql(std::string_view sql);
 bool is_table_maintenance_sql(std::string_view sql);
 bool is_sql_handler_command_sql(std::string_view sql);
 bool is_help_command_sql(std::string_view sql);
@@ -2025,6 +2026,9 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_server_surface_sql(sql)) {
         return "unsupported server-oriented SQL surface";
     }
+    if (is_backup_sql(sql)) {
+        return "unsupported external backup SQL surface";
+    }
     if (is_table_maintenance_sql(sql)) {
         return "unsupported table-maintenance SQL surface";
     }
@@ -2157,6 +2161,11 @@ bool is_server_surface_sql(std::string_view sql) {
     }
 
     return false;
+}
+
+bool is_backup_sql(std::string_view sql) {
+    std::string_view first;
+    return pop_sql_scanned_token(sql, first) && sql_token_equals(first, "BACKUP");
 }
 
 bool is_table_maintenance_sql(std::string_view sql) {

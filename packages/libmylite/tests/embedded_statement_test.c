@@ -419,6 +419,10 @@ static void test_prepare_diagnostics(void) {
         "SHOW CREATE SERVER mylite_probe_server",
         "server-oriented"
     );
+    assert_prepare_fails_with_message(db, "BACKUP STAGE START", "external backup");
+    assert_prepare_fails_with_message(db, "BACKUP STAGE BLOCK_COMMIT", "external backup");
+    assert_prepare_fails_with_message(db, "BACKUP LOCK backup_probe", "external backup");
+    assert_prepare_fails_with_message(db, "BACKUP UNLOCK", "external backup");
 
     assert_prepare_fails_with_message(db, "CHECK TABLE maintenance_probe", "table-maintenance");
     assert_prepare_fails_with_message(db, "ANALYZE TABLE maintenance_probe", "table-maintenance");

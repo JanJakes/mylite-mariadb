@@ -181,6 +181,13 @@ ELSE()
   SET(MYLITE_FOREIGN_SERVER_METADATA_SOURCE mylite_sql_servers_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_BACKUP_RUNTIME "Build external backup SQL runtime" ON)
+IF(MYLITE_WITH_BACKUP_RUNTIME)
+  SET(MYLITE_BACKUP_RUNTIME_SOURCE backup.cc)
+ELSE()
+  SET(MYLITE_BACKUP_RUNTIME_SOURCE mylite_backup_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_ORACLE_SQL_MODE "Build Oracle SQL mode parser" ON)
 IF(MYLITE_WITH_ORACLE_SQL_MODE)
   SET(MYLITE_ORACLE_PARSER_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/yy_oracle.cc)
@@ -284,7 +291,7 @@ SET (SQL_SOURCE
                opt_trace.cc
                table_cache.cc encryption.cc temporary_tables.cc
                ${MYLITE_JSON_TABLE_SOURCE}
-               proxy_protocol.cc backup.cc xa.cc
+               proxy_protocol.cc ${MYLITE_BACKUP_RUNTIME_SOURCE} xa.cc
                socketpair.c socketpair.h
                opt_vcol_substitution.h
                opt_vcol_substitution.cc
