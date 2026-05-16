@@ -61,8 +61,16 @@
 #define MYLITE_WITH_BINLOG_SYSVARS 1
 #endif
 
+#ifndef MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE
+#define MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE 1
+#endif
+
 #if defined(EMBEDDED_LIBRARY) && !MYLITE_WITH_BINLOG_SYSVARS
 #define MYLITE_OMIT_BINLOG_SYSVARS 1
+#endif
+
+#if !MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE
+#define MYLITE_OMIT_NATIVE_MYISAM_SYSVARS 1
 #endif
 
 #ifdef WITH_PERFSCHEMA_STORAGE_ENGINE
@@ -1060,11 +1068,13 @@ static Sys_var_mybool Sys_column_compression_zlib_wrap(
        SESSION_VAR(column_compression_zlib_wrap), CMD_LINE(OPT_ARG),
        DEFAULT(FALSE));
 
+#ifndef MYLITE_OMIT_NATIVE_MYISAM_SYSVARS
 static const char *concurrent_insert_names[]= {"NEVER", "AUTO", "ALWAYS", 0};
 static Sys_var_enum Sys_concurrent_insert(
        "concurrent_insert", "Use concurrent insert with MyISAM",
        GLOBAL_VAR(myisam_concurrent_insert), CMD_LINE(OPT_ARG),
        concurrent_insert_names, DEFAULT(1));
+#endif
 
 static Sys_var_on_access_global<Sys_var_ulong,
                                 PRIV_SET_SYSTEM_GLOBAL_VAR_CONNECT_TIMEOUT>
@@ -1092,6 +1102,7 @@ static Sys_var_dbug Sys_debug_dbug(
        ON_CHECK(check_has_super));
 #endif
 
+#ifndef MYLITE_OMIT_NATIVE_MYISAM_SYSVARS
 /**
   @todo
     When updating myisam_delay_key_write, we should do a 'flush tables'
@@ -1134,6 +1145,7 @@ static Sys_var_enum Sys_delay_key_write(
        delay_key_write_names, DEFAULT(DELAY_KEY_WRITE_ON),
        NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0),
        ON_UPDATE(fix_delay_key_write));
+#endif
 
 static Sys_var_ulong Sys_delayed_insert_limit(
        "delayed_insert_limit",
@@ -1350,10 +1362,12 @@ Sys_slave_connections_needed_for_purge(
 #endif
 
 
+#ifndef MYLITE_OMIT_NATIVE_MYISAM_SYSVARS
 static Sys_var_mybool Sys_flush(
        "flush", "Flush MyISAM tables to disk between SQL commands",
        GLOBAL_VAR(myisam_flush),
        CMD_LINE(OPT_ARG), DEFAULT(FALSE));
+#endif
 
 static Sys_var_ulong Sys_flush_time(
        "flush_time",

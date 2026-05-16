@@ -109,7 +109,13 @@
 #include "mysql_com_server.h"
 
 #include "keycaches.h"
+#ifndef MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE
+#define MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE 1
+#endif
+
+#if MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE
 #include "../storage/myisam/ha_myisam.h"
+#endif
 #include "set_var.h"
 
 #include "rpl_injector.h"
@@ -4090,6 +4096,8 @@ static int init_common_variables()
   */
 #if defined(WITH_INNOBASE_STORAGE_ENGINE)
   default_storage_engine= const_cast<char *>("InnoDB");
+#elif !MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE
+  default_storage_engine= const_cast<char *>("Aria");
 #else
   default_storage_engine= const_cast<char *>("MyISAM");
 #endif
@@ -5674,8 +5682,10 @@ static int init_server_components()
     unireg_abort(1);
   ha_signal_ddl_recovery_done();
 
+#if MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE
   if (opt_myisam_log)
     (void) mi_log(1);
+#endif
 
 #if defined(HAVE_MLOCKALL) && defined(MCL_CURRENT) && !defined(EMBEDDED_LIBRARY)
   if (locked_in_memory)
@@ -6843,9 +6853,11 @@ struct my_option my_long_options[]=
    "Path to file used for recovery of DDL statements after a crash",
    &opt_ddl_recovery_file, &opt_ddl_recovery_file, 0, GET_STR,
    REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+#if MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE
   {"log-isam", OPT_ISAM_LOG, "Log all MyISAM changes to file",
    &myisam_log_filename, &myisam_log_filename, 0, GET_STR,
    OPT_ARG, 0, 0, 0, 0, 0, 0},
+#endif
   {"log-short-format", 0,
    "Don't log extra information to update and slow-query logs",
    &opt_short_log_format, &opt_short_log_format,
@@ -8341,9 +8353,11 @@ mysqld_get_one_option(const struct my_option *opt, const char *argument,
   case OPT_SECURE_AUTH:
     warn_deprecated<1006>("--secure-auth");
     break;
+#if MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE
   case (int) OPT_ISAM_LOG:
     opt_myisam_log=1;
     break;
+#endif
   case (int) OPT_BIN_LOG:
     opt_bin_log= MY_TEST(argument != disabled_my_option);
     opt_bin_log_used= 1;
@@ -8485,7 +8499,9 @@ mysqld_get_one_option(const struct my_option *opt, const char *argument,
   case (int) OPT_SAFE:
     opt_specialflag|= SPECIAL_SAFE_MODE | SPECIAL_NO_NEW_FUNC;
     SYSVAR_AUTOSIZE(delay_key_write_options, (uint) DELAY_KEY_WRITE_NONE);
+#if MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE
     myisam_recover_options= HA_RECOVER_DEFAULT;
+#endif
     ha_open_options&= ~(HA_OPEN_DELAY_KEY_WRITE);
     SYSVAR_AUTOSIZE(query_cache_size, 0);
     break;
@@ -8913,8 +8929,10 @@ static int get_options(int *argc_ptr, char ***argv_ptr)
   if (opt_skip_show_db)
     opt_specialflag|= SPECIAL_SKIP_SHOW_DB;
 
+#if MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE
   if (myisam_flush)
     flush_time= 0;
+#endif
 
 #ifdef HAVE_REPLICATION
   if (init_slave_skip_errors(opt_slave_skip_errors))
@@ -8973,7 +8991,9 @@ static int get_options(int *argc_ptr, char ***argv_ptr)
     test_flags&= ~TEST_CORE_ON_SIGNAL;
   }
   /* Set global MyISAM variables from delay_key_write_options */
+#if MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE
   fix_delay_key_write(0, 0, OPT_GLOBAL);
+#endif
 
 #ifndef EMBEDDED_LIBRARY
   if (mysqld_chroot)
@@ -8990,7 +9010,10 @@ static int get_options(int *argc_ptr, char ***argv_ptr)
     Set some global variables from the global_system_variables
     In most cases the global variables will not be used
   */
-  my_disable_locking= myisam_single_user= MY_TEST(opt_external_locking == 0);
+  my_disable_locking= MY_TEST(opt_external_locking == 0);
+#if MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE
+  myisam_single_user= my_disable_locking;
+#endif
   my_default_record_cache_size=global_system_variables.read_buff_size;
 
   /*

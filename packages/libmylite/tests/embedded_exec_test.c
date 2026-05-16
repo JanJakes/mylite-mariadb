@@ -18,6 +18,11 @@ typedef struct variable_context {
     int rows;
 } variable_context;
 
+typedef struct engine_context {
+    const char *name;
+    int rows;
+} engine_context;
+
 typedef struct scalar_context {
     const char *column_name;
     const char *value;
@@ -71,6 +76,7 @@ static void test_partition_policy_is_rejected(void);
 static void assert_variable_value(mylite_db *db, const char *name, const char *value);
 static void assert_variable_value_or_missing(mylite_db *db, const char *name, const char *value);
 static void assert_variable_missing(mylite_db *db, const char *name);
+static void assert_engine_missing(mylite_db *db, const char *name);
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_backup_exec_fails(mylite_db *db, const char *sql);
 static void assert_query_cache_exec_fails(mylite_db *db, const char *sql);
@@ -116,6 +122,7 @@ static int abort_callback(void *ctx, int column_count, char **values, char **col
 static int count_only_callback(void *ctx, int column_count, char **values, char **column_names);
 static int variable_callback(void *ctx, int column_count, char **values, char **column_names);
 static int variable_name_callback(void *ctx, int column_count, char **values, char **column_names);
+static int engine_name_callback(void *ctx, int column_count, char **values, char **column_names);
 static mylite_db *open_database(const char *root, char **filename);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
@@ -292,6 +299,11 @@ static void test_server_surfaces_are_disabled(void) {
     assert_variable_missing(db, "gtid_binlog_state");
     assert_variable_missing(db, "relay_log");
     assert_variable_missing(db, "replicate_do_db");
+    assert_variable_missing(db, "concurrent_insert");
+    assert_variable_missing(db, "delay_key_write");
+    assert_variable_missing(db, "flush");
+    assert_engine_missing(db, "MyISAM");
+    assert_engine_missing(db, "MRG_MyISAM");
 
     assert_exec_fails(db, "CREATE USER 'mylite_probe'@'localhost' IDENTIFIED BY 'secret'");
     assert_exec_fails(db, "GRANT SELECT ON *.* TO 'mylite_probe'@'localhost'");
@@ -1860,6 +1872,19 @@ static void assert_variable_missing(mylite_db *db, const char *name) {
     assert(ctx.rows == 0);
 }
 
+static void assert_engine_missing(mylite_db *db, const char *name) {
+    engine_context ctx = {
+        .name = name,
+        .rows = 0,
+    };
+
+    assert(mylite_exec(db, "SHOW ENGINES", engine_name_callback, &ctx, NULL) == MYLITE_OK);
+    if (ctx.rows != 0) {
+        fprintf(stderr, "engine unexpectedly present: %s rows=%d\n", name, ctx.rows);
+    }
+    assert(ctx.rows == 0);
+}
+
 static void assert_exec_fails(mylite_db *db, const char *sql) {
     char *errmsg = NULL;
 
@@ -2341,6 +2366,18 @@ static int variable_name_callback(void *ctx, int column_count, char **values, ch
     assert(values[0] != NULL);
     assert(strcmp(values[0], variable_ctx->name) == 0);
     ++variable_ctx->rows;
+    return 0;
+}
+
+static int engine_name_callback(void *ctx, int column_count, char **values, char **column_names) {
+    engine_context *engine_ctx = (engine_context *)ctx;
+    (void)column_names;
+
+    assert(column_count >= 1);
+    assert(values[0] != NULL);
+    if (strcmp(values[0], engine_ctx->name) == 0) {
+        ++engine_ctx->rows;
+    }
     return 0;
 }
 

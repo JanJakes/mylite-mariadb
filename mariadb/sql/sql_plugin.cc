@@ -55,6 +55,10 @@ static PSI_memory_key key_memory_plugin_bookmark;
 extern struct st_maria_plugin *mysql_optional_plugins[];
 extern struct st_maria_plugin *mysql_mandatory_plugins[];
 
+#ifndef MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE
+#define MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE 1
+#endif
+
 /**
   @note The order of the enumeration is critical.
   @see construct_options
@@ -1594,6 +1598,9 @@ int plugin_init(int *argc, char **argv, int flags)
   char plugin_table_engine_name_buf[NAME_CHAR_LEN + 1];
   LEX_CSTRING plugin_table_engine_name= { plugin_table_engine_name_buf, 0 };
   LEX_CSTRING MyISAM= { STRING_WITH_LEN("MyISAM") };
+#if !MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE
+  LEX_CSTRING Aria= { STRING_WITH_LEN("Aria") };
+#endif
   DBUG_ENTER("plugin_init");
 
   if (initialized)
@@ -1686,11 +1693,20 @@ int plugin_init(int *argc, char **argv, int flags)
     }
   }
 
+#if MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE
   /*
     First, we initialize only MyISAM - that should almost always succeed
     (almost always, because plugins can be loaded outside of the server, too).
   */
   plugin_ptr= plugin_find_internal(&MyISAM, MYSQL_STORAGE_ENGINE_PLUGIN);
+#else
+  /*
+    MyLite can build without the native MyISAM engine. Keep the early child THD
+    default storage engine non-null by initializing Aria first; the configured
+    default storage engine is applied later by init_default_storage_engine().
+  */
+  plugin_ptr= plugin_find_internal(&Aria, MYSQL_STORAGE_ENGINE_PLUGIN);
+#endif
   DBUG_ASSERT(plugin_ptr || !mysql_mandatory_plugins[0]);
   if (plugin_ptr)
   {

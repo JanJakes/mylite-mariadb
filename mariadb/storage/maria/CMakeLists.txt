@@ -47,6 +47,14 @@ SET(ARIA_SOURCES ma_init.c ma_open.c ma_extra.c ma_info.c ma_rkey.c
             ma_crypt.c ma_backup.c
 )
 
+OPTION(MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE "Build native MyISAM storage engine" ON)
+IF(MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE)
+  SET(MYLITE_ARIA_MYISAM_LIB myisam)
+ELSE()
+  LIST(APPEND ARIA_SOURCES mylite_maria_fulltext_support.c)
+  SET(MYLITE_ARIA_MYISAM_LIB)
+ENDIF()
+
 IF(APPLE)
   # Workaround linker bug on OSX 10.7
   ADD_DEFINITIONS(-fno-common)
@@ -58,7 +66,7 @@ IF(CMAKE_SYSTEM_NAME MATCHES AIX)
 ENDIF()
 
 MYSQL_ADD_PLUGIN(aria ${ARIA_SOURCES} STORAGE_ENGINE MANDATORY
-                 LINK_LIBRARIES myisam mysys mysys_ssl
+                 LINK_LIBRARIES ${MYLITE_ARIA_MYISAM_LIB} mysys mysys_ssl
                  RECOMPILE_FOR_EMBEDDED)
 
 MYSQL_ADD_EXECUTABLE(aria_ftdump aria_ftdump.c COMPONENT Server)

@@ -20,13 +20,18 @@ MariaDB base: `mariadb-11.8.6`
 - `mariadb/mysql-test/CMakeLists.txt` defines the upstream embedded MTR command
   with `--embedded-server`, `--skip-rpl`, and `MTR_BUILD_THREAD`.
 - The out-of-source build wrapper produces
-  `build/mariadb-embedded/mysql-test/mariadb-test-run.pl`.
-- A real embedded smoke run of `main.1st` requires more than
+  `build/mariadb-mtr-smoke/mysql-test/mariadb-test-run.pl` when run with the
+  MTR smoke profile.
+- A real embedded smoke run requires more than
   `libmariadbd.a`: MTR probes for `mariadbd`, `mariadb-test-embedded`,
   `mariadb-client-test-embedded`, `my_safe_process`, common client binaries,
-  MyISAM/Aria utility tools, `perror`, `mariadb-tzinfo-to-sql`, and `replace`.
+  Aria utility tools, `perror`, `mariadb-tzinfo-to-sql`, and `replace`.
+- The MyLite MTR smoke profile disables InnoDB at runtime and omits native
+  MyISAM and MRG_MyISAM. Its bootstrap-schema expectation is therefore
+  profile-specific and lives in
+  `mariadb/mysql-test/suite/mylite/t/bootstrap_schema.test`.
 - Verified command:
-  `tools/mylite-mtr-harness run main.1st`.
+  `tools/mylite-mtr-harness run mylite.bootstrap_schema`.
 - `mariadb/mysql-test/main/cast.test` exercises MariaDB scalar CAST/CONVERT
   semantics, temporal precision conversion, numeric overflow and truncation
   warnings, character-set conversion, and result metadata through a mix of
@@ -34,6 +39,9 @@ MariaDB base: `mariadb-11.8.6`
   test prelude.
 - Verified command:
   `tools/mylite-mtr-harness run main.cast`.
+- `mariadb/mysql-test/main/cast.test` normalizes `SHOW CREATE TABLE` default
+  engine output for Aria-based smoke runs while preserving the upstream MyISAM
+  expected result.
 
 ## Design
 
@@ -41,12 +49,12 @@ Add `tools/mylite-mtr-harness` with two commands:
 
 - `list` prints the curated smoke test list;
 - `run [suite.test...]` builds the required MariaDB MTR support targets under
-  `build/mariadb-embedded` and runs each selected test with
-  `mariadb-test-run.pl --embedded-server --skip-rpl`.
+  `build/mariadb-mtr-smoke` with `cmake/mariadb-mtr-smoke.cmake` and runs each
+  selected test with `mariadb-test-run.pl --embedded-server --skip-rpl`.
 
 The default curated list is intentionally tiny:
 
-- `main.1st`.
+- `mylite.bootstrap_schema`.
 - `main.cast`.
 
 This establishes a working MTR path while avoiding a false claim that MyLite has
@@ -56,7 +64,8 @@ meaningful MTR-scale coverage.
 
 - MariaDB embedded MTR smoke runner.
 - Curated upstream baseline test execution.
-- Reuse of the existing MariaDB 11.8.6 embedded build directory.
+- Reuse of the MariaDB 11.8.6 embedded source through a separate MTR smoke
+  build directory and CMake profile.
 
 ## Non-Goals
 
@@ -75,14 +84,14 @@ embedded MTR smoke coverage, with MTR-scale comparison still planned.
 ## Single-File And Embedded-Lifecycle Impact
 
 No MyLite file format or runtime behavior changes. The smoke runner exercises
-MariaDB's embedded baseline under `build/mariadb-embedded/mysql-test/var`, not
+MariaDB's embedded baseline under `build/mariadb-mtr-smoke/mysql-test/var`, not
 MyLite `.mylite` storage.
 
 ## Build, Size, And Dependencies
 
 No new dependency is added. The runner is a Bash script. The build impact
 is significant when first run because it builds `mariadbd` and upstream MTR
-client/support tools in the existing MariaDB build tree; these are test
+client/support tools in the MTR smoke build tree; these are test
 artifacts, not default MyLite linked-library artifacts.
 
 ## Test And Verification Plan
@@ -94,18 +103,18 @@ artifacts, not default MyLite linked-library artifacts.
 
 ## Acceptance Criteria
 
-- The runner lists `main.1st` and `main.cast`.
+- The runner lists `mylite.bootstrap_schema` and `main.cast`.
 - The runner builds the required MTR support targets from a fresh enough
-  `build/mariadb-embedded` tree.
-- `main.1st` and `main.cast` pass under
-  `mariadb-test-run.pl --embedded-server`.
+  `build/mariadb-mtr-smoke` tree.
+- `mylite.bootstrap_schema` and `main.cast` pass under
+  `mariadb-test-run.pl --embedded-server` with the MTR smoke profile.
 - Documentation states that this is opt-in smoke coverage, not full MTR-scale
   comparison.
 
 ## Risks And Open Questions
 
 - Building MTR prerequisites materially increases local build size. Use
-  `rm -rf build/mariadb-embedded` or `rm -rf build` to reclaim it.
+  `rm -rf build/mariadb-mtr-smoke` or `rm -rf build` to reclaim it.
 - The first curated test does not exercise MyLite storage; a later slice should
   decide how to compare MTR cases against MyLite's embedded API and routed
   storage without introducing daemon-only behavior into the core library.

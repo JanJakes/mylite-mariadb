@@ -624,32 +624,37 @@ ENDIF()
 IF(NOT WITHOUT_SERVER)
   # Define target for minimal mtr-testable build
   ADD_CUSTOM_TARGET(minbuild)
-  ADD_DEPENDENCIES(minbuild
-   aria_chk
-   aria_pack
-   mariadb
-   mariadb-admin
-   mariadb-binlog
-   mariadb-check
-   mariadb-client-test
-   mariadb-conv
-   mariadb-dump
-   mariadb-import
-   mariadb-plugin
-   mariadb-show
-   mariadb-slap
-   mariadb-test
-   mariadb-tzinfo-to-sql
-   mariadb-upgrade
-   mariadbd
-   my_print_defaults
-   my_safe_process
-   myisam_ftdump
-   myisamchk
-   myisamlog
-   myisampack
-   perror
-   replace)
+  SET(MINBUILD_TARGETS
+    aria_chk
+    aria_pack
+    mariadb
+    mariadb-admin
+    mariadb-binlog
+    mariadb-check
+    mariadb-client-test
+    mariadb-conv
+    mariadb-dump
+    mariadb-import
+    mariadb-plugin
+    mariadb-show
+    mariadb-slap
+    mariadb-test
+    mariadb-tzinfo-to-sql
+    mariadb-upgrade
+    mariadbd
+    my_print_defaults
+    my_safe_process
+    myisam_ftdump
+    myisamchk
+    myisamlog
+    myisampack
+    perror
+    replace)
+  FOREACH(MINBUILD_TARGET ${MINBUILD_TARGETS})
+    IF(TARGET ${MINBUILD_TARGET})
+      ADD_DEPENDENCIES(minbuild ${MINBUILD_TARGET})
+    ENDIF()
+  ENDFOREACH()
   IF(WIN32)
     ADD_DEPENDENCIES(minbuild echo mariadb-install-db my_safe_kill mariadb-upgrade-service)
   ENDIF()

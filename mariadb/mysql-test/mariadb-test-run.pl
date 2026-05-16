@@ -2086,6 +2086,21 @@ sub tool_arguments ($$) {
   return mtr_args2str($exe, @$args);
 }
 
+sub tool_arguments_maybe ($$) {
+  my($sedir, $tool_name) = @_;
+  my $exe= my_find_bin($bindir,
+		       [$sedir, "bin"],
+		       $tool_name,
+		       NOT_REQUIRED);
+
+  return "" unless $exe;
+
+  my $args;
+  mtr_init_args(\$args);
+  client_debug_arg($args, $tool_name);
+  return mtr_args2str($exe, @$args);
+}
+
 # This is not used to actually start a mysqld server, just to allow test
 # scripts to run the mysqld binary to test invalid server startup options.
 sub mysqld_client_arguments () {
@@ -2287,10 +2302,20 @@ sub environment_setup {
   # ----------------------------------------------------
   # myisam tools
   # ----------------------------------------------------
-  $ENV{'MYISAMLOG'}= tool_arguments("storage/myisam", "myisamlog", );
-  $ENV{'MYISAMCHK'}= tool_arguments("storage/myisam", "myisamchk");
-  $ENV{'MYISAMPACK'}= tool_arguments("storage/myisam", "myisampack");
-  $ENV{'MYISAM_FTDUMP'}= tool_arguments("storage/myisam", "myisam_ftdump");
+  if ($ENV{'MYLITE_MTR_WITHOUT_NATIVE_MYISAM_TOOLS'})
+  {
+    $ENV{'MYISAMLOG'}= tool_arguments_maybe("storage/myisam", "myisamlog", );
+    $ENV{'MYISAMCHK'}= tool_arguments_maybe("storage/myisam", "myisamchk");
+    $ENV{'MYISAMPACK'}= tool_arguments_maybe("storage/myisam", "myisampack");
+    $ENV{'MYISAM_FTDUMP'}= tool_arguments_maybe("storage/myisam", "myisam_ftdump");
+  }
+  else
+  {
+    $ENV{'MYISAMLOG'}= tool_arguments("storage/myisam", "myisamlog", );
+    $ENV{'MYISAMCHK'}= tool_arguments("storage/myisam", "myisamchk");
+    $ENV{'MYISAMPACK'}= tool_arguments("storage/myisam", "myisampack");
+    $ENV{'MYISAM_FTDUMP'}= tool_arguments("storage/myisam", "myisam_ftdump");
+  }
 
   # ----------------------------------------------------
   # aria tools
@@ -3119,7 +3144,14 @@ sub mysql_install_db {
   mtr_add_arg($args, "--basedir=%s", $install_basedir);
   mtr_add_arg($args, "--datadir=%s", $install_datadir);
   mtr_add_arg($args, "--plugin-dir=%s", $plugindir);
-  mtr_add_arg($args, "--default-storage-engine=myisam");
+  my $bootstrap_default_storage_engine= "myisam";
+  foreach my $extra_opt ( @opt_extra_mysqld_opt ) {
+    if ($extra_opt =~ /^--default[-_]storage[-_]engine=(\S+)/) {
+      $bootstrap_default_storage_engine= $1;
+    }
+  }
+  mtr_add_arg($args, "--default-storage-engine=%s",
+              $bootstrap_default_storage_engine);
   mtr_add_arg($args, "--loose-skip-plugin-$_") for @optional_plugins;
   # starting from 10.0 bootstrap scripts require InnoDB
   mtr_add_arg($args, "--loose-innodb");
@@ -3929,6 +3961,18 @@ sub run_testcase ($$) {
 	   embedded        => $opt_embedded_server,
 	  }
 	);
+
+      if ($ENV{'MYLITE_MTR_DEFAULT_STORAGE_ENGINE'})
+      {
+        foreach my $group ($config->option_groups())
+        {
+          my $name= $group->name();
+          next unless $name eq 'mysqld' || $name eq 'embedded' ||
+                      $name =~ /^mysqld\./;
+          $config->insert($name, 'default-storage-engine',
+                          $ENV{'MYLITE_MTR_DEFAULT_STORAGE_ENGINE'});
+        }
+      }
 
       fix_servers($tinfo);
 

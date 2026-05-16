@@ -59,7 +59,7 @@ Add an embedded-only comparison test binary that runs in two separate phases:
 1. Start a raw MariaDB embedded runtime with the same local-file defaults that
    MyLite uses for non-storage-engine embedded tests: no defaults, private
    datadir/tmp/plugin directories, skip grants, skip binlog, skip networking,
-   MyISAM default storage, InnoDB off, and the configured message/charset
+   Aria default storage, InnoDB off, and the configured message/charset
    directories.
 2. Execute representative direct, prepared, metadata, statement-effect, and
    warning probes through the MariaDB C API, copy the observed values, then

@@ -72,6 +72,10 @@
 #define MYLITE_WITH_MYISAM_MAINTENANCE 1
 #endif
 
+#ifndef MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE
+#define MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE 1
+#endif
+
 /**
   @def MYSQL_TABLE_LOCK_WAIT
   Instrumentation helper for table io_waits.
@@ -6756,7 +6760,8 @@ int ha_repartition_key_cache(KEY_CACHE *key_cache)
 int ha_change_key_cache(KEY_CACHE *old_key_cache,
 			KEY_CACHE *new_key_cache)
 {
-#if defined(EMBEDDED_LIBRARY) && !MYLITE_WITH_MYISAM_MAINTENANCE
+#if !MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE || \
+  (defined(EMBEDDED_LIBRARY) && !MYLITE_WITH_MYISAM_MAINTENANCE)
   return 0;
 #else
   mi_change_key_cache(old_key_cache, new_key_cache);

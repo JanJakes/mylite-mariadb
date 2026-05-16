@@ -70,7 +70,7 @@ file-backed MyLite embedded connection:
   of failing before handler enforcement.
 - Set `default_storage_engine=MYLITE`.
 - Set `enforce_storage_engine=MYLITE`.
-- Leave `:memory:` runtimes on the old MyISAM-oriented bootstrap so explicit
+- Leave `:memory:` runtimes on the Aria-oriented bootstrap so explicit
   `ENGINE=MYLITE` continues to fail without a primary file.
 
 The handler remains the policy gate. On `create()` it determines the requested

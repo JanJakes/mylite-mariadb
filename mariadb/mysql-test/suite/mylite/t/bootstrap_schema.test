@@ -1,0 +1,7 @@
+#
+# Check the mysql-test bootstrap schema produced by the MyLite MTR smoke
+# profile. The profile disables InnoDB at runtime and omits native MyISAM.
+#
+
+show databases;
+show tables in mysql;

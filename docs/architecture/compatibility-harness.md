@@ -51,7 +51,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `sidecar` | `storage-smoke-dev` | `compat-sidecar` | Forbidden durable sidecar gates |
 | `routed-ddl-dml` | `storage-smoke-dev` | `compat-routed-ddl-dml` | Routed direct/prepared schema namespaces, directory-free file-backed `CREATE DATABASE`, catalog-backed `CREATE DATABASE` existence options, table and index DDL, ordinary `CREATE TABLE IF NOT EXISTS`, column ALTER existence-option skips, index DDL existence-option skips, index rename existence-option skips, index ignorability, non-CHECK primary/unique constraint DDL including primary-key add/drop/re-add and failed ADD UNIQUE rollback, CHECK constraint existence-option skips, indexed table/index rename, table-DDL `IF EXISTS` skips, failed table-DDL rollback, temporary LIKE/CTAS isolation, shadowing, and OR REPLACE, online/in-place ALTER rejection, `CREATE TABLE ... SELECT` duplicate modes, plain/LIKE/CTAS OR REPLACE, truncate, and DML smoke |
 | `application-schema` | `storage-smoke-dev` | `compat-application-schema` | WordPress-shaped core schema, WordPress installer DDL and seed fixtures, collation restart matrix, and prefix-index smoke |
-| `server-surface` | `storage-smoke-dev` | `compat-server-surface` | Unsupported server, binlog/replication, replication/binlog filter assignment, binlog/replication system-variable assignment and omitted-variable introspection, dynamic plugin loading, SQL HANDLER, SQL sequence values, virtual sequence storage engine, SQL HELP, SELECT PROCEDURE, SQL file-I/O, table-maintenance/key-cache administration, user-statistics, statement profiling, optimizer trace, static SHOW information, status metadata, process-list metadata, view metadata, routine metadata, trigger metadata, foreign-server metadata, external backup SQL, query cache administration, zlib compression, server utility function, Oracle SQL mode, XML SQL function, GIS SQL function, vector SQL function, SFORMAT SQL function, JSON schema validation function, JSON table function, dynamic column function, view runtime, stored-program runtime, trigger runtime, dynamic UDF runtime, and non-table object surface policy |
+| `server-surface` | `storage-smoke-dev` | `compat-server-surface` | Unsupported server, binlog/replication, replication/binlog filter assignment, binlog/replication system-variable assignment and omitted-variable introspection, dynamic plugin loading, SQL HANDLER, SQL sequence values, virtual sequence storage engine, SQL HELP, SELECT PROCEDURE, SQL file-I/O, table-maintenance/key-cache administration, native MyISAM/MRG engine absence, user-statistics, statement profiling, optimizer trace, static SHOW information, status metadata, process-list metadata, view metadata, routine metadata, trigger metadata, foreign-server metadata, external backup SQL, query cache administration, zlib compression, server utility function, Oracle SQL mode, XML SQL function, GIS SQL function, vector SQL function, SFORMAT SQL function, JSON schema validation function, JSON table function, dynamic column function, view runtime, stored-program runtime, trigger runtime, dynamic UDF runtime, and non-table object surface policy |
 
 ## Relationship To MariaDB MTR
 
@@ -62,8 +62,11 @@ compatibility cases. MyLite should not run MTR blindly as the primary local
 signal yet: current MyLite behavior is embedded, file-owned, and intentionally
 excludes server surfaces that many upstream suites assume. The opt-in
 `tools/mylite-mtr-harness` runner proves the embedded MTR path with a tiny
-curated upstream smoke list covering bootstrap and scalar CAST/CONVERT behavior,
-but it remains outside the default compatibility groups because it builds
+curated smoke list covering the MyLite trimmed bootstrap schema and upstream
+scalar CAST/CONVERT behavior. It uses a separate `build/mariadb-mtr-smoke`
+profile because the default embedded profile intentionally omits view, stored
+program, trigger, and binlog sysvar surfaces that MTR bootstrap still expects.
+It remains outside the default compatibility groups because it builds
 `mariadbd` and several upstream client/support tools. Broader MTR integration
 should be a separate comparison slice with explicit include lists, expected
 unsupported surfaces, and stable result normalization.

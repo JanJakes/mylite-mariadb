@@ -2,9 +2,10 @@
 set -euo pipefail
 
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-build_dir="${BUILD_DIR:-"${root_dir}/build/mariadb-embedded"}"
+build_dir="${BUILD_DIR:-"${root_dir}/build/mariadb-mtr-smoke"}"
+mtr_profile="${PROFILE:-"${root_dir}/cmake/mariadb-mtr-smoke.cmake"}"
 mtr_build_thread="${MTR_BUILD_THREAD:-auto}"
-default_tests=(main.1st main.cast)
+default_tests=(mylite.bootstrap_schema main.cast)
 
 usage() {
   cat <<EOF
@@ -16,7 +17,8 @@ Commands:
              Defaults to the curated smoke list.
 
 Environment:
-  BUILD_DIR          MariaDB build directory. Defaults to build/mariadb-embedded.
+  BUILD_DIR          MariaDB build directory. Defaults to build/mariadb-mtr-smoke.
+  PROFILE            Initial CMake cache. Defaults to cmake/mariadb-mtr-smoke.cmake.
   MTR_BUILD_THREAD  MTR build thread/port block. Defaults to auto.
 EOF
 }
@@ -39,15 +41,20 @@ mtr_targets=(
   mariadb-binlog
   mariadb-upgrade
   my_print_defaults
-  myisamlog
-  myisamchk
-  myisampack
-  myisam_ftdump
   aria_chk
   aria_pack
   perror
   mariadb-tzinfo-to-sql
   replace
+)
+
+mtr_required_cache_entries=(
+  "MYLITE_WITH_VIEW_RUNTIME:BOOL=ON"
+  "MYLITE_WITH_STORED_PROGRAM_RUNTIME:BOOL=ON"
+  "MYLITE_WITH_TRIGGER_RUNTIME:BOOL=ON"
+  "MYLITE_WITH_BINLOG_SYSVARS:BOOL=ON"
+  "MYLITE_WITH_NATIVE_MYISAM_STORAGE_ENGINE:BOOL=OFF"
+  "MYLITE_WITH_NATIVE_MYISAMMRG_STORAGE_ENGINE:BOOL=OFF"
 )
 
 require_command() {
@@ -68,17 +75,36 @@ list_tests() {
 }
 
 prepare_mtr_build() {
-  local archive="${build_dir}/libmysqld/libmariadbd.a"
   local target
 
-  if [ -f "${archive}" ] && [ -f "${build_dir}/CMakeCache.txt" ]; then
-    BUILD_DIR="${build_dir}" "${root_dir}/tools/mariadb-embedded-build" build
-  else
-    BUILD_DIR="${build_dir}" "${root_dir}/tools/mariadb-embedded-build" all
+  if ! mtr_cache_ready; then
+    PROFILE="${mtr_profile}" BUILD_DIR="${build_dir}" \
+      "${root_dir}/tools/mariadb-embedded-build" configure
   fi
+
+  if ! mtr_cache_ready; then
+    echo "MTR build cache does not match the required MyLite MTR smoke profile" >&2
+    exit 1
+  fi
+
+  BUILD_DIR="${build_dir}" "${root_dir}/tools/mariadb-embedded-build" build
 
   for target in "${mtr_targets[@]}"; do
     cmake --build "${build_dir}" --target "${target}"
+  done
+}
+
+mtr_cache_ready() {
+  local entry
+
+  if [ ! -f "${build_dir}/CMakeCache.txt" ]; then
+    return 1
+  fi
+
+  for entry in "${mtr_required_cache_entries[@]}"; do
+    if ! grep -qxF "${entry}" "${build_dir}/CMakeCache.txt"; then
+      return 1
+    fi
   done
 }
 
@@ -105,10 +131,14 @@ run_tests() {
     (
       cd "${build_dir}/mysql-test"
       MTR_BUILD_THREAD="${mtr_build_thread}" \
+      MYLITE_MTR_WITHOUT_NATIVE_MYISAM_TOOLS=1 \
+      MYLITE_MTR_DEFAULT_STORAGE_ENGINE=Aria \
         perl ./mariadb-test-run.pl \
           --embedded-server \
           --skip-rpl \
           --force \
+          --mysqld=--default-storage-engine=Aria \
+          --mysqld=--innodb=OFF \
           --suite="${suite_name}" \
           --do-test="${case_name}" \
           --max-test-fail=1

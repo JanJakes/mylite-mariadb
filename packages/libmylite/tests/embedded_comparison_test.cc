@@ -789,7 +789,7 @@ std::vector<std::string> raw_runtime_arguments(const std::filesystem::path &runt
         "--skip-grant-tables",
         "--skip-log-bin",
         "--skip-networking",
-        "--default-storage-engine=MyISAM",
+        "--default-storage-engine=Aria",
         "--innodb=OFF",
         std::string("--lc-messages-dir=") + MYLITE_MARIADB_MESSAGES_DIR,
         std::string("--character-sets-dir=") + MYLITE_MARIADB_CHARSETS_DIR,

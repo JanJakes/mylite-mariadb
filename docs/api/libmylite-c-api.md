@@ -574,8 +574,9 @@ embedded profile also links fail-closed stubs for stored-program runtime
 symbols that retained MariaDB parser or cleanup paths still reference, omits
 dynamic UDF lookup/execution bodies, omits unsupported binlog event-root,
 log-event server runtime, replication GTID-state runtime, and MyISAM
-maintenance source objects, omits disabled binlog/replication system-variable
-registration, omits the JSON schema-validation source object,
+maintenance source objects, omits native MyISAM and MRG_MyISAM engine
+registration and disabled binlog/replication plus native-MyISAM-only
+system-variable registration, omits the JSON schema-validation source object,
 replaces replication filter runtime, JSON table-function execution,
 dynamic-column packed BLOB runtime, SQL handler command execution, SQL sequence
 runtime, external backup command execution, query cache runtime, zlib-backed
