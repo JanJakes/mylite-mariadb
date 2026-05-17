@@ -139,6 +139,8 @@ public:
   int update_row(const uchar *old_data, const uchar *new_data) override;
   int delete_row(const uchar *buf) override;
   int truncate() override;
+  char *get_foreign_key_create_info() override;
+  void free_foreign_key_create_info(char *str) override;
   int get_foreign_key_list(THD *thd,
                            List<FOREIGN_KEY_INFO> *f_key_list) override;
   int get_parent_foreign_key_list(THD *thd,

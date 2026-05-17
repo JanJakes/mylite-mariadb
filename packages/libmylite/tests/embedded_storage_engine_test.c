@@ -1626,20 +1626,28 @@ static void test_transaction_and_foreign_key_policies(void) {
 
 static void test_foreign_key_handler_metadata(void) {
     const char *foreign_columns[] = {"parent_id"};
+    const char *remote_foreign_columns[] = {"remote_parent_id"};
     const char *referenced_columns[] = {"id"};
     char *root = make_temp_root();
     char *filename = NULL;
     mylite_db *db = open_database(root, &filename);
 
     assert_exec_succeeds(db, "CREATE DATABASE fk_metadata");
+    assert_exec_succeeds(db, "CREATE DATABASE fk_parent");
     assert_exec_succeeds(db, "USE fk_metadata");
     assert_exec_succeeds(db, "CREATE TABLE parent (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_parent.remote_parent (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB"
+    );
     assert_exec_succeeds(
         db,
         "CREATE TABLE child ("
         "id INT NOT NULL PRIMARY KEY, "
         "parent_id INT NULL, "
-        "KEY child_parent_key (parent_id)"
+        "remote_parent_id INT NULL, "
+        "KEY child_parent_key (parent_id), "
+        "KEY child_remote_parent_key (remote_parent_id)"
         ") ENGINE=InnoDB"
     );
 
@@ -1661,6 +1669,26 @@ static void test_foreign_key_handler_metadata(void) {
     };
     assert(
         mylite_storage_store_foreign_key_definition(filename, &foreign_key) == MYLITE_STORAGE_OK
+    );
+    mylite_storage_foreign_key_definition remote_foreign_key = {
+        .size = sizeof(remote_foreign_key),
+        .schema_name = "fk_metadata",
+        .table_name = "child",
+        .constraint_name = "fk_child_remote_parent",
+        .referenced_schema_name = "fk_parent",
+        .referenced_table_name = "remote_parent",
+        .referenced_key_name = "PRIMARY",
+        .foreign_column_names = remote_foreign_columns,
+        .referenced_column_names = referenced_columns,
+        .column_count = 1U,
+        .update_action = MYLITE_STORAGE_FOREIGN_KEY_ACTION_CASCADE,
+        .delete_action = MYLITE_STORAGE_FOREIGN_KEY_ACTION_SET_NULL,
+        .match_option = MYLITE_STORAGE_FOREIGN_KEY_MATCH_SIMPLE,
+        .nullable_column_bitmap = 0x1ULL,
+    };
+    assert(
+        mylite_storage_store_foreign_key_definition(filename, &remote_foreign_key) ==
+        MYLITE_STORAGE_OK
     );
     assert_query_single_value(
         db,
@@ -1695,7 +1723,25 @@ static void test_foreign_key_handler_metadata(void) {
         "AND DELETE_RULE = 'RESTRICT'",
         "1"
     );
+    char *create_sql = capture_show_create_table(db, "child");
+    assert(
+        strstr(
+            create_sql,
+            "CONSTRAINT `fk_child_parent` FOREIGN KEY (`parent_id`) "
+            "REFERENCES `parent` (`id`) ON UPDATE NO ACTION"
+        ) != NULL
+    );
+    assert(
+        strstr(
+            create_sql,
+            "CONSTRAINT `fk_child_remote_parent` FOREIGN KEY (`remote_parent_id`) "
+            "REFERENCES `fk_parent`.`remote_parent` (`id`) "
+            "ON DELETE SET NULL ON UPDATE CASCADE"
+        ) != NULL
+    );
+    free(create_sql);
     assert_exec_fails(db, "TRUNCATE TABLE parent");
+    assert_exec_fails(db, "TRUNCATE TABLE fk_parent.remote_parent");
     assert_foreign_key_exec_fails(
         db,
         "ALTER TABLE child ADD CONSTRAINT fk_sql_still_blocked "
@@ -1707,6 +1753,14 @@ static void test_foreign_key_handler_metadata(void) {
             "fk_metadata",
             "child",
             "fk_child_parent"
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_drop_foreign_key_definition(
+            filename,
+            "fk_metadata",
+            "child",
+            "fk_child_remote_parent"
         ) == MYLITE_STORAGE_OK
     );
 

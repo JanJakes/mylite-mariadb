@@ -13,7 +13,8 @@ slices do not depend on InnoDB's dictionary or persistent sidecars.
 - Accepting `CREATE TABLE` or `ALTER TABLE` foreign-key DDL through
   `libmylite`.
 - Advertising `HTON_SUPPORTS_FOREIGN_KEYS` from the MyLite handlerton.
-- Appending FK clauses to `SHOW CREATE TABLE`.
+- Appending FK clauses to `SHOW CREATE TABLE`; this belongs to the follow-up
+  `foreign-key-create-info` slice.
 - Enforcing child/parent row existence checks, restrict checks, cascading
   actions, or `foreign_key_checks=0` import semantics.
 - Implementing statement-scoped table-plus-FK publication for inline
@@ -151,5 +152,6 @@ native InnoDB dictionary or FK code is reintroduced.
   must be replaced or cached before FK enforcement becomes hot DML behavior.
 - Public FK DDL needs statement-scoped table-plus-FK publication before inline
   `CREATE TABLE` FK clauses can be accepted safely.
-- `SHOW CREATE TABLE` FK output needs a separate formatting decision so MyLite
-  does not emit metadata before DDL and enforcement semantics are ready.
+- `SHOW CREATE TABLE` FK output is intentionally handled by the follow-up
+  `foreign-key-create-info` slice so formatting remains separate from handler
+  list metadata.

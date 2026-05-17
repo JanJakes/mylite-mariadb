@@ -96,8 +96,8 @@ Foreign-key DDL is rejected at the `libmylite` boundary until MyLite has safe
 DDL publication, enforcement, locking, recovery, and transaction-aware checks
 for referential constraints. The storage layer now has internal catalog-backed
 FK metadata records, typed FK blob pages, child and parent FK listing, and
-handler metadata hooks for manually seeded internal records; this does not yet
-make FK SQL supported.
+handler metadata and `SHOW CREATE TABLE` hooks for manually seeded internal
+records; this does not yet make FK SQL supported.
 Partition DDL is rejected at the same boundary until MyLite has partition
 metadata, partition-to-primary-file routing, per-partition catalog lifecycle,
 and partition-aware row and index maintenance.
