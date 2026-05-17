@@ -11,6 +11,9 @@ default_tests=(
   main.case
   main.bigint
   main.adddate_454
+  main.brackets
+  main.comments
+  main.compare
   main.func_equal
   main.func_op
   main.func_concat
