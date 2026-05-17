@@ -229,6 +229,13 @@ enum class TransactionControlKind : unsigned char {
     SetSessionTransactionReadOnly,
     SetSessionTransactionReadWrite,
     SetSessionTransactionIsolation,
+    SetAutocommitParameter,
+    SetCompletionTypeParameter,
+    SetNextTransactionReadOnlyParameter,
+    SetSessionTransactionReadOnlyParameter,
+    SetNextTransactionIsolationParameter,
+    SetSessionTransactionIsolationParameter,
+    SetParameterizedTransactionControl,
     Unsupported,
 };
 
@@ -381,10 +388,24 @@ int prepare_impl(
 int initialize_statement_metadata(mylite_stmt &statement);
 int bind_statement_parameters(mylite_stmt &statement);
 int execute_statement(mylite_stmt &statement);
+int resolve_parameterized_transaction_controls(
+    mylite_stmt &statement,
+    std::vector<TransactionControlKind> &out_controls
+);
+int resolve_parameterized_transaction_assignment(
+    mylite_stmt &statement,
+    std::string_view assignment,
+    std::size_t next_parameter,
+    std::vector<TransactionControlKind> &out_controls
+);
 int apply_successful_transaction_control(
     mylite_db &database,
     std::string_view sql,
     TransactionControlKind transaction_control
+);
+int apply_successful_resolved_transaction_controls(
+    mylite_db &database,
+    const std::vector<TransactionControlKind> &controls
 );
 int apply_successful_autocommit_assignments_control(
     mylite_db &database,
@@ -429,7 +450,11 @@ bool is_unsigned_column(unsigned int flags);
 mylite_warning_level map_warning_level(const char *level);
 std::string field_string(const char *value, unsigned int length);
 const char *unsupported_sql_surface_message(std::string_view sql);
-TransactionControlKind direct_transaction_control_kind(std::string_view sql, bool ansi_quotes);
+TransactionControlKind direct_transaction_control_kind(
+    std::string_view sql,
+    bool ansi_quotes,
+    bool allow_parameter_markers = false
+);
 TransactionControlKind direct_start_transaction_control_kind(std::string_view sql);
 TransactionControlKind direct_completion_transaction_control_kind(
     std::string_view sql,
@@ -437,7 +462,10 @@ TransactionControlKind direct_completion_transaction_control_kind(
     TransactionControlKind no_chain_kind,
     TransactionControlKind chained_kind
 );
-TransactionControlKind direct_set_transaction_control_kind(std::string_view sql);
+TransactionControlKind direct_set_transaction_control_kind(
+    std::string_view sql,
+    bool allow_parameter_markers = false
+);
 TransactionControlKind direct_set_transaction_characteristics_control_kind(
     std::string_view sql,
     bool has_statement_tail
@@ -496,11 +524,21 @@ const char *unsupported_engine_request_message(std::string_view sql);
 bool is_partition_sql(std::string_view sql);
 const char *unsupported_foreign_key_sql_message(std::string_view sql);
 bool is_non_table_object_keyword(std::string_view token);
-TransactionControlKind direct_set_assignment_transaction_control_kind(std::string_view sql);
-TransactionControlKind autocommit_assignment_control_kind(std::string_view assignment);
-TransactionControlKind completion_type_assignment_control_kind(std::string_view assignment);
+TransactionControlKind direct_set_assignment_transaction_control_kind(
+    std::string_view sql,
+    bool allow_parameter_markers
+);
+TransactionControlKind autocommit_assignment_control_kind(
+    std::string_view assignment,
+    bool allow_parameter_markers = false
+);
+TransactionControlKind completion_type_assignment_control_kind(
+    std::string_view assignment,
+    bool allow_parameter_markers = false
+);
 TransactionControlKind transaction_characteristic_assignment_control_kind(
-    std::string_view assignment
+    std::string_view assignment,
+    bool allow_parameter_markers = false
 );
 bool direct_set_completion_type_chain_default(std::string_view sql, bool *out_chain);
 bool sql_token_is_completion_type_no_chain(std::string_view token);
@@ -512,17 +550,29 @@ bool transaction_assignment_targets_variable(
     TransactionAssignmentScope *out_scope
 );
 bool pop_transaction_read_only_assignment_value(std::string_view &assignment, bool *out_read_only);
+bool pop_parameter_marker_assignment_value(std::string_view &assignment);
 bool pop_transaction_access_mode(std::string_view &sql, bool *out_read_only);
 bool pop_transaction_isolation_level(std::string_view &sql);
 TransactionControlKind transaction_access_mode_control_kind(bool session_scope, bool read_only);
 TransactionControlKind transaction_isolation_control_kind(bool session_scope);
+bool is_autocommit_transaction_control(TransactionControlKind kind);
+bool is_parameterized_autocommit_transaction_control(TransactionControlKind kind);
+bool is_completion_type_transaction_control(TransactionControlKind kind);
+bool is_parameterized_completion_type_transaction_control(TransactionControlKind kind);
 bool is_transaction_access_mode_characteristic_control(TransactionControlKind kind);
+bool is_parameterized_transaction_access_mode_characteristic_control(TransactionControlKind kind);
 bool is_transaction_isolation_characteristic_control(TransactionControlKind kind);
+bool is_parameterized_transaction_isolation_characteristic_control(TransactionControlKind kind);
 bool is_begin_transaction_control(TransactionControlKind kind);
 bool is_completion_transaction_control(TransactionControlKind kind);
 bool is_savepoint_transaction_control(TransactionControlKind kind);
 bool is_chained_completion_transaction_control(TransactionControlKind kind);
 bool is_preparable_transaction_control(TransactionControlKind kind);
+bool bound_parameter_is_transaction_bool(const BoundValue &value, bool *out_value);
+bool bound_parameter_is_completion_type_chain(const BoundValue &value, bool *out_chain);
+std::string_view bound_parameter_text(const BoundValue &value);
+std::string_view trim_ascii_space(std::string_view value);
+std::size_t sql_span_count_parameter_markers(std::string_view sql);
 bool transaction_start_read_only(const mylite_db &database, TransactionControlKind kind);
 void mark_transaction_started(mylite_db &database, bool read_only);
 void mark_transaction_completed(mylite_db &database);
@@ -1646,7 +1696,7 @@ int prepare_impl(
     const std::string_view sql_view(sql, sql_len);
     const bool ansi_quotes = mylite_session_ansi_quotes(*database);
     const TransactionControlKind transaction_control =
-        direct_transaction_control_kind(sql_view, ansi_quotes);
+        direct_transaction_control_kind(sql_view, ansi_quotes, true);
     if (transaction_control == TransactionControlKind::Unsupported) {
         set_error(*database, MYLITE_ERROR, "unsupported SQL transaction control");
         return MYLITE_ERROR;
@@ -1866,6 +1916,16 @@ int execute_statement(mylite_stmt &statement) {
         return bind_result;
     }
 
+    std::vector<TransactionControlKind> resolved_transaction_controls;
+    if (statement.statement_transaction_control ==
+        TransactionControlKind::SetParameterizedTransactionControl) {
+        const int resolve_result =
+            resolve_parameterized_transaction_controls(statement, resolved_transaction_controls);
+        if (resolve_result != MYLITE_OK) {
+            return resolve_result;
+        }
+    }
+
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
     StorageStatementCheckpoint checkpoint;
     const bool checkpoint_enabled =
@@ -1933,11 +1993,18 @@ int execute_statement(mylite_stmt &statement) {
             return checkpoint_result;
         }
 #  endif
-        const int transaction_result = apply_successful_transaction_control(
-            *statement.database,
-            statement.sql,
-            statement.statement_transaction_control
-        );
+        const int transaction_result =
+            statement.statement_transaction_control ==
+                    TransactionControlKind::SetParameterizedTransactionControl
+                ? apply_successful_resolved_transaction_controls(
+                      *statement.database,
+                      resolved_transaction_controls
+                  )
+                : apply_successful_transaction_control(
+                      *statement.database,
+                      statement.sql,
+                      statement.statement_transaction_control
+                  );
         if (transaction_result != MYLITE_OK) {
             return transaction_result;
         }
@@ -1961,6 +2028,163 @@ int execute_statement(mylite_stmt &statement) {
     }
 #  endif
     return fetch_statement_row(statement);
+}
+
+int resolve_parameterized_transaction_controls(
+    mylite_stmt &statement,
+    std::vector<TransactionControlKind> &out_controls
+) {
+    out_controls.clear();
+
+    std::string_view rest = skip_sql_leading_noise(statement.sql);
+    if (!sql_token_equals(pop_sql_token(rest), "SET")) {
+        return MYLITE_OK;
+    }
+
+    std::size_t next_parameter = 0;
+    while (!skip_sql_leading_noise(rest).empty()) {
+        const std::string_view assignment = pop_sql_set_assignment(rest);
+        const int result = resolve_parameterized_transaction_assignment(
+            statement,
+            assignment,
+            next_parameter,
+            out_controls
+        );
+        if (result != MYLITE_OK) {
+            return result;
+        }
+        next_parameter += sql_span_count_parameter_markers(assignment);
+    }
+    return MYLITE_OK;
+}
+
+int resolve_parameterized_transaction_assignment(
+    mylite_stmt &statement,
+    std::string_view assignment,
+    std::size_t next_parameter,
+    std::vector<TransactionControlKind> &out_controls
+) {
+    const TransactionControlKind autocommit_control =
+        autocommit_assignment_control_kind(assignment, true);
+    if (autocommit_control == TransactionControlKind::Unsupported) {
+        set_error(*statement.database, MYLITE_ERROR, "unsupported SQL transaction control");
+        return MYLITE_ERROR;
+    }
+    if (autocommit_control == TransactionControlKind::SetAutocommitParameter) {
+        if (next_parameter >= statement.parameters.size()) {
+            set_error(*statement.database, MYLITE_ERROR, "unsupported SQL transaction control");
+            return MYLITE_ERROR;
+        }
+        bool autocommit = false;
+        if (!bound_parameter_is_transaction_bool(
+                statement.parameters[next_parameter],
+                &autocommit
+            )) {
+            set_error(*statement.database, MYLITE_ERROR, "unsupported SQL transaction control");
+            return MYLITE_ERROR;
+        }
+        out_controls.push_back(
+            autocommit ? TransactionControlKind::SetAutocommitOn
+                       : TransactionControlKind::SetAutocommitOff
+        );
+        return MYLITE_OK;
+    }
+    if (is_autocommit_transaction_control(autocommit_control)) {
+        out_controls.push_back(autocommit_control);
+        return MYLITE_OK;
+    }
+
+    const TransactionControlKind completion_control =
+        completion_type_assignment_control_kind(assignment, true);
+    if (completion_control == TransactionControlKind::Unsupported) {
+        set_error(*statement.database, MYLITE_ERROR, "unsupported SQL transaction control");
+        return MYLITE_ERROR;
+    }
+    if (completion_control == TransactionControlKind::SetCompletionTypeParameter) {
+        if (next_parameter >= statement.parameters.size()) {
+            set_error(*statement.database, MYLITE_ERROR, "unsupported SQL transaction control");
+            return MYLITE_ERROR;
+        }
+        bool chain = false;
+        if (!bound_parameter_is_completion_type_chain(
+                statement.parameters[next_parameter],
+                &chain
+            )) {
+            set_error(*statement.database, MYLITE_ERROR, "unsupported SQL transaction control");
+            return MYLITE_ERROR;
+        }
+        out_controls.push_back(
+            chain ? TransactionControlKind::SetCompletionTypeChain
+                  : TransactionControlKind::SetCompletionTypeNoChain
+        );
+        return MYLITE_OK;
+    }
+    if (is_completion_type_transaction_control(completion_control)) {
+        out_controls.push_back(completion_control);
+        return MYLITE_OK;
+    }
+
+    const TransactionControlKind characteristic_control =
+        transaction_characteristic_assignment_control_kind(assignment, true);
+    if (characteristic_control == TransactionControlKind::Unsupported) {
+        set_error(*statement.database, MYLITE_ERROR, "unsupported SQL transaction control");
+        return MYLITE_ERROR;
+    }
+    if (is_parameterized_transaction_access_mode_characteristic_control(characteristic_control)) {
+        if (next_parameter >= statement.parameters.size()) {
+            set_error(*statement.database, MYLITE_ERROR, "unsupported SQL transaction control");
+            return MYLITE_ERROR;
+        }
+        bool read_only = false;
+        if (!bound_parameter_is_transaction_bool(
+                statement.parameters[next_parameter],
+                &read_only
+            )) {
+            set_error(*statement.database, MYLITE_ERROR, "unsupported SQL transaction control");
+            return MYLITE_ERROR;
+        }
+        out_controls.push_back(transaction_access_mode_control_kind(
+            characteristic_control ==
+                TransactionControlKind::SetSessionTransactionReadOnlyParameter,
+            read_only
+        ));
+        return MYLITE_OK;
+    }
+    if (is_parameterized_transaction_isolation_characteristic_control(characteristic_control)) {
+        out_controls.push_back(
+            characteristic_control ==
+                    TransactionControlKind::SetSessionTransactionIsolationParameter
+                ? TransactionControlKind::SetSessionTransactionIsolation
+                : TransactionControlKind::SetNextTransactionIsolation
+        );
+        return MYLITE_OK;
+    }
+    if (is_transaction_access_mode_characteristic_control(characteristic_control) ||
+        is_transaction_isolation_characteristic_control(characteristic_control)) {
+        out_controls.push_back(characteristic_control);
+    }
+    return MYLITE_OK;
+}
+
+int apply_successful_resolved_transaction_controls(
+    mylite_db &database,
+    const std::vector<TransactionControlKind> &controls
+) {
+    for (const TransactionControlKind control : controls) {
+        if (is_autocommit_transaction_control(control)) {
+            const int result = apply_successful_single_autocommit_control(database, control);
+            if (result != MYLITE_OK) {
+                return result;
+            }
+        } else if (control == TransactionControlKind::SetCompletionTypeNoChain) {
+            database.completion_type_chain = false;
+        } else if (control == TransactionControlKind::SetCompletionTypeChain) {
+            database.completion_type_chain = true;
+        } else if (is_transaction_access_mode_characteristic_control(control)) {
+            apply_transaction_characteristics_control(database, control);
+        }
+    }
+    return MYLITE_OK;
 }
 
 int apply_successful_transaction_control(
@@ -3719,7 +3943,11 @@ bool is_select_procedure_sql(std::string_view sql) {
     return false;
 }
 
-TransactionControlKind direct_transaction_control_kind(std::string_view sql, bool ansi_quotes) {
+TransactionControlKind direct_transaction_control_kind(
+    std::string_view sql,
+    bool ansi_quotes,
+    bool allow_parameter_markers
+) {
     std::string_view rest = skip_sql_leading_noise(sql);
     const std::string_view first = pop_sql_token(rest);
     std::string_view after_first = rest;
@@ -3797,7 +4025,7 @@ TransactionControlKind direct_transaction_control_kind(std::string_view sql, boo
     }
 
     if (sql_token_equals(first, "SET")) {
-        return direct_set_transaction_control_kind(after_first);
+        return direct_set_transaction_control_kind(after_first, allow_parameter_markers);
     }
 
     return TransactionControlKind::None;
@@ -3991,7 +4219,10 @@ bool pop_sql_delimited_identifier_name(std::string_view &sql, char quote, std::s
     return false;
 }
 
-TransactionControlKind direct_set_transaction_control_kind(std::string_view sql) {
+TransactionControlKind direct_set_transaction_control_kind(
+    std::string_view sql,
+    bool allow_parameter_markers
+) {
     std::string_view statement_check = skip_sql_leading_noise(sql);
     if (sql_token_equals(pop_sql_token(statement_check), "STATEMENT")) {
         std::string_view assignments = sql_set_statement_assignment_span(statement_check);
@@ -4012,7 +4243,7 @@ TransactionControlKind direct_set_transaction_control_kind(std::string_view sql)
         return characteristics_control;
     }
 
-    return direct_set_assignment_transaction_control_kind(sql);
+    return direct_set_assignment_transaction_control_kind(sql, allow_parameter_markers);
 }
 
 TransactionControlKind direct_set_transaction_characteristics_control_kind(
@@ -4069,11 +4300,15 @@ TransactionControlKind direct_set_transaction_characteristics_control_kind(
                            : transaction_isolation_control_kind(session_scope);
 }
 
-TransactionControlKind direct_set_assignment_transaction_control_kind(std::string_view sql) {
+TransactionControlKind direct_set_assignment_transaction_control_kind(
+    std::string_view sql,
+    bool allow_parameter_markers
+) {
     const bool has_statement_tail = sql_has_statement_tail_after_semicolon(sql);
     TransactionControlKind result = TransactionControlKind::None;
     bool autocommit_seen = false;
     bool transaction_access_mode_seen = false;
+    bool parameterized_seen = false;
 
     while (!skip_sql_leading_noise(sql).empty()) {
         std::string_view assignment = pop_sql_set_assignment(sql);
@@ -4082,55 +4317,77 @@ TransactionControlKind direct_set_assignment_transaction_control_kind(std::strin
         }
 
         const TransactionControlKind assignment_result =
-            autocommit_assignment_control_kind(assignment);
+            autocommit_assignment_control_kind(assignment, allow_parameter_markers);
         if (assignment_result == TransactionControlKind::Unsupported) {
             return TransactionControlKind::Unsupported;
         }
-        if (assignment_result != TransactionControlKind::None) {
+        if (is_autocommit_transaction_control(assignment_result) ||
+            is_parameterized_autocommit_transaction_control(assignment_result)) {
             if (transaction_access_mode_seen) {
                 return TransactionControlKind::Unsupported;
             }
             autocommit_seen = true;
             result = assignment_result;
+            parameterized_seen = parameterized_seen ||
+                                 is_parameterized_autocommit_transaction_control(assignment_result);
             continue;
         }
 
         const TransactionControlKind completion_type_result =
-            completion_type_assignment_control_kind(assignment);
+            completion_type_assignment_control_kind(assignment, allow_parameter_markers);
         if (completion_type_result == TransactionControlKind::Unsupported) {
             return TransactionControlKind::Unsupported;
         }
-        if (completion_type_result == TransactionControlKind::SetCompletionTypeNoChain ||
-            completion_type_result == TransactionControlKind::SetCompletionTypeChain) {
+        if (is_completion_type_transaction_control(completion_type_result) ||
+            is_parameterized_completion_type_transaction_control(completion_type_result)) {
             if (result == TransactionControlKind::None ||
-                result == TransactionControlKind::SetCompletionTypeNoChain ||
-                result == TransactionControlKind::SetCompletionTypeChain) {
+                is_completion_type_transaction_control(result) ||
+                is_parameterized_completion_type_transaction_control(result)) {
                 result = completion_type_result;
             }
+            parameterized_seen =
+                parameterized_seen ||
+                is_parameterized_completion_type_transaction_control(completion_type_result);
             continue;
         }
 
         const TransactionControlKind transaction_characteristic_result =
-            transaction_characteristic_assignment_control_kind(assignment);
+            transaction_characteristic_assignment_control_kind(assignment, allow_parameter_markers);
         if (transaction_characteristic_result == TransactionControlKind::Unsupported) {
             return TransactionControlKind::Unsupported;
         }
-        if (is_transaction_access_mode_characteristic_control(transaction_characteristic_result)) {
+        if (is_transaction_access_mode_characteristic_control(transaction_characteristic_result) ||
+            is_parameterized_transaction_access_mode_characteristic_control(
+                transaction_characteristic_result
+            )) {
             if (autocommit_seen) {
                 return TransactionControlKind::Unsupported;
             }
             transaction_access_mode_seen = true;
             if (result == TransactionControlKind::None ||
-                is_transaction_access_mode_characteristic_control(result)) {
+                is_transaction_access_mode_characteristic_control(result) ||
+                is_parameterized_transaction_access_mode_characteristic_control(result)) {
                 result = transaction_characteristic_result;
             }
+            parameterized_seen = parameterized_seen ||
+                                 is_parameterized_transaction_access_mode_characteristic_control(
+                                     transaction_characteristic_result
+                                 );
             continue;
         }
-        if (is_transaction_isolation_characteristic_control(transaction_characteristic_result)) {
+        if (is_transaction_isolation_characteristic_control(transaction_characteristic_result) ||
+            is_parameterized_transaction_isolation_characteristic_control(
+                transaction_characteristic_result
+            )) {
             if (result == TransactionControlKind::None ||
-                is_transaction_isolation_characteristic_control(result)) {
+                is_transaction_isolation_characteristic_control(result) ||
+                is_parameterized_transaction_isolation_characteristic_control(result)) {
                 result = transaction_characteristic_result;
             }
+            parameterized_seen =
+                parameterized_seen || is_parameterized_transaction_isolation_characteristic_control(
+                                          transaction_characteristic_result
+                                      );
             continue;
         }
 
@@ -4145,10 +4402,16 @@ TransactionControlKind direct_set_assignment_transaction_control_kind(std::strin
     if (has_statement_tail) {
         return TransactionControlKind::Unsupported;
     }
+    if (parameterized_seen) {
+        return TransactionControlKind::SetParameterizedTransactionControl;
+    }
     return result;
 }
 
-TransactionControlKind autocommit_assignment_control_kind(std::string_view assignment) {
+TransactionControlKind autocommit_assignment_control_kind(
+    std::string_view assignment,
+    bool allow_parameter_markers
+) {
     assignment = skip_sql_leading_noise(assignment);
     if (assignment.empty()) {
         return TransactionControlKind::None;
@@ -4184,6 +4447,10 @@ TransactionControlKind autocommit_assignment_control_kind(std::string_view assig
     if (assignment.empty() || assignment.front() != '=') {
         return TransactionControlKind::Unsupported;
     }
+    std::string_view parameter_candidate = assignment;
+    if (allow_parameter_markers && pop_parameter_marker_assignment_value(parameter_candidate)) {
+        return TransactionControlKind::SetAutocommitParameter;
+    }
     assignment.remove_prefix(1);
     assignment = skip_sql_leading_noise(assignment);
 
@@ -4203,7 +4470,10 @@ TransactionControlKind autocommit_assignment_control_kind(std::string_view assig
     return TransactionControlKind::Unsupported;
 }
 
-TransactionControlKind completion_type_assignment_control_kind(std::string_view assignment) {
+TransactionControlKind completion_type_assignment_control_kind(
+    std::string_view assignment,
+    bool allow_parameter_markers
+) {
     assignment = skip_sql_leading_noise(assignment);
     if (assignment.empty()) {
         return TransactionControlKind::None;
@@ -4239,6 +4509,10 @@ TransactionControlKind completion_type_assignment_control_kind(std::string_view 
     if (assignment.empty() || assignment.front() != '=') {
         return TransactionControlKind::Unsupported;
     }
+    std::string_view parameter_candidate = assignment;
+    if (allow_parameter_markers && pop_parameter_marker_assignment_value(parameter_candidate)) {
+        return TransactionControlKind::SetCompletionTypeParameter;
+    }
     assignment.remove_prefix(1);
     assignment = skip_sql_leading_noise(assignment);
 
@@ -4256,7 +4530,8 @@ TransactionControlKind completion_type_assignment_control_kind(std::string_view 
 }
 
 TransactionControlKind transaction_characteristic_assignment_control_kind(
-    std::string_view assignment
+    std::string_view assignment,
+    bool allow_parameter_markers
 ) {
     TransactionAssignmentScope scope = TransactionAssignmentScope::None;
     std::string_view candidate = assignment;
@@ -4274,6 +4549,12 @@ TransactionControlKind transaction_characteristic_assignment_control_kind(
         }
 
         bool read_only = false;
+        std::string_view parameter_candidate = candidate;
+        if (allow_parameter_markers && pop_parameter_marker_assignment_value(parameter_candidate)) {
+            return scope == TransactionAssignmentScope::Session
+                       ? TransactionControlKind::SetSessionTransactionReadOnlyParameter
+                       : TransactionControlKind::SetNextTransactionReadOnlyParameter;
+        }
         if (!pop_transaction_read_only_assignment_value(candidate, &read_only)) {
             return TransactionControlKind::Unsupported;
         }
@@ -4300,6 +4581,12 @@ TransactionControlKind transaction_characteristic_assignment_control_kind(
         candidate = skip_sql_leading_noise(candidate);
         if (candidate.empty() || candidate.front() != '=') {
             return TransactionControlKind::Unsupported;
+        }
+        std::string_view parameter_candidate = candidate;
+        if (allow_parameter_markers && pop_parameter_marker_assignment_value(parameter_candidate)) {
+            return scope == TransactionAssignmentScope::Session
+                       ? TransactionControlKind::SetSessionTransactionIsolationParameter
+                       : TransactionControlKind::SetNextTransactionIsolationParameter;
         }
         candidate.remove_prefix(1);
         if (skip_sql_leading_noise(candidate).empty()) {
@@ -4401,6 +4688,20 @@ bool pop_transaction_read_only_assignment_value(std::string_view &assignment, bo
     return false;
 }
 
+bool pop_parameter_marker_assignment_value(std::string_view &assignment) {
+    assignment = skip_sql_leading_noise(assignment);
+    if (assignment.empty() || assignment.front() != '=') {
+        return false;
+    }
+    assignment.remove_prefix(1);
+    assignment = skip_sql_leading_noise(assignment);
+    if (assignment.empty() || assignment.front() != '?') {
+        return false;
+    }
+    assignment.remove_prefix(1);
+    return sql_rest_is_statement_end(assignment);
+}
+
 bool sql_token_is_completion_type_no_chain(std::string_view token) {
     return token == "0" || sql_token_equals(token, "NO_CHAIN") ||
            sql_token_equals(token, "DEFAULT");
@@ -4492,6 +4793,24 @@ TransactionControlKind transaction_isolation_control_kind(bool session_scope) {
                          : TransactionControlKind::SetNextTransactionIsolation;
 }
 
+bool is_autocommit_transaction_control(TransactionControlKind kind) {
+    return kind == TransactionControlKind::SetAutocommitOff ||
+           kind == TransactionControlKind::SetAutocommitOn;
+}
+
+bool is_parameterized_autocommit_transaction_control(TransactionControlKind kind) {
+    return kind == TransactionControlKind::SetAutocommitParameter;
+}
+
+bool is_completion_type_transaction_control(TransactionControlKind kind) {
+    return kind == TransactionControlKind::SetCompletionTypeNoChain ||
+           kind == TransactionControlKind::SetCompletionTypeChain;
+}
+
+bool is_parameterized_completion_type_transaction_control(TransactionControlKind kind) {
+    return kind == TransactionControlKind::SetCompletionTypeParameter;
+}
+
 bool is_transaction_access_mode_characteristic_control(TransactionControlKind kind) {
     return kind == TransactionControlKind::SetNextTransactionReadOnly ||
            kind == TransactionControlKind::SetNextTransactionReadWrite ||
@@ -4499,9 +4818,19 @@ bool is_transaction_access_mode_characteristic_control(TransactionControlKind ki
            kind == TransactionControlKind::SetSessionTransactionReadWrite;
 }
 
+bool is_parameterized_transaction_access_mode_characteristic_control(TransactionControlKind kind) {
+    return kind == TransactionControlKind::SetNextTransactionReadOnlyParameter ||
+           kind == TransactionControlKind::SetSessionTransactionReadOnlyParameter;
+}
+
 bool is_transaction_isolation_characteristic_control(TransactionControlKind kind) {
     return kind == TransactionControlKind::SetNextTransactionIsolation ||
            kind == TransactionControlKind::SetSessionTransactionIsolation;
+}
+
+bool is_parameterized_transaction_isolation_characteristic_control(TransactionControlKind kind) {
+    return kind == TransactionControlKind::SetNextTransactionIsolationParameter ||
+           kind == TransactionControlKind::SetSessionTransactionIsolationParameter;
 }
 
 bool is_begin_transaction_control(TransactionControlKind kind) {
@@ -4540,8 +4869,170 @@ bool is_preparable_transaction_control(TransactionControlKind kind) {
            kind == TransactionControlKind::SetAutocommitOn ||
            kind == TransactionControlKind::SetCompletionTypeNoChain ||
            kind == TransactionControlKind::SetCompletionTypeChain ||
+           kind == TransactionControlKind::SetParameterizedTransactionControl ||
            is_transaction_access_mode_characteristic_control(kind) ||
            is_transaction_isolation_characteristic_control(kind);
+}
+
+bool bound_parameter_is_transaction_bool(const BoundValue &value, bool *out_value) {
+    if (value.kind == BoundValueKind::Int64) {
+        if (value.int64_value == 0) {
+            *out_value = false;
+            return true;
+        }
+        if (value.int64_value == 1) {
+            *out_value = true;
+            return true;
+        }
+        return false;
+    }
+    if (value.kind == BoundValueKind::UInt64) {
+        if (value.uint64_value == 0U) {
+            *out_value = false;
+            return true;
+        }
+        if (value.uint64_value == 1U) {
+            *out_value = true;
+            return true;
+        }
+        return false;
+    }
+    if (value.kind == BoundValueKind::Double) {
+        if (value.double_value == 0.0) {
+            *out_value = false;
+            return true;
+        }
+        if (value.double_value == 1.0) {
+            *out_value = true;
+            return true;
+        }
+        return false;
+    }
+
+    const std::string_view text = trim_ascii_space(bound_parameter_text(value));
+    if (text.empty()) {
+        return false;
+    }
+    if (sql_token_is_autocommit_off(text)) {
+        *out_value = false;
+        return true;
+    }
+    if (sql_token_is_autocommit_on(text)) {
+        *out_value = true;
+        return true;
+    }
+    return false;
+}
+
+bool bound_parameter_is_completion_type_chain(const BoundValue &value, bool *out_chain) {
+    if (value.kind == BoundValueKind::Int64) {
+        if (value.int64_value == 0) {
+            *out_chain = false;
+            return true;
+        }
+        if (value.int64_value == 1) {
+            *out_chain = true;
+            return true;
+        }
+        return false;
+    }
+    if (value.kind == BoundValueKind::UInt64) {
+        if (value.uint64_value == 0U) {
+            *out_chain = false;
+            return true;
+        }
+        if (value.uint64_value == 1U) {
+            *out_chain = true;
+            return true;
+        }
+        return false;
+    }
+    if (value.kind == BoundValueKind::Double) {
+        if (value.double_value == 0.0) {
+            *out_chain = false;
+            return true;
+        }
+        if (value.double_value == 1.0) {
+            *out_chain = true;
+            return true;
+        }
+        return false;
+    }
+
+    const std::string_view text = trim_ascii_space(bound_parameter_text(value));
+    if (text.empty()) {
+        return false;
+    }
+    if (text == "0" || sql_token_equals(text, "NO_CHAIN")) {
+        *out_chain = false;
+        return true;
+    }
+    if (sql_token_is_completion_type_chain(text)) {
+        *out_chain = true;
+        return true;
+    }
+    return false;
+}
+
+std::string_view bound_parameter_text(const BoundValue &value) {
+    if (value.kind != BoundValueKind::Text && value.kind != BoundValueKind::Blob) {
+        return {};
+    }
+    const char *data = static_cast<const char *>(bound_value_data(value));
+    return data != nullptr ? std::string_view(data, value.length) : std::string_view();
+}
+
+std::string_view trim_ascii_space(std::string_view value) {
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.front())) != 0) {
+        value.remove_prefix(1);
+    }
+    while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back())) != 0) {
+        value.remove_suffix(1);
+    }
+    return value;
+}
+
+std::size_t sql_span_count_parameter_markers(std::string_view sql) {
+    std::size_t count = 0;
+    while (!sql.empty()) {
+        if (sql.front() == '\'' || sql.front() == '"' || sql.front() == '`') {
+            skip_sql_quoted_span(sql, sql.front());
+            continue;
+        }
+
+        if (sql.size() >= 2U && sql[0] == '-' && sql[1] == '-') {
+            const std::size_t newline = sql.find('\n');
+            if (newline == std::string_view::npos) {
+                return count;
+            }
+            sql.remove_prefix(newline + 1U);
+            continue;
+        }
+
+        if (sql.front() == '#') {
+            const std::size_t newline = sql.find('\n');
+            if (newline == std::string_view::npos) {
+                return count;
+            }
+            sql.remove_prefix(newline + 1U);
+            continue;
+        }
+
+        if (sql.size() >= 2U && sql[0] == '/' && sql[1] == '*') {
+            const std::size_t end = sql.find("*/");
+            if (end == std::string_view::npos) {
+                return count;
+            }
+            sql.remove_prefix(end + 2U);
+            continue;
+        }
+
+        if (sql.front() == '?') {
+            ++count;
+        }
+        sql.remove_prefix(1);
+    }
+    return count;
 }
 
 bool transaction_start_read_only(const mylite_db &database, TransactionControlKind kind) {

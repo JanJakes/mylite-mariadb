@@ -205,6 +205,25 @@ static void assert_foreign_key_exec_fails(mylite_db *db, const char *sql);
 static void assert_prepared_succeeds(mylite_db *db, const char *sql);
 static void assert_prepared_fails(mylite_db *db, const char *sql);
 static void assert_prepared_fails_with_message(mylite_db *db, const char *sql, const char *message);
+static void assert_prepared_one_int_succeeds(mylite_db *db, const char *sql, long long value);
+static void assert_prepared_one_text_succeeds(mylite_db *db, const char *sql, const char *value);
+static void assert_prepared_one_int_policy_fails_with_message(
+    mylite_db *db,
+    const char *sql,
+    long long value,
+    const char *message
+);
+static void assert_prepared_one_text_policy_fails_with_message(
+    mylite_db *db,
+    const char *sql,
+    const char *value,
+    const char *message
+);
+static void assert_prepared_one_null_policy_fails_with_message(
+    mylite_db *db,
+    const char *sql,
+    const char *message
+);
 static void assert_prepared_one_int_statement_fails_with_message(
     mylite_db *db,
     const char *sql,
@@ -3234,6 +3253,145 @@ static void test_row_dml_transactions(void) {
         "0"
     );
     assert_exec_succeeds(db, "DELETE FROM tx_posts WHERE id = 75");
+
+    assert_prepared_one_int_succeeds(db, "SET autocommit=?", 0);
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO tx_posts VALUES (80, 'prepared-param-autocommit-rollback')"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts WHERE title = 'prepared-param-autocommit-rollback'",
+        "0"
+    );
+
+    assert_prepared_one_int_succeeds(db, "SET autocommit=?", 0);
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO tx_posts VALUES (80, 'prepared-param-autocommit-commit')"
+    );
+    assert_prepared_one_int_succeeds(db, "SET @@session.autocommit=?", 1);
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts "
+        "WHERE id = 80 AND title = 'prepared-param-autocommit-commit'",
+        "1"
+    );
+    assert_exec_succeeds(db, "DELETE FROM tx_posts WHERE id = 80");
+
+    assert_prepared_one_int_succeeds(db, "SET autocommit=?", 0);
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO tx_posts VALUES (81, 'prepared-param-autocommit-ordered-commit')"
+    );
+    assert_prepared_two_int_statement_succeeds(db, "SET autocommit=?, autocommit=?", 1, 0);
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts "
+        "WHERE id = 81 AND title = 'prepared-param-autocommit-ordered-commit'",
+        "1"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO tx_posts VALUES (82, 'prepared-param-autocommit-ordered-rollback')"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts "
+        "WHERE title = 'prepared-param-autocommit-ordered-rollback'",
+        "0"
+    );
+    assert_exec_succeeds(db, "DELETE FROM tx_posts WHERE id = 81");
+    assert_prepared_one_int_succeeds(db, "SET autocommit=?", 1);
+
+    assert_prepared_two_int_statement_succeeds(
+        db,
+        "SET @mylite_param_ordinary=?, autocommit=?",
+        7,
+        0
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO tx_posts VALUES (86, 'prepared-param-ordinary-marker-before')"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts "
+        "WHERE title = 'prepared-param-ordinary-marker-before'",
+        "0"
+    );
+    assert_prepared_one_int_succeeds(db, "SET autocommit=?", 1);
+
+    assert_prepared_one_int_succeeds(db, "SET completion_type=?", 1);
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO tx_posts VALUES (83, 'prepared-param-completion-before')"
+    );
+    assert_exec_succeeds(db, "COMMIT");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (84, 'prepared-param-completion-after')");
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_exec_succeeds(db, "ROLLBACK AND NO CHAIN");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts "
+        "WHERE id = 83 AND title = 'prepared-param-completion-before'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts WHERE title = 'prepared-param-completion-after'",
+        "0"
+    );
+    assert_exec_succeeds(db, "DELETE FROM tx_posts WHERE id = 83");
+    assert_prepared_one_int_succeeds(db, "SET completion_type=?", 0);
+
+    assert_prepared_one_int_succeeds(db, "SET transaction_read_only=?", 1);
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO tx_posts VALUES (85, 'prepared-param-read-only')",
+        "read-only transaction"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_prepared_one_int_succeeds(db, "SET tx_read_only=?", 0);
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (85, 'prepared-param-read-write')");
+    assert_exec_succeeds(db, "ROLLBACK");
+
+    assert_prepared_one_text_succeeds(db, "SET transaction_isolation=?", "READ-COMMITTED");
+    assert_prepared_one_int_policy_fails_with_message(
+        db,
+        "SET autocommit=?",
+        2,
+        "transaction control"
+    );
+    assert_prepared_one_int_policy_fails_with_message(
+        db,
+        "SET completion_type=?",
+        2,
+        "transaction control"
+    );
+    assert_prepared_one_text_policy_fails_with_message(
+        db,
+        "SET autocommit=?",
+        "DEFAULT",
+        "transaction control"
+    );
+    assert_prepared_one_text_policy_fails_with_message(
+        db,
+        "SET completion_type=?",
+        "RELEASE",
+        "transaction control"
+    );
+    assert_prepared_one_null_policy_fails_with_message(
+        db,
+        "SET transaction_read_only=?",
+        "transaction control"
+    );
 
     assert_exec_succeeds(db, "SET @@transaction_read_only=1");
     assert_exec_succeeds(db, "BEGIN");
@@ -12740,6 +12898,15 @@ static void assert_exec_fails_with_message(mylite_db *db, const char *sql, const
     }
     assert(result != MYLITE_OK);
     assert(errmsg != NULL);
+    if (strstr(errmsg, message) == NULL) {
+        fprintf(
+            stderr,
+            "Expected message '%s' for SQL: %s\nActual message: %s\n",
+            message,
+            sql,
+            errmsg
+        );
+    }
     assert(strstr(errmsg, message) != NULL);
     mylite_free(errmsg);
 }
@@ -12987,6 +13154,127 @@ static void assert_prepared_fails_with_message(
     assert(warning_code == mariadb_errno);
     assert(warning_message != NULL);
     assert(strstr(warning_message, message) != NULL);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+}
+
+static void assert_prepared_one_int_succeeds(mylite_db *db, const char *sql, long long value) {
+    mylite_stmt *stmt = NULL;
+    const int prepare_result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, NULL);
+    if (prepare_result != MYLITE_OK) {
+        fprintf(stderr, "Prepare failed: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(prepare_result == MYLITE_OK);
+    assert(stmt != NULL);
+    assert(mylite_bind_parameter_count(stmt) == 1U);
+    assert(mylite_bind_int64(stmt, 1U, value) == MYLITE_OK);
+
+    const int step_result = mylite_step(stmt);
+    if (step_result != MYLITE_DONE) {
+        fprintf(stderr, "Prepared SQL failed: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(step_result == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+}
+
+static void assert_prepared_one_text_succeeds(mylite_db *db, const char *sql, const char *value) {
+    mylite_stmt *stmt = NULL;
+    const int prepare_result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, NULL);
+    if (prepare_result != MYLITE_OK) {
+        fprintf(stderr, "Prepare failed: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(prepare_result == MYLITE_OK);
+    assert(stmt != NULL);
+    assert(mylite_bind_parameter_count(stmt) == 1U);
+    assert(mylite_bind_text(stmt, 1U, value, MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK);
+
+    const int step_result = mylite_step(stmt);
+    if (step_result != MYLITE_DONE) {
+        fprintf(stderr, "Prepared SQL failed: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(step_result == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+}
+
+static void assert_prepared_one_int_policy_fails_with_message(
+    mylite_db *db,
+    const char *sql,
+    long long value,
+    const char *message
+) {
+    mylite_stmt *stmt = NULL;
+    const int prepare_result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, NULL);
+    if (prepare_result != MYLITE_OK) {
+        fprintf(stderr, "Prepare failed before execution: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(prepare_result == MYLITE_OK);
+    assert(stmt != NULL);
+    assert(mylite_bind_parameter_count(stmt) == 1U);
+    assert(mylite_bind_int64(stmt, 1U, value) == MYLITE_OK);
+
+    const int step_result = mylite_step(stmt);
+    if (step_result != MYLITE_ERROR) {
+        fprintf(stderr, "Prepared SQL unexpectedly succeeded: %s\n", sql);
+    }
+    assert(step_result == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), message) != NULL);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+}
+
+static void assert_prepared_one_text_policy_fails_with_message(
+    mylite_db *db,
+    const char *sql,
+    const char *value,
+    const char *message
+) {
+    mylite_stmt *stmt = NULL;
+    const int prepare_result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, NULL);
+    if (prepare_result != MYLITE_OK) {
+        fprintf(stderr, "Prepare failed before execution: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(prepare_result == MYLITE_OK);
+    assert(stmt != NULL);
+    assert(mylite_bind_parameter_count(stmt) == 1U);
+    assert(mylite_bind_text(stmt, 1U, value, MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK);
+
+    const int step_result = mylite_step(stmt);
+    if (step_result != MYLITE_ERROR) {
+        fprintf(stderr, "Prepared SQL unexpectedly succeeded: %s\n", sql);
+    }
+    assert(step_result == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), message) != NULL);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+}
+
+static void assert_prepared_one_null_policy_fails_with_message(
+    mylite_db *db,
+    const char *sql,
+    const char *message
+) {
+    mylite_stmt *stmt = NULL;
+    const int prepare_result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, NULL);
+    if (prepare_result != MYLITE_OK) {
+        fprintf(stderr, "Prepare failed before execution: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(prepare_result == MYLITE_OK);
+    assert(stmt != NULL);
+    assert(mylite_bind_parameter_count(stmt) == 1U);
+    assert(mylite_bind_null(stmt, 1U) == MYLITE_OK);
+
+    const int step_result = mylite_step(stmt);
+    if (step_result != MYLITE_ERROR) {
+        fprintf(stderr, "Prepared SQL unexpectedly succeeded: %s\n", sql);
+    }
+    assert(step_result == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), message) != NULL);
     assert(mylite_finalize(stmt) == MYLITE_OK);
 }
 

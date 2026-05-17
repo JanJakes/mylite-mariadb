@@ -547,11 +547,15 @@ follow the final supported assignment in a `SET` list, while explicit
 `AND NO CHAIN` overrides chained defaults. Direct and prepared session
 `SET autocommit` lists also allow duplicate supported assignments; MyLite
 applies them in order after MariaDB accepts the statement and leaves the final
-value as session state.
+value as session state. Prepared single-marker values for supported session
+`SET autocommit=?`, `SET completion_type=?`, transaction read-only, and
+transaction-isolation assignments are validated before MariaDB prepared
+execution and mirrored after successful execution.
 `RELEASE`, `WITH CONSISTENT SNAPSHOT`, `completion_type=RELEASE/2`, global
-transaction variables, global autocommit, parameterized transaction-control
-`SET` values, and duplicate `SET TRANSACTION` characteristics remain
-unsupported.
+transaction variables, global autocommit, direct-execution parameter markers,
+expression-valued or global parameterized transaction-control `SET` forms,
+bound `DEFAULT` / `RELEASE` transaction-control values, and duplicate
+`SET TRANSACTION` characteristics remain unsupported.
 Direct savepoint control is handled by `libmylite` before MariaDB execution
 for the same bounded transaction scope: case-insensitive simple unquoted,
 backtick-quoted, and ANSI_QUOTES double-quoted `SAVEPOINT` names open nested
@@ -582,8 +586,10 @@ This is still partial SQL transaction support. The MyLite handler still
 advertises non-transactional engine flags. Public `libmylite` SQL entry points
 continue to reject global autocommit changes, unsupported `SET TRANSACTION`
 forms, unsupported transaction modifiers, global transaction variables,
-parameterized transaction-control `SET` values, release completion defaults,
-XA, and durable direct or prepared DDL inside active transactions.
+direct-execution parameter markers, expression-valued or global parameterized
+transaction-control `SET` forms, bound `DEFAULT` / `RELEASE`
+transaction-control values, release completion defaults, XA, and durable direct
+or prepared DDL inside active transactions.
 Handler-level savepoint hooks, durable transactional DDL, isolation,
 WAL/checkpoint, and transactional engine-flag support remain planned.
 

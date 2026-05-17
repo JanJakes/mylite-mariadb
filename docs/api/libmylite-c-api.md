@@ -109,7 +109,8 @@ rollback-journal and transaction-journal publication state in the primary
 catalog when no transient MariaDB schema directory exists. Direct or prepared
 `BEGIN`, `START TRANSACTION`, `COMMIT`, `ROLLBACK`,
 transaction restart through repeated `BEGIN` / `START TRANSACTION`, and
-supported direct or prepared session `SET autocommit=0/1/DEFAULT` forms,
+supported direct or prepared session `SET autocommit=0/1/DEFAULT` forms and
+prepared single-marker session `SET autocommit=?` values,
 including `SET` lists that mix one autocommit assignment with ordinary
 non-transaction assignments and duplicate supported session autocommit
 assignments applied in order with the final value as session state, support
@@ -140,11 +141,14 @@ simple unquoted and backtick-quoted savepoint names inside active bounded
 row-DML transactions. Double-quoted savepoint names are also supported when the
 session has `ANSI_QUOTES` enabled. The same savepoint-control statements can be
 prepared and reused for file-backed MyLite transactions. Global
-autocommit-control statements, parameterized transaction-control `SET` values,
-`WITH CONSISTENT SNAPSHOT`, `RELEASE` completion, `completion_type=RELEASE/2`,
-global transaction variable assignments, duplicate `SET TRANSACTION`
-characteristics, XA, and direct or prepared DDL inside an active transaction
-remain unsupported until the storage and catalog transaction design is broader.
+autocommit-control statements, direct-execution parameter markers,
+expression-valued or global parameterized transaction-control `SET` forms,
+bound `DEFAULT` / `RELEASE` transaction-control values,
+`WITH CONSISTENT SNAPSHOT` transaction starts, `RELEASE` completion,
+`completion_type=RELEASE/2`, global transaction variable assignments,
+duplicate `SET TRANSACTION` characteristics, XA, and direct or prepared DDL
+inside an active transaction remain unsupported until the storage and catalog
+transaction design is broader.
 Existing-file opens preserve storage lock conflicts as
 `MYLITE_BUSY` before starting the embedded runtime.
 
@@ -267,7 +271,11 @@ Initial implementation status: ordinary prepared statements run through
 MariaDB's embedded `MYSQL_STMT` API; MyLite-owned prepared savepoint-control
 statements use the direct transaction checkpoint path, and prepared transaction
 lifecycle controls mirror the supported bounded direct transaction lifecycle
-after MariaDB prepared execution succeeds. The implementation supports one
+after MariaDB prepared execution succeeds. Prepared single-marker
+transaction-related `SET` assignments mirror supported `autocommit`,
+`completion_type`, transaction read-only, and transaction-isolation setup after
+their bound values are validated and MariaDB prepared execution succeeds. The
+implementation supports one
 statement per prepare call, 1-based scalar parameter binding, row stepping,
 reset/finalize ownership, parameter counts, affected rows, insert ids, MariaDB
 diagnostics, warnings after completed execution and selected failed execution

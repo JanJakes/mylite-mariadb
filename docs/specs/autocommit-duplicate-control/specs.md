@@ -10,7 +10,8 @@ determines the effective session state.
 ## Non-Goals
 
 - Global autocommit assignments.
-- Parameterized transaction-control values such as `SET autocommit=?`.
+- Parameterized transaction-control values such as `SET autocommit=?` at this
+  slice point.
 - Mixing autocommit assignments with transaction read-only assignments in the
   same `SET` list.
 - Prepared `BEGIN`, `START TRANSACTION`, `COMMIT`, or `ROLLBACK`.
@@ -44,9 +45,10 @@ active autocommit-disabled MyLite transaction before later assignments run.
 
 Global autocommit assignment remains unsupported because it mutates
 process-global server state rather than the file-owned `libmylite` session
-contract. Parameterized transaction-control values remain unsupported because
-MyLite must know the transaction transition before executing the prepared
-statement.
+contract. The later
+[Prepared Parameterized Transaction SET Control](../prepared-parameterized-transaction-set-control/specs.md)
+slice supports single-marker prepared transaction `SET` values by resolving the
+bound transition before MariaDB prepared execution.
 
 ## Design
 

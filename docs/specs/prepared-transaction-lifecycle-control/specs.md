@@ -14,7 +14,7 @@ supports.
 - Durable transactional DDL.
 - Handler-level MariaDB transaction or savepoint hooks.
 - Storage isolation guarantees beyond the existing read-only write rejection.
-- Parameterized transaction-control values.
+- Parameterized transaction-control values at this slice point.
 
 ## Source Findings
 
@@ -53,8 +53,11 @@ the same bounded row-DML transaction controls as direct execution:
 
 The support remains bounded to MyLite's current row-DML transaction model.
 Global transaction defaults, consistent snapshots, release completion, XA,
-parameterized transaction-control values, durable transactional DDL, real
-storage isolation, and handler-level transaction flags remain unsupported.
+durable transactional DDL, real storage isolation, and handler-level
+transaction flags remain unsupported. The later
+[Prepared Parameterized Transaction SET Control](../prepared-parameterized-transaction-set-control/specs.md)
+slice supports single-marker prepared transaction `SET` values by resolving the
+bound transition before MariaDB prepared execution.
 
 ## Design
 

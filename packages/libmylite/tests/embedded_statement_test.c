@@ -25,6 +25,12 @@ static void test_prepare_diagnostics(void);
 static void test_invalid_indexes(void);
 static void assert_prepare_fails_with_message(mylite_db *db, const char *sql, const char *message);
 static void assert_prepare_step_succeeds(mylite_db *db, const char *sql);
+static void assert_prepare_one_int_step_succeeds(mylite_db *db, const char *sql, long long value);
+static void assert_prepare_one_text_step_succeeds(
+    mylite_db *db,
+    const char *sql,
+    const char *value
+);
 static void assert_prepare_savepoint_control_policy(mylite_db *db, const char *sql);
 static mylite_stmt *prepare_statement(mylite_db *db, const char *sql);
 static mylite_db *open_database(const char *root, char **filename);
@@ -1113,12 +1119,26 @@ static void test_prepare_diagnostics(void) {
     assert_prepare_step_succeeds(db, "SET transaction_read_only=1");
     assert_prepare_step_succeeds(db, "SET transaction_read_only=0");
     assert_prepare_step_succeeds(db, "SET transaction_read_only=1, tx_read_only=0");
+    assert_prepare_one_int_step_succeeds(db, "SET autocommit=?", 1);
+    assert_prepare_one_int_step_succeeds(db, "SET @@session.autocommit=?", 0);
+    assert_prepare_one_int_step_succeeds(db, "SET autocommit=?", 1);
+    assert_prepare_one_int_step_succeeds(db, "SET completion_type=?", 0);
+    assert_prepare_one_int_step_succeeds(db, "SET @@session.completion_type=?", 1);
+    assert_prepare_one_int_step_succeeds(db, "SET completion_type=?", 0);
+    assert_prepare_one_int_step_succeeds(db, "SET transaction_read_only=?", 1);
+    assert_prepare_one_int_step_succeeds(db, "SET tx_read_only=?", 0);
+    assert_prepare_one_text_step_succeeds(db, "SET transaction_isolation=?", "READ-COMMITTED");
     assert_prepare_fails_with_message(db, "SET GLOBAL autocommit=0", "transaction control");
-    assert_prepare_fails_with_message(db, "SET autocommit=?", "transaction control");
-    assert_prepare_fails_with_message(db, "SET transaction_read_only=?", "transaction control");
+    assert_prepare_fails_with_message(db, "SET GLOBAL autocommit=?", "transaction control");
+    assert_prepare_fails_with_message(db, "SET autocommit=? + 0", "transaction control");
     assert_prepare_fails_with_message(
         db,
         "SET STATEMENT completion_type=CHAIN FOR SELECT 1",
+        "transaction control"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "SET STATEMENT completion_type=? FOR SELECT 1",
         "transaction control"
     );
 
@@ -1316,6 +1336,50 @@ static void assert_prepare_step_succeeds(mylite_db *db, const char *sql) {
     }
     assert(step_result == MYLITE_DONE);
     assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+}
+
+static void assert_prepare_one_int_step_succeeds(mylite_db *db, const char *sql, long long value) {
+    mylite_stmt *stmt = NULL;
+    const int prepare_result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, NULL);
+    if (prepare_result != MYLITE_OK) {
+        fprintf(stderr, "Prepare failed: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(prepare_result == MYLITE_OK);
+    assert(stmt != NULL);
+    assert(mylite_bind_parameter_count(stmt) == 1U);
+    assert(mylite_column_count(stmt) == 0U);
+    assert(mylite_bind_int64(stmt, 1U, value) == MYLITE_OK);
+
+    const int step_result = mylite_step(stmt);
+    if (step_result != MYLITE_DONE) {
+        fprintf(stderr, "Prepared SQL failed: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(step_result == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+}
+
+static void assert_prepare_one_text_step_succeeds(
+    mylite_db *db,
+    const char *sql,
+    const char *value
+) {
+    mylite_stmt *stmt = NULL;
+    const int prepare_result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, NULL);
+    if (prepare_result != MYLITE_OK) {
+        fprintf(stderr, "Prepare failed: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(prepare_result == MYLITE_OK);
+    assert(stmt != NULL);
+    assert(mylite_bind_parameter_count(stmt) == 1U);
+    assert(mylite_column_count(stmt) == 0U);
+    assert(mylite_bind_text(stmt, 1U, value, MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK);
+
+    const int step_result = mylite_step(stmt);
+    if (step_result != MYLITE_DONE) {
+        fprintf(stderr, "Prepared SQL failed: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(step_result == MYLITE_DONE);
     assert(mylite_finalize(stmt) == MYLITE_OK);
 }
 

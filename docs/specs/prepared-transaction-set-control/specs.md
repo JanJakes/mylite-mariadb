@@ -3,7 +3,9 @@
 Status note: the later
 [Prepared Transaction Lifecycle Control](../prepared-transaction-lifecycle-control/specs.md)
 slice accepts prepared `BEGIN`, `START TRANSACTION`, `COMMIT`, and `ROLLBACK`
-forms that match the bounded direct transaction lifecycle.
+forms that match the bounded direct transaction lifecycle. The later
+[Prepared Parameterized Transaction SET Control](../prepared-parameterized-transaction-set-control/specs.md)
+slice accepts supported single-marker prepared transaction `SET` values.
 
 ## Goal
 
@@ -16,7 +18,7 @@ MyLite already supports through direct execution.
 - Prepared `BEGIN`, `START TRANSACTION`, `COMMIT`, or `ROLLBACK` at this slice
   point.
 - Prepared transaction controls whose value is supplied through a parameter
-  marker, such as `SET autocommit=?`.
+  marker, such as `SET autocommit=?`, at this slice point.
 - Unsupported direct transaction controls: global autocommit or transaction
   variable assignments, duplicate autocommit assignments at this slice point,
   release `completion_type`, `SET STATEMENT`, duplicate `SET TRANSACTION`
