@@ -9,6 +9,8 @@ default_tests=(
   mylite.bootstrap_schema
   main.cast
   main.case
+  main.bigint
+  main.adddate_454
   main.func_equal
   main.func_op
   main.func_concat
