@@ -72,9 +72,10 @@ stored-program runtime stubbing,
 event parse-data validation stubbing,
 dynamic UDF runtime, and non-table-object policies, and representative
 `SHOW CREATE TABLE` round-trip export/import.
-The opt-in embedded MTR smoke runner covers MariaDB bootstrap and scalar
-CAST/CONVERT behavior, while MariaDB MTR comparison suites and broader
-application-schema and runtime suites remain planned.
+The opt-in embedded MTR smoke runner covers MariaDB bootstrap, scalar
+CAST/CONVERT behavior, and CASE-family expression behavior, while MariaDB MTR
+comparison suites and broader application-schema and runtime suites remain
+planned.
 
 ## Baseline
 

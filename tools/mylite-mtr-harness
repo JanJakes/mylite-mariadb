@@ -5,7 +5,7 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_dir="${BUILD_DIR:-"${root_dir}/build/mariadb-mtr-smoke"}"
 mtr_profile="${PROFILE:-"${root_dir}/cmake/mariadb-mtr-smoke.cmake"}"
 mtr_build_thread="${MTR_BUILD_THREAD:-auto}"
-default_tests=(mylite.bootstrap_schema main.cast)
+default_tests=(mylite.bootstrap_schema main.cast main.case)
 
 usage() {
   cat <<EOF
@@ -13,7 +13,7 @@ Usage: tools/mylite-mtr-harness [list|run] [suite.test...]
 
 Commands:
   list       Show curated MariaDB MTR smoke tests.
-  run        Build the MTR smoke prerequisites and run selected tests.
+  run        Build the MTR smoke prerequisites and run exact selected tests.
              Defaults to the curated smoke list.
 
 Environment:
@@ -143,7 +143,7 @@ run_tests() {
           --force \
           --mysqld=--default-storage-engine=Aria \
           --suite="${suite_name}" \
-          --do-test="${case_name}" \
+          --do-test="^${case_name}$" \
           --max-test-fail=1
     )
   done
