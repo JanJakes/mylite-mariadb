@@ -154,6 +154,7 @@ static void test_non_table_object_policy(void);
 static void test_transaction_and_foreign_key_policies(void);
 static void test_foreign_key_self_set_null_delete(void);
 static void test_foreign_key_self_set_null_update(void);
+static void test_foreign_key_non_self_set_null_actions(void);
 static void test_foreign_key_non_self_ordering(void);
 static void test_foreign_key_multi_table_ordering(void);
 static void test_foreign_key_handler_metadata(void);
@@ -433,6 +434,7 @@ int main(int argc, char **argv) {
     test_transaction_and_foreign_key_policies();
     test_foreign_key_self_set_null_delete();
     test_foreign_key_self_set_null_update();
+    test_foreign_key_non_self_set_null_actions();
     test_foreign_key_non_self_ordering();
     test_foreign_key_multi_table_ordering();
     test_foreign_key_handler_metadata();
@@ -2512,22 +2514,6 @@ static void test_foreign_key_self_set_null_delete(void) {
         "1"
     );
 
-    assert_exec_succeeds(
-        db,
-        "CREATE TABLE fk_set_null_other_parent ("
-        "id INT NOT NULL PRIMARY KEY"
-        ") ENGINE=InnoDB"
-    );
-    assert_foreign_key_exec_fails(
-        db,
-        "CREATE TABLE fk_set_null_other_child ("
-        "id INT NOT NULL PRIMARY KEY, parent_id INT NULL, "
-        "KEY fk_set_null_other_child_parent (parent_id), "
-        "CONSTRAINT fk_set_null_other_child_parent "
-        "FOREIGN KEY (parent_id) REFERENCES fk_set_null_other_parent(id) "
-        "ON DELETE SET NULL"
-        ") ENGINE=InnoDB"
-    );
     assert_foreign_key_exec_fails(
         db,
         "CREATE TABLE fk_set_null_not_null ("
@@ -2537,10 +2523,6 @@ static void test_foreign_key_self_set_null_delete(void) {
         "FOREIGN KEY (parent_id) REFERENCES fk_set_null_not_null(id) "
         "ON DELETE SET NULL"
         ") ENGINE=InnoDB"
-    );
-    assert(
-        mylite_storage_table_exists(filename, "app", "fk_set_null_other_child") ==
-        MYLITE_STORAGE_NOTFOUND
     );
     assert(
         mylite_storage_table_exists(filename, "app", "fk_set_null_not_null") ==
@@ -2673,22 +2655,6 @@ static void test_foreign_key_self_set_null_update(void) {
         "1"
     );
 
-    assert_exec_succeeds(
-        db,
-        "CREATE TABLE fk_set_null_update_other_parent ("
-        "id INT NOT NULL PRIMARY KEY"
-        ") ENGINE=InnoDB"
-    );
-    assert_foreign_key_exec_fails(
-        db,
-        "CREATE TABLE fk_set_null_update_other_child ("
-        "id INT NOT NULL PRIMARY KEY, parent_id INT NULL, "
-        "KEY fk_set_null_update_other_child_parent (parent_id), "
-        "CONSTRAINT fk_set_null_update_other_child_parent "
-        "FOREIGN KEY (parent_id) REFERENCES fk_set_null_update_other_parent(id) "
-        "ON UPDATE SET NULL"
-        ") ENGINE=InnoDB"
-    );
     assert_foreign_key_exec_fails(
         db,
         "CREATE TABLE fk_set_null_update_not_null ("
@@ -2698,10 +2664,6 @@ static void test_foreign_key_self_set_null_update(void) {
         "FOREIGN KEY (parent_id) REFERENCES fk_set_null_update_not_null(id) "
         "ON UPDATE SET NULL"
         ") ENGINE=InnoDB"
-    );
-    assert(
-        mylite_storage_table_exists(filename, "app", "fk_set_null_update_other_child") ==
-        MYLITE_STORAGE_NOTFOUND
     );
     assert(
         mylite_storage_table_exists(filename, "app", "fk_set_null_update_not_null") ==
@@ -2725,6 +2687,258 @@ static void test_foreign_key_self_set_null_update(void) {
         "SELECT id FROM fk_set_null_update_tree FORCE INDEX (fk_set_null_update_tree_parent) "
         "WHERE parent_id = 10",
         "5"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_foreign_key_non_self_set_null_actions(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_non_self_delete_parent ("
+        "id INT NOT NULL PRIMARY KEY, label VARCHAR(32) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_non_self_delete_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NULL, "
+        "label VARCHAR(32) NOT NULL, "
+        "KEY fk_non_self_delete_child_parent (parent_id), "
+        "CONSTRAINT fk_non_self_delete_child_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_non_self_delete_parent(id) "
+        "ON DELETE SET NULL"
+        ") ENGINE=InnoDB"
+    );
+    char *create_sql = capture_show_create_table(db, "fk_non_self_delete_child");
+    assert(strstr(create_sql, "ON DELETE SET NULL") != NULL);
+    free(create_sql);
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_non_self_delete_parent VALUES "
+        "(1, 'old'), (2, 'kept')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_non_self_delete_child VALUES "
+        "(10, 1, 'first child'), "
+        "(11, 1, 'second child'), "
+        "(12, 2, 'kept child'), "
+        "(13, NULL, 'orphan allowed')"
+    );
+    assert_exec_succeeds(db, "DELETE FROM fk_non_self_delete_parent WHERE id = 1");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_non_self_delete_child "
+        "WHERE id IN (10, 11) AND parent_id IS NULL",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM fk_non_self_delete_child "
+        "FORCE INDEX (fk_non_self_delete_child_parent) WHERE parent_id = 2",
+        "12"
+    );
+    assert_exec_fails(db, "INSERT INTO fk_non_self_delete_child VALUES (14, 1, 'old parent')");
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_non_self_update_parent ("
+        "id INT NOT NULL PRIMARY KEY, label VARCHAR(32) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_non_self_update_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NULL, "
+        "label VARCHAR(32) NOT NULL, "
+        "KEY fk_non_self_update_child_parent (parent_id), "
+        "CONSTRAINT fk_non_self_update_child_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_non_self_update_parent(id) "
+        "ON UPDATE SET NULL"
+        ") ENGINE=InnoDB"
+    );
+    create_sql = capture_show_create_table(db, "fk_non_self_update_child");
+    assert(strstr(create_sql, "ON UPDATE SET NULL") != NULL);
+    free(create_sql);
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_non_self_update_parent VALUES "
+        "(1, 'old'), (2, 'kept')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_non_self_update_child VALUES "
+        "(20, 1, 'first child'), "
+        "(21, 1, 'second child'), "
+        "(22, 2, 'kept child')"
+    );
+    assert_exec_succeeds(db, "UPDATE fk_non_self_update_parent SET id = 10 WHERE id = 1");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_non_self_update_child "
+        "WHERE id IN (20, 21) AND parent_id IS NULL",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM fk_non_self_update_child "
+        "FORCE INDEX (fk_non_self_update_child_parent) WHERE parent_id = 2",
+        "22"
+    );
+    assert_exec_fails(db, "INSERT INTO fk_non_self_update_child VALUES (23, 1, 'old parent')");
+    assert_exec_succeeds(db, "INSERT INTO fk_non_self_update_child VALUES (24, 10, 'new parent')");
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_non_self_delete_restrict_parent ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_non_self_delete_restrict_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "set_null_parent_id INT NULL, "
+        "restrict_parent_id INT NULL, "
+        "KEY fk_non_self_delete_restrict_set_null (set_null_parent_id), "
+        "KEY fk_non_self_delete_restrict_restrict (restrict_parent_id), "
+        "CONSTRAINT fk_non_self_delete_restrict_set_null "
+        "FOREIGN KEY (set_null_parent_id) REFERENCES fk_non_self_delete_restrict_parent(id) "
+        "ON DELETE SET NULL, "
+        "CONSTRAINT fk_non_self_delete_restrict_restrict "
+        "FOREIGN KEY (restrict_parent_id) REFERENCES fk_non_self_delete_restrict_parent(id) "
+        "ON DELETE RESTRICT"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_non_self_delete_restrict_parent VALUES (1)");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_non_self_delete_restrict_child VALUES "
+        "(1, 1, NULL), (2, NULL, 1)"
+    );
+    assert_exec_fails(db, "DELETE FROM fk_non_self_delete_restrict_parent WHERE id = 1");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_non_self_delete_restrict_child "
+        "WHERE id = 1 AND set_null_parent_id = 1",
+        "1"
+    );
+    assert_exec_succeeds(db, "DELETE FROM fk_non_self_delete_restrict_child WHERE id = 2");
+    assert_exec_succeeds(db, "DELETE FROM fk_non_self_delete_restrict_parent WHERE id = 1");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_non_self_delete_restrict_child "
+        "WHERE id = 1 AND set_null_parent_id IS NULL",
+        "1"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_non_self_update_restrict_parent ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_non_self_update_restrict_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "set_null_parent_id INT NULL, "
+        "restrict_parent_id INT NULL, "
+        "KEY fk_non_self_update_restrict_set_null (set_null_parent_id), "
+        "KEY fk_non_self_update_restrict_restrict (restrict_parent_id), "
+        "CONSTRAINT fk_non_self_update_restrict_set_null "
+        "FOREIGN KEY (set_null_parent_id) REFERENCES fk_non_self_update_restrict_parent(id) "
+        "ON UPDATE SET NULL, "
+        "CONSTRAINT fk_non_self_update_restrict_restrict "
+        "FOREIGN KEY (restrict_parent_id) REFERENCES fk_non_self_update_restrict_parent(id) "
+        "ON UPDATE RESTRICT"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_non_self_update_restrict_parent VALUES (1)");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_non_self_update_restrict_child VALUES "
+        "(1, 1, NULL), (2, NULL, 1)"
+    );
+    assert_exec_fails(db, "UPDATE fk_non_self_update_restrict_parent SET id = 10 WHERE id = 1");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_non_self_update_restrict_child "
+        "WHERE id = 1 AND set_null_parent_id = 1",
+        "1"
+    );
+    assert_exec_succeeds(db, "DELETE FROM fk_non_self_update_restrict_child WHERE id = 2");
+    assert_exec_succeeds(db, "UPDATE fk_non_self_update_restrict_parent SET id = 10 WHERE id = 1");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_non_self_update_restrict_child "
+        "WHERE id = 1 AND set_null_parent_id IS NULL",
+        "1"
+    );
+
+    assert_foreign_key_exec_fails(
+        db,
+        "CREATE TABLE fk_non_self_set_null_not_null ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT NOT NULL, "
+        "KEY fk_non_self_set_null_not_null_parent (parent_id), "
+        "CONSTRAINT fk_non_self_set_null_not_null_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_non_self_update_parent(id) "
+        "ON DELETE SET NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_foreign_key_exec_fails(
+        db,
+        "CREATE TABLE fk_non_self_set_null_blob ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT NULL, note TEXT, "
+        "KEY fk_non_self_set_null_blob_parent (parent_id), "
+        "CONSTRAINT fk_non_self_set_null_blob_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_non_self_update_parent(id) "
+        "ON UPDATE SET NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "fk_non_self_set_null_not_null") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "fk_non_self_set_null_blob") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE app");
+    create_sql = capture_show_create_table(db, "fk_non_self_delete_child");
+    assert(strstr(create_sql, "ON DELETE SET NULL") != NULL);
+    free(create_sql);
+    create_sql = capture_show_create_table(db, "fk_non_self_update_child");
+    assert(strstr(create_sql, "ON UPDATE SET NULL") != NULL);
+    free(create_sql);
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_non_self_delete_child "
+        "WHERE id IN (10, 11) AND parent_id IS NULL",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM fk_non_self_update_child "
+        "FORCE INDEX (fk_non_self_update_child_parent) WHERE parent_id = 10",
+        "24"
     );
 
     assert(mylite_close(db) == MYLITE_OK);
@@ -3126,7 +3340,14 @@ static void test_foreign_key_handler_metadata(void) {
     assert_exec_fails(db, "UPDATE child SET parent_id = 99 WHERE id = 1");
     assert_exec_fails(db, "UPDATE parent SET id = 2 WHERE id = 1");
     assert_exec_fails(db, "DELETE FROM parent WHERE id = 1");
-    assert_exec_fails(db, "DELETE FROM fk_parent.remote_parent WHERE id = 10");
+    assert_exec_succeeds(db, "DELETE FROM fk_parent.remote_parent WHERE id = 10");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM child WHERE id = 3 AND remote_parent_id IS NULL",
+        "1"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_parent.remote_parent VALUES (10)");
+    assert_exec_succeeds(db, "UPDATE child SET remote_parent_id = 10 WHERE id = 3");
     assert_exec_succeeds(db, "UPDATE child SET parent_id = NULL WHERE id = 1");
     assert_exec_succeeds(db, "DELETE FROM parent WHERE id = 1");
     assert_exec_succeeds(db, "INSERT INTO parent VALUES (1)");
@@ -3137,7 +3358,14 @@ static void test_foreign_key_handler_metadata(void) {
     assert_exec_succeeds(db, "USE fk_metadata");
     assert_exec_fails(db, "INSERT INTO child VALUES (4, 99, NULL)");
     assert_exec_fails(db, "UPDATE parent SET id = 2 WHERE id = 1");
-    assert_exec_fails(db, "DELETE FROM fk_parent.remote_parent WHERE id = 10");
+    assert_exec_succeeds(db, "DELETE FROM fk_parent.remote_parent WHERE id = 10");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM child WHERE id = 3 AND remote_parent_id IS NULL",
+        "1"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_parent.remote_parent VALUES (10)");
+    assert_exec_succeeds(db, "UPDATE child SET remote_parent_id = 10 WHERE id = 3");
     assert_exec_fails(db, "ALTER TABLE child DROP COLUMN parent_id, ALGORITHM=COPY");
     assert_exec_fails(db, "ALTER TABLE child MODIFY COLUMN parent_id BIGINT, ALGORITHM=COPY");
     assert_exec_fails(db, "ALTER TABLE child DROP KEY child_parent_key, ALGORITHM=COPY");
