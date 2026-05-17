@@ -1738,11 +1738,52 @@ static void test_transaction_and_foreign_key_policies(void) {
     assert(strstr(create_sql, "CONSTRAINT `fk_drop_child_parent` FOREIGN KEY") == NULL);
     free(create_sql);
 
+    assert_prepared_succeeds(
+        db,
+        "CREATE TABLE fk_prepared_parent (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB"
+    );
+    assert_prepared_succeeds(
+        db,
+        "CREATE TABLE fk_prepared_child ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT, "
+        "KEY fk_prepared_child_parent_key (parent_id), "
+        "CONSTRAINT fk_prepared_child_parent FOREIGN KEY (parent_id) "
+        "REFERENCES fk_prepared_parent(id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_prepared_fails_with_message(
+        db,
+        "INSERT INTO fk_prepared_child VALUES (1, 99)",
+        "foreign key constraint"
+    );
+    assert_prepared_succeeds(db, "INSERT INTO fk_prepared_parent VALUES (90)");
+    assert_prepared_succeeds(db, "INSERT INTO fk_prepared_child VALUES (1, 90)");
+    assert_prepared_fails_with_message(
+        db,
+        "UPDATE fk_prepared_parent SET id = 91 WHERE id = 90",
+        "foreign key constraint"
+    );
+    assert_prepared_fails_with_message(
+        db,
+        "DELETE FROM fk_prepared_parent WHERE id = 90",
+        "foreign key constraint"
+    );
+
     assert(mylite_close(db) == MYLITE_OK);
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "USE app");
     assert_exec_succeeds(db, "INSERT INTO fk_child VALUES (3, 99)");
     assert_exec_succeeds(db, "INSERT INTO fk_drop_child VALUES (3, 100)");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_prepared_child WHERE parent_id = 90",
+        "1"
+    );
+    assert_prepared_fails_with_message(
+        db,
+        "INSERT INTO fk_prepared_child VALUES (2, 900)",
+        "foreign key constraint"
+    );
     create_sql = capture_show_create_table(db, "fk_child");
     assert(strstr(create_sql, "CONSTRAINT `fk_child_parent` FOREIGN KEY") == NULL);
     free(create_sql);
