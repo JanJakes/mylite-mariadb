@@ -205,6 +205,25 @@ static void assert_foreign_key_exec_fails(mylite_db *db, const char *sql);
 static void assert_prepared_succeeds(mylite_db *db, const char *sql);
 static void assert_prepared_fails(mylite_db *db, const char *sql);
 static void assert_prepared_fails_with_message(mylite_db *db, const char *sql, const char *message);
+static void assert_prepared_one_int_statement_fails_with_message(
+    mylite_db *db,
+    const char *sql,
+    long long value,
+    const char *message
+);
+static void assert_prepared_two_int_statement_succeeds(
+    mylite_db *db,
+    const char *sql,
+    long long first_value,
+    long long second_value
+);
+static void assert_prepared_two_int_statement_fails_with_message(
+    mylite_db *db,
+    const char *sql,
+    long long first_value,
+    long long second_value,
+    const char *message
+);
 static void assert_prepared_policy_fails_with_message(
     mylite_db *db,
     mylite_stmt *stmt,
@@ -1758,6 +1777,19 @@ static void test_transaction_and_foreign_key_policies(void) {
     );
     assert_prepared_succeeds(db, "INSERT INTO fk_prepared_parent VALUES (90)");
     assert_prepared_succeeds(db, "INSERT INTO fk_prepared_child VALUES (1, 90)");
+    assert_prepared_two_int_statement_succeeds(
+        db,
+        "INSERT INTO fk_prepared_child VALUES (?, ?)",
+        2,
+        90
+    );
+    assert_prepared_two_int_statement_fails_with_message(
+        db,
+        "INSERT INTO fk_prepared_child VALUES (?, ?)",
+        3,
+        900,
+        "foreign key constraint"
+    );
     assert_prepared_fails_with_message(
         db,
         "UPDATE fk_prepared_parent SET id = 91 WHERE id = 90",
@@ -1766,6 +1798,12 @@ static void test_transaction_and_foreign_key_policies(void) {
     assert_prepared_fails_with_message(
         db,
         "DELETE FROM fk_prepared_parent WHERE id = 90",
+        "foreign key constraint"
+    );
+    assert_prepared_one_int_statement_fails_with_message(
+        db,
+        "DELETE FROM fk_prepared_parent WHERE id = ?",
+        90,
         "foreign key constraint"
     );
 
@@ -1777,11 +1815,11 @@ static void test_transaction_and_foreign_key_policies(void) {
     assert_query_single_value(
         db,
         "SELECT COUNT(*) FROM fk_prepared_child WHERE parent_id = 90",
-        "1"
+        "2"
     );
     assert_prepared_fails_with_message(
         db,
-        "INSERT INTO fk_prepared_child VALUES (2, 900)",
+        "INSERT INTO fk_prepared_child VALUES (4, 900)",
         "foreign key constraint"
     );
     create_sql = capture_show_create_table(db, "fk_child");
@@ -12687,6 +12725,88 @@ static void assert_prepared_fails_with_message(
     assert(warning_code == mariadb_errno);
     assert(warning_message != NULL);
     assert(strstr(warning_message, message) != NULL);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+}
+
+static void assert_prepared_one_int_statement_fails_with_message(
+    mylite_db *db,
+    const char *sql,
+    long long value,
+    const char *message
+) {
+    mylite_stmt *stmt = NULL;
+    const int prepare_result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, NULL);
+    if (prepare_result != MYLITE_OK) {
+        fprintf(stderr, "Prepare failed before execution: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(prepare_result == MYLITE_OK);
+    assert(stmt != NULL);
+    assert(mylite_bind_int64(stmt, 1U, value) == MYLITE_OK);
+
+    const int step_result = mylite_step(stmt);
+    if (step_result != MYLITE_ERROR) {
+        fprintf(stderr, "Prepared SQL unexpectedly succeeded: %s\n", sql);
+    }
+    assert(step_result == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    const unsigned mariadb_errno = mylite_mariadb_errno(db);
+    assert(mariadb_errno != 0U);
+    assert(strcmp(mylite_sqlstate(db), "00000") != 0);
+    assert(strstr(mylite_errmsg(db), message) != NULL);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+}
+
+static void assert_prepared_two_int_statement_succeeds(
+    mylite_db *db,
+    const char *sql,
+    long long first_value,
+    long long second_value
+) {
+    mylite_stmt *stmt = NULL;
+    const int prepare_result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, NULL);
+    if (prepare_result != MYLITE_OK) {
+        fprintf(stderr, "Prepare failed: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(prepare_result == MYLITE_OK);
+    assert(stmt != NULL);
+    assert(mylite_bind_int64(stmt, 1U, first_value) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 2U, second_value) == MYLITE_OK);
+
+    const int step_result = mylite_step(stmt);
+    if (step_result != MYLITE_DONE) {
+        fprintf(stderr, "Prepared SQL failed: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(step_result == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+}
+
+static void assert_prepared_two_int_statement_fails_with_message(
+    mylite_db *db,
+    const char *sql,
+    long long first_value,
+    long long second_value,
+    const char *message
+) {
+    mylite_stmt *stmt = NULL;
+    const int prepare_result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, NULL);
+    if (prepare_result != MYLITE_OK) {
+        fprintf(stderr, "Prepare failed before execution: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(prepare_result == MYLITE_OK);
+    assert(stmt != NULL);
+    assert(mylite_bind_int64(stmt, 1U, first_value) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 2U, second_value) == MYLITE_OK);
+
+    const int step_result = mylite_step(stmt);
+    if (step_result != MYLITE_ERROR) {
+        fprintf(stderr, "Prepared SQL unexpectedly succeeded: %s\n", sql);
+    }
+    assert(step_result == MYLITE_ERROR);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    const unsigned mariadb_errno = mylite_mariadb_errno(db);
+    assert(mariadb_errno != 0U);
+    assert(strcmp(mylite_sqlstate(db), "00000") != 0);
+    assert(strstr(mylite_errmsg(db), message) != NULL);
     assert(mylite_finalize(stmt) == MYLITE_OK);
 }
 

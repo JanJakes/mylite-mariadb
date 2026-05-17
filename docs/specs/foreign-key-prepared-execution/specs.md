@@ -67,8 +67,8 @@ storage-smoke coverage that:
    close/reopen through the existing FK smoke database.
 
 Use existing test helpers for prepared zero-parameter DDL/DML and prepared
-failure diagnostics. Parameterized FK DML can be covered later with a broader
-prepared-parameter matrix.
+failure diagnostics. Add bounded parameterized child-insert and parent-delete
+coverage so FK checks are proven after MyLite binds scalar prepared values.
 
 ## Single-File And Embedded Lifecycle
 
@@ -86,6 +86,7 @@ dependency or binary-size impact is expected.
 
 - Add storage-smoke prepared FK DDL/DML coverage in
   `packages/libmylite/tests/embedded_storage_engine_test.c`.
+- Include bounded parameterized child insert and parent delete coverage.
 - Run embedded storage/exec/statement smoke tests.
 - Run default first-party format and storage checks.
 - Run `git diff --check`.
@@ -103,8 +104,7 @@ dependency or binary-size impact is expected.
 
 ## Risks And Open Questions
 
-- Parameterized FK statements are not covered by this slice; they should be
-  grouped with broader prepared binding matrices rather than hidden in this
-  zero-parameter coverage.
+- Parameterized coverage is intentionally narrow: it proves bound scalar values
+  reach FK checks, but it is not a full prepared binding matrix.
 - Prepared transaction-control statements remain intentionally unsupported, so
   this does not claim prepared multi-statement transaction orchestration.
