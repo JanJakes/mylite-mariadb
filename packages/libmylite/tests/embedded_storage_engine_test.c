@@ -187,6 +187,7 @@ static void test_wordpress_multisite_global_schema_fixture(void);
 static void test_wordpress_multisite_blog_schema_fixture(void);
 static void test_buddypress_component_schema_fixture(void);
 static void test_laravel_default_schema_fixture(void);
+static void test_django_default_schema_fixture(void);
 static void assert_exec_succeeds(mylite_db *db, const char *sql);
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_exec_fails_with_message(mylite_db *db, const char *sql, const char *message);
@@ -265,6 +266,13 @@ static void assert_laravel_table_metadata(
     const char *table_name
 );
 static void assert_laravel_rows(mylite_db *db);
+static void assert_django_catalog_metadata(const char *filename);
+static void assert_django_table_metadata(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name
+);
+static void assert_django_rows(mylite_db *db);
 static void assert_table_collation(
     mylite_db *db,
     const char *schema_name,
@@ -407,6 +415,7 @@ int main(int argc, char **argv) {
     test_wordpress_multisite_blog_schema_fixture();
     test_buddypress_component_schema_fixture();
     test_laravel_default_schema_fixture();
+    test_django_default_schema_fixture();
     return 0;
 }
 
@@ -10556,6 +10565,41 @@ static void test_laravel_default_schema_fixture(void) {
     free(root);
 }
 
+static void test_django_default_schema_fixture(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(
+        db,
+        "CREATE DATABASE django_install "
+        "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    );
+    assert_exec_succeeds(db, "USE django_install");
+    exec_sql_fixture(db, "django-6.0.5-default-schema.sql");
+    assert_django_catalog_metadata(filename);
+    assert_table_collation(db, "django_install", "auth_user", "utf8mb4_unicode_ci");
+    assert_table_collation(db, "django_install", "django_session", "utf8mb4_unicode_ci");
+    exec_sql_fixture(db, "django-6.0.5-default-seed.sql");
+    assert_django_rows(db);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE django_install");
+    assert_django_catalog_metadata(filename);
+    assert_django_rows(db);
+    assert_table_collation(db, "django_install", "auth_user", "utf8mb4_unicode_ci");
+    assert_table_collation(db, "django_install", "django_session", "utf8mb4_unicode_ci");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
 static void assert_wordpress_catalog_metadata(const char *filename) {
     assert_catalog_table_count(filename, "app", 11U);
     assert_catalog_table_metadata(filename, "app", "wp_options", "InnoDB", "MYLITE");
@@ -11243,6 +11287,127 @@ static void assert_laravel_rows(mylite_db *db) {
         "SELECT uuid FROM failed_jobs FORCE INDEX (failed_jobs_connection_queue_failed_at_index) "
         "WHERE connection = 'database' AND queue = 'default'",
         "failed-job-fixture"
+    );
+}
+
+static void assert_django_catalog_metadata(const char *filename) {
+    static const char *const table_names[] = {
+        "django_migrations",
+        "django_content_type",
+        "auth_permission",
+        "auth_group",
+        "auth_group_permissions",
+        "auth_user",
+        "auth_user_groups",
+        "auth_user_user_permissions",
+        "django_admin_log",
+        "django_session",
+    };
+
+    assert_catalog_table_count(filename, "django_install", 10U);
+    for (size_t i = 0; i < sizeof(table_names) / sizeof(table_names[0]); ++i) {
+        assert_django_table_metadata(filename, "django_install", table_names[i]);
+    }
+}
+
+static void assert_django_table_metadata(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name
+) {
+    assert_catalog_table_metadata(filename, schema_name, table_name, "DEFAULT", "MYLITE");
+}
+
+static void assert_django_rows(mylite_db *db) {
+    assert_query_single_value(db, "SELECT COUNT(*) FROM django_migrations", "18");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM auth_permission", "24");
+    assert_query_single_value(
+        db,
+        "SELECT name FROM django_migrations FORCE INDEX (PRIMARY) WHERE id = 14",
+        "0012_alter_user_first_name_max_length"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM django_content_type "
+        "FORCE INDEX (django_content_type_app_label_model_unique) "
+        "WHERE app_label = 'auth' AND model = 'user'",
+        "4"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT name FROM auth_permission "
+        "FORCE INDEX (auth_permission_content_type_id_codename_unique) "
+        "WHERE content_type_id = 4 AND codename = 'change_user'",
+        "Can change user"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT codename FROM auth_permission "
+        "FORCE INDEX (auth_permission_content_type_id_codename_unique) "
+        "WHERE content_type_id = 4 AND codename = 'view_user'",
+        "view_user"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM auth_group FORCE INDEX (auth_group_name_unique) WHERE name = 'Editors'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT permission_id FROM auth_group_permissions "
+        "FORCE INDEX (auth_group_permissions_group_id_permission_id_unique) "
+        "WHERE group_id = 1 AND permission_id = 14",
+        "14"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT group_id FROM auth_user_groups "
+        "FORCE INDEX (auth_user_groups_user_id_group_id_unique) "
+        "WHERE user_id = 1 AND group_id = 1",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT permission_id FROM auth_user_user_permissions "
+        "FORCE INDEX (auth_user_user_permissions_user_id_permission_id_unique) "
+        "WHERE user_id = 1 AND permission_id = 16",
+        "16"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT email FROM auth_user FORCE INDEX (auth_user_username_unique) "
+        "WHERE username = 'admin'",
+        "admin@example.test"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT username FROM auth_user WHERE email = 'admin@example.test'",
+        "admin"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT session_data FROM django_session FORCE INDEX (PRIMARY) "
+        "WHERE session_key = 'django-session-fixture'",
+        ".eJyrVkrLz1eyUkpKLFKqBQAeXgRK:fixture-signature"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT session_key FROM django_session FORCE INDEX (django_session_expire_date_index) "
+        "WHERE expire_date = '2026-05-22 12:00:00.000000'",
+        "django-session-fixture"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT object_repr FROM django_admin_log FORCE INDEX (django_admin_log_user_id_index) "
+        "WHERE user_id = 1 AND action_flag = 1",
+        "admin"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT user_id FROM django_admin_log "
+        "FORCE INDEX (django_admin_log_content_type_id_index) "
+        "WHERE content_type_id = 4",
+        "1"
     );
 }
 
