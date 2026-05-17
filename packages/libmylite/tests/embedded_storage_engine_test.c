@@ -152,6 +152,7 @@ static void test_utf8mb4_unicode_ci_survives_restart(void);
 static void test_collation_restart_matrix(void);
 static void test_non_table_object_policy(void);
 static void test_transaction_and_foreign_key_policies(void);
+static void test_foreign_key_handler_metadata(void);
 static void test_row_dml_transactions(void);
 static void test_create_table_persists_catalog_metadata(void);
 static void test_check_constraint_if_exists(void);
@@ -388,6 +389,7 @@ int main(int argc, char **argv) {
     test_collation_restart_matrix();
     test_non_table_object_policy();
     test_transaction_and_foreign_key_policies();
+    test_foreign_key_handler_metadata();
     test_row_dml_transactions();
     test_create_table_persists_catalog_metadata();
     test_check_constraint_if_exists();
@@ -1614,6 +1616,99 @@ static void test_transaction_and_foreign_key_policies(void) {
     );
     assert(errmsg == NULL);
     assert(child_count.rows == 1);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_foreign_key_handler_metadata(void) {
+    const char *foreign_columns[] = {"parent_id"};
+    const char *referenced_columns[] = {"id"};
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE fk_metadata");
+    assert_exec_succeeds(db, "USE fk_metadata");
+    assert_exec_succeeds(db, "CREATE TABLE parent (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NULL, "
+        "KEY child_parent_key (parent_id)"
+        ") ENGINE=InnoDB"
+    );
+
+    mylite_storage_foreign_key_definition foreign_key = {
+        .size = sizeof(foreign_key),
+        .schema_name = "fk_metadata",
+        .table_name = "child",
+        .constraint_name = "fk_child_parent",
+        .referenced_schema_name = "fk_metadata",
+        .referenced_table_name = "parent",
+        .referenced_key_name = "PRIMARY",
+        .foreign_column_names = foreign_columns,
+        .referenced_column_names = referenced_columns,
+        .column_count = 1U,
+        .update_action = MYLITE_STORAGE_FOREIGN_KEY_ACTION_NO_ACTION,
+        .delete_action = MYLITE_STORAGE_FOREIGN_KEY_ACTION_RESTRICT,
+        .match_option = MYLITE_STORAGE_FOREIGN_KEY_MATCH_SIMPLE,
+        .nullable_column_bitmap = 0x1ULL,
+    };
+    assert(
+        mylite_storage_store_foreign_key_definition(filename, &foreign_key) == MYLITE_STORAGE_OK
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'fk_metadata' "
+        "AND TABLE_NAME = 'child' "
+        "AND CONSTRAINT_NAME = 'fk_child_parent' "
+        "AND CONSTRAINT_TYPE = 'FOREIGN KEY'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.KEY_COLUMN_USAGE "
+        "WHERE CONSTRAINT_SCHEMA = 'fk_metadata' "
+        "AND TABLE_NAME = 'child' "
+        "AND CONSTRAINT_NAME = 'fk_child_parent' "
+        "AND COLUMN_NAME = 'parent_id' "
+        "AND REFERENCED_TABLE_SCHEMA = 'fk_metadata' "
+        "AND REFERENCED_TABLE_NAME = 'parent' "
+        "AND REFERENCED_COLUMN_NAME = 'id'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'fk_metadata' "
+        "AND TABLE_NAME = 'child' "
+        "AND CONSTRAINT_NAME = 'fk_child_parent' "
+        "AND UNIQUE_CONSTRAINT_NAME = 'PRIMARY' "
+        "AND REFERENCED_TABLE_NAME = 'parent' "
+        "AND UPDATE_RULE = 'NO ACTION' "
+        "AND DELETE_RULE = 'RESTRICT'",
+        "1"
+    );
+    assert_exec_fails(db, "TRUNCATE TABLE parent");
+    assert_foreign_key_exec_fails(
+        db,
+        "ALTER TABLE child ADD CONSTRAINT fk_sql_still_blocked "
+        "FOREIGN KEY (parent_id) REFERENCES parent(id)"
+    );
+    assert(
+        mylite_storage_drop_foreign_key_definition(
+            filename,
+            "fk_metadata",
+            "child",
+            "fk_child_parent"
+        ) == MYLITE_STORAGE_OK
+    );
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");

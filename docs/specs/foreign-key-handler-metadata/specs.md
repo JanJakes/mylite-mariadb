@@ -83,9 +83,9 @@ to `FOREIGN_KEY_INFO` allocated from `THD` memory. The mapping must preserve:
 `storage_schema()` / `storage_table()`. `ha_mylite::get_parent_foreign_key_list()`
 reads parent FK metadata from the new storage parent-list primitive.
 `ha_mylite::referenced_by_foreign_key()` can use the parent-list primitive with
-a stop-after-first callback. Errors should fail closed where MariaDB can receive
-an error code through a list hook, and avoid throwing from the `noexcept`
-boolean hook.
+a stop-after-first callback. Errors should fail closed through the list hooks'
+handler error codes and by returning `true` from the `noexcept` boolean hook
+when storage cannot be inspected.
 
 `get_foreign_key_create_info()` stays unimplemented in this slice because
 public FK DDL remains rejected and MyLite has not yet designed canonical

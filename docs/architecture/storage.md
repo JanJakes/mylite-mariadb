@@ -92,11 +92,12 @@ catalog-only reopen without a rehydrated runtime schema directory.
 Representative online and in-place ALTER requests, including `LOCK=NONE`,
 `ALTER ONLINE TABLE`, and `ALGORITHM=INPLACE` / `INSTANT` / `NOCOPY`, are
 rejected by the MyLite SQL policy before MariaDB execution.
-Foreign-key DDL is rejected at the `libmylite` boundary until MyLite has
-handler metadata hooks, enforcement, locking, recovery, and transaction-aware
-checks for referential constraints. The storage layer now has internal
-catalog-backed FK metadata records and typed FK blob pages as groundwork for
-those hooks; this does not yet make FK SQL supported.
+Foreign-key DDL is rejected at the `libmylite` boundary until MyLite has safe
+DDL publication, enforcement, locking, recovery, and transaction-aware checks
+for referential constraints. The storage layer now has internal catalog-backed
+FK metadata records, typed FK blob pages, child and parent FK listing, and
+handler metadata hooks for manually seeded internal records; this does not yet
+make FK SQL supported.
 Partition DDL is rejected at the same boundary until MyLite has partition
 metadata, partition-to-primary-file routing, per-partition catalog lifecycle,
 and partition-aware row and index maintenance.
@@ -365,7 +366,8 @@ filesystem-backed or server-table-backed metadata. Catalog-backed persistence
 for those object classes requires a separate format and execution design.
 Foreign-key DDL is also rejected by policy so routed `ENGINE=InnoDB` metadata
 does not imply referential-integrity enforcement before MyLite storage supports
-it.
+it. Handler hooks expose only MyLite-owned internal FK metadata that was seeded
+through first-party storage primitives.
 
 The default embedded profile does not expose server account administration,
 dynamic plugin installation, replication metadata, or the event scheduler.

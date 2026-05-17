@@ -30,6 +30,7 @@
 #include "key.h"
 #include "sql_class.h"
 #include "sql_cmd.h"
+#include "table.h"
 
 static handler *mylite_create_handler(handlerton *hton,
                                       TABLE_SHARE *table,
@@ -166,6 +167,22 @@ static int mylite_compare_index_entries(TABLE *table, uint index_number,
                                         const Mylite_index_cursor_entry *left,
                                         const Mylite_index_cursor_entry *right,
                                         int *out_cmp);
+static int mylite_add_foreign_key_info(
+  void *ctx, const mylite_storage_foreign_key_metadata *metadata);
+static int mylite_detect_foreign_key_presence(
+  void *ctx, const mylite_storage_foreign_key_metadata *metadata);
+static FOREIGN_KEY_INFO *mylite_foreign_key_info_from_metadata(
+  THD *thd, const mylite_storage_foreign_key_metadata *metadata);
+static LEX_CSTRING *mylite_make_foreign_key_string(THD *thd,
+                                                   const char *value);
+static int mylite_append_foreign_key_column_names(THD *thd,
+                                                  List<LEX_CSTRING> *list,
+                                                  char **column_names,
+                                                  size_t column_count);
+static void mylite_set_foreign_key_nullable_bits(
+  THD *thd, FOREIGN_KEY_INFO *info,
+  const mylite_storage_foreign_key_metadata *metadata);
+static enum_fk_option mylite_foreign_key_option(unsigned action);
 static int mylite_storage_to_handler_error(mylite_storage_result result);
 static int mylite_storage_to_schema_hook_result(mylite_storage_result result);
 static bool mylite_table_has_blob_fields(TABLE *table);
@@ -342,6 +359,18 @@ struct Mylite_trx_context
 {
   mylite_storage_statement *transaction;
   mylite_storage_statement *statement;
+};
+
+struct Mylite_foreign_key_list_context
+{
+  THD *thd;
+  List<FOREIGN_KEY_INFO> *list;
+  int error;
+};
+
+struct Mylite_foreign_key_presence_context
+{
+  bool found;
 };
 
 static int mylite_discover_table(handlerton *, THD *thd, TABLE_SHARE *share)
@@ -1740,6 +1769,59 @@ int ha_mylite::truncate()
   DBUG_RETURN(0);
 }
 
+int ha_mylite::get_foreign_key_list(THD *thd,
+                                    List<FOREIGN_KEY_INFO> *f_key_list)
+{
+  DBUG_ENTER("ha_mylite::get_foreign_key_list");
+
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file || volatile_rows)
+    DBUG_RETURN(0);
+
+  Mylite_foreign_key_list_context ctx= {thd, f_key_list, 0};
+  const mylite_storage_result result=
+    mylite_storage_list_foreign_keys(primary_file, storage_schema(),
+                                     storage_table(),
+                                     mylite_add_foreign_key_info, &ctx);
+  if (ctx.error)
+    DBUG_RETURN(ctx.error);
+  DBUG_RETURN(mylite_storage_to_handler_error(result));
+}
+
+int ha_mylite::get_parent_foreign_key_list(THD *thd,
+                                           List<FOREIGN_KEY_INFO> *f_key_list)
+{
+  DBUG_ENTER("ha_mylite::get_parent_foreign_key_list");
+
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file || volatile_rows)
+    DBUG_RETURN(0);
+
+  Mylite_foreign_key_list_context ctx= {thd, f_key_list, 0};
+  const mylite_storage_result result=
+    mylite_storage_list_parent_foreign_keys(primary_file, storage_schema(),
+                                            storage_table(),
+                                            mylite_add_foreign_key_info, &ctx);
+  if (ctx.error)
+    DBUG_RETURN(ctx.error);
+  DBUG_RETURN(mylite_storage_to_handler_error(result));
+}
+
+bool ha_mylite::referenced_by_foreign_key() const noexcept
+{
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file || volatile_rows)
+    return false;
+
+  Mylite_foreign_key_presence_context ctx= {false};
+  const mylite_storage_result result=
+    mylite_storage_list_parent_foreign_keys(primary_file, storage_schema(),
+                                            storage_table(),
+                                            mylite_detect_foreign_key_presence,
+                                            &ctx);
+  return ctx.found || result != MYLITE_STORAGE_OK;
+}
+
 int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info)
 {
   DBUG_ENTER("ha_mylite::create");
@@ -2846,6 +2928,132 @@ static int mylite_compare_index_entries(TABLE *table, uint index_number,
 
   *out_cmp= cmp;
   return 0;
+}
+
+static int mylite_add_foreign_key_info(
+  void *ctx, const mylite_storage_foreign_key_metadata *metadata)
+{
+  Mylite_foreign_key_list_context *list_ctx=
+    static_cast<Mylite_foreign_key_list_context *>(ctx);
+  FOREIGN_KEY_INFO *info=
+    mylite_foreign_key_info_from_metadata(list_ctx->thd, metadata);
+  if (!info)
+  {
+    list_ctx->error= HA_ERR_OUT_OF_MEM;
+    return 1;
+  }
+  if (list_ctx->list->push_back(info))
+  {
+    list_ctx->error= HA_ERR_OUT_OF_MEM;
+    return 1;
+  }
+  return 0;
+}
+
+static int mylite_detect_foreign_key_presence(
+  void *ctx, const mylite_storage_foreign_key_metadata *)
+{
+  Mylite_foreign_key_presence_context *presence_ctx=
+    static_cast<Mylite_foreign_key_presence_context *>(ctx);
+  presence_ctx->found= true;
+  return 1;
+}
+
+static FOREIGN_KEY_INFO *mylite_foreign_key_info_from_metadata(
+  THD *thd, const mylite_storage_foreign_key_metadata *metadata)
+{
+  if (!thd || !metadata)
+    return NULL;
+
+  FOREIGN_KEY_INFO info;
+  info.foreign_id= mylite_make_foreign_key_string(thd,
+                                                  metadata->constraint_name);
+  info.foreign_db= mylite_make_foreign_key_string(thd, metadata->schema_name);
+  info.foreign_table= mylite_make_foreign_key_string(thd, metadata->table_name);
+  info.referenced_db= mylite_make_foreign_key_string(
+    thd, metadata->referenced_schema_name);
+  info.referenced_table= mylite_make_foreign_key_string(
+    thd, metadata->referenced_table_name);
+  if (!info.foreign_id || !info.foreign_db || !info.foreign_table ||
+      !info.referenced_db || !info.referenced_table)
+    return NULL;
+
+  info.update_method= mylite_foreign_key_option(metadata->update_action);
+  info.delete_method= mylite_foreign_key_option(metadata->delete_action);
+  info.referenced_key_name= metadata->referenced_key_name &&
+                            metadata->referenced_key_name[0] ?
+    mylite_make_foreign_key_string(thd, metadata->referenced_key_name) : NULL;
+  if (metadata->referenced_key_name && metadata->referenced_key_name[0] &&
+      !info.referenced_key_name)
+    return NULL;
+
+  if (mylite_append_foreign_key_column_names(
+        thd, &info.foreign_fields, metadata->foreign_column_names,
+        metadata->column_count) ||
+      mylite_append_foreign_key_column_names(
+        thd, &info.referenced_fields, metadata->referenced_column_names,
+        metadata->column_count))
+    return NULL;
+
+  mylite_set_foreign_key_nullable_bits(thd, &info, metadata);
+
+  return static_cast<FOREIGN_KEY_INFO *>(
+    thd_memdup(thd, &info, sizeof(FOREIGN_KEY_INFO)));
+}
+
+static LEX_CSTRING *mylite_make_foreign_key_string(THD *thd,
+                                                   const char *value)
+{
+  if (!value)
+    return NULL;
+  return thd_make_lex_string(thd, NULL, value, strlen(value), 1);
+}
+
+static int mylite_append_foreign_key_column_names(THD *thd,
+                                                  List<LEX_CSTRING> *list,
+                                                  char **column_names,
+                                                  size_t column_count)
+{
+  for (size_t i= 0; i < column_count; ++i)
+  {
+    LEX_CSTRING *name= mylite_make_foreign_key_string(thd, column_names[i]);
+    if (!name || list->push_back(name))
+      return HA_ERR_OUT_OF_MEM;
+  }
+  return 0;
+}
+
+static void mylite_set_foreign_key_nullable_bits(
+  THD *thd, FOREIGN_KEY_INFO *info,
+  const mylite_storage_foreign_key_metadata *metadata)
+{
+  const unsigned column_count= static_cast<unsigned>(metadata->column_count);
+  for (unsigned i= 0; i < column_count; ++i)
+  {
+    const unsigned long long bit= 1ULL << i;
+    if (metadata->nullable_column_bitmap & bit)
+      info->set_nullable(thd, false, i, column_count);
+    if (metadata->referenced_nullable_column_bitmap & bit)
+      info->set_nullable(thd, true, i, column_count);
+  }
+}
+
+static enum_fk_option mylite_foreign_key_option(unsigned action)
+{
+  switch (action) {
+  case MYLITE_STORAGE_FOREIGN_KEY_ACTION_CASCADE:
+    return FK_OPTION_CASCADE;
+  case MYLITE_STORAGE_FOREIGN_KEY_ACTION_SET_NULL:
+    return FK_OPTION_SET_NULL;
+  case MYLITE_STORAGE_FOREIGN_KEY_ACTION_NO_ACTION:
+    return FK_OPTION_NO_ACTION;
+  case MYLITE_STORAGE_FOREIGN_KEY_ACTION_SET_DEFAULT:
+    return FK_OPTION_SET_DEFAULT;
+  case MYLITE_STORAGE_FOREIGN_KEY_ACTION_UNSPECIFIED:
+  case MYLITE_STORAGE_FOREIGN_KEY_ACTION_RESTRICT:
+  default:
+    return FK_OPTION_RESTRICT;
+  }
 }
 
 static bool mylite_table_has_blob_fields(TABLE *table)

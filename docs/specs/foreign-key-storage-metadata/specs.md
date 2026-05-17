@@ -49,6 +49,7 @@ Add MyLite-owned FK metadata APIs to `packages/mylite-storage`:
 - `mylite_storage_store_foreign_key_definition()`
 - `mylite_storage_read_foreign_key_definition()`
 - `mylite_storage_list_foreign_keys()`
+- `mylite_storage_list_parent_foreign_keys()`
 - `mylite_storage_drop_foreign_key_definition()`
 - `mylite_storage_free_foreign_key_metadata()`
 
@@ -98,6 +99,7 @@ continues to omit native InnoDB registration and dictionary code.
 - Storage unit coverage for FK capability reporting.
 - Store/read/list coverage for FK metadata fields, column lists, and child and
   referenced nullable-column bitmaps.
+- Parent-list coverage for FK metadata by referenced table.
 - Duplicate FK metadata rejection.
 - Parent and child table rename updates.
 - Referenced-parent drop rejection.
