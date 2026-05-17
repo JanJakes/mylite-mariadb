@@ -91,6 +91,12 @@ static void test_rejects_newer_format_version(void);
 static void test_rejects_bad_catalog_root(void);
 static void test_store_and_read_table_definition(void);
 static void test_store_large_table_definition(void);
+static void test_foreign_key_metadata_records(void);
+static void assert_foreign_key_metadata(
+    const mylite_storage_foreign_key_metadata *metadata,
+    const char *table_name,
+    const char *referenced_table_name
+);
 static void test_append_and_read_rows(void);
 static void test_append_and_read_large_row_payload(void);
 static void test_update_and_delete_rows(void);
@@ -225,6 +231,7 @@ static void flip_file_byte(const char *path, long offset);
 static void write_header_format_version(const char *path, unsigned value);
 static int collect_table(void *ctx, const char *schema_name, const char *table_name);
 static int collect_schema(void *ctx, const char *schema_name);
+static int collect_foreign_key(void *ctx, const mylite_storage_foreign_key_metadata *metadata);
 
 typedef struct table_list_capture {
     const char *schema_name;
@@ -238,6 +245,13 @@ typedef struct schema_list_capture {
     unsigned count;
 } schema_list_capture;
 
+typedef struct foreign_key_list_capture {
+    const char *expected_constraint_name;
+    const char *expected_referenced_table_name;
+    size_t expected_column_count;
+    unsigned count;
+} foreign_key_list_capture;
+
 int main(void) {
     test_capabilities();
     test_create_empty_database();
@@ -249,6 +263,7 @@ int main(void) {
     test_rejects_bad_catalog_root();
     test_store_and_read_table_definition();
     test_store_large_table_definition();
+    test_foreign_key_metadata_records();
     test_append_and_read_rows();
     test_append_and_read_large_row_payload();
     test_update_and_delete_rows();
@@ -297,6 +312,7 @@ static void test_capabilities(void) {
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_STATEMENT_CHECKPOINTS) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_BUSY_TIMEOUT) != 0U);
     assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_TRANSACTION_JOURNAL) != 0U);
+    assert((capabilities.flags & MYLITE_STORAGE_CAPABILITY_FOREIGN_KEY_METADATA) != 0U);
 }
 
 static void test_create_empty_database(void) {
@@ -581,6 +597,162 @@ static void test_store_large_table_definition(void) {
     assert(rmdir(root) == 0);
     free(filename);
     free(root);
+}
+
+static void test_foreign_key_metadata_records(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    const char *foreign_columns[] = {"user_id", "site_id"};
+    const char *referenced_columns[] = {"id", "site_id"};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "foreign-keys.mylite");
+    mylite_storage_table_definition users_definition = {
+        .size = sizeof(users_definition),
+        .schema_name = "app",
+        .table_name = "users",
+        .requested_engine_name = "InnoDB",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_table_definition posts_definition = {
+        .size = sizeof(posts_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "InnoDB",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_foreign_key_definition foreign_key = {
+        .size = sizeof(foreign_key),
+        .schema_name = "app",
+        .table_name = "posts",
+        .constraint_name = "fk_posts_users",
+        .referenced_schema_name = "app",
+        .referenced_table_name = "users",
+        .referenced_key_name = "PRIMARY",
+        .foreign_column_names = foreign_columns,
+        .referenced_column_names = referenced_columns,
+        .column_count = 2U,
+        .update_action = MYLITE_STORAGE_FOREIGN_KEY_ACTION_NO_ACTION,
+        .delete_action = MYLITE_STORAGE_FOREIGN_KEY_ACTION_RESTRICT,
+        .match_option = MYLITE_STORAGE_FOREIGN_KEY_MATCH_SIMPLE,
+        .nullable_column_bitmap = 0x1ULL,
+    };
+    mylite_storage_foreign_key_metadata metadata = {
+        .size = sizeof(metadata),
+    };
+    foreign_key_list_capture capture = {
+        .expected_constraint_name = "fk_posts_users",
+        .expected_referenced_table_name = "users",
+        .expected_column_count = 2U,
+    };
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &users_definition) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &posts_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_store_foreign_key_definition(filename, &foreign_key) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_store_foreign_key_definition(filename, &foreign_key) == MYLITE_STORAGE_ERROR
+    );
+    assert(
+        mylite_storage_read_foreign_key_definition(
+            filename,
+            "app",
+            "posts",
+            "fk_posts_users",
+            &metadata
+        ) == MYLITE_STORAGE_OK
+    );
+    assert_foreign_key_metadata(&metadata, "posts", "users");
+    mylite_storage_free_foreign_key_metadata(&metadata);
+
+    assert(
+        mylite_storage_list_foreign_keys(filename, "app", "posts", collect_foreign_key, &capture) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(capture.count == 1U);
+
+    assert(
+        mylite_storage_rename_table(filename, "app", "users", "app", "accounts") ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_rename_table(filename, "app", "posts", "app", "articles") ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_read_foreign_key_definition(
+            filename,
+            "app",
+            "posts",
+            "fk_posts_users",
+            &metadata
+        ) == MYLITE_STORAGE_NOTFOUND
+    );
+    assert(
+        mylite_storage_read_foreign_key_definition(
+            filename,
+            "app",
+            "articles",
+            "fk_posts_users",
+            &metadata
+        ) == MYLITE_STORAGE_OK
+    );
+    assert_foreign_key_metadata(&metadata, "articles", "accounts");
+    mylite_storage_free_foreign_key_metadata(&metadata);
+
+    assert(mylite_storage_drop_table(filename, "app", "accounts") == MYLITE_STORAGE_ERROR);
+    assert(
+        mylite_storage_drop_foreign_key_definition(filename, "app", "articles", "fk_posts_users") ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_read_foreign_key_definition(
+            filename,
+            "app",
+            "articles",
+            "fk_posts_users",
+            &metadata
+        ) == MYLITE_STORAGE_NOTFOUND
+    );
+
+    foreign_key.table_name = "articles";
+    foreign_key.referenced_table_name = "accounts";
+    assert(
+        mylite_storage_store_foreign_key_definition(filename, &foreign_key) == MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_drop_table(filename, "app", "articles") == MYLITE_STORAGE_OK);
+    assert(mylite_storage_drop_table(filename, "app", "accounts") == MYLITE_STORAGE_OK);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void assert_foreign_key_metadata(
+    const mylite_storage_foreign_key_metadata *metadata,
+    const char *table_name,
+    const char *referenced_table_name
+) {
+    assert(strcmp(metadata->schema_name, "app") == 0);
+    assert(strcmp(metadata->table_name, table_name) == 0);
+    assert(strcmp(metadata->constraint_name, "fk_posts_users") == 0);
+    assert(strcmp(metadata->referenced_schema_name, "app") == 0);
+    assert(strcmp(metadata->referenced_table_name, referenced_table_name) == 0);
+    assert(strcmp(metadata->referenced_key_name, "PRIMARY") == 0);
+    assert(metadata->column_count == 2U);
+    assert(strcmp(metadata->foreign_column_names[0], "user_id") == 0);
+    assert(strcmp(metadata->foreign_column_names[1], "site_id") == 0);
+    assert(strcmp(metadata->referenced_column_names[0], "id") == 0);
+    assert(strcmp(metadata->referenced_column_names[1], "site_id") == 0);
+    assert(metadata->update_action == MYLITE_STORAGE_FOREIGN_KEY_ACTION_NO_ACTION);
+    assert(metadata->delete_action == MYLITE_STORAGE_FOREIGN_KEY_ACTION_RESTRICT);
+    assert(metadata->match_option == MYLITE_STORAGE_FOREIGN_KEY_MATCH_SIMPLE);
+    assert(metadata->nullable_column_bitmap == 0x1ULL);
 }
 
 static void test_append_and_read_rows(void) {
@@ -2888,6 +3060,15 @@ static int collect_schema(void *ctx, const char *schema_name) {
         strcmp(schema_name, capture->app_schema) == 0 ||
         strcmp(schema_name, capture->blog_schema) == 0
     );
+    ++capture->count;
+    return 0;
+}
+
+static int collect_foreign_key(void *ctx, const mylite_storage_foreign_key_metadata *metadata) {
+    foreign_key_list_capture *capture = (foreign_key_list_capture *)ctx;
+    assert(strcmp(metadata->constraint_name, capture->expected_constraint_name) == 0);
+    assert(strcmp(metadata->referenced_table_name, capture->expected_referenced_table_name) == 0);
+    assert(metadata->column_count == capture->expected_column_count);
     ++capture->count;
     return 0;
 }

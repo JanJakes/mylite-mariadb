@@ -25,6 +25,18 @@ extern "C" {
 #define MYLITE_STORAGE_CAPABILITY_STATEMENT_CHECKPOINTS 0x00001000U
 #define MYLITE_STORAGE_CAPABILITY_BUSY_TIMEOUT 0x00002000U
 #define MYLITE_STORAGE_CAPABILITY_TRANSACTION_JOURNAL 0x00004000U
+#define MYLITE_STORAGE_CAPABILITY_FOREIGN_KEY_METADATA 0x00008000U
+
+#define MYLITE_STORAGE_FOREIGN_KEY_ACTION_UNSPECIFIED 0U
+#define MYLITE_STORAGE_FOREIGN_KEY_ACTION_RESTRICT 1U
+#define MYLITE_STORAGE_FOREIGN_KEY_ACTION_CASCADE 2U
+#define MYLITE_STORAGE_FOREIGN_KEY_ACTION_SET_NULL 3U
+#define MYLITE_STORAGE_FOREIGN_KEY_ACTION_NO_ACTION 4U
+#define MYLITE_STORAGE_FOREIGN_KEY_ACTION_SET_DEFAULT 5U
+#define MYLITE_STORAGE_FOREIGN_KEY_MATCH_UNSPECIFIED 0U
+#define MYLITE_STORAGE_FOREIGN_KEY_MATCH_SIMPLE 1U
+#define MYLITE_STORAGE_FOREIGN_KEY_MATCH_FULL 2U
+#define MYLITE_STORAGE_FOREIGN_KEY_MATCH_PARTIAL 3U
 
 typedef enum mylite_storage_result { /* NOLINT(performance-enum-size): C ABI enum. */
                                      MYLITE_STORAGE_OK = 0,
@@ -90,6 +102,40 @@ typedef struct mylite_storage_schema_metadata {
     char *schema_comment;
 } mylite_storage_schema_metadata;
 
+typedef struct mylite_storage_foreign_key_definition {
+    size_t size;
+    const char *schema_name;
+    const char *table_name;
+    const char *constraint_name;
+    const char *referenced_schema_name;
+    const char *referenced_table_name;
+    const char *referenced_key_name;
+    const char *const *foreign_column_names;
+    const char *const *referenced_column_names;
+    size_t column_count;
+    unsigned update_action;
+    unsigned delete_action;
+    unsigned match_option;
+    unsigned long long nullable_column_bitmap;
+} mylite_storage_foreign_key_definition;
+
+typedef struct mylite_storage_foreign_key_metadata {
+    size_t size;
+    char *schema_name;
+    char *table_name;
+    char *constraint_name;
+    char *referenced_schema_name;
+    char *referenced_table_name;
+    char *referenced_key_name;
+    char **foreign_column_names;
+    char **referenced_column_names;
+    size_t column_count;
+    unsigned update_action;
+    unsigned delete_action;
+    unsigned match_option;
+    unsigned long long nullable_column_bitmap;
+} mylite_storage_foreign_key_metadata;
+
 typedef struct mylite_storage_rowset {
     size_t size;
     unsigned char *rows;
@@ -126,6 +172,10 @@ typedef int (*mylite_storage_table_callback)(
     const char *table_name
 );
 typedef int (*mylite_storage_schema_callback)(void *ctx, const char *schema_name);
+typedef int (*mylite_storage_foreign_key_callback)(
+    void *ctx,
+    const mylite_storage_foreign_key_metadata *metadata
+);
 
 const char *mylite_storage_engine_name(void);
 mylite_storage_capabilities mylite_storage_get_capabilities(void);
@@ -149,6 +199,30 @@ mylite_storage_result mylite_storage_read_schema_definition(
     const char *filename,
     const char *schema_name,
     mylite_storage_schema_metadata *out_metadata
+);
+mylite_storage_result mylite_storage_store_foreign_key_definition(
+    const char *filename,
+    const mylite_storage_foreign_key_definition *definition
+);
+mylite_storage_result mylite_storage_read_foreign_key_definition(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    const char *constraint_name,
+    mylite_storage_foreign_key_metadata *out_metadata
+);
+mylite_storage_result mylite_storage_drop_foreign_key_definition(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    const char *constraint_name
+);
+mylite_storage_result mylite_storage_list_foreign_keys(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    mylite_storage_foreign_key_callback callback,
+    void *ctx
 );
 mylite_storage_result mylite_storage_read_table_definition(
     const char *filename,
@@ -300,6 +374,7 @@ mylite_storage_result mylite_storage_rollback_statement(mylite_storage_statement
 void mylite_storage_free(void *ptr);
 void mylite_storage_free_rowset(mylite_storage_rowset *rowset);
 void mylite_storage_free_index_entryset(mylite_storage_index_entryset *entryset);
+void mylite_storage_free_foreign_key_metadata(mylite_storage_foreign_key_metadata *metadata);
 
 #ifdef __cplusplus
 }

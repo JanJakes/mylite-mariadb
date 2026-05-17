@@ -93,8 +93,10 @@ Representative online and in-place ALTER requests, including `LOCK=NONE`,
 `ALTER ONLINE TABLE`, and `ALGORITHM=INPLACE` / `INSTANT` / `NOCOPY`, are
 rejected by the MyLite SQL policy before MariaDB execution.
 Foreign-key DDL is rejected at the `libmylite` boundary until MyLite has
-catalog metadata, enforcement, locking, recovery, and transaction-aware checks
-for referential constraints.
+handler metadata hooks, enforcement, locking, recovery, and transaction-aware
+checks for referential constraints. The storage layer now has internal
+catalog-backed FK metadata records and typed FK blob pages as groundwork for
+those hooks; this does not yet make FK SQL supported.
 Partition DDL is rejected at the same boundary until MyLite has partition
 metadata, partition-to-primary-file routing, per-partition catalog lifecycle,
 and partition-aware row and index maintenance.
@@ -141,8 +143,10 @@ checksummed header and page 1 as a catalog root. Explicit MyLite table
 definitions are stored as catalog records plus checksummed definition blob
 pages. Schema namespace names use lightweight catalog records; table-definition
 schema names are also treated as namespaces for compatibility with files that
-pre-date explicit schema records. Row inserts append checksummed row pages
-tagged by catalog table id;
+pre-date explicit schema records. Internal FK definitions use catalog records
+keyed by child schema/table and constraint name plus typed FK blob pages for
+referenced key, column-list, action, match-option, and nullable-column
+metadata. Row inserts append checksummed row pages tagged by catalog table id;
 non-BLOB rows store raw MariaDB record images, while BLOB/TEXT rows store a
 durable handler-owned row payload that replaces process pointers with value
 bytes. Large row payloads spill into checksummed row-payload blob pages inside
@@ -170,6 +174,7 @@ The catalog stores:
 - table definitions,
 - table-definition binary images needed by MariaDB discovery,
 - columns, indexes, constraints, and engine metadata,
+- internal foreign-key metadata before FK SQL support is enabled,
 - views, triggers, and routines when those surfaces are supported,
 - collation and character-set metadata needed to reopen tables,
 - autoincrement state,

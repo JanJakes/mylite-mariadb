@@ -86,6 +86,9 @@ three implementation steps.
      build `FOREIGN_KEY_INFO`.
    - Make FK records participate in catalog checkpoint, rollback, recovery,
      drop, rename, and close/reopen tests.
+   - Implemented by
+     [Foreign-key storage metadata](../foreign-key-storage-metadata/specs.md)
+     as an internal storage foundation while public FK SQL remains rejected.
 
 2. Add handler metadata hooks without enabling public FK DDL yet.
    - Implement internal helpers that can construct `FOREIGN_KEY_INFO` lists
