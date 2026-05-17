@@ -285,6 +285,11 @@ target columns. Duplicate-key CTAS abort follows MariaDB's target-drop path and
 removes target catalog metadata; the current statement checkpoint restores
 pre-statement MyLite header/catalog visibility for covered failed file-backed
 statements.
+Explicit FK-constrained CTAS targets are covered for the current supported
+`RESTRICT` / `NO ACTION` subset: the target FK metadata is published with the
+table definition, selected rows run through child-row checks, failed FK row
+checks remove the target catalog record, and the FK remains visible and
+enforced after close/reopen.
 Representative `CREATE TABLE ... IGNORE SELECT` and
 `CREATE TABLE ... REPLACE SELECT` coverage follows MariaDB's CTAS duplicate
 mode handling over supported MyLite primary, unique, and secondary indexes with

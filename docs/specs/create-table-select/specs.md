@@ -64,9 +64,8 @@ MariaDB base: `mariadb-11.8.6`
 - Broader temporary CTAS variants beyond the representative catalog isolation
   and shadowing covered by `temporary-table-catalog-isolation` and
   `temporary-table-shadowing`.
-- Generated-column definitions on CTAS targets, CTAS from views, information
-  schema, foreign keys, partitions, unsupported indexes, or server-only
-  sources.
+- CTAS from views, information schema, partitions, unsupported foreign-key
+  shapes, unsupported indexes, or server-only sources.
 - SQL transaction commit/rollback, savepoints, or transaction-aware index
   maintenance.
 
@@ -98,9 +97,11 @@ catalog isolation, representative successful OR REPLACE CTAS, representative
 failed replacement CTAS rollback, representative duplicate-mode CTAS, and
 representative temporary CTAS shadowing are covered by follow-up slices. It
 remains partial because physical rollback of pages written before failed CTAS
-abort, broader duplicate-mode matrices, broader temporary-table CTAS, foreign
-keys, partitions, unsupported source objects, broader failed replacement
-variants, and SQL rollback remain planned.
+abort, broader duplicate-mode matrices, broader temporary-table CTAS,
+unsupported foreign-key shapes/actions, partitions, unsupported source objects,
+broader failed replacement variants, and SQL rollback remain planned. The
+`foreign-key-ctas-targets` slice covers explicit CTAS targets with the current
+supported `RESTRICT` / `NO ACTION` FK subset.
 
 ## DDL Metadata Routing Impact
 
@@ -144,6 +145,8 @@ unless handler fixes are needed; update size measurements after verification.
     columns;
   - explicit generated target definitions;
   - explicit CHECK-constrained target definitions;
+  - explicit FK-constrained target definitions for the current supported FK
+    subset;
   - explicit target primary/unique/secondary indexes before `SELECT`;
   - representative `IGNORE` and `REPLACE` duplicate-mode CTAS over supported
     indexed targets;
@@ -159,8 +162,8 @@ unless handler fixes are needed; update size measurements after verification.
   SELECT result rows.
 - Target metadata records the requested engine correctly.
 - CTAS target rows, BLOB/TEXT payloads, generated-source projections,
-  generated target definitions, autoincrement values, and supported indexes
-  survive close/reopen.
+  generated target definitions, supported foreign-key metadata, autoincrement
+  values, and supported indexes survive close/reopen.
 - Representative `IGNORE` and `REPLACE` CTAS duplicate handling survives
   close/reopen for supported indexed targets.
 - Failed CTAS duplicate-key abort removes the target catalog metadata before
@@ -196,6 +199,10 @@ entry points:
   `CREATE TABLE ... IGNORE SELECT` and `CREATE TABLE ... REPLACE SELECT`
   duplicate handling for supported indexed targets and deterministic ordered
   SELECT input.
+- The `foreign-key-ctas-targets` slice covers explicit FK-constrained CTAS
+  targets for the current supported `RESTRICT` / `NO ACTION` subset, including
+  successful row checks, failed target cleanup, metadata visibility, and
+  close/reopen enforcement.
 
 ## Risks And Open Questions
 

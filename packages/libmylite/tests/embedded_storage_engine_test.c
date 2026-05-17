@@ -8751,11 +8751,13 @@ static void test_create_table_select(void) {
         .expected_value = "4",
     };
     table_context failed_check_tables = {0};
+    table_context failed_fk_tables = {0};
     table_context failed_tables = {0};
     table_context body_rows = {0};
     table_context reopened_body_rows = {0};
     table_context reopened_checked_rows = {0};
     char *errmsg = NULL;
+    char *create_sql = NULL;
 
     assert_exec_succeeds(db, "CREATE DATABASE app");
     assert_exec_succeeds(db, "USE app");
@@ -8877,7 +8879,46 @@ static void test_create_table_select(void) {
         ") ENGINE=InnoDB "
         "SELECT 1 AS id, 4 AS rating"
     );
-    assert_catalog_table_count(filename, "app", 7U);
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE ctas_fk_parent (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO ctas_fk_parent VALUES (10), (20)");
+    assert_exec_fails(
+        db,
+        "CREATE TABLE ctas_failed_fk_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT, "
+        "CONSTRAINT ctas_failed_fk_child_parent "
+        "FOREIGN KEY (parent_id) REFERENCES ctas_fk_parent(id)"
+        ") ENGINE=InnoDB "
+        "SELECT 1 AS id, 999 AS parent_id"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW TABLES LIKE 'ctas_failed_fk_child'",
+            table_callback,
+            &failed_fk_tables,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(failed_fk_tables.rows == 0);
+    assert_catalog_table_count(filename, "app", 8U);
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE ctas_fk_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT, "
+        "KEY ctas_fk_child_parent_key (parent_id), "
+        "CONSTRAINT ctas_fk_child_parent "
+        "FOREIGN KEY (parent_id) REFERENCES ctas_fk_parent(id)"
+        ") ENGINE=InnoDB "
+        "SELECT 1 AS id, 10 AS parent_id "
+        "UNION ALL SELECT 2 AS id, 20 AS parent_id"
+    );
+    assert_catalog_table_count(filename, "app", 9U);
     assert_catalog_table_metadata(filename, "app", "ctas_source_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_default_constants", "DEFAULT", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_indexed_posts", "InnoDB", "MYLITE");
@@ -8891,6 +8932,8 @@ static void test_create_table_select(void) {
         "MYLITE"
     );
     assert_catalog_table_metadata(filename, "app", "ctas_checked_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "ctas_fk_parent", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "ctas_fk_child", "InnoDB", "MYLITE");
 
     assert(
         mylite_exec(
@@ -9006,6 +9049,28 @@ static void test_create_table_select(void) {
     );
     assert_exec_fails(db, "INSERT INTO ctas_checked_posts VALUES (2, -1)");
     assert_exec_fails(db, "INSERT INTO ctas_checked_posts VALUES (3, 6)");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM ctas_fk_child", "2");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'app' "
+        "AND TABLE_NAME = 'ctas_fk_child' "
+        "AND CONSTRAINT_NAME = 'ctas_fk_child_parent' "
+        "AND REFERENCED_TABLE_NAME = 'ctas_fk_parent'",
+        "1"
+    );
+    create_sql = capture_show_create_table(db, "ctas_fk_child");
+    assert(
+        strstr(
+            create_sql,
+            "CONSTRAINT `ctas_fk_child_parent` FOREIGN KEY (`parent_id`) "
+            "REFERENCES `ctas_fk_parent` (`id`)"
+        ) != NULL
+    );
+    free(create_sql);
+    assert_exec_fails(db, "INSERT INTO ctas_fk_child VALUES (3, 999)");
+    assert_exec_fails(db, "UPDATE ctas_fk_parent SET id = 11 WHERE id = 10");
+    assert_exec_fails(db, "DELETE FROM ctas_fk_parent WHERE id = 10");
     assert(
         mylite_exec(
             db,
@@ -9028,7 +9093,7 @@ static void test_create_table_select(void) {
     generated_label = (single_value_context){.expected_value = "draft-1"};
     target_title_len = (single_value_context){.expected_value = "6"};
     target_label = (single_value_context){.expected_value = "target-2"};
-    assert_catalog_table_count(filename, "app", 7U);
+    assert_catalog_table_count(filename, "app", 9U);
     assert_catalog_table_metadata(filename, "app", "ctas_source_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_default_constants", "DEFAULT", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "ctas_indexed_posts", "InnoDB", "MYLITE");
@@ -9042,6 +9107,8 @@ static void test_create_table_select(void) {
         "MYLITE"
     );
     assert_catalog_table_metadata(filename, "app", "ctas_checked_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "ctas_fk_parent", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "ctas_fk_child", "InnoDB", "MYLITE");
     assert(
         mylite_exec(
             db,
@@ -9110,6 +9177,17 @@ static void test_create_table_select(void) {
     assert(errmsg == NULL);
     assert(target_label.rows == 1);
     assert_exec_fails(db, "INSERT INTO ctas_checked_posts VALUES (4, 7)");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM ctas_fk_child", "2");
+    assert_exec_fails(db, "INSERT INTO ctas_fk_child VALUES (4, 999)");
+    assert_exec_fails(db, "DELETE FROM ctas_fk_parent WHERE id = 20");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'app' "
+        "AND TABLE_NAME = 'ctas_fk_child' "
+        "AND CONSTRAINT_NAME = 'ctas_fk_child_parent'",
+        "1"
+    );
     assert(
         mylite_exec(
             db,
