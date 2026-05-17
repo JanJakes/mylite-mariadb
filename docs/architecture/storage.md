@@ -105,11 +105,11 @@ with handler-owned retained supporting-key validation plus immediate
 child/parent row checks. Supported copy
 `ALTER TABLE ... DROP FOREIGN KEY` removes FK metadata from the primary file
 and disables the dropped constraint's row checks across close/reopen. Session
-`foreign_key_checks=0` disables supported FK row checks without retrospective
-validation when checks are re-enabled. MariaDB-generated supporting keys are
-cleaned up when copy ALTER replaces them with explicit compatible keys, and
-can be explicitly dropped after the owning FK is removed. Cascades, `SET NULL`,
-and `SET DEFAULT` remain planned.
+`foreign_key_checks=0` disables supported FK row checks and parent-table
+truncate checks without retrospective validation when checks are re-enabled.
+MariaDB-generated supporting keys are cleaned up when copy ALTER replaces them
+with explicit compatible keys, and can be explicitly dropped after the owning
+FK is removed. Cascades, `SET NULL`, and `SET DEFAULT` remain planned.
 Partition DDL remains rejected at the `libmylite` boundary until MyLite has
 partition metadata, partition-to-primary-file routing, per-partition catalog
 lifecycle, and partition-aware row and index maintenance.

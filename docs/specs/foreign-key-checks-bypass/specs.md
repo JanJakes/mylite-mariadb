@@ -53,8 +53,10 @@ behavior: applications may disable checks, import child rows before parent
 rows, and re-enable checks without existing orphan rows being revalidated.
 
 Compatibility remains partial. Unsupported FK actions, temporary-table FK DDL,
-generated supporting-key cleanup, handlerton FK advertising, and broader DDL
-effects remain out of scope for this row-DML bypass slice.
+generated supporting-key cleanup, handlerton FK advertising, and parent-table
+truncate bypass remain out of scope for this row-DML bypass slice. Parent
+truncate behavior is covered by
+[Foreign-Key Truncate Checks Bypass](../foreign-key-truncate-checks-bypass/specs.md).
 
 ## Design
 
@@ -69,6 +71,7 @@ effects remain out of scope for this row-DML bypass slice.
 5. Keep FK DDL validation unchanged: table shape, action, match, parent engine,
    child supporting key, and parent unique-key checks still run regardless of
    `foreign_key_checks`.
+6. Leave parent-table `TRUNCATE` behavior to a follow-up DDL slice.
 
 ## File Lifecycle
 
