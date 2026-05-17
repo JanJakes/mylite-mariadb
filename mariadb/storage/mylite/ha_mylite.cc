@@ -141,6 +141,32 @@ static int mylite_check_volatile_duplicate_keys(
   TABLE *table, const mylite_storage_index_entry *index_entries,
   size_t index_entry_count, const uchar *buf, ulonglong skip_row_id,
   uint *out_duplicate_key);
+static int mylite_check_child_foreign_keys(const char *primary_file,
+                                           const char *schema_name,
+                                           const char *table_name,
+                                           TABLE *table, const uchar *buf);
+static int mylite_check_parent_foreign_keys(const char *primary_file,
+                                            const char *schema_name,
+                                            const char *table_name,
+                                            TABLE *table,
+                                            const uchar *old_data,
+                                            const uchar *new_data);
+static int mylite_check_child_foreign_key(
+  void *ctx, const mylite_storage_foreign_key_metadata *metadata);
+static int mylite_check_parent_foreign_key(
+  void *ctx, const mylite_storage_foreign_key_metadata *metadata);
+static const KEY *mylite_find_foreign_key_prefix(
+  TABLE *table, char **column_names, size_t column_count,
+  const char *key_name);
+static bool mylite_key_prefix_contains_null(TABLE *table, const KEY *key,
+                                            const uchar *buf,
+                                            size_t column_count);
+static int mylite_make_key_prefix(TABLE *table, const KEY *key,
+                                  const uchar *buf, size_t column_count,
+                                  unsigned long long target_nullable_bitmap,
+                                  uchar **out_key, size_t *out_key_size);
+static bool mylite_key_prefix_equals(const uchar *left, size_t left_size,
+                                     const uchar *right, size_t right_size);
 static bool mylite_unique_key_allows_duplicate_null(TABLE *table,
                                                     const KEY *key,
                                                     const uchar *buf);
@@ -392,6 +418,15 @@ struct Mylite_foreign_key_create_info_context
 {
   THD *thd;
   String *text;
+  int error;
+};
+
+struct Mylite_foreign_key_row_check_context
+{
+  const char *primary_file;
+  TABLE *table;
+  const uchar *old_data;
+  const uchar *new_data;
   int error;
 };
 
@@ -1571,6 +1606,17 @@ int ha_mylite::write_row(const uchar *buf)
     DBUG_RETURN(error);
   }
 
+  if (!volatile_rows)
+  {
+    error= mylite_check_child_foreign_keys(primary_file, storage_schema(),
+                                           storage_table(), table, buf);
+    if (error)
+    {
+      mylite_free_index_entries(index_entries, index_key_storage);
+      DBUG_RETURN(error);
+    }
+  }
+
   if (volatile_rows)
   {
     Field *auto_field= mylite_auto_increment_field(table);
@@ -1625,7 +1671,7 @@ int ha_mylite::write_row(const uchar *buf)
   DBUG_RETURN(mylite_storage_to_handler_error(result));
 }
 
-int ha_mylite::update_row(const uchar *, const uchar *new_data)
+int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
 {
   DBUG_ENTER("ha_mylite::update_row");
 
@@ -1668,6 +1714,21 @@ int ha_mylite::update_row(const uchar *, const uchar *new_data)
     mylite_free_index_entries(index_entries, index_key_storage);
     duplicate_key_index= duplicate_key;
     DBUG_RETURN(error);
+  }
+
+  if (!volatile_rows)
+  {
+    error= mylite_check_child_foreign_keys(primary_file, storage_schema(),
+                                           storage_table(), table, new_data);
+    if (!error)
+      error= mylite_check_parent_foreign_keys(primary_file, storage_schema(),
+                                              storage_table(), table,
+                                              old_data, new_data);
+    if (error)
+    {
+      mylite_free_index_entries(index_entries, index_key_storage);
+      DBUG_RETURN(error);
+    }
   }
 
   if (volatile_rows)
@@ -1728,7 +1789,7 @@ int ha_mylite::update_row(const uchar *, const uchar *new_data)
   DBUG_RETURN(0);
 }
 
-int ha_mylite::delete_row(const uchar *)
+int ha_mylite::delete_row(const uchar *buf)
 {
   DBUG_ENTER("ha_mylite::delete_row");
 
@@ -1742,6 +1803,15 @@ int ha_mylite::delete_row(const uchar *)
   const char *primary_file= mylite_primary_file_path();
   if (!primary_file)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
+
+  if (!volatile_rows)
+  {
+    const int error=
+      mylite_check_parent_foreign_keys(primary_file, storage_schema(),
+                                       storage_table(), table, buf, NULL);
+    if (error)
+      DBUG_RETURN(error);
+  }
 
   const mylite_storage_result result= volatile_rows ?
     mylite_volatile_delete_row(primary_file, storage_schema(), storage_table(),
@@ -2782,6 +2852,309 @@ static int mylite_check_volatile_duplicate_keys(
   }
 
   return 0;
+}
+
+static int mylite_check_child_foreign_keys(const char *primary_file,
+                                           const char *schema_name,
+                                           const char *table_name,
+                                           TABLE *table, const uchar *buf)
+{
+  Mylite_foreign_key_row_check_context ctx= {primary_file, table, NULL, buf, 0};
+  const mylite_storage_result result=
+    mylite_storage_list_foreign_keys(primary_file, schema_name, table_name,
+                                     mylite_check_child_foreign_key, &ctx);
+  if (ctx.error)
+    return ctx.error;
+  return mylite_storage_to_handler_error(result);
+}
+
+static int mylite_check_parent_foreign_keys(const char *primary_file,
+                                            const char *schema_name,
+                                            const char *table_name,
+                                            TABLE *table,
+                                            const uchar *old_data,
+                                            const uchar *new_data)
+{
+  Mylite_foreign_key_row_check_context ctx=
+    {primary_file, table, old_data, new_data, 0};
+  const mylite_storage_result result=
+    mylite_storage_list_parent_foreign_keys(primary_file, schema_name,
+                                            table_name,
+                                            mylite_check_parent_foreign_key,
+                                            &ctx);
+  if (ctx.error)
+    return ctx.error;
+  return mylite_storage_to_handler_error(result);
+}
+
+static int mylite_check_child_foreign_key(
+  void *ctx, const mylite_storage_foreign_key_metadata *metadata)
+{
+  Mylite_foreign_key_row_check_context *check_ctx=
+    static_cast<Mylite_foreign_key_row_check_context *>(ctx);
+  const KEY *key= mylite_find_foreign_key_prefix(
+    check_ctx->table, metadata->foreign_column_names, metadata->column_count,
+    NULL);
+  if (!key)
+  {
+    check_ctx->error= HA_ERR_NO_REFERENCED_ROW;
+    return 1;
+  }
+  if (mylite_key_prefix_contains_null(check_ctx->table, key,
+                                      check_ctx->new_data,
+                                      metadata->column_count))
+    return 0;
+
+  uchar *key_prefix= NULL;
+  size_t key_prefix_size= 0;
+  int error= mylite_make_key_prefix(check_ctx->table, key, check_ctx->new_data,
+                                    metadata->column_count,
+                                    metadata->referenced_nullable_column_bitmap,
+                                    &key_prefix, &key_prefix_size);
+  if (error)
+  {
+    check_ctx->error= error;
+    return 1;
+  }
+
+  int exists= 0;
+  const mylite_storage_result result=
+    mylite_storage_index_prefix_exists(check_ctx->primary_file,
+                                       metadata->referenced_schema_name,
+                                       metadata->referenced_table_name,
+                                       key_prefix, key_prefix_size, &exists);
+  free(key_prefix);
+  if (result != MYLITE_STORAGE_OK)
+  {
+    check_ctx->error= mylite_storage_to_handler_error(result);
+    return 1;
+  }
+  if (!exists)
+  {
+    check_ctx->error= HA_ERR_NO_REFERENCED_ROW;
+    return 1;
+  }
+  return 0;
+}
+
+static int mylite_check_parent_foreign_key(
+  void *ctx, const mylite_storage_foreign_key_metadata *metadata)
+{
+  Mylite_foreign_key_row_check_context *check_ctx=
+    static_cast<Mylite_foreign_key_row_check_context *>(ctx);
+  const KEY *key= mylite_find_foreign_key_prefix(
+    check_ctx->table, metadata->referenced_column_names,
+    metadata->column_count, metadata->referenced_key_name);
+  if (!key)
+  {
+    check_ctx->error= HA_ERR_ROW_IS_REFERENCED;
+    return 1;
+  }
+  if (mylite_key_prefix_contains_null(check_ctx->table, key,
+                                      check_ctx->old_data,
+                                      metadata->column_count))
+    return 0;
+
+  uchar *old_key_prefix= NULL;
+  size_t old_key_prefix_size= 0;
+  int error= mylite_make_key_prefix(check_ctx->table, key, check_ctx->old_data,
+                                    metadata->column_count,
+                                    metadata->nullable_column_bitmap,
+                                    &old_key_prefix, &old_key_prefix_size);
+  if (error)
+  {
+    check_ctx->error= error;
+    return 1;
+  }
+
+  if (check_ctx->new_data)
+  {
+    uchar *new_key_prefix= NULL;
+    size_t new_key_prefix_size= 0;
+    error= mylite_make_key_prefix(check_ctx->table, key, check_ctx->new_data,
+                                  metadata->column_count,
+                                  metadata->nullable_column_bitmap,
+                                  &new_key_prefix, &new_key_prefix_size);
+    if (error)
+    {
+      free(old_key_prefix);
+      check_ctx->error= error;
+      return 1;
+    }
+    const bool unchanged= mylite_key_prefix_equals(
+      old_key_prefix, old_key_prefix_size, new_key_prefix,
+      new_key_prefix_size);
+    free(new_key_prefix);
+    if (unchanged)
+    {
+      free(old_key_prefix);
+      return 0;
+    }
+  }
+
+  int exists= 0;
+  const mylite_storage_result result=
+    mylite_storage_index_prefix_exists(check_ctx->primary_file,
+                                       metadata->schema_name,
+                                       metadata->table_name,
+                                       old_key_prefix, old_key_prefix_size,
+                                       &exists);
+  free(old_key_prefix);
+  if (result != MYLITE_STORAGE_OK)
+  {
+    check_ctx->error= mylite_storage_to_handler_error(result);
+    return 1;
+  }
+  if (exists)
+  {
+    check_ctx->error= HA_ERR_ROW_IS_REFERENCED;
+    return 1;
+  }
+  return 0;
+}
+
+static const KEY *mylite_find_foreign_key_prefix(
+  TABLE *table, char **column_names, size_t column_count, const char *key_name)
+{
+  if (!table || !column_names || column_count == 0 ||
+      column_count > UINT_MAX)
+    return NULL;
+
+  for (uint i= 0; i < table->s->keys; ++i)
+  {
+    const KEY *key= table->key_info + i;
+    if (!mylite_key_is_supported(key) ||
+        key->user_defined_key_parts < column_count)
+      continue;
+    if (key_name && key_name[0])
+    {
+      LEX_CSTRING key_name_lex= {key_name, strlen(key_name)};
+      if (!key->name.streq(key_name_lex))
+        continue;
+    }
+
+    bool matches= true;
+    for (size_t j= 0; matches && j < column_count; ++j)
+    {
+      if (!column_names[j] || !column_names[j][0] ||
+          !key->key_part[j].field)
+      {
+        matches= false;
+        break;
+      }
+      LEX_CSTRING column_name= {column_names[j], strlen(column_names[j])};
+      matches= key->key_part[j].field->field_name.streq(column_name);
+    }
+    if (matches)
+      return key;
+  }
+
+  return NULL;
+}
+
+static bool mylite_key_prefix_contains_null(TABLE *table, const KEY *key,
+                                            const uchar *buf,
+                                            size_t column_count)
+{
+  if (!table || !key || !buf)
+    return true;
+
+  const my_ptrdiff_t row_offset= buf - table->record[0];
+  for (size_t i= 0; i < column_count; ++i)
+  {
+    Field *field= key->key_part[i].field;
+    if (field && field->is_null(row_offset))
+      return true;
+  }
+  return false;
+}
+
+static int mylite_make_key_prefix(TABLE *, const KEY *key, const uchar *buf,
+                                  size_t column_count,
+                                  unsigned long long target_nullable_bitmap,
+                                  uchar **out_key, size_t *out_key_size)
+{
+  *out_key= NULL;
+  *out_key_size= 0;
+  if (!key || !buf || column_count == 0 ||
+      column_count > key->user_defined_key_parts ||
+      column_count > sizeof(target_nullable_bitmap) * CHAR_BIT)
+    return HA_ERR_CRASHED_ON_USAGE;
+
+  size_t source_key_prefix_size= 0;
+  size_t target_key_prefix_size= 0;
+  for (size_t i= 0; i < column_count; ++i)
+  {
+    const KEY_PART_INFO *key_part= key->key_part + i;
+    const bool source_nullable= key_part->null_bit != 0;
+    const bool target_nullable=
+      target_nullable_bitmap & (1ULL << i);
+    if (source_nullable && key_part->store_length < HA_KEY_NULL_LENGTH)
+      return HA_ERR_CRASHED_ON_USAGE;
+
+    const size_t value_size= key_part->store_length -
+      (source_nullable ? HA_KEY_NULL_LENGTH : 0);
+    const size_t target_part_size= value_size +
+      (target_nullable ? HA_KEY_NULL_LENGTH : 0);
+    if (key_part->store_length > SIZE_MAX - source_key_prefix_size ||
+        target_part_size > SIZE_MAX - target_key_prefix_size)
+      return HA_ERR_RECORD_FILE_FULL;
+    source_key_prefix_size+= key_part->store_length;
+    target_key_prefix_size+= target_part_size;
+  }
+  if (source_key_prefix_size == 0 || target_key_prefix_size == 0 ||
+      key->key_length == 0)
+    return HA_ERR_CRASHED_ON_USAGE;
+
+  uchar *key_buffer= static_cast<uchar *>(malloc(key->key_length));
+  if (!key_buffer)
+    return HA_ERR_OUT_OF_MEM;
+
+  uchar *target_key= static_cast<uchar *>(malloc(target_key_prefix_size));
+  if (!target_key)
+  {
+    free(key_buffer);
+    return HA_ERR_OUT_OF_MEM;
+  }
+
+  key_copy(key_buffer, buf, key, 0);
+  size_t source_offset= 0;
+  size_t target_offset= 0;
+  for (size_t i= 0; i < column_count; ++i)
+  {
+    const KEY_PART_INFO *key_part= key->key_part + i;
+    const bool source_nullable= key_part->null_bit != 0;
+    const bool target_nullable=
+      target_nullable_bitmap & (1ULL << i);
+    const uchar *source_part= key_buffer + source_offset;
+    const size_t value_size= key_part->store_length -
+      (source_nullable ? HA_KEY_NULL_LENGTH : 0);
+    if (target_nullable)
+      target_key[target_offset++]= source_nullable ? source_part[0] : 0;
+    if (source_nullable)
+      source_part+= HA_KEY_NULL_LENGTH;
+    memcpy(target_key + target_offset, source_part, value_size);
+    source_offset+= key_part->store_length;
+    target_offset+= value_size;
+  }
+  free(key_buffer);
+  if (target_offset != target_key_prefix_size ||
+      source_offset != source_key_prefix_size)
+  {
+    free(target_key);
+    return HA_ERR_CRASHED_ON_USAGE;
+  }
+
+  *out_key= target_key;
+  *out_key_size= target_key_prefix_size;
+  return 0;
+}
+
+static bool mylite_key_prefix_equals(const uchar *left, size_t left_size,
+                                     const uchar *right, size_t right_size)
+{
+  return left_size == right_size &&
+         (left_size == 0 || memcmp(left, right, left_size) == 0);
 }
 
 static bool mylite_unique_key_allows_duplicate_null(TABLE *table,

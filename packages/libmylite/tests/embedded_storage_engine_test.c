@@ -1740,6 +1740,27 @@ static void test_foreign_key_handler_metadata(void) {
         ) != NULL
     );
     free(create_sql);
+    assert_exec_fails(db, "INSERT INTO child VALUES (1, 99, NULL)");
+    assert_exec_succeeds(db, "INSERT INTO parent VALUES (1)");
+    assert_exec_succeeds(db, "INSERT INTO fk_parent.remote_parent VALUES (10)");
+    assert_exec_succeeds(db, "INSERT INTO child VALUES (1, 1, NULL)");
+    assert_exec_succeeds(db, "INSERT INTO child VALUES (2, NULL, NULL)");
+    assert_exec_succeeds(db, "INSERT INTO child VALUES (3, NULL, 10)");
+    assert_exec_fails(db, "UPDATE child SET parent_id = 99 WHERE id = 1");
+    assert_exec_fails(db, "UPDATE parent SET id = 2 WHERE id = 1");
+    assert_exec_fails(db, "DELETE FROM parent WHERE id = 1");
+    assert_exec_fails(db, "DELETE FROM fk_parent.remote_parent WHERE id = 10");
+    assert_exec_succeeds(db, "UPDATE child SET parent_id = NULL WHERE id = 1");
+    assert_exec_succeeds(db, "DELETE FROM parent WHERE id = 1");
+    assert_exec_succeeds(db, "INSERT INTO parent VALUES (1)");
+    assert_exec_succeeds(db, "UPDATE child SET parent_id = 1 WHERE id = 1");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE fk_metadata");
+    assert_exec_fails(db, "INSERT INTO child VALUES (4, 99, NULL)");
+    assert_exec_fails(db, "UPDATE parent SET id = 2 WHERE id = 1");
+    assert_exec_fails(db, "DELETE FROM fk_parent.remote_parent WHERE id = 10");
     assert_exec_fails(db, "ALTER TABLE child DROP COLUMN parent_id, ALGORITHM=COPY");
     assert_exec_fails(db, "ALTER TABLE child MODIFY COLUMN parent_id BIGINT, ALGORITHM=COPY");
     assert_exec_fails(db, "ALTER TABLE child DROP KEY child_parent_key, ALGORITHM=COPY");

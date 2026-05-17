@@ -75,12 +75,14 @@ In `ha_mylite`:
 
 - for child writes, list FK metadata for the current table, find a supported
   current-table key whose leading columns match the FK child columns, encode
-  the child key prefix with `key_copy()`, skip the check when any child FK
-  column is `NULL`, and require a matching parent key prefix in storage;
+  the child key prefix with `key_copy()`, normalize nullable key-part markers
+  to the referenced-side format, skip the check when any child FK column is
+  `NULL`, and require a matching parent key prefix in storage;
 - for parent updates/deletes, list parent FK metadata for the current table,
   find the current-table referenced key by referenced key name and columns,
-  encode the old parent key prefix, skip unchanged parent-key updates, and
-  reject when a child key prefix exists;
+  encode the old parent key prefix, normalize nullable key-part markers to the
+  child-side format, skip unchanged parent-key updates, and reject when a child
+  key prefix exists;
 - treat unsupported FK action metadata as fail-closed for parent changes by
   rejecting referenced parent updates/deletes instead of silently omitting a
   cascade or `SET NULL`;
