@@ -185,6 +185,7 @@ static void test_wordpress_shaped_schema(void);
 static void test_wordpress_installer_schema_fixture(void);
 static void test_wordpress_multisite_global_schema_fixture(void);
 static void test_wordpress_multisite_blog_schema_fixture(void);
+static void test_buddypress_component_schema_fixture(void);
 static void assert_exec_succeeds(mylite_db *db, const char *sql);
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_exec_fails_with_message(mylite_db *db, const char *sql, const char *message);
@@ -249,6 +250,13 @@ static void assert_wordpress_multisite_global_table_metadata(
     const char *schema_name
 );
 static void assert_wordpress_multisite_blog_rows(mylite_db *db);
+static void assert_buddypress_catalog_metadata(const char *filename);
+static void assert_buddypress_table_metadata(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name
+);
+static void assert_buddypress_rows(mylite_db *db);
 static void assert_table_collation(
     mylite_db *db,
     const char *schema_name,
@@ -389,6 +397,7 @@ int main(int argc, char **argv) {
     test_wordpress_installer_schema_fixture();
     test_wordpress_multisite_global_schema_fixture();
     test_wordpress_multisite_blog_schema_fixture();
+    test_buddypress_component_schema_fixture();
     return 0;
 }
 
@@ -10398,6 +10407,41 @@ static void test_wordpress_multisite_blog_schema_fixture(void) {
     free(root);
 }
 
+static void test_buddypress_component_schema_fixture(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(
+        db,
+        "CREATE DATABASE buddypress_install "
+        "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    );
+    assert_exec_succeeds(db, "USE buddypress_install");
+    exec_sql_fixture(db, "buddypress-14.4.0-component-schema.sql");
+    assert_buddypress_catalog_metadata(filename);
+    assert_table_collation(db, "buddypress_install", "wp_bp_activity", "utf8mb4_unicode_ci");
+    assert_table_collation(db, "buddypress_install", "wp_bp_xprofile_fields", "utf8mb4_unicode_ci");
+    exec_sql_fixture(db, "buddypress-14.4.0-component-seed.sql");
+    assert_buddypress_rows(db);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE buddypress_install");
+    assert_buddypress_catalog_metadata(filename);
+    assert_buddypress_rows(db);
+    assert_table_collation(db, "buddypress_install", "wp_bp_activity", "utf8mb4_unicode_ci");
+    assert_table_collation(db, "buddypress_install", "wp_bp_xprofile_fields", "utf8mb4_unicode_ci");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
 static void assert_wordpress_catalog_metadata(const char *filename) {
     assert_catalog_table_count(filename, "app", 11U);
     assert_catalog_table_metadata(filename, "app", "wp_options", "InnoDB", "MYLITE");
@@ -10899,6 +10943,151 @@ static void assert_wordpress_multisite_blog_rows(mylite_db *db) {
         db,
         "SELECT COUNT(*) FROM wp_2_terms FORCE INDEX (slug) WHERE slug = 'network-news'",
         "1"
+    );
+}
+
+static void assert_buddypress_catalog_metadata(const char *filename) {
+    static const char *const table_names[] = {
+        "wp_bp_notifications",     "wp_bp_notifications_meta",
+        "wp_bp_activity",          "wp_bp_activity_meta",
+        "wp_bp_friends",           "wp_bp_groups",
+        "wp_bp_groups_members",    "wp_bp_groups_groupmeta",
+        "wp_bp_messages_messages", "wp_bp_messages_recipients",
+        "wp_bp_messages_notices",  "wp_bp_messages_meta",
+        "wp_bp_xprofile_groups",   "wp_bp_xprofile_fields",
+        "wp_bp_xprofile_data",     "wp_bp_xprofile_meta",
+        "wp_bp_user_blogs",        "wp_bp_user_blogs_blogmeta",
+        "wp_bp_invitations",       "wp_bp_optouts",
+    };
+
+    assert_catalog_table_count(filename, "buddypress_install", 20U);
+    for (size_t i = 0; i < sizeof(table_names) / sizeof(table_names[0]); ++i) {
+        assert_buddypress_table_metadata(filename, "buddypress_install", table_names[i]);
+    }
+}
+
+static void assert_buddypress_table_metadata(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name
+) {
+    assert_catalog_table_metadata(filename, schema_name, table_name, "DEFAULT", "MYLITE");
+}
+
+static void assert_buddypress_rows(mylite_db *db) {
+    assert_query_single_value(
+        db,
+        "SELECT component_action FROM wp_bp_notifications FORCE INDEX (useritem) "
+        "WHERE user_id = 10 AND is_new = 1",
+        "membership_request"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT meta_value FROM wp_bp_notifications_meta FORCE INDEX (notification_id) "
+        "WHERE notification_id = 1 AND meta_key = 'source'",
+        "fixture"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT content FROM wp_bp_activity FORCE INDEX (user_id) "
+        "WHERE user_id = 10 AND component = 'activity'",
+        "BuddyPress fixture activity"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT meta_value FROM wp_bp_activity_meta FORCE INDEX (activity_id) "
+        "WHERE activity_id = 1 AND meta_key = 'favorite_count'",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT friend_user_id FROM wp_bp_friends FORCE INDEX (initiator_user_id) "
+        "WHERE initiator_user_id = 10",
+        "11"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT name FROM wp_bp_groups FORCE INDEX (status) WHERE status = 'public'",
+        "Fixture Group"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT user_title FROM wp_bp_groups_members FORCE INDEX (group_id) "
+        "WHERE group_id = 1 AND user_id = 10",
+        "Admin"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT meta_value FROM wp_bp_groups_groupmeta FORCE INDEX (meta_key) "
+        "WHERE meta_key = 'last_activity'",
+        "2026-05-15 12:17:00"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT subject FROM wp_bp_messages_messages FORCE INDEX (thread_id) "
+        "WHERE thread_id = 501",
+        "Fixture message"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT unread_count FROM wp_bp_messages_recipients FORCE INDEX (user_id) "
+        "WHERE user_id = 11",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT subject FROM wp_bp_messages_notices FORCE INDEX (is_active) WHERE is_active = 1",
+        "Fixture notice"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT meta_value FROM wp_bp_messages_meta FORCE INDEX (message_id) "
+        "WHERE message_id = 1 AND meta_key = 'priority'",
+        "high"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT name FROM wp_bp_xprofile_groups FORCE INDEX (can_delete) WHERE can_delete = 0",
+        "General"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT name FROM wp_bp_xprofile_fields FORCE INDEX (group_id) WHERE group_id = 1",
+        "Display Name"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT value FROM wp_bp_xprofile_data FORCE INDEX (user_id) WHERE user_id = 10",
+        "Jan Fixture"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT meta_value FROM wp_bp_xprofile_meta FORCE INDEX (meta_key) "
+        "WHERE meta_key = 'allow_custom_visibility'",
+        "disabled"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT blog_id FROM wp_bp_user_blogs FORCE INDEX (user_id) WHERE user_id = 10",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT meta_value FROM wp_bp_user_blogs_blogmeta FORCE INDEX (meta_key) "
+        "WHERE meta_key = 'last_activity'",
+        "2026-05-15 12:35:00"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT invitee_email FROM wp_bp_invitations FORCE INDEX (inviter_id) "
+        "WHERE inviter_id = 10",
+        "invitee@example.test"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT email_address_hash FROM wp_bp_optouts FORCE INDEX (email_type) "
+        "WHERE email_type = 'members-invitation'",
+        "hash-fixture"
     );
 }
 
