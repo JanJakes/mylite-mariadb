@@ -101,6 +101,12 @@ static void test_append_and_read_rows(void);
 static void test_append_and_read_large_row_payload(void);
 static void test_update_and_delete_rows(void);
 static void test_index_entries(void);
+static void assert_index_prefix_exists(
+    const char *filename,
+    const unsigned char *key_prefix,
+    size_t key_prefix_size,
+    int expected_exists
+);
 static void append_index_entry_test_rows(index_entries_test_context *ctx);
 static void assert_primary_index_entries_after_insert(const index_entries_test_context *ctx);
 static void update_index_entry_test_row(index_entries_test_context *ctx);
@@ -1164,16 +1170,42 @@ static void test_index_entries(void) {
     assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
     append_index_entry_test_rows(&ctx);
     assert_primary_index_entries_after_insert(&ctx);
+    assert_index_prefix_exists(filename, key_1, sizeof(key_1), 1);
+    assert_index_prefix_exists(filename, key_9, sizeof(key_9), 0);
     update_index_entry_test_row(&ctx);
     assert_primary_index_entries_after_update(&ctx);
+    assert_index_prefix_exists(filename, key_1, sizeof(key_1), 0);
+    assert_index_prefix_exists(filename, key_9, sizeof(key_9), 1);
     delete_index_entry_test_row(&ctx);
     assert_secondary_index_entries_after_delete(&ctx);
+    assert_index_prefix_exists(filename, key_2, sizeof(key_2), 0);
+    assert_index_prefix_exists(filename, title_u, sizeof(title_u), 1);
     assert_index_entry_test_live_rows(&ctx);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
     free(filename);
     free(root);
+}
+
+static void assert_index_prefix_exists(
+    const char *filename,
+    const unsigned char *key_prefix,
+    size_t key_prefix_size,
+    int expected_exists
+) {
+    int exists = 0;
+    assert(
+        mylite_storage_index_prefix_exists(
+            filename,
+            "app",
+            "posts",
+            key_prefix,
+            key_prefix_size,
+            &exists
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(exists == expected_exists);
 }
 
 static void append_index_entry_test_rows(index_entries_test_context *ctx) {

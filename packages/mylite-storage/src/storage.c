@@ -2555,6 +2555,87 @@ mylite_storage_result mylite_storage_read_index_entries(
     return result;
 }
 
+mylite_storage_result mylite_storage_index_prefix_exists(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    const unsigned char *key_prefix,
+    size_t key_prefix_size,
+    int *out_exists
+) {
+    if (filename == NULL || filename[0] == '\0' || schema_name == NULL || schema_name[0] == '\0' ||
+        table_name == NULL || table_name[0] == '\0' || key_prefix == NULL ||
+        key_prefix_size == 0U || out_exists == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    *out_exists = 0;
+
+    FILE *file = NULL;
+    mylite_storage_result result = open_existing_file(filename, &file);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_header header = {0};
+    unsigned long long table_id = 0ULL;
+    mylite_storage_row_state_map row_state_map = {0};
+    result = read_header(file, &header);
+    if (result == MYLITE_STORAGE_OK) {
+        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = build_row_state_map(file, &header, table_id, &row_state_map);
+    }
+    for (unsigned long long page_id = MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT;
+         result == MYLITE_STORAGE_OK && page_id < header.page_count && !*out_exists;
+         ++page_id) {
+        unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        mylite_storage_index_entry_page entry_page = {0};
+        result = read_index_entry_page(file, &header, page_id, page, &entry_page);
+        if (result == MYLITE_STORAGE_NOTFOUND) {
+            result = MYLITE_STORAGE_OK;
+            continue;
+        }
+        if (result != MYLITE_STORAGE_OK) {
+            break;
+        }
+        if (entry_page.table_id != table_id ||
+            find_row_state_entry(&row_state_map, entry_page.row_id) != NULL ||
+            entry_page.key_size < key_prefix_size ||
+            memcmp(entry_page.key, key_prefix, key_prefix_size) != 0) {
+            continue;
+        }
+
+        mylite_storage_row_page row_page = {0};
+        unsigned char row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        result = validate_live_row(
+            file,
+            &header,
+            &row_state_map,
+            (mylite_storage_live_row_request){
+                .table_id = table_id,
+                .row_id = entry_page.row_id,
+            },
+            row_buffer,
+            &row_page
+        );
+        free(row_page.owned_payload);
+        if (result == MYLITE_STORAGE_OK) {
+            *out_exists = 1;
+        }
+    }
+
+    free_row_state_map(&row_state_map);
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    if (result != MYLITE_STORAGE_OK) {
+        *out_exists = 0;
+    }
+    return result;
+}
+
 mylite_storage_result mylite_storage_read_auto_increment(
     const char *filename,
     const char *schema_name,
