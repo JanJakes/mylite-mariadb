@@ -7,9 +7,9 @@ shutdown, and the storage-smoke suite covers `utf8mb4_unicode_ci`. That proves
 the original UCA crash path, but it still leaves the roadmap's broader
 collation-suite gap open.
 
-This slice adds a bounded collation matrix that exercises representative
-compiled, UCA, binary, and one-byte charset collations through indexed MyLite
-tables across close/reopen cycles.
+This slice broadens the bounded collation matrix to exercise representative
+compiled, UCA, UCA 1400, binary, NO PAD, legacy UTF-8, and one-byte charset
+collations through indexed MyLite tables across close/reopen cycles.
 
 ## Source Findings
 
@@ -19,12 +19,22 @@ MariaDB base: `mariadb-11.8.6`
 - `mariadb/mysys/charset.c` registers compiled collations through
   `add_compiled_collation()` and lazily prepares them through
   `get_internal_charset()`.
+- `mariadb/cmake/character_sets.cmake:21-23` sets MariaDB 11.8's default
+  collation to `utf8mb4_uca1400_ai_ci`.
 - `mariadb/strings/ctype-utf8.c` defines compiled `utf8mb4_general_ci` and
-  `utf8mb4_bin` handlers.
-- `mariadb/strings/ctype-uca.c` defines `utf8mb4_unicode_ci` and
-  `utf8mb4_unicode_520_ci` UCA handlers.
+  `utf8mb4_bin`, the legacy `utf8mb3_general_ci` handler, and
+  `utf8mb4_general1400_as_ci`.
+- `mariadb/strings/ctype-uca.c` defines `utf8mb4_unicode_ci`,
+  `utf8mb4_unicode_520_ci`, and `utf8mb4_unicode_nopad_ci` UCA handlers.
+- `mariadb/strings/ctype-uca1400.c:171-174` resets UCA 1400 tailoring caches,
+  and `ctype-uca1400.c:327-365` registers generated UCA 1400 collation
+  combinations for Unicode character sets, tailorings, pad modes, accent
+  sensitivity, and case sensitivity.
 - `mariadb/strings/ctype-latin1.c` and `sql/share/charsets/latin1.xml` define
-  `latin1_swedish_ci`, the traditional MariaDB/MySQL default latin1 collation.
+  `latin1_swedish_ci`, the traditional MariaDB/MySQL default latin1 collation;
+  `mariadb/strings/ctype-extra.c` and `Index.xml` define additional latin1 and
+  Central European collations such as `latin1_general_ci`,
+  `latin1_german2_ci`, `latin2_czech_cs`, and `cp1250_czech_cs`.
 - The MyLite storage handler stores and reads MariaDB key images, then relies on
   MariaDB collation handlers for indexed lookup and duplicate checks.
 
@@ -37,7 +47,18 @@ file-backed schema and one indexed table for each representative collation:
 - `utf8mb4_bin`;
 - `utf8mb4_unicode_ci`;
 - `utf8mb4_unicode_520_ci`;
-- `latin1_swedish_ci`.
+- `utf8mb4_unicode_nopad_ci`;
+- `utf8mb4_uca1400_ai_ci`;
+- `utf8mb4_uca1400_as_cs`;
+- `utf8mb4_uca1400_czech_ai_ci`;
+- `utf8mb4_general1400_as_ci`;
+- `utf8mb3_general_ci`;
+- `latin1_swedish_ci`;
+- `latin1_bin`;
+- `latin1_general_ci`;
+- `latin1_german2_ci`;
+- `latin2_czech_cs`;
+- `cp1250_czech_cs`.
 
 Each table uses a unique indexed `name` column and a secondary indexed `slug`
 column. The test inserts representative ASCII values, closes the database,
@@ -46,6 +67,7 @@ reopens it twice, then checks:
 - table collation metadata;
 - duplicate-key rejection on the unique key;
 - indexed lookup through `FORCE INDEX (name_key)`;
+- indexed lookup through `FORCE INDEX (slug_key)`;
 - the existing durable sidecar gate after each close.
 
 This is a compatibility matrix, not a semantics matrix. It proves the selected
@@ -54,7 +76,7 @@ embedded restarts; it does not claim full linguistic comparison coverage.
 
 ## Supported Scope
 
-- The five representative collations above.
+- The representative collations above.
 - File-backed routed `ENGINE=InnoDB` tables.
 - Unique and secondary index paths after close/reopen.
 - Metadata checks through `INFORMATION_SCHEMA.TABLES`.

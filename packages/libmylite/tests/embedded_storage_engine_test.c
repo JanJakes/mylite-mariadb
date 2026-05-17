@@ -1163,9 +1163,64 @@ static void test_collation_restart_matrix(void) {
             .collation_name = "utf8mb4_unicode_520_ci",
         },
         {
+            .table_name = "collation_utf8mb4_unicode_nopad_ci",
+            .character_set_name = "utf8mb4",
+            .collation_name = "utf8mb4_unicode_nopad_ci",
+        },
+        {
+            .table_name = "collation_utf8mb4_uca1400_ai_ci",
+            .character_set_name = "utf8mb4",
+            .collation_name = "utf8mb4_uca1400_ai_ci",
+        },
+        {
+            .table_name = "collation_utf8mb4_uca1400_as_cs",
+            .character_set_name = "utf8mb4",
+            .collation_name = "utf8mb4_uca1400_as_cs",
+        },
+        {
+            .table_name = "collation_utf8mb4_uca1400_czech_ai_ci",
+            .character_set_name = "utf8mb4",
+            .collation_name = "utf8mb4_uca1400_czech_ai_ci",
+        },
+        {
+            .table_name = "collation_utf8mb4_general1400_as_ci",
+            .character_set_name = "utf8mb4",
+            .collation_name = "utf8mb4_general1400_as_ci",
+        },
+        {
+            .table_name = "collation_utf8mb3_general_ci",
+            .character_set_name = "utf8mb3",
+            .collation_name = "utf8mb3_general_ci",
+        },
+        {
             .table_name = "collation_latin1_swedish_ci",
             .character_set_name = "latin1",
             .collation_name = "latin1_swedish_ci",
+        },
+        {
+            .table_name = "collation_latin1_bin",
+            .character_set_name = "latin1",
+            .collation_name = "latin1_bin",
+        },
+        {
+            .table_name = "collation_latin1_general_ci",
+            .character_set_name = "latin1",
+            .collation_name = "latin1_general_ci",
+        },
+        {
+            .table_name = "collation_latin1_german2_ci",
+            .character_set_name = "latin1",
+            .collation_name = "latin1_german2_ci",
+        },
+        {
+            .table_name = "collation_latin2_czech_cs",
+            .character_set_name = "latin2",
+            .collation_name = "latin2_czech_cs",
+        },
+        {
+            .table_name = "collation_cp1250_czech_cs",
+            .character_set_name = "cp1250",
+            .collation_name = "cp1250_czech_cs",
         },
     };
     const size_t case_count = sizeof(cases) / sizeof(cases[0]);
@@ -1253,6 +1308,9 @@ static void assert_collation_matrix_table(mylite_db *db, const collation_restart
     single_value_context slug = {
         .expected_value = "resume",
     };
+    single_value_context name = {
+        .expected_value = "Cafe",
+    };
     char *errmsg = NULL;
 
     assert_table_collation(
@@ -1283,6 +1341,18 @@ static void assert_collation_matrix_table(mylite_db *db, const collation_restart
     assert(mylite_exec(db, sql, single_value_callback, &slug, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
     assert(slug.rows == 1);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT name FROM %s FORCE INDEX (slug_key) WHERE slug = 'cafe'",
+        test_case->table_name
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert(mylite_exec(db, sql, single_value_callback, &name, &errmsg) == MYLITE_OK);
+    assert(errmsg == NULL);
+    assert(name.rows == 1);
 }
 
 static void test_non_table_object_policy(void) {
