@@ -1818,6 +1818,10 @@ static void test_unsupported_engine_policy_is_rejected(void) {
     );
     assert_csv_engine_exec_fails(
         db,
+        "CREATE TABLE csv_no_equal_posts (id INT NOT NULL PRIMARY KEY) ENGINE CSV"
+    );
+    assert_csv_engine_exec_fails(
+        db,
         "CREATE TEMPORARY TABLE csv_quoted_posts (id INT NOT NULL PRIMARY KEY) ENGINE='CSV'"
     );
     assert_csv_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE=CSV");
@@ -1827,9 +1831,14 @@ static void test_unsupported_engine_policy_is_rejected(void) {
     );
     assert_unsupported_engine_exec_fails(
         db,
+        "CREATE TABLE archive_no_equal_posts (id INT NOT NULL PRIMARY KEY) ENGINE ARCHIVE"
+    );
+    assert_unsupported_engine_exec_fails(
+        db,
         "CREATE TABLE archive_quoted_posts (id INT NOT NULL PRIMARY KEY) ENGINE='ARCHIVE'"
     );
     assert_unsupported_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE=ARCHIVE");
+    assert_unsupported_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE ARCHIVE");
 
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);

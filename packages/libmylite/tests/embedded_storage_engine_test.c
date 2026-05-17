@@ -419,7 +419,7 @@ static void test_unsupported_engine_request_policy(void) {
         "CREATE TABLE csv_comment ("
         "id INT NOT NULL PRIMARY KEY COMMENT 'ENGINE=CSV ENGINE=ARCHIVE', "
         "engine_label VARCHAR(16)"
-        ") ENGINE=InnoDB"
+        ") ENGINE InnoDB"
     );
     assert_catalog_table_count(filename, "app", 1U);
     assert_catalog_table_metadata(filename, "app", "csv_comment", "InnoDB", "MYLITE");
@@ -433,6 +433,10 @@ static void test_unsupported_engine_request_policy(void) {
     assert_csv_engine_exec_fails(
         db,
         "CREATE TEMPORARY TABLE csv_temp_posts (id INT NOT NULL PRIMARY KEY) ENGINE = CSV"
+    );
+    assert_csv_engine_exec_fails(
+        db,
+        "CREATE TABLE csv_no_equal_posts (id INT NOT NULL PRIMARY KEY) ENGINE CSV"
     );
     assert_csv_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE=CSV");
     assert_catalog_table_count(filename, "app", 1U);
@@ -452,7 +456,16 @@ static void test_unsupported_engine_request_policy(void) {
         mylite_storage_table_exists(filename, "app", "archive_quoted_posts") ==
         MYLITE_STORAGE_NOTFOUND
     );
+    assert_unsupported_engine_exec_fails(
+        db,
+        "CREATE TABLE archive_no_equal_posts (id INT NOT NULL PRIMARY KEY) ENGINE ARCHIVE"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "archive_no_equal_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
     assert_unsupported_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE=ARCHIVE");
+    assert_unsupported_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE ARCHIVE");
     assert_catalog_table_count(filename, "app", 1U);
     assert_catalog_table_metadata(filename, "app", "csv_comment", "InnoDB", "MYLITE");
 
