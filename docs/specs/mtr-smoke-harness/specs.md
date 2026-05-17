@@ -72,6 +72,11 @@ MariaDB base: `mariadb-11.8.6`
   `main.type_time_6065`.
 - [MTR parser and comparison smoke](../mtr-parser-comparison-smoke/specs.md)
   adds `main.brackets`, `main.comments`, and `main.compare`.
+- [MTR parser and expression smoke](../mtr-parser-expression-smoke/specs.md)
+  adds `main.keywords`, `main.parser_stack`, `main.precedence`,
+  `main.statement-expr`, `main.cte_cycle`, `main.name_const_replacement`,
+  `main.implicit_char_to_num_conversion`, `main.item_types`, `main.round`, and
+  `main.sql_safe_updates`.
 - [MTR IN predicate smoke](../mtr-in-predicate-smoke/specs.md) adds
   `main.func_in`.
 - [MTR query and subselect smoke](../mtr-query-subselect-smoke/specs.md) adds
@@ -153,6 +158,16 @@ The default curated list remains intentionally baseline-oriented:
 - `main.brackets`.
 - `main.comments`.
 - `main.compare`.
+- `main.keywords`.
+- `main.parser_stack`.
+- `main.precedence`.
+- `main.statement-expr`.
+- `main.cte_cycle`.
+- `main.name_const_replacement`.
+- `main.implicit_char_to_num_conversion`.
+- `main.item_types`.
+- `main.round`.
+- `main.sql_safe_updates`.
 - `main.func_in`.
 - `main.update_ignore_216`.
 - `main.subselect_nulls`.
@@ -248,7 +263,10 @@ artifacts, not default MyLite linked-library artifacts.
   `main.func_timestamp`, `main.type_date_round`, `main.type_datetime_round`,
   `main.type_time_round`, `main.type_time_6065`,
   `main.type_timestamp_round`, `main.brackets`, `main.comments`,
-  `main.compare`, `main.func_in`, `main.update_ignore_216`,
+  `main.compare`, `main.keywords`, `main.parser_stack`, `main.precedence`,
+  `main.statement-expr`, `main.cte_cycle`, `main.name_const_replacement`,
+  `main.implicit_char_to_num_conversion`, `main.item_types`, `main.round`,
+  `main.sql_safe_updates`, `main.func_in`, `main.update_ignore_216`,
   `main.subselect_nulls`, `main.subselect_extra`,
   `main.order_by_zerolength-4285`, `main.order_fill_sortbuf`,
   `main.subselect_union_rand`, `main.prepare`, `main.ps_10nestset`,
@@ -276,7 +294,10 @@ artifacts, not default MyLite linked-library artifacts.
   `main.func_timestamp`, `main.type_date_round`, `main.type_datetime_round`,
   `main.type_time_round`, `main.type_time_6065`,
   `main.type_timestamp_round`, `main.brackets`, `main.comments`,
-  `main.compare`, `main.func_in`, `main.update_ignore_216`,
+  `main.compare`, `main.keywords`, `main.parser_stack`, `main.precedence`,
+  `main.statement-expr`, `main.cte_cycle`, `main.name_const_replacement`,
+  `main.implicit_char_to_num_conversion`, `main.item_types`, `main.round`,
+  `main.sql_safe_updates`, `main.func_in`, `main.update_ignore_216`,
   `main.subselect_nulls`, `main.subselect_extra`,
   `main.order_by_zerolength-4285`, `main.order_fill_sortbuf`,
   `main.subselect_union_rand`, `main.prepare`, `main.ps_10nestset`,
