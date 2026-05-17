@@ -82,7 +82,8 @@ The opt-in embedded MTR smoke runner covers MariaDB bootstrap, scalar
 CAST/CONVERT behavior, CASE-family expression behavior, selected numeric and
 date behavior, selected parser/comment and comparison behavior, selected scalar
 operator behavior, selected string/format function behavior, and selected
-aggregate DISTINCT behavior, while MariaDB MTR comparison suites and broader
+aggregate DISTINCT behavior, selected date-format behavior, and selected ASCII
+charset behavior, while MariaDB MTR comparison suites and broader
 application-schema and runtime suites remain planned.
 
 ## Baseline

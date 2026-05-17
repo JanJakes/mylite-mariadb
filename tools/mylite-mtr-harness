@@ -11,9 +11,12 @@ default_tests=(
   main.case
   main.bigint
   main.adddate_454
+  main.date_formats
+  main.datetime_456
   main.brackets
   main.comments
   main.compare
+  main.ctype_ascii
   main.count_distinct
   main.sum_distinct
   main.func_equal

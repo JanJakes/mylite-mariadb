@@ -48,6 +48,8 @@ MariaDB base: `mariadb-11.8.6`
   `main.case`.
 - [MTR numeric and date smoke](../mtr-numeric-date-smoke/specs.md) adds
   `main.bigint` and `main.adddate_454`.
+- [MTR date format and ASCII charset smoke](../mtr-date-charset-smoke/specs.md)
+  adds `main.date_formats`, `main.datetime_456`, and `main.ctype_ascii`.
 - [MTR parser and comparison smoke](../mtr-parser-comparison-smoke/specs.md)
   adds `main.brackets`, `main.comments`, and `main.compare`.
 - [MTR aggregate DISTINCT smoke](../mtr-aggregate-distinct-smoke/specs.md)
@@ -80,9 +82,12 @@ The default curated list is intentionally tiny:
 - `main.case`.
 - `main.bigint`.
 - `main.adddate_454`.
+- `main.date_formats`.
+- `main.datetime_456`.
 - `main.brackets`.
 - `main.comments`.
 - `main.compare`.
+- `main.ctype_ascii`.
 - `main.count_distinct`.
 - `main.sum_distinct`.
 - `main.func_equal`.
@@ -137,14 +142,16 @@ artifacts, not default MyLite linked-library artifacts.
 ## Acceptance Criteria
 
 - The runner lists `mylite.bootstrap_schema`, `main.cast`, `main.case`,
-  `main.bigint`, `main.adddate_454`, `main.brackets`, `main.comments`,
-  `main.compare`, `main.count_distinct`, `main.sum_distinct`,
+  `main.bigint`, `main.adddate_454`, `main.date_formats`,
+  `main.datetime_456`, `main.brackets`, `main.comments`, `main.compare`,
+  `main.ctype_ascii`, `main.count_distinct`, `main.sum_distinct`,
   `main.func_equal`, `main.func_op`, `main.func_concat`, and
   `main.func_format`.
 - The runner builds the required MTR support targets from a fresh enough
   `build/mariadb-mtr-smoke` tree.
 - `mylite.bootstrap_schema`, `main.cast`, `main.case`, `main.bigint`,
-  `main.adddate_454`, `main.brackets`, `main.comments`, `main.compare`,
+  `main.adddate_454`, `main.date_formats`, `main.datetime_456`,
+  `main.brackets`, `main.comments`, `main.compare`, `main.ctype_ascii`,
   `main.count_distinct`, `main.sum_distinct`, `main.func_equal`,
   `main.func_op`, `main.func_concat`, and `main.func_format` pass under
   `mariadb-test-run.pl --embedded-server` with the MTR smoke profile.
