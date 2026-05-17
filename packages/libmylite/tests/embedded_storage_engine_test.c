@@ -183,6 +183,7 @@ static void test_constraint_generated_expression_matrix(void);
 static void test_truncate_table_lifecycle(void);
 static void test_wordpress_shaped_schema(void);
 static void test_wordpress_installer_schema_fixture(void);
+static void test_wordpress_multisite_global_schema_fixture(void);
 static void assert_exec_succeeds(mylite_db *db, const char *sql);
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_exec_fails_with_message(mylite_db *db, const char *sql, const char *message);
@@ -239,6 +240,8 @@ static void assert_collation_matrix_table(mylite_db *db, const collation_restart
 static void assert_wordpress_catalog_metadata(const char *filename);
 static void assert_wordpress_installer_catalog_metadata(const char *filename);
 static void assert_wordpress_installer_seed_data(mylite_db *db);
+static void assert_wordpress_multisite_global_catalog_metadata(const char *filename);
+static void assert_wordpress_multisite_global_rows(mylite_db *db);
 static void assert_table_collation(
     mylite_db *db,
     const char *schema_name,
@@ -377,6 +380,7 @@ int main(int argc, char **argv) {
     test_truncate_table_lifecycle();
     test_wordpress_shaped_schema();
     test_wordpress_installer_schema_fixture();
+    test_wordpress_multisite_global_schema_fixture();
     return 0;
 }
 
@@ -10271,6 +10275,85 @@ static void test_wordpress_installer_schema_fixture(void) {
     free(root);
 }
 
+static void test_wordpress_multisite_global_schema_fixture(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(
+        db,
+        "CREATE DATABASE wordpress_multisite "
+        "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    );
+    assert_exec_succeeds(db, "USE wordpress_multisite");
+    exec_sql_fixture(db, "wordpress-6.9.4-multisite-global-schema.sql");
+    assert_wordpress_multisite_global_catalog_metadata(filename);
+    assert_table_collation(db, "wordpress_multisite", "wp_users", "utf8mb4_unicode_ci");
+    assert_table_collation(db, "wordpress_multisite", "wp_signups", "utf8mb4_unicode_ci");
+
+    assert_exec_succeeds(db, "INSERT INTO wp_site (domain, path) VALUES ('example.test', '/')");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_blogs "
+        "(site_id, domain, path, registered, last_updated) VALUES "
+        "(1, 'example.test', '/', '2026-05-15 12:00:00', '2026-05-15 12:00:00')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_blogmeta (blog_id, meta_key, meta_value) VALUES "
+        "(1, 'public', '1')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_sitemeta (site_id, meta_key, meta_value) VALUES "
+        "(1, 'site_name', 'MyLite Network')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_users "
+        "(user_login, user_pass, user_nicename, user_email, user_registered, display_name) "
+        "VALUES "
+        "('admin', '$P$Bfixturehash', 'admin', 'admin@example.test', "
+        "'2026-05-15 10:00:00', 'admin')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_usermeta (user_id, meta_key, meta_value) VALUES "
+        "(1, 'wp_capabilities', 'a:1:{s:13:\"administrator\";b:1;}')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_registration_log (email, IP, blog_id, date_registered) VALUES "
+        "('admin@example.test', '127.0.0.1', 1, '2026-05-15 12:00:00')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_signups "
+        "(domain, path, title, user_login, user_email, registered, activated, active, "
+        "activation_key, meta) VALUES "
+        "('example.test', '/', 'MyLite Network', 'admin', 'admin@example.test', "
+        "'2026-05-15 12:00:00', '2026-05-15 12:00:00', 1, 'activation', "
+        "'a:1:{s:6:\"public\";i:1;}')"
+    );
+    assert_wordpress_multisite_global_rows(db);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE wordpress_multisite");
+    assert_wordpress_multisite_global_catalog_metadata(filename);
+    assert_wordpress_multisite_global_rows(db);
+    assert_table_collation(db, "wordpress_multisite", "wp_users", "utf8mb4_unicode_ci");
+    assert_table_collation(db, "wordpress_multisite", "wp_signups", "utf8mb4_unicode_ci");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
 static void assert_wordpress_catalog_metadata(const char *filename) {
     assert_catalog_table_count(filename, "app", 11U);
     assert_catalog_table_metadata(filename, "app", "wp_options", "InnoDB", "MYLITE");
@@ -10543,6 +10626,100 @@ static void assert_wordpress_installer_seed_data(mylite_db *db) {
     );
     assert(errmsg == NULL);
     assert(page_template.rows == 1);
+}
+
+static void assert_wordpress_multisite_global_catalog_metadata(const char *filename) {
+    assert_catalog_table_count(filename, "wordpress_multisite", 8U);
+    assert_catalog_table_metadata(filename, "wordpress_multisite", "wp_users", "DEFAULT", "MYLITE");
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_multisite",
+        "wp_usermeta",
+        "DEFAULT",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(filename, "wordpress_multisite", "wp_blogs", "DEFAULT", "MYLITE");
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_multisite",
+        "wp_blogmeta",
+        "DEFAULT",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_multisite",
+        "wp_registration_log",
+        "DEFAULT",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(filename, "wordpress_multisite", "wp_site", "DEFAULT", "MYLITE");
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_multisite",
+        "wp_sitemeta",
+        "DEFAULT",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_multisite",
+        "wp_signups",
+        "DEFAULT",
+        "MYLITE"
+    );
+}
+
+static void assert_wordpress_multisite_global_rows(mylite_db *db) {
+    assert_query_single_value(
+        db,
+        "SELECT id FROM wp_site FORCE INDEX (domain) "
+        "WHERE domain = 'example.test' AND path = '/'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT blog_id FROM wp_blogs FORCE INDEX (domain) "
+        "WHERE domain = 'example.test' AND path = '/'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT meta_value FROM wp_blogmeta FORCE INDEX (meta_key) WHERE meta_key = 'public'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT meta_value FROM wp_sitemeta FORCE INDEX (meta_key) WHERE meta_key = 'site_name'",
+        "MyLite Network"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT user_email FROM wp_users FORCE INDEX (user_login_key) WHERE user_login = 'admin'",
+        "admin@example.test"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT meta_value FROM wp_usermeta FORCE INDEX (meta_key) "
+        "WHERE meta_key = 'wp_capabilities'",
+        "a:1:{s:13:\"administrator\";b:1;}"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT ID FROM wp_registration_log FORCE INDEX (IP) WHERE IP = '127.0.0.1'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT signup_id FROM wp_signups FORCE INDEX (user_login_email) "
+        "WHERE user_login = 'admin' AND user_email = 'admin@example.test'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM wp_users WHERE spam = 0 AND deleted = 0",
+        "1"
+    );
 }
 
 static void assert_table_collation(
