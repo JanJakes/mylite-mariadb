@@ -121,9 +121,11 @@ FK is removed. Referenced parent unique secondary-key renames update the FK
 referenced-key metadata and preserve parent row checks across close/reopen for
 the supported `RESTRICT` / `NO ACTION` subset. Ordered multi-row child and
 self-referential inserts are covered for the supported FK subset, including
-failed-statement rollback when a later row violates the constraint. Broader
-update/delete ordering matrices, deferrable set-wide validation, cascades,
-`SET NULL`, and `SET DEFAULT` remain planned.
+failed-statement rollback when a later row violates the constraint.
+Representative ordered self-referential update/delete checks cover
+parent-first rejection and child-first success. Broader non-self and
+multi-table update/delete ordering matrices, deferrable set-wide validation,
+cascades, `SET NULL`, and `SET DEFAULT` remain planned.
 Partition DDL remains rejected at the `libmylite` boundary until MyLite has
 partition metadata, partition-to-primary-file routing, per-partition catalog
 lifecycle, and partition-aware row and index maintenance.

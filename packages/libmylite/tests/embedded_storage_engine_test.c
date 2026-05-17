@@ -2345,6 +2345,71 @@ static void test_transaction_and_foreign_key_policies(void) {
     );
     assert_query_single_value(db, "SELECT parent_id FROM fk_self WHERE id = 22", "22");
     assert_exec_fails(db, "DELETE FROM fk_self WHERE id = 20");
+    assert_exec_fails(
+        db,
+        "DELETE FROM fk_self WHERE id IN (23, 24) ORDER BY id ASC"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_self WHERE id IN (23, 24)",
+        "2"
+    );
+    assert_exec_succeeds(
+        db,
+        "DELETE FROM fk_self WHERE id IN (23, 24) ORDER BY id DESC"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_self WHERE id IN (23, 24)",
+        "0"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_self VALUES (31, NULL), (32, 31)");
+    assert_exec_fails(
+        db,
+        "UPDATE fk_self SET "
+        "id = CASE WHEN id = 31 THEN 131 ELSE id END, "
+        "parent_id = CASE WHEN id = 32 THEN NULL ELSE parent_id END "
+        "WHERE id IN (31, 32) ORDER BY id ASC"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_self "
+        "WHERE (id = 31 AND parent_id IS NULL) OR (id = 32 AND parent_id = 31)",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_self WHERE id = 131",
+        "0"
+    );
+    assert_exec_succeeds(
+        db,
+        "UPDATE fk_self SET "
+        "id = CASE WHEN id = 31 THEN 131 ELSE id END, "
+        "parent_id = CASE WHEN id = 32 THEN NULL ELSE parent_id END "
+        "WHERE id IN (31, 32) ORDER BY id DESC"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_self "
+        "WHERE (id = 131 AND parent_id IS NULL) OR (id = 32 AND parent_id IS NULL)",
+        "2"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE app");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_self WHERE id IN (23, 24)",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_self "
+        "WHERE (id = 131 AND parent_id IS NULL) OR (id = 32 AND parent_id IS NULL)",
+        "2"
+    );
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
