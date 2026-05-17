@@ -10,9 +10,18 @@ default_tests=(
   main.cast
   main.case
   main.bigint
+  main.type_ranges
+  main.type_num
+  main.type_uint
+  main.type_year
   main.adddate_454
   main.date_formats
   main.datetime_456
+  main.func_time_round
+  main.type_date_round
+  main.type_datetime_round
+  main.type_time_round
+  main.type_timestamp_round
   main.brackets
   main.comments
   main.compare

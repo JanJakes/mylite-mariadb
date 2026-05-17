@@ -48,6 +48,11 @@ MariaDB base: `mariadb-11.8.6`
   `main.case`.
 - [MTR numeric and date smoke](../mtr-numeric-date-smoke/specs.md) adds
   `main.bigint` and `main.adddate_454`.
+- [MTR type and temporal rounding smoke](../mtr-type-rounding-smoke/specs.md)
+  adds `main.type_ranges`, `main.type_num`, `main.type_uint`,
+  `main.type_year`, `main.func_time_round`, `main.type_date_round`,
+  `main.type_datetime_round`, `main.type_time_round`, and
+  `main.type_timestamp_round`.
 - [MTR date format and ASCII charset smoke](../mtr-date-charset-smoke/specs.md)
   adds `main.date_formats`, `main.datetime_456`, and `main.ctype_ascii`.
 - [MTR parser and comparison smoke](../mtr-parser-comparison-smoke/specs.md)
@@ -83,15 +88,24 @@ The runner anchors exact selected case names and requires the matching MTR
 summary line to report `[ pass ]`. A selected test that is skipped by MTR
 feature checks is treated as no coverage and fails the harness.
 
-The default curated list is intentionally tiny:
+The default curated list remains intentionally baseline-oriented:
 
 - `mylite.bootstrap_schema`.
 - `main.cast`.
 - `main.case`.
 - `main.bigint`.
+- `main.type_ranges`.
+- `main.type_num`.
+- `main.type_uint`.
+- `main.type_year`.
 - `main.adddate_454`.
 - `main.date_formats`.
 - `main.datetime_456`.
+- `main.func_time_round`.
+- `main.type_date_round`.
+- `main.type_datetime_round`.
+- `main.type_time_round`.
+- `main.type_timestamp_round`.
 - `main.brackets`.
 - `main.comments`.
 - `main.compare`.
@@ -100,8 +114,13 @@ The default curated list is intentionally tiny:
 - `main.sum_distinct`.
 - `main.func_equal`.
 - `main.func_op`.
+- `main.func_bit`.
 - `main.func_concat`.
+- `main.func_default`.
+- `main.func_extract`.
 - `main.func_format`.
+- `main.func_replace`.
+- `main.func_weight_string`.
 - `main.func_kdf`.
 - `main.func_encrypt_nossl`.
 
@@ -152,18 +171,27 @@ artifacts, not default MyLite linked-library artifacts.
 ## Acceptance Criteria
 
 - The runner lists `mylite.bootstrap_schema`, `main.cast`, `main.case`,
-  `main.bigint`, `main.adddate_454`, `main.date_formats`,
-  `main.datetime_456`, `main.brackets`, `main.comments`, `main.compare`,
-  `main.ctype_ascii`, `main.count_distinct`, `main.sum_distinct`,
-  `main.func_equal`, `main.func_op`, `main.func_concat`, `main.func_format`,
+  `main.bigint`, `main.type_ranges`, `main.type_num`, `main.type_uint`,
+  `main.type_year`, `main.adddate_454`, `main.date_formats`,
+  `main.datetime_456`, `main.func_time_round`, `main.type_date_round`,
+  `main.type_datetime_round`, `main.type_time_round`,
+  `main.type_timestamp_round`, `main.brackets`, `main.comments`,
+  `main.compare`, `main.ctype_ascii`, `main.count_distinct`,
+  `main.sum_distinct`, `main.func_equal`, `main.func_op`, `main.func_bit`,
+  `main.func_concat`, `main.func_default`, `main.func_extract`,
+  `main.func_format`, `main.func_replace`, `main.func_weight_string`,
   `main.func_kdf`, and `main.func_encrypt_nossl`.
 - The runner builds the required MTR support targets from a fresh enough
   `build/mariadb-mtr-smoke` tree.
 - `mylite.bootstrap_schema`, `main.cast`, `main.case`, `main.bigint`,
+  `main.type_ranges`, `main.type_num`, `main.type_uint`, `main.type_year`,
   `main.adddate_454`, `main.date_formats`, `main.datetime_456`,
-  `main.brackets`, `main.comments`, `main.compare`, `main.ctype_ascii`,
-  `main.count_distinct`, `main.sum_distinct`, `main.func_equal`,
-  `main.func_op`, `main.func_concat`, `main.func_format`,
+  `main.func_time_round`, `main.type_date_round`, `main.type_datetime_round`,
+  `main.type_time_round`, `main.type_timestamp_round`, `main.brackets`,
+  `main.comments`, `main.compare`, `main.ctype_ascii`, `main.count_distinct`,
+  `main.sum_distinct`, `main.func_equal`, `main.func_op`, `main.func_bit`,
+  `main.func_concat`, `main.func_default`, `main.func_extract`,
+  `main.func_format`, `main.func_replace`, `main.func_weight_string`,
   `main.func_kdf`, and `main.func_encrypt_nossl` pass under
   `mariadb-test-run.pl --embedded-server` with the MTR smoke profile.
 - Documentation states that this is opt-in smoke coverage, not full MTR-scale
