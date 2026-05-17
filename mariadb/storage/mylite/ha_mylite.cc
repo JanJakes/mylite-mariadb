@@ -169,7 +169,8 @@ static int mylite_check_child_foreign_keys(const char *primary_file,
                                            TABLE *table, const uchar *buf);
 static int mylite_apply_parent_foreign_key_actions(
   const char *primary_file, const char *schema_name, const char *table_name,
-  TABLE *table, const uchar *old_data, ulonglong parent_row_id);
+  TABLE *table, const uchar *old_data, const uchar *new_data,
+  ulonglong parent_row_id);
 static int mylite_check_parent_foreign_keys(const char *primary_file,
                                             const char *schema_name,
                                             const char *table_name,
@@ -261,10 +262,10 @@ static unsigned long long mylite_key_nullable_bitmap(const KEY *key,
                                                      size_t column_count);
 static int mylite_apply_parent_foreign_key_action(
   void *ctx, const mylite_storage_foreign_key_metadata *metadata);
-static int mylite_apply_self_referencing_set_null_delete(
+static int mylite_apply_self_referencing_set_null(
   const char *primary_file, TABLE *table,
   const mylite_storage_foreign_key_metadata *metadata, const uchar *old_data,
-  ulonglong parent_row_id);
+  const uchar *new_data, ulonglong parent_row_id);
 static void mylite_set_foreign_key_columns_null(
   TABLE *table, const KEY *child_key, size_t column_count);
 static int mylite_check_child_foreign_key(
@@ -582,6 +583,7 @@ struct Mylite_foreign_key_action_context
   const char *primary_file;
   TABLE *table;
   const uchar *old_data;
+  const uchar *new_data;
   ulonglong parent_row_id;
   int error;
 };
@@ -1896,6 +1898,10 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
     error= mylite_check_child_foreign_keys(primary_file, storage_schema(),
                                            storage_table(), table, new_data);
     if (!error)
+      error= mylite_apply_parent_foreign_key_actions(
+        primary_file, storage_schema(), storage_table(), table, old_data,
+        new_data, current_row_id);
+    if (!error)
       error= mylite_check_parent_foreign_keys(primary_file, storage_schema(),
                                               storage_table(), table,
                                               old_data, new_data);
@@ -1984,7 +1990,7 @@ int ha_mylite::delete_row(const uchar *buf)
     int error=
       mylite_apply_parent_foreign_key_actions(
         primary_file, storage_schema(), storage_table(), table, buf,
-        current_row_id);
+        NULL, current_row_id);
     if (!error)
       error= mylite_check_parent_foreign_keys(primary_file, storage_schema(),
                                              storage_table(), table, buf,
@@ -3192,10 +3198,11 @@ static int mylite_check_child_foreign_keys(const char *primary_file,
 
 static int mylite_apply_parent_foreign_key_actions(
   const char *primary_file, const char *schema_name, const char *table_name,
-  TABLE *table, const uchar *old_data, ulonglong parent_row_id)
+  TABLE *table, const uchar *old_data, const uchar *new_data,
+  ulonglong parent_row_id)
 {
   Mylite_foreign_key_action_context ctx=
-    {primary_file, table, old_data, parent_row_id, 0};
+    {primary_file, table, old_data, new_data, parent_row_id, 0};
   const mylite_storage_result result=
     mylite_storage_list_parent_foreign_keys(
       primary_file, schema_name, table_name,
@@ -3210,7 +3217,9 @@ static int mylite_apply_parent_foreign_key_action(
 {
   Mylite_foreign_key_action_context *action_ctx=
     static_cast<Mylite_foreign_key_action_context *>(ctx);
-  if (metadata->delete_action != MYLITE_STORAGE_FOREIGN_KEY_ACTION_SET_NULL)
+  const unsigned action= action_ctx->new_data ?
+    metadata->update_action : metadata->delete_action;
+  if (action != MYLITE_STORAGE_FOREIGN_KEY_ACTION_SET_NULL)
     return 0;
 
   if (!mylite_foreign_key_is_self_referencing(metadata))
@@ -3219,16 +3228,16 @@ static int mylite_apply_parent_foreign_key_action(
     return 1;
   }
 
-  action_ctx->error= mylite_apply_self_referencing_set_null_delete(
+  action_ctx->error= mylite_apply_self_referencing_set_null(
     action_ctx->primary_file, action_ctx->table, metadata,
-    action_ctx->old_data, action_ctx->parent_row_id);
+    action_ctx->old_data, action_ctx->new_data, action_ctx->parent_row_id);
   return action_ctx->error ? 1 : 0;
 }
 
-static int mylite_apply_self_referencing_set_null_delete(
+static int mylite_apply_self_referencing_set_null(
   const char *primary_file, TABLE *table,
   const mylite_storage_foreign_key_metadata *metadata, const uchar *old_data,
-  ulonglong parent_row_id)
+  const uchar *new_data, ulonglong parent_row_id)
 {
   const KEY *parent_key= mylite_find_foreign_key_prefix(
     table, metadata->referenced_column_names, metadata->column_count,
@@ -3251,6 +3260,33 @@ static int mylite_apply_self_referencing_set_null_delete(
                                     &old_key_prefix, &old_key_prefix_size);
   if (error)
     return error;
+  if (new_data)
+  {
+    if (!mylite_key_prefix_contains_null(table, parent_key, new_data,
+                                         metadata->column_count))
+    {
+      uchar *new_key_prefix= NULL;
+      size_t new_key_prefix_size= 0;
+      error= mylite_make_key_prefix(table, parent_key, new_data,
+                                    metadata->column_count,
+                                    metadata->nullable_column_bitmap,
+                                    &new_key_prefix, &new_key_prefix_size);
+      if (error)
+      {
+        free(old_key_prefix);
+        return error;
+      }
+      const bool unchanged= mylite_key_prefix_equals(
+        old_key_prefix, old_key_prefix_size, new_key_prefix,
+        new_key_prefix_size);
+      free(new_key_prefix);
+      if (unchanged)
+      {
+        free(old_key_prefix);
+        return 0;
+      }
+    }
+  }
 
   mylite_storage_rowset rowset= {sizeof(rowset), NULL, 0, 0, NULL, NULL, 0,
                                  NULL};
@@ -4122,13 +4158,20 @@ static bool mylite_foreign_key_actions_supported(
   TABLE *form, const Foreign_key *fk,
   const mylite_storage_foreign_key_definition *definition)
 {
-  if (!fk || !definition ||
-      !mylite_foreign_key_restrict_action_supported(fk->update_opt))
+  if (!fk || !definition)
     return false;
-  if (mylite_foreign_key_restrict_action_supported(fk->delete_opt))
+
+  const bool update_restrict=
+    mylite_foreign_key_restrict_action_supported(fk->update_opt);
+  const bool delete_restrict=
+    mylite_foreign_key_restrict_action_supported(fk->delete_opt);
+  const bool update_set_null= fk->update_opt == FK_OPTION_SET_NULL;
+  const bool delete_set_null= fk->delete_opt == FK_OPTION_SET_NULL;
+  if (update_restrict && delete_restrict)
     return true;
-  if (fk->delete_opt != FK_OPTION_SET_NULL ||
-      !logical_schema_name || !logical_table_name ||
+  if ((!update_restrict && !update_set_null) ||
+      (!delete_restrict && !delete_set_null) || !logical_schema_name ||
+      !logical_table_name ||
       strcmp(definition->referenced_schema_name, logical_schema_name) != 0 ||
       strcmp(definition->referenced_table_name, logical_table_name) != 0)
     return false;
