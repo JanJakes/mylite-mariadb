@@ -80,15 +80,16 @@ dynamic UDF runtime, and non-table-object policies, and representative
 `SHOW CREATE TABLE` round-trip export/import.
 The opt-in embedded MTR smoke runner covers MariaDB bootstrap, scalar
 CAST/CONVERT behavior, CASE-family expression behavior, selected numeric and
-type behavior, selected date and temporal-rounding behavior, selected
-parser/comment and comparison behavior, selected scalar operator behavior,
-selected bit/extraction/replacement/regexp scalar-function behavior, selected
+type behavior, selected date, temporal-rounding, temporal-function, and
+time/datetime comparison behavior, selected parser/comment and comparison
+behavior, selected scalar operator behavior, selected
+bit/extraction/replacement/regexp scalar-function behavior, selected
 default-expression and weight-string behavior, selected string/format function
 behavior, selected crypto/KDF function behavior, selected disabled DES
 encryption-function behavior, selected aggregate DISTINCT behavior, selected
 date-format behavior, and selected ASCII charset behavior, while MariaDB MTR
-comparison suites and broader
-application-schema and runtime suites remain planned.
+comparison suites and broader application-schema and runtime suites remain
+planned.
 
 ## Baseline
 

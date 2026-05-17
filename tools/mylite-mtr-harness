@@ -17,10 +17,16 @@ default_tests=(
   main.adddate_454
   main.date_formats
   main.datetime_456
+  main.in_datetime_241
+  main.str_to_datetime_457
   main.func_time_round
+  main.func_sapdb
+  main.func_time_64
+  main.func_timestamp
   main.type_date_round
   main.type_datetime_round
   main.type_time_round
+  main.type_time_6065
   main.type_timestamp_round
   main.brackets
   main.comments

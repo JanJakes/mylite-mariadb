@@ -55,6 +55,10 @@ MariaDB base: `mariadb-11.8.6`
   `main.type_timestamp_round`.
 - [MTR date format and ASCII charset smoke](../mtr-date-charset-smoke/specs.md)
   adds `main.date_formats`, `main.datetime_456`, and `main.ctype_ascii`.
+- [MTR temporal function smoke](../mtr-temporal-function-smoke/specs.md) adds
+  `main.func_sapdb`, `main.func_time_64`, `main.func_timestamp`,
+  `main.in_datetime_241`, `main.str_to_datetime_457`, and
+  `main.type_time_6065`.
 - [MTR parser and comparison smoke](../mtr-parser-comparison-smoke/specs.md)
   adds `main.brackets`, `main.comments`, and `main.compare`.
 - [MTR aggregate DISTINCT smoke](../mtr-aggregate-distinct-smoke/specs.md)
@@ -103,10 +107,16 @@ The default curated list remains intentionally baseline-oriented:
 - `main.adddate_454`.
 - `main.date_formats`.
 - `main.datetime_456`.
+- `main.in_datetime_241`.
+- `main.str_to_datetime_457`.
 - `main.func_time_round`.
+- `main.func_sapdb`.
+- `main.func_time_64`.
+- `main.func_timestamp`.
 - `main.type_date_round`.
 - `main.type_datetime_round`.
 - `main.type_time_round`.
+- `main.type_time_6065`.
 - `main.type_timestamp_round`.
 - `main.brackets`.
 - `main.comments`.
@@ -177,8 +187,10 @@ artifacts, not default MyLite linked-library artifacts.
 - The runner lists `mylite.bootstrap_schema`, `main.cast`, `main.case`,
   `main.bigint`, `main.type_ranges`, `main.type_num`, `main.type_uint`,
   `main.type_year`, `main.adddate_454`, `main.date_formats`,
-  `main.datetime_456`, `main.func_time_round`, `main.type_date_round`,
-  `main.type_datetime_round`, `main.type_time_round`,
+  `main.datetime_456`, `main.in_datetime_241`, `main.str_to_datetime_457`,
+  `main.func_time_round`, `main.func_sapdb`, `main.func_time_64`,
+  `main.func_timestamp`, `main.type_date_round`, `main.type_datetime_round`,
+  `main.type_time_round`, `main.type_time_6065`,
   `main.type_timestamp_round`, `main.brackets`, `main.comments`,
   `main.compare`, `main.ctype_ascii`, `main.count_distinct`,
   `main.sum_distinct`, `main.func_equal`, `main.func_op`, `main.func_bit`,
@@ -191,9 +203,12 @@ artifacts, not default MyLite linked-library artifacts.
 - `mylite.bootstrap_schema`, `main.cast`, `main.case`, `main.bigint`,
   `main.type_ranges`, `main.type_num`, `main.type_uint`, `main.type_year`,
   `main.adddate_454`, `main.date_formats`, `main.datetime_456`,
-  `main.func_time_round`, `main.type_date_round`, `main.type_datetime_round`,
-  `main.type_time_round`, `main.type_timestamp_round`, `main.brackets`,
-  `main.comments`, `main.compare`, `main.ctype_ascii`, `main.count_distinct`,
+  `main.in_datetime_241`, `main.str_to_datetime_457`,
+  `main.func_time_round`, `main.func_sapdb`, `main.func_time_64`,
+  `main.func_timestamp`, `main.type_date_round`, `main.type_datetime_round`,
+  `main.type_time_round`, `main.type_time_6065`,
+  `main.type_timestamp_round`, `main.brackets`, `main.comments`,
+  `main.compare`, `main.ctype_ascii`, `main.count_distinct`,
   `main.sum_distinct`, `main.func_equal`, `main.func_op`, `main.func_bit`,
   `main.func_concat`, `main.func_default`, `main.func_extract`,
   `main.func_format`, `main.func_replace`, `main.func_regexp`,
