@@ -54,6 +54,11 @@ default_tests=(
   main.replace_returning
   main.replace_returning_datatypes
   main.replace_returning_err
+  main.comment_column2
+  main.check
+  main.create_drop_db
+  main.lowercase_utf8
+  main.key_diff
   main.subselect_nulls
   main.subselect_extra
   main.order_by_zerolength-4285

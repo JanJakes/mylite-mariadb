@@ -87,6 +87,9 @@ MariaDB base: `mariadb-11.8.6`
   `main.key_primary`, `main.insert_returning_datatypes`,
   `main.replace_returning`, `main.replace_returning_datatypes`, and
   `main.replace_returning_err`.
+- [MTR DDL and name smoke](../mtr-ddl-name-smoke/specs.md) adds
+  `main.comment_column2`, `main.check`, `main.create_drop_db`,
+  `main.lowercase_utf8`, and `main.key_diff`.
 - [MTR order and union smoke](../mtr-order-union-smoke/specs.md) adds
   `main.order_by_zerolength-4285`, `main.order_fill_sortbuf`, and
   `main.subselect_union_rand`.
@@ -183,6 +186,11 @@ The default curated list remains intentionally baseline-oriented:
 - `main.replace_returning`.
 - `main.replace_returning_datatypes`.
 - `main.replace_returning_err`.
+- `main.comment_column2`.
+- `main.check`.
+- `main.create_drop_db`.
+- `main.lowercase_utf8`.
+- `main.key_diff`.
 - `main.subselect_nulls`.
 - `main.subselect_extra`.
 - `main.order_by_zerolength-4285`.
@@ -283,7 +291,8 @@ artifacts, not default MyLite linked-library artifacts.
   `main.replace`, `main.bulk_replace`, `main.create_replace_tmp`,
   `main.key_primary`, `main.insert_returning_datatypes`,
   `main.replace_returning`, `main.replace_returning_datatypes`,
-  `main.replace_returning_err`,
+  `main.replace_returning_err`, `main.comment_column2`, `main.check`,
+  `main.create_drop_db`, `main.lowercase_utf8`, `main.key_diff`,
   `main.subselect_nulls`, `main.subselect_extra`,
   `main.order_by_zerolength-4285`, `main.order_fill_sortbuf`,
   `main.subselect_union_rand`, `main.prepare`, `main.ps_10nestset`,
@@ -318,7 +327,8 @@ artifacts, not default MyLite linked-library artifacts.
   `main.replace`, `main.bulk_replace`, `main.create_replace_tmp`,
   `main.key_primary`, `main.insert_returning_datatypes`,
   `main.replace_returning`, `main.replace_returning_datatypes`,
-  `main.replace_returning_err`,
+  `main.replace_returning_err`, `main.comment_column2`, `main.check`,
+  `main.create_drop_db`, `main.lowercase_utf8`, `main.key_diff`,
   `main.subselect_nulls`, `main.subselect_extra`,
   `main.order_by_zerolength-4285`, `main.order_fill_sortbuf`,
   `main.subselect_union_rand`, `main.prepare`, `main.ps_10nestset`,

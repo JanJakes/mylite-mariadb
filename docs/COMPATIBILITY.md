@@ -86,8 +86,8 @@ time/datetime comparison behavior, selected parser/comment, keyword,
 CTE-cycle, precedence, expression, type-coercion, rounding, safe-update, and
 comparison behavior, selected `IN` / `NOT IN` predicate behavior, selected
 subquery, update-ignore, `REPLACE`, `RETURNING`, temporary create-or-replace,
-primary-key lookup, ORDER BY, UNION, and prepared-statement behavior, selected
-scalar operator behavior, selected
+primary-key lookup, selected DDL/name behavior, ORDER BY, UNION, and
+prepared-statement behavior, selected scalar operator behavior, selected
 bit/extraction/replacement/regexp scalar-function behavior, selected
 default-expression and weight-string behavior, selected string/format function
 behavior, selected crypto/KDF function behavior, selected disabled DES
