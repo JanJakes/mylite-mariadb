@@ -38,6 +38,9 @@ default_tests=(
   main.update_ignore_216
   main.subselect_nulls
   main.subselect_extra
+  main.order_by_zerolength-4285
+  main.order_fill_sortbuf
+  main.subselect_union_rand
   main.ctype_ascii
   main.ctype_cp850
   main.ctype_cp866
