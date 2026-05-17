@@ -13,6 +13,9 @@ default_tests=(
   main.type_ranges
   main.type_num
   main.type_uint
+  main.type_char
+  main.type_interval
+  main.type_varbinary
   main.type_year
   main.adddate_454
   main.date_formats

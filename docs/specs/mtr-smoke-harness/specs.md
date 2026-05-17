@@ -53,6 +53,8 @@ MariaDB base: `mariadb-11.8.6`
   `main.type_year`, `main.func_time_round`, `main.type_date_round`,
   `main.type_datetime_round`, `main.type_time_round`, and
   `main.type_timestamp_round`.
+- [MTR type edge smoke](../mtr-type-edge-smoke/specs.md) adds
+  `main.type_char`, `main.type_interval`, and `main.type_varbinary`.
 - [MTR date format and ASCII charset smoke](../mtr-date-charset-smoke/specs.md)
   adds `main.date_formats`, `main.datetime_456`, and `main.ctype_ascii`.
 - [MTR charset edge smoke](../mtr-charset-edge-smoke/specs.md) adds
@@ -114,6 +116,9 @@ The default curated list remains intentionally baseline-oriented:
 - `main.type_ranges`.
 - `main.type_num`.
 - `main.type_uint`.
+- `main.type_char`.
+- `main.type_interval`.
+- `main.type_varbinary`.
 - `main.type_year`.
 - `main.adddate_454`.
 - `main.date_formats`.
@@ -209,6 +214,7 @@ artifacts, not default MyLite linked-library artifacts.
 
 - The runner lists `mylite.bootstrap_schema`, `main.cast`, `main.case`,
   `main.bigint`, `main.type_ranges`, `main.type_num`, `main.type_uint`,
+  `main.type_char`, `main.type_interval`, `main.type_varbinary`,
   `main.type_year`, `main.adddate_454`, `main.date_formats`,
   `main.datetime_456`, `main.in_datetime_241`, `main.str_to_datetime_457`,
   `main.func_time_round`, `main.func_sapdb`, `main.func_time_64`,
@@ -230,7 +236,8 @@ artifacts, not default MyLite linked-library artifacts.
 - The runner builds the required MTR support targets from a fresh enough
   `build/mariadb-mtr-smoke` tree.
 - `mylite.bootstrap_schema`, `main.cast`, `main.case`, `main.bigint`,
-  `main.type_ranges`, `main.type_num`, `main.type_uint`, `main.type_year`,
+  `main.type_ranges`, `main.type_num`, `main.type_uint`, `main.type_char`,
+  `main.type_interval`, `main.type_varbinary`, `main.type_year`,
   `main.adddate_454`, `main.date_formats`, `main.datetime_456`,
   `main.in_datetime_241`, `main.str_to_datetime_457`,
   `main.func_time_round`, `main.func_sapdb`, `main.func_time_64`,

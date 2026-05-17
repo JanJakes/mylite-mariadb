@@ -79,8 +79,9 @@ event parse-data validation stubbing,
 dynamic UDF runtime, and non-table-object policies, and representative
 `SHOW CREATE TABLE` round-trip export/import.
 The opt-in embedded MTR smoke runner covers MariaDB bootstrap, scalar
-CAST/CONVERT behavior, CASE-family expression behavior, selected numeric and
-type behavior, selected date, temporal-rounding, temporal-function, and
+CAST/CONVERT behavior, CASE-family expression behavior, selected numeric,
+character/binary, interval, and type behavior, selected date,
+temporal-rounding, temporal-function, and
 time/datetime comparison behavior, selected parser/comment and comparison
 behavior, selected `IN` / `NOT IN` predicate behavior, selected scalar
 operator behavior, selected
