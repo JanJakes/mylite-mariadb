@@ -123,9 +123,11 @@ the supported `RESTRICT` / `NO ACTION` subset. Ordered multi-row child and
 self-referential inserts are covered for the supported FK subset, including
 failed-statement rollback when a later row violates the constraint.
 Representative ordered self-referential update/delete checks cover
-parent-first rejection and child-first success. Broader non-self and
-multi-table update/delete ordering matrices, deferrable set-wide validation,
-cascades, `SET NULL`, and `SET DEFAULT` remain planned.
+parent-first rejection and child-first success. Representative non-self parent
+update/delete ordering checks cover failed-statement rollback when an earlier
+unreferenced parent row was processed before a later referenced parent row.
+Broader multi-table update/delete ordering matrices, deferrable set-wide
+validation, cascades, `SET NULL`, and `SET DEFAULT` remain planned.
 Partition DDL remains rejected at the `libmylite` boundary until MyLite has
 partition metadata, partition-to-primary-file routing, per-partition catalog
 lifecycle, and partition-aware row and index maintenance.

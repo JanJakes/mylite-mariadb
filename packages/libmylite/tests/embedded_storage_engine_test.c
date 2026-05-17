@@ -152,6 +152,7 @@ static void test_utf8mb4_unicode_ci_survives_restart(void);
 static void test_collation_restart_matrix(void);
 static void test_non_table_object_policy(void);
 static void test_transaction_and_foreign_key_policies(void);
+static void test_foreign_key_non_self_ordering(void);
 static void test_foreign_key_handler_metadata(void);
 static void test_row_dml_transactions(void);
 static void test_create_table_persists_catalog_metadata(void);
@@ -427,6 +428,7 @@ int main(int argc, char **argv) {
     test_collation_restart_matrix();
     test_non_table_object_policy();
     test_transaction_and_foreign_key_policies();
+    test_foreign_key_non_self_ordering();
     test_foreign_key_handler_metadata();
     test_row_dml_transactions();
     test_create_table_persists_catalog_metadata();
@@ -2410,6 +2412,89 @@ static void test_transaction_and_foreign_key_policies(void) {
         "WHERE (id = 131 AND parent_id IS NULL) OR (id = 32 AND parent_id IS NULL)",
         "2"
     );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_foreign_key_non_self_ordering(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_nonself_parent ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_nonself_child ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT, "
+        "CONSTRAINT fk_nonself_child_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_nonself_parent(id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_nonself_parent VALUES (10), (20), (30), (40)");
+    assert_exec_succeeds(db, "INSERT INTO fk_nonself_child VALUES (1, 20), (2, 40)");
+
+    assert_exec_fails(
+        db,
+        "DELETE FROM fk_nonself_parent WHERE id IN (10, 20) ORDER BY id ASC"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_nonself_parent WHERE id IN (10, 20)",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_nonself_child WHERE parent_id = 20",
+        "1"
+    );
+
+    assert_exec_fails(
+        db,
+        "UPDATE fk_nonself_parent SET id = id + 100 "
+        "WHERE id IN (30, 40) ORDER BY id ASC"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_nonself_parent WHERE id IN (30, 40)",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_nonself_parent WHERE id IN (130, 140)",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_nonself_child WHERE parent_id = 40",
+        "1"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE app");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_nonself_parent WHERE id IN (10, 20, 30, 40)",
+        "4"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_nonself_child WHERE parent_id IN (20, 40)",
+        "2"
+    );
+    assert_exec_fails(db, "DELETE FROM fk_nonself_parent WHERE id = 20");
+    assert_exec_fails(db, "UPDATE fk_nonself_parent SET id = 140 WHERE id = 40");
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
