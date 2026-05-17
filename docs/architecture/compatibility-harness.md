@@ -64,7 +64,8 @@ excludes server surfaces that many upstream suites assume. The opt-in
 `tools/mylite-mtr-harness` runner proves the embedded MTR path with a tiny
 curated smoke list covering the MyLite trimmed bootstrap schema and upstream
 scalar CAST/CONVERT, CASE-family expression, and selected scalar operator
-behavior. It uses a separate `build/mariadb-mtr-smoke`
+behavior plus selected string/format function behavior. It uses a separate
+`build/mariadb-mtr-smoke`
 profile because the default embedded profile intentionally omits view, stored
 program, trigger, and binlog sysvar surfaces that MTR bootstrap still expects.
 It remains outside the default compatibility groups because it builds

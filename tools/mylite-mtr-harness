@@ -5,7 +5,15 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_dir="${BUILD_DIR:-"${root_dir}/build/mariadb-mtr-smoke"}"
 mtr_profile="${PROFILE:-"${root_dir}/cmake/mariadb-mtr-smoke.cmake"}"
 mtr_build_thread="${MTR_BUILD_THREAD:-auto}"
-default_tests=(mylite.bootstrap_schema main.cast main.case main.func_equal main.func_op)
+default_tests=(
+  mylite.bootstrap_schema
+  main.cast
+  main.case
+  main.func_equal
+  main.func_op
+  main.func_concat
+  main.func_format
+)
 
 usage() {
   cat <<EOF
