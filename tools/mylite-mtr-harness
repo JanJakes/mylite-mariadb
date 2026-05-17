@@ -41,6 +41,11 @@ default_tests=(
   main.order_by_zerolength-4285
   main.order_fill_sortbuf
   main.subselect_union_rand
+  main.prepare
+  main.ps_10nestset
+  main.ps_11bugs
+  main.ps_max_subselect-5113
+  main.information_schema_prepare
   main.ctype_ascii
   main.ctype_cp850
   main.ctype_cp866

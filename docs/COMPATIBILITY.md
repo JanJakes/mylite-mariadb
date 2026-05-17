@@ -84,8 +84,9 @@ character/binary, interval, and type behavior, selected date,
 temporal-rounding, temporal-function, and
 time/datetime comparison behavior, selected parser/comment and comparison
 behavior, selected `IN` / `NOT IN` predicate behavior, selected subquery,
-update-ignore, ORDER BY, and UNION behavior, selected scalar operator behavior,
-selected bit/extraction/replacement/regexp scalar-function behavior, selected
+update-ignore, ORDER BY, UNION, and prepared-statement behavior, selected
+scalar operator behavior, selected
+bit/extraction/replacement/regexp scalar-function behavior, selected
 default-expression and weight-string behavior, selected string/format function
 behavior, selected crypto/KDF function behavior, selected disabled DES
 encryption-function behavior, selected aggregate DISTINCT behavior, selected
