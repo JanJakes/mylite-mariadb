@@ -55,6 +55,10 @@ MariaDB base: `mariadb-11.8.6`
   `main.type_timestamp_round`.
 - [MTR date format and ASCII charset smoke](../mtr-date-charset-smoke/specs.md)
   adds `main.date_formats`, `main.datetime_456`, and `main.ctype_ascii`.
+- [MTR collation and diagnostics smoke](../mtr-collation-diagnostics-smoke/specs.md)
+  adds `main.ctype_collate_database`, `main.ctype_collate_implicit`,
+  `main.ctype_collate_implicit_def`, `main.ctype_collate_table`, and
+  `main.ctype_errors`.
 - [MTR temporal function smoke](../mtr-temporal-function-smoke/specs.md) adds
   `main.func_sapdb`, `main.func_time_64`, `main.func_timestamp`,
   `main.in_datetime_241`, `main.str_to_datetime_457`, and
@@ -125,6 +129,11 @@ The default curated list remains intentionally baseline-oriented:
 - `main.compare`.
 - `main.func_in`.
 - `main.ctype_ascii`.
+- `main.ctype_collate_database`.
+- `main.ctype_collate_implicit`.
+- `main.ctype_collate_implicit_def`.
+- `main.ctype_collate_table`.
+- `main.ctype_errors`.
 - `main.count_distinct`.
 - `main.sum_distinct`.
 - `main.func_equal`.
@@ -195,8 +204,11 @@ artifacts, not default MyLite linked-library artifacts.
   `main.func_timestamp`, `main.type_date_round`, `main.type_datetime_round`,
   `main.type_time_round`, `main.type_time_6065`,
   `main.type_timestamp_round`, `main.brackets`, `main.comments`,
-  `main.compare`, `main.func_in`, `main.ctype_ascii`, `main.count_distinct`,
-  `main.sum_distinct`, `main.func_equal`, `main.func_op`, `main.func_bit`,
+  `main.compare`, `main.func_in`, `main.ctype_ascii`,
+  `main.ctype_collate_database`, `main.ctype_collate_implicit`,
+  `main.ctype_collate_implicit_def`, `main.ctype_collate_table`,
+  `main.ctype_errors`, `main.count_distinct`, `main.sum_distinct`,
+  `main.func_equal`, `main.func_op`, `main.func_bit`,
   `main.func_concat`, `main.func_default`, `main.func_extract`,
   `main.func_format`, `main.func_replace`, `main.func_regexp`,
   `main.func_regexp_pcre`, `main.func_weight_string`, `main.func_kdf`, and
@@ -211,8 +223,11 @@ artifacts, not default MyLite linked-library artifacts.
   `main.func_timestamp`, `main.type_date_round`, `main.type_datetime_round`,
   `main.type_time_round`, `main.type_time_6065`,
   `main.type_timestamp_round`, `main.brackets`, `main.comments`,
-  `main.compare`, `main.func_in`, `main.ctype_ascii`, `main.count_distinct`,
-  `main.sum_distinct`, `main.func_equal`, `main.func_op`, `main.func_bit`,
+  `main.compare`, `main.func_in`, `main.ctype_ascii`,
+  `main.ctype_collate_database`, `main.ctype_collate_implicit`,
+  `main.ctype_collate_implicit_def`, `main.ctype_collate_table`,
+  `main.ctype_errors`, `main.count_distinct`, `main.sum_distinct`,
+  `main.func_equal`, `main.func_op`, `main.func_bit`,
   `main.func_concat`, `main.func_default`, `main.func_extract`,
   `main.func_format`, `main.func_replace`, `main.func_regexp`,
   `main.func_regexp_pcre`, `main.func_weight_string`, `main.func_kdf`, and

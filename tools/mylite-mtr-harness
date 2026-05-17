@@ -33,6 +33,11 @@ default_tests=(
   main.compare
   main.func_in
   main.ctype_ascii
+  main.ctype_collate_database
+  main.ctype_collate_implicit
+  main.ctype_collate_implicit_def
+  main.ctype_collate_table
+  main.ctype_errors
   main.count_distinct
   main.sum_distinct
   main.func_equal

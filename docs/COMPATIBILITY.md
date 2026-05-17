@@ -88,9 +88,9 @@ bit/extraction/replacement/regexp scalar-function behavior, selected
 default-expression and weight-string behavior, selected string/format function
 behavior, selected crypto/KDF function behavior, selected disabled DES
 encryption-function behavior, selected aggregate DISTINCT behavior, selected
-date-format behavior, and selected ASCII charset behavior, while MariaDB MTR
-comparison suites and broader application-schema and runtime suites remain
-planned.
+date-format behavior, selected ASCII charset behavior, and selected charset
+diagnostics and collation-default behavior, while MariaDB MTR comparison
+suites and broader application-schema and runtime suites remain planned.
 
 ## Baseline
 
