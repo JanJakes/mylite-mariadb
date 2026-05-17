@@ -184,6 +184,7 @@ static void test_truncate_table_lifecycle(void);
 static void test_wordpress_shaped_schema(void);
 static void test_wordpress_installer_schema_fixture(void);
 static void test_wordpress_multisite_global_schema_fixture(void);
+static void test_wordpress_multisite_blog_schema_fixture(void);
 static void assert_exec_succeeds(mylite_db *db, const char *sql);
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_exec_fails_with_message(mylite_db *db, const char *sql, const char *message);
@@ -242,6 +243,12 @@ static void assert_wordpress_installer_catalog_metadata(const char *filename);
 static void assert_wordpress_installer_seed_data(mylite_db *db);
 static void assert_wordpress_multisite_global_catalog_metadata(const char *filename);
 static void assert_wordpress_multisite_global_rows(mylite_db *db);
+static void assert_wordpress_multisite_blog_catalog_metadata(const char *filename);
+static void assert_wordpress_multisite_global_table_metadata(
+    const char *filename,
+    const char *schema_name
+);
+static void assert_wordpress_multisite_blog_rows(mylite_db *db);
 static void assert_table_collation(
     mylite_db *db,
     const char *schema_name,
@@ -381,6 +388,7 @@ int main(int argc, char **argv) {
     test_wordpress_shaped_schema();
     test_wordpress_installer_schema_fixture();
     test_wordpress_multisite_global_schema_fixture();
+    test_wordpress_multisite_blog_schema_fixture();
     return 0;
 }
 
@@ -10354,6 +10362,125 @@ static void test_wordpress_multisite_global_schema_fixture(void) {
     free(root);
 }
 
+static void test_wordpress_multisite_blog_schema_fixture(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(
+        db,
+        "CREATE DATABASE wordpress_multisite_blog "
+        "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    );
+    assert_exec_succeeds(db, "USE wordpress_multisite_blog");
+    exec_sql_fixture(db, "wordpress-6.9.4-multisite-global-schema.sql");
+    exec_sql_fixture(db, "wordpress-6.9.4-multisite-blog-2-schema.sql");
+    assert_wordpress_multisite_blog_catalog_metadata(filename);
+    assert_table_collation(db, "wordpress_multisite_blog", "wp_2_posts", "utf8mb4_unicode_ci");
+    assert_table_collation(db, "wordpress_multisite_blog", "wp_2_options", "utf8mb4_unicode_ci");
+
+    assert_exec_succeeds(db, "INSERT INTO wp_site (domain, path) VALUES ('example.test', '/')");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_blogs "
+        "(site_id, domain, path, registered, last_updated) VALUES "
+        "(1, 'example.test', '/second/', '2026-05-15 12:00:00', "
+        "'2026-05-15 12:00:00')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_users "
+        "(user_login, user_pass, user_nicename, user_email, user_registered, display_name) "
+        "VALUES "
+        "('network-admin', '$P$Bfixturehash', 'network-admin', 'admin@example.test', "
+        "'2026-05-15 10:00:00', 'network-admin')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_2_options (option_name, option_value, autoload) VALUES "
+        "('siteurl', 'https://example.test/second', 'yes'), "
+        "('blogname', 'Second Site', 'yes')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_2_terms (name, slug, term_group) VALUES "
+        "('Network News', 'network-news', 0)"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_2_term_taxonomy (term_id, taxonomy, description, parent, count) VALUES "
+        "(1, 'category', 'Second site category', 0, 1)"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_2_posts ("
+        "post_author, post_date, post_date_gmt, post_content, post_title, post_excerpt, "
+        "post_status, comment_status, ping_status, post_password, post_name, to_ping, pinged, "
+        "post_modified, post_modified_gmt, post_content_filtered, post_parent, guid, "
+        "menu_order, post_type, post_mime_type, comment_count"
+        ") VALUES ("
+        "1, '2026-05-15 12:30:00', '2026-05-15 10:30:00', 'Second site body', "
+        "'Second Site Post', '', 'publish', 'open', 'open', '', 'second-site-post', "
+        "'', '', '2026-05-15 12:31:00', '2026-05-15 10:31:00', '', 0, "
+        "'https://example.test/second/?p=1', 0, 'post', '', 0"
+        ")"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_2_postmeta (post_id, meta_key, meta_value) VALUES "
+        "(1, '_thumbnail_id', '84')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_2_term_relationships (object_id, term_taxonomy_id, term_order) VALUES "
+        "(1, 1, 0)"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_2_comments ("
+        "comment_post_ID, comment_author, comment_author_email, comment_author_url, "
+        "comment_author_IP, comment_date, comment_date_gmt, comment_content, "
+        "comment_karma, comment_approved, comment_agent, comment_type, comment_parent, user_id"
+        ") VALUES ("
+        "1, 'Jan', 'jan@example.test', '', '127.0.0.1', "
+        "'2026-05-15 12:40:00', '2026-05-15 10:40:00', 'Second site comment', "
+        "0, '1', 'mylite-test', 'comment', 0, 1"
+        ")"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_2_commentmeta (comment_id, meta_key, meta_value) VALUES "
+        "(1, '_rating', '5')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO wp_2_links ("
+        "link_url, link_name, link_image, link_target, link_description, link_visible, "
+        "link_owner, link_rating, link_updated, link_rel, link_notes, link_rss"
+        ") VALUES ("
+        "'https://mylite.example/second', 'Second Site Link', '', '', 'Network link', "
+        "'Y', 1, 0, '2026-05-15 12:50:00', '', 'link notes', ''"
+        ")"
+    );
+    assert_wordpress_multisite_blog_rows(db);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE wordpress_multisite_blog");
+    assert_wordpress_multisite_blog_catalog_metadata(filename);
+    assert_wordpress_multisite_blog_rows(db);
+    assert_table_collation(db, "wordpress_multisite_blog", "wp_2_posts", "utf8mb4_unicode_ci");
+    assert_table_collation(db, "wordpress_multisite_blog", "wp_2_options", "utf8mb4_unicode_ci");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
 static void assert_wordpress_catalog_metadata(const char *filename) {
     assert_catalog_table_count(filename, "app", 11U);
     assert_catalog_table_metadata(filename, "app", "wp_options", "InnoDB", "MYLITE");
@@ -10630,44 +10757,7 @@ static void assert_wordpress_installer_seed_data(mylite_db *db) {
 
 static void assert_wordpress_multisite_global_catalog_metadata(const char *filename) {
     assert_catalog_table_count(filename, "wordpress_multisite", 8U);
-    assert_catalog_table_metadata(filename, "wordpress_multisite", "wp_users", "DEFAULT", "MYLITE");
-    assert_catalog_table_metadata(
-        filename,
-        "wordpress_multisite",
-        "wp_usermeta",
-        "DEFAULT",
-        "MYLITE"
-    );
-    assert_catalog_table_metadata(filename, "wordpress_multisite", "wp_blogs", "DEFAULT", "MYLITE");
-    assert_catalog_table_metadata(
-        filename,
-        "wordpress_multisite",
-        "wp_blogmeta",
-        "DEFAULT",
-        "MYLITE"
-    );
-    assert_catalog_table_metadata(
-        filename,
-        "wordpress_multisite",
-        "wp_registration_log",
-        "DEFAULT",
-        "MYLITE"
-    );
-    assert_catalog_table_metadata(filename, "wordpress_multisite", "wp_site", "DEFAULT", "MYLITE");
-    assert_catalog_table_metadata(
-        filename,
-        "wordpress_multisite",
-        "wp_sitemeta",
-        "DEFAULT",
-        "MYLITE"
-    );
-    assert_catalog_table_metadata(
-        filename,
-        "wordpress_multisite",
-        "wp_signups",
-        "DEFAULT",
-        "MYLITE"
-    );
+    assert_wordpress_multisite_global_table_metadata(filename, "wordpress_multisite");
 }
 
 static void assert_wordpress_multisite_global_rows(mylite_db *db) {
@@ -10718,6 +10808,158 @@ static void assert_wordpress_multisite_global_rows(mylite_db *db) {
     assert_query_single_value(
         db,
         "SELECT COUNT(*) FROM wp_users WHERE spam = 0 AND deleted = 0",
+        "1"
+    );
+}
+
+static void assert_wordpress_multisite_blog_catalog_metadata(const char *filename) {
+    assert_catalog_table_count(filename, "wordpress_multisite_blog", 18U);
+    assert_wordpress_multisite_global_table_metadata(filename, "wordpress_multisite_blog");
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_multisite_blog",
+        "wp_2_termmeta",
+        "DEFAULT",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_multisite_blog",
+        "wp_2_terms",
+        "DEFAULT",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_multisite_blog",
+        "wp_2_term_taxonomy",
+        "DEFAULT",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_multisite_blog",
+        "wp_2_term_relationships",
+        "DEFAULT",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_multisite_blog",
+        "wp_2_commentmeta",
+        "DEFAULT",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_multisite_blog",
+        "wp_2_comments",
+        "DEFAULT",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_multisite_blog",
+        "wp_2_links",
+        "DEFAULT",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_multisite_blog",
+        "wp_2_options",
+        "DEFAULT",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_multisite_blog",
+        "wp_2_postmeta",
+        "DEFAULT",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "wordpress_multisite_blog",
+        "wp_2_posts",
+        "DEFAULT",
+        "MYLITE"
+    );
+}
+
+static void assert_wordpress_multisite_global_table_metadata(
+    const char *filename,
+    const char *schema_name
+) {
+    assert_catalog_table_metadata(filename, schema_name, "wp_users", "DEFAULT", "MYLITE");
+    assert_catalog_table_metadata(filename, schema_name, "wp_usermeta", "DEFAULT", "MYLITE");
+    assert_catalog_table_metadata(filename, schema_name, "wp_blogs", "DEFAULT", "MYLITE");
+    assert_catalog_table_metadata(filename, schema_name, "wp_blogmeta", "DEFAULT", "MYLITE");
+    assert_catalog_table_metadata(
+        filename,
+        schema_name,
+        "wp_registration_log",
+        "DEFAULT",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(filename, schema_name, "wp_site", "DEFAULT", "MYLITE");
+    assert_catalog_table_metadata(filename, schema_name, "wp_sitemeta", "DEFAULT", "MYLITE");
+    assert_catalog_table_metadata(filename, schema_name, "wp_signups", "DEFAULT", "MYLITE");
+}
+
+static void assert_wordpress_multisite_blog_rows(mylite_db *db) {
+    assert_query_single_value(
+        db,
+        "SELECT blog_id FROM wp_blogs FORCE INDEX (domain) "
+        "WHERE domain = 'example.test' AND path = '/second/'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT option_value FROM wp_2_options FORCE INDEX (option_name) "
+        "WHERE option_name = 'blogname'",
+        "Second Site"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT post_title FROM wp_2_posts FORCE INDEX (post_name) "
+        "WHERE post_name = 'second-site-post'",
+        "Second Site Post"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT meta_value FROM wp_2_postmeta FORCE INDEX (post_id) "
+        "WHERE post_id = 1 AND meta_key = '_thumbnail_id'",
+        "84"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT t.slug FROM wp_2_terms t "
+        "JOIN wp_2_term_taxonomy tt ON tt.term_id = t.term_id "
+        "JOIN wp_2_term_relationships tr ON tr.term_taxonomy_id = tt.term_taxonomy_id "
+        "WHERE tr.object_id = 1 AND tt.taxonomy = 'category'",
+        "network-news"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT comment_author FROM wp_2_comments FORCE INDEX (comment_post_ID) "
+        "WHERE comment_post_ID = 1",
+        "Jan"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT meta_value FROM wp_2_commentmeta FORCE INDEX (comment_id) "
+        "WHERE comment_id = 1 AND meta_key = '_rating'",
+        "5"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT link_name FROM wp_2_links FORCE INDEX (link_visible) WHERE link_visible = 'Y'",
+        "Second Site Link"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM wp_2_terms FORCE INDEX (slug) WHERE slug = 'network-news'",
         "1"
     );
 }

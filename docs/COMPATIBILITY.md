@@ -44,7 +44,7 @@ partition DDL rejection, online and in-place ALTER rejection, MariaDB statement
 transaction hook integration, busy-timeout lock waits, SQL locking policy
 rejection, failed
 statement rollback, initial application-schema smoke including WordPress
-single-site and multisite-global fixtures,
+single-site and multisite schema fixtures,
 unsupported server, binlog/replication, replication/binlog filter assignment,
 binlog/replication system-variable assignment and omitted-variable
 introspection,
@@ -214,5 +214,5 @@ application-schema and runtime suites remain planned.
 
 | Capability | MyLite status | Compatibility target |
 | --- | --- | --- |
-| WordPress-shaped core tables | 🟡&nbsp;Partial | Storage-engine smoke covers a broader `wp_options`, `wp_posts`, `wp_postmeta`, `wp_users`, `wp_usermeta`, `wp_terms`, `wp_term_taxonomy`, `wp_term_relationships`, `wp_comments`, `wp_commentmeta`, and `wp_links` subset with `ENGINE=InnoDB` routing, `utf8mb4_unicode_ci` defaults, autoincrement ids, text payloads, composite keys, secondary and prefix indexes, joins, updates, deletes, close/reopen, and sidecar gates; it also imports WordPress 6.9.4 single-site installer DDL, representative installer seed fixtures with broader default-option rows plus the full default role payload, and multisite global schema DDL with representative indexed network rows through omitted-engine routing to MyLite; full WordPress runtime install, exhaustive installer defaults, exhaustive collation variants, full multisite runtime and per-blog suites, and plugin tables remain planned |
+| WordPress-shaped core tables | 🟡&nbsp;Partial | Storage-engine smoke covers a broader `wp_options`, `wp_posts`, `wp_postmeta`, `wp_users`, `wp_usermeta`, `wp_terms`, `wp_term_taxonomy`, `wp_term_relationships`, `wp_comments`, `wp_commentmeta`, and `wp_links` subset with `ENGINE=InnoDB` routing, `utf8mb4_unicode_ci` defaults, autoincrement ids, text payloads, composite keys, secondary and prefix indexes, joins, updates, deletes, close/reopen, and sidecar gates; it also imports WordPress 6.9.4 single-site installer DDL, representative installer seed fixtures with broader default-option rows plus the full default role payload, and multisite global plus blog-id-2 schema DDL with representative indexed network and per-blog rows through omitted-engine routing to MyLite; full WordPress runtime install, exhaustive installer defaults, exhaustive collation variants, full multisite runtime, additional per-blog suites, and plugin tables remain planned |
 | Representative collation index paths | 🟡&nbsp;Partial | Storage-engine smoke covers `utf8mb4_general_ci`, `utf8mb4_bin`, `utf8mb4_unicode_ci`, `utf8mb4_unicode_520_ci`, and `latin1_swedish_ci` table metadata, duplicate-key checks, indexed lookups, close/reopen, and sidecar gates; exhaustive collation semantics and locale-specific comparison matrices remain planned |
