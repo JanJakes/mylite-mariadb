@@ -119,8 +119,11 @@ MariaDB-generated supporting keys are cleaned up when copy ALTER replaces them
 with explicit compatible keys, and can be explicitly dropped after the owning
 FK is removed. Referenced parent unique secondary-key renames update the FK
 referenced-key metadata and preserve parent row checks across close/reopen for
-the supported `RESTRICT` / `NO ACTION` subset. Multi-row FK ordering,
-cascades, `SET NULL`, and `SET DEFAULT` remain planned.
+the supported `RESTRICT` / `NO ACTION` subset. Ordered multi-row child and
+self-referential inserts are covered for the supported FK subset, including
+failed-statement rollback when a later row violates the constraint. Broader
+update/delete ordering matrices, deferrable set-wide validation, cascades,
+`SET NULL`, and `SET DEFAULT` remain planned.
 Partition DDL remains rejected at the `libmylite` boundary until MyLite has
 partition metadata, partition-to-primary-file routing, per-partition catalog
 lifecycle, and partition-aware row and index maintenance.

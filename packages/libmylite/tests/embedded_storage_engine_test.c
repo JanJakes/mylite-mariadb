@@ -2200,6 +2200,20 @@ static void test_transaction_and_foreign_key_policies(void) {
     assert_exec_succeeds(db, "INSERT INTO fk_checks_child VALUES (5, 30)");
     assert_exec_fails(db, "UPDATE fk_checks_parent SET id = 31 WHERE id = 30");
     assert_exec_fails(db, "DELETE FROM fk_checks_parent WHERE id = 30");
+    assert_exec_succeeds(db, "INSERT INTO fk_checks_parent VALUES (31)");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_checks_child VALUES (100, 31), (101, 31)"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO fk_checks_child VALUES (102, 31), (103, 123)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_checks_child WHERE id IN (102, 103)",
+        "0"
+    );
     assert_query_single_value(
         db,
         "SELECT COUNT(*) FROM fk_checks_child WHERE parent_id IN (10, 20, 99)",
@@ -2257,6 +2271,30 @@ static void test_transaction_and_foreign_key_policies(void) {
     assert_exec_succeeds(db, "INSERT INTO fk_self VALUES (5, NULL)");
     assert_exec_succeeds(db, "UPDATE fk_self SET id = 6, parent_id = 6 WHERE id = 5");
     assert_query_single_value(db, "SELECT parent_id FROM fk_self WHERE id = 6", "6");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_self VALUES (7, NULL), (8, 7), (9, 9), (11, 9)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_self WHERE id IN (7, 8, 9, 11)",
+        "4"
+    );
+    assert_exec_fails(db, "INSERT INTO fk_self VALUES (12, 13), (13, NULL)");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_self WHERE id IN (12, 13)",
+        "0"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO fk_self VALUES (14, NULL), (15, 16), (16, NULL)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_self WHERE id IN (14, 15, 16)",
+        "0"
+    );
     assert_exec_succeeds(db, "TRUNCATE TABLE fk_self");
     assert_query_single_value(db, "SELECT COUNT(*) FROM fk_self", "0");
 
@@ -2269,6 +2307,16 @@ static void test_transaction_and_foreign_key_policies(void) {
         "3"
     );
     assert_exec_fails(db, "INSERT INTO fk_checks_child VALUES (6, 555)");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_checks_child WHERE parent_id = 31",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_checks_child WHERE id IN (102, 103)",
+        "0"
+    );
     assert_query_single_value(db, "SELECT COUNT(*) FROM fk_truncate_parent", "0");
     assert_query_single_value(
         db,
@@ -2280,6 +2328,21 @@ static void test_transaction_and_foreign_key_policies(void) {
     assert_exec_succeeds(db, "INSERT INTO fk_self VALUES (20, NULL)");
     assert_exec_succeeds(db, "INSERT INTO fk_self VALUES (21, 20)");
     assert_exec_succeeds(db, "INSERT INTO fk_self VALUES (22, 22)");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_self VALUES (23, NULL), (24, 23), (25, 25), (26, 25)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_self WHERE id IN (23, 24, 25, 26)",
+        "4"
+    );
+    assert_exec_fails(db, "INSERT INTO fk_self VALUES (27, 28), (28, NULL)");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_self WHERE id IN (27, 28)",
+        "0"
+    );
     assert_query_single_value(db, "SELECT parent_id FROM fk_self WHERE id = 22", "22");
     assert_exec_fails(db, "DELETE FROM fk_self WHERE id = 20");
 
