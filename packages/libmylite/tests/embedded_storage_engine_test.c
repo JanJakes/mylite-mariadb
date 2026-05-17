@@ -156,6 +156,7 @@ static void test_foreign_key_self_set_null_delete(void);
 static void test_foreign_key_self_set_null_update(void);
 static void test_foreign_key_non_self_set_null_actions(void);
 static void test_foreign_key_delete_cascade_actions(void);
+static void test_foreign_key_update_cascade_actions(void);
 static void test_foreign_key_non_self_ordering(void);
 static void test_foreign_key_multi_table_ordering(void);
 static void test_foreign_key_handler_metadata(void);
@@ -437,6 +438,7 @@ int main(int argc, char **argv) {
     test_foreign_key_self_set_null_update();
     test_foreign_key_non_self_set_null_actions();
     test_foreign_key_delete_cascade_actions();
+    test_foreign_key_update_cascade_actions();
     test_foreign_key_non_self_ordering();
     test_foreign_key_multi_table_ordering();
     test_foreign_key_handler_metadata();
@@ -3152,12 +3154,12 @@ static void test_foreign_key_delete_cascade_actions(void) {
 
     assert_foreign_key_exec_fails(
         db,
-        "CREATE TABLE fk_cascade_update_reject ("
+        "CREATE TABLE fk_cascade_update_combo_reject ("
         "id INT NOT NULL PRIMARY KEY, parent_id INT NOT NULL, "
-        "KEY fk_cascade_update_reject_parent (parent_id), "
-        "CONSTRAINT fk_cascade_update_reject_parent "
+        "KEY fk_cascade_update_combo_reject_parent (parent_id), "
+        "CONSTRAINT fk_cascade_update_combo_reject_parent "
         "FOREIGN KEY (parent_id) REFERENCES fk_cascade_parent(id) "
-        "ON UPDATE CASCADE"
+        "ON DELETE CASCADE ON UPDATE CASCADE"
         ") ENGINE=InnoDB"
     );
     assert_foreign_key_exec_fails(
@@ -3171,7 +3173,11 @@ static void test_foreign_key_delete_cascade_actions(void) {
         ") ENGINE=InnoDB"
     );
     assert(
-        mylite_storage_table_exists(filename, "app", "fk_cascade_update_reject") ==
+        mylite_storage_table_exists(
+            filename,
+            "app",
+            "fk_cascade_update_combo_reject"
+        ) ==
         MYLITE_STORAGE_NOTFOUND
     );
     assert(
@@ -3198,6 +3204,183 @@ static void test_foreign_key_delete_cascade_actions(void) {
         db,
         "SELECT COUNT(*) FROM fk_cascade_block_child WHERE id = 10",
         "1"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_foreign_key_update_cascade_actions(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_update_parent ("
+        "id INT NOT NULL PRIMARY KEY, label VARCHAR(32) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_update_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NOT NULL, "
+        "label VARCHAR(32) NOT NULL, "
+        "KEY fk_update_child_parent (parent_id), "
+        "CONSTRAINT fk_update_child_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_update_parent(id) "
+        "ON UPDATE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    char *create_sql = capture_show_create_table(db, "fk_update_child");
+    assert(strstr(create_sql, "ON UPDATE CASCADE") != NULL);
+    free(create_sql);
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_update_parent VALUES "
+        "(1, 'moved'), (2, 'kept')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_update_child VALUES "
+        "(10, 1, 'first child'), "
+        "(11, 1, 'second child'), "
+        "(12, 2, 'kept child')"
+    );
+    assert_exec_succeeds(db, "UPDATE fk_update_parent SET id = 3 WHERE id = 1");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_update_child "
+        "FORCE INDEX (fk_update_child_parent) WHERE parent_id = 1",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_update_child "
+        "FORCE INDEX (fk_update_child_parent) WHERE parent_id = 3",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM fk_update_child "
+        "FORCE INDEX (fk_update_child_parent) WHERE parent_id = 2",
+        "12"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_update_self ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NOT NULL, "
+        "KEY fk_update_self_parent (parent_id), "
+        "CONSTRAINT fk_update_self_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_update_self(id) "
+        "ON UPDATE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_update_self VALUES (1, 1)");
+    assert_exec_succeeds(db, "UPDATE fk_update_self SET id = 2 WHERE id = 1");
+    assert_query_single_value(
+        db,
+        "SELECT CONCAT(id, ':', parent_id) FROM fk_update_self",
+        "2:2"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_update_block_parent ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_update_block_guard ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_update_block_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NOT NULL, "
+        "KEY fk_update_block_child_parent (parent_id), "
+        "CONSTRAINT fk_update_block_child_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_update_block_parent(id) "
+        "ON UPDATE CASCADE, "
+        "CONSTRAINT fk_update_block_child_guard "
+        "FOREIGN KEY (parent_id) REFERENCES fk_update_block_guard(id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_update_block_parent VALUES (1)");
+    assert_exec_succeeds(db, "INSERT INTO fk_update_block_guard VALUES (1)");
+    assert_exec_succeeds(db, "INSERT INTO fk_update_block_child VALUES (10, 1)");
+    assert_exec_fails(db, "UPDATE fk_update_block_parent SET id = 2 WHERE id = 1");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_update_block_parent WHERE id = 1",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_id FROM fk_update_block_child WHERE id = 10",
+        "1"
+    );
+
+    assert_foreign_key_exec_fails(
+        db,
+        "CREATE TABLE fk_update_combo_reject ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT NOT NULL, "
+        "KEY fk_update_combo_reject_parent (parent_id), "
+        "CONSTRAINT fk_update_combo_reject_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_update_parent(id) "
+        "ON DELETE CASCADE ON UPDATE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    assert_foreign_key_exec_fails(
+        db,
+        "CREATE TABLE fk_update_blob_reject ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT NOT NULL, note TEXT, "
+        "KEY fk_update_blob_reject_parent (parent_id), "
+        "CONSTRAINT fk_update_blob_reject_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_update_parent(id) "
+        "ON UPDATE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "fk_update_combo_reject") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "fk_update_blob_reject") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE app");
+    create_sql = capture_show_create_table(db, "fk_update_child");
+    assert(strstr(create_sql, "ON UPDATE CASCADE") != NULL);
+    free(create_sql);
+    create_sql = capture_show_create_table(db, "fk_update_self");
+    assert(strstr(create_sql, "ON UPDATE CASCADE") != NULL);
+    free(create_sql);
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_update_child "
+        "FORCE INDEX (fk_update_child_parent) WHERE parent_id = 3",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT CONCAT(id, ':', parent_id) FROM fk_update_self",
+        "2:2"
     );
 
     assert(mylite_close(db) == MYLITE_OK);

@@ -177,7 +177,10 @@ static int mylite_check_child_foreign_keys(const char *primary_file,
                                            const char *schema_name,
                                            const char *table_name,
                                            TABLE *table, const uchar *buf);
-static int mylite_apply_same_row_update_set_null_actions(
+static int mylite_check_child_foreign_keys_except(
+  const char *primary_file, const char *schema_name, const char *table_name,
+  TABLE *table, const uchar *buf, const char *skipped_constraint_name);
+static int mylite_apply_same_row_update_actions(
   const char *primary_file, const char *schema_name, const char *table_name,
   TABLE *table, const uchar *old_data, const uchar *new_data);
 static int mylite_apply_parent_foreign_key_actions(
@@ -277,6 +280,8 @@ static bool mylite_foreign_key_restrict_action_supported(
   enum_fk_option action);
 static bool mylite_foreign_key_set_null_supported(
   TABLE *table, const char *const *column_names, size_t column_count);
+static bool mylite_foreign_key_update_cascade_supported(
+  TABLE *table, const char *const *column_names, size_t column_count);
 static bool mylite_foreign_key_delete_cascade_supported(
   TABLE *table, const char *const *column_names, size_t column_count);
 static unsigned long long mylite_key_nullable_bitmap(const KEY *key,
@@ -291,6 +296,18 @@ static int mylite_apply_non_self_set_null(
   const char *primary_file, TABLE *parent_table,
   const mylite_storage_foreign_key_metadata *metadata, const uchar *old_data,
   const uchar *new_data);
+static int mylite_apply_self_referencing_update_cascade(
+  const char *primary_file, TABLE *table,
+  const mylite_storage_foreign_key_metadata *metadata, const uchar *old_data,
+  const uchar *new_data, ulonglong parent_row_id, uint cascade_depth);
+static int mylite_apply_non_self_update_cascade(
+  const char *primary_file, TABLE *parent_table,
+  const mylite_storage_foreign_key_metadata *metadata, const uchar *old_data,
+  const uchar *new_data, uint cascade_depth);
+static int mylite_apply_update_cascade_to_child_rows(
+  const char *primary_file, TABLE *parent_table, TABLE *child_table,
+  const mylite_storage_foreign_key_metadata *metadata, const uchar *old_data,
+  const uchar *new_data, ulonglong skipped_child_row_id, uint cascade_depth);
 static int mylite_apply_self_referencing_delete_cascade(
   const char *primary_file, TABLE *table,
   const mylite_storage_foreign_key_metadata *metadata, const uchar *old_data,
@@ -315,9 +332,16 @@ static void mylite_set_foreign_key_columns_null(
   TABLE *table, const KEY *child_key, size_t column_count);
 static void mylite_set_foreign_key_columns_null_at(
   TABLE *table, const KEY *child_key, size_t column_count, const uchar *buf);
-static int mylite_apply_same_row_update_set_null_action(
+static int mylite_copy_foreign_key_columns(
+  TABLE *parent_table, const KEY *parent_key, TABLE *child_table,
+  const KEY *child_key, size_t column_count, const uchar *parent_data,
+  uchar *child_data);
+static int mylite_apply_same_row_update_action(
   void *ctx, const mylite_storage_foreign_key_metadata *metadata);
 static int mylite_apply_same_row_update_set_null(
+  TABLE *table, const mylite_storage_foreign_key_metadata *metadata,
+  const uchar *old_data, const uchar *new_data);
+static int mylite_apply_same_row_update_cascade(
   TABLE *table, const mylite_storage_foreign_key_metadata *metadata,
   const uchar *old_data, const uchar *new_data);
 static int mylite_check_child_foreign_key(
@@ -635,6 +659,7 @@ struct Mylite_foreign_key_row_check_context
   const uchar *old_data;
   const uchar *new_data;
   ulonglong skipped_child_row_id;
+  const char *skipped_constraint_name;
   int error;
 };
 
@@ -1937,7 +1962,7 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
   int error= 0;
   if (!volatile_rows && !mylite_foreign_key_checks_disabled(ha_thd()))
   {
-    error= mylite_apply_same_row_update_set_null_actions(
+    error= mylite_apply_same_row_update_actions(
       primary_file, storage_schema(), storage_table(), table, old_data,
       new_data);
     if (error)
@@ -3269,8 +3294,16 @@ static int mylite_check_child_foreign_keys(const char *primary_file,
                                            const char *table_name,
                                            TABLE *table, const uchar *buf)
 {
+  return mylite_check_child_foreign_keys_except(
+    primary_file, schema_name, table_name, table, buf, NULL);
+}
+
+static int mylite_check_child_foreign_keys_except(
+  const char *primary_file, const char *schema_name, const char *table_name,
+  TABLE *table, const uchar *buf, const char *skipped_constraint_name)
+{
   Mylite_foreign_key_row_check_context ctx=
-    {primary_file, table, NULL, buf, 0, 0};
+    {primary_file, table, NULL, buf, 0, skipped_constraint_name, 0};
   const mylite_storage_result result=
     mylite_storage_list_foreign_keys(primary_file, schema_name, table_name,
                                      mylite_check_child_foreign_key, &ctx);
@@ -3279,7 +3312,7 @@ static int mylite_check_child_foreign_keys(const char *primary_file,
   return mylite_storage_to_handler_error(result);
 }
 
-static int mylite_apply_same_row_update_set_null_actions(
+static int mylite_apply_same_row_update_actions(
   const char *primary_file, const char *schema_name, const char *table_name,
   TABLE *table, const uchar *old_data, const uchar *new_data)
 {
@@ -3288,7 +3321,7 @@ static int mylite_apply_same_row_update_set_null_actions(
   const mylite_storage_result result=
     mylite_storage_list_parent_foreign_keys(
       primary_file, schema_name, table_name,
-      mylite_apply_same_row_update_set_null_action, &ctx);
+      mylite_apply_same_row_update_action, &ctx);
   if (ctx.error)
     return ctx.error;
   return mylite_storage_to_handler_error(result);
@@ -3327,6 +3360,20 @@ static int mylite_apply_parent_foreign_key_action(
       mylite_apply_non_self_set_null(
         action_ctx->primary_file, action_ctx->table, metadata,
         action_ctx->old_data, action_ctx->new_data);
+    return action_ctx->error ? 1 : 0;
+  }
+  if (action_ctx->new_data &&
+      action == MYLITE_STORAGE_FOREIGN_KEY_ACTION_CASCADE)
+  {
+    action_ctx->error= mylite_foreign_key_is_self_referencing(metadata) ?
+      mylite_apply_self_referencing_update_cascade(
+        action_ctx->primary_file, action_ctx->table, metadata,
+        action_ctx->old_data, action_ctx->new_data,
+        action_ctx->parent_row_id, action_ctx->cascade_depth) :
+      mylite_apply_non_self_update_cascade(
+        action_ctx->primary_file, action_ctx->table, metadata,
+        action_ctx->old_data, action_ctx->new_data,
+        action_ctx->cascade_depth);
     return action_ctx->error ? 1 : 0;
   }
   if (!action_ctx->new_data &&
@@ -3373,6 +3420,250 @@ static int mylite_apply_non_self_set_null(
       new_data, 0);
 
   mylite_close_catalog_table(&child_table);
+  return error;
+}
+
+static int mylite_apply_self_referencing_update_cascade(
+  const char *primary_file, TABLE *table,
+  const mylite_storage_foreign_key_metadata *metadata, const uchar *old_data,
+  const uchar *new_data, ulonglong parent_row_id, uint cascade_depth)
+{
+  return mylite_apply_update_cascade_to_child_rows(
+    primary_file, table, table, metadata, old_data, new_data, parent_row_id,
+    cascade_depth);
+}
+
+static int mylite_apply_non_self_update_cascade(
+  const char *primary_file, TABLE *parent_table,
+  const mylite_storage_foreign_key_metadata *metadata, const uchar *old_data,
+  const uchar *new_data, uint cascade_depth)
+{
+  THD *thd= current_thd;
+  if (!thd)
+    return HA_ERR_INTERNAL_ERROR;
+
+  Mylite_catalog_table child_table= {};
+  int error= mylite_open_catalog_table(
+    thd, primary_file, metadata->schema_name, metadata->table_name,
+    &child_table);
+  if (!error)
+    error= mylite_apply_update_cascade_to_child_rows(
+      primary_file, parent_table, &child_table.table, metadata, old_data,
+      new_data, 0, cascade_depth);
+
+  mylite_close_catalog_table(&child_table);
+  return error;
+}
+
+static int mylite_apply_update_cascade_to_child_rows(
+  const char *primary_file, TABLE *parent_table, TABLE *child_table,
+  const mylite_storage_foreign_key_metadata *metadata, const uchar *old_data,
+  const uchar *new_data, ulonglong skipped_child_row_id, uint cascade_depth)
+{
+  if (cascade_depth >= MYLITE_FOREIGN_KEY_MAX_CASCADE_DEPTH)
+    return HA_ERR_ROW_IS_REFERENCED;
+
+  const KEY *parent_key= mylite_find_foreign_key_prefix(
+    parent_table, metadata->referenced_column_names, metadata->column_count,
+    metadata->referenced_key_name);
+  const KEY *child_key= mylite_find_foreign_key_prefix(
+    child_table, metadata->foreign_column_names, metadata->column_count, NULL);
+  if (!parent_key || !child_key)
+    return HA_ERR_ROW_IS_REFERENCED;
+  if (!child_table->record[1])
+    return HA_ERR_UNSUPPORTED;
+  if (mylite_key_prefix_contains_null(parent_table, parent_key, old_data,
+                                      metadata->column_count))
+    return 0;
+
+  uchar *old_key_prefix= NULL;
+  size_t old_key_prefix_size= 0;
+  int error= mylite_make_key_prefix(parent_table, parent_key, old_data,
+                                    metadata->column_count,
+                                    metadata->nullable_column_bitmap,
+                                    &old_key_prefix, &old_key_prefix_size);
+  if (error)
+    return error;
+
+  if (!mylite_key_prefix_contains_null(parent_table, parent_key, new_data,
+                                       metadata->column_count))
+  {
+    uchar *new_key_prefix= NULL;
+    size_t new_key_prefix_size= 0;
+    error= mylite_make_key_prefix(parent_table, parent_key, new_data,
+                                  metadata->column_count,
+                                  metadata->nullable_column_bitmap,
+                                  &new_key_prefix, &new_key_prefix_size);
+    if (error)
+    {
+      free(old_key_prefix);
+      return error;
+    }
+    const bool unchanged= mylite_key_prefix_equals(
+      old_key_prefix, old_key_prefix_size, new_key_prefix,
+      new_key_prefix_size);
+    free(new_key_prefix);
+    if (unchanged)
+    {
+      free(old_key_prefix);
+      return 0;
+    }
+  }
+
+  uchar *parent_new_data= NULL;
+  const uchar *effective_new_data= new_data;
+  if (parent_table == child_table)
+  {
+    parent_new_data= static_cast<uchar *>(malloc(parent_table->s->reclength));
+    if (!parent_new_data)
+    {
+      free(old_key_prefix);
+      return HA_ERR_OUT_OF_MEM;
+    }
+    memcpy(parent_new_data, new_data, parent_table->s->reclength);
+    effective_new_data= parent_new_data;
+  }
+
+  mylite_storage_rowset rowset= {sizeof(rowset), NULL, 0, 0, NULL, NULL, 0,
+                                 NULL};
+  mylite_storage_result storage_result=
+    mylite_storage_read_rows(primary_file, metadata->schema_name,
+                             metadata->table_name, &rowset);
+  if (storage_result != MYLITE_STORAGE_OK)
+  {
+    free(parent_new_data);
+    free(old_key_prefix);
+    return mylite_storage_to_handler_error(storage_result);
+  }
+
+  uchar *rows= NULL;
+  size_t row_size= 0;
+  size_t row_count= 0;
+  ulonglong *row_ids= NULL;
+  uchar *blob_payloads= NULL;
+  size_t blob_payloads_size= 0;
+  error= mylite_prepare_scan_rows(child_table, &rowset, &rows, &row_size,
+                                  &row_count, &row_ids, &blob_payloads,
+                                  &blob_payloads_size);
+  mylite_storage_free_rowset(&rowset);
+  if (error)
+  {
+    free(parent_new_data);
+    free(old_key_prefix);
+    return error;
+  }
+
+  uchar *saved_record0= static_cast<uchar *>(
+    malloc(child_table->s->reclength));
+  uchar *saved_record1= static_cast<uchar *>(
+    malloc(child_table->s->reclength));
+  if (!saved_record0 || !saved_record1)
+  {
+    free(saved_record0);
+    free(saved_record1);
+    free(parent_new_data);
+    free(old_key_prefix);
+    free(rows);
+    free(row_ids);
+    free(blob_payloads);
+    return HA_ERR_OUT_OF_MEM;
+  }
+  memcpy(saved_record0, child_table->record[0], child_table->s->reclength);
+  memcpy(saved_record1, child_table->record[1], child_table->s->reclength);
+
+  for (size_t i= 0; !error && i < row_count; ++i)
+  {
+    if (skipped_child_row_id && row_ids[i] == skipped_child_row_id)
+      continue;
+
+    uchar *row= rows + (i * row_size);
+    memcpy(child_table->record[0], row, child_table->s->reclength);
+    if (mylite_key_prefix_contains_null(child_table, child_key,
+                                        child_table->record[0],
+                                        metadata->column_count))
+      continue;
+
+    uchar *child_key_prefix= NULL;
+    size_t child_key_prefix_size= 0;
+    error= mylite_make_key_prefix(child_table, child_key,
+                                  child_table->record[0],
+                                  metadata->column_count,
+                                  metadata->nullable_column_bitmap,
+                                  &child_key_prefix,
+                                  &child_key_prefix_size);
+    if (error)
+      break;
+    const bool matches= mylite_key_prefix_equals(
+      old_key_prefix, old_key_prefix_size, child_key_prefix,
+      child_key_prefix_size);
+    free(child_key_prefix);
+    if (!matches)
+      continue;
+
+    memcpy(child_table->record[1], row, child_table->s->reclength);
+    error= mylite_copy_foreign_key_columns(
+      parent_table, parent_key, child_table, child_key,
+      metadata->column_count, effective_new_data, child_table->record[0]);
+    if (error)
+      break;
+
+    mylite_storage_index_entry *index_entries= NULL;
+    uchar *index_key_storage= NULL;
+    size_t index_entry_count= 0;
+    error= mylite_prepare_index_entries(child_table, child_table->record[0],
+                                        &index_entries, &index_entry_count,
+                                        &index_key_storage);
+    if (!error)
+    {
+      uint duplicate_key= (uint) -1;
+      error= mylite_check_duplicate_keys(
+        primary_file, metadata->schema_name, metadata->table_name,
+        child_table, index_entries, index_entry_count,
+        child_table->record[0], row_ids[i], &duplicate_key);
+    }
+    if (!error)
+      error= mylite_check_child_foreign_keys_except(
+        primary_file, metadata->schema_name, metadata->table_name,
+        child_table, child_table->record[0], metadata->constraint_name);
+    if (!error)
+      error= mylite_check_parent_foreign_keys(
+        primary_file, metadata->schema_name, metadata->table_name,
+        child_table, child_table->record[1], child_table->record[0],
+        row_ids[i]);
+    if (!error)
+    {
+      const uchar *row_payload= NULL;
+      size_t row_payload_size= 0;
+      uchar *owned_row_payload= NULL;
+      error= mylite_prepare_row_payload(child_table, child_table->record[0],
+                                        &row_payload, &row_payload_size,
+                                        &owned_row_payload);
+      if (!error)
+      {
+        unsigned long long new_row_id= 0ULL;
+        storage_result= mylite_storage_update_row_with_index_entries(
+          primary_file, metadata->schema_name, metadata->table_name,
+          row_ids[i], row_payload, row_payload_size, index_entries,
+          index_entry_count, &new_row_id);
+        if (storage_result == MYLITE_STORAGE_OK)
+          row_ids[i]= new_row_id;
+        else
+          error= mylite_storage_to_handler_error(storage_result);
+      }
+      mylite_storage_free(owned_row_payload);
+    }
+    mylite_free_index_entries(index_entries, index_key_storage);
+  }
+
+  memcpy(child_table->record[0], saved_record0, child_table->s->reclength);
+  memcpy(child_table->record[1], saved_record1, child_table->s->reclength);
+  free(saved_record0);
+  free(saved_record1);
+  free(parent_new_data);
+  free(old_key_prefix);
+  free(rows);
+  free(row_ids);
+  free(blob_payloads);
   return error;
 }
 
@@ -3764,17 +4055,93 @@ static void mylite_set_foreign_key_columns_null_at(
   }
 }
 
-static int mylite_apply_same_row_update_set_null_action(
+static int mylite_copy_foreign_key_columns(
+  TABLE *parent_table, const KEY *parent_key, TABLE *child_table,
+  const KEY *child_key, size_t column_count, const uchar *parent_data,
+  uchar *child_data)
+{
+  if (!parent_table || !parent_key || !child_table || !child_key ||
+      !parent_data || !child_data ||
+      column_count == 0 ||
+      column_count > sizeof(unsigned long long) * CHAR_BIT)
+    return HA_ERR_CRASHED_ON_USAGE;
+
+  size_t offsets[sizeof(unsigned long long) * CHAR_BIT]= {0};
+  size_t lengths[sizeof(unsigned long long) * CHAR_BIT]= {0};
+  bool nulls[sizeof(unsigned long long) * CHAR_BIT]= {false};
+  size_t total_length= 0;
+  const my_ptrdiff_t parent_offset= parent_data - parent_table->record[0];
+  const my_ptrdiff_t child_offset= child_data - child_table->record[0];
+
+  for (size_t i= 0; i < column_count; ++i)
+  {
+    Field *parent_field= parent_key->key_part[i].field;
+    Field *child_field= child_key->key_part[i].field;
+    if (!parent_field || !child_field ||
+        parent_field->pack_length() != child_field->pack_length())
+      return HA_ERR_UNSUPPORTED;
+
+    nulls[i]= parent_field->is_null(parent_offset);
+    lengths[i]= parent_field->pack_length();
+    offsets[i]= total_length;
+    if (!nulls[i] && lengths[i] > SIZE_MAX - total_length)
+      return HA_ERR_RECORD_FILE_FULL;
+    if (!nulls[i])
+      total_length+= lengths[i];
+  }
+
+  uchar *values= total_length ?
+    static_cast<uchar *>(malloc(total_length)) : NULL;
+  if (total_length && !values)
+    return HA_ERR_OUT_OF_MEM;
+
+  for (size_t i= 0; i < column_count; ++i)
+  {
+    if (nulls[i])
+      continue;
+    Field *parent_field= parent_key->key_part[i].field;
+    memcpy(values + offsets[i], parent_field->ptr + parent_offset,
+           lengths[i]);
+  }
+
+  for (size_t i= 0; i < column_count; ++i)
+  {
+    Field *child_field= child_key->key_part[i].field;
+    if (nulls[i])
+    {
+      if (!child_field->real_maybe_null())
+      {
+        free(values);
+        return HA_ERR_ROW_IS_REFERENCED;
+      }
+      child_field->set_null(child_offset);
+      continue;
+    }
+
+    child_field->set_notnull(child_offset);
+    memcpy(child_field->ptr + child_offset, values + offsets[i],
+           lengths[i]);
+  }
+
+  free(values);
+  return 0;
+}
+
+static int mylite_apply_same_row_update_action(
   void *ctx, const mylite_storage_foreign_key_metadata *metadata)
 {
   Mylite_foreign_key_same_row_update_action_context *action_ctx=
     static_cast<Mylite_foreign_key_same_row_update_action_context *>(ctx);
-  if (!mylite_foreign_key_is_self_referencing(metadata) ||
-      metadata->update_action != MYLITE_STORAGE_FOREIGN_KEY_ACTION_SET_NULL)
+  if (!mylite_foreign_key_is_self_referencing(metadata))
     return 0;
 
-  action_ctx->error= mylite_apply_same_row_update_set_null(
-    action_ctx->table, metadata, action_ctx->old_data, action_ctx->new_data);
+  if (metadata->update_action == MYLITE_STORAGE_FOREIGN_KEY_ACTION_SET_NULL)
+    action_ctx->error= mylite_apply_same_row_update_set_null(
+      action_ctx->table, metadata, action_ctx->old_data, action_ctx->new_data);
+  else if (metadata->update_action ==
+           MYLITE_STORAGE_FOREIGN_KEY_ACTION_CASCADE)
+    action_ctx->error= mylite_apply_same_row_update_cascade(
+      action_ctx->table, metadata, action_ctx->old_data, action_ctx->new_data);
   return action_ctx->error ? 1 : 0;
 }
 
@@ -3880,6 +4247,110 @@ static int mylite_apply_same_row_update_set_null(
   return 0;
 }
 
+static int mylite_apply_same_row_update_cascade(
+  TABLE *table, const mylite_storage_foreign_key_metadata *metadata,
+  const uchar *old_data, const uchar *new_data)
+{
+  const KEY *parent_key= mylite_find_foreign_key_prefix(
+    table, metadata->referenced_column_names, metadata->column_count,
+    metadata->referenced_key_name);
+  const KEY *child_key= mylite_find_foreign_key_prefix(
+    table, metadata->foreign_column_names, metadata->column_count, NULL);
+  if (!parent_key || !child_key)
+    return HA_ERR_ROW_IS_REFERENCED;
+  if (mylite_key_prefix_contains_null(table, parent_key, old_data,
+                                      metadata->column_count))
+    return 0;
+
+  uchar *old_parent_prefix= NULL;
+  size_t old_parent_prefix_size= 0;
+  int error= mylite_make_key_prefix(
+    table, parent_key, old_data, metadata->column_count,
+    metadata->nullable_column_bitmap, &old_parent_prefix,
+    &old_parent_prefix_size);
+  if (error)
+    return error;
+
+  if (new_data &&
+      !mylite_key_prefix_contains_null(table, parent_key, new_data,
+                                       metadata->column_count))
+  {
+    uchar *new_parent_prefix= NULL;
+    size_t new_parent_prefix_size= 0;
+    error= mylite_make_key_prefix(
+      table, parent_key, new_data, metadata->column_count,
+      metadata->nullable_column_bitmap, &new_parent_prefix,
+      &new_parent_prefix_size);
+    if (error)
+    {
+      free(old_parent_prefix);
+      return error;
+    }
+    const bool unchanged= mylite_key_prefix_equals(
+      old_parent_prefix, old_parent_prefix_size, new_parent_prefix,
+      new_parent_prefix_size);
+    free(new_parent_prefix);
+    if (unchanged)
+    {
+      free(old_parent_prefix);
+      return 0;
+    }
+  }
+
+  if (mylite_key_prefix_contains_null(table, child_key, old_data,
+                                      metadata->column_count))
+  {
+    free(old_parent_prefix);
+    return 0;
+  }
+
+  uchar *old_child_prefix= NULL;
+  size_t old_child_prefix_size= 0;
+  error= mylite_make_key_prefix(
+    table, child_key, old_data, metadata->column_count,
+    metadata->nullable_column_bitmap, &old_child_prefix,
+    &old_child_prefix_size);
+  if (error)
+  {
+    free(old_parent_prefix);
+    return error;
+  }
+  const bool old_row_was_same_row_child= mylite_key_prefix_equals(
+    old_parent_prefix, old_parent_prefix_size, old_child_prefix,
+    old_child_prefix_size);
+  free(old_child_prefix);
+  if (!old_row_was_same_row_child ||
+      mylite_key_prefix_contains_null(table, child_key, new_data,
+                                      metadata->column_count))
+  {
+    free(old_parent_prefix);
+    return 0;
+  }
+
+  uchar *new_child_prefix= NULL;
+  size_t new_child_prefix_size= 0;
+  error= mylite_make_key_prefix(
+    table, child_key, new_data, metadata->column_count,
+    metadata->nullable_column_bitmap, &new_child_prefix,
+    &new_child_prefix_size);
+  if (error)
+  {
+    free(old_parent_prefix);
+    return error;
+  }
+  const bool new_child_still_references_old_parent= mylite_key_prefix_equals(
+    old_parent_prefix, old_parent_prefix_size, new_child_prefix,
+    new_child_prefix_size);
+  free(new_child_prefix);
+  free(old_parent_prefix);
+  if (!new_child_still_references_old_parent)
+    return 0;
+
+  return mylite_copy_foreign_key_columns(
+    table, parent_key, table, child_key, metadata->column_count, new_data,
+    const_cast<uchar *>(new_data));
+}
+
 static int mylite_check_parent_foreign_keys(const char *primary_file,
                                             const char *schema_name,
                                             const char *table_name,
@@ -3889,7 +4360,7 @@ static int mylite_check_parent_foreign_keys(const char *primary_file,
                                             ulonglong skipped_child_row_id)
 {
   Mylite_foreign_key_row_check_context ctx=
-    {primary_file, table, old_data, new_data, skipped_child_row_id, 0};
+    {primary_file, table, old_data, new_data, skipped_child_row_id, NULL, 0};
   const mylite_storage_result result=
     mylite_storage_list_parent_foreign_keys(primary_file, schema_name,
                                             table_name,
@@ -4652,11 +5123,18 @@ static bool mylite_foreign_key_actions_supported(
     mylite_foreign_key_restrict_action_supported(fk->update_opt);
   const bool delete_restrict=
     mylite_foreign_key_restrict_action_supported(fk->delete_opt);
+  const bool update_cascade= fk->update_opt == FK_OPTION_CASCADE;
   const bool update_set_null= fk->update_opt == FK_OPTION_SET_NULL;
   const bool delete_set_null= fk->delete_opt == FK_OPTION_SET_NULL;
   const bool delete_cascade= fk->delete_opt == FK_OPTION_CASCADE;
   if (update_restrict && delete_restrict)
     return true;
+  if (update_cascade)
+  {
+    return delete_restrict &&
+           mylite_foreign_key_update_cascade_supported(
+             form, definition->foreign_column_names, definition->column_count);
+  }
   if (delete_cascade)
   {
     return update_restrict &&
@@ -4699,6 +5177,16 @@ static bool mylite_foreign_key_set_null_supported(
   return true;
 }
 
+static bool mylite_foreign_key_update_cascade_supported(
+  TABLE *table, const char *const *column_names, size_t column_count)
+{
+  if (!table || table->vfield || mylite_table_has_blob_fields(table))
+    return false;
+
+  return mylite_find_foreign_key_prefix(table, column_names, column_count,
+                                        NULL) != NULL;
+}
+
 static bool mylite_foreign_key_delete_cascade_supported(
   TABLE *table, const char *const *column_names, size_t column_count)
 {
@@ -4729,6 +5217,12 @@ static int mylite_check_child_foreign_key(
 {
   Mylite_foreign_key_row_check_context *check_ctx=
     static_cast<Mylite_foreign_key_row_check_context *>(ctx);
+  if (check_ctx->skipped_constraint_name &&
+      metadata->constraint_name &&
+      strcmp(check_ctx->skipped_constraint_name,
+             metadata->constraint_name) == 0)
+    return 0;
+
   const KEY *key= mylite_find_foreign_key_prefix(
     check_ctx->table, metadata->foreign_column_names, metadata->column_count,
     NULL);
