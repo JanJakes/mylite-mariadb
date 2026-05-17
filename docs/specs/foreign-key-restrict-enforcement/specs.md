@@ -20,8 +20,7 @@ shapes:
   by
   [Foreign-Key Handlerton Advertising](../foreign-key-handlerton-advertising/specs.md).
 - Cascading actions, `SET NULL`, `SET DEFAULT`, deferrable checks, dump-import
-  `foreign_key_checks=0` semantics, same-row self-references, or multi-row
-  self-referential statement ordering.
+  `foreign_key_checks=0` semantics, or self-referential statement ordering.
 - Cross-file references, partitioned tables, unsupported index classes, or
   virtual generated-column edge cases.
 - Full key-shape validation at metadata creation time. Public FK DDL will add
@@ -154,7 +153,9 @@ changes unexpectedly.
   provide richer validation but risks lock recursion and larger fork deltas.
 - Basic self-references where the parent row already exists are covered by
   [Foreign-Key Self-Reference Restrict](../foreign-key-self-reference-restrict/specs.md).
-  Same-row self-references, multi-row ordering, and cascades still need
-  separate statement-ordering and action semantics before they can be claimed.
+  Exact same-row self-references are covered by
+  [Foreign-Key Same-Row Self-Reference](../foreign-key-same-row-self-reference/specs.md).
+  Multi-row ordering and cascades still need separate statement-ordering and
+  action semantics before they can be claimed.
 - `foreign_key_checks=0` is still an import-compatibility design problem, not
   a bypass in this slice.

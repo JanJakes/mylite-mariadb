@@ -193,9 +193,10 @@ in normal MyLite row payloads. The public foreign-key subset supports
 validated `RESTRICT` / `NO ACTION` `CREATE TABLE`, copy
 `ALTER TABLE ... ADD FOREIGN KEY`, and `ALTER TABLE ... DROP FOREIGN KEY`
 metadata over durable routed base tables, including basic self-references to
-parent rows that already exist, and is advertised to MariaDB through the MyLite
-handlerton for that documented subset. Same-row self-referencing inserts and
-multi-row FK ordering remain unsupported. Session `foreign_key_checks=0`
+parent rows that already exist and same-row self-references where the child and
+parent key prefixes match. The subset is advertised to MariaDB through the
+MyLite handlerton. Multi-row FK ordering remains unsupported. Session
+`foreign_key_checks=0`
 disables supported FK row checks and parent-table truncate checks without
 revalidating existing rows when checks are re-enabled. MariaDB-generated FK
 child keys follow copy-ALTER cleanup when explicit compatible keys replace them

@@ -98,20 +98,22 @@ statements. The subset requires durable MyLite-routed base tables, explicit or
 MariaDB-generated supported child key prefixes, exact unique parent keys, and
 immediate `RESTRICT` / `NO ACTION` semantics. Basic self-referential
 constraints are covered when child rows reference parent rows that already
-exist. The storage layer stores typed FK blob pages, supports child and parent
-FK listing, exposes handler metadata and `SHOW CREATE TABLE` hooks, advertises
-MyLite's covered FK subset through the MariaDB handlerton, preserves retained
-metadata across MariaDB's internal old-table backup rename, and performs
-FK-aware column/supporting-key checks with handler-owned retained supporting-key
-validation plus immediate child/parent row checks. Supported copy
+exist, and same-row self-references are covered when the child and referenced
+parent key prefixes match in the same new row. The storage layer stores typed
+FK blob pages, supports child and parent FK listing, exposes handler metadata
+and `SHOW CREATE TABLE` hooks, advertises MyLite's covered FK subset through
+the MariaDB handlerton, preserves retained metadata across MariaDB's internal
+old-table backup rename, and performs FK-aware column/supporting-key checks
+with handler-owned retained supporting-key validation plus immediate
+child/parent row checks. Supported copy
 `ALTER TABLE ... DROP FOREIGN KEY` removes FK metadata from the primary file
 and disables the dropped constraint's row checks across close/reopen. Session
 `foreign_key_checks=0` disables supported FK row checks and parent-table
 truncate checks without retrospective validation when checks are re-enabled.
 MariaDB-generated supporting keys are cleaned up when copy ALTER replaces them
 with explicit compatible keys, and can be explicitly dropped after the owning
-FK is removed. Same-row self-referencing inserts, multi-row FK ordering,
-cascades, `SET NULL`, and `SET DEFAULT` remain planned.
+FK is removed. Multi-row FK ordering, cascades, `SET NULL`, and `SET DEFAULT`
+remain planned.
 Partition DDL remains rejected at the `libmylite` boundary until MyLite has
 partition metadata, partition-to-primary-file routing, per-partition catalog
 lifecycle, and partition-aware row and index maintenance.

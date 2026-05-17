@@ -1983,12 +1983,20 @@ static void test_transaction_and_foreign_key_policies(void) {
     assert_exec_succeeds(db, "INSERT INTO fk_self VALUES (1, NULL)");
     assert_exec_succeeds(db, "INSERT INTO fk_self VALUES (2, 1)");
     assert_exec_fails(db, "INSERT INTO fk_self VALUES (3, 99)");
-    assert_exec_fails(db, "INSERT INTO fk_self VALUES (3, 3)");
+    assert_exec_succeeds(db, "INSERT INTO fk_self VALUES (3, 3)");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_self WHERE id = 3 AND parent_id = 3",
+        "1"
+    );
     assert_exec_fails(db, "UPDATE fk_self SET id = 10 WHERE id = 1");
     assert_exec_fails(db, "DELETE FROM fk_self WHERE id = 1");
     assert_exec_succeeds(db, "UPDATE fk_self SET parent_id = NULL WHERE id = 2");
     assert_exec_succeeds(db, "UPDATE fk_self SET id = 10 WHERE id = 1");
-    assert_exec_succeeds(db, "INSERT INTO fk_self VALUES (3, 10)");
+    assert_exec_succeeds(db, "INSERT INTO fk_self VALUES (4, 10)");
+    assert_exec_succeeds(db, "INSERT INTO fk_self VALUES (5, NULL)");
+    assert_exec_succeeds(db, "UPDATE fk_self SET id = 6, parent_id = 6 WHERE id = 5");
+    assert_query_single_value(db, "SELECT parent_id FROM fk_self WHERE id = 6", "6");
     assert_exec_succeeds(db, "TRUNCATE TABLE fk_self");
     assert_query_single_value(db, "SELECT COUNT(*) FROM fk_self", "0");
 
@@ -2011,7 +2019,8 @@ static void test_transaction_and_foreign_key_policies(void) {
     assert_query_single_value(db, "SELECT COUNT(*) FROM fk_self", "0");
     assert_exec_succeeds(db, "INSERT INTO fk_self VALUES (20, NULL)");
     assert_exec_succeeds(db, "INSERT INTO fk_self VALUES (21, 20)");
-    assert_exec_fails(db, "INSERT INTO fk_self VALUES (22, 22)");
+    assert_exec_succeeds(db, "INSERT INTO fk_self VALUES (22, 22)");
+    assert_query_single_value(db, "SELECT parent_id FROM fk_self WHERE id = 22", "22");
     assert_exec_fails(db, "DELETE FROM fk_self WHERE id = 20");
 
     assert(mylite_close(db) == MYLITE_OK);

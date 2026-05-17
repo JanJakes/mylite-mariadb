@@ -8,13 +8,16 @@ with the current immediate `RESTRICT` / `NO ACTION` infrastructure.
 The supported behavior is deliberately narrow: a durable MyLite-routed table
 may reference its own exact unique parent key when child rows point at parent
 rows that already exist. Immediate child and parent checks should work across
-insert, update, delete, truncate, and close/reopen. Same-row self-inserts,
-multi-row statement ordering, cascades, `SET NULL`, and `SET DEFAULT` remain
+insert, update, delete, truncate, and close/reopen. Same-row self-inserts are
+covered separately by
+[Foreign-Key Same-Row Self-Reference](../foreign-key-same-row-self-reference/specs.md).
+Multi-row statement ordering, cascades, `SET NULL`, and `SET DEFAULT` remain
 separate work.
 
 ## Non-Goals
 
-- Same-row self-referencing inserts such as `(id, parent_id) = (1, 1)`.
+- Same-row self-referencing inserts such as `(id, parent_id) = (1, 1)`, which
+  belong to the later same-row self-reference slice.
 - Multi-row statement ordering where a later row in the same statement creates
   a parent for an earlier child.
 - Cascades, `SET NULL`, `SET DEFAULT`, or recursive action execution.
@@ -37,10 +40,10 @@ MariaDB base: `mariadb-11.8.6`
 - `mariadb/storage/mylite/ha_mylite.cc:mylite_validate_foreign_key_shape()`
   has a self-reference path that validates child and parent keys from the same
   `TABLE`/`TABLE_SHARE` without opening a second table definition.
-- `mariadb/storage/mylite/ha_mylite.cc:mylite_check_child_foreign_key()` checks
-  parent existence before appending the new row. That makes same-row
-  self-reference inserts unsupported until MyLite has a statement-ordering or
-  deferred-check design.
+- `mariadb/storage/mylite/ha_mylite.cc:mylite_check_child_foreign_key()` checked
+  parent existence before appending the new row when this slice was specified.
+  Exact same-row self-reference support is covered by the later same-row slice;
+  multi-row ordering still needs a statement-ordering or deferred-check design.
 - `mariadb/storage/mylite/ha_mylite.cc:mylite_check_parent_foreign_key()` checks
   child existence by prefix when parent keys are updated or deleted, which
   should protect existing self-referencing parent rows.
@@ -52,8 +55,8 @@ This makes MyLite's documented FK subset more precise:
 - covered: self-referential `RESTRICT` / `NO ACTION` constraints where the
   referenced parent row already exists, including close/reopen and
   self-referencing truncate;
-- unsupported/planned: same-row self-inserts, multi-row ordering, recursive
-  cascades, `SET NULL`, `SET DEFAULT`, and deferrable checks.
+- unsupported/planned: multi-row ordering, recursive cascades, `SET NULL`,
+  `SET DEFAULT`, and deferrable checks.
 
 ## Design
 
@@ -65,7 +68,8 @@ and row checks should be exercised through public FK DDL:
 2. Insert a root row with `NULL` parent.
 3. Insert a child row referencing the existing root.
 4. Reject an insert that references a missing row.
-5. Reject same-row self-reference until a later ordering slice defines it.
+5. Leave same-row self-reference to a later slice that can distinguish exact
+   same-row matches from broader statement ordering.
 6. Reject updating or deleting a referenced parent row.
 7. After deleting the child row, allow the parent update/delete path.
 8. Verify `TRUNCATE TABLE` succeeds for the self-referencing table and resets
@@ -102,7 +106,8 @@ The coverage runs through existing direct SQL execution.
 - Public self-referential `RESTRICT` / `NO ACTION` FK DDL succeeds for the
   documented durable routed table shape.
 - Child inserts referencing existing parent rows succeed.
-- Missing-parent and same-row self-reference inserts fail.
+- Missing-parent inserts fail; same-row self-reference behavior is covered by
+  the later same-row slice.
 - Parent update/delete checks reject referenced parent rows and allow the same
   operations after child rows no longer reference them.
 - Self-referencing truncate succeeds and leaves the table empty.
@@ -110,7 +115,8 @@ The coverage runs through existing direct SQL execution.
 
 ## Risks And Open Questions
 
-- Same-row self-inserts are a real compatibility gap; supporting them probably
+- Exact same-row self-inserts are covered by a later slice. Multi-row
+  self-referential ordering remains a real compatibility gap and probably
   requires statement-level ordering or deferred self-reference checks.
 - Cascading self-references need recursion limits, cycle handling, prelocking,
   and transactional mutation semantics before MyLite can claim compatibility.

@@ -251,6 +251,10 @@ static int mylite_make_key_prefix(TABLE *table, const KEY *key,
                                   const uchar *buf, size_t column_count,
                                   unsigned long long target_nullable_bitmap,
                                   uchar **out_key, size_t *out_key_size);
+static int mylite_check_same_row_self_reference(
+  TABLE *table, const mylite_storage_foreign_key_metadata *metadata,
+  const uchar *new_data, const uchar *child_key_prefix,
+  size_t child_key_prefix_size, bool *out_matches);
 static bool mylite_key_prefix_equals(const uchar *left, size_t left_size,
                                      const uchar *right, size_t right_size);
 static bool mylite_unique_key_allows_duplicate_null(TABLE *table,
@@ -3734,6 +3738,22 @@ static int mylite_check_child_foreign_key(
     return 1;
   }
 
+  bool same_row_reference= false;
+  error= mylite_check_same_row_self_reference(
+    check_ctx->table, metadata, check_ctx->new_data, key_prefix,
+    key_prefix_size, &same_row_reference);
+  if (error)
+  {
+    free(key_prefix);
+    check_ctx->error= error;
+    return 1;
+  }
+  if (same_row_reference)
+  {
+    free(key_prefix);
+    return 0;
+  }
+
   int exists= 0;
   const mylite_storage_result result=
     mylite_storage_index_prefix_exists(check_ctx->primary_file,
@@ -3751,6 +3771,39 @@ static int mylite_check_child_foreign_key(
     check_ctx->error= HA_ERR_NO_REFERENCED_ROW;
     return 1;
   }
+  return 0;
+}
+
+static int mylite_check_same_row_self_reference(
+  TABLE *table, const mylite_storage_foreign_key_metadata *metadata,
+  const uchar *new_data, const uchar *child_key_prefix,
+  size_t child_key_prefix_size, bool *out_matches)
+{
+  *out_matches= false;
+  if (!mylite_foreign_key_is_self_referencing(metadata))
+    return 0;
+
+  const KEY *parent_key= mylite_find_foreign_key_prefix(
+    table, metadata->referenced_column_names, metadata->column_count,
+    metadata->referenced_key_name);
+  if (!parent_key ||
+      mylite_key_prefix_contains_null(table, parent_key, new_data,
+                                      metadata->column_count))
+    return 0;
+
+  uchar *parent_key_prefix= NULL;
+  size_t parent_key_prefix_size= 0;
+  const int error= mylite_make_key_prefix(
+    table, parent_key, new_data, metadata->column_count,
+    metadata->referenced_nullable_column_bitmap, &parent_key_prefix,
+    &parent_key_prefix_size);
+  if (error)
+    return error;
+
+  *out_matches= mylite_key_prefix_equals(
+    child_key_prefix, child_key_prefix_size, parent_key_prefix,
+    parent_key_prefix_size);
+  free(parent_key_prefix);
   return 0;
 }
 
