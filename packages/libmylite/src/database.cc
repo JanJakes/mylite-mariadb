@@ -5494,33 +5494,6 @@ const char *unsupported_foreign_key_sql_message(std::string_view sql) {
         return nullptr;
     }
 
-    if (sql_token_equals(token, "ALTER")) {
-        if (!pop_sql_scanned_token(rest, token)) {
-            return nullptr;
-        }
-        if (sql_token_equals(token, "IGNORE") || sql_token_equals(token, "ONLINE") ||
-            sql_token_equals(token, "OFFLINE")) {
-            if (!pop_sql_scanned_token(rest, token)) {
-                return nullptr;
-            }
-        }
-        if (!sql_token_equals(token, "TABLE")) {
-            return nullptr;
-        }
-        while (pop_sql_scanned_token(rest, token)) {
-            if (!sql_token_equals(token, "DROP")) {
-                continue;
-            }
-            std::string_view after_drop = rest;
-            std::string_view next;
-            if (pop_sql_scanned_token(after_drop, next) && sql_token_equals(next, "FOREIGN") &&
-                pop_sql_scanned_token(after_drop, next) && sql_token_equals(next, "KEY")) {
-                return "unsupported foreign-key SQL surface";
-            }
-        }
-        return nullptr;
-    }
-
     return nullptr;
 }
 

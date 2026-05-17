@@ -60,8 +60,8 @@ MyLite:
    both, while a generated key satisfies validation when no explicit key exists.
 4. Keep parent-key validation unchanged: referenced columns must still match an
    exact supported unique parent key.
-5. Keep `DROP FOREIGN KEY` unsupported so generated-key cleanup semantics do
-   not need to be claimed in this slice.
+5. Leave `DROP FOREIGN KEY` and generated-key cleanup semantics to a separate
+   lifecycle slice.
 
 ## File Lifecycle
 

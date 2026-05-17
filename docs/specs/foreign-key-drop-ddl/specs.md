@@ -41,8 +41,9 @@ MariaDB base: `mariadb-11.8.6`
 - `packages/mylite-storage/src/storage.c:mylite_storage_drop_foreign_key_definition()`
   already removes a named FK catalog record under the rollback-journal
   publication path.
-- `packages/libmylite/src/database.cc:unsupported_foreign_key_sql_message()`
-  still rejects `ALTER TABLE ... DROP FOREIGN KEY` before MariaDB execution.
+- Before this slice,
+  `packages/libmylite/src/database.cc:unsupported_foreign_key_sql_message()`
+  rejected `ALTER TABLE ... DROP FOREIGN KEY` before MariaDB execution.
 
 ## Compatibility Impact
 

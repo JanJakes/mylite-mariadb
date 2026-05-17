@@ -112,6 +112,13 @@ static int mylite_table_name_from_path(const char *path, char *out_schema_name,
                                        char *out_table_name,
                                        size_t out_table_name_size);
 static bool mylite_is_alter_backup_table_name(const char *table_name);
+static int mylite_drop_foreign_keys_for_alter(const char *primary_file,
+                                              const char *schema_name,
+                                              const char *table_name);
+static int mylite_drop_foreign_key_for_alter(const char *primary_file,
+                                             const char *schema_name,
+                                             const char *table_name,
+                                             const Lex_ident_column &name);
 static bool mylite_table_supports_row_write(TABLE *table);
 static bool mylite_table_supports_row_lifecycle(TABLE *table);
 static bool mylite_table_supports_auto_increment(TABLE *table);
@@ -274,6 +281,8 @@ static const char *mylite_foreign_key_action_name(unsigned action);
 static int mylite_add_foreign_key_info(
   void *ctx, const mylite_storage_foreign_key_metadata *metadata);
 static int mylite_detect_foreign_key_presence(
+  void *ctx, const mylite_storage_foreign_key_metadata *metadata);
+static int mylite_match_foreign_key_to_drop(
   void *ctx, const mylite_storage_foreign_key_metadata *metadata);
 static FOREIGN_KEY_INFO *mylite_foreign_key_info_from_metadata(
   THD *thd, const mylite_storage_foreign_key_metadata *metadata);
@@ -475,6 +484,14 @@ struct Mylite_foreign_key_list_context
 struct Mylite_foreign_key_presence_context
 {
   bool found;
+};
+
+struct Mylite_foreign_key_drop_context
+{
+  THD *thd;
+  Lex_ident_column name;
+  const char *stored_name;
+  int error;
 };
 
 struct Mylite_foreign_key_create_info_context
@@ -2230,6 +2247,13 @@ int ha_mylite::rename_table(const char *from, const char *to)
   const bool rebuild_backup_rename=
     thd && thd->lex && thd->lex->sql_command == SQLCOM_ALTER_TABLE &&
     mylite_is_alter_backup_table_name(new_table_name);
+  if (rebuild_backup_rename)
+  {
+    const int drop_error= mylite_drop_foreign_keys_for_alter(
+      primary_file, old_schema_name, old_table_name);
+    if (drop_error)
+      DBUG_RETURN(drop_error);
+  }
   const mylite_storage_result result= rebuild_backup_rename ?
     mylite_storage_rename_table_for_rebuild_backup(
       primary_file, old_schema_name, old_table_name, new_schema_name,
@@ -2242,6 +2266,54 @@ int ha_mylite::rename_table(const char *from, const char *to)
     mylite_volatile_rename_table(primary_file, old_schema_name, old_table_name,
                                  new_schema_name, new_table_name);
   DBUG_RETURN(mylite_storage_to_handler_error(volatile_result));
+}
+
+static int mylite_drop_foreign_keys_for_alter(const char *primary_file,
+                                              const char *schema_name,
+                                              const char *table_name)
+{
+  THD *thd= current_thd;
+  if (!thd || !thd->lex || thd->lex->sql_command != SQLCOM_ALTER_TABLE)
+    return 0;
+
+  List_iterator_fast<Alter_drop> drop_it(thd->lex->alter_info.drop_list);
+  while (Alter_drop *drop= drop_it++)
+  {
+    if (drop->type != Alter_drop::FOREIGN_KEY)
+      continue;
+
+    const int error= mylite_drop_foreign_key_for_alter(
+      primary_file, schema_name, table_name, drop->name);
+    if (error)
+      return error;
+  }
+  return 0;
+}
+
+static int mylite_drop_foreign_key_for_alter(const char *primary_file,
+                                             const char *schema_name,
+                                             const char *table_name,
+                                             const Lex_ident_column &name)
+{
+  THD *thd= current_thd;
+  if (!thd)
+    return HA_ERR_INTERNAL_ERROR;
+
+  Mylite_foreign_key_drop_context ctx= {thd, name, NULL, 0};
+  const mylite_storage_result list_result=
+    mylite_storage_list_foreign_keys(primary_file, schema_name, table_name,
+                                     mylite_match_foreign_key_to_drop, &ctx);
+  if (ctx.error)
+    return ctx.error;
+  if (list_result != MYLITE_STORAGE_OK)
+    return mylite_storage_to_handler_error(list_result);
+  if (!ctx.stored_name)
+    return HA_ERR_UNSUPPORTED;
+
+  const mylite_storage_result drop_result=
+    mylite_storage_drop_foreign_key_definition(primary_file, schema_name,
+                                               table_name, ctx.stored_name);
+  return mylite_storage_to_handler_error(drop_result);
 }
 
 static int mylite_requested_engine_name(const char *primary_file,
@@ -4102,6 +4174,29 @@ static int mylite_detect_foreign_key_presence(
     static_cast<Mylite_foreign_key_presence_context *>(ctx);
   presence_ctx->found= true;
   return 1;
+}
+
+static int mylite_match_foreign_key_to_drop(
+  void *ctx, const mylite_storage_foreign_key_metadata *metadata)
+{
+  Mylite_foreign_key_drop_context *drop_ctx=
+    static_cast<Mylite_foreign_key_drop_context *>(ctx);
+  if (drop_ctx->stored_name || !metadata || !metadata->constraint_name)
+    return 0;
+
+  LEX_CSTRING stored_name=
+    {metadata->constraint_name, strlen(metadata->constraint_name)};
+  if (!Lex_ident_column(stored_name).streq(drop_ctx->name))
+    return 0;
+
+  drop_ctx->stored_name= drop_ctx->thd->strmake(stored_name.str,
+                                                stored_name.length);
+  if (!drop_ctx->stored_name)
+  {
+    drop_ctx->error= HA_ERR_OUT_OF_MEM;
+    return 1;
+  }
+  return 0;
 }
 
 static FOREIGN_KEY_INFO *mylite_foreign_key_info_from_metadata(

@@ -24,7 +24,8 @@ narrow:
 - Treating `foreign_key_checks=0` as an import bypass.
 - Opening arbitrary additional MariaDB `TABLE` objects inside MyLite handler
   row-DML enforcement.
-- `ALTER TABLE ... DROP FOREIGN KEY`.
+- `ALTER TABLE ... DROP FOREIGN KEY`, which is handled by a later lifecycle
+  slice.
 
 ## Source Findings
 
@@ -75,9 +76,9 @@ persist or enforce.
 The first support claim is that public FK DDL works for validated `RESTRICT` /
 `NO ACTION` constraints over explicit or MariaDB-generated MyLite-supported
 child key prefixes and exact unique parent keys. Unsupported actions,
-unsupported key shapes, volatile/temporary tables, and `DROP FOREIGN KEY` fail
-before durable publication. Full InnoDB features, including cascades and
-dump-import `foreign_key_checks=0` bypass behavior, remain planned.
+unsupported key shapes and volatile/temporary tables fail before durable
+publication. Full InnoDB features, including cascades and dump-import
+`foreign_key_checks=0` bypass behavior, remain planned.
 
 ## Design
 
@@ -129,8 +130,8 @@ The publication slice is implemented with the following behavior.
    - Replace the blanket `libmylite` FK SQL rejection with a narrower policy
      that allows MariaDB to execute supported `CREATE TABLE` and copy
      `ALTER TABLE ... ADD FOREIGN KEY` forms.
-   - Continue to reject `CREATE TEMPORARY TABLE` FK DDL and
-     `ALTER TABLE ... DROP FOREIGN KEY` at the `libmylite` boundary.
+   - Continue to reject `CREATE TEMPORARY TABLE` FK DDL at the `libmylite`
+     boundary.
    - Continue to reject unsupported FK actions, volatile FK tables, partitions,
      and unsupported key shapes before durable publication.
    - Keep `HTON_SUPPORTS_FOREIGN_KEYS` disabled until the SQL-layer side
@@ -195,5 +196,5 @@ before acceptance.
   TRUNCATE, and prelocking behavior; it should stay a separate review point.
 - `foreign_key_checks=0` is common in dumps and still needs explicit import
   semantics before MyLite can claim broad FK compatibility.
-- `DROP FOREIGN KEY` and generated-key cleanup semantics remain a specific
-  follow-up before MyLite can claim a full FK metadata lifecycle.
+- Generated supporting-key cleanup semantics remain a specific follow-up before
+  MyLite can claim a full FK metadata lifecycle.

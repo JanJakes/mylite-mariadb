@@ -100,9 +100,11 @@ immediate `RESTRICT` / `NO ACTION` semantics. The storage layer stores typed FK
 blob pages, supports child and parent FK listing, exposes handler metadata and
 `SHOW CREATE TABLE` hooks, preserves retained metadata across MariaDB's
 internal old-table backup rename, and performs FK-aware column/supporting-key
-checks plus immediate child/parent row checks. `DROP FOREIGN KEY`, cascades,
-`SET NULL`, `SET DEFAULT`, and dump-import `foreign_key_checks=0` bypass
-behavior remain planned.
+checks plus immediate child/parent row checks. Supported copy
+`ALTER TABLE ... DROP FOREIGN KEY` removes FK metadata from the primary file
+and disables the dropped constraint's row checks across close/reopen. Cascades,
+`SET NULL`, `SET DEFAULT`, generated supporting-key cleanup, and dump-import
+`foreign_key_checks=0` bypass behavior remain planned.
 Partition DDL remains rejected at the `libmylite` boundary until MyLite has
 partition metadata, partition-to-primary-file routing, per-partition catalog
 lifecycle, and partition-aware row and index maintenance.
@@ -443,10 +445,10 @@ semantics, and partitioned tables need explicit storage designs before support
 is claimed.
 Generated primary keys follow MariaDB's SQL-layer rejection policy. Long-unique
 hash keys remain unsupported until MyLite has a durable hidden-key design.
-Current `libmylite` entry points still reject `CREATE TEMPORARY TABLE` FK DDL,
-`ALTER TABLE ... DROP FOREIGN KEY`, and partition DDL before MariaDB execution;
-unsupported FK shapes, FULLTEXT, SPATIAL, and long-unique indexes reject
-through handler capability checks before catalog publication.
+Current `libmylite` entry points still reject `CREATE TEMPORARY TABLE` FK DDL
+and partition DDL before MariaDB execution. Unsupported FK shapes, FULLTEXT,
+SPATIAL, and long-unique indexes reject through handler capability checks
+before catalog publication.
 
 ## Transactions And Recovery
 

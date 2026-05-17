@@ -1618,7 +1618,7 @@ static void test_transaction_and_foreign_key_policies(void) {
         "FOREIGN KEY (parent_id) REFERENCES fk_parent(id)"
     );
     assert_catalog_table_count(filename, "app", 12U);
-    assert_foreign_key_exec_fails(db, "ALTER TABLE fk_child DROP FOREIGN KEY fk_child_parent");
+    assert_exec_fails(db, "ALTER TABLE fk_child DROP FOREIGN KEY missing_fk");
     assert_exec_succeeds(db, "SET foreign_key_checks=1");
 
     assert_exec_succeeds(db, "INSERT INTO fk_parent VALUES (1)");
@@ -1691,6 +1691,74 @@ static void test_transaction_and_foreign_key_policies(void) {
     );
     assert(errmsg == NULL);
     assert(fk_metadata_count.rows == 1);
+
+    assert_exec_succeeds(db, "ALTER TABLE fk_child DROP FOREIGN KEY fk_child_parent");
+    assert_exec_succeeds(db, "INSERT INTO fk_child VALUES (2, 99)");
+    create_sql = capture_show_create_table(db, "fk_child");
+    assert(strstr(create_sql, "CONSTRAINT `fk_child_parent` FOREIGN KEY") == NULL);
+    free(create_sql);
+    single_value_context dropped_fk_metadata_count = {0, "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+            "WHERE CONSTRAINT_SCHEMA = 'app' "
+            "AND TABLE_NAME = 'fk_child' "
+            "AND CONSTRAINT_NAME = 'fk_child_parent'",
+            single_value_callback,
+            &dropped_fk_metadata_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(dropped_fk_metadata_count.rows == 1);
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_drop_parent (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_drop_child ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT, "
+        "CONSTRAINT fk_drop_child_parent FOREIGN KEY (parent_id) REFERENCES fk_drop_parent(id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_drop_parent VALUES (10)");
+    assert_exec_succeeds(db, "INSERT INTO fk_drop_child VALUES (1, 10)");
+    assert_exec_fails(db, "INSERT INTO fk_drop_child VALUES (2, 99)");
+    assert_exec_fails(db, "UPDATE fk_drop_parent SET id = 11 WHERE id = 10");
+    assert_prepared_succeeds(db, "ALTER TABLE fk_drop_child DROP FOREIGN KEY fk_drop_child_parent");
+    assert_exec_succeeds(db, "INSERT INTO fk_drop_child VALUES (2, 99)");
+    assert_exec_succeeds(db, "UPDATE fk_drop_parent SET id = 11 WHERE id = 10");
+    assert_exec_succeeds(db, "DELETE FROM fk_drop_parent WHERE id = 11");
+    create_sql = capture_show_create_table(db, "fk_drop_child");
+    assert(strstr(create_sql, "CONSTRAINT `fk_drop_child_parent` FOREIGN KEY") == NULL);
+    free(create_sql);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(db, "INSERT INTO fk_child VALUES (3, 99)");
+    assert_exec_succeeds(db, "INSERT INTO fk_drop_child VALUES (3, 100)");
+    create_sql = capture_show_create_table(db, "fk_child");
+    assert(strstr(create_sql, "CONSTRAINT `fk_child_parent` FOREIGN KEY") == NULL);
+    free(create_sql);
+    single_value_context reopened_dropped_fk_metadata_count = {0, "0"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+            "WHERE CONSTRAINT_SCHEMA = 'app' "
+            "AND TABLE_NAME = 'fk_child' "
+            "AND CONSTRAINT_NAME = 'fk_child_parent'",
+            single_value_callback,
+            &reopened_dropped_fk_metadata_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_dropped_fk_metadata_count.rows == 1);
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");

@@ -189,12 +189,14 @@ routed table definitions are enforced by MariaDB before MyLite handler writes,
 and those definitions survive close/reopen through the MyLite catalog.
 Basic unindexed generated columns use MariaDB's generated-column evaluation,
 with virtual values computed from restored row buffers and stored values kept
-in normal MyLite row payloads.
-Foreign-key DDL is rejected before execution until MyLite has referential
-metadata and enforcement. SQL sequence object/value surfaces are rejected, and
-the default embedded profile does not register MariaDB's virtual `SEQUENCE`
-storage engine, so magic generated tables such as `seq_1_to_10` are unavailable
-outside ordinary catalog-backed user tables. MariaDB user-statistics
+in normal MyLite row payloads. The public foreign-key subset supports
+validated `RESTRICT` / `NO ACTION` `CREATE TABLE`, copy
+`ALTER TABLE ... ADD FOREIGN KEY`, and `ALTER TABLE ... DROP FOREIGN KEY`
+metadata over durable routed base tables. SQL sequence object/value surfaces
+are rejected, and the default embedded profile does not register MariaDB's
+virtual `SEQUENCE` storage engine, so magic generated tables such as
+`seq_1_to_10` are unavailable outside ordinary catalog-backed user tables.
+MariaDB user-statistics
 information-schema surfaces and `userstat` system-variable assignments are
 rejected as server observability, while ordinary SQL user variables remain
 available. MariaDB statement profiling surfaces such as `SHOW PROFILE`,
@@ -489,8 +491,8 @@ the embedded library model:
 - dynamic plugin installation and loading,
 - dynamic UDF registration, loading, lookup, and execution,
 - external durable storage engines,
-- `CREATE TEMPORARY TABLE` foreign-key DDL, `DROP FOREIGN KEY`, and broader
-  foreign-key actions outside the supported MyLite subset,
+- `CREATE TEMPORARY TABLE` foreign-key DDL and broader foreign-key actions
+  outside the supported MyLite subset,
 - partition DDL until partition metadata, partition routing, and per-partition
   lifecycle semantics exist,
 - filesystem-backed views, triggers, and routines until they have MyLite
@@ -578,8 +580,8 @@ information, process-list metadata, zlib compression, server utility function,
 Oracle SQL mode, XML SQL function, GIS SQL function, vector SQL function,
 SFORMAT SQL function, JSON schema validation function, JSON table function,
 dynamic column function, SQL sequence value surface, partition,
-`CREATE TEMPORARY TABLE` foreign-key DDL, `DROP FOREIGN KEY`, broader
-unsupported foreign-key action commands, plus unsupported explicit
+`CREATE TEMPORARY TABLE` foreign-key DDL, broader unsupported foreign-key
+action commands, plus unsupported explicit
 `ENGINE=...` table creation and engine-change requests, are rejected before
 MariaDB execution with stable MyLite errors. The default
 embedded profile also links fail-closed stubs for stored-program runtime
