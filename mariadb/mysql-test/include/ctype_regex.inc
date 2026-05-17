@@ -22,6 +22,7 @@ create table t1 as
 select repeat(' ', 64) as s1, repeat(' ',64) as s2
 union
 select null, null;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 delete from t1;
 

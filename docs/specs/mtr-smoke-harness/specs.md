@@ -66,6 +66,8 @@ MariaDB base: `mariadb-11.8.6`
   adds `main.func_concat` and `main.func_format`.
 - [MTR scalar function smoke](../mtr-scalar-function-smoke/specs.md) adds
   `main.func_bit`, `main.func_extract`, and `main.func_replace`.
+- [MTR REGEXP smoke](../mtr-regexp-smoke/specs.md) adds
+  `main.func_regexp` and `main.func_regexp_pcre`.
 - [MTR DEFAULT and weight string smoke](../mtr-default-weight-string-smoke/specs.md)
   adds `main.func_default` and `main.func_weight_string`.
 - [MTR KDF smoke](../mtr-kdf-smoke/specs.md) adds `main.func_kdf` and allows
@@ -120,6 +122,8 @@ The default curated list remains intentionally baseline-oriented:
 - `main.func_extract`.
 - `main.func_format`.
 - `main.func_replace`.
+- `main.func_regexp`.
+- `main.func_regexp_pcre`.
 - `main.func_weight_string`.
 - `main.func_kdf`.
 - `main.func_encrypt_nossl`.
@@ -179,8 +183,9 @@ artifacts, not default MyLite linked-library artifacts.
   `main.compare`, `main.ctype_ascii`, `main.count_distinct`,
   `main.sum_distinct`, `main.func_equal`, `main.func_op`, `main.func_bit`,
   `main.func_concat`, `main.func_default`, `main.func_extract`,
-  `main.func_format`, `main.func_replace`, `main.func_weight_string`,
-  `main.func_kdf`, and `main.func_encrypt_nossl`.
+  `main.func_format`, `main.func_replace`, `main.func_regexp`,
+  `main.func_regexp_pcre`, `main.func_weight_string`, `main.func_kdf`, and
+  `main.func_encrypt_nossl`.
 - The runner builds the required MTR support targets from a fresh enough
   `build/mariadb-mtr-smoke` tree.
 - `mylite.bootstrap_schema`, `main.cast`, `main.case`, `main.bigint`,
@@ -191,8 +196,9 @@ artifacts, not default MyLite linked-library artifacts.
   `main.comments`, `main.compare`, `main.ctype_ascii`, `main.count_distinct`,
   `main.sum_distinct`, `main.func_equal`, `main.func_op`, `main.func_bit`,
   `main.func_concat`, `main.func_default`, `main.func_extract`,
-  `main.func_format`, `main.func_replace`, `main.func_weight_string`,
-  `main.func_kdf`, and `main.func_encrypt_nossl` pass under
+  `main.func_format`, `main.func_replace`, `main.func_regexp`,
+  `main.func_regexp_pcre`, `main.func_weight_string`, `main.func_kdf`, and
+  `main.func_encrypt_nossl` pass under
   `mariadb-test-run.pl --embedded-server` with the MTR smoke profile.
 - Documentation states that this is opt-in smoke coverage, not full MTR-scale
   comparison.
