@@ -226,6 +226,13 @@ mylite_storage_result mylite_storage_list_foreign_keys(
     mylite_storage_foreign_key_callback callback,
     void *ctx
 );
+mylite_storage_result mylite_storage_list_parent_foreign_keys(
+    const char *filename,
+    const char *referenced_schema_name,
+    const char *referenced_table_name,
+    mylite_storage_foreign_key_callback callback,
+    void *ctx
+);
 mylite_storage_result mylite_storage_read_table_definition(
     const char *filename,
     const char *schema_name,

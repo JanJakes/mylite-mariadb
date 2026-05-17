@@ -247,6 +247,7 @@ typedef struct schema_list_capture {
 
 typedef struct foreign_key_list_capture {
     const char *expected_constraint_name;
+    const char *expected_table_name;
     const char *expected_referenced_table_name;
     size_t expected_column_count;
     unsigned count;
@@ -645,7 +646,20 @@ static void test_foreign_key_metadata_records(void) {
     };
     foreign_key_list_capture capture = {
         .expected_constraint_name = "fk_posts_users",
+        .expected_table_name = "posts",
         .expected_referenced_table_name = "users",
+        .expected_column_count = 2U,
+    };
+    foreign_key_list_capture parent_capture = {
+        .expected_constraint_name = "fk_posts_users",
+        .expected_table_name = "posts",
+        .expected_referenced_table_name = "users",
+        .expected_column_count = 2U,
+    };
+    foreign_key_list_capture renamed_parent_capture = {
+        .expected_constraint_name = "fk_posts_users",
+        .expected_table_name = "articles",
+        .expected_referenced_table_name = "accounts",
         .expected_column_count = 2U,
     };
 
@@ -675,6 +689,16 @@ static void test_foreign_key_metadata_records(void) {
         MYLITE_STORAGE_OK
     );
     assert(capture.count == 1U);
+    assert(
+        mylite_storage_list_parent_foreign_keys(
+            filename,
+            "app",
+            "users",
+            collect_foreign_key,
+            &parent_capture
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(parent_capture.count == 1U);
 
     assert(
         mylite_storage_rename_table(filename, "app", "users", "app", "accounts") ==
@@ -704,6 +728,16 @@ static void test_foreign_key_metadata_records(void) {
     );
     assert_foreign_key_metadata(&metadata, "articles", "accounts");
     mylite_storage_free_foreign_key_metadata(&metadata);
+    assert(
+        mylite_storage_list_parent_foreign_keys(
+            filename,
+            "app",
+            "accounts",
+            collect_foreign_key,
+            &renamed_parent_capture
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(renamed_parent_capture.count == 1U);
 
     assert(mylite_storage_drop_table(filename, "app", "accounts") == MYLITE_STORAGE_ERROR);
     assert(
@@ -3069,6 +3103,7 @@ static int collect_schema(void *ctx, const char *schema_name) {
 static int collect_foreign_key(void *ctx, const mylite_storage_foreign_key_metadata *metadata) {
     foreign_key_list_capture *capture = (foreign_key_list_capture *)ctx;
     assert(strcmp(metadata->constraint_name, capture->expected_constraint_name) == 0);
+    assert(strcmp(metadata->table_name, capture->expected_table_name) == 0);
     assert(strcmp(metadata->referenced_table_name, capture->expected_referenced_table_name) == 0);
     assert(metadata->column_count == capture->expected_column_count);
     ++capture->count;

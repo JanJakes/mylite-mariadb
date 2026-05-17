@@ -1550,6 +1550,75 @@ mylite_storage_result mylite_storage_list_foreign_keys(
     return result;
 }
 
+mylite_storage_result mylite_storage_list_parent_foreign_keys(
+    const char *filename,
+    const char *referenced_schema_name,
+    const char *referenced_table_name,
+    mylite_storage_foreign_key_callback callback,
+    void *ctx
+) {
+    if (filename == NULL || filename[0] == '\0' || referenced_schema_name == NULL ||
+        referenced_schema_name[0] == '\0' || referenced_table_name == NULL ||
+        referenced_table_name[0] == '\0' || callback == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    FILE *file = NULL;
+    mylite_storage_result result = open_existing_file(filename, &file);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_header header = {0};
+    unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    result = read_header(file, &header);
+    if (result == MYLITE_STORAGE_OK) {
+        result = read_catalog_root(file, &header, catalog_page);
+    }
+
+    size_t offset = MYLITE_STORAGE_FORMAT_CATALOG_HEADER_SIZE;
+    const unsigned long long record_count =
+        result == MYLITE_STORAGE_OK ? catalog_record_count(catalog_page) : 0ULL;
+    for (unsigned long long i = 0ULL; result == MYLITE_STORAGE_OK && i < record_count; ++i) {
+        const unsigned char *record = catalog_page + offset;
+        const size_t record_size = get_u32_le(record, MYLITE_STORAGE_FORMAT_RECORD_SIZE_OFFSET);
+        if (record_is_foreign_key(record) && record_matches_foreign_key_parent(
+                                                 record,
+                                                 referenced_schema_name,
+                                                 referenced_table_name
+                                             )) {
+            mylite_storage_catalog_entry entry = {
+                .record = record,
+                .table_id = get_u64_le(record, MYLITE_STORAGE_FORMAT_RECORD_TABLE_ID_OFFSET),
+                .definition_root_page =
+                    get_u64_le(record, MYLITE_STORAGE_FORMAT_RECORD_DEFINITION_ROOT_PAGE_OFFSET),
+                .definition_size =
+                    get_u64_le(record, MYLITE_STORAGE_FORMAT_RECORD_DEFINITION_SIZE_OFFSET),
+            };
+            unsigned char *metadata = NULL;
+            size_t metadata_size = 0U;
+            mylite_storage_foreign_key_metadata decoded = {
+                .size = sizeof(decoded),
+            };
+            result = read_foreign_key_blob_pages(file, &header, &entry, &metadata, &metadata_size);
+            if (result == MYLITE_STORAGE_OK) {
+                result = decode_foreign_key_metadata(record, metadata, metadata_size, &decoded);
+            }
+            free(metadata);
+            if (result == MYLITE_STORAGE_OK && callback(ctx, &decoded) != 0) {
+                result = MYLITE_STORAGE_ERROR;
+            }
+            mylite_storage_free_foreign_key_metadata(&decoded);
+        }
+        offset += record_size;
+    }
+
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    return result;
+}
+
 // NOLINTEND(bugprone-easily-swappable-parameters)
 
 mylite_storage_result mylite_storage_read_table_definition(
