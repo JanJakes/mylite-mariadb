@@ -1972,6 +1972,26 @@ static void test_transaction_and_foreign_key_policies(void) {
     );
     assert_exec_fails(db, "INSERT INTO fk_truncate_child VALUES (2, 70)");
 
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_self ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT NULL, "
+        "KEY fk_self_parent_key (parent_id), "
+        "CONSTRAINT fk_self_parent FOREIGN KEY (parent_id) REFERENCES fk_self(id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_self VALUES (1, NULL)");
+    assert_exec_succeeds(db, "INSERT INTO fk_self VALUES (2, 1)");
+    assert_exec_fails(db, "INSERT INTO fk_self VALUES (3, 99)");
+    assert_exec_fails(db, "INSERT INTO fk_self VALUES (3, 3)");
+    assert_exec_fails(db, "UPDATE fk_self SET id = 10 WHERE id = 1");
+    assert_exec_fails(db, "DELETE FROM fk_self WHERE id = 1");
+    assert_exec_succeeds(db, "UPDATE fk_self SET parent_id = NULL WHERE id = 2");
+    assert_exec_succeeds(db, "UPDATE fk_self SET id = 10 WHERE id = 1");
+    assert_exec_succeeds(db, "INSERT INTO fk_self VALUES (3, 10)");
+    assert_exec_succeeds(db, "TRUNCATE TABLE fk_self");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM fk_self", "0");
+
     assert(mylite_close(db) == MYLITE_OK);
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "USE app");
@@ -1988,6 +2008,11 @@ static void test_transaction_and_foreign_key_policies(void) {
         "1"
     );
     assert_exec_fails(db, "INSERT INTO fk_truncate_child VALUES (3, 70)");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM fk_self", "0");
+    assert_exec_succeeds(db, "INSERT INTO fk_self VALUES (20, NULL)");
+    assert_exec_succeeds(db, "INSERT INTO fk_self VALUES (21, 20)");
+    assert_exec_fails(db, "INSERT INTO fk_self VALUES (22, 22)");
+    assert_exec_fails(db, "DELETE FROM fk_self WHERE id = 20");
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
