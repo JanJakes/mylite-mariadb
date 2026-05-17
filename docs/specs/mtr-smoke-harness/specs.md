@@ -55,6 +55,9 @@ MariaDB base: `mariadb-11.8.6`
   `main.type_timestamp_round`.
 - [MTR date format and ASCII charset smoke](../mtr-date-charset-smoke/specs.md)
   adds `main.date_formats`, `main.datetime_456`, and `main.ctype_ascii`.
+- [MTR charset edge smoke](../mtr-charset-edge-smoke/specs.md) adds
+  `main.ctype_cp850`, `main.ctype_cp866`, `main.ctype_hebrew`, and
+  `main.ctype_utf32_def`.
 - [MTR collation and diagnostics smoke](../mtr-collation-diagnostics-smoke/specs.md)
   adds `main.ctype_collate_database`, `main.ctype_collate_implicit`,
   `main.ctype_collate_implicit_def`, `main.ctype_collate_table`, and
@@ -131,6 +134,10 @@ The default curated list remains intentionally baseline-oriented:
 - `main.compare`.
 - `main.func_in`.
 - `main.ctype_ascii`.
+- `main.ctype_cp850`.
+- `main.ctype_cp866`.
+- `main.ctype_hebrew`.
+- `main.ctype_utf32_def`.
 - `main.ctype_collate_column`.
 - `main.ctype_collate_context`.
 - `main.ctype_collate_database`.
@@ -209,6 +216,8 @@ artifacts, not default MyLite linked-library artifacts.
   `main.type_time_round`, `main.type_time_6065`,
   `main.type_timestamp_round`, `main.brackets`, `main.comments`,
   `main.compare`, `main.func_in`, `main.ctype_ascii`,
+  `main.ctype_cp850`, `main.ctype_cp866`, `main.ctype_hebrew`,
+  `main.ctype_utf32_def`,
   `main.ctype_collate_column`, `main.ctype_collate_context`,
   `main.ctype_collate_database`, `main.ctype_collate_implicit`,
   `main.ctype_collate_implicit_def`, `main.ctype_collate_table`,
@@ -229,6 +238,8 @@ artifacts, not default MyLite linked-library artifacts.
   `main.type_time_round`, `main.type_time_6065`,
   `main.type_timestamp_round`, `main.brackets`, `main.comments`,
   `main.compare`, `main.func_in`, `main.ctype_ascii`,
+  `main.ctype_cp850`, `main.ctype_cp866`, `main.ctype_hebrew`,
+  `main.ctype_utf32_def`,
   `main.ctype_collate_column`, `main.ctype_collate_context`,
   `main.ctype_collate_database`, `main.ctype_collate_implicit`,
   `main.ctype_collate_implicit_def`, `main.ctype_collate_table`,
