@@ -317,6 +317,14 @@ static mylite_storage_result validate_index_entries(
     const mylite_storage_index_entry *index_entries,
     size_t index_entry_count
 );
+static mylite_storage_result rename_table(
+    const char *filename,
+    const char *old_schema_name,
+    const char *old_table_name,
+    const char *new_schema_name,
+    const char *new_table_name,
+    int preserve_foreign_keys
+);
 static mylite_storage_result read_catalog_root(
     FILE *file,
     const mylite_storage_header *header,
@@ -382,7 +390,8 @@ static mylite_storage_result remove_schema_records(
 static mylite_storage_result rename_table_record(
     unsigned char *catalog_page,
     mylite_storage_table_identity old_identity,
-    mylite_storage_table_identity new_identity
+    mylite_storage_table_identity new_identity,
+    int preserve_foreign_keys
 );
 static mylite_storage_result append_renamed_foreign_key_record(
     unsigned char *catalog_page,
@@ -1831,6 +1840,41 @@ mylite_storage_result mylite_storage_rename_table(
     const char *new_schema_name,
     const char *new_table_name
 ) {
+    return rename_table(
+        filename,
+        old_schema_name,
+        old_table_name,
+        new_schema_name,
+        new_table_name,
+        0
+    );
+}
+
+mylite_storage_result mylite_storage_rename_table_for_rebuild_backup(
+    const char *filename,
+    const char *old_schema_name,
+    const char *old_table_name,
+    const char *new_schema_name,
+    const char *new_table_name
+) {
+    return rename_table(
+        filename,
+        old_schema_name,
+        old_table_name,
+        new_schema_name,
+        new_table_name,
+        1
+    );
+}
+
+static mylite_storage_result rename_table(
+    const char *filename,
+    const char *old_schema_name,
+    const char *old_table_name,
+    const char *new_schema_name,
+    const char *new_table_name,
+    int preserve_foreign_keys
+) {
     if (filename == NULL || filename[0] == '\0' || old_schema_name == NULL ||
         old_schema_name[0] == '\0' || old_table_name == NULL || old_table_name[0] == '\0' ||
         new_schema_name == NULL || new_schema_name[0] == '\0' || new_table_name == NULL ||
@@ -1860,7 +1904,8 @@ mylite_storage_result mylite_storage_rename_table(
             (mylite_storage_table_identity){
                 .schema_name = new_schema_name,
                 .table_name = new_table_name,
-            }
+            },
+            preserve_foreign_keys
         );
     }
     if (result == MYLITE_STORAGE_OK) {
@@ -4713,7 +4758,8 @@ static mylite_storage_result remove_schema_records(
 static mylite_storage_result rename_table_record(
     unsigned char *catalog_page,
     mylite_storage_table_identity old_identity,
-    mylite_storage_table_identity new_identity
+    mylite_storage_table_identity new_identity,
+    int preserve_foreign_keys
 ) {
     mylite_storage_result result =
         find_table_record(catalog_page, old_identity.schema_name, old_identity.table_name, NULL);
@@ -4790,7 +4836,7 @@ static mylite_storage_result rename_table_record(
             }
             renamed = 1;
         } else if (
-            record_is_foreign_key(record) &&
+            !preserve_foreign_keys && record_is_foreign_key(record) &&
             (record_matches_table(record, old_identity.schema_name, old_identity.table_name) ||
              record_matches_foreign_key_parent(
                  record,

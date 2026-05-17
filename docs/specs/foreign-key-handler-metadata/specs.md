@@ -13,8 +13,6 @@ slices do not depend on InnoDB's dictionary or persistent sidecars.
 - Accepting `CREATE TABLE` or `ALTER TABLE` foreign-key DDL through
   `libmylite`.
 - Advertising `HTON_SUPPORTS_FOREIGN_KEYS` from the MyLite handlerton.
-- Appending FK clauses to `SHOW CREATE TABLE`; this belongs to the follow-up
-  `foreign-key-create-info` slice.
 - Enforcing child/parent row existence checks, restrict checks, cascading
   actions, or `foreign_key_checks=0` import semantics.
 - Implementing statement-scoped table-plus-FK publication for inline
@@ -42,6 +40,10 @@ MariaDB base: `mariadb-11.8.6`
 - `mariadb/sql/sql_table.cc:fk_prepare_copy_alter_table()` uses child and
   parent FK lists when deciding whether copy ALTER may drop, rename, or change
   FK columns.
+- `mariadb/sql/sql_table.cc` performs copy ALTER by renaming the old table to
+  an internal `#sql-backup-*` name, renaming the rebuilt temporary table to the
+  logical table name, and then dropping the backup. MyLite must not move FK
+  catalog records onto the internal backup identity during that first rename.
 - `mariadb/sql/sql_truncate.cc` and `mariadb/sql/sql_base.cc` use
   `referenced_by_foreign_key()` and `get_parent_foreign_key_list()` for
   parent-table checks.
@@ -88,11 +90,17 @@ a stop-after-first callback. Errors should fail closed through the list hooks'
 handler error codes and by returning `true` from the `noexcept` boolean hook
 when storage cannot be inspected.
 
-`get_foreign_key_create_info()` stays unimplemented in this slice because
-public FK DDL remains rejected and MyLite has not yet designed canonical
-`SHOW CREATE TABLE` FK formatting. `is_fk_defined_on_table_or_index()` stays
-conservative until FK-aware index-drop and index-change checks are implemented
-with column-to-key mapping.
+`get_foreign_key_create_info()` is implemented by the follow-up
+`foreign-key-create-info` slice. `is_fk_defined_on_table_or_index()` stays
+conservative, while SQL copy ALTER validates retained child and parent FK
+metadata against the prepared post-ALTER key list so FK columns and required
+supporting keys cannot be removed underneath manually seeded metadata.
+
+During copy ALTER, MyLite uses a rebuild-backup rename path for MariaDB's
+internal old-table backup rename. It renames only the table record while
+leaving child and parent FK records attached to the logical table identity that
+the rebuilt temporary table will take over. Ordinary `RENAME TABLE` still
+rewrites child and parent FK identities.
 
 ## File Lifecycle
 
@@ -138,6 +146,9 @@ native InnoDB dictionary or FK code is reintroduced.
   opened MyLite table.
 - `FOREIGN_KEY_INFO` fields match stored identifiers, column order, actions,
   referenced key name, and nullable bits.
+- Retained FK metadata survives covered copy ALTER rebuilds and rejects
+  copy-ALTER attempts to remove FK columns or the last supporting child/parent
+  key.
 - `HTON_SUPPORTS_FOREIGN_KEYS` remains clear and FK DDL remains rejected.
 - FK metadata remains single-file and does not rely on InnoDB dictionary state
   or persistent MariaDB sidecars.
@@ -152,6 +163,6 @@ native InnoDB dictionary or FK code is reintroduced.
   must be replaced or cached before FK enforcement becomes hot DML behavior.
 - Public FK DDL needs statement-scoped table-plus-FK publication before inline
   `CREATE TABLE` FK clauses can be accepted safely.
-- `SHOW CREATE TABLE` FK output is intentionally handled by the follow-up
-  `foreign-key-create-info` slice so formatting remains separate from handler
-  list metadata.
+- FK-aware ALTER checks currently cover manually seeded metadata only; public
+  FK DDL still needs statement-scoped publication before these checks can
+  become user-visible FK support.

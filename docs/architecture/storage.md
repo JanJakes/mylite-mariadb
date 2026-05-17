@@ -95,9 +95,11 @@ rejected by the MyLite SQL policy before MariaDB execution.
 Foreign-key DDL is rejected at the `libmylite` boundary until MyLite has safe
 DDL publication, enforcement, locking, recovery, and transaction-aware checks
 for referential constraints. The storage layer now has internal catalog-backed
-FK metadata records, typed FK blob pages, child and parent FK listing, and
-handler metadata and `SHOW CREATE TABLE` hooks for manually seeded internal
-records; this does not yet make FK SQL supported.
+FK metadata records, typed FK blob pages, child and parent FK listing, handler
+metadata and `SHOW CREATE TABLE` hooks for manually seeded internal records,
+copy-ALTER preservation across MariaDB's internal old-table backup rename, and
+FK-aware column/supporting-key checks for retained metadata; this does not yet
+make FK SQL supported.
 Partition DDL is rejected at the same boundary until MyLite has partition
 metadata, partition-to-primary-file routing, per-partition catalog lifecycle,
 and partition-aware row and index maintenance.

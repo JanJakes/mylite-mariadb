@@ -624,6 +624,24 @@ static void test_foreign_key_metadata_records(void) {
         .definition = definition,
         .definition_size = sizeof(definition),
     };
+    mylite_storage_table_definition rebuilt_users_definition = {
+        .size = sizeof(rebuilt_users_definition),
+        .schema_name = "app",
+        .table_name = "rebuilt_users",
+        .requested_engine_name = "InnoDB",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_table_definition rebuilt_posts_definition = {
+        .size = sizeof(rebuilt_posts_definition),
+        .schema_name = "app",
+        .table_name = "rebuilt_posts",
+        .requested_engine_name = "InnoDB",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
     mylite_storage_foreign_key_definition foreign_key = {
         .size = sizeof(foreign_key),
         .schema_name = "app",
@@ -699,6 +717,67 @@ static void test_foreign_key_metadata_records(void) {
         ) == MYLITE_STORAGE_OK
     );
     assert(parent_capture.count == 1U);
+
+    assert(
+        mylite_storage_store_table_definition(filename, &rebuilt_posts_definition) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_rename_table_for_rebuild_backup(
+            filename,
+            "app",
+            "posts",
+            "app",
+            "posts_backup"
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_table_exists(filename, "app", "posts") == MYLITE_STORAGE_NOTFOUND);
+    assert(mylite_storage_table_exists(filename, "app", "posts_backup") == MYLITE_STORAGE_OK);
+    capture.count = 0U;
+    assert(
+        mylite_storage_list_foreign_keys(filename, "app", "posts", collect_foreign_key, &capture) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(capture.count == 1U);
+    assert(
+        mylite_storage_rename_table(filename, "app", "rebuilt_posts", "app", "posts") ==
+        MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_table_exists(filename, "app", "posts") == MYLITE_STORAGE_OK);
+    assert(mylite_storage_drop_table(filename, "app", "posts_backup") == MYLITE_STORAGE_OK);
+
+    assert(
+        mylite_storage_store_table_definition(filename, &rebuilt_users_definition) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_rename_table_for_rebuild_backup(
+            filename,
+            "app",
+            "users",
+            "app",
+            "users_backup"
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_table_exists(filename, "app", "users") == MYLITE_STORAGE_NOTFOUND);
+    assert(mylite_storage_table_exists(filename, "app", "users_backup") == MYLITE_STORAGE_OK);
+    parent_capture.count = 0U;
+    assert(
+        mylite_storage_list_parent_foreign_keys(
+            filename,
+            "app",
+            "users",
+            collect_foreign_key,
+            &parent_capture
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(parent_capture.count == 1U);
+    assert(
+        mylite_storage_rename_table(filename, "app", "rebuilt_users", "app", "users") ==
+        MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_table_exists(filename, "app", "users") == MYLITE_STORAGE_OK);
+    assert(mylite_storage_drop_table(filename, "app", "users_backup") == MYLITE_STORAGE_OK);
 
     assert(
         mylite_storage_rename_table(filename, "app", "users", "app", "accounts") ==

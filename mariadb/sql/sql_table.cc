@@ -9844,6 +9844,94 @@ func_exit:
 }
 
 
+static bool fk_key_supports_columns(Key *key, List<LEX_CSTRING> &fk_columns,
+                                    const LEX_CSTRING *key_name)
+{
+  if (key->type == Key::FOREIGN_KEY || key->type == Key::FULLTEXT ||
+      key->type == Key::SPATIAL || key->type == Key::VECTOR ||
+      key->type == Key::IGNORE_KEY)
+    return false;
+
+  if (key_name && key_name->str && !key->name.streq(*key_name))
+    return false;
+
+  if (key->columns.elements < fk_columns.elements)
+    return false;
+
+  List_iterator_fast<Key_part_spec> key_part_it(key->columns);
+  List_iterator_fast<LEX_CSTRING> column_it(fk_columns);
+  LEX_CSTRING *column;
+
+  while ((column= column_it++))
+  {
+    Key_part_spec *key_part= key_part_it++;
+    if (!key_part || !key_part->field_name.streq(*column))
+      return false;
+  }
+
+  return true;
+}
+
+
+static bool fk_key_list_supports_columns(List<Key> &key_list,
+                                         List<LEX_CSTRING> &fk_columns,
+                                         const LEX_CSTRING *key_name= NULL)
+{
+  if (!fk_columns.elements)
+    return true;
+
+  List_iterator_fast<Key> key_it(key_list);
+  Key *key;
+
+  while ((key= key_it++))
+  {
+    if (fk_key_supports_columns(key, fk_columns, key_name))
+      return true;
+  }
+
+  return false;
+}
+
+
+static bool fk_table_key_supports_columns(const KEY *key,
+                                          List<LEX_CSTRING> &fk_columns)
+{
+  if (key->flags & HA_INVISIBLE_KEY)
+    return false;
+
+  if (key->user_defined_key_parts < fk_columns.elements)
+    return false;
+
+  List_iterator_fast<LEX_CSTRING> column_it(fk_columns);
+  const KEY_PART_INFO *key_part= key->key_part;
+  LEX_CSTRING *column;
+
+  while ((column= column_it++))
+  {
+    if (!key_part->field ||
+        !key_part->field->field_name.streq(*column))
+      return false;
+    key_part++;
+  }
+
+  return true;
+}
+
+
+static const char *fk_table_supporting_key_name(const TABLE *table,
+                                                List<LEX_CSTRING> &fk_columns)
+{
+  for (uint i= 0; i < table->s->total_keys; i++)
+  {
+    const KEY *key= table->key_info + i;
+    if (fk_table_key_supports_columns(key, fk_columns))
+      return key->name.str;
+  }
+
+  return NULL;
+}
+
+
 /**
   Check if ALTER TABLE we are about to execute using COPY algorithm
   is not supported as it might break referential integrity.
@@ -9875,6 +9963,8 @@ static bool fk_prepare_copy_alter_table(THD *thd, TABLE *table,
   List <FOREIGN_KEY_INFO> fk_parent_key_list;
   List <FOREIGN_KEY_INFO> fk_child_key_list;
   FOREIGN_KEY_INFO *f_key;
+  const bool engine_validates_fk_keys=
+    table->file->ht->flags & HTON_SUPPORTS_FOREIGN_KEYS;
 
   DBUG_ENTER("fk_prepare_copy_alter_table");
 
@@ -9970,6 +10060,21 @@ static bool fk_prepare_copy_alter_table(THD *thd, TABLE *table,
     default:
       DBUG_ASSERT(0);
     }
+
+    if (!engine_validates_fk_keys &&
+        !fk_key_list_supports_columns(alter_info->key_list,
+                                      f_key->referenced_fields,
+                                      f_key->referenced_key_name))
+    {
+      const char *bad_key_name= f_key->referenced_key_name &&
+                                f_key->referenced_key_name->str ?
+                                f_key->referenced_key_name->str :
+                                fk_table_supporting_key_name(table,
+                                                             f_key->referenced_fields);
+      my_error(ER_DROP_INDEX_FK, MYF(0),
+               bad_key_name ? bad_key_name : f_key->foreign_id->str);
+      DBUG_RETURN(true);
+    }
   }
 
   table->file->get_foreign_key_list(thd, &fk_child_key_list);
@@ -10032,6 +10137,17 @@ static bool fk_prepare_copy_alter_table(THD *thd, TABLE *table,
       DBUG_RETURN(true);
     default:
       DBUG_ASSERT(0);
+    }
+
+    if (!engine_validates_fk_keys &&
+        !fk_key_list_supports_columns(alter_info->key_list,
+                                      f_key->foreign_fields))
+    {
+      const char *bad_key_name=
+        fk_table_supporting_key_name(table, f_key->foreign_fields);
+      my_error(ER_DROP_INDEX_FK, MYF(0),
+               bad_key_name ? bad_key_name : f_key->foreign_id->str);
+      DBUG_RETURN(true);
     }
   }
 

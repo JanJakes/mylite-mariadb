@@ -104,6 +104,7 @@ static int mylite_table_name_from_path(const char *path, char *out_schema_name,
                                        size_t out_schema_name_size,
                                        char *out_table_name,
                                        size_t out_table_name_size);
+static bool mylite_is_alter_backup_table_name(const char *table_name);
 static bool mylite_table_supports_row_write(TABLE *table);
 static bool mylite_table_supports_row_lifecycle(TABLE *table);
 static bool mylite_table_supports_auto_increment(TABLE *table);
@@ -2069,7 +2070,14 @@ int ha_mylite::rename_table(const char *from, const char *to)
   if (path_error)
     DBUG_RETURN(path_error);
 
-  const mylite_storage_result result=
+  THD *thd= current_thd;
+  const bool rebuild_backup_rename=
+    thd && thd->lex && thd->lex->sql_command == SQLCOM_ALTER_TABLE &&
+    mylite_is_alter_backup_table_name(new_table_name);
+  const mylite_storage_result result= rebuild_backup_rename ?
+    mylite_storage_rename_table_for_rebuild_backup(
+      primary_file, old_schema_name, old_table_name, new_schema_name,
+      new_table_name) :
     mylite_storage_rename_table(primary_file, old_schema_name, old_table_name,
                                 new_schema_name, new_table_name);
   if (result != MYLITE_STORAGE_OK)
@@ -2375,6 +2383,12 @@ static int mylite_table_name_from_path(const char *path, char *out_schema_name,
   memcpy(out_table_name, table_start, table_name_length);
   out_table_name[table_name_length]= '\0';
   return 0;
+}
+
+static bool mylite_is_alter_backup_table_name(const char *table_name)
+{
+  return table_name &&
+         strncmp(table_name, "#sql-backup-", strlen("#sql-backup-")) == 0;
 }
 
 static bool mylite_table_supports_row_write(TABLE *table)

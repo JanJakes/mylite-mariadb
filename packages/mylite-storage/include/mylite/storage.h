@@ -263,6 +263,13 @@ mylite_storage_result mylite_storage_rename_table(
     const char *new_schema_name,
     const char *new_table_name
 );
+mylite_storage_result mylite_storage_rename_table_for_rebuild_backup(
+    const char *filename,
+    const char *old_schema_name,
+    const char *old_table_name,
+    const char *new_schema_name,
+    const char *new_table_name
+);
 mylite_storage_result mylite_storage_append_row(
     const char *filename,
     const char *schema_name,

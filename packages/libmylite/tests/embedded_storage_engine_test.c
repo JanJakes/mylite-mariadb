@@ -1740,6 +1740,16 @@ static void test_foreign_key_handler_metadata(void) {
         ) != NULL
     );
     free(create_sql);
+    assert_exec_fails(db, "ALTER TABLE child DROP COLUMN parent_id, ALGORITHM=COPY");
+    assert_exec_fails(db, "ALTER TABLE child MODIFY COLUMN parent_id BIGINT, ALGORITHM=COPY");
+    assert_exec_fails(db, "ALTER TABLE child DROP KEY child_parent_key, ALGORITHM=COPY");
+    assert_exec_fails(db, "ALTER TABLE parent DROP PRIMARY KEY, ALGORITHM=COPY");
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE child DROP KEY child_parent_key, "
+        "ADD KEY child_parent_replacement (parent_id), ALGORITHM=COPY"
+    );
+    assert_exec_fails(db, "ALTER TABLE child DROP KEY child_parent_replacement, ALGORITHM=COPY");
     assert_exec_fails(db, "TRUNCATE TABLE parent");
     assert_exec_fails(db, "TRUNCATE TABLE fk_parent.remote_parent");
     assert_foreign_key_exec_fails(
