@@ -2651,6 +2651,54 @@ static void test_foreign_key_non_self_ordering(void) {
         "1"
     );
 
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_exact_parent_probe ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_key INT NULL, "
+        "alt_key INT NULL, "
+        "UNIQUE KEY fk_exact_parent_probe_parent (parent_key), "
+        "KEY fk_exact_parent_probe_alt (alt_key)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_exact_child_probe ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_key INT NULL, "
+        "KEY fk_exact_child_probe_parent (parent_key), "
+        "CONSTRAINT fk_exact_child_probe_parent "
+        "FOREIGN KEY (parent_key) REFERENCES fk_exact_parent_probe(parent_key)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_exact_parent_probe VALUES (1, NULL, 99)");
+    assert_exec_fails(db, "INSERT INTO fk_exact_child_probe VALUES (1, 99)");
+    assert_exec_succeeds(db, "INSERT INTO fk_exact_child_probe VALUES (2, NULL)");
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_exact_delete_parent ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_key INT NULL, "
+        "UNIQUE KEY fk_exact_delete_parent_parent (parent_key)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_exact_delete_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_key INT NULL, "
+        "other_key INT NULL, "
+        "KEY fk_exact_delete_child_parent (parent_key), "
+        "KEY fk_exact_delete_child_other (other_key), "
+        "CONSTRAINT fk_exact_delete_child_parent "
+        "FOREIGN KEY (parent_key) REFERENCES fk_exact_delete_parent(parent_key)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_exact_delete_parent VALUES (1, 77)");
+    assert_exec_succeeds(db, "INSERT INTO fk_exact_delete_child VALUES (1, NULL, 77)");
+    assert_exec_succeeds(db, "DELETE FROM fk_exact_delete_parent WHERE id = 1");
+
     assert(mylite_close(db) == MYLITE_OK);
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "USE app");
@@ -2666,6 +2714,13 @@ static void test_foreign_key_non_self_ordering(void) {
     );
     assert_exec_fails(db, "DELETE FROM fk_nonself_parent WHERE id = 20");
     assert_exec_fails(db, "UPDATE fk_nonself_parent SET id = 140 WHERE id = 40");
+    assert_exec_fails(db, "INSERT INTO fk_exact_child_probe VALUES (3, 99)");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM fk_exact_delete_parent", "0");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_exact_delete_child WHERE id = 1 AND other_key = 77",
+        "1"
+    );
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");

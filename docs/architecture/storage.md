@@ -119,9 +119,12 @@ MariaDB-generated supporting keys are cleaned up when copy ALTER replaces them
 with explicit compatible keys, and can be explicitly dropped after the owning
 FK is removed. Referenced parent unique secondary-key renames update the FK
 referenced-key metadata and preserve parent row checks across close/reopen for
-the supported `RESTRICT` / `NO ACTION` subset. Ordered multi-row child and
-self-referential inserts are covered for the supported FK subset, including
-failed-statement rollback when a later row violates the constraint.
+the supported `RESTRICT` / `NO ACTION` subset. Non-self child and parent row
+checks resolve the actual referenced or child supporting index before probing
+stored index entries, so unrelated indexes with matching key prefixes do not
+affect FK enforcement. Ordered multi-row child and self-referential inserts are
+covered for the supported FK subset, including failed-statement rollback when a
+later row violates the constraint.
 Representative ordered self-referential update/delete checks cover
 parent-first rejection and child-first success. Representative non-self parent
 update/delete ordering checks cover failed-statement rollback when an earlier

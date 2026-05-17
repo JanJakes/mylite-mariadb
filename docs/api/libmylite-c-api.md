@@ -197,10 +197,11 @@ validated `RESTRICT` / `NO ACTION` `CREATE TABLE`, copy
 `ALTER TABLE ... ADD FOREIGN KEY`, and `ALTER TABLE ... DROP FOREIGN KEY`
 metadata over durable routed base tables, including basic self-references to
 parent rows that already exist and same-row self-references where the child and
-parent key prefixes match, representative immediate update/delete ordering,
-and bounded self-referencing `ON DELETE SET NULL` over simple nullable child
-columns. The subset is advertised to MariaDB through the MyLite handlerton.
-Broader multi-table matrices and non-self FK actions remain unsupported. Session
+parent key prefixes match, representative immediate exact-index row checks,
+representative update/delete ordering, and bounded self-referencing
+`ON DELETE SET NULL` over simple nullable child columns. The subset is
+advertised to MariaDB through the MyLite handlerton. Broader multi-table
+matrices and non-self FK actions remain unsupported. Session
 `foreign_key_checks=0`
 disables supported FK row checks and parent-table truncate checks without
 revalidating existing rows when checks are re-enabled. MariaDB-generated FK

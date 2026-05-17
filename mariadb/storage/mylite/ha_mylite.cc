@@ -271,6 +271,14 @@ static int mylite_check_child_foreign_key(
   void *ctx, const mylite_storage_foreign_key_metadata *metadata);
 static int mylite_check_parent_foreign_key(
   void *ctx, const mylite_storage_foreign_key_metadata *metadata);
+static int mylite_child_foreign_key_parent_prefix_exists(
+  const char *primary_file, TABLE *child_table,
+  const mylite_storage_foreign_key_metadata *metadata,
+  const uchar *key_prefix, size_t key_prefix_size, int *out_exists);
+static int mylite_parent_foreign_key_child_prefix_exists(
+  const char *primary_file, TABLE *parent_table,
+  const mylite_storage_foreign_key_metadata *metadata,
+  const uchar *key_prefix, size_t key_prefix_size, int *out_exists);
 static const KEY *mylite_find_foreign_key_prefix(
   TABLE *table, const char *const *column_names, size_t column_count,
   const char *key_name);
@@ -4218,30 +4226,9 @@ static int mylite_check_child_foreign_key(
   }
 
   int exists= 0;
-  if (mylite_foreign_key_is_self_referencing(metadata))
-  {
-    const KEY *parent_key= mylite_find_foreign_key_prefix(
-      check_ctx->table, metadata->referenced_column_names,
-      metadata->column_count, metadata->referenced_key_name);
-    if (!parent_key)
-    {
-      free(key_prefix);
-      check_ctx->error= HA_ERR_NO_REFERENCED_ROW;
-      return 1;
-    }
-    error= mylite_index_prefix_exists(
-      check_ctx->primary_file, metadata->referenced_schema_name,
-      metadata->referenced_table_name,
-      static_cast<uint>(parent_key - check_ctx->table->key_info), key_prefix,
-      key_prefix_size, &exists);
-  }
-  else
-  {
-    const mylite_storage_result result= mylite_storage_index_prefix_exists(
-      check_ctx->primary_file, metadata->referenced_schema_name,
-      metadata->referenced_table_name, key_prefix, key_prefix_size, &exists);
-    error= mylite_storage_to_handler_error(result);
-  }
+  error= mylite_child_foreign_key_parent_prefix_exists(
+    check_ctx->primary_file, check_ctx->table, metadata, key_prefix,
+    key_prefix_size, &exists);
   free(key_prefix);
   if (error)
   {
@@ -4349,29 +4336,9 @@ static int mylite_check_parent_foreign_key(
   }
 
   int exists= 0;
-  if (mylite_foreign_key_is_self_referencing(metadata))
-  {
-    const KEY *child_key= mylite_find_foreign_key_prefix(
-      check_ctx->table, metadata->foreign_column_names,
-      metadata->column_count, NULL);
-    if (!child_key)
-    {
-      free(old_key_prefix);
-      check_ctx->error= HA_ERR_ROW_IS_REFERENCED;
-      return 1;
-    }
-    error= mylite_index_prefix_exists(
-      check_ctx->primary_file, metadata->schema_name, metadata->table_name,
-      static_cast<uint>(child_key - check_ctx->table->key_info),
-      old_key_prefix, old_key_prefix_size, &exists);
-  }
-  else
-  {
-    const mylite_storage_result result= mylite_storage_index_prefix_exists(
-      check_ctx->primary_file, metadata->schema_name, metadata->table_name,
-      old_key_prefix, old_key_prefix_size, &exists);
-    error= mylite_storage_to_handler_error(result);
-  }
+  error= mylite_parent_foreign_key_child_prefix_exists(
+    check_ctx->primary_file, check_ctx->table, metadata, old_key_prefix,
+    old_key_prefix_size, &exists);
   free(old_key_prefix);
   if (error)
   {
@@ -4384,6 +4351,100 @@ static int mylite_check_parent_foreign_key(
     return 1;
   }
   return 0;
+}
+
+static int mylite_child_foreign_key_parent_prefix_exists(
+  const char *primary_file, TABLE *child_table,
+  const mylite_storage_foreign_key_metadata *metadata,
+  const uchar *key_prefix, size_t key_prefix_size, int *out_exists)
+{
+  *out_exists= 0;
+  if (mylite_foreign_key_is_self_referencing(metadata))
+  {
+    const KEY *parent_key= mylite_find_foreign_key_prefix(
+      child_table, metadata->referenced_column_names, metadata->column_count,
+      metadata->referenced_key_name);
+    if (!parent_key)
+      return HA_ERR_NO_REFERENCED_ROW;
+
+    return mylite_index_prefix_exists(
+      primary_file, metadata->referenced_schema_name,
+      metadata->referenced_table_name,
+      static_cast<uint>(parent_key - child_table->key_info), key_prefix,
+      key_prefix_size, out_exists);
+  }
+
+  THD *thd= current_thd;
+  if (!thd)
+    return HA_ERR_INTERNAL_ERROR;
+
+  Mylite_catalog_table_share parent_share= {};
+  int error= mylite_init_catalog_table_share(
+    thd, primary_file, metadata->referenced_schema_name,
+    metadata->referenced_table_name, &parent_share);
+  if (error)
+    return error;
+
+  const KEY *parent_key= mylite_find_foreign_key_prefix_in_share(
+    &parent_share.share, metadata->referenced_column_names,
+    metadata->column_count, metadata->referenced_key_name, true);
+  if (!parent_key)
+    error= HA_ERR_NO_REFERENCED_ROW;
+  else
+    error= mylite_index_prefix_exists(
+      primary_file, metadata->referenced_schema_name,
+      metadata->referenced_table_name,
+      static_cast<uint>(parent_key - parent_share.share.key_info),
+      key_prefix, key_prefix_size, out_exists);
+
+  mylite_free_catalog_table_share(&parent_share);
+  return error;
+}
+
+static int mylite_parent_foreign_key_child_prefix_exists(
+  const char *primary_file, TABLE *parent_table,
+  const mylite_storage_foreign_key_metadata *metadata,
+  const uchar *key_prefix, size_t key_prefix_size, int *out_exists)
+{
+  *out_exists= 0;
+  if (mylite_foreign_key_is_self_referencing(metadata))
+  {
+    const KEY *child_key= mylite_find_foreign_key_prefix(
+      parent_table, metadata->foreign_column_names, metadata->column_count,
+      NULL);
+    if (!child_key)
+      return HA_ERR_ROW_IS_REFERENCED;
+
+    return mylite_index_prefix_exists(
+      primary_file, metadata->schema_name, metadata->table_name,
+      static_cast<uint>(child_key - parent_table->key_info), key_prefix,
+      key_prefix_size, out_exists);
+  }
+
+  THD *thd= current_thd;
+  if (!thd)
+    return HA_ERR_INTERNAL_ERROR;
+
+  Mylite_catalog_table_share child_share= {};
+  int error= mylite_init_catalog_table_share(
+    thd, primary_file, metadata->schema_name, metadata->table_name,
+    &child_share);
+  if (error)
+    return error;
+
+  const KEY *child_key= mylite_find_foreign_key_prefix_in_share(
+    &child_share.share, metadata->foreign_column_names,
+    metadata->column_count, NULL, false);
+  if (!child_key)
+    error= HA_ERR_ROW_IS_REFERENCED;
+  else
+    error= mylite_index_prefix_exists(
+      primary_file, metadata->schema_name, metadata->table_name,
+      static_cast<uint>(child_key - child_share.share.key_info), key_prefix,
+      key_prefix_size, out_exists);
+
+  mylite_free_catalog_table_share(&child_share);
+  return error;
 }
 
 static const KEY *mylite_find_foreign_key_prefix(
