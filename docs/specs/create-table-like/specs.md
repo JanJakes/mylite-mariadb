@@ -24,6 +24,8 @@ MariaDB base: `mariadb-11.8.6`
   calls `mysql_prepare_alter_table()` to build a cloned `Alter_info`, resets
   the cloned autoincrement value, drops inherited data/index directory
   attributes, and calls `mysql_create_table_no_lock()` for the target table.
+- `mariadb/sql/sql_table.cc:mysql_prepare_alter_table()` rebuilds existing
+  foreign-key metadata into the cloned key list with `key->old = true`.
 - `mariadb/sql/sql_table.cc:Sql_cmd_create_table_like::execute()` routes the
   no-select `CREATE TABLE ... LIKE` branch to `mysql_create_like_table()`;
   `CREATE TABLE ... SELECT` uses a separate `select_create` path.
@@ -32,6 +34,10 @@ MariaDB base: `mariadb-11.8.6`
   `CREATE TABLE ... LIKE` targets would otherwise be cataloged as requested
   `DEFAULT` even when the source table was requested as `InnoDB`, `MyISAM`, or
   `Aria` and routed to effective `MYLITE`.
+- `mariadb/storage/mylite/ha_mylite.cc:mylite_store_foreign_key_definitions()`
+  publishes only new FK definitions and skips `Key::FOREIGN_KEY` entries
+  marked `old`, so `CREATE TABLE ... LIKE` clones table and index shape without
+  copying MyLite FK metadata.
 - MariaDB's `CREATE TABLE` documentation describes `CREATE TABLE ... LIKE` as
   creating an empty table using the same table definition as another table:
   <https://mariadb.com/docs/server/server-usage/tables/create-table>.
@@ -43,6 +49,8 @@ MariaDB base: `mariadb-11.8.6`
 - Clone table definitions, supported primary/unique/secondary indexes,
   bounded BLOB/TEXT prefix indexes, nullable columns, BLOB/TEXT columns, and
   autoincrement declarations.
+- Clone supported FK child-table source shapes without copying FK metadata to
+  the target table.
 - Preserve source requested-engine metadata when the statement does not specify
   a new engine and the source is a MyLite-routed table.
 - Keep target tables empty and reset target autoincrement state.
@@ -58,8 +66,9 @@ MariaDB base: `mariadb-11.8.6`
   `temporary-table-shadowing`.
 - Broader `CREATE OR REPLACE TABLE ... LIKE` edge cases beyond the
   representative successful replacement covered by `create-or-replace-table`.
-- Cloning views, information-schema tables, partitions, foreign keys, triggers,
-  or unsupported index classes.
+- Cloning views, information-schema tables, partitions, triggers, or
+  unsupported index classes.
+- Copying source FK metadata to the target table.
 - SQL rollback, savepoints, or transaction-aware DDL rollback.
 
 ## Design
@@ -87,7 +96,8 @@ shadowing are covered by follow-up slices, and representative failed self-LIKE
 OR REPLACE target preservation is covered by
 `failed-create-or-replace-rollback`. It remains partial because unsupported
 source objects, broader temporary-table variants, broader OR REPLACE variants,
-foreign keys, partitions, and SQL rollback need separate slices.
+partitions, and SQL rollback need separate slices. FK source-table shape
+cloning is covered only for the no-FK-copy behavior.
 
 ## DDL Metadata Routing Impact
 
@@ -125,6 +135,8 @@ logic and smoke-test code; update size measurements after verification.
   - no source row copy and reset autoincrement state;
   - cloned unique and BLOB/TEXT prefix indexes;
   - duplicate-key checks and forced-index lookup on inserted target rows;
+  - FK source child-table clone does not copy FK metadata and allows target
+    rows that would violate the source FK;
   - close/reopen source and clone metadata;
   - durable-sidecar gates.
 - Run dev, embedded-dev, storage-smoke-dev, format, tidy, diff, shell,
@@ -138,6 +150,8 @@ logic and smoke-test code; update size measurements after verification.
   engine when no explicit target engine is specified.
 - Inserted target rows use the cloned key definitions for duplicate checks and
   forced-index reads before and after close/reopen.
+- FK metadata is not copied to LIKE targets, while source FK row checks remain
+  enforced.
 - Compatibility, roadmap, and storage architecture docs describe
   `CREATE TABLE ... LIKE` as partial support with explicit remaining limits.
 
@@ -154,6 +168,8 @@ Implemented in the MyLite handler and storage-engine smoke:
   target, reset target autoincrement, cloned unique and BLOB/TEXT prefix
   indexes, duplicate-key checks, forced-index reads, close/reopen metadata, and
   durable-sidecar gates.
+- Storage-engine smoke covers a FK child source table and verifies LIKE clones
+  do not copy FK metadata while retaining ordinary table/index shape.
 - The `temporary-table-catalog-isolation` slice covers representative
   `CREATE TEMPORARY TABLE ... LIKE` behavior and verifies the SQL-visible
   temporary name does not become a durable user-schema catalog table.

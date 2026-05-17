@@ -8145,10 +8145,17 @@ static void test_create_table_like(void) {
     single_value_context clone_count = {
         .expected_value = "1",
     };
+    single_value_context fk_clone_metadata_count = {
+        .expected_value = "0",
+    };
+    single_value_context reopened_fk_clone_count = {
+        .expected_value = "1",
+    };
     table_context slug_index_rows = {0};
     table_context body_index_rows = {0};
     table_context payload_rows = {0};
     table_context reopened_body_rows = {0};
+    char *fk_clone_sql = NULL;
     char *errmsg = NULL;
 
     assert_exec_succeeds(db, "CREATE DATABASE app");
@@ -8246,12 +8253,53 @@ static void test_create_table_like(void) {
     assert(errmsg == NULL);
     assert(payload_rows.rows == 1);
 
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE like_fk_parent (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE like_fk_source ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT, "
+        "KEY like_fk_source_parent_key (parent_id), "
+        "CONSTRAINT like_fk_source_parent FOREIGN KEY (parent_id) REFERENCES like_fk_parent(id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_foreign_key_exec_fails(db, "INSERT INTO like_fk_source VALUES (1, 999)");
+    assert_exec_succeeds(db, "INSERT INTO like_fk_parent VALUES (7)");
+    assert_exec_succeeds(db, "INSERT INTO like_fk_source VALUES (1, 7)");
+    assert_exec_succeeds(db, "CREATE TABLE like_fk_clone LIKE like_fk_source");
+    assert_catalog_table_count(filename, "app", 5U);
+    fk_clone_sql = capture_show_create_table(db, "like_fk_clone");
+    assert(strstr(fk_clone_sql, "FOREIGN KEY") == NULL);
+    free(fk_clone_sql);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+            "WHERE CONSTRAINT_SCHEMA = 'app' "
+            "AND TABLE_NAME = 'like_fk_clone'",
+            single_value_callback,
+            &fk_clone_metadata_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(fk_clone_metadata_count.rows == 1);
+    assert_exec_succeeds(db, "INSERT INTO like_fk_clone VALUES (1, 999)");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM like_fk_clone FORCE INDEX (like_fk_source_parent_key) "
+        "WHERE parent_id = 999",
+        "1"
+    );
+
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "USE app");
-    assert_catalog_table_count(filename, "app", 2U);
+    assert_catalog_table_count(filename, "app", 5U);
     assert_catalog_table_metadata(filename, "app", "like_source_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "like_clone_posts", "InnoDB", "MYLITE");
     assert(
@@ -8288,6 +8336,26 @@ static void test_create_table_like(void) {
     );
     assert(errmsg == NULL);
     assert(reopened_body_rows.rows == 1);
+    fk_clone_sql = capture_show_create_table(db, "like_fk_clone");
+    assert(strstr(fk_clone_sql, "FOREIGN KEY") == NULL);
+    free(fk_clone_sql);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM like_fk_clone WHERE parent_id = 999",
+            single_value_callback,
+            &reopened_fk_clone_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_fk_clone_count.rows == 1);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM like_fk_clone FORCE INDEX (like_fk_source_parent_key) "
+        "WHERE parent_id = 999",
+        "1"
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 

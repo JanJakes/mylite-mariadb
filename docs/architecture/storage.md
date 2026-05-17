@@ -73,10 +73,12 @@ missing DROP/RENAME targets through MariaDB's warning semantics while applying
 existing routed-table catalog mutations in the same statement. Copy `ALTER`
 rebuilds use MariaDB's table-copy path and append rebuilt table definitions,
 rows, and supported index entries inside the primary file. `CREATE TABLE ...
-LIKE` uses MariaDB's clone-definition
-path and publishes an empty MyLite catalog record with source requested-engine
-metadata preserved. Online `ALTER`, in-place `ALTER`, transaction-aware index
-maintenance, free-space reclamation, and unsupported index classes still reject
+LIKE` uses MariaDB's clone-definition path and publishes an empty MyLite catalog
+record with source requested-engine metadata preserved. FK child source tables
+clone their ordinary table and index shape, but MyLite does not copy source FK
+metadata to the LIKE target. Online `ALTER`, in-place `ALTER`,
+transaction-aware index maintenance, free-space reclamation, and unsupported
+index classes still reject
 or remain planned until those slices define the paths. Standalone
 `CREATE INDEX` and `DROP INDEX` use MariaDB's ALTER-backed DDL path for
 supported copy-rebuild index additions and drops, including representative
@@ -272,7 +274,9 @@ MyLite has locking and recovery.
 `CREATE TABLE ... LIKE` clones supported routed source table definitions through
 MariaDB's normal LIKE path, does not copy rows, resets target autoincrement
 state, and records the source requested engine with effective `MYLITE` when the
-statement has no explicit engine.
+statement has no explicit engine. When the source table is a supported FK child,
+the cloned target keeps the ordinary columns and supporting indexes, but source
+FK metadata is not copied into MyLite's FK catalog.
 Successful supported `CREATE TABLE ... SELECT` uses MariaDB's `select_create`
 path to derive or open the target definition and then inserts result rows
 through MyLite's normal `write_row()` path, including projections that read
