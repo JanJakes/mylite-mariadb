@@ -43,8 +43,9 @@ full InnoDB compatibility.
 Generated FK child keys remain ordinary MyLite secondary indexes for storage
 purposes. Hidden long-unique hash keys, MySQL-style expression indexes,
 generated primary keys, cascades, `SET NULL`, `SET DEFAULT`, generated-key
-cleanup, session `foreign_key_checks=0` row-check bypass, and full
-`HTON_SUPPORTS_FOREIGN_KEYS` advertising remain out of scope for this slice.
+cleanup, session `foreign_key_checks=0` row-check bypass, and
+`HTON_SUPPORTS_FOREIGN_KEYS` advertising remain out of scope for this slice and
+are handled by later FK lifecycle slices.
 
 ## Design
 

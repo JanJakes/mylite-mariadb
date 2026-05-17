@@ -12,7 +12,9 @@ hooks without relying on InnoDB's dictionary or persistent sidecars.
 
 - Accepting `CREATE TABLE` or `ALTER TABLE` foreign-key DDL through
   `libmylite`.
-- Advertising `HTON_SUPPORTS_FOREIGN_KEYS` from the MyLite handler.
+- Advertising `HTON_SUPPORTS_FOREIGN_KEYS` from the MyLite handler. That later
+  review point is covered by
+  [Foreign-Key Handlerton Advertising](../foreign-key-handlerton-advertising/specs.md).
 - Enforcing child/parent row checks or cascading actions.
 - Designing `foreign_key_checks=0` import behavior.
 - Reusing native InnoDB dictionary, redo, undo, or tablespace files.
@@ -28,7 +30,7 @@ MariaDB base: `mariadb-11.8.6`
   used by `SHOW CREATE TABLE`, information schema, and FK-aware DDL checks.
 - `mariadb/sql/handler.h` defines the FK handler hooks and
   `HTON_SUPPORTS_FOREIGN_KEYS`; MyLite must not advertise that bit until
-  metadata hooks and enforcement agree.
+  metadata hooks, enforcement, and retained supporting-key validation agree.
 - `mariadb/sql/sql_table.cc:fk_prepare_copy_alter_table()` depends on child and
   parent FK metadata during copy ALTER.
 - `mariadb/storage/innobase/handler/ha_innodb.cc` persists FK definitions in

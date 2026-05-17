@@ -40,6 +40,11 @@ MariaDB base: `mariadb-11.8.6`
 - `mariadb/sql/sql_table.cc:fk_prepare_copy_alter_table()` still performs
   column drop, rename, and significant type-change checks for retained child
   and parent FK columns regardless of the handlerton bit.
+- `mariadb/sql/sql_table.cc:mysql_alter_table()` also handles `CREATE INDEX`
+  and `DROP INDEX`. When an ALTER is not forced to copy, MariaDB asks
+  `handler::check_if_supported_inplace_alter()` whether the engine can use the
+  old in-place index path. MyLite must reject in-place ALTER so retained FK key
+  validation always runs through the copy path.
 - `mariadb/sql/sql_truncate.cc` rejects `TRUNCATE TABLE` on parent tables by
   using `referenced_by_foreign_key()` and `get_parent_foreign_key_list()`.
 - `mariadb/sql/sql_base.cc:prepare_fk_prelocking_list()` uses parent FK
@@ -71,7 +76,8 @@ InnoDB:
 ## Design
 
 Set `HTON_SUPPORTS_FOREIGN_KEYS` in the MyLite handlerton only after adding
-handler-side retained-FK key validation.
+handler-side retained-FK key validation and explicitly rejecting in-place ALTER
+from the MyLite handler.
 
 The validation runs from `ha_mylite::create()` during copy `ALTER`, before the
 rebuilt table definition is stored:
@@ -92,6 +98,9 @@ rebuilt table definition is stored:
 4. Keep generated supporting-key cleanup behavior intact: dropping a generated
    child key is allowed only when the rebuilt table contains another supported
    child key prefix for the retained FK.
+5. Override `ha_mylite::check_if_supported_inplace_alter()` to return
+   `HA_ALTER_INPLACE_NOT_SUPPORTED`, so default standalone index DDL also uses
+   the copy path and cannot bypass retained-FK key validation.
 
 ## Affected Subsystems
 

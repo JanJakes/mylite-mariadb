@@ -101,7 +101,9 @@ three implementation steps.
 3. Enable a narrow `RESTRICT` / `NO ACTION` FK subset.
    - Remove the public SQL rejection only for supported FK DDL shapes.
    - Keep `HTON_SUPPORTS_FOREIGN_KEYS` as a separate review point after the
-     handler can persist metadata and enforce the covered row checks.
+     handler can persist metadata, enforce the covered row checks, and validate
+     retained FK supporting keys. That follow-up is covered by
+     [Foreign-Key Handlerton Advertising](../foreign-key-handlerton-advertising/specs.md).
    - Validate parent table existence, referenced key existence, column count,
      type/collation compatibility, and supported key shapes before catalog
      publication.

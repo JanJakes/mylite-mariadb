@@ -12,7 +12,10 @@ slices do not depend on InnoDB's dictionary or persistent sidecars.
 
 - Accepting `CREATE TABLE` or `ALTER TABLE` foreign-key DDL through
   `libmylite`.
-- Advertising `HTON_SUPPORTS_FOREIGN_KEYS` from the MyLite handlerton.
+- Advertising `HTON_SUPPORTS_FOREIGN_KEYS` from the MyLite handlerton. This
+  was deliberately left to the later
+  [Foreign-Key Handlerton Advertising](../foreign-key-handlerton-advertising/specs.md)
+  slice after public FK DDL, row checks, and retained-key validation existed.
 - Enforcing child/parent row existence checks, restrict checks, cascading
   actions, or `foreign_key_checks=0` import semantics.
 - Implementing statement-scoped table-plus-FK publication for inline
@@ -152,7 +155,9 @@ native InnoDB dictionary or FK code is reintroduced.
 - Retained FK metadata survives covered copy ALTER rebuilds and rejects
   copy-ALTER attempts to remove FK columns or the last supporting child/parent
   key.
-- `HTON_SUPPORTS_FOREIGN_KEYS` remains clear and FK DDL remains rejected.
+- `HTON_SUPPORTS_FOREIGN_KEYS` remains clear and FK DDL remains rejected for
+  this metadata-only slice. Later slices enable public FK DDL and the
+  handlerton advertisement for the covered subset.
 - FK metadata remains single-file and does not rely on InnoDB dictionary state
   or persistent MariaDB sidecars.
 

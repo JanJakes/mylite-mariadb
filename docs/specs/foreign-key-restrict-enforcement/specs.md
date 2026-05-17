@@ -16,7 +16,9 @@ shapes:
 
 - Accepting `CREATE TABLE` or `ALTER TABLE` foreign-key DDL through
   `libmylite`.
-- Advertising `HTON_SUPPORTS_FOREIGN_KEYS`.
+- Advertising `HTON_SUPPORTS_FOREIGN_KEYS`. That later review point is covered
+  by
+  [Foreign-Key Handlerton Advertising](../foreign-key-handlerton-advertising/specs.md).
 - Cascading actions, `SET NULL`, `SET DEFAULT`, deferrable checks, dump-import
   `foreign_key_checks=0` semantics, or self-referential statement ordering.
 - Cross-file references, partitioned tables, unsupported index classes, or

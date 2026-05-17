@@ -22,7 +22,9 @@ FK child keys:
   KEY`.
 - Cascades, `SET NULL`, `SET DEFAULT`, deferrable constraints, or full InnoDB
   FK behavior.
-- Advertising `HTON_SUPPORTS_FOREIGN_KEYS`.
+- Advertising `HTON_SUPPORTS_FOREIGN_KEYS`. That later review point is covered
+  by
+  [Foreign-Key Handlerton Advertising](../foreign-key-handlerton-advertising/specs.md).
 - Free-space reclamation for orphaned index-entry pages after copy rebuilds or
   index drops.
 - Durable DDL inside active MyLite transactions.
@@ -53,7 +55,9 @@ MariaDB base: `mariadb-11.8.6`
 - `mariadb/storage/mylite/ha_mylite.cc:mylite_key_is_supported()` accepts
   `HA_GENERATED_KEY` when the rest of the key shape is supported, while
   `mylite_validate_foreign_key_shape()` still rejects dropping the last
-  supporting key for retained FK metadata through MariaDB's copy-ALTER checks.
+  supporting key for retained FK metadata through MariaDB's copy-ALTER checks
+  before MyLite takes over that retained-key validation in the later
+  handlerton-advertising slice.
 
 ## Compatibility Impact
 

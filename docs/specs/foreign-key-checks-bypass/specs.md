@@ -53,8 +53,8 @@ behavior: applications may disable checks, import child rows before parent
 rows, and re-enable checks without existing orphan rows being revalidated.
 
 Compatibility remains partial. Unsupported FK actions, temporary-table FK DDL,
-full HTON FK advertising, generated supporting-key cleanup, and broader DDL
-effects remain out of scope.
+generated supporting-key cleanup, handlerton FK advertising, and broader DDL
+effects remain out of scope for this row-DML bypass slice.
 
 ## Design
 

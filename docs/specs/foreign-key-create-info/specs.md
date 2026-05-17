@@ -11,7 +11,9 @@ later DDL publication and enforcement slices can safely accept FK SQL.
 
 - Accepting `CREATE TABLE` or `ALTER TABLE` foreign-key DDL through
   `libmylite`.
-- Advertising `HTON_SUPPORTS_FOREIGN_KEYS`.
+- Advertising `HTON_SUPPORTS_FOREIGN_KEYS`. That later review point is covered
+  by
+  [Foreign-Key Handlerton Advertising](../foreign-key-handlerton-advertising/specs.md).
 - Enforcing child/parent row existence checks, restrict checks, cascading
   actions, or `foreign_key_checks=0` import semantics.
 - Implementing FK-aware index drop/change checks.
@@ -100,7 +102,9 @@ limited to formatting helpers.
 - Identifier quoting follows MariaDB SQL mode behavior through
   `append_identifier()`.
 - Public FK SQL publication is covered by the later DDL publication slice, and
-  `HTON_SUPPORTS_FOREIGN_KEYS` remains clear.
+  `HTON_SUPPORTS_FOREIGN_KEYS` remains clear for this create-info slice. Later
+  slices enable public FK DDL and handlerton advertising for the covered
+  subset.
 - FK metadata remains single-file and does not rely on InnoDB dictionary state
   or persistent MariaDB sidecars.
 

@@ -98,9 +98,11 @@ statements. The subset requires durable MyLite-routed base tables, explicit or
 MariaDB-generated supported child key prefixes, exact unique parent keys, and
 immediate `RESTRICT` / `NO ACTION` semantics. The storage layer stores typed FK
 blob pages, supports child and parent FK listing, exposes handler metadata and
-`SHOW CREATE TABLE` hooks, preserves retained metadata across MariaDB's
-internal old-table backup rename, and performs FK-aware column/supporting-key
-checks plus immediate child/parent row checks. Supported copy
+`SHOW CREATE TABLE` hooks, advertises MyLite's covered FK subset through the
+MariaDB handlerton, preserves retained metadata across MariaDB's internal
+old-table backup rename, and performs FK-aware column/supporting-key checks
+with handler-owned retained supporting-key validation plus immediate
+child/parent row checks. Supported copy
 `ALTER TABLE ... DROP FOREIGN KEY` removes FK metadata from the primary file
 and disables the dropped constraint's row checks across close/reopen. Session
 `foreign_key_checks=0` disables supported FK row checks without retrospective

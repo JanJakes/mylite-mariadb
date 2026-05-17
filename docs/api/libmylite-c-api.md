@@ -192,7 +192,8 @@ with virtual values computed from restored row buffers and stored values kept
 in normal MyLite row payloads. The public foreign-key subset supports
 validated `RESTRICT` / `NO ACTION` `CREATE TABLE`, copy
 `ALTER TABLE ... ADD FOREIGN KEY`, and `ALTER TABLE ... DROP FOREIGN KEY`
-metadata over durable routed base tables. Session `foreign_key_checks=0`
+metadata over durable routed base tables and is advertised to MariaDB through
+the MyLite handlerton for that documented subset. Session `foreign_key_checks=0`
 disables supported FK row checks without revalidating existing rows when checks
 are re-enabled. MariaDB-generated FK child keys follow copy-ALTER cleanup when
 explicit compatible keys replace them or when no-longer-needed retained indexes

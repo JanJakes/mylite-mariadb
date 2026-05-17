@@ -1658,6 +1658,8 @@ static void test_transaction_and_foreign_key_policies(void) {
     );
     assert(errmsg == NULL);
     assert(child_count.rows == 1);
+    assert_exec_fails(db, "ALTER TABLE fk_child DROP KEY fk_child_parent_id, ALGORITHM=COPY");
+    assert_exec_fails(db, "ALTER TABLE fk_parent DROP PRIMARY KEY, ALGORITHM=COPY");
 
     assert(mylite_close(db) == MYLITE_OK);
     db = open_database_with_filename(root, filename);

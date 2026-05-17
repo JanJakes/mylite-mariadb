@@ -170,6 +170,21 @@ static int mylite_validate_foreign_key_definitions(
   const char *primary_file, const char *logical_schema_name,
   const char *logical_table_name, TABLE *form, HA_CREATE_INFO *create_info,
   bool volatile_or_discarded_rows);
+static int mylite_validate_retained_foreign_keys(
+  const char *primary_file, const char *logical_schema_name,
+  const char *logical_table_name, TABLE *form, HA_CREATE_INFO *create_info);
+static int mylite_validate_retained_child_foreign_key(
+  void *ctx, const mylite_storage_foreign_key_metadata *metadata);
+static int mylite_validate_retained_parent_foreign_key(
+  void *ctx, const mylite_storage_foreign_key_metadata *metadata);
+static bool mylite_alter_drops_foreign_key(
+  HA_CREATE_INFO *create_info,
+  const mylite_storage_foreign_key_metadata *metadata);
+static bool mylite_foreign_key_is_self_referencing(
+  const mylite_storage_foreign_key_metadata *metadata);
+static int mylite_reject_dropped_foreign_key_supporting_key(
+  const mylite_storage_foreign_key_metadata *metadata,
+  const char *fallback_key_name);
 static int mylite_store_foreign_key_definitions(
   const char *primary_file, const char *storage_schema_name,
   const char *storage_table_name, const char *logical_schema_name,
@@ -377,6 +392,7 @@ static int mylite_init_func(void *p)
   mylite_hton->close_connection= mylite_close_connection;
   mylite_hton->commit= mylite_commit;
   mylite_hton->rollback= mylite_rollback;
+  mylite_hton->flags|= HTON_SUPPORTS_FOREIGN_KEYS;
   mylite_hton->tablefile_extensions= ha_mylite_exts;
   mylite_register_schema_hooks(&mylite_schema_hooks);
 
@@ -508,6 +524,13 @@ struct Mylite_foreign_key_row_check_context
   TABLE *table;
   const uchar *old_data;
   const uchar *new_data;
+  int error;
+};
+
+struct Mylite_retained_foreign_key_validation_context
+{
+  TABLE *table;
+  HA_CREATE_INFO *create_info;
   int error;
 };
 
@@ -2028,6 +2051,12 @@ bool ha_mylite::referenced_by_foreign_key() const noexcept
   return ctx.found || result != MYLITE_STORAGE_OK;
 }
 
+enum_alter_inplace_result ha_mylite::check_if_supported_inplace_alter(
+  TABLE *, Alter_inplace_info *)
+{
+  return HA_ALTER_INPLACE_NOT_SUPPORTED;
+}
+
 int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info)
 {
   DBUG_ENTER("ha_mylite::create");
@@ -2089,9 +2118,22 @@ int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info
                          sizeof(display_engine_name)))
     DBUG_RETURN(HA_ERR_UNSUPPORTED);
 
-  const char *logical_schema_name= form && form->s && form->s->db.str ?
-    form->s->db.str : schema_name;
-  const char *logical_table_name= form && form->s && form->s->table_name.str ?
+  const bool rebuild_existing_table_command=
+    thd && thd->lex &&
+    (thd->lex->sql_command == SQLCOM_ALTER_TABLE ||
+     thd->lex->sql_command == SQLCOM_CREATE_INDEX ||
+     thd->lex->sql_command == SQLCOM_DROP_INDEX);
+  TABLE *alter_original_table= rebuild_existing_table_command ?
+    thd->lex->alter_info.original_table : NULL;
+  const char *logical_schema_name=
+    alter_original_table && alter_original_table->s &&
+    alter_original_table->s->db.str ? alter_original_table->s->db.str :
+    form && form->s && form->s->db.str ? form->s->db.str : schema_name;
+  const char *logical_table_name=
+    alter_original_table && alter_original_table->s &&
+    alter_original_table->s->table_name.str ?
+    alter_original_table->s->table_name.str :
+    form && form->s && form->s->table_name.str ?
     form->s->table_name.str : table_name;
   const bool foreign_key_unsupported_rows=
     temporary_table || requested_engine_discards_rows || use_volatile_rows;
@@ -2101,6 +2143,12 @@ int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info
       create_info, foreign_key_unsupported_rows);
   if (foreign_key_validation_error)
     DBUG_RETURN(foreign_key_validation_error);
+  const int retained_foreign_key_validation_error=
+    mylite_validate_retained_foreign_keys(
+      primary_file, logical_schema_name, logical_table_name, form,
+      create_info);
+  if (retained_foreign_key_validation_error)
+    DBUG_RETURN(retained_foreign_key_validation_error);
 
   if (!temporary_table)
   {
@@ -3075,6 +3123,119 @@ static int mylite_validate_foreign_key_definitions(
       return error;
   }
   return 0;
+}
+
+static int mylite_validate_retained_foreign_keys(
+  const char *primary_file, const char *logical_schema_name,
+  const char *logical_table_name, TABLE *form, HA_CREATE_INFO *create_info)
+{
+  THD *thd= current_thd;
+  if (!thd || !thd->lex ||
+      (thd->lex->sql_command != SQLCOM_ALTER_TABLE &&
+       thd->lex->sql_command != SQLCOM_CREATE_INDEX &&
+       thd->lex->sql_command != SQLCOM_DROP_INDEX) ||
+      !create_info || !create_info->alter_info)
+    return 0;
+
+  Mylite_retained_foreign_key_validation_context ctx=
+    {form, create_info, 0};
+  mylite_storage_result result=
+    mylite_storage_list_foreign_keys(
+      primary_file, logical_schema_name, logical_table_name,
+      mylite_validate_retained_child_foreign_key, &ctx);
+  if (ctx.error)
+    return ctx.error;
+  if (result != MYLITE_STORAGE_OK)
+    return mylite_storage_to_handler_error(result);
+
+  result= mylite_storage_list_parent_foreign_keys(
+    primary_file, logical_schema_name, logical_table_name,
+    mylite_validate_retained_parent_foreign_key, &ctx);
+  if (ctx.error)
+    return ctx.error;
+  return mylite_storage_to_handler_error(result);
+}
+
+static int mylite_validate_retained_child_foreign_key(
+  void *ctx, const mylite_storage_foreign_key_metadata *metadata)
+{
+  Mylite_retained_foreign_key_validation_context *validation_ctx=
+    static_cast<Mylite_retained_foreign_key_validation_context *>(ctx);
+  if (mylite_alter_drops_foreign_key(validation_ctx->create_info, metadata))
+    return 0;
+
+  const KEY *key= mylite_find_foreign_key_prefix(
+    validation_ctx->table, metadata->foreign_column_names,
+    metadata->column_count, NULL);
+  if (key)
+    return 0;
+
+  validation_ctx->error=
+    mylite_reject_dropped_foreign_key_supporting_key(
+      metadata, metadata->constraint_name);
+  return 1;
+}
+
+static int mylite_validate_retained_parent_foreign_key(
+  void *ctx, const mylite_storage_foreign_key_metadata *metadata)
+{
+  Mylite_retained_foreign_key_validation_context *validation_ctx=
+    static_cast<Mylite_retained_foreign_key_validation_context *>(ctx);
+  if (mylite_foreign_key_is_self_referencing(metadata) &&
+      mylite_alter_drops_foreign_key(validation_ctx->create_info, metadata))
+    return 0;
+
+  const KEY *key= mylite_find_foreign_key_prefix(
+    validation_ctx->table, metadata->referenced_column_names,
+    metadata->column_count, metadata->referenced_key_name);
+  if (key && (key->flags & HA_NOSAME) &&
+      key->user_defined_key_parts == metadata->column_count)
+    return 0;
+
+  validation_ctx->error=
+    mylite_reject_dropped_foreign_key_supporting_key(
+      metadata, metadata->referenced_key_name);
+  return 1;
+}
+
+static bool mylite_alter_drops_foreign_key(
+  HA_CREATE_INFO *create_info,
+  const mylite_storage_foreign_key_metadata *metadata)
+{
+  if (!create_info || !create_info->alter_info || !metadata ||
+      !metadata->constraint_name)
+    return false;
+
+  LEX_CSTRING constraint_name=
+    {metadata->constraint_name, strlen(metadata->constraint_name)};
+  List_iterator_fast<Alter_drop> drop_it(create_info->alter_info->drop_list);
+  while (Alter_drop *drop= drop_it++)
+  {
+    if (drop->type == Alter_drop::FOREIGN_KEY &&
+        Lex_ident_column(constraint_name).streq(drop->name))
+      return true;
+  }
+  return false;
+}
+
+static bool mylite_foreign_key_is_self_referencing(
+  const mylite_storage_foreign_key_metadata *metadata)
+{
+  return metadata && metadata->schema_name && metadata->table_name &&
+         metadata->referenced_schema_name && metadata->referenced_table_name &&
+         strcmp(metadata->schema_name, metadata->referenced_schema_name) == 0 &&
+         strcmp(metadata->table_name, metadata->referenced_table_name) == 0;
+}
+
+static int mylite_reject_dropped_foreign_key_supporting_key(
+  const mylite_storage_foreign_key_metadata *metadata,
+  const char *fallback_key_name)
+{
+  const char *key_name= fallback_key_name && fallback_key_name[0] ?
+    fallback_key_name :
+    metadata && metadata->constraint_name ? metadata->constraint_name : "";
+  my_error(ER_DROP_INDEX_FK, MYF(0), key_name);
+  return HA_ERR_UNSUPPORTED;
 }
 
 static int mylite_store_foreign_key_definitions(

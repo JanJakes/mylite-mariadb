@@ -137,7 +137,9 @@ The publication slice is implemented with the following behavior.
    - Continue to reject unsupported FK actions, volatile FK tables, partitions,
      and unsupported key shapes before durable publication.
    - Keep `HTON_SUPPORTS_FOREIGN_KEYS` disabled until the SQL-layer side
-     effects of advertising it have been reviewed separately.
+     effects of advertising it have been reviewed separately. That follow-up is
+     covered by
+     [Foreign-Key Handlerton Advertising](../foreign-key-handlerton-advertising/specs.md).
 
 ## File Lifecycle
 
@@ -195,7 +197,8 @@ before acceptance.
   the current smallest validation bridge. It still needs broader charset,
   collation, and size-impact evidence before the subset is widened.
 - Advertising `HTON_SUPPORTS_FOREIGN_KEYS` may change SQL-layer ALTER, DROP,
-  TRUNCATE, and prelocking behavior; it should stay a separate review point.
+  TRUNCATE, and prelocking behavior; the follow-up handlerton-advertising
+  slice owns that review point.
 - `foreign_key_checks=0` is common in dumps. The row-DML bypass is handled by
   a separate slice, while broader dump/import semantics remain outside the
   first public FK DDL publication subset.

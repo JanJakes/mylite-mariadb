@@ -15,7 +15,9 @@ and no longer participates in child or parent row checks after close/reopen.
 - Cascades, `SET NULL`, `SET DEFAULT`, and full InnoDB FK behavior.
 - Disabling FK row checks through `foreign_key_checks=0`, which belongs to a
   separate row-check slice.
-- Advertising `HTON_SUPPORTS_FOREIGN_KEYS`.
+- Advertising `HTON_SUPPORTS_FOREIGN_KEYS`. That later review point is covered
+  by
+  [Foreign-Key Handlerton Advertising](../foreign-key-handlerton-advertising/specs.md).
 - Automatically dropping child supporting indexes when a FK is dropped.
   MariaDB's rebuilt table definition remains the authority for retained keys;
   generated-key cleanup belongs to a separate compatibility slice.

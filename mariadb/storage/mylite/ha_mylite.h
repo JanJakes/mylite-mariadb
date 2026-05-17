@@ -146,6 +146,8 @@ public:
   int get_parent_foreign_key_list(THD *thd,
                                   List<FOREIGN_KEY_INFO> *f_key_list) override;
   bool referenced_by_foreign_key() const noexcept override;
+  enum_alter_inplace_result check_if_supported_inplace_alter(
+    TABLE *altered_table, Alter_inplace_info *ha_alter_info) override;
   int create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) override;
   int delete_table(const char *name) override;
   int rename_table(const char *from, const char *to) override;
