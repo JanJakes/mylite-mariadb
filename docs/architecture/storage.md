@@ -131,13 +131,14 @@ update/delete ordering checks cover failed-statement rollback when an earlier
 unreferenced parent row was processed before a later referenced parent row.
 Representative multi-table update/delete ordering checks cover parent-first
 rejection and child-first success when the target-table order is forced.
-Bounded self-referencing and non-self `ON DELETE SET NULL` /
-`ON UPDATE SET NULL` actions are supported for simple durable tables with
-nullable child FK columns and no BLOB/TEXT or generated columns; the handler
-mutates matching child rows and their index entries before deleting or updating
-the parent row.
+Bounded self-referencing, same-row self-referencing, and non-self
+`ON DELETE SET NULL` / `ON UPDATE SET NULL` actions are supported for simple
+durable tables with nullable child FK columns and no BLOB/TEXT or generated
+columns; the handler mutates matching child rows or the current same-row update
+buffer before deleting or updating the parent row.
 Broader exhaustive multi-table matrices, deferrable set-wide validation,
-same-row update actions, cascades, and `SET DEFAULT` remain planned.
+explicit same-row action override matrices, cascades, and `SET DEFAULT` remain
+planned.
 Partition DDL remains rejected at the `libmylite` boundary until MyLite has
 partition metadata, partition-to-primary-file routing, per-partition catalog
 lifecycle, and partition-aware row and index maintenance.

@@ -29,6 +29,11 @@ MariaDB base: `mariadb-11.8.6`
 - `mariadb/sql/field.h:Field::set_null()` supports setting a nullable field in
   a specific record buffer by passing a row offset, which lets MyLite update
   the `new_data` record buffer before index preparation.
+- MyLite parent FK checks inspect the still-live old index entries before the
+  current row update is published. The parent check therefore must ignore the
+  current self-referencing row only when the new child key no longer references
+  the old parent key; external child rows and unchanged self-restrict cases
+  must still block the update.
 
 Official MariaDB documentation describes `SET NULL` as a storage-engine FK
 action and requires nullable child columns:
@@ -81,7 +86,11 @@ should list parent FK metadata for the updated table. For each self-referencing
 
 The existing update path then recomputes index entries and row payload from the
 rewritten `new_data`, runs duplicate-key and child-FK checks over that buffer,
-applies other parent actions, and performs the normal parent checks.
+applies other parent actions, and performs the normal parent checks. During
+those parent checks, self-referencing FK lookup skips the current row id only
+when the updated child key is `NULL` or rewritten to a different key. That
+prevents the old same-row child index entry from blocking its own update while
+preserving external-child rejection.
 
 ## Compatibility Impact
 
@@ -110,6 +119,8 @@ change is introduced.
 - Verify the behavior survives close/reopen.
 - Keep coverage where explicit child-key rewrites to a valid parent continue to
   work through ordinary immediate checks.
+- Keep the existing parent-check ordering coverage passing so external children
+  still reject parent-key updates after the current row is ignored.
 - Run the storage-smoke archive rebuild, focused storage-engine smoke binary,
   `ctest --preset storage-smoke-dev`, `ctest --preset dev`, and
   `git diff --check`.

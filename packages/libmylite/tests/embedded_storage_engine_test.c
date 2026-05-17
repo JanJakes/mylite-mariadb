@@ -2615,6 +2615,31 @@ static void test_foreign_key_self_set_null_update(void) {
         "SELECT COUNT(*) FROM fk_set_null_update_tree WHERE id = 4 AND parent_id IS NULL",
         "1"
     );
+    assert_exec_succeeds(db, "INSERT INTO fk_set_null_update_tree VALUES (30, 30, 'same row')");
+    assert_exec_succeeds(db, "UPDATE fk_set_null_update_tree SET id = 300 WHERE id = 30");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_set_null_update_tree "
+        "WHERE id = 300 AND parent_id IS NULL",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_set_null_update_tree "
+        "FORCE INDEX (fk_set_null_update_tree_parent) WHERE parent_id = 30",
+        "0"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_set_null_update_tree VALUES (40, 40, 'explicit rewrite')");
+    assert_exec_succeeds(
+        db,
+        "UPDATE fk_set_null_update_tree SET id = 400, parent_id = 20 WHERE id = 40"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_set_null_update_tree "
+        "WHERE id = 400 AND parent_id = 20",
+        "1"
+    );
 
     assert_exec_succeeds(
         db,
@@ -2687,6 +2712,18 @@ static void test_foreign_key_self_set_null_update(void) {
         "SELECT id FROM fk_set_null_update_tree FORCE INDEX (fk_set_null_update_tree_parent) "
         "WHERE parent_id = 10",
         "5"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_set_null_update_tree "
+        "WHERE id = 300 AND parent_id IS NULL",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_set_null_update_tree "
+        "WHERE id = 400 AND parent_id = 20",
+        "1"
     );
 
     assert(mylite_close(db) == MYLITE_OK);
