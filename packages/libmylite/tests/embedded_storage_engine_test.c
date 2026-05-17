@@ -6432,7 +6432,7 @@ static void test_autoincrement_key_policy(void) {
     assert_catalog_table_count(filename, "auto_policy", 1U);
     assert_catalog_table_metadata(filename, "auto_policy", "single_auto_posts", "InnoDB", "MYLITE");
 
-    assert_exec_fails(
+    assert_exec_succeeds(
         db,
         "CREATE TABLE compound_auto_first ("
         "id INT NOT NULL AUTO_INCREMENT,"
@@ -6440,11 +6440,34 @@ static void test_autoincrement_key_policy(void) {
         "PRIMARY KEY (id, category)"
         ") ENGINE=InnoDB"
     );
-    assert(
-        mylite_storage_table_exists(filename, "auto_policy", "compound_auto_first") ==
-        MYLITE_STORAGE_NOTFOUND
+    assert_exec_succeeds(db, "INSERT INTO compound_auto_first (category) VALUES (7), (7), (8)");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM compound_auto_first WHERE category = 7 ORDER BY id LIMIT 1",
+        "1"
     );
-    assert_catalog_table_count(filename, "auto_policy", 1U);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM compound_auto_first WHERE category = 7 ORDER BY id DESC LIMIT 1",
+        "2"
+    );
+    assert_query_single_value(db, "SELECT id FROM compound_auto_first WHERE category = 8", "3");
+    assert_exec_fails(db, "INSERT INTO compound_auto_first VALUES (1, 7)");
+    assert_exec_succeeds(db, "INSERT INTO compound_auto_first VALUES (10, 9)");
+    assert_exec_succeeds(db, "INSERT INTO compound_auto_first (category) VALUES (9)");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM compound_auto_first WHERE category = 9 ORDER BY id DESC LIMIT 1",
+        "11"
+    );
+    assert_catalog_table_count(filename, "auto_policy", 2U);
+    assert_catalog_table_metadata(
+        filename,
+        "auto_policy",
+        "compound_auto_first",
+        "InnoDB",
+        "MYLITE"
+    );
 
     assert_exec_fails(
         db,
@@ -6459,7 +6482,26 @@ static void test_autoincrement_key_policy(void) {
         mylite_storage_table_exists(filename, "auto_policy", "grouped_auto_posts") ==
         MYLITE_STORAGE_NOTFOUND
     );
-    assert_catalog_table_count(filename, "auto_policy", 1U);
+    assert_catalog_table_count(filename, "auto_policy", 2U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE auto_policy");
+    assert_catalog_table_count(filename, "auto_policy", 2U);
+    assert_exec_succeeds(db, "INSERT INTO compound_auto_first (category) VALUES (10)");
+    assert_query_single_value(db, "SELECT id FROM compound_auto_first WHERE category = 10", "12");
+    assert_exec_fails(
+        db,
+        "CREATE TABLE grouped_auto_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (category, id)"
+        ") ENGINE=Aria"
+    );
+    assert_catalog_table_count(filename, "auto_policy", 2U);
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");

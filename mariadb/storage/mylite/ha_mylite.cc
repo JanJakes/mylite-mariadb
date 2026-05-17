@@ -2697,8 +2697,8 @@ static bool mylite_table_supports_auto_increment(TABLE *table)
   for (uint i= 0; i < table->s->keys; ++i)
   {
     const KEY *key= table->key_info + i;
-    if (key->user_defined_key_parts == 1 && key->key_part &&
-        key->key_part->field == auto_field)
+    if (key->user_defined_key_parts > 0 && key->key_part &&
+        key->key_part[0].field == auto_field)
       return true;
   }
 

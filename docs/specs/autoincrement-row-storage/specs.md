@@ -61,9 +61,10 @@ Add a bounded MyLite autoincrement path:
   MySQL/MariaDB expectations; MyLite does not promise gapless sequences.
 - Permit writes for tables whose only key is a single-part key over the
   `AUTO_INCREMENT` column. The follow-up general-index slices allow additional
-  supported keys when the autoincrement column still has a complete
-  single-column key, and `autoincrement-key-policy` keeps compound-only
-  autoincrement definitions rejected.
+  supported keys when the autoincrement column has a supported first-key
+  position. The `autoincrement-first-key-compound` slice allows first-key
+  compound definitions, while `autoincrement-key-policy` keeps grouped
+  later-in-key autoincrement definitions rejected.
 - Check duplicate values for that single autoincrement key by scanning existing
   raw row images and comparing the auto field through MariaDB's `Field`
   object. This is a narrow duplicate gate, not general index support.
@@ -77,8 +78,9 @@ ids, and old autoincrement state pages are ignored like old row pages.
 ## Non-Goals
 
 - General primary-key, unique-key, secondary-index, or ordered-index reads.
-- Compound autoincrement allocation semantics. Compound-only definitions are
-  explicitly rejected by `autoincrement-key-policy`.
+- Grouped per-prefix autoincrement allocation semantics. First-key compound
+  definitions are covered by `autoincrement-first-key-compound`, while
+  later-in-key grouped definitions are explicitly rejected.
 - `ALTER TABLE ... AUTO_INCREMENT=N`; `TRUNCATE TABLE` reset is handled by the
   truncate table lifecycle slice.
 - Transaction rollback of consumed autoincrement values.
@@ -173,9 +175,10 @@ Implemented in the storage package and MyLite handler:
   sidecar absence.
 - The truncate table lifecycle slice resets autoincrement to the first
   generated value during `TRUNCATE TABLE`.
-- The autoincrement key policy slice allows additional supported keys when the
-  autoincrement column has a complete single-column key and rejects
-  compound-only autoincrement definitions before catalog publication.
+- The autoincrement key policy slices allow additional supported keys when the
+  autoincrement column has a supported first-key position, including first-key
+  compound definitions, and reject grouped later-in-key autoincrement
+  definitions before catalog publication.
 
 ## Risks
 

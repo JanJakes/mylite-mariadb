@@ -89,8 +89,9 @@ index invariants.
 
 ## Non-Goals
 
-- Compound autoincrement allocation semantics. Compound-only definitions are
-  explicitly rejected by `autoincrement-key-policy`.
+- Grouped per-prefix autoincrement allocation semantics. First-key compound
+  definitions use the same table-local ALTER behavior, while later-in-key
+  grouped definitions are explicitly rejected by `autoincrement-key-policy`.
 - Metadata-only or in-place autoincrement ALTER.
 - Transaction-aware rollback of successful explicit autoincrement ALTER.
 - Full SQL transaction semantics around autoincrement allocation.
