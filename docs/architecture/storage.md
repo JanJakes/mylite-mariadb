@@ -94,15 +94,15 @@ Representative online and in-place ALTER requests, including `LOCK=NONE`,
 rejected by the MyLite SQL policy before MariaDB execution.
 The first public foreign-key DDL subset publishes catalog-backed FK metadata
 for supported `CREATE TABLE` and copy `ALTER TABLE ... ADD FOREIGN KEY`
-statements. The subset requires durable MyLite-routed base tables, explicit
-supported child key prefixes, exact unique parent keys, and immediate
-`RESTRICT` / `NO ACTION` semantics. The storage layer stores typed FK blob
-pages, supports child and parent FK listing, exposes handler metadata and
+statements. The subset requires durable MyLite-routed base tables, explicit or
+MariaDB-generated supported child key prefixes, exact unique parent keys, and
+immediate `RESTRICT` / `NO ACTION` semantics. The storage layer stores typed FK
+blob pages, supports child and parent FK listing, exposes handler metadata and
 `SHOW CREATE TABLE` hooks, preserves retained metadata across MariaDB's
 internal old-table backup rename, and performs FK-aware column/supporting-key
-checks plus immediate child/parent row checks. Generated child supporting keys,
-`DROP FOREIGN KEY`, cascades, `SET NULL`, `SET DEFAULT`, and dump-import
-`foreign_key_checks=0` bypass behavior remain planned.
+checks plus immediate child/parent row checks. `DROP FOREIGN KEY`, cascades,
+`SET NULL`, `SET DEFAULT`, and dump-import `foreign_key_checks=0` bypass
+behavior remain planned.
 Partition DDL remains rejected at the `libmylite` boundary until MyLite has
 partition metadata, partition-to-primary-file routing, per-partition catalog
 lifecycle, and partition-aware row and index maintenance.

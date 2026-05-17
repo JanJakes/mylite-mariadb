@@ -11,7 +11,8 @@ narrow:
   `ENGINE=InnoDB`;
 - `CREATE TABLE` and copy `ALTER TABLE ... ADD CONSTRAINT ... FOREIGN KEY`;
 - same-file parent and child tables;
-- explicit supported child key prefixes and exact unique parent keys;
+- explicit or MariaDB-generated supported child key prefixes and exact unique
+  parent keys;
 - immediate `RESTRICT` / `NO ACTION` behavior.
 
 ## Non-Goals
@@ -23,7 +24,6 @@ narrow:
 - Treating `foreign_key_checks=0` as an import bypass.
 - Opening arbitrary additional MariaDB `TABLE` objects inside MyLite handler
   row-DML enforcement.
-- Generated supporting child keys created implicitly by MariaDB for FK clauses.
 - `ALTER TABLE ... DROP FOREIGN KEY`.
 
 ## Source Findings
@@ -73,8 +73,8 @@ because MariaDB could accept user-authored FK clauses that MyLite did not
 persist or enforce.
 
 The first support claim is that public FK DDL works for validated `RESTRICT` /
-`NO ACTION` constraints over explicit MyLite-supported child key prefixes and
-exact unique parent keys. Unsupported actions, generated child supporting keys,
+`NO ACTION` constraints over explicit or MariaDB-generated MyLite-supported
+child key prefixes and exact unique parent keys. Unsupported actions,
 unsupported key shapes, volatile/temporary tables, and `DROP FOREIGN KEY` fail
 before durable publication. Full InnoDB features, including cascades and
 dump-import `foreign_key_checks=0` bypass behavior, remain planned.
@@ -86,8 +86,8 @@ The publication slice is implemented with the following behavior.
 1. Extract parsed FK definitions from `HA_CREATE_INFO::alter_info` in
    `ha_mylite::create()`.
    - Ignore old FK entries during copy ALTER.
-   - Treat generated supporting keys as unsupported until MyLite deliberately
-     supports `HA_GENERATED_KEY` index metadata.
+   - Treat MariaDB-generated supporting keys as ordinary secondary keys when
+     their physical key shape is otherwise MyLite-supported.
    - Map MariaDB action and match enums to MyLite storage action and match
      values.
 
@@ -97,8 +97,8 @@ The publication slice is implemented with the following behavior.
      subset.
    - Require parent and child schemas to belong to the same primary `.mylite`
      file.
-   - Require child columns to match an explicit supported current-table key
-     prefix.
+   - Require child columns to match an explicit or MariaDB-generated supported
+     current-table key prefix.
    - Require referenced columns to match an exact supported parent-table unique
      key that can be enforced by MyLite key-prefix lookups.
    - Require compatible nullability metadata so child/parent key marker
@@ -132,8 +132,7 @@ The publication slice is implemented with the following behavior.
    - Continue to reject `CREATE TEMPORARY TABLE` FK DDL and
      `ALTER TABLE ... DROP FOREIGN KEY` at the `libmylite` boundary.
    - Continue to reject unsupported FK actions, volatile FK tables, partitions,
-     generated child supporting keys, and unsupported key shapes before durable
-     publication.
+     and unsupported key shapes before durable publication.
    - Keep `HTON_SUPPORTS_FOREIGN_KEYS` disabled until the SQL-layer side
      effects of advertising it have been reviewed separately.
 
@@ -169,10 +168,9 @@ before acceptance.
   - child insert/update missing-parent rejection;
   - parent update/delete referenced-row rejection;
   - failed FK DDL rollback and sidecar gates.
-- Unsupported coverage for generated supporting child keys, cascades,
-  `SET NULL`, temporary/volatile tables, partitioned tables, unsupported index
-  classes, missing parents, missing referenced keys, incompatible column
-  counts, and invalid referenced columns.
+- Unsupported coverage for cascades, `SET NULL`, temporary/volatile tables,
+  partitioned tables, unsupported index classes, missing parents, missing
+  referenced keys, incompatible column counts, and invalid referenced columns.
 - Compatibility harness coverage under the existing `foreign-key` and
   `routed-ddl-dml` groups.
 - Verification: storage-smoke build/tests, default storage tests, format check,
@@ -197,6 +195,5 @@ before acceptance.
   TRUNCATE, and prelocking behavior; it should stay a separate review point.
 - `foreign_key_checks=0` is common in dumps and still needs explicit import
   semantics before MyLite can claim broad FK compatibility.
-- Generated child supporting-key metadata is common in MySQL/MariaDB FK DDL
-  and remains a specific follow-up before MyLite can accept FK clauses without
-  explicit child indexes.
+- `DROP FOREIGN KEY` and generated-key cleanup semantics remain a specific
+  follow-up before MyLite can claim a full FK metadata lifecycle.

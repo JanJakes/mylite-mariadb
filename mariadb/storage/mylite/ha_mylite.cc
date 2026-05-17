@@ -2593,7 +2593,7 @@ static bool mylite_key_is_supported(const KEY *key)
       (key->algorithm != HA_KEY_ALG_UNDEF &&
        key->algorithm != HA_KEY_ALG_BTREE) ||
       (key->flags & (HA_FULLTEXT_legacy | HA_SPATIAL_legacy |
-                     HA_GENERATED_KEY | HA_UNIQUE_HASH)))
+                     HA_UNIQUE_HASH)))
     return false;
 
   for (uint i= 0; i < key->user_defined_key_parts; ++i)

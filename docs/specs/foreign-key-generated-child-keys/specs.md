@@ -25,9 +25,10 @@ MariaDB base: `mariadb-11.8.6`
   generated keys with `HA_GENERATED_KEY`.
 - `mariadb/sql/sql_class.cc:is_foreign_key_prefix()` treats a generated FK key
   as redundant when it is a prefix of a compatible explicit key.
-- `mariadb/storage/mylite/ha_mylite.cc:mylite_key_is_supported()` currently
-  rejects `HA_GENERATED_KEY`, so otherwise valid FK DDL without an explicit
-  child index fails before MyLite catalog publication.
+- Before this slice,
+  `mariadb/storage/mylite/ha_mylite.cc:mylite_key_is_supported()` rejected
+  `HA_GENERATED_KEY`, so otherwise valid FK DDL without an explicit child index
+  failed before MyLite catalog publication.
 - `mariadb/include/my_base.h` groups `HA_GENERATED_KEY` with other key flags,
   while `HA_UNIQUE_HASH` remains the separate hidden long-unique hash surface
   that MyLite must continue to reject.

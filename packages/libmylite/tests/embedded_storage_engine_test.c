@@ -1499,28 +1499,30 @@ static void test_transaction_and_foreign_key_policies(void) {
     assert_catalog_table_count(filename, "app", 2U);
     assert_catalog_table_metadata(filename, "app", "fk_parent", "InnoDB", "MYLITE");
 
-    assert_foreign_key_exec_fails(
+    assert_exec_succeeds(
         db,
-        "CREATE TABLE fk_blocked_table ("
+        "CREATE TABLE fk_generated_table ("
         "id INT NOT NULL PRIMARY KEY, parent_id INT, "
         "CONSTRAINT fk_parent FOREIGN KEY (parent_id) REFERENCES fk_parent(id)"
         ") ENGINE=InnoDB"
     );
-    assert(
-        mylite_storage_table_exists(filename, "app", "fk_blocked_table") == MYLITE_STORAGE_NOTFOUND
-    );
-    assert_catalog_table_count(filename, "app", 2U);
+    assert_catalog_table_count(filename, "app", 3U);
 
-    assert_foreign_key_exec_fails(
+    assert_exec_succeeds(
         db,
-        "CREATE TABLE fk_blocked_column ("
+        "CREATE TABLE fk_generated_column ("
         "id INT NOT NULL PRIMARY KEY, parent_id INT REFERENCES fk_parent(id)"
         ") ENGINE=InnoDB"
     );
-    assert(
-        mylite_storage_table_exists(filename, "app", "fk_blocked_column") == MYLITE_STORAGE_NOTFOUND
+    assert_catalog_table_count(filename, "app", 4U);
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_alter_generated ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT"
+        ") ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 2U);
+    assert_catalog_table_count(filename, "app", 5U);
 
     assert_exec_succeeds(
         db,
@@ -1528,7 +1530,7 @@ static void test_transaction_and_foreign_key_policies(void) {
         "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)"
         ") ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 3U);
+    assert_catalog_table_count(filename, "app", 6U);
     assert_exec_succeeds(
         db,
         "CREATE TABLE laravel_sessions_with_fk ("
@@ -1537,7 +1539,7 @@ static void test_transaction_and_foreign_key_policies(void) {
         "CONSTRAINT sessions_user_id_foreign FOREIGN KEY (user_id) REFERENCES laravel_users(id)"
         ") ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 4U);
+    assert_catalog_table_count(filename, "app", 7U);
     assert_exec_fails(
         db,
         "INSERT INTO laravel_sessions_with_fk (id, user_id) VALUES ('missing', 99)"
@@ -1565,7 +1567,7 @@ static void test_transaction_and_foreign_key_policies(void) {
         "id INTEGER NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)"
         ") ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 5U);
+    assert_catalog_table_count(filename, "app", 8U);
     assert_exec_succeeds(
         db,
         "CREATE TABLE django_admin_log_with_fk ("
@@ -1575,7 +1577,7 @@ static void test_transaction_and_foreign_key_policies(void) {
         "FOREIGN KEY (user_id) REFERENCES django_auth_user(id)"
         ") ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 6U);
+    assert_catalog_table_count(filename, "app", 9U);
 
     assert_exec_succeeds(
         db,
@@ -1583,7 +1585,7 @@ static void test_transaction_and_foreign_key_policies(void) {
         "id BIGINT NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)"
         ") ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 7U);
+    assert_catalog_table_count(filename, "app", 10U);
     assert_exec_succeeds(
         db,
         "CREATE TABLE rails_active_storage_attachments_fk ("
@@ -1593,7 +1595,7 @@ static void test_transaction_and_foreign_key_policies(void) {
         "FOREIGN KEY (blob_id) REFERENCES rails_active_storage_blobs(id)"
         ") ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 8U);
+    assert_catalog_table_count(filename, "app", 11U);
 
     assert_exec_succeeds(
         db,
@@ -1601,19 +1603,48 @@ static void test_transaction_and_foreign_key_policies(void) {
         "id INT NOT NULL PRIMARY KEY, parent_id INT, KEY fk_child_parent_id (parent_id)"
         ") ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 9U);
+    assert_catalog_table_count(filename, "app", 12U);
     assert_catalog_table_metadata(filename, "app", "fk_child", "InnoDB", "MYLITE");
 
     assert_exec_succeeds(db, "SET foreign_key_checks=0");
     assert_exec_succeeds(
         db,
+        "ALTER TABLE fk_alter_generated ADD CONSTRAINT fk_alter_generated_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_parent(id)"
+    );
+    assert_exec_succeeds(
+        db,
         "ALTER TABLE fk_child ADD CONSTRAINT fk_child_parent "
         "FOREIGN KEY (parent_id) REFERENCES fk_parent(id)"
     );
+    assert_catalog_table_count(filename, "app", 12U);
     assert_foreign_key_exec_fails(db, "ALTER TABLE fk_child DROP FOREIGN KEY fk_child_parent");
     assert_exec_succeeds(db, "SET foreign_key_checks=1");
 
     assert_exec_succeeds(db, "INSERT INTO fk_parent VALUES (1)");
+    assert_exec_fails(db, "INSERT INTO fk_generated_table VALUES (1, 99)");
+    assert_exec_succeeds(db, "INSERT INTO fk_generated_table VALUES (1, 1)");
+    assert_exec_fails(db, "INSERT INTO fk_generated_column VALUES (1, 99)");
+    assert_exec_succeeds(db, "INSERT INTO fk_generated_column VALUES (1, 1)");
+    assert_exec_fails(db, "INSERT INTO fk_alter_generated VALUES (1, 99)");
+    assert_exec_succeeds(db, "INSERT INTO fk_alter_generated VALUES (1, 1)");
+    assert_exec_fails(db, "UPDATE fk_parent SET id = 2 WHERE id = 1");
+    assert_exec_fails(db, "DELETE FROM fk_parent WHERE id = 1");
+    char *generated_column_sql = capture_show_create_table(db, "fk_generated_column");
+    assert(
+        strstr(generated_column_sql, "FOREIGN KEY (`parent_id`) REFERENCES `fk_parent` (`id`)") !=
+        NULL
+    );
+    free(generated_column_sql);
+    char *alter_generated_sql = capture_show_create_table(db, "fk_alter_generated");
+    assert(
+        strstr(
+            alter_generated_sql,
+            "CONSTRAINT `fk_alter_generated_parent` FOREIGN KEY (`parent_id`) "
+            "REFERENCES `fk_parent` (`id`)"
+        ) != NULL
+    );
+    free(alter_generated_sql);
     assert_exec_fails(db, "INSERT INTO fk_child VALUES (1, 99)");
     assert_exec_succeeds(db, "INSERT INTO fk_child VALUES (1, 1)");
     assert(
@@ -1631,6 +1662,8 @@ static void test_transaction_and_foreign_key_policies(void) {
     assert(mylite_close(db) == MYLITE_OK);
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "USE app");
+    assert_exec_fails(db, "INSERT INTO fk_generated_table VALUES (2, 99)");
+    assert_exec_fails(db, "INSERT INTO fk_alter_generated VALUES (2, 99)");
     assert_exec_fails(db, "INSERT INTO fk_child VALUES (2, 99)");
     create_sql = capture_show_create_table(db, "fk_child");
     assert(

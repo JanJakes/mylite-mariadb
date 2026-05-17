@@ -1,5 +1,10 @@
 # Foreign-Key Policy
 
+> Historical note: this was the initial explicit-rejection policy. The current
+> supported subset is documented in
+> [Foreign-Key DDL Publication](../foreign-key-ddl-publication/specs.md) and
+> [Foreign-Key Generated Child Keys](../foreign-key-generated-child-keys/specs.md).
+
 ## Goal
 
 Reject foreign-key DDL explicitly through `libmylite` until MyLite storage has

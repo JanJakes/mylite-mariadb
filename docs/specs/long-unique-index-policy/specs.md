@@ -32,9 +32,10 @@ therefore long-unique hash handling, not direct expression-index DDL.
   duplicate long-unique keys in the server layer when a table share has
   long-unique metadata.
 - `mariadb/storage/mylite/ha_mylite.cc`: `mylite_key_is_supported()` rejects
-  non-BTREE/undefined algorithms, `HA_GENERATED_KEY`, `HA_UNIQUE_HASH`, and
-  unbounded BLOB key parts. Long-unique hash indexes therefore fail the
-  MyLite key-shape gate before catalog publication.
+  non-BTREE/undefined algorithms, `HA_UNIQUE_HASH`, and unbounded BLOB key
+  parts. Long-unique hash indexes therefore fail the MyLite key-shape gate
+  before catalog publication, while generated FK supporting keys are handled
+  separately.
 - Upstream MTR coverage such as `mariadb/mysql-test/main/long_unique.test`
   exercises `CREATE TABLE t1(a blob unique)` and checks that the synthetic
   `db_row_hash_*` column is hidden from ordinary SQL.
@@ -54,7 +55,7 @@ therefore long-unique hash handling, not direct expression-index DDL.
 
 - Implementing MariaDB long-unique hash storage.
 - Implementing MySQL-style expression indexes.
-- Supporting hidden generated keys for foreign keys or any other key class.
+- Supporting hidden generated keys beyond generated FK supporting keys.
 - Supporting full or oversized non-unique BLOB/TEXT key payloads.
 - Changing generated-column prefix index support, which remains covered for
   bounded key parts.
