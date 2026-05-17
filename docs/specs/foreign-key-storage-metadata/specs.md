@@ -57,7 +57,7 @@ constraint name. Parent schema/table are inline catalog fields so child and
 parent table renames can update FK identity without rewriting metadata blobs.
 Variable metadata lives in typed FK blob pages: referenced key name,
 NUL-separated child and parent column names, update/delete actions, match
-option, and nullable-column bitmap.
+option, and child and referenced nullable-column bitmaps.
 
 The storage API requires child and parent table records to exist before FK
 metadata is stored. That is sufficient for this internal foundation; later SQL
@@ -96,7 +96,8 @@ continues to omit native InnoDB registration and dictionary code.
 ## Test Plan
 
 - Storage unit coverage for FK capability reporting.
-- Store/read/list coverage for FK metadata fields and column lists.
+- Store/read/list coverage for FK metadata fields, column lists, and child and
+  referenced nullable-column bitmaps.
 - Duplicate FK metadata rejection.
 - Parent and child table rename updates.
 - Referenced-parent drop rejection.
@@ -120,7 +121,7 @@ continues to omit native InnoDB registration and dictionary code.
 
 - `CREATE TABLE` with inline FK clauses will need statement-scoped
   table-plus-FK publication before public FK DDL can be enabled.
-- The nullable-column bitmap supports the current bounded internal shape; very
+- The nullable-column bitmaps support the current bounded internal shape; very
   wide FKs need a larger metadata representation if MariaDB compatibility
   requires them.
 - Parent lookups are catalog scans. That is acceptable for the initial

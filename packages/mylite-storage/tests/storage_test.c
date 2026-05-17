@@ -638,6 +638,7 @@ static void test_foreign_key_metadata_records(void) {
         .delete_action = MYLITE_STORAGE_FOREIGN_KEY_ACTION_RESTRICT,
         .match_option = MYLITE_STORAGE_FOREIGN_KEY_MATCH_SIMPLE,
         .nullable_column_bitmap = 0x1ULL,
+        .referenced_nullable_column_bitmap = 0x2ULL,
     };
     mylite_storage_foreign_key_metadata metadata = {
         .size = sizeof(metadata),
@@ -753,6 +754,7 @@ static void assert_foreign_key_metadata(
     assert(metadata->delete_action == MYLITE_STORAGE_FOREIGN_KEY_ACTION_RESTRICT);
     assert(metadata->match_option == MYLITE_STORAGE_FOREIGN_KEY_MATCH_SIMPLE);
     assert(metadata->nullable_column_bitmap == 0x1ULL);
+    assert(metadata->referenced_nullable_column_bitmap == 0x2ULL);
 }
 
 static void test_append_and_read_rows(void) {

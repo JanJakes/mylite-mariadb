@@ -5434,6 +5434,11 @@ static mylite_storage_result encode_foreign_key_metadata(
         MYLITE_STORAGE_FORMAT_FOREIGN_KEY_PAYLOAD_NULLABLE_BITMAP_OFFSET,
         definition->nullable_column_bitmap
     );
+    put_u64_le(
+        metadata,
+        MYLITE_STORAGE_FORMAT_FOREIGN_KEY_PAYLOAD_REFERENCED_NULLABLE_BITMAP_OFFSET,
+        definition->referenced_nullable_column_bitmap
+    );
 
     size_t offset = MYLITE_STORAGE_FORMAT_FOREIGN_KEY_PAYLOAD_HEADER_SIZE;
     if (lengths->referenced_key_name_size > 0U) {
@@ -6918,6 +6923,10 @@ static mylite_storage_result decode_foreign_key_metadata(
             get_u32_le(metadata, MYLITE_STORAGE_FORMAT_FOREIGN_KEY_PAYLOAD_MATCH_OPTION_OFFSET);
         out_metadata->nullable_column_bitmap =
             get_u64_le(metadata, MYLITE_STORAGE_FORMAT_FOREIGN_KEY_PAYLOAD_NULLABLE_BITMAP_OFFSET);
+        out_metadata->referenced_nullable_column_bitmap = get_u64_le(
+            metadata,
+            MYLITE_STORAGE_FORMAT_FOREIGN_KEY_PAYLOAD_REFERENCED_NULLABLE_BITMAP_OFFSET
+        );
         if (validate_foreign_key_action(out_metadata->update_action) != MYLITE_STORAGE_OK ||
             validate_foreign_key_action(out_metadata->delete_action) != MYLITE_STORAGE_OK ||
             validate_foreign_key_match_option(out_metadata->match_option) != MYLITE_STORAGE_OK) {

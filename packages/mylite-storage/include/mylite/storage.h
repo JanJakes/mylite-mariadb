@@ -117,6 +117,7 @@ typedef struct mylite_storage_foreign_key_definition {
     unsigned delete_action;
     unsigned match_option;
     unsigned long long nullable_column_bitmap;
+    unsigned long long referenced_nullable_column_bitmap;
 } mylite_storage_foreign_key_definition;
 
 typedef struct mylite_storage_foreign_key_metadata {
@@ -134,6 +135,7 @@ typedef struct mylite_storage_foreign_key_metadata {
     unsigned delete_action;
     unsigned match_option;
     unsigned long long nullable_column_bitmap;
+    unsigned long long referenced_nullable_column_bitmap;
 } mylite_storage_foreign_key_metadata;
 
 typedef struct mylite_storage_rowset {
