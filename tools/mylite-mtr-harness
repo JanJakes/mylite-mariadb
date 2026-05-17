@@ -63,6 +63,8 @@ default_tests=(
   main.subselect_nulls
   main.subselect_extra
   main.order_by_zerolength-4285
+  main.order_by_optimizer
+  main.order_by-mdev-10122
   main.order_fill_sortbuf
   main.subselect_union_rand
   main.prepare
