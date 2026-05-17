@@ -11,8 +11,10 @@ supported `completion_type` assignments, using MariaDB's normal left-to-right
 - `completion_type=RELEASE/2`.
 - Global `completion_type` assignments.
 - Prepared transaction-completion statements.
-- Duplicate autocommit assignments or duplicate transaction characteristic
-  assignments.
+- Duplicate autocommit assignments at this slice point or duplicate
+  transaction characteristic assignments. The later
+  [Autocommit Duplicate Control](../autocommit-duplicate-control/specs.md)
+  slice supports duplicate supported session autocommit assignments.
 - Connection release semantics, XA, or broader transaction completion changes.
 
 ## Source Findings
@@ -47,8 +49,8 @@ Keep the existing parser and policy boundary, but change duplicate
 - remember the final supported value in the statement,
 - keep rejecting unsupported values, global scope, `SET STATEMENT`, and
   semicolon tails,
-- keep duplicate autocommit and duplicate transaction characteristic
-  assignments unsupported.
+- keep duplicate autocommit unsupported at this slice point and duplicate
+  transaction characteristic assignments unsupported.
 
 The execution path still lets MariaDB apply the `SET` first, then mirrors the
 final supported completion default into `mylite_db::completion_type_chain`.

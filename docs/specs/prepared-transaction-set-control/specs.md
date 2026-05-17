@@ -12,8 +12,8 @@ MyLite already supports through direct execution.
 - Prepared transaction controls whose value is supplied through a parameter
   marker, such as `SET autocommit=?`.
 - Unsupported direct transaction controls: global autocommit or transaction
-  variable assignments, duplicate autocommit assignments, release
-  `completion_type`, `SET STATEMENT`, duplicate `SET TRANSACTION`
+  variable assignments, duplicate autocommit assignments at this slice point,
+  release `completion_type`, `SET STATEMENT`, duplicate `SET TRANSACTION`
   characteristics, XA, and semicolon-chained statements.
 - Real MyLite storage isolation guarantees beyond the existing read-only
   enforcement mirror.
@@ -51,7 +51,9 @@ This removes a MyLite-only restriction for prepared session setup statements.
 Applications that prepare setup SQL can use the same bounded transaction `SET`
 surface as direct execution:
 
-- `SET autocommit=0/1/DEFAULT` and supported one-autocommit `SET` lists,
+- `SET autocommit=0/1/DEFAULT` and supported one-autocommit `SET` lists at
+  this slice point; later duplicate supported autocommit lists use the same
+  prepared execution path,
 - `SET completion_type=NO_CHAIN/0/DEFAULT/CHAIN/1`,
 - supported duplicate `completion_type` assignment lists where the final value
   wins,
@@ -114,8 +116,10 @@ No dependency or build-profile change.
 - Add prepared-statement policy coverage proving supported prepared
   transaction `SET` controls now prepare and execute.
 - Keep prepared `BEGIN`, `START TRANSACTION`, `COMMIT`, `ROLLBACK`, unsupported
-  global controls, duplicate autocommit, `SET STATEMENT`, and semicolon tails
-  rejected.
+  global controls, duplicate autocommit at this slice point, `SET STATEMENT`,
+  and semicolon tails rejected. The later
+  [Autocommit Duplicate Control](../autocommit-duplicate-control/specs.md)
+  slice accepts duplicate supported session autocommit assignments.
 - Add storage-smoke coverage proving prepared `SET autocommit=0` opens a
   rollbackable transaction, prepared `SET autocommit=1/DEFAULT` commits it,
   prepared `SET completion_type` controls later plain completion behavior, and

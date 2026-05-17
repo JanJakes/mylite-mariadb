@@ -76,7 +76,8 @@ Compatibility remains partial:
 - Prepared autocommit-control statements remain rejected at this slice point.
 - Global and duplicate autocommit changes, unsupported transaction-variable
   `SET` lists, and prepared autocommit control remain rejected at this slice
-  point.
+  point. Later slices support prepared autocommit control and duplicate
+  supported session autocommit assignments.
 - `SET TRANSACTION`, isolation-level changes, transaction modifiers, XA, and
   transactional DDL remain unsupported.
 

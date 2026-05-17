@@ -1102,6 +1102,8 @@ static void test_prepare_diagnostics(void) {
     assert_prepare_step_succeeds(db, "SET autocommit=1");
     assert_prepare_step_succeeds(db, "SET autocommit=0, sql_mode='ANSI'");
     assert_prepare_step_succeeds(db, "SET sql_mode='', autocommit=DEFAULT");
+    assert_prepare_step_succeeds(db, "SET autocommit=0, autocommit=1");
+    assert_prepare_step_succeeds(db, "SET autocommit=1, @@session.autocommit=DEFAULT");
     assert_prepare_step_succeeds(db, "SET completion_type=NO_CHAIN");
     assert_prepare_step_succeeds(db, "SET completion_type=CHAIN");
     assert_prepare_step_succeeds(db, "SET completion_type=CHAIN, completion_type=NO_CHAIN");
@@ -1115,7 +1117,6 @@ static void test_prepare_diagnostics(void) {
     assert_prepare_step_succeeds(db, "SET transaction_read_only=0");
     assert_prepare_step_succeeds(db, "SET transaction_read_only=1, tx_read_only=0");
     assert_prepare_fails_with_message(db, "SET GLOBAL autocommit=0", "transaction control");
-    assert_prepare_fails_with_message(db, "SET autocommit=0, autocommit=1", "transaction control");
     assert_prepare_fails_with_message(db, "SET autocommit=?", "transaction control");
     assert_prepare_fails_with_message(db, "SET transaction_read_only=?", "transaction control");
     assert_prepare_fails_with_message(

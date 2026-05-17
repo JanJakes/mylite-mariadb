@@ -4,10 +4,12 @@ Status note: this slice introduced rollback-journal publication and recovery.
 Later slices added statement rollback checkpoints, MariaDB statement hook
 integration, bounded direct row-DML transactions, and supported direct session
 autocommit mode, including direct `SET` lists that mix one supported session
-autocommit assignment with ordinary non-transaction assignments. Savepoints,
-global or duplicate autocommit changes, unsupported transaction-variable `SET`
-lists, transaction modifiers, XA, transactional DDL, and fully transactional
-engine flags remain outside the implemented scope.
+autocommit assignment with ordinary non-transaction assignments. Later
+transaction-control slices add duplicate supported session autocommit
+assignments where the final value wins. Savepoints, global autocommit changes,
+unsupported transaction-variable `SET` lists, transaction modifiers, XA,
+transactional DDL, and fully transactional engine flags remain outside the
+implemented scope.
 
 ## Problem
 

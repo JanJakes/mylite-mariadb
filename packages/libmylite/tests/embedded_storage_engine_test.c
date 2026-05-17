@@ -2768,6 +2768,63 @@ static void test_row_dml_transactions(void) {
     );
     assert(count.rows == 1);
 
+    assert_exec_succeeds(db, "SET autocommit=0, autocommit=0");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (66, 'autocommit-duplicate-commit')");
+    assert_exec_succeeds(db, "SET autocommit=0, autocommit=1");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts "
+        "WHERE id = 66 AND title = 'autocommit-duplicate-commit'",
+        "1"
+    );
+    assert_exec_succeeds(db, "DELETE FROM tx_posts WHERE id = 66");
+
+    assert_exec_succeeds(db, "SET autocommit=1, autocommit=0");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (67, 'autocommit-duplicate-rollback')");
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts WHERE title = 'autocommit-duplicate-rollback'",
+        "0"
+    );
+
+    assert_exec_succeeds(db, "SET @@session.autocommit=OFF, LOCAL autocommit=FALSE");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (68, 'autocommit-duplicate-default')");
+    assert_exec_succeeds(db, "SET autocommit=0, @@session.autocommit=DEFAULT");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts "
+        "WHERE id = 68 AND title = 'autocommit-duplicate-default'",
+        "1"
+    );
+    assert_exec_succeeds(db, "DELETE FROM tx_posts WHERE id = 68");
+
+    assert_exec_succeeds(db, "SET autocommit=0");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO tx_posts VALUES (71, 'autocommit-duplicate-intermediate-commit')"
+    );
+    assert_exec_succeeds(db, "SET autocommit=1, autocommit=0");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts "
+        "WHERE id = 71 AND title = 'autocommit-duplicate-intermediate-commit'",
+        "1"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO tx_posts VALUES (72, 'autocommit-duplicate-intermediate-rollback')"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts "
+        "WHERE title = 'autocommit-duplicate-intermediate-rollback'",
+        "0"
+    );
+    assert_exec_succeeds(db, "DELETE FROM tx_posts WHERE id = 71");
+    assert_exec_succeeds(db, "SET autocommit=1");
+
     assert_exec_succeeds(db, "SET TRANSACTION READ WRITE");
     assert_exec_succeeds(db, "BEGIN");
     assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (38, 'set-transaction-read-write')");
@@ -3031,6 +3088,56 @@ static void test_row_dml_transactions(void) {
         "1"
     );
     assert_exec_succeeds(db, "DELETE FROM tx_posts WHERE id = 61");
+
+    assert_prepared_succeeds(db, "SET autocommit=0, autocommit=0");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (69, 'prepared-autocommit-duplicate')");
+    assert_prepared_succeeds(db, "SET autocommit=0, autocommit=1");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts "
+        "WHERE id = 69 AND title = 'prepared-autocommit-duplicate'",
+        "1"
+    );
+    assert_exec_succeeds(db, "DELETE FROM tx_posts WHERE id = 69");
+
+    assert_prepared_succeeds(db, "SET @@session.autocommit=ON, autocommit=OFF");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO tx_posts VALUES (70, 'prepared-autocommit-duplicate-rollback')"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts WHERE title = 'prepared-autocommit-duplicate-rollback'",
+        "0"
+    );
+    assert_prepared_succeeds(db, "SET autocommit=1, autocommit=DEFAULT");
+
+    assert_prepared_succeeds(db, "SET autocommit=0");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO tx_posts VALUES (73, 'prepared-autocommit-intermediate-commit')"
+    );
+    assert_prepared_succeeds(db, "SET autocommit=1, autocommit=0");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts "
+        "WHERE id = 73 AND title = 'prepared-autocommit-intermediate-commit'",
+        "1"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO tx_posts VALUES (74, 'prepared-autocommit-intermediate-rollback')"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts "
+        "WHERE title = 'prepared-autocommit-intermediate-rollback'",
+        "0"
+    );
+    assert_exec_succeeds(db, "DELETE FROM tx_posts WHERE id = 73");
+    assert_prepared_succeeds(db, "SET autocommit=1");
 
     assert_prepared_succeeds(db, "SET completion_type=NO_CHAIN, completion_type=CHAIN");
     assert_exec_succeeds(db, "BEGIN");

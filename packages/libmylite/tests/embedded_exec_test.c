@@ -1604,7 +1604,15 @@ static void test_transaction_control_policy(void) {
             NULL
         ) == MYLITE_OK
     );
-    assert_transaction_control_exec_fails(db, "SET autocommit=0, autocommit=1");
+    assert(mylite_exec(db, "SET autocommit=0, autocommit=1", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(db, "SET autocommit=1, autocommit=0, autocommit=DEFAULT", NULL, NULL, NULL) ==
+        MYLITE_OK
+    );
+    assert(
+        mylite_exec(db, "SET @@session.autocommit=OFF, LOCAL autocommit=TRUE", NULL, NULL, NULL) ==
+        MYLITE_OK
+    );
     assert(
         mylite_exec(db, "SET autocommit=0, completion_type=CHAIN", NULL, NULL, NULL) == MYLITE_OK
     );

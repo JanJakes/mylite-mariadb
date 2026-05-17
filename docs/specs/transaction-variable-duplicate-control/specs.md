@@ -14,7 +14,9 @@ prepared statements as well.
 ## Non-Goals
 
 - Duplicate `SET TRANSACTION ...` access-mode or isolation clauses.
-- Duplicate autocommit assignments.
+- Duplicate autocommit assignments at this slice point. The later
+  [Autocommit Duplicate Control](../autocommit-duplicate-control/specs.md)
+  slice supports duplicate supported session autocommit assignments.
 - Global transaction-variable assignments.
 - `DEFAULT.variable` transaction-variable syntax.
 - Prepared transaction-variable control at this slice point.
@@ -50,7 +52,7 @@ not claim storage isolation semantics.
 Change only direct `SET` assignment-list policy:
 
 - keep rejecting duplicate `SET TRANSACTION ...` characteristics,
-- keep rejecting duplicate autocommit assignments,
+- keep rejecting duplicate autocommit assignments at this slice point,
 - allow repeated supported transaction read-only variable assignments,
 - allow repeated supported transaction isolation variable assignments,
 - preserve rejection for global scope, `DEFAULT.variable`, invalid read-only
@@ -79,8 +81,9 @@ No dependency or build-profile change.
 
 - Add direct SQL policy coverage proving duplicate supported transaction
   read-only and isolation variable assignments succeed.
-- Keep duplicate `SET TRANSACTION` characteristics, duplicate autocommit,
-  global scope, invalid values, `SET STATEMENT`, and semicolon tails rejected.
+- Keep duplicate `SET TRANSACTION` characteristics, duplicate autocommit at
+  this slice point, global scope, invalid values, `SET STATEMENT`, and
+  semicolon tails rejected.
 - Add storage-smoke coverage proving final read-write and final read-only
   transaction variable assignments determine later write policy.
 - Run dev, embedded, storage-smoke, compatibility harness, formatting, tidy,

@@ -111,8 +111,9 @@ catalog when no transient MariaDB schema directory exists. Direct `BEGIN`,
 transaction restart through repeated direct `BEGIN` / `START TRANSACTION`, and
 supported direct or prepared session `SET autocommit=0/1/DEFAULT` forms,
 including `SET` lists that mix one autocommit assignment with ordinary
-non-transaction assignments, support row-DML transactions over routed MyLite
-tables. Direct
+non-transaction assignments and duplicate supported session autocommit
+assignments applied in order with the final value as session state, support
+row-DML transactions over routed MyLite tables. Direct
 transaction modifiers support
 explicit `START TRANSACTION READ WRITE`, `COMMIT` / `ROLLBACK` `AND CHAIN`,
 `AND NO CHAIN`, and `NO RELEASE` forms for the same bounded scope, including
@@ -139,13 +140,12 @@ simple unquoted and backtick-quoted savepoint names inside active bounded
 row-DML transactions. Double-quoted savepoint names are also supported when the
 session has `ANSI_QUOTES` enabled. The same savepoint-control statements can be
 prepared and reused for file-backed MyLite transactions. Global
-autocommit-control statements, duplicate autocommit assignments,
-parameterized transaction-control `SET` values, prepared transaction-start or
-completion statements, `WITH CONSISTENT SNAPSHOT`, `RELEASE` completion,
-`completion_type=RELEASE/2`, global transaction variable assignments,
-duplicate `SET TRANSACTION` characteristics, XA, and direct or prepared DDL
-inside an active transaction remain unsupported until the storage and catalog
-transaction design is broader.
+autocommit-control statements, parameterized transaction-control `SET` values,
+prepared transaction-start or completion statements, `WITH CONSISTENT SNAPSHOT`,
+`RELEASE` completion, `completion_type=RELEASE/2`, global transaction variable
+assignments, duplicate `SET TRANSACTION` characteristics, XA, and direct or
+prepared DDL inside an active transaction remain unsupported until the storage
+and catalog transaction design is broader.
 Existing-file opens preserve storage lock conflicts as
 `MYLITE_BUSY` before starting the embedded runtime.
 
@@ -580,7 +580,7 @@ Representative account, event, plugin, replication, binlog,
 replication/binlog filter assignment, binlog/replication system-variable
 assignment, view, trigger, routine, package,
 sequence, `CALL`, UDF `CREATE FUNCTION ... SONAME`,
-global or duplicate autocommit-control, parameterized or otherwise unsupported
+global autocommit-control, parameterized or otherwise unsupported
 transaction-control `SET` forms, unsupported transaction-control, release
 completion defaults, XA,
 SQL locking,

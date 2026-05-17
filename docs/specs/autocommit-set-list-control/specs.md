@@ -11,12 +11,15 @@ autocommit state after MariaDB accepts the full statement.
 
 Global autocommit changes, duplicate autocommit assignments, transaction
 isolation/read-only variables, release `completion_type` defaults, unsupported
-`SET TRANSACTION` forms, and semicolon-chained statements remain unsupported.
-Later transaction SET slices allow no-chain and chain `completion_type`
-assignments in direct `SET` lists. The later
+`SET TRANSACTION` forms, and semicolon-chained statements remain unsupported at
+this slice point. Later transaction SET slices allow no-chain and chain
+`completion_type` assignments in direct `SET` lists. The later
 [Prepared Transaction SET Control](../prepared-transaction-set-control/specs.md)
 slice applies the supported transaction `SET` policy to prepared statements as
-well.
+well, and the later
+[Autocommit Duplicate Control](../autocommit-duplicate-control/specs.md) slice
+allows duplicate supported session autocommit assignments where the final value
+wins.
 
 ## Source Findings
 
@@ -55,7 +58,8 @@ Relax `libmylite`'s direct autocommit-control parser:
   - `0` / `OFF` / `FALSE`,
   - `1` / `ON` / `TRUE`,
   - `DEFAULT`.
-- Reject duplicate autocommit assignments in the same `SET` statement.
+- Reject duplicate autocommit assignments in the same `SET` statement at this
+  slice point.
 - Reject global autocommit assignment, `completion_type`, transaction
   isolation/read-only variables, `SET TRANSACTION`, and semicolon-chained
   statements before MariaDB execution at this slice point.
@@ -116,7 +120,8 @@ tests.
   assignments mixed with ordinary session/user-variable assignments.
 - Keep duplicate, global, transaction-variable, prepared forms at this slice
   point, and semicolon-chained forms rejected with transaction-control
-  diagnostics.
+  diagnostics. Later slices support prepared forms and duplicate supported
+  session autocommit assignments.
 - Add storage-smoke coverage proving:
   - `SET autocommit=0, sql_mode='ANSI'` opens a rollbackable row-DML
     transaction,
@@ -135,7 +140,8 @@ tests.
 - MyLite mirrors autocommit state only after MariaDB reports success.
 - Global, duplicate, unsupported transaction-variable, prepared forms at this
   slice point, and chained-statement forms remain explicit unsupported
-  transaction-control surfaces.
+  transaction-control surfaces. Later slices support prepared forms and
+  duplicate supported session autocommit assignments.
 - Docs and compatibility tables describe multi-assignment support without
   claiming global autocommit or isolation semantics.
 

@@ -386,6 +386,15 @@ int apply_successful_transaction_control(
     std::string_view sql,
     TransactionControlKind transaction_control
 );
+int apply_successful_autocommit_assignments_control(
+    mylite_db &database,
+    std::string_view sql,
+    TransactionControlKind fallback_control
+);
+int apply_successful_single_autocommit_control(
+    mylite_db &database,
+    TransactionControlKind transaction_control
+);
 int fetch_statement_row(mylite_stmt &statement);
 int bind_statement_results(mylite_stmt &statement);
 int fetch_truncated_column(mylite_stmt &statement, unsigned column);
@@ -2014,6 +2023,47 @@ int apply_successful_transaction_control(
             mark_transaction_started(database, restart_read_only);
         }
     } else if (transaction_control == TransactionControlKind::SetAutocommitOff) {
+        return apply_successful_autocommit_assignments_control(database, sql, transaction_control);
+    } else if (transaction_control == TransactionControlKind::SetAutocommitOn) {
+        return apply_successful_autocommit_assignments_control(database, sql, transaction_control);
+    }
+    return MYLITE_OK;
+}
+
+int apply_successful_autocommit_assignments_control(
+    mylite_db &database,
+    std::string_view sql,
+    TransactionControlKind fallback_control
+) {
+    std::string_view rest = skip_sql_leading_noise(sql);
+    if (!sql_token_equals(pop_sql_token(rest), "SET")) {
+        return apply_successful_single_autocommit_control(database, fallback_control);
+    }
+
+    bool applied = false;
+    while (!skip_sql_leading_noise(rest).empty()) {
+        const TransactionControlKind assignment_control =
+            autocommit_assignment_control_kind(pop_sql_set_assignment(rest));
+        if (assignment_control == TransactionControlKind::SetAutocommitOff ||
+            assignment_control == TransactionControlKind::SetAutocommitOn) {
+            const int result =
+                apply_successful_single_autocommit_control(database, assignment_control);
+            if (result != MYLITE_OK) {
+                return result;
+            }
+            applied = true;
+        }
+    }
+
+    return applied ? MYLITE_OK
+                   : apply_successful_single_autocommit_control(database, fallback_control);
+}
+
+int apply_successful_single_autocommit_control(
+    mylite_db &database,
+    TransactionControlKind transaction_control
+) {
+    if (transaction_control == TransactionControlKind::SetAutocommitOff) {
         const bool read_only = transaction_start_read_only(database, transaction_control);
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
         if (!database.transaction_active) {
@@ -2028,19 +2078,22 @@ int apply_successful_transaction_control(
         if (!database.transaction_active) {
             mark_transaction_started(database, read_only);
         }
-    } else if (transaction_control == TransactionControlKind::SetAutocommitOn) {
-        if (database.autocommit_disabled) {
-#  if MYLITE_MARIADB_HAS_MYLITE_SE
-            const int transaction_result = finish_direct_transaction(database, true);
-            mark_transaction_completed(database);
-            if (transaction_result != MYLITE_OK) {
-                return transaction_result;
-            }
-#  endif
-            database.autocommit_disabled = false;
-            mark_transaction_completed(database);
-        }
+        return MYLITE_OK;
     }
+
+    if (transaction_control == TransactionControlKind::SetAutocommitOn &&
+        database.autocommit_disabled) {
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        const int transaction_result = finish_direct_transaction(database, true);
+        mark_transaction_completed(database);
+        if (transaction_result != MYLITE_OK) {
+            return transaction_result;
+        }
+#  endif
+        database.autocommit_disabled = false;
+        mark_transaction_completed(database);
+    }
+
     return MYLITE_OK;
 }
 
@@ -4034,7 +4087,7 @@ TransactionControlKind direct_set_assignment_transaction_control_kind(std::strin
             return TransactionControlKind::Unsupported;
         }
         if (assignment_result != TransactionControlKind::None) {
-            if (autocommit_seen || transaction_access_mode_seen) {
+            if (transaction_access_mode_seen) {
                 return TransactionControlKind::Unsupported;
             }
             autocommit_seen = true;

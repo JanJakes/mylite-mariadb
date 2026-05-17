@@ -17,9 +17,12 @@ slice accepts bounded direct read-only access mode. The later
 [Transaction Variable Control](../transaction-variable-control/specs.md) and
 [Transaction Variable Duplicate Control](../transaction-variable-duplicate-control/specs.md)
 slices accept supported transaction variable `SET` forms, including duplicate
-supported assignments. Global or duplicate autocommit changes, global
-transaction variables, unsupported transaction modifiers, XA, and durable
-transactional DDL remain rejected; the later
+supported assignments. The later
+[Autocommit Duplicate Control](../autocommit-duplicate-control/specs.md) slice
+accepts duplicate supported session autocommit assignments where the final
+value wins. Global autocommit changes, global transaction variables,
+unsupported transaction modifiers, XA, and durable transactional DDL remain
+rejected; the later
 [Prepared Transactional DDL Policy](../prepared-transactional-ddl-policy/specs.md)
 slice makes the prepared execution path enforce the same active-transaction DDL
 policy as direct SQL, and the later
