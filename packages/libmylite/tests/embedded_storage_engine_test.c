@@ -157,6 +157,7 @@ static void test_foreign_key_self_set_null_update(void);
 static void test_foreign_key_non_self_set_null_actions(void);
 static void test_foreign_key_delete_cascade_actions(void);
 static void test_foreign_key_update_cascade_actions(void);
+static void test_foreign_key_action_combinations(void);
 static void test_foreign_key_non_self_ordering(void);
 static void test_foreign_key_multi_table_ordering(void);
 static void test_foreign_key_handler_metadata(void);
@@ -439,6 +440,7 @@ int main(int argc, char **argv) {
     test_foreign_key_non_self_set_null_actions();
     test_foreign_key_delete_cascade_actions();
     test_foreign_key_update_cascade_actions();
+    test_foreign_key_action_combinations();
     test_foreign_key_non_self_ordering();
     test_foreign_key_multi_table_ordering();
     test_foreign_key_handler_metadata();
@@ -3154,12 +3156,12 @@ static void test_foreign_key_delete_cascade_actions(void) {
 
     assert_foreign_key_exec_fails(
         db,
-        "CREATE TABLE fk_cascade_update_combo_reject ("
+        "CREATE TABLE fk_cascade_default_reject ("
         "id INT NOT NULL PRIMARY KEY, parent_id INT NOT NULL, "
-        "KEY fk_cascade_update_combo_reject_parent (parent_id), "
-        "CONSTRAINT fk_cascade_update_combo_reject_parent "
+        "KEY fk_cascade_default_reject_parent (parent_id), "
+        "CONSTRAINT fk_cascade_default_reject_parent "
         "FOREIGN KEY (parent_id) REFERENCES fk_cascade_parent(id) "
-        "ON DELETE CASCADE ON UPDATE CASCADE"
+        "ON DELETE SET DEFAULT"
         ") ENGINE=InnoDB"
     );
     assert_foreign_key_exec_fails(
@@ -3176,7 +3178,7 @@ static void test_foreign_key_delete_cascade_actions(void) {
         mylite_storage_table_exists(
             filename,
             "app",
-            "fk_cascade_update_combo_reject"
+            "fk_cascade_default_reject"
         ) ==
         MYLITE_STORAGE_NOTFOUND
     );
@@ -3335,12 +3337,12 @@ static void test_foreign_key_update_cascade_actions(void) {
 
     assert_foreign_key_exec_fails(
         db,
-        "CREATE TABLE fk_update_combo_reject ("
+        "CREATE TABLE fk_update_default_reject ("
         "id INT NOT NULL PRIMARY KEY, parent_id INT NOT NULL, "
-        "KEY fk_update_combo_reject_parent (parent_id), "
-        "CONSTRAINT fk_update_combo_reject_parent "
+        "KEY fk_update_default_reject_parent (parent_id), "
+        "CONSTRAINT fk_update_default_reject_parent "
         "FOREIGN KEY (parent_id) REFERENCES fk_update_parent(id) "
-        "ON DELETE CASCADE ON UPDATE CASCADE"
+        "ON UPDATE SET DEFAULT"
         ") ENGINE=InnoDB"
     );
     assert_foreign_key_exec_fails(
@@ -3354,7 +3356,7 @@ static void test_foreign_key_update_cascade_actions(void) {
         ") ENGINE=InnoDB"
     );
     assert(
-        mylite_storage_table_exists(filename, "app", "fk_update_combo_reject") ==
+        mylite_storage_table_exists(filename, "app", "fk_update_default_reject") ==
         MYLITE_STORAGE_NOTFOUND
     );
     assert(
@@ -3381,6 +3383,160 @@ static void test_foreign_key_update_cascade_actions(void) {
         db,
         "SELECT CONCAT(id, ':', parent_id) FROM fk_update_self",
         "2:2"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_foreign_key_action_combinations(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_combo_parent ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_combo_both ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NOT NULL, "
+        "KEY fk_combo_both_parent (parent_id), "
+        "CONSTRAINT fk_combo_both_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_combo_parent(id) "
+        "ON DELETE CASCADE ON UPDATE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    char *create_sql = capture_show_create_table(db, "fk_combo_both");
+    assert(strstr(create_sql, "ON DELETE CASCADE") != NULL);
+    assert(strstr(create_sql, "ON UPDATE CASCADE") != NULL);
+    free(create_sql);
+    assert_exec_succeeds(db, "INSERT INTO fk_combo_parent VALUES (1), (2)");
+    assert_exec_succeeds(db, "INSERT INTO fk_combo_both VALUES (10, 1), (11, 2)");
+    assert_exec_succeeds(db, "UPDATE fk_combo_parent SET id = 3 WHERE id = 1");
+    assert_query_single_value(
+        db,
+        "SELECT parent_id FROM fk_combo_both WHERE id = 10",
+        "3"
+    );
+    assert_exec_succeeds(db, "DELETE FROM fk_combo_parent WHERE id = 3");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_combo_both WHERE id = 10",
+        "0"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_combo_set_parent ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_combo_delete_set_update_cascade ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NULL, "
+        "KEY fk_combo_delete_set_update_cascade_parent (parent_id), "
+        "CONSTRAINT fk_combo_delete_set_update_cascade_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_combo_set_parent(id) "
+        "ON DELETE SET NULL ON UPDATE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_combo_set_parent VALUES (1)");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_combo_delete_set_update_cascade VALUES (20, 1)"
+    );
+    assert_exec_succeeds(db, "UPDATE fk_combo_set_parent SET id = 4 WHERE id = 1");
+    assert_query_single_value(
+        db,
+        "SELECT parent_id FROM fk_combo_delete_set_update_cascade WHERE id = 20",
+        "4"
+    );
+    assert_exec_succeeds(db, "DELETE FROM fk_combo_set_parent WHERE id = 4");
+    assert_query_single_value(
+        db,
+        "SELECT parent_id IS NULL FROM fk_combo_delete_set_update_cascade "
+        "WHERE id = 20",
+        "1"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_combo_update_set_parent ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_combo_delete_cascade_update_set ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NULL, "
+        "KEY fk_combo_delete_cascade_update_set_parent (parent_id), "
+        "CONSTRAINT fk_combo_delete_cascade_update_set_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_combo_update_set_parent(id) "
+        "ON DELETE CASCADE ON UPDATE SET NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_combo_update_set_parent VALUES (1)");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_combo_delete_cascade_update_set VALUES (30, 1)"
+    );
+    assert_exec_succeeds(
+        db,
+        "UPDATE fk_combo_update_set_parent SET id = 5 WHERE id = 1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_id IS NULL FROM fk_combo_delete_cascade_update_set "
+        "WHERE id = 30",
+        "1"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_combo_delete_cascade_update_set VALUES (31, 5)"
+    );
+    assert_exec_succeeds(db, "DELETE FROM fk_combo_update_set_parent WHERE id = 5");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_combo_delete_cascade_update_set WHERE id = 31",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_id IS NULL FROM fk_combo_delete_cascade_update_set "
+        "WHERE id = 30",
+        "1"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE app");
+    create_sql = capture_show_create_table(db, "fk_combo_both");
+    assert(strstr(create_sql, "ON DELETE CASCADE") != NULL);
+    assert(strstr(create_sql, "ON UPDATE CASCADE") != NULL);
+    free(create_sql);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM fk_combo_both WHERE parent_id = 2",
+        "11"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_id IS NULL FROM fk_combo_delete_set_update_cascade "
+        "WHERE id = 20",
+        "1"
     );
 
     assert(mylite_close(db) == MYLITE_OK);

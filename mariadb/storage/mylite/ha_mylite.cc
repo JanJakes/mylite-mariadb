@@ -5129,25 +5129,24 @@ static bool mylite_foreign_key_actions_supported(
   const bool delete_cascade= fk->delete_opt == FK_OPTION_CASCADE;
   if (update_restrict && delete_restrict)
     return true;
-  if (update_cascade)
-  {
-    return delete_restrict &&
-           mylite_foreign_key_update_cascade_supported(
-             form, definition->foreign_column_names, definition->column_count);
-  }
-  if (delete_cascade)
-  {
-    return update_restrict &&
-           mylite_foreign_key_delete_cascade_supported(
-             form, definition->foreign_column_names, definition->column_count);
-  }
-  if ((!update_restrict && !update_set_null) ||
-      (!delete_restrict && !delete_set_null) || !logical_schema_name ||
-      !logical_table_name)
+  if ((!update_restrict && !update_set_null && !update_cascade) ||
+      (!delete_restrict && !delete_set_null && !delete_cascade) ||
+      !logical_schema_name || !logical_table_name)
+    return false;
+  if ((update_set_null || delete_set_null) &&
+      !mylite_foreign_key_set_null_supported(
+        form, definition->foreign_column_names, definition->column_count))
+    return false;
+  if (update_cascade &&
+      !mylite_foreign_key_update_cascade_supported(
+        form, definition->foreign_column_names, definition->column_count))
+    return false;
+  if (delete_cascade &&
+      !mylite_foreign_key_delete_cascade_supported(
+        form, definition->foreign_column_names, definition->column_count))
     return false;
 
-  return mylite_foreign_key_set_null_supported(
-    form, definition->foreign_column_names, definition->column_count);
+  return true;
 }
 
 static bool mylite_foreign_key_restrict_action_supported(
