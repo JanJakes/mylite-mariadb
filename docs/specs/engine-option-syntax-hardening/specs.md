@@ -25,8 +25,9 @@ engine options.
 - Extend the top-level table-option scanner to accept `ENGINE <name>` as well
   as `ENGINE=<name>`.
 - Require no-equals engine names to be recognized engine-name tokens. This
-  covers routed engines and the known unsupported names MyLite already
-  documents, while avoiding broad false positives after arbitrary identifiers.
+  covers routed engines plus the known unsupported `CSV`, `ARCHIVE`, and
+  `SEQUENCE` names MyLite already documents, while avoiding broad false
+  positives after arbitrary identifiers.
 - Continue to parse quoted engine names for the explicit-equals form.
 - Keep unsupported `CSV` requests on the existing CSV-specific diagnostic.
 

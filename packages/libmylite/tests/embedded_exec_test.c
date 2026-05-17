@@ -1837,8 +1837,17 @@ static void test_unsupported_engine_policy_is_rejected(void) {
         db,
         "CREATE TABLE archive_quoted_posts (id INT NOT NULL PRIMARY KEY) ENGINE='ARCHIVE'"
     );
+    assert_unsupported_engine_exec_fails(
+        db,
+        "CREATE TABLE sequence_posts (id INT NOT NULL PRIMARY KEY) ENGINE=SEQUENCE"
+    );
+    assert_unsupported_engine_exec_fails(
+        db,
+        "CREATE TABLE sequence_no_equal_posts (id INT NOT NULL PRIMARY KEY) ENGINE SEQUENCE"
+    );
     assert_unsupported_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE=ARCHIVE");
     assert_unsupported_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE ARCHIVE");
+    assert_unsupported_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE=SEQUENCE");
 
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);

@@ -464,8 +464,24 @@ static void test_unsupported_engine_request_policy(void) {
         mylite_storage_table_exists(filename, "app", "archive_no_equal_posts") ==
         MYLITE_STORAGE_NOTFOUND
     );
+    assert_unsupported_engine_exec_fails(
+        db,
+        "CREATE TABLE sequence_posts (id INT NOT NULL PRIMARY KEY) ENGINE=SEQUENCE"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "sequence_posts") == MYLITE_STORAGE_NOTFOUND
+    );
+    assert_unsupported_engine_exec_fails(
+        db,
+        "CREATE TABLE sequence_no_equal_posts (id INT NOT NULL PRIMARY KEY) ENGINE SEQUENCE"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "sequence_no_equal_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
     assert_unsupported_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE=ARCHIVE");
     assert_unsupported_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE ARCHIVE");
+    assert_unsupported_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE=SEQUENCE");
     assert_catalog_table_count(filename, "app", 1U);
     assert_catalog_table_metadata(filename, "app", "csv_comment", "InnoDB", "MYLITE");
 

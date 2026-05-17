@@ -1184,6 +1184,11 @@ static void test_prepare_diagnostics(void) {
     );
     assert_prepare_fails_with_message(
         db,
+        "CREATE TABLE sequence_prepare (id INT NOT NULL PRIMARY KEY) ENGINE=SEQUENCE",
+        "storage engine request"
+    );
+    assert_prepare_fails_with_message(
+        db,
         "ALTER TABLE online_alter_prepare ENGINE = ARCHIVE",
         "storage engine request"
     );

@@ -81,8 +81,9 @@ The trim prevents MariaDB from auto-discovering virtual tables outside MyLite's
 catalog. It does not change routed `CREATE TABLE` metadata for omitted/default,
 `MYLITE`, `InnoDB`, `MyISAM`, `Aria`, `BLACKHOLE`, `MEMORY`, or `HEAP`.
 
-Unsupported explicit `ENGINE=SEQUENCE` requests should fail through the normal
-storage-engine availability path because the engine is not registered.
+Unsupported explicit `ENGINE=SEQUENCE` and `ENGINE SEQUENCE` requests fail
+through MyLite's unsupported-engine request policy before MariaDB execution and
+catalog publication.
 
 ## Single-File And Embedded-Lifecycle Impact
 
