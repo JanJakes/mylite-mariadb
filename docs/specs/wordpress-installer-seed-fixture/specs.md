@@ -59,9 +59,9 @@ Extend the storage-smoke installer fixture test to:
 
 1. import the existing schema fixture;
 2. import the seed fixture through `mylite_exec()`;
-3. assert representative default options, administrator rows, usermeta,
-   taxonomy rows, first post, first comment, first page metadata, and serialized
-   widget option payloads;
+3. assert representative default options, the default role payload,
+   administrator rows, usermeta, taxonomy rows, first post, first comment,
+   first page metadata, and serialized widget option payloads;
 4. close and reopen the `.mylite` file;
 5. repeat the seed-data assertions without rehydrating durable sidecars.
 
@@ -92,8 +92,9 @@ semantics.
 ## Compatibility Impact
 
 Application-schema compatibility remains partial, but the WordPress coverage now
-includes a versioned DDL fixture and representative installer seed data. This is
-still not full WordPress runtime compatibility.
+includes a versioned DDL fixture, representative installer seed data, broader
+default-option rows, and the full default role payload. This is still not full
+WordPress runtime compatibility.
 
 ## Single-File And Embedded-Lifecycle Impact
 
@@ -136,9 +137,9 @@ is added.
   storage-smoke database.
 - Semicolons inside serialized WordPress SQL string literals do not break
   fixture execution.
-- Representative seeded options, user, usermeta, taxonomy, post, comment, and
-  postmeta rows read back through indexed or joined access paths before and
-  after reopen.
+- Representative seeded options, default roles, user, usermeta, taxonomy, post,
+  comment, and postmeta rows read back through indexed or joined access paths
+  before and after reopen.
 - No durable sidecars remain after close.
 - Compatibility and roadmap docs distinguish this representative seed fixture
   from full WordPress runtime install support.
@@ -147,5 +148,6 @@ is added.
 
 - A static SQL seed cannot cover WordPress's dynamic PHP filters, generated
   privacy policy content, cron scheduling, rewrite probing, or mail paths.
-- The seed is representative rather than exhaustive. A later full runtime
-  installer test should compare against an actual WordPress install database.
+- The seed is representative rather than exhaustive. Although default role
+  payload storage is now covered, a later full runtime installer test should
+  compare against an actual WordPress install database.

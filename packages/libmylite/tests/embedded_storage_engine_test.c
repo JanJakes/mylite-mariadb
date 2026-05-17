@@ -10354,6 +10354,15 @@ static void assert_wordpress_installer_seed_data(mylite_db *db) {
     single_value_context admin_email = {
         .expected_value = "admin@example.test",
     };
+    single_value_context default_role = {
+        .expected_value = "subscriber",
+    };
+    single_value_context default_options_count = {
+        .expected_value = "9",
+    };
+    single_value_context role_payload_count = {
+        .expected_value = "1",
+    };
     single_value_context admin_capabilities = {
         .expected_value = "a:1:{s:13:\"administrator\";b:1;}",
     };
@@ -10410,6 +10419,56 @@ static void assert_wordpress_installer_seed_data(mylite_db *db) {
     );
     assert(errmsg == NULL);
     assert(admin_email.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT option_value FROM wp_options FORCE INDEX (option_name) "
+            "WHERE option_name = 'default_role'",
+            single_value_callback,
+            &default_role,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(default_role.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM wp_options WHERE "
+            "(option_name = 'users_can_register' AND option_value = '0') OR "
+            "(option_name = 'start_of_week' AND option_value = '1') OR "
+            "(option_name = 'use_smilies' AND option_value = '1') OR "
+            "(option_name = 'comments_notify' AND option_value = '1') OR "
+            "(option_name = 'posts_per_page' AND option_value = '10') OR "
+            "(option_name = 'active_plugins' AND option_value = 'a:0:{}') OR "
+            "(option_name = 'sticky_posts' AND option_value = 'a:0:{}') OR "
+            "(option_name = 'comment_previously_approved' AND option_value = '1') OR "
+            "(option_name = 'auto_update_core_major' AND option_value = 'enabled')",
+            single_value_callback,
+            &default_options_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(default_options_count.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM wp_options FORCE INDEX (option_name) "
+            "WHERE option_name = 'wp_user_roles' AND LENGTH(option_value) > 3000 "
+            "AND LOCATE('s:13:\"administrator\"', option_value) > 0 "
+            "AND LOCATE('s:6:\"editor\"', option_value) > 0 "
+            "AND LOCATE('s:6:\"author\"', option_value) > 0 "
+            "AND LOCATE('s:11:\"contributor\"', option_value) > 0 "
+            "AND LOCATE('s:10:\"subscriber\"', option_value) > 0 "
+            "AND LOCATE('s:14:\"update_plugins\";b:1;', option_value) > 0",
+            single_value_callback,
+            &role_payload_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(role_payload_count.rows == 1);
     assert(
         mylite_exec(
             db,
