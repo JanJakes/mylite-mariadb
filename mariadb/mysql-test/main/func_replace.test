@@ -38,6 +38,7 @@ INSERT INTO t1 (col1, col2) VALUES ('a', 'ba');
 SELECT REPLACE('a', col1, col2) FROM t1;
 CREATE TABLE t2 AS SELECT 'a' UNION ALL SELECT REPLACE('a', col1, col2) FROM t1;
 SELECT * FROM t2;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t1, t2;
 
@@ -51,6 +52,7 @@ INSERT INTO t1 (col1, col2) VALUES ('a', '0123456789');
 SELECT REPLACE('aa', col1, col2) FROM t1;
 CREATE TABLE t2 AS SELECT 'a' UNION ALL SELECT REPLACE('aa', col1, col2) FROM t1;
 SELECT * FROM t2;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t1, t2;
 
@@ -64,6 +66,7 @@ INSERT INTO t1 (col1, col2) VALUES ('a', 'aaaaaaaaaabbbbbbbbbb');
 SELECT REPLACE('aa', col1, col2) FROM t1;
 CREATE TABLE t2 AS SELECT 'a' UNION ALL SELECT REPLACE('aa', col1, col2) FROM t1;
 SELECT * FROM t2;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t1, t2;
 
@@ -77,6 +80,7 @@ INSERT INTO t1 (col1, col2) VALUES ('a', 'aaaaaaaaaabbbbbbbbbbcccccccccc');
 SELECT REPLACE('aaa', col1, col2) FROM t1;
 CREATE TABLE t2 AS SELECT 'a' UNION ALL SELECT REPLACE('aaa', col1, col2) FROM t1;
 SELECT * FROM t2;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t1, t2;
 

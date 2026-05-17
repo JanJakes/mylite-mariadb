@@ -59,6 +59,8 @@ MariaDB base: `mariadb-11.8.6`
   `main.func_equal` and `main.func_op`.
 - [MTR string and format function smoke](../mtr-string-format-smoke/specs.md)
   adds `main.func_concat` and `main.func_format`.
+- [MTR scalar function smoke](../mtr-scalar-function-smoke/specs.md) adds
+  `main.func_bit`, `main.func_extract`, and `main.func_replace`.
 - [MTR KDF smoke](../mtr-kdf-smoke/specs.md) adds `main.func_kdf` and allows
   optional quoted MTR variant suffixes in pass-result assertions.
 - [MTR disabled DES smoke](../mtr-disabled-des-smoke/specs.md) adds

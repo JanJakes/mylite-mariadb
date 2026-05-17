@@ -21,8 +21,11 @@ default_tests=(
   main.sum_distinct
   main.func_equal
   main.func_op
+  main.func_bit
   main.func_concat
+  main.func_extract
   main.func_format
+  main.func_replace
   main.func_kdf
   main.func_encrypt_nossl
 )

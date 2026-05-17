@@ -32,16 +32,25 @@ $$
 DELIMITER ;$$
 
 --vertical_results
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('BIGINT UNSIGNED', 18446744073709551615);
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('DOUBLE',          18446744073709551615);
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('DECIMAL(30,0)',   18446744073709551615);
 
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('BIGINT',          -1);
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('DOUBLE',          -1);
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('DECIMAL(30,0)',   -1);
 
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('BIGINT',          -9223372036854775808);
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('DOUBLE',          -9223372036854775808);
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('DECIMAL(30,0)',   -9223372036854775808);
 --horizontal_results
 
