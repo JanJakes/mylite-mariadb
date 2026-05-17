@@ -155,6 +155,7 @@ static void test_transaction_and_foreign_key_policies(void);
 static void test_foreign_key_self_set_null_delete(void);
 static void test_foreign_key_self_set_null_update(void);
 static void test_foreign_key_non_self_set_null_actions(void);
+static void test_foreign_key_delete_cascade_actions(void);
 static void test_foreign_key_non_self_ordering(void);
 static void test_foreign_key_multi_table_ordering(void);
 static void test_foreign_key_handler_metadata(void);
@@ -435,6 +436,7 @@ int main(int argc, char **argv) {
     test_foreign_key_self_set_null_delete();
     test_foreign_key_self_set_null_update();
     test_foreign_key_non_self_set_null_actions();
+    test_foreign_key_delete_cascade_actions();
     test_foreign_key_non_self_ordering();
     test_foreign_key_multi_table_ordering();
     test_foreign_key_handler_metadata();
@@ -2976,6 +2978,226 @@ static void test_foreign_key_non_self_set_null_actions(void) {
         "SELECT id FROM fk_non_self_update_child "
         "FORCE INDEX (fk_non_self_update_child_parent) WHERE parent_id = 10",
         "24"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_foreign_key_delete_cascade_actions(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_cascade_parent ("
+        "id INT NOT NULL PRIMARY KEY, label VARCHAR(32) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_cascade_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NOT NULL, "
+        "label VARCHAR(32) NOT NULL, "
+        "KEY fk_cascade_child_parent (parent_id), "
+        "CONSTRAINT fk_cascade_child_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_cascade_parent(id) "
+        "ON DELETE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    char *create_sql = capture_show_create_table(db, "fk_cascade_child");
+    assert(strstr(create_sql, "ON DELETE CASCADE") != NULL);
+    free(create_sql);
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_cascade_parent VALUES "
+        "(1, 'deleted'), (2, 'kept')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_cascade_child VALUES "
+        "(10, 1, 'first child'), "
+        "(11, 1, 'second child'), "
+        "(12, 2, 'kept child')"
+    );
+    assert_exec_succeeds(db, "DELETE FROM fk_cascade_parent WHERE id = 1");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_cascade_child WHERE id IN (10, 11)",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM fk_cascade_child "
+        "FORCE INDEX (fk_cascade_child_parent) WHERE parent_id = 2",
+        "12"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_cascade_child "
+        "FORCE INDEX (fk_cascade_child_parent) WHERE parent_id = 1",
+        "0"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_cascade_root ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_cascade_mid ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "root_id INT NOT NULL, "
+        "KEY fk_cascade_mid_root (root_id), "
+        "CONSTRAINT fk_cascade_mid_root "
+        "FOREIGN KEY (root_id) REFERENCES fk_cascade_root(id) "
+        "ON DELETE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_cascade_leaf ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "mid_id INT NOT NULL, "
+        "KEY fk_cascade_leaf_mid (mid_id), "
+        "CONSTRAINT fk_cascade_leaf_mid "
+        "FOREIGN KEY (mid_id) REFERENCES fk_cascade_mid(id) "
+        "ON DELETE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_cascade_root VALUES (1)");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_cascade_mid VALUES (100, 1), (101, 1)"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_cascade_leaf VALUES (1000, 100), (1001, 101)"
+    );
+    assert_exec_succeeds(db, "DELETE FROM fk_cascade_root WHERE id = 1");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM fk_cascade_mid", "0");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM fk_cascade_leaf", "0");
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_cascade_tree ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NULL, "
+        "KEY fk_cascade_tree_parent (parent_id), "
+        "CONSTRAINT fk_cascade_tree_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_cascade_tree(id) "
+        "ON DELETE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_cascade_tree VALUES "
+        "(1, NULL), (2, 1), (3, 1), (4, 2)"
+    );
+    assert_exec_succeeds(db, "DELETE FROM fk_cascade_tree WHERE id = 1");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM fk_cascade_tree", "0");
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_cascade_block_parent ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_cascade_block_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NOT NULL, "
+        "KEY fk_cascade_block_child_parent (parent_id), "
+        "CONSTRAINT fk_cascade_block_child_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_cascade_block_parent(id) "
+        "ON DELETE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_cascade_block_guard ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "child_id INT NOT NULL, "
+        "KEY fk_cascade_block_guard_child (child_id), "
+        "CONSTRAINT fk_cascade_block_guard_child "
+        "FOREIGN KEY (child_id) REFERENCES fk_cascade_block_child(id) "
+        "ON DELETE RESTRICT"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_cascade_block_parent VALUES (1)");
+    assert_exec_succeeds(db, "INSERT INTO fk_cascade_block_child VALUES (10, 1)");
+    assert_exec_succeeds(db, "INSERT INTO fk_cascade_block_guard VALUES (100, 10)");
+    assert_exec_fails(db, "DELETE FROM fk_cascade_block_parent WHERE id = 1");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_cascade_block_child WHERE id = 10",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_cascade_block_parent WHERE id = 1",
+        "1"
+    );
+
+    assert_foreign_key_exec_fails(
+        db,
+        "CREATE TABLE fk_cascade_update_reject ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT NOT NULL, "
+        "KEY fk_cascade_update_reject_parent (parent_id), "
+        "CONSTRAINT fk_cascade_update_reject_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_cascade_parent(id) "
+        "ON UPDATE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    assert_foreign_key_exec_fails(
+        db,
+        "CREATE TABLE fk_cascade_blob_reject ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT NOT NULL, note TEXT, "
+        "KEY fk_cascade_blob_reject_parent (parent_id), "
+        "CONSTRAINT fk_cascade_blob_reject_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_cascade_parent(id) "
+        "ON DELETE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "fk_cascade_update_reject") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "fk_cascade_blob_reject") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE app");
+    create_sql = capture_show_create_table(db, "fk_cascade_child");
+    assert(strstr(create_sql, "ON DELETE CASCADE") != NULL);
+    free(create_sql);
+    create_sql = capture_show_create_table(db, "fk_cascade_tree");
+    assert(strstr(create_sql, "ON DELETE CASCADE") != NULL);
+    free(create_sql);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM fk_cascade_child "
+        "FORCE INDEX (fk_cascade_child_parent) WHERE parent_id = 2",
+        "12"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_cascade_block_child WHERE id = 10",
+        "1"
     );
 
     assert(mylite_close(db) == MYLITE_OK);
