@@ -126,8 +126,10 @@ Representative ordered self-referential update/delete checks cover
 parent-first rejection and child-first success. Representative non-self parent
 update/delete ordering checks cover failed-statement rollback when an earlier
 unreferenced parent row was processed before a later referenced parent row.
-Broader multi-table update/delete ordering matrices, deferrable set-wide
-validation, cascades, `SET NULL`, and `SET DEFAULT` remain planned.
+Representative multi-table update/delete ordering checks cover parent-first
+rejection and child-first success when the target-table order is forced.
+Broader exhaustive multi-table matrices, deferrable set-wide validation,
+cascades, `SET NULL`, and `SET DEFAULT` remain planned.
 Partition DDL remains rejected at the `libmylite` boundary until MyLite has
 partition metadata, partition-to-primary-file routing, per-partition catalog
 lifecycle, and partition-aware row and index maintenance.

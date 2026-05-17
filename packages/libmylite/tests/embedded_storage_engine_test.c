@@ -153,6 +153,7 @@ static void test_collation_restart_matrix(void);
 static void test_non_table_object_policy(void);
 static void test_transaction_and_foreign_key_policies(void);
 static void test_foreign_key_non_self_ordering(void);
+static void test_foreign_key_multi_table_ordering(void);
 static void test_foreign_key_handler_metadata(void);
 static void test_row_dml_transactions(void);
 static void test_create_table_persists_catalog_metadata(void);
@@ -429,6 +430,7 @@ int main(int argc, char **argv) {
     test_non_table_object_policy();
     test_transaction_and_foreign_key_policies();
     test_foreign_key_non_self_ordering();
+    test_foreign_key_multi_table_ordering();
     test_foreign_key_handler_metadata();
     test_row_dml_transactions();
     test_create_table_persists_catalog_metadata();
@@ -2495,6 +2497,104 @@ static void test_foreign_key_non_self_ordering(void) {
     );
     assert_exec_fails(db, "DELETE FROM fk_nonself_parent WHERE id = 20");
     assert_exec_fails(db, "UPDATE fk_nonself_parent SET id = 140 WHERE id = 40");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_foreign_key_multi_table_ordering(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_multi_parent ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_multi_child ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT, "
+        "CONSTRAINT fk_multi_child_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_multi_parent(id)"
+        ") ENGINE=InnoDB"
+    );
+
+    assert_exec_succeeds(db, "INSERT INTO fk_multi_parent VALUES (10)");
+    assert_exec_succeeds(db, "INSERT INTO fk_multi_child VALUES (1, 10)");
+    assert_exec_fails(
+        db,
+        "DELETE fk_multi_parent, fk_multi_child "
+        "FROM fk_multi_parent STRAIGHT_JOIN fk_multi_child "
+        "ON fk_multi_child.parent_id = fk_multi_parent.id "
+        "WHERE fk_multi_parent.id = 10"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM fk_multi_parent WHERE id = 10", "1");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_multi_child WHERE parent_id = 10",
+        "1"
+    );
+    assert_exec_succeeds(
+        db,
+        "DELETE fk_multi_child, fk_multi_parent "
+        "FROM fk_multi_child STRAIGHT_JOIN fk_multi_parent "
+        "ON fk_multi_parent.id = fk_multi_child.parent_id "
+        "WHERE fk_multi_parent.id = 10"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM fk_multi_parent WHERE id = 10", "0");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM fk_multi_child WHERE parent_id = 10", "0");
+
+    assert_exec_succeeds(db, "INSERT INTO fk_multi_parent VALUES (20)");
+    assert_exec_succeeds(db, "INSERT INTO fk_multi_child VALUES (2, 20)");
+    assert_exec_fails(
+        db,
+        "UPDATE fk_multi_parent STRAIGHT_JOIN fk_multi_child "
+        "ON fk_multi_child.parent_id = fk_multi_parent.id "
+        "SET fk_multi_parent.id = 120, fk_multi_child.parent_id = NULL "
+        "WHERE fk_multi_parent.id = 20"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM fk_multi_parent WHERE id = 20", "1");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM fk_multi_parent WHERE id = 120", "0");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_multi_child WHERE id = 2 AND parent_id = 20",
+        "1"
+    );
+    assert_exec_succeeds(
+        db,
+        "UPDATE fk_multi_child STRAIGHT_JOIN fk_multi_parent "
+        "ON fk_multi_parent.id = fk_multi_child.parent_id "
+        "SET fk_multi_child.parent_id = NULL, fk_multi_parent.id = 120 "
+        "WHERE fk_multi_parent.id = 20"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM fk_multi_parent WHERE id = 120", "1");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_multi_child WHERE id = 2 AND parent_id IS NULL",
+        "1"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE app");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM fk_multi_parent WHERE id = 10", "0");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM fk_multi_child WHERE id = 1", "0");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM fk_multi_parent WHERE id = 120", "1");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_multi_child WHERE id = 2 AND parent_id IS NULL",
+        "1"
+    );
+    assert_exec_fails(db, "INSERT INTO fk_multi_child VALUES (3, 20)");
+    assert_exec_succeeds(db, "INSERT INTO fk_multi_child VALUES (3, 120)");
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
