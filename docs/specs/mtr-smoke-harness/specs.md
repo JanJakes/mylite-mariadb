@@ -51,6 +51,8 @@ MariaDB base: `mariadb-11.8.6`
   `main.func_equal` and `main.func_op`.
 - [MTR string and format function smoke](../mtr-string-format-smoke/specs.md)
   adds `main.func_concat` and `main.func_format`.
+- [MTR require-pass harness](../mtr-require-pass-harness/specs.md) makes
+  selected tests fail unless MTR reports an actual `[ pass ]` result.
 
 ## Design
 
@@ -60,6 +62,10 @@ Add `tools/mylite-mtr-harness` with two commands:
 - `run [suite.test...]` builds the required MariaDB MTR support targets under
   `build/mariadb-mtr-smoke` with `cmake/mariadb-mtr-smoke.cmake` and runs each
   selected test with `mariadb-test-run.pl --embedded-server --skip-rpl`.
+
+The runner anchors exact selected case names and requires the matching MTR
+summary line to report `[ pass ]`. A selected test that is skipped by MTR
+feature checks is treated as no coverage and fails the harness.
 
 The default curated list is intentionally tiny:
 

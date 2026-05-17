@@ -120,11 +120,24 @@ mtr_cache_ready() {
   done
 }
 
+assert_test_passed() {
+  local output_file="$1"
+  local suite_name="$2"
+  local case_name="$3"
+
+  if ! grep -Eq "^[[:space:]]*${suite_name}\\.${case_name}[[:space:]]+\\[ pass \\]" \
+    "${output_file}"; then
+    echo "Expected ${suite_name}.${case_name} to report an MTR pass" >&2
+    return 1
+  fi
+}
+
 run_tests() {
   local tests=("$@")
   local test_name
   local suite_name
   local case_name
+  local output_file
 
   if [ "${#tests[@]}" -eq 0 ]; then
     tests=("${default_tests[@]}")
@@ -140,7 +153,8 @@ run_tests() {
 
     suite_name="${test_name%%.*}"
     case_name="${test_name#*.}"
-    (
+    output_file="$(mktemp "${TMPDIR:-/tmp}/mylite-mtr-output.XXXXXX")"
+    if ! (
       cd "${build_dir}/mysql-test"
       MTR_BUILD_THREAD="${mtr_build_thread}" \
       MYLITE_MTR_WITHOUT_NATIVE_MYISAM_TOOLS=1 \
@@ -152,8 +166,17 @@ run_tests() {
           --mysqld=--default-storage-engine=Aria \
           --suite="${suite_name}" \
           --do-test="^${case_name}$" \
-          --max-test-fail=1
-    )
+          --max-test-fail=1 | tee "${output_file}"
+    ); then
+      rm -f "${output_file}"
+      exit 1
+    fi
+
+    if ! assert_test_passed "${output_file}" "${suite_name}" "${case_name}"; then
+      rm -f "${output_file}"
+      exit 1
+    fi
+    rm -f "${output_file}"
   done
 }
 
