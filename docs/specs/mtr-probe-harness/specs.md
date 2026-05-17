@@ -29,6 +29,9 @@ MariaDB base: `mariadb-11.8.6`
 - Failed upstream MTR candidates can generate `*.reject` files under
   `mariadb/mysql-test/main`. Probe is a discovery workflow, so it should not
   leave newly generated rejects in the source tree.
+- MariaDB MTR supports `--testcase-timeout=MINUTES`; candidate discovery
+  benefits from a shorter probe-only timeout because some rejected candidates
+  can sit in deadlock-oriented multi-connection sections.
 
 ## Compatibility Impact
 
@@ -45,6 +48,10 @@ compatibility slices.
   MTR pass.
 - Snapshot existing `mariadb/mysql-test/**/*.reject` files before probing and
   remove only rejects created during probe execution.
+- Pass `--testcase-timeout=${MTR_PROBE_TESTCASE_TIMEOUT_MINUTES}` to MTR for
+  `probe` runs. The default is 5 minutes. Strict `run` keeps MTR's default
+  testcase timeout unless a later accepted-coverage slice proves a need to
+  change it.
 - Keep `run` strict: it still stops at the first failed or skipped selected
   test and preserves failure artifacts for debugging.
 
@@ -71,6 +78,7 @@ the existing Bash harness.
   `mariadb/mysql-test/main/ansi.reject` file is removed.
 - `! tools/mylite-mtr-harness run main.ansi` and verify strict `run` leaves
   `mariadb/mysql-test/main/ansi.reject` for debugging.
+- `MTR_PROBE_TESTCASE_TIMEOUT_MINUTES=1 tools/mylite-mtr-harness probe main.prepare`
 - `tools/mylite-mtr-harness run main.prepare`
 - `tools/mylite-mtr-harness run`
 - `find mariadb/mysql-test -name '*.reject' -print`
@@ -84,6 +92,8 @@ the existing Bash harness.
   pass.
 - `probe` removes newly generated `.reject` files without deleting reject files
   that existed before the probe started.
+- `probe` passes the configured testcase timeout to MTR without changing
+  strict `run` timeout behavior.
 - `run` keeps its strict accepted-coverage behavior.
 
 ## Risks And Open Questions
@@ -93,5 +103,8 @@ the existing Bash harness.
 - Cleaning probe-generated rejects trades source-tree hygiene for less
   convenient immediate diff inspection. Full failure logs remain under the MTR
   build tree for deeper analysis.
+- The default 5-minute probe timeout is a discovery policy, not proof that
+  slower tests are incompatible. Slow candidates can still be retried with a
+  larger `MTR_PROBE_TESTCASE_TIMEOUT_MINUTES` value.
 - A future CI dashboard may need machine-readable probe output, but plain text
   is sufficient for local candidate discovery.

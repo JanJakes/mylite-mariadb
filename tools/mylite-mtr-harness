@@ -5,6 +5,7 @@ root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_dir="${BUILD_DIR:-"${root_dir}/build/mariadb-mtr-smoke"}"
 mtr_profile="${PROFILE:-"${root_dir}/cmake/mariadb-mtr-smoke.cmake"}"
 mtr_build_thread="${MTR_BUILD_THREAD:-auto}"
+mtr_probe_testcase_timeout_minutes="${MTR_PROBE_TESTCASE_TIMEOUT_MINUTES:-5}"
 default_tests=(
   mylite.bootstrap_schema
   main.cast
@@ -114,6 +115,8 @@ Environment:
   BUILD_DIR          MariaDB build directory. Defaults to build/mariadb-mtr-smoke.
   PROFILE            Initial CMake cache. Defaults to cmake/mariadb-mtr-smoke.cmake.
   MTR_BUILD_THREAD  MTR build thread/port block. Defaults to auto.
+  MTR_PROBE_TESTCASE_TIMEOUT_MINUTES
+                     Probe testcase timeout passed to MTR. Defaults to 5.
 EOF
 }
 
@@ -254,7 +257,11 @@ probe_tests() {
 
   for test_name in "${tests[@]}"; do
     output_file="$(mktemp "${TMPDIR:-/tmp}/mylite-mtr-output.XXXXXX")"
-    if run_mtr_case "${test_name}" "${output_file}" quiet; then
+    if run_mtr_case \
+      "${test_name}" \
+      "${output_file}" \
+      quiet \
+      "${mtr_probe_testcase_timeout_minutes}"; then
       echo "PASS ${test_name}"
     else
       echo "FAIL ${test_name}"
@@ -290,8 +297,10 @@ run_mtr_case() {
   local test_name="$1"
   local output_file="$2"
   local output_mode="$3"
+  local testcase_timeout_minutes="${4:-}"
   local suite_name
   local case_name
+  local testcase_timeout_args=()
 
   if [[ "${test_name}" != *.* ]]; then
     echo "Expected suite.test name, got: ${test_name}" >&2
@@ -300,6 +309,10 @@ run_mtr_case() {
 
   suite_name="${test_name%%.*}"
   case_name="${test_name#*.}"
+
+  if [ -n "${testcase_timeout_minutes}" ]; then
+    testcase_timeout_args=("--testcase-timeout=${testcase_timeout_minutes}")
+  fi
 
   if [ "${output_mode}" = quiet ]; then
     if ! (
@@ -314,6 +327,7 @@ run_mtr_case() {
           --mysqld=--default-storage-engine=Aria \
           --suite="${suite_name}" \
           --do-test="^${case_name}$" \
+          ${testcase_timeout_args[@]+"${testcase_timeout_args[@]}"} \
           --max-test-fail=1 >"${output_file}" 2>&1
     ); then
       return 1
@@ -336,6 +350,7 @@ run_mtr_case() {
         --mysqld=--default-storage-engine=Aria \
         --suite="${suite_name}" \
         --do-test="^${case_name}$" \
+        ${testcase_timeout_args[@]+"${testcase_timeout_args[@]}"} \
         --max-test-fail=1 | tee "${output_file}"
   ); then
     return 1
