@@ -199,5 +199,5 @@ before acceptance.
 - `foreign_key_checks=0` is common in dumps. The row-DML bypass is handled by
   a separate slice, while broader dump/import semantics remain outside the
   first public FK DDL publication subset.
-- Generated supporting-key cleanup semantics remain a specific follow-up before
-  MyLite can claim a full FK metadata lifecycle.
+- Generated supporting-key cleanup semantics are handled by a separate cleanup
+  slice before MyLite can claim a fuller FK metadata lifecycle.

@@ -18,7 +18,7 @@ and no longer participates in child or parent row checks after close/reopen.
 - Advertising `HTON_SUPPORTS_FOREIGN_KEYS`.
 - Automatically dropping child supporting indexes when a FK is dropped.
   MariaDB's rebuilt table definition remains the authority for retained keys;
-  generated-key cleanup can be a later compatibility slice.
+  generated-key cleanup belongs to a separate compatibility slice.
 - Durable DDL inside active MyLite transactions.
 
 ## Source Findings
@@ -118,8 +118,8 @@ handler bridge and tests.
 ## Risks And Open Questions
 
 - Automatically dropping MariaDB-generated child supporting keys is left for a
-  later slice because compatibility depends on MariaDB's retained-key behavior
-  and application expectations.
+  separate cleanup slice because compatibility depends on MariaDB's
+  retained-key behavior and application expectations.
 - Multiple FK drops in one ALTER should work through repeated catalog removals,
   but exhaustive multi-drop and mixed ADD/DROP FK matrices can follow the first
   public lifecycle support.

@@ -1762,6 +1762,158 @@ static void test_transaction_and_foreign_key_policies(void) {
 
     assert_exec_succeeds(
         db,
+        "CREATE TABLE fk_cleanup_parent (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_cleanup_child ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT, "
+        "CONSTRAINT fk_cleanup_child_parent FOREIGN KEY (parent_id) "
+        "REFERENCES fk_cleanup_parent(id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS "
+        "WHERE TABLE_SCHEMA = 'app' "
+        "AND TABLE_NAME = 'fk_cleanup_child' "
+        "AND INDEX_NAME = 'fk_cleanup_child_parent' "
+        "AND SEQ_IN_INDEX = 1",
+        "1"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_cleanup_parent VALUES (50)");
+    assert_exec_succeeds(db, "INSERT INTO fk_cleanup_child VALUES (1, 50)");
+    assert_exec_fails(db, "DROP INDEX fk_cleanup_child_parent ON fk_cleanup_child");
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE fk_cleanup_child "
+        "ADD KEY fk_cleanup_child_explicit (parent_id, id), ALGORITHM=COPY"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS "
+        "WHERE TABLE_SCHEMA = 'app' "
+        "AND TABLE_NAME = 'fk_cleanup_child' "
+        "AND INDEX_NAME = 'fk_cleanup_child_parent'",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS "
+        "WHERE TABLE_SCHEMA = 'app' "
+        "AND TABLE_NAME = 'fk_cleanup_child' "
+        "AND INDEX_NAME = 'fk_cleanup_child_explicit' "
+        "AND SEQ_IN_INDEX = 1",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'app' "
+        "AND TABLE_NAME = 'fk_cleanup_child' "
+        "AND CONSTRAINT_NAME = 'fk_cleanup_child_parent'",
+        "1"
+    );
+    assert_exec_fails(db, "INSERT INTO fk_cleanup_child VALUES (2, 999)");
+    assert_exec_fails(db, "UPDATE fk_cleanup_parent SET id = 51 WHERE id = 50");
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_cleanup_drop_parent (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_cleanup_drop_child ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT, "
+        "CONSTRAINT fk_cleanup_drop_child_parent FOREIGN KEY (parent_id) "
+        "REFERENCES fk_cleanup_drop_parent(id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_cleanup_drop_parent VALUES (60)");
+    assert_exec_succeeds(db, "INSERT INTO fk_cleanup_drop_child VALUES (1, 60)");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS "
+        "WHERE TABLE_SCHEMA = 'app' "
+        "AND TABLE_NAME = 'fk_cleanup_drop_child' "
+        "AND INDEX_NAME = 'fk_cleanup_drop_child_parent' "
+        "AND SEQ_IN_INDEX = 1",
+        "1"
+    );
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE fk_cleanup_drop_child "
+        "DROP FOREIGN KEY fk_cleanup_drop_child_parent"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'app' "
+        "AND TABLE_NAME = 'fk_cleanup_drop_child' "
+        "AND CONSTRAINT_NAME = 'fk_cleanup_drop_child_parent'",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS "
+        "WHERE TABLE_SCHEMA = 'app' "
+        "AND TABLE_NAME = 'fk_cleanup_drop_child' "
+        "AND INDEX_NAME = 'fk_cleanup_drop_child_parent' "
+        "AND SEQ_IN_INDEX = 1",
+        "1"
+    );
+    assert_exec_succeeds(db, "DROP INDEX fk_cleanup_drop_child_parent ON fk_cleanup_drop_child");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS "
+        "WHERE TABLE_SCHEMA = 'app' "
+        "AND TABLE_NAME = 'fk_cleanup_drop_child' "
+        "AND INDEX_NAME = 'fk_cleanup_drop_child_parent'",
+        "0"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_cleanup_drop_child VALUES (2, 999)");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE app");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS "
+        "WHERE TABLE_SCHEMA = 'app' "
+        "AND TABLE_NAME = 'fk_cleanup_child' "
+        "AND INDEX_NAME = 'fk_cleanup_child_parent'",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS "
+        "WHERE TABLE_SCHEMA = 'app' "
+        "AND TABLE_NAME = 'fk_cleanup_child' "
+        "AND INDEX_NAME = 'fk_cleanup_child_explicit' "
+        "AND SEQ_IN_INDEX = 1",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'app' "
+        "AND TABLE_NAME = 'fk_cleanup_child' "
+        "AND CONSTRAINT_NAME = 'fk_cleanup_child_parent'",
+        "1"
+    );
+    assert_exec_fails(db, "INSERT INTO fk_cleanup_child VALUES (3, 999)");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS "
+        "WHERE TABLE_SCHEMA = 'app' "
+        "AND TABLE_NAME = 'fk_cleanup_drop_child' "
+        "AND INDEX_NAME = 'fk_cleanup_drop_child_parent'",
+        "0"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_cleanup_drop_child VALUES (3, 1000)");
+
+    assert_exec_succeeds(
+        db,
         "CREATE TABLE fk_checks_parent (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB"
     );
     assert_exec_succeeds(
