@@ -10378,90 +10378,7 @@ static void test_wordpress_multisite_blog_schema_fixture(void) {
     assert_wordpress_multisite_blog_catalog_metadata(filename);
     assert_table_collation(db, "wordpress_multisite_blog", "wp_2_posts", "utf8mb4_unicode_ci");
     assert_table_collation(db, "wordpress_multisite_blog", "wp_2_options", "utf8mb4_unicode_ci");
-
-    assert_exec_succeeds(db, "INSERT INTO wp_site (domain, path) VALUES ('example.test', '/')");
-    assert_exec_succeeds(
-        db,
-        "INSERT INTO wp_blogs "
-        "(site_id, domain, path, registered, last_updated) VALUES "
-        "(1, 'example.test', '/second/', '2026-05-15 12:00:00', "
-        "'2026-05-15 12:00:00')"
-    );
-    assert_exec_succeeds(
-        db,
-        "INSERT INTO wp_users "
-        "(user_login, user_pass, user_nicename, user_email, user_registered, display_name) "
-        "VALUES "
-        "('network-admin', '$P$Bfixturehash', 'network-admin', 'admin@example.test', "
-        "'2026-05-15 10:00:00', 'network-admin')"
-    );
-    assert_exec_succeeds(
-        db,
-        "INSERT INTO wp_2_options (option_name, option_value, autoload) VALUES "
-        "('siteurl', 'https://example.test/second', 'yes'), "
-        "('blogname', 'Second Site', 'yes')"
-    );
-    assert_exec_succeeds(
-        db,
-        "INSERT INTO wp_2_terms (name, slug, term_group) VALUES "
-        "('Network News', 'network-news', 0)"
-    );
-    assert_exec_succeeds(
-        db,
-        "INSERT INTO wp_2_term_taxonomy (term_id, taxonomy, description, parent, count) VALUES "
-        "(1, 'category', 'Second site category', 0, 1)"
-    );
-    assert_exec_succeeds(
-        db,
-        "INSERT INTO wp_2_posts ("
-        "post_author, post_date, post_date_gmt, post_content, post_title, post_excerpt, "
-        "post_status, comment_status, ping_status, post_password, post_name, to_ping, pinged, "
-        "post_modified, post_modified_gmt, post_content_filtered, post_parent, guid, "
-        "menu_order, post_type, post_mime_type, comment_count"
-        ") VALUES ("
-        "1, '2026-05-15 12:30:00', '2026-05-15 10:30:00', 'Second site body', "
-        "'Second Site Post', '', 'publish', 'open', 'open', '', 'second-site-post', "
-        "'', '', '2026-05-15 12:31:00', '2026-05-15 10:31:00', '', 0, "
-        "'https://example.test/second/?p=1', 0, 'post', '', 0"
-        ")"
-    );
-    assert_exec_succeeds(
-        db,
-        "INSERT INTO wp_2_postmeta (post_id, meta_key, meta_value) VALUES "
-        "(1, '_thumbnail_id', '84')"
-    );
-    assert_exec_succeeds(
-        db,
-        "INSERT INTO wp_2_term_relationships (object_id, term_taxonomy_id, term_order) VALUES "
-        "(1, 1, 0)"
-    );
-    assert_exec_succeeds(
-        db,
-        "INSERT INTO wp_2_comments ("
-        "comment_post_ID, comment_author, comment_author_email, comment_author_url, "
-        "comment_author_IP, comment_date, comment_date_gmt, comment_content, "
-        "comment_karma, comment_approved, comment_agent, comment_type, comment_parent, user_id"
-        ") VALUES ("
-        "1, 'Jan', 'jan@example.test', '', '127.0.0.1', "
-        "'2026-05-15 12:40:00', '2026-05-15 10:40:00', 'Second site comment', "
-        "0, '1', 'mylite-test', 'comment', 0, 1"
-        ")"
-    );
-    assert_exec_succeeds(
-        db,
-        "INSERT INTO wp_2_commentmeta (comment_id, meta_key, meta_value) VALUES "
-        "(1, '_rating', '5')"
-    );
-    assert_exec_succeeds(
-        db,
-        "INSERT INTO wp_2_links ("
-        "link_url, link_name, link_image, link_target, link_description, link_visible, "
-        "link_owner, link_rating, link_updated, link_rel, link_notes, link_rss"
-        ") VALUES ("
-        "'https://mylite.example/second', 'Second Site Link', '', '', 'Network link', "
-        "'Y', 1, 0, '2026-05-15 12:50:00', '', 'link notes', ''"
-        ")"
-    );
+    exec_sql_fixture(db, "wordpress-6.9.4-multisite-network-seed.sql");
     assert_wordpress_multisite_blog_rows(db);
 
     assert(mylite_close(db) == MYLITE_OK);
@@ -10910,9 +10827,24 @@ static void assert_wordpress_multisite_global_table_metadata(
 static void assert_wordpress_multisite_blog_rows(mylite_db *db) {
     assert_query_single_value(
         db,
+        "SELECT meta_value FROM wp_sitemeta FORCE INDEX (meta_key) WHERE meta_key = 'site_name'",
+        "MyLite Network"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT meta_value FROM wp_sitemeta FORCE INDEX (meta_key) WHERE meta_key = 'site_admins'",
+        "a:1:{i:0;s:13:\"network-admin\";}"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT meta_value FROM wp_usermeta FORCE INDEX (meta_key) WHERE meta_key = 'primary_blog'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
         "SELECT blog_id FROM wp_blogs FORCE INDEX (domain) "
         "WHERE domain = 'example.test' AND path = '/second/'",
-        "1"
+        "2"
     );
     assert_query_single_value(
         db,
@@ -10931,6 +10863,12 @@ static void assert_wordpress_multisite_blog_rows(mylite_db *db) {
         "SELECT meta_value FROM wp_2_postmeta FORCE INDEX (post_id) "
         "WHERE post_id = 1 AND meta_key = '_thumbnail_id'",
         "84"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT meta_value FROM wp_2_termmeta FORCE INDEX (term_id) "
+        "WHERE term_id = 1 AND meta_key = 'display'",
+        "featured"
     );
     assert_query_single_value(
         db,
