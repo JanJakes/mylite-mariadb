@@ -177,6 +177,12 @@ static int mylite_validate_retained_child_foreign_key(
   void *ctx, const mylite_storage_foreign_key_metadata *metadata);
 static int mylite_validate_retained_parent_foreign_key(
   void *ctx, const mylite_storage_foreign_key_metadata *metadata);
+static const char *mylite_foreign_key_referenced_key_name_for_alter(
+  HA_CREATE_INFO *create_info, const char *referenced_key_name);
+static const char *mylite_foreign_key_referenced_key_name_in_alter_info(
+  Alter_info *alter_info, const char *referenced_key_name);
+static bool mylite_alter_renames_keys(HA_CREATE_INFO *create_info);
+static Alter_info *mylite_current_alter_info_for_key_rename();
 static bool mylite_alter_drops_foreign_key(
   HA_CREATE_INFO *create_info,
   const mylite_storage_foreign_key_metadata *metadata);
@@ -185,6 +191,11 @@ static bool mylite_foreign_key_is_self_referencing(
 static int mylite_reject_dropped_foreign_key_supporting_key(
   const mylite_storage_foreign_key_metadata *metadata,
   const char *fallback_key_name);
+static int mylite_update_renamed_parent_foreign_keys(
+  const char *primary_file, const char *logical_schema_name,
+  const char *logical_table_name, HA_CREATE_INFO *create_info);
+static int mylite_update_renamed_parent_foreign_key(
+  void *ctx, const mylite_storage_foreign_key_metadata *metadata);
 static int mylite_store_foreign_key_definitions(
   const char *primary_file, const char *storage_schema_name,
   const char *storage_table_name, const char *logical_schema_name,
@@ -305,7 +316,8 @@ static int mylite_detect_foreign_key_presence(
 static int mylite_match_foreign_key_to_drop(
   void *ctx, const mylite_storage_foreign_key_metadata *metadata);
 static FOREIGN_KEY_INFO *mylite_foreign_key_info_from_metadata(
-  THD *thd, const mylite_storage_foreign_key_metadata *metadata);
+  THD *thd, const mylite_storage_foreign_key_metadata *metadata,
+  bool map_referenced_key_name);
 static LEX_CSTRING *mylite_make_foreign_key_string(THD *thd,
                                                    const char *value);
 static int mylite_append_foreign_key_column_names(THD *thd,
@@ -499,6 +511,7 @@ struct Mylite_foreign_key_list_context
 {
   THD *thd;
   List<FOREIGN_KEY_INFO> *list;
+  bool map_referenced_key_name;
   int error;
 };
 
@@ -534,6 +547,13 @@ struct Mylite_foreign_key_row_check_context
 struct Mylite_retained_foreign_key_validation_context
 {
   TABLE *table;
+  HA_CREATE_INFO *create_info;
+  int error;
+};
+
+struct Mylite_parent_foreign_key_rename_context
+{
+  const char *primary_file;
   HA_CREATE_INFO *create_info;
   int error;
 };
@@ -2011,7 +2031,7 @@ int ha_mylite::get_foreign_key_list(THD *thd,
   if (!primary_file || volatile_rows)
     DBUG_RETURN(0);
 
-  Mylite_foreign_key_list_context ctx= {thd, f_key_list, 0};
+  Mylite_foreign_key_list_context ctx= {thd, f_key_list, false, 0};
   const mylite_storage_result result=
     mylite_storage_list_foreign_keys(primary_file, storage_schema(),
                                      storage_table(),
@@ -2030,7 +2050,7 @@ int ha_mylite::get_parent_foreign_key_list(THD *thd,
   if (!primary_file || volatile_rows)
     DBUG_RETURN(0);
 
-  Mylite_foreign_key_list_context ctx= {thd, f_key_list, 0};
+  Mylite_foreign_key_list_context ctx= {thd, f_key_list, true, 0};
   const mylite_storage_result result=
     mylite_storage_list_parent_foreign_keys(primary_file, storage_schema(),
                                             storage_table(),
@@ -2175,6 +2195,12 @@ int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info
     form->s->free_frm_image(frm);
     if (result != MYLITE_STORAGE_OK)
       DBUG_RETURN(mylite_storage_to_handler_error(result));
+
+    const int parent_foreign_key_rename_error=
+      mylite_update_renamed_parent_foreign_keys(
+        primary_file, logical_schema_name, logical_table_name, create_info);
+    if (parent_foreign_key_rename_error)
+      DBUG_RETURN(parent_foreign_key_rename_error);
 
     if (!requested_engine_discards_rows && !use_volatile_rows)
     {
@@ -3189,17 +3215,80 @@ static int mylite_validate_retained_parent_foreign_key(
       mylite_alter_drops_foreign_key(validation_ctx->create_info, metadata))
     return 0;
 
+  const char *referenced_key_name=
+    mylite_foreign_key_referenced_key_name_for_alter(
+      validation_ctx->create_info, metadata->referenced_key_name);
   const KEY *key= mylite_find_foreign_key_prefix(
     validation_ctx->table, metadata->referenced_column_names,
-    metadata->column_count, metadata->referenced_key_name);
+    metadata->column_count, referenced_key_name);
   if (key && (key->flags & HA_NOSAME) &&
       key->user_defined_key_parts == metadata->column_count)
     return 0;
 
   validation_ctx->error=
     mylite_reject_dropped_foreign_key_supporting_key(
-      metadata, metadata->referenced_key_name);
+      metadata, referenced_key_name);
   return 1;
+}
+
+static const char *mylite_foreign_key_referenced_key_name_for_alter(
+  HA_CREATE_INFO *create_info, const char *referenced_key_name)
+{
+  if (!referenced_key_name || !referenced_key_name[0])
+    return referenced_key_name;
+
+  const char *renamed_key_name=
+    mylite_foreign_key_referenced_key_name_in_alter_info(
+      create_info ? create_info->alter_info : NULL, referenced_key_name);
+  if (renamed_key_name != referenced_key_name)
+    return renamed_key_name;
+
+  return mylite_foreign_key_referenced_key_name_in_alter_info(
+    mylite_current_alter_info_for_key_rename(), referenced_key_name);
+}
+
+static const char *mylite_foreign_key_referenced_key_name_in_alter_info(
+  Alter_info *alter_info, const char *referenced_key_name)
+{
+  if (!alter_info || !referenced_key_name || !referenced_key_name[0])
+    return referenced_key_name;
+
+  LEX_CSTRING stored_name=
+    {referenced_key_name, strlen(referenced_key_name)};
+  List_iterator_fast<Alter_rename_key> rename_key_it(
+    alter_info->alter_rename_key_list);
+  while (Alter_rename_key *rename_key= rename_key_it++)
+  {
+    if (Lex_ident_column(stored_name).streq(rename_key->old_name))
+      return rename_key->new_name.str;
+  }
+  return referenced_key_name;
+}
+
+static bool mylite_alter_renames_keys(HA_CREATE_INFO *create_info)
+{
+  if (create_info && create_info->alter_info &&
+      create_info->alter_info->alter_rename_key_list.elements)
+    return true;
+
+  Alter_info *alter_info= mylite_current_alter_info_for_key_rename();
+  return alter_info && alter_info->alter_rename_key_list.elements;
+}
+
+static Alter_info *mylite_current_alter_info_for_key_rename()
+{
+  THD *thd= current_thd;
+  if (!thd || !thd->lex)
+    return NULL;
+
+  switch (thd->lex->sql_command) {
+  case SQLCOM_ALTER_TABLE:
+  case SQLCOM_CREATE_INDEX:
+  case SQLCOM_DROP_INDEX:
+    return &thd->lex->alter_info;
+  default:
+    return NULL;
+  }
 }
 
 static bool mylite_alter_drops_foreign_key(
@@ -3240,6 +3329,60 @@ static int mylite_reject_dropped_foreign_key_supporting_key(
     metadata && metadata->constraint_name ? metadata->constraint_name : "";
   my_error(ER_DROP_INDEX_FK, MYF(0), key_name);
   return HA_ERR_UNSUPPORTED;
+}
+
+static int mylite_update_renamed_parent_foreign_keys(
+  const char *primary_file, const char *logical_schema_name,
+  const char *logical_table_name, HA_CREATE_INFO *create_info)
+{
+  if (!mylite_alter_renames_keys(create_info))
+    return 0;
+
+  Mylite_parent_foreign_key_rename_context ctx=
+    {primary_file, create_info, 0};
+  const mylite_storage_result result=
+    mylite_storage_list_parent_foreign_keys(
+      primary_file, logical_schema_name, logical_table_name,
+      mylite_update_renamed_parent_foreign_key, &ctx);
+  if (ctx.error)
+    return ctx.error;
+  return mylite_storage_to_handler_error(result);
+}
+
+static int mylite_update_renamed_parent_foreign_key(
+  void *ctx, const mylite_storage_foreign_key_metadata *metadata)
+{
+  Mylite_parent_foreign_key_rename_context *rename_ctx=
+    static_cast<Mylite_parent_foreign_key_rename_context *>(ctx);
+  if (!metadata || !metadata->referenced_key_name ||
+      !metadata->referenced_key_name[0])
+    return 0;
+  if (mylite_foreign_key_is_self_referencing(metadata) &&
+      mylite_alter_drops_foreign_key(rename_ctx->create_info, metadata))
+    return 0;
+
+  const char *referenced_key_name=
+    mylite_foreign_key_referenced_key_name_for_alter(
+      rename_ctx->create_info, metadata->referenced_key_name);
+  if (!referenced_key_name || !referenced_key_name[0])
+    return 0;
+
+  LEX_CSTRING stored_name=
+    {metadata->referenced_key_name, strlen(metadata->referenced_key_name)};
+  LEX_CSTRING renamed_name=
+    {referenced_key_name, strlen(referenced_key_name)};
+  if (Lex_ident_column(stored_name).streq(renamed_name))
+    return 0;
+
+  const mylite_storage_result result=
+    mylite_storage_update_foreign_key_referenced_key_name(
+      rename_ctx->primary_file, metadata->schema_name, metadata->table_name,
+      metadata->constraint_name, referenced_key_name);
+  if (result == MYLITE_STORAGE_OK)
+    return 0;
+
+  rename_ctx->error= mylite_storage_to_handler_error(result);
+  return 1;
 }
 
 static int mylite_store_foreign_key_definitions(
@@ -4373,7 +4516,8 @@ static int mylite_add_foreign_key_info(
   Mylite_foreign_key_list_context *list_ctx=
     static_cast<Mylite_foreign_key_list_context *>(ctx);
   FOREIGN_KEY_INFO *info=
-    mylite_foreign_key_info_from_metadata(list_ctx->thd, metadata);
+    mylite_foreign_key_info_from_metadata(
+      list_ctx->thd, metadata, list_ctx->map_referenced_key_name);
   if (!info)
   {
     list_ctx->error= HA_ERR_OUT_OF_MEM;
@@ -4420,7 +4564,8 @@ static int mylite_match_foreign_key_to_drop(
 }
 
 static FOREIGN_KEY_INFO *mylite_foreign_key_info_from_metadata(
-  THD *thd, const mylite_storage_foreign_key_metadata *metadata)
+  THD *thd, const mylite_storage_foreign_key_metadata *metadata,
+  bool map_referenced_key_name)
 {
   if (!thd || !metadata)
     return NULL;
@@ -4440,10 +4585,12 @@ static FOREIGN_KEY_INFO *mylite_foreign_key_info_from_metadata(
 
   info.update_method= mylite_foreign_key_option(metadata->update_action);
   info.delete_method= mylite_foreign_key_option(metadata->delete_action);
-  info.referenced_key_name= metadata->referenced_key_name &&
-                            metadata->referenced_key_name[0] ?
-    mylite_make_foreign_key_string(thd, metadata->referenced_key_name) : NULL;
-  if (metadata->referenced_key_name && metadata->referenced_key_name[0] &&
+  const char *referenced_key_name= map_referenced_key_name ?
+    mylite_foreign_key_referenced_key_name_for_alter(
+      NULL, metadata->referenced_key_name) : metadata->referenced_key_name;
+  info.referenced_key_name= referenced_key_name && referenced_key_name[0] ?
+    mylite_make_foreign_key_string(thd, referenced_key_name) : NULL;
+  if (referenced_key_name && referenced_key_name[0] &&
       !info.referenced_key_name)
     return NULL;
 

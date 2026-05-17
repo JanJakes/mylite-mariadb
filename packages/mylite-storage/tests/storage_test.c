@@ -95,7 +95,8 @@ static void test_foreign_key_metadata_records(void);
 static void assert_foreign_key_metadata(
     const mylite_storage_foreign_key_metadata *metadata,
     const char *table_name,
-    const char *referenced_table_name
+    const char *referenced_table_name,
+    const char *referenced_key_name
 );
 static void test_append_and_read_rows(void);
 static void test_append_and_read_large_row_payload(void);
@@ -705,7 +706,7 @@ static void test_foreign_key_metadata_records(void) {
             &metadata
         ) == MYLITE_STORAGE_OK
     );
-    assert_foreign_key_metadata(&metadata, "posts", "users");
+    assert_foreign_key_metadata(&metadata, "posts", "users", "PRIMARY");
     mylite_storage_free_foreign_key_metadata(&metadata);
 
     assert(
@@ -811,8 +812,40 @@ static void test_foreign_key_metadata_records(void) {
             &metadata
         ) == MYLITE_STORAGE_OK
     );
-    assert_foreign_key_metadata(&metadata, "articles", "accounts");
+    assert_foreign_key_metadata(&metadata, "articles", "accounts", "PRIMARY");
     mylite_storage_free_foreign_key_metadata(&metadata);
+    assert(
+        mylite_storage_list_parent_foreign_keys(
+            filename,
+            "app",
+            "accounts",
+            collect_foreign_key,
+            &renamed_parent_capture
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(renamed_parent_capture.count == 1U);
+
+    assert(
+        mylite_storage_update_foreign_key_referenced_key_name(
+            filename,
+            "app",
+            "articles",
+            "fk_posts_users",
+            "accounts_id_unique"
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_read_foreign_key_definition(
+            filename,
+            "app",
+            "articles",
+            "fk_posts_users",
+            &metadata
+        ) == MYLITE_STORAGE_OK
+    );
+    assert_foreign_key_metadata(&metadata, "articles", "accounts", "accounts_id_unique");
+    mylite_storage_free_foreign_key_metadata(&metadata);
+    renamed_parent_capture.count = 0U;
     assert(
         mylite_storage_list_parent_foreign_keys(
             filename,
@@ -856,14 +889,15 @@ static void test_foreign_key_metadata_records(void) {
 static void assert_foreign_key_metadata(
     const mylite_storage_foreign_key_metadata *metadata,
     const char *table_name,
-    const char *referenced_table_name
+    const char *referenced_table_name,
+    const char *referenced_key_name
 ) {
     assert(strcmp(metadata->schema_name, "app") == 0);
     assert(strcmp(metadata->table_name, table_name) == 0);
     assert(strcmp(metadata->constraint_name, "fk_posts_users") == 0);
     assert(strcmp(metadata->referenced_schema_name, "app") == 0);
     assert(strcmp(metadata->referenced_table_name, referenced_table_name) == 0);
-    assert(strcmp(metadata->referenced_key_name, "PRIMARY") == 0);
+    assert(strcmp(metadata->referenced_key_name, referenced_key_name) == 0);
     assert(metadata->column_count == 2U);
     assert(strcmp(metadata->foreign_column_names[0], "user_id") == 0);
     assert(strcmp(metadata->foreign_column_names[1], "site_id") == 0);

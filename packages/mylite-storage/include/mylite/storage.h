@@ -213,6 +213,13 @@ mylite_storage_result mylite_storage_read_foreign_key_definition(
     const char *constraint_name,
     mylite_storage_foreign_key_metadata *out_metadata
 );
+mylite_storage_result mylite_storage_update_foreign_key_referenced_key_name(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    const char *constraint_name,
+    const char *referenced_key_name
+);
 mylite_storage_result mylite_storage_drop_foreign_key_definition(
     const char *filename,
     const char *schema_name,

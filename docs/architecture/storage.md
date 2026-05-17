@@ -117,8 +117,10 @@ be dropped afterward. Session
 truncate checks without retrospective validation when checks are re-enabled.
 MariaDB-generated supporting keys are cleaned up when copy ALTER replaces them
 with explicit compatible keys, and can be explicitly dropped after the owning
-FK is removed. Multi-row FK ordering, cascades, `SET NULL`, and `SET DEFAULT`
-remain planned.
+FK is removed. Referenced parent unique secondary-key renames update the FK
+referenced-key metadata and preserve parent row checks across close/reopen for
+the supported `RESTRICT` / `NO ACTION` subset. Multi-row FK ordering,
+cascades, `SET NULL`, and `SET DEFAULT` remain planned.
 Partition DDL remains rejected at the `libmylite` boundary until MyLite has
 partition metadata, partition-to-primary-file routing, per-partition catalog
 lifecycle, and partition-aware row and index maintenance.
@@ -168,7 +170,9 @@ schema names are also treated as namespaces for compatibility with files that
 pre-date explicit schema records. Internal FK definitions use catalog records
 keyed by child schema/table and constraint name plus typed FK blob pages for
 referenced key, column-list, action, match-option, and nullable-column
-metadata. Row inserts append checksummed row pages tagged by catalog table id;
+metadata. FK referenced-key rewrites append replacement FK blob pages and
+republish the FK catalog record. Row inserts append checksummed row pages
+tagged by catalog table id;
 non-BLOB rows store raw MariaDB record images, while BLOB/TEXT rows store a
 durable handler-owned row payload that replaces process pointers with value
 bytes. Large row payloads spill into checksummed row-payload blob pages inside

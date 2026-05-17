@@ -68,8 +68,10 @@ The storage-engine smoke test extends the standalone index DDL scenario:
 `ALTER TABLE ... RENAME INDEX` moves from planned to partial for supported
 copy-rebuild MyLite-routed tables, including generated-column secondary and
 unique indexes. It remains partial because online rename paths, primary-key
-rename, conflict matrices, unsupported index classes, and transactional DDL
-rollback remain separate work.
+rename, conflict matrices, unsupported index classes, broader foreign-key
+matrices, and transactional DDL rollback remain separate work. A follow-up
+foreign-key slice covers referenced parent unique secondary-key rename for
+MyLite's supported FK subset.
 
 ## Single-File And Embedded-Lifecycle Impact
 
@@ -110,6 +112,8 @@ Implemented in the storage-engine smoke test:
   old-name `FORCE INDEX` rejection, new-name forced-index reads,
   duplicate-key rejection, generated-column unique-index rename coverage,
   close/reopen discovery, catalog table-count stability, and sidecar cleanup.
+- A later FK-focused slice extends the same copy-rebuild path to referenced
+  parent unique secondary-key rename, with FK metadata and row-check coverage.
 - No production storage change was required because the current copy ALTER path
   already republishes the rebuilt table definition and index-entry pages.
 

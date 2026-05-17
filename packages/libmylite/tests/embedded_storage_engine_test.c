@@ -1862,6 +1862,59 @@ static void test_transaction_and_foreign_key_policies(void) {
 
     assert_exec_succeeds(
         db,
+        "CREATE TABLE fk_rename_index_parent ("
+        "id INT NOT NULL PRIMARY KEY, parent_code INT NOT NULL, "
+        "UNIQUE KEY fk_rename_index_parent_code (parent_code)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_rename_index_child ("
+        "id INT NOT NULL PRIMARY KEY, parent_code INT, "
+        "KEY fk_rename_index_child_code (parent_code), "
+        "CONSTRAINT fk_rename_index_child_parent FOREIGN KEY (parent_code) "
+        "REFERENCES fk_rename_index_parent(parent_code)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_rename_index_parent VALUES (1, 400)");
+    assert_exec_succeeds(db, "INSERT INTO fk_rename_index_child VALUES (1, 400)");
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE fk_rename_index_parent "
+        "RENAME INDEX fk_rename_index_parent_code TO renamed_fk_rename_index_parent_code, "
+        "ALGORITHM=COPY"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'app' "
+        "AND TABLE_NAME = 'fk_rename_index_child' "
+        "AND CONSTRAINT_NAME = 'fk_rename_index_child_parent' "
+        "AND UNIQUE_CONSTRAINT_NAME = 'renamed_fk_rename_index_parent_code'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM fk_rename_index_parent "
+        "FORCE INDEX (renamed_fk_rename_index_parent_code) "
+        "WHERE parent_code = 400",
+        "1"
+    );
+    assert_exec_fails(
+        db,
+        "SELECT id FROM fk_rename_index_parent "
+        "FORCE INDEX (fk_rename_index_parent_code) "
+        "WHERE parent_code = 400"
+    );
+    assert_exec_fails(db, "INSERT INTO fk_rename_index_child VALUES (2, 999)");
+    assert_exec_fails(
+        db,
+        "UPDATE fk_rename_index_parent SET parent_code = 401 WHERE parent_code = 400"
+    );
+    assert_exec_fails(db, "DELETE FROM fk_rename_index_parent WHERE parent_code = 400");
+
+    assert_exec_succeeds(
+        db,
         "CREATE TABLE fk_table_drop_parent (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB"
     );
     assert_exec_succeeds(
@@ -2030,6 +2083,29 @@ static void test_transaction_and_foreign_key_policies(void) {
     assert(mylite_close(db) == MYLITE_OK);
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "USE app");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'app' "
+        "AND TABLE_NAME = 'fk_rename_index_child' "
+        "AND CONSTRAINT_NAME = 'fk_rename_index_child_parent' "
+        "AND UNIQUE_CONSTRAINT_NAME = 'renamed_fk_rename_index_parent_code'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM fk_rename_index_parent "
+        "FORCE INDEX (renamed_fk_rename_index_parent_code) "
+        "WHERE parent_code = 400",
+        "1"
+    );
+    assert_exec_fails(
+        db,
+        "SELECT id FROM fk_rename_index_parent "
+        "FORCE INDEX (fk_rename_index_parent_code) "
+        "WHERE parent_code = 400"
+    );
+    assert_exec_fails(db, "INSERT INTO fk_rename_index_child VALUES (2, 999)");
     assert(
         mylite_storage_table_exists(filename, "app", "fk_table_drop_parent") ==
         MYLITE_STORAGE_NOTFOUND

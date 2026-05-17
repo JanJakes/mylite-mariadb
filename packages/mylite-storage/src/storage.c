@@ -1432,6 +1432,171 @@ mylite_storage_result mylite_storage_read_foreign_key_definition(
     return result;
 }
 
+mylite_storage_result mylite_storage_update_foreign_key_referenced_key_name(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    const char *constraint_name,
+    const char *referenced_key_name
+) {
+    if (filename == NULL || filename[0] == '\0' || schema_name == NULL || schema_name[0] == '\0' ||
+        table_name == NULL || table_name[0] == '\0' || constraint_name == NULL ||
+        constraint_name[0] == '\0' || referenced_key_name == NULL ||
+        referenced_key_name[0] == '\0') {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    FILE *file = NULL;
+    mylite_storage_result result = open_existing_file_for_update(filename, &file);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_header header = {0};
+    unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    mylite_storage_catalog_entry entry = {0};
+    unsigned char *old_metadata = NULL;
+    size_t old_metadata_size = 0U;
+    mylite_storage_foreign_key_metadata decoded = {
+        .size = sizeof(decoded),
+    };
+    unsigned char *new_metadata = NULL;
+    size_t new_metadata_size = 0U;
+    mylite_storage_foreign_key_definition_lengths lengths = {0};
+
+    result = read_header(file, &header);
+    if (result == MYLITE_STORAGE_OK) {
+        result = read_catalog_root(file, &header, catalog_page);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = find_foreign_key_record(
+            catalog_page,
+            schema_name,
+            table_name,
+            constraint_name,
+            &entry
+        );
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = read_foreign_key_blob_pages(
+            file,
+            &header,
+            &entry,
+            &old_metadata,
+            &old_metadata_size
+        );
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = decode_foreign_key_metadata(
+            entry.record,
+            old_metadata,
+            old_metadata_size,
+            &decoded
+        );
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        const mylite_storage_foreign_key_definition definition = {
+            .size = sizeof(definition),
+            .schema_name = decoded.schema_name,
+            .table_name = decoded.table_name,
+            .constraint_name = decoded.constraint_name,
+            .referenced_schema_name = decoded.referenced_schema_name,
+            .referenced_table_name = decoded.referenced_table_name,
+            .referenced_key_name = referenced_key_name,
+            .foreign_column_names = (const char *const *)decoded.foreign_column_names,
+            .referenced_column_names = (const char *const *)decoded.referenced_column_names,
+            .column_count = decoded.column_count,
+            .update_action = decoded.update_action,
+            .delete_action = decoded.delete_action,
+            .match_option = decoded.match_option,
+            .nullable_column_bitmap = decoded.nullable_column_bitmap,
+            .referenced_nullable_column_bitmap = decoded.referenced_nullable_column_bitmap,
+        };
+        result = validate_foreign_key_definition(&definition, &lengths);
+        if (result == MYLITE_STORAGE_OK) {
+            result = encode_foreign_key_metadata(
+                &definition,
+                &lengths,
+                &new_metadata,
+                &new_metadata_size
+            );
+        }
+        const size_t blob_payload_size =
+            MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_BLOB_PAYLOAD_OFFSET;
+        const unsigned long long blob_page_count =
+            result == MYLITE_STORAGE_OK ?
+                ((new_metadata_size - 1U) / blob_payload_size) + 1U :
+                0ULL;
+        const unsigned long long first_blob_page = header.page_count;
+        if (result == MYLITE_STORAGE_OK && blob_page_count > ULLONG_MAX - header.page_count) {
+            result = MYLITE_STORAGE_FULL;
+        }
+        if (result == MYLITE_STORAGE_OK) {
+            result = remove_foreign_key_record(
+                catalog_page,
+                schema_name,
+                table_name,
+                constraint_name
+            );
+        }
+        if (result == MYLITE_STORAGE_OK) {
+            result = append_foreign_key_record(
+                catalog_page,
+                &definition,
+                &lengths,
+                first_blob_page,
+                new_metadata_size,
+                entry.table_id
+            );
+        }
+        if (result == MYLITE_STORAGE_OK) {
+            result = begin_recovery_journal(file, filename, &header, 1);
+        }
+        if (result == MYLITE_STORAGE_OK) {
+            result = write_foreign_key_blob_pages(
+                file,
+                first_blob_page,
+                new_metadata,
+                new_metadata_size
+            );
+        }
+        if (result == MYLITE_STORAGE_OK) {
+            ++header.catalog_generation;
+            header.page_count += blob_page_count;
+            put_u64_le(
+                catalog_page,
+                MYLITE_STORAGE_FORMAT_CATALOG_GENERATION_OFFSET,
+                header.catalog_generation
+            );
+            update_catalog_checksum(catalog_page);
+
+            unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+            encode_header_page(header_page, &header);
+
+            result = write_page_at(file, header.catalog_root_page, header.page_size, catalog_page);
+            if (result == MYLITE_STORAGE_OK) {
+                result = write_page_at(
+                    file,
+                    MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
+                    header.page_size,
+                    header_page
+                );
+            }
+            if (result == MYLITE_STORAGE_OK) {
+                result = finish_recovery_journal(file, filename);
+            }
+        }
+    }
+
+    free(old_metadata);
+    free(new_metadata);
+    mylite_storage_free_foreign_key_metadata(&decoded);
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    return result;
+}
+
 mylite_storage_result mylite_storage_drop_foreign_key_definition(
     const char *filename,
     const char *schema_name,
