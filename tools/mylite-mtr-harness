@@ -31,6 +31,7 @@ default_tests=(
   main.brackets
   main.comments
   main.compare
+  main.func_in
   main.ctype_ascii
   main.count_distinct
   main.sum_distinct

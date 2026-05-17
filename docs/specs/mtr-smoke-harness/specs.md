@@ -61,6 +61,8 @@ MariaDB base: `mariadb-11.8.6`
   `main.type_time_6065`.
 - [MTR parser and comparison smoke](../mtr-parser-comparison-smoke/specs.md)
   adds `main.brackets`, `main.comments`, and `main.compare`.
+- [MTR IN predicate smoke](../mtr-in-predicate-smoke/specs.md) adds
+  `main.func_in`.
 - [MTR aggregate DISTINCT smoke](../mtr-aggregate-distinct-smoke/specs.md)
   adds `main.count_distinct` and `main.sum_distinct`.
 - It was also extended by
@@ -121,6 +123,7 @@ The default curated list remains intentionally baseline-oriented:
 - `main.brackets`.
 - `main.comments`.
 - `main.compare`.
+- `main.func_in`.
 - `main.ctype_ascii`.
 - `main.count_distinct`.
 - `main.sum_distinct`.
@@ -192,7 +195,7 @@ artifacts, not default MyLite linked-library artifacts.
   `main.func_timestamp`, `main.type_date_round`, `main.type_datetime_round`,
   `main.type_time_round`, `main.type_time_6065`,
   `main.type_timestamp_round`, `main.brackets`, `main.comments`,
-  `main.compare`, `main.ctype_ascii`, `main.count_distinct`,
+  `main.compare`, `main.func_in`, `main.ctype_ascii`, `main.count_distinct`,
   `main.sum_distinct`, `main.func_equal`, `main.func_op`, `main.func_bit`,
   `main.func_concat`, `main.func_default`, `main.func_extract`,
   `main.func_format`, `main.func_replace`, `main.func_regexp`,
@@ -208,7 +211,7 @@ artifacts, not default MyLite linked-library artifacts.
   `main.func_timestamp`, `main.type_date_round`, `main.type_datetime_round`,
   `main.type_time_round`, `main.type_time_6065`,
   `main.type_timestamp_round`, `main.brackets`, `main.comments`,
-  `main.compare`, `main.ctype_ascii`, `main.count_distinct`,
+  `main.compare`, `main.func_in`, `main.ctype_ascii`, `main.count_distinct`,
   `main.sum_distinct`, `main.func_equal`, `main.func_op`, `main.func_bit`,
   `main.func_concat`, `main.func_default`, `main.func_extract`,
   `main.func_format`, `main.func_replace`, `main.func_regexp`,

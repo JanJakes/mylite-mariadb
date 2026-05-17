@@ -82,7 +82,8 @@ The opt-in embedded MTR smoke runner covers MariaDB bootstrap, scalar
 CAST/CONVERT behavior, CASE-family expression behavior, selected numeric and
 type behavior, selected date, temporal-rounding, temporal-function, and
 time/datetime comparison behavior, selected parser/comment and comparison
-behavior, selected scalar operator behavior, selected
+behavior, selected `IN` / `NOT IN` predicate behavior, selected scalar
+operator behavior, selected
 bit/extraction/replacement/regexp scalar-function behavior, selected
 default-expression and weight-string behavior, selected string/format function
 behavior, selected crypto/KDF function behavior, selected disabled DES
