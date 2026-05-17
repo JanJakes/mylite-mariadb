@@ -26,6 +26,9 @@ MariaDB base: `mariadb-11.8.6`
   failures.
 - MTR can exit successfully for a skipped selected test; the harness must keep
   using pass-line assertion rather than process exit status alone.
+- Failed upstream MTR candidates can generate `*.reject` files under
+  `mariadb/mysql-test/main`. Probe is a discovery workflow, so it should not
+  leave newly generated rejects in the source tree.
 
 ## Compatibility Impact
 
@@ -40,8 +43,10 @@ compatibility slices.
 - Continue after failed or skipped candidates, print `PASS <suite.test>` or
   `FAIL <suite.test>`, and return nonzero if any candidate does not report an
   MTR pass.
+- Snapshot existing `mariadb/mysql-test/**/*.reject` files before probing and
+  remove only rejects created during probe execution.
 - Keep `run` strict: it still stops at the first failed or skipped selected
-  test.
+  test and preserves failure artifacts for debugging.
 
 ## File Lifecycle
 
@@ -62,8 +67,10 @@ the existing Bash harness.
 - `bash -n tools/mariadb-embedded-build tools/mylite-mtr-harness tools/mylite-compat-harness tools/mylite-size-report`
 - `tools/mylite-mtr-harness list`
 - `tools/mylite-mtr-harness probe main.prepare`
-- `tools/mylite-mtr-harness probe main.prepare main.distinct` and verify it
-  exits nonzero after reporting the skipped `main.distinct` as `FAIL`.
+- `! tools/mylite-mtr-harness probe main.ansi` and verify the generated
+  `mariadb/mysql-test/main/ansi.reject` file is removed.
+- `! tools/mylite-mtr-harness run main.ansi` and verify strict `run` leaves
+  `mariadb/mysql-test/main/ansi.reject` for debugging.
 - `tools/mylite-mtr-harness run main.prepare`
 - `tools/mylite-mtr-harness run`
 - `find mariadb/mysql-test -name '*.reject' -print`
@@ -75,11 +82,16 @@ the existing Bash harness.
 - `probe` continues after failed or skipped candidates.
 - `probe` returns success only when every selected candidate reports an MTR
   pass.
+- `probe` removes newly generated `.reject` files without deleting reject files
+  that existed before the probe started.
 - `run` keeps its strict accepted-coverage behavior.
 
 ## Risks And Open Questions
 
 - Probe summaries intentionally show only the tail of the MTR output. Deeper
   failure analysis still belongs in the full MTR log under the build tree.
+- Cleaning probe-generated rejects trades source-tree hygiene for less
+  convenient immediate diff inspection. Full failure logs remain under the MTR
+  build tree for deeper analysis.
 - A future CI dashboard may need machine-readable probe output, but plain text
   is sufficient for local candidate discovery.

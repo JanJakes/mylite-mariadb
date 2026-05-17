@@ -121,7 +121,7 @@ MariaDB base: `mariadb-11.8.6`
   selected tests fail unless MTR reports an actual `[ pass ]` result.
 - [MTR probe harness](../mtr-probe-harness/specs.md) adds a `probe` command
   for repeatable candidate discovery without treating skipped tests as
-  coverage.
+  coverage, and removes newly generated `.reject` files after probe failures.
 
 ## Design
 
@@ -134,7 +134,8 @@ Add `tools/mylite-mtr-harness` with three commands:
   `mariadb-test-run.pl --embedded-server --skip-rpl`;
 - `probe suite.test...` uses the same exact MTR execution and pass-line
   assertion as `run`, but continues after failures so candidate suites can be
-  evaluated in batches.
+  evaluated in batches, and removes newly generated `.reject` files so failed
+  discovery runs do not dirty the source tree.
 
 The runner anchors exact selected case names and requires the matching MTR
 summary line to report `[ pass ]`. A selected test that is skipped by MTR

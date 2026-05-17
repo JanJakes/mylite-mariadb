@@ -108,7 +108,7 @@ Commands:
              Defaults to the curated smoke list.
   probe      Build the MTR smoke prerequisites, run exact selected tests, and
              continue after failures. Exits nonzero if any test does not
-             report an MTR pass.
+             report an MTR pass. Removes newly generated .reject files.
 
 Environment:
   BUILD_DIR          MariaDB build directory. Defaults to build/mariadb-mtr-smoke.
@@ -239,6 +239,7 @@ run_tests() {
 probe_tests() {
   local tests=("$@")
   local failures=0
+  local reject_baseline_file
   local test_name
   local output_file
 
@@ -248,6 +249,8 @@ probe_tests() {
   fi
 
   prepare_mtr_build
+  reject_baseline_file="$(mktemp "${TMPDIR:-/tmp}/mylite-mtr-rejects.XXXXXX")"
+  snapshot_reject_files "${reject_baseline_file}"
 
   for test_name in "${tests[@]}"; do
     output_file="$(mktemp "${TMPDIR:-/tmp}/mylite-mtr-output.XXXXXX")"
@@ -258,10 +261,29 @@ probe_tests() {
       print_probe_failure_summary "${output_file}"
       failures=1
     fi
+    cleanup_new_reject_files "${reject_baseline_file}"
     rm -f "${output_file}"
   done
 
+  rm -f "${reject_baseline_file}"
   return "${failures}"
+}
+
+snapshot_reject_files() {
+  local output_file="$1"
+
+  find "${root_dir}/mariadb/mysql-test" -name '*.reject' -print >"${output_file}"
+}
+
+cleanup_new_reject_files() {
+  local baseline_file="$1"
+  local reject_file
+
+  while IFS= read -r reject_file; do
+    if ! grep -qxF "${reject_file}" "${baseline_file}"; then
+      rm -f "${reject_file}"
+    fi
+  done < <(find "${root_dir}/mariadb/mysql-test" -name '*.reject' -print)
 }
 
 run_mtr_case() {
