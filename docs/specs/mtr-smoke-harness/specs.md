@@ -26,6 +26,9 @@ MariaDB base: `mariadb-11.8.6`
   MTR smoke profile.
 - [MTR support target build](../mtr-support-target-build/specs.md) batches the
   support target build through `tools/mariadb-embedded-build build`.
+- [MTR run suite batching](../mtr-run-suite-batching/specs.md) runs accepted
+  smoke tests one MTR process per suite while preserving per-test pass
+  assertions.
 - A real embedded smoke run requires more than
   `libmariadbd.a`: MTR probes for `mariadbd`, `mariadb-test-embedded`,
   `mariadb-client-test-embedded`, `my_safe_process`, common client binaries,
@@ -131,8 +134,8 @@ Add `tools/mylite-mtr-harness` with three commands:
 - `list` prints the curated smoke test list;
 - `run [suite.test...]` builds the required MariaDB MTR support targets in one
   batched build under `build/mariadb-mtr-smoke` with
-  `cmake/mariadb-mtr-smoke.cmake` and runs each selected test with
-  `mariadb-test-run.pl --embedded-server --skip-rpl`;
+  `cmake/mariadb-mtr-smoke.cmake`, groups selected tests by suite, and runs one
+  MTR process per suite with `mariadb-test-run.pl --embedded-server --skip-rpl`;
 - `probe suite.test...` uses the same exact MTR execution and pass-line
   assertion as `run`, but continues after failures so candidate suites can be
   evaluated in batches, and removes newly generated `.reject` files so failed
@@ -320,6 +323,8 @@ artifacts, not default MyLite linked-library artifacts.
   `main.func_encrypt_nossl`.
 - The runner builds the required MTR support targets from a fresh enough
   `build/mariadb-mtr-smoke` tree with one batched build invocation.
+- Strict `run` batches accepted tests by suite and still requires every
+  selected test to report an MTR `[ pass ]` line.
 - `mylite.bootstrap_schema`, `main.cast`, `main.case`, `main.bigint`,
   `main.type_ranges`, `main.type_num`, `main.type_uint`, `main.type_char`,
   `main.type_interval`, `main.type_varbinary`, `main.type_year`,
