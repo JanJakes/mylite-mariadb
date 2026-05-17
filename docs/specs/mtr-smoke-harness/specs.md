@@ -102,19 +102,26 @@ MariaDB base: `mariadb-11.8.6`
   `main.func_encrypt_nossl`.
 - [MTR require-pass harness](../mtr-require-pass-harness/specs.md) makes
   selected tests fail unless MTR reports an actual `[ pass ]` result.
+- [MTR probe harness](../mtr-probe-harness/specs.md) adds a `probe` command
+  for repeatable candidate discovery without treating skipped tests as
+  coverage.
 
 ## Design
 
-Add `tools/mylite-mtr-harness` with two commands:
+Add `tools/mylite-mtr-harness` with three commands:
 
 - `list` prints the curated smoke test list;
 - `run [suite.test...]` builds the required MariaDB MTR support targets under
   `build/mariadb-mtr-smoke` with `cmake/mariadb-mtr-smoke.cmake` and runs each
-  selected test with `mariadb-test-run.pl --embedded-server --skip-rpl`.
+  selected test with `mariadb-test-run.pl --embedded-server --skip-rpl`;
+- `probe suite.test...` uses the same exact MTR execution and pass-line
+  assertion as `run`, but continues after failures so candidate suites can be
+  evaluated in batches.
 
 The runner anchors exact selected case names and requires the matching MTR
 summary line to report `[ pass ]`. A selected test that is skipped by MTR
-feature checks is treated as no coverage and fails the harness.
+feature checks is treated as no coverage and fails `run` or the overall
+`probe` command.
 
 The default curated list remains intentionally baseline-oriented:
 
@@ -289,6 +296,8 @@ artifacts, not default MyLite linked-library artifacts.
   `mariadb-test-run.pl --embedded-server` with the MTR smoke profile.
 - Documentation states that this is opt-in smoke coverage, not full MTR-scale
   comparison.
+- `probe` continues through multiple candidates and exits nonzero when any
+  candidate fails or is skipped.
 
 ## Risks And Open Questions
 

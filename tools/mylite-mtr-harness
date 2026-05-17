@@ -77,12 +77,15 @@ default_tests=(
 
 usage() {
   cat <<EOF
-Usage: tools/mylite-mtr-harness [list|run] [suite.test...]
+Usage: tools/mylite-mtr-harness [list|run|probe] [suite.test...]
 
 Commands:
   list       Show curated MariaDB MTR smoke tests.
   run        Build the MTR smoke prerequisites and run exact selected tests.
              Defaults to the curated smoke list.
+  probe      Build the MTR smoke prerequisites, run exact selected tests, and
+             continue after failures. Exits nonzero if any test does not
+             report an MTR pass.
 
 Environment:
   BUILD_DIR          MariaDB build directory. Defaults to build/mariadb-mtr-smoke.
@@ -197,8 +200,6 @@ assert_test_passed() {
 run_tests() {
   local tests=("$@")
   local test_name
-  local suite_name
-  local case_name
   local output_file
 
   if [ "${#tests[@]}" -eq 0 ]; then
@@ -208,14 +209,59 @@ run_tests() {
   prepare_mtr_build
 
   for test_name in "${tests[@]}"; do
-    if [[ "${test_name}" != *.* ]]; then
-      echo "Expected suite.test name, got: ${test_name}" >&2
+    output_file="$(mktemp "${TMPDIR:-/tmp}/mylite-mtr-output.XXXXXX")"
+    if ! run_mtr_case "${test_name}" "${output_file}" stream; then
+      rm -f "${output_file}"
       exit 1
     fi
+    rm -f "${output_file}"
+  done
+}
 
-    suite_name="${test_name%%.*}"
-    case_name="${test_name#*.}"
+probe_tests() {
+  local tests=("$@")
+  local failures=0
+  local test_name
+  local output_file
+
+  if [ "${#tests[@]}" -eq 0 ]; then
+    echo "Expected at least one suite.test name for probe" >&2
+    exit 1
+  fi
+
+  prepare_mtr_build
+
+  for test_name in "${tests[@]}"; do
     output_file="$(mktemp "${TMPDIR:-/tmp}/mylite-mtr-output.XXXXXX")"
+    if run_mtr_case "${test_name}" "${output_file}" quiet; then
+      echo "PASS ${test_name}"
+    else
+      echo "FAIL ${test_name}"
+      print_probe_failure_summary "${output_file}"
+      failures=1
+    fi
+    rm -f "${output_file}"
+  done
+
+  return "${failures}"
+}
+
+run_mtr_case() {
+  local test_name="$1"
+  local output_file="$2"
+  local output_mode="$3"
+  local suite_name
+  local case_name
+
+  if [[ "${test_name}" != *.* ]]; then
+    echo "Expected suite.test name, got: ${test_name}" >&2
+    return 2
+  fi
+
+  suite_name="${test_name%%.*}"
+  case_name="${test_name#*.}"
+
+  if [ "${output_mode}" = quiet ]; then
     if ! (
       cd "${build_dir}/mysql-test"
       MTR_BUILD_THREAD="${mtr_build_thread}" \
@@ -228,18 +274,40 @@ run_tests() {
           --mysqld=--default-storage-engine=Aria \
           --suite="${suite_name}" \
           --do-test="^${case_name}$" \
-          --max-test-fail=1 | tee "${output_file}"
+          --max-test-fail=1 >"${output_file}" 2>&1
     ); then
-      rm -f "${output_file}"
-      exit 1
+      return 1
     fi
 
-    if ! assert_test_passed "${output_file}" "${suite_name}" "${case_name}"; then
-      rm -f "${output_file}"
-      exit 1
-    fi
-    rm -f "${output_file}"
-  done
+    assert_test_passed "${output_file}" "${suite_name}" "${case_name}" \
+      >>"${output_file}" 2>&1
+    return $?
+  fi
+
+  if ! (
+    cd "${build_dir}/mysql-test"
+    MTR_BUILD_THREAD="${mtr_build_thread}" \
+    MYLITE_MTR_WITHOUT_NATIVE_MYISAM_TOOLS=1 \
+    MYLITE_MTR_DEFAULT_STORAGE_ENGINE=Aria \
+      perl ./mariadb-test-run.pl \
+        --embedded-server \
+        --skip-rpl \
+        --force \
+        --mysqld=--default-storage-engine=Aria \
+        --suite="${suite_name}" \
+        --do-test="^${case_name}$" \
+        --max-test-fail=1 | tee "${output_file}"
+  ); then
+    return 1
+  fi
+
+  assert_test_passed "${output_file}" "${suite_name}" "${case_name}"
+}
+
+print_probe_failure_summary() {
+  local output_file="$1"
+
+  tail -n 40 "${output_file}" >&2
 }
 
 require_command cmake
@@ -256,6 +324,9 @@ case "${command_name}" in
     ;;
   run)
     run_tests "$@"
+    ;;
+  probe)
+    probe_tests "$@"
     ;;
   -h|--help|help)
     usage
