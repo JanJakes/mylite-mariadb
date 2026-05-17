@@ -1862,6 +1862,60 @@ static void test_transaction_and_foreign_key_policies(void) {
 
     assert_exec_succeeds(
         db,
+        "CREATE TABLE fk_table_drop_parent (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_table_drop_child ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT, "
+        "CONSTRAINT fk_table_drop_child_parent FOREIGN KEY (parent_id) "
+        "REFERENCES fk_table_drop_parent(id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_table_drop_parent VALUES (40)");
+    assert_exec_succeeds(db, "INSERT INTO fk_table_drop_child VALUES (1, 40)");
+    assert_exec_fails(db, "DROP TABLE fk_table_drop_parent");
+    assert(
+        mylite_storage_table_exists(filename, "app", "fk_table_drop_parent") ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "fk_table_drop_child") ==
+        MYLITE_STORAGE_OK
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM fk_table_drop_parent", "1");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM fk_table_drop_child", "1");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'app' "
+        "AND TABLE_NAME = 'fk_table_drop_child' "
+        "AND CONSTRAINT_NAME = 'fk_table_drop_child_parent' "
+        "AND UNIQUE_CONSTRAINT_NAME = 'PRIMARY' "
+        "AND REFERENCED_TABLE_NAME = 'fk_table_drop_parent'",
+        "1"
+    );
+    assert_exec_succeeds(db, "DROP TABLE fk_table_drop_child");
+    assert(
+        mylite_storage_table_exists(filename, "app", "fk_table_drop_child") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'app' "
+        "AND TABLE_NAME = 'fk_table_drop_child' "
+        "AND CONSTRAINT_NAME = 'fk_table_drop_child_parent'",
+        "0"
+    );
+    assert_exec_succeeds(db, "DROP TABLE fk_table_drop_parent");
+    assert(
+        mylite_storage_table_exists(filename, "app", "fk_table_drop_parent") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+
+    assert_exec_succeeds(
+        db,
         "CREATE TABLE fk_cleanup_parent (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB"
     );
     assert_exec_succeeds(
@@ -1976,6 +2030,38 @@ static void test_transaction_and_foreign_key_policies(void) {
     assert(mylite_close(db) == MYLITE_OK);
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "USE app");
+    assert(
+        mylite_storage_table_exists(filename, "app", "fk_table_drop_parent") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "fk_table_drop_child") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    table_context table_drop_tables = {0};
+    assert(
+        mylite_exec(
+            db,
+            "SHOW TABLES LIKE 'fk_table_drop_parent'",
+            table_callback,
+            &table_drop_tables,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(table_drop_tables.rows == 0);
+    table_drop_tables = (table_context){0};
+    assert(
+        mylite_exec(
+            db,
+            "SHOW TABLES LIKE 'fk_table_drop_child'",
+            table_callback,
+            &table_drop_tables,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(table_drop_tables.rows == 0);
     assert_query_single_value(
         db,
         "SELECT COUNT(*) FROM INFORMATION_SCHEMA.STATISTICS "

@@ -109,7 +109,10 @@ old-table backup rename, and performs FK-aware column/supporting-key checks
 with handler-owned retained supporting-key validation plus immediate
 child/parent row checks. Supported copy
 `ALTER TABLE ... DROP FOREIGN KEY` removes FK metadata from the primary file
-and disables the dropped constraint's row checks across close/reopen. Session
+and disables the dropped constraint's row checks across close/reopen. SQL-level
+`DROP TABLE` rejects referenced-parent drops while supported FK metadata remains
+and removes child-table FK metadata with dropped child tables so the parent can
+be dropped afterward. Session
 `foreign_key_checks=0` disables supported FK row checks and parent-table
 truncate checks without retrospective validation when checks are re-enabled.
 MariaDB-generated supporting keys are cleaned up when copy ALTER replaces them
@@ -237,10 +240,13 @@ normal create path and
 leave existing routed targets unchanged while exposing MariaDB warnings through
 the public warning API. `DROP TABLE` removes the live catalog record and
 increments the catalog generation without deleting external MariaDB sidecars.
-Dropped table-definition blobs, row pages, and index-entry pages remain
-orphaned inside the primary file until free-space management exists; new table
-ids are allocated above both live catalog records and existing row pages so
-drop/recreate does not expose old rows. Simple
+Referenced-parent drops fail while supported FK metadata still points at the
+table. Child-table drops remove child FK metadata and the table record in one
+catalog publication, after which the parent can be dropped normally. Dropped
+table-definition blobs, row pages, index-entry pages, and FK metadata blob pages
+remain orphaned inside the primary file until free-space management exists; new
+table ids are allocated above both live catalog records and existing row pages
+so drop/recreate does not expose old rows. Simple
 `RENAME TABLE` rewrites the catalog record identity while preserving table id,
 requested/effective engine metadata, and the stored table-definition blob
 reference, so existing row and index-entry pages move with the renamed table.
