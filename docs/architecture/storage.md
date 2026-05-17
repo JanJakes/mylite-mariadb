@@ -128,8 +128,13 @@ update/delete ordering checks cover failed-statement rollback when an earlier
 unreferenced parent row was processed before a later referenced parent row.
 Representative multi-table update/delete ordering checks cover parent-first
 rejection and child-first success when the target-table order is forced.
+Bounded self-referencing `ON DELETE SET NULL` is supported for simple durable
+tables with nullable child FK columns and no BLOB/TEXT or generated columns;
+the handler mutates matching child rows and their index entries before deleting
+the parent row.
 Broader exhaustive multi-table matrices, deferrable set-wide validation,
-cascades, `SET NULL`, and `SET DEFAULT` remain planned.
+non-self `SET NULL`, `ON UPDATE SET NULL`, cascades, and `SET DEFAULT` remain
+planned.
 Partition DDL remains rejected at the `libmylite` boundary until MyLite has
 partition metadata, partition-to-primary-file routing, per-partition catalog
 lifecycle, and partition-aware row and index maintenance.
