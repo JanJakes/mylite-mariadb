@@ -9,13 +9,20 @@ target="${TARGET:-libmariadbd.a}"
 
 usage() {
   cat <<EOF
-Usage: tools/mariadb-embedded-build [configure|build|measure|all] [cmake args...]
+Usage: tools/mariadb-embedded-build [configure|build|measure|all] [args...]
+
+Commands:
+  configure [cmake args...]
+  build [target...]
+  measure
+  all [cmake args...]
 
 Environment:
   BUILD_DIR   Build directory. Defaults to build/mariadb-embedded.
   GENERATOR   CMake generator. Defaults to Ninja.
   PROFILE     Initial cache file. Defaults to cmake/mariadb-embedded-baseline.cmake.
-  TARGET      Build target. Defaults to libmariadbd.a.
+  TARGET      Default build target when build receives no target arguments.
+              Defaults to libmariadbd.a.
   DEVELOPER_DIR
               macOS developer directory. Defaults to CommandLineTools when
               available unless explicitly set.
@@ -68,11 +75,17 @@ configure() {
 }
 
 build() {
+  local targets=("$@")
+
   require_command cmake
   prefer_macos_command_line_tools
   prefer_homebrew_bison
 
-  cmake --build "${build_dir}" --target "${target}"
+  if [ "${#targets[@]}" -eq 0 ]; then
+    targets=("${target}")
+  fi
+
+  cmake --build "${build_dir}" --target "${targets[@]}"
 }
 
 measure() {
@@ -135,7 +148,7 @@ case "${command_name}" in
     configure "$@"
     ;;
   build)
-    build
+    build "$@"
     ;;
   measure)
     measure

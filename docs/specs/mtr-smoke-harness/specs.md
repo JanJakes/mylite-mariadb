@@ -19,9 +19,13 @@ MariaDB base: `mariadb-11.8.6`
 - `mariadb/mysql-test/mariadb-test-run.pl` is MariaDB's MTR entry point.
 - `mariadb/mysql-test/CMakeLists.txt` defines the upstream embedded MTR command
   with `--embedded-server`, `--skip-rpl`, and `MTR_BUILD_THREAD`.
+- CMake accepts multiple targets after one `--target` flag, so the support
+  target preparation does not need one `cmake --build` process per binary.
 - The out-of-source build wrapper produces
   `build/mariadb-mtr-smoke/mysql-test/mariadb-test-run.pl` when run with the
   MTR smoke profile.
+- [MTR support target build](../mtr-support-target-build/specs.md) batches the
+  support target build through `tools/mariadb-embedded-build build`.
 - A real embedded smoke run requires more than
   `libmariadbd.a`: MTR probes for `mariadbd`, `mariadb-test-embedded`,
   `mariadb-client-test-embedded`, `my_safe_process`, common client binaries,
@@ -124,9 +128,10 @@ MariaDB base: `mariadb-11.8.6`
 Add `tools/mylite-mtr-harness` with three commands:
 
 - `list` prints the curated smoke test list;
-- `run [suite.test...]` builds the required MariaDB MTR support targets under
-  `build/mariadb-mtr-smoke` with `cmake/mariadb-mtr-smoke.cmake` and runs each
-  selected test with `mariadb-test-run.pl --embedded-server --skip-rpl`;
+- `run [suite.test...]` builds the required MariaDB MTR support targets in one
+  batched build under `build/mariadb-mtr-smoke` with
+  `cmake/mariadb-mtr-smoke.cmake` and runs each selected test with
+  `mariadb-test-run.pl --embedded-server --skip-rpl`;
 - `probe suite.test...` uses the same exact MTR execution and pass-line
   assertion as `run`, but continues after failures so candidate suites can be
   evaluated in batches.
@@ -310,7 +315,7 @@ artifacts, not default MyLite linked-library artifacts.
   `main.func_regexp_pcre`, `main.func_weight_string`, `main.func_kdf`, and
   `main.func_encrypt_nossl`.
 - The runner builds the required MTR support targets from a fresh enough
-  `build/mariadb-mtr-smoke` tree.
+  `build/mariadb-mtr-smoke` tree with one batched build invocation.
 - `mylite.bootstrap_schema`, `main.cast`, `main.case`, `main.bigint`,
   `main.type_ranges`, `main.type_num`, `main.type_uint`, `main.type_char`,
   `main.type_interval`, `main.type_varbinary`, `main.type_year`,
