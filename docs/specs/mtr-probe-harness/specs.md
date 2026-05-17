@@ -46,6 +46,8 @@ compatibility slices.
 - Continue after failed or skipped candidates, print `PASS <suite.test>` or
   `FAIL <suite.test>`, and return nonzero if any candidate does not report an
   MTR pass.
+- Print a final summary with pass/fail counts and candidate names after all
+  selected probes finish.
 - Snapshot existing `mariadb/mysql-test/**/*.reject` files before probing and
   remove only rejects created during probe execution.
 - Pass `--testcase-timeout=${MTR_PROBE_TESTCASE_TIMEOUT_MINUTES}` to MTR for
@@ -76,6 +78,8 @@ the existing Bash harness.
 - `tools/mylite-mtr-harness probe main.prepare`
 - `! tools/mylite-mtr-harness probe main.ansi` and verify the generated
   `mariadb/mysql-test/main/ansi.reject` file is removed.
+- `! tools/mylite-mtr-harness probe main.prepare main.ansi` and verify the
+  summary lists one passed and one failed candidate.
 - `! tools/mylite-mtr-harness run main.ansi` and verify strict `run` leaves
   `mariadb/mysql-test/main/ansi.reject` for debugging.
 - `MTR_PROBE_TESTCASE_TIMEOUT_MINUTES=1 tools/mylite-mtr-harness probe main.prepare`
@@ -88,6 +92,7 @@ the existing Bash harness.
 
 - `probe` requires at least one `suite.test` argument.
 - `probe` continues after failed or skipped candidates.
+- `probe` prints a final summary after all selected candidates run.
 - `probe` returns success only when every selected candidate reports an MTR
   pass.
 - `probe` removes newly generated `.reject` files without deleting reject files

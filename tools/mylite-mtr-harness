@@ -287,6 +287,10 @@ run_mtr_suite_batches() {
 probe_tests() {
   local tests=("$@")
   local failures=0
+  local passed_count=0
+  local failed_count=0
+  local passed_tests=""
+  local failed_tests=""
   local reject_baseline_file
   local test_name
   local output_file
@@ -308,15 +312,20 @@ probe_tests() {
       quiet \
       "${mtr_probe_testcase_timeout_minutes}"; then
       echo "PASS ${test_name}"
+      passed_count=$((passed_count + 1))
+      passed_tests+="${test_name}"$'\n'
     else
       echo "FAIL ${test_name}"
       print_probe_failure_summary "${output_file}"
       failures=1
+      failed_count=$((failed_count + 1))
+      failed_tests+="${test_name}"$'\n'
     fi
     cleanup_new_reject_files "${reject_baseline_file}"
     rm -f "${output_file}"
   done
 
+  print_probe_summary "${passed_count}" "${failed_count}" "${passed_tests}" "${failed_tests}"
   rm -f "${reject_baseline_file}"
   return "${failures}"
 }
@@ -452,6 +461,21 @@ print_probe_failure_summary() {
   local output_file="$1"
 
   tail -n 40 "${output_file}" >&2
+}
+
+print_probe_summary() {
+  local passed_count="$1"
+  local failed_count="$2"
+  local passed_tests="$3"
+  local failed_tests="$4"
+
+  echo "Probe summary: ${passed_count} passed, ${failed_count} failed"
+  if [ "${passed_count}" -gt 0 ]; then
+    printf 'Passed tests:\n%s' "${passed_tests}"
+  fi
+  if [ "${failed_count}" -gt 0 ]; then
+    printf 'Failed tests:\n%s' "${failed_tests}"
+  fi
 }
 
 require_command cmake
