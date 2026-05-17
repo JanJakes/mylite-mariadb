@@ -30,11 +30,13 @@ MariaDB base: `mariadb-11.8.6`
   text, aggregate, scientific-notation, and large-value inputs.
 - Both tests pass under the MyLite MTR smoke profile without source changes.
 - Nearby string/function candidates remain outside the curated list:
-  `main.func_weight_string` and `main.func_default` need profile-specific
-  `SHOW CREATE TABLE` normalization; `main.func_str` is skipped because the
-  Sequence engine is disabled for the profile. The later
+  `main.func_str` is skipped because the Sequence engine is disabled for the
+  profile. The later
   [MTR scalar function smoke](../mtr-scalar-function-smoke/specs.md) admits
-  `main.func_replace` with narrow default-engine normalization.
+  `main.func_replace`, and
+  [MTR DEFAULT and weight string smoke](../mtr-default-weight-string-smoke/specs.md)
+  admits `main.func_default` and `main.func_weight_string` with narrow
+  default-engine normalization.
 
 ## Compatibility Impact
 

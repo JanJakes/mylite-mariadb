@@ -82,9 +82,11 @@ select hex(weight_string('ab' level 1 DESC REVERSE));
 # the result data type is BLOB.
 #
 create table t1 select weight_string('test') as w;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 drop table t1;
 create table t1 select weight_string(repeat('t',66000)) as w;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 drop table t1;
 
@@ -163,6 +165,7 @@ DROP TABLE t1;
 --echo # MDEV-10134 Add full support for DEFAULT
 --echo #
 CREATE TABLE t1 (a VARCHAR(10) CHARACTER SET latin1, b VARBINARY(10) DEFAULT WEIGHT_STRING(a AS CHAR(10)));
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 INSERT INTO t1 (a) VALUES ('a');
 SELECT a, HEX(b) FROM t1;
