@@ -50,6 +50,8 @@ MariaDB base: `mariadb-11.8.6`
   `main.bigint` and `main.adddate_454`.
 - [MTR parser and comparison smoke](../mtr-parser-comparison-smoke/specs.md)
   adds `main.brackets`, `main.comments`, and `main.compare`.
+- [MTR aggregate DISTINCT smoke](../mtr-aggregate-distinct-smoke/specs.md)
+  adds `main.count_distinct` and `main.sum_distinct`.
 - It was also extended by
   [MTR operator smoke](../mtr-operator-smoke/specs.md) to include
   `main.func_equal` and `main.func_op`.
@@ -81,6 +83,8 @@ The default curated list is intentionally tiny:
 - `main.brackets`.
 - `main.comments`.
 - `main.compare`.
+- `main.count_distinct`.
+- `main.sum_distinct`.
 - `main.func_equal`.
 - `main.func_op`.
 - `main.func_concat`.
@@ -134,14 +138,15 @@ artifacts, not default MyLite linked-library artifacts.
 
 - The runner lists `mylite.bootstrap_schema`, `main.cast`, `main.case`,
   `main.bigint`, `main.adddate_454`, `main.brackets`, `main.comments`,
-  `main.compare`, `main.func_equal`, `main.func_op`, `main.func_concat`, and
+  `main.compare`, `main.count_distinct`, `main.sum_distinct`,
+  `main.func_equal`, `main.func_op`, `main.func_concat`, and
   `main.func_format`.
 - The runner builds the required MTR support targets from a fresh enough
   `build/mariadb-mtr-smoke` tree.
 - `mylite.bootstrap_schema`, `main.cast`, `main.case`, `main.bigint`,
   `main.adddate_454`, `main.brackets`, `main.comments`, `main.compare`,
-  `main.func_equal`, `main.func_op`, `main.func_concat`, and
-  `main.func_format` pass under
+  `main.count_distinct`, `main.sum_distinct`, `main.func_equal`,
+  `main.func_op`, `main.func_concat`, and `main.func_format` pass under
   `mariadb-test-run.pl --embedded-server` with the MTR smoke profile.
 - Documentation states that this is opt-in smoke coverage, not full MTR-scale
   comparison.

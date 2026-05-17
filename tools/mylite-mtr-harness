@@ -14,6 +14,8 @@ default_tests=(
   main.brackets
   main.comments
   main.compare
+  main.count_distinct
+  main.sum_distinct
   main.func_equal
   main.func_op
   main.func_concat
