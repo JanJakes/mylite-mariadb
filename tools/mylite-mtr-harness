@@ -35,6 +35,9 @@ default_tests=(
   main.comments
   main.compare
   main.func_in
+  main.update_ignore_216
+  main.subselect_nulls
+  main.subselect_extra
   main.ctype_ascii
   main.ctype_cp850
   main.ctype_cp866

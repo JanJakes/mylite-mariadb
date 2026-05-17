@@ -74,6 +74,9 @@ MariaDB base: `mariadb-11.8.6`
   adds `main.brackets`, `main.comments`, and `main.compare`.
 - [MTR IN predicate smoke](../mtr-in-predicate-smoke/specs.md) adds
   `main.func_in`.
+- [MTR query and subselect smoke](../mtr-query-subselect-smoke/specs.md) adds
+  `main.update_ignore_216`, `main.subselect_nulls`, and
+  `main.subselect_extra`.
 - [MTR aggregate DISTINCT smoke](../mtr-aggregate-distinct-smoke/specs.md)
   adds `main.count_distinct` and `main.sum_distinct`.
 - It was also extended by
@@ -138,6 +141,9 @@ The default curated list remains intentionally baseline-oriented:
 - `main.comments`.
 - `main.compare`.
 - `main.func_in`.
+- `main.update_ignore_216`.
+- `main.subselect_nulls`.
+- `main.subselect_extra`.
 - `main.ctype_ascii`.
 - `main.ctype_cp850`.
 - `main.ctype_cp866`.
@@ -221,7 +227,8 @@ artifacts, not default MyLite linked-library artifacts.
   `main.func_timestamp`, `main.type_date_round`, `main.type_datetime_round`,
   `main.type_time_round`, `main.type_time_6065`,
   `main.type_timestamp_round`, `main.brackets`, `main.comments`,
-  `main.compare`, `main.func_in`, `main.ctype_ascii`,
+  `main.compare`, `main.func_in`, `main.update_ignore_216`,
+  `main.subselect_nulls`, `main.subselect_extra`, `main.ctype_ascii`,
   `main.ctype_cp850`, `main.ctype_cp866`, `main.ctype_hebrew`,
   `main.ctype_utf32_def`,
   `main.ctype_collate_column`, `main.ctype_collate_context`,
@@ -244,7 +251,8 @@ artifacts, not default MyLite linked-library artifacts.
   `main.func_timestamp`, `main.type_date_round`, `main.type_datetime_round`,
   `main.type_time_round`, `main.type_time_6065`,
   `main.type_timestamp_round`, `main.brackets`, `main.comments`,
-  `main.compare`, `main.func_in`, `main.ctype_ascii`,
+  `main.compare`, `main.func_in`, `main.update_ignore_216`,
+  `main.subselect_nulls`, `main.subselect_extra`, `main.ctype_ascii`,
   `main.ctype_cp850`, `main.ctype_cp866`, `main.ctype_hebrew`,
   `main.ctype_utf32_def`,
   `main.ctype_collate_column`, `main.ctype_collate_context`,
