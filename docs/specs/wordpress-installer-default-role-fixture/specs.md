@@ -1,12 +1,14 @@
-# WordPress Installer Default Role Fixture
+# WordPress Installer Default Options And Role Fixture
 
 ## Problem
 
-The WordPress single-site seed fixture proves representative installer data,
-but its role option was intentionally minimal. The roadmap still calls out
-installer defaults and roles as planned application-schema coverage. MyLite
-needs more pressure on long serialized `wp_options` values and default-option
-rows without claiming a full PHP runtime install.
+The WordPress single-site seed fixture proves representative installer data and
+the default role payload, but it still omits many deterministic
+`populate_options()` defaults. The roadmap calls out installer defaults as
+planned application-schema coverage. MyLite needs broader pressure on
+`wp_options` inventory, autoload flags, serialized empty arrays, media/comment
+defaults, and long serialized values without claiming a full PHP runtime
+install.
 
 ## Source Findings
 
@@ -19,13 +21,19 @@ WordPress source: `WordPress/WordPress` tag `6.9.4`
 - `wp-admin/includes/upgrade.php:79-80` calls `populate_options()` and
   `populate_roles()` during install.
 - `wp-admin/includes/schema.php:411-566` defines the default option array,
-  including `users_can_register`, `start_of_week`, `use_smilies`,
-  `comments_notify`, `posts_per_page`, serialized empty option arrays,
-  `comment_previously_approved`, `default_role`, and core auto-update defaults.
+  including site, mail, date/time, comment, media, avatar, permalink, serialized
+  empty-array, update, and `6.9.0` notification defaults.
+- `wp-admin/includes/schema.php:568-572` adds `initial_db_version` for
+  single-site installs.
+- `wp-admin/includes/schema.php:581-588` marks selected large text defaults as
+  non-autoloaded.
 - `wp-admin/includes/schema.php:719-734` runs the role population chain.
 - `wp-admin/includes/schema.php:750-967` creates the default administrator,
   editor, author, contributor, and subscriber roles and adds the versioned
   capability set used by a single-site install.
+- `wp-admin/includes/upgrade.php:82-87` overwrites the installer-provided
+  blog name, admin email, public flag, and `fresh_site` option after
+  `populate_options()`.
 - MyLite already stores `LONGTEXT` option values and tests semicolons inside
   serialized SQL string literals through the WordPress seed fixture executor.
 
@@ -34,14 +42,20 @@ WordPress source: `WordPress/WordPress` tag `6.9.4`
 Broaden the deterministic `wordpress-6.9.4-single-site-seed.sql` fixture:
 
 - keep the existing stable site/user/timestamp substitutions;
-- add representative default option rows from `populate_options()`;
+- add the full deterministic single-site `populate_options()` option-name set;
+- pin dynamic values: the default theme to `twentytwentysix`, `wp_guess_url()`
+  to `https://example.test`, and `time()` to `1778839200`;
+- preserve `fresh_site` and installer-provided blog/admin/public updates from
+  `wp_install()`;
 - replace the minimal `wp_user_roles` payload with the serialized default
   single-site roles and capabilities for administrator, editor, author,
   contributor, and subscriber.
 
 Extend the storage-smoke WordPress installer test to assert:
 
-- selected default option names and values are present;
+- the expanded option row count and option-name inventory are present;
+- non-autoloaded defaults keep the expected `off` autoload flag;
+- selected defaults from the full option array keep their expected values;
 - `default_role` remains `subscriber`;
 - the role payload is a long serialized option containing all five role names
   and representative administrator capabilities;
@@ -50,7 +64,9 @@ Extend the storage-smoke WordPress installer test to assert:
 
 ## Supported Scope
 
-- Representative WordPress 6.9.4 single-site default options.
+- Full deterministic WordPress 6.9.4 single-site `populate_options()` default
+  option-name inventory.
+- Representative value assertions across the default option array.
 - Full default role-name set and capability payload as a serialized
   `wp_user_roles` option.
 - Indexed `wp_options` reads and long serialized `LONGTEXT` persistence across
@@ -59,15 +75,19 @@ Extend the storage-smoke WordPress installer test to assert:
 ## Non-Goals
 
 - Running WordPress PHP, WP-CLI, hooks, filters, cron, or mail paths.
-- Exhaustively asserting every `populate_options()` default value.
+- Dynamic runtime output from hooks, filters, installed themes, localization,
+  cron, rewrite probing, mail notification, or PHP-generated privacy-policy
+  content.
 - Multisite roles, network options, plugin tables, or upgrade migrations.
 - Parsing PHP serialization in MyLite.
 
 ## Compatibility Impact
 
 Application-schema compatibility remains partial. The WordPress fixture now
-covers broader installer default options and full default role payload storage,
-but full WordPress runtime install remains planned.
+covers the full deterministic single-site `populate_options()` option-name
+inventory, representative default values, expected non-autoload flags, and full
+default role payload storage, but full WordPress runtime install remains
+planned.
 
 ## Single-File And Embedded-Lifecycle Impact
 
@@ -92,8 +112,8 @@ source.
 ## Acceptance Criteria
 
 - The WordPress installer schema plus seed fixtures import successfully.
-- Broader default option rows and the serialized full role payload read back
-  before and after close/reopen.
+- The full deterministic single-site default-option inventory and serialized
+  full role payload read back before and after close/reopen.
 - No durable sidecars remain after close.
 - Compatibility and roadmap docs describe the added default/role fixture
   coverage without claiming full WordPress runtime support.

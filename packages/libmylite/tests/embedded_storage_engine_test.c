@@ -10560,204 +10560,165 @@ static void assert_wordpress_installer_catalog_metadata(const char *filename) {
 }
 
 static void assert_wordpress_installer_seed_data(mylite_db *db) {
-    single_value_context blogname = {
-        .expected_value = "MyLite Fixture",
-    };
-    single_value_context db_version = {
-        .expected_value = "60717",
-    };
-    single_value_context admin_email = {
-        .expected_value = "admin@example.test",
-    };
-    single_value_context default_role = {
-        .expected_value = "subscriber",
-    };
-    single_value_context default_options_count = {
-        .expected_value = "9",
-    };
-    single_value_context role_payload_count = {
-        .expected_value = "1",
-    };
-    single_value_context admin_capabilities = {
-        .expected_value = "a:1:{s:13:\"administrator\";b:1;}",
-    };
-    single_value_context widget_block = {
-        .expected_value = "a:1:{i:2;a:1:{s:7:\"content\";s:19:\"<!-- wp:search /-->\";}}",
-    };
-    single_value_context term_slug = {
-        .expected_value = "uncategorized",
-    };
-    single_value_context post_title = {
-        .expected_value = "Hello world!",
-    };
-    single_value_context comment_author = {
-        .expected_value = "A WordPress Commenter",
-    };
-    single_value_context page_template = {
-        .expected_value = "default",
-    };
-    char *errmsg = NULL;
-
-    assert(
-        mylite_exec(
-            db,
-            "SELECT option_value FROM wp_options FORCE INDEX (option_name) "
-            "WHERE option_name = 'blogname'",
-            single_value_callback,
-            &blogname,
-            &errmsg
-        ) == MYLITE_OK
+    assert_query_single_value(db, "SELECT COUNT(*) FROM wp_options", "104");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM wp_options WHERE option_name IN ("
+        "'siteurl', 'home', 'blogname', 'blogdescription', 'users_can_register', "
+        "'admin_email', 'start_of_week', 'use_balanceTags', 'use_smilies', "
+        "'require_name_email', 'comments_notify', 'posts_per_rss', 'rss_use_excerpt', "
+        "'mailserver_url', 'mailserver_login', 'mailserver_pass', 'mailserver_port', "
+        "'default_category', 'default_comment_status', 'default_ping_status', "
+        "'default_pingback_flag', 'posts_per_page', 'date_format', 'time_format', "
+        "'links_updated_date_format', 'comment_moderation', 'moderation_notify', "
+        "'permalink_structure', 'rewrite_rules', 'hack_file', 'blog_charset', "
+        "'moderation_keys', 'active_plugins', 'category_base', 'ping_sites', "
+        "'comment_max_links', 'gmt_offset', 'default_email_category', 'recently_edited', "
+        "'template', 'stylesheet', 'comment_registration', 'html_type', 'use_trackback', "
+        "'default_role', 'db_version', 'uploads_use_yearmonth_folders', 'upload_path', "
+        "'blog_public', 'default_link_category', 'show_on_front', 'tag_base', "
+        "'show_avatars', 'avatar_rating', 'upload_url_path', 'thumbnail_size_w', "
+        "'thumbnail_size_h', 'thumbnail_crop', 'medium_size_w', 'medium_size_h', "
+        "'avatar_default', 'large_size_w', 'large_size_h', 'image_default_link_type', "
+        "'image_default_size', 'image_default_align', 'close_comments_for_old_posts', "
+        "'close_comments_days_old', 'thread_comments', 'thread_comments_depth', "
+        "'page_comments', 'comments_per_page', 'default_comments_page', 'comment_order', "
+        "'sticky_posts', 'widget_categories', 'widget_text', 'widget_rss', "
+        "'uninstall_plugins', 'timezone_string', 'page_for_posts', 'page_on_front', "
+        "'default_post_format', 'link_manager_enabled', 'finished_splitting_shared_terms', "
+        "'site_icon', 'medium_large_size_w', 'medium_large_size_h', "
+        "'wp_page_for_privacy_policy', 'show_comments_cookies_opt_in', "
+        "'admin_email_lifespan', 'disallowed_keys', 'comment_previously_approved', "
+        "'auto_plugin_theme_update_emails', 'auto_update_core_dev', "
+        "'auto_update_core_minor', 'auto_update_core_major', 'wp_force_deactivated_plugins', "
+        "'wp_attachment_pages_enabled', 'wp_notes_notify', 'fresh_site', "
+        "'initial_db_version', 'widget_block', 'wp_user_roles')",
+        "104"
     );
-    assert(errmsg == NULL);
-    assert(blogname.rows == 1);
-    assert(
-        mylite_exec(
-            db,
-            "SELECT option_value FROM wp_options FORCE INDEX (option_name) "
-            "WHERE option_name = 'db_version'",
-            single_value_callback,
-            &db_version,
-            &errmsg
-        ) == MYLITE_OK
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM wp_options WHERE autoload = 'off' AND option_name IN ("
+        "'moderation_keys', 'recently_edited', 'uninstall_plugins', 'fresh_site', "
+        "'disallowed_keys', 'auto_plugin_theme_update_emails')",
+        "6"
     );
-    assert(errmsg == NULL);
-    assert(db_version.rows == 1);
-    assert(
-        mylite_exec(
-            db,
-            "SELECT user_email FROM wp_users FORCE INDEX (user_login_key) "
-            "WHERE user_login = 'admin'",
-            single_value_callback,
-            &admin_email,
-            &errmsg
-        ) == MYLITE_OK
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM wp_options WHERE "
+        "(option_name = 'users_can_register' AND option_value = '0') OR "
+        "(option_name = 'use_balanceTags' AND option_value = '0') OR "
+        "(option_name = 'require_name_email' AND option_value = '1') OR "
+        "(option_name = 'posts_per_rss' AND option_value = '10') OR "
+        "(option_name = 'rss_use_excerpt' AND option_value = '0') OR "
+        "(option_name = 'mailserver_url' AND option_value = 'mail.example.com') OR "
+        "(option_name = 'mailserver_port' AND option_value = '110') OR "
+        "(option_name = 'default_pingback_flag' AND option_value = '1') OR "
+        "(option_name = 'date_format' AND option_value = 'F j, Y') OR "
+        "(option_name = 'time_format' AND option_value = 'g:i a') OR "
+        "(option_name = 'blog_charset' AND option_value = 'UTF-8') OR "
+        "(option_name = 'ping_sites' AND option_value = 'https://rpc.pingomatic.com/') OR "
+        "(option_name = 'gmt_offset' AND option_value = '0') OR "
+        "(option_name = 'html_type' AND option_value = 'text/html') OR "
+        "(option_name = 'uploads_use_yearmonth_folders' AND option_value = '1') OR "
+        "(option_name = 'default_link_category' AND option_value = '2') OR "
+        "(option_name = 'show_avatars' AND option_value = '1') OR "
+        "(option_name = 'thumbnail_size_w' AND option_value = '150') OR "
+        "(option_name = 'medium_size_h' AND option_value = '300') OR "
+        "(option_name = 'large_size_w' AND option_value = '1024') OR "
+        "(option_name = 'thread_comments_depth' AND option_value = '5') OR "
+        "(option_name = 'comments_per_page' AND option_value = '50') OR "
+        "(option_name = 'default_comments_page' AND option_value = 'newest') OR "
+        "(option_name = 'comment_order' AND option_value = 'asc') OR "
+        "(option_name = 'uninstall_plugins' AND option_value = 'a:0:{}') OR "
+        "(option_name = 'timezone_string' AND option_value = '') OR "
+        "(option_name = 'page_for_posts' AND option_value = '0') OR "
+        "(option_name = 'finished_splitting_shared_terms' AND option_value = '1') OR "
+        "(option_name = 'medium_large_size_w' AND option_value = '768') OR "
+        "(option_name = 'admin_email_lifespan' AND option_value = '1794391200') OR "
+        "(option_name = 'auto_plugin_theme_update_emails' AND option_value = 'a:0:{}') OR "
+        "(option_name = 'auto_update_core_dev' AND option_value = 'enabled') OR "
+        "(option_name = 'auto_update_core_minor' AND option_value = 'enabled') OR "
+        "(option_name = 'wp_force_deactivated_plugins' AND option_value = 'a:0:{}') OR "
+        "(option_name = 'wp_attachment_pages_enabled' AND option_value = '0') OR "
+        "(option_name = 'wp_notes_notify' AND option_value = '1') OR "
+        "(option_name = 'initial_db_version' AND option_value = '60717') OR "
+        "(option_name = 'fresh_site' AND option_value = '1')",
+        "38"
     );
-    assert(errmsg == NULL);
-    assert(admin_email.rows == 1);
-    assert(
-        mylite_exec(
-            db,
-            "SELECT option_value FROM wp_options FORCE INDEX (option_name) "
-            "WHERE option_name = 'default_role'",
-            single_value_callback,
-            &default_role,
-            &errmsg
-        ) == MYLITE_OK
+    assert_query_single_value(
+        db,
+        "SELECT option_value FROM wp_options FORCE INDEX (option_name) "
+        "WHERE option_name = 'blogname'",
+        "MyLite Fixture"
     );
-    assert(errmsg == NULL);
-    assert(default_role.rows == 1);
-    assert(
-        mylite_exec(
-            db,
-            "SELECT COUNT(*) FROM wp_options WHERE "
-            "(option_name = 'users_can_register' AND option_value = '0') OR "
-            "(option_name = 'start_of_week' AND option_value = '1') OR "
-            "(option_name = 'use_smilies' AND option_value = '1') OR "
-            "(option_name = 'comments_notify' AND option_value = '1') OR "
-            "(option_name = 'posts_per_page' AND option_value = '10') OR "
-            "(option_name = 'active_plugins' AND option_value = 'a:0:{}') OR "
-            "(option_name = 'sticky_posts' AND option_value = 'a:0:{}') OR "
-            "(option_name = 'comment_previously_approved' AND option_value = '1') OR "
-            "(option_name = 'auto_update_core_major' AND option_value = 'enabled')",
-            single_value_callback,
-            &default_options_count,
-            &errmsg
-        ) == MYLITE_OK
+    assert_query_single_value(
+        db,
+        "SELECT option_value FROM wp_options FORCE INDEX (option_name) "
+        "WHERE option_name = 'db_version'",
+        "60717"
     );
-    assert(errmsg == NULL);
-    assert(default_options_count.rows == 1);
-    assert(
-        mylite_exec(
-            db,
-            "SELECT COUNT(*) FROM wp_options FORCE INDEX (option_name) "
-            "WHERE option_name = 'wp_user_roles' AND LENGTH(option_value) > 3000 "
-            "AND LOCATE('s:13:\"administrator\"', option_value) > 0 "
-            "AND LOCATE('s:6:\"editor\"', option_value) > 0 "
-            "AND LOCATE('s:6:\"author\"', option_value) > 0 "
-            "AND LOCATE('s:11:\"contributor\"', option_value) > 0 "
-            "AND LOCATE('s:10:\"subscriber\"', option_value) > 0 "
-            "AND LOCATE('s:14:\"update_plugins\";b:1;', option_value) > 0",
-            single_value_callback,
-            &role_payload_count,
-            &errmsg
-        ) == MYLITE_OK
+    assert_query_single_value(
+        db,
+        "SELECT option_value FROM wp_options FORCE INDEX (option_name) "
+        "WHERE option_name = 'default_role'",
+        "subscriber"
     );
-    assert(errmsg == NULL);
-    assert(role_payload_count.rows == 1);
-    assert(
-        mylite_exec(
-            db,
-            "SELECT meta_value FROM wp_usermeta FORCE INDEX (meta_key) "
-            "WHERE meta_key = 'wp_capabilities'",
-            single_value_callback,
-            &admin_capabilities,
-            &errmsg
-        ) == MYLITE_OK
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM wp_options FORCE INDEX (option_name) "
+        "WHERE option_name = 'wp_user_roles' AND LENGTH(option_value) > 3000 "
+        "AND LOCATE('s:13:\"administrator\"', option_value) > 0 "
+        "AND LOCATE('s:6:\"editor\"', option_value) > 0 "
+        "AND LOCATE('s:6:\"author\"', option_value) > 0 "
+        "AND LOCATE('s:11:\"contributor\"', option_value) > 0 "
+        "AND LOCATE('s:10:\"subscriber\"', option_value) > 0 "
+        "AND LOCATE('s:14:\"update_plugins\";b:1;', option_value) > 0",
+        "1"
     );
-    assert(errmsg == NULL);
-    assert(admin_capabilities.rows == 1);
-    assert(
-        mylite_exec(
-            db,
-            "SELECT option_value FROM wp_options FORCE INDEX (option_name) "
-            "WHERE option_name = 'widget_block'",
-            single_value_callback,
-            &widget_block,
-            &errmsg
-        ) == MYLITE_OK
+    assert_query_single_value(
+        db,
+        "SELECT user_email FROM wp_users FORCE INDEX (user_login_key) "
+        "WHERE user_login = 'admin'",
+        "admin@example.test"
     );
-    assert(errmsg == NULL);
-    assert(widget_block.rows == 1);
-    assert(
-        mylite_exec(
-            db,
-            "SELECT t.slug FROM wp_terms t "
-            "JOIN wp_term_taxonomy tt ON tt.term_id = t.term_id "
-            "JOIN wp_term_relationships tr ON tr.term_taxonomy_id = tt.term_taxonomy_id "
-            "WHERE tr.object_id = 1 AND tt.taxonomy = 'category'",
-            single_value_callback,
-            &term_slug,
-            &errmsg
-        ) == MYLITE_OK
+    assert_query_single_value(
+        db,
+        "SELECT meta_value FROM wp_usermeta FORCE INDEX (meta_key) "
+        "WHERE meta_key = 'wp_capabilities'",
+        "a:1:{s:13:\"administrator\";b:1;}"
     );
-    assert(errmsg == NULL);
-    assert(term_slug.rows == 1);
-    assert(
-        mylite_exec(
-            db,
-            "SELECT post_title FROM wp_posts FORCE INDEX (post_name) "
-            "WHERE post_name = 'hello-world'",
-            single_value_callback,
-            &post_title,
-            &errmsg
-        ) == MYLITE_OK
+    assert_query_single_value(
+        db,
+        "SELECT option_value FROM wp_options FORCE INDEX (option_name) "
+        "WHERE option_name = 'widget_block'",
+        "a:1:{i:2;a:1:{s:7:\"content\";s:19:\"<!-- wp:search /-->\";}}"
     );
-    assert(errmsg == NULL);
-    assert(post_title.rows == 1);
-    assert(
-        mylite_exec(
-            db,
-            "SELECT comment_author FROM wp_comments FORCE INDEX (comment_post_ID) "
-            "WHERE comment_post_ID = 1",
-            single_value_callback,
-            &comment_author,
-            &errmsg
-        ) == MYLITE_OK
+    assert_query_single_value(
+        db,
+        "SELECT t.slug FROM wp_terms t "
+        "JOIN wp_term_taxonomy tt ON tt.term_id = t.term_id "
+        "JOIN wp_term_relationships tr ON tr.term_taxonomy_id = tt.term_taxonomy_id "
+        "WHERE tr.object_id = 1 AND tt.taxonomy = 'category'",
+        "uncategorized"
     );
-    assert(errmsg == NULL);
-    assert(comment_author.rows == 1);
-    assert(
-        mylite_exec(
-            db,
-            "SELECT meta_value FROM wp_postmeta FORCE INDEX (post_id) "
-            "WHERE post_id = 2 AND meta_key = '_wp_page_template'",
-            single_value_callback,
-            &page_template,
-            &errmsg
-        ) == MYLITE_OK
+    assert_query_single_value(
+        db,
+        "SELECT post_title FROM wp_posts FORCE INDEX (post_name) "
+        "WHERE post_name = 'hello-world'",
+        "Hello world!"
     );
-    assert(errmsg == NULL);
-    assert(page_template.rows == 1);
+    assert_query_single_value(
+        db,
+        "SELECT comment_author FROM wp_comments FORCE INDEX (comment_post_ID) "
+        "WHERE comment_post_ID = 1",
+        "A WordPress Commenter"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT meta_value FROM wp_postmeta FORCE INDEX (post_id) "
+        "WHERE post_id = 2 AND meta_key = '_wp_page_template'",
+        "default"
+    );
 }
 
 static void assert_wordpress_multisite_global_catalog_metadata(const char *filename) {
