@@ -23,6 +23,7 @@ default_tests=(
   main.func_op
   main.func_concat
   main.func_format
+  main.func_kdf
 )
 
 usage() {
@@ -134,9 +135,11 @@ assert_test_passed() {
   local output_file="$1"
   local suite_name="$2"
   local case_name="$3"
+  local pass_pattern
 
-  if ! grep -Eq "^[[:space:]]*${suite_name}\\.${case_name}[[:space:]]+\\[ pass \\]" \
-    "${output_file}"; then
+  pass_pattern="^[[:space:]]*${suite_name}\\.${case_name}"
+  pass_pattern+="([[:space:]]+'[^']+')?[[:space:]]+\\[ pass \\]"
+  if ! grep -Eq "${pass_pattern}" "${output_file}"; then
     echo "Expected ${suite_name}.${case_name} to report an MTR pass" >&2
     return 1
   fi
