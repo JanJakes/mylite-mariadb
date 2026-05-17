@@ -116,8 +116,8 @@ continues to omit native InnoDB registration and dictionary code.
 - Child and parent table rename keep FK metadata logically reachable.
 - Parent drops fail while a referencing FK record remains; child drops remove
   child FK records.
-- Public FK SQL remains rejected until handler metadata hooks and row
-  enforcement are implemented.
+- Public FK SQL is enabled only by a later publication slice after handler
+  metadata hooks and row enforcement are implemented.
 
 ## Risks And Open Questions
 

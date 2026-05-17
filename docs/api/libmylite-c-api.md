@@ -489,7 +489,8 @@ the embedded library model:
 - dynamic plugin installation and loading,
 - dynamic UDF registration, loading, lookup, and execution,
 - external durable storage engines,
-- foreign-key DDL until referential metadata and enforcement exist,
+- `CREATE TEMPORARY TABLE` foreign-key DDL, `DROP FOREIGN KEY`, and broader
+  foreign-key actions outside the supported MyLite subset,
 - partition DDL until partition metadata, partition routing, and per-partition
   lifecycle semantics exist,
 - filesystem-backed views, triggers, and routines until they have MyLite
@@ -576,10 +577,11 @@ backup SQL, query cache administration, optimizer trace, static SHOW
 information, process-list metadata, zlib compression, server utility function,
 Oracle SQL mode, XML SQL function, GIS SQL function, vector SQL function,
 SFORMAT SQL function, JSON schema validation function, JSON table function,
-dynamic column function, SQL sequence value surface, partition, and
-foreign-key DDL commands, plus unsupported explicit `ENGINE=...` table
-creation and engine-change requests, are rejected before MariaDB execution with
-stable MyLite errors. The default
+dynamic column function, SQL sequence value surface, partition,
+`CREATE TEMPORARY TABLE` foreign-key DDL, `DROP FOREIGN KEY`, broader
+unsupported foreign-key action commands, plus unsupported explicit
+`ENGINE=...` table creation and engine-change requests, are rejected before
+MariaDB execution with stable MyLite errors. The default
 embedded profile also links fail-closed stubs for stored-program runtime
 symbols that retained MariaDB parser or cleanup paths still reference, omits
 dynamic UDF lookup/execution bodies, omits unsupported binlog event-root,

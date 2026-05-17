@@ -88,7 +88,7 @@ three implementation steps.
      drop, rename, and close/reopen tests.
    - Implemented by
      [Foreign-key storage metadata](../foreign-key-storage-metadata/specs.md)
-     as an internal storage foundation while public FK SQL remains rejected.
+     as the internal storage foundation for later public FK SQL publication.
 
 2. Add handler metadata hooks without enabling public FK DDL yet.
    - Implement internal helpers that can construct `FOREIGN_KEY_INFO` lists
@@ -100,8 +100,8 @@ three implementation steps.
 
 3. Enable a narrow `RESTRICT` / `NO ACTION` FK subset.
    - Remove the public SQL rejection only for supported FK DDL shapes.
-   - Advertise `HTON_SUPPORTS_FOREIGN_KEYS` when the handler can persist
-     metadata and enforce the covered row checks.
+   - Keep `HTON_SUPPORTS_FOREIGN_KEYS` as a separate review point after the
+     handler can persist metadata and enforce the covered row checks.
    - Validate parent table existence, referenced key existence, column count,
      type/collation compatibility, and supported key shapes before catalog
      publication.

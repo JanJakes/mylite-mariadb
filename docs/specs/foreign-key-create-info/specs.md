@@ -86,8 +86,9 @@ limited to formatting helpers.
 
 - Storage-smoke coverage that manually seeded FK metadata appears in
   `SHOW CREATE TABLE`.
-- Storage-smoke coverage that public FK DDL still rejects before catalog
-  publication after `SHOW CREATE TABLE` support is added.
+- Storage-smoke coverage that public FK DDL did not become accepted before
+  catalog publication existed. The supported public subset is now covered by
+  [Foreign-Key DDL Publication](../foreign-key-ddl-publication/specs.md).
 - Format check, storage-smoke build/test when handler code changes, full
   default `ctest --preset dev`, and `git diff --check`.
 
@@ -98,8 +99,8 @@ limited to formatting helpers.
 - Referenced tables in other schemas are schema-qualified.
 - Identifier quoting follows MariaDB SQL mode behavior through
   `append_identifier()`.
-- Public FK SQL remains rejected and `HTON_SUPPORTS_FOREIGN_KEYS` remains
-  clear.
+- Public FK SQL publication is covered by the later DDL publication slice, and
+  `HTON_SUPPORTS_FOREIGN_KEYS` remains clear.
 - FK metadata remains single-file and does not rely on InnoDB dictionary state
   or persistent MariaDB sidecars.
 

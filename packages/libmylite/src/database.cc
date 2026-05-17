@@ -485,7 +485,7 @@ bool is_locking_sql(std::string_view sql);
 bool is_online_alter_sql(std::string_view sql);
 const char *unsupported_engine_request_message(std::string_view sql);
 bool is_partition_sql(std::string_view sql);
-bool is_foreign_key_sql(std::string_view sql);
+const char *unsupported_foreign_key_sql_message(std::string_view sql);
 bool is_non_table_object_keyword(std::string_view token);
 TransactionControlKind direct_set_assignment_transaction_control_kind(std::string_view sql);
 TransactionControlKind autocommit_assignment_control_kind(std::string_view assignment);
@@ -2804,8 +2804,8 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_partition_sql(sql)) {
         return "unsupported partition SQL surface";
     }
-    if (is_foreign_key_sql(sql)) {
-        return "unsupported foreign-key SQL surface";
+    if (const char *foreign_key_message = unsupported_foreign_key_sql_message(sql)) {
+        return foreign_key_message;
     }
     return nullptr;
 }
@@ -5463,45 +5463,65 @@ bool sql_tokens_contain_partition_marker(std::string_view sql) {
     return false;
 }
 
-bool is_foreign_key_sql(std::string_view sql) {
+const char *unsupported_foreign_key_sql_message(std::string_view sql) {
     std::string_view rest = sql;
     std::string_view token;
     if (!pop_sql_scanned_token(rest, token)) {
-        return false;
+        return nullptr;
     }
 
     if (sql_token_equals(token, "CREATE")) {
         if (!pop_sql_scanned_token(rest, token)) {
-            return false;
+            return nullptr;
         }
         if (sql_token_equals(token, "OR")) {
             if (!pop_sql_scanned_token(rest, token) || !sql_token_equals(token, "REPLACE") ||
                 !pop_sql_scanned_token(rest, token)) {
-                return false;
+                return nullptr;
             }
         }
+        bool temporary_table = false;
         if (sql_token_equals(token, "TEMPORARY")) {
+            temporary_table = true;
             if (!pop_sql_scanned_token(rest, token)) {
-                return false;
+                return nullptr;
             }
         }
-        return sql_token_equals(token, "TABLE") && sql_tokens_contain_foreign_key_marker(rest);
+        if (sql_token_equals(token, "TABLE") && sql_tokens_contain_foreign_key_marker(rest) &&
+            temporary_table) {
+            return "unsupported foreign-key SQL surface";
+        }
+        return nullptr;
     }
 
     if (sql_token_equals(token, "ALTER")) {
         if (!pop_sql_scanned_token(rest, token)) {
-            return false;
+            return nullptr;
         }
         if (sql_token_equals(token, "IGNORE") || sql_token_equals(token, "ONLINE") ||
             sql_token_equals(token, "OFFLINE")) {
             if (!pop_sql_scanned_token(rest, token)) {
-                return false;
+                return nullptr;
             }
         }
-        return sql_token_equals(token, "TABLE") && sql_tokens_contain_foreign_key_marker(rest);
+        if (!sql_token_equals(token, "TABLE")) {
+            return nullptr;
+        }
+        while (pop_sql_scanned_token(rest, token)) {
+            if (!sql_token_equals(token, "DROP")) {
+                continue;
+            }
+            std::string_view after_drop = rest;
+            std::string_view next;
+            if (pop_sql_scanned_token(after_drop, next) && sql_token_equals(next, "FOREIGN") &&
+                pop_sql_scanned_token(after_drop, next) && sql_token_equals(next, "KEY")) {
+                return "unsupported foreign-key SQL surface";
+            }
+        }
+        return nullptr;
     }
 
-    return false;
+    return nullptr;
 }
 
 bool sql_tokens_contain_foreign_key_marker(std::string_view sql) {

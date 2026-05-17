@@ -92,17 +92,20 @@ catalog-only reopen without a rehydrated runtime schema directory.
 Representative online and in-place ALTER requests, including `LOCK=NONE`,
 `ALTER ONLINE TABLE`, and `ALGORITHM=INPLACE` / `INSTANT` / `NOCOPY`, are
 rejected by the MyLite SQL policy before MariaDB execution.
-Foreign-key DDL is rejected at the `libmylite` boundary until MyLite has safe
-DDL publication, enforcement, locking, recovery, and transaction-aware checks
-for referential constraints. The storage layer now has internal catalog-backed
-FK metadata records, typed FK blob pages, child and parent FK listing, handler
-metadata and `SHOW CREATE TABLE` hooks for manually seeded internal records,
-copy-ALTER preservation across MariaDB's internal old-table backup rename, and
-FK-aware column/supporting-key checks plus immediate `RESTRICT` / `NO ACTION`
-row checks for retained metadata; this does not yet make FK SQL supported.
-Partition DDL is rejected at the same boundary until MyLite has partition
-metadata, partition-to-primary-file routing, per-partition catalog lifecycle,
-and partition-aware row and index maintenance.
+The first public foreign-key DDL subset publishes catalog-backed FK metadata
+for supported `CREATE TABLE` and copy `ALTER TABLE ... ADD FOREIGN KEY`
+statements. The subset requires durable MyLite-routed base tables, explicit
+supported child key prefixes, exact unique parent keys, and immediate
+`RESTRICT` / `NO ACTION` semantics. The storage layer stores typed FK blob
+pages, supports child and parent FK listing, exposes handler metadata and
+`SHOW CREATE TABLE` hooks, preserves retained metadata across MariaDB's
+internal old-table backup rename, and performs FK-aware column/supporting-key
+checks plus immediate child/parent row checks. Generated child supporting keys,
+`DROP FOREIGN KEY`, cascades, `SET NULL`, `SET DEFAULT`, and dump-import
+`foreign_key_checks=0` bypass behavior remain planned.
+Partition DDL remains rejected at the `libmylite` boundary until MyLite has
+partition metadata, partition-to-primary-file routing, per-partition catalog
+lifecycle, and partition-aware row and index maintenance.
 Basic CHECK constraints are kept inside the MariaDB table-definition image and
 evaluated by MariaDB before MyLite handler writes. Supported copy
 `ALTER TABLE` paths can add and drop named table-level CHECK constraints
@@ -177,7 +180,7 @@ The catalog stores:
 - table definitions,
 - table-definition binary images needed by MariaDB discovery,
 - columns, indexes, constraints, and engine metadata,
-- internal foreign-key metadata before FK SQL support is enabled,
+- validated foreign-key metadata for the supported public FK SQL subset,
 - views, triggers, and routines when those surfaces are supported,
 - collation and character-set metadata needed to reopen tables,
 - autoincrement state,
@@ -435,12 +438,14 @@ The storage engine must support:
 - truncate,
 - table rebuilds for copy `ALTER`.
 
-FULLTEXT, SPATIAL, MySQL-style expression indexes, foreign-key enforcement, and
-partitioned tables need explicit storage designs before support is claimed.
+FULLTEXT, SPATIAL, MySQL-style expression indexes, broader foreign-key
+semantics, and partitioned tables need explicit storage designs before support
+is claimed.
 Generated primary keys follow MariaDB's SQL-layer rejection policy. Long-unique
 hash keys remain unsupported until MyLite has a durable hidden-key design.
-Current `libmylite` entry points reject foreign-key and partition DDL before
-MariaDB execution; unsupported FULLTEXT, SPATIAL, and long-unique indexes reject
+Current `libmylite` entry points still reject `CREATE TEMPORARY TABLE` FK DDL,
+`ALTER TABLE ... DROP FOREIGN KEY`, and partition DDL before MariaDB execution;
+unsupported FK shapes, FULLTEXT, SPATIAL, and long-unique indexes reject
 through handler capability checks before catalog publication.
 
 ## Transactions And Recovery

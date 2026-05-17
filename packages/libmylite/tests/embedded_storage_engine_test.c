@@ -1529,7 +1529,7 @@ static void test_transaction_and_foreign_key_policies(void) {
         ") ENGINE=InnoDB"
     );
     assert_catalog_table_count(filename, "app", 3U);
-    assert_foreign_key_exec_fails(
+    assert_exec_succeeds(
         db,
         "CREATE TABLE laravel_sessions_with_fk ("
         "id VARCHAR(255) NOT NULL, user_id BIGINT UNSIGNED, "
@@ -1537,11 +1537,27 @@ static void test_transaction_and_foreign_key_policies(void) {
         "CONSTRAINT sessions_user_id_foreign FOREIGN KEY (user_id) REFERENCES laravel_users(id)"
         ") ENGINE=InnoDB"
     );
-    assert(
-        mylite_storage_table_exists(filename, "app", "laravel_sessions_with_fk") ==
-        MYLITE_STORAGE_NOTFOUND
+    assert_catalog_table_count(filename, "app", 4U);
+    assert_exec_fails(
+        db,
+        "INSERT INTO laravel_sessions_with_fk (id, user_id) VALUES ('missing', 99)"
     );
-    assert_catalog_table_count(filename, "app", 3U);
+    assert_exec_succeeds(db, "INSERT INTO laravel_users (id) VALUES (42)");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO laravel_sessions_with_fk (id, user_id) VALUES ('ok', 42)"
+    );
+    assert_exec_fails(db, "UPDATE laravel_users SET id = 43 WHERE id = 42");
+    assert_exec_fails(db, "DELETE FROM laravel_users WHERE id = 42");
+    char *create_sql = capture_show_create_table(db, "laravel_sessions_with_fk");
+    assert(
+        strstr(
+            create_sql,
+            "CONSTRAINT `sessions_user_id_foreign` FOREIGN KEY (`user_id`) "
+            "REFERENCES `laravel_users` (`id`)"
+        ) != NULL
+    );
+    free(create_sql);
 
     assert_exec_succeeds(
         db,
@@ -1549,8 +1565,8 @@ static void test_transaction_and_foreign_key_policies(void) {
         "id INTEGER NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)"
         ") ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 4U);
-    assert_foreign_key_exec_fails(
+    assert_catalog_table_count(filename, "app", 5U);
+    assert_exec_succeeds(
         db,
         "CREATE TABLE django_admin_log_with_fk ("
         "id INTEGER NOT NULL AUTO_INCREMENT, user_id INTEGER NOT NULL, "
@@ -1559,11 +1575,7 @@ static void test_transaction_and_foreign_key_policies(void) {
         "FOREIGN KEY (user_id) REFERENCES django_auth_user(id)"
         ") ENGINE=InnoDB"
     );
-    assert(
-        mylite_storage_table_exists(filename, "app", "django_admin_log_with_fk") ==
-        MYLITE_STORAGE_NOTFOUND
-    );
-    assert_catalog_table_count(filename, "app", 4U);
+    assert_catalog_table_count(filename, "app", 6U);
 
     assert_exec_succeeds(
         db,
@@ -1571,8 +1583,8 @@ static void test_transaction_and_foreign_key_policies(void) {
         "id BIGINT NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)"
         ") ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 5U);
-    assert_foreign_key_exec_fails(
+    assert_catalog_table_count(filename, "app", 7U);
+    assert_exec_succeeds(
         db,
         "CREATE TABLE rails_active_storage_attachments_fk ("
         "id BIGINT NOT NULL AUTO_INCREMENT, blob_id BIGINT NOT NULL, "
@@ -1581,21 +1593,19 @@ static void test_transaction_and_foreign_key_policies(void) {
         "FOREIGN KEY (blob_id) REFERENCES rails_active_storage_blobs(id)"
         ") ENGINE=InnoDB"
     );
-    assert(
-        mylite_storage_table_exists(filename, "app", "rails_active_storage_attachments_fk") ==
-        MYLITE_STORAGE_NOTFOUND
-    );
-    assert_catalog_table_count(filename, "app", 5U);
+    assert_catalog_table_count(filename, "app", 8U);
 
     assert_exec_succeeds(
         db,
-        "CREATE TABLE fk_child (id INT NOT NULL PRIMARY KEY, parent_id INT) ENGINE=InnoDB"
+        "CREATE TABLE fk_child ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT, KEY fk_child_parent_id (parent_id)"
+        ") ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 6U);
+    assert_catalog_table_count(filename, "app", 9U);
     assert_catalog_table_metadata(filename, "app", "fk_child", "InnoDB", "MYLITE");
 
     assert_exec_succeeds(db, "SET foreign_key_checks=0");
-    assert_foreign_key_exec_fails(
+    assert_exec_succeeds(
         db,
         "ALTER TABLE fk_child ADD CONSTRAINT fk_child_parent "
         "FOREIGN KEY (parent_id) REFERENCES fk_parent(id)"
@@ -1604,11 +1614,12 @@ static void test_transaction_and_foreign_key_policies(void) {
     assert_exec_succeeds(db, "SET foreign_key_checks=1");
 
     assert_exec_succeeds(db, "INSERT INTO fk_parent VALUES (1)");
-    assert_exec_succeeds(db, "INSERT INTO fk_child VALUES (1, 99)");
+    assert_exec_fails(db, "INSERT INTO fk_child VALUES (1, 99)");
+    assert_exec_succeeds(db, "INSERT INTO fk_child VALUES (1, 1)");
     assert(
         mylite_exec(
             db,
-            "SELECT COUNT(*) FROM fk_child WHERE parent_id = 99",
+            "SELECT COUNT(*) FROM fk_child WHERE parent_id = 1",
             single_value_callback,
             &child_count,
             &errmsg
@@ -1616,6 +1627,37 @@ static void test_transaction_and_foreign_key_policies(void) {
     );
     assert(errmsg == NULL);
     assert(child_count.rows == 1);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_fails(db, "INSERT INTO fk_child VALUES (2, 99)");
+    create_sql = capture_show_create_table(db, "fk_child");
+    assert(
+        strstr(
+            create_sql,
+            "CONSTRAINT `fk_child_parent` FOREIGN KEY (`parent_id`) "
+            "REFERENCES `fk_parent` (`id`)"
+        ) != NULL
+    );
+    free(create_sql);
+    single_value_context fk_metadata_count = {0, "1"};
+    assert(
+        mylite_exec(
+            db,
+            "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+            "WHERE CONSTRAINT_SCHEMA = 'app' "
+            "AND TABLE_NAME = 'fk_child' "
+            "AND CONSTRAINT_NAME = 'fk_child_parent' "
+            "AND UNIQUE_CONSTRAINT_NAME = 'PRIMARY' "
+            "AND REFERENCED_TABLE_NAME = 'fk_parent'",
+            single_value_callback,
+            &fk_metadata_count,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(fk_metadata_count.rows == 1);
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
@@ -1649,6 +1691,37 @@ static void test_foreign_key_handler_metadata(void) {
         "KEY child_parent_key (parent_id), "
         "KEY child_remote_parent_key (remote_parent_id)"
         ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE memory_parent (id INT NOT NULL PRIMARY KEY) ENGINE=MEMORY"
+    );
+    assert_foreign_key_exec_fails(
+        db,
+        "CREATE TABLE memory_parent_child ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT, KEY memory_parent_child_key (parent_id), "
+        "CONSTRAINT fk_memory_parent_child FOREIGN KEY (parent_id) REFERENCES memory_parent(id)"
+        ") ENGINE=InnoDB"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "fk_metadata", "memory_parent_child") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE blackhole_parent (id INT NOT NULL PRIMARY KEY) ENGINE=BLACKHOLE"
+    );
+    assert_foreign_key_exec_fails(
+        db,
+        "CREATE TABLE blackhole_parent_child ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT, KEY blackhole_parent_child_key (parent_id), "
+        "CONSTRAINT fk_blackhole_parent_child "
+        "FOREIGN KEY (parent_id) REFERENCES blackhole_parent(id)"
+        ") ENGINE=InnoDB"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "fk_metadata", "blackhole_parent_child") ==
+        MYLITE_STORAGE_NOTFOUND
     );
 
     mylite_storage_foreign_key_definition foreign_key = {
@@ -1773,9 +1846,9 @@ static void test_foreign_key_handler_metadata(void) {
     assert_exec_fails(db, "ALTER TABLE child DROP KEY child_parent_replacement, ALGORITHM=COPY");
     assert_exec_fails(db, "TRUNCATE TABLE parent");
     assert_exec_fails(db, "TRUNCATE TABLE fk_parent.remote_parent");
-    assert_foreign_key_exec_fails(
+    assert_exec_succeeds(
         db,
-        "ALTER TABLE child ADD CONSTRAINT fk_sql_still_blocked "
+        "ALTER TABLE child ADD CONSTRAINT fk_sql_public_add "
         "FOREIGN KEY (parent_id) REFERENCES parent(id)"
     );
     assert(
@@ -1792,6 +1865,14 @@ static void test_foreign_key_handler_metadata(void) {
             "fk_metadata",
             "child",
             "fk_child_remote_parent"
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_drop_foreign_key_definition(
+            filename,
+            "fk_metadata",
+            "child",
+            "fk_sql_public_add"
         ) == MYLITE_STORAGE_OK
     );
 
@@ -12117,10 +12198,21 @@ static void assert_foreign_key_exec_fails(mylite_db *db, const char *sql) {
     }
     assert(result == MYLITE_ERROR);
     assert(mylite_errcode(db) == MYLITE_ERROR);
-    assert(mylite_mariadb_errno(db) == 0U);
-    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(errmsg != NULL);
-    assert(strstr(errmsg, "foreign-key") != NULL);
+    const int foreign_key_message =
+        strstr(errmsg, "foreign-key") != NULL || strstr(errmsg, "foreign key") != NULL ||
+        strstr(errmsg, "Foreign key") != NULL || mylite_mariadb_errno(db) != 0U;
+    if (!foreign_key_message) {
+        fprintf(
+            stderr,
+            "Expected foreign-key failure for SQL: %s\nerrno=%u sqlstate=%s message=%s\n",
+            sql,
+            mylite_mariadb_errno(db),
+            mylite_sqlstate(db),
+            errmsg
+        );
+    }
+    assert(foreign_key_message);
     mylite_free(errmsg);
 }
 

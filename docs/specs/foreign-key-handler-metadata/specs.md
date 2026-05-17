@@ -131,9 +131,12 @@ native InnoDB dictionary or FK code is reintroduced.
 - Storage unit coverage that parent-list records survive parent and child
   renames.
 - Handler/storage-smoke coverage that manually seeded FK metadata appears in
-  MariaDB information-schema FK metadata rows when FK SQL remains rejected.
-- Handler/storage-smoke coverage that public FK DDL still rejects before
-  catalog publication.
+  MariaDB information-schema FK metadata rows before public FK DDL
+  publication.
+- Handler/storage-smoke coverage that public FK DDL did not become accepted
+  before catalog publication existed. The supported public subset is now
+  covered by
+  [Foreign-Key DDL Publication](../foreign-key-ddl-publication/specs.md).
 - Format check, storage build, storage unit test, storage-smoke build/test when
   handler code changes, full default `ctest --preset dev`, and `git diff
   --check`.

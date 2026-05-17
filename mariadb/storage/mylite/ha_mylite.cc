@@ -34,6 +34,13 @@
 #include "sql_string.h"
 #include "table.h"
 
+struct Mylite_catalog_table_share
+{
+  TABLE_SHARE share;
+  char path[FN_REFLEN + 1];
+  bool initialized;
+};
+
 static handler *mylite_create_handler(handlerton *hton,
                                       TABLE_SHARE *table,
                                       MEM_ROOT *mem_root);
@@ -151,13 +158,69 @@ static int mylite_check_parent_foreign_keys(const char *primary_file,
                                             TABLE *table,
                                             const uchar *old_data,
                                             const uchar *new_data);
+static int mylite_validate_foreign_key_definitions(
+  const char *primary_file, const char *logical_schema_name,
+  const char *logical_table_name, TABLE *form, HA_CREATE_INFO *create_info,
+  bool volatile_or_discarded_rows);
+static int mylite_store_foreign_key_definitions(
+  const char *primary_file, const char *storage_schema_name,
+  const char *storage_table_name, const char *logical_schema_name,
+  const char *logical_table_name, TABLE *form, HA_CREATE_INFO *create_info);
+static int mylite_validate_foreign_key_definition(
+  const char *primary_file, const char *logical_schema_name,
+  const char *logical_table_name, TABLE *form, const Foreign_key *fk,
+  uint foreign_key_number, bool volatile_or_discarded_rows);
+static int mylite_store_foreign_key_definition(
+  const char *primary_file, const char *storage_schema_name,
+  const char *storage_table_name, const char *logical_schema_name,
+  const char *logical_table_name, TABLE *form, const Foreign_key *fk,
+  uint foreign_key_number);
+static int mylite_prepare_foreign_key_definition(
+  THD *thd, const char *storage_schema_name, const char *storage_table_name,
+  const char *logical_schema_name, const char *logical_table_name, TABLE *form,
+  const Foreign_key *fk, uint foreign_key_number,
+  mylite_storage_foreign_key_definition *out_definition);
+static int mylite_validate_foreign_key_shape(
+  const char *primary_file, const char *logical_schema_name,
+  const char *logical_table_name, TABLE *form, THD *thd,
+  mylite_storage_foreign_key_definition *definition);
+static int mylite_validate_foreign_key_parent_engine(
+  const char *primary_file, const char *schema_name, const char *table_name);
+static int mylite_validate_foreign_key_parent_share(
+  mylite_storage_foreign_key_definition *definition, TABLE *child_table,
+  const TABLE_SHARE *parent_share);
+static int mylite_validate_foreign_key_key_parts(
+  const KEY *child_key, const KEY *parent_key, size_t column_count);
+static int mylite_init_catalog_table_share(
+  THD *thd, const char *primary_file, const char *schema_name,
+  const char *table_name, Mylite_catalog_table_share *out_share);
+static void mylite_free_catalog_table_share(
+  Mylite_catalog_table_share *catalog_share);
+static int mylite_foreign_key_columns_from_list(
+  THD *thd, List<Key_part_spec> *columns, const char ***out_column_names,
+  size_t *out_column_count);
+static const char *mylite_foreign_key_constraint_name(
+  THD *thd, const char *logical_table_name, const Foreign_key *fk,
+  uint foreign_key_number);
+static unsigned mylite_foreign_key_storage_action(enum_fk_option action);
+static unsigned mylite_foreign_key_storage_match(
+  Foreign_key::fk_match_opt match_option);
+static bool mylite_foreign_key_action_supported(enum_fk_option action);
+static unsigned long long mylite_key_nullable_bitmap(const KEY *key,
+                                                     size_t column_count);
 static int mylite_check_child_foreign_key(
   void *ctx, const mylite_storage_foreign_key_metadata *metadata);
 static int mylite_check_parent_foreign_key(
   void *ctx, const mylite_storage_foreign_key_metadata *metadata);
 static const KEY *mylite_find_foreign_key_prefix(
-  TABLE *table, char **column_names, size_t column_count,
+  TABLE *table, const char *const *column_names, size_t column_count,
   const char *key_name);
+static const KEY *mylite_find_foreign_key_prefix_in_share(
+  const TABLE_SHARE *share, const char *const *column_names,
+  size_t column_count, const char *key_name, bool require_unique_exact_key);
+static const KEY *mylite_find_foreign_key_prefix_in_keys(
+  const KEY *keys, uint key_count, const char *const *column_names,
+  size_t column_count, const char *key_name, bool require_unique_exact_key);
 static bool mylite_key_prefix_contains_null(TABLE *table, const KEY *key,
                                             const uchar *buf,
                                             size_t column_count);
@@ -2003,6 +2066,19 @@ int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info
                          sizeof(display_engine_name)))
     DBUG_RETURN(HA_ERR_UNSUPPORTED);
 
+  const char *logical_schema_name= form && form->s && form->s->db.str ?
+    form->s->db.str : schema_name;
+  const char *logical_table_name= form && form->s && form->s->table_name.str ?
+    form->s->table_name.str : table_name;
+  const bool foreign_key_unsupported_rows=
+    temporary_table || requested_engine_discards_rows || use_volatile_rows;
+  const int foreign_key_validation_error=
+    mylite_validate_foreign_key_definitions(
+      primary_file, logical_schema_name, logical_table_name, form,
+      create_info, foreign_key_unsupported_rows);
+  if (foreign_key_validation_error)
+    DBUG_RETURN(foreign_key_validation_error);
+
   if (!temporary_table)
   {
     const uchar *frm= NULL;
@@ -2024,6 +2100,16 @@ int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info
     form->s->free_frm_image(frm);
     if (result != MYLITE_STORAGE_OK)
       DBUG_RETURN(mylite_storage_to_handler_error(result));
+
+    if (!requested_engine_discards_rows && !use_volatile_rows)
+    {
+      const int foreign_key_store_error=
+        mylite_store_foreign_key_definitions(
+          primary_file, schema_name, table_name, logical_schema_name,
+          logical_table_name, form, create_info);
+      if (foreign_key_store_error)
+        DBUG_RETURN(foreign_key_store_error);
+    }
   }
 
   if (!temporary_table && requested_engine_discards_rows)
@@ -2887,6 +2973,498 @@ static int mylite_check_parent_foreign_keys(const char *primary_file,
   return mylite_storage_to_handler_error(result);
 }
 
+static int mylite_validate_foreign_key_definitions(
+  const char *primary_file, const char *logical_schema_name,
+  const char *logical_table_name, TABLE *form, HA_CREATE_INFO *create_info,
+  bool volatile_or_discarded_rows)
+{
+  if (!create_info || !create_info->alter_info)
+    return 0;
+
+  uint foreign_key_number= 0;
+  List_iterator_fast<Key> key_it(create_info->alter_info->key_list);
+  while (Key *key= key_it++)
+  {
+    if (key->type != Key::FOREIGN_KEY || key->old)
+      continue;
+
+    ++foreign_key_number;
+    int error= mylite_validate_foreign_key_definition(
+      primary_file, logical_schema_name, logical_table_name, form,
+      static_cast<Foreign_key *>(key), foreign_key_number,
+      volatile_or_discarded_rows);
+    if (error)
+      return error;
+  }
+  return 0;
+}
+
+static int mylite_store_foreign_key_definitions(
+  const char *primary_file, const char *storage_schema_name,
+  const char *storage_table_name, const char *logical_schema_name,
+  const char *logical_table_name, TABLE *form, HA_CREATE_INFO *create_info)
+{
+  if (!create_info || !create_info->alter_info)
+    return 0;
+
+  uint foreign_key_number= 0;
+  List_iterator_fast<Key> key_it(create_info->alter_info->key_list);
+  while (Key *key= key_it++)
+  {
+    if (key->type != Key::FOREIGN_KEY || key->old)
+      continue;
+
+    ++foreign_key_number;
+    int error= mylite_store_foreign_key_definition(
+      primary_file, storage_schema_name, storage_table_name,
+      logical_schema_name, logical_table_name, form,
+      static_cast<Foreign_key *>(key), foreign_key_number);
+    if (error)
+      return error;
+  }
+  return 0;
+}
+
+static int mylite_validate_foreign_key_definition(
+  const char *primary_file, const char *logical_schema_name,
+  const char *logical_table_name, TABLE *form, const Foreign_key *fk,
+  uint foreign_key_number, bool volatile_or_discarded_rows)
+{
+  THD *thd= current_thd;
+  mylite_storage_foreign_key_definition definition= {0};
+  int error= mylite_prepare_foreign_key_definition(
+    thd, logical_schema_name, logical_table_name, logical_schema_name,
+    logical_table_name, form, fk, foreign_key_number, &definition);
+  if (error)
+    return error;
+
+  if (volatile_or_discarded_rows ||
+      !mylite_foreign_key_action_supported(fk->delete_opt) ||
+      !mylite_foreign_key_action_supported(fk->update_opt) ||
+      (fk->match_opt != Foreign_key::FK_MATCH_UNDEF &&
+       fk->match_opt != Foreign_key::FK_MATCH_SIMPLE))
+  {
+    my_error(ER_FK_INCORRECT_OPTION, MYF(0), logical_table_name,
+             definition.constraint_name);
+    return HA_ERR_UNSUPPORTED;
+  }
+
+  mylite_storage_foreign_key_metadata existing= {sizeof(existing)};
+  mylite_storage_result storage_result=
+    mylite_storage_read_foreign_key_definition(
+      primary_file, logical_schema_name, logical_table_name,
+      definition.constraint_name, &existing);
+  mylite_storage_free_foreign_key_metadata(&existing);
+  if (storage_result == MYLITE_STORAGE_OK)
+  {
+    my_error(ER_DUP_CONSTRAINT_NAME, MYF(0), "FOREIGN KEY",
+             definition.constraint_name);
+    return HA_ERR_UNSUPPORTED;
+  }
+  if (storage_result != MYLITE_STORAGE_NOTFOUND)
+    return mylite_storage_to_handler_error(storage_result);
+
+  return mylite_validate_foreign_key_shape(
+    primary_file, logical_schema_name, logical_table_name, form, thd,
+    &definition);
+}
+
+static int mylite_store_foreign_key_definition(
+  const char *primary_file, const char *storage_schema_name,
+  const char *storage_table_name, const char *logical_schema_name,
+  const char *logical_table_name, TABLE *form, const Foreign_key *fk,
+  uint foreign_key_number)
+{
+  THD *thd= current_thd;
+  mylite_storage_foreign_key_definition definition= {0};
+  int error= mylite_prepare_foreign_key_definition(
+    thd, storage_schema_name, storage_table_name, logical_schema_name,
+    logical_table_name, form, fk, foreign_key_number, &definition);
+  if (error)
+    return error;
+
+  error= mylite_validate_foreign_key_shape(
+    primary_file, logical_schema_name, logical_table_name, form, thd,
+    &definition);
+  if (error)
+    return error;
+
+  const mylite_storage_result result=
+    mylite_storage_store_foreign_key_definition(primary_file, &definition);
+  return mylite_storage_to_handler_error(result);
+}
+
+static int mylite_prepare_foreign_key_definition(
+  THD *thd, const char *storage_schema_name, const char *storage_table_name,
+  const char *logical_schema_name, const char *logical_table_name, TABLE *form,
+  const Foreign_key *fk, uint foreign_key_number,
+  mylite_storage_foreign_key_definition *out_definition)
+{
+  if (!thd || !storage_schema_name || !storage_table_name ||
+      !logical_schema_name || !form || !fk || !out_definition)
+    return HA_ERR_INTERNAL_ERROR;
+
+  const char *constraint_name=
+    mylite_foreign_key_constraint_name(thd, logical_table_name, fk,
+                                       foreign_key_number);
+  if (!constraint_name)
+    return HA_ERR_OUT_OF_MEM;
+
+  const char **foreign_column_names= NULL;
+  const char **referenced_column_names= NULL;
+  size_t foreign_column_count= 0;
+  size_t referenced_column_count= 0;
+  int error= mylite_foreign_key_columns_from_list(
+    thd, const_cast<List<Key_part_spec> *>(&fk->columns),
+    &foreign_column_names, &foreign_column_count);
+  if (error)
+    return error;
+  error= mylite_foreign_key_columns_from_list(
+    thd, const_cast<List<Key_part_spec> *>(&fk->ref_columns),
+    &referenced_column_names, &referenced_column_count);
+  if (error)
+    return error;
+  if (foreign_column_count != referenced_column_count)
+  {
+    my_error(ER_WRONG_FK_DEF, MYF(0), constraint_name,
+             ER_THD(thd, ER_KEY_REF_DO_NOT_MATCH_TABLE_REF));
+    return HA_ERR_UNSUPPORTED;
+  }
+
+  const char *referenced_schema_name= logical_schema_name;
+  if (fk->ref_db.str && fk->ref_db.length)
+  {
+    referenced_schema_name= thd->strmake(fk->ref_db.str, fk->ref_db.length);
+    if (!referenced_schema_name)
+      return HA_ERR_OUT_OF_MEM;
+  }
+  const char *referenced_table_name=
+    thd->strmake(fk->ref_table.str, fk->ref_table.length);
+  if (!referenced_table_name)
+    return HA_ERR_OUT_OF_MEM;
+
+  *out_definition= {
+    sizeof(*out_definition),
+    storage_schema_name,
+    storage_table_name,
+    constraint_name,
+    referenced_schema_name,
+    referenced_table_name,
+    NULL,
+    foreign_column_names,
+    referenced_column_names,
+    foreign_column_count,
+    mylite_foreign_key_storage_action(fk->update_opt),
+    mylite_foreign_key_storage_action(fk->delete_opt),
+    mylite_foreign_key_storage_match(fk->match_opt),
+    0ULL,
+    0ULL
+  };
+  return 0;
+}
+
+static int mylite_validate_foreign_key_shape(
+  const char *primary_file, const char *logical_schema_name,
+  const char *logical_table_name, TABLE *form, THD *thd,
+  mylite_storage_foreign_key_definition *definition)
+{
+  const KEY *child_key= mylite_find_foreign_key_prefix(
+    form, definition->foreign_column_names, definition->column_count, NULL);
+  if (!child_key)
+  {
+    my_error(ER_CANNOT_ADD_FOREIGN, MYF(0), logical_table_name);
+    return HA_ERR_UNSUPPORTED;
+  }
+
+  const bool self_reference=
+    strcmp(definition->referenced_schema_name, logical_schema_name) == 0 &&
+    strcmp(definition->referenced_table_name, logical_table_name) == 0;
+  if (self_reference)
+  {
+    const KEY *parent_key= mylite_find_foreign_key_prefix_in_share(
+      form->s, definition->referenced_column_names, definition->column_count,
+      NULL, true);
+    if (!parent_key ||
+        mylite_validate_foreign_key_key_parts(child_key, parent_key,
+                                              definition->column_count))
+    {
+      my_error(ER_CANNOT_ADD_FOREIGN, MYF(0), logical_table_name);
+      return HA_ERR_UNSUPPORTED;
+    }
+    if (!parent_key->name.str || !parent_key->name.length)
+      return HA_ERR_UNSUPPORTED;
+    definition->referenced_key_name=
+      thd->strmake(parent_key->name.str, parent_key->name.length);
+    if (!definition->referenced_key_name)
+      return HA_ERR_OUT_OF_MEM;
+    definition->nullable_column_bitmap=
+      mylite_key_nullable_bitmap(child_key, definition->column_count);
+    definition->referenced_nullable_column_bitmap=
+      mylite_key_nullable_bitmap(parent_key, definition->column_count);
+    return 0;
+  }
+
+  int error= mylite_validate_foreign_key_parent_engine(
+    primary_file, definition->referenced_schema_name,
+    definition->referenced_table_name);
+  if (error)
+  {
+    my_error(ER_CANNOT_ADD_FOREIGN, MYF(0), logical_table_name);
+    return error;
+  }
+
+  Mylite_catalog_table_share parent_share= {};
+  error= mylite_init_catalog_table_share(
+    thd, primary_file, definition->referenced_schema_name,
+    definition->referenced_table_name, &parent_share);
+  if (error)
+  {
+    my_error(ER_CANNOT_ADD_FOREIGN, MYF(0), logical_table_name);
+    return error;
+  }
+
+  error= mylite_validate_foreign_key_parent_share(definition, form,
+                                                  &parent_share.share);
+  if (!error)
+  {
+    const KEY *parent_key= mylite_find_foreign_key_prefix_in_share(
+      &parent_share.share, definition->referenced_column_names,
+      definition->column_count, NULL, true);
+    DBUG_ASSERT(parent_key);
+    if (!parent_key->name.str || !parent_key->name.length)
+      error= HA_ERR_UNSUPPORTED;
+    definition->referenced_key_name=
+      error ? NULL : thd->strmake(parent_key->name.str,
+                                  parent_key->name.length);
+    if (!error && !definition->referenced_key_name)
+      error= HA_ERR_OUT_OF_MEM;
+  }
+  mylite_free_catalog_table_share(&parent_share);
+  if (error)
+  {
+    if (error == HA_ERR_UNSUPPORTED)
+      my_error(ER_CANNOT_ADD_FOREIGN, MYF(0), logical_table_name);
+    return error;
+  }
+
+  definition->nullable_column_bitmap=
+    mylite_key_nullable_bitmap(child_key, definition->column_count);
+  return 0;
+}
+
+static int mylite_validate_foreign_key_parent_engine(
+  const char *primary_file, const char *schema_name, const char *table_name)
+{
+  mylite_storage_table_metadata metadata= {sizeof(metadata), NULL, NULL};
+  const mylite_storage_result storage_result=
+    mylite_storage_read_table_metadata(primary_file, schema_name, table_name,
+                                       &metadata);
+  if (storage_result != MYLITE_STORAGE_OK)
+    return mylite_storage_to_handler_error(storage_result);
+
+  const char *requested_engine_name= metadata.requested_engine_name ?
+    metadata.requested_engine_name : "";
+  const bool unsupported_parent_engine=
+    mylite_discards_rows_engine_request(requested_engine_name) ||
+    mylite_uses_volatile_rows_engine_request(requested_engine_name);
+  mylite_storage_free(metadata.requested_engine_name);
+  mylite_storage_free(metadata.effective_engine_name);
+  return unsupported_parent_engine ? HA_ERR_UNSUPPORTED : 0;
+}
+
+static int mylite_validate_foreign_key_parent_share(
+  mylite_storage_foreign_key_definition *definition, TABLE *child_table,
+  const TABLE_SHARE *parent_share)
+{
+  const KEY *child_key= mylite_find_foreign_key_prefix(
+    child_table, definition->foreign_column_names, definition->column_count,
+    NULL);
+  const KEY *parent_key= mylite_find_foreign_key_prefix_in_share(
+    parent_share, definition->referenced_column_names,
+    definition->column_count, NULL, true);
+  if (!child_key || !parent_key ||
+      mylite_validate_foreign_key_key_parts(child_key, parent_key,
+                                            definition->column_count))
+    return HA_ERR_UNSUPPORTED;
+
+  definition->referenced_nullable_column_bitmap=
+    mylite_key_nullable_bitmap(parent_key, definition->column_count);
+  return 0;
+}
+
+static int mylite_validate_foreign_key_key_parts(
+  const KEY *child_key, const KEY *parent_key, size_t column_count)
+{
+  if (!child_key || !parent_key || column_count == 0 ||
+      child_key->user_defined_key_parts < column_count ||
+      parent_key->user_defined_key_parts != column_count)
+    return HA_ERR_UNSUPPORTED;
+
+  for (size_t i= 0; i < column_count; ++i)
+  {
+    const KEY_PART_INFO *child_part= child_key->key_part + i;
+    const KEY_PART_INFO *parent_part= parent_key->key_part + i;
+    if (!child_part->field || !parent_part->field ||
+        !child_part->field->eq_def(parent_part->field) ||
+        child_part->length != child_part->field->key_length() ||
+        parent_part->length != parent_part->field->key_length())
+      return HA_ERR_UNSUPPORTED;
+
+    const size_t child_value_size= child_part->store_length -
+      (child_part->null_bit ? HA_KEY_NULL_LENGTH : 0U);
+    const size_t parent_value_size= parent_part->store_length -
+      (parent_part->null_bit ? HA_KEY_NULL_LENGTH : 0U);
+    if (child_value_size != parent_value_size)
+      return HA_ERR_UNSUPPORTED;
+  }
+  return 0;
+}
+
+static int mylite_init_catalog_table_share(
+  THD *thd, const char *primary_file, const char *schema_name,
+  const char *table_name, Mylite_catalog_table_share *out_share)
+{
+  if (!thd || !primary_file || !schema_name || !table_name || !out_share)
+    return HA_ERR_INTERNAL_ERROR;
+
+  *out_share= {};
+  unsigned char *frm= NULL;
+  size_t frm_len= 0;
+  mylite_storage_result storage_result=
+    mylite_storage_read_table_definition(primary_file, schema_name,
+                                         table_name, &frm, &frm_len);
+  if (storage_result != MYLITE_STORAGE_OK)
+    return mylite_storage_to_handler_error(storage_result);
+
+  my_snprintf(out_share->path, sizeof(out_share->path), "%s/%s",
+              schema_name, table_name);
+  init_tmp_table_share(thd, &out_share->share, schema_name, 0, table_name,
+                       out_share->path, true);
+  out_share->initialized= true;
+  const int error=
+    out_share->share.init_from_binary_frm_image(thd, false, frm, frm_len);
+  mylite_storage_free(frm);
+  if (error)
+  {
+    mylite_free_catalog_table_share(out_share);
+    return HA_ERR_CRASHED_ON_USAGE;
+  }
+  return 0;
+}
+
+static void mylite_free_catalog_table_share(
+  Mylite_catalog_table_share *catalog_share)
+{
+  if (!catalog_share || !catalog_share->initialized)
+    return;
+
+  free_table_share(&catalog_share->share);
+  catalog_share->initialized= false;
+}
+
+static int mylite_foreign_key_columns_from_list(
+  THD *thd, List<Key_part_spec> *columns, const char ***out_column_names,
+  size_t *out_column_count)
+{
+  if (!thd || !columns || !out_column_names || !out_column_count ||
+      columns->elements == 0 ||
+      columns->elements > sizeof(unsigned long long) * CHAR_BIT)
+    return HA_ERR_UNSUPPORTED;
+
+  const char **column_names= static_cast<const char **>(
+    thd_alloc(thd, columns->elements * sizeof(char *)));
+  if (!column_names)
+    return HA_ERR_OUT_OF_MEM;
+
+  size_t index= 0;
+  List_iterator_fast<Key_part_spec> column_it(*columns);
+  while (Key_part_spec *column= column_it++)
+  {
+    if (!column->field_name.str || !column->field_name.length)
+      return HA_ERR_UNSUPPORTED;
+    column_names[index]= thd->strmake(column->field_name.str,
+                                      column->field_name.length);
+    if (!column_names[index])
+      return HA_ERR_OUT_OF_MEM;
+    ++index;
+  }
+
+  *out_column_names= column_names;
+  *out_column_count= index;
+  return 0;
+}
+
+static const char *mylite_foreign_key_constraint_name(
+  THD *thd, const char *logical_table_name, const Foreign_key *fk,
+  uint foreign_key_number)
+{
+  if (fk->constraint_name.str && fk->constraint_name.length)
+    return thd->strmake(fk->constraint_name.str, fk->constraint_name.length);
+  if (fk->name.str && fk->name.length)
+    return thd->strmake(fk->name.str, fk->name.length);
+
+  char generated_name[NAME_LEN + 32];
+  my_snprintf(generated_name, sizeof(generated_name), "%s_ibfk_%u",
+              logical_table_name, foreign_key_number);
+  return thd->strmake(generated_name, strlen(generated_name));
+}
+
+static unsigned mylite_foreign_key_storage_action(enum_fk_option action)
+{
+  switch (action) {
+  case FK_OPTION_RESTRICT:
+    return MYLITE_STORAGE_FOREIGN_KEY_ACTION_RESTRICT;
+  case FK_OPTION_NO_ACTION:
+    return MYLITE_STORAGE_FOREIGN_KEY_ACTION_NO_ACTION;
+  case FK_OPTION_CASCADE:
+    return MYLITE_STORAGE_FOREIGN_KEY_ACTION_CASCADE;
+  case FK_OPTION_SET_NULL:
+    return MYLITE_STORAGE_FOREIGN_KEY_ACTION_SET_NULL;
+  case FK_OPTION_SET_DEFAULT:
+    return MYLITE_STORAGE_FOREIGN_KEY_ACTION_SET_DEFAULT;
+  case FK_OPTION_UNDEF:
+  default:
+    return MYLITE_STORAGE_FOREIGN_KEY_ACTION_UNSPECIFIED;
+  }
+}
+
+static unsigned mylite_foreign_key_storage_match(
+  Foreign_key::fk_match_opt match_option)
+{
+  switch (match_option) {
+  case Foreign_key::FK_MATCH_SIMPLE:
+    return MYLITE_STORAGE_FOREIGN_KEY_MATCH_SIMPLE;
+  case Foreign_key::FK_MATCH_FULL:
+    return MYLITE_STORAGE_FOREIGN_KEY_MATCH_FULL;
+  case Foreign_key::FK_MATCH_PARTIAL:
+    return MYLITE_STORAGE_FOREIGN_KEY_MATCH_PARTIAL;
+  case Foreign_key::FK_MATCH_UNDEF:
+  default:
+    return MYLITE_STORAGE_FOREIGN_KEY_MATCH_UNSPECIFIED;
+  }
+}
+
+static bool mylite_foreign_key_action_supported(enum_fk_option action)
+{
+  return action == FK_OPTION_UNDEF || action == FK_OPTION_RESTRICT ||
+         action == FK_OPTION_NO_ACTION;
+}
+
+static unsigned long long mylite_key_nullable_bitmap(const KEY *key,
+                                                     size_t column_count)
+{
+  unsigned long long bitmap= 0ULL;
+  if (!key)
+    return bitmap;
+
+  for (size_t i= 0; i < column_count; ++i)
+  {
+    if (key->key_part[i].null_bit)
+      bitmap|= 1ULL << i;
+  }
+  return bitmap;
+}
+
 static int mylite_check_child_foreign_key(
   void *ctx, const mylite_storage_foreign_key_metadata *metadata)
 {
@@ -3014,17 +3592,47 @@ static int mylite_check_parent_foreign_key(
 }
 
 static const KEY *mylite_find_foreign_key_prefix(
-  TABLE *table, char **column_names, size_t column_count, const char *key_name)
+  TABLE *table, const char *const *column_names, size_t column_count,
+  const char *key_name)
 {
   if (!table || !column_names || column_count == 0 ||
       column_count > UINT_MAX)
     return NULL;
 
-  for (uint i= 0; i < table->s->keys; ++i)
+  return mylite_find_foreign_key_prefix_in_keys(
+    table->key_info, table->s->keys, column_names, column_count, key_name,
+    false);
+}
+
+static const KEY *mylite_find_foreign_key_prefix_in_share(
+  const TABLE_SHARE *share, const char *const *column_names,
+  size_t column_count, const char *key_name, bool require_unique_exact_key)
+{
+  if (!share)
+    return NULL;
+
+  return mylite_find_foreign_key_prefix_in_keys(
+    share->key_info, share->keys, column_names, column_count, key_name,
+    require_unique_exact_key);
+}
+
+static const KEY *mylite_find_foreign_key_prefix_in_keys(
+  const KEY *keys, uint key_count, const char *const *column_names,
+  size_t column_count, const char *key_name, bool require_unique_exact_key)
+{
+  if (!keys || !column_names || column_count == 0 ||
+      column_count > UINT_MAX)
+    return NULL;
+
+  for (uint i= 0; i < key_count; ++i)
   {
-    const KEY *key= table->key_info + i;
+    const KEY *key= keys + i;
     if (!mylite_key_is_supported(key) ||
         key->user_defined_key_parts < column_count)
+      continue;
+    if (require_unique_exact_key &&
+        (!(key->flags & HA_NOSAME) ||
+         key->user_defined_key_parts != column_count))
       continue;
     if (key_name && key_name[0])
     {
