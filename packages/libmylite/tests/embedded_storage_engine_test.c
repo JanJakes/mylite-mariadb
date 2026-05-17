@@ -1760,6 +1760,48 @@ static void test_transaction_and_foreign_key_policies(void) {
     assert(errmsg == NULL);
     assert(reopened_dropped_fk_metadata_count.rows == 1);
 
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_checks_parent (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_checks_child ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT, "
+        "CONSTRAINT fk_checks_child_parent FOREIGN KEY (parent_id) "
+        "REFERENCES fk_checks_parent(id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "SET foreign_key_checks=0");
+    assert_exec_succeeds(db, "INSERT INTO fk_checks_child VALUES (1, 99)");
+    assert_exec_succeeds(db, "INSERT INTO fk_checks_parent VALUES (10)");
+    assert_exec_succeeds(db, "INSERT INTO fk_checks_child VALUES (2, 10)");
+    assert_prepared_succeeds(db, "UPDATE fk_checks_parent SET id = 11 WHERE id = 10");
+    assert_exec_succeeds(db, "INSERT INTO fk_checks_parent VALUES (20)");
+    assert_exec_succeeds(db, "INSERT INTO fk_checks_child VALUES (3, 20)");
+    assert_exec_succeeds(db, "DELETE FROM fk_checks_parent WHERE id = 20");
+    assert_exec_succeeds(db, "SET foreign_key_checks=1");
+    assert_exec_fails(db, "INSERT INTO fk_checks_child VALUES (4, 123)");
+    assert_exec_succeeds(db, "INSERT INTO fk_checks_parent VALUES (30)");
+    assert_exec_succeeds(db, "INSERT INTO fk_checks_child VALUES (5, 30)");
+    assert_exec_fails(db, "UPDATE fk_checks_parent SET id = 31 WHERE id = 30");
+    assert_exec_fails(db, "DELETE FROM fk_checks_parent WHERE id = 30");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_checks_child WHERE parent_id IN (10, 20, 99)",
+        "3"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE app");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_checks_child WHERE parent_id IN (10, 20, 99)",
+        "3"
+    );
+    assert_exec_fails(db, "INSERT INTO fk_checks_child VALUES (6, 555)");
+
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
     free(filename);

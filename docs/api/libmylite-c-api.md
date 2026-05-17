@@ -192,9 +192,11 @@ with virtual values computed from restored row buffers and stored values kept
 in normal MyLite row payloads. The public foreign-key subset supports
 validated `RESTRICT` / `NO ACTION` `CREATE TABLE`, copy
 `ALTER TABLE ... ADD FOREIGN KEY`, and `ALTER TABLE ... DROP FOREIGN KEY`
-metadata over durable routed base tables. SQL sequence object/value surfaces
-are rejected, and the default embedded profile does not register MariaDB's
-virtual `SEQUENCE` storage engine, so magic generated tables such as
+metadata over durable routed base tables. Session `foreign_key_checks=0`
+disables supported FK row checks without revalidating existing rows when checks
+are re-enabled. SQL sequence object/value surfaces are rejected, and the default
+embedded profile does not register MariaDB's virtual `SEQUENCE` storage engine,
+so magic generated tables such as
 `seq_1_to_10` are unavailable outside ordinary catalog-backed user tables.
 MariaDB user-statistics
 information-schema surfaces and `userstat` system-variable assignments are

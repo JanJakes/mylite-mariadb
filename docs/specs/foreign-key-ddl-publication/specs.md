@@ -21,7 +21,8 @@ narrow:
 - Cascading actions, `SET NULL`, `SET DEFAULT`, deferrable constraints,
   partitioned tables, foreign keys over volatile zero-file tables, or
   cross-file references.
-- Treating `foreign_key_checks=0` as an import bypass.
+- Treating `foreign_key_checks=0` as a row-DML import bypass, which belongs
+  to a separate row-check slice.
 - Opening arbitrary additional MariaDB `TABLE` objects inside MyLite handler
   row-DML enforcement.
 - `ALTER TABLE ... DROP FOREIGN KEY`, which is handled by a later lifecycle
@@ -77,8 +78,9 @@ The first support claim is that public FK DDL works for validated `RESTRICT` /
 `NO ACTION` constraints over explicit or MariaDB-generated MyLite-supported
 child key prefixes and exact unique parent keys. Unsupported actions,
 unsupported key shapes and volatile/temporary tables fail before durable
-publication. Full InnoDB features, including cascades and dump-import
-`foreign_key_checks=0` bypass behavior, remain planned.
+publication. Full InnoDB features, including cascades, remain planned.
+Session `foreign_key_checks=0` row-DML bypass belongs to a separate
+row-check slice.
 
 ## Design
 
@@ -194,7 +196,8 @@ before acceptance.
   collation, and size-impact evidence before the subset is widened.
 - Advertising `HTON_SUPPORTS_FOREIGN_KEYS` may change SQL-layer ALTER, DROP,
   TRUNCATE, and prelocking behavior; it should stay a separate review point.
-- `foreign_key_checks=0` is common in dumps and still needs explicit import
-  semantics before MyLite can claim broad FK compatibility.
+- `foreign_key_checks=0` is common in dumps. The row-DML bypass is handled by
+  a separate slice, while broader dump/import semantics remain outside the
+  first public FK DDL publication subset.
 - Generated supporting-key cleanup semantics remain a specific follow-up before
   MyLite can claim a full FK metadata lifecycle.

@@ -13,7 +13,8 @@ and no longer participates in child or parent row checks after close/reopen.
 ## Non-Goals
 
 - Cascades, `SET NULL`, `SET DEFAULT`, and full InnoDB FK behavior.
-- Treating `foreign_key_checks=0` as a dump-import bypass.
+- Disabling FK row checks through `foreign_key_checks=0`, which belongs to a
+  separate row-check slice.
 - Advertising `HTON_SUPPORTS_FOREIGN_KEYS`.
 - Automatically dropping child supporting indexes when a FK is dropped.
   MariaDB's rebuilt table definition remains the authority for retained keys;
@@ -112,7 +113,7 @@ handler bridge and tests.
   `SHOW CREATE TABLE`, and information-schema rows before and after close/reopen.
 - Row checks no longer enforce the dropped constraint.
 - Retained FK constraints and their supporting-key protections continue to work.
-- Unsupported broader FK actions and import semantics remain documented.
+- Unsupported broader FK actions and broader import semantics remain documented.
 
 ## Risks And Open Questions
 

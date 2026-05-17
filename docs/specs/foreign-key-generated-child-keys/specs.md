@@ -42,9 +42,9 @@ full InnoDB compatibility.
 
 Generated FK child keys remain ordinary MyLite secondary indexes for storage
 purposes. Hidden long-unique hash keys, MySQL-style expression indexes,
-generated primary keys, cascades, `SET NULL`, `SET DEFAULT`, `DROP FOREIGN
-KEY`, `foreign_key_checks=0` import bypass behavior, and full
-`HTON_SUPPORTS_FOREIGN_KEYS` advertising remain out of scope.
+generated primary keys, cascades, `SET NULL`, `SET DEFAULT`, generated-key
+cleanup, session `foreign_key_checks=0` row-check bypass, and full
+`HTON_SUPPORTS_FOREIGN_KEYS` advertising remain out of scope for this slice.
 
 ## Design
 
@@ -60,8 +60,8 @@ MyLite:
    both, while a generated key satisfies validation when no explicit key exists.
 4. Keep parent-key validation unchanged: referenced columns must still match an
    exact supported unique parent key.
-5. Leave `DROP FOREIGN KEY` and generated-key cleanup semantics to a separate
-   lifecycle slice.
+5. Leave `DROP FOREIGN KEY`, generated-key cleanup, and row-check bypass
+   semantics to separate lifecycle slices.
 
 ## File Lifecycle
 

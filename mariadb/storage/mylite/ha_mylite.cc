@@ -78,6 +78,7 @@ static int mylite_schema_hook_add_table(void *ctx, const char *,
                                         const char *table_name);
 static bool mylite_is_user_temporary_table_share(const TABLE_SHARE *share);
 static bool mylite_current_command_creates_user_temporary_table();
+static bool mylite_foreign_key_checks_disabled(THD *thd);
 static int mylite_requested_engine_name(const char *primary_file,
                                         HA_CREATE_INFO *create_info,
                                         char *out_name, size_t out_name_size);
@@ -733,6 +734,11 @@ static bool mylite_current_command_creates_user_temporary_table()
   THD *thd= current_thd;
   return thd && thd->lex && thd->lex->sql_command == SQLCOM_CREATE_TABLE &&
          thd->lex->create_info.tmp_table();
+}
+
+static bool mylite_foreign_key_checks_disabled(THD *thd)
+{
+  return thd && thd_test_options(thd, OPTION_NO_FOREIGN_KEY_CHECKS);
 }
 
 static int mylite_storage_to_handler_error(mylite_storage_result result)
@@ -1686,7 +1692,7 @@ int ha_mylite::write_row(const uchar *buf)
     DBUG_RETURN(error);
   }
 
-  if (!volatile_rows)
+  if (!volatile_rows && !mylite_foreign_key_checks_disabled(ha_thd()))
   {
     error= mylite_check_child_foreign_keys(primary_file, storage_schema(),
                                            storage_table(), table, buf);
@@ -1796,7 +1802,7 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
     DBUG_RETURN(error);
   }
 
-  if (!volatile_rows)
+  if (!volatile_rows && !mylite_foreign_key_checks_disabled(ha_thd()))
   {
     error= mylite_check_child_foreign_keys(primary_file, storage_schema(),
                                            storage_table(), table, new_data);
@@ -1884,7 +1890,7 @@ int ha_mylite::delete_row(const uchar *buf)
   if (!primary_file)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
 
-  if (!volatile_rows)
+  if (!volatile_rows && !mylite_foreign_key_checks_disabled(ha_thd()))
   {
     const int error=
       mylite_check_parent_foreign_keys(primary_file, storage_schema(),
