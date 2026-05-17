@@ -59,6 +59,8 @@ MariaDB base: `mariadb-11.8.6`
   adds `main.ctype_collate_database`, `main.ctype_collate_implicit`,
   `main.ctype_collate_implicit_def`, `main.ctype_collate_table`, and
   `main.ctype_errors`.
+- [MTR collation column and context smoke](../mtr-collation-column-context-smoke/specs.md)
+  adds `main.ctype_collate_column` and `main.ctype_collate_context`.
 - [MTR temporal function smoke](../mtr-temporal-function-smoke/specs.md) adds
   `main.func_sapdb`, `main.func_time_64`, `main.func_timestamp`,
   `main.in_datetime_241`, `main.str_to_datetime_457`, and
@@ -129,6 +131,8 @@ The default curated list remains intentionally baseline-oriented:
 - `main.compare`.
 - `main.func_in`.
 - `main.ctype_ascii`.
+- `main.ctype_collate_column`.
+- `main.ctype_collate_context`.
 - `main.ctype_collate_database`.
 - `main.ctype_collate_implicit`.
 - `main.ctype_collate_implicit_def`.
@@ -205,6 +209,7 @@ artifacts, not default MyLite linked-library artifacts.
   `main.type_time_round`, `main.type_time_6065`,
   `main.type_timestamp_round`, `main.brackets`, `main.comments`,
   `main.compare`, `main.func_in`, `main.ctype_ascii`,
+  `main.ctype_collate_column`, `main.ctype_collate_context`,
   `main.ctype_collate_database`, `main.ctype_collate_implicit`,
   `main.ctype_collate_implicit_def`, `main.ctype_collate_table`,
   `main.ctype_errors`, `main.count_distinct`, `main.sum_distinct`,
@@ -224,6 +229,7 @@ artifacts, not default MyLite linked-library artifacts.
   `main.type_time_round`, `main.type_time_6065`,
   `main.type_timestamp_round`, `main.brackets`, `main.comments`,
   `main.compare`, `main.func_in`, `main.ctype_ascii`,
+  `main.ctype_collate_column`, `main.ctype_collate_context`,
   `main.ctype_collate_database`, `main.ctype_collate_implicit`,
   `main.ctype_collate_implicit_def`, `main.ctype_collate_table`,
   `main.ctype_errors`, `main.count_distinct`, `main.sum_distinct`,
