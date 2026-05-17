@@ -186,6 +186,7 @@ static void test_wordpress_installer_schema_fixture(void);
 static void test_wordpress_multisite_global_schema_fixture(void);
 static void test_wordpress_multisite_blog_schema_fixture(void);
 static void test_buddypress_component_schema_fixture(void);
+static void test_laravel_default_schema_fixture(void);
 static void assert_exec_succeeds(mylite_db *db, const char *sql);
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_exec_fails_with_message(mylite_db *db, const char *sql, const char *message);
@@ -257,6 +258,13 @@ static void assert_buddypress_table_metadata(
     const char *table_name
 );
 static void assert_buddypress_rows(mylite_db *db);
+static void assert_laravel_catalog_metadata(const char *filename);
+static void assert_laravel_table_metadata(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name
+);
+static void assert_laravel_rows(mylite_db *db);
 static void assert_table_collation(
     mylite_db *db,
     const char *schema_name,
@@ -398,6 +406,7 @@ int main(int argc, char **argv) {
     test_wordpress_multisite_global_schema_fixture();
     test_wordpress_multisite_blog_schema_fixture();
     test_buddypress_component_schema_fixture();
+    test_laravel_default_schema_fixture();
     return 0;
 }
 
@@ -10442,6 +10451,41 @@ static void test_buddypress_component_schema_fixture(void) {
     free(root);
 }
 
+static void test_laravel_default_schema_fixture(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(
+        db,
+        "CREATE DATABASE laravel_install "
+        "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    );
+    assert_exec_succeeds(db, "USE laravel_install");
+    exec_sql_fixture(db, "laravel-13.6.0-default-schema.sql");
+    assert_laravel_catalog_metadata(filename);
+    assert_table_collation(db, "laravel_install", "users", "utf8mb4_unicode_ci");
+    assert_table_collation(db, "laravel_install", "failed_jobs", "utf8mb4_unicode_ci");
+    exec_sql_fixture(db, "laravel-13.6.0-default-seed.sql");
+    assert_laravel_rows(db);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE laravel_install");
+    assert_laravel_catalog_metadata(filename);
+    assert_laravel_rows(db);
+    assert_table_collation(db, "laravel_install", "users", "utf8mb4_unicode_ci");
+    assert_table_collation(db, "laravel_install", "failed_jobs", "utf8mb4_unicode_ci");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
 static void assert_wordpress_catalog_metadata(const char *filename) {
     assert_catalog_table_count(filename, "app", 11U);
     assert_catalog_table_metadata(filename, "app", "wp_options", "InnoDB", "MYLITE");
@@ -11088,6 +11132,86 @@ static void assert_buddypress_rows(mylite_db *db) {
         "SELECT email_address_hash FROM wp_bp_optouts FORCE INDEX (email_type) "
         "WHERE email_type = 'members-invitation'",
         "hash-fixture"
+    );
+}
+
+static void assert_laravel_catalog_metadata(const char *filename) {
+    static const char *const table_names[] = {
+        "users",
+        "password_reset_tokens",
+        "sessions",
+        "cache",
+        "cache_locks",
+        "jobs",
+        "job_batches",
+        "failed_jobs",
+    };
+
+    assert_catalog_table_count(filename, "laravel_install", 8U);
+    for (size_t i = 0; i < sizeof(table_names) / sizeof(table_names[0]); ++i) {
+        assert_laravel_table_metadata(filename, "laravel_install", table_names[i]);
+    }
+}
+
+static void assert_laravel_table_metadata(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name
+) {
+    assert_catalog_table_metadata(filename, schema_name, table_name, "DEFAULT", "MYLITE");
+}
+
+static void assert_laravel_rows(mylite_db *db) {
+    assert_query_single_value(
+        db,
+        "SELECT name FROM users FORCE INDEX (users_email_unique) "
+        "WHERE email = 'jan@example.test'",
+        "Jan Fixture"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT token FROM password_reset_tokens FORCE INDEX (PRIMARY) "
+        "WHERE email = 'jan@example.test'",
+        "reset-token-fixture"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM sessions FORCE INDEX (sessions_user_id_index) WHERE user_id = 1",
+        "session-fixture"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT value FROM `cache` FORCE INDEX (PRIMARY) "
+        "WHERE `key` = 'laravel_cache_fixture'",
+        "fixture-cache-value"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT owner FROM cache_locks FORCE INDEX (PRIMARY) "
+        "WHERE `key` = 'laravel_lock_fixture'",
+        "fixture-owner"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT attempts FROM jobs FORCE INDEX (jobs_queue_index) WHERE queue = 'default'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT pending_jobs FROM job_batches FORCE INDEX (PRIMARY) WHERE id = 'batch-fixture'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT connection FROM failed_jobs FORCE INDEX (failed_jobs_uuid_unique) "
+        "WHERE uuid = 'failed-job-fixture'",
+        "database"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT uuid FROM failed_jobs FORCE INDEX (failed_jobs_connection_queue_failed_at_index) "
+        "WHERE connection = 'database' AND queue = 'default'",
+        "failed-job-fixture"
     );
 }
 

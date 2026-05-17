@@ -44,8 +44,8 @@ partition DDL rejection, online and in-place ALTER rejection, MariaDB statement
 transaction hook integration, busy-timeout lock waits, SQL locking policy
 rejection, failed
 statement rollback, initial application-schema smoke including WordPress
-single-site and multisite schema/seed fixtures plus a BuddyPress component
-schema fixture,
+single-site and multisite schema/seed fixtures, a BuddyPress component schema
+fixture, and a Laravel default ORM schema fixture,
 unsupported server, binlog/replication, replication/binlog filter assignment,
 binlog/replication system-variable assignment and omitted-variable
 introspection,
@@ -217,4 +217,5 @@ application-schema and runtime suites remain planned.
 | --- | --- | --- |
 | WordPress-shaped core tables | 🟡&nbsp;Partial | Storage-engine smoke covers a broader `wp_options`, `wp_posts`, `wp_postmeta`, `wp_users`, `wp_usermeta`, `wp_terms`, `wp_term_taxonomy`, `wp_term_relationships`, `wp_comments`, `wp_commentmeta`, and `wp_links` subset with `ENGINE=InnoDB` routing, `utf8mb4_unicode_ci` defaults, autoincrement ids, text payloads, composite keys, secondary and prefix indexes, joins, updates, deletes, close/reopen, and sidecar gates; it also imports WordPress 6.9.4 single-site installer DDL, representative installer seed fixtures with broader default-option rows plus the full default role payload, and multisite global plus blog-id-2 schema and network seed fixtures with representative indexed network and per-blog rows through omitted-engine routing to MyLite; full WordPress runtime install, exhaustive installer defaults, exhaustive collation variants, full multisite runtime, and additional per-blog suites remain planned |
 | BuddyPress component tables | 🟡&nbsp;Partial | Storage-engine smoke imports BuddyPress 14.4.0 full-component table DDL through omitted-engine routing with deterministic `wp_` prefix, `utf8mb4_unicode_ci` defaults, BuddyPress meta-key prefix indexes, and representative activity, notification, friends, groups, messaging, xProfile, blog-tracking, invitation, and opt-out rows with forced indexed reads before and after close/reopen; full BuddyPress runtime activation, WordPress `dbDelta()` execution, email post/term content, the WordPress core `wp_signups` table from BuddyPress install flow, and additional plugin schemas remain planned |
+| Laravel default ORM tables | 🟡&nbsp;Partial | Storage-engine smoke imports deterministic MySQL/MariaDB DDL equivalent to Laravel skeleton v13.6.0 default migrations through omitted-engine routing, with `users`, `password_reset_tokens`, `sessions`, `cache`, `cache_locks`, `jobs`, `job_batches`, and `failed_jobs` tables plus representative user, session, cache, queued-job, batch, and failed-job rows with forced indexed reads before and after close/reopen; Laravel runtime compatibility, `artisan migrate`, Illuminate schema grammar execution, foreign-key constraints, broader ORM suites, and application-level Eloquent behavior remain planned |
 | Representative collation index paths | 🟡&nbsp;Partial | Storage-engine smoke covers `utf8mb4_general_ci`, `utf8mb4_bin`, `utf8mb4_unicode_ci`, `utf8mb4_unicode_520_ci`, and `latin1_swedish_ci` table metadata, duplicate-key checks, indexed lookups, close/reopen, and sidecar gates; exhaustive collation semantics and locale-specific comparison matrices remain planned |
