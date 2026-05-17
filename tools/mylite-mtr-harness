@@ -24,6 +24,7 @@ default_tests=(
   main.func_concat
   main.func_format
   main.func_kdf
+  main.func_encrypt_nossl
 )
 
 usage() {

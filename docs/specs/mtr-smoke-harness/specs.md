@@ -61,6 +61,8 @@ MariaDB base: `mariadb-11.8.6`
   adds `main.func_concat` and `main.func_format`.
 - [MTR KDF smoke](../mtr-kdf-smoke/specs.md) adds `main.func_kdf` and allows
   optional quoted MTR variant suffixes in pass-result assertions.
+- [MTR disabled DES smoke](../mtr-disabled-des-smoke/specs.md) adds
+  `main.func_encrypt_nossl`.
 - [MTR require-pass harness](../mtr-require-pass-harness/specs.md) makes
   selected tests fail unless MTR reports an actual `[ pass ]` result.
 
@@ -97,6 +99,7 @@ The default curated list is intentionally tiny:
 - `main.func_concat`.
 - `main.func_format`.
 - `main.func_kdf`.
+- `main.func_encrypt_nossl`.
 
 This establishes a working MTR path while avoiding a false claim that MyLite has
 meaningful MTR-scale coverage.
@@ -149,16 +152,16 @@ artifacts, not default MyLite linked-library artifacts.
   `main.datetime_456`, `main.brackets`, `main.comments`, `main.compare`,
   `main.ctype_ascii`, `main.count_distinct`, `main.sum_distinct`,
   `main.func_equal`, `main.func_op`, `main.func_concat`, `main.func_format`,
-  and `main.func_kdf`.
+  `main.func_kdf`, and `main.func_encrypt_nossl`.
 - The runner builds the required MTR support targets from a fresh enough
   `build/mariadb-mtr-smoke` tree.
 - `mylite.bootstrap_schema`, `main.cast`, `main.case`, `main.bigint`,
   `main.adddate_454`, `main.date_formats`, `main.datetime_456`,
   `main.brackets`, `main.comments`, `main.compare`, `main.ctype_ascii`,
   `main.count_distinct`, `main.sum_distinct`, `main.func_equal`,
-  `main.func_op`, `main.func_concat`, `main.func_format`, and
-  `main.func_kdf` pass under `mariadb-test-run.pl --embedded-server` with the
-  MTR smoke profile.
+  `main.func_op`, `main.func_concat`, `main.func_format`,
+  `main.func_kdf`, and `main.func_encrypt_nossl` pass under
+  `mariadb-test-run.pl --embedded-server` with the MTR smoke profile.
 - Documentation states that this is opt-in smoke coverage, not full MTR-scale
   comparison.
 

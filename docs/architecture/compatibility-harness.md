@@ -61,10 +61,11 @@ runtime. MariaDB's MTR remains the long-term source for broad upstream
 compatibility cases. MyLite should not run MTR blindly as the primary local
 signal yet: current MyLite behavior is embedded, file-owned, and intentionally
 excludes server surfaces that many upstream suites assume. The opt-in
-`tools/mylite-mtr-harness` runner proves the embedded MTR path with a tiny
-curated smoke list covering the MyLite trimmed bootstrap schema and upstream
-scalar CAST/CONVERT, CASE-family expression, and selected scalar operator
-behavior plus selected string/format function behavior. It uses a separate
+`tools/mylite-mtr-harness` runner proves the embedded MTR path with a curated
+smoke list covering the MyLite trimmed bootstrap schema, upstream scalar
+CAST/CONVERT, CASE-family expression, selected numeric/date, parser/comment,
+comparison, scalar operator, string/format, crypto/KDF, disabled DES,
+aggregate DISTINCT, date-format, and ASCII charset behavior. It uses a separate
 `build/mariadb-mtr-smoke`
 profile because the default embedded profile intentionally omits view, stored
 program, trigger, and binlog sysvar surfaces that MTR bootstrap still expects.
