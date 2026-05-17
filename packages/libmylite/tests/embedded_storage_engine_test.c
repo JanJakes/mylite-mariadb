@@ -188,6 +188,7 @@ static void test_wordpress_multisite_blog_schema_fixture(void);
 static void test_buddypress_component_schema_fixture(void);
 static void test_laravel_default_schema_fixture(void);
 static void test_django_default_schema_fixture(void);
+static void test_rails_active_record_schema_fixture(void);
 static void assert_exec_succeeds(mylite_db *db, const char *sql);
 static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_exec_fails_with_message(mylite_db *db, const char *sql, const char *message);
@@ -273,6 +274,13 @@ static void assert_django_table_metadata(
     const char *table_name
 );
 static void assert_django_rows(mylite_db *db);
+static void assert_rails_catalog_metadata(const char *filename);
+static void assert_rails_table_metadata(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name
+);
+static void assert_rails_rows(mylite_db *db);
 static void assert_table_collation(
     mylite_db *db,
     const char *schema_name,
@@ -416,6 +424,7 @@ int main(int argc, char **argv) {
     test_buddypress_component_schema_fixture();
     test_laravel_default_schema_fixture();
     test_django_default_schema_fixture();
+    test_rails_active_record_schema_fixture();
     return 0;
 }
 
@@ -10600,6 +10609,41 @@ static void test_django_default_schema_fixture(void) {
     free(root);
 }
 
+static void test_rails_active_record_schema_fixture(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(
+        db,
+        "CREATE DATABASE rails_install "
+        "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"
+    );
+    assert_exec_succeeds(db, "USE rails_install");
+    exec_sql_fixture(db, "rails-8.1.3-active-record-schema.sql");
+    assert_rails_catalog_metadata(filename);
+    assert_table_collation(db, "rails_install", "active_storage_blobs", "utf8mb4_unicode_ci");
+    assert_table_collation(db, "rails_install", "action_text_rich_texts", "utf8mb4_unicode_ci");
+    exec_sql_fixture(db, "rails-8.1.3-active-record-seed.sql");
+    assert_rails_rows(db);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE rails_install");
+    assert_rails_catalog_metadata(filename);
+    assert_rails_rows(db);
+    assert_table_collation(db, "rails_install", "active_storage_blobs", "utf8mb4_unicode_ci");
+    assert_table_collation(db, "rails_install", "action_text_rich_texts", "utf8mb4_unicode_ci");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
 static void assert_wordpress_catalog_metadata(const char *filename) {
     assert_catalog_table_count(filename, "app", 11U);
     assert_catalog_table_metadata(filename, "app", "wp_options", "InnoDB", "MYLITE");
@@ -11408,6 +11452,90 @@ static void assert_django_rows(mylite_db *db) {
         "FORCE INDEX (django_admin_log_content_type_id_index) "
         "WHERE content_type_id = 4",
         "1"
+    );
+}
+
+static void assert_rails_catalog_metadata(const char *filename) {
+    static const char *const table_names[] = {
+        "schema_migrations",
+        "ar_internal_metadata",
+        "active_storage_blobs",
+        "active_storage_attachments",
+        "active_storage_variant_records",
+        "action_text_rich_texts",
+    };
+
+    assert_catalog_table_count(filename, "rails_install", 6U);
+    for (size_t i = 0; i < sizeof(table_names) / sizeof(table_names[0]); ++i) {
+        assert_rails_table_metadata(filename, "rails_install", table_names[i]);
+    }
+}
+
+static void assert_rails_table_metadata(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name
+) {
+    assert_catalog_table_metadata(filename, schema_name, table_name, "DEFAULT", "MYLITE");
+}
+
+static void assert_rails_rows(mylite_db *db) {
+    assert_query_single_value(db, "SELECT COUNT(*) FROM schema_migrations", "2");
+    assert_query_single_value(
+        db,
+        "SELECT version FROM schema_migrations FORCE INDEX (PRIMARY) "
+        "WHERE version = '20170806125915'",
+        "20170806125915"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT value FROM ar_internal_metadata FORCE INDEX (PRIMARY) "
+        "WHERE `key` = 'environment'",
+        "test"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT filename FROM active_storage_blobs FORCE INDEX (index_active_storage_blobs_on_key) "
+        "WHERE `key` = 'rails-fixture-key'",
+        "avatar.png"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT metadata FROM active_storage_blobs FORCE INDEX (PRIMARY) WHERE id = 1",
+        "{\"identified\":true,\"width\":64,\"height\":64}"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT name FROM active_storage_attachments "
+        "FORCE INDEX (index_active_storage_attachments_on_blob_id) "
+        "WHERE blob_id = 1",
+        "avatar"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT blob_id FROM active_storage_attachments "
+        "FORCE INDEX (index_active_storage_attachments_uniqueness) "
+        "WHERE record_type = 'User' AND record_id = 1 AND name = 'avatar'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT variation_digest FROM active_storage_variant_records "
+        "FORCE INDEX (index_active_storage_variant_records_uniqueness) "
+        "WHERE blob_id = 1",
+        "variant-digest-fixture"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT name FROM action_text_rich_texts "
+        "FORCE INDEX (index_action_text_rich_texts_uniqueness) "
+        "WHERE record_type = 'Post' AND record_id = 1",
+        "body"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT body FROM action_text_rich_texts FORCE INDEX (PRIMARY) WHERE id = 1",
+        "<div class=\"trix-content\">Rails fixture body</div>"
     );
 }
 
