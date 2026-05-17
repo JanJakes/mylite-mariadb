@@ -522,7 +522,7 @@ bool is_begin_transaction_control(TransactionControlKind kind);
 bool is_completion_transaction_control(TransactionControlKind kind);
 bool is_savepoint_transaction_control(TransactionControlKind kind);
 bool is_chained_completion_transaction_control(TransactionControlKind kind);
-bool is_preparable_transaction_set_control(TransactionControlKind kind);
+bool is_preparable_transaction_control(TransactionControlKind kind);
 bool transaction_start_read_only(const mylite_db &database, TransactionControlKind kind);
 void mark_transaction_started(mylite_db &database, bool read_only);
 void mark_transaction_completed(mylite_db &database);
@@ -1671,7 +1671,7 @@ int prepare_impl(
     const bool prepared_savepoint_control = false;
 #  endif
     if (transaction_control != TransactionControlKind::None && !prepared_savepoint_control &&
-        !is_preparable_transaction_set_control(transaction_control)) {
+        !is_preparable_transaction_control(transaction_control)) {
         set_error(*database, MYLITE_ERROR, "unsupported SQL transaction control");
         return MYLITE_ERROR;
     }
@@ -4527,8 +4527,16 @@ bool is_chained_completion_transaction_control(TransactionControlKind kind) {
            kind == TransactionControlKind::RollbackAndChain;
 }
 
-bool is_preparable_transaction_set_control(TransactionControlKind kind) {
-    return kind == TransactionControlKind::SetAutocommitOff ||
+bool is_preparable_transaction_control(TransactionControlKind kind) {
+    return kind == TransactionControlKind::Begin || kind == TransactionControlKind::BeginReadOnly ||
+           kind == TransactionControlKind::BeginReadWrite ||
+           kind == TransactionControlKind::Commit ||
+           kind == TransactionControlKind::CommitNoChain ||
+           kind == TransactionControlKind::CommitAndChain ||
+           kind == TransactionControlKind::Rollback ||
+           kind == TransactionControlKind::RollbackNoChain ||
+           kind == TransactionControlKind::RollbackAndChain ||
+           kind == TransactionControlKind::SetAutocommitOff ||
            kind == TransactionControlKind::SetAutocommitOn ||
            kind == TransactionControlKind::SetCompletionTypeNoChain ||
            kind == TransactionControlKind::SetCompletionTypeChain ||

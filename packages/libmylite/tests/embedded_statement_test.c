@@ -1053,37 +1053,34 @@ static void test_prepare_diagnostics(void) {
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(strstr(mylite_errmsg(db), "non-table database object") != NULL);
 
-    assert(
-        mylite_prepare(db, "START TRANSACTION", MYLITE_NUL_TERMINATED, &stmt, NULL) == MYLITE_ERROR
-    );
-    assert(stmt == NULL);
-    assert(mylite_errcode(db) == MYLITE_ERROR);
-    assert(mylite_mariadb_errno(db) == 0U);
-    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
-    assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
-    assert_prepare_fails_with_message(db, "START TRANSACTION READ WRITE", "transaction control");
-    assert_prepare_fails_with_message(db, "START TRANSACTION READ ONLY", "transaction control");
+    assert_prepare_step_succeeds(db, "START TRANSACTION");
+    assert_prepare_step_succeeds(db, "COMMIT");
+    assert_prepare_step_succeeds(db, "START TRANSACTION READ WRITE");
+    assert_prepare_step_succeeds(db, "ROLLBACK");
+    assert_prepare_step_succeeds(db, "START TRANSACTION READ ONLY");
+    assert_prepare_step_succeeds(db, "ROLLBACK AND NO CHAIN");
+    assert_prepare_step_succeeds(db, "BEGIN");
+    assert_prepare_step_succeeds(db, "COMMIT AND CHAIN");
+    assert_prepare_step_succeeds(db, "ROLLBACK AND NO CHAIN");
     assert_prepare_step_succeeds(db, "SET TRANSACTION READ WRITE");
     assert_prepare_step_succeeds(db, "SET TRANSACTION READ ONLY");
     assert_prepare_step_succeeds(db, "SET TRANSACTION ISOLATION LEVEL READ COMMITTED");
     assert_prepare_step_succeeds(db, "SET SESSION TRANSACTION READ WRITE");
     assert_prepare_step_succeeds(db, "SET SESSION TRANSACTION READ ONLY");
     assert_prepare_step_succeeds(db, "SET SESSION TRANSACTION READ WRITE");
-
-    assert(mylite_prepare(db, "BEGIN", MYLITE_NUL_TERMINATED, &stmt, NULL) == MYLITE_ERROR);
-    assert(stmt == NULL);
-    assert(mylite_errcode(db) == MYLITE_ERROR);
-    assert(mylite_mariadb_errno(db) == 0U);
-    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
-    assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
-
-    assert(mylite_prepare(db, "COMMIT", MYLITE_NUL_TERMINATED, &stmt, NULL) == MYLITE_ERROR);
-    assert(stmt == NULL);
-    assert(mylite_errcode(db) == MYLITE_ERROR);
-    assert(mylite_mariadb_errno(db) == 0U);
-    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
-    assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
-    assert_prepare_fails_with_message(db, "COMMIT AND CHAIN", "transaction control");
+    assert_prepare_fails_with_message(
+        db,
+        "START TRANSACTION WITH CONSISTENT SNAPSHOT",
+        "transaction control"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "START TRANSACTION READ WRITE, READ ONLY",
+        "transaction control"
+    );
+    assert_prepare_fails_with_message(db, "COMMIT RELEASE", "transaction control");
+    assert_prepare_fails_with_message(db, "ROLLBACK RELEASE", "transaction control");
+    assert_prepare_fails_with_message(db, "COMMIT AND CHAIN RELEASE", "transaction control");
 
     assert_prepare_savepoint_control_policy(db, "SAVEPOINT mylite_probe");
     assert_prepare_savepoint_control_policy(db, "ROLLBACK TO SAVEPOINT mylite_probe");

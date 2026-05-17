@@ -1,5 +1,11 @@
 # Prepared Transactional DDL Policy
 
+Status note: the later
+[Prepared Transaction Lifecycle Control](../prepared-transaction-lifecycle-control/specs.md)
+slice allows prepared transaction-start and completion controls for the same
+bounded row-DML transaction scope. The DDL policy now applies to active MyLite
+transactions regardless of whether direct or prepared SQL started them.
+
 ## Problem
 
 MyLite rejects direct storage DDL while a bounded direct transaction is active,

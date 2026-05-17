@@ -1,5 +1,10 @@
 # Prepared Transaction SET Control
 
+Status note: the later
+[Prepared Transaction Lifecycle Control](../prepared-transaction-lifecycle-control/specs.md)
+slice accepts prepared `BEGIN`, `START TRANSACTION`, `COMMIT`, and `ROLLBACK`
+forms that match the bounded direct transaction lifecycle.
+
 ## Goal
 
 Allow prepared statements for the transaction-related `SET` controls that
@@ -8,7 +13,8 @@ MyLite already supports through direct execution.
 
 ## Non-Goals
 
-- Prepared `BEGIN`, `START TRANSACTION`, `COMMIT`, or `ROLLBACK`.
+- Prepared `BEGIN`, `START TRANSACTION`, `COMMIT`, or `ROLLBACK` at this slice
+  point.
 - Prepared transaction controls whose value is supplied through a parameter
   marker, such as `SET autocommit=?`.
 - Unsupported direct transaction controls: global autocommit or transaction
@@ -62,9 +68,10 @@ surface as direct execution:
 - supported transaction read-only and isolation variable assignments, including
   duplicate supported assignments where the final read-only value wins.
 
-Prepared lifecycle statements remain explicit policy failures because MariaDB's
-prepared-statement path does not accept those commands and MyLite's active
-transaction lifecycle still needs MyLite-owned storage checkpoint transitions.
+Prepared lifecycle statements remain explicit policy failures at this slice
+point because MyLite's active transaction lifecycle still needs MyLite-owned
+storage checkpoint transitions. A later slice accepts the bounded lifecycle
+commands through the same post-execute state mirror.
 
 ## Design
 
@@ -115,11 +122,14 @@ No dependency or build-profile change.
 
 - Add prepared-statement policy coverage proving supported prepared
   transaction `SET` controls now prepare and execute.
-- Keep prepared `BEGIN`, `START TRANSACTION`, `COMMIT`, `ROLLBACK`, unsupported
-  global controls, duplicate autocommit at this slice point, `SET STATEMENT`,
-  and semicolon tails rejected. The later
+- Keep prepared `BEGIN`, `START TRANSACTION`, `COMMIT`, `ROLLBACK`,
+  unsupported global controls, duplicate autocommit at this slice point,
+  `SET STATEMENT`, and semicolon tails rejected at this slice point. The later
   [Autocommit Duplicate Control](../autocommit-duplicate-control/specs.md)
-  slice accepts duplicate supported session autocommit assignments.
+  slice accepts duplicate supported session autocommit assignments, and the
+  later
+  [Prepared Transaction Lifecycle Control](../prepared-transaction-lifecycle-control/specs.md)
+  slice accepts bounded prepared lifecycle controls.
 - Add storage-smoke coverage proving prepared `SET autocommit=0` opens a
   rollbackable transaction, prepared `SET autocommit=1/DEFAULT` commits it,
   prepared `SET completion_type` controls later plain completion behavior, and
@@ -136,5 +146,5 @@ No dependency or build-profile change.
 - Prepared `SET completion_type=...` mirrors later direct `COMMIT` chaining
   behavior.
 - Prepared transaction-variable assignments mirror read-only enforcement.
-- Prepared transaction lifecycle statements and unsupported direct transaction
-  controls remain explicit MyLite policy failures.
+- Prepared transaction lifecycle statements remain explicit MyLite policy
+  failures at this slice point.

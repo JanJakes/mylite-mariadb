@@ -3190,6 +3190,51 @@ static void test_row_dml_transactions(void) {
     assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (65, 'prepared-set-transaction-write')");
     assert_exec_succeeds(db, "ROLLBACK");
 
+    assert_prepared_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (75, 'prepared-begin-rollback')");
+    assert_prepared_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts WHERE title = 'prepared-begin-rollback'",
+        "0"
+    );
+
+    assert_prepared_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (75, 'prepared-begin-commit')");
+    assert_prepared_succeeds(db, "COMMIT");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts WHERE id = 75 AND title = 'prepared-begin-commit'",
+        "1"
+    );
+    assert_exec_succeeds(db, "DELETE FROM tx_posts WHERE id = 75");
+
+    assert_prepared_succeeds(db, "START TRANSACTION READ ONLY");
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO tx_posts VALUES (75, 'prepared-read-only-start')",
+        "read-only transaction"
+    );
+    assert_prepared_succeeds(db, "ROLLBACK");
+
+    assert_prepared_succeeds(db, "START TRANSACTION READ WRITE");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (75, 'prepared-start-commit-chain')");
+    assert_prepared_succeeds(db, "COMMIT AND CHAIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (76, 'prepared-chain-rollback')");
+    assert_prepared_succeeds(db, "ROLLBACK AND NO CHAIN");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts "
+        "WHERE id = 75 AND title = 'prepared-start-commit-chain'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_posts WHERE title = 'prepared-chain-rollback'",
+        "0"
+    );
+    assert_exec_succeeds(db, "DELETE FROM tx_posts WHERE id = 75");
+
     assert_exec_succeeds(db, "SET @@transaction_read_only=1");
     assert_exec_succeeds(db, "BEGIN");
     assert_exec_fails_with_message(

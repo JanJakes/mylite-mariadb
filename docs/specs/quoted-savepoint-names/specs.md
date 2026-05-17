@@ -3,7 +3,9 @@
 Status note: this slice kept transaction modifiers out of scope. The later
 [Transaction Modifier Control](../transaction-modifier-control/specs.md) slice
 adds bounded direct modifier support; prepared transaction-start/completion
-modifiers remain unsupported. The later
+modifiers remain unsupported at that slice point. The later
+[Prepared Transaction Lifecycle Control](../prepared-transaction-lifecycle-control/specs.md)
+slice accepts bounded prepared transaction-start/completion modifiers. The later
 [Double-Quoted Savepoint Names](../double-quoted-savepoint-names/specs.md)
 slice adds SQL-mode-aware double-quoted savepoint identifiers, and the later
 [Case-Insensitive Savepoint Names](../case-insensitive-savepoint-names/specs.md)

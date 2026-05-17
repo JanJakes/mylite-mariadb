@@ -19,7 +19,9 @@ slice accepts direct/session isolation controls as compatibility setup SQL
 without claiming storage isolation semantics. The later
 [Prepared Transaction SET Control](../prepared-transaction-set-control/specs.md)
 slice accepts supported prepared transaction access-mode `SET` controls while
-prepared transaction-start commands remain unsupported.
+prepared transaction-start commands remain unsupported. The later
+[Prepared Transaction Lifecycle Control](../prepared-transaction-lifecycle-control/specs.md)
+slice accepts bounded prepared transaction-start and completion forms.
 
 ## Source Findings
 

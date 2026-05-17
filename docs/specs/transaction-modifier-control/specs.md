@@ -19,7 +19,9 @@ slice accepts direct/session isolation controls as compatibility setup SQL
 without claiming storage isolation semantics. The later
 [Prepared Transaction SET Control](../prepared-transaction-set-control/specs.md)
 slice supports MariaDB-preparable transaction `SET` controls while prepared
-transaction-start and completion commands remain unsupported.
+transaction-start and completion commands remain unsupported. The later
+[Prepared Transaction Lifecycle Control](../prepared-transaction-lifecycle-control/specs.md)
+slice accepts the bounded prepared lifecycle subset.
 
 ## Problem
 
@@ -158,7 +160,8 @@ No dependency is added. The binary-size impact is negligible.
 
 - Extend direct SQL policy tests to accept supported modifier syntax and reject
   unsupported start options, release forms, completion defaults, isolation
-  variables, XA, and prepared transaction-start/completion statements.
+  variables, XA, and prepared transaction-start/completion statements at this
+  slice point.
 - Add storage-smoke coverage proving:
   - `START TRANSACTION READ WRITE` starts a transaction over routed
     `ENGINE=InnoDB` rows,
@@ -178,8 +181,8 @@ No dependency is added. The binary-size impact is negligible.
   MariaDB's `trans_begin()` follow-up.
 - Unsupported modifier forms fail before MariaDB execution with stable MyLite
   transaction-control diagnostics.
-- Prepared transaction-start and completion statements remain rejected; prepared
-  savepoint control remains supported.
+- Prepared transaction-start and completion statements remain rejected at this
+  slice point; prepared savepoint control remains supported.
 - Docs and compatibility matrix describe the bounded support accurately.
 
 ## Risks And Unresolved Questions

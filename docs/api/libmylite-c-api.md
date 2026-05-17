@@ -106,14 +106,14 @@ records with default character set, collation, and comment options,
 table-definition metadata, rows, autoincrement state, supported indexes, and
 rollback-journal and transaction-journal publication state in the primary
 `.mylite` file. File-backed opens answer schema and table discovery from the
-catalog when no transient MariaDB schema directory exists. Direct `BEGIN`,
-`COMMIT`, `ROLLBACK`,
-transaction restart through repeated direct `BEGIN` / `START TRANSACTION`, and
+catalog when no transient MariaDB schema directory exists. Direct or prepared
+`BEGIN`, `START TRANSACTION`, `COMMIT`, `ROLLBACK`,
+transaction restart through repeated `BEGIN` / `START TRANSACTION`, and
 supported direct or prepared session `SET autocommit=0/1/DEFAULT` forms,
 including `SET` lists that mix one autocommit assignment with ordinary
 non-transaction assignments and duplicate supported session autocommit
 assignments applied in order with the final value as session state, support
-row-DML transactions over routed MyLite tables. Direct
+row-DML transactions over routed MyLite tables. Direct or prepared
 transaction modifiers support
 explicit `START TRANSACTION READ WRITE`, `COMMIT` / `ROLLBACK` `AND CHAIN`,
 `AND NO CHAIN`, and `NO RELEASE` forms for the same bounded scope, including
@@ -132,8 +132,8 @@ assignment wins. Isolation controls and isolation variables are accepted as
 compatibility setup SQL, not as a storage-isolation guarantee. Read-only
 transactions reject direct and prepared durable MyLite storage writes while
 allowing simple row DML against tracked temporary tables. `CHAIN` makes later
-plain direct `COMMIT` and `ROLLBACK` use the same chained behavior as explicit
-`AND CHAIN`, while explicit `AND NO CHAIN` still overrides it.
+plain direct or prepared `COMMIT` and `ROLLBACK` use the same chained behavior
+as explicit `AND CHAIN`, while explicit `AND NO CHAIN` still overrides it.
 Direct `SAVEPOINT`,
 `ROLLBACK TO [SAVEPOINT]`, and `RELEASE SAVEPOINT` support case-insensitive
 simple unquoted and backtick-quoted savepoint names inside active bounded
@@ -141,11 +141,10 @@ row-DML transactions. Double-quoted savepoint names are also supported when the
 session has `ANSI_QUOTES` enabled. The same savepoint-control statements can be
 prepared and reused for file-backed MyLite transactions. Global
 autocommit-control statements, parameterized transaction-control `SET` values,
-prepared transaction-start or completion statements, `WITH CONSISTENT SNAPSHOT`,
-`RELEASE` completion, `completion_type=RELEASE/2`, global transaction variable
-assignments, duplicate `SET TRANSACTION` characteristics, XA, and direct or
-prepared DDL inside an active transaction remain unsupported until the storage
-and catalog transaction design is broader.
+`WITH CONSISTENT SNAPSHOT`, `RELEASE` completion, `completion_type=RELEASE/2`,
+global transaction variable assignments, duplicate `SET TRANSACTION`
+characteristics, XA, and direct or prepared DDL inside an active transaction
+remain unsupported until the storage and catalog transaction design is broader.
 Existing-file opens preserve storage lock conflicts as
 `MYLITE_BUSY` before starting the embedded runtime.
 
@@ -266,12 +265,14 @@ non-NULL, receives the first uncompiled byte.
 
 Initial implementation status: ordinary prepared statements run through
 MariaDB's embedded `MYSQL_STMT` API; MyLite-owned prepared savepoint-control
-statements use the direct transaction checkpoint path. The implementation
-supports one statement per prepare call, 1-based scalar parameter binding, row
-stepping, reset/finalize ownership, parameter counts, affected rows, insert
-ids, MariaDB diagnostics, warnings after completed execution and selected
-failed execution paths, and binary-safe text/BLOB column reads. File-backed
-MyLite storage-engine builds synchronize
+statements use the direct transaction checkpoint path, and prepared transaction
+lifecycle controls mirror the supported bounded direct transaction lifecycle
+after MariaDB prepared execution succeeds. The implementation supports one
+statement per prepare call, 1-based scalar parameter binding, row stepping,
+reset/finalize ownership, parameter counts, affected rows, insert ids, MariaDB
+diagnostics, warnings after completed execution and selected failed execution
+paths, and binary-safe text/BLOB column reads. File-backed MyLite
+storage-engine builds synchronize
 successful prepared `CREATE/DROP DATABASE` and `CREATE/DROP SCHEMA` statements
 plus prepared `ALTER DATABASE` / `ALTER SCHEMA` option changes with the schema
 namespace catalog. Prepared execution also covers the supported foreign-key

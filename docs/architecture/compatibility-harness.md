@@ -31,7 +31,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `public-api` | `dev` | `compat-public-api` | C API argument validation and version surface |
 | `storage-core` | `dev` | `compat-storage` | Primary file, catalog, rows, indexes, and mutations |
 | `crash-recovery` | `dev` | `compat-crash-recovery` | Rollback-journal, transaction-journal, and corrupt-journal recovery |
-| `transaction` | `storage-smoke-dev` | `compat-transaction` | Direct row-DML transaction commit/rollback, supported direct and prepared session autocommit mode, read-only/read-write, isolation-level, transaction variable, temporary row-DML, and completion-type transaction SET controls, direct and prepared case-insensitive quoted savepoint rollback/release, active transaction crash recovery, and unsupported transaction-control policy |
+| `transaction` | `storage-smoke-dev` | `compat-transaction` | Direct and prepared row-DML transaction start/completion, supported direct and prepared session autocommit mode, read-only/read-write, isolation-level, transaction variable, temporary row-DML, and completion-type transaction SET controls, direct and prepared case-insensitive quoted savepoint rollback/release, active transaction crash recovery, and unsupported transaction-control policy |
 | `transaction-hooks` | `storage-smoke-dev` | `compat-transaction-hooks` | MariaDB statement transaction hook integration |
 | `statement-rollback` | `storage-smoke-dev` | `compat-statement-rollback` | Failed statement rollback for routed MyLite storage, including prepared row-DML, representative row `REPLACE`, OR REPLACE replacement, and table-DDL failures |
 | `partition` | `storage-smoke-dev` | `compat-partition` | Partition DDL rejection until partition metadata and routing exist |
