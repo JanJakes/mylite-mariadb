@@ -6,6 +6,10 @@ Reject foreign-key DDL explicitly through `libmylite` until MyLite storage has
 catalog metadata, enforcement, locking, recovery, and transaction semantics for
 referential constraints.
 
+The later [Foreign-key foundation](../foreign-key-foundation/specs.md) design
+defines the boundary for implementing those prerequisites without weakening
+this rejection policy prematurely.
+
 This protects routed `ENGINE=InnoDB` tables from implying InnoDB-compatible
 foreign-key behavior while the MyLite handler is still non-transactional and
 does not expose foreign-key metadata hooks.
