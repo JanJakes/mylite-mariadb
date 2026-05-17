@@ -43,7 +43,7 @@ group_spec() {
       echo "storage-smoke-dev|compat-partition|Partition DDL rejection policy"
       ;;
     foreign-key)
-      echo "storage-smoke-dev|compat-foreign-key|Foreign-key DDL rejection policy"
+      echo "storage-smoke-dev|compat-foreign-key|Foreign-key DDL rejection policy including application-shaped ORM constraints"
       ;;
     check-constraint)
       echo "storage-smoke-dev|compat-check-constraint|CHECK constraint enforcement, ALTER existence-option skips, CTAS targets, and failed ADD CHECK rollback"

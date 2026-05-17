@@ -1522,9 +1522,74 @@ static void test_transaction_and_foreign_key_policies(void) {
 
     assert_exec_succeeds(
         db,
-        "CREATE TABLE fk_child (id INT NOT NULL PRIMARY KEY, parent_id INT) ENGINE=InnoDB"
+        "CREATE TABLE laravel_users ("
+        "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)"
+        ") ENGINE=InnoDB"
     );
     assert_catalog_table_count(filename, "app", 3U);
+    assert_foreign_key_exec_fails(
+        db,
+        "CREATE TABLE laravel_sessions_with_fk ("
+        "id VARCHAR(255) NOT NULL, user_id BIGINT UNSIGNED, "
+        "PRIMARY KEY (id), KEY sessions_user_id_index (user_id), "
+        "CONSTRAINT sessions_user_id_foreign FOREIGN KEY (user_id) REFERENCES laravel_users(id)"
+        ") ENGINE=InnoDB"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "laravel_sessions_with_fk") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_catalog_table_count(filename, "app", 3U);
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE django_auth_user ("
+        "id INTEGER NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_catalog_table_count(filename, "app", 4U);
+    assert_foreign_key_exec_fails(
+        db,
+        "CREATE TABLE django_admin_log_with_fk ("
+        "id INTEGER NOT NULL AUTO_INCREMENT, user_id INTEGER NOT NULL, "
+        "PRIMARY KEY (id), KEY django_admin_log_user_id_index (user_id), "
+        "CONSTRAINT django_admin_log_user_id_fk "
+        "FOREIGN KEY (user_id) REFERENCES django_auth_user(id)"
+        ") ENGINE=InnoDB"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "django_admin_log_with_fk") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_catalog_table_count(filename, "app", 4U);
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE rails_active_storage_blobs ("
+        "id BIGINT NOT NULL AUTO_INCREMENT, PRIMARY KEY (id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_catalog_table_count(filename, "app", 5U);
+    assert_foreign_key_exec_fails(
+        db,
+        "CREATE TABLE rails_active_storage_attachments_fk ("
+        "id BIGINT NOT NULL AUTO_INCREMENT, blob_id BIGINT NOT NULL, "
+        "PRIMARY KEY (id), KEY index_active_storage_attachments_on_blob_id (blob_id), "
+        "CONSTRAINT fk_rails_active_storage_attachments_blobs "
+        "FOREIGN KEY (blob_id) REFERENCES rails_active_storage_blobs(id)"
+        ") ENGINE=InnoDB"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "rails_active_storage_attachments_fk") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_catalog_table_count(filename, "app", 5U);
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_child (id INT NOT NULL PRIMARY KEY, parent_id INT) ENGINE=InnoDB"
+    );
+    assert_catalog_table_count(filename, "app", 6U);
     assert_catalog_table_metadata(filename, "app", "fk_child", "InnoDB", "MYLITE");
 
     assert_exec_succeeds(db, "SET foreign_key_checks=0");
