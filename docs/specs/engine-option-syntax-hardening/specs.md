@@ -26,8 +26,9 @@ engine options.
   as `ENGINE=<name>`.
 - Require no-equals engine names to be recognized engine-name tokens. This
   covers routed engines plus the known unsupported `CSV`, `ARCHIVE`, and
-  `SEQUENCE` names MyLite already documents, while avoiding broad false
-  positives after arbitrary identifiers.
+  `SEQUENCE` names MyLite already documents; the follow-up external-engine
+  request policy broadens this to additional bundled optional engine names
+  while avoiding broad false positives after arbitrary identifiers.
 - Continue to parse quoted engine names for the explicit-equals form.
 - Keep unsupported `CSV` requests on the existing CSV-specific diagnostic.
 

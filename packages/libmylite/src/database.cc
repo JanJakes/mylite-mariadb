@@ -5396,7 +5396,18 @@ bool sql_engine_request_is_supported(std::string_view engine_name) {
 
 bool sql_engine_request_name_can_omit_equal(std::string_view engine_name) {
     return sql_engine_request_is_supported(engine_name) || sql_token_equals(engine_name, "CSV") ||
-           sql_token_equals(engine_name, "ARCHIVE") || sql_token_equals(engine_name, "SEQUENCE");
+           sql_token_equals(engine_name, "ARCHIVE") ||
+           sql_token_equals(engine_name, "COLUMNSTORE") ||
+           sql_token_equals(engine_name, "CONNECT") || sql_token_equals(engine_name, "EXAMPLE") ||
+           sql_token_equals(engine_name, "FEDERATED") ||
+           sql_token_equals(engine_name, "FEDERATEDX") ||
+           sql_token_equals(engine_name, "MROONGA") ||
+           sql_token_equals(engine_name, "MRG_MyISAM") ||
+           sql_token_equals(engine_name, "OQGRAPH") ||
+           sql_token_equals(engine_name, "PERFORMANCE_SCHEMA") ||
+           sql_token_equals(engine_name, "ROCKSDB") || sql_token_equals(engine_name, "S3") ||
+           sql_token_equals(engine_name, "SEQUENCE") || sql_token_equals(engine_name, "SPHINX") ||
+           sql_token_equals(engine_name, "SPIDER");
 }
 
 bool is_partition_sql(std::string_view sql) {

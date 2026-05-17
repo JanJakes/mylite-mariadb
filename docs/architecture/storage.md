@@ -205,7 +205,8 @@ metadata and discard row writes instead of publishing MyLite row or index-entry
 pages. MEMORY/HEAP-routed tables persist only table metadata in the primary
 file; row contents and supported index entries live in a process-runtime
 volatile store and are cleared when the embedded MariaDB runtime shuts down.
-Unsupported explicit `ENGINE` table options fail before catalog publication.
+Unsupported explicit `ENGINE` table options, including known external
+no-equals engine names, fail before catalog publication.
 Ordinary
 `CREATE TABLE IF NOT EXISTS` statements publish missing targets through the
 normal create path and

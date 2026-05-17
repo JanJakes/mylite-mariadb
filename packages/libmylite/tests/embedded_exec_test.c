@@ -1835,6 +1835,18 @@ static void test_unsupported_engine_policy_is_rejected(void) {
     );
     assert_unsupported_engine_exec_fails(
         db,
+        "CREATE TABLE connect_no_equal_posts (id INT NOT NULL PRIMARY KEY) ENGINE CONNECT"
+    );
+    assert_unsupported_engine_exec_fails(
+        db,
+        "CREATE TABLE federated_no_equal_posts (id INT NOT NULL PRIMARY KEY) ENGINE FEDERATED"
+    );
+    assert_unsupported_engine_exec_fails(
+        db,
+        "CREATE TABLE mrg_no_equal_posts (id INT NOT NULL PRIMARY KEY) ENGINE MRG_MyISAM"
+    );
+    assert_unsupported_engine_exec_fails(
+        db,
         "CREATE TABLE archive_quoted_posts (id INT NOT NULL PRIMARY KEY) ENGINE='ARCHIVE'"
     );
     assert_unsupported_engine_exec_fails(
@@ -1847,7 +1859,9 @@ static void test_unsupported_engine_policy_is_rejected(void) {
     );
     assert_unsupported_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE=ARCHIVE");
     assert_unsupported_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE ARCHIVE");
+    assert_unsupported_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE ROCKSDB");
     assert_unsupported_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE=SEQUENCE");
+    assert_unsupported_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE SEQUENCE");
 
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);

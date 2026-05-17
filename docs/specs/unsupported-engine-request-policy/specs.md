@@ -75,6 +75,9 @@ explicit table-engine requests.
 
 - Direct and prepared SQL reject `ENGINE=ARCHIVE` creates, quoted
   `ENGINE='ARCHIVE'` creates, and engine changes.
+- Follow-up no-equals policy coverage rejects representative bundled optional
+  engine names such as `ENGINE CONNECT`, `ENGINE FEDERATED`, `ENGINE ROCKSDB`,
+  and `ENGINE S3` before MariaDB execution.
 - Storage-engine smoke verifies unsupported engine requests do not create a
   catalog record or mutate an existing routed table's requested/effective
   engine metadata.
