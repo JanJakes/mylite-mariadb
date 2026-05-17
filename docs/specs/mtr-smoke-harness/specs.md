@@ -82,6 +82,11 @@ MariaDB base: `mariadb-11.8.6`
 - [MTR query and subselect smoke](../mtr-query-subselect-smoke/specs.md) adds
   `main.update_ignore_216`, `main.subselect_nulls`, and
   `main.subselect_extra`.
+- [MTR DML RETURNING smoke](../mtr-dml-returning-smoke/specs.md) adds
+  `main.replace`, `main.bulk_replace`, `main.create_replace_tmp`,
+  `main.key_primary`, `main.insert_returning_datatypes`,
+  `main.replace_returning`, `main.replace_returning_datatypes`, and
+  `main.replace_returning_err`.
 - [MTR order and union smoke](../mtr-order-union-smoke/specs.md) adds
   `main.order_by_zerolength-4285`, `main.order_fill_sortbuf`, and
   `main.subselect_union_rand`.
@@ -170,6 +175,14 @@ The default curated list remains intentionally baseline-oriented:
 - `main.sql_safe_updates`.
 - `main.func_in`.
 - `main.update_ignore_216`.
+- `main.replace`.
+- `main.bulk_replace`.
+- `main.create_replace_tmp`.
+- `main.key_primary`.
+- `main.insert_returning_datatypes`.
+- `main.replace_returning`.
+- `main.replace_returning_datatypes`.
+- `main.replace_returning_err`.
 - `main.subselect_nulls`.
 - `main.subselect_extra`.
 - `main.order_by_zerolength-4285`.
@@ -267,6 +280,10 @@ artifacts, not default MyLite linked-library artifacts.
   `main.statement-expr`, `main.cte_cycle`, `main.name_const_replacement`,
   `main.implicit_char_to_num_conversion`, `main.item_types`, `main.round`,
   `main.sql_safe_updates`, `main.func_in`, `main.update_ignore_216`,
+  `main.replace`, `main.bulk_replace`, `main.create_replace_tmp`,
+  `main.key_primary`, `main.insert_returning_datatypes`,
+  `main.replace_returning`, `main.replace_returning_datatypes`,
+  `main.replace_returning_err`,
   `main.subselect_nulls`, `main.subselect_extra`,
   `main.order_by_zerolength-4285`, `main.order_fill_sortbuf`,
   `main.subselect_union_rand`, `main.prepare`, `main.ps_10nestset`,
@@ -298,6 +315,10 @@ artifacts, not default MyLite linked-library artifacts.
   `main.statement-expr`, `main.cte_cycle`, `main.name_const_replacement`,
   `main.implicit_char_to_num_conversion`, `main.item_types`, `main.round`,
   `main.sql_safe_updates`, `main.func_in`, `main.update_ignore_216`,
+  `main.replace`, `main.bulk_replace`, `main.create_replace_tmp`,
+  `main.key_primary`, `main.insert_returning_datatypes`,
+  `main.replace_returning`, `main.replace_returning_datatypes`,
+  `main.replace_returning_err`,
   `main.subselect_nulls`, `main.subselect_extra`,
   `main.order_by_zerolength-4285`, `main.order_fill_sortbuf`,
   `main.subselect_union_rand`, `main.prepare`, `main.ps_10nestset`,
