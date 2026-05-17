@@ -46,6 +46,9 @@ MariaDB base: `mariadb-11.8.6`
 - The curated smoke list was later extended by
   [MTR CASE expression smoke](../mtr-case-expression-smoke/specs.md) to include
   `main.case`.
+- It was also extended by
+  [MTR operator smoke](../mtr-operator-smoke/specs.md) to include
+  `main.func_equal` and `main.func_op`.
 
 ## Design
 
@@ -61,6 +64,8 @@ The default curated list is intentionally tiny:
 - `mylite.bootstrap_schema`.
 - `main.cast`.
 - `main.case`.
+- `main.func_equal`.
+- `main.func_op`.
 
 This establishes a working MTR path while avoiding a false claim that MyLite has
 meaningful MTR-scale coverage.
@@ -108,10 +113,12 @@ artifacts, not default MyLite linked-library artifacts.
 
 ## Acceptance Criteria
 
-- The runner lists `mylite.bootstrap_schema`, `main.cast`, and `main.case`.
+- The runner lists `mylite.bootstrap_schema`, `main.cast`, `main.case`,
+  `main.func_equal`, and `main.func_op`.
 - The runner builds the required MTR support targets from a fresh enough
   `build/mariadb-mtr-smoke` tree.
-- `mylite.bootstrap_schema`, `main.cast`, and `main.case` pass under
+- `mylite.bootstrap_schema`, `main.cast`, `main.case`, `main.func_equal`, and
+  `main.func_op` pass under
   `mariadb-test-run.pl --embedded-server` with the MTR smoke profile.
 - Documentation states that this is opt-in smoke coverage, not full MTR-scale
   comparison.
