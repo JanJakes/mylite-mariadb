@@ -22,11 +22,16 @@ include(MyLiteDeveloperTools)
 include(MyLiteMariaDB)
 
 option(MYLITE_BUILD_TOOLS "Build MyLite command-line tools" ON)
+option(MYLITE_BUILD_PHP_EXTENSIONS "Build MyLite PHP extensions" OFF)
 option(MYLITE_WARNINGS_AS_ERRORS "Treat compiler warnings as errors" OFF)
 option(MYLITE_WITH_MARIADB_EMBEDDED "Build libmylite with the MariaDB embedded backend" OFF)
 
 add_subdirectory(packages/mylite-storage)
 add_subdirectory(packages/libmylite)
+
+if(MYLITE_BUILD_PHP_EXTENSIONS)
+  add_subdirectory(packages/php-ext-mylite-mysqli)
+endif()
 
 if(MYLITE_BUILD_TOOLS)
   add_subdirectory(tools)
