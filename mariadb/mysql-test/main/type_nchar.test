@@ -6,30 +6,37 @@ drop table if exists t1;
 --enable_warnings
 
 create table t1 (c nchar(10));
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 drop table t1;
 
 create table t1 (c national char(10));
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 drop table t1;
 
 create table t1 (c national varchar(10));
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 drop table t1;
 
 create table t1 (c nvarchar(10));
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 drop table t1;
 
 create table t1 (c nchar varchar(10));
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 drop table t1;
 
 create table t1 (c national character varying(10));
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 drop table t1;
 
 create table t1 (c nchar varying(10));
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 drop table t1;
 
