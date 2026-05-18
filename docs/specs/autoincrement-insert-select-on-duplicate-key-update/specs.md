@@ -91,9 +91,11 @@ semantics: successful high-value updates advance the durable next value and
 preserve that advancement through transaction rollback and close/reopen.
 
 The claim remains representative. Broader ODKU matrices remain planned for
-grouped autoincrement, triggers, views, source errors, offset/increment, and
-durable routed-storage insert-id behavior beyond the representative direct and
-prepared statement-effect coverage.
+triggers, views, source-read errors, offset/increment, and durable
+routed-storage insert-id behavior beyond the representative direct and
+prepared statement-effect coverage. Grouped later-in-key behavior and
+source-driven update-expression errors are covered in separate grouped ODKU
+slices.
 
 ## Design
 
@@ -163,9 +165,9 @@ No dependency, license, or intended size-profile change is introduced.
   `mysql_insert_id()` behavior is covered by
   `docs/specs/routed-odku-statement-effects/specs.md`; broader matrices remain
   planned.
-- Grouped later-in-key ODKU behavior may require storage-level prefix lookup
-  work before it can be claimed broadly.
-- Trigger, view, and source-error paths may have different SQL-layer ordering
+- Grouped later-in-key ODKU behavior now has representative coverage, while
+  broader grouped source-read/error matrices remain planned.
+- Trigger, view, and source-read paths may have different SQL-layer ordering
   and remain planned.
 - Failed duplicate-update branches after earlier generated source-row
   publication are covered by the failed-DML ODKU follow-up slice.

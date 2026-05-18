@@ -76,7 +76,7 @@ successful rows, and preserves the larger unknown-row-count reservation tail
 for the next statement.
 
 The claim remains representative. Broader source-driven DML matrices remain
-planned for grouped autoincrement, source errors, triggers, views, and
+planned for grouped autoincrement, source-read errors, triggers, views, and
 offset/increment coverage.
 
 ## Design
@@ -143,5 +143,7 @@ No dependency, license, or intended size-profile change is introduced.
 
 - This slice checks duplicate target failures, not source-read failures.
 - The public insert-id API is not asserted here.
-- Trigger, view, grouped-autoincrement, and source-error paths may need
-  separate source-backed slices.
+- Trigger, view, and source-read paths may need separate source-backed slices.
+  Representative grouped source-driven ODKU update-expression errors are
+  covered separately in
+  `docs/specs/autoincrement-grouped-odku-source-driven-update-expression-errors/specs.md`.

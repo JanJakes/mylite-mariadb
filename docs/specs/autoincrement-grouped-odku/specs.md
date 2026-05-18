@@ -43,8 +43,9 @@ MariaDB base: `mariadb-11.8.6`
 
 ## Non-Goals
 
-- Exhaustive grouped ODKU expression, trigger, view, partition, source-error,
+- Exhaustive grouped ODKU expression, trigger, view, partition,
   offset/increment, integer-width, or prepared parameter-shape matrices.
+- Source-read errors that occur before the target handler is called.
 - Native MyISAM/Aria sidecar storage behavior.
 - Changing first-key autoincrement ODKU reservation behavior.
 - Size-profile reduction work.
@@ -60,8 +61,10 @@ the next generated value is derived from live rows.
 
 The claim remains representative. Broader ODKU matrices stay planned for
 triggers, views, offsets, integer widths, prepared parameter-shape expansion,
-and additional source-error paths. Grouped failed-update paths are covered
-separately in `docs/specs/autoincrement-grouped-odku-failed-dml/specs.md`.
+and source-read/error paths. Grouped failed-update paths are covered
+separately in `docs/specs/autoincrement-grouped-odku-failed-dml/specs.md`,
+and source-driven update-expression errors are covered separately in
+`docs/specs/autoincrement-grouped-odku-source-driven-update-expression-errors/specs.md`.
 
 ## Design
 
@@ -129,5 +132,6 @@ No dependency, license, or intended size-profile change is introduced.
 - Native MyISAM/Aria/InnoDB server comparison is not part of this slice because
   MyLite routes those engine requests to MyLite storage and forbids durable
   sidecars.
-- Grouped failed-update ODKU is covered separately; trigger, view, and
-  source-error paths remain planned.
+- Grouped failed-update and source-driven update-expression errors are covered
+  separately; trigger, view, source-read, and broader expression paths remain
+  planned.
