@@ -194,6 +194,7 @@ static void test_failed_table_ddl_rollback(void);
 static void test_table_ddl_if_exists(void);
 static void test_constraint_generated_dump_fixture(void);
 static void test_show_create_table_round_trip(void);
+static void test_show_create_foreign_key_round_trip(void);
 static void test_constraint_generated_expression_matrix(void);
 static void test_truncate_table_lifecycle(void);
 static void test_wordpress_shaped_schema(void);
@@ -483,6 +484,7 @@ int main(int argc, char **argv) {
     test_table_ddl_if_exists();
     test_constraint_generated_dump_fixture();
     test_show_create_table_round_trip();
+    test_show_create_foreign_key_round_trip();
     test_constraint_generated_expression_matrix();
     test_truncate_table_lifecycle();
     test_wordpress_shaped_schema();
@@ -13222,6 +13224,131 @@ static void test_show_create_table_round_trip(void) {
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
     free(create_sql);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_show_create_foreign_key_round_trip(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE export_fk_source");
+    assert_exec_succeeds(db, "USE export_fk_source");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_export_parent ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_code INT NOT NULL, "
+        "slug VARCHAR(32) NOT NULL, "
+        "UNIQUE KEY fk_export_parent_code (parent_code)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_export_child ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_code INT NULL, "
+        "body VARCHAR(64) NOT NULL, "
+        "KEY fk_export_child_parent_code (parent_code), "
+        "CONSTRAINT fk_export_child_parent FOREIGN KEY (parent_code) "
+        "REFERENCES fk_export_parent(parent_code) "
+        "ON DELETE SET NULL ON UPDATE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_export_parent VALUES (1, 10, 'source-parent')");
+    assert_exec_succeeds(db, "INSERT INTO fk_export_child VALUES (1, 10, 'source-child')");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE export_fk_source");
+    char *parent_sql = capture_show_create_table(db, "fk_export_parent");
+    char *child_sql = capture_show_create_table(db, "fk_export_child");
+    assert(strstr(child_sql, "CONSTRAINT `fk_export_child_parent` FOREIGN KEY") != NULL);
+    assert(strstr(child_sql, "REFERENCES `fk_export_parent` (`parent_code`)") != NULL);
+    assert(strstr(child_sql, "ON DELETE SET NULL") != NULL);
+    assert(strstr(child_sql, "ON UPDATE CASCADE") != NULL);
+
+    assert_exec_succeeds(db, "CREATE DATABASE export_fk_roundtrip");
+    assert_exec_succeeds(db, "USE export_fk_roundtrip");
+    assert_exec_succeeds(db, parent_sql);
+    assert_exec_succeeds(db, child_sql);
+    assert_catalog_table_count(filename, "export_fk_roundtrip", 2U);
+    assert_catalog_table_metadata(
+        filename,
+        "export_fk_roundtrip",
+        "fk_export_parent",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "export_fk_roundtrip",
+        "fk_export_child",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'export_fk_roundtrip' "
+        "AND TABLE_NAME = 'fk_export_child' "
+        "AND CONSTRAINT_NAME = 'fk_export_child_parent' "
+        "AND UNIQUE_CONSTRAINT_NAME = 'fk_export_parent_code' "
+        "AND REFERENCED_TABLE_NAME = 'fk_export_parent' "
+        "AND UPDATE_RULE = 'CASCADE' "
+        "AND DELETE_RULE = 'SET NULL'",
+        "1"
+    );
+    assert_foreign_key_exec_fails(db, "INSERT INTO fk_export_child VALUES (1, 999, 'orphan')");
+    assert_exec_succeeds(db, "INSERT INTO fk_export_parent VALUES (1, 10, 'import-parent')");
+    assert_exec_succeeds(db, "INSERT INTO fk_export_child VALUES (1, 10, 'import-child')");
+    assert_exec_succeeds(db, "UPDATE fk_export_parent SET parent_code = 20 WHERE parent_code = 10");
+    assert_query_single_value(
+        db,
+        "SELECT parent_code FROM fk_export_child WHERE id = 1",
+        "20"
+    );
+    assert_exec_succeeds(db, "DELETE FROM fk_export_parent WHERE parent_code = 20");
+    assert_query_single_value(
+        db,
+        "SELECT COALESCE(parent_code, -1) FROM fk_export_child WHERE id = 1",
+        "-1"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "export_fk_roundtrip");
+    assert_exec_succeeds(db, "USE export_fk_roundtrip");
+    assert_catalog_table_count(filename, "export_fk_roundtrip", 2U);
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'export_fk_roundtrip' "
+        "AND TABLE_NAME = 'fk_export_child' "
+        "AND CONSTRAINT_NAME = 'fk_export_child_parent' "
+        "AND UPDATE_RULE = 'CASCADE' "
+        "AND DELETE_RULE = 'SET NULL'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COALESCE(parent_code, -1) FROM fk_export_child WHERE id = 1",
+        "-1"
+    );
+    char *reopened_child_sql = capture_show_create_table(db, "fk_export_child");
+    assert(strstr(reopened_child_sql, "ON DELETE SET NULL") != NULL);
+    assert(strstr(reopened_child_sql, "ON UPDATE CASCADE") != NULL);
+    free(reopened_child_sql);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(child_sql);
+    free(parent_sql);
     free(filename);
     remove_tree(root);
     free(root);

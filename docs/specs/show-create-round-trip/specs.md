@@ -59,8 +59,9 @@ Add storage-engine smoke coverage that:
 
 - A full `mariadb-dump` CLI integration.
 - Exhaustive dump/export option matrices.
-- View, trigger, routine, foreign-key, partition, FULLTEXT, SPATIAL, or
-  unsupported-index export.
+- View, trigger, routine, partition, FULLTEXT, SPATIAL, or unsupported-index
+  export. Foreign-key parent/child export/import is covered by the separate
+  `show-create-foreign-key-round-trip` slice.
 - SQL-mode-sensitive formatting comparisons beyond the embedded default SQL
   mode used by current smoke tests.
 
@@ -127,6 +128,8 @@ Implemented in the MyLite handler and storage-engine smoke:
   CHECK constraints, supported indexes, bounded BLOB/TEXT prefix indexes,
   requested-engine metadata, autoincrement next value, close/reopen visibility,
   and sidecar absence.
+- Foreign-key parent/child `SHOW CREATE TABLE` export/import is covered by the
+  separate `show-create-foreign-key-round-trip` slice.
 
 ## Risks And Unresolved Questions
 
