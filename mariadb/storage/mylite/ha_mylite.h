@@ -39,7 +39,6 @@ struct Mylite_index_cursor_entry
 {
   size_t key_offset;
   size_t key_size;
-  size_t row_offset;
   ulonglong row_id;
 };
 
@@ -51,8 +50,6 @@ class ha_mylite: public handler
   unsigned char *scan_blob_payloads;
   ulonglong *scan_row_ids;
   unsigned char *record_blob_payloads[2];
-  unsigned char *index_rows;
-  unsigned char *index_blob_payloads;
   unsigned char *index_keys;
   Mylite_index_cursor_entry *index_entries;
   char storage_schema_name[NAME_LEN + 1];
@@ -64,10 +61,8 @@ class ha_mylite: public handler
   size_t scan_row_index;
   size_t scan_blob_payloads_size;
   size_t record_blob_payloads_size[2];
-  size_t index_row_size;
   size_t index_row_count;
   size_t index_row_index;
-  size_t index_blob_payloads_size;
   uint index_cursor_number;
   ulonglong current_row_id;
   uint duplicate_key_index;

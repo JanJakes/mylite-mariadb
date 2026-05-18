@@ -1145,16 +1145,14 @@ static int mylite_storage_to_schema_hook_result(mylite_storage_result result)
 }
 
 ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
-  :handler(hton, table_arg), share(NULL), scan_rows(NULL),
-   scan_blob_payloads(NULL), scan_row_ids(NULL),
-   record_blob_payloads{NULL, NULL}, index_rows(NULL),
-   index_blob_payloads(NULL), index_keys(NULL), index_entries(NULL),
-   scan_row_size(0), scan_row_count(0), scan_row_index(0),
-   scan_blob_payloads_size(0), record_blob_payloads_size{0, 0},
-   index_row_size(0), index_row_count(0),
-   index_row_index(0), index_blob_payloads_size(0),
-   index_cursor_number(MAX_KEY), current_row_id(0),
-   duplicate_key_index((uint) -1), discard_rows(false), volatile_rows(false)
+    : handler(hton, table_arg), share(NULL), scan_rows(NULL),
+      scan_blob_payloads(NULL), scan_row_ids(NULL),
+      record_blob_payloads{NULL, NULL}, index_keys(NULL), index_entries(NULL),
+      scan_row_size(0), scan_row_count(0), scan_row_index(0),
+      scan_blob_payloads_size(0), record_blob_payloads_size{0, 0},
+      index_row_count(0), index_row_index(0), index_cursor_number(MAX_KEY),
+      current_row_id(0), duplicate_key_index((uint) -1), discard_rows(false),
+      volatile_rows(false)
 {
   storage_schema_name[0]= '\0';
   storage_table_name[0]= '\0';
@@ -1188,18 +1186,12 @@ void ha_mylite::clear_scan_rows()
 
 void ha_mylite::clear_index_cursor()
 {
-  mylite_storage_free(index_rows);
-  mylite_storage_free(index_blob_payloads);
   mylite_storage_free(index_keys);
   mylite_storage_free(index_entries);
-  index_rows= NULL;
-  index_blob_payloads= NULL;
   index_keys= NULL;
   index_entries= NULL;
-  index_row_size= 0;
   index_row_count= 0;
   index_row_index= 0;
-  index_blob_payloads_size= 0;
   index_cursor_number= MAX_KEY;
 }
 
@@ -1269,8 +1261,7 @@ int ha_mylite::build_index_cursor(uint index_number)
     DBUG_RETURN(0);
   }
   if (!entryset.key_offsets || !entryset.key_sizes || !entryset.row_ids ||
-      !entryset.keys || table->s->reclength == 0 ||
-      entryset.entry_count > SIZE_MAX / table->s->reclength ||
+      !entryset.keys ||
       entryset.entry_count > SIZE_MAX / sizeof(Mylite_index_cursor_entry))
   {
     mylite_storage_free_index_entryset(&entryset);
@@ -1278,132 +1269,41 @@ int ha_mylite::build_index_cursor(uint index_number)
   }
 
   KEY *key_info= table->key_info + index_number;
-  size_t blob_payloads_size= 0;
+  Mylite_index_cursor_entry *entries= static_cast<Mylite_index_cursor_entry *>(
+      malloc(entryset.entry_count * sizeof(Mylite_index_cursor_entry)));
+  if (!entries)
+  {
+    mylite_storage_free_index_entryset(&entryset);
+    DBUG_RETURN(HA_ERR_OUT_OF_MEM);
+  }
+
   for (size_t i= 0; i < entryset.entry_count; ++i)
   {
     if (entryset.key_sizes[i] != key_info->key_length ||
         entryset.key_offsets[i] > entryset.key_bytes ||
         entryset.key_sizes[i] > entryset.key_bytes - entryset.key_offsets[i])
     {
+      free(entries);
       mylite_storage_free_index_entryset(&entryset);
       DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
     }
-
-    uchar *row_payload= NULL;
-    size_t row_payload_size= 0;
-    storage_result= volatile_rows ?
-      mylite_volatile_read_row(primary_file, storage_schema(), storage_table(),
-                               entryset.row_ids[i], &row_payload,
-                               &row_payload_size) :
-      mylite_storage_read_row(primary_file, storage_schema(), storage_table(),
-                              entryset.row_ids[i], &row_payload,
-                              &row_payload_size);
-    if (storage_result != MYLITE_STORAGE_OK)
-    {
-      mylite_storage_free_index_entryset(&entryset);
-      DBUG_RETURN(mylite_storage_to_handler_error(storage_result));
-    }
-
-    size_t row_blob_payloads_size= 0;
-    int error= mylite_scan_stored_row(table, row_payload, row_payload_size,
-                                      &row_blob_payloads_size);
-    mylite_storage_free(row_payload);
-    if (error)
-    {
-      mylite_storage_free_index_entryset(&entryset);
-      DBUG_RETURN(error);
-    }
-    if (row_blob_payloads_size > SIZE_MAX - blob_payloads_size)
-    {
-      mylite_storage_free_index_entryset(&entryset);
-      DBUG_RETURN(HA_ERR_RECORD_FILE_FULL);
-    }
-    blob_payloads_size+= row_blob_payloads_size;
-  }
-
-  const size_t rows_size= entryset.entry_count * table->s->reclength;
-  uchar *rows= static_cast<uchar *>(malloc(rows_size));
-  Mylite_index_cursor_entry *entries= static_cast<Mylite_index_cursor_entry *>(
-    malloc(entryset.entry_count * sizeof(Mylite_index_cursor_entry)));
-  uchar *blob_payloads= NULL;
-  if (blob_payloads_size > 0)
-    blob_payloads= static_cast<uchar *>(malloc(blob_payloads_size));
-  if (!rows || !entries || (blob_payloads_size > 0 && !blob_payloads))
-  {
-    free(rows);
-    free(entries);
-    free(blob_payloads);
-    mylite_storage_free_index_entryset(&entryset);
-    DBUG_RETURN(HA_ERR_OUT_OF_MEM);
-  }
-
-  size_t blob_payloads_used= 0;
-  for (size_t i= 0; i < entryset.entry_count; ++i)
-  {
-    uchar *row_payload= NULL;
-    size_t row_payload_size= 0;
-    storage_result= volatile_rows ?
-      mylite_volatile_read_row(primary_file, storage_schema(), storage_table(),
-                               entryset.row_ids[i], &row_payload,
-                               &row_payload_size) :
-      mylite_storage_read_row(primary_file, storage_schema(), storage_table(),
-                              entryset.row_ids[i], &row_payload,
-                              &row_payload_size);
-    if (storage_result != MYLITE_STORAGE_OK)
-    {
-      free(rows);
-      free(entries);
-      free(blob_payloads);
-      mylite_storage_free_index_entryset(&entryset);
-      DBUG_RETURN(mylite_storage_to_handler_error(storage_result));
-    }
-
-    uchar *out_row= rows + (i * table->s->reclength);
-    int error= mylite_copy_stored_row_to_scan(table, row_payload,
-                                              row_payload_size, out_row,
-                                              blob_payloads,
-                                              &blob_payloads_used);
-    mylite_storage_free(row_payload);
-    if (error)
-    {
-      free(rows);
-      free(entries);
-      free(blob_payloads);
-      mylite_storage_free_index_entryset(&entryset);
-      DBUG_RETURN(error);
-    }
     entries[i].key_offset= entryset.key_offsets[i];
     entries[i].key_size= entryset.key_sizes[i];
-    entries[i].row_offset= i * table->s->reclength;
     entries[i].row_id= entryset.row_ids[i];
-  }
-  if (blob_payloads_used != blob_payloads_size)
-  {
-    free(rows);
-    free(entries);
-    free(blob_payloads);
-    mylite_storage_free_index_entryset(&entryset);
-    DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
   }
 
   int error= mylite_sort_index_entries(table, index_number, entryset.keys,
                                        entries, entryset.entry_count);
   if (error)
   {
-    free(rows);
     free(entries);
-    free(blob_payloads);
     mylite_storage_free_index_entryset(&entryset);
     DBUG_RETURN(error);
   }
 
-  index_rows= rows;
-  index_blob_payloads= blob_payloads;
   index_keys= entryset.keys;
   index_entries= entries;
-  index_row_size= table->s->reclength;
   index_row_count= entryset.entry_count;
-  index_blob_payloads_size= blob_payloads_size;
   index_cursor_number= index_number;
   entryset.keys= NULL;
   mylite_storage_free_index_entryset(&entryset);
@@ -1413,21 +1313,69 @@ int ha_mylite::build_index_cursor(uint index_number)
 int ha_mylite::read_index_cursor_row(uchar *buf, size_t row_index)
 {
   DBUG_ENTER("ha_mylite::read_index_cursor_row");
-  if (row_index >= index_row_count || !index_entries || !index_rows)
+  if (row_index >= index_row_count || !index_entries)
     DBUG_RETURN(HA_ERR_END_OF_FILE);
 
   const Mylite_index_cursor_entry *entry= index_entries + row_index;
-  if (index_row_size != 0 && index_row_count > SIZE_MAX / index_row_size)
-    DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
-  const size_t rows_size= index_row_count * index_row_size;
-  if (entry->row_offset > rows_size ||
-      index_row_size > rows_size - entry->row_offset)
-    DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
 
-  memcpy(buf, index_rows + entry->row_offset, index_row_size);
-  const int error= preserve_record_blob_payloads(buf);
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    DBUG_RETURN(HA_ERR_NO_CONNECTION);
+
+  uchar *row_payload= NULL;
+  size_t row_payload_size= 0;
+  mylite_storage_result result=
+      volatile_rows ? mylite_volatile_read_row(primary_file, storage_schema(),
+                                               storage_table(), entry->row_id,
+                                               &row_payload, &row_payload_size)
+                    : mylite_storage_read_row(primary_file, storage_schema(),
+                                              storage_table(), entry->row_id,
+                                              &row_payload, &row_payload_size);
+  if (result != MYLITE_STORAGE_OK)
+    DBUG_RETURN(mylite_storage_to_handler_error(result));
+
+  size_t blob_payloads_size= 0;
+  int error= mylite_scan_stored_row(table, row_payload, row_payload_size,
+                                    &blob_payloads_size);
   if (error)
+  {
+    mylite_storage_free(row_payload);
     DBUG_RETURN(error);
+  }
+
+  uchar *blob_payloads= NULL;
+  if (blob_payloads_size > 0)
+  {
+    blob_payloads= static_cast<uchar *>(malloc(blob_payloads_size));
+    if (!blob_payloads)
+    {
+      mylite_storage_free(row_payload);
+      DBUG_RETURN(HA_ERR_OUT_OF_MEM);
+    }
+  }
+
+  size_t blob_payloads_used= 0;
+  error=
+      mylite_copy_stored_row_to_scan(table, row_payload, row_payload_size, buf,
+                                     blob_payloads, &blob_payloads_used);
+  mylite_storage_free(row_payload);
+  if (error || blob_payloads_used != blob_payloads_size)
+  {
+    mylite_storage_free(blob_payloads);
+    DBUG_RETURN(error ? error : HA_ERR_CRASHED_ON_USAGE);
+  }
+
+  size_t slot= 0;
+  error= record_blob_payload_slot(buf, &slot);
+  if (error)
+  {
+    mylite_storage_free(blob_payloads);
+    DBUG_RETURN(error);
+  }
+
+  mylite_storage_free(record_blob_payloads[slot]);
+  record_blob_payloads[slot]= blob_payloads;
+  record_blob_payloads_size[slot]= blob_payloads_size;
   index_row_index= row_index;
   current_row_id= entry->row_id;
   DBUG_RETURN(0);

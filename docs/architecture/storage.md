@@ -60,7 +60,9 @@ after close/reopen. Routed tables support row inserts, full scans, updates, and
 deletes from the primary file, including BLOB/TEXT payloads. Supported
 primary, unique, and secondary indexes append durable index-entry pages and
 serve ordered handler cursors from MariaDB key tuples, including bounded
-BLOB/TEXT prefix key images produced by MariaDB. `TRUNCATE TABLE` logically
+BLOB/TEXT prefix key images produced by MariaDB. Those cursors keep sorted key
+metadata and row ids, then materialize the selected row payload lazily when the
+SQL layer asks for a row. `TRUNCATE TABLE` logically
 deletes live rows and resets autoincrement state without changing catalog
 metadata. Ordinary `CREATE TABLE IF NOT EXISTS` creates missing routed tables
 and skips existing routed tables without changing their catalog metadata.
@@ -619,13 +621,14 @@ FULLTEXT, SPATIAL, hidden generated, hash, long-unique hash, and oversized or
 unbounded BLOB/TEXT keys.
 Duplicate checks read live index entries, use MariaDB key comparison, and
 preserve nullable unique-key semantics. Ordered index reads build in-memory
-cursors from live index entries and then reconstruct row buffers from row
-pages. This provides correct indexed insert, lookup, update, delete, reopen,
-and copy `ALTER` behavior for the supported shapes, but it is not the final
-performance structure. Standalone `CREATE INDEX` and `DROP INDEX` are covered
-for supported copy-rebuild index definitions. B-tree pages, free-space
-reclamation, multi-statement transaction rollback, and transaction-aware index
-maintenance remain planned.
+cursors from live index entries, keep sorted key metadata plus row ids, and
+reconstruct only the selected row buffer from row pages. This provides correct
+indexed insert, lookup, update, delete, reopen, and copy `ALTER` behavior for
+the supported shapes, but it is still an interim performance structure because
+cursor construction scans and sorts live append-only entries. Standalone
+`CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
+definitions. B-tree pages, free-space reclamation, multi-statement transaction
+rollback, and transaction-aware index maintenance remain planned.
 
 The storage engine must support:
 
