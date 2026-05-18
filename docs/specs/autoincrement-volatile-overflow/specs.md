@@ -90,10 +90,11 @@ No dependency or intended size-profile change is introduced.
 - Reopen preserves metadata, clears volatile rows, and resets volatile
   autoincrement state.
 - Docs narrow the remaining autoincrement gap to exhaustive integer-width
-  matrices and `BIGINT UNSIGNED` maximum-state handling.
+  matrices.
 
 ## Risks And Unresolved Questions
 
 - This remains representative smoke coverage; exhaustive volatile
   offset/increment matrices are still out of scope.
-- `BIGINT UNSIGNED` maximum-state handling remains a separate design issue.
+- `BIGINT UNSIGNED` maximum-state handling is covered by the separate
+  `autoincrement-bigint-unsigned-maximum` slice.

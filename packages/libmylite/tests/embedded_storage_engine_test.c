@@ -193,6 +193,7 @@ static void test_autoincrement_offset_increment(void);
 static void test_autoincrement_offset_increment_multirow(void);
 static void test_autoincrement_offset_increment_matrix(void);
 static void test_autoincrement_integer_overflow(void);
+static void test_autoincrement_bigint_unsigned_maximum(void);
 static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
 static void test_index_ddl_if_exists(void);
@@ -499,6 +500,7 @@ int main(int argc, char **argv) {
     test_autoincrement_offset_increment_multirow();
     test_autoincrement_offset_increment_matrix();
     test_autoincrement_integer_overflow();
+    test_autoincrement_bigint_unsigned_maximum();
     test_indexed_rows();
     test_standalone_index_ddl();
     test_index_ddl_if_exists();
@@ -10296,6 +10298,177 @@ static void test_autoincrement_integer_overflow(void) {
         db,
         "SET @@session.auto_increment_increment = 1, "
         "@@session.auto_increment_offset = 1"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_autoincrement_bigint_unsigned_maximum(void) {
+    const char *max_id = "18446744073709551615";
+    const char *read_failed = "Failed to read auto-increment value from storage engine";
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_bigint_max");
+    assert_exec_succeeds(db, "USE auto_bigint_max");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE first_key_max ("
+        "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO first_key_max VALUES "
+        "(18446744073709551615, 'max-explicit')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM first_key_max WHERE title = 'max-explicit'",
+        max_id
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO first_key_max (title) VALUES ('generated-overflow')",
+        read_failed
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM first_key_max WHERE title = 'generated-overflow'",
+        "0"
+    );
+    assert_exec_succeeds(db, "INSERT INTO first_key_max VALUES (1, 'lower-explicit')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM first_key_max WHERE title = 'lower-explicit'",
+        "1"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_max ("
+        "category INT NOT NULL,"
+        "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (category, id)"
+        ") ENGINE=MyISAM"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_max VALUES "
+        "(1, 18446744073709551615, 'g-max-explicit')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_max WHERE title = 'g-max-explicit'",
+        max_id
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO grouped_max (category, title) VALUES (1, 'g-overflow')",
+        read_failed
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_max WHERE title = 'g-overflow'",
+        "0"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_max (category, title) VALUES (2, 'other-prefix')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_max WHERE title = 'other-prefix'",
+        "1"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE memory_max ("
+        "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (id)"
+        ") ENGINE=MEMORY"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO memory_max VALUES (18446744073709551615, 'm-max-explicit')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM memory_max WHERE title = 'm-max-explicit'",
+        max_id
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO memory_max (title) VALUES ('m-overflow')",
+        read_failed
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM memory_max WHERE title = 'm-overflow'",
+        "0"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE heap_max ("
+        "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (id)"
+        ") ENGINE=HEAP"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO heap_max VALUES (18446744073709551615, 'h-max-explicit')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM heap_max WHERE title = 'h-max-explicit'",
+        max_id
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO heap_max (title) VALUES ('h-overflow')",
+        read_failed
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM heap_max WHERE title = 'h-overflow'",
+        "0"
+    );
+    assert_catalog_table_count(filename, "auto_bigint_max", 4U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE auto_bigint_max");
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO first_key_max (title) VALUES ('after-reopen-overflow')",
+        read_failed
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM first_key_max WHERE title = 'after-reopen-overflow'",
+        "0"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM memory_max", "0");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM heap_max", "0");
+    assert_exec_succeeds(db, "INSERT INTO memory_max (title) VALUES ('after-reopen')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM memory_max WHERE title = 'after-reopen'",
+        "1"
     );
 
     assert(mylite_close(db) == MYLITE_OK);

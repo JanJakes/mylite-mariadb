@@ -137,6 +137,8 @@ static bool mylite_table_has_grouped_auto_increment(TABLE *table);
 static bool mylite_table_supports_indexes(TABLE *table);
 static bool mylite_key_is_supported(const KEY *key);
 static Field *mylite_auto_increment_field(TABLE *table);
+static bool mylite_next_auto_increment_value_from_field(Field *auto_field,
+                                                        ulonglong *out_value);
 static int mylite_prepare_row_payload(TABLE *table, const uchar *buf,
                                       const uchar **out_payload,
                                       size_t *out_payload_size,
@@ -1922,19 +1924,12 @@ int ha_mylite::write_row(const uchar *buf)
   if (volatile_rows)
   {
     Field *auto_field= mylite_auto_increment_field(table);
-    if (auto_field)
+    ulonglong next_value= 0ULL;
+    if (mylite_next_auto_increment_value_from_field(auto_field, &next_value))
     {
-      const longlong signed_value= auto_field->val_int();
-      if (signed_value >= 0 || (auto_field->flags & UNSIGNED_FLAG))
-      {
-        const ulonglong value= (ulonglong) signed_value;
-        error= value == ULONGLONG_MAX ? HA_ERR_AUTOINC_ERANGE :
-          mylite_storage_to_handler_error(
-            mylite_volatile_advance_auto_increment(primary_file,
-                                                   storage_schema(),
-                                                   storage_table(),
-                                                   value + 1ULL));
-      }
+      error= mylite_storage_to_handler_error(
+        mylite_volatile_advance_auto_increment(primary_file, storage_schema(),
+                                               storage_table(), next_value));
     }
   }
   else
@@ -2050,19 +2045,12 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
   if (volatile_rows)
   {
     Field *auto_field= mylite_auto_increment_field(table);
-    if (auto_field)
+    ulonglong next_value= 0ULL;
+    if (mylite_next_auto_increment_value_from_field(auto_field, &next_value))
     {
-      const longlong signed_value= auto_field->val_int();
-      if (signed_value >= 0 || (auto_field->flags & UNSIGNED_FLAG))
-      {
-        const ulonglong value= (ulonglong) signed_value;
-        error= value == ULONGLONG_MAX ? HA_ERR_AUTOINC_ERANGE :
-          mylite_storage_to_handler_error(
-            mylite_volatile_advance_auto_increment(primary_file,
-                                                   storage_schema(),
-                                                   storage_table(),
-                                                   value + 1ULL));
-      }
+      error= mylite_storage_to_handler_error(
+        mylite_volatile_advance_auto_increment(primary_file, storage_schema(),
+                                               storage_table(), next_value));
     }
   }
   else
@@ -3313,15 +3301,7 @@ static int mylite_read_grouped_auto_increment(
       }
       else
       {
-        const longlong signed_value= auto_field->val_int();
-        if (signed_value >= 0 || (auto_field->flags & UNSIGNED_FLAG))
-        {
-          const ulonglong value= (ulonglong) signed_value;
-          if (value == ULONGLONG_MAX)
-            error= HA_ERR_AUTOINC_ERANGE;
-          else
-            next_value= value + 1ULL;
-        }
+        mylite_next_auto_increment_value_from_field(auto_field, &next_value);
         free(row_blob_payloads);
       }
     }
@@ -6066,21 +6046,29 @@ static int mylite_advance_auto_increment_from_row(const char *primary_file,
                                                   TABLE *table)
 {
   Field *auto_field= mylite_auto_increment_field(table);
-  if (!auto_field)
+  ulonglong next_value= 0ULL;
+  if (!mylite_next_auto_increment_value_from_field(auto_field, &next_value))
     return 0;
-
-  const longlong signed_value= auto_field->val_int();
-  if (signed_value < 0 && !(auto_field->flags & UNSIGNED_FLAG))
-    return 0;
-
-  const ulonglong value= (ulonglong) signed_value;
-  if (value == ULONGLONG_MAX)
-    return HA_ERR_AUTOINC_ERANGE;
 
   const mylite_storage_result result=
     mylite_storage_advance_auto_increment(primary_file, schema_name, table_name,
-                                          value + 1ULL);
+                                          next_value);
   return mylite_storage_to_handler_error(result);
+}
+
+static bool mylite_next_auto_increment_value_from_field(Field *auto_field,
+                                                        ulonglong *out_value)
+{
+  if (!auto_field)
+    return false;
+
+  const longlong signed_value= auto_field->val_int();
+  if (signed_value < 0 && !(auto_field->flags & UNSIGNED_FLAG))
+    return false;
+
+  const ulonglong value= (ulonglong) signed_value;
+  *out_value= value == ULONGLONG_MAX ? ULONGLONG_MAX : value + 1ULL;
+  return true;
 }
 
 static int mylite_find_index_entry(TABLE *table,

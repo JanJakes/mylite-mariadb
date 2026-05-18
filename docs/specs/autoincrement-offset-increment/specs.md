@@ -111,9 +111,8 @@ test and documentation slice unless the new tests expose a bug.
 
 ## Risks And Open Questions
 
-- MyLite still needs temporary/volatile-row, exhaustive integer-width, and
-  `BIGINT UNSIGNED` maximum-state coverage before claiming exhaustive
-  compatibility.
+- MyLite still needs exhaustive integer-width coverage before claiming
+  exhaustive compatibility.
 - Multi-row post-explicit first-key and grouped-prefix allocation is covered by
   the separate `autoincrement-offset-increment-multi-row` slice.
 - A broader first-key and grouped-prefix pair matrix is covered by the separate

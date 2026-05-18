@@ -490,6 +490,9 @@ last valid generated value and next generated overflow for signed and unsigned
 Runtime-volatile MEMORY/HEAP autoincrement overflow uses the same SQL-layer
 boundary behavior while keeping rows and autoincrement state out of durable
 MyLite row pages.
+Explicit `BIGINT UNSIGNED` maximum values are allowed for first-key,
+grouped-prefix, and MEMORY/HEAP tables; the following generated value fails
+through MariaDB's `ULONGLONG_MAX` autoincrement read-failed sentinel.
 That grouped path is correct for the supported storage subset but still scans
 append-only index entries until storage-level B-tree navigation exists.
 Row, overflow, index-entry, and old autoincrement pages remain orphaned until
