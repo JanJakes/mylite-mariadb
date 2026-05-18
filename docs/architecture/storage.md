@@ -204,9 +204,11 @@ schema names are also treated as namespaces for compatibility with files that
 pre-date explicit schema records. Internal FK definitions use catalog records
 keyed by child schema/table and constraint name plus typed FK blob pages for
 referenced key, column-list, action, match-option, and nullable-column
-metadata. FK referenced-key rewrites append replacement FK blob pages and
-republish the FK catalog record. Row inserts append checksummed row pages
-tagged by catalog table id;
+metadata. Catalog-backed index-root records key future navigable index roots by
+schema, table, table id, and MariaDB key number; table rename and drop preserve
+or remove those records with the owning table. FK referenced-key rewrites append
+replacement FK blob pages and republish the FK catalog record. Row inserts
+append checksummed row pages tagged by catalog table id;
 non-BLOB rows store raw MariaDB record images, while BLOB/TEXT rows store a
 durable handler-owned row payload that replaces process pointers with value
 bytes. Large row payloads spill into checksummed row-payload blob pages inside

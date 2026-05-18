@@ -26,6 +26,7 @@ extern "C" {
 #define MYLITE_STORAGE_CAPABILITY_BUSY_TIMEOUT 0x00002000U
 #define MYLITE_STORAGE_CAPABILITY_TRANSACTION_JOURNAL 0x00004000U
 #define MYLITE_STORAGE_CAPABILITY_FOREIGN_KEY_METADATA 0x00008000U
+#define MYLITE_STORAGE_CAPABILITY_INDEX_ROOTS 0x00010000U
 
 #define MYLITE_STORAGE_FOREIGN_KEY_ACTION_UNSPECIFIED 0U
 #define MYLITE_STORAGE_FOREIGN_KEY_ACTION_RESTRICT 1U
@@ -101,6 +102,21 @@ typedef struct mylite_storage_schema_metadata {
     char *default_collation_name;
     char *schema_comment;
 } mylite_storage_schema_metadata;
+
+typedef struct mylite_storage_index_root_definition {
+    size_t size;
+    const char *schema_name;
+    const char *table_name;
+    unsigned index_number;
+    unsigned long long root_page;
+    unsigned long long entry_count;
+} mylite_storage_index_root_definition;
+
+typedef struct mylite_storage_index_root_metadata {
+    size_t size;
+    unsigned long long root_page;
+    unsigned long long entry_count;
+} mylite_storage_index_root_metadata;
 
 typedef struct mylite_storage_foreign_key_definition {
     size_t size;
@@ -257,6 +273,23 @@ mylite_storage_result mylite_storage_table_exists(
     const char *filename,
     const char *schema_name,
     const char *table_name
+);
+mylite_storage_result mylite_storage_store_index_root(
+    const char *filename,
+    const mylite_storage_index_root_definition *definition
+);
+mylite_storage_result mylite_storage_read_index_root(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    mylite_storage_index_root_metadata *out_metadata
+);
+mylite_storage_result mylite_storage_drop_index_root(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number
 );
 mylite_storage_result mylite_storage_drop_table(
     const char *filename,
