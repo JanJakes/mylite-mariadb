@@ -53,6 +53,7 @@ No production change is expected. Add storage-engine smoke coverage over a
 routed `ENGINE=InnoDB` table with:
 
 - a stored generated slug,
+- a virtual generated slug,
 - a unique generated-column index,
 - ordinary base rows that make statement-start visibility easy to assert.
 
@@ -65,7 +66,8 @@ The test covers two failure shapes:
    index.
 
 Both cases assert that generated values, base row values, and forced generated
-index reads match the statement-start state before and after close/reopen.
+index reads match the statement-start state before and after close/reopen for
+both stored and virtual generated-column definitions.
 
 ## File Lifecycle
 
@@ -105,9 +107,8 @@ No dependency, license, or size-profile change is intended.
 
 ## Risks And Open Questions
 
-- Virtual generated columns, generated-column expression errors, triggers,
-  views, and partitioned tables can take different SQL paths and remain
-  separate compatibility work.
+- Generated-column expression errors, triggers, views, and partitioned tables
+  can take different SQL paths and remain separate compatibility work.
 - This proves visible rollback through statement checkpoints, not physical page
   reclamation or crash-safe logical undo for a process interrupted during
   rollback.

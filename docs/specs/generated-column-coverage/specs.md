@@ -118,7 +118,7 @@ unchanged for practical purposes.
   generated BLOB/TEXT prefix indexes declared in initial table definitions and
   added through standalone copy-rebuild index DDL.
 - Storage-engine smoke verifies representative failed direct and prepared
-  multi-row generated-column DML rollback.
+  multi-row DML rollback for stored and virtual generated-column indexes.
 - Add a compatibility harness group for generated columns.
 - Run formatting, tidy, configured CTest presets, the named harness report, and
   `git diff --check`.
@@ -150,7 +150,7 @@ unchanged for practical purposes.
 - `SHOW CREATE TABLE` export/import works for a representative table whose
   generated columns and generated indexes were added through copy ALTER.
 - Representative failed direct insert and prepared update statements restore
-  generated values and generated-index visibility.
+  stored and virtual generated values and generated-index visibility.
 - Compatibility docs and roadmap mark generated columns as partial rather than
   planned.
 - The compatibility harness can run the generated-column evidence by name.

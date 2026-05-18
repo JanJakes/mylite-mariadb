@@ -9620,11 +9620,101 @@ static void test_generated_column_dml_rollback(void) {
         "WHERE slug = 'gamma-post'",
         "4"
     );
-    assert_catalog_table_count(filename, "generated_dml_rollback", 1U);
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE virtual_generated_dml_posts ("
+        "id INT NOT NULL PRIMARY KEY,"
+        "title VARCHAR(64) NOT NULL,"
+        "slug VARCHAR(96) AS (LOWER(REPLACE(title, ' ', '-'))) VIRTUAL,"
+        "UNIQUE KEY slug_key (slug)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO virtual_generated_dml_posts (id, title) VALUES "
+        "(10, 'Virtual Alpha'), (20, 'Virtual Beta')"
+    );
+
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO virtual_generated_dml_posts (id, title) VALUES "
+        "(30, 'Virtual Gamma'), (40, 'Virtual Alpha')",
+        "Duplicate entry"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM virtual_generated_dml_posts WHERE id = 30",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM virtual_generated_dml_posts "
+        "FORCE INDEX (slug_key) WHERE slug = 'virtual-gamma'",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM virtual_generated_dml_posts FORCE INDEX (slug_key) "
+        "WHERE slug = 'virtual-alpha'",
+        "10"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO virtual_generated_dml_posts (id, title) "
+        "VALUES (40, 'Virtual Gamma')"
+    );
+    assert_prepared_fails_with_message(
+        db,
+        "UPDATE virtual_generated_dml_posts "
+        "SET title = CASE id "
+        "WHEN 20 THEN 'Virtual Delta' "
+        "WHEN 40 THEN 'Virtual Alpha' "
+        "ELSE title END "
+        "WHERE id IN (20, 40) "
+        "ORDER BY id ASC",
+        "Duplicate entry"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT title FROM virtual_generated_dml_posts WHERE id = 20",
+        "Virtual Beta"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM virtual_generated_dml_posts FORCE INDEX (slug_key) "
+        "WHERE slug = 'virtual-beta'",
+        "20"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM virtual_generated_dml_posts "
+        "FORCE INDEX (slug_key) WHERE slug = 'virtual-delta'",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT title FROM virtual_generated_dml_posts WHERE id = 40",
+        "Virtual Gamma"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM virtual_generated_dml_posts FORCE INDEX (slug_key) "
+        "WHERE slug = 'virtual-gamma'",
+        "40"
+    );
+    assert_catalog_table_count(filename, "generated_dml_rollback", 2U);
     assert_catalog_table_metadata(
         filename,
         "generated_dml_rollback",
         "generated_dml_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "generated_dml_rollback",
+        "virtual_generated_dml_posts",
         "InnoDB",
         "MYLITE"
     );
@@ -9663,11 +9753,47 @@ static void test_generated_column_dml_rollback(void) {
         "FORCE INDEX (slug_key) WHERE slug = 'delta-post'",
         "0"
     );
-    assert_catalog_table_count(filename, "generated_dml_rollback", 1U);
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM virtual_generated_dml_posts WHERE id = 30",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM virtual_generated_dml_posts FORCE INDEX (slug_key) "
+        "WHERE slug = 'virtual-alpha'",
+        "10"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM virtual_generated_dml_posts FORCE INDEX (slug_key) "
+        "WHERE slug = 'virtual-beta'",
+        "20"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM virtual_generated_dml_posts FORCE INDEX (slug_key) "
+        "WHERE slug = 'virtual-gamma'",
+        "40"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM virtual_generated_dml_posts "
+        "FORCE INDEX (slug_key) WHERE slug = 'virtual-delta'",
+        "0"
+    );
+    assert_catalog_table_count(filename, "generated_dml_rollback", 2U);
     assert_catalog_table_metadata(
         filename,
         "generated_dml_rollback",
         "generated_dml_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "generated_dml_rollback",
+        "virtual_generated_dml_posts",
         "InnoDB",
         "MYLITE"
     );
