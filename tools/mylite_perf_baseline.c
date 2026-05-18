@@ -40,7 +40,9 @@ static void print_result(const char *operation, size_t count, uint64_t elapsed_n
 static int setup_database(benchmark_context *ctx);
 static int benchmark_insert_rows(benchmark_context *ctx);
 static int benchmark_point_selects(benchmark_context *ctx);
+static int benchmark_prepared_point_selects(benchmark_context *ctx);
 static int benchmark_updates(benchmark_context *ctx);
+static int benchmark_prepared_updates(benchmark_context *ctx);
 static int benchmark_ordered_scan(benchmark_context *ctx);
 static int verify_row_count(benchmark_context *ctx, size_t expected);
 static int exec_sql(benchmark_context *ctx, const char *sql);
@@ -134,7 +136,13 @@ static int run_benchmark(const benchmark_config *config) {
     if (benchmark_point_selects(&ctx) != 0) {
         goto cleanup;
     }
+    if (benchmark_prepared_point_selects(&ctx) != 0) {
+        goto cleanup;
+    }
     if (benchmark_updates(&ctx) != 0) {
+        goto cleanup;
+    }
+    if (benchmark_prepared_updates(&ctx) != 0) {
         goto cleanup;
     }
     if (verify_row_count(&ctx, config->rows) != 0) {
@@ -293,6 +301,74 @@ static int benchmark_point_selects(benchmark_context *ctx) {
     return 0;
 }
 
+static int benchmark_prepared_point_selects(benchmark_context *ctx) {
+    mylite_stmt *stmt = NULL;
+    uint64_t checksum = 0U;
+    int result = 1;
+
+    if (mylite_prepare(
+            ctx->db,
+            "SELECT value FROM perf_rows WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) != MYLITE_OK) {
+        report_database_error(ctx, "prepare primary-key point select");
+        return 1;
+    }
+
+    const uint64_t start_ns = monotonic_ns();
+    for (size_t i = 0; i < ctx->config->iterations; ++i) {
+        const size_t id = (i % ctx->config->rows) + 1U;
+        if (mylite_bind_int64(stmt, 1U, (long long)id) != MYLITE_OK) {
+            report_database_error(ctx, "bind prepared primary-key point select");
+            goto cleanup;
+        }
+
+        const int row_result = mylite_step(stmt);
+        if (row_result != MYLITE_ROW) {
+            fprintf(stderr, "Prepared primary-key point select returned no row for id %zu\n", id);
+            report_database_error(ctx, "prepared primary-key point select");
+            goto cleanup;
+        }
+        if (mylite_column_type(stmt, 0U) != MYLITE_TYPE_INT64) {
+            fprintf(stderr, "Prepared primary-key point select returned a non-integer value\n");
+            goto cleanup;
+        }
+        checksum += (uint64_t)mylite_column_int64(stmt, 0U);
+
+        const int done_result = mylite_step(stmt);
+        if (done_result != MYLITE_DONE) {
+            fprintf(
+                stderr,
+                "Prepared primary-key point select returned extra rows for id %zu\n",
+                id
+            );
+            report_database_error(ctx, "prepared primary-key point select completion");
+            goto cleanup;
+        }
+        if (mylite_reset(stmt) != MYLITE_OK) {
+            report_database_error(ctx, "reset prepared primary-key point select");
+            goto cleanup;
+        }
+    }
+
+    print_result(
+        "prepared primary-key point selects",
+        ctx->config->iterations,
+        monotonic_ns() - start_ns
+    );
+    printf("Prepared point-select checksum: %" PRIu64 "\n", checksum);
+    result = 0;
+
+cleanup:
+    if (mylite_finalize(stmt) != MYLITE_OK) {
+        report_database_error(ctx, "finalize prepared primary-key point select");
+        return 1;
+    }
+    return result;
+}
+
 static int benchmark_updates(benchmark_context *ctx) {
     const uint64_t start_ns = monotonic_ns();
     int result = 1;
@@ -322,6 +398,71 @@ static int benchmark_updates(benchmark_context *ctx) {
     result = 0;
 
 rollback:
+    if (result != 0) {
+        (void)mylite_exec(ctx->db, "ROLLBACK", NULL, NULL, NULL);
+    }
+    return result;
+}
+
+static int benchmark_prepared_updates(benchmark_context *ctx) {
+    mylite_stmt *stmt = NULL;
+    int result = 1;
+
+    if (exec_sql(ctx, "BEGIN") != 0) {
+        return 1;
+    }
+    if (mylite_prepare(
+            ctx->db,
+            "UPDATE perf_rows SET value = value + 1 WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) != MYLITE_OK) {
+        report_database_error(ctx, "prepare primary-key update");
+        goto rollback;
+    }
+
+    const uint64_t start_ns = monotonic_ns();
+    for (size_t i = 0; i < ctx->config->iterations; ++i) {
+        const size_t id = (i % ctx->config->rows) + 1U;
+        if (mylite_bind_int64(stmt, 1U, (long long)id) != MYLITE_OK) {
+            report_database_error(ctx, "bind prepared primary-key update");
+            goto rollback;
+        }
+
+        const int step_result = mylite_step(stmt);
+        if (step_result != MYLITE_DONE) {
+            fprintf(stderr, "Prepared primary-key update failed for id %zu\n", id);
+            report_database_error(ctx, "prepared primary-key update");
+            goto rollback;
+        }
+        if (mylite_reset(stmt) != MYLITE_OK) {
+            report_database_error(ctx, "reset prepared primary-key update");
+            goto rollback;
+        }
+    }
+    print_result(
+        "prepared primary-key updates in one transaction",
+        ctx->config->iterations,
+        monotonic_ns() - start_ns
+    );
+
+    if (mylite_finalize(stmt) != MYLITE_OK) {
+        stmt = NULL;
+        report_database_error(ctx, "finalize prepared primary-key update");
+        goto rollback;
+    }
+    stmt = NULL;
+    if (exec_sql(ctx, "COMMIT") != 0) {
+        return 1;
+    }
+    result = 0;
+
+rollback:
+    if (stmt != NULL && mylite_finalize(stmt) != MYLITE_OK) {
+        report_database_error(ctx, "finalize prepared primary-key update");
+        result = 1;
+    }
     if (result != 0) {
         (void)mylite_exec(ctx->db, "ROLLBACK", NULL, NULL, NULL);
     }

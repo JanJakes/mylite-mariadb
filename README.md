@@ -143,7 +143,7 @@ tools/mylite-mtr-harness run
 ```
 
 The storage-smoke performance baseline is local, machine-dependent evidence for
-before/after storage work:
+before/after storage work, with direct and prepared timings labelled separately:
 
 ```sh
 tools/mylite-perf-baseline

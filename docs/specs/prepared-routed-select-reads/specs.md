@@ -73,6 +73,5 @@ file lifecycle artifacts.
 
 ## Risks And Open Questions
 
-- This confirms correctness, not performance. Prepared-statement benchmark rows
-  still need separate harness work so direct and prepared timing are reported as
-  distinct measurements.
+- This confirms correctness, not performance. Prepared-statement timing belongs
+  in the separate `docs/specs/prepared-performance-baseline/` measurement slice.
