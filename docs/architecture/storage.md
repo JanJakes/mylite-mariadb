@@ -268,6 +268,12 @@ metadata and discard row writes instead of publishing MyLite row or index-entry
 pages. MEMORY/HEAP-routed tables persist only table metadata in the primary
 file; row contents and supported index entries live in a process-runtime
 volatile store and are cleared when the embedded MariaDB runtime shuts down.
+Those MEMORY/HEAP volatile rows participate in the current bounded MyLite
+statement, transaction, and savepoint rollback model through in-memory
+snapshots, while preserving generated autoincrement gaps. User temporary tables
+also use the volatile row store, but they are explicitly excluded from these
+snapshots so their rows and create/drop lifecycle follow MariaDB's ordinary
+temporary-table transaction behavior.
 Unsupported explicit `ENGINE` table options, including known external
 no-equals engine names, fail before catalog publication.
 Ordinary
@@ -775,8 +781,8 @@ direct-execution parameter markers, expression-valued or global parameterized
 transaction-control `SET` forms, bound `DEFAULT` / `RELEASE`
 transaction-control values, release completion defaults, XA, and durable direct
 or prepared DDL inside active transactions.
-Durable transactional DDL, isolation, WAL/checkpoint, MEMORY/HEAP savepoint
-coverage, and transactional engine-flag support remain planned.
+Durable transactional DDL, isolation, WAL/checkpoint, broader native
+MEMORY/HEAP parity, and transactional engine-flag support remain planned.
 
 The storage design must preserve the full write-concurrency goal. Early
 milestones may use coarse locks for correctness, but the page, transaction,

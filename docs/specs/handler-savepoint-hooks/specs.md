@@ -70,7 +70,9 @@ Compatibility remains partial:
 - Fully transactional engine flags remain planned.
 - Transactional DDL, isolation, XA, and WAL/checkpoint work remain planned or
   explicitly rejected.
-- MEMORY/HEAP savepoint behavior is not expanded by this slice.
+- MEMORY/HEAP savepoint behavior is covered by the later
+  [Volatile Row Transaction Snapshots](../volatile-row-transaction-snapshots/specs.md)
+  slice.
 
 ## Single-File And Lifecycle Impact
 

@@ -13,8 +13,10 @@ simple, backtick-quoted, and ANSI_QUOTES double-quoted names.
   [Handler Savepoint Hooks](../handler-savepoint-hooks/specs.md) slice.
 - Changing the MyLite checkpoint stack model.
 - SQL identifier comparison changes outside savepoint names.
-- Transactional DDL, MEMORY/HEAP row savepoints, XA, isolation, or fully
-  transactional handler flags.
+- Transactional DDL, XA, isolation, or fully transactional handler flags.
+- MEMORY/HEAP row savepoints are covered by the later
+  [Volatile Row Transaction Snapshots](../volatile-row-transaction-snapshots/specs.md)
+  slice.
 
 ## Source Findings
 

@@ -19,10 +19,19 @@
 #include <my_global.h>
 #include <mylite/storage.h>
 
+struct Mylite_volatile_snapshot;
+
 void mylite_volatile_clear_tables();
 
+mylite_storage_result mylite_volatile_begin_snapshot(
+  const char *primary_file, Mylite_volatile_snapshot **out_snapshot);
+mylite_storage_result mylite_volatile_commit_snapshot(
+  Mylite_volatile_snapshot *snapshot);
+mylite_storage_result mylite_volatile_rollback_snapshot(
+  Mylite_volatile_snapshot *snapshot);
 mylite_storage_result mylite_volatile_create_table(
-  const char *primary_file, const char *schema_name, const char *table_name);
+  const char *primary_file, const char *schema_name, const char *table_name,
+  bool participates_in_snapshots);
 mylite_storage_result mylite_volatile_drop_table(
   const char *primary_file, const char *schema_name, const char *table_name);
 mylite_storage_result mylite_volatile_register_table_alias(

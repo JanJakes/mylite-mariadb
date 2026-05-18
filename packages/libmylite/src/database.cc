@@ -44,6 +44,16 @@
 #  define MYLITE_MARIADB_HAS_INNOBASE 1
 #endif
 
+#if MYLITE_WITH_MARIADB_EMBEDDED && MYLITE_MARIADB_HAS_MYLITE_SE
+struct Mylite_volatile_snapshot;
+mylite_storage_result mylite_volatile_begin_snapshot(
+    const char *primary_file,
+    Mylite_volatile_snapshot **out_snapshot
+);
+mylite_storage_result mylite_volatile_commit_snapshot(Mylite_volatile_snapshot *snapshot);
+mylite_storage_result mylite_volatile_rollback_snapshot(Mylite_volatile_snapshot *snapshot);
+#endif
+
 namespace {
 
 constexpr unsigned k_known_open_flags = MYLITE_OPEN_READONLY | MYLITE_OPEN_READWRITE |
@@ -251,6 +261,7 @@ enum class TransactionAssignmentScope : unsigned char {
 struct DirectSavepoint {
     std::string name;
     mylite_storage_statement *statement = nullptr;
+    Mylite_volatile_snapshot *volatile_snapshot = nullptr;
     bool active = true;
 };
 #endif
@@ -263,6 +274,7 @@ struct mylite_db {
 #endif
 #if MYLITE_WITH_MARIADB_EMBEDDED && MYLITE_MARIADB_HAS_MYLITE_SE
     mylite_storage_statement *transaction_statement = nullptr;
+    Mylite_volatile_snapshot *transaction_volatile_snapshot = nullptr;
     std::vector<DirectSavepoint> savepoints;
 #endif
     std::string filename;
@@ -328,6 +340,7 @@ class StorageStatementCheckpoint {
 
   private:
     mylite_storage_statement *statement_ = nullptr;
+    Mylite_volatile_snapshot *volatile_snapshot_ = nullptr;
 };
 #endif
 
@@ -439,6 +452,13 @@ std::size_t find_direct_savepoint(const mylite_db &database, std::string_view na
 bool direct_savepoint_names_equal(std::string_view left, std::string_view right);
 int finish_direct_savepoint_frame(mylite_db &database, std::size_t index, bool commit);
 int begin_direct_savepoint_frame(mylite_db &database, std::string_view name);
+int finish_volatile_snapshot(
+    mylite_db &database,
+    Mylite_volatile_snapshot *snapshot,
+    bool commit,
+    const char *commit_message,
+    const char *rollback_message
+);
 #  endif
 void clear_current_row(mylite_stmt &statement);
 bool is_variable_column_type(mylite_value_type type);
@@ -2349,6 +2369,9 @@ StorageStatementCheckpoint::~StorageStatementCheckpoint() {
     if (statement_ != nullptr) {
         mylite_storage_commit_statement(statement_);
     }
+    if (volatile_snapshot_ != nullptr) {
+        mylite_volatile_commit_snapshot(volatile_snapshot_);
+    }
 }
 
 int StorageStatementCheckpoint::begin(mylite_db &database, bool enabled) {
@@ -2362,17 +2385,40 @@ int StorageStatementCheckpoint::begin(mylite_db &database, bool enabled) {
         set_error(database, map_storage_result(result), "statement checkpoint failed");
         return database.errcode;
     }
+    const mylite_storage_result snapshot_result =
+        mylite_volatile_begin_snapshot(database.filename.c_str(), &volatile_snapshot_);
+    if (snapshot_result != MYLITE_STORAGE_OK) {
+        mylite_storage_rollback_statement(statement_);
+        statement_ = nullptr;
+        set_error(database, map_storage_result(snapshot_result), "statement checkpoint failed");
+        return database.errcode;
+    }
     return MYLITE_OK;
 }
 
 int StorageStatementCheckpoint::commit(mylite_db &database) {
-    if (statement_ == nullptr) {
+    if (statement_ == nullptr && volatile_snapshot_ == nullptr) {
         return MYLITE_OK;
     }
 
     mylite_storage_statement *statement = statement_;
+    Mylite_volatile_snapshot *snapshot = volatile_snapshot_;
     statement_ = nullptr;
-    const mylite_storage_result result = mylite_storage_commit_statement(statement);
+    volatile_snapshot_ = nullptr;
+    mylite_storage_result result = MYLITE_STORAGE_OK;
+    if (statement != nullptr) {
+        result = mylite_storage_commit_statement(statement);
+    }
+    const int snapshot_result = finish_volatile_snapshot(
+        database,
+        snapshot,
+        true,
+        "statement checkpoint commit failed",
+        "statement rollback failed"
+    );
+    if (snapshot_result != MYLITE_OK) {
+        return snapshot_result;
+    }
     if (result != MYLITE_STORAGE_OK) {
         set_error(database, map_storage_result(result), "statement checkpoint commit failed");
         return database.errcode;
@@ -2381,13 +2427,28 @@ int StorageStatementCheckpoint::commit(mylite_db &database) {
 }
 
 int StorageStatementCheckpoint::rollback(mylite_db &database) {
-    if (statement_ == nullptr) {
+    if (statement_ == nullptr && volatile_snapshot_ == nullptr) {
         return MYLITE_OK;
     }
 
     mylite_storage_statement *statement = statement_;
+    Mylite_volatile_snapshot *snapshot = volatile_snapshot_;
     statement_ = nullptr;
-    const mylite_storage_result result = mylite_storage_rollback_statement(statement);
+    volatile_snapshot_ = nullptr;
+    mylite_storage_result result = MYLITE_STORAGE_OK;
+    if (statement != nullptr) {
+        result = mylite_storage_rollback_statement(statement);
+    }
+    const int snapshot_result = finish_volatile_snapshot(
+        database,
+        snapshot,
+        false,
+        "statement checkpoint commit failed",
+        "statement rollback failed"
+    );
+    if (snapshot_result != MYLITE_OK) {
+        return snapshot_result;
+    }
     if (result != MYLITE_STORAGE_OK) {
         set_error(database, map_storage_result(result), "statement rollback failed");
         return database.errcode;
@@ -2396,7 +2457,8 @@ int StorageStatementCheckpoint::rollback(mylite_db &database) {
 }
 
 int begin_direct_transaction(mylite_db &database) {
-    if (database.filename == ":memory:" || database.transaction_statement != nullptr) {
+    if (database.filename == ":memory:" || database.transaction_statement != nullptr ||
+        database.transaction_volatile_snapshot != nullptr) {
         return MYLITE_OK;
     }
 
@@ -2408,6 +2470,16 @@ int begin_direct_transaction(mylite_db &database) {
         set_error(database, map_storage_result(result), "transaction checkpoint failed");
         return database.errcode;
     }
+    const mylite_storage_result snapshot_result = mylite_volatile_begin_snapshot(
+        database.filename.c_str(),
+        &database.transaction_volatile_snapshot
+    );
+    if (snapshot_result != MYLITE_STORAGE_OK) {
+        mylite_storage_rollback_statement(database.transaction_statement);
+        database.transaction_statement = nullptr;
+        set_error(database, map_storage_result(snapshot_result), "transaction checkpoint failed");
+        return database.errcode;
+    }
     return MYLITE_OK;
 }
 
@@ -2417,14 +2489,30 @@ int finish_direct_transaction(mylite_db &database, bool commit) {
         return savepoint_result;
     }
 
-    if (database.transaction_statement == nullptr) {
+    if (database.transaction_statement == nullptr &&
+        database.transaction_volatile_snapshot == nullptr) {
         return MYLITE_OK;
     }
 
     mylite_storage_statement *transaction = database.transaction_statement;
+    Mylite_volatile_snapshot *snapshot = database.transaction_volatile_snapshot;
     database.transaction_statement = nullptr;
-    const mylite_storage_result result = commit ? mylite_storage_commit_statement(transaction)
-                                                : mylite_storage_rollback_statement(transaction);
+    database.transaction_volatile_snapshot = nullptr;
+    mylite_storage_result result = MYLITE_STORAGE_OK;
+    if (transaction != nullptr) {
+        result = commit ? mylite_storage_commit_statement(transaction)
+                        : mylite_storage_rollback_statement(transaction);
+    }
+    const int snapshot_result = finish_volatile_snapshot(
+        database,
+        snapshot,
+        commit,
+        "transaction checkpoint commit failed",
+        "transaction rollback failed"
+    );
+    if (snapshot_result != MYLITE_OK) {
+        return snapshot_result;
+    }
     if (result != MYLITE_STORAGE_OK) {
         set_error(
             database,
@@ -2551,13 +2639,23 @@ int finish_direct_savepoint_frame(mylite_db &database, std::size_t index, bool c
     }
 
     mylite_storage_statement *statement = database.savepoints.back().statement;
+    Mylite_volatile_snapshot *snapshot = database.savepoints.back().volatile_snapshot;
     database.savepoints.pop_back();
-    if (statement == nullptr) {
-        return MYLITE_OK;
+    mylite_storage_result result = MYLITE_STORAGE_OK;
+    if (statement != nullptr) {
+        result = commit ? mylite_storage_commit_statement(statement)
+                        : mylite_storage_rollback_statement(statement);
     }
-
-    const mylite_storage_result result = commit ? mylite_storage_commit_statement(statement)
-                                                : mylite_storage_rollback_statement(statement);
+    const int snapshot_result = finish_volatile_snapshot(
+        database,
+        snapshot,
+        commit,
+        "savepoint checkpoint commit failed",
+        "savepoint rollback failed"
+    );
+    if (snapshot_result != MYLITE_OK) {
+        return snapshot_result;
+    }
     if (result != MYLITE_STORAGE_OK) {
         set_error(
             database,
@@ -2579,9 +2677,19 @@ int begin_direct_savepoint_frame(mylite_db &database, std::string_view name) {
     }
 
     if (database.filename != ":memory:") {
-        const mylite_storage_result result =
+        mylite_storage_result result =
             mylite_storage_begin_statement(database.filename.c_str(), &savepoint.statement);
         if (result != MYLITE_STORAGE_OK) {
+            set_error(database, map_storage_result(result), "savepoint checkpoint failed");
+            return database.errcode;
+        }
+        result = mylite_volatile_begin_snapshot(
+            database.filename.c_str(),
+            &savepoint.volatile_snapshot
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            mylite_storage_rollback_statement(savepoint.statement);
+            savepoint.statement = nullptr;
             set_error(database, map_storage_result(result), "savepoint checkpoint failed");
             return database.errcode;
         }
@@ -2593,8 +2701,32 @@ int begin_direct_savepoint_frame(mylite_db &database, std::string_view name) {
         if (savepoint.statement != nullptr) {
             mylite_storage_rollback_statement(savepoint.statement);
         }
+        if (savepoint.volatile_snapshot != nullptr) {
+            mylite_volatile_rollback_snapshot(savepoint.volatile_snapshot);
+        }
         set_error(database, MYLITE_NOMEM, "savepoint allocation failed");
         return MYLITE_NOMEM;
+    }
+    return MYLITE_OK;
+}
+
+int finish_volatile_snapshot(
+    mylite_db &database,
+    Mylite_volatile_snapshot *snapshot,
+    bool commit,
+    const char *commit_message,
+    const char *rollback_message
+) {
+    if (snapshot == nullptr) {
+        return MYLITE_OK;
+    }
+
+    const mylite_storage_result result =
+        commit ? mylite_volatile_commit_snapshot(snapshot)
+               : mylite_volatile_rollback_snapshot(snapshot);
+    if (result != MYLITE_STORAGE_OK) {
+        set_error(database, map_storage_result(result), commit ? commit_message : rollback_message);
+        return database.errcode;
     }
     return MYLITE_OK;
 }

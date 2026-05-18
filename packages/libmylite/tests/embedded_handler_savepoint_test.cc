@@ -122,6 +122,13 @@ void run_savepoint_queries(MYSQL &mysql) {
         "title VARCHAR(64) NOT NULL UNIQUE"
         ") ENGINE=InnoDB"
     );
+    assert_query_succeeds(
+        mysql,
+        "CREATE TABLE raw_memory_posts ("
+        "id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL UNIQUE KEY"
+        ") ENGINE=MEMORY"
+    );
 
     assert_query_succeeds(mysql, "BEGIN");
     assert_query_succeeds(mysql, "INSERT INTO raw_posts VALUES (1, 'before')");
@@ -172,6 +179,42 @@ void run_savepoint_queries(MYSQL &mysql) {
     assert_single_count(
         mysql,
         "SELECT COUNT(*) FROM raw_posts WHERE title IN ('full-before', 'full-after')",
+        0
+    );
+
+    assert_query_succeeds(mysql, "BEGIN");
+    assert_query_succeeds(mysql, "INSERT INTO raw_memory_posts (title) VALUES ('memory-before')");
+    assert_query_succeeds(mysql, "SAVEPOINT memory_sp");
+    assert_query_succeeds(mysql, "INSERT INTO raw_memory_posts (title) VALUES ('memory-rolled')");
+    assert_query_succeeds(mysql, "ROLLBACK TO SAVEPOINT memory_sp");
+    assert_single_count(
+        mysql,
+        "SELECT COUNT(*) FROM raw_memory_posts WHERE title = 'memory-before'",
+        1
+    );
+    assert_single_count(
+        mysql,
+        "SELECT COUNT(*) FROM raw_memory_posts WHERE title = 'memory-rolled'",
+        0
+    );
+    assert_query_succeeds(mysql, "INSERT INTO raw_memory_posts (title) VALUES ('memory-after')");
+    assert_single_count(
+        mysql,
+        "SELECT COUNT(*) FROM raw_memory_posts WHERE id = 3 AND title = 'memory-after'",
+        1
+    );
+    assert_query_succeeds(mysql, "RELEASE SAVEPOINT memory_sp");
+    assert_query_succeeds(mysql, "COMMIT");
+
+    assert_query_succeeds(mysql, "BEGIN");
+    assert_query_succeeds(mysql, "INSERT INTO raw_memory_posts (title) VALUES ('memory-full')");
+    assert_query_succeeds(mysql, "SAVEPOINT memory_full_sp");
+    assert_query_succeeds(mysql, "INSERT INTO raw_memory_posts (title) VALUES ('memory-full-after')");
+    assert_query_succeeds(mysql, "ROLLBACK");
+    assert_single_count(
+        mysql,
+        "SELECT COUNT(*) FROM raw_memory_posts "
+        "WHERE title IN ('memory-full', 'memory-full-after')",
         0
     );
 }

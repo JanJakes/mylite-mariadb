@@ -46,6 +46,7 @@ struct Mylite_volatile_table
   std::string table_name;
   ulonglong next_row_id;
   ulonglong auto_increment_value;
+  bool participates_in_snapshots;
   std::vector<Mylite_volatile_row> rows;
 };
 
@@ -58,13 +59,25 @@ struct Mylite_volatile_table_alias
   std::string target_table_name;
 };
 
+struct Mylite_volatile_snapshot
+{
+  std::string primary_file;
+  std::vector<Mylite_volatile_table> tables;
+  std::vector<Mylite_volatile_table_alias> aliases;
+};
+
 static bool mylite_volatile_table_args_valid(const char *primary_file,
                                              const char *schema_name,
                                              const char *table_name);
+static bool mylite_volatile_primary_file_valid(const char *primary_file);
 static bool mylite_same_volatile_table(const Mylite_volatile_table &table,
                                        const char *primary_file,
                                        const char *schema_name,
                                        const char *table_name);
+static bool mylite_same_volatile_table_identity(
+  const Mylite_volatile_table &left, const Mylite_volatile_table &right);
+static bool mylite_volatile_alias_participates_in_snapshots_locked(
+  const Mylite_volatile_table_alias &alias);
 static Mylite_volatile_table *mylite_find_volatile_table_locked(
   const char *primary_file, const char *schema_name, const char *table_name);
 static Mylite_volatile_table *mylite_find_or_create_volatile_table_locked(
@@ -72,6 +85,8 @@ static Mylite_volatile_table *mylite_find_or_create_volatile_table_locked(
 static bool mylite_erase_volatile_table_locked(const char *primary_file,
                                                const char *schema_name,
                                                const char *table_name);
+static void mylite_preserve_volatile_table_counters_locked(
+  Mylite_volatile_table *restored_table);
 
 static std::mutex mylite_volatile_mutex;
 static std::vector<Mylite_volatile_table> mylite_volatile_tables;
@@ -84,8 +99,115 @@ void mylite_volatile_clear_tables()
   mylite_volatile_table_aliases.clear();
 }
 
+mylite_storage_result mylite_volatile_begin_snapshot(
+  const char *primary_file, Mylite_volatile_snapshot **out_snapshot)
+{
+  if (!mylite_volatile_primary_file_valid(primary_file) || !out_snapshot)
+    return MYLITE_STORAGE_MISUSE;
+
+  *out_snapshot= NULL;
+
+  Mylite_volatile_snapshot *snapshot= NULL;
+  try
+  {
+    snapshot= new Mylite_volatile_snapshot;
+    snapshot->primary_file= primary_file;
+
+    std::lock_guard<std::mutex> guard(mylite_volatile_mutex);
+    for (std::vector<Mylite_volatile_table>::const_iterator it=
+           mylite_volatile_tables.begin();
+         it != mylite_volatile_tables.end(); ++it)
+    {
+      if (it->primary_file == primary_file && it->participates_in_snapshots)
+        snapshot->tables.push_back(*it);
+    }
+    for (std::vector<Mylite_volatile_table_alias>::const_iterator it=
+           mylite_volatile_table_aliases.begin();
+         it != mylite_volatile_table_aliases.end(); ++it)
+    {
+      if (it->primary_file == primary_file &&
+          mylite_volatile_alias_participates_in_snapshots_locked(*it))
+        snapshot->aliases.push_back(*it);
+    }
+
+    *out_snapshot= snapshot;
+    return MYLITE_STORAGE_OK;
+  }
+  catch (const std::bad_alloc &)
+  {
+    delete snapshot;
+    return MYLITE_STORAGE_NOMEM;
+  }
+}
+
+mylite_storage_result mylite_volatile_commit_snapshot(
+  Mylite_volatile_snapshot *snapshot)
+{
+  if (!snapshot)
+    return MYLITE_STORAGE_MISUSE;
+
+  delete snapshot;
+  return MYLITE_STORAGE_OK;
+}
+
+mylite_storage_result mylite_volatile_rollback_snapshot(
+  Mylite_volatile_snapshot *snapshot)
+{
+  if (!snapshot)
+    return MYLITE_STORAGE_MISUSE;
+
+  try
+  {
+    std::vector<Mylite_volatile_table> restored_tables;
+    std::vector<Mylite_volatile_table_alias> restored_aliases;
+
+    std::lock_guard<std::mutex> guard(mylite_volatile_mutex);
+    restored_tables.reserve(mylite_volatile_tables.size() +
+                            snapshot->tables.size());
+    for (std::vector<Mylite_volatile_table>::const_iterator it=
+           mylite_volatile_tables.begin();
+         it != mylite_volatile_tables.end(); ++it)
+    {
+      if (it->primary_file != snapshot->primary_file ||
+          !it->participates_in_snapshots)
+        restored_tables.push_back(*it);
+    }
+    for (std::vector<Mylite_volatile_table>::const_iterator it=
+           snapshot->tables.begin();
+         it != snapshot->tables.end(); ++it)
+    {
+      restored_tables.push_back(*it);
+      mylite_preserve_volatile_table_counters_locked(&restored_tables.back());
+    }
+
+    restored_aliases.reserve(mylite_volatile_table_aliases.size() +
+                             snapshot->aliases.size());
+    for (std::vector<Mylite_volatile_table_alias>::const_iterator it=
+           mylite_volatile_table_aliases.begin();
+         it != mylite_volatile_table_aliases.end(); ++it)
+    {
+      if (it->primary_file != snapshot->primary_file ||
+          !mylite_volatile_alias_participates_in_snapshots_locked(*it))
+        restored_aliases.push_back(*it);
+    }
+    restored_aliases.insert(restored_aliases.end(), snapshot->aliases.begin(),
+                            snapshot->aliases.end());
+
+    mylite_volatile_tables.swap(restored_tables);
+    mylite_volatile_table_aliases.swap(restored_aliases);
+    delete snapshot;
+    return MYLITE_STORAGE_OK;
+  }
+  catch (const std::bad_alloc &)
+  {
+    delete snapshot;
+    return MYLITE_STORAGE_NOMEM;
+  }
+}
+
 mylite_storage_result mylite_volatile_create_table(
-  const char *primary_file, const char *schema_name, const char *table_name)
+  const char *primary_file, const char *schema_name, const char *table_name,
+  bool participates_in_snapshots)
 {
   if (!mylite_volatile_table_args_valid(primary_file, schema_name, table_name))
     return MYLITE_STORAGE_MISUSE;
@@ -99,6 +221,7 @@ mylite_storage_result mylite_volatile_create_table(
     table->rows.clear();
     table->next_row_id= 1ULL;
     table->auto_increment_value= 1ULL;
+    table->participates_in_snapshots= participates_in_snapshots;
     return MYLITE_STORAGE_OK;
   }
   catch (const std::bad_alloc &)
@@ -670,8 +793,14 @@ static bool mylite_volatile_table_args_valid(const char *primary_file,
                                              const char *schema_name,
                                              const char *table_name)
 {
-  return primary_file && primary_file[0] && schema_name && schema_name[0] &&
+  return mylite_volatile_primary_file_valid(primary_file) &&
+         schema_name && schema_name[0] &&
          table_name && table_name[0];
+}
+
+static bool mylite_volatile_primary_file_valid(const char *primary_file)
+{
+  return primary_file && primary_file[0];
 }
 
 static bool mylite_same_volatile_table(const Mylite_volatile_table &table,
@@ -682,6 +811,24 @@ static bool mylite_same_volatile_table(const Mylite_volatile_table &table,
   return table.primary_file == primary_file &&
          table.schema_name == schema_name &&
          table.table_name == table_name;
+}
+
+static bool mylite_same_volatile_table_identity(
+  const Mylite_volatile_table &left, const Mylite_volatile_table &right)
+{
+  return left.primary_file == right.primary_file &&
+         left.schema_name == right.schema_name &&
+         left.table_name == right.table_name;
+}
+
+static bool mylite_volatile_alias_participates_in_snapshots_locked(
+  const Mylite_volatile_table_alias &alias)
+{
+  Mylite_volatile_table *table=
+    mylite_find_volatile_table_locked(alias.primary_file.c_str(),
+                                      alias.target_schema_name.c_str(),
+                                      alias.target_table_name.c_str());
+  return table && table->participates_in_snapshots;
 }
 
 static Mylite_volatile_table *mylite_find_volatile_table_locked(
@@ -712,6 +859,7 @@ static Mylite_volatile_table *mylite_find_or_create_volatile_table_locked(
   new_table.table_name= table_name;
   new_table.next_row_id= 1ULL;
   new_table.auto_increment_value= 1ULL;
+  new_table.participates_in_snapshots= true;
   mylite_volatile_tables.push_back(new_table);
   return &mylite_volatile_tables.back();
 }
@@ -732,4 +880,22 @@ static bool mylite_erase_volatile_table_locked(const char *primary_file,
   }
 
   return false;
+}
+
+static void mylite_preserve_volatile_table_counters_locked(
+  Mylite_volatile_table *restored_table)
+{
+  for (std::vector<Mylite_volatile_table>::const_iterator it=
+         mylite_volatile_tables.begin();
+       it != mylite_volatile_tables.end(); ++it)
+  {
+    if (!mylite_same_volatile_table_identity(*it, *restored_table))
+      continue;
+
+    if (it->next_row_id > restored_table->next_row_id)
+      restored_table->next_row_id= it->next_row_id;
+    if (it->auto_increment_value > restored_table->auto_increment_value)
+      restored_table->auto_increment_value= it->auto_increment_value;
+    return;
+  }
 }

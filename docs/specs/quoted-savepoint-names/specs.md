@@ -79,10 +79,10 @@ backticks. Compatibility remains partial:
 
 - SQL-mode-sensitive double-quoted identifiers are covered by a later slice.
 - Execution outside an active file-backed MyLite transaction still fails.
-- Handler-level savepoint hooks remained planned at this slice point, and full
+- Handler-level savepoint hooks and MEMORY/HEAP row savepoints remained
+  planned at this slice point and are covered by later slices.
+- Transactional DDL, isolation, XA, unsupported transaction modifiers, and full
   transactional engine semantics remain broader work.
-- MEMORY/HEAP row savepoints, transactional DDL, isolation, XA, and unsupported
-  transaction modifiers remain unsupported.
 
 ## DDL Metadata Routing Impact
 

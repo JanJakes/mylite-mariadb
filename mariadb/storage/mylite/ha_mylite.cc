@@ -51,6 +51,7 @@ struct Mylite_catalog_table
 struct Mylite_savepoint_frame
 {
   mylite_storage_statement *statement;
+  Mylite_volatile_snapshot *volatile_snapshot;
   Mylite_savepoint_frame *previous;
 };
 
@@ -63,6 +64,7 @@ struct Mylite_trx_context
 {
   mylite_storage_statement *transaction;
   mylite_storage_statement *statement;
+  Mylite_volatile_snapshot *transaction_snapshot;
   Mylite_savepoint_frame *savepoints;
 };
 
@@ -145,6 +147,8 @@ static int mylite_finish_top_savepoint_frame(Mylite_trx_context *ctx,
                                              bool commit);
 static bool mylite_savepoint_frame_in_stack(Mylite_trx_context *ctx,
                                             Mylite_savepoint_frame *target);
+static int mylite_finish_volatile_snapshot(
+  Mylite_volatile_snapshot *snapshot, bool commit);
 static int mylite_finish_transaction_checkpoint(THD *thd, bool commit);
 static Mylite_trx_context *mylite_trx_context(THD *thd, bool create);
 static int mylite_table_name_from_path(const char *path, char *out_schema_name,
@@ -640,15 +644,26 @@ static int mylite_savepoint_set(THD *thd, void *sv)
   if (error)
     DBUG_RETURN(error);
 
+  Mylite_volatile_snapshot *snapshot= NULL;
+  result= mylite_volatile_begin_snapshot(primary_file, &snapshot);
+  error= mylite_storage_to_handler_error(result);
+  if (error)
+  {
+    mylite_storage_rollback_statement(statement);
+    DBUG_RETURN(error);
+  }
+
   Mylite_savepoint_frame *frame= static_cast<Mylite_savepoint_frame *>(
     calloc(1, sizeof(*frame)));
   if (!frame)
   {
     mylite_storage_rollback_statement(statement);
+    mylite_volatile_rollback_snapshot(snapshot);
     DBUG_RETURN(HA_ERR_OUT_OF_MEM);
   }
 
   frame->statement= statement;
+  frame->volatile_snapshot= snapshot;
   frame->previous= ctx->savepoints;
   ctx->savepoints= frame;
   reference->frame= frame;
@@ -2605,7 +2620,8 @@ int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info
   if (use_volatile_rows)
   {
     const mylite_storage_result volatile_result=
-      mylite_volatile_create_table(primary_file, schema_name, table_name);
+      mylite_volatile_create_table(primary_file, schema_name, table_name,
+                                   !temporary_table);
     if (volatile_result != MYLITE_STORAGE_OK)
       DBUG_RETURN(mylite_storage_to_handler_error(volatile_result));
     if (temporary_table)
@@ -2969,12 +2985,26 @@ static int mylite_begin_transaction_checkpoint(THD *thd,
   Mylite_trx_context *ctx= mylite_trx_context(thd, true);
   if (!ctx)
     return HA_ERR_OUT_OF_MEM;
-  if (ctx->transaction)
+  if (ctx->transaction || ctx->transaction_snapshot)
     return 0;
 
   mylite_storage_result result=
     mylite_storage_begin_transaction(primary_file, &ctx->transaction);
-  return mylite_storage_to_handler_error(result);
+  int error= mylite_storage_to_handler_error(result);
+  if (error)
+    return error;
+
+  Mylite_volatile_snapshot *snapshot= NULL;
+  result= mylite_volatile_begin_snapshot(primary_file, &snapshot);
+  error= mylite_storage_to_handler_error(result);
+  if (error)
+  {
+    mylite_storage_rollback_statement(ctx->transaction);
+    ctx->transaction= NULL;
+    return error;
+  }
+  ctx->transaction_snapshot= snapshot;
+  return 0;
 }
 
 static int mylite_begin_statement_checkpoint(THD *thd,
@@ -3044,16 +3074,21 @@ static int mylite_finish_top_savepoint_frame(Mylite_trx_context *ctx,
   ctx->savepoints= frame->previous;
 
   mylite_storage_statement *statement= frame->statement;
+  Mylite_volatile_snapshot *snapshot= frame->volatile_snapshot;
   free(frame);
-  if (!statement)
-    return 0;
 
-  mylite_storage_result result;
-  if (commit)
-    result= mylite_storage_commit_statement(statement);
-  else
-    result= mylite_storage_rollback_statement(statement);
-  return mylite_storage_to_handler_error(result);
+  mylite_storage_result storage_result= MYLITE_STORAGE_OK;
+  if (statement)
+  {
+    if (commit)
+      storage_result= mylite_storage_commit_statement(statement);
+    else
+      storage_result= mylite_storage_rollback_statement(statement);
+  }
+
+  int volatile_error= mylite_finish_volatile_snapshot(snapshot, commit);
+  int storage_error= mylite_storage_to_handler_error(storage_result);
+  return storage_error ? storage_error : volatile_error;
 }
 
 static bool mylite_savepoint_frame_in_stack(Mylite_trx_context *ctx,
@@ -3071,20 +3106,43 @@ static bool mylite_savepoint_frame_in_stack(Mylite_trx_context *ctx,
   return false;
 }
 
+static int mylite_finish_volatile_snapshot(
+  Mylite_volatile_snapshot *snapshot, bool commit)
+{
+  if (!snapshot)
+    return 0;
+
+  mylite_storage_result result;
+  if (commit)
+    result= mylite_volatile_commit_snapshot(snapshot);
+  else
+    result= mylite_volatile_rollback_snapshot(snapshot);
+  return mylite_storage_to_handler_error(result);
+}
+
 static int mylite_finish_transaction_checkpoint(THD *thd, bool commit)
 {
   Mylite_trx_context *ctx= mylite_trx_context(thd, false);
-  if (!ctx || !ctx->transaction)
+  if (!ctx || (!ctx->transaction && !ctx->transaction_snapshot))
     return 0;
 
   mylite_storage_statement *transaction= ctx->transaction;
+  Mylite_volatile_snapshot *snapshot= ctx->transaction_snapshot;
   ctx->transaction= NULL;
-  mylite_storage_result result;
-  if (commit)
-    result= mylite_storage_commit_statement(transaction);
-  else
-    result= mylite_storage_rollback_statement(transaction);
-  return mylite_storage_to_handler_error(result);
+  ctx->transaction_snapshot= NULL;
+
+  mylite_storage_result storage_result= MYLITE_STORAGE_OK;
+  if (transaction)
+  {
+    if (commit)
+      storage_result= mylite_storage_commit_statement(transaction);
+    else
+      storage_result= mylite_storage_rollback_statement(transaction);
+  }
+
+  int volatile_error= mylite_finish_volatile_snapshot(snapshot, commit);
+  int storage_error= mylite_storage_to_handler_error(storage_result);
+  return storage_error ? storage_error : volatile_error;
 }
 
 static Mylite_trx_context *mylite_trx_context(THD *thd, bool create)

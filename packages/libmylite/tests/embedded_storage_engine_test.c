@@ -160,6 +160,7 @@ static void test_unsupported_engine_request_policy(void);
 static void test_blackhole_engine_routes_to_mylite(void);
 static void test_memory_engine_routes_to_mylite(void);
 static void test_memory_autoincrement_overflow(void);
+static void test_memory_savepoint_transactions(void);
 static void test_memory_database_has_empty_mylite_discovery(void);
 static void test_schema_namespaces(void);
 static void test_prepared_schema_namespaces(void);
@@ -504,6 +505,7 @@ int main(int argc, char **argv) {
     test_blackhole_engine_routes_to_mylite();
     test_memory_engine_routes_to_mylite();
     test_memory_autoincrement_overflow();
+    test_memory_savepoint_transactions();
     test_memory_database_has_empty_mylite_discovery();
     test_schema_namespaces();
     test_prepared_schema_namespaces();
@@ -1030,6 +1032,130 @@ static void test_memory_autoincrement_overflow(void) {
         "SELECT id FROM memory_tiny_auto WHERE title = 'after-reopen'",
         "1"
     );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_memory_savepoint_transactions(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    unsigned long long durable_row_count = 0ULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE memory_savepoints");
+    assert_exec_succeeds(db, "USE memory_savepoints");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE memory_posts ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY USING BTREE (id),"
+        "UNIQUE KEY title_key USING BTREE (title)"
+        ") ENGINE=MEMORY AUTO_INCREMENT=10"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE heap_posts ("
+        "id INT NOT NULL,"
+        "title VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY USING BTREE (id),"
+        "UNIQUE KEY title_key USING BTREE (title)"
+        ") ENGINE=HEAP"
+    );
+    assert_catalog_table_metadata(filename, "memory_savepoints", "memory_posts", "MEMORY", "MYLITE");
+    assert_catalog_table_metadata(filename, "memory_savepoints", "heap_posts", "HEAP", "MYLITE");
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO memory_posts (title) VALUES ('before')");
+    assert_query_single_value(db, "SELECT id FROM memory_posts WHERE title = 'before'", "10");
+    assert_exec_succeeds(db, "INSERT INTO heap_posts VALUES (1, 'heap-before')");
+    assert_exec_succeeds(db, "SAVEPOINT volatile_sp");
+    assert_exec_succeeds(db, "INSERT INTO memory_posts (title) VALUES ('rolled')");
+    assert_query_single_value(db, "SELECT id FROM memory_posts WHERE title = 'rolled'", "11");
+    assert_exec_succeeds(db, "UPDATE memory_posts SET title = 'before-updated' WHERE id = 10");
+    assert_exec_succeeds(db, "DELETE FROM heap_posts WHERE id = 1");
+    assert_exec_succeeds(db, "ROLLBACK TO SAVEPOINT volatile_sp");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM memory_posts WHERE title = 'rolled'", "0");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM memory_posts WHERE title = 'before-updated'",
+        "0"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM memory_posts WHERE title = 'before'", "1");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM heap_posts WHERE title = 'heap-before'", "1");
+    assert_exec_succeeds(db, "INSERT INTO memory_posts (title) VALUES ('after-savepoint')");
+    assert_query_single_value(db, "SELECT id FROM memory_posts WHERE title = 'after-savepoint'", "12");
+    assert_exec_succeeds(db, "RELEASE SAVEPOINT volatile_sp");
+    assert_exec_succeeds(db, "COMMIT");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM memory_posts", "2");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM heap_posts", "1");
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_prepared_succeeds(db, "SAVEPOINT prepared_volatile_sp");
+    assert_exec_succeeds(db, "INSERT INTO memory_posts (title) VALUES ('prepared-rolled')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM memory_posts WHERE title = 'prepared-rolled'",
+        "13"
+    );
+    assert_prepared_succeeds(db, "ROLLBACK TO SAVEPOINT prepared_volatile_sp");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM memory_posts WHERE title = 'prepared-rolled'",
+        "0"
+    );
+    assert_exec_succeeds(db, "INSERT INTO memory_posts (title) VALUES ('after-prepared')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM memory_posts WHERE title = 'after-prepared'",
+        "14"
+    );
+    assert_prepared_succeeds(db, "RELEASE SAVEPOINT prepared_volatile_sp");
+    assert_exec_succeeds(db, "COMMIT");
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO memory_posts (title) VALUES ('full-rollback')");
+    assert_exec_succeeds(db, "INSERT INTO heap_posts VALUES (2, 'heap-full-rollback')");
+    assert_exec_succeeds(db, "SAVEPOINT full_volatile_sp");
+    assert_exec_succeeds(db, "INSERT INTO memory_posts (title) VALUES ('full-rollback-after')");
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM memory_posts "
+        "WHERE title IN ('full-rollback', 'full-rollback-after')",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM heap_posts WHERE title = 'heap-full-rollback'",
+        "0"
+    );
+    assert_exec_succeeds(db, "INSERT INTO memory_posts (title) VALUES ('after-full-rollback')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM memory_posts WHERE title = 'after-full-rollback'",
+        "17"
+    );
+
+    assert(
+        mylite_storage_count_rows(filename, "memory_savepoints", "memory_posts", &durable_row_count) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(durable_row_count == 0ULL);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE memory_savepoints");
+    assert_catalog_table_metadata(filename, "memory_savepoints", "memory_posts", "MEMORY", "MYLITE");
+    assert_catalog_table_metadata(filename, "memory_savepoints", "heap_posts", "HEAP", "MYLITE");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM memory_posts", "0");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM heap_posts", "0");
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
@@ -5124,6 +5250,22 @@ static void test_row_dml_transactions(void) {
         db,
         "SELECT title FROM tx_active_ctas WHERE id = 40",
         "active-temp-source"
+    );
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "SAVEPOINT active_temp_sp");
+    assert_exec_succeeds(db, "INSERT INTO tx_active_temp VALUES (3, 'active-temp-savepoint')");
+    assert_exec_succeeds(db, "ROLLBACK TO SAVEPOINT active_temp_sp");
+    assert_query_single_value(
+        db,
+        "SELECT title FROM tx_active_temp WHERE id = 3",
+        "active-temp-savepoint"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT title FROM tx_active_temp WHERE id = 3",
+        "active-temp-savepoint"
     );
 
     assert_exec_succeeds(db, "BEGIN");
@@ -19924,6 +20066,9 @@ static void assert_query_single_value(mylite_db *db, const char *sql, const char
     }
     assert(result == MYLITE_OK);
     assert(errmsg == NULL);
+    if (value.rows != 1) {
+        fprintf(stderr, "Query returned no single value: %s\nexpected: %s\n", sql, expected_value);
+    }
     assert(value.rows == 1);
 }
 

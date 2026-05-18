@@ -13,8 +13,11 @@ as simple and backtick-quoted savepoint names.
 - Handler-level MariaDB savepoint hooks.
 - SQL-mode parsing for unrelated SQL surfaces.
 - Double-quoted string handling outside savepoint-control classification.
-- Transactional DDL, MEMORY/HEAP row savepoints, XA, consistent snapshots,
-  release completion, or fully transactional handler flags.
+- Transactional DDL, XA, consistent snapshots, release completion, or fully
+  transactional handler flags.
+- MEMORY/HEAP row savepoints are covered by the later
+  [Volatile Row Transaction Snapshots](../volatile-row-transaction-snapshots/specs.md)
+  slice.
 - Changing savepoint-name collation or case-folding behavior.
 
 ## Source Findings
