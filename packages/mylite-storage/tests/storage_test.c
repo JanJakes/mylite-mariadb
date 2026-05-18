@@ -67,6 +67,12 @@ typedef struct lock_child {
     int release_fd;
 } lock_child;
 
+typedef struct transaction_child {
+    pid_t pid;
+    int release_fd;
+    unsigned long long row_id;
+} transaction_child;
+
 typedef struct timed_lock_request {
     int operation;
     unsigned milliseconds;
@@ -161,6 +167,7 @@ static void assert_statement_checkpoint_preserves_marked_auto_increment_rollback
 );
 static void test_transaction_journals(void);
 static void test_transaction_owner_isolation(void);
+static void test_cross_process_transaction_read_snapshot(void);
 static void assert_transaction_journal_commits(const transaction_journal_test_context *ctx);
 static void assert_transaction_journal_rolls_back(const transaction_journal_test_context *ctx);
 static void assert_transaction_journal_preserves_auto_increment_rollback(
@@ -179,6 +186,7 @@ static void test_rejects_corrupt_recovery_journal(void);
 static void test_rejects_operations_during_exclusive_file_lock(void);
 static void test_shared_file_lock_allows_readers_and_blocks_writers(void);
 static void test_recovery_requires_exclusive_file_lock(void);
+static void test_transaction_recovery_requires_exclusive_file_lock(void);
 static void test_busy_timeout_expires_while_lock_held(void);
 static void test_busy_timeout_waits_for_lock_release(void);
 static void test_rejects_corrupt_row_page(void);
@@ -238,6 +246,13 @@ static lock_child hold_test_lock(const char *filename, int operation);
 static void release_test_lock(lock_child child);
 static pid_t hold_test_lock_for(const char *filename, timed_lock_request request);
 static void wait_test_lock_child(pid_t pid);
+static transaction_child hold_transaction_with_uncommitted_row(
+    const char *filename,
+    const unsigned char *row,
+    size_t row_size,
+    const mylite_storage_index_entry *index_entry
+);
+static void release_transaction_child(transaction_child child);
 static void put_test_u32_le(unsigned char *page, size_t offset, unsigned value);
 static void put_test_u64_le(unsigned char *page, size_t offset, unsigned long long value);
 static unsigned long long checksum_test_page(const unsigned char *page, size_t checksum_offset);
@@ -288,6 +303,7 @@ int main(void) {
     test_statement_checkpoints();
     test_transaction_journals();
     test_transaction_owner_isolation();
+    test_cross_process_transaction_read_snapshot();
     test_cleans_recovery_journal_after_mutations();
     test_recovers_row_publication_journal();
     test_recovers_catalog_publication_journal();
@@ -295,6 +311,7 @@ int main(void) {
     test_rejects_operations_during_exclusive_file_lock();
     test_shared_file_lock_allows_readers_and_blocks_writers();
     test_recovery_requires_exclusive_file_lock();
+    test_transaction_recovery_requires_exclusive_file_lock();
     test_busy_timeout_expires_while_lock_held();
     test_busy_timeout_waits_for_lock_release();
     test_rejects_corrupt_row_page();
@@ -2143,6 +2160,109 @@ static void test_transaction_owner_isolation(void) {
     free(root);
 }
 
+static void test_cross_process_transaction_read_snapshot(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row_1[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    static const unsigned char row_2[] = {0x00U, 0x02U, 'd', 'e', 'f'};
+    static const unsigned char key_1[] = {'a'};
+    static const unsigned char key_2[] = {'d'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "cross-process-read-snapshot.mylite");
+    char *transaction_journal_filename = transaction_journal_path(filename);
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "InnoDB",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_index_entry row_1_entry = {
+        .size = sizeof(row_1_entry),
+        .index_number = 0U,
+        .key = key_1,
+        .key_size = sizeof(key_1),
+    };
+    mylite_storage_index_entry row_2_entry = {
+        .size = sizeof(row_2_entry),
+        .index_number = 0U,
+        .key = key_2,
+        .key_size = sizeof(key_2),
+    };
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+    mylite_storage_index_entryset entries = {
+        .size = sizeof(entries),
+    };
+    unsigned long long row_1_id = 0ULL;
+    unsigned long long row_count = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_1,
+            sizeof(row_1),
+            &row_1_entry,
+            1U,
+            &row_1_id
+        ) == MYLITE_STORAGE_OK
+    );
+
+    transaction_child child =
+        hold_transaction_with_uncommitted_row(filename, row_2, sizeof(row_2), &row_2_entry);
+    assert(access(transaction_journal_filename, F_OK) == 0);
+
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 1ULL);
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
+    assert(rows.row_count == 1U);
+    assert(rows.row_ids[0] == row_1_id);
+    assert(rows.row_sizes[0] == sizeof(row_1));
+    assert(memcmp(rows.rows + rows.row_offsets[0], row_1, sizeof(row_1)) == 0);
+    mylite_storage_free_rowset(&rows);
+    assert(
+        mylite_storage_read_index_entries(filename, "app", "posts", 0U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == 1U);
+    assert_index_entry(&entries, 0U, row_1_id, key_1, sizeof(key_1));
+    mylite_storage_free_index_entryset(&entries);
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", row_2, sizeof(row_2)) ==
+        MYLITE_STORAGE_BUSY
+    );
+
+    release_transaction_child(child);
+    assert_file_missing(transaction_journal_filename);
+
+    row_count = 0ULL;
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 2ULL);
+    entries = (mylite_storage_index_entryset){
+        .size = sizeof(entries),
+    };
+    assert(
+        mylite_storage_read_index_entries(filename, "app", "posts", 0U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == 2U);
+    assert_index_entry(&entries, 0U, row_1_id, key_1, sizeof(key_1));
+    assert_index_entry(&entries, 1U, child.row_id, key_2, sizeof(key_2));
+    mylite_storage_free_index_entryset(&entries);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(transaction_journal_filename);
+    free(filename);
+    free(root);
+}
+
 static void assert_transaction_journal_commits(const transaction_journal_test_context *ctx) {
     static const unsigned char row_1[] = {0x00U, 0x01U, 'a', 'b', 'c'};
     static const unsigned char key_1[] = {'a'};
@@ -2654,6 +2774,57 @@ static void test_recovery_requires_exclusive_file_lock(void) {
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
     free(journal_filename);
+    free(filename);
+    free(root);
+}
+
+static void test_transaction_recovery_requires_exclusive_file_lock(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "transaction-recovery-lock.mylite");
+    char *transaction_journal_filename = transaction_journal_path(filename);
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    unsigned char saved_pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {{0}};
+    const unsigned long long page_ids[] = {
+        MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
+        MYLITE_STORAGE_FORMAT_CATALOG_ROOT_PAGE_ID,
+    };
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    read_test_page(filename, MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID, saved_pages[0]);
+    read_test_page(filename, MYLITE_STORAGE_FORMAT_CATALOG_ROOT_PAGE_ID, saved_pages[1]);
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", row, sizeof(row)) == MYLITE_STORAGE_OK
+    );
+    write_test_transaction_journal(filename, page_ids, 2U, saved_pages);
+
+    lock_child child = hold_test_lock(filename, LOCK_SH);
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_BUSY);
+    assert(access(transaction_journal_filename, F_OK) == 0);
+    release_test_lock(child);
+
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
+    assert(rows.row_count == 0U);
+    mylite_storage_free_rowset(&rows);
+    assert_file_missing(transaction_journal_filename);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(transaction_journal_filename);
     free(filename);
     free(root);
 }
@@ -3421,6 +3592,78 @@ static pid_t hold_test_lock_for(const char *filename, timed_lock_request request
 static void wait_test_lock_child(pid_t pid) {
     int status = 0;
     assert(waitpid(pid, &status, 0) == pid);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
+}
+
+static transaction_child hold_transaction_with_uncommitted_row(
+    const char *filename,
+    const unsigned char *row,
+    size_t row_size,
+    const mylite_storage_index_entry *index_entry
+) {
+    int ready_pipe[2];
+    int release_pipe[2];
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    const pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+
+        mylite_storage_statement *transaction = NULL;
+        unsigned long long row_id = 0ULL;
+        if (mylite_storage_begin_transaction(filename, &transaction) != MYLITE_STORAGE_OK) {
+            _exit(2);
+        }
+        if (mylite_storage_append_row_with_index_entries(
+                filename,
+                "app",
+                "posts",
+                row,
+                row_size,
+                index_entry,
+                1U,
+                &row_id
+            ) != MYLITE_STORAGE_OK) {
+            _exit(3);
+        }
+        if (write(ready_pipe[1], &row_id, sizeof(row_id)) != (ssize_t)sizeof(row_id)) {
+            _exit(4);
+        }
+
+        unsigned char release = 0U;
+        (void)read(release_pipe[0], &release, sizeof(release));
+        if (mylite_storage_commit_statement(transaction) != MYLITE_STORAGE_OK) {
+            _exit(5);
+        }
+        close(ready_pipe[1]);
+        close(release_pipe[0]);
+        _exit(0);
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    unsigned long long row_id = 0ULL;
+    assert(read(ready_pipe[0], &row_id, sizeof(row_id)) == (ssize_t)sizeof(row_id));
+    close(ready_pipe[0]);
+
+    return (transaction_child){
+        .pid = pid,
+        .release_fd = release_pipe[1],
+        .row_id = row_id,
+    };
+}
+
+static void release_transaction_child(transaction_child child) {
+    const unsigned char release = 1U;
+    assert(write(child.release_fd, &release, sizeof(release)) == (ssize_t)sizeof(release));
+    assert(close(child.release_fd) == 0);
+
+    int status = 0;
+    assert(waitpid(child.pid, &status, 0) == child.pid);
     assert(WIFEXITED(status));
     assert(WEXITSTATUS(status) == 0);
 }

@@ -25,7 +25,7 @@ group_spec() {
       echo "dev|compat-public-api|Public C API validation and version surface"
       ;;
     storage-core)
-      echo "dev|compat-storage|Primary-file storage format, catalog, row, index, and mutation coverage"
+      echo "dev|compat-storage|Primary-file storage format, catalog, row, index, cross-process read snapshot, and mutation coverage"
       ;;
     crash-recovery)
       echo "dev|compat-crash-recovery|Rollback-journal, transaction-journal, and corrupt-journal coverage"

@@ -669,7 +669,11 @@ pages. Conflicts return busy errors after the current thread's configured busy
 timeout expires; a zero timeout keeps immediate non-blocking behavior. No
 durable lock sidecar is created. These locks protect cooperating MyLite
 processes from unsafe concurrent access but are not the final multi-writer lock
-manager.
+manager. If a cooperating writer holds an active row-DML transaction lock and
+has published a valid transaction journal, cross-process storage reads use the
+journal's transaction-start header and catalog root pages as a read-only
+snapshot; stale journals without an active exclusive writer still require the
+exclusive recovery path.
 
 File-backed MyLite statements that can mutate storage now take in-process
 statement checkpoints. Autocommit row DML begins that checkpoint from the
@@ -762,7 +766,10 @@ row-state pages, index entries, and autoincrement state rather than the owning
 handle's uncommitted appends. File-backed outer transactions also publish
 `<database>.mylite-transaction-journal`, remove it as the durable commit point,
 and use it to restore transaction-start visibility after an unclean process
-exit. If MariaDB reports statement failure, MyLite restores the saved
+exit. A cooperating process can read the same transaction-start snapshot from
+that journal while the writer remains active; writes from other processes still
+return busy under the coarse writer lock. If MariaDB reports statement failure,
+MyLite restores the saved
 catalog/header pages so rows, row-state pages, index entries, autoincrement
 pages, and catalog records appended after the checkpoint are no longer visible.
 When the restored checkpoint is an outer durable transaction or a nested direct
@@ -789,9 +796,9 @@ transaction modifiers, global transaction variables, direct-execution parameter
 markers, expression-valued or global parameterized transaction-control `SET`
 forms, bound `DEFAULT` / `RELEASE` transaction-control values, release
 completion defaults, XA, and durable direct or prepared DDL inside active
-transactions. Durable transactional DDL, cross-process read progress during an
-active writer, full isolation-level semantics, WAL/checkpoint, and broader
-native MEMORY/HEAP parity remain planned.
+transactions. Durable transactional DDL, SQL-level cross-process isolation
+harnesses, full isolation-level semantics, WAL/checkpoint, and broader native
+MEMORY/HEAP parity remain planned.
 
 The storage design must preserve the full write-concurrency goal. Early
 milestones may use coarse locks for correctness, but the page, transaction,

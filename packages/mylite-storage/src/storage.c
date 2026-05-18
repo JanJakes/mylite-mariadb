@@ -178,6 +178,13 @@ struct mylite_storage_statement {
     int preserve_auto_increment_rollback;
 };
 
+typedef struct mylite_storage_transaction_journal_snapshot {
+    FILE *file;
+    mylite_storage_header header;
+    unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+} mylite_storage_transaction_journal_snapshot;
+
 typedef mylite_storage_result (*mylite_storage_row_page_callback)(
     void *ctx,
     const mylite_storage_row_page *row_page
@@ -186,6 +193,7 @@ typedef mylite_storage_result (*mylite_storage_row_page_callback)(
 static _Thread_local mylite_storage_statement *active_statement;
 static _Thread_local const void *active_context_owner;
 static _Thread_local mylite_storage_statement *active_read_snapshot;
+static _Thread_local mylite_storage_transaction_journal_snapshot active_transaction_journal_snapshot;
 
 static mylite_storage_result path_exists(const char *filename, int *exists);
 static mylite_storage_result write_empty_database(FILE *file);
@@ -254,6 +262,14 @@ static mylite_storage_result flush_file(FILE *file);
 static mylite_storage_result flush_parent_directory(const char *filename);
 static mylite_storage_result close_created_file(FILE *file, const char *filename);
 static mylite_storage_result open_existing_file(const char *filename, FILE **out_file);
+static mylite_storage_result open_transaction_journal_snapshot(
+    const char *filename,
+    FILE **out_file
+);
+static mylite_storage_result read_transaction_journal_snapshot(
+    const char *filename,
+    mylite_storage_transaction_journal_snapshot *out_snapshot
+);
 static mylite_storage_result open_existing_file_for_update(const char *filename, FILE **out_file);
 static mylite_storage_result close_existing_file(FILE *file);
 static mylite_storage_statement *active_statement_for(const char *filename);
@@ -261,6 +277,7 @@ static mylite_storage_statement *active_statement_for_any_owner(const char *file
 static mylite_storage_statement *active_read_snapshot_for(const char *filename);
 static int active_statement_has_file(FILE *file);
 static int active_read_snapshot_has_file(FILE *file);
+static int active_transaction_journal_snapshot_has_file(FILE *file);
 static mylite_storage_result begin_checkpoint(
     const char *filename,
     mylite_storage_statement **out_statement,
@@ -4132,6 +4149,16 @@ static mylite_storage_result open_existing_file(const char *filename, FILE **out
 
     mylite_storage_result result = recover_pending_journals(filename);
     if (result != MYLITE_STORAGE_OK) {
+        if (result == MYLITE_STORAGE_BUSY) {
+            const mylite_storage_result snapshot_result =
+                open_transaction_journal_snapshot(filename, out_file);
+            if (snapshot_result == MYLITE_STORAGE_OK) {
+                return MYLITE_STORAGE_OK;
+            }
+            if (snapshot_result != MYLITE_STORAGE_BUSY) {
+                return snapshot_result;
+            }
+        }
         return result;
     }
 
@@ -4148,6 +4175,77 @@ static mylite_storage_result open_existing_file(const char *filename, FILE **out
     }
 
     *out_file = file;
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result open_transaction_journal_snapshot(
+    const char *filename,
+    FILE **out_file
+) {
+    errno = 0;
+    FILE *file = fopen(filename, "rb");
+    if (file == NULL) {
+        return errno == ENOENT ? MYLITE_STORAGE_NOTFOUND : MYLITE_STORAGE_IOERR;
+    }
+
+    if (flock(fileno(file), LOCK_SH | LOCK_NB) == 0) {
+        flock(fileno(file), LOCK_UN);
+        fclose(file);
+        return MYLITE_STORAGE_BUSY;
+    }
+    if (!is_lock_conflict(errno)) {
+        fclose(file);
+        return MYLITE_STORAGE_IOERR;
+    }
+
+    mylite_storage_transaction_journal_snapshot snapshot = {0};
+    mylite_storage_result result = read_transaction_journal_snapshot(filename, &snapshot);
+    if (result != MYLITE_STORAGE_OK) {
+        fclose(file);
+        return result == MYLITE_STORAGE_CORRUPT ? MYLITE_STORAGE_BUSY : result;
+    }
+
+    snapshot.file = file;
+    active_transaction_journal_snapshot = snapshot;
+    *out_file = file;
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result read_transaction_journal_snapshot(
+    const char *filename,
+    mylite_storage_transaction_journal_snapshot *out_snapshot
+) {
+    char *journal_filename = transaction_journal_path(filename);
+    if (journal_filename == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    errno = 0;
+    FILE *journal_file = fopen(journal_filename, "rb");
+    free(journal_filename);
+    if (journal_file == NULL) {
+        return errno == ENOENT ? MYLITE_STORAGE_BUSY : MYLITE_STORAGE_IOERR;
+    }
+
+    mylite_storage_recovery_journal journal = {0};
+    unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                       [MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {{0}};
+    mylite_storage_header saved_header = {0};
+    mylite_storage_result result =
+        read_recovery_journal(journal_file, &journal, pages, &saved_header);
+    if (fclose(journal_file) != 0 && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    if (journal.page_count != 2U) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    out_snapshot->header = saved_header;
+    memcpy(out_snapshot->header_page, pages[0], sizeof(out_snapshot->header_page));
+    memcpy(out_snapshot->catalog_page, pages[1], sizeof(out_snapshot->catalog_page));
     return MYLITE_STORAGE_OK;
 }
 
@@ -4186,6 +4284,11 @@ static mylite_storage_result close_existing_file(FILE *file) {
         active_read_snapshot = NULL;
         clearerr(file);
         return MYLITE_STORAGE_OK;
+    }
+    if (active_transaction_journal_snapshot_has_file(file)) {
+        active_transaction_journal_snapshot = (mylite_storage_transaction_journal_snapshot){0};
+        clearerr(file);
+        return fclose(file) == 0 ? MYLITE_STORAGE_OK : MYLITE_STORAGE_IOERR;
     }
     /* Statement-owned handles stay open until checkpoint commit or rollback. */
     if (active_statement_has_file(file)) {
@@ -4261,6 +4364,11 @@ static int active_read_snapshot_has_file(FILE *file) {
     return active_read_snapshot != NULL && active_read_snapshot->file == file;
 }
 
+static int active_transaction_journal_snapshot_has_file(FILE *file) {
+    return active_transaction_journal_snapshot.file != NULL &&
+           active_transaction_journal_snapshot.file == file;
+}
+
 static mylite_storage_result close_statement(mylite_storage_statement *statement) {
     if (statement->file == NULL || !statement->owns_file) {
         return MYLITE_STORAGE_OK;
@@ -4324,6 +4432,19 @@ static mylite_storage_result read_page_at(
         if (page_id == active_read_snapshot->header.catalog_root_page &&
             page_size == active_read_snapshot->header.page_size) {
             memcpy(out_page, active_read_snapshot->catalog_page, page_size);
+            return MYLITE_STORAGE_OK;
+        }
+    }
+
+    if (active_transaction_journal_snapshot_has_file(file)) {
+        if (page_id == MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID &&
+            page_size == MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+            memcpy(out_page, active_transaction_journal_snapshot.header_page, page_size);
+            return MYLITE_STORAGE_OK;
+        }
+        if (page_id == active_transaction_journal_snapshot.header.catalog_root_page &&
+            page_size == active_transaction_journal_snapshot.header.page_size) {
+            memcpy(out_page, active_transaction_journal_snapshot.catalog_page, page_size);
             return MYLITE_STORAGE_OK;
         }
     }

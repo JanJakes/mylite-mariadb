@@ -29,7 +29,7 @@ first-party preset. Storage-engine groups use the opt-in
 | Group | Preset | CTest label | Surface |
 | --- | --- | --- | --- |
 | `public-api` | `dev` | `compat-public-api` | C API argument validation and version surface |
-| `storage-core` | `dev` | `compat-storage` | Primary file, catalog, rows, indexes, and mutations |
+| `storage-core` | `dev` | `compat-storage` | Primary file, catalog, rows, indexes, cross-process read snapshots, and mutations |
 | `crash-recovery` | `dev` | `compat-crash-recovery` | Rollback-journal, transaction-journal, and corrupt-journal recovery |
 | `transaction` | `storage-smoke-dev` | `compat-transaction` | Direct and prepared row-DML transaction start/completion, transactional engine table flags, two-handle transaction-owner read snapshots, MEMORY/HEAP volatile transaction/savepoint rollback, generated, explicit-insert/update, and `INSERT ... VALUES` / `INSERT ... SELECT` `ON DUPLICATE KEY UPDATE` explicit-update autoincrement rollback and reservation gaps, supported direct and prepared session autocommit mode, read-only/read-write, isolation-level, transaction variable, temporary row-DML, and completion-type transaction SET controls, direct and prepared case-insensitive quoted savepoint rollback/release, active transaction crash recovery, and unsupported transaction-control policy |
 | `transaction-hooks` | `storage-smoke-dev` | `compat-transaction-hooks` | MariaDB statement transaction and handler savepoint hook integration, including representative MEMORY volatile failed-statement and savepoint rollback |
