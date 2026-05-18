@@ -54,6 +54,8 @@ Covered by this slice:
 - `ALTER TABLE ... DROP CONSTRAINT IF EXISTS missing_name` skip behavior.
 - Duplicate-key enforcement and forced-index reads before and after close/reopen
   for supported constraint-backed unique keys.
+- Composite named unique constraints added through copy ALTER, including
+  duplicate tuple checks, forced-index reads, close/reopen, and drop behavior.
 
 Still planned:
 
@@ -161,6 +163,8 @@ Implemented:
 - The `failed-add-unique-constraint-rollback` follow-up slice covers failed
   `ADD CONSTRAINT ... UNIQUE` over duplicate existing rows preserving the old
   table, then successful add after duplicate cleanup.
+- The `composite-unique-constraint-ddl` follow-up slice covers named composite
+  unique constraints added and dropped through copy ALTER.
 
 No MariaDB source, public API, storage file-format, dependency, license, or
 binary-size change was required.

@@ -169,6 +169,7 @@ static void test_row_dml_transactions(void);
 static void test_create_table_persists_catalog_metadata(void);
 static void test_check_constraint_if_exists(void);
 static void test_non_check_constraint_ddl(void);
+static void test_composite_unique_constraint_ddl(void);
 static void test_primary_key_alter_ddl(void);
 static void test_failed_add_unique_constraint_rollback(void);
 static void test_create_table_if_not_exists(void);
@@ -462,6 +463,7 @@ int main(int argc, char **argv) {
     test_create_table_persists_catalog_metadata();
     test_check_constraint_if_exists();
     test_non_check_constraint_ddl();
+    test_composite_unique_constraint_ddl();
     test_primary_key_alter_ddl();
     test_failed_add_unique_constraint_rollback();
     test_create_table_if_not_exists();
@@ -7971,6 +7973,126 @@ static void test_non_check_constraint_ddl(void) {
         filename,
         "non_check_constraints",
         "constraint_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_composite_unique_constraint_ddl(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    table_context composite_index_rows = {0};
+    table_context reopened_composite_index_rows = {0};
+    table_context dropped_composite_index_rows = {0};
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE composite_constraints");
+    assert_exec_succeeds(db, "USE composite_constraints");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE localized_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "site_id INT NOT NULL, "
+        "slug VARCHAR(64) NOT NULL, "
+        "locale VARCHAR(16) NOT NULL, "
+        "title VARCHAR(64) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO localized_posts VALUES "
+        "(1, 1, 'about', 'en', 'About'), "
+        "(2, 1, 'contact', 'en', 'Contact'), "
+        "(3, 2, 'about', 'en', 'About Network')"
+    );
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE localized_posts "
+        "ADD CONSTRAINT site_slug_unique UNIQUE (site_id, slug), ALGORITHM=COPY"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM localized_posts WHERE Key_name = 'site_slug_unique'",
+            table_callback,
+            &composite_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(composite_index_rows.rows == 2);
+    assert_exec_fails(
+        db,
+        "INSERT INTO localized_posts VALUES (4, 1, 'about', 'fr', 'A propos')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO localized_posts VALUES (4, 2, 'contact', 'en', 'Contact Network')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM localized_posts FORCE INDEX (site_slug_unique) "
+        "WHERE site_id = 2 AND slug = 'contact'",
+        "4"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE composite_constraints");
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM localized_posts WHERE Key_name = 'site_slug_unique'",
+            table_callback,
+            &reopened_composite_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_composite_index_rows.rows == 2);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM localized_posts FORCE INDEX (site_slug_unique) "
+        "WHERE site_id = 1 AND slug = 'contact'",
+        "2"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO localized_posts VALUES (5, 2, 'about', 'fr', 'A propos Network')"
+    );
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE localized_posts DROP CONSTRAINT site_slug_unique, ALGORITHM=COPY"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM localized_posts WHERE Key_name = 'site_slug_unique'",
+            table_callback,
+            &dropped_composite_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(dropped_composite_index_rows.rows == 0);
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO localized_posts VALUES (5, 2, 'about', 'fr', 'A propos Network')"
+    );
+    assert_catalog_table_count(filename, "composite_constraints", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "composite_constraints",
+        "localized_posts",
         "InnoDB",
         "MYLITE"
     );
