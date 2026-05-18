@@ -12778,6 +12778,14 @@ static void test_create_or_replace_foreign_key_lifecycle(void) {
     assert_exec_succeeds(db, "USE replace_fk");
     assert_exec_succeeds(
         db,
+        "CREATE TABLE parent_template ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(32) NOT NULL, "
+        "UNIQUE KEY template_slug_key (slug)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
         "CREATE TABLE parent_posts ("
         "id INT NOT NULL PRIMARY KEY, "
         "slug VARCHAR(32) NOT NULL, "
@@ -12786,24 +12794,35 @@ static void test_create_or_replace_foreign_key_lifecycle(void) {
     );
     assert_exec_succeeds(
         db,
-        "CREATE TABLE child_posts ("
+        "CREATE TABLE child_like_posts ("
         "id INT NOT NULL PRIMARY KEY, "
         "parent_id INT NOT NULL, "
         "body VARCHAR(64) NOT NULL, "
-        "CONSTRAINT child_posts_parent FOREIGN KEY (parent_id) REFERENCES parent_posts(id)"
+        "CONSTRAINT child_like_posts_parent "
+        "FOREIGN KEY (parent_id) REFERENCES parent_posts(id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE child_ctas_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NOT NULL, "
+        "body VARCHAR(64) NOT NULL, "
+        "CONSTRAINT child_ctas_posts_parent "
+        "FOREIGN KEY (parent_id) REFERENCES parent_posts(id)"
         ") ENGINE=InnoDB"
     );
     assert_exec_succeeds(db, "INSERT INTO parent_posts VALUES (1, 'old-parent')");
-    assert_exec_succeeds(db, "INSERT INTO child_posts VALUES (1, 1, 'old-child')");
-    assert_catalog_table_count(filename, "replace_fk", 2U);
+    assert_exec_succeeds(db, "INSERT INTO child_like_posts VALUES (1, 1, 'old-like-child')");
+    assert_exec_succeeds(db, "INSERT INTO child_ctas_posts VALUES (1, 1, 'old-ctas-child')");
+    assert_catalog_table_count(filename, "replace_fk", 4U);
     assert_query_single_value(
         db,
         "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
         "WHERE CONSTRAINT_SCHEMA = 'replace_fk' "
-        "AND TABLE_NAME = 'child_posts' "
-        "AND CONSTRAINT_NAME = 'child_posts_parent' "
+        "AND TABLE_NAME IN ('child_like_posts', 'child_ctas_posts') "
         "AND REFERENCED_TABLE_NAME = 'parent_posts'",
-        "1"
+        "2"
     );
 
     assert_foreign_key_exec_fails(
@@ -12813,55 +12832,137 @@ static void test_create_or_replace_foreign_key_lifecycle(void) {
         "slug VARCHAR(32) NOT NULL"
         ") ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "replace_fk", 2U);
+    assert_catalog_table_count(filename, "replace_fk", 4U);
+    assert_foreign_key_exec_fails(
+        db,
+        "CREATE OR REPLACE TABLE parent_posts LIKE parent_template"
+    );
+    assert_catalog_table_count(filename, "replace_fk", 4U);
+    assert_foreign_key_exec_fails(
+        db,
+        "CREATE OR REPLACE TABLE parent_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(32) NOT NULL"
+        ") ENGINE=InnoDB "
+        "SELECT 2 AS id, 'new-parent' AS slug"
+    );
+    assert_catalog_table_count(filename, "replace_fk", 4U);
     assert_catalog_table_metadata(filename, "replace_fk", "parent_posts", "InnoDB", "MYLITE");
-    assert_catalog_table_metadata(filename, "replace_fk", "child_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(
+        filename,
+        "replace_fk",
+        "child_like_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "replace_fk",
+        "child_ctas_posts",
+        "InnoDB",
+        "MYLITE"
+    );
     assert(
         mylite_storage_table_exists(filename, "replace_fk", "parent_posts") == MYLITE_STORAGE_OK
     );
     assert(
-        mylite_storage_table_exists(filename, "replace_fk", "child_posts") == MYLITE_STORAGE_OK
+        mylite_storage_table_exists(filename, "replace_fk", "child_like_posts") ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_table_exists(filename, "replace_fk", "child_ctas_posts") ==
+        MYLITE_STORAGE_OK
     );
     assert_query_single_value(db, "SELECT slug FROM parent_posts WHERE id = 1", "old-parent");
-    assert_query_single_value(db, "SELECT body FROM child_posts WHERE id = 1", "old-child");
+    assert_query_single_value(
+        db,
+        "SELECT body FROM child_like_posts WHERE id = 1",
+        "old-like-child"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT body FROM child_ctas_posts WHERE id = 1",
+        "old-ctas-child"
+    );
     assert_query_single_value(
         db,
         "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
         "WHERE CONSTRAINT_SCHEMA = 'replace_fk' "
-        "AND TABLE_NAME = 'child_posts' "
-        "AND CONSTRAINT_NAME = 'child_posts_parent' "
+        "AND TABLE_NAME IN ('child_like_posts', 'child_ctas_posts') "
         "AND REFERENCED_TABLE_NAME = 'parent_posts'",
-        "1"
+        "2"
     );
-    assert_foreign_key_exec_fails(db, "INSERT INTO child_posts VALUES (2, 99, 'orphan')");
+    assert_foreign_key_exec_fails(db, "INSERT INTO child_like_posts VALUES (2, 99, 'orphan')");
+    assert_foreign_key_exec_fails(db, "INSERT INTO child_ctas_posts VALUES (2, 99, 'orphan')");
     assert_foreign_key_exec_fails(db, "UPDATE parent_posts SET id = 2 WHERE id = 1");
 
     assert_exec_succeeds(
         db,
-        "CREATE OR REPLACE TABLE child_posts ("
-        "id INT NOT NULL PRIMARY KEY, "
-        "loose_parent_id INT NULL, "
-        "body VARCHAR(64) NOT NULL, "
-        "KEY loose_parent_key (loose_parent_id)"
-        ") ENGINE=MyISAM"
+        "CREATE OR REPLACE TABLE child_like_posts LIKE parent_template"
     );
-    assert_catalog_table_count(filename, "replace_fk", 2U);
-    assert_catalog_table_metadata(filename, "replace_fk", "parent_posts", "InnoDB", "MYLITE");
-    assert_catalog_table_metadata(filename, "replace_fk", "child_posts", "MyISAM", "MYLITE");
-    assert_query_single_value(db, "SELECT COUNT(*) FROM child_posts", "0");
+    assert_catalog_table_count(filename, "replace_fk", 4U);
+    assert_catalog_table_metadata(
+        filename,
+        "replace_fk",
+        "child_like_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM child_like_posts", "0");
     assert_query_single_value(
         db,
         "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
         "WHERE CONSTRAINT_SCHEMA = 'replace_fk' "
-        "AND TABLE_NAME = 'child_posts' "
-        "AND CONSTRAINT_NAME = 'child_posts_parent'",
+        "AND TABLE_NAME = 'child_like_posts'",
         "0"
     );
-    assert_exec_succeeds(db, "INSERT INTO child_posts VALUES (1, 99, 'loose-child')");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'replace_fk' "
+        "AND TABLE_NAME = 'child_ctas_posts'",
+        "1"
+    );
+    assert_exec_succeeds(db, "INSERT INTO child_like_posts VALUES (1, 'loose-like-child')");
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM child_like_posts FORCE INDEX (template_slug_key) WHERE id = 1",
+        "loose-like-child"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE OR REPLACE TABLE child_ctas_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "loose_parent_id INT NULL, "
+        "body VARCHAR(64) NOT NULL, "
+        "KEY loose_parent_key (loose_parent_id)"
+        ") ENGINE=MyISAM "
+        "SELECT 1 AS id, 99 AS loose_parent_id, 'loose-ctas-child' AS body"
+    );
+    assert_catalog_table_count(filename, "replace_fk", 4U);
+    assert_catalog_table_metadata(filename, "replace_fk", "parent_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(
+        filename,
+        "replace_fk",
+        "child_ctas_posts",
+        "MyISAM",
+        "MYLITE"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM child_ctas_posts", "1");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'replace_fk' "
+        "AND TABLE_NAME IN ('child_like_posts', 'child_ctas_posts')",
+        "0"
+    );
+    assert_exec_succeeds(db, "INSERT INTO child_ctas_posts VALUES (2, 100, 'loose-inserted')");
     assert_exec_succeeds(db, "UPDATE parent_posts SET id = 2 WHERE id = 1");
     assert_query_single_value(
         db,
-        "SELECT id FROM child_posts FORCE INDEX (loose_parent_key) WHERE loose_parent_id = 99",
+        "SELECT id FROM child_ctas_posts FORCE INDEX (loose_parent_key) "
+        "WHERE loose_parent_id = 99",
         "1"
     );
 
@@ -12871,17 +12972,38 @@ static void test_create_or_replace_foreign_key_lifecycle(void) {
     db = open_database_with_filename(root, filename);
     assert_no_runtime_schema_directory(root, "replace_fk");
     assert_exec_succeeds(db, "USE replace_fk");
-    assert_catalog_table_count(filename, "replace_fk", 2U);
+    assert_catalog_table_count(filename, "replace_fk", 4U);
     assert_catalog_table_metadata(filename, "replace_fk", "parent_posts", "InnoDB", "MYLITE");
-    assert_catalog_table_metadata(filename, "replace_fk", "child_posts", "MyISAM", "MYLITE");
+    assert_catalog_table_metadata(
+        filename,
+        "replace_fk",
+        "child_like_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "replace_fk",
+        "child_ctas_posts",
+        "MyISAM",
+        "MYLITE"
+    );
     assert_query_single_value(db, "SELECT slug FROM parent_posts WHERE id = 2", "old-parent");
-    assert_query_single_value(db, "SELECT body FROM child_posts WHERE id = 1", "loose-child");
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM child_like_posts WHERE id = 1",
+        "loose-like-child"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT body FROM child_ctas_posts WHERE id = 1",
+        "loose-ctas-child"
+    );
     assert_query_single_value(
         db,
         "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
         "WHERE CONSTRAINT_SCHEMA = 'replace_fk' "
-        "AND TABLE_NAME = 'child_posts' "
-        "AND CONSTRAINT_NAME = 'child_posts_parent'",
+        "AND TABLE_NAME IN ('child_like_posts', 'child_ctas_posts')",
         "0"
     );
     assert(mylite_close(db) == MYLITE_OK);

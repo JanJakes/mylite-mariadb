@@ -46,9 +46,11 @@ This is a bounded InnoDB-compatible FK lifecycle claim for MyLite's routed
 by OR REPLACE because replacement would first drop the parent. A child table can
 be replaced, and the old child FK metadata disappears with the old child table.
 
-Broader OR REPLACE matrices remain planned, including FK action combinations,
-multi-table DDL interactions, temporary table replacement with FKs, unsupported
-replacement definitions, and full SQL transaction semantics.
+Follow-up coverage extends this to representative `LIKE` and CTAS parent/child
+replacement forms. Broader OR REPLACE matrices remain planned, including FK
+action combinations, multi-table DDL interactions, temporary table replacement
+with FKs, unsupported replacement definitions, and full SQL transaction
+semantics.
 
 ## Design
 
@@ -88,9 +90,12 @@ storage-smoke embedded build.
 - Create a routed InnoDB parent/child FK pair under `libmylite`.
 - Verify `CREATE OR REPLACE TABLE parent (...)` fails while preserving parent
   rows, child rows, catalog metadata, and `INFORMATION_SCHEMA` FK metadata.
+- Verify `CREATE OR REPLACE TABLE parent LIKE source` and parent CTAS
+  replacement fail with the same preservation guarantees.
 - Verify child inserts with missing parents and parent key changes still fail
   after the rejected parent replacement.
-- Replace the child table with a MyISAM-routed definition that has no FK.
+- Replace child tables with representative `LIKE` and MyISAM-routed CTAS
+  definitions that have no FK.
 - Verify the old child rows and FK metadata are gone, orphan child rows can be
   inserted, and parent key changes are no longer blocked.
 - Close and reopen the database and verify the replacement child definition,
@@ -114,10 +119,12 @@ Implemented in storage-engine smoke coverage:
 
 - Rejected OR REPLACE over a referenced parent preserves parent/child rows,
   catalog metadata, and FK information-schema metadata.
+- Rejected `LIKE` and CTAS OR REPLACE over a referenced parent preserve
+  parent/child rows, catalog metadata, and FK information-schema metadata.
 - Rejected parent replacement leaves child inserts with missing parents and
   parent key changes protected by the original FK.
-- OR REPLACE over a child table publishes the replacement child definition,
-  removes old child FK metadata, drops old child rows, and allows orphan rows
-  plus parent key changes after the FK is gone.
+- OR REPLACE over child tables publishes replacement `LIKE` and CTAS
+  definitions, removes old child FK metadata, drops old child rows, and allows
+  orphan rows plus parent key changes after the FKs are gone.
 - Close/reopen rediscovers the replacement child table and absent FK metadata
   without durable MariaDB sidecars.

@@ -356,9 +356,10 @@ replacement. Representative failed OR REPLACE rollback covers self-LIKE
 rejection, unsupported replacement definitions, and duplicate-key replacement
 CTAS while preserving old target metadata, rows, indexes, and autoincrement
 state through the existing statement checkpoint. FK-aware OR REPLACE coverage
-rejects replacing a referenced parent without dropping parent rows, child rows,
-or FK metadata, and verifies replacing a child table removes its old FK
-metadata before publishing the replacement definition. Representative failed
+rejects plain, LIKE, and CTAS replacement of a referenced parent without
+dropping parent rows, child rows, or FK metadata, and verifies LIKE and CTAS
+replacement of child tables removes old FK metadata before publishing the
+replacement definition. Representative failed
 multi-table DROP/RENAME rollback preserves original target metadata, rows, and
 indexes through the same checkpoint, including child FK metadata for covered
 FK table shapes; broader locking, temporary-table edge cases, and SQL
