@@ -39,8 +39,8 @@ support separately from the MyISAM/Aria grouped-prefix form:
 
 - Accept routed durable tables whose autoincrement column appears later in a
   supported key and no first-key autoincrement key exists.
-- Generate values per exact key prefix by scanning current MyLite rows and
-  computing `max(auto_increment_column) + 1` for that prefix.
+- Generate values per exact key prefix by finding current MyLite rows in that
+  prefix and computing `max(auto_increment_column) + 1` for that prefix.
 - Preserve the existing table-local counter for first-key single-column and
   first-key compound autoincrement tables.
 - Cover explicit high values, repeated prefixes, new prefixes, close/reopen,
@@ -48,7 +48,7 @@ support separately from the MyISAM/Aria grouped-prefix form:
 
 ## Non-Goals
 
-- Durable per-prefix counter pages or index-assisted prefix maximum lookup.
+- Durable per-prefix counter pages or B-tree-style prefix maximum lookup.
 - Changing table-local autoincrement behavior for first-key definitions.
 - Transaction-aware rollback of consumed generated values.
 - Cross-process allocation guarantees beyond the current file lock behavior.
@@ -81,15 +81,16 @@ For `get_auto_increment()`:
 1. keep the existing table-local path when `next_number_keypart == 0`;
 2. for grouped keys, serialize the current row's key prefix before the
    autoincrement part;
-3. read current live rows from MyLite storage;
-4. compare each row's serialized prefix with the current prefix;
-5. return the largest non-negative autoincrement value in the prefix plus one,
+3. read current live index entries for the grouped key;
+4. compare each entry's serialized prefix with the current prefix;
+5. fetch only matching live rows and read the autoincrement field;
+6. return the largest non-negative autoincrement value in the prefix plus one,
    or `1` for a new prefix;
-6. reserve a single generated value so MariaDB calls back for the next row.
+7. reserve a single generated value so MariaDB calls back for the next row.
 
-The scan is intentionally simple for the first compatibility slice. MyLite's
-append-only index entries can support a faster prefix maximum lookup later,
-but correctness should land before optimizing this path.
+The first compatibility slice used a table-row scan. The current implementation
+uses MyLite's live index-entry stream to narrow candidate rows. B-tree pages or
+a direct prefix-maximum primitive remain future performance work.
 
 ## File Lifecycle
 
@@ -125,8 +126,8 @@ adds handler logic and tests only.
 - Verify a different prefix continues from its own maximum.
 - Verify duplicate compound keys still fail.
 - Verify supported update/delete and forced-index reads keep rows visible.
-- Verify close/reopen preserves grouped allocation because it scans durable
-  rows.
+- Verify close/reopen preserves grouped allocation through live index entries
+  and matching durable rows.
 - Keep first-key compound autoincrement coverage intact.
 - Run `git diff --check`, the focused storage-engine smoke binary,
   `ctest --preset storage-smoke-dev`, and `ctest --preset dev`.
@@ -143,9 +144,10 @@ adds handler logic and tests only.
 
 ## Risks And Open Questions
 
-- The scan-based implementation is O(rows) per generated value. That is
-  acceptable for this compatibility slice but should be replaced by an
-  index-assisted path before large grouped-write workloads are advertised.
+- The append-only index-entry implementation is O(index entries) per generated
+  value. That is better than the earlier row scan, but large grouped-write
+  workloads still need a real prefix-maximum lookup before performance is
+  advertised.
 - The current table-level `AUTO_INCREMENT` value may still reflect explicit
   high values for `SHOW CREATE TABLE`; grouped generation itself does not rely
   on that table-local counter.

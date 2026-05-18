@@ -9259,6 +9259,10 @@ static void test_autoincrement_key_policy(void) {
     );
     assert_exec_succeeds(db, "INSERT INTO grouped_auto_posts (category, title) VALUES (4, 'd1')");
     assert_query_single_value(db, "SELECT id FROM grouped_auto_posts WHERE category = 4", "1");
+    assert_exec_succeeds(db, "INSERT INTO grouped_auto_posts VALUES (8, 50, 'e50')");
+    assert_exec_succeeds(db, "DELETE FROM grouped_auto_posts WHERE category = 8 AND id = 50");
+    assert_exec_succeeds(db, "INSERT INTO grouped_auto_posts (category, title) VALUES (8, 'e1')");
+    assert_query_single_value(db, "SELECT id FROM grouped_auto_posts WHERE category = 8", "1");
     assert_exec_succeeds(
         db,
         "CREATE TABLE grouped_auto_aria_posts ("

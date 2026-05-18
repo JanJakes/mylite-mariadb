@@ -14,8 +14,8 @@ later-in-key allocation.
 - Do not cover every integer width, overflow boundary, negative explicit value,
   or offset-greater-than-increment behavior.
 - Do not add transaction-aware rollback of consumed generated values.
-- Do not replace the scan-backed grouped allocation path with an index-assisted
-  allocator.
+- Do not replace the grouped allocation path with a B-tree-style prefix-maximum
+  lookup.
 
 ## Source Findings
 
@@ -29,8 +29,8 @@ MariaDB base: `mariadb-11.8.6`
   increment into the storage-engine `get_auto_increment()` hook for each
   generated row.
 - `mariadb/storage/mylite/ha_mylite.cc:ha_mylite::get_auto_increment()` uses
-  table-local durable state for first-key allocation and scan-backed live-row
-  maxima for grouped prefix allocation.
+  table-local durable state for first-key allocation and live-index-entry
+  prefix maxima for grouped prefix allocation.
 
 ## Compatibility Impact
 
@@ -63,8 +63,8 @@ or reservation behavior.
 ## File Lifecycle
 
 No file-format or companion-file change is introduced. First-key allocation
-uses durable table autoincrement state. Grouped allocation continues to scan
-live rows in the primary `.mylite` file.
+uses durable table autoincrement state. Grouped allocation uses live index
+entries and matching rows in the primary `.mylite` file.
 
 ## Embedded Lifecycle And API
 
@@ -104,5 +104,5 @@ Implemented in storage-engine smoke coverage:
   close/reopen preserves the next generated value `39`.
 - Grouped-prefix multi-row inserts allocate independent per-prefix sequences
   before and after explicit `(prefix=1, id=30)`.
-- Close/reopen preserves grouped allocation by scanning live rows and rounding
-  each prefix independently.
+- Close/reopen preserves grouped allocation by reading live index entries and
+  rounding each prefix independently.

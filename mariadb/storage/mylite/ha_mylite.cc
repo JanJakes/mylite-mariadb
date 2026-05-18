@@ -160,6 +160,10 @@ static ulonglong mylite_first_auto_increment_value(ulonglong next_value,
 static int mylite_read_grouped_auto_increment(
   const char *primary_file, const char *schema_name, const char *table_name,
   bool volatile_rows, TABLE *table, ulonglong *out_next_value);
+static int mylite_copy_stored_row_to_record(TABLE *table, const uchar *payload,
+                                            size_t payload_size,
+                                            uchar *record,
+                                            uchar **out_blob_payloads);
 static int mylite_check_duplicate_keys(
   const char *primary_file, const char *schema_name, const char *table_name,
   TABLE *table, const mylite_storage_index_entry *index_entries,
@@ -3227,42 +3231,36 @@ static int mylite_read_grouped_auto_increment(
   if (error)
     return error;
 
-  mylite_storage_rowset rowset= {sizeof(rowset), NULL, 0, 0, NULL, NULL, 0,
-                                 NULL};
+  mylite_storage_index_entryset entryset= {sizeof(entryset), NULL, 0, 0,
+                                           NULL, NULL, NULL};
   const mylite_storage_result storage_result= volatile_rows ?
-    mylite_volatile_read_rows(primary_file, schema_name, table_name,
-                              &rowset) :
-    mylite_storage_read_rows(primary_file, schema_name, table_name, &rowset);
+    mylite_volatile_read_index_entries(primary_file, schema_name, table_name,
+                                       table->s->next_number_index,
+                                       &entryset) :
+    mylite_storage_read_index_entries(primary_file, schema_name, table_name,
+                                      table->s->next_number_index,
+                                      &entryset);
   if (storage_result != MYLITE_STORAGE_OK)
   {
     free(target_prefix);
     return mylite_storage_to_handler_error(storage_result);
   }
 
-  uchar *rows= NULL;
-  size_t row_size= 0;
-  size_t row_count= 0;
-  ulonglong *row_ids= NULL;
-  uchar *blob_payloads= NULL;
-  size_t blob_payloads_size= 0;
-  error= mylite_prepare_scan_rows(table, &rowset, &rows, &row_size,
-                                  &row_count, &row_ids, &blob_payloads,
-                                  &blob_payloads_size);
-  mylite_storage_free_rowset(&rowset);
-  if (error)
+  if (entryset.entry_count > 0 &&
+      (!entryset.keys || !entryset.key_offsets || !entryset.key_sizes ||
+       !entryset.row_ids))
   {
+    mylite_storage_free_index_entryset(&entryset);
     free(target_prefix);
-    return error;
+    return HA_ERR_CRASHED_ON_USAGE;
   }
 
   uchar *saved_record0= static_cast<uchar *>(
     malloc(table->s->reclength));
   if (!saved_record0)
   {
+    mylite_storage_free_index_entryset(&entryset);
     free(target_prefix);
-    free(rows);
-    free(row_ids);
-    free(blob_payloads);
     return HA_ERR_OUT_OF_MEM;
   }
   memcpy(saved_record0, table->record[0], table->s->reclength);
@@ -3272,24 +3270,50 @@ static int mylite_read_grouped_auto_increment(
   if (!auto_field)
     error= HA_ERR_CRASHED_ON_USAGE;
 
-  for (size_t i= 0; !error && i < row_count; ++i)
+  for (size_t i= 0; !error && i < entryset.entry_count; ++i)
   {
-    memcpy(table->record[0], rows + (i * row_size), table->s->reclength);
-
-    uchar *row_prefix= NULL;
-    size_t row_prefix_size= 0;
-    error= mylite_make_key_prefix(table, auto_key, table->record[0],
-                                  prefix_part_count, nullable_bitmap,
-                                  &row_prefix, &row_prefix_size);
-    if (error)
+    if (entryset.key_sizes[i] != auto_key->key_length ||
+        entryset.key_offsets[i] > entryset.key_bytes ||
+        entryset.key_sizes[i] > entryset.key_bytes - entryset.key_offsets[i] ||
+        target_prefix_size > entryset.key_sizes[i])
+    {
+      error= HA_ERR_CRASHED_ON_USAGE;
       break;
-    const bool matches= mylite_key_prefix_equals(
-      target_prefix, target_prefix_size, row_prefix, row_prefix_size);
-    free(row_prefix);
-    if (!matches)
+    }
+
+    const uchar *entry_key= entryset.keys + entryset.key_offsets[i];
+    if (memcmp(entry_key, target_prefix, target_prefix_size) != 0)
       continue;
 
+    uchar *row_payload= NULL;
+    size_t row_payload_size= 0;
+    const mylite_storage_result row_result= volatile_rows ?
+      mylite_volatile_read_row(primary_file, schema_name, table_name,
+                               entryset.row_ids[i], &row_payload,
+                               &row_payload_size) :
+      mylite_storage_read_row(primary_file, schema_name, table_name,
+                              entryset.row_ids[i], &row_payload,
+                              &row_payload_size);
+    if (row_result != MYLITE_STORAGE_OK)
+    {
+      error= mylite_storage_to_handler_error(row_result);
+      break;
+    }
+
+    uchar *row_blob_payloads= NULL;
+    error= mylite_copy_stored_row_to_record(table, row_payload,
+                                            row_payload_size,
+                                            table->record[0],
+                                            &row_blob_payloads);
+    mylite_storage_free(row_payload);
+    if (error)
+    {
+      free(row_blob_payloads);
+      break;
+    }
+
     const longlong signed_value= auto_field->val_int();
+    free(row_blob_payloads);
     if (signed_value < 0 && !(auto_field->flags & UNSIGNED_FLAG))
       continue;
 
@@ -3305,13 +3329,44 @@ static int mylite_read_grouped_auto_increment(
 
   memcpy(table->record[0], saved_record0, table->s->reclength);
   free(saved_record0);
+  mylite_storage_free_index_entryset(&entryset);
   free(target_prefix);
-  free(rows);
-  free(row_ids);
-  free(blob_payloads);
   if (!error)
     *out_next_value= next_value;
   return error;
+}
+
+static int mylite_copy_stored_row_to_record(TABLE *table, const uchar *payload,
+                                            size_t payload_size,
+                                            uchar *record,
+                                            uchar **out_blob_payloads)
+{
+  *out_blob_payloads= NULL;
+  size_t blob_payloads_size= 0;
+  int error= mylite_scan_stored_row(table, payload, payload_size,
+                                    &blob_payloads_size);
+  if (error)
+    return error;
+
+  uchar *blob_payloads= NULL;
+  if (blob_payloads_size > 0)
+  {
+    blob_payloads= static_cast<uchar *>(malloc(blob_payloads_size));
+    if (!blob_payloads)
+      return HA_ERR_OUT_OF_MEM;
+  }
+
+  size_t blob_payloads_used= 0;
+  error= mylite_copy_stored_row_to_scan(table, payload, payload_size, record,
+                                        blob_payloads, &blob_payloads_used);
+  if (error || blob_payloads_used != blob_payloads_size)
+  {
+    free(blob_payloads);
+    return error ? error : HA_ERR_CRASHED_ON_USAGE;
+  }
+
+  *out_blob_payloads= blob_payloads;
+  return 0;
 }
 
 static int mylite_check_duplicate_keys(
