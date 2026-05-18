@@ -188,6 +188,7 @@ static void test_create_table_persists_catalog_metadata(void);
 static void test_check_constraint_if_exists(void);
 static void test_non_check_constraint_ddl(void);
 static void test_composite_unique_constraint_ddl(void);
+static void test_nullable_composite_unique_constraint_ddl(void);
 static void test_generated_unique_constraint_ddl(void);
 static void test_generated_unique_constraint_matrix(void);
 static void test_failed_generated_unique_constraint_rollback(void);
@@ -505,6 +506,7 @@ int main(int argc, char **argv) {
     test_check_constraint_if_exists();
     test_non_check_constraint_ddl();
     test_composite_unique_constraint_ddl();
+    test_nullable_composite_unique_constraint_ddl();
     test_generated_unique_constraint_ddl();
     test_generated_unique_constraint_matrix();
     test_failed_generated_unique_constraint_rollback();
@@ -8254,6 +8256,145 @@ static void test_composite_unique_constraint_ddl(void) {
         filename,
         "composite_constraints",
         "localized_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_nullable_composite_unique_constraint_ddl(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    table_context nullable_composite_index_rows = {0};
+    table_context reopened_nullable_composite_index_rows = {0};
+    table_context dropped_nullable_composite_index_rows = {0};
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE nullable_composite_constraints");
+    assert_exec_succeeds(db, "USE nullable_composite_constraints");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE localized_external_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "tenant_id INT NOT NULL, "
+        "external_id INT NULL, "
+        "locale VARCHAR(16) NULL, "
+        "title VARCHAR(64) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO localized_external_posts VALUES "
+        "(1, 1, NULL, 'en', 'Null external one'), "
+        "(2, 1, NULL, 'en', 'Null external two'), "
+        "(3, 1, 7, NULL, 'Null locale one'), "
+        "(4, 1, 7, NULL, 'Null locale two'), "
+        "(5, 1, 7, 'en', 'Exact one'), "
+        "(6, 2, 7, 'en', 'Other tenant')"
+    );
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE localized_external_posts "
+        "ADD CONSTRAINT tenant_external_locale_unique "
+        "UNIQUE (tenant_id, external_id, locale), ALGORITHM=COPY"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM localized_external_posts "
+            "WHERE Key_name = 'tenant_external_locale_unique'",
+            table_callback,
+            &nullable_composite_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(nullable_composite_index_rows.rows == 3);
+    assert_exec_fails(
+        db,
+        "INSERT INTO localized_external_posts VALUES "
+        "(7, 1, 7, 'en', 'Exact duplicate')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO localized_external_posts VALUES "
+        "(7, 1, NULL, 'en', 'Additional null external')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO localized_external_posts VALUES "
+        "(8, 1, 7, NULL, 'Additional null locale')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM localized_external_posts "
+        "FORCE INDEX (tenant_external_locale_unique) "
+        "WHERE tenant_id = 2 AND external_id = 7 AND locale = 'en'",
+        "6"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE nullable_composite_constraints");
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM localized_external_posts "
+            "WHERE Key_name = 'tenant_external_locale_unique'",
+            table_callback,
+            &reopened_nullable_composite_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_nullable_composite_index_rows.rows == 3);
+    assert_exec_fails(
+        db,
+        "INSERT INTO localized_external_posts VALUES "
+        "(9, 1, 7, 'en', 'Reopened exact duplicate')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM localized_external_posts "
+        "FORCE INDEX (tenant_external_locale_unique) "
+        "WHERE tenant_id = 1 AND external_id IS NULL AND locale = 'en'",
+        "3"
+    );
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE localized_external_posts "
+        "DROP CONSTRAINT tenant_external_locale_unique, ALGORITHM=COPY"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM localized_external_posts "
+            "WHERE Key_name = 'tenant_external_locale_unique'",
+            table_callback,
+            &dropped_nullable_composite_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(dropped_nullable_composite_index_rows.rows == 0);
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO localized_external_posts VALUES "
+        "(9, 1, 7, 'en', 'Post-drop exact duplicate')"
+    );
+    assert_catalog_table_count(filename, "nullable_composite_constraints", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "nullable_composite_constraints",
+        "localized_external_posts",
         "InnoDB",
         "MYLITE"
     );

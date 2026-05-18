@@ -103,5 +103,6 @@ Implemented in storage-engine smoke coverage.
 
 ## Risks And Unresolved Questions
 
-- Broader nullable composite unique-key behavior remains covered only by
-  existing ordinary unique-key semantics, not a full constraint matrix.
+- Nullable composite unique-key behavior is covered by the separate
+  `nullable-composite-unique-constraint-ddl` slice, but exhaustive nullable
+  unique-key matrices remain planned.

@@ -415,6 +415,9 @@ long-unique hash metadata reject before catalog publication, including generated
 BLOB/TEXT columns. MariaDB 11.8 does not expose MySQL-style base-table
 expression key-part syntax; full BLOB/TEXT index support, MySQL-style
 expression-index compatibility, and exhaustive expression matrices remain planned.
+Nullable composite unique constraints preserve MariaDB NULL semantics through
+the same retained-key and key-tuple paths: exact non-NULL duplicates reject, but
+rows with NULL in nullable key parts do not conflict.
 Prepared execution diagnostics are covered for representative generated-column
 unique-key failures.
 Representative dump-style fixture import is covered for generated-column

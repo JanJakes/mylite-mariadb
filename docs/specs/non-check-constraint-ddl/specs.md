@@ -166,6 +166,8 @@ Implemented:
   table, then successful add after duplicate cleanup.
 - The `composite-unique-constraint-ddl` follow-up slice covers named composite
   unique constraints added and dropped through copy ALTER.
+- The `nullable-composite-unique-constraint-ddl` follow-up slice covers nullable
+  composite unique constraints added and dropped through copy ALTER.
 - The `generated-unique-constraint-ddl` follow-up slice covers named unique
   constraints over supported generated columns.
 - The `generated-unique-constraint-matrix` follow-up slice covers composite
