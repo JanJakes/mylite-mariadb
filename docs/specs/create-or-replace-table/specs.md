@@ -49,8 +49,8 @@ MariaDB base: `mariadb-11.8.6`
 ## Non-Goals
 
 - Failed OR REPLACE rollback beyond the representative follow-up coverage for
-  self-LIKE rejection, unsupported replacement definitions, and duplicate-key
-  replacement CTAS.
+  self-LIKE rejection, missing-source replacement inputs, unsupported
+  replacement definitions, and duplicate-key replacement CTAS.
 - `CREATE OR REPLACE TEMPORARY TABLE` beyond the representative temporary slice,
   `IGNORE` / `REPLACE` CTAS, lock-table edge cases, views, foreign keys,
   partitions, triggers, or unsupported index classes.

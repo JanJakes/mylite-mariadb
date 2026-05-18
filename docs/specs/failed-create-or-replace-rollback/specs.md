@@ -37,8 +37,10 @@ MariaDB base: `mariadb-11.8.6`
 
 - Failed `CREATE OR REPLACE TABLE target LIKE target` over a routed MyLite
   table.
+- Failed `CREATE OR REPLACE TABLE target LIKE missing_source`.
 - Failed `CREATE OR REPLACE TABLE target (...)` where replacement creation
   reaches the MyLite handler but the replacement definition is unsupported.
+- Failed `CREATE OR REPLACE TABLE target AS SELECT ... FROM missing_source`.
 - Failed `CREATE OR REPLACE TABLE target (...) SELECT ...` where replacement
   row population fails after the replacement target has been created.
 - Old target table visibility, requested-engine metadata, rows, indexes,
@@ -106,8 +108,10 @@ test code unless a checkpoint bug needs a production fix.
 - Add storage-engine smoke coverage that:
   - creates an old target with rows, supported indexes, and autoincrement
     state;
-  - verifies failed self-LIKE OR REPLACE preserves the old target;
+  - verifies failed self-LIKE and missing-source LIKE OR REPLACE preserve the
+    old target;
   - verifies failed unsupported-index replacement preserves the old target;
+  - verifies failed missing-source CTAS replacement preserves the old target;
   - verifies failed duplicate-key replacement CTAS preserves the old target;
   - inserts a new row after the failed replacements to prove autoincrement
     state is still the old target's state;
@@ -129,6 +133,8 @@ test code unless a checkpoint bug needs a production fix.
 Implemented in storage-engine smoke coverage:
 
 - Failed self-LIKE OR REPLACE preserves the old target.
+- Failed missing-source LIKE and missing-source CTAS replacements preserve the
+  old target.
 - Failed unsupported-index replacement creation preserves the old target.
 - Failed duplicate-key replacement CTAS preserves the old target.
 - The old target's requested-engine metadata, rows, supported indexes, and

@@ -359,9 +359,10 @@ replacement definition, writes replacement rows and indexes where applicable,
 and verifies close/reopen visibility. The plain replacement coverage verifies
 old rows, old indexes, and old autoincrement state are not SQL-visible after
 replacement. Representative failed OR REPLACE rollback covers self-LIKE
-rejection, unsupported replacement definitions, and duplicate-key replacement
-CTAS while preserving old target metadata, rows, indexes, and autoincrement
-state through the existing statement checkpoint. FK-aware OR REPLACE coverage
+rejection, missing-source LIKE/CTAS inputs, unsupported replacement
+definitions, and duplicate-key replacement CTAS while preserving old target
+metadata, rows, indexes, and autoincrement state through the existing statement
+checkpoint. FK-aware OR REPLACE coverage
 rejects plain, LIKE, and CTAS replacement of a referenced parent without
 dropping parent rows, child rows, or FK metadata, and verifies LIKE and CTAS
 replacement of child tables removes old FK metadata before publishing the

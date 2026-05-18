@@ -12842,6 +12842,30 @@ static void test_failed_create_or_replace_rollback(void) {
     );
     assert_catalog_table_metadata(filename, "replace_rollback", "target_posts", "MyISAM", "MYLITE");
 
+    assert_exec_fails(db, "CREATE OR REPLACE TABLE target_posts LIKE missing_like_source");
+    assert_catalog_table_count(filename, "replace_rollback", 2U);
+    assert_query_single_value(db, "SELECT COUNT(*) FROM target_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM target_posts FORCE INDEX (slug_key) WHERE slug = 'old-alpha'",
+        "1"
+    );
+    assert_catalog_table_metadata(filename, "replace_rollback", "target_posts", "MyISAM", "MYLITE");
+
+    assert_exec_fails(
+        db,
+        "CREATE OR REPLACE TABLE target_posts ENGINE=InnoDB AS "
+        "SELECT id, slug, body FROM missing_select_source"
+    );
+    assert_catalog_table_count(filename, "replace_rollback", 2U);
+    assert_query_single_value(db, "SELECT COUNT(*) FROM target_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM target_posts FORCE INDEX (body_prefix) WHERE body = 'old body two'",
+        "2"
+    );
+    assert_catalog_table_metadata(filename, "replace_rollback", "target_posts", "MyISAM", "MYLITE");
+
     assert_exec_fails(
         db,
         "CREATE OR REPLACE TABLE target_posts ("
