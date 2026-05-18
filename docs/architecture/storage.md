@@ -527,6 +527,12 @@ the reserved gap even when later generated rows never reach `write_row()`.
 SQL-layer failures before generated value allocation, such as CHECK failures
 that MariaDB rejects before handler writes, do not reserve MyLite values.
 Failed DDL checkpoints do not inherit the row-DML preservation marker.
+Explicit high-value updates to first-key autoincrement columns advance the
+table-local next value only after the MyLite update path passes duplicate-key
+and foreign-key checks. Failed duplicate-key updates and duplicate-key
+`UPDATE IGNORE` skips therefore leave the attempted high value unused, while a
+successful high-value update advances the next generated value and close/reopen
+state.
 The grouped autoincrement path is correct for the supported storage subset but
 still scans append-only index entries until storage-level B-tree navigation
 exists.
@@ -702,7 +708,11 @@ keep generated and explicit high-value gaps without making failed DDL metadata
 changes durable. Durable first-key generated inserts additionally publish and
 mark the whole requested reservation interval from `get_auto_increment()`, which
 preserves MariaDB/InnoDB-style failed multi-row insert gaps even when not every
-reserved generated value is written.
+reserved generated value is written. Successful explicit high-value updates to
+first-key autoincrement columns publish the new lower bound through the same
+ordinary autoincrement pages, so transaction rollback restores the row image
+while preserving the advanced counter for tables that existed at the
+checkpoint.
 
 This is still partial SQL transaction support. The MyLite handler still
 advertises non-transactional engine flags. Public `libmylite` SQL entry points

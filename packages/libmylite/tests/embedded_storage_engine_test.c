@@ -210,6 +210,7 @@ static void test_autoincrement_bigint_unsigned_maximum(void);
 static void test_autoincrement_transaction_rollback(void);
 static void test_autoincrement_failed_dml_gaps(void);
 static void test_autoincrement_reservation_gaps(void);
+static void test_autoincrement_update_gaps(void);
 static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
 static void test_index_ddl_if_exists(void);
@@ -533,6 +534,7 @@ int main(int argc, char **argv) {
     test_autoincrement_transaction_rollback();
     test_autoincrement_failed_dml_gaps();
     test_autoincrement_reservation_gaps();
+    test_autoincrement_update_gaps();
     test_indexed_rows();
     test_standalone_index_ddl();
     test_index_ddl_if_exists();
@@ -11693,6 +11695,140 @@ static void test_autoincrement_reservation_gaps(void) {
         db,
         "SELECT id FROM reservation_posts WHERE title = 'after-reopen'",
         "6"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_autoincrement_update_gaps(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_update_gaps");
+    assert_exec_succeeds(db, "USE auto_update_gaps");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE update_auto_posts ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (id),"
+        "UNIQUE KEY title_key (title)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO update_auto_posts (title) VALUES ('seed'), ('second')"
+    );
+    assert_exec_fails(
+        db,
+        "UPDATE update_auto_posts SET id = 100, title = 'seed' "
+        "WHERE title = 'second'"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM update_auto_posts WHERE title = 'second'",
+        "2"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO update_auto_posts (title) VALUES ('after-failed')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM update_auto_posts WHERE title = 'after-failed'",
+        "3"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "UPDATE IGNORE update_auto_posts SET id = 200, title = 'seed' "
+        "WHERE title = 'after-failed'"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM update_auto_posts WHERE title = 'after-failed'",
+        "3"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO update_auto_posts (title) VALUES ('after-ignore')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM update_auto_posts WHERE title = 'after-ignore'",
+        "4"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "UPDATE update_auto_posts SET id = 50 WHERE title = 'after-ignore'"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM update_auto_posts WHERE title = 'after-ignore'",
+        "50"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO update_auto_posts (title) VALUES ('after-success')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM update_auto_posts WHERE title = 'after-success'",
+        "51"
+    );
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(
+        db,
+        "UPDATE update_auto_posts SET id = 80 WHERE title = 'after-failed'"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM update_auto_posts WHERE title = 'after-failed'",
+        "80"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM update_auto_posts WHERE title = 'after-failed'",
+        "3"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM update_auto_posts WHERE id = 80",
+        "0"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO update_auto_posts (title) VALUES ('after-rollback')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM update_auto_posts WHERE title = 'after-rollback'",
+        "81"
+    );
+    assert_catalog_table_count(filename, "auto_update_gaps", 1U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE auto_update_gaps");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO update_auto_posts (title) VALUES ('after-reopen')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM update_auto_posts WHERE title = 'after-reopen'",
+        "82"
     );
 
     assert(mylite_close(db) == MYLITE_OK);
