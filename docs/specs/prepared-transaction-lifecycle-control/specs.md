@@ -57,7 +57,10 @@ durable transactional DDL, real storage isolation, and handler-level
 transaction flags remain unsupported. The later
 [Prepared Parameterized Transaction SET Control](../prepared-parameterized-transaction-set-control/specs.md)
 slice supports single-marker prepared transaction `SET` values by resolving the
-bound transition before MariaDB prepared execution.
+bound transition before MariaDB prepared execution. The later
+[Transaction Lifecycle Rejection Matrix](../transaction-lifecycle-rejection-matrix/specs.md)
+slice adds focused routed-storage coverage for the unsupported consistent
+snapshot, release completion, release completion-default, and XA forms.
 
 ## Design
 

@@ -6151,6 +6151,36 @@ static void test_row_dml_transactions(void) {
     assert_exec_succeeds(db, "ROLLBACK TO SAVEPOINT mylite_probe");
     assert_exec_succeeds(db, "RELEASE SAVEPOINT mylite_probe");
     assert_transaction_control_exec_fails(db, "XA START 'mylite-xid'");
+    assert_transaction_control_exec_fails(db, "XA END 'mylite-xid'");
+    assert_transaction_control_exec_fails(db, "XA PREPARE 'mylite-xid'");
+    assert_transaction_control_exec_fails(db, "XA COMMIT 'mylite-xid' ONE PHASE");
+    assert_transaction_control_exec_fails(db, "XA ROLLBACK 'mylite-xid'");
+    assert_transaction_control_exec_fails(db, "XA RECOVER");
+    assert_transaction_control_exec_fails(db, "START TRANSACTION WITH CONSISTENT SNAPSHOT");
+    assert_transaction_control_exec_fails(db, "COMMIT RELEASE");
+    assert_transaction_control_exec_fails(db, "ROLLBACK RELEASE");
+    assert_transaction_control_exec_fails(db, "COMMIT AND CHAIN RELEASE");
+    assert_transaction_control_exec_fails(db, "ROLLBACK AND NO CHAIN RELEASE");
+    assert_transaction_control_exec_fails(db, "SET completion_type=RELEASE");
+    assert_transaction_control_exec_fails(db, "SET completion_type=2");
+    assert_prepare_policy_fails_with_message(
+        db,
+        "XA START 'mylite-prepared-xid'",
+        "transaction control"
+    );
+    assert_prepare_policy_fails_with_message(db, "XA RECOVER", "transaction control");
+    assert_prepare_policy_fails_with_message(
+        db,
+        "START TRANSACTION WITH CONSISTENT SNAPSHOT",
+        "transaction control"
+    );
+    assert_prepare_policy_fails_with_message(db, "COMMIT RELEASE", "transaction control");
+    assert_prepare_policy_fails_with_message(db, "ROLLBACK RELEASE", "transaction control");
+    assert_prepare_policy_fails_with_message(
+        db,
+        "COMMIT AND CHAIN RELEASE",
+        "transaction control"
+    );
     assert_exec_succeeds(db, "ROLLBACK");
 
     assert_exec_succeeds(db, "BEGIN");

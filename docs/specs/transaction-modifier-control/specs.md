@@ -21,7 +21,10 @@ without claiming storage isolation semantics. The later
 slice supports MariaDB-preparable transaction `SET` controls while prepared
 transaction-start and completion commands remain unsupported. The later
 [Prepared Transaction Lifecycle Control](../prepared-transaction-lifecycle-control/specs.md)
-slice accepts the bounded prepared lifecycle subset.
+slice accepts the bounded prepared lifecycle subset. The later
+[Transaction Lifecycle Rejection Matrix](../transaction-lifecycle-rejection-matrix/specs.md)
+slice adds routed-storage coverage for the remaining unsupported consistent
+snapshot, release completion, release completion-default, and XA forms.
 
 ## Problem
 
