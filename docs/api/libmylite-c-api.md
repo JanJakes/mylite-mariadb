@@ -202,10 +202,10 @@ representative update/delete ordering, and bounded self-referencing, same-row
 self-referencing, and non-self `ON DELETE SET NULL` / `ON UPDATE SET NULL` over
 simple nullable child columns, plus bounded `ON DELETE CASCADE` over simple
 child table shapes, direct bounded `ON UPDATE CASCADE` over simple child table
-shapes, and supported combinations of those actions. The subset is advertised
-to MariaDB through the MyLite handlerton. Broader multi-table matrices,
-explicit same-row action override matrices, and broader recursive FK action
-chains remain unsupported.
+shapes, supported combinations of those actions, and the bounded same-row
+update action matrix for `ON UPDATE SET NULL` and `ON UPDATE CASCADE`. The
+subset is advertised to MariaDB through the MyLite handlerton. Broader
+multi-table matrices and broader recursive FK action chains remain unsupported.
 Session
 `foreign_key_checks=0`
 disables supported FK row checks and parent-table truncate checks without

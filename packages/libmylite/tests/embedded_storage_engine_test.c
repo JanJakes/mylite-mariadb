@@ -158,6 +158,7 @@ static void test_foreign_key_non_self_set_null_actions(void);
 static void test_foreign_key_delete_cascade_actions(void);
 static void test_foreign_key_update_cascade_actions(void);
 static void test_foreign_key_action_combinations(void);
+static void test_foreign_key_same_row_action_matrix(void);
 static void test_foreign_key_non_self_ordering(void);
 static void test_foreign_key_multi_table_ordering(void);
 static void test_foreign_key_handler_metadata(void);
@@ -441,6 +442,7 @@ int main(int argc, char **argv) {
     test_foreign_key_delete_cascade_actions();
     test_foreign_key_update_cascade_actions();
     test_foreign_key_action_combinations();
+    test_foreign_key_same_row_action_matrix();
     test_foreign_key_non_self_ordering();
     test_foreign_key_multi_table_ordering();
     test_foreign_key_handler_metadata();
@@ -3537,6 +3539,236 @@ static void test_foreign_key_action_combinations(void) {
         "SELECT parent_id IS NULL FROM fk_combo_delete_set_update_cascade "
         "WHERE id = 20",
         "1"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_foreign_key_same_row_action_matrix(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_same_row_set_null_matrix ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NULL, "
+        "label VARCHAR(32) NOT NULL, "
+        "KEY fk_same_row_set_null_matrix_parent (parent_id), "
+        "CONSTRAINT fk_same_row_set_null_matrix_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_same_row_set_null_matrix(id) "
+        "ON UPDATE SET NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_same_row_set_null_matrix VALUES "
+        "(1, 1, 'implicit'), "
+        "(2, 2, 'target'), "
+        "(3, 3, 'explicit null'), "
+        "(4, 4, 'explicit self'), "
+        "(5, 5, 'explicit other'), "
+        "(6, 6, 'explicit old')"
+    );
+    assert_exec_succeeds(
+        db,
+        "UPDATE fk_same_row_set_null_matrix SET id = 10 WHERE id = 1"
+    );
+    assert_exec_succeeds(
+        db,
+        "UPDATE fk_same_row_set_null_matrix "
+        "SET id = 30, parent_id = NULL WHERE id = 3"
+    );
+    assert_exec_succeeds(
+        db,
+        "UPDATE fk_same_row_set_null_matrix "
+        "SET id = 40, parent_id = 40 WHERE id = 4"
+    );
+    assert_exec_succeeds(
+        db,
+        "UPDATE fk_same_row_set_null_matrix "
+        "SET id = 50, parent_id = 2 WHERE id = 5"
+    );
+    assert_exec_succeeds(
+        db,
+        "UPDATE fk_same_row_set_null_matrix "
+        "SET id = 60, parent_id = 6 WHERE id = 6"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_id IS NULL FROM fk_same_row_set_null_matrix "
+        "WHERE id = 10",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_id IS NULL FROM fk_same_row_set_null_matrix "
+        "WHERE id = 30",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_id FROM fk_same_row_set_null_matrix WHERE id = 40",
+        "40"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_id FROM fk_same_row_set_null_matrix WHERE id = 50",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_id IS NULL FROM fk_same_row_set_null_matrix "
+        "WHERE id = 60",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_same_row_set_null_matrix "
+        "FORCE INDEX (fk_same_row_set_null_matrix_parent) "
+        "WHERE parent_id IN (1, 3, 5, 6)",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_same_row_set_null_matrix "
+        "FORCE INDEX (fk_same_row_set_null_matrix_parent) "
+        "WHERE parent_id = 2",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM fk_same_row_set_null_matrix "
+        "FORCE INDEX (fk_same_row_set_null_matrix_parent) "
+        "WHERE parent_id = 40",
+        "40"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_same_row_cascade_matrix ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NULL, "
+        "label VARCHAR(32) NOT NULL, "
+        "KEY fk_same_row_cascade_matrix_parent (parent_id), "
+        "CONSTRAINT fk_same_row_cascade_matrix_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_same_row_cascade_matrix(id) "
+        "ON UPDATE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_same_row_cascade_matrix VALUES "
+        "(1, 1, 'implicit'), "
+        "(2, 2, 'target'), "
+        "(3, 3, 'explicit null'), "
+        "(4, 4, 'explicit self'), "
+        "(5, 5, 'explicit other'), "
+        "(6, 6, 'explicit old')"
+    );
+    assert_exec_succeeds(
+        db,
+        "UPDATE fk_same_row_cascade_matrix SET id = 10 WHERE id = 1"
+    );
+    assert_exec_succeeds(
+        db,
+        "UPDATE fk_same_row_cascade_matrix "
+        "SET id = 30, parent_id = NULL WHERE id = 3"
+    );
+    assert_exec_succeeds(
+        db,
+        "UPDATE fk_same_row_cascade_matrix "
+        "SET id = 40, parent_id = 40 WHERE id = 4"
+    );
+    assert_exec_succeeds(
+        db,
+        "UPDATE fk_same_row_cascade_matrix "
+        "SET id = 50, parent_id = 2 WHERE id = 5"
+    );
+    assert_exec_succeeds(
+        db,
+        "UPDATE fk_same_row_cascade_matrix "
+        "SET id = 60, parent_id = 6 WHERE id = 6"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_id FROM fk_same_row_cascade_matrix WHERE id = 10",
+        "10"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_id IS NULL FROM fk_same_row_cascade_matrix WHERE id = 30",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_id FROM fk_same_row_cascade_matrix WHERE id = 40",
+        "40"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_id FROM fk_same_row_cascade_matrix WHERE id = 50",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_id FROM fk_same_row_cascade_matrix WHERE id = 60",
+        "60"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_same_row_cascade_matrix "
+        "FORCE INDEX (fk_same_row_cascade_matrix_parent) "
+        "WHERE parent_id IN (1, 3, 5, 6)",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_same_row_cascade_matrix "
+        "FORCE INDEX (fk_same_row_cascade_matrix_parent) "
+        "WHERE parent_id = 2",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM fk_same_row_cascade_matrix "
+        "FORCE INDEX (fk_same_row_cascade_matrix_parent) "
+        "WHERE parent_id = 60",
+        "60"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE app");
+    assert_query_single_value(
+        db,
+        "SELECT parent_id FROM fk_same_row_set_null_matrix WHERE id = 50",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_id IS NULL FROM fk_same_row_set_null_matrix "
+        "WHERE id = 60",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_id FROM fk_same_row_cascade_matrix WHERE id = 60",
+        "60"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_same_row_cascade_matrix "
+        "FORCE INDEX (fk_same_row_cascade_matrix_parent) "
+        "WHERE parent_id = 2",
+        "2"
     );
 
     assert(mylite_close(db) == MYLITE_OK);
