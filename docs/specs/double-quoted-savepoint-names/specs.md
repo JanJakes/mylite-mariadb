@@ -118,6 +118,6 @@ helper and tests.
 - Savepoint-name lookup remains byte-for-byte at this slice point. The later
   [Case-Insensitive Savepoint Names](../case-insensitive-savepoint-names/specs.md)
   slice aligns lookup with MariaDB's savepoint identifier comparison.
-- Handler-level savepoint hooks still require a deeper storage checkpoint
-  design that can model non-LIFO release and duplicate savepoint replacement
-  without corrupting MyLite's checkpoint stack.
+- The later [Handler Savepoint Hooks](../handler-savepoint-hooks/specs.md)
+  slice adds raw embedded handler hooks for routed durable row-DML, while full
+  transactional engine semantics remain broader work.

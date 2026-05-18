@@ -9,7 +9,8 @@ simple, backtick-quoted, and ANSI_QUOTES double-quoted names.
 
 ## Non-Goals
 
-- Handler-level MariaDB savepoint hooks.
+- Handler-level MariaDB savepoint hooks, which are covered by the later
+  [Handler Savepoint Hooks](../handler-savepoint-hooks/specs.md) slice.
 - Changing the MyLite checkpoint stack model.
 - SQL identifier comparison changes outside savepoint names.
 - Transactional DDL, MEMORY/HEAP row savepoints, XA, isolation, or fully
@@ -40,7 +41,7 @@ This closes a behavioral mismatch in the bounded file-backed row-DML
 transaction path: savepoint replacement, rollback, and release now use
 MariaDB's case-insensitive savepoint-name comparison. Compatibility remains
 partial because the operations still execute through MyLite-owned storage
-checkpoints rather than MariaDB handler-level savepoint hooks.
+checkpoints rather than the later MariaDB handler-level savepoint hooks.
 
 ## Design
 
@@ -92,6 +93,6 @@ comparison to avoid a local approximation.
 
 ## Risks And Open Questions
 
-- This still does not solve handler-level savepoint hooks. The storage
-  checkpoint stack remains the execution mechanism until MyLite can model
-  MariaDB handler savepoint semantics directly.
+- This slice still did not solve handler-level savepoint hooks. The later
+  handler hook slice narrows the raw embedded gap, while full transactional
+  handler semantics remain broader work.

@@ -127,6 +127,26 @@ if(BUILD_TESTING)
         PROPERTIES LABELS
           "compat-storage-engine;compat-sidecar;compat-routed-ddl-dml;compat-application-schema;compat-server-surface;compat-transaction;compat-transaction-hooks;compat-statement-rollback;compat-locking;compat-partition;compat-foreign-key;compat-check-constraint;compat-generated-column;compat-unsupported-index"
       )
+
+      add_executable(mylite_embedded_handler_savepoint_test
+        tests/embedded_handler_savepoint_test.cc
+      )
+      target_link_libraries(
+        mylite_embedded_handler_savepoint_test
+        PRIVATE MyLite::storage
+      )
+      mylite_configure_cxx_target(mylite_embedded_handler_savepoint_test)
+      mylite_link_mariadb_embedded(mylite_embedded_handler_savepoint_test)
+
+      add_test(
+        NAME libmylite.embedded-handler-savepoint
+        COMMAND mylite_embedded_handler_savepoint_test
+      )
+      set_tests_properties(
+        libmylite.embedded-handler-savepoint
+        PROPERTIES LABELS
+          "compat-storage-engine;compat-transaction;compat-transaction-hooks"
+      )
     endif()
 
     add_test(NAME libmylite.embedded-open-close COMMAND mylite_embedded_open_close_test)

@@ -732,6 +732,9 @@ savepoint active, and `RELEASE SAVEPOINT` commits the target and later nested
 frames while preserving changes. Prepared savepoint-control statements use the
 same MyLite-owned checkpoint path and can be prepared before an active
 transaction, but execution requires an active file-backed MyLite transaction.
+Native MariaDB handler savepoint hooks are also installed for raw embedded
+routed durable row-DML transactions, using nested MyLite storage checkpoint
+frames while keeping metadata-lock release conservative.
 Read-only transaction enforcement rejects direct and prepared durable MyLite
 row writes before MariaDB execution, but permits simple single-target row DML
 when the target name is tracked as a session-local temporary table. Explicit
@@ -772,8 +775,8 @@ direct-execution parameter markers, expression-valued or global parameterized
 transaction-control `SET` forms, bound `DEFAULT` / `RELEASE`
 transaction-control values, release completion defaults, XA, and durable direct
 or prepared DDL inside active transactions.
-Handler-level savepoint hooks, durable transactional DDL, isolation,
-WAL/checkpoint, and transactional engine-flag support remain planned.
+Durable transactional DDL, isolation, WAL/checkpoint, MEMORY/HEAP savepoint
+coverage, and transactional engine-flag support remain planned.
 
 The storage design must preserve the full write-concurrency goal. Early
 milestones may use coarse locks for correctness, but the page, transaction,

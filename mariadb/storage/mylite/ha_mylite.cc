@@ -48,6 +48,24 @@ struct Mylite_catalog_table
   bool opened;
 };
 
+struct Mylite_savepoint_frame
+{
+  mylite_storage_statement *statement;
+  Mylite_savepoint_frame *previous;
+};
+
+struct Mylite_savepoint_reference
+{
+  Mylite_savepoint_frame *frame;
+};
+
+struct Mylite_trx_context
+{
+  mylite_storage_statement *transaction;
+  mylite_storage_statement *statement;
+  Mylite_savepoint_frame *savepoints;
+};
+
 struct Mylite_foreign_key_row_check_context;
 
 static handler *mylite_create_handler(handlerton *hton,
@@ -61,6 +79,10 @@ static int mylite_discover_table_names(handlerton *hton, const LEX_CSTRING *db,
 static int mylite_discover_table_existence(handlerton *hton, const char *db,
                                            const char *table_name);
 static int mylite_close_connection(THD *thd);
+static int mylite_savepoint_set(THD *thd, void *sv);
+static int mylite_savepoint_rollback(THD *thd, void *sv);
+static bool mylite_savepoint_rollback_can_release_mdl(THD *thd);
+static int mylite_savepoint_release(THD *thd, void *sv);
 static int mylite_commit(THD *thd, bool all);
 static int mylite_rollback(THD *thd, bool all);
 static int mylite_done_func(void *p);
@@ -115,8 +137,16 @@ static int mylite_begin_transaction_checkpoint(THD *thd,
 static int mylite_begin_statement_checkpoint(THD *thd,
                                              const char *primary_file);
 static int mylite_finish_statement_checkpoint(THD *thd, bool commit);
+static int mylite_finish_savepoints(THD *thd, bool commit);
+static int mylite_finish_savepoint_frames(Mylite_trx_context *ctx,
+                                          Mylite_savepoint_frame *target,
+                                          bool commit);
+static int mylite_finish_top_savepoint_frame(Mylite_trx_context *ctx,
+                                             bool commit);
+static bool mylite_savepoint_frame_in_stack(Mylite_trx_context *ctx,
+                                            Mylite_savepoint_frame *target);
 static int mylite_finish_transaction_checkpoint(THD *thd, bool commit);
-static struct Mylite_trx_context *mylite_trx_context(THD *thd, bool create);
+static Mylite_trx_context *mylite_trx_context(THD *thd, bool create);
 static int mylite_table_name_from_path(const char *path, char *out_schema_name,
                                        size_t out_schema_name_size,
                                        char *out_table_name,
@@ -543,6 +573,12 @@ static int mylite_init_func(void *p)
   mylite_hton->discover_table_names= mylite_discover_table_names;
   mylite_hton->discover_table_existence= mylite_discover_table_existence;
   mylite_hton->close_connection= mylite_close_connection;
+  mylite_hton->savepoint_offset= sizeof(Mylite_savepoint_reference);
+  mylite_hton->savepoint_set= mylite_savepoint_set;
+  mylite_hton->savepoint_rollback= mylite_savepoint_rollback;
+  mylite_hton->savepoint_rollback_can_release_mdl=
+    mylite_savepoint_rollback_can_release_mdl;
+  mylite_hton->savepoint_release= mylite_savepoint_release;
   mylite_hton->commit= mylite_commit;
   mylite_hton->rollback= mylite_rollback;
   mylite_hton->flags|= HTON_SUPPORTS_FOREIGN_KEYS;
@@ -565,7 +601,10 @@ static int mylite_close_connection(THD *thd)
   DBUG_ENTER("mylite_close_connection");
 
   int error= mylite_finish_statement_checkpoint(thd, false);
+  int savepoint_error= mylite_finish_savepoints(thd, false);
   int transaction_error= mylite_finish_transaction_checkpoint(thd, false);
+  if (!error)
+    error= savepoint_error;
   if (!error)
     error= transaction_error;
   Mylite_trx_context *ctx= mylite_trx_context(thd, false);
@@ -578,6 +617,97 @@ static int mylite_close_connection(THD *thd)
   DBUG_RETURN(error);
 }
 
+static int mylite_savepoint_set(THD *thd, void *sv)
+{
+  DBUG_ENTER("mylite_savepoint_set");
+
+  Mylite_savepoint_reference *reference=
+    static_cast<Mylite_savepoint_reference *>(sv);
+  reference->frame= NULL;
+
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    DBUG_RETURN(HA_ERR_NO_CONNECTION);
+
+  Mylite_trx_context *ctx= mylite_trx_context(thd, true);
+  if (!ctx)
+    DBUG_RETURN(HA_ERR_OUT_OF_MEM);
+
+  mylite_storage_statement *statement= NULL;
+  mylite_storage_result result=
+    mylite_storage_begin_statement(primary_file, &statement);
+  int error= mylite_storage_to_handler_error(result);
+  if (error)
+    DBUG_RETURN(error);
+
+  Mylite_savepoint_frame *frame= static_cast<Mylite_savepoint_frame *>(
+    calloc(1, sizeof(*frame)));
+  if (!frame)
+  {
+    mylite_storage_rollback_statement(statement);
+    DBUG_RETURN(HA_ERR_OUT_OF_MEM);
+  }
+
+  frame->statement= statement;
+  frame->previous= ctx->savepoints;
+  ctx->savepoints= frame;
+  reference->frame= frame;
+  DBUG_RETURN(0);
+}
+
+static int mylite_savepoint_rollback(THD *thd, void *sv)
+{
+  DBUG_ENTER("mylite_savepoint_rollback");
+
+  Mylite_savepoint_reference *reference=
+    static_cast<Mylite_savepoint_reference *>(sv);
+  Mylite_savepoint_frame *target= reference->frame;
+  if (!target)
+    DBUG_RETURN(0);
+
+  Mylite_trx_context *ctx= mylite_trx_context(thd, false);
+  if (!mylite_savepoint_frame_in_stack(ctx, target))
+  {
+    reference->frame= NULL;
+    DBUG_RETURN(0);
+  }
+
+  int error= mylite_finish_savepoint_frames(ctx, target, false);
+  reference->frame= NULL;
+  if (error)
+    DBUG_RETURN(error);
+
+  DBUG_RETURN(mylite_savepoint_set(thd, sv));
+}
+
+static bool mylite_savepoint_rollback_can_release_mdl(THD *)
+{
+  return false;
+}
+
+static int mylite_savepoint_release(THD *thd, void *sv)
+{
+  DBUG_ENTER("mylite_savepoint_release");
+
+  Mylite_savepoint_reference *reference=
+    static_cast<Mylite_savepoint_reference *>(sv);
+  Mylite_savepoint_frame *target= reference->frame;
+  if (!target)
+    DBUG_RETURN(0);
+
+  if (thd && thd->lex && thd->lex->sql_command == SQLCOM_SAVEPOINT)
+  {
+    reference->frame= NULL;
+    DBUG_RETURN(0);
+  }
+
+  Mylite_trx_context *ctx= mylite_trx_context(thd, false);
+  int error= mylite_finish_savepoint_frames(ctx, target, true);
+  if (!error)
+    reference->frame= NULL;
+  DBUG_RETURN(error);
+}
+
 static int mylite_commit(THD *thd, bool all)
 {
   DBUG_ENTER("mylite_commit");
@@ -585,6 +715,9 @@ static int mylite_commit(THD *thd, bool all)
   int error= mylite_finish_statement_checkpoint(thd, true);
   if (all)
   {
+    int savepoint_error= mylite_finish_savepoints(thd, true);
+    if (!error)
+      error= savepoint_error;
     int transaction_error= mylite_finish_transaction_checkpoint(thd, true);
     if (!error)
       error= transaction_error;
@@ -599,6 +732,9 @@ static int mylite_rollback(THD *thd, bool all)
   int error= mylite_finish_statement_checkpoint(thd, false);
   if (all)
   {
+    int savepoint_error= mylite_finish_savepoints(thd, false);
+    if (!error)
+      error= savepoint_error;
     int transaction_error= mylite_finish_transaction_checkpoint(thd, false);
     if (!error)
       error= transaction_error;
@@ -636,12 +772,6 @@ static handler *mylite_create_handler(handlerton *hton,
 struct Mylite_discover_context
 {
   handlerton::discovered_list *result;
-};
-
-struct Mylite_trx_context
-{
-  mylite_storage_statement *transaction;
-  mylite_storage_statement *statement;
 };
 
 struct Mylite_foreign_key_list_context
@@ -2878,6 +3008,67 @@ static int mylite_finish_statement_checkpoint(THD *thd, bool commit)
   else
     result= mylite_storage_rollback_statement(statement);
   return mylite_storage_to_handler_error(result);
+}
+
+static int mylite_finish_savepoints(THD *thd, bool commit)
+{
+  Mylite_trx_context *ctx= mylite_trx_context(thd, false);
+  return mylite_finish_savepoint_frames(ctx, NULL, commit);
+}
+
+static int mylite_finish_savepoint_frames(Mylite_trx_context *ctx,
+                                          Mylite_savepoint_frame *target,
+                                          bool commit)
+{
+  if (!ctx)
+    return 0;
+  if (target && !mylite_savepoint_frame_in_stack(ctx, target))
+    return 0;
+
+  while (ctx->savepoints)
+  {
+    Mylite_savepoint_frame *frame= ctx->savepoints;
+    bool reached_target= frame == target;
+    int error= mylite_finish_top_savepoint_frame(ctx, commit);
+    if (error || reached_target)
+      return error;
+  }
+  return 0;
+}
+
+static int mylite_finish_top_savepoint_frame(Mylite_trx_context *ctx,
+                                             bool commit)
+{
+  Mylite_savepoint_frame *frame= ctx->savepoints;
+  DBUG_ASSERT(frame != NULL);
+  ctx->savepoints= frame->previous;
+
+  mylite_storage_statement *statement= frame->statement;
+  free(frame);
+  if (!statement)
+    return 0;
+
+  mylite_storage_result result;
+  if (commit)
+    result= mylite_storage_commit_statement(statement);
+  else
+    result= mylite_storage_rollback_statement(statement);
+  return mylite_storage_to_handler_error(result);
+}
+
+static bool mylite_savepoint_frame_in_stack(Mylite_trx_context *ctx,
+                                            Mylite_savepoint_frame *target)
+{
+  if (!ctx)
+    return false;
+
+  for (Mylite_savepoint_frame *frame= ctx->savepoints; frame;
+       frame= frame->previous)
+  {
+    if (frame == target)
+      return true;
+  }
+  return false;
 }
 
 static int mylite_finish_transaction_checkpoint(THD *thd, bool commit)

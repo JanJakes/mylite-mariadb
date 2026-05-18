@@ -21,9 +21,11 @@ reserved words, so this remains a compatibility gap in the current
 `ENGINE=InnoDB`-routes-to-MyLite transaction surface.
 
 This slice adds backtick-quoted savepoint names to the existing direct and
-prepared MyLite-owned savepoint path. It does not add handler-level savepoint
-hooks, SQL-mode-sensitive double-quoted identifiers, transactional DDL,
-isolation, XA, transaction modifiers, or fully transactional engine flags.
+prepared MyLite-owned savepoint path. It does not add SQL-mode-sensitive
+double-quoted identifiers, transactional DDL, isolation, XA, transaction
+modifiers, or fully transactional engine flags. Handler-level savepoint hooks
+remained planned at this slice point and are covered by the later
+[Handler Savepoint Hooks](../handler-savepoint-hooks/specs.md) slice.
 
 ## Source Findings
 
@@ -77,8 +79,8 @@ backticks. Compatibility remains partial:
 
 - SQL-mode-sensitive double-quoted identifiers are covered by a later slice.
 - Execution outside an active file-backed MyLite transaction still fails.
-- Handler-level savepoint hooks and full transactional engine semantics remain
-  planned.
+- Handler-level savepoint hooks remained planned at this slice point, and full
+  transactional engine semantics remain broader work.
 - MEMORY/HEAP row savepoints, transactional DDL, isolation, XA, and unsupported
   transaction modifiers remain unsupported.
 

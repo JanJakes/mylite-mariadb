@@ -8,6 +8,8 @@ remain unsupported. The later
 [Prepared Transaction SET Control](../prepared-transaction-set-control/specs.md)
 slice adds prepared `SET` transaction controls. Later quoted-name slices add
 SQL-mode-aware double-quoted identifiers and case-insensitive savepoint lookup.
+The later [Handler Savepoint Hooks](../handler-savepoint-hooks/specs.md) slice
+adds native MariaDB handler hooks for raw embedded routed row-DML savepoints.
 
 ## Problem
 
@@ -20,8 +22,9 @@ transaction surface.
 
 This slice adds prepared savepoint-control statements for the same bounded
 file-backed row-DML transaction scope. It does not add prepared `BEGIN`,
-`COMMIT`, `ROLLBACK`, transaction modifiers, XA, handler-level savepoint hooks,
-transactional DDL, isolation, or transactional engine flags. At this slice
+`COMMIT`, `ROLLBACK`, transaction modifiers, XA, transactional DDL, isolation,
+or transactional engine flags. Handler-level savepoint hooks remained planned at
+this slice point. At this slice
 point, prepared transaction `SET` controls were still unsupported; the later
 prepared transaction SET slice narrows that gap.
 
@@ -50,8 +53,9 @@ MariaDB base: `mariadb-11.8.6`
   integration points.
 
 Because the MyLite handler still advertises non-transactional engine flags and
-does not provide handler-level savepoint hooks, prepared savepoint support must
-use the same `libmylite` policy path as direct savepoint control for now.
+did not yet provide handler-level savepoint hooks at this slice point, prepared
+savepoint support used the same `libmylite` policy path as direct savepoint
+control.
 
 ## Design
 
@@ -96,8 +100,8 @@ Compatibility remains partial:
   backtick-quoted identifiers added by the later
   [Quoted Savepoint Names](../quoted-savepoint-names/specs.md) slice.
 - Execution outside an active file-backed MyLite transaction fails explicitly.
-- Handler-level savepoint hooks and fully transactional engine flags remain
-  planned.
+- Handler-level savepoint hooks and fully transactional engine flags remained
+  planned at this slice point.
 - MEMORY/HEAP volatile-row savepoints, transactional DDL, isolation, XA, and
   unsupported transaction modifiers remain unsupported.
 
@@ -131,7 +135,8 @@ semantics.
 
 No wire-protocol package changes are included. A future wire-protocol wrapper
 can map prepared savepoint-control commands onto the public `libmylite`
-prepared-statement behavior until handler-level savepoint hooks exist.
+prepared-statement behavior, while raw embedded paths can use the later handler
+hook implementation.
 
 ## Binary-Size And Dependency Impact
 

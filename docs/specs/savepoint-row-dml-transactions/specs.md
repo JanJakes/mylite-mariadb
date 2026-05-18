@@ -6,6 +6,8 @@ adds prepared `SAVEPOINT`, `ROLLBACK TO [SAVEPOINT]`, and
 `RELEASE SAVEPOINT` for the same bounded file-backed transaction scope.
 The later [Quoted Savepoint Names](../quoted-savepoint-names/specs.md) slice
 adds backtick-quoted identifiers on the same MyLite-owned savepoint path.
+The later [Handler Savepoint Hooks](../handler-savepoint-hooks/specs.md) slice
+adds native MariaDB handler hooks for raw embedded routed row-DML savepoints.
 
 ## Problem
 
@@ -52,8 +54,8 @@ MariaDB base: `mariadb-11.8.6`
 - `mariadb/storage/innobase/handler/ha_innodb.cc:innobase_savepoint()` stores
   an InnoDB undo number in the per-savepoint storage area.
 - `mariadb/storage/mylite/ha_mylite.h` still advertises `HA_NO_TRANSACTIONS`.
-  MyLite therefore cannot honestly expose full handler-level savepoint support
-  yet.
+  MyLite therefore could not honestly expose full handler-level savepoint
+  support at this slice point.
 
 ## Design
 
@@ -102,8 +104,8 @@ Compatibility remains partial:
 - Savepoints are supported only through direct `libmylite` execution, not
   prepared statements.
 - The first parser supports simple unquoted savepoint names.
-- Handler-level savepoint hooks and fully transactional engine flags remain
-  planned.
+- Handler-level savepoint hooks and fully transactional engine flags remained
+  planned at this slice point.
 - Transactional DDL, isolation-level changes, transaction modifiers, and XA
   remain unsupported.
 
@@ -133,8 +135,9 @@ transaction claim.
 ## Wire Protocol Or Integration Impact
 
 No wire-protocol package changes are included. A future wire-protocol wrapper
-should route direct savepoint-control SQL through the same public core behavior
-until handler-level savepoint hooks are implemented.
+can route direct savepoint-control SQL through the same public core behavior or
+through the later handler hook path, depending on which runtime entry point it
+uses.
 
 ## Binary-Size And Dependency Impact
 
@@ -177,5 +180,6 @@ savepoint frame vector and direct SQL policy parsing.
   below newer frames until an enclosing unwind. This preserves LIFO correctness
   with the current storage API, but it can hold more in-memory savepoint frames
   during long transactions with many replacements.
-- Handler-level savepoint hooks remain necessary before MyLite can remove
-  `HA_NO_TRANSACTIONS` or claim full MariaDB transactional engine semantics.
+- The later handler savepoint hook slice narrows the raw embedded gap, but
+  `HA_NO_TRANSACTIONS` removal and full MariaDB transactional engine semantics
+  still require broader transaction work.
