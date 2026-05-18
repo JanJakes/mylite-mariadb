@@ -1238,11 +1238,16 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
       !mylite_key_is_supported(table->key_info + index_number))
     DBUG_RETURN(HA_ERR_UNSUPPORTED);
   KEY *key_info= table->key_info + index_number;
+  const bool full_key_filter=
+      filter_cursor && key_filter_length == key_info->key_length;
+  const bool non_nullable_full_key_filter=
+      full_key_filter && !(key_info->flags & HA_NULL_PART_KEY);
   const bool unique_full_key_filter=
-      filter_cursor && key_filter_length == key_info->key_length &&
-      (key_info->flags & HA_NOSAME) && !(key_info->flags & HA_NULL_PART_KEY);
-  const bool raw_exact_filter=
-      unique_full_key_filter && mylite_key_uses_raw_exact_filter(key_info);
+      non_nullable_full_key_filter && (key_info->flags & HA_NOSAME);
+  const bool raw_exact_filter= non_nullable_full_key_filter &&
+                               mylite_key_uses_raw_exact_filter(key_info);
+  const bool raw_exact_unique_filter=
+      raw_exact_filter && (key_info->flags & HA_NOSAME);
   if (discard_rows)
   {
     index_cursor_number= index_number;
@@ -1254,7 +1259,7 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
   if (!primary_file)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
 
-  if (raw_exact_filter)
+  if (raw_exact_unique_filter)
   {
     ulonglong row_id= 0ULL;
     mylite_storage_result storage_result=
@@ -1299,12 +1304,20 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
   mylite_storage_index_entryset entryset= {sizeof(entryset), NULL, 0, 0};
   mylite_storage_result storage_result=
       volatile_rows
-          ? mylite_volatile_read_index_entries(primary_file, storage_schema(),
-                                               storage_table(), index_number,
-                                               &entryset)
-          : mylite_storage_read_index_entries(primary_file, storage_schema(),
-                                              storage_table(), index_number,
-                                              &entryset);
+          ? (raw_exact_filter
+                 ? mylite_volatile_read_exact_index_entries(
+                       primary_file, storage_schema(), storage_table(),
+                       index_number, key_filter, key_filter_length, &entryset)
+                 : mylite_volatile_read_index_entries(
+                       primary_file, storage_schema(), storage_table(),
+                       index_number, &entryset))
+          : (raw_exact_filter
+                 ? mylite_storage_read_exact_index_entries(
+                       primary_file, storage_schema(), storage_table(),
+                       index_number, key_filter, key_filter_length, &entryset)
+                 : mylite_storage_read_index_entries(
+                       primary_file, storage_schema(), storage_table(),
+                       index_number, &entryset));
   if (storage_result != MYLITE_STORAGE_OK)
     DBUG_RETURN(mylite_storage_to_handler_error(storage_result));
 

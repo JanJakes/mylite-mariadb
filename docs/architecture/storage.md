@@ -626,10 +626,11 @@ row-page validation until a selected row is materialized. Ordered index reads
 build in-memory cursors from live index entries, keep sorted key metadata plus
 row ids, use bound searches for key positioning, build filtered cursors for
 exact-key and prefix reads, stop after the first matching non-nullable full-key
-unique integer entry, and use storage-level exact-entry lookup for that guarded
-raw equality path so the handler does not allocate a full entryset for common
-primary-key reads. Cursors check `index_next_same()` boundaries before row
-materialization and reconstruct only the selected row buffer from row pages.
+unique integer entry, and use storage-level exact-entry or exact-entryset lookup
+for guarded raw equality paths so the handler does not allocate unrelated index
+entries for common integer point reads. Cursors check `index_next_same()`
+boundaries before row materialization and reconstruct only the selected row
+buffer from row pages.
 This provides correct indexed insert, lookup, update, delete, reopen, and copy
 `ALTER` behavior for the supported shapes, but it is still an interim
 performance structure because exact lookup still scans live append-only entry

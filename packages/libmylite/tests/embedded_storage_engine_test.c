@@ -908,6 +908,12 @@ static void test_memory_engine_routes_to_mylite(void) {
     char *filename = NULL;
     mylite_db *db = open_database(root, &filename);
     unsigned long long durable_row_count = 0ULL;
+    table_context missing_memory_score_rows = {0};
+    const char *memory_score_ids[] = {"1", "2"};
+    id_sequence_context memory_score_sequence = {
+        .expected_count = 2,
+        .expected_ids = memory_score_ids,
+    };
     char *show_create = NULL;
 
     assert_exec_succeeds(db, "CREATE DATABASE app");
@@ -928,9 +934,18 @@ static void test_memory_engine_routes_to_mylite(void) {
         "title VARCHAR(64) NOT NULL UNIQUE KEY"
         ") ENGINE=HEAP"
     );
-    assert_catalog_table_count(filename, "app", 2U);
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE memory_score_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "score INT NOT NULL, "
+        "KEY score_key (score)"
+        ") ENGINE=MEMORY"
+    );
+    assert_catalog_table_count(filename, "app", 3U);
     assert_catalog_table_metadata(filename, "app", "memory_posts", "MEMORY", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "heap_posts", "HEAP", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "memory_score_posts", "MEMORY", "MYLITE");
     show_create = capture_show_create_table(db, "memory_posts");
     assert(strstr(show_create, "ENGINE=MEMORY") != NULL);
     free(show_create);
@@ -957,10 +972,11 @@ static void test_memory_engine_routes_to_mylite(void) {
         mylite_storage_table_exists(filename, "app", "memory_rename_target") ==
         MYLITE_STORAGE_NOTFOUND
     );
-    assert_catalog_table_count(filename, "app", 2U);
+    assert_catalog_table_count(filename, "app", 3U);
 
     assert_exec_succeeds(db, "INSERT INTO memory_posts (title) VALUES ('first'), ('second')");
     assert_exec_succeeds(db, "INSERT INTO heap_posts VALUES (1, 'heap-row')");
+    assert_exec_succeeds(db, "INSERT INTO memory_score_posts VALUES (1, 7), (2, 7), (3, 9)");
     assert(
         mylite_storage_count_rows(filename, "app", "memory_posts", &durable_row_count) ==
         MYLITE_STORAGE_OK
@@ -972,6 +988,27 @@ static void test_memory_engine_routes_to_mylite(void) {
         "SELECT id FROM memory_posts FORCE INDEX (title_key) WHERE title = 'first'",
         "10"
     );
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM memory_score_posts FORCE INDEX (score_key) "
+            "WHERE score = 7 ORDER BY id",
+            id_sequence_callback,
+            &memory_score_sequence,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(memory_score_sequence.rows == 2);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM memory_score_posts FORCE INDEX (score_key) WHERE score = 8",
+            row_callback,
+            &missing_memory_score_rows,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(missing_memory_score_rows.rows == 0);
     assert_query_single_value(db, "SELECT COUNT(*) FROM heap_posts", "1");
     assert_exec_fails(db, "INSERT INTO memory_posts (title) VALUES ('first')");
     assert_query_single_value(db, "SELECT COUNT(*) FROM memory_posts", "2");
@@ -1020,11 +1057,13 @@ static void test_memory_engine_routes_to_mylite(void) {
 
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "USE app");
-    assert_catalog_table_count(filename, "app", 2U);
+    assert_catalog_table_count(filename, "app", 3U);
     assert_catalog_table_metadata(filename, "app", "memory_posts", "MEMORY", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "heap_posts", "HEAP", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "memory_score_posts", "MEMORY", "MYLITE");
     assert_query_single_value(db, "SELECT COUNT(*) FROM memory_posts", "0");
     assert_query_single_value(db, "SELECT COUNT(*) FROM heap_posts", "0");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM memory_score_posts", "0");
     assert_exec_succeeds(db, "INSERT INTO memory_posts (title) VALUES ('after-reopen')");
     assert_query_single_value(
         db,
@@ -16173,10 +16212,16 @@ static void test_indexed_rows(void) {
     table_context renamed_category_rows = {0};
     table_context reopened_rows = {0};
     table_context reopened_renamed_slug_rows = {0};
+    table_context missing_score_rows = {0};
     const char *score_desc_ids[] = {"3", "2", "1"};
     id_sequence_context score_desc = {
         .expected_count = 3,
         .expected_ids = score_desc_ids,
+    };
+    const char *score_lookup_ids[] = {"1", "2"};
+    id_sequence_context score_lookup_sequence = {
+        .expected_count = 2,
+        .expected_ids = score_lookup_ids,
     };
     const char *news_ids[] = {"1", "3"};
     id_sequence_context news_sequence = {
@@ -16227,7 +16272,15 @@ static void test_indexed_rows(void) {
         "KEY category_key (category)"
         ") ENGINE=InnoDB"
     );
-    assert_catalog_table_count(filename, "app", 4U);
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE score_lookup_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "score INT NOT NULL, "
+        "KEY score_key (score)"
+        ") ENGINE=InnoDB"
+    );
+    assert_catalog_table_count(filename, "app", 5U);
 
     assert_exec_succeeds(db, "INSERT INTO indexed_posts VALUES (1, 'alpha', 'news', 10)");
     assert_exec_succeeds(db, "INSERT INTO indexed_posts VALUES (2, 'beta', NULL, 20)");
@@ -16279,6 +16332,30 @@ static void test_indexed_rows(void) {
     );
     assert(errmsg == NULL);
     assert(score_desc.rows == 3);
+    assert_exec_succeeds(db, "INSERT INTO score_lookup_posts VALUES (1, 7), (2, 7), (3, 9)");
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM score_lookup_posts FORCE INDEX (score_key) "
+            "WHERE score = 7 ORDER BY id",
+            id_sequence_callback,
+            &score_lookup_sequence,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(score_lookup_sequence.rows == 2);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM score_lookup_posts FORCE INDEX (score_key) WHERE score = 8",
+            row_callback,
+            &missing_score_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(missing_score_rows.rows == 0);
 
     assert_exec_succeeds(
         db,
@@ -16413,11 +16490,12 @@ static void test_indexed_rows(void) {
     assert(errmsg == NULL);
     assert(reopened_renamed_slug_rows.rows == 1);
     assert_exec_fails(db, "SELECT id FROM rename_index_posts");
-    assert_catalog_table_count(filename, "app", 4U);
+    assert_catalog_table_count(filename, "app", 5U);
     assert_catalog_table_metadata(filename, "app", "indexed_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "nullable_unique_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "alter_index_posts", "InnoDB", "MYLITE");
     assert_catalog_table_metadata(filename, "app", "renamed_index_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "score_lookup_posts", "InnoDB", "MYLITE");
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 

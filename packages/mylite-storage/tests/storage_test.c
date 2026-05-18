@@ -122,6 +122,14 @@ static void assert_index_entry_lookup(
     mylite_storage_result expected_result,
     unsigned long long expected_row_id
 );
+static void assert_exact_index_entries(
+    const char *filename,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    const unsigned long long *expected_row_ids,
+    size_t expected_count
+);
 static void append_index_entry_test_rows(index_entries_test_context *ctx);
 static void assert_primary_index_entries_after_insert(const index_entries_test_context *ctx);
 static void update_index_entry_test_row(index_entries_test_context *ctx);
@@ -1167,7 +1175,6 @@ static void test_index_entries(void) {
     static const unsigned char key_2[] = {0x02U};
     static const unsigned char key_9[] = {0x09U};
     static const unsigned char title_a[] = {'a'};
-    static const unsigned char title_d[] = {'d'};
     static const unsigned char title_u[] = {'u'};
     char *root = make_temp_root();
     char *filename = path_join(root, "index-entries.mylite");
@@ -1197,8 +1204,8 @@ static void test_index_entries(void) {
          .key_size = sizeof(key_2)},
         {.size = sizeof(row_2_entries[1]),
          .index_number = 1U,
-         .key = title_d,
-         .key_size = sizeof(title_d)},
+         .key = title_a,
+         .key_size = sizeof(title_a)},
     };
     mylite_storage_index_entry update_entries[] = {
         {.size = sizeof(update_entries[0]),
@@ -1237,13 +1244,25 @@ static void test_index_entries(void) {
     assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
     assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
     append_index_entry_test_rows(&ctx);
+    const unsigned long long title_a_row_ids[] = {ctx.row_1_id, ctx.row_2_id};
     assert_primary_index_entries_after_insert(&ctx);
     assert_index_prefix_exists(filename, key_1, sizeof(key_1), 1);
     assert_index_prefix_exists(filename, key_9, sizeof(key_9), 0);
     assert_index_entry_lookup(filename, 0U, key_1, sizeof(key_1), MYLITE_STORAGE_OK, ctx.row_1_id);
     assert_index_entry_lookup(filename, 0U, key_2, sizeof(key_2), MYLITE_STORAGE_OK, ctx.row_2_id);
     assert_index_entry_lookup(filename, 0U, key_9, sizeof(key_9), MYLITE_STORAGE_NOTFOUND, 0ULL);
+    assert_exact_index_entries(
+        filename,
+        1U,
+        title_a,
+        sizeof(title_a),
+        title_a_row_ids,
+        sizeof(title_a_row_ids) / sizeof(title_a_row_ids[0])
+    );
+    assert_exact_index_entries(filename, 0U, key_9, sizeof(key_9), NULL, 0U);
     update_index_entry_test_row(&ctx);
+    const unsigned long long title_a_after_update_row_ids[] = {ctx.row_2_id};
+    const unsigned long long key_9_row_ids[] = {ctx.updated_row_1_id};
     assert_primary_index_entries_after_update(&ctx);
     assert_index_prefix_exists(filename, key_1, sizeof(key_1), 0);
     assert_index_prefix_exists(filename, key_9, sizeof(key_9), 1);
@@ -1256,7 +1275,24 @@ static void test_index_entries(void) {
         MYLITE_STORAGE_OK,
         ctx.updated_row_1_id
     );
+    assert_exact_index_entries(
+        filename,
+        1U,
+        title_a,
+        sizeof(title_a),
+        title_a_after_update_row_ids,
+        sizeof(title_a_after_update_row_ids) / sizeof(title_a_after_update_row_ids[0])
+    );
+    assert_exact_index_entries(
+        filename,
+        0U,
+        key_9,
+        sizeof(key_9),
+        key_9_row_ids,
+        sizeof(key_9_row_ids) / sizeof(key_9_row_ids[0])
+    );
     delete_index_entry_test_row(&ctx);
+    const unsigned long long title_u_row_ids[] = {ctx.updated_row_1_id};
     assert_secondary_index_entries_after_delete(&ctx);
     assert_index_prefix_exists(filename, key_2, sizeof(key_2), 0);
     assert_index_prefix_exists(filename, title_u, sizeof(title_u), 1);
@@ -1269,11 +1305,35 @@ static void test_index_entries(void) {
         MYLITE_STORAGE_OK,
         ctx.updated_row_1_id
     );
+    assert_exact_index_entries(filename, 0U, key_2, sizeof(key_2), NULL, 0U);
+    assert_exact_index_entries(filename, 1U, title_a, sizeof(title_a), NULL, 0U);
+    assert_exact_index_entries(
+        filename,
+        1U,
+        title_u,
+        sizeof(title_u),
+        title_u_row_ids,
+        sizeof(title_u_row_ids) / sizeof(title_u_row_ids[0])
+    );
     assert_index_entry_test_live_rows(&ctx);
 
     assert(
         mylite_storage_find_index_entry(filename, "app", "posts", 0U, NULL, sizeof(key_1), NULL) ==
         MYLITE_STORAGE_MISUSE
+    );
+    mylite_storage_index_entryset misuse_entries = {
+        .size = sizeof(misuse_entries),
+    };
+    assert(
+        mylite_storage_read_exact_index_entries(
+            filename,
+            "app",
+            "posts",
+            0U,
+            NULL,
+            sizeof(key_1),
+            &misuse_entries
+        ) == MYLITE_STORAGE_MISUSE
     );
 
     assert(unlink(filename) == 0);
@@ -1323,6 +1383,36 @@ static void assert_index_entry_lookup(
         ) == expected_result
     );
     assert(row_id == expected_row_id);
+}
+
+static void assert_exact_index_entries(
+    const char *filename,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    const unsigned long long *expected_row_ids,
+    size_t expected_count
+) {
+    mylite_storage_index_entryset index_entries = {
+        .size = sizeof(index_entries),
+    };
+    assert(
+        mylite_storage_read_exact_index_entries(
+            filename,
+            "app",
+            "posts",
+            index_number,
+            key,
+            key_size,
+            &index_entries
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(index_entries.entry_count == expected_count);
+    assert(index_entries.key_bytes == expected_count * key_size);
+    for (size_t i = 0; i < expected_count; ++i) {
+        assert_index_entry(&index_entries, i, expected_row_ids[i], key, key_size);
+    }
+    mylite_storage_free_index_entryset(&index_entries);
 }
 
 static void append_index_entry_test_rows(index_entries_test_context *ctx) {
