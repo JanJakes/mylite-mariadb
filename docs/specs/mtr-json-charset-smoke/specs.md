@@ -26,8 +26,11 @@ Rejected probes are intentionally not promoted:
 
 - `main.ctype_utf16_def` fails on `ft_stopword_file` result drift in the
   trimmed embedded profile.
-- `main.json_normalize`, `main.ansi`, and `main.ctype_utf8mb4_bin` fail on
-  Aria-vs-MyISAM `SHOW CREATE TABLE` result drift.
+- `main.json_normalize` and `main.ctype_utf8mb4_bin` fail on Aria-vs-MyISAM
+  `SHOW CREATE TABLE` result drift.
+- `main.ansi` needed separate SQL-mode-specific default-engine normalization
+  and is now covered by
+  [MTR ANSI and binary smoke](../mtr-ansi-binary-smoke/specs.md).
 - `main.func_digest` reports an MTR skip because SSL support is unavailable.
 - `main.func_set` and `main.ctype_ucs2_uca` depend on native MyISAM paths.
 - `main.ctype_utf8mb4_general_ci_casefold` and

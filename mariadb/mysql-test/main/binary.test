@@ -88,6 +88,7 @@ drop table t1;
 # Bug #6552 CHAR column w/o length is legal, BINARY w/o length is not
 #
 create table t1 (a binary);
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 drop table t1;
 

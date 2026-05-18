@@ -45,8 +45,10 @@ MariaDB base: `mariadb-11.8.6`
     `main.group_by`, `main.strings`, `main.create_select`, and
     `main.mysqltest_string_functions` are skipped under the current embedded
     profile or require disabled engines.
-  - `main.count_distinct2`, `main.select_safe`, and `main.type_varchar` need
-    separate result normalization review.
+  - `main.count_distinct2` and `main.select_safe` need separate result
+    normalization review.
+  - `main.type_varchar` needed separate result normalization review and is
+    now covered by [MTR VARCHAR smoke](../mtr-varchar-smoke/specs.md).
 
 ## Compatibility Impact
 

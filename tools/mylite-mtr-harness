@@ -10,12 +10,14 @@ default_tests=(
   mylite.bootstrap_schema
   main.cast
   main.case
+  main.ansi
   main.bigint
   main.type_ranges
   main.type_num
   main.type_uint
   main.type_char
   main.type_binary
+  main.binary
   main.type_nchar
   main.type_varchar
   main.type_interval

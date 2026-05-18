@@ -53,6 +53,8 @@ MariaDB base: `mariadb-11.8.6`
 - The curated smoke list was later extended by
   [MTR CASE expression smoke](../mtr-case-expression-smoke/specs.md) to include
   `main.case`.
+- [MTR ANSI and binary smoke](../mtr-ansi-binary-smoke/specs.md) adds
+  `main.ansi` and `main.binary`.
 - [MTR numeric and date smoke](../mtr-numeric-date-smoke/specs.md) adds
   `main.bigint` and `main.adddate_454`.
 - [MTR type and temporal rounding smoke](../mtr-type-rounding-smoke/specs.md)
@@ -62,11 +64,18 @@ MariaDB base: `mariadb-11.8.6`
   `main.type_timestamp_round`.
 - [MTR type edge smoke](../mtr-type-edge-smoke/specs.md) adds
   `main.type_char`, `main.type_interval`, and `main.type_varbinary`.
+- [MTR binary and NCHAR smoke](../mtr-binary-nchar-smoke/specs.md) adds
+  `main.type_binary` and `main.type_nchar`.
+- [MTR VARCHAR smoke](../mtr-varchar-smoke/specs.md) adds
+  `main.type_varchar`.
 - [MTR date format and ASCII charset smoke](../mtr-date-charset-smoke/specs.md)
   adds `main.date_formats`, `main.datetime_456`, and `main.ctype_ascii`.
 - [MTR charset edge smoke](../mtr-charset-edge-smoke/specs.md) adds
   `main.ctype_cp850`, `main.ctype_cp866`, `main.ctype_hebrew`, and
   `main.ctype_utf32_def`.
+- [MTR JSON and charset smoke](../mtr-json-charset-smoke/specs.md) adds
+  `main.ctype_filesystem`, `main.ctype_collate_implicit_utf32`, and
+  `main.json_equals`.
 - [MTR collation and diagnostics smoke](../mtr-collation-diagnostics-smoke/specs.md)
   adds `main.ctype_collate_database`, `main.ctype_collate_implicit`,
   `main.ctype_collate_implicit_def`, `main.ctype_collate_table`, and
@@ -77,6 +86,7 @@ MariaDB base: `mariadb-11.8.6`
   `main.func_sapdb`, `main.func_time_64`, `main.func_timestamp`,
   `main.in_datetime_241`, `main.str_to_datetime_457`, and
   `main.type_time_6065`.
+- [MTR timezone smoke](../mtr-timezone-smoke/specs.md) adds `main.timezone4`.
 - [MTR parser and comparison smoke](../mtr-parser-comparison-smoke/specs.md)
   adds `main.brackets`, `main.comments`, and `main.compare`.
 - [MTR parser and expression smoke](../mtr-parser-expression-smoke/specs.md)
@@ -100,6 +110,8 @@ MariaDB base: `mariadb-11.8.6`
 - [MTR order and union smoke](../mtr-order-union-smoke/specs.md) adds
   `main.order_by_zerolength-4285`, `main.order_fill_sortbuf`, and
   `main.subselect_union_rand`.
+- [MTR ORDER BY optimizer smoke](../mtr-order-by-optimizer-smoke/specs.md)
+  adds `main.order_by_optimizer` and `main.order_by-mdev-10122`.
 - [MTR prepared statement smoke](../mtr-prepared-statement-smoke/specs.md)
   adds `main.prepare`, `main.ps_10nestset`, `main.ps_11bugs`,
   `main.ps_max_subselect-5113`, and `main.information_schema_prepare`.
@@ -153,11 +165,16 @@ The default curated list remains intentionally baseline-oriented:
 - `mylite.bootstrap_schema`.
 - `main.cast`.
 - `main.case`.
+- `main.ansi`.
 - `main.bigint`.
 - `main.type_ranges`.
 - `main.type_num`.
 - `main.type_uint`.
 - `main.type_char`.
+- `main.type_binary`.
+- `main.binary`.
+- `main.type_nchar`.
+- `main.type_varchar`.
 - `main.type_interval`.
 - `main.type_varbinary`.
 - `main.type_year`.
@@ -175,6 +192,7 @@ The default curated list remains intentionally baseline-oriented:
 - `main.type_time_round`.
 - `main.type_time_6065`.
 - `main.type_timestamp_round`.
+- `main.timezone4`.
 - `main.brackets`.
 - `main.comments`.
 - `main.compare`.
@@ -206,6 +224,8 @@ The default curated list remains intentionally baseline-oriented:
 - `main.subselect_nulls`.
 - `main.subselect_extra`.
 - `main.order_by_zerolength-4285`.
+- `main.order_by_optimizer`.
+- `main.order_by-mdev-10122`.
 - `main.order_fill_sortbuf`.
 - `main.subselect_union_rand`.
 - `main.prepare`.
@@ -218,11 +238,13 @@ The default curated list remains intentionally baseline-oriented:
 - `main.ctype_cp866`.
 - `main.ctype_hebrew`.
 - `main.ctype_utf32_def`.
+- `main.ctype_filesystem`.
 - `main.ctype_collate_column`.
 - `main.ctype_collate_context`.
 - `main.ctype_collate_database`.
 - `main.ctype_collate_implicit`.
 - `main.ctype_collate_implicit_def`.
+- `main.ctype_collate_implicit_utf32`.
 - `main.ctype_collate_table`.
 - `main.ctype_errors`.
 - `main.count_distinct`.
@@ -238,6 +260,7 @@ The default curated list remains intentionally baseline-oriented:
 - `main.func_regexp`.
 - `main.func_regexp_pcre`.
 - `main.func_weight_string`.
+- `main.json_equals`.
 - `main.func_kdf`.
 - `main.func_encrypt_nossl`.
 
@@ -287,78 +310,13 @@ artifacts, not default MyLite linked-library artifacts.
 
 ## Acceptance Criteria
 
-- The runner lists `mylite.bootstrap_schema`, `main.cast`, `main.case`,
-  `main.bigint`, `main.type_ranges`, `main.type_num`, `main.type_uint`,
-  `main.type_char`, `main.type_interval`, `main.type_varbinary`,
-  `main.type_year`, `main.adddate_454`, `main.date_formats`,
-  `main.datetime_456`, `main.in_datetime_241`, `main.str_to_datetime_457`,
-  `main.func_time_round`, `main.func_sapdb`, `main.func_time_64`,
-  `main.func_timestamp`, `main.type_date_round`, `main.type_datetime_round`,
-  `main.type_time_round`, `main.type_time_6065`,
-  `main.type_timestamp_round`, `main.brackets`, `main.comments`,
-  `main.compare`, `main.keywords`, `main.parser_stack`, `main.precedence`,
-  `main.statement-expr`, `main.cte_cycle`, `main.name_const_replacement`,
-  `main.implicit_char_to_num_conversion`, `main.item_types`, `main.round`,
-  `main.sql_safe_updates`, `main.func_in`, `main.update_ignore_216`,
-  `main.replace`, `main.bulk_replace`, `main.create_replace_tmp`,
-  `main.key_primary`, `main.insert_returning_datatypes`,
-  `main.replace_returning`, `main.replace_returning_datatypes`,
-  `main.replace_returning_err`, `main.comment_column2`, `main.check`,
-  `main.create_drop_db`, `main.lowercase_utf8`, `main.key_diff`,
-  `main.subselect_nulls`, `main.subselect_extra`,
-  `main.order_by_zerolength-4285`, `main.order_fill_sortbuf`,
-  `main.subselect_union_rand`, `main.prepare`, `main.ps_10nestset`,
-  `main.ps_11bugs`, `main.ps_max_subselect-5113`,
-  `main.information_schema_prepare`, `main.ctype_ascii`,
-  `main.ctype_cp850`, `main.ctype_cp866`, `main.ctype_hebrew`,
-  `main.ctype_utf32_def`,
-  `main.ctype_collate_column`, `main.ctype_collate_context`,
-  `main.ctype_collate_database`, `main.ctype_collate_implicit`,
-  `main.ctype_collate_implicit_def`, `main.ctype_collate_table`,
-  `main.ctype_errors`, `main.count_distinct`, `main.sum_distinct`,
-  `main.func_equal`, `main.func_op`, `main.func_bit`,
-  `main.func_concat`, `main.func_default`, `main.func_extract`,
-  `main.func_format`, `main.func_replace`, `main.func_regexp`,
-  `main.func_regexp_pcre`, `main.func_weight_string`, `main.func_kdf`, and
-  `main.func_encrypt_nossl`.
+- The runner lists the default curated tests shown above, including all
+  follow-up additions recorded in this spec.
 - The runner builds the required MTR support targets from a fresh enough
   `build/mariadb-mtr-smoke` tree with one batched build invocation.
 - Strict `run` batches accepted tests by suite and still requires every
   selected test to report an MTR `[ pass ]` line.
-- `mylite.bootstrap_schema`, `main.cast`, `main.case`, `main.bigint`,
-  `main.type_ranges`, `main.type_num`, `main.type_uint`, `main.type_char`,
-  `main.type_interval`, `main.type_varbinary`, `main.type_year`,
-  `main.adddate_454`, `main.date_formats`, `main.datetime_456`,
-  `main.in_datetime_241`, `main.str_to_datetime_457`,
-  `main.func_time_round`, `main.func_sapdb`, `main.func_time_64`,
-  `main.func_timestamp`, `main.type_date_round`, `main.type_datetime_round`,
-  `main.type_time_round`, `main.type_time_6065`,
-  `main.type_timestamp_round`, `main.brackets`, `main.comments`,
-  `main.compare`, `main.keywords`, `main.parser_stack`, `main.precedence`,
-  `main.statement-expr`, `main.cte_cycle`, `main.name_const_replacement`,
-  `main.implicit_char_to_num_conversion`, `main.item_types`, `main.round`,
-  `main.sql_safe_updates`, `main.func_in`, `main.update_ignore_216`,
-  `main.replace`, `main.bulk_replace`, `main.create_replace_tmp`,
-  `main.key_primary`, `main.insert_returning_datatypes`,
-  `main.replace_returning`, `main.replace_returning_datatypes`,
-  `main.replace_returning_err`, `main.comment_column2`, `main.check`,
-  `main.create_drop_db`, `main.lowercase_utf8`, `main.key_diff`,
-  `main.subselect_nulls`, `main.subselect_extra`,
-  `main.order_by_zerolength-4285`, `main.order_fill_sortbuf`,
-  `main.subselect_union_rand`, `main.prepare`, `main.ps_10nestset`,
-  `main.ps_11bugs`, `main.ps_max_subselect-5113`,
-  `main.information_schema_prepare`, `main.ctype_ascii`,
-  `main.ctype_cp850`, `main.ctype_cp866`, `main.ctype_hebrew`,
-  `main.ctype_utf32_def`,
-  `main.ctype_collate_column`, `main.ctype_collate_context`,
-  `main.ctype_collate_database`, `main.ctype_collate_implicit`,
-  `main.ctype_collate_implicit_def`, `main.ctype_collate_table`,
-  `main.ctype_errors`, `main.count_distinct`, `main.sum_distinct`,
-  `main.func_equal`, `main.func_op`, `main.func_bit`,
-  `main.func_concat`, `main.func_default`, `main.func_extract`,
-  `main.func_format`, `main.func_replace`, `main.func_regexp`,
-  `main.func_regexp_pcre`, `main.func_weight_string`, `main.func_kdf`, and
-  `main.func_encrypt_nossl` pass under
+- The full default curated list passes under
   `mariadb-test-run.pl --embedded-server` with the MTR smoke profile.
 - Documentation states that this is opt-in smoke coverage, not full MTR-scale
   comparison.

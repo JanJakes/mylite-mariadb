@@ -65,8 +65,9 @@ signal yet: current MyLite behavior is embedded, file-owned, and intentionally
 excludes server surfaces that many upstream suites assume. The opt-in
 `tools/mylite-mtr-harness` runner proves the embedded MTR path with a curated
 smoke list covering the MyLite trimmed bootstrap schema, upstream scalar
-CAST/CONVERT, CASE-family expression, selected numeric, varchar,
-binary/national character, date/timezone, parser/comment, comparison,
+CAST/CONVERT, CASE-family and ANSI SQL-mode expression, selected numeric,
+varchar, binary-string, binary/national character, date/timezone,
+parser/comment, comparison,
 `ORDER BY`, scalar operator, string/format, crypto/KDF, disabled DES,
 aggregate DISTINCT, date-format, and ASCII charset behavior. It uses a separate
 `build/mariadb-mtr-smoke`
