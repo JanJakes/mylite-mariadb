@@ -524,6 +524,10 @@ checkpoints for autoincrement preservation. Durable first-key generated
 statements publish MariaDB-requested reservation intervals from
 `get_auto_increment()` before row publication, so failed multi-row inserts keep
 the reserved gap even when later generated rows never reach `write_row()`.
+Source-driven `INSERT ... SELECT` statements use MariaDB's unknown-row-count
+reservation growth, so failed statements roll back visible rows while preserving
+the reserved generated boundary, and `INSERT IGNORE ... SELECT` skips duplicate
+source rows while preserving the reserved tail for the next statement.
 Mixed generated `INSERT IGNORE` statements may assign consecutive ids to
 successful rows around a skipped duplicate row, but the next statement still
 resumes after the reserved interval boundary.

@@ -214,6 +214,7 @@ static void test_autoincrement_update_gaps(void);
 static void test_autoincrement_failed_dml_matrices(void);
 static void test_autoincrement_on_duplicate_key_update(void);
 static void test_autoincrement_insert_select_on_duplicate_key_update(void);
+static void test_autoincrement_insert_select_failed_dml(void);
 static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
 static void test_index_ddl_if_exists(void);
@@ -541,6 +542,7 @@ int main(int argc, char **argv) {
     test_autoincrement_failed_dml_matrices();
     test_autoincrement_on_duplicate_key_update();
     test_autoincrement_insert_select_on_duplicate_key_update();
+    test_autoincrement_insert_select_failed_dml();
     test_indexed_rows();
     test_standalone_index_ddl();
     test_index_ddl_if_exists();
@@ -12431,6 +12433,153 @@ static void test_autoincrement_insert_select_on_duplicate_key_update(void) {
         db,
         "SELECT id FROM odku_select_explicit_posts WHERE title = 'after-reopen'",
         "252"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_autoincrement_insert_select_failed_dml(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_insert_select_failed");
+    assert_exec_succeeds(db, "USE auto_insert_select_failed");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE insert_select_fail_posts ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (id),"
+        "UNIQUE KEY title_key (title)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE insert_select_fail_source ("
+        "ord INT NOT NULL,"
+        "title VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (ord)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO insert_select_fail_posts (title) VALUES ('dupe')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO insert_select_fail_source (ord, title) VALUES "
+        "(1, 'new-one'),"
+        "(2, 'dupe'),"
+        "(3, 'new-two'),"
+        "(4, 'new-three'),"
+        "(5, 'new-four')"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO insert_select_fail_posts (title) "
+        "SELECT title FROM insert_select_fail_source ORDER BY ord"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM insert_select_fail_posts "
+        "WHERE title IN ('new-one', 'new-two', 'new-three', 'new-four')",
+        "0"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO insert_select_fail_posts (title) VALUES ('after-failed')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM insert_select_fail_posts WHERE title = 'after-failed'",
+        "5"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE insert_select_ignore_posts ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (id),"
+        "UNIQUE KEY title_key (title)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE insert_select_ignore_source ("
+        "ord INT NOT NULL,"
+        "title VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (ord)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO insert_select_ignore_posts (title) VALUES ('dupe')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO insert_select_ignore_source (ord, title) VALUES "
+        "(1, 'new-one'),"
+        "(2, 'dupe'),"
+        "(3, 'new-two'),"
+        "(4, 'new-three'),"
+        "(5, 'new-four')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT IGNORE INTO insert_select_ignore_posts (title) "
+        "SELECT title FROM insert_select_ignore_source ORDER BY ord"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM insert_select_ignore_posts WHERE title = 'new-one'",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM insert_select_ignore_posts WHERE title = 'new-two'",
+        "3"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM insert_select_ignore_posts WHERE title = 'new-three'",
+        "4"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM insert_select_ignore_posts WHERE title = 'new-four'",
+        "5"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO insert_select_ignore_posts (title) VALUES ('after-ignore')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM insert_select_ignore_posts WHERE title = 'after-ignore'",
+        "9"
+    );
+    assert_catalog_table_count(filename, "auto_insert_select_failed", 4U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE auto_insert_select_failed");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO insert_select_ignore_posts (title) VALUES ('after-reopen')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM insert_select_ignore_posts WHERE title = 'after-reopen'",
+        "10"
     );
 
     assert(mylite_close(db) == MYLITE_OK);
