@@ -1236,21 +1236,28 @@ static void test_prepare_diagnostics(void) {
         "storage engine request"
     );
 
-    assert(
-        mylite_prepare(
-            db,
-            "CREATE TABLE partitioned_prepare (id INT NOT NULL PRIMARY KEY) "
-            "PARTITION BY HASH (id) PARTITIONS 2",
-            MYLITE_NUL_TERMINATED,
-            &stmt,
-            NULL
-        ) == MYLITE_ERROR
+    assert_prepare_fails_with_message(
+        db,
+        "CREATE TABLE partitioned_prepare (id INT NOT NULL PRIMARY KEY) "
+        "PARTITION BY HASH (id) PARTITIONS 2",
+        "partition"
     );
-    assert(stmt == NULL);
-    assert(mylite_errcode(db) == MYLITE_ERROR);
-    assert(mylite_mariadb_errno(db) == 0U);
-    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
-    assert(strstr(mylite_errmsg(db), "partition") != NULL);
+    assert_prepare_fails_with_message(
+        db,
+        "ALTER TABLE partitioned_prepare DROP PARTITION p0",
+        "partition"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "ALTER TABLE partitioned_prepare EXCHANGE PARTITION p0 WITH TABLE partitioned_prepare",
+        "partition"
+    );
+    assert_prepare_fails_with_message(
+        db,
+        "ALTER TABLE partitioned_prepare REORGANIZE PARTITION p0 INTO ("
+        "PARTITION p0a VALUES LESS THAN (10))",
+        "partition"
+    );
 
     assert(
         mylite_prepare(

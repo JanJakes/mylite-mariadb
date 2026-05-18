@@ -248,8 +248,9 @@ ordinary MyLite/MariaDB diagnostics.
 Native InnoDB is not registered in the default embedded profile, but
 file-backed storage-engine builds still route application `ENGINE=InnoDB` DDL
 to MyLite storage. Native CSV and partition are not registered either; CSV
-table files remain unsupported, and partition DDL continues to fail before
-MariaDB execution until MyLite has partition metadata and routing.
+table files remain unsupported, and partition DDL plus representative
+partition-management statements continue to fail before MariaDB execution until
+MyLite has partition metadata and routing.
 
 ## Prepared Statements
 
@@ -528,8 +529,8 @@ the embedded library model:
 - external durable storage engines,
 - `CREATE TEMPORARY TABLE` foreign-key DDL, `SET DEFAULT` FK actions, and
   broader foreign-key actions outside the supported MyLite subset,
-- partition DDL until partition metadata, partition routing, and per-partition
-  lifecycle semantics exist,
+- partition DDL and management statements until partition metadata, partition
+  routing, and per-partition lifecycle semantics exist,
 - filesystem-backed views, triggers, and routines until they have MyLite
   catalog storage,
 - sequence objects and sequence value surfaces such as `NEXT VALUE FOR`,

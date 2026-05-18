@@ -53,8 +53,11 @@ Add a `libmylite` SQL policy check for table partition DDL:
 - `CREATE TABLE ... PARTITIONS N` / `SUBPARTITION ...` rejects when attached to
   table DDL.
 - `ALTER TABLE ... PARTITION BY ...` rejects.
-- Representative partition-management forms such as `ADD PARTITION` and
-  `REMOVE PARTITIONING` reject.
+- Representative partition-management forms such as `ADD PARTITION`,
+  `DROP PARTITION`, `TRUNCATE PARTITION`, `EXCHANGE PARTITION`,
+  `REORGANIZE PARTITION`, `ANALYZE PARTITION`, `CHECK PARTITION`,
+  `OPTIMIZE PARTITION`, `REPAIR PARTITION`, and `REMOVE PARTITIONING`
+  reject.
 
 The detector scans SQL tokens while skipping comments, quoted identifiers, and
 string literals, matching the existing foreign-key and locking policy style.
@@ -95,10 +98,11 @@ is first-party SQL policy code plus tests and docs.
 
 ## Test And Verification Plan
 
-- Direct embedded API rejects `CREATE TABLE ... PARTITION BY ...` and
-  representative `ALTER TABLE` partition-management forms with stable MyLite
-  diagnostics.
-- Prepared API rejects partitioned table DDL before MariaDB prepare.
+- Direct embedded API rejects `CREATE TABLE ... PARTITION BY ...` and a
+  representative matrix of `ALTER TABLE` partition-management forms with stable
+  MyLite diagnostics.
+- Prepared API rejects partitioned table DDL and representative
+  partition-management forms before MariaDB prepare.
 - Storage-engine smoke rejects partitioned routed `ENGINE=InnoDB` DDL before
   catalog publication and verifies the catalog remains unchanged.
 - Add a `partition` compatibility harness group.

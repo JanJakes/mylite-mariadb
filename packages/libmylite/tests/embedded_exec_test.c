@@ -1904,6 +1904,21 @@ static void test_partition_policy_is_rejected(void) {
         db,
         "ALTER TABLE partition_comment ADD PARTITION (PARTITION p1 VALUES LESS THAN (10))"
     );
+    assert_partition_exec_fails(db, "ALTER TABLE partition_comment DROP PARTITION p0");
+    assert_partition_exec_fails(db, "ALTER TABLE partition_comment TRUNCATE PARTITION p0");
+    assert_partition_exec_fails(
+        db,
+        "ALTER TABLE partition_comment EXCHANGE PARTITION p0 WITH TABLE partition_comment"
+    );
+    assert_partition_exec_fails(
+        db,
+        "ALTER TABLE partition_comment REORGANIZE PARTITION p0 INTO ("
+        "PARTITION p0a VALUES LESS THAN (10))"
+    );
+    assert_partition_exec_fails(db, "ALTER TABLE partition_comment ANALYZE PARTITION p0");
+    assert_partition_exec_fails(db, "ALTER TABLE partition_comment CHECK PARTITION p0");
+    assert_partition_exec_fails(db, "ALTER TABLE partition_comment OPTIMIZE PARTITION p0");
+    assert_partition_exec_fails(db, "ALTER TABLE partition_comment REPAIR PARTITION p0");
     assert_partition_exec_fails(db, "ALTER TABLE partition_comment REMOVE PARTITIONING");
 
     assert(mylite_close(db) == MYLITE_OK);

@@ -1745,6 +1745,22 @@ static void test_transaction_and_foreign_key_policies(void) {
         mylite_storage_table_exists(filename, "app", "partitioned_posts") == MYLITE_STORAGE_NOTFOUND
     );
     assert_partition_exec_fails(db, "ALTER TABLE posts PARTITION BY HASH (id) PARTITIONS 2");
+    assert_partition_exec_fails(
+        db,
+        "ALTER TABLE posts ADD PARTITION (PARTITION p1 VALUES LESS THAN (10))"
+    );
+    assert_partition_exec_fails(db, "ALTER TABLE posts DROP PARTITION p0");
+    assert_partition_exec_fails(db, "ALTER TABLE posts TRUNCATE PARTITION p0");
+    assert_partition_exec_fails(db, "ALTER TABLE posts EXCHANGE PARTITION p0 WITH TABLE posts");
+    assert_partition_exec_fails(
+        db,
+        "ALTER TABLE posts REORGANIZE PARTITION p0 INTO ("
+        "PARTITION p0a VALUES LESS THAN (10))"
+    );
+    assert_partition_exec_fails(db, "ALTER TABLE posts ANALYZE PARTITION p0");
+    assert_partition_exec_fails(db, "ALTER TABLE posts CHECK PARTITION p0");
+    assert_partition_exec_fails(db, "ALTER TABLE posts OPTIMIZE PARTITION p0");
+    assert_partition_exec_fails(db, "ALTER TABLE posts REPAIR PARTITION p0");
     assert_partition_exec_fails(db, "ALTER TABLE posts REMOVE PARTITIONING");
     assert_catalog_table_count(filename, "app", 1U);
     assert_exec_succeeds(db, "ALTER TABLE posts ADD COLUMN copy_ok INT NULL, ALGORITHM=COPY");

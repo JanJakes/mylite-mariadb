@@ -152,9 +152,10 @@ buffer before deleting or updating the parent row.
 MariaDB/InnoDB base documents the action as unsupported. Broader exhaustive
 multi-table matrices, deferrable set-wide validation, and cyclic or full
 recursive action graphs remain planned.
-Partition DDL remains rejected at the `libmylite` boundary until MyLite has
-partition metadata, partition-to-primary-file routing, per-partition catalog
-lifecycle, and partition-aware row and index maintenance.
+Partition DDL and representative partition-management statements remain
+rejected at the `libmylite` boundary until MyLite has partition metadata,
+partition-to-primary-file routing, per-partition catalog lifecycle, and
+partition-aware row and index maintenance.
 Basic CHECK constraints are kept inside the MariaDB table-definition image and
 evaluated by MariaDB before MyLite handler writes. Supported copy
 `ALTER TABLE` paths can add and drop named table-level CHECK constraints
@@ -614,9 +615,9 @@ is claimed.
 Generated primary keys follow MariaDB's SQL-layer rejection policy. Long-unique
 hash keys remain unsupported until MyLite has a durable hidden-key design.
 Current `libmylite` entry points still reject `CREATE TEMPORARY TABLE` FK DDL
-and partition DDL before MariaDB execution. Unsupported FK shapes, FULLTEXT,
-SPATIAL, and long-unique indexes reject through handler capability checks
-before catalog publication.
+and partition DDL or management statements before MariaDB execution.
+Unsupported FK shapes, FULLTEXT, SPATIAL, and long-unique indexes reject
+through handler capability checks before catalog publication.
 
 ## Transactions And Recovery
 
