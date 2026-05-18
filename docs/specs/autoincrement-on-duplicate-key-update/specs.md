@@ -57,12 +57,15 @@ MariaDB base: `mariadb-11.8.6`
   `docs/specs/routed-odku-statement-effects/specs.md`.
 - Close/reopen persistence and transaction rollback preservation for the
   explicit high-value duplicate-update path.
+- Grouped later-in-key successful ODKU is covered separately in
+  `docs/specs/autoincrement-grouped-odku/specs.md`.
 
 ## Non-Goals
 
-- Exhaustive ODKU expression, trigger, view, partition, source-error, or grouped
-  later-in-key autoincrement matrices. Failed duplicate-update branches after
-  earlier generated row publication are covered separately in
+- Exhaustive ODKU expression, trigger, view, partition, source-error, grouped
+  source-driven, or grouped failed-update autoincrement matrices. Failed
+  duplicate-update branches after earlier generated row publication are covered
+  separately in
   `docs/specs/autoincrement-on-duplicate-key-update-failed-dml/specs.md`.
 - Native InnoDB old-style autoincrement lock-mode parity.
 - Exhaustive durable routed-storage `LAST_INSERT_ID()` / `mysql_insert_id()`
@@ -83,9 +86,9 @@ non-gapless autoincrement behavior:
   that advancement across transaction rollback and close/reopen.
 
 The claim remains representative. Broader ODKU surfaces remain planned until
-grouped-autoincrement, trigger, offset, integer-width, additional error-path,
-and durable routed-storage insert-id matrices beyond the representative
-coverage are covered.
+trigger, offset, integer-width, additional grouped source/error-path, and
+durable routed-storage insert-id matrices beyond the representative coverage
+are covered.
 
 ## Design
 
@@ -158,7 +161,7 @@ No dependency, license, or intended size-profile change is introduced.
   planned.
 - Failed duplicate-update branches after earlier generated row publication are
   covered by the failed-DML ODKU follow-up slice.
-- Grouped later-in-key autoincrement ODKU behavior may need storage-level
-  prefix lookup before it can be claimed broadly.
+- Grouped later-in-key successful ODKU now has representative direct coverage;
+  source-driven and failed-update grouped variants remain planned.
 - ODKU trigger, view, and source-error paths may have distinct SQL-layer
   ordering and remain planned.

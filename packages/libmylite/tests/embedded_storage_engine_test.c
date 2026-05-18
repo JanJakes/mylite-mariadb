@@ -216,6 +216,7 @@ static void test_autoincrement_failed_dml_matrices(void);
 static void test_autoincrement_prior_success_failed_update(void);
 static void test_autoincrement_prior_success_failed_update_matrices(void);
 static void test_autoincrement_on_duplicate_key_update(void);
+static void test_autoincrement_grouped_on_duplicate_key_update(void);
 static void test_autoincrement_on_duplicate_key_update_failed_dml(void);
 static void test_autoincrement_insert_select_on_duplicate_key_update(void);
 static void test_autoincrement_insert_select_failed_dml(void);
@@ -548,6 +549,7 @@ int main(int argc, char **argv) {
     test_autoincrement_prior_success_failed_update();
     test_autoincrement_prior_success_failed_update_matrices();
     test_autoincrement_on_duplicate_key_update();
+    test_autoincrement_grouped_on_duplicate_key_update();
     test_autoincrement_on_duplicate_key_update_failed_dml();
     test_autoincrement_insert_select_on_duplicate_key_update();
     test_autoincrement_insert_select_failed_dml();
@@ -12696,6 +12698,167 @@ static void test_autoincrement_on_duplicate_key_update(void) {
         db,
         "SELECT id FROM odku_explicit_posts WHERE title = 'after-reopen'",
         "152"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_autoincrement_grouped_on_duplicate_key_update(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_grouped_odku");
+    assert_exec_succeeds(db, "USE auto_grouped_odku");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_odku_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "body VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (category, id),"
+        "UNIQUE KEY title_key (title)"
+        ") ENGINE=MyISAM"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_odku_posts (category, title, body) VALUES "
+        "(1, 'dupe', 'original'),"
+        "(2, 'other-prefix', 'other original')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_odku_posts WHERE title = 'dupe'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_odku_posts WHERE title = 'other-prefix'",
+        "1"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_odku_posts (category, title, body) VALUES "
+        "(1, 'new-before', 'before'),"
+        "(1, 'dupe', 'updated'),"
+        "(1, 'new-after', 'after') "
+        "ON DUPLICATE KEY UPDATE body = VALUES(body)"
+    );
+    assert(mylite_changes(db) == 4);
+    assert(mylite_last_insert_id(db) == 2U);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_odku_posts WHERE title = 'new-before'",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_odku_posts WHERE title = 'new-after'",
+        "3"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT body FROM grouped_odku_posts WHERE title = 'dupe'",
+        "updated"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_odku_posts (category, title, body) VALUES "
+        "(1, 'dupe', 'last-id') "
+        "ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), body = VALUES(body)"
+    );
+    assert(mylite_changes(db) == 2);
+    assert(mylite_last_insert_id(db) == 1U);
+    assert_query_single_value(
+        db,
+        "SELECT body FROM grouped_odku_posts WHERE title = 'dupe'",
+        "last-id"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_odku_posts (category, title, body) VALUES "
+        "(1, 'after-grouped-odku', 'after')"
+    );
+    assert(mylite_changes(db) == 1);
+    assert(mylite_last_insert_id(db) == 4U);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_odku_posts WHERE title = 'after-grouped-odku'",
+        "4"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_odku_posts (category, title, body) VALUES "
+        "(2, 'other-prefix-tail', 'other tail')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_odku_posts WHERE title = 'other-prefix-tail'",
+        "2"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_odku_posts (category, title, body) VALUES "
+        "(1, 'dupe', 'high') "
+        "ON DUPLICATE KEY UPDATE id = 10, body = VALUES(body)"
+    );
+    assert(mylite_changes(db) == 2);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_odku_posts WHERE title = 'dupe'",
+        "10"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT body FROM grouped_odku_posts WHERE title = 'dupe'",
+        "high"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_odku_posts (category, title, body) VALUES "
+        "(1, 'after-high-grouped-odku', 'after high')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_odku_posts WHERE title = 'after-high-grouped-odku'",
+        "11"
+    );
+    assert_catalog_table_count(filename, "auto_grouped_odku", 1U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE auto_grouped_odku");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_odku_posts (category, title, body) VALUES "
+        "(1, 'after-reopen-grouped-odku', 'reopened')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_odku_posts WHERE title = 'after-reopen-grouped-odku'",
+        "12"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_odku_posts (category, title, body) VALUES "
+        "(2, 'after-reopen-other-prefix', 'reopened other')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_odku_posts WHERE title = 'after-reopen-other-prefix'",
+        "3"
     );
 
     assert(mylite_close(db) == MYLITE_OK);
