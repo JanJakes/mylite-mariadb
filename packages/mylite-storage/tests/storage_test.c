@@ -201,6 +201,7 @@ static char *path_join(const char *directory, const char *name);
 static char *journal_path(const char *filename);
 static char *transaction_journal_path(const char *filename);
 static long long file_size(const char *path);
+static void assert_file_size_matches_header(const char *filename);
 static void assert_file_missing(const char *path);
 static void assert_post_rowset_layout(const mylite_storage_rowset *rows, size_t row_size);
 static void assert_lifecycle_initial_rows(const mylite_storage_rowset *rows);
@@ -1768,6 +1769,7 @@ static void assert_statement_checkpoint_rolls_back_row(statement_checkpoint_test
     mylite_storage_index_entryset entries = {
         .size = sizeof(entries),
     };
+    const long long checkpoint_file_size = file_size(ctx->filename);
 
     assert(!mylite_storage_statement_active(ctx->filename));
     assert(mylite_storage_begin_statement(ctx->filename, &statement) == MYLITE_STORAGE_OK);
@@ -1791,6 +1793,8 @@ static void assert_statement_checkpoint_rolls_back_row(statement_checkpoint_test
     assert(row_count == 1ULL);
     assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
     assert(!mylite_storage_statement_active(ctx->filename));
+    assert(file_size(ctx->filename) == checkpoint_file_size);
+    assert_file_size_matches_header(ctx->filename);
 
     assert(
         mylite_storage_count_rows(ctx->filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK
@@ -1987,6 +1991,7 @@ static void assert_statement_checkpoint_preserves_marked_auto_increment_rollback
     );
     assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
     assert_auto_increment_value(ctx->filename, 11ULL);
+    assert_file_size_matches_header(ctx->filename);
     assert_row_not_found(ctx->filename, row_id);
     assert(
         mylite_storage_count_rows(ctx->filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK
@@ -2013,6 +2018,7 @@ static void assert_statement_checkpoint_preserves_marked_auto_increment_rollback
     );
     assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
     assert_auto_increment_value(ctx->filename, 11ULL);
+    assert_file_size_matches_header(ctx->filename);
     assert_row_not_found(ctx->filename, no_marker_row_id);
 }
 
@@ -2332,6 +2338,7 @@ static void assert_transaction_journal_rolls_back(const transaction_journal_test
     );
     assert(mylite_storage_rollback_statement(transaction) == MYLITE_STORAGE_OK);
     assert_file_missing(ctx->transaction_journal_filename);
+    assert_file_size_matches_header(ctx->filename);
     assert(mylite_storage_read_rows(ctx->filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
     assert(rows.row_count == 1U);
     mylite_storage_free_rowset(&rows);
@@ -2595,6 +2602,7 @@ static void test_recovers_row_publication_journal(void) {
     assert(rows.row_count == 0U);
     mylite_storage_free_rowset(&rows);
     assert_file_missing(journal_filename);
+    assert_file_size_matches_header(filename);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
@@ -2634,6 +2642,7 @@ static void test_recovers_catalog_publication_journal(void) {
 
     assert(mylite_storage_table_exists(filename, "app", "posts") == MYLITE_STORAGE_OK);
     assert_file_missing(journal_filename);
+    assert_file_size_matches_header(filename);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
@@ -3302,6 +3311,12 @@ static long long file_size(const char *path) {
     struct stat path_stat;
     assert(stat(path, &path_stat) == 0);
     return (long long)path_stat.st_size;
+}
+
+static void assert_file_size_matches_header(const char *filename) {
+    mylite_storage_header header = {0};
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(file_size(filename) == (long long)(header.page_count * header.page_size));
 }
 
 static void assert_file_missing(const char *path) {

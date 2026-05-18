@@ -259,6 +259,10 @@ static mylite_storage_result write_page(FILE *file, const unsigned char *page, s
 static mylite_storage_result lock_file(FILE *file, int operation);
 static int is_lock_conflict(int error_number);
 static mylite_storage_result flush_file(FILE *file);
+static mylite_storage_result truncate_file_to_header_page_count(
+    FILE *file,
+    const mylite_storage_header *header
+);
 static mylite_storage_result flush_parent_directory(const char *filename);
 static mylite_storage_result close_created_file(FILE *file, const char *filename);
 static mylite_storage_result open_existing_file(const char *filename, FILE **out_file);
@@ -3142,6 +3146,13 @@ mylite_storage_result mylite_storage_rollback_statement(mylite_storage_statement
     }
     free_rollback_auto_increment_values(&auto_increment_values);
     if (result == MYLITE_STORAGE_OK) {
+        mylite_storage_header header = {0};
+        result = read_header(statement->file, &header);
+        if (result == MYLITE_STORAGE_OK) {
+            result = truncate_file_to_header_page_count(statement->file, &header);
+        }
+    }
+    if (result == MYLITE_STORAGE_OK) {
         result = flush_file(statement->file);
     }
     if (result == MYLITE_STORAGE_OK && statement->owns_transaction_journal) {
@@ -3758,6 +3769,9 @@ static mylite_storage_result restore_recovery_journal(
         result = write_page_at(file, journal->page_ids[i], saved_header->page_size, pages[i]);
     }
     if (result == MYLITE_STORAGE_OK) {
+        result = truncate_file_to_header_page_count(file, saved_header);
+    }
+    if (result == MYLITE_STORAGE_OK) {
         result = flush_file(file);
     }
     return result;
@@ -4079,6 +4093,28 @@ static mylite_storage_result flush_file(FILE *file) {
         return MYLITE_STORAGE_IOERR;
     }
     if (fsync(fileno(file)) != 0) {
+        return MYLITE_STORAGE_IOERR;
+    }
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result truncate_file_to_header_page_count(
+    FILE *file,
+    const mylite_storage_header *header
+) {
+    if (header->page_size == 0U ||
+        header->page_count > ULLONG_MAX / (unsigned long long)header->page_size) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    const unsigned long long file_size =
+        header->page_count * (unsigned long long)header->page_size;
+    if (file_size > (unsigned long long)LONG_MAX) {
+        return MYLITE_STORAGE_UNSUPPORTED;
+    }
+
+    const int file_descriptor = fileno(file);
+    if (file_descriptor < 0 || ftruncate(file_descriptor, (off_t)file_size) != 0) {
         return MYLITE_STORAGE_IOERR;
     }
     return MYLITE_STORAGE_OK;

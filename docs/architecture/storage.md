@@ -672,8 +672,9 @@ catalog mutations, the committed catalog root page. It is fsynced before
 primary-file writes, the primary file is fsynced before the journal is removed,
 the parent directory is synced after journal create/remove, and every storage
 open first recovers and removes a valid pending journal. Recovery restores the
-previously committed header/catalog state; appended pages beyond the restored
-header page count are ignored until free-space reclamation exists.
+previously committed header/catalog state and truncates the primary file to the
+restored header page count. Committed orphan pages from update/delete/truncate
+history still wait for free-space reclamation.
 
 Storage operations now use advisory locks on the primary `.mylite` file
 descriptor. Read APIs take a shared lock after pending recovery is handled,
@@ -785,6 +786,9 @@ return busy under the coarse writer lock. If MariaDB reports statement failure,
 MyLite restores the saved
 catalog/header pages so rows, row-state pages, index entries, autoincrement
 pages, and catalog records appended after the checkpoint are no longer visible.
+After rollback finishes, the primary file is truncated to the restored header
+page count, or to the later page count if rollback intentionally republishes
+advancing autoincrement pages.
 When the restored checkpoint is an outer durable transaction or a nested direct
 savepoint frame, rollback scans appended autoincrement pages before restoring
 the checkpoint and republishes only advancing values for table IDs that existed
