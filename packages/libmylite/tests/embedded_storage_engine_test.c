@@ -177,6 +177,7 @@ static void test_column_alter_if_exists(void);
 static void test_generated_column_alter_ddl(void);
 static void test_generated_primary_key_policy(void);
 static void test_autoincrement_key_policy(void);
+static void test_autoincrement_offset_increment(void);
 static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
 static void test_index_ddl_if_exists(void);
@@ -464,6 +465,7 @@ int main(int argc, char **argv) {
     test_generated_column_alter_ddl();
     test_generated_primary_key_policy();
     test_autoincrement_key_policy();
+    test_autoincrement_offset_increment();
     test_indexed_rows();
     test_standalone_index_ddl();
     test_index_ddl_if_exists();
@@ -9307,6 +9309,105 @@ static void test_autoincrement_key_policy(void) {
         "MYLITE"
     );
     assert_catalog_table_count(filename, "auto_policy", 5U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_autoincrement_offset_increment(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_offset");
+    assert_exec_succeeds(db, "USE auto_offset");
+    assert_exec_succeeds(
+        db,
+        "SET @@session.auto_increment_increment = 3, "
+        "@@session.auto_increment_offset = 2"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE first_key_posts ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "category INT NOT NULL,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO first_key_posts (category, title) VALUES "
+        "(1, 'first'), (1, 'second')"
+    );
+    assert_query_single_value(db, "SELECT id FROM first_key_posts WHERE title = 'first'", "2");
+    assert_query_single_value(db, "SELECT id FROM first_key_posts WHERE title = 'second'", "5");
+    assert_exec_succeeds(db, "INSERT INTO first_key_posts VALUES (20, 2, 'explicit')");
+    assert_exec_succeeds(db, "INSERT INTO first_key_posts (category, title) VALUES (2, 'after-explicit')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM first_key_posts WHERE title = 'after-explicit'",
+        "23"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (category, id)"
+        ") ENGINE=MyISAM"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_posts (category, title) VALUES "
+        "(1, 'a1'), (1, 'a2'), (2, 'b1')"
+    );
+    assert_query_single_value(db, "SELECT id FROM grouped_posts WHERE title = 'a1'", "2");
+    assert_query_single_value(db, "SELECT id FROM grouped_posts WHERE title = 'a2'", "5");
+    assert_query_single_value(db, "SELECT id FROM grouped_posts WHERE title = 'b1'", "2");
+    assert_exec_succeeds(db, "INSERT INTO grouped_posts VALUES (1, 20, 'a20')");
+    assert_exec_succeeds(db, "INSERT INTO grouped_posts (category, title) VALUES (1, 'a23')");
+    assert_exec_succeeds(db, "INSERT INTO grouped_posts (category, title) VALUES (2, 'b5')");
+    assert_query_single_value(db, "SELECT id FROM grouped_posts WHERE title = 'a23'", "23");
+    assert_query_single_value(db, "SELECT id FROM grouped_posts WHERE title = 'b5'", "5");
+    assert_catalog_table_count(filename, "auto_offset", 2U);
+    assert_exec_succeeds(
+        db,
+        "SET @@session.auto_increment_increment = 1, "
+        "@@session.auto_increment_offset = 1"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE auto_offset");
+    assert_exec_succeeds(
+        db,
+        "SET @@session.auto_increment_increment = 3, "
+        "@@session.auto_increment_offset = 2"
+    );
+    assert_exec_succeeds(db, "INSERT INTO first_key_posts (category, title) VALUES (3, 'after-reopen')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM first_key_posts WHERE title = 'after-reopen'",
+        "26"
+    );
+    assert_exec_succeeds(db, "INSERT INTO grouped_posts (category, title) VALUES (1, 'a26')");
+    assert_exec_succeeds(db, "INSERT INTO grouped_posts (category, title) VALUES (3, 'c2')");
+    assert_query_single_value(db, "SELECT id FROM grouped_posts WHERE title = 'a26'", "26");
+    assert_query_single_value(db, "SELECT id FROM grouped_posts WHERE title = 'c2'", "2");
+    assert_exec_succeeds(
+        db,
+        "SET @@session.auto_increment_increment = 1, "
+        "@@session.auto_increment_offset = 1"
+    );
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
