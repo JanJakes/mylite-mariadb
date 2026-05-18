@@ -168,6 +168,8 @@ Implemented:
   unique constraints added and dropped through copy ALTER.
 - The `generated-unique-constraint-ddl` follow-up slice covers named unique
   constraints over supported generated columns.
+- The `generated-unique-constraint-matrix` follow-up slice covers composite
+  unique constraints over virtual generated columns plus existence-option DDL.
 - The `failed-generated-unique-constraint-rollback` follow-up slice covers
   duplicate generated values preserving the old table after a failed generated
   unique constraint add.

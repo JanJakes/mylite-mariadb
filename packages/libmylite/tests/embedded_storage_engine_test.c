@@ -189,6 +189,7 @@ static void test_check_constraint_if_exists(void);
 static void test_non_check_constraint_ddl(void);
 static void test_composite_unique_constraint_ddl(void);
 static void test_generated_unique_constraint_ddl(void);
+static void test_generated_unique_constraint_matrix(void);
 static void test_failed_generated_unique_constraint_rollback(void);
 static void test_primary_key_alter_ddl(void);
 static void test_failed_add_unique_constraint_rollback(void);
@@ -505,6 +506,7 @@ int main(int argc, char **argv) {
     test_non_check_constraint_ddl();
     test_composite_unique_constraint_ddl();
     test_generated_unique_constraint_ddl();
+    test_generated_unique_constraint_matrix();
     test_failed_generated_unique_constraint_rollback();
     test_primary_key_alter_ddl();
     test_failed_add_unique_constraint_rollback();
@@ -8394,6 +8396,161 @@ static void test_generated_unique_constraint_ddl(void) {
         filename,
         "generated_constraints",
         "generated_constraint_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_generated_unique_constraint_matrix(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    table_context composite_generated_index_rows = {0};
+    table_context existing_generated_index_rows = {0};
+    table_context reopened_generated_index_rows = {0};
+    table_context dropped_generated_index_rows = {0};
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE generated_constraint_matrix");
+    assert_exec_succeeds(db, "USE generated_constraint_matrix");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE localized_generated_posts ("
+        "id INT NOT NULL PRIMARY KEY,"
+        "site_id INT NOT NULL,"
+        "title VARCHAR(64) NOT NULL,"
+        "slug VARCHAR(96) AS (LOWER(REPLACE(title, ' ', '-'))) VIRTUAL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO localized_generated_posts (id, site_id, title) VALUES "
+        "(1, 1, 'Alpha Post'), (2, 2, 'Alpha Post'), (3, 1, 'Beta Post')"
+    );
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE localized_generated_posts "
+        "ADD CONSTRAINT site_slug_unique UNIQUE (site_id, slug), ALGORITHM=COPY"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM localized_generated_posts "
+            "WHERE Key_name = 'site_slug_unique'",
+            table_callback,
+            &composite_generated_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(composite_generated_index_rows.rows == 2);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM localized_generated_posts FORCE INDEX (site_slug_unique) "
+        "WHERE site_id = 2 AND slug = 'alpha-post'",
+        "2"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO localized_generated_posts (id, site_id, title) "
+        "VALUES (4, 1, 'Alpha Post')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO localized_generated_posts (id, site_id, title) "
+        "VALUES (4, 3, 'Alpha Post')"
+    );
+    assert_exec_fails(
+        db,
+        "UPDATE localized_generated_posts SET site_id = 1 WHERE id = 4"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT site_id FROM localized_generated_posts WHERE id = 4",
+        "3"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE generated_constraint_matrix");
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM localized_generated_posts "
+            "WHERE Key_name = 'site_slug_unique'",
+            table_callback,
+            &reopened_generated_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_generated_index_rows.rows == 2);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM localized_generated_posts FORCE INDEX (site_slug_unique) "
+        "WHERE site_id = 3 AND slug = 'alpha-post'",
+        "4"
+    );
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE localized_generated_posts "
+        "ADD CONSTRAINT site_slug_unique UNIQUE IF NOT EXISTS (site_id, slug), "
+        "ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "site_slug_unique");
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM localized_generated_posts "
+            "WHERE Key_name = 'site_slug_unique'",
+            table_callback,
+            &existing_generated_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(existing_generated_index_rows.rows == 2);
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE localized_generated_posts "
+        "DROP CONSTRAINT IF EXISTS missing_site_slug_unique, ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "missing_site_slug_unique");
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE localized_generated_posts "
+        "DROP CONSTRAINT IF EXISTS site_slug_unique, ALGORITHM=COPY"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM localized_generated_posts "
+            "WHERE Key_name = 'site_slug_unique'",
+            table_callback,
+            &dropped_generated_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(dropped_generated_index_rows.rows == 0);
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO localized_generated_posts (id, site_id, title) "
+        "VALUES (5, 1, 'Alpha Post')"
+    );
+    assert_catalog_table_count(filename, "generated_constraint_matrix", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "generated_constraint_matrix",
+        "localized_generated_posts",
         "InnoDB",
         "MYLITE"
     );

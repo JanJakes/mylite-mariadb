@@ -403,7 +403,9 @@ virtual or stored generated columns use the same MariaDB-generated key tuples
 as supported base-column indexes, including initial definitions and supported
 copy-rebuild add, drop, rename, standalone index DDL, generated-column
 `ADD CONSTRAINT ... UNIQUE` / `DROP CONSTRAINT` paths, and failed generated
-unique constraint adds over duplicate generated values. Bounded
+unique constraint adds over duplicate generated values. Representative
+composite unique constraints over virtual generated columns use the same key
+tuple and retained metadata paths. Bounded
 generated BLOB/TEXT prefix indexes declared in initial table definitions or
 added through standalone copy-rebuild index DDL use the same generated-value and
 BLOB/TEXT prefix key-image paths. Generated

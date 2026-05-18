@@ -129,6 +129,8 @@ unchanged for practical purposes.
   and after close/reopen.
 - Ordinary generated-column secondary and unique indexes, including supported
   generated-index DDL paths, work before and after close/reopen.
+- Composite unique constraints over virtual generated columns work before and
+  after close/reopen for representative insert/update duplicate paths.
 - Copy-rebuild generated-column add, modify, and drop DDL works before and
   after close/reopen.
 - CTAS projections from virtual and stored generated source columns materialize
