@@ -88,6 +88,7 @@ default_tests=(
   main.order_by_optimizer
   main.order_by-mdev-10122
   main.optimizer_costs2
+  main.explain
   main.order_fill_sortbuf
   main.subselect_union_rand
   main.prepare
@@ -108,8 +109,10 @@ default_tests=(
   main.ctype_recoding
   main.ctype_utf32_def
   main.ctype_utf8mb3_bin
+  main.ctype_utf8mb3_general_ci
   main.ctype_utf8mb4_bin
   main.ctype_utf8mb4_general_ci
+  main.ctype_utf8mb4_uca1400_ai_ci
   main.ctype_filesystem
   main.ctype_collate_column
   main.ctype_collate_context

@@ -110,9 +110,9 @@ subquery, update-ignore, `REPLACE`, `RETURNING`, temporary create-or-replace,
 primary-key lookup, selected DDL/name and comment metadata behavior,
 selected DDL constraint/index metadata and UCA CTAS behavior,
 selected `ORDER BY` optimizer
-and aggregate-ordering behavior, optimizer-cost metadata, UNION,
-prepared-statement behavior, selected SIGNAL/RESIGNAL diagnostics and
-row-constructor behavior, selected scalar operator behavior, selected
+and aggregate-ordering behavior, optimizer-cost metadata, selected EXPLAIN
+plan output, UNION, prepared-statement behavior, selected SIGNAL/RESIGNAL
+diagnostics and row-constructor behavior, selected scalar operator behavior, selected
 bit/extraction/replacement/regexp scalar-function behavior, selected
 default-expression and weight-string behavior, selected string/format function
 behavior, selected charset-conversion expression behavior, selected crypto/KDF
@@ -120,8 +120,9 @@ function behavior, selected disabled DES encryption-function behavior,
 selected JSON equality and normalization behavior, selected aggregate DISTINCT behavior,
 selected autoincrement ODKU and strict HEAP autoincrement behavior, selected
 date-format behavior, selected ASCII, legacy, and UTF-32 charset edge
-behavior, selected Latin2 and UTF-8 binary/general charset, weight-string, and
-LIKE condition-propagation behavior, selected multibyte charset recoding,
+behavior, selected Latin2, UTF-8 binary/general, and UTF-8 UCA 1400 charset,
+weight-string, and LIKE condition-propagation behavior, selected multibyte
+charset recoding,
 selected filesystem charset behavior, and selected charset
 diagnostics, collation-default behavior,
 UTF-32 `character_set_collations`, and column/context collation behavior,

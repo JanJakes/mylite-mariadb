@@ -68,13 +68,13 @@ smoke list covering the MyLite trimmed bootstrap schema, upstream scalar
 CAST/CONVERT, CASE-family and ANSI SQL-mode expression, selected numeric,
 integer, varchar, binary-string, binary/national character, date/timezone,
 parser/comment, comparison, DDL/comment metadata, DDL constraint/index
-metadata, `ORDER BY`, optimizer-cost metadata, SIGNAL/RESIGNAL diagnostics,
-row constructors, scalar
+metadata, `ORDER BY`, optimizer-cost metadata, selected EXPLAIN plan output,
+SIGNAL/RESIGNAL diagnostics, row constructors, scalar
 operator, string/format, charset-conversion expressions, crypto/KDF, disabled
 DES, aggregate DISTINCT, autoincrement ODKU, strict HEAP autoincrement,
 temporal scale, microsecond parsing, date-format, ASCII charset, selected
-Latin2 and UTF-8 binary/general charset, weight-string, and LIKE
-condition-propagation behavior, and multibyte charset recoding.
+Latin2, UTF-8 binary/general, and UTF-8 UCA 1400 charset, weight-string, and
+LIKE condition-propagation behavior, and multibyte charset recoding.
 It uses a separate
 `build/mariadb-mtr-smoke`
 profile because the default embedded profile intentionally omits view, stored
