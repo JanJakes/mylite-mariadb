@@ -186,6 +186,7 @@ static void test_foreign_key_multi_table_ordering(void);
 static void test_foreign_key_multi_table_action_matrix(void);
 static void test_foreign_key_handler_metadata(void);
 static void test_row_dml_transactions(void);
+static void test_two_handle_transaction_owner_isolation(void);
 static void test_create_table_persists_catalog_metadata(void);
 static void test_check_constraint_if_exists(void);
 static void test_non_check_constraint_ddl(void);
@@ -534,6 +535,7 @@ int main(int argc, char **argv) {
     test_foreign_key_multi_table_action_matrix();
     test_foreign_key_handler_metadata();
     test_row_dml_transactions();
+    test_two_handle_transaction_owner_isolation();
     test_create_table_persists_catalog_metadata();
     test_check_constraint_if_exists();
     test_non_check_constraint_ddl();
@@ -7022,6 +7024,94 @@ static void test_row_dml_transactions(void) {
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
     free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_two_handle_transaction_owner_isolation(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *filename = path_join(root, "two-handle-isolation.mylite");
+    mylite_open_config config = open_config(runtime_root);
+    mylite_db *writer = NULL;
+    mylite_db *reader = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    assert(
+        mylite_open_v2(filename, &writer, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
+        MYLITE_OK
+    );
+    assert(
+        mylite_open_v2(filename, &reader, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
+        MYLITE_OK
+    );
+
+    assert_exec_succeeds(writer, "CREATE DATABASE tx_owner_app");
+    assert_exec_succeeds(writer, "USE tx_owner_app");
+    assert_exec_succeeds(reader, "USE tx_owner_app");
+    assert_exec_succeeds(
+        writer,
+        "CREATE TABLE tx_owner_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+
+    assert_exec_succeeds(writer, "BEGIN");
+    assert_exec_succeeds(writer, "INSERT INTO tx_owner_posts VALUES (1, 'uncommitted-insert')");
+    assert_query_single_value(
+        writer,
+        "SELECT COUNT(*) FROM tx_owner_posts WHERE title = 'uncommitted-insert'",
+        "1"
+    );
+    assert_query_single_value(
+        reader,
+        "SELECT COUNT(*) FROM tx_owner_posts WHERE title = 'uncommitted-insert'",
+        "0"
+    );
+    assert_exec_succeeds(writer, "COMMIT");
+    assert_query_single_value(
+        reader,
+        "SELECT COUNT(*) FROM tx_owner_posts WHERE title = 'uncommitted-insert'",
+        "1"
+    );
+
+    assert_exec_succeeds(writer, "INSERT INTO tx_owner_posts VALUES (2, 'committed-update')");
+    assert_exec_succeeds(writer, "BEGIN");
+    assert_exec_succeeds(
+        writer,
+        "UPDATE tx_owner_posts SET title = 'uncommitted-update' WHERE id = 2"
+    );
+    assert_query_single_value(
+        writer,
+        "SELECT title FROM tx_owner_posts WHERE id = 2",
+        "uncommitted-update"
+    );
+    assert_query_single_value(
+        reader,
+        "SELECT title FROM tx_owner_posts WHERE id = 2",
+        "committed-update"
+    );
+    assert_exec_succeeds(writer, "COMMIT");
+    assert_query_single_value(
+        reader,
+        "SELECT title FROM tx_owner_posts WHERE id = 2",
+        "uncommitted-update"
+    );
+
+    assert_exec_succeeds(writer, "BEGIN");
+    assert_exec_succeeds(writer, "DELETE FROM tx_owner_posts WHERE id = 2");
+    assert_query_single_value(writer, "SELECT COUNT(*) FROM tx_owner_posts WHERE id = 2", "0");
+    assert_query_single_value(reader, "SELECT COUNT(*) FROM tx_owner_posts WHERE id = 2", "1");
+    assert_exec_succeeds(writer, "ROLLBACK");
+    assert_query_single_value(reader, "SELECT COUNT(*) FROM tx_owner_posts WHERE id = 2", "1");
+
+    assert(mylite_close(reader) == MYLITE_OK);
+    assert(mylite_close(writer) == MYLITE_OK);
+    assert(is_directory_empty(runtime_root));
+    assert_no_durable_sidecars(root, "two-handle-isolation.mylite");
+    free(filename);
+    free(runtime_root);
     remove_tree(root);
     free(root);
 }

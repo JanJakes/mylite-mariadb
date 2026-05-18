@@ -754,8 +754,12 @@ temporary-table rows, indexes, and autoincrement state live in process-local
 volatile MyLite storage rather than durable primary-file pages.
 
 Checkpoints save the committed header and catalog root pages while holding the
-primary-file exclusive lock; storage APIs in the same thread borrow that locked
-descriptor. File-backed outer transactions also publish
+primary-file exclusive lock. Storage APIs in the same thread borrow that locked
+descriptor only when the caller's storage context owner matches the checkpoint
+owner. A different same-process `libmylite` handle reads through the saved
+transaction-start header and catalog snapshot, so it sees committed rows,
+row-state pages, index entries, and autoincrement state rather than the owning
+handle's uncommitted appends. File-backed outer transactions also publish
 `<database>.mylite-transaction-journal`, remove it as the durable commit point,
 and use it to restore transaction-start visibility after an unclean process
 exit. If MariaDB reports statement failure, MyLite restores the saved
@@ -785,7 +789,8 @@ transaction modifiers, global transaction variables, direct-execution parameter
 markers, expression-valued or global parameterized transaction-control `SET`
 forms, bound `DEFAULT` / `RELEASE` transaction-control values, release
 completion defaults, XA, and durable direct or prepared DDL inside active
-transactions. Durable transactional DDL, isolation, WAL/checkpoint, and broader
+transactions. Durable transactional DDL, cross-process read progress during an
+active writer, full isolation-level semantics, WAL/checkpoint, and broader
 native MEMORY/HEAP parity remain planned.
 
 The storage design must preserve the full write-concurrency goal. Early

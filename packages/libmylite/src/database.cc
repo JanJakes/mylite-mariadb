@@ -362,6 +362,24 @@ class StorageBusyTimeoutScope {
     unsigned previous_ = 0;
 };
 
+class StorageContextScope {
+  public:
+    explicit StorageContextScope(const void *owner)
+        : previous_(mylite_storage_context_owner()) {
+        mylite_storage_set_context_owner(owner);
+    }
+
+    StorageContextScope(const StorageContextScope &) = delete;
+    StorageContextScope &operator=(const StorageContextScope &) = delete;
+
+    ~StorageContextScope() {
+        mylite_storage_set_context_owner(previous_);
+    }
+
+  private:
+    const void *previous_ = nullptr;
+};
+
 int open_v2_impl(
     const char *filename,
     mylite_db **out_db,
@@ -745,6 +763,7 @@ int mylite_close(mylite_db *database) {
     }
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
+    StorageContextScope storage_context(database);
     if (database->transaction_active && mysql_query(&database->mysql, "ROLLBACK") != 0) {
         set_mariadb_error(*database);
         return MYLITE_ERROR;
@@ -809,6 +828,7 @@ int mylite_step(mylite_stmt *statement) {
     StorageBusyTimeoutScope busy_timeout(
         statement->database != nullptr ? statement->database->busy_timeout_ms : 0U
     );
+    StorageContextScope storage_context(statement->database);
     try {
         if (statement->done) {
             return MYLITE_DONE;
@@ -1421,6 +1441,7 @@ int open_v2_impl(
         database->filename = normalize_filename(filename).string();
         database->busy_timeout_ms = busy_timeout_from_config(config);
 
+        StorageContextScope storage_context(database.get());
         StorageBusyTimeoutScope busy_timeout(database->busy_timeout_ms);
         const int file_result = prepare_primary_file(database->filename, flags);
         if (file_result != MYLITE_OK) {
@@ -1528,6 +1549,7 @@ int exec_impl(
     return copy_error_message(*database, errmsg);
 #else
     StorageBusyTimeoutScope busy_timeout(database->busy_timeout_ms);
+    StorageContextScope storage_context(database);
     set_ok(*database);
     clear_warnings(*database);
     const bool ansi_quotes = mylite_session_ansi_quotes(*database);
@@ -1711,6 +1733,7 @@ int prepare_impl(
     return MYLITE_ERROR;
 #else
     StorageBusyTimeoutScope busy_timeout(database->busy_timeout_ms);
+    StorageContextScope storage_context(database);
     set_ok(*database);
     clear_warnings(*database);
     const std::string_view sql_view(sql, sql_len);

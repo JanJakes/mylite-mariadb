@@ -401,6 +401,8 @@ int mylite_storage_statement_active(const char *filename);
 mylite_storage_result mylite_storage_preserve_auto_increment_on_rollback(
     const char *filename
 );
+const void *mylite_storage_context_owner(void);
+void mylite_storage_set_context_owner(const void *owner);
 void mylite_storage_set_busy_timeout(unsigned milliseconds);
 unsigned mylite_storage_busy_timeout(void);
 mylite_storage_result mylite_storage_commit_statement(mylite_storage_statement *statement);

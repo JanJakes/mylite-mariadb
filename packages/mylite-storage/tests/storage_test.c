@@ -160,6 +160,7 @@ static void assert_statement_checkpoint_preserves_marked_auto_increment_rollback
     statement_checkpoint_test_context *ctx
 );
 static void test_transaction_journals(void);
+static void test_transaction_owner_isolation(void);
 static void assert_transaction_journal_commits(const transaction_journal_test_context *ctx);
 static void assert_transaction_journal_rolls_back(const transaction_journal_test_context *ctx);
 static void assert_transaction_journal_preserves_auto_increment_rollback(
@@ -286,6 +287,7 @@ int main(void) {
     test_truncate_table_lifecycle();
     test_statement_checkpoints();
     test_transaction_journals();
+    test_transaction_owner_isolation();
     test_cleans_recovery_journal_after_mutations();
     test_recovers_row_publication_journal();
     test_recovers_catalog_publication_journal();
@@ -2032,6 +2034,111 @@ static void test_transaction_journals(void) {
     assert(rmdir(root) == 0);
     free(journal_filename);
     free(transaction_journal_filename);
+    free(filename);
+    free(root);
+}
+
+static void test_transaction_owner_isolation(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row_1[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    static const unsigned char row_2[] = {0x00U, 0x02U, 'd', 'e', 'f'};
+    static const unsigned char key_1[] = {'a'};
+    static int owner_1 = 0;
+    static int owner_2 = 0;
+    char *root = make_temp_root();
+    char *filename = path_join(root, "transaction-owner-isolation.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "InnoDB",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_index_entry row_1_entry = {
+        .size = sizeof(row_1_entry),
+        .index_number = 0U,
+        .key = key_1,
+        .key_size = sizeof(key_1),
+    };
+    mylite_storage_statement *transaction = NULL;
+    mylite_storage_statement *savepoint = NULL;
+    mylite_storage_index_entryset entries = {
+        .size = sizeof(entries),
+    };
+    unsigned long long row_id = 0ULL;
+    unsigned long long row_count = 0ULL;
+
+    assert(mylite_storage_context_owner() == NULL);
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+
+    mylite_storage_set_context_owner(&owner_1);
+    assert(mylite_storage_begin_transaction(filename, &transaction) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_statement_active(filename));
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_1,
+            sizeof(row_1),
+            &row_1_entry,
+            1U,
+            &row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 1ULL);
+    assert(mylite_storage_begin_statement(filename, &savepoint) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", row_2, sizeof(row_2)) ==
+        MYLITE_STORAGE_OK
+    );
+    row_count = 0ULL;
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 2ULL);
+
+    mylite_storage_set_context_owner(&owner_2);
+    assert(!mylite_storage_statement_active(filename));
+    row_count = 1ULL;
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 0ULL);
+    assert(
+        mylite_storage_read_index_entries(filename, "app", "posts", 0U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == 0U);
+    mylite_storage_free_index_entryset(&entries);
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", row_2, sizeof(row_2)) ==
+        MYLITE_STORAGE_BUSY
+    );
+
+    mylite_storage_set_context_owner(&owner_1);
+    assert(mylite_storage_rollback_statement(savepoint) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_commit_statement(transaction) == MYLITE_STORAGE_OK);
+    assert(!mylite_storage_statement_active(filename));
+
+    mylite_storage_set_context_owner(&owner_2);
+    row_count = 0ULL;
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 1ULL);
+    entries = (mylite_storage_index_entryset){
+        .size = sizeof(entries),
+    };
+    assert(
+        mylite_storage_read_index_entries(filename, "app", "posts", 0U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == 1U);
+    assert_index_entry(&entries, 0U, row_id, key_1, sizeof(key_1));
+    mylite_storage_free_index_entryset(&entries);
+
+    mylite_storage_set_context_owner(NULL);
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
     free(filename);
     free(root);
 }
