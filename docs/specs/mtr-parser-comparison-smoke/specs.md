@@ -37,13 +37,14 @@ MariaDB base: `mariadb-11.8.6`
   - `tools/mylite-mtr-harness run main.comments`
   - `tools/mylite-mtr-harness run main.compare`
 - Nearby candidates are not admitted in this slice:
-  `main.comment_table` and `main.comment_column` need repeated Aria
-  `PAGE_CHECKSUM=1` normalization, `main.comment_database` is skipped under
-  embedded MTR, and `main.1st` depends on server-system tables omitted by the
-  MyLite MTR smoke profile.
+  `main.comment_database` is skipped under embedded MTR, and `main.1st`
+  depends on server-system tables omitted by the MyLite MTR smoke profile.
 - `main.ansi` was intentionally left for a follow-up slice because it needed
   SQL-mode-specific default-engine normalization; it is now covered by
   [MTR ANSI and binary smoke](../mtr-ansi-binary-smoke/specs.md).
+- `main.comment_table`, `main.comment_column`, and `main.comment_index` needed
+  repeated Aria `PAGE_CHECKSUM=1` normalization and are now covered by
+  [MTR comment DDL smoke](../mtr-comment-ddl-smoke/specs.md).
 
 ## Compatibility Impact
 

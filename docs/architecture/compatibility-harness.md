@@ -67,8 +67,8 @@ excludes server surfaces that many upstream suites assume. The opt-in
 smoke list covering the MyLite trimmed bootstrap schema, upstream scalar
 CAST/CONVERT, CASE-family and ANSI SQL-mode expression, selected numeric,
 varchar, binary-string, binary/national character, date/timezone,
-parser/comment, comparison,
-`ORDER BY`, scalar operator, string/format, crypto/KDF, disabled DES,
+parser/comment, comparison, DDL/comment metadata, `ORDER BY`, scalar
+operator, string/format, crypto/KDF, disabled DES,
 aggregate DISTINCT, date-format, and ASCII charset behavior. It uses a separate
 `build/mariadb-mtr-smoke`
 profile because the default embedded profile intentionally omits view, stored

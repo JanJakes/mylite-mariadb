@@ -61,6 +61,9 @@ default_tests=(
   main.replace_returning
   main.replace_returning_datatypes
   main.replace_returning_err
+  main.comment_column
+  main.comment_table
+  main.comment_index
   main.comment_column2
   main.check
   main.create_drop_db

@@ -42,11 +42,13 @@ MariaDB base: `mariadb-11.8.6`
 - All selected tests pass under the MyLite MTR smoke profile without upstream
   source changes.
 - Probed nearby DDL/name candidates stay outside this slice:
-  - `main.comment_table`, `main.comment_column`, `main.comment_index`,
-    `main.check_constraint_show`, `main.constraints`, `main.create_drop_index`,
+  - `main.check_constraint_show`, `main.constraints`, `main.create_drop_index`,
     `main.create-uca`, and `main.create_w_max_indexes_64` have
     default-engine or Aria `PAGE_CHECKSUM=1` result differences under the
     embedded profile.
+  - `main.comment_table`, `main.comment_column`, and `main.comment_index`
+    needed profile-specific `PAGE_CHECKSUM=1` normalization and are now
+    covered by [MTR comment DDL smoke](../mtr-comment-ddl-smoke/specs.md).
   - `main.comment_database` is skipped for embedded server.
   - `main.drop_bad_db_type` requires a debug build.
   - `main.create_windows` requires Windows.
