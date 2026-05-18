@@ -44,8 +44,10 @@ MariaDB base: `mariadb-11.8.6`
 
 ## Non-Goals
 
-- Exhaustive ODKU expression, trigger, view, partition, grouped later-in-key,
-  offset/increment, integer-width, or durable insert-id matrices.
+- Exhaustive ODKU expression, trigger, view, partition, offset/increment,
+  integer-width, or durable insert-id matrices. Representative grouped
+  later-in-key failed-update paths are covered separately in
+  `docs/specs/autoincrement-grouped-odku-failed-dml/specs.md`.
 - `INSERT IGNORE ... ON DUPLICATE KEY UPDATE` and warning diagnostics.
 - Native InnoDB old-style autoincrement lock-mode parity.
 - Size-profile reduction work.
@@ -58,9 +60,10 @@ publication. The failed statement removes rows inserted earlier by the same
 statement, restores updated row images, and keeps MariaDB/InnoDB-style
 non-gapless generated reservation boundaries for the next insert.
 
-This remains representative. Broader ODKU matrices stay planned for grouped
-autoincrement, triggers, views, source errors, offsets, integer-width
-boundaries, and durable insert-id behavior.
+This remains representative. Broader ODKU matrices stay planned for triggers,
+views, source errors, offsets, integer-width boundaries, and durable insert-id
+behavior. Representative grouped later-in-key failed-update paths are covered
+separately.
 
 ## Design
 
@@ -122,6 +125,7 @@ No dependency, license, or intended size-profile change is introduced.
 ## Risks And Open Questions
 
 - Other ODKU update failures, especially trigger, view, generated-column, and
-  grouped-autoincrement variants, may follow different SQL-layer paths.
+  additional grouped-autoincrement variants, may follow different SQL-layer
+  paths.
 - This does not compare native InnoDB lock modes or public insert-id behavior
   for durable routed ODKU statements.

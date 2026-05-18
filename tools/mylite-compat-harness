@@ -37,7 +37,7 @@ group_spec() {
       echo "storage-smoke-dev|compat-transaction-hooks|MariaDB statement transaction hook integration"
       ;;
     statement-rollback)
-      echo "storage-smoke-dev|compat-statement-rollback|Failed statement rollback for routed MyLite storage, including prepared row-DML, failed-DML autoincrement generated reservation, source-driven insert-select reservation growth, failed ODKU reservation preservation, prior-success update preservation across representative FK, duplicate-key, and CHECK failures, explicit duplicate non-consumption, and update gaps, representative mixed-row autoincrement matrices, row REPLACE, OR REPLACE replacement, and table-DDL failures"
+      echo "storage-smoke-dev|compat-statement-rollback|Failed statement rollback for routed MyLite storage, including prepared row-DML, failed-DML autoincrement generated reservation, source-driven insert-select reservation growth, failed first-key ODKU reservation preservation, grouped ODKU rollback to live prefix maxima, prior-success update preservation across representative FK, duplicate-key, and CHECK failures, explicit duplicate non-consumption, and update gaps, representative mixed-row autoincrement matrices, row REPLACE, OR REPLACE replacement, and table-DDL failures"
       ;;
     partition)
       echo "storage-smoke-dev|compat-partition|Partition DDL and partition-management rejection policy"

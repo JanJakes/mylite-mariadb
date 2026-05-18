@@ -547,6 +547,9 @@ allocation model: generated values are derived from the current live prefix
 maximum, so duplicate-update attempts do not create a first-key-style
 table-local reserved tail gap, while explicit high-value duplicate updates
 advance only their own prefix.
+When a grouped duplicate-update branch fails after earlier row publication in
+the statement, rollback removes the published rows and the next statement still
+recomputes from the live prefix maximum.
 SQL-layer failures before generated value allocation, such as CHECK failures
 that MariaDB rejects before handler writes, do not reserve MyLite values.
 Failed DDL checkpoints do not inherit the row-DML preservation marker.

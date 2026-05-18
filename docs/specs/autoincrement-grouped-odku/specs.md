@@ -60,7 +60,8 @@ the next generated value is derived from live rows.
 
 The claim remains representative. Broader ODKU matrices stay planned for
 triggers, views, offsets, integer widths, prepared parameter-shape expansion,
-and additional error paths.
+and additional source-error paths. Grouped failed-update paths are covered
+separately in `docs/specs/autoincrement-grouped-odku-failed-dml/specs.md`.
 
 ## Design
 
@@ -128,5 +129,5 @@ No dependency, license, or intended size-profile change is introduced.
 - Native MyISAM/Aria/InnoDB server comparison is not part of this slice because
   MyLite routes those engine requests to MyLite storage and forbids durable
   sidecars.
-- Grouped failed-update ODKU may have distinct SQL-layer ordering and remains
-  planned.
+- Grouped failed-update ODKU is covered separately; trigger, view, and
+  source-error paths remain planned.
