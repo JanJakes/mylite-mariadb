@@ -231,6 +231,7 @@ static void test_autoincrement_grouped_on_duplicate_key_update(void);
 static void test_autoincrement_grouped_on_duplicate_key_update_variants(void);
 static void test_autoincrement_grouped_on_duplicate_key_update_failed_dml(void);
 static void test_autoincrement_grouped_on_duplicate_key_update_source_update_errors(void);
+static void test_autoincrement_grouped_on_duplicate_key_update_generated_expression_errors(void);
 static void test_autoincrement_grouped_on_duplicate_key_update_source_read_errors(void);
 static void test_autoincrement_grouped_failed_dml_matrices(void);
 static void test_autoincrement_on_duplicate_key_update_failed_dml(void);
@@ -596,6 +597,7 @@ int main(int argc, char **argv) {
     test_autoincrement_grouped_on_duplicate_key_update_variants();
     test_autoincrement_grouped_on_duplicate_key_update_failed_dml();
     test_autoincrement_grouped_on_duplicate_key_update_source_update_errors();
+    test_autoincrement_grouped_on_duplicate_key_update_generated_expression_errors();
     test_autoincrement_grouped_on_duplicate_key_update_source_read_errors();
     test_autoincrement_grouped_failed_dml_matrices();
     test_autoincrement_on_duplicate_key_update_failed_dml();
@@ -14479,6 +14481,252 @@ static void test_autoincrement_grouped_on_duplicate_key_update_source_update_err
         db,
         "SELECT id FROM grouped_prepared_source_update_error_posts "
         "WHERE title = 'after-prepared-source-update-error-reopen'",
+        "3"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_autoincrement_grouped_on_duplicate_key_update_generated_expression_errors(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_grouped_odku_generated_errors");
+    assert_exec_succeeds(db, "USE auto_grouped_odku_generated_errors");
+    assert_exec_succeeds(db, "SET sql_mode='STRICT_ALL_TABLES'");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_generated_update_error_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "score TINYINT NOT NULL,"
+        "next_score TINYINT AS (score + 1) STORED,"
+        "PRIMARY KEY (category, id),"
+        "UNIQUE KEY title_key (title),"
+        "KEY next_score_key (next_score)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_generated_update_error_posts (category, title, score) VALUES "
+        "(1, 'dupe', 10)"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO grouped_generated_update_error_posts (category, title, score) VALUES "
+        "(1, 'new-before-generated-error', 20),"
+        "(1, 'dupe', 126) "
+        "ON DUPLICATE KEY UPDATE score = VALUES(score) + 1",
+        "Out of range"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_generated_update_error_posts "
+        "WHERE title = 'new-before-generated-error'",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_generated_update_error_posts "
+        "FORCE INDEX (next_score_key) WHERE next_score = 21",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT score FROM grouped_generated_update_error_posts WHERE title = 'dupe'",
+        "10"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_generated_update_error_posts (category, title, score) VALUES "
+        "(1, 'after-generated-error', 30)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_generated_update_error_posts "
+        "WHERE title = 'after-generated-error'",
+        "2"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_prepared_generated_update_error_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "score TINYINT NOT NULL,"
+        "next_score TINYINT AS (score + 1) STORED,"
+        "PRIMARY KEY (category, id),"
+        "UNIQUE KEY title_key (title),"
+        "KEY next_score_key (next_score)"
+        ") ENGINE=MyISAM"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_prepared_generated_update_error_posts "
+        "(category, title, score) VALUES (1, 'dupe', 10)"
+    );
+    assert_prepared_fails_with_message(
+        db,
+        "INSERT INTO grouped_prepared_generated_update_error_posts "
+        "(category, title, score) VALUES "
+        "(1, 'prepared-new-before-generated-error', 20),"
+        "(1, 'dupe', 126) "
+        "ON DUPLICATE KEY UPDATE score = VALUES(score) + 1",
+        "Out of range"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_prepared_generated_update_error_posts "
+        "WHERE title = 'prepared-new-before-generated-error'",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_prepared_generated_update_error_posts "
+        "FORCE INDEX (next_score_key) WHERE next_score = 21",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT score FROM grouped_prepared_generated_update_error_posts WHERE title = 'dupe'",
+        "10"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_prepared_generated_update_error_posts "
+        "(category, title, score) VALUES "
+        "(1, 'after-prepared-generated-error', 30)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_prepared_generated_update_error_posts "
+        "WHERE title = 'after-prepared-generated-error'",
+        "2"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_source_generated_update_error_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "score TINYINT NOT NULL,"
+        "next_score TINYINT AS (score + 1) STORED,"
+        "PRIMARY KEY (category, id),"
+        "UNIQUE KEY title_key (title),"
+        "KEY next_score_key (next_score)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_source_generated_update_error_source ("
+        "ord INT NOT NULL,"
+        "category INT NOT NULL,"
+        "title VARCHAR(64) NOT NULL,"
+        "score TINYINT NOT NULL,"
+        "PRIMARY KEY (ord)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_source_generated_update_error_posts "
+        "(category, title, score) VALUES (1, 'dupe', 10)"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_source_generated_update_error_source "
+        "(ord, category, title, score) VALUES "
+        "(1, 1, 'source-new-before-generated-error', 20),"
+        "(2, 1, 'dupe', 126)"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO grouped_source_generated_update_error_posts "
+        "(category, title, score) "
+        "SELECT category, title, score "
+        "FROM grouped_source_generated_update_error_source ORDER BY ord "
+        "ON DUPLICATE KEY UPDATE score = VALUES(score) + 1",
+        "Out of range"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_source_generated_update_error_posts "
+        "WHERE title = 'source-new-before-generated-error'",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_source_generated_update_error_posts "
+        "FORCE INDEX (next_score_key) WHERE next_score = 21",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT score FROM grouped_source_generated_update_error_posts WHERE title = 'dupe'",
+        "10"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_source_generated_update_error_posts "
+        "(category, title, score) VALUES "
+        "(1, 'after-source-generated-error', 30)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_source_generated_update_error_posts "
+        "WHERE title = 'after-source-generated-error'",
+        "2"
+    );
+    assert_catalog_table_count(filename, "auto_grouped_odku_generated_errors", 4U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE auto_grouped_odku_generated_errors");
+    assert_exec_succeeds(db, "SET sql_mode='STRICT_ALL_TABLES'");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_generated_update_error_posts "
+        "(category, title, score) VALUES "
+        "(1, 'after-generated-error-reopen', 31)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_generated_update_error_posts "
+        "WHERE title = 'after-generated-error-reopen'",
+        "3"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_prepared_generated_update_error_posts "
+        "(category, title, score) VALUES "
+        "(1, 'after-prepared-generated-error-reopen', 31)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_prepared_generated_update_error_posts "
+        "WHERE title = 'after-prepared-generated-error-reopen'",
+        "3"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_source_generated_update_error_posts "
+        "(category, title, score) VALUES "
+        "(1, 'after-source-generated-error-reopen', 31)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_source_generated_update_error_posts "
+        "WHERE title = 'after-source-generated-error-reopen'",
         "3"
     );
 

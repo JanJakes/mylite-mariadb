@@ -436,7 +436,8 @@ restore stored and virtual generated base values and generated-index visibility
 through statement rollback checkpoints.
 Representative strict-mode generated expression failures also restore row and
 generated-index visibility after earlier attempted writes in the failed
-statement.
+statement, including representative grouped ODKU duplicate-update expression
+failures.
 Nullable composite unique constraints preserve MariaDB NULL semantics through
 the same retained-key and key-tuple paths: exact non-NULL duplicates reject, but
 rows with NULL in nullable key parts do not conflict.
@@ -563,8 +564,9 @@ maximum, so duplicate-update attempts do not create a first-key-style
 table-local reserved tail gap, while explicit high-value duplicate updates
 advance only their own prefix.
 When a grouped duplicate-update branch fails after earlier row publication in
-the statement, rollback removes the published rows and the next statement still
-recomputes from the live prefix maximum.
+the statement, including representative source-read, update-expression, and
+generated-expression errors, rollback removes the published rows and the next
+statement still recomputes from the live prefix maximum.
 SQL-layer failures before generated value allocation, such as CHECK failures
 that MariaDB rejects before handler writes, do not reserve MyLite values.
 Failed DDL checkpoints do not inherit the row-DML preservation marker.

@@ -136,6 +136,6 @@ No dependency, license, or intended size-profile change is introduced.
 - Native MyISAM/Aria/InnoDB server comparison is not part of this slice because
   MyLite routes those engine requests to MyLite storage and forbids durable
   sidecars.
-- Grouped failed-update, source-read, and source-driven update-expression
-  errors are covered separately; trigger, view, and broader expression paths
-  remain planned.
+- Grouped failed-update, source-read, source-driven update-expression, and
+  generated-expression errors are covered separately; trigger, view, and
+  broader expression paths remain planned.
