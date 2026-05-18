@@ -196,6 +196,7 @@ static void test_failed_generated_unique_constraint_rollback(void);
 static void test_failed_dependent_column_alter_rollback(void);
 static void test_primary_key_alter_ddl(void);
 static void test_failed_add_unique_constraint_rollback(void);
+static void test_failed_alter_conversion_rollback(void);
 static void test_create_table_if_not_exists(void);
 static void test_alter_table_rebuilds_keyless_rows(void);
 static void test_column_alter_if_exists(void);
@@ -539,6 +540,7 @@ int main(int argc, char **argv) {
     test_failed_dependent_column_alter_rollback();
     test_primary_key_alter_ddl();
     test_failed_add_unique_constraint_rollback();
+    test_failed_alter_conversion_rollback();
     test_create_table_if_not_exists();
     test_alter_table_rebuilds_keyless_rows();
     test_column_alter_if_exists();
@@ -9545,6 +9547,105 @@ static void test_failed_add_unique_constraint_rollback(void) {
         "1"
     );
     assert_exec_fails(db, "INSERT INTO unique_posts VALUES (5, 'jane', 'docs')");
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_failed_alter_conversion_rollback(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE alter_conversion_rollback");
+    assert_exec_succeeds(db, "USE alter_conversion_rollback");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE conversion_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(32) NOT NULL, "
+        "rating INT NOT NULL, "
+        "UNIQUE KEY slug_key (slug), "
+        "KEY rating_key (rating)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO conversion_posts VALUES "
+        "(1, 'alpha', 100), "
+        "(2, 'beta', 300)"
+    );
+    assert_catalog_table_count(filename, "alter_conversion_rollback", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "alter_conversion_rollback",
+        "conversion_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+
+    assert_exec_succeeds(db, "SET sql_mode='STRICT_ALL_TABLES'");
+    assert_exec_fails_with_message(
+        db,
+        "ALTER TABLE conversion_posts "
+        "MODIFY COLUMN rating TINYINT UNSIGNED NOT NULL, ALGORITHM=COPY",
+        "Out of range"
+    );
+    assert_catalog_table_count(filename, "alter_conversion_rollback", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "alter_conversion_rollback",
+        "conversion_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM conversion_posts", "2");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM conversion_posts FORCE INDEX (rating_key) WHERE rating = 300",
+        "2"
+    );
+    assert_exec_succeeds(db, "INSERT INTO conversion_posts VALUES (3, 'gamma', 400)");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM conversion_posts FORCE INDEX (rating_key) WHERE rating = 400",
+        "3"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "alter_conversion_rollback");
+    assert_exec_succeeds(db, "USE alter_conversion_rollback");
+    assert_catalog_table_count(filename, "alter_conversion_rollback", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "alter_conversion_rollback",
+        "conversion_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM conversion_posts FORCE INDEX (rating_key) WHERE rating = 300",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM conversion_posts FORCE INDEX (slug_key) WHERE slug = 'gamma'",
+        "3"
+    );
+    assert_exec_succeeds(db, "SET sql_mode='STRICT_ALL_TABLES'");
+    assert_exec_succeeds(db, "INSERT INTO conversion_posts VALUES (4, 'delta', 500)");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM conversion_posts FORCE INDEX (rating_key) WHERE rating = 500",
+        "4"
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 

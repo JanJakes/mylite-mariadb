@@ -312,7 +312,9 @@ rollback over duplicate existing rows, duplicate and missing
 `ADD CONSTRAINT ... UNIQUE IF NOT EXISTS` paths, existing and missing unique-key
 `DROP CONSTRAINT IF EXISTS` paths, explicit unique-constraint key-name
 semantics, named composite unique constraints through copy ALTER, and
-autoincrement metadata updates.
+autoincrement metadata updates. Failed strict copy ALTER conversion from an
+existing column to an incompatible target column type restores the old catalog
+and row/index visibility through the existing statement checkpoint.
 `LOCK=NONE` and in-place/instant/no-copy ALTER requests are explicitly
 rejected until MyLite has online DDL and lock integration.
 Unsupported index rebuilds and transactional DDL rollback remain planned until
@@ -398,8 +400,9 @@ CHECK definitions, including a representative table whose CHECK constraints
 were added through copy ALTER before export.
 Representative deterministic CHECK expression matrices cover string,
 NULL-handling, conditional, temporal, and numeric expressions. Exhaustive CHECK
-expression, broader failed ALTER rollback, broader dump/export, and transaction
-rollback coverage remains planned.
+expression, broader failed ALTER rollback beyond the covered ADD CHECK,
+ADD UNIQUE, generated-dependency, and strict conversion shapes, broader
+dump/export, and transaction rollback coverage remains planned.
 Basic virtual and stored generated columns follow the same catalog-backed
 table-definition path, including supported copy ALTER add/modify/drop
 operations, CTAS projections from generated source columns, and generated
