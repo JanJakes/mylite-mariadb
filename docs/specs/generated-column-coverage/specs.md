@@ -133,6 +133,8 @@ unchanged for practical purposes.
   after close/reopen for representative insert/update duplicate paths.
 - Copy-rebuild generated-column add, modify, and drop DDL works before and
   after close/reopen.
+- Failed dependent column drops preserve generated-column metadata and
+  generated indexes before and after close/reopen.
 - CTAS projections from virtual and stored generated source columns materialize
   expected values before and after close/reopen.
 - Generated target CTAS definitions compute virtual and stored generated values

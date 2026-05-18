@@ -192,6 +192,7 @@ static void test_nullable_composite_unique_constraint_ddl(void);
 static void test_generated_unique_constraint_ddl(void);
 static void test_generated_unique_constraint_matrix(void);
 static void test_failed_generated_unique_constraint_rollback(void);
+static void test_failed_dependent_column_alter_rollback(void);
 static void test_primary_key_alter_ddl(void);
 static void test_failed_add_unique_constraint_rollback(void);
 static void test_create_table_if_not_exists(void);
@@ -510,6 +511,7 @@ int main(int argc, char **argv) {
     test_generated_unique_constraint_ddl();
     test_generated_unique_constraint_matrix();
     test_failed_generated_unique_constraint_rollback();
+    test_failed_dependent_column_alter_rollback();
     test_primary_key_alter_ddl();
     test_failed_add_unique_constraint_rollback();
     test_create_table_if_not_exists();
@@ -8829,6 +8831,87 @@ static void test_failed_generated_unique_constraint_rollback(void) {
         "INSERT INTO generated_rollback_posts (id, title) VALUES (3, 'Beta Post')"
     );
 
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_failed_dependent_column_alter_rollback(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE dependent_column_rollback");
+    assert_exec_succeeds(db, "USE dependent_column_rollback");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE dependency_posts ("
+        "id INT NOT NULL PRIMARY KEY,"
+        "title VARCHAR(64) NOT NULL,"
+        "rating INT NOT NULL,"
+        "slug VARCHAR(96) AS (LOWER(REPLACE(title, ' ', '-'))) STORED,"
+        "KEY slug_key (slug)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO dependency_posts (id, title, rating) VALUES "
+        "(1, 'Alpha Post', 1), (2, 'Beta Post', 2)"
+    );
+    assert_exec_fails(
+        db,
+        "ALTER TABLE dependency_posts DROP COLUMN title, ALGORITHM=COPY"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM dependency_posts WHERE id = 1",
+        "alpha-post"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM dependency_posts FORCE INDEX (slug_key) "
+        "WHERE slug = 'beta-post'",
+        "2"
+    );
+    assert_catalog_table_count(filename, "dependent_column_rollback", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "dependent_column_rollback",
+        "dependency_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE dependent_column_rollback");
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM dependency_posts WHERE id = 2",
+        "beta-post"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM dependency_posts FORCE INDEX (slug_key) "
+        "WHERE slug = 'alpha-post'",
+        "1"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO dependency_posts (id, title, rating) VALUES "
+        "(3, 'Gamma Post', 3)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM dependency_posts FORCE INDEX (slug_key) "
+        "WHERE slug = 'gamma-post'",
+        "3"
+    );
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
