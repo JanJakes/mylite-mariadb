@@ -69,6 +69,9 @@ source-read errors are covered separately in
 `docs/specs/autoincrement-grouped-odku-source-read-errors/specs.md`, and
 source-driven update-expression errors are covered separately in
 `docs/specs/autoincrement-grouped-odku-source-driven-update-expression-errors/specs.md`.
+Generated-expression and CHECK-constraint errors are covered separately in
+`docs/specs/autoincrement-grouped-odku-generated-expression-errors/specs.md` and
+`docs/specs/autoincrement-grouped-odku-check-constraint-errors/specs.md`.
 
 ## Design
 
@@ -136,6 +139,7 @@ No dependency, license, or intended size-profile change is introduced.
 - Native MyISAM/Aria/InnoDB server comparison is not part of this slice because
   MyLite routes those engine requests to MyLite storage and forbids durable
   sidecars.
-- Grouped failed-update, source-read, source-driven update-expression, and
-  generated-expression errors are covered separately; trigger, view, and
+- Grouped failed-update, source-read, source-driven update-expression,
+  generated-expression, and CHECK-constraint errors are covered separately;
+  trigger, view, and
   broader expression paths remain planned.

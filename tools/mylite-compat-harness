@@ -37,7 +37,7 @@ group_spec() {
       echo "storage-smoke-dev|compat-transaction-hooks|MariaDB statement transaction and handler savepoint hook integration, including representative MEMORY volatile failed-statement and savepoint rollback"
       ;;
     statement-rollback)
-      echo "storage-smoke-dev|compat-statement-rollback|Failed statement rollback for routed MyLite storage, including prepared row-DML, failed-DML autoincrement generated reservation, source-driven insert-select reservation growth, failed first-key ODKU reservation preservation, grouped ODKU source-read, update-expression, and generated-expression rollback plus mixed grouped failed-DML and UPDATE IGNORE matrices to live prefix maxima, prior-success update preservation across representative FK, duplicate-key, and CHECK failures, explicit duplicate non-consumption, and update gaps, representative mixed-row autoincrement matrices, row REPLACE, OR REPLACE replacement, failed copy ALTER conversion, and table-DDL failures"
+      echo "storage-smoke-dev|compat-statement-rollback|Failed statement rollback for routed MyLite storage, including prepared row-DML, failed-DML autoincrement generated reservation, source-driven insert-select reservation growth, failed first-key ODKU reservation preservation, grouped ODKU source-read, update-expression, generated-expression, and CHECK-constraint rollback plus mixed grouped failed-DML and UPDATE IGNORE matrices to live prefix maxima, prior-success update preservation across representative FK, duplicate-key, and CHECK failures, explicit duplicate non-consumption, and update gaps, representative mixed-row autoincrement matrices, row REPLACE, OR REPLACE replacement, failed copy ALTER conversion, and table-DDL failures"
       ;;
     partition)
       echo "storage-smoke-dev|compat-partition|Partition DDL and partition-management rejection policy"
@@ -46,7 +46,7 @@ group_spec() {
       echo "storage-smoke-dev|compat-foreign-key|Foreign-key DDL rejection policy including application-shaped ORM constraints"
       ;;
     check-constraint)
-      echo "storage-smoke-dev|compat-check-constraint|CHECK constraint enforcement, ALTER existence-option skips, CTAS targets, and failed ADD CHECK rollback"
+      echo "storage-smoke-dev|compat-check-constraint|CHECK constraint enforcement, ALTER existence-option skips, CTAS targets, representative grouped ODKU CHECK rollback, and failed ADD CHECK rollback"
       ;;
     generated-column)
       echo "storage-smoke-dev|compat-generated-column|Generated column coverage"

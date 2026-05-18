@@ -565,10 +565,12 @@ table-local reserved tail gap, while explicit high-value duplicate updates
 advance only their own prefix.
 When a grouped duplicate-update branch fails after earlier row publication in
 the statement, including representative source-read, update-expression, and
-generated-expression errors, rollback removes the published rows and the next
-statement still recomputes from the live prefix maximum.
-SQL-layer failures before generated value allocation, such as CHECK failures
-that MariaDB rejects before handler writes, do not reserve MyLite values.
+generated-expression, and CHECK-constraint errors, rollback removes the
+published rows and the next statement still recomputes from the live prefix
+maximum.
+SQL-layer failures before generated value allocation, such as CHECK failures on
+the initial insert candidate before handler writes, do not reserve MyLite
+values.
 Failed DDL checkpoints do not inherit the row-DML preservation marker.
 Explicit high-value updates to first-key autoincrement columns advance the
 table-local next value only after the MyLite update path passes duplicate-key

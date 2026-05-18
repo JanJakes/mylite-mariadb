@@ -232,6 +232,7 @@ static void test_autoincrement_grouped_on_duplicate_key_update_variants(void);
 static void test_autoincrement_grouped_on_duplicate_key_update_failed_dml(void);
 static void test_autoincrement_grouped_on_duplicate_key_update_source_update_errors(void);
 static void test_autoincrement_grouped_on_duplicate_key_update_generated_expression_errors(void);
+static void test_autoincrement_grouped_on_duplicate_key_update_check_constraint_errors(void);
 static void test_autoincrement_grouped_on_duplicate_key_update_source_read_errors(void);
 static void test_autoincrement_grouped_failed_dml_matrices(void);
 static void test_autoincrement_on_duplicate_key_update_failed_dml(void);
@@ -598,6 +599,7 @@ int main(int argc, char **argv) {
     test_autoincrement_grouped_on_duplicate_key_update_failed_dml();
     test_autoincrement_grouped_on_duplicate_key_update_source_update_errors();
     test_autoincrement_grouped_on_duplicate_key_update_generated_expression_errors();
+    test_autoincrement_grouped_on_duplicate_key_update_check_constraint_errors();
     test_autoincrement_grouped_on_duplicate_key_update_source_read_errors();
     test_autoincrement_grouped_failed_dml_matrices();
     test_autoincrement_on_duplicate_key_update_failed_dml();
@@ -14727,6 +14729,250 @@ static void test_autoincrement_grouped_on_duplicate_key_update_generated_express
         db,
         "SELECT id FROM grouped_source_generated_update_error_posts "
         "WHERE title = 'after-source-generated-error-reopen'",
+        "3"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_autoincrement_grouped_on_duplicate_key_update_check_constraint_errors(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_grouped_odku_check_errors");
+    assert_exec_succeeds(db, "USE auto_grouped_odku_check_errors");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_check_update_error_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "score INT NOT NULL,"
+        "PRIMARY KEY (category, id),"
+        "UNIQUE KEY title_key (title),"
+        "KEY score_key (score),"
+        "CONSTRAINT score_limit CHECK (score <= 100)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_check_update_error_posts (category, title, score) VALUES "
+        "(1, 'dupe', 10)"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO grouped_check_update_error_posts (category, title, score) VALUES "
+        "(1, 'new-before-check-error', 20),"
+        "(1, 'dupe', 99) "
+        "ON DUPLICATE KEY UPDATE score = VALUES(score) + 2",
+        "score_limit"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_check_update_error_posts "
+        "WHERE title = 'new-before-check-error'",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_check_update_error_posts "
+        "FORCE INDEX (score_key) WHERE score = 20",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT score FROM grouped_check_update_error_posts WHERE title = 'dupe'",
+        "10"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_check_update_error_posts (category, title, score) VALUES "
+        "(1, 'after-check-error', 30)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_check_update_error_posts "
+        "WHERE title = 'after-check-error'",
+        "2"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_prepared_check_update_error_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "score INT NOT NULL,"
+        "PRIMARY KEY (category, id),"
+        "UNIQUE KEY title_key (title),"
+        "KEY score_key (score),"
+        "CONSTRAINT prepared_score_limit CHECK (score <= 100)"
+        ") ENGINE=MyISAM"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_prepared_check_update_error_posts "
+        "(category, title, score) VALUES (1, 'dupe', 10)"
+    );
+    assert_prepared_fails_with_message(
+        db,
+        "INSERT INTO grouped_prepared_check_update_error_posts "
+        "(category, title, score) VALUES "
+        "(1, 'prepared-new-before-check-error', 20),"
+        "(1, 'dupe', 99) "
+        "ON DUPLICATE KEY UPDATE score = VALUES(score) + 2",
+        "prepared_score_limit"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_prepared_check_update_error_posts "
+        "WHERE title = 'prepared-new-before-check-error'",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_prepared_check_update_error_posts "
+        "FORCE INDEX (score_key) WHERE score = 20",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT score FROM grouped_prepared_check_update_error_posts WHERE title = 'dupe'",
+        "10"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_prepared_check_update_error_posts "
+        "(category, title, score) VALUES "
+        "(1, 'after-prepared-check-error', 30)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_prepared_check_update_error_posts "
+        "WHERE title = 'after-prepared-check-error'",
+        "2"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_source_check_update_error_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "score INT NOT NULL,"
+        "PRIMARY KEY (category, id),"
+        "UNIQUE KEY title_key (title),"
+        "KEY score_key (score),"
+        "CONSTRAINT source_score_limit CHECK (score <= 100)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_source_check_update_error_source ("
+        "ord INT NOT NULL,"
+        "category INT NOT NULL,"
+        "title VARCHAR(64) NOT NULL,"
+        "score INT NOT NULL,"
+        "PRIMARY KEY (ord)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_source_check_update_error_posts "
+        "(category, title, score) VALUES (1, 'dupe', 10)"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_source_check_update_error_source "
+        "(ord, category, title, score) VALUES "
+        "(1, 1, 'source-new-before-check-error', 20),"
+        "(2, 1, 'dupe', 99)"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO grouped_source_check_update_error_posts "
+        "(category, title, score) "
+        "SELECT category, title, score "
+        "FROM grouped_source_check_update_error_source ORDER BY ord "
+        "ON DUPLICATE KEY UPDATE score = VALUES(score) + 2",
+        "source_score_limit"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_source_check_update_error_posts "
+        "WHERE title = 'source-new-before-check-error'",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_source_check_update_error_posts "
+        "FORCE INDEX (score_key) WHERE score = 20",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT score FROM grouped_source_check_update_error_posts WHERE title = 'dupe'",
+        "10"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_source_check_update_error_posts "
+        "(category, title, score) VALUES "
+        "(1, 'after-source-check-error', 30)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_source_check_update_error_posts "
+        "WHERE title = 'after-source-check-error'",
+        "2"
+    );
+    assert_catalog_table_count(filename, "auto_grouped_odku_check_errors", 4U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE auto_grouped_odku_check_errors");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_check_update_error_posts "
+        "(category, title, score) VALUES "
+        "(1, 'after-check-error-reopen', 31)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_check_update_error_posts "
+        "WHERE title = 'after-check-error-reopen'",
+        "3"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_prepared_check_update_error_posts "
+        "(category, title, score) VALUES "
+        "(1, 'after-prepared-check-error-reopen', 31)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_prepared_check_update_error_posts "
+        "WHERE title = 'after-prepared-check-error-reopen'",
+        "3"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_source_check_update_error_posts "
+        "(category, title, score) VALUES "
+        "(1, 'after-source-check-error-reopen', 31)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_source_check_update_error_posts "
+        "WHERE title = 'after-source-check-error-reopen'",
         "3"
     );
 
