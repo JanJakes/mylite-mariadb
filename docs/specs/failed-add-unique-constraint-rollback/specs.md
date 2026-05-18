@@ -49,6 +49,8 @@ covered:
 - existing secondary indexes remain usable after the failed ALTER;
 - the unique constraint can be added successfully after duplicate cleanup and
   survives close/reopen.
+- generated-column duplicate rollback for the same constraint syntax is
+  covered by the separate `failed-generated-unique-constraint-rollback` slice.
 
 Broader unique-key matrices, nullable edge cases, online DDL, foreign keys, and
 full SQL transaction/savepoint semantics remain planned.
@@ -127,3 +129,4 @@ Implemented in storage-smoke coverage:
   full SQL transaction or savepoint rollback.
 - Nullable unique-key behavior is already covered elsewhere for initial keys;
   this slice does not expand nullable ALTER matrices.
+- Failed generated-column unique constraint add rollback is covered separately.

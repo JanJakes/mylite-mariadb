@@ -398,8 +398,9 @@ operations, CTAS projections from generated source columns, and generated
 target CTAS definitions. Ordinary secondary and unique indexes on scalar
 virtual or stored generated columns use the same MariaDB-generated key tuples
 as supported base-column indexes, including initial definitions and supported
-copy-rebuild add, drop, rename, standalone index DDL, and generated-column
-`ADD CONSTRAINT ... UNIQUE` / `DROP CONSTRAINT` paths. Bounded
+copy-rebuild add, drop, rename, standalone index DDL, generated-column
+`ADD CONSTRAINT ... UNIQUE` / `DROP CONSTRAINT` paths, and failed generated
+unique constraint adds over duplicate generated values. Bounded
 generated BLOB/TEXT prefix indexes declared in initial table definitions or
 added through standalone copy-rebuild index DDL use the same generated-value and
 BLOB/TEXT prefix key-image paths. Generated

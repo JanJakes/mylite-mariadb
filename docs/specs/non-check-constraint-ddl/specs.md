@@ -168,6 +168,9 @@ Implemented:
   unique constraints added and dropped through copy ALTER.
 - The `generated-unique-constraint-ddl` follow-up slice covers named unique
   constraints over supported generated columns.
+- The `failed-generated-unique-constraint-rollback` follow-up slice covers
+  duplicate generated values preserving the old table after a failed generated
+  unique constraint add.
 
 No MariaDB source, public API, storage file-format, dependency, license, or
 binary-size change was required.

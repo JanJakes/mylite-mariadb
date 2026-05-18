@@ -96,5 +96,7 @@ No dependency or intended size-profile change is introduced.
 ## Risks And Unresolved Questions
 
 - This does not cover virtual generated columns, composite generated
-  constraints, BLOB/TEXT generated columns, or failed add rollback; those remain
-  separate matrix items.
+  constraints, or BLOB/TEXT generated columns; those remain separate matrix
+  items.
+- Failed add rollback for duplicate existing generated values is covered by the
+  separate `failed-generated-unique-constraint-rollback` slice.

@@ -104,6 +104,8 @@ InnoDB, MyISAM, Aria, binlog, relay-log, or plugin-owned sidecars.
   and hidden long-unique hash indexes.
 - Generated-column unique constraint syntax is covered by the separate
   `generated-unique-constraint-ddl` slice.
+- Failed generated-column unique constraint add rollback is covered by the
+  separate `failed-generated-unique-constraint-rollback` slice.
 
 ## Risks And Open Questions
 

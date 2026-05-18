@@ -189,6 +189,7 @@ static void test_check_constraint_if_exists(void);
 static void test_non_check_constraint_ddl(void);
 static void test_composite_unique_constraint_ddl(void);
 static void test_generated_unique_constraint_ddl(void);
+static void test_failed_generated_unique_constraint_rollback(void);
 static void test_primary_key_alter_ddl(void);
 static void test_failed_add_unique_constraint_rollback(void);
 static void test_create_table_if_not_exists(void);
@@ -503,6 +504,7 @@ int main(int argc, char **argv) {
     test_non_check_constraint_ddl();
     test_composite_unique_constraint_ddl();
     test_generated_unique_constraint_ddl();
+    test_failed_generated_unique_constraint_rollback();
     test_primary_key_alter_ddl();
     test_failed_add_unique_constraint_rollback();
     test_create_table_if_not_exists();
@@ -8393,6 +8395,140 @@ static void test_generated_unique_constraint_ddl(void) {
         "InnoDB",
         "MYLITE"
     );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_failed_generated_unique_constraint_rollback(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    table_context failed_generated_index_rows = {0};
+    table_context generated_index_rows = {0};
+    table_context reopened_generated_index_rows = {0};
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE failed_generated_constraint");
+    assert_exec_succeeds(db, "USE failed_generated_constraint");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE generated_rollback_posts ("
+        "id INT NOT NULL PRIMARY KEY,"
+        "title VARCHAR(64) NOT NULL,"
+        "slug VARCHAR(96) AS (LOWER(REPLACE(title, ' ', '-'))) STORED"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO generated_rollback_posts (id, title) VALUES "
+        "(1, 'Alpha Post'), (2, 'Alpha Post')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM generated_rollback_posts WHERE slug = 'alpha-post'",
+        "2"
+    );
+    assert_exec_fails(
+        db,
+        "ALTER TABLE generated_rollback_posts "
+        "ADD CONSTRAINT generated_slug_unique UNIQUE (slug), ALGORITHM=COPY"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM generated_rollback_posts "
+            "WHERE Key_name = 'generated_slug_unique'",
+            table_callback,
+            &failed_generated_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(failed_generated_index_rows.rows == 0);
+    assert_catalog_table_count(filename, "failed_generated_constraint", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "failed_generated_constraint",
+        "generated_rollback_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM generated_rollback_posts WHERE slug = 'alpha-post'",
+        "2"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "UPDATE generated_rollback_posts SET title = 'Beta Post' WHERE id = 2"
+    );
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE generated_rollback_posts "
+        "ADD CONSTRAINT generated_slug_unique UNIQUE (slug), ALGORITHM=COPY"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM generated_rollback_posts "
+            "WHERE Key_name = 'generated_slug_unique'",
+            table_callback,
+            &generated_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(generated_index_rows.rows == 1);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM generated_rollback_posts "
+        "FORCE INDEX (generated_slug_unique) WHERE slug = 'beta-post'",
+        "2"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO generated_rollback_posts (id, title) VALUES (3, 'Alpha Post')"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE failed_generated_constraint");
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM generated_rollback_posts "
+            "WHERE Key_name = 'generated_slug_unique'",
+            table_callback,
+            &reopened_generated_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_generated_index_rows.rows == 1);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM generated_rollback_posts "
+        "FORCE INDEX (generated_slug_unique) WHERE slug = 'alpha-post'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM generated_rollback_posts "
+        "FORCE INDEX (generated_slug_unique) WHERE slug = 'beta-post'",
+        "2"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO generated_rollback_posts (id, title) VALUES (3, 'Beta Post')"
+    );
+
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
