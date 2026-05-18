@@ -32,6 +32,7 @@ default_tests=(
   main.type_time_round
   main.type_time_6065
   main.type_timestamp_round
+  main.timezone4
   main.brackets
   main.comments
   main.compare

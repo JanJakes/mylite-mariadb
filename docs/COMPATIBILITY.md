@@ -96,7 +96,7 @@ date/time, string, cast, UNION, and NULL-safe comparison result sets.
 The opt-in embedded MTR smoke runner covers MariaDB bootstrap, scalar
 CAST/CONVERT behavior, CASE-family expression behavior, selected numeric,
 character/binary, interval, and type behavior, selected date,
-temporal-rounding, temporal-function, and
+temporal-rounding, temporal-function, alternate-timezone conversion, and
 time/datetime comparison behavior, selected parser/comment, keyword,
 CTE-cycle, precedence, expression, type-coercion, rounding, safe-update, and
 comparison behavior, selected `IN` / `NOT IN` predicate behavior, selected
