@@ -202,6 +202,7 @@ static void test_nullable_composite_unique_constraint_ddl(void);
 static void test_generated_unique_constraint_ddl(void);
 static void test_generated_unique_constraint_matrix(void);
 static void test_failed_generated_unique_constraint_rollback(void);
+static void test_generated_column_dml_rollback(void);
 static void test_failed_dependent_column_alter_rollback(void);
 static void test_primary_key_alter_ddl(void);
 static void test_failed_add_unique_constraint_rollback(void);
@@ -566,6 +567,7 @@ int main(int argc, char **argv) {
     test_generated_unique_constraint_ddl();
     test_generated_unique_constraint_matrix();
     test_failed_generated_unique_constraint_rollback();
+    test_generated_column_dml_rollback();
     test_failed_dependent_column_alter_rollback();
     test_primary_key_alter_ddl();
     test_failed_add_unique_constraint_rollback();
@@ -9519,6 +9521,155 @@ static void test_failed_generated_unique_constraint_rollback(void) {
     assert_exec_fails(
         db,
         "INSERT INTO generated_rollback_posts (id, title) VALUES (3, 'Beta Post')"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_generated_column_dml_rollback(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE generated_dml_rollback");
+    assert_exec_succeeds(db, "USE generated_dml_rollback");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE generated_dml_posts ("
+        "id INT NOT NULL PRIMARY KEY,"
+        "title VARCHAR(64) NOT NULL,"
+        "slug VARCHAR(96) AS (LOWER(REPLACE(title, ' ', '-'))) STORED,"
+        "UNIQUE KEY slug_key (slug)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO generated_dml_posts (id, title) VALUES "
+        "(1, 'Alpha Post'), (2, 'Beta Post')"
+    );
+
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO generated_dml_posts (id, title) VALUES "
+        "(3, 'Gamma Post'), (4, 'Alpha Post')",
+        "Duplicate entry"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM generated_dml_posts WHERE id = 3",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM generated_dml_posts "
+        "FORCE INDEX (slug_key) WHERE slug = 'gamma-post'",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM generated_dml_posts FORCE INDEX (slug_key) "
+        "WHERE slug = 'alpha-post'",
+        "1"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO generated_dml_posts (id, title) VALUES (4, 'Gamma Post')"
+    );
+    assert_prepared_fails_with_message(
+        db,
+        "UPDATE generated_dml_posts "
+        "SET title = CASE id "
+        "WHEN 2 THEN 'Delta Post' "
+        "WHEN 4 THEN 'Alpha Post' "
+        "ELSE title END "
+        "WHERE id IN (2, 4) "
+        "ORDER BY id ASC",
+        "Duplicate entry"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT title FROM generated_dml_posts WHERE id = 2",
+        "Beta Post"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM generated_dml_posts FORCE INDEX (slug_key) "
+        "WHERE slug = 'beta-post'",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM generated_dml_posts "
+        "FORCE INDEX (slug_key) WHERE slug = 'delta-post'",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT title FROM generated_dml_posts WHERE id = 4",
+        "Gamma Post"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM generated_dml_posts FORCE INDEX (slug_key) "
+        "WHERE slug = 'gamma-post'",
+        "4"
+    );
+    assert_catalog_table_count(filename, "generated_dml_rollback", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "generated_dml_rollback",
+        "generated_dml_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE generated_dml_rollback");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM generated_dml_posts WHERE id = 3",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM generated_dml_posts FORCE INDEX (slug_key) "
+        "WHERE slug = 'alpha-post'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM generated_dml_posts FORCE INDEX (slug_key) "
+        "WHERE slug = 'beta-post'",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM generated_dml_posts FORCE INDEX (slug_key) "
+        "WHERE slug = 'gamma-post'",
+        "4"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM generated_dml_posts "
+        "FORCE INDEX (slug_key) WHERE slug = 'delta-post'",
+        "0"
+    );
+    assert_catalog_table_count(filename, "generated_dml_rollback", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "generated_dml_rollback",
+        "generated_dml_posts",
+        "InnoDB",
+        "MYLITE"
     );
 
     assert(mylite_close(db) == MYLITE_OK);

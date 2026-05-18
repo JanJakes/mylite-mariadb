@@ -431,6 +431,9 @@ expression key-part syntax; full BLOB/TEXT index support, MySQL-style
 expression-index compatibility, and exhaustive expression matrices remain planned.
 Failed dependent column drops for generated-column base columns leave the
 original generated metadata, generated index entries, and rows visible.
+Representative failed multi-row direct insert and prepared update statements
+restore generated base values and generated-index visibility through statement
+rollback checkpoints.
 Nullable composite unique constraints preserve MariaDB NULL semantics through
 the same retained-key and key-tuple paths: exact non-NULL duplicates reject, but
 rows with NULL in nullable key parts do not conflict.

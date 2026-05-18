@@ -37,7 +37,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `partition` | `storage-smoke-dev` | `compat-partition` | Partition DDL and partition-management rejection until partition metadata and routing exist |
 | `foreign-key` | `storage-smoke-dev` | `compat-foreign-key` | Foreign-key DDL publication, metadata, row checks, bounded actions, and unsupported-action policy coverage |
 | `check-constraint` | `storage-smoke-dev` | `compat-check-constraint` | CHECK constraint enforcement, ALTER existence-option skips, CTAS targets, and failed ADD CHECK rollback on routed tables |
-| `generated-column` | `storage-smoke-dev` | `compat-generated-column` | Generated column read/write, CTAS projection, ALTER, BLOB/TEXT prefix, and generated-column index coverage |
+| `generated-column` | `storage-smoke-dev` | `compat-generated-column` | Generated column read/write, CTAS projection, ALTER, BLOB/TEXT prefix, generated-column index, and representative DML rollback coverage |
 | `unsupported-index` | `storage-smoke-dev` | `compat-unsupported-index` | Unsupported FULLTEXT, SPATIAL, vector, and long-unique index rejection |
 | `locking` | `storage-smoke-dev` | `compat-locking` | Primary-file lock conflicts, busy timeouts, and SQL locking policy |
 | `embedded-lifecycle` | `embedded-dev` | `compat-embedded-lifecycle` | Embedded runtime open/close, direct execution, and cleanup |

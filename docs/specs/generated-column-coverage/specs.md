@@ -23,7 +23,7 @@ added through standalone copy-rebuild index DDL.
   primary keys.
 - Add exhaustive expression, `ALTER`, CTAS, broader dump/export,
   prepared-statement, or MTR coverage.
-- Implement SQL rollback for generated-column writes.
+- Claim exhaustive SQL rollback for generated-column writes.
 
 ## Source Findings
 
@@ -117,6 +117,8 @@ unchanged for practical purposes.
 - Storage-engine smoke verifies generated BLOB/TEXT values and bounded
   generated BLOB/TEXT prefix indexes declared in initial table definitions and
   added through standalone copy-rebuild index DDL.
+- Storage-engine smoke verifies representative failed direct and prepared
+  multi-row generated-column DML rollback.
 - Add a compatibility harness group for generated columns.
 - Run formatting, tidy, configured CTest presets, the named harness report, and
   `git diff --check`.
@@ -147,6 +149,8 @@ unchanged for practical purposes.
   DDL, and close/reopen.
 - `SHOW CREATE TABLE` export/import works for a representative table whose
   generated columns and generated indexes were added through copy ALTER.
+- Representative failed direct insert and prepared update statements restore
+  generated values and generated-index visibility.
 - Compatibility docs and roadmap mark generated columns as partial rather than
   planned.
 - The compatibility harness can run the generated-column evidence by name.
@@ -154,7 +158,7 @@ unchanged for practical purposes.
 ## Risks And Open Questions
 
 - Exhaustive expression classes, SQL-mode-sensitive expressions, full
-  dump/export compatibility, and rollback remain uncovered.
+  dump/export compatibility, and broader rollback matrices remain uncovered.
 - Expression/hidden generated indexes, generated full/oversized BLOB/TEXT key
   payloads, and exhaustive expression matrices need separate specs before
   support is claimed.
