@@ -33,6 +33,11 @@ typedef struct scan_result {
     uint64_t checksum;
 } scan_result;
 
+typedef struct secondary_result {
+    size_t rows;
+    uint64_t checksum;
+} secondary_result;
+
 static int parse_config(int argc, char **argv, benchmark_config *config);
 static int run_benchmark(const benchmark_config *config);
 static void print_usage(const char *program);
@@ -41,13 +46,20 @@ static int setup_database(benchmark_context *ctx);
 static int benchmark_insert_rows(benchmark_context *ctx);
 static int benchmark_point_selects(benchmark_context *ctx);
 static int benchmark_prepared_point_selects(benchmark_context *ctx);
+static int benchmark_secondary_selects(benchmark_context *ctx);
+static int benchmark_prepared_secondary_selects(benchmark_context *ctx);
 static int benchmark_updates(benchmark_context *ctx);
 static int benchmark_prepared_updates(benchmark_context *ctx);
 static int benchmark_ordered_scan(benchmark_context *ctx);
+static size_t secondary_value_for_row(benchmark_context *ctx, size_t row_number);
+static size_t secondary_value_for_iteration(benchmark_context *ctx, size_t iteration);
+static uint64_t secondary_expected_checksum(benchmark_context *ctx, size_t value, size_t *out_rows);
+static size_t secondary_bucket_count(benchmark_context *ctx);
 static int verify_row_count(benchmark_context *ctx, size_t expected);
 static int exec_sql(benchmark_context *ctx, const char *sql);
 static int query_uint64(benchmark_context *ctx, const char *sql, unsigned long long *out_value);
 static int scalar_callback(void *data, int column_count, char **values, char **column_names);
+static int secondary_callback(void *data, int column_count, char **values, char **column_names);
 static int scan_callback(void *data, int column_count, char **values, char **column_names);
 static void report_database_error(benchmark_context *ctx, const char *operation);
 static uint64_t monotonic_ns(void);
@@ -137,6 +149,12 @@ static int run_benchmark(const benchmark_config *config) {
         goto cleanup;
     }
     if (benchmark_prepared_point_selects(&ctx) != 0) {
+        goto cleanup;
+    }
+    if (benchmark_secondary_selects(&ctx) != 0) {
+        goto cleanup;
+    }
+    if (benchmark_prepared_secondary_selects(&ctx) != 0) {
         goto cleanup;
     }
     if (benchmark_updates(&ctx) != 0) {
@@ -255,7 +273,7 @@ static int benchmark_insert_rows(benchmark_context *ctx) {
             sizeof(sql),
             "INSERT INTO perf_rows (id, value, pad) VALUES (%zu, %zu, 'row-%zu')",
             i + 1U,
-            i + 1U,
+            secondary_value_for_row(ctx, i + 1U),
             i + 1U
         );
         if (written < 0 || (size_t)written >= sizeof(sql) || exec_sql(ctx, sql) != 0) {
@@ -367,6 +385,189 @@ cleanup:
         return 1;
     }
     return result;
+}
+
+static int benchmark_secondary_selects(benchmark_context *ctx) {
+    size_t total_rows = 0U;
+    uint64_t checksum = 0U;
+    const uint64_t start_ns = monotonic_ns();
+
+    for (size_t i = 0; i < ctx->config->iterations; ++i) {
+        const size_t value = secondary_value_for_iteration(ctx, i);
+        char sql[128];
+        secondary_result result = {
+            .rows = 0U,
+            .checksum = 0U,
+        };
+        size_t expected_rows = 0U;
+        const uint64_t expected_checksum = secondary_expected_checksum(ctx, value, &expected_rows);
+        const int written = snprintf(
+            sql,
+            sizeof(sql),
+            "SELECT id, value FROM perf_rows FORCE INDEX (value_key) "
+            "WHERE value = %zu ORDER BY id",
+            value
+        );
+        if (written < 0 || (size_t)written >= sizeof(sql)) {
+            return 1;
+        }
+        if (mylite_exec(ctx->db, sql, secondary_callback, &result, NULL) != MYLITE_OK) {
+            report_database_error(ctx, "direct secondary-index exact select");
+            return 1;
+        }
+        if (result.rows != expected_rows || result.checksum != expected_checksum) {
+            fprintf(
+                stderr,
+                "Secondary exact select for value %zu returned %zu rows/%" PRIu64
+                " checksum; expected %zu/%" PRIu64 "\n",
+                value,
+                result.rows,
+                result.checksum,
+                expected_rows,
+                expected_checksum
+            );
+            return 1;
+        }
+        total_rows += result.rows;
+        checksum += result.checksum;
+    }
+
+    print_result(
+        "direct secondary-index exact selects",
+        ctx->config->iterations,
+        monotonic_ns() - start_ns
+    );
+    printf("Secondary exact-select rows: %zu\n", total_rows);
+    printf("Secondary exact-select checksum: %" PRIu64 "\n", checksum);
+    return 0;
+}
+
+static int benchmark_prepared_secondary_selects(benchmark_context *ctx) {
+    mylite_stmt *stmt = NULL;
+    size_t total_rows = 0U;
+    uint64_t checksum = 0U;
+    int result = 1;
+
+    if (mylite_prepare(
+            ctx->db,
+            "SELECT id, value FROM perf_rows FORCE INDEX (value_key) "
+            "WHERE value = ? ORDER BY id",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) != MYLITE_OK) {
+        report_database_error(ctx, "prepare secondary-index exact select");
+        return 1;
+    }
+
+    const uint64_t start_ns = monotonic_ns();
+    for (size_t i = 0; i < ctx->config->iterations; ++i) {
+        const size_t value = secondary_value_for_iteration(ctx, i);
+        secondary_result selected = {
+            .rows = 0U,
+            .checksum = 0U,
+        };
+        size_t expected_rows = 0U;
+        const uint64_t expected_checksum = secondary_expected_checksum(ctx, value, &expected_rows);
+        if (mylite_bind_int64(stmt, 1U, (long long)value) != MYLITE_OK) {
+            report_database_error(ctx, "bind prepared secondary-index exact select");
+            goto cleanup;
+        }
+
+        for (;;) {
+            const int step_result = mylite_step(stmt);
+            if (step_result == MYLITE_DONE) {
+                break;
+            }
+            if (step_result != MYLITE_ROW) {
+                fprintf(
+                    stderr,
+                    "Prepared secondary-index exact select failed for value %zu\n",
+                    value
+                );
+                report_database_error(ctx, "prepared secondary-index exact select");
+                goto cleanup;
+            }
+            if (mylite_column_type(stmt, 0U) != MYLITE_TYPE_INT64 ||
+                mylite_column_type(stmt, 1U) != MYLITE_TYPE_INT64) {
+                fprintf(
+                    stderr,
+                    "Prepared secondary-index exact select returned non-integer values\n"
+                );
+                goto cleanup;
+            }
+            selected.checksum +=
+                (uint64_t)mylite_column_int64(stmt, 0U) + (uint64_t)mylite_column_int64(stmt, 1U);
+            ++selected.rows;
+        }
+
+        if (selected.rows != expected_rows || selected.checksum != expected_checksum) {
+            fprintf(
+                stderr,
+                "Prepared secondary exact select for value %zu returned %zu rows/%" PRIu64
+                " checksum; expected %zu/%" PRIu64 "\n",
+                value,
+                selected.rows,
+                selected.checksum,
+                expected_rows,
+                expected_checksum
+            );
+            goto cleanup;
+        }
+        total_rows += selected.rows;
+        checksum += selected.checksum;
+        if (mylite_reset(stmt) != MYLITE_OK) {
+            report_database_error(ctx, "reset prepared secondary-index exact select");
+            goto cleanup;
+        }
+    }
+
+    print_result(
+        "prepared secondary-index exact selects",
+        ctx->config->iterations,
+        monotonic_ns() - start_ns
+    );
+    printf("Prepared secondary exact-select rows: %zu\n", total_rows);
+    printf("Prepared secondary exact-select checksum: %" PRIu64 "\n", checksum);
+    result = 0;
+
+cleanup:
+    if (mylite_finalize(stmt) != MYLITE_OK) {
+        report_database_error(ctx, "finalize prepared secondary-index exact select");
+        return 1;
+    }
+    return result;
+}
+
+static size_t secondary_value_for_row(benchmark_context *ctx, size_t row_number) {
+    return ((row_number - 1U) % secondary_bucket_count(ctx)) + 1U;
+}
+
+static size_t secondary_value_for_iteration(benchmark_context *ctx, size_t iteration) {
+    return (iteration % secondary_bucket_count(ctx)) + 1U;
+}
+
+static uint64_t secondary_expected_checksum(
+    benchmark_context *ctx,
+    size_t value,
+    size_t *out_rows
+) {
+    const size_t bucket_count = secondary_bucket_count(ctx);
+    size_t rows = 0U;
+    uint64_t checksum = 0U;
+    if (value <= bucket_count && value <= ctx->config->rows) {
+        const size_t first_id = value;
+        const size_t last_id = value + ((ctx->config->rows - value) / bucket_count) * bucket_count;
+        rows = ((last_id - first_id) / bucket_count) + 1U;
+        checksum = ((uint64_t)rows * ((uint64_t)first_id + (uint64_t)last_id)) / 2U +
+                   (uint64_t)rows * (uint64_t)value;
+    }
+    *out_rows = rows;
+    return checksum;
+}
+
+static size_t secondary_bucket_count(benchmark_context *ctx) {
+    return ctx->config->rows < 10U ? 1U : 10U;
 }
 
 static int benchmark_updates(benchmark_context *ctx) {
@@ -548,6 +749,26 @@ static int scalar_callback(void *data, int column_count, char **values, char **c
         return 1;
     }
     result->value = value;
+    ++result->rows;
+    return 0;
+}
+
+static int secondary_callback(void *data, int column_count, char **values, char **column_names) {
+    (void)column_names;
+    secondary_result *result = data;
+    if (column_count != 2 || values[0] == NULL || values[1] == NULL) {
+        return 1;
+    }
+
+    for (int i = 0; i < 2; ++i) {
+        char *end = NULL;
+        errno = 0;
+        const unsigned long long value = strtoull(values[i], &end, 10);
+        if (errno != 0 || end == values[i] || *end != '\0') {
+            return 1;
+        }
+        result->checksum += (uint64_t)value;
+    }
     ++result->rows;
     return 0;
 }

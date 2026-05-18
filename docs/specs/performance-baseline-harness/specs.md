@@ -5,8 +5,9 @@
 Add a repeatable developer harness for measuring the current MyLite routed
 storage path before storage-level performance work. The harness should report
 simple elapsed-time baselines for file open/schema setup, direct inserts,
-direct and prepared primary-key point selects, direct and prepared primary-key
-updates, and ordered scans through the public `libmylite` API.
+direct and prepared primary-key point selects, direct and prepared secondary-key
+exact selects, direct and prepared primary-key updates, and ordered scans
+through the public `libmylite` API.
 
 ## Non-Goals
 
@@ -47,6 +48,8 @@ schemas usually request InnoDB even though MyLite owns the durable storage.
   `tools/mylite-perf-baseline [rows] [iterations]`.
 - Default to 100 rows and 100 point-operation iterations so the command remains
   practical while the storage layer is still scan-heavy.
+- Use duplicate secondary-key value buckets so secondary exact-read timings
+  measure non-unique index iteration instead of another unique lookup.
 - Print Markdown-compatible rows so results can be pasted into research notes
   without post-processing.
 - Report direct and prepared timing rows separately. The prepared rows are
@@ -87,6 +90,7 @@ are true.
 - Output includes operation counts, total milliseconds, and microseconds per
   operation.
 - Prepared and direct timings are labelled separately.
+- Secondary exact-read rows include returned-row counts and checksums.
 - No benchmark result is documented as a product performance claim.
 
 ## Risks And Open Questions
