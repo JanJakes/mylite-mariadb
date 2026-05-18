@@ -6039,8 +6039,16 @@ const char *unsupported_foreign_key_sql_message(std::string_view sql) {
                 return nullptr;
             }
         }
+        const bool reject_foreign_key_table = !MYLITE_MARIADB_HAS_MYLITE_SE || temporary_table;
         if (sql_token_equals(token, "TABLE") && sql_tokens_contain_foreign_key_marker(rest) &&
-            temporary_table) {
+            reject_foreign_key_table) {
+            return "unsupported foreign-key SQL surface";
+        }
+        return nullptr;
+    }
+
+    if (sql_token_equals(token, "ALTER")) {
+        if (!MYLITE_MARIADB_HAS_MYLITE_SE && sql_tokens_contain_foreign_key_marker(rest)) {
             return "unsupported foreign-key SQL surface";
         }
         return nullptr;
