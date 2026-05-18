@@ -206,7 +206,9 @@ child table action chains, supported combinations of those actions, and the
 bounded same-row update action matrix for `ON UPDATE SET NULL` and
 `ON UPDATE CASCADE`. The subset is advertised to MariaDB through the MyLite
 handlerton. Broader multi-table matrices and cyclic or full recursive FK action
-chains remain unsupported.
+chains remain unsupported. `SET DEFAULT` FK action clauses are rejected
+explicitly because the selected MariaDB/InnoDB base documents them as
+unsupported.
 Session
 `foreign_key_checks=0`
 disables supported FK row checks and parent-table truncate checks without
@@ -520,8 +522,8 @@ the embedded library model:
 - dynamic plugin installation and loading,
 - dynamic UDF registration, loading, lookup, and execution,
 - external durable storage engines,
-- `CREATE TEMPORARY TABLE` foreign-key DDL and broader foreign-key actions
-  outside the supported MyLite subset,
+- `CREATE TEMPORARY TABLE` foreign-key DDL, `SET DEFAULT` FK actions, and
+  broader foreign-key actions outside the supported MyLite subset,
 - partition DDL until partition metadata, partition routing, and per-partition
   lifecycle semantics exist,
 - filesystem-backed views, triggers, and routines until they have MyLite
@@ -610,7 +612,7 @@ Oracle SQL mode, XML SQL function, GIS SQL function, vector SQL function,
 SFORMAT SQL function, JSON schema validation function, JSON table function,
 dynamic column function, SQL sequence value surface, partition,
 `CREATE TEMPORARY TABLE` foreign-key DDL, broader unsupported foreign-key
-action commands, plus unsupported explicit
+action commands including `SET DEFAULT`, plus unsupported explicit
 `ENGINE=...` table creation and engine-change requests, are rejected before
 MariaDB execution with stable MyLite errors. The default
 embedded profile also links fail-closed stubs for stored-program runtime

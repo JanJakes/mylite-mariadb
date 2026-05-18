@@ -141,8 +141,10 @@ simple durable tables with nullable child FK columns where required and no
 BLOB/TEXT or generated columns; the handler mutates matching child rows,
 deletes matching cascade children, or rewrites the current same-row update
 buffer before deleting or updating the parent row.
-Broader exhaustive multi-table matrices, deferrable set-wide validation,
-`SET DEFAULT`, and cyclic or full recursive action graphs remain planned.
+`SET DEFAULT` action clauses are rejected explicitly because the selected
+MariaDB/InnoDB base documents the action as unsupported. Broader exhaustive
+multi-table matrices, deferrable set-wide validation, and cyclic or full
+recursive action graphs remain planned.
 Partition DDL remains rejected at the `libmylite` boundary until MyLite has
 partition metadata, partition-to-primary-file routing, per-partition catalog
 lifecycle, and partition-aware row and index maintenance.

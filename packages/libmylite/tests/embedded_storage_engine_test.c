@@ -152,6 +152,7 @@ static void test_utf8mb4_unicode_ci_survives_restart(void);
 static void test_collation_restart_matrix(void);
 static void test_non_table_object_policy(void);
 static void test_transaction_and_foreign_key_policies(void);
+static void test_foreign_key_set_default_policy(void);
 static void test_foreign_key_self_set_null_delete(void);
 static void test_foreign_key_self_set_null_update(void);
 static void test_foreign_key_non_self_set_null_actions(void);
@@ -437,6 +438,7 @@ int main(int argc, char **argv) {
     test_collation_restart_matrix();
     test_non_table_object_policy();
     test_transaction_and_foreign_key_policies();
+    test_foreign_key_set_default_policy();
     test_foreign_key_self_set_null_delete();
     test_foreign_key_self_set_null_update();
     test_foreign_key_non_self_set_null_actions();
@@ -2429,6 +2431,123 @@ static void test_transaction_and_foreign_key_policies(void) {
         "SELECT COUNT(*) FROM fk_self "
         "WHERE (id = 131 AND parent_id IS NULL) OR (id = 32 AND parent_id IS NULL)",
         "2"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_foreign_key_set_default_policy(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_default_parent (id INT NOT NULL PRIMARY KEY) ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_default_alter_delete ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT NOT NULL, "
+        "KEY fk_default_alter_delete_parent (parent_id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_default_alter_update ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT NOT NULL, "
+        "KEY fk_default_alter_update_parent (parent_id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_catalog_table_count(filename, "app", 3U);
+
+    assert_foreign_key_exec_fails(
+        db,
+        "CREATE TABLE fk_default_delete_reject ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT NOT NULL DEFAULT 1, "
+        "KEY fk_default_delete_reject_parent (parent_id), "
+        "CONSTRAINT fk_default_delete_reject_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_default_parent(id) "
+        "ON DELETE SET DEFAULT"
+        ") ENGINE=InnoDB"
+    );
+    assert_foreign_key_exec_fails(
+        db,
+        "CREATE TABLE fk_default_update_reject ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT NOT NULL DEFAULT 1, "
+        "KEY fk_default_update_reject_parent (parent_id), "
+        "CONSTRAINT fk_default_update_reject_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_default_parent(id) "
+        "ON UPDATE SET DEFAULT"
+        ") ENGINE=InnoDB"
+    );
+    assert_prepared_fails(
+        db,
+        "CREATE TABLE fk_default_prepared_reject ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT NOT NULL DEFAULT 1, "
+        "KEY fk_default_prepared_reject_parent (parent_id), "
+        "CONSTRAINT fk_default_prepared_reject_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_default_parent(id) "
+        "ON DELETE SET DEFAULT ON UPDATE SET DEFAULT"
+        ") ENGINE=InnoDB"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "fk_default_delete_reject") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "fk_default_update_reject") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "fk_default_prepared_reject") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_catalog_table_count(filename, "app", 3U);
+
+    assert_foreign_key_exec_fails(
+        db,
+        "ALTER TABLE fk_default_alter_delete "
+        "ADD CONSTRAINT fk_default_alter_delete_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_default_parent(id) "
+        "ON DELETE SET DEFAULT, ALGORITHM=COPY"
+    );
+    assert_foreign_key_exec_fails(
+        db,
+        "ALTER TABLE fk_default_alter_update "
+        "ADD CONSTRAINT fk_default_alter_update_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_default_parent(id) "
+        "ON UPDATE SET DEFAULT, ALGORITHM=COPY"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'app' "
+        "AND TABLE_NAME IN ('fk_default_alter_delete', 'fk_default_alter_update')",
+        "0"
+    );
+    char *create_sql = capture_show_create_table(db, "fk_default_alter_delete");
+    assert(strstr(create_sql, "FOREIGN KEY") == NULL);
+    free(create_sql);
+    create_sql = capture_show_create_table(db, "fk_default_alter_update");
+    assert(strstr(create_sql, "FOREIGN KEY") == NULL);
+    free(create_sql);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE app");
+    assert_catalog_table_count(filename, "app", 3U);
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'app'",
+        "0"
     );
 
     assert(mylite_close(db) == MYLITE_OK);
