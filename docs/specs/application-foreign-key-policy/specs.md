@@ -114,5 +114,5 @@ specs.
 
 - Full framework compatibility still needs broader FK metadata lifecycle plus
   adapter or wire-protocol integration.
-- SQL dump import flows that disable `foreign_key_checks` still need a dedicated
-  policy once MyLite has an FK implementation plan.
+- Fixture-backed SQL dump import ordering with `foreign_key_checks=0` is covered
+  separately; full framework dump/client compatibility remains broader work.

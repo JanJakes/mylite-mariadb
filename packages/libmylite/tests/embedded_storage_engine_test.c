@@ -197,6 +197,7 @@ static void test_table_ddl_if_exists(void);
 static void test_constraint_generated_dump_fixture(void);
 static void test_show_create_table_round_trip(void);
 static void test_show_create_foreign_key_round_trip(void);
+static void test_foreign_key_dump_import_ordering(void);
 static void test_constraint_generated_expression_matrix(void);
 static void test_truncate_table_lifecycle(void);
 static void test_wordpress_shaped_schema(void);
@@ -489,6 +490,7 @@ int main(int argc, char **argv) {
     test_constraint_generated_dump_fixture();
     test_show_create_table_round_trip();
     test_show_create_foreign_key_round_trip();
+    test_foreign_key_dump_import_ordering();
     test_constraint_generated_expression_matrix();
     test_truncate_table_lifecycle();
     test_wordpress_shaped_schema();
@@ -13747,6 +13749,116 @@ static void test_show_create_foreign_key_round_trip(void) {
 
     free(child_sql);
     free(parent_sql);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_foreign_key_dump_import_ordering(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE dump_fk_import");
+    assert_exec_succeeds(db, "USE dump_fk_import");
+    exec_sql_fixture(db, "foreign-key-dump-import.sql");
+    assert_query_single_value(db, "SELECT @@foreign_key_checks", "1");
+    assert_catalog_table_count(filename, "dump_fk_import", 2U);
+    assert_catalog_table_metadata(
+        filename,
+        "dump_fk_import",
+        "dump_fk_parent",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "dump_fk_import",
+        "dump_fk_child",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'dump_fk_import' "
+        "AND TABLE_NAME = 'dump_fk_child' "
+        "AND CONSTRAINT_NAME = 'dump_fk_child_parent' "
+        "AND UNIQUE_CONSTRAINT_NAME = 'dump_fk_parent_code' "
+        "AND REFERENCED_TABLE_NAME = 'dump_fk_parent' "
+        "AND UPDATE_RULE = 'CASCADE' "
+        "AND DELETE_RULE = 'SET NULL'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_code FROM dump_fk_child WHERE id = 1",
+        "10"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_code FROM dump_fk_child WHERE id = 2",
+        "20"
+    );
+    assert_foreign_key_exec_fails(
+        db,
+        "INSERT INTO dump_fk_child VALUES (3, 999, 'new-orphan')"
+    );
+    assert_exec_succeeds(db, "INSERT INTO dump_fk_parent VALUES (3, 30, 'new-parent')");
+    assert_exec_succeeds(db, "INSERT INTO dump_fk_child VALUES (4, 30, 'new-child')");
+    assert_exec_succeeds(
+        db,
+        "UPDATE dump_fk_parent SET parent_code = 11 WHERE parent_code = 10"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_code FROM dump_fk_child WHERE id = 1",
+        "11"
+    );
+    assert_exec_succeeds(db, "DELETE FROM dump_fk_parent WHERE parent_code = 11");
+    assert_query_single_value(
+        db,
+        "SELECT COALESCE(parent_code, -1) FROM dump_fk_child WHERE id = 1",
+        "-1"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "dump_fk_import");
+    assert_exec_succeeds(db, "USE dump_fk_import");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'dump_fk_import' "
+        "AND TABLE_NAME = 'dump_fk_child' "
+        "AND CONSTRAINT_NAME = 'dump_fk_child_parent'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_code FROM dump_fk_child WHERE id = 2",
+        "20"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_code FROM dump_fk_child FORCE INDEX (dump_fk_child_parent_code) "
+        "WHERE parent_code = 20",
+        "20"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_code FROM dump_fk_child WHERE id = 4",
+        "30"
+    );
+    assert_foreign_key_exec_fails(
+        db,
+        "INSERT INTO dump_fk_child VALUES (5, 555, 'reopened-orphan')"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
     free(filename);
     remove_tree(root);
     free(root);

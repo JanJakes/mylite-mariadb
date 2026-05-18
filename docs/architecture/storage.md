@@ -115,6 +115,9 @@ and removes child-table FK metadata with dropped child tables so the parent can
 be dropped afterward. Session
 `foreign_key_checks=0` disables supported FK row checks and parent-table
 truncate checks without retrospective validation when checks are re-enabled.
+Fixture-backed dump coverage imports child rows before parent rows under that
+session bypass, then proves later violating writes fail after checks are
+restored.
 MariaDB-generated supporting keys are cleaned up when copy ALTER replaces them
 with explicit compatible keys, and can be explicitly dropped after the owning
 FK is removed. Referenced parent unique secondary-key renames update the FK

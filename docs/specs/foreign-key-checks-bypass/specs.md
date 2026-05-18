@@ -102,6 +102,8 @@ No dependency or size-profile change is expected.
 - Close/reopen coverage proves orphan rows written while disabled remain
   ordinary durable rows and checks are back to the default enabled session
   behavior on a new handle.
+- A follow-up dump fixture covers child-row import before parent-row import
+  under the same session bypass.
 - Verification: storage-smoke embedded tests, default storage tests,
   format-check, and `git diff --check`.
 
