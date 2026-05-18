@@ -2123,9 +2123,18 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
     }
   }
   else
+  {
     error= mylite_advance_auto_increment_from_row(primary_file,
                                                   storage_schema(),
                                                   storage_table(), table);
+    if (!error && mylite_auto_increment_field(table))
+    {
+      const mylite_storage_result preserve_result=
+        mylite_storage_preserve_auto_increment_on_rollback(primary_file);
+      if (preserve_result != MYLITE_STORAGE_OK)
+        error= mylite_storage_to_handler_error(preserve_result);
+    }
+  }
   if (error)
   {
     mylite_free_index_entries(index_entries, index_key_storage);

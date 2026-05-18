@@ -8,8 +8,9 @@ reservation and update failure ordering are easy to overstate:
 
 - mixed `INSERT IGNORE` can keep successful row ids consecutive while still
   preserving the reserved interval boundary for the next statement; and
-- failed multi-row `UPDATE` attempts that do not pass the MyLite update checks
-  must not consume attempted explicit high values.
+- failed multi-row `UPDATE` attempts ordered to hit MyLite update checks before
+  any prior high-value publication must not consume attempted explicit high
+  values.
 
 ## Source Findings
 
@@ -48,9 +49,9 @@ MariaDB base: `mariadb-11.8.6`
 - Mixed generated `INSERT IGNORE` where successful rows surround a skipped
   duplicate row and the statement's reserved interval leaves a tail gap after
   the successful rows.
-- Failed multi-row parent `UPDATE` that attempts explicit high values but
-  fails a foreign-key restriction before publishing advancement, proving the
-  attempted high values are not consumed.
+- Failed multi-row parent `UPDATE` that attempts explicit high values but is
+  ordered to fail a foreign-key restriction before publishing advancement,
+  proving the attempted high values are not consumed.
 - Close/reopen persistence for the covered mixed-row insert next value.
 
 ## Non-Goals
@@ -70,8 +71,8 @@ non-gapless autoincrement behavior:
 
 - a mixed `INSERT IGNORE` statement keeps the reserved interval boundary even
   when a skipped row does not itself take a visible generated id; and
-- a failed multi-row `UPDATE` that does not pass MyLite FK checks leaves
-  attempted explicit high values unused.
+- a failed multi-row `UPDATE` that does not pass MyLite FK checks before any
+  high-value publication leaves attempted explicit high values unused.
 
 The support claim remains representative. Broader failed-DML matrices stay
 planned until prior-success multi-row update failures, broader
@@ -90,8 +91,9 @@ consecutive ids while the next statement resumes after the reserved interval.
 Keep the existing durable `ha_mylite::update_row()` ordering for failed update
 attempts: duplicate-key and foreign-key checks run before
 `mylite_advance_auto_increment_from_row()`. The representative FK-protected
-multi-row update therefore proves attempted explicit high values remain unused
-when the statement fails before MyLite publishes an updated row.
+multi-row update is ordered so the failing row runs first, proving attempted
+explicit high values remain unused when the statement fails before MyLite
+publishes an updated row.
 
 ## File Lifecycle
 
@@ -120,9 +122,9 @@ No dependency, license, or intended size-profile change is introduced.
   successful rows around a skipped duplicate row and a reserved tail gap after
   the statement.
 - Add a storage-engine smoke test for a failed ordered multi-row parent
-  `UPDATE` that attempts explicit high values, hits a foreign-key restriction,
-  and proves the next generated value remains at the ordinary post-insert
-  value.
+  `UPDATE` that attempts explicit high values, hits a foreign-key restriction
+  before any high-value publication, and proves the next generated value
+  remains at the ordinary post-insert value.
 - Reopen the database and prove the covered next value persists.
 - Run the focused storage-engine test, statement-rollback and transaction
   compatibility harness groups, shell syntax checks, `git diff --check`, and
@@ -146,7 +148,5 @@ No dependency, license, or intended size-profile change is introduced.
 - Explicit high-value duplicate insert failures are covered separately in
   `docs/specs/autoincrement-explicit-duplicate-inserts/specs.md`; insert-select
   and grouped-key variants remain planned.
-- This does not prove the harder prior-success multi-row `UPDATE` failure
-  shape. The candidate duplicate, CHECK, and FK forms investigated for this
-  slice failed before a prior row-level autoincrement advancement was
-  observable, so that claim remains planned.
+- Prior-success multi-row `UPDATE` failure is covered separately in
+  `docs/specs/autoincrement-prior-success-failed-update/specs.md`.
