@@ -624,11 +624,12 @@ preserve nullable unique-key semantics. Durable index-entry scans use the
 index-entry table id and row-state tombstone map for visibility, then defer
 row-page validation until a selected row is materialized. Ordered index reads
 build in-memory cursors from live index entries, keep sorted key metadata plus
-row ids, use bound searches for key positioning, and reconstruct only the
-selected row buffer from row pages. This provides correct indexed insert,
-lookup, update, delete, reopen, and copy `ALTER` behavior for the supported
-shapes, but it is still an interim performance structure because cursor
-construction scans and sorts live append-only entries. Standalone
+row ids, use bound searches for key positioning, check `index_next_same()`
+boundaries before row materialization, and reconstruct only the selected row
+buffer from row pages. This provides correct indexed insert, lookup, update,
+delete, reopen, and copy `ALTER` behavior for the supported shapes, but it is
+still an interim performance structure because cursor construction scans and
+sorts live append-only entries. Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, free-space reclamation, multi-statement transaction
 rollback, and transaction-aware index maintenance remain planned.

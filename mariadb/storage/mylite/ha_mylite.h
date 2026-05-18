@@ -114,6 +114,7 @@ public:
                          key_part_map keypart_map,
                          enum ha_rkey_function find_flag) override;
   int index_next(uchar *buf) override;
+  int index_next_same(uchar *buf, const uchar *key, uint keylen) override;
   int index_prev(uchar *buf) override;
   int index_first(uchar *buf) override;
   int index_last(uchar *buf) override;

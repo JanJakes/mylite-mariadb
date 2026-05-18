@@ -1626,6 +1626,27 @@ int ha_mylite::index_next(uchar *buf)
   DBUG_RETURN(read_index_cursor_row(buf, index_row_index + 1));
 }
 
+int ha_mylite::index_next_same(uchar *buf, const uchar *key, uint keylen)
+{
+  DBUG_ENTER("ha_mylite::index_next_same");
+  if (index_row_count == 0 || index_row_index + 1 >= index_row_count ||
+      !index_entries || !index_keys || !key)
+    DBUG_RETURN(HA_ERR_END_OF_FILE);
+
+  const size_t next_index= index_row_index + 1;
+  const Mylite_index_cursor_entry *entry= index_entries + next_index;
+  int cmp= 0;
+  const int error= mylite_compare_key_tuple(
+      table, active_index, index_keys + entry->key_offset, entry->key_size,
+      key, keylen, keylen, &cmp);
+  if (error)
+    DBUG_RETURN(error);
+  if (cmp != 0)
+    DBUG_RETURN(HA_ERR_END_OF_FILE);
+
+  DBUG_RETURN(read_index_cursor_row(buf, next_index));
+}
+
 int ha_mylite::index_prev(uchar *buf)
 {
   DBUG_ENTER("ha_mylite::index_prev");
