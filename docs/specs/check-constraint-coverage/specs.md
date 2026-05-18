@@ -53,9 +53,10 @@ MariaDB before the MyLite handler writes rows.
 This slice marks CHECK constraints as partial support: covered for basic
 column-level and table-level constraints on routed base tables. Later coverage
 adds named table-level CHECK add/drop ALTER, failed ADD CHECK rollback over
-incompatible existing rows, explicit CHECK-constrained CTAS targets, and
-representative deterministic expression matrices, while exhaustive expression,
-broader dump/export, and rollback cases remain planned.
+incompatible existing rows, explicit CHECK-constrained CTAS targets, generated
+and CHECK plain OR REPLACE replacement metadata, and representative deterministic
+expression matrices, while exhaustive expression, broader dump/export, and
+rollback cases remain planned.
 
 ## Design
 
@@ -109,6 +110,9 @@ behavior plus MyLite catalog persistence.
 
 - Basic CHECK constraints on routed tables reject invalid insert/update writes.
 - CHECK metadata survives close/reopen through the `.mylite` catalog.
+- Follow-up coverage verifies CHECK metadata published by plain
+  `CREATE OR REPLACE TABLE` survives close/reopen and old CHECK metadata is
+  no longer SQL-visible after replacement.
 - `check_constraint_checks=OFF` behavior is documented and tested for this
   basic surface.
 - Compatibility docs and roadmap mark CHECK constraints as partial rather than

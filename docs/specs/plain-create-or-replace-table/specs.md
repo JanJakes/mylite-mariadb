@@ -48,9 +48,11 @@ close/reopen without durable MariaDB sidecars.
 ## Compatibility Impact
 
 `CREATE OR REPLACE TABLE` moves from representative LIKE/CTAS-only success
-coverage to representative plain, LIKE, and CTAS success coverage. The support
-claim remains partial: broader error matrices, lock-table interactions,
-temporary-table edge cases, and full SQL transaction semantics remain planned.
+coverage to representative plain, LIKE, and CTAS success coverage. Follow-up
+coverage verifies plain replacement with generated-column and CHECK metadata.
+The support claim remains partial: broader error matrices, lock-table
+interactions, temporary-table edge cases, and full SQL transaction semantics
+remain planned.
 
 ## Design
 
@@ -107,6 +109,8 @@ code unless a handler fix is required.
   existing routed MyLite table without persistent MariaDB sidecars.
 - The old target definition, rows, indexes, and autoincrement state are not
   SQL-visible after replacement.
+- A follow-up slice covers plain OR REPLACE replacement metadata for generated
+  columns and CHECK constraints while keeping broader edge cases planned.
 - The replacement table remains usable and discoverable after close/reopen.
 - Compatibility, storage architecture, harness, roadmap, and related specs name
   plain `OR REPLACE` as covered while keeping broader edge cases planned.

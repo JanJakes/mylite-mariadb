@@ -217,6 +217,7 @@ static void test_create_table_select(void);
 static void test_create_table_select_duplicate_modes(void);
 static void test_temporary_table_catalog_isolation(void);
 static void test_create_or_replace_table(void);
+static void test_create_or_replace_generated_check_table(void);
 static void test_failed_create_or_replace_rollback(void);
 static void test_create_or_replace_foreign_key_lifecycle(void);
 static void test_failed_table_ddl_rollback(void);
@@ -536,6 +537,7 @@ int main(int argc, char **argv) {
     test_create_table_select_duplicate_modes();
     test_temporary_table_catalog_isolation();
     test_create_or_replace_table();
+    test_create_or_replace_generated_check_table();
     test_failed_create_or_replace_rollback();
     test_create_or_replace_foreign_key_lifecycle();
     test_failed_table_ddl_rollback();
@@ -14465,6 +14467,215 @@ static void test_create_or_replace_table(void) {
         "WHERE body = 'ctas body two'",
         "2"
     );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_create_or_replace_generated_check_table(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    table_context old_slug_index_rows = {0};
+    table_context reopened_old_slug_index_rows = {0};
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE replace_expr");
+    assert_exec_succeeds(db, "USE replace_expr");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE replace_expr_target ("
+        "id INT NOT NULL PRIMARY KEY,"
+        "title VARCHAR(64) NOT NULL,"
+        "old_slug VARCHAR(96) AS (CONCAT('old-', title)) STORED,"
+        "CONSTRAINT old_title_short CHECK (CHAR_LENGTH(title) <= 5),"
+        "KEY old_slug_key (old_slug)"
+        ") ENGINE=MyISAM"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO replace_expr_target (id, title) VALUES (1, 'alpha')"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO replace_expr_target (id, title) VALUES (2, 'too-long')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM replace_expr_target FORCE INDEX (old_slug_key) "
+        "WHERE old_slug = 'old-alpha'",
+        "1"
+    );
+    assert_check_constraint_count(
+        db,
+        "replace_expr",
+        "replace_expr_target",
+        "old_title_short",
+        1U
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE OR REPLACE TABLE replace_expr_target ("
+        "id INT NOT NULL PRIMARY KEY,"
+        "title VARCHAR(64) NOT NULL,"
+        "rating INT NOT NULL,"
+        "slug VARCHAR(96) AS (LOWER(REPLACE(title, ' ', '-'))) STORED,"
+        "CONSTRAINT rating_window CHECK (rating BETWEEN 0 AND 10),"
+        "UNIQUE KEY slug_key (slug),"
+        "KEY rating_key (rating)"
+        ") ENGINE=InnoDB"
+    );
+    assert_catalog_table_count(filename, "replace_expr", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "replace_expr",
+        "replace_expr_target",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM replace_expr_target", "0");
+    assert_exec_fails(db, "SELECT old_slug FROM replace_expr_target");
+    assert_check_constraint_count(
+        db,
+        "replace_expr",
+        "replace_expr_target",
+        "old_title_short",
+        0U
+    );
+    assert_check_constraint_count(
+        db,
+        "replace_expr",
+        "replace_expr_target",
+        "rating_window",
+        1U
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM replace_expr_target WHERE Key_name = 'old_slug_key'",
+            table_callback,
+            &old_slug_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(old_slug_index_rows.rows == 0);
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO replace_expr_target (id, title, rating) VALUES "
+        "(1, 'Alpha Post', 5), (2, 'Beta Post', 7)"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO replace_expr_target (id, title, rating) VALUES "
+        "(3, 'Gamma Post', 99)"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO replace_expr_target (id, title, rating) VALUES "
+        "(3, 'Alpha Post', 6)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM replace_expr_target WHERE id = 1",
+        "alpha-post"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM replace_expr_target FORCE INDEX (slug_key) "
+        "WHERE slug = 'beta-post'",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM replace_expr_target FORCE INDEX (rating_key) "
+        "WHERE rating = 5",
+        "1"
+    );
+    char *create_sql = capture_show_create_table(db, "replace_expr_target");
+    assert(strstr(create_sql, "old_slug") == NULL);
+    assert(strstr(create_sql, "old_title_short") == NULL);
+    assert(strstr(create_sql, "`slug` varchar(96)") != NULL);
+    assert(strstr(create_sql, "CONSTRAINT `rating_window` CHECK") != NULL);
+    free(create_sql);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "replace_expr");
+    assert_exec_succeeds(db, "USE replace_expr");
+    assert_catalog_table_count(filename, "replace_expr", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "replace_expr",
+        "replace_expr_target",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_exec_fails(db, "SELECT old_slug FROM replace_expr_target");
+    assert_check_constraint_count(
+        db,
+        "replace_expr",
+        "replace_expr_target",
+        "old_title_short",
+        0U
+    );
+    assert_check_constraint_count(
+        db,
+        "replace_expr",
+        "replace_expr_target",
+        "rating_window",
+        1U
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM replace_expr_target WHERE Key_name = 'old_slug_key'",
+            table_callback,
+            &reopened_old_slug_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_old_slug_index_rows.rows == 0);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM replace_expr_target FORCE INDEX (slug_key) "
+        "WHERE slug = 'alpha-post'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM replace_expr_target FORCE INDEX (rating_key) "
+        "WHERE rating = 7",
+        "2"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO replace_expr_target (id, title, rating) VALUES "
+        "(3, 'Delta Post', 11)"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO replace_expr_target (id, title, rating) VALUES "
+        "(3, 'Delta Post', 8)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM replace_expr_target FORCE INDEX (slug_key) "
+        "WHERE slug = 'delta-post'",
+        "3"
+    );
+    create_sql = capture_show_create_table(db, "replace_expr_target");
+    assert(strstr(create_sql, "old_slug") == NULL);
+    assert(strstr(create_sql, "CONSTRAINT `rating_window` CHECK") != NULL);
+    free(create_sql);
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 

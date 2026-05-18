@@ -135,6 +135,9 @@ unchanged for practical purposes.
   after close/reopen.
 - Failed dependent column drops preserve generated-column metadata and
   generated indexes before and after close/reopen.
+- Plain `CREATE OR REPLACE TABLE` replacement can publish a new
+  generated-column definition and generated-column index while removing old
+  generated metadata before and after close/reopen.
 - CTAS projections from virtual and stored generated source columns materialize
   expected values before and after close/reopen.
 - Generated target CTAS definitions compute virtual and stored generated values

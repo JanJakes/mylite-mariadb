@@ -358,7 +358,10 @@ drop-then-create flow: MyLite removes the old catalog record, publishes the
 replacement definition, writes replacement rows and indexes where applicable,
 and verifies close/reopen visibility. The plain replacement coverage verifies
 old rows, old indexes, and old autoincrement state are not SQL-visible after
-replacement. Representative failed OR REPLACE rollback covers self-LIKE
+replacement. Representative plain replacement coverage for generated columns
+and CHECK constraints verifies old metadata is not SQL-visible, while
+replacement generated-column indexes and CHECK constraints survive close/reopen.
+Representative failed OR REPLACE rollback covers self-LIKE
 rejection, missing-source LIKE/CTAS inputs, unsupported replacement
 definitions, and duplicate-key replacement CTAS while preserving old target
 metadata, rows, indexes, and autoincrement state through the existing statement
