@@ -97,7 +97,11 @@ default_tests=(
   main.ctype_cp850
   main.ctype_cp866
   main.ctype_hebrew
+  main.ctype_latin2
   main.ctype_utf32_def
+  main.ctype_utf8mb3_bin
+  main.ctype_utf8mb4_bin
+  main.ctype_utf8mb4_general_ci
   main.ctype_filesystem
   main.ctype_collate_column
   main.ctype_collate_context

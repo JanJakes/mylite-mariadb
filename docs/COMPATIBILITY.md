@@ -119,7 +119,8 @@ function behavior, selected disabled DES encryption-function behavior,
 selected JSON equality and normalization behavior, selected aggregate DISTINCT behavior,
 selected autoincrement ODKU and strict HEAP autoincrement behavior, selected
 date-format behavior, selected ASCII, legacy, and UTF-32 charset edge
-behavior, selected filesystem charset behavior, and selected charset
+behavior, selected Latin2 and UTF-8 binary/general charset, weight-string, and
+LIKE condition-propagation behavior, selected filesystem charset behavior, and selected charset
 diagnostics, collation-default behavior,
 UTF-32 `character_set_collations`, and column/context collation behavior,
 while MariaDB MTR comparison

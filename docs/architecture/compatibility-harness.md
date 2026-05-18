@@ -71,7 +71,9 @@ parser/comment, comparison, DDL/comment metadata, DDL constraint/index
 metadata, `ORDER BY`, optimizer-cost metadata, scalar
 operator, string/format, charset-conversion expressions, crypto/KDF, disabled
 DES, aggregate DISTINCT, autoincrement ODKU, strict HEAP autoincrement,
-temporal scale, microsecond parsing, date-format, and ASCII charset behavior.
+temporal scale, microsecond parsing, date-format, ASCII charset, selected
+Latin2 and UTF-8 binary/general charset, weight-string, and LIKE
+condition-propagation behavior.
 It uses a separate
 `build/mariadb-mtr-smoke`
 profile because the default embedded profile intentionally omits view, stored

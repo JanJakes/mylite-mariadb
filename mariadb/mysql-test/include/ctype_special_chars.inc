@@ -54,6 +54,7 @@ EXECUTE IMMEDIATE
   'DEFAULT', collation('a')),
   'latin1', charset('a'));
 
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 
 
