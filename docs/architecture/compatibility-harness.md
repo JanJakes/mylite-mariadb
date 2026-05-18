@@ -72,7 +72,9 @@ uses a separate
 `build/mariadb-mtr-smoke`
 profile because the default embedded profile intentionally omits view, stored
 program, trigger, and binlog sysvar surfaces that MTR bootstrap still expects.
-It remains outside the default compatibility groups because it builds
+The curated list also covers selected filesystem charset,
+UTF-32 `character_set_collations`, and JSON equality behavior. It remains
+outside the default compatibility groups because it builds
 `mariadbd` and several upstream client/support tools. Broader MTR integration
 should be a separate comparison slice with explicit include lists, expected
 unsupported surfaces, and stable result normalization.
