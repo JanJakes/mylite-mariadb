@@ -638,14 +638,19 @@ entries for common integer point reads. Durable exact lookups classify each
 published append-only page once and prune candidates as later row-state pages
 hide older row ids. Single-level index leaf roots can serve as exact lookup base
 snapshots, with only pages appended after the root scanned as a visibility
-overlay; missing roots fall back to the append-only scan path. Cursors check
+overlay; missing roots fall back to the append-only scan path. Explicit
+standalone `CREATE INDEX` and `ALTER TABLE ... ADD KEY` copy rebuilds can
+opportunistically publish supported fixed-width leaf roots when catalog headroom
+allows, while generated FK helper keys plus rename/drop rebuilds keep using the
+scan fallback. Cursors check
 `index_next_same()` boundaries before row materialization and reconstruct only
 the selected row buffer from row pages. This provides correct indexed insert,
 lookup, update, delete, reopen, and copy `ALTER` behavior for the supported
 shapes, but it is still an interim performance structure because maintained
 multi-page B-tree navigation is not implemented. Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
-definitions. B-tree pages, free-space reclamation, multi-statement transaction
+definitions. B-tree pages, multi-page catalog storage, free-space reclamation,
+multi-statement transaction
 rollback, and transaction-aware index maintenance remain planned.
 
 The storage engine must support:

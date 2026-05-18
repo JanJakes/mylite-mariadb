@@ -220,6 +220,8 @@ static _Thread_local const void *active_context_owner;
 static _Thread_local mylite_storage_statement *active_read_snapshot;
 static _Thread_local mylite_storage_transaction_journal_snapshot active_transaction_journal_snapshot;
 
+#define MYLITE_STORAGE_INDEX_ROOT_CATALOG_RESERVE_BYTES 1024U
+
 static mylite_storage_result path_exists(const char *filename, int *exists);
 static mylite_storage_result write_empty_database(FILE *file);
 static void initialize_header_page(unsigned char *page);
@@ -2519,8 +2521,17 @@ mylite_storage_result mylite_storage_rebuild_index_leaf(
             .schema_name_size = strlen(schema_name),
             .table_name_size = strlen(table_name),
         };
-        result =
-            append_index_root_record(catalog_page, &definition, &lengths, table_entry.table_id);
+        const size_t record_size = MYLITE_STORAGE_FORMAT_RECORD_HEADER_SIZE +
+                                   lengths.schema_name_size + lengths.table_name_size;
+        const size_t used_bytes = catalog_used_bytes(catalog_page);
+        if (record_size > MYLITE_STORAGE_FORMAT_PAGE_SIZE - used_bytes ||
+            MYLITE_STORAGE_FORMAT_PAGE_SIZE - used_bytes - record_size <
+                MYLITE_STORAGE_INDEX_ROOT_CATALOG_RESERVE_BYTES) {
+            result = MYLITE_STORAGE_FULL;
+        } else {
+            result =
+                append_index_root_record(catalog_page, &definition, &lengths, table_entry.table_id);
+        }
     }
     if (result == MYLITE_STORAGE_OK) {
         result = begin_recovery_journal(file, filename, &header, 1);

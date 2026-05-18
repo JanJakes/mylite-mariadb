@@ -376,6 +376,13 @@ static void assert_catalog_table_metadata(
     const char *requested_engine_name,
     const char *effective_engine_name
 );
+static void assert_index_root_metadata(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    unsigned long long expected_entry_count
+);
 static void assert_collation_matrix_catalog_metadata(
     const char *filename,
     const collation_restart_case *cases,
@@ -16578,6 +16585,7 @@ static void test_standalone_index_ddl(void) {
     char *filename = NULL;
     mylite_db *db = open_database(root, &filename);
     table_context slug_rows = {0};
+    table_context score_rows = {0};
     table_context renamed_slug_rows = {0};
     table_context old_renamed_index_rows = {0};
     table_context new_renamed_index_rows = {0};
@@ -16610,6 +16618,10 @@ static void test_standalone_index_ddl(void) {
         .expected_count = 2,
         .expected_ids = category_ids,
     };
+    id_sequence_context views_sequence = {
+        .expected_count = 2,
+        .expected_ids = category_ids,
+    };
     id_sequence_context post_drop_sequence = {
         .expected_count = 2,
         .expected_ids = category_ids,
@@ -16624,7 +16636,8 @@ static void test_standalone_index_ddl(void) {
         "id INT NOT NULL, "
         "slug VARCHAR(32) NOT NULL, "
         "category VARCHAR(32) NULL, "
-        "score INT NOT NULL"
+        "score INT NOT NULL, "
+        "views INT NOT NULL"
         ") ENGINE=InnoDB"
     );
     assert_exec_succeeds(
@@ -16646,9 +16659,18 @@ static void test_standalone_index_ddl(void) {
         "generated_payload BLOB AS (UNHEX(HEX(CONCAT(title, '-bin')))) STORED"
         ") ENGINE=InnoDB"
     );
-    assert_exec_succeeds(db, "INSERT INTO standalone_index_posts VALUES (1, 'alpha', 'news', 10)");
-    assert_exec_succeeds(db, "INSERT INTO standalone_index_posts VALUES (2, 'beta', 'tech', 20)");
-    assert_exec_succeeds(db, "INSERT INTO standalone_index_posts VALUES (3, 'gamma', 'news', 30)");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO standalone_index_posts VALUES (1, 'alpha', 'news', 10, 5)"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO standalone_index_posts VALUES (2, 'beta', 'tech', 20, 7)"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO standalone_index_posts VALUES (3, 'gamma', 'news', 30, 5)"
+    );
     assert_exec_succeeds(
         db,
         "INSERT INTO generated_index_ddl_posts (id, title) VALUES (1, 'alpha')"
@@ -16675,6 +16697,16 @@ static void test_standalone_index_ddl(void) {
         db,
         "CREATE UNIQUE INDEX slug_lookup ON standalone_index_posts (slug) ALGORITHM=COPY"
     );
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE standalone_index_posts ADD KEY views_lookup (views), ALGORITHM=COPY"
+    );
+    assert_index_root_metadata(filename, "app", "standalone_index_posts", 2U, 3ULL);
+    assert_exec_succeeds(
+        db,
+        "CREATE INDEX score_lookup ON standalone_index_posts (score) ALGORITHM=COPY"
+    );
+    assert_index_root_metadata(filename, "app", "standalone_index_posts", 3U, 3ULL);
     assert_exec_succeeds(
         db,
         "ALTER TABLE generated_index_ddl_posts "
@@ -16709,7 +16741,7 @@ static void test_standalone_index_ddl(void) {
         "InnoDB",
         "MYLITE"
     );
-    assert_exec_fails(db, "INSERT INTO standalone_index_posts VALUES (4, 'beta', 'docs', 40)");
+    assert_exec_fails(db, "INSERT INTO standalone_index_posts VALUES (4, 'beta', 'docs', 40, 9)");
     assert_exec_fails(db, "INSERT INTO generated_index_ddl_posts (id, title) VALUES (4, 'alpha')");
     assert_exec_fails(
         db,
@@ -16739,6 +16771,29 @@ static void test_standalone_index_ddl(void) {
     );
     assert(errmsg == NULL);
     assert(category_sequence.rows == 2);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM standalone_index_posts FORCE INDEX (views_lookup) "
+            "WHERE views = 5 ORDER BY id",
+            id_sequence_callback,
+            &views_sequence,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(views_sequence.rows == 2);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM standalone_index_posts FORCE INDEX (score_lookup) WHERE score = 20",
+            row_callback,
+            &score_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(score_rows.rows == 1);
     assert(
         mylite_exec(
             db,
@@ -16879,7 +16934,7 @@ static void test_standalone_index_ddl(void) {
     assert(errmsg == NULL);
     assert(generated_slug_rows.rows == 1);
     assert_exec_fails(db, "INSERT INTO generated_index_ddl_posts (id, title) VALUES (4, 'beta')");
-    assert_exec_fails(db, "INSERT INTO standalone_index_posts VALUES (4, 'beta', 'docs', 40)");
+    assert_exec_fails(db, "INSERT INTO standalone_index_posts VALUES (4, 'beta', 'docs', 40, 9)");
     assert_exec_fails(
         db,
         "INSERT INTO generated_blob_index_ddl_posts (id, title) VALUES (4, 'beta')"
@@ -24486,6 +24541,30 @@ static void assert_catalog_table_metadata(
     assert(strcmp(metadata.effective_engine_name, effective_engine_name) == 0);
     mylite_storage_free(metadata.requested_engine_name);
     mylite_storage_free(metadata.effective_engine_name);
+}
+
+static void assert_index_root_metadata(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    unsigned long long expected_entry_count
+) {
+    mylite_storage_index_root_metadata metadata = {
+        .size = sizeof(metadata),
+    };
+
+    assert(
+        mylite_storage_read_index_root(
+            filename,
+            schema_name,
+            table_name,
+            index_number,
+            &metadata
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(metadata.root_page != 0ULL);
+    assert(metadata.entry_count == expected_entry_count);
 }
 
 static int engine_callback(void *ctx, int column_count, char **values, char **column_names) {
