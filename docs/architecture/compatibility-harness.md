@@ -46,7 +46,7 @@ first-party preset. Storage-engine groups use the opt-in
 | `column-metadata` | `embedded-dev` | `compat-column-metadata` | Prepared statement column metadata |
 | `large-value` | `embedded-dev` | `compat-large-value` | Prepared statement large-value segment reads |
 | `warning` | `embedded-dev` | `compat-warning` | Warning counts and structured `SHOW WARNINGS` rows |
-| `sql-comparison` | `embedded-dev` | `compat-sql-comparison` | MariaDB baseline SQL API comparison |
+| `sql-comparison` | `embedded-dev` | `compat-sql-comparison` | MariaDB baseline SQL API comparison, including direct expression result sets |
 | `storage-engine` | `storage-smoke-dev` | `compat-storage-engine` | Static handler registration, routed engine metadata, BLACKHOLE row-discard smoke, and MEMORY/HEAP volatile-row smoke |
 | `sidecar` | `storage-smoke-dev` | `compat-sidecar` | Forbidden durable sidecar gates |
 | `routed-ddl-dml` | `storage-smoke-dev` | `compat-routed-ddl-dml` | Routed direct/prepared schema namespaces, directory-free file-backed `CREATE DATABASE`, catalog-backed `CREATE DATABASE` existence options, table and index DDL, ordinary `CREATE TABLE IF NOT EXISTS`, column ALTER existence-option skips, index DDL existence-option skips, index rename existence-option skips, index ignorability, non-CHECK primary/unique constraint DDL including primary-key add/drop/re-add and failed ADD UNIQUE rollback, CHECK constraint existence-option skips, indexed table/index rename, table-DDL `IF EXISTS` skips, failed table-DDL rollback, temporary LIKE/CTAS isolation, shadowing, and OR REPLACE, online/in-place ALTER rejection, `CREATE TABLE ... SELECT` duplicate modes, plain/LIKE/CTAS OR REPLACE, truncate, and DML smoke |
@@ -55,10 +55,11 @@ first-party preset. Storage-engine groups use the opt-in
 
 ## Relationship To MariaDB MTR
 
-The `sql-comparison` group compares representative direct execution, prepared
-statement, metadata, and warning behavior against a raw MariaDB embedded
-runtime. MariaDB's MTR remains the long-term source for broad upstream
-compatibility cases. MyLite should not run MTR blindly as the primary local
+The `sql-comparison` group compares representative direct execution, direct
+expression result sets, prepared statement, metadata, and warning behavior
+against a raw MariaDB embedded runtime. MariaDB's MTR remains the long-term
+source for broad upstream compatibility cases. MyLite should not run MTR
+blindly as the primary local
 signal yet: current MyLite behavior is embedded, file-owned, and intentionally
 excludes server surfaces that many upstream suites assume. The opt-in
 `tools/mylite-mtr-harness` runner proves the embedded MTR path with a curated

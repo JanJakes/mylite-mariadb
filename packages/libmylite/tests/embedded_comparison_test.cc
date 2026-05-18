@@ -69,6 +69,7 @@ struct StatementEffects {
 
 struct Observation {
     QueryResult direct;
+    std::vector<QueryResult> direct_expressions;
     PreparedResult prepared;
     StatementEffects effects;
     unsigned warning_count = 0;
@@ -96,6 +97,36 @@ constexpr const char *kDirectSql = "SELECT 1 AS one,"
                                    "CAST(3.25 AS DOUBLE) AS double_value,"
                                    "CONCAT('al','pha') AS text_value,"
                                    "NULL AS missing";
+
+constexpr std::array<const char *, 8> kDirectExpressionSql = {{
+    "SELECT "
+    "CASE WHEN 2 > 1 THEN 'case-hit' ELSE 'case-miss' END AS case_value,"
+    "COALESCE(NULL, 'fallback') AS coalesced,"
+    "NULLIF('same', 'same') AS nullif_value",
+    "SELECT "
+    "7 DIV 3 AS div_value,"
+    "7 MOD 3 AS mod_value,"
+    "ROUND(12.345, 2) AS rounded_value",
+    "SELECT "
+    "'alpha' IN ('alpha', 'beta') AS in_hit,"
+    "'alpha' NOT IN ('gamma', 'delta') AS not_in_hit,"
+    "NULL IN ('alpha') AS null_in",
+    "SELECT "
+    "DATE_ADD('2026-05-18', INTERVAL 2 DAY) AS plus_two_days,"
+    "TIMESTAMPDIFF(DAY, '2026-05-18', '2026-05-21') AS date_delta",
+    "SELECT "
+    "CONCAT('my', 'lite') AS joined_text,"
+    "REPLACE('embedded db', 'db', 'sql') AS replaced_text,"
+    "CHAR_LENGTH('portable') AS text_length",
+    "SELECT "
+    "CAST('42' AS SIGNED) + CAST('8' AS UNSIGNED) AS numeric_cast,"
+    "CAST(3.14159 AS DECIMAL(6,3)) AS decimal_cast",
+    "SELECT 1 AS n UNION ALL SELECT 2 UNION ALL SELECT 3 ORDER BY n",
+    "SELECT "
+    "NOT (1 = 0) AS not_value,"
+    "(1 <=> NULL) AS null_safe_false,"
+    "(NULL <=> NULL) AS null_safe_true",
+}};
 
 constexpr const char *kPreparedSql = "SELECT ? AS missing,"
                                      "CAST(? AS SIGNED) AS signed_value,"
@@ -126,6 +157,7 @@ void compare_observations(const Observation &expected, const Observation &actual
 void start_raw_runtime(RawRuntime &runtime);
 void stop_raw_runtime(RawRuntime &runtime);
 QueryResult run_raw_query(RawRuntime &runtime, const char *sql);
+std::vector<QueryResult> run_raw_direct_expression_matrix(RawRuntime &runtime);
 PreparedResult run_raw_prepared_query(RawRuntime &runtime);
 StatementEffects run_raw_statement_effects(RawRuntime &runtime);
 StatementEffect run_raw_effect_query(RawRuntime &runtime, const char *sql);
@@ -135,6 +167,7 @@ StatementEffect run_raw_prepared_delete(RawRuntime &runtime);
 StatementEffect raw_statement_effect(RawRuntime &runtime);
 Observation run_mylite_queries(mylite_db *database);
 QueryResult run_mylite_query(mylite_db *database, const char *sql);
+std::vector<QueryResult> run_mylite_direct_expression_matrix(mylite_db *database);
 PreparedResult run_mylite_prepared_query(mylite_db *database);
 StatementEffects run_mylite_statement_effects(mylite_db *database);
 StatementEffect run_mylite_effect_query(mylite_db *database, const char *sql);
@@ -146,6 +179,10 @@ WarningRow first_mylite_warning(mylite_db *database);
 void open_mylite_runtime(MyLiteRuntime &runtime);
 void close_mylite_runtime(MyLiteRuntime &runtime);
 int collect_mylite_row(void *ctx, int column_count, char **values, char **column_names);
+void compare_query_result_sets(
+    const std::vector<QueryResult> &expected,
+    const std::vector<QueryResult> &actual
+);
 void compare_query_results(const QueryResult &expected, const QueryResult &actual);
 void compare_prepared_results(const PreparedResult &expected, const PreparedResult &actual);
 void compare_statement_effects(const StatementEffects &expected, const StatementEffects &actual);
@@ -178,6 +215,7 @@ Observation run_raw_observation(void) {
     Observation observation = {};
 
     observation.direct = run_raw_query(runtime, kDirectSql);
+    observation.direct_expressions = run_raw_direct_expression_matrix(runtime);
     observation.prepared = run_raw_prepared_query(runtime);
     observation.effects = run_raw_statement_effects(runtime);
     const QueryResult warning_result = run_raw_query(runtime, kWarningSql);
@@ -199,6 +237,7 @@ Observation run_mylite_observation(void) {
 
 void compare_observations(const Observation &expected, const Observation &actual) {
     compare_query_results(expected.direct, actual.direct);
+    compare_query_result_sets(expected.direct_expressions, actual.direct_expressions);
     compare_prepared_results(expected.prepared, actual.prepared);
     compare_statement_effects(expected.effects, actual.effects);
     assert(actual.warning_count == expected.warning_count);
@@ -271,6 +310,15 @@ QueryResult run_raw_query(RawRuntime &runtime, const char *sql) {
 
     mysql_free_result(raw_result);
     return result;
+}
+
+std::vector<QueryResult> run_raw_direct_expression_matrix(RawRuntime &runtime) {
+    std::vector<QueryResult> results;
+    results.reserve(kDirectExpressionSql.size());
+    for (const char *sql : kDirectExpressionSql) {
+        results.push_back(run_raw_query(runtime, sql));
+    }
+    return results;
 }
 
 PreparedResult run_raw_prepared_query(RawRuntime &runtime) {
@@ -489,6 +537,7 @@ Observation run_mylite_queries(mylite_db *database) {
     Observation observation = {};
 
     observation.direct = run_mylite_query(database, kDirectSql);
+    observation.direct_expressions = run_mylite_direct_expression_matrix(database);
     observation.prepared = run_mylite_prepared_query(database);
     observation.effects = run_mylite_statement_effects(database);
     assert(mylite_exec(database, kWarningSql, nullptr, nullptr, nullptr) == MYLITE_OK);
@@ -502,6 +551,15 @@ QueryResult run_mylite_query(mylite_db *database, const char *sql) {
     assert(mylite_exec(database, sql, collect_mylite_row, &result, nullptr) == MYLITE_OK);
     result.warning_count = mylite_warning_count(database);
     return result;
+}
+
+std::vector<QueryResult> run_mylite_direct_expression_matrix(mylite_db *database) {
+    std::vector<QueryResult> results;
+    results.reserve(kDirectExpressionSql.size());
+    for (const char *sql : kDirectExpressionSql) {
+        results.push_back(run_mylite_query(database, sql));
+    }
+    return results;
 }
 
 PreparedResult run_mylite_prepared_query(mylite_db *database) {
@@ -723,7 +781,18 @@ int collect_mylite_row(void *ctx, int column_count, char **values, char **column
 
 // NOLINTEND(bugprone-easily-swappable-parameters)
 
+void compare_query_result_sets(
+    const std::vector<QueryResult> &expected,
+    const std::vector<QueryResult> &actual
+) {
+    assert(actual.size() == expected.size());
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        compare_query_results(expected[i], actual[i]);
+    }
+}
+
 void compare_query_results(const QueryResult &expected, const QueryResult &actual) {
+    assert(actual.warning_count == expected.warning_count);
     assert(actual.names == expected.names);
     assert(actual.rows.size() == expected.rows.size());
     for (std::size_t row = 0; row < expected.rows.size(); ++row) {

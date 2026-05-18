@@ -18,7 +18,8 @@ Compatibility evidence is grouped by the local harness documented in
 [Compatibility Harness](architecture/compatibility-harness.md). The initial
 groups cover public API validation, storage, crash recovery, locking, embedded
 lifecycle, direct SQL including statement effects, prepared statements, column
-metadata, large value reads, warnings, MariaDB baseline SQL API comparison,
+metadata, large value reads, warnings, MariaDB baseline SQL API comparison
+including direct expression result sets,
 storage-engine smoke including BLACKHOLE row discard and MEMORY/HEAP volatile
 rows, sidecar gates, routed DDL/DML including schema namespaces,
 directory-free file-backed `CREATE DATABASE`, and catalog-backed
@@ -88,6 +89,9 @@ stored-program runtime stubbing,
 event parse-data validation stubbing,
 dynamic UDF runtime, and non-table-object policies, and representative
 `SHOW CREATE TABLE` round-trip export/import including an FK parent/child pair.
+The raw MariaDB SQL API comparison also covers a direct table-free expression
+matrix for conditional, NULL, numeric, predicate, date/time, string, cast,
+UNION, and NULL-safe comparison result sets.
 The opt-in embedded MTR smoke runner covers MariaDB bootstrap, scalar
 CAST/CONVERT behavior, CASE-family expression behavior, selected numeric,
 character/binary, interval, and type behavior, selected date,
