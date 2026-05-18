@@ -211,6 +211,7 @@ static void test_autoincrement_transaction_rollback(void);
 static void test_autoincrement_failed_dml_gaps(void);
 static void test_autoincrement_reservation_gaps(void);
 static void test_autoincrement_update_gaps(void);
+static void test_autoincrement_failed_dml_matrices(void);
 static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
 static void test_index_ddl_if_exists(void);
@@ -535,6 +536,7 @@ int main(int argc, char **argv) {
     test_autoincrement_failed_dml_gaps();
     test_autoincrement_reservation_gaps();
     test_autoincrement_update_gaps();
+    test_autoincrement_failed_dml_matrices();
     test_indexed_rows();
     test_standalone_index_ddl();
     test_index_ddl_if_exists();
@@ -11829,6 +11831,158 @@ static void test_autoincrement_update_gaps(void) {
         db,
         "SELECT id FROM update_auto_posts WHERE title = 'after-reopen'",
         "82"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_autoincrement_failed_dml_matrices(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_failed_matrices");
+    assert_exec_succeeds(db, "USE auto_failed_matrices");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE mixed_insert_posts ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (id),"
+        "UNIQUE KEY title_key (title)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO mixed_insert_posts (title) VALUES ('seed')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT IGNORE INTO mixed_insert_posts (title) VALUES "
+        "('kept-before'), ('seed'), ('kept-after')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM mixed_insert_posts WHERE title = 'kept-before'",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM mixed_insert_posts WHERE title = 'kept-after'",
+        "3"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM mixed_insert_posts WHERE title = 'seed'",
+        "1"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO mixed_insert_posts (title) VALUES ('after-mixed-ignore')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM mixed_insert_posts WHERE title = 'after-mixed-ignore'",
+        "5"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE mixed_update_parent ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (id),"
+        "UNIQUE KEY title_key (title)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE mixed_update_child ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "parent_id INT NOT NULL,"
+        "PRIMARY KEY (id),"
+        "KEY parent_id_key (parent_id),"
+        "CONSTRAINT mixed_update_child_parent_fk "
+        "FOREIGN KEY (parent_id) REFERENCES mixed_update_parent (id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO mixed_update_parent (title) VALUES "
+        "('fail-second'), ('attempt-first')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO mixed_update_child (parent_id) VALUES (1)"
+    );
+    assert_exec_fails(
+        db,
+        "UPDATE mixed_update_parent "
+        "SET id = CASE title "
+        "WHEN 'attempt-first' THEN 100 "
+        "WHEN 'fail-second' THEN 101 "
+        "ELSE id END "
+        "WHERE title IN ('attempt-first', 'fail-second') "
+        "ORDER BY id DESC"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM mixed_update_parent WHERE title = 'attempt-first'",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM mixed_update_parent WHERE title = 'fail-second'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM mixed_update_parent WHERE id = 100",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_id FROM mixed_update_child",
+        "1"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO mixed_update_parent (title) VALUES ('after-failed-update')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM mixed_update_parent WHERE title = 'after-failed-update'",
+        "3"
+    );
+    assert_catalog_table_count(filename, "auto_failed_matrices", 3U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE auto_failed_matrices");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO mixed_insert_posts (title) VALUES ('after-reopen')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM mixed_insert_posts WHERE title = 'after-reopen'",
+        "6"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO mixed_update_parent (title) VALUES ('after-reopen')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM mixed_update_parent WHERE title = 'after-reopen'",
+        "4"
     );
 
     assert(mylite_close(db) == MYLITE_OK);
