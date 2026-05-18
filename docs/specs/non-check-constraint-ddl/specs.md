@@ -56,6 +56,7 @@ Covered by this slice:
   for supported constraint-backed unique keys.
 - Composite named unique constraints added through copy ALTER, including
   duplicate tuple checks, forced-index reads, close/reopen, and drop behavior.
+- Generated-column unique constraints added and dropped through copy ALTER.
 
 Still planned:
 
@@ -165,6 +166,8 @@ Implemented:
   table, then successful add after duplicate cleanup.
 - The `composite-unique-constraint-ddl` follow-up slice covers named composite
   unique constraints added and dropped through copy ALTER.
+- The `generated-unique-constraint-ddl` follow-up slice covers named unique
+  constraints over supported generated columns.
 
 No MariaDB source, public API, storage file-format, dependency, license, or
 binary-size change was required.

@@ -47,8 +47,10 @@ Generated columns remain partial, but the supported subset expands from
 unindexed generated columns to ordinary secondary and unique indexes on scalar
 virtual or stored generated columns. The follow-up generated-column-index DDL
 slice extends the same key support to copy-rebuild add, drop, rename, and
-standalone index DDL. MyLite still does not claim expression indexes, generated
-primary-key support beyond MariaDB's inherited rejection, full or oversized
+standalone index DDL, and the generated unique constraint follow-up covers
+named `ADD CONSTRAINT ... UNIQUE` syntax over generated columns. MyLite still
+does not claim expression indexes, generated primary-key support beyond
+MariaDB's inherited rejection, full or oversized
 generated BLOB/TEXT key payloads, foreign-key interactions, or broad
 SQL-mode-sensitive expression coverage. A follow-up generated BLOB/TEXT prefix
 slice covers bounded generated prefix key payloads declared in initial DDL, and

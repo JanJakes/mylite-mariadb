@@ -35,6 +35,8 @@ initial `CREATE TABLE` declarations to supported copy-rebuild index DDL:
 - standalone `CREATE INDEX ... ALGORITHM=COPY`,
 - `ALTER TABLE ... RENAME INDEX ..., ALGORITHM=COPY`,
 - standalone `DROP INDEX`.
+- named `ALTER TABLE ... ADD CONSTRAINT ... UNIQUE` /
+  `DROP CONSTRAINT` over a generated column.
 
 Online, instant, in-place, MySQL-style expression indexes, foreign keys, and
 transactional DDL rollback remain planned. Generated primary-key DDL follows
@@ -84,6 +86,8 @@ InnoDB, MyISAM, Aria, binlog, relay-log, or plugin-owned sidecars.
   visibility.
 - Reopen the file, verify the renamed generated index, then create and drop a
   generated secondary index through the default standalone path.
+- Cover generated-column unique constraint add/drop through the separate
+  `generated-unique-constraint-ddl` slice.
 - Run the generated-column, routed DDL/DML, sidecar, and unsupported-index
   compatibility evidence plus normal format, tidy, preset, and diff checks.
 
@@ -98,6 +102,8 @@ InnoDB, MyISAM, Aria, binlog, relay-log, or plugin-owned sidecars.
 - Compatibility docs and roadmap distinguish generated-index DDL support from
   online DDL, generated-primary-key rejection, MySQL-style expression indexes,
   and hidden long-unique hash indexes.
+- Generated-column unique constraint syntax is covered by the separate
+  `generated-unique-constraint-ddl` slice.
 
 ## Risks And Open Questions
 
