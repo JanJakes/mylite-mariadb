@@ -110,8 +110,9 @@ subquery, update-ignore, `REPLACE`, `RETURNING`, temporary create-or-replace,
 primary-key lookup, selected DDL/name and comment metadata behavior,
 selected DDL constraint/index metadata and UCA CTAS behavior,
 selected `ORDER BY` optimizer
-and aggregate-ordering behavior, optimizer-cost metadata, UNION, and
-prepared-statement behavior, selected scalar operator behavior, selected
+and aggregate-ordering behavior, optimizer-cost metadata, UNION,
+prepared-statement behavior, selected SIGNAL/RESIGNAL diagnostics and
+row-constructor behavior, selected scalar operator behavior, selected
 bit/extraction/replacement/regexp scalar-function behavior, selected
 default-expression and weight-string behavior, selected string/format function
 behavior, selected charset-conversion expression behavior, selected crypto/KDF

@@ -54,6 +54,7 @@ default_tests=(
   main.implicit_char_to_num_conversion
   main.item_types
   main.round
+  main.row
   main.mdev316
   main.sql_safe_updates
   main.func_in
@@ -94,6 +95,10 @@ default_tests=(
   main.ps_11bugs
   main.ps_max_subselect-5113
   main.information_schema_prepare
+  main.signal
+  main.signal_demo1
+  main.signal_demo3
+  main.signal_sqlmode
   main.ctype_ascii
   main.ctype_cp850
   main.ctype_cp866
