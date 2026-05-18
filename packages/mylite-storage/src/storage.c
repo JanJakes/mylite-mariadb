@@ -2753,20 +2753,6 @@ mylite_storage_result mylite_storage_read_index_entries(
             continue;
         }
 
-        mylite_storage_row_page row_page = {0};
-        unsigned char row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-        result = validate_live_row(
-            file,
-            &header,
-            &row_state_map,
-            (mylite_storage_live_row_request){
-                .table_id = table_id,
-                .row_id = entry_page.row_id,
-            },
-            row_buffer,
-            &row_page
-        );
-        free(row_page.owned_payload);
         if (result == MYLITE_STORAGE_OK) {
             result = append_index_entry_to_entryset(out_entries, &entry_page);
         }
@@ -2834,23 +2820,7 @@ mylite_storage_result mylite_storage_index_prefix_exists(
             continue;
         }
 
-        mylite_storage_row_page row_page = {0};
-        unsigned char row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-        result = validate_live_row(
-            file,
-            &header,
-            &row_state_map,
-            (mylite_storage_live_row_request){
-                .table_id = table_id,
-                .row_id = entry_page.row_id,
-            },
-            row_buffer,
-            &row_page
-        );
-        free(row_page.owned_payload);
-        if (result == MYLITE_STORAGE_OK) {
-            *out_exists = 1;
-        }
+        *out_exists = 1;
     }
 
     free_row_state_map(&row_state_map);

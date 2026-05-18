@@ -620,15 +620,18 @@ The handler rejects unsupported key classes before table publication, including
 FULLTEXT, SPATIAL, hidden generated, hash, long-unique hash, and oversized or
 unbounded BLOB/TEXT keys.
 Duplicate checks read live index entries, use MariaDB key comparison, and
-preserve nullable unique-key semantics. Ordered index reads build in-memory
-cursors from live index entries, keep sorted key metadata plus row ids, and
-reconstruct only the selected row buffer from row pages. This provides correct
-indexed insert, lookup, update, delete, reopen, and copy `ALTER` behavior for
-the supported shapes, but it is still an interim performance structure because
-cursor construction scans and sorts live append-only entries. Standalone
-`CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
-definitions. B-tree pages, free-space reclamation, multi-statement transaction
-rollback, and transaction-aware index maintenance remain planned.
+preserve nullable unique-key semantics. Durable index-entry scans use the
+index-entry table id and row-state tombstone map for visibility, then defer
+row-page validation until a selected row is materialized. Ordered index reads
+build in-memory cursors from live index entries, keep sorted key metadata plus
+row ids, and reconstruct only the selected row buffer from row pages. This
+provides correct indexed insert, lookup, update, delete, reopen, and copy
+`ALTER` behavior for the supported shapes, but it is still an interim
+performance structure because cursor construction scans and sorts live
+append-only entries. Standalone `CREATE INDEX` and `DROP INDEX` are covered for
+supported copy-rebuild index definitions. B-tree pages, free-space reclamation,
+multi-statement transaction rollback, and transaction-aware index maintenance
+remain planned.
 
 The storage engine must support:
 
