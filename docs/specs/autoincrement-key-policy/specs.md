@@ -7,7 +7,7 @@ keys. Since general primary and secondary indexes are now supported, the
 generic key-shape gate can admit compound keys that include an
 `AUTO_INCREMENT` column. Some compound shapes are safe for MyLite's
 table-local allocation model, while MyISAM/Aria-style grouped sequences require
-per-prefix allocation that MyLite has not designed yet.
+per-prefix allocation that MyLite had not designed at the time of this slice.
 
 This slice made the initial policy explicit: routed tables with an
 `AUTO_INCREMENT` column were supported only when that column had a single-part
@@ -15,6 +15,10 @@ key over itself. The follow-up `autoincrement-first-key-compound` slice extends
 that policy to support InnoDB-compatible first-key compound autoincrement
 definitions while still rejecting grouped-sequence shapes before MyLite catalog
 publication.
+
+Current status: the later `autoincrement-grouped-prefix` slice supersedes the
+grouped rejection by adding scan-backed per-prefix allocation for routed
+tables.
 
 ## Source Findings
 
@@ -70,16 +74,16 @@ blocks unsupported grouped-allocation shapes such as
 
 ## Compatibility Impact
 
-Autoincrement support remains partial. The compatibility matrix should state
-that first-key compound autoincrement definitions use table-local allocation,
-while grouped per-prefix sequence definitions are rejected explicitly until
-their sequence semantics are designed and tested.
+Autoincrement support remains partial. First-key compound autoincrement
+definitions use table-local allocation. The grouped-prefix slice now covers the
+initial scan-backed per-prefix allocation path for later-in-key definitions.
 
 ## DDL Metadata Routing Impact
 
-The gate runs before catalog publication through the existing `create()` path,
-so rejected grouped-sequence autoincrement tables leave no MyLite
-table-definition record behind.
+The gate runs before catalog publication through the existing `create()` path.
+For this historical slice, rejected grouped-sequence autoincrement tables left
+no MyLite table-definition record behind. The grouped-prefix slice later
+relaxed that gate for supported routed tables.
 
 ## Single-File And Embedded-Lifecycle Impact
 
@@ -106,9 +110,9 @@ No dependency or binary-size-sensitive runtime code is added.
   - accepts a single-column autoincrement key with an additional compound
     secondary key,
   - accepts first-key compound autoincrement definitions,
-  - rejects grouped-sequence autoincrement definitions for representative
-    routed engines, and
-  - proves rejected definitions do not publish catalog metadata.
+  - originally rejected grouped-sequence autoincrement definitions for
+    representative routed engines, and
+  - proved rejected definitions did not publish catalog metadata.
 - Update compatibility, storage architecture, roadmap, and autoincrement specs.
 - Run format, targeted storage-smoke tests, routed DDL/DML harness report,
   tidy, full preset tests, shell checks, and `git diff --check`.
@@ -119,12 +123,14 @@ No dependency or binary-size-sensitive runtime code is added.
   generated ids.
 - First-key compound autoincrement table definitions create, insert, and
   preserve table-local generated ids.
-- Grouped-sequence autoincrement table definitions fail before MyLite catalog
-  publication.
+- Grouped-sequence autoincrement table definitions failed before MyLite catalog
+  publication in this slice; the grouped-prefix slice supersedes this
+  criterion.
 - Compatibility docs distinguish first-key compound support from future
   grouped-sequence support.
 
 ## Risks And Unresolved Questions
 
-- Future grouped-sequence support may need per-prefix sequence state,
-  index-assisted maximum lookup, or both.
+- The grouped-prefix slice adds scan-backed grouped-sequence support. Future
+  performance work may still need per-prefix sequence state, index-assisted
+  maximum lookup, or both.

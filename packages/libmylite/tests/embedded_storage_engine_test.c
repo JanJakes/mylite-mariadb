@@ -9178,7 +9178,7 @@ static void test_autoincrement_key_policy(void) {
         "MYLITE"
     );
 
-    assert_exec_fails(
+    assert_exec_succeeds(
         db,
         "CREATE TABLE grouped_auto_posts ("
         "category INT NOT NULL,"
@@ -9187,30 +9187,126 @@ static void test_autoincrement_key_policy(void) {
         "PRIMARY KEY (category, id)"
         ") ENGINE=MyISAM"
     );
-    assert(
-        mylite_storage_table_exists(filename, "auto_policy", "grouped_auto_posts") ==
-        MYLITE_STORAGE_NOTFOUND
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_auto_posts (category, title) VALUES "
+        "(1, 'a1'), (1, 'a2'), (2, 'b1'), (1, 'a3'), (2, 'b2')"
     );
-    assert_catalog_table_count(filename, "auto_policy", 2U);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_auto_posts WHERE category = 1 ORDER BY id DESC LIMIT 1",
+        "3"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_auto_posts WHERE category = 2 ORDER BY id DESC LIMIT 1",
+        "2"
+    );
+    assert_exec_succeeds(db, "INSERT INTO grouped_auto_posts VALUES (2, 22, 'b22')");
+    assert_exec_succeeds(db, "INSERT INTO grouped_auto_posts (category, title) VALUES (2, 'b23')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_auto_posts WHERE category = 2 ORDER BY id DESC LIMIT 1",
+        "23"
+    );
+    assert_exec_succeeds(db, "INSERT INTO grouped_auto_posts (category, title) VALUES (3, 'c1')");
+    assert_query_single_value(db, "SELECT id FROM grouped_auto_posts WHERE category = 3", "1");
+    assert_exec_fails(db, "INSERT INTO grouped_auto_posts VALUES (1, 3, 'duplicate')");
+    assert_exec_succeeds(
+        db,
+        "UPDATE grouped_auto_posts SET title = 'a3-updated' WHERE category = 1 AND id = 3"
+    );
+    assert_exec_succeeds(db, "DELETE FROM grouped_auto_posts WHERE category = 1 AND id = 2");
+    assert_exec_succeeds(db, "INSERT INTO grouped_auto_posts (category, title) VALUES (1, 'a4')");
+    assert_query_single_value(
+        db,
+        "SELECT title FROM grouped_auto_posts FORCE INDEX (PRIMARY) "
+        "WHERE category = 1 AND id = 4",
+        "a4"
+    );
+    assert_catalog_table_count(filename, "auto_policy", 3U);
+    assert_catalog_table_metadata(
+        filename,
+        "auto_policy",
+        "grouped_auto_posts",
+        "MyISAM",
+        "MYLITE"
+    );
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "USE auto_policy");
-    assert_catalog_table_count(filename, "auto_policy", 2U);
+    assert_catalog_table_count(filename, "auto_policy", 3U);
     assert_exec_succeeds(db, "INSERT INTO compound_auto_first (category) VALUES (10)");
     assert_query_single_value(db, "SELECT id FROM compound_auto_first WHERE category = 10", "12");
-    assert_exec_fails(
+    assert_exec_succeeds(db, "INSERT INTO grouped_auto_posts (category, title) VALUES (2, 'b24')");
+    assert_query_single_value(
         db,
-        "CREATE TABLE grouped_auto_posts ("
+        "SELECT id FROM grouped_auto_posts WHERE category = 2 ORDER BY id DESC LIMIT 1",
+        "24"
+    );
+    assert_exec_succeeds(db, "INSERT INTO grouped_auto_posts (category, title) VALUES (4, 'd1')");
+    assert_query_single_value(db, "SELECT id FROM grouped_auto_posts WHERE category = 4", "1");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_auto_aria_posts ("
         "category INT NOT NULL,"
         "id INT NOT NULL AUTO_INCREMENT,"
         "title VARCHAR(32) NOT NULL,"
         "PRIMARY KEY (category, id)"
         ") ENGINE=Aria"
     );
-    assert_catalog_table_count(filename, "auto_policy", 2U);
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_auto_aria_posts (category, title) VALUES "
+        "(5, 'aria-a'), (5, 'aria-b'), (6, 'aria-c')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_auto_aria_posts WHERE category = 5 ORDER BY id DESC LIMIT 1",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_auto_aria_posts WHERE category = 6",
+        "1"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "auto_policy",
+        "grouped_auto_aria_posts",
+        "Aria",
+        "MYLITE"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_auto_innodb_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (category, id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_auto_innodb_posts (category, title) VALUES "
+        "(9, 'innodb-a'), (9, 'innodb-b')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_auto_innodb_posts WHERE category = 9 ORDER BY id DESC LIMIT 1",
+        "2"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "auto_policy",
+        "grouped_auto_innodb_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_catalog_table_count(filename, "auto_policy", 5U);
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");

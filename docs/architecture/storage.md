@@ -460,8 +460,11 @@ before and after catalog-only reopen, and copy `ALTER` row movement can advance
 that value above copied live row data. Routed autoincrement definitions are
 accepted when the autoincrement column is the first part of a supported key,
 including single-column and first-key compound keys. Grouped later-in-key
-autoincrement definitions reject before catalog publication until per-prefix
-allocation semantics are designed.
+autoincrement definitions are also accepted for routed tables; MyLite advertises
+MariaDB's auto-part-key handler capability and allocates generated values by
+scanning live rows for the current key prefix. That grouped path is correct for
+the supported storage subset but remains O(rows) until index-assisted prefix
+maximum lookup exists.
 Row, overflow, index-entry, and old autoincrement pages remain orphaned until
 compaction exists. Nullable fixed and variable fields are covered because the
 stored record image includes MariaDB's null bitmap. BLOB/TEXT fields are

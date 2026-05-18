@@ -6,7 +6,11 @@ Support the InnoDB-compatible compound autoincrement shape where the
 `AUTO_INCREMENT` column is the first column of a supported key, even when no
 separate single-column autoincrement key exists. Keep grouped sequence shapes,
 where the autoincrement column appears later in a compound key, explicitly
-unsupported.
+unsupported for this slice.
+
+Current status: the later `autoincrement-grouped-prefix` slice supersedes the
+grouped rejection by adding scan-backed per-prefix allocation for routed
+tables.
 
 ## Non-Goals
 
@@ -44,8 +48,9 @@ MariaDB base: `mariadb-11.8.6`
 ## Compatibility Impact
 
 Autoincrement support remains partial but now covers the InnoDB-compatible
-first-key compound shape. MyLite still does not claim MyISAM/Aria grouped
-sequence behavior for `PRIMARY KEY (category, id)` style definitions.
+first-key compound shape. The later grouped-prefix slice adds the initial
+MyISAM/Aria-style grouped behavior for `PRIMARY KEY (category, id)` style
+definitions.
 
 ## Design
 
@@ -66,8 +71,9 @@ non-autoincrement prefix.
 ## DDL Metadata Routing Impact
 
 Accepted first-key compound autoincrement tables publish normal MyLite catalog
-metadata. Rejected grouped-sequence definitions still fail before table
-definition publication.
+metadata. At the time of this slice, grouped-sequence definitions still failed
+before table definition publication; the grouped-prefix slice supersedes that
+with positive routed coverage.
 
 ## Single-File And Embedded-Lifecycle Impact
 
@@ -83,8 +89,8 @@ No public `libmylite` API or file-format change.
 The newly supported shape is safe for routed `ENGINE=InnoDB` semantics because
 the autoincrement column is first in the compound key. Requested `ENGINE=MyISAM`
 and `ENGINE=Aria` still use the same MyLite behavior for this shape, but
-MyISAM/Aria-specific grouped sequences remain rejected when the autoincrement
-column is not first.
+MyISAM/Aria-specific grouped sequences are covered separately by the
+grouped-prefix slice when the autoincrement column is not first.
 
 ## Build, Size, And Dependencies
 
@@ -115,9 +121,10 @@ handler gate adjustment plus tests.
 
 ## Risks And Open Questions
 
-- This does not implement per-prefix allocation for MyISAM/Aria grouped
-  sequences. Future support would need prefix-specific durable counters or
-  index-assisted maximum lookup by group.
+- This slice did not implement per-prefix allocation for MyISAM/Aria grouped
+  sequences. The later grouped-prefix slice adds a scan-backed implementation;
+  prefix-specific durable counters or index-assisted maximum lookup by group
+  remain future optimizations.
 - Explicit duplicate behavior follows the declared unique keys. A compound
   primary key can allow repeated autoincrement values when another key part
   differs, while generated values remain table-local.

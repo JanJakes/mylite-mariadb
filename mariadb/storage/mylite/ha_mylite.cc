@@ -132,6 +132,8 @@ static int mylite_drop_foreign_key_for_alter(const char *primary_file,
 static bool mylite_table_supports_row_write(TABLE *table);
 static bool mylite_table_supports_row_lifecycle(TABLE *table);
 static bool mylite_table_supports_auto_increment(TABLE *table);
+static bool mylite_table_has_first_key_auto_increment(TABLE *table);
+static bool mylite_table_has_grouped_auto_increment(TABLE *table);
 static bool mylite_table_supports_indexes(TABLE *table);
 static bool mylite_key_is_supported(const KEY *key);
 static Field *mylite_auto_increment_field(TABLE *table);
@@ -155,6 +157,9 @@ static int mylite_prepare_scan_rows(TABLE *table,
 static ulonglong mylite_first_auto_increment_value(ulonglong next_value,
                                                    ulonglong offset,
                                                    ulonglong increment);
+static int mylite_read_grouped_auto_increment(
+  const char *primary_file, const char *schema_name, const char *table_name,
+  bool volatile_rows, TABLE *table, ulonglong *out_next_value);
 static int mylite_check_duplicate_keys(
   const char *primary_file, const char *schema_name, const char *table_name,
   TABLE *table, const mylite_storage_index_entry *index_entries,
@@ -378,6 +383,8 @@ static int mylite_make_key_prefix(TABLE *table, const KEY *key,
                                   const uchar *buf, size_t column_count,
                                   unsigned long long target_nullable_bitmap,
                                   uchar **out_key, size_t *out_key_size);
+static unsigned long long mylite_key_nullable_bitmap(const KEY *key,
+                                                     size_t column_count);
 static int mylite_check_same_row_self_reference(
   TABLE *table, const mylite_storage_foreign_key_metadata *metadata,
   const uchar *new_data, const uchar *child_key_prefix,
@@ -1796,18 +1803,34 @@ void ha_mylite::get_auto_increment(ulonglong offset, ulonglong increment,
     DBUG_VOID_RETURN;
 
   unsigned long long next_value= 0ULL;
-  const mylite_storage_result result= volatile_rows ?
-    mylite_volatile_read_auto_increment(primary_file, storage_schema(),
-                                        storage_table(), &next_value) :
-    mylite_storage_read_auto_increment(primary_file, storage_schema(),
-                                       storage_table(), &next_value);
-  if (result != MYLITE_STORAGE_OK)
-    DBUG_VOID_RETURN;
+  if (table && table->s && table->s->next_number_keypart > 0)
+  {
+    const int grouped_error=
+      mylite_read_grouped_auto_increment(primary_file, storage_schema(),
+                                         storage_table(), volatile_rows,
+                                         table, &next_value);
+    if (grouped_error)
+      DBUG_VOID_RETURN;
+  }
+  else
+  {
+    const mylite_storage_result result= volatile_rows ?
+      mylite_volatile_read_auto_increment(primary_file, storage_schema(),
+                                          storage_table(), &next_value) :
+      mylite_storage_read_auto_increment(primary_file, storage_schema(),
+                                         storage_table(), &next_value);
+    if (result != MYLITE_STORAGE_OK)
+      DBUG_VOID_RETURN;
+  }
 
   *first_value= mylite_first_auto_increment_value(next_value, offset,
                                                   increment);
   if (*first_value != ULONGLONG_MAX)
-    *nb_reserved_values= ULONGLONG_MAX;
+  {
+    const bool grouped_auto_increment= table && table->s &&
+      table->s->next_number_keypart > 0;
+    *nb_reserved_values= grouped_auto_increment ? 1ULL : ULONGLONG_MAX;
+  }
 
   DBUG_VOID_RETURN;
 }
@@ -2873,9 +2896,18 @@ static bool mylite_table_supports_row_lifecycle(TABLE *table)
 
 static bool mylite_table_supports_auto_increment(TABLE *table)
 {
+  if (!mylite_auto_increment_field(table))
+    return true;
+
+  return mylite_table_has_first_key_auto_increment(table) ||
+         mylite_table_has_grouped_auto_increment(table);
+}
+
+static bool mylite_table_has_first_key_auto_increment(TABLE *table)
+{
   Field *auto_field= mylite_auto_increment_field(table);
   if (!auto_field)
-    return true;
+    return false;
 
   for (uint i= 0; i < table->s->keys; ++i)
   {
@@ -2883,6 +2915,27 @@ static bool mylite_table_supports_auto_increment(TABLE *table)
     if (key->user_defined_key_parts > 0 && key->key_part &&
         key->key_part[0].field == auto_field)
       return true;
+  }
+
+  return false;
+}
+
+static bool mylite_table_has_grouped_auto_increment(TABLE *table)
+{
+  Field *auto_field= mylite_auto_increment_field(table);
+  if (!auto_field)
+    return false;
+
+  for (uint i= 0; i < table->s->keys; ++i)
+  {
+    const KEY *key= table->key_info + i;
+    if (!key->key_part || key->user_defined_key_parts < 2)
+      continue;
+    for (uint part= 1; part < key->user_defined_key_parts; ++part)
+    {
+      if (key->key_part[part].field == auto_field)
+        return true;
+    }
   }
 
   return false;
@@ -3147,6 +3200,118 @@ static ulonglong mylite_first_auto_increment_value(ulonglong next_value,
     return ULONGLONG_MAX;
 
   return offset + (steps * increment);
+}
+
+static int mylite_read_grouped_auto_increment(
+  const char *primary_file, const char *schema_name, const char *table_name,
+  bool volatile_rows, TABLE *table, ulonglong *out_next_value)
+{
+  *out_next_value= 1ULL;
+  if (!table || !table->s || !table->record[0] ||
+      table->s->next_number_index >= table->s->keys)
+    return HA_ERR_CRASHED_ON_USAGE;
+
+  const KEY *auto_key= table->key_info + table->s->next_number_index;
+  const size_t prefix_part_count= table->s->next_number_keypart;
+  if (!auto_key->key_part || prefix_part_count == 0 ||
+      prefix_part_count >= auto_key->user_defined_key_parts)
+    return HA_ERR_CRASHED_ON_USAGE;
+
+  const unsigned long long nullable_bitmap=
+    mylite_key_nullable_bitmap(auto_key, prefix_part_count);
+  uchar *target_prefix= NULL;
+  size_t target_prefix_size= 0;
+  int error= mylite_make_key_prefix(table, auto_key, table->record[0],
+                                    prefix_part_count, nullable_bitmap,
+                                    &target_prefix, &target_prefix_size);
+  if (error)
+    return error;
+
+  mylite_storage_rowset rowset= {sizeof(rowset), NULL, 0, 0, NULL, NULL, 0,
+                                 NULL};
+  const mylite_storage_result storage_result= volatile_rows ?
+    mylite_volatile_read_rows(primary_file, schema_name, table_name,
+                              &rowset) :
+    mylite_storage_read_rows(primary_file, schema_name, table_name, &rowset);
+  if (storage_result != MYLITE_STORAGE_OK)
+  {
+    free(target_prefix);
+    return mylite_storage_to_handler_error(storage_result);
+  }
+
+  uchar *rows= NULL;
+  size_t row_size= 0;
+  size_t row_count= 0;
+  ulonglong *row_ids= NULL;
+  uchar *blob_payloads= NULL;
+  size_t blob_payloads_size= 0;
+  error= mylite_prepare_scan_rows(table, &rowset, &rows, &row_size,
+                                  &row_count, &row_ids, &blob_payloads,
+                                  &blob_payloads_size);
+  mylite_storage_free_rowset(&rowset);
+  if (error)
+  {
+    free(target_prefix);
+    return error;
+  }
+
+  uchar *saved_record0= static_cast<uchar *>(
+    malloc(table->s->reclength));
+  if (!saved_record0)
+  {
+    free(target_prefix);
+    free(rows);
+    free(row_ids);
+    free(blob_payloads);
+    return HA_ERR_OUT_OF_MEM;
+  }
+  memcpy(saved_record0, table->record[0], table->s->reclength);
+
+  ulonglong next_value= 1ULL;
+  Field *auto_field= mylite_auto_increment_field(table);
+  if (!auto_field)
+    error= HA_ERR_CRASHED_ON_USAGE;
+
+  for (size_t i= 0; !error && i < row_count; ++i)
+  {
+    memcpy(table->record[0], rows + (i * row_size), table->s->reclength);
+
+    uchar *row_prefix= NULL;
+    size_t row_prefix_size= 0;
+    error= mylite_make_key_prefix(table, auto_key, table->record[0],
+                                  prefix_part_count, nullable_bitmap,
+                                  &row_prefix, &row_prefix_size);
+    if (error)
+      break;
+    const bool matches= mylite_key_prefix_equals(
+      target_prefix, target_prefix_size, row_prefix, row_prefix_size);
+    free(row_prefix);
+    if (!matches)
+      continue;
+
+    const longlong signed_value= auto_field->val_int();
+    if (signed_value < 0 && !(auto_field->flags & UNSIGNED_FLAG))
+      continue;
+
+    const ulonglong value= (ulonglong) signed_value;
+    if (value == ULONGLONG_MAX)
+    {
+      error= HA_ERR_AUTOINC_ERANGE;
+      break;
+    }
+    if (value >= next_value)
+      next_value= value + 1ULL;
+  }
+
+  memcpy(table->record[0], saved_record0, table->s->reclength);
+  free(saved_record0);
+  free(target_prefix);
+  free(rows);
+  free(row_ids);
+  free(blob_payloads);
+  if (!error)
+    *out_next_value= next_value;
+  return error;
 }
 
 static int mylite_check_duplicate_keys(
@@ -5239,16 +5404,22 @@ static bool mylite_foreign_key_delete_cascade_supported(
 static unsigned long long mylite_key_nullable_bitmap(const KEY *key,
                                                      size_t column_count)
 {
-  unsigned long long bitmap= 0ULL;
-  if (!key)
-    return bitmap;
+  unsigned long long nullable_bitmap= 0ULL;
+  if (!key || !key->key_part)
+    return nullable_bitmap;
+
+  const size_t max_bits= sizeof(nullable_bitmap) * CHAR_BIT;
+  if (column_count > key->user_defined_key_parts)
+    column_count= key->user_defined_key_parts;
+  if (column_count > max_bits)
+    column_count= max_bits;
 
   for (size_t i= 0; i < column_count; ++i)
   {
     if (key->key_part[i].null_bit)
-      bitmap|= 1ULL << i;
+      nullable_bitmap|= 1ULL << i;
   }
-  return bitmap;
+  return nullable_bitmap;
 }
 
 static int mylite_check_child_foreign_key(
