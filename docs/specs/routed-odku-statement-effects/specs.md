@@ -38,13 +38,16 @@ MariaDB base: `mariadb-11.8.6`
 - Direct ODKU duplicate updates that do not call `LAST_INSERT_ID(id)`.
 - Direct multi-row ODKU with successful generated inserted rows around a
   duplicate update.
+- Direct `INSERT ... SELECT` ODKU with successful generated selected rows
+  around a duplicate update.
 - Direct and prepared ODKU duplicate updates that call `LAST_INSERT_ID(id)`.
+- Direct and prepared `INSERT ... SELECT` ODKU duplicate updates that call
+  `LAST_INSERT_ID(id)`.
 - Affected-row counts for the same representative routed ODKU statements.
 
 ## Non-Goals
 
 - Exhaustive routed `LAST_INSERT_ID()` / `mysql_insert_id()` matrices.
-- `INSERT ... SELECT` ODKU public statement-effect matrices.
 - Raw MariaDB-vs-MyLite durable-storage comparison; native MariaDB durable
   engines use sidecars and are not the MyLite storage target.
 - Binary log, replication, or wire-protocol statement effects.
@@ -58,13 +61,15 @@ the important routed-storage cases:
 
 - duplicate updates without `LAST_INSERT_ID(id)` preserve the previous
   connection insert id, matching the embedded API observation;
-- multi-row ODKU reports the first successful generated inserted id; and
+- multi-row `INSERT ... VALUES` and `INSERT ... SELECT` ODKU report the first
+  successful generated inserted id; and
 - direct and prepared `LAST_INSERT_ID(id)` duplicate updates expose the target
-  row id through `mylite_last_insert_id()`.
+  row id through `mylite_last_insert_id()` for both `VALUES` and
+  `INSERT ... SELECT` ODKU.
 
 The claim remains representative. Broader statement-effect matrices stay
-planned for `INSERT ... SELECT`, grouped autoincrement, triggers, views,
-offset/increment, integer-width boundaries, and other ODKU expression paths.
+planned for grouped autoincrement, triggers, views, offset/increment,
+integer-width boundaries, and other ODKU expression paths.
 
 ## Design
 
@@ -101,6 +106,9 @@ No dependency, license, or intended size-profile change is introduced.
   insert-id assertions for generated duplicate updates, multi-row ODKU, and
   explicit high-value ODKU paths.
 - Add prepared routed ODKU coverage for `LAST_INSERT_ID(id)`.
+- Extend insert-select ODKU coverage with direct affected-row and insert-id
+  assertions for generated duplicate updates and direct/prepared
+  `LAST_INSERT_ID(id)` duplicate updates.
 - Run the focused storage-engine test, routed DDL/DML and storage-engine
   compatibility harness groups, shell syntax checks, `git diff --check`, and
   the dev, embedded-dev, and storage-smoke presets.
@@ -113,6 +121,11 @@ No dependency, license, or intended size-profile change is introduced.
   id and the expected affected-row count.
 - Direct and prepared routed ODKU with `LAST_INSERT_ID(id)` report the target
   row id through `mylite_last_insert_id()`.
+- Direct routed `INSERT ... SELECT` ODKU reports the first successful generated
+  inserted id and the expected affected-row count.
+- Direct and prepared routed `INSERT ... SELECT` ODKU with
+  `LAST_INSERT_ID(id)` report the target row id through
+  `mylite_last_insert_id()`.
 - Docs distinguish this representative routed statement-effect coverage from
   broader ODKU statement-effect matrices.
 
@@ -121,5 +134,5 @@ No dependency, license, or intended size-profile change is introduced.
 - Prepared `mysql_stmt_insert_id()` has a documented embedded-library caveat
   when the connection insert-id state is stale; this slice covers the explicit
   `LAST_INSERT_ID(id)` idiom where MariaDB sets that state deliberately.
-- `INSERT ... SELECT`, triggers, views, and grouped autoincrement may have
-  different statement-effect ordering and remain planned.
+- Triggers, views, and grouped autoincrement may have different
+  statement-effect ordering and remain planned.

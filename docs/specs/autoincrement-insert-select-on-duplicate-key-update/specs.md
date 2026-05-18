@@ -64,9 +64,11 @@ MariaDB base: `mariadb-11.8.6`
 
 - Exhaustive `INSERT ... SELECT` optimizer, trigger, view, partition, grouped
   later-in-key, offset/increment, integer-width, or durable routed-storage
-  `LAST_INSERT_ID()` matrices. Representative temporary-table SQL API
-  comparison coverage lives in
-  `docs/specs/sql-api-statement-effects-comparison/specs.md`.
+  `LAST_INSERT_ID()` matrices beyond representative direct/prepared coverage.
+  Representative temporary-table SQL API comparison coverage lives in
+  `docs/specs/sql-api-statement-effects-comparison/specs.md`; representative
+  durable routed-storage statement-effect coverage lives in
+  `docs/specs/routed-odku-statement-effects/specs.md`.
 - Failed duplicate-update branches after earlier source-row publication are
   covered separately in
   `docs/specs/autoincrement-on-duplicate-key-update-failed-dml/specs.md`.
@@ -90,7 +92,8 @@ preserve that advancement through transaction rollback and close/reopen.
 
 The claim remains representative. Broader ODKU matrices remain planned for
 grouped autoincrement, triggers, views, source errors, offset/increment, and
-durable routed-storage insert-id behavior.
+durable routed-storage insert-id behavior beyond the representative direct and
+prepared statement-effect coverage.
 
 ## Design
 
@@ -115,7 +118,8 @@ journal and autoincrement rollback-preservation marker.
 ## Embedded Lifecycle And API
 
 No `libmylite` API change is required. The behavior is observable through
-direct SQL execution. Public insert-id API coverage remains outside this slice.
+direct SQL execution. Representative public insert-id API coverage is handled
+by `docs/specs/routed-odku-statement-effects/specs.md`.
 
 ## Storage-Engine Routing
 
@@ -155,9 +159,10 @@ No dependency, license, or intended size-profile change is introduced.
 
 ## Risks And Open Questions
 
-- Durable routed-storage `LAST_INSERT_ID()` / `mysql_insert_id()` behavior is
-  not checked here because representative public insert-id API comparison is
-  covered separately.
+- Representative durable routed-storage `LAST_INSERT_ID()` /
+  `mysql_insert_id()` behavior is covered by
+  `docs/specs/routed-odku-statement-effects/specs.md`; broader matrices remain
+  planned.
 - Grouped later-in-key ODKU behavior may require storage-level prefix lookup
   work before it can be claimed broadly.
 - Trigger, view, and source-error paths may have different SQL-layer ordering

@@ -460,8 +460,9 @@ insert id after successful statements and report affected rows for successful
 non-result statements. Direct execution covers temporary-table
 insert/update/delete effects, prepared execution covers parameterized
 insert/update/delete effects, and durable routed ODKU coverage verifies
-representative direct and prepared affected-row and insert-id behavior,
-including the `LAST_INSERT_ID(id)` idiom. Result-producing statements report
+representative direct and prepared affected-row and insert-id behavior for
+`INSERT ... VALUES` and `INSERT ... SELECT`, including the
+`LAST_INSERT_ID(id)` idiom. Result-producing statements report
 zero changed rows.
 
 ## Memory Ownership

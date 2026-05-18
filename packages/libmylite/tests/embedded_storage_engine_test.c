@@ -12718,6 +12718,8 @@ static void test_autoincrement_insert_select_on_duplicate_key_update(void) {
         "INSERT INTO odku_select_posts (title, body) VALUES "
         "('dupe', 'original')"
     );
+    assert(mylite_changes(db) == 1);
+    assert(mylite_last_insert_id(db) == 1U);
     assert_exec_succeeds(
         db,
         "INSERT INTO odku_select_source (ord, title, body) VALUES "
@@ -12733,6 +12735,8 @@ static void test_autoincrement_insert_select_on_duplicate_key_update(void) {
         "SELECT title, body FROM odku_select_source ORDER BY ord "
         "ON DUPLICATE KEY UPDATE body = VALUES(body)"
     );
+    assert(mylite_changes(db) == 6);
+    assert(mylite_last_insert_id(db) == 2U);
     assert_query_single_value(
         db,
         "SELECT id FROM odku_select_posts WHERE title = 'new-one'",
@@ -12763,6 +12767,8 @@ static void test_autoincrement_insert_select_on_duplicate_key_update(void) {
         "INSERT INTO odku_select_posts (title, body) VALUES "
         "('after-select-odku', 'tail')"
     );
+    assert(mylite_changes(db) == 1);
+    assert(mylite_last_insert_id(db) == 9U);
     assert_query_single_value(
         db,
         "SELECT id FROM odku_select_posts WHERE title = 'after-select-odku'",
@@ -12792,6 +12798,8 @@ static void test_autoincrement_insert_select_on_duplicate_key_update(void) {
         "INSERT INTO odku_select_explicit_posts (title, body) VALUES "
         "('dupe', 'original')"
     );
+    assert(mylite_changes(db) == 1);
+    assert(mylite_last_insert_id(db) == 1U);
     assert_exec_succeeds(
         db,
         "INSERT INTO odku_select_explicit_source (title, body) VALUES "
@@ -12803,6 +12811,7 @@ static void test_autoincrement_insert_select_on_duplicate_key_update(void) {
         "SELECT title, body FROM odku_select_explicit_source "
         "ON DUPLICATE KEY UPDATE id = 200, body = VALUES(body)"
     );
+    assert(mylite_changes(db) == 2);
     assert_query_single_value(
         db,
         "SELECT id FROM odku_select_explicit_posts WHERE title = 'dupe'",
@@ -12818,12 +12827,30 @@ static void test_autoincrement_insert_select_on_duplicate_key_update(void) {
         "INSERT INTO odku_select_explicit_posts (title, body) VALUES "
         "('after-explicit-select-odku', 'after')"
     );
+    assert(mylite_changes(db) == 1);
+    assert(mylite_last_insert_id(db) == 201U);
     assert_query_single_value(
         db,
         "SELECT id FROM odku_select_explicit_posts "
         "WHERE title = 'after-explicit-select-odku'",
         "201"
     );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO odku_select_explicit_posts (title, body) "
+        "SELECT title, 'direct-last-id' FROM odku_select_explicit_source "
+        "ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), body = VALUES(body)"
+    );
+    assert(mylite_changes(db) == 2);
+    assert(mylite_last_insert_id(db) == 200U);
+    assert_prepared_succeeds(
+        db,
+        "INSERT INTO odku_select_explicit_posts (title, body) "
+        "SELECT title, 'prepared-last-id' FROM odku_select_explicit_source "
+        "ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), body = VALUES(body)"
+    );
+    assert(mylite_changes(db) == 2);
+    assert(mylite_last_insert_id(db) == 200U);
 
     assert_exec_succeeds(
         db,

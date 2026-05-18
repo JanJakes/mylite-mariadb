@@ -83,8 +83,9 @@ non-gapless autoincrement behavior:
   that advancement across transaction rollback and close/reopen.
 
 The claim remains representative. Broader ODKU surfaces remain planned until
-grouped-autoincrement, trigger, durable routed-storage insert-id,
-offset, integer-width, and additional error-path matrices are covered.
+grouped-autoincrement, trigger, offset, integer-width, additional error-path,
+and durable routed-storage insert-id matrices beyond the representative
+coverage are covered.
 
 ## Design
 
