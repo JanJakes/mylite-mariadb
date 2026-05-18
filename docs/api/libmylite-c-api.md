@@ -299,6 +299,9 @@ plus prepared `ALTER DATABASE` / `ALTER SCHEMA` option changes with the schema
 namespace catalog. Prepared execution also covers the supported foreign-key
 subset for prepared FK table creation, successful FK-constrained DML, and
 child/parent row-check diagnostics, including bounded scalar-parameter FK DML.
+Prepared routed `SELECT` coverage includes aggregate counts, primary-key
+lookups, secondary-index lookups, text result reads, native integer result
+reads, and one-bound-parameter lookups over MyLite-routed durable tables.
 Rich parameter metadata is not exposed on the current MariaDB base because
 `mysql_stmt_param_metadata()` is reserved and returns no metadata. Multi-result
 execution, array binding, streaming parameter binding, parser-derived parameter

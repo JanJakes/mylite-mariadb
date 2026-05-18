@@ -239,6 +239,7 @@ static void test_autoincrement_on_duplicate_key_update_failed_dml(void);
 static void test_autoincrement_insert_select_on_duplicate_key_update(void);
 static void test_autoincrement_insert_select_failed_dml(void);
 static void test_indexed_rows(void);
+static void test_prepared_routed_select_reads(void);
 static void test_standalone_index_ddl(void);
 static void test_index_ddl_if_exists(void);
 static void test_index_ignorability(void);
@@ -292,6 +293,22 @@ static void assert_prepared_fails(mylite_db *db, const char *sql);
 static void assert_prepared_fails_with_message(mylite_db *db, const char *sql, const char *message);
 static void assert_prepared_one_int_succeeds(mylite_db *db, const char *sql, long long value);
 static void assert_prepared_one_text_succeeds(mylite_db *db, const char *sql, const char *value);
+static void assert_prepared_query_single_value(
+    mylite_db *db,
+    const char *sql,
+    const char *expected_value
+);
+static void assert_prepared_query_single_int64(
+    mylite_db *db,
+    const char *sql,
+    long long expected_value
+);
+static void assert_prepared_one_int_query_single_value(
+    mylite_db *db,
+    const char *sql,
+    long long value,
+    const char *expected_value
+);
 static void assert_prepared_one_int_policy_fails_with_message(
     mylite_db *db,
     const char *sql,
@@ -606,6 +623,7 @@ int main(int argc, char **argv) {
     test_autoincrement_insert_select_on_duplicate_key_update();
     test_autoincrement_insert_select_failed_dml();
     test_indexed_rows();
+    test_prepared_routed_select_reads();
     test_standalone_index_ddl();
     test_index_ddl_if_exists();
     test_index_ignorability();
@@ -16391,6 +16409,75 @@ static void test_indexed_rows(void) {
     free(root);
 }
 
+static void test_prepared_routed_select_reads(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE prepared_reads");
+    assert_exec_succeeds(db, "USE prepared_reads");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE prepared_select_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(32) NOT NULL, "
+        "category VARCHAR(32) NOT NULL, "
+        "KEY slug_key (slug), "
+        "KEY category_key (category)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO prepared_select_posts VALUES "
+        "(1, 'first', 'news'), "
+        "(2, 'second', 'news'), "
+        "(3, 'third', 'tech')"
+    );
+    assert_query_single_value(db, "SELECT CAST(COUNT(*) AS CHAR) FROM prepared_select_posts", "3");
+    assert_query_single_value(db, "SELECT slug FROM prepared_select_posts WHERE id = 2", "second");
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM prepared_select_posts FORCE INDEX (slug_key) WHERE slug = 'third'",
+        "third"
+    );
+
+    assert_prepared_query_single_value(
+        db,
+        "SELECT CAST(COUNT(*) AS CHAR) FROM prepared_select_posts",
+        "3"
+    );
+    assert_prepared_query_single_int64(db, "SELECT COUNT(*) FROM prepared_select_posts", 3);
+    assert_prepared_query_single_value(
+        db,
+        "SELECT slug FROM prepared_select_posts WHERE id = 2",
+        "second"
+    );
+    assert_prepared_query_single_value(
+        db,
+        "SELECT slug FROM prepared_select_posts FORCE INDEX (slug_key) WHERE slug = 'third'",
+        "third"
+    );
+    assert_prepared_query_single_value(
+        db,
+        "SELECT CAST(COUNT(*) AS CHAR) FROM prepared_select_posts "
+        "FORCE INDEX (category_key) WHERE category = 'news'",
+        "2"
+    );
+    assert_prepared_one_int_query_single_value(
+        db,
+        "SELECT slug FROM prepared_select_posts WHERE id = ?",
+        1,
+        "first"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_standalone_index_ddl(void) {
     char *root = make_temp_root();
     char *filename = NULL;
@@ -23896,6 +23983,118 @@ static void assert_prepared_one_text_succeeds(mylite_db *db, const char *sql, co
         fprintf(stderr, "Prepared SQL failed: %s\n%s\n", sql, mylite_errmsg(db));
     }
     assert(step_result == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+}
+
+static void assert_prepared_query_single_value(
+    mylite_db *db,
+    const char *sql,
+    const char *expected_value
+) {
+    mylite_stmt *stmt = NULL;
+    const int prepare_result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, NULL);
+    if (prepare_result != MYLITE_OK) {
+        fprintf(stderr, "Prepare failed: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(prepare_result == MYLITE_OK);
+    assert(stmt != NULL);
+    assert(mylite_bind_parameter_count(stmt) == 0U);
+    assert(mylite_column_count(stmt) == 1U);
+
+    const int row_result = mylite_step(stmt);
+    if (row_result != MYLITE_ROW) {
+        fprintf(stderr, "Prepared query returned no row: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(row_result == MYLITE_ROW);
+    assert(mylite_column_type(stmt, 0U) == MYLITE_TYPE_TEXT);
+    const char *actual_value = mylite_column_text(stmt, 0U);
+    assert(actual_value != NULL);
+    if (strcmp(actual_value, expected_value) != 0) {
+        fprintf(
+            stderr,
+            "Prepared query returned unexpected value: %s\nexpected: %s\nactual: %s\n",
+            sql,
+            expected_value,
+            actual_value
+        );
+    }
+    assert(strcmp(actual_value, expected_value) == 0);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+}
+
+static void assert_prepared_query_single_int64(
+    mylite_db *db,
+    const char *sql,
+    long long expected_value
+) {
+    mylite_stmt *stmt = NULL;
+    const int prepare_result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, NULL);
+    if (prepare_result != MYLITE_OK) {
+        fprintf(stderr, "Prepare failed: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(prepare_result == MYLITE_OK);
+    assert(stmt != NULL);
+    assert(mylite_bind_parameter_count(stmt) == 0U);
+    assert(mylite_column_count(stmt) == 1U);
+
+    const int row_result = mylite_step(stmt);
+    if (row_result != MYLITE_ROW) {
+        fprintf(stderr, "Prepared query returned no row: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(row_result == MYLITE_ROW);
+    assert(mylite_column_type(stmt, 0U) == MYLITE_TYPE_INT64);
+    const long long actual_value = mylite_column_int64(stmt, 0U);
+    if (actual_value != expected_value) {
+        fprintf(
+            stderr,
+            "Prepared query returned unexpected value: %s\nexpected: %lld\nactual: %lld\n",
+            sql,
+            expected_value,
+            actual_value
+        );
+    }
+    assert(actual_value == expected_value);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+}
+
+static void assert_prepared_one_int_query_single_value(
+    mylite_db *db,
+    const char *sql,
+    long long value,
+    const char *expected_value
+) {
+    mylite_stmt *stmt = NULL;
+    const int prepare_result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, NULL);
+    if (prepare_result != MYLITE_OK) {
+        fprintf(stderr, "Prepare failed: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(prepare_result == MYLITE_OK);
+    assert(stmt != NULL);
+    assert(mylite_bind_parameter_count(stmt) == 1U);
+    assert(mylite_column_count(stmt) == 1U);
+    assert(mylite_bind_int64(stmt, 1U, value) == MYLITE_OK);
+
+    const int row_result = mylite_step(stmt);
+    if (row_result != MYLITE_ROW) {
+        fprintf(stderr, "Prepared query returned no row: %s\n%s\n", sql, mylite_errmsg(db));
+    }
+    assert(row_result == MYLITE_ROW);
+    assert(mylite_column_type(stmt, 0U) == MYLITE_TYPE_TEXT);
+    const char *actual_value = mylite_column_text(stmt, 0U);
+    assert(actual_value != NULL);
+    if (strcmp(actual_value, expected_value) != 0) {
+        fprintf(
+            stderr,
+            "Prepared query returned unexpected value: %s\nexpected: %s\nactual: %s\n",
+            sql,
+            expected_value,
+            actual_value
+        );
+    }
+    assert(strcmp(actual_value, expected_value) == 0);
+    assert(mylite_step(stmt) == MYLITE_DONE);
     assert(mylite_finalize(stmt) == MYLITE_OK);
 }
 

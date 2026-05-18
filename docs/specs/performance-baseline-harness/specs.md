@@ -49,10 +49,10 @@ schemas usually request InnoDB even though MyLite owns the durable storage.
   practical while the storage layer is still scan-heavy.
 - Print Markdown-compatible rows so results can be pasted into research notes
   without post-processing.
-- Use direct SQL for the measured paths. Probes while adding the harness found
-  that prepared DML and prepared reads are not safe benchmark dependencies for
-  routed storage yet: they can report success without matching direct row-count
-  observations in this profile.
+- Use direct SQL for the initial measured paths so the first baseline has one
+  narrow interpretation. Prepared routed reads are covered separately by
+  `docs/specs/prepared-routed-select-reads/`; prepared timing rows should be
+  added as distinct measurements instead of mixed into the direct baseline.
 - Use a temporary `.mylite` file and clean it up after the run.
 
 ## File Lifecycle
