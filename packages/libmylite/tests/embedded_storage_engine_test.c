@@ -191,6 +191,7 @@ static void test_create_or_replace_table(void);
 static void test_failed_create_or_replace_rollback(void);
 static void test_create_or_replace_foreign_key_lifecycle(void);
 static void test_failed_table_ddl_rollback(void);
+static void test_foreign_key_table_ddl_rollback(void);
 static void test_table_ddl_if_exists(void);
 static void test_constraint_generated_dump_fixture(void);
 static void test_show_create_table_round_trip(void);
@@ -481,6 +482,7 @@ int main(int argc, char **argv) {
     test_failed_create_or_replace_rollback();
     test_create_or_replace_foreign_key_lifecycle();
     test_failed_table_ddl_rollback();
+    test_foreign_key_table_ddl_rollback();
     test_table_ddl_if_exists();
     test_constraint_generated_dump_fixture();
     test_show_create_table_round_trip();
@@ -12846,6 +12848,133 @@ static void test_failed_table_ddl_rollback(void) {
         "SELECT id FROM rename_posts FORCE INDEX (slug_key) WHERE slug = 'rename-beta'",
         "2"
     );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_foreign_key_table_ddl_rollback(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE fk_ddl_rollback");
+    assert_exec_succeeds(db, "USE fk_ddl_rollback");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE parent_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(32) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE child_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "parent_id INT NOT NULL, "
+        "body VARCHAR(64) NOT NULL, "
+        "KEY child_parent_id (parent_id), "
+        "CONSTRAINT child_posts_parent FOREIGN KEY (parent_id) REFERENCES parent_posts(id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO parent_posts VALUES (1, 'parent')");
+    assert_exec_succeeds(db, "INSERT INTO child_posts VALUES (1, 1, 'child')");
+    assert_catalog_table_count(filename, "fk_ddl_rollback", 2U);
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'fk_ddl_rollback' "
+        "AND TABLE_NAME = 'child_posts' "
+        "AND CONSTRAINT_NAME = 'child_posts_parent' "
+        "AND REFERENCED_TABLE_NAME = 'parent_posts'",
+        "1"
+    );
+
+    assert_exec_fails(db, "DROP TABLE child_posts, missing_child_posts");
+    assert_catalog_table_count(filename, "fk_ddl_rollback", 2U);
+    assert_catalog_table_metadata(filename, "fk_ddl_rollback", "parent_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "fk_ddl_rollback", "child_posts", "InnoDB", "MYLITE");
+    assert(
+        mylite_storage_table_exists(filename, "fk_ddl_rollback", "child_posts") ==
+        MYLITE_STORAGE_OK
+    );
+    assert_query_single_value(db, "SELECT body FROM child_posts WHERE id = 1", "child");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'fk_ddl_rollback' "
+        "AND TABLE_NAME = 'child_posts' "
+        "AND CONSTRAINT_NAME = 'child_posts_parent'",
+        "1"
+    );
+    assert_foreign_key_exec_fails(db, "INSERT INTO child_posts VALUES (2, 99, 'orphan')");
+    assert_foreign_key_exec_fails(db, "UPDATE parent_posts SET id = 2 WHERE id = 1");
+
+    assert_exec_fails(
+        db,
+        "RENAME TABLE child_posts TO renamed_child_posts, "
+        "missing_child_posts TO missing_renamed_child_posts"
+    );
+    assert_catalog_table_count(filename, "fk_ddl_rollback", 2U);
+    assert_catalog_table_metadata(filename, "fk_ddl_rollback", "child_posts", "InnoDB", "MYLITE");
+    assert(
+        mylite_storage_table_exists(filename, "fk_ddl_rollback", "renamed_child_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_exec_fails(db, "SELECT COUNT(*) FROM renamed_child_posts");
+    assert_query_single_value(db, "SELECT body FROM child_posts WHERE id = 1", "child");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'fk_ddl_rollback' "
+        "AND TABLE_NAME = 'child_posts' "
+        "AND CONSTRAINT_NAME = 'child_posts_parent' "
+        "AND REFERENCED_TABLE_NAME = 'parent_posts'",
+        "1"
+    );
+    assert_foreign_key_exec_fails(db, "INSERT INTO child_posts VALUES (3, 99, 'orphan')");
+    assert_foreign_key_exec_fails(db, "DELETE FROM parent_posts WHERE id = 1");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "fk_ddl_rollback");
+    assert_exec_succeeds(db, "USE fk_ddl_rollback");
+    assert_catalog_table_count(filename, "fk_ddl_rollback", 2U);
+    assert_catalog_table_metadata(filename, "fk_ddl_rollback", "parent_posts", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "fk_ddl_rollback", "child_posts", "InnoDB", "MYLITE");
+    assert(
+        mylite_storage_table_exists(filename, "fk_ddl_rollback", "renamed_child_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert_query_single_value(db, "SELECT body FROM child_posts WHERE id = 1", "child");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'fk_ddl_rollback' "
+        "AND TABLE_NAME = 'child_posts' "
+        "AND CONSTRAINT_NAME = 'child_posts_parent' "
+        "AND REFERENCED_TABLE_NAME = 'parent_posts'",
+        "1"
+    );
+    assert_foreign_key_exec_fails(db, "INSERT INTO child_posts VALUES (4, 99, 'orphan')");
+    assert_foreign_key_exec_fails(db, "DELETE FROM parent_posts WHERE id = 1");
+
+    assert_exec_succeeds(db, "DROP TABLE child_posts");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS "
+        "WHERE CONSTRAINT_SCHEMA = 'fk_ddl_rollback' "
+        "AND TABLE_NAME = 'child_posts' "
+        "AND CONSTRAINT_NAME = 'child_posts_parent'",
+        "0"
+    );
+    assert_exec_succeeds(db, "DROP TABLE parent_posts");
+    assert_catalog_table_count(filename, "fk_ddl_rollback", 0U);
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 

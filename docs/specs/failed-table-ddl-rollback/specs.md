@@ -51,8 +51,9 @@ MariaDB base: `mariadb-11.8.6`
 - General DDL transaction support.
 - SQL transactions, savepoints, or user-visible `ROLLBACK`.
 - Temporary table DDL rollback.
-- Views, triggers, routines, foreign keys, partitions, or cross-schema rename
-  matrices.
+- Views, triggers, routines, partitions, or cross-schema rename matrices.
+  Foreign-key table metadata is covered by the separate
+  `foreign-key-table-ddl-rollback` slice.
 - Crash-safe logical rollback if the process dies while restoring a failed
   statement checkpoint.
 - Physical compaction of pages made unreachable by failed DDL attempts.
@@ -124,6 +125,8 @@ coverage exposes a production bug.
 - The compatibility matrix, roadmap, storage architecture, and harness
   descriptions identify representative failed table-DDL rollback as covered.
 - Broader SQL transaction and DDL rollback work remains planned.
+- Foreign-key table metadata rollback is covered by the separate
+  `foreign-key-table-ddl-rollback` slice.
 
 ## Risks And Open Questions
 

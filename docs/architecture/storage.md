@@ -360,8 +360,9 @@ rejects replacing a referenced parent without dropping parent rows, child rows,
 or FK metadata, and verifies replacing a child table removes its old FK
 metadata before publishing the replacement definition. Representative failed
 multi-table DROP/RENAME rollback preserves original target metadata, rows, and
-indexes through the same checkpoint; broader locking, temporary-table edge
-cases, and SQL transaction/savepoint semantics remain planned.
+indexes through the same checkpoint, including child FK metadata for covered
+FK table shapes; broader locking, temporary-table edge cases, and SQL
+transaction/savepoint semantics remain planned.
 Representative `SHOW CREATE TABLE` round-trip coverage includes both a
 generated/CHECK/indexed table shape and an FK parent/child pair exported after
 catalog-backed reopen and imported into a fresh schema with FK checks and
