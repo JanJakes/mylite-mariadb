@@ -27,6 +27,7 @@ extern "C" {
 #define MYLITE_STORAGE_CAPABILITY_TRANSACTION_JOURNAL 0x00004000U
 #define MYLITE_STORAGE_CAPABILITY_FOREIGN_KEY_METADATA 0x00008000U
 #define MYLITE_STORAGE_CAPABILITY_INDEX_ROOTS 0x00010000U
+#define MYLITE_STORAGE_CAPABILITY_INDEX_LEAF_PAGES 0x00020000U
 
 #define MYLITE_STORAGE_FOREIGN_KEY_ACTION_UNSPECIFIED 0U
 #define MYLITE_STORAGE_FOREIGN_KEY_ACTION_RESTRICT 1U
@@ -286,6 +287,12 @@ mylite_storage_result mylite_storage_read_index_root(
     mylite_storage_index_root_metadata *out_metadata
 );
 mylite_storage_result mylite_storage_drop_index_root(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number
+);
+mylite_storage_result mylite_storage_rebuild_index_leaf(
     const char *filename,
     const char *schema_name,
     const char *table_name,

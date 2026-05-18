@@ -220,9 +220,12 @@ Autoincrement tables append checksummed state pages keyed by catalog table id so
 generated values survive close/reopen and dropped table ids do not leak into
 recreated tables. Supported primary, unique, and secondary indexes append
 checksummed index-entry pages containing the catalog table id, MariaDB key
-number, row page id, and MariaDB key-tuple bytes. Handler index reads build
-ordered in-memory cursors from live index entries and compare keys with
-MariaDB's key helpers. Current mutating publication paths are protected by a
+number, row page id, and MariaDB key-tuple bytes. Single-page index leaf
+snapshots can be rebuilt from live append-only entries, appended as root pages,
+and catalog-published for exact byte-key lookup while they remain the last
+published page. Handler index reads build ordered in-memory cursors from live
+index entries and compare keys with MariaDB's key helpers. Current mutating
+publication paths are protected by a
 rollback journal before the header or catalog root page is overwritten. Active
 file-backed row-DML transactions create a transient transaction journal
 with the transaction-start header and catalog root pages; recovery applies any
@@ -632,12 +635,14 @@ unique integer entry, and use storage-level exact-entry or exact-entryset lookup
 for guarded raw equality paths so the handler does not allocate unrelated index
 entries for common integer point reads. Durable exact lookups classify each
 published append-only page once and prune candidates as later row-state pages
-hide older row ids. Cursors check `index_next_same()` boundaries before row
-materialization and reconstruct only the selected row buffer from row pages.
-This provides correct indexed insert, lookup, update, delete, reopen, and copy
-`ALTER` behavior for the supported shapes, but it is still an interim
-performance structure because exact lookup still scans append-only index and
-row-state pages. Standalone
+hide older row ids. Current single-level index leaf roots can serve exact
+storage lookups without scanning when the root page is still current; stale or
+missing roots fall back to the append-only scan path. Cursors check
+`index_next_same()` boundaries before row materialization and reconstruct only
+the selected row buffer from row pages. This provides correct indexed insert,
+lookup, update, delete, reopen, and copy `ALTER` behavior for the supported
+shapes, but it is still an interim performance structure because maintained
+multi-page B-tree navigation is not implemented. Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, free-space reclamation, multi-statement transaction
 rollback, and transaction-aware index maintenance remain planned.
