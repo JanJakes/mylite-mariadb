@@ -67,6 +67,9 @@ MariaDB base: `mariadb-11.8.6`
   `LAST_INSERT_ID()` matrices. Representative temporary-table SQL API
   comparison coverage lives in
   `docs/specs/sql-api-statement-effects-comparison/specs.md`.
+- Failed duplicate-update branches after earlier source-row publication are
+  covered separately in
+  `docs/specs/autoincrement-on-duplicate-key-update-failed-dml/specs.md`.
 - Native InnoDB old-style autoincrement lock-mode parity.
 - Binary log, replication, or wire-protocol behavior.
 - Size-profile reduction work.
@@ -159,3 +162,5 @@ No dependency, license, or intended size-profile change is introduced.
   work before it can be claimed broadly.
 - Trigger, view, and source-error paths may have different SQL-layer ordering
   and remain planned.
+- Failed duplicate-update branches after earlier generated source-row
+  publication are covered by the failed-DML ODKU follow-up slice.

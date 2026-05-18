@@ -215,6 +215,7 @@ static void test_autoincrement_failed_dml_matrices(void);
 static void test_autoincrement_prior_success_failed_update(void);
 static void test_autoincrement_prior_success_failed_update_matrices(void);
 static void test_autoincrement_on_duplicate_key_update(void);
+static void test_autoincrement_on_duplicate_key_update_failed_dml(void);
 static void test_autoincrement_insert_select_on_duplicate_key_update(void);
 static void test_autoincrement_insert_select_failed_dml(void);
 static void test_indexed_rows(void);
@@ -545,6 +546,7 @@ int main(int argc, char **argv) {
     test_autoincrement_prior_success_failed_update();
     test_autoincrement_prior_success_failed_update_matrices();
     test_autoincrement_on_duplicate_key_update();
+    test_autoincrement_on_duplicate_key_update_failed_dml();
     test_autoincrement_insert_select_on_duplicate_key_update();
     test_autoincrement_insert_select_failed_dml();
     test_indexed_rows();
@@ -12488,6 +12490,156 @@ static void test_autoincrement_on_duplicate_key_update(void) {
         db,
         "SELECT id FROM odku_explicit_posts WHERE title = 'after-reopen'",
         "152"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_autoincrement_on_duplicate_key_update_failed_dml(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_odku_failed");
+    assert_exec_succeeds(db, "USE auto_odku_failed");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE odku_failed_posts ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "slug VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (id),"
+        "UNIQUE KEY title_key (title),"
+        "UNIQUE KEY slug_key (slug)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO odku_failed_posts (title, slug) VALUES "
+        "('dupe', 'dupe-slug'),"
+        "('conflict', 'taken')"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO odku_failed_posts (title, slug) VALUES "
+        "('new-before-fail', 'new-before'),"
+        "('dupe', 'ignored-insert-slug') "
+        "ON DUPLICATE KEY UPDATE slug = 'taken'"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM odku_failed_posts "
+        "WHERE title = 'new-before-fail'",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM odku_failed_posts WHERE title = 'dupe'",
+        "dupe-slug"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO odku_failed_posts (title, slug) VALUES "
+        "('after-values-failure', 'after-values')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM odku_failed_posts WHERE title = 'after-values-failure'",
+        "5"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE odku_select_failed_posts ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "slug VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (id),"
+        "UNIQUE KEY title_key (title),"
+        "UNIQUE KEY slug_key (slug)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE odku_select_failed_source ("
+        "ord INT NOT NULL,"
+        "title VARCHAR(64) NOT NULL,"
+        "slug VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (ord)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO odku_select_failed_posts (title, slug) VALUES "
+        "('dupe', 'dupe-slug'),"
+        "('conflict', 'taken')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO odku_select_failed_source (ord, title, slug) VALUES "
+        "(1, 'new-before-fail', 'new-before'),"
+        "(2, 'dupe', 'ignored-insert-slug')"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO odku_select_failed_posts (title, slug) "
+        "SELECT title, slug FROM odku_select_failed_source ORDER BY ord "
+        "ON DUPLICATE KEY UPDATE slug = 'taken'"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM odku_select_failed_posts "
+        "WHERE title = 'new-before-fail'",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM odku_select_failed_posts WHERE title = 'dupe'",
+        "dupe-slug"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO odku_select_failed_posts (title, slug) VALUES "
+        "('after-select-failure', 'after-select')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM odku_select_failed_posts "
+        "WHERE title = 'after-select-failure'",
+        "6"
+    );
+    assert_catalog_table_count(filename, "auto_odku_failed", 3U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE auto_odku_failed");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO odku_failed_posts (title, slug) VALUES "
+        "('after-values-reopen', 'values-reopen')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM odku_failed_posts WHERE title = 'after-values-reopen'",
+        "6"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO odku_select_failed_posts (title, slug) VALUES "
+        "('after-select-reopen', 'select-reopen')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM odku_select_failed_posts "
+        "WHERE title = 'after-select-reopen'",
+        "7"
     );
 
     assert(mylite_close(db) == MYLITE_OK);

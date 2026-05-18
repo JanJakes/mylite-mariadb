@@ -558,6 +558,9 @@ publication likewise leave attempted explicit high values unused.
 Duplicate-update branches that explicitly set the autoincrement column advance
 the durable next value through the ordinary MyLite update path, including
 transaction rollback preservation and close/reopen persistence.
+Failed duplicate-update branches after earlier generated row publication roll
+back visible row/index changes while preserving the generated reservation
+boundary for both `INSERT ... VALUES` and `INSERT ... SELECT` ODKU statements.
 Explicit high-value inserts likewise advance only after MyLite duplicate-key
 and FK checks pass, so failed explicit duplicate inserts and ignored skips do
 not consume the attempted value.
