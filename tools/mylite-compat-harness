@@ -31,13 +31,13 @@ group_spec() {
       echo "dev|compat-crash-recovery|Rollback-journal, transaction-journal, and corrupt-journal coverage"
       ;;
     transaction)
-      echo "storage-smoke-dev|compat-transaction|Direct row-DML transaction commit/rollback, generated autoincrement rollback gaps, supported direct and prepared session autocommit mode, read-only/read-write, isolation-level, transaction variable, temporary row-DML, and completion-type transaction SET controls, direct and prepared case-insensitive quoted savepoint rollback/release, active transaction crash recovery, and unsupported transaction-control policy"
+      echo "storage-smoke-dev|compat-transaction|Direct row-DML transaction commit/rollback, generated autoincrement rollback and reservation gaps, supported direct and prepared session autocommit mode, read-only/read-write, isolation-level, transaction variable, temporary row-DML, and completion-type transaction SET controls, direct and prepared case-insensitive quoted savepoint rollback/release, active transaction crash recovery, and unsupported transaction-control policy"
       ;;
     transaction-hooks)
       echo "storage-smoke-dev|compat-transaction-hooks|MariaDB statement transaction hook integration"
       ;;
     statement-rollback)
-      echo "storage-smoke-dev|compat-statement-rollback|Failed statement rollback for routed MyLite storage, including prepared row-DML, failed-DML autoincrement gaps, row REPLACE, OR REPLACE replacement, and table-DDL failures"
+      echo "storage-smoke-dev|compat-statement-rollback|Failed statement rollback for routed MyLite storage, including prepared row-DML, failed-DML autoincrement reservation gaps, row REPLACE, OR REPLACE replacement, and table-DDL failures"
       ;;
     partition)
       echo "storage-smoke-dev|compat-partition|Partition DDL rejection policy"

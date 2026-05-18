@@ -159,6 +159,9 @@ static int mylite_prepare_scan_rows(TABLE *table,
 static ulonglong mylite_first_auto_increment_value(ulonglong next_value,
                                                    ulonglong offset,
                                                    ulonglong increment);
+static bool mylite_reserved_auto_increment_lower_bound(
+  ulonglong first_value, ulonglong increment, ulonglong reserved_values,
+  ulonglong *out_next_value);
 static int mylite_read_grouped_auto_increment(
   const char *primary_file, const char *schema_name, const char *table_name,
   bool volatile_rows, TABLE *table, ulonglong *out_next_value);
@@ -1800,7 +1803,8 @@ int ha_mylite::external_lock(THD *thd, int lock_type)
 }
 
 void ha_mylite::get_auto_increment(ulonglong offset, ulonglong increment,
-                                   ulonglong, ulonglong *first_value,
+                                   ulonglong nb_desired_values,
+                                   ulonglong *first_value,
                                    ulonglong *nb_reserved_values)
 {
   DBUG_ENTER("ha_mylite::get_auto_increment");
@@ -1839,7 +1843,36 @@ void ha_mylite::get_auto_increment(ulonglong offset, ulonglong increment,
   {
     const bool grouped_auto_increment= table && table->s &&
       table->s->next_number_keypart > 0;
-    *nb_reserved_values= grouped_auto_increment ? 1ULL : ULONGLONG_MAX;
+    ulonglong reserved_values= grouped_auto_increment || volatile_rows ?
+      1ULL : nb_desired_values;
+    if (reserved_values == 0ULL)
+      reserved_values= 1ULL;
+
+    if (!grouped_auto_increment && !volatile_rows)
+    {
+      ulonglong reserved_next_value= 0ULL;
+      if (!mylite_reserved_auto_increment_lower_bound(
+            *first_value, increment, reserved_values, &reserved_next_value))
+      {
+        *first_value= ULONGLONG_MAX;
+        DBUG_VOID_RETURN;
+      }
+
+      mylite_storage_result result=
+        mylite_storage_advance_auto_increment(primary_file, storage_schema(),
+                                              storage_table(),
+                                              reserved_next_value);
+      if (result == MYLITE_STORAGE_OK)
+        result= mylite_storage_preserve_auto_increment_on_rollback(
+          primary_file);
+      if (result != MYLITE_STORAGE_OK)
+      {
+        *first_value= ULONGLONG_MAX;
+        DBUG_VOID_RETURN;
+      }
+    }
+
+    *nb_reserved_values= reserved_values;
   }
 
   DBUG_VOID_RETURN;
@@ -3215,6 +3248,20 @@ static ulonglong mylite_first_auto_increment_value(ulonglong next_value,
     return ULONGLONG_MAX;
 
   return offset + (steps * increment);
+}
+
+static bool mylite_reserved_auto_increment_lower_bound(
+  ulonglong first_value, ulonglong increment, ulonglong reserved_values,
+  ulonglong *out_next_value)
+{
+  if (first_value == 0ULL || increment == 0ULL || reserved_values == 0ULL ||
+      !out_next_value)
+    return false;
+  if (reserved_values > (ULONGLONG_MAX - first_value) / increment)
+    return false;
+
+  *out_next_value= first_value + (reserved_values * increment);
+  return true;
 }
 
 static int mylite_read_grouped_auto_increment(

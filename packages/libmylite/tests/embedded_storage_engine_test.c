@@ -209,6 +209,7 @@ static void test_autoincrement_integer_width_matrix(void);
 static void test_autoincrement_bigint_unsigned_maximum(void);
 static void test_autoincrement_transaction_rollback(void);
 static void test_autoincrement_failed_dml_gaps(void);
+static void test_autoincrement_reservation_gaps(void);
 static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
 static void test_index_ddl_if_exists(void);
@@ -531,6 +532,7 @@ int main(int argc, char **argv) {
     test_autoincrement_bigint_unsigned_maximum();
     test_autoincrement_transaction_rollback();
     test_autoincrement_failed_dml_gaps();
+    test_autoincrement_reservation_gaps();
     test_indexed_rows();
     test_standalone_index_ddl();
     test_index_ddl_if_exists();
@@ -11589,6 +11591,108 @@ static void test_autoincrement_failed_dml_gaps(void) {
         db,
         "SELECT id FROM failed_auto_posts WHERE title = 'after-reopen'",
         "102"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_autoincrement_reservation_gaps(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_reservation");
+    assert_exec_succeeds(db, "USE auto_reservation");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE reservation_posts ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (id),"
+        "UNIQUE KEY title_key (title)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO reservation_posts (title) VALUES ('seed')");
+    assert_exec_fails(
+        db,
+        "INSERT INTO reservation_posts (title) VALUES "
+        "('multi-a'), ('seed'), ('multi-c')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM reservation_posts WHERE title IN ('multi-a', 'multi-c')",
+        "0"
+    );
+    assert_exec_succeeds(db, "INSERT INTO reservation_posts (title) VALUES ('after-failed')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM reservation_posts WHERE title = 'after-failed'",
+        "5"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "SET @@session.auto_increment_increment = 4, "
+        "@@session.auto_increment_offset = 3"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE offset_reservation_posts ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (id),"
+        "UNIQUE KEY title_key (title)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO offset_reservation_posts (title) VALUES ('seed')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM offset_reservation_posts WHERE title = 'seed'",
+        "3"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO offset_reservation_posts (title) VALUES "
+        "('offset-a'), ('seed'), ('offset-c')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM offset_reservation_posts "
+        "WHERE title IN ('offset-a', 'offset-c')",
+        "0"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO offset_reservation_posts (title) VALUES ('after-offset-failed')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM offset_reservation_posts WHERE title = 'after-offset-failed'",
+        "19"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "SET @@session.auto_increment_increment = 1, "
+        "@@session.auto_increment_offset = 1"
+    );
+    assert_catalog_table_count(filename, "auto_reservation", 2U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE auto_reservation");
+    assert_exec_succeeds(db, "INSERT INTO reservation_posts (title) VALUES ('after-reopen')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM reservation_posts WHERE title = 'after-reopen'",
+        "6"
     );
 
     assert(mylite_close(db) == MYLITE_OK);

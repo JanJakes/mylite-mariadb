@@ -520,10 +520,16 @@ republishing advancing next values for tables that existed at the checkpoint,
 matching MariaDB/InnoDB's persistent-but-non-transactional gap behavior for
 `ROLLBACK` and `ROLLBACK TO SAVEPOINT`. Durable failed and ignored insert
 statements also preserve generated and explicit high-value gaps by marking only
-row-DML checkpoints for autoincrement preservation; failed DDL checkpoints do
-not inherit that marker.
-That grouped path is correct for the supported storage subset but still scans
-append-only index entries until storage-level B-tree navigation exists.
+row-DML checkpoints for autoincrement preservation. Durable first-key generated
+statements publish MariaDB-requested reservation intervals from
+`get_auto_increment()` before row publication, so failed multi-row inserts keep
+the reserved gap even when later generated rows never reach `write_row()`.
+SQL-layer failures before generated value allocation, such as CHECK failures
+that MariaDB rejects before handler writes, do not reserve MyLite values.
+Failed DDL checkpoints do not inherit the row-DML preservation marker.
+The grouped autoincrement path is correct for the supported storage subset but
+still scans append-only index entries until storage-level B-tree navigation
+exists.
 Row, overflow, index-entry, and old autoincrement pages remain orphaned until
 compaction exists. Nullable fixed and variable fields are covered because the
 stored record image includes MariaDB's null bitmap. BLOB/TEXT fields are
@@ -693,7 +699,10 @@ in the checkpoint catalog. Durable row insert paths can also mark their current
 statement checkpoint after publishing an advancing autoincrement value and
 before duplicate-key or foreign-key checks fail, so failed or ignored inserts
 keep generated and explicit high-value gaps without making failed DDL metadata
-changes durable.
+changes durable. Durable first-key generated inserts additionally publish and
+mark the whole requested reservation interval from `get_auto_increment()`, which
+preserves MariaDB/InnoDB-style failed multi-row insert gaps even when not every
+reserved generated value is written.
 
 This is still partial SQL transaction support. The MyLite handler still
 advertises non-transactional engine flags. Public `libmylite` SQL entry points
