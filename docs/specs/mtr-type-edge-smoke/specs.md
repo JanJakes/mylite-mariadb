@@ -46,9 +46,8 @@ MariaDB base: `mariadb-11.8.6`
     by the harness.
   - `main.func_hybrid_type` reaches the unsupported embedded `SLEEP()`
     function path.
-  - `main.type_int`, `main.type_binary`, `main.type_varchar`,
-    `main.type_hex_hybrid`, `main.type_nchar`, and
-    `main.type_varchar_mysql41` need separate output-normalization review.
+  - `main.type_int` and `main.type_varchar_mysql41` need separate
+    output-normalization review.
   - `main.type_json` needs separate disabled-engine and normalization review.
   - `main.type_row` currently diverges on the profile's maximum key length for
     a `TEXT UNIQUE` case.

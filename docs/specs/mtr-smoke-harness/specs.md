@@ -62,6 +62,8 @@ MariaDB base: `mariadb-11.8.6`
   `main.type_year`, `main.func_time_round`, `main.type_date_round`,
   `main.type_datetime_round`, `main.type_time_round`, and
   `main.type_timestamp_round`.
+- [MTR hex-hybrid smoke](../mtr-hex-hybrid-smoke/specs.md) adds
+  `main.type_hex_hybrid`.
 - [MTR type edge smoke](../mtr-type-edge-smoke/specs.md) adds
   `main.type_char`, `main.type_interval`, and `main.type_varbinary`.
 - [MTR binary and NCHAR smoke](../mtr-binary-nchar-smoke/specs.md) adds
@@ -180,6 +182,7 @@ The default curated list remains intentionally baseline-oriented:
 - `main.type_ranges`.
 - `main.type_num`.
 - `main.type_uint`.
+- `main.type_hex_hybrid`.
 - `main.type_char`.
 - `main.type_binary`.
 - `main.binary`.

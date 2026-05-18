@@ -98,8 +98,8 @@ bound-parameter expression query for conditional, NULL, numeric, predicate,
 date/time, string, cast, UNION, and NULL-safe comparison result sets.
 The opt-in embedded MTR smoke runner covers MariaDB bootstrap, scalar
 CAST/CONVERT behavior, CASE-family and ANSI SQL-mode expression behavior,
-selected numeric, character/varchar, binary-string, binary/varbinary,
-national-character, interval, and type
+selected numeric, hex-hybrid literal/rounding, character/varchar,
+binary-string, binary/varbinary, national-character, interval, and type
 behavior, selected date,
 temporal-rounding, temporal-function, alternate-timezone conversion,
 temporal scale, microsecond parsing, and time/datetime comparison behavior,

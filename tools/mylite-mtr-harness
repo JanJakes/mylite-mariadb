@@ -15,6 +15,7 @@ default_tests=(
   main.type_ranges
   main.type_num
   main.type_uint
+  main.type_hex_hybrid
   main.type_char
   main.type_binary
   main.binary
