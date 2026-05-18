@@ -10,7 +10,8 @@ and grouped later-in-key allocation.
 
 - Do not test all legal `1..65535` offset and increment pairs.
 - Do not cover every integer width, overflow boundary, or negative explicit
-  value.
+  value; representative small-width overflow coverage is handled by the
+  `autoincrement-integer-overflow` slice.
 - Do not add transaction-aware rollback of consumed generated values.
 - Do not add a storage format or public API change.
 
@@ -101,5 +102,5 @@ tables under `(1,2)`, `(2,2)`, `(5,10)`, and `(7,3)`.
 
 - Exhaustive legal-value coverage is impractical in the smoke suite; broader
   generated or MTR-scale comparison can still expand this area.
-- Overflow boundaries and smaller integer widths remain separate compatibility
-  work.
+- Overflow boundaries and smaller integer widths are covered only
+  representatively by the separate `autoincrement-integer-overflow` slice.

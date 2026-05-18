@@ -191,6 +191,7 @@ static void test_autoincrement_key_policy(void);
 static void test_autoincrement_offset_increment(void);
 static void test_autoincrement_offset_increment_multirow(void);
 static void test_autoincrement_offset_increment_matrix(void);
+static void test_autoincrement_integer_overflow(void);
 static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
 static void test_index_ddl_if_exists(void);
@@ -495,6 +496,7 @@ int main(int argc, char **argv) {
     test_autoincrement_offset_increment();
     test_autoincrement_offset_increment_multirow();
     test_autoincrement_offset_increment_matrix();
+    test_autoincrement_integer_overflow();
     test_indexed_rows();
     test_standalone_index_ddl();
     test_index_ddl_if_exists();
@@ -10000,6 +10002,195 @@ static void assert_autoincrement_matrix_value(
     assert(written > 0);
     assert((size_t)written < sizeof(expected_value));
     assert_query_single_value(db, sql, expected_value);
+}
+
+static void test_autoincrement_integer_overflow(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_integer_bounds");
+    assert_exec_succeeds(db, "USE auto_integer_bounds");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE tiny_signed_first ("
+        "id TINYINT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO tiny_signed_first VALUES (126, 'near-max')");
+    assert_exec_succeeds(db, "INSERT INTO tiny_signed_first (title) VALUES ('max-generated')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM tiny_signed_first WHERE title = 'max-generated'",
+        "127"
+    );
+    assert_exec_fails(db, "INSERT INTO tiny_signed_first (title) VALUES ('overflow')");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tiny_signed_first WHERE title = 'overflow'",
+        "0"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE tiny_unsigned_first ("
+        "id TINYINT UNSIGNED NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO tiny_unsigned_first VALUES (254, 'near-max')");
+    assert_exec_succeeds(db, "INSERT INTO tiny_unsigned_first (title) VALUES ('max-generated')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM tiny_unsigned_first WHERE title = 'max-generated'",
+        "255"
+    );
+    assert_exec_fails(db, "INSERT INTO tiny_unsigned_first (title) VALUES ('overflow')");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tiny_unsigned_first WHERE title = 'overflow'",
+        "0"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE tiny_unsigned_grouped ("
+        "category INT NOT NULL,"
+        "id TINYINT UNSIGNED NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (category, id)"
+        ") ENGINE=MyISAM"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO tiny_unsigned_grouped VALUES (1, 254, 'near-max')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO tiny_unsigned_grouped (category, title) VALUES "
+        "(1, 'max-generated')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM tiny_unsigned_grouped WHERE title = 'max-generated'",
+        "255"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO tiny_unsigned_grouped (category, title) VALUES (1, 'overflow')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tiny_unsigned_grouped WHERE title = 'overflow'",
+        "0"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO tiny_unsigned_grouped (category, title) VALUES "
+        "(2, 'other-prefix')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM tiny_unsigned_grouped WHERE title = 'other-prefix'",
+        "1"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "SET @@session.auto_increment_increment = 10, "
+        "@@session.auto_increment_offset = 5"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE small_offset_first ("
+        "id SMALLINT UNSIGNED NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO small_offset_first VALUES (65521, 'near-max')");
+    assert_exec_succeeds(db, "INSERT INTO small_offset_first (title) VALUES ('rounded-low')");
+    assert_exec_succeeds(db, "INSERT INTO small_offset_first (title) VALUES ('rounded-max')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM small_offset_first WHERE title = 'rounded-low'",
+        "65525"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM small_offset_first WHERE title = 'rounded-max'",
+        "65535"
+    );
+    assert_exec_fails(db, "INSERT INTO small_offset_first (title) VALUES ('overflow')");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM small_offset_first WHERE title = 'overflow'",
+        "0"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE small_offset_grouped ("
+        "category INT NOT NULL,"
+        "id SMALLINT UNSIGNED NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (category, id)"
+        ") ENGINE=MyISAM"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO small_offset_grouped VALUES (1, 65521, 'near-max')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO small_offset_grouped (category, title) VALUES "
+        "(1, 'rounded-low'), (1, 'rounded-max')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM small_offset_grouped WHERE title = 'rounded-low'",
+        "65525"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM small_offset_grouped WHERE title = 'rounded-max'",
+        "65535"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO small_offset_grouped (category, title) VALUES (1, 'overflow')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM small_offset_grouped WHERE title = 'overflow'",
+        "0"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO small_offset_grouped (category, title) VALUES "
+        "(2, 'other-prefix')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM small_offset_grouped WHERE title = 'other-prefix'",
+        "5"
+    );
+    assert_catalog_table_count(filename, "auto_integer_bounds", 5U);
+    assert_exec_succeeds(
+        db,
+        "SET @@session.auto_increment_increment = 1, "
+        "@@session.auto_increment_offset = 1"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
 }
 
 static void test_indexed_rows(void) {

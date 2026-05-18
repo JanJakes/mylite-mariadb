@@ -42,7 +42,8 @@ MariaDB base: `mariadb-11.8.6`
   which is covered by the separate
   `autoincrement-offset-increment-multi-row` slice.
 - Offset values larger than increment.
-- Negative explicit values, overflow, or integer-width edge cases.
+- Negative explicit values. Representative overflow and integer-width edges are
+  covered by the separate `autoincrement-integer-overflow` slice.
 - Transaction-aware rollback of consumed generated values.
 - New storage format or public API behavior.
 
@@ -110,8 +111,9 @@ test and documentation slice unless the new tests expose a bug.
 
 ## Risks And Open Questions
 
-- MyLite still needs integer-width, temporary/volatile-row, and overflow-boundary
-  coverage before claiming exhaustive compatibility.
+- MyLite still needs temporary/volatile-row, exhaustive integer-width, and
+  `BIGINT UNSIGNED` maximum-state coverage before claiming exhaustive
+  compatibility.
 - Multi-row post-explicit first-key and grouped-prefix allocation is covered by
   the separate `autoincrement-offset-increment-multi-row` slice.
 - A broader first-key and grouped-prefix pair matrix is covered by the separate

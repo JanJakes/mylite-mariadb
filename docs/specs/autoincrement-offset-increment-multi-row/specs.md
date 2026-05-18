@@ -12,8 +12,10 @@ later-in-key allocation.
 - Do not claim exhaustive `auto_increment_offset` /
   `auto_increment_increment` matrices; broader pair coverage is handled by the
   `autoincrement-offset-increment-matrix` slice.
-- Do not cover every integer width, overflow boundary, negative explicit value,
-  or offset-greater-than-increment behavior.
+- Do not cover negative explicit values. Offset-greater-than-increment behavior
+  is covered by the `autoincrement-offset-increment-matrix` slice, and
+  representative small-width overflow behavior is covered by the
+  `autoincrement-integer-overflow` slice.
 - Do not add transaction-aware rollback of consumed generated values.
 - Do not replace the grouped allocation path with a B-tree-style prefix-maximum
   lookup.
@@ -92,8 +94,8 @@ test and documentation slice unless coverage exposes a bug.
   before and after an explicit high id.
 - Close/reopen preserves first-key state and grouped live-row-derived next
   values.
-- Docs continue to mark overflow/integer-width offset-increment coverage and
-  storage-level B-tree navigation as planned.
+- Docs continue to mark exhaustive integer-width coverage, `BIGINT UNSIGNED`
+  maximum-state handling, and storage-level B-tree navigation as planned.
 
 ## Implementation Status
 
