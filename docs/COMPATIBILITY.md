@@ -137,7 +137,7 @@ suites and broader application-schema and runtime suites remain planned.
 | Column metadata | 🟡&nbsp;Partial | Prepared statements expose alias, schema/table/origin names, MariaDB-native type, flags, charset, decimals, and length metadata; representative native type/name comparison is covered; prepared parameter counts are exposed, while rich parameter metadata is explicitly unsupported on the current MariaDB base because the MariaDB API returns no parameter metadata |
 | Diagnostics | 🟡&nbsp;Partial | Open handles expose stable MyLite result codes, MariaDB errno, SQLSTATE, and message text |
 | Warnings | 🟡&nbsp;Partial | Successful direct and prepared execution expose retained `SHOW WARNINGS` rows; failed direct execution, failed prepare, and failed prepared execute retain structured error rows before a result set is active; representative baseline comparison is covered, while fetch-time failure warning capture remains planned |
-| Affected rows and insert ids | 🟡&nbsp;Partial | Successful direct and prepared execution expose affected rows for non-result statements and the last insert id; direct and prepared execution cover temporary-table insert/update/delete effects with representative MariaDB baseline comparison |
+| Affected rows and insert ids | 🟡&nbsp;Partial | Successful direct and prepared execution expose affected rows for non-result statements and the last insert id; direct and prepared execution cover temporary-table insert/update/delete effects and representative `ON DUPLICATE KEY UPDATE` duplicate-update insert-id behavior, including `LAST_INSERT_ID(id)`, with MariaDB baseline comparison |
 | Raw `MYSQL *` as primary API | ➖&nbsp;Out&nbsp;of&nbsp;scope | Available only through a deliberate compatibility adapter |
 
 ## Engine Routing

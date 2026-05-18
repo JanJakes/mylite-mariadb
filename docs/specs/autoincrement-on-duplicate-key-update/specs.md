@@ -60,7 +60,9 @@ MariaDB base: `mariadb-11.8.6`
 - Exhaustive ODKU expression, trigger, view, partition, source-error, or grouped
   later-in-key autoincrement matrices.
 - Native InnoDB old-style autoincrement lock-mode parity.
-- `LAST_INSERT_ID()` / `mysql_insert_id()` API coverage.
+- Durable routed-storage `LAST_INSERT_ID()` / `mysql_insert_id()` matrices.
+  Representative temporary-table SQL API comparison coverage lives in
+  `docs/specs/sql-api-statement-effects-comparison/specs.md`.
 - Binary log, replication, or wire-protocol ODKU behavior.
 
 ## Compatibility Impact
@@ -77,8 +79,8 @@ non-gapless autoincrement behavior:
   that advancement across transaction rollback and close/reopen.
 
 The claim remains representative. Broader ODKU surfaces remain planned until
-grouped-autoincrement, trigger, `LAST_INSERT_ID()`, offset, integer-width, and
-error-path matrices are covered.
+grouped-autoincrement, trigger, durable routed-storage insert-id,
+offset, integer-width, and error-path matrices are covered.
 
 ## Design
 
@@ -145,8 +147,9 @@ No dependency, license, or intended size-profile change is introduced.
 
 ## Risks And Open Questions
 
-- The slice does not compare `LAST_INSERT_ID()` / `mysql_insert_id()` because
-  the current public API coverage for insert ids is separate from storage state.
+- The slice does not compare durable routed-storage `LAST_INSERT_ID()` /
+  `mysql_insert_id()` because the public SQL API comparison for representative
+  temporary-table ODKU insert ids is separate from storage state.
 - Grouped later-in-key autoincrement ODKU behavior may need storage-level
   prefix lookup before it can be claimed broadly.
 - ODKU trigger, view, and source-error paths may have distinct SQL-layer

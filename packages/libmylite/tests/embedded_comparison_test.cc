@@ -191,7 +191,7 @@ constexpr const char *kTextProbeValue = "hello";
 constexpr unsigned long kTextProbeLength = 5;
 constexpr std::size_t kTextOutputBufferSize = 32;
 constexpr std::size_t kWarningColumnCount = 3;
-constexpr std::size_t kStatementEffectCount = 6;
+constexpr std::size_t kStatementEffectCount = 9;
 
 Observation run_raw_observation(void);
 Observation run_mylite_observation(void);
@@ -206,6 +206,7 @@ TypedPreparedExpressionResult run_raw_typed_prepared_expression_query(RawRuntime
 StatementEffects run_raw_statement_effects(RawRuntime &runtime);
 StatementEffect run_raw_effect_query(RawRuntime &runtime, const char *sql);
 StatementEffect run_raw_prepared_insert(RawRuntime &runtime);
+StatementEffect run_raw_prepared_odku_last_insert_id(RawRuntime &runtime);
 StatementEffect run_raw_prepared_update(RawRuntime &runtime);
 StatementEffect run_raw_prepared_delete(RawRuntime &runtime);
 StatementEffect raw_statement_effect(RawRuntime &runtime);
@@ -218,6 +219,7 @@ TypedPreparedExpressionResult run_mylite_typed_prepared_expression_query(mylite_
 StatementEffects run_mylite_statement_effects(mylite_db *database);
 StatementEffect run_mylite_effect_query(mylite_db *database, const char *sql);
 StatementEffect run_mylite_prepared_insert(mylite_db *database);
+StatementEffect run_mylite_prepared_odku_last_insert_id(mylite_db *database);
 StatementEffect run_mylite_prepared_update(mylite_db *database);
 StatementEffect run_mylite_prepared_delete(mylite_db *database);
 StatementEffect mylite_statement_effect(mylite_db *database);
@@ -747,13 +749,24 @@ StatementEffects run_raw_statement_effects(RawRuntime &runtime) {
             "CREATE TEMPORARY TABLE effect_values ("
             "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
             "name VARCHAR(32),"
-            "qty INT NOT NULL)"
+            "qty INT NOT NULL,"
+            "UNIQUE KEY name_key (name))"
         ) == 0
     );
 
     effects.values.push_back(run_raw_effect_query(
         runtime,
         "INSERT INTO effect_values(name, qty) VALUES ('alpha', 1), ('beta', 2)"
+    ));
+    effects.values.push_back(run_raw_effect_query(
+        runtime,
+        "INSERT INTO effect_values(name, qty) VALUES ('beta', 20) "
+        "ON DUPLICATE KEY UPDATE qty = VALUES(qty)"
+    ));
+    effects.values.push_back(run_raw_effect_query(
+        runtime,
+        "INSERT INTO effect_values(name, qty) VALUES ('beta', 21) "
+        "ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), qty = VALUES(qty)"
     ));
     effects.values.push_back(
         run_raw_effect_query(runtime, "UPDATE effect_values SET qty = qty + 10 WHERE name = 'beta'")
@@ -762,6 +775,7 @@ StatementEffects run_raw_statement_effects(RawRuntime &runtime) {
         run_raw_effect_query(runtime, "DELETE FROM effect_values WHERE name = 'alpha'")
     );
     effects.values.push_back(run_raw_prepared_insert(runtime));
+    effects.values.push_back(run_raw_prepared_odku_last_insert_id(runtime));
     effects.values.push_back(run_raw_prepared_update(runtime));
     effects.values.push_back(run_raw_prepared_delete(runtime));
     return effects;
@@ -781,6 +795,35 @@ StatementEffect run_raw_prepared_insert(RawRuntime &runtime) {
     char name[] = "gamma";
     unsigned long name_length = 5;
     int quantity = 3;
+    std::array<MYSQL_BIND, 2> parameters = {};
+    parameters[0].buffer_type = MYSQL_TYPE_STRING;
+    parameters[0].buffer = name;
+    parameters[0].buffer_length = name_length;
+    parameters[0].length = &name_length;
+    parameters[1].buffer_type = MYSQL_TYPE_LONG;
+    parameters[1].buffer = &quantity;
+
+    assert(mysql_stmt_bind_param(statement, parameters.data()) == 0);
+    assert(mysql_stmt_execute(statement) == 0);
+    const StatementEffect effect{
+        static_cast<long long>(mysql_stmt_affected_rows(statement)),
+        mysql_stmt_insert_id(statement),
+    };
+    assert(mysql_stmt_close(statement) == 0);
+    return effect;
+}
+
+StatementEffect run_raw_prepared_odku_last_insert_id(RawRuntime &runtime) {
+    MYSQL_STMT *statement = mysql_stmt_init(&runtime.mysql);
+    assert(statement != nullptr);
+    constexpr const char *sql =
+        "INSERT INTO effect_values(name, qty) VALUES (?, ?) "
+        "ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), qty = VALUES(qty)";
+    assert(mysql_stmt_prepare(statement, sql, string_length(sql)) == 0);
+
+    char name[] = "gamma";
+    unsigned long name_length = 5;
+    int quantity = 30;
     std::array<MYSQL_BIND, 2> parameters = {};
     parameters[0].buffer_type = MYSQL_TYPE_STRING;
     parameters[0].buffer = name;
@@ -1078,7 +1121,8 @@ StatementEffects run_mylite_statement_effects(mylite_db *database) {
             "CREATE TEMPORARY TABLE effect_values ("
             "id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,"
             "name VARCHAR(32),"
-            "qty INT NOT NULL)",
+            "qty INT NOT NULL,"
+            "UNIQUE KEY name_key (name))",
             nullptr,
             nullptr,
             nullptr
@@ -1091,12 +1135,23 @@ StatementEffects run_mylite_statement_effects(mylite_db *database) {
     ));
     effects.values.push_back(run_mylite_effect_query(
         database,
+        "INSERT INTO effect_values(name, qty) VALUES ('beta', 20) "
+        "ON DUPLICATE KEY UPDATE qty = VALUES(qty)"
+    ));
+    effects.values.push_back(run_mylite_effect_query(
+        database,
+        "INSERT INTO effect_values(name, qty) VALUES ('beta', 21) "
+        "ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), qty = VALUES(qty)"
+    ));
+    effects.values.push_back(run_mylite_effect_query(
+        database,
         "UPDATE effect_values SET qty = qty + 10 WHERE name = 'beta'"
     ));
     effects.values.push_back(
         run_mylite_effect_query(database, "DELETE FROM effect_values WHERE name = 'alpha'")
     );
     effects.values.push_back(run_mylite_prepared_insert(database));
+    effects.values.push_back(run_mylite_prepared_odku_last_insert_id(database));
     effects.values.push_back(run_mylite_prepared_update(database));
     effects.values.push_back(run_mylite_prepared_delete(database));
     return effects;
@@ -1123,6 +1178,30 @@ StatementEffect run_mylite_prepared_insert(mylite_db *database) {
         mylite_bind_text(statement, 1U, "gamma", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK
     );
     assert(mylite_bind_int64(statement, 2U, 3) == MYLITE_OK);
+    assert(mylite_step(statement) == MYLITE_DONE);
+    const StatementEffect effect = mylite_statement_effect(database);
+    assert(mylite_finalize(statement) == MYLITE_OK);
+    return effect;
+}
+
+StatementEffect run_mylite_prepared_odku_last_insert_id(mylite_db *database) {
+    mylite_stmt *statement = nullptr;
+    assert(
+        mylite_prepare(
+            database,
+            "INSERT INTO effect_values(name, qty) VALUES (?, ?) "
+            "ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), qty = VALUES(qty)",
+            MYLITE_NUL_TERMINATED,
+            &statement,
+            nullptr
+        ) == MYLITE_OK
+    );
+    assert(statement != nullptr);
+    assert(
+        mylite_bind_text(statement, 1U, "gamma", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+        MYLITE_OK
+    );
+    assert(mylite_bind_int64(statement, 2U, 30) == MYLITE_OK);
     assert(mylite_step(statement) == MYLITE_DONE);
     const StatementEffect effect = mylite_statement_effect(database);
     assert(mylite_finalize(statement) == MYLITE_OK);

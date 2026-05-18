@@ -41,8 +41,8 @@ first-party preset. Storage-engine groups use the opt-in
 | `unsupported-index` | `storage-smoke-dev` | `compat-unsupported-index` | Unsupported FULLTEXT, SPATIAL, vector, and long-unique index rejection |
 | `locking` | `storage-smoke-dev` | `compat-locking` | Primary-file lock conflicts, busy timeouts, and SQL locking policy |
 | `embedded-lifecycle` | `embedded-dev` | `compat-embedded-lifecycle` | Embedded runtime open/close, direct execution, and cleanup |
-| `direct-sql` | `embedded-dev` | `compat-direct-sql` | `mylite_exec()` SQL execution and statement effects |
-| `prepared-statement` | `embedded-dev` | `compat-prepared-statement` | Prepared statements, typed bindings, binary-safe column access, and statement effects |
+| `direct-sql` | `embedded-dev` | `compat-direct-sql` | `mylite_exec()` SQL execution and statement effects, including representative ODKU insert-id behavior |
+| `prepared-statement` | `embedded-dev` | `compat-prepared-statement` | Prepared statements, typed bindings, binary-safe column access, and statement effects, including representative ODKU insert-id behavior |
 | `column-metadata` | `embedded-dev` | `compat-column-metadata` | Prepared statement column metadata |
 | `large-value` | `embedded-dev` | `compat-large-value` | Prepared statement large-value segment reads |
 | `warning` | `embedded-dev` | `compat-warning` | Warning counts and structured `SHOW WARNINGS` rows |

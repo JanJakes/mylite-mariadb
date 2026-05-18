@@ -63,7 +63,10 @@ MariaDB base: `mariadb-11.8.6`
 ## Non-Goals
 
 - Exhaustive `INSERT ... SELECT` optimizer, trigger, view, partition, grouped
-  later-in-key, offset/increment, integer-width, or `LAST_INSERT_ID()` matrices.
+  later-in-key, offset/increment, integer-width, or durable routed-storage
+  `LAST_INSERT_ID()` matrices. Representative temporary-table SQL API
+  comparison coverage lives in
+  `docs/specs/sql-api-statement-effects-comparison/specs.md`.
 - Native InnoDB old-style autoincrement lock-mode parity.
 - Binary log, replication, or wire-protocol behavior.
 - Size-profile reduction work.
@@ -84,7 +87,7 @@ preserve that advancement through transaction rollback and close/reopen.
 
 The claim remains representative. Broader ODKU matrices remain planned for
 grouped autoincrement, triggers, views, source errors, offset/increment, and
-public insert-id behavior.
+durable routed-storage insert-id behavior.
 
 ## Design
 
@@ -149,8 +152,9 @@ No dependency, license, or intended size-profile change is introduced.
 
 ## Risks And Open Questions
 
-- `LAST_INSERT_ID()` / `mysql_insert_id()` behavior is not checked here because
-  the public insert-id API surface is covered separately.
+- Durable routed-storage `LAST_INSERT_ID()` / `mysql_insert_id()` behavior is
+  not checked here because representative public insert-id API comparison is
+  covered separately.
 - Grouped later-in-key ODKU behavior may require storage-level prefix lookup
   work before it can be claimed broadly.
 - Trigger, view, and source-error paths may have different SQL-layer ordering

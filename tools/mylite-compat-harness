@@ -61,10 +61,10 @@ group_spec() {
       echo "embedded-dev|compat-embedded-lifecycle|Embedded runtime open, close, direct execution, and cleanup coverage"
       ;;
     direct-sql)
-      echo "embedded-dev|compat-direct-sql|Direct SQL execution and statement effects through the public libmylite API"
+      echo "embedded-dev|compat-direct-sql|Direct SQL execution and statement effects through the public libmylite API, including representative ODKU insert-id behavior"
       ;;
     prepared-statement)
-      echo "embedded-dev|compat-prepared-statement|Prepared statements, typed bindings, binary-safe column access, and statement effects"
+      echo "embedded-dev|compat-prepared-statement|Prepared statements, typed bindings, binary-safe column access, and statement effects, including representative ODKU insert-id behavior"
       ;;
     column-metadata)
       echo "embedded-dev|compat-column-metadata|Prepared statement column metadata"
