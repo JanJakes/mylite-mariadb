@@ -374,7 +374,9 @@ transaction/savepoint semantics remain planned.
 Representative `SHOW CREATE TABLE` round-trip coverage includes both a
 generated/CHECK/indexed table shape and an FK parent/child pair exported after
 catalog-backed reopen and imported into a fresh schema with FK checks and
-supported actions preserved.
+supported actions preserved. A representative ALTER-evolved table is also
+exported after generated-column, CHECK, unique-key, and prefix-index copy
+ALTERs and imported into a fresh schema.
 Basic column-level and named table-level CHECK constraints survive close/reopen
 because they are stored in the catalog-backed table-definition image. MariaDB
 enforces those checks before insert/update handler calls unless
@@ -387,7 +389,8 @@ pre-statement catalog and row state through the existing statement checkpoint.
 Prepared execution diagnostics are covered for representative CHECK failures.
 Representative dump-style fixture import is covered for CHECK definitions.
 Representative `SHOW CREATE TABLE` round-trip export/import is covered for
-CHECK definitions.
+CHECK definitions, including a representative table whose CHECK constraints
+were added through copy ALTER before export.
 Representative deterministic CHECK expression matrices cover string,
 NULL-handling, conditional, temporal, and numeric expressions. Exhaustive CHECK
 expression, broader failed ALTER rollback, broader dump/export, and transaction
@@ -415,7 +418,9 @@ unique-key failures.
 Representative dump-style fixture import is covered for generated-column
 definitions and generated-column indexes.
 Representative `SHOW CREATE TABLE` round-trip export/import is covered for
-generated-column definitions and indexes.
+generated-column definitions and indexes, including a representative table
+whose generated columns and generated indexes were added through copy ALTER
+before export.
 Representative deterministic generated-column expression matrices cover string,
 NULL-handling, conditional, temporal, and numeric expressions.
 The same create-time key-shape gate rejects FULLTEXT, SPATIAL, and long-unique

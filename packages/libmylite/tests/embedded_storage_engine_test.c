@@ -221,6 +221,7 @@ static void test_foreign_key_table_ddl_rollback(void);
 static void test_table_ddl_if_exists(void);
 static void test_constraint_generated_dump_fixture(void);
 static void test_show_create_table_round_trip(void);
+static void test_altered_table_show_create_round_trip(void);
 static void test_show_create_foreign_key_round_trip(void);
 static void test_foreign_key_dump_import_ordering(void);
 static void test_constraint_generated_expression_matrix(void);
@@ -536,6 +537,7 @@ int main(int argc, char **argv) {
     test_table_ddl_if_exists();
     test_constraint_generated_dump_fixture();
     test_show_create_table_round_trip();
+    test_altered_table_show_create_round_trip();
     test_show_create_foreign_key_round_trip();
     test_foreign_key_dump_import_ordering();
     test_constraint_generated_expression_matrix();
@@ -15064,6 +15066,164 @@ static void test_show_create_table_round_trip(void) {
         "INSERT INTO export_posts (title, status, rating, body) "
         "VALUES ('Too High', 'draft', 11, 'too-high')",
         "CONSTRAINT"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(create_sql);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_altered_table_show_create_round_trip(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE altered_export_source");
+    assert_exec_succeeds(db, "USE altered_export_source");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE altered_export_posts ("
+        "id int NOT NULL AUTO_INCREMENT,"
+        "title varchar(64) NOT NULL,"
+        "status varchar(16) NOT NULL DEFAULT 'draft',"
+        "rating int NOT NULL,"
+        "body text NOT NULL,"
+        "PRIMARY KEY (id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO altered_export_posts (title, status, rating, body) VALUES "
+        "('Altered Source', 'draft', 4, 'altered source body'),"
+        "('Published Source', 'published', 9, 'published source body')"
+    );
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE altered_export_posts "
+        "ADD COLUMN slug varchar(96) AS (LOWER(REPLACE(title, ' ', '-'))) STORED,"
+        "ADD COLUMN title_len int AS (CHAR_LENGTH(title)) VIRTUAL,"
+        "ALGORITHM=COPY"
+    );
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE altered_export_posts "
+        "ADD UNIQUE KEY slug_unique (slug),"
+        "ADD KEY title_len_key (title_len),"
+        "ADD KEY body_prefix (body(12)),"
+        "ALGORITHM=COPY"
+    );
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE altered_export_posts "
+        "ADD CONSTRAINT rating_window CHECK (rating BETWEEN 0 AND 10),"
+        "ADD CONSTRAINT status_choice CHECK (status IN ('draft', 'published')),"
+        "ALGORITHM=COPY"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE altered_export_source");
+    char *create_sql = capture_show_create_table(db, "altered_export_posts");
+    assert(strstr(create_sql, "ENGINE=InnoDB") != NULL);
+    assert(strstr(create_sql, "AUTO_INCREMENT=3") != NULL);
+    assert(strstr(create_sql, "`slug`") != NULL);
+    assert(strstr(create_sql, "`title_len_key`") != NULL);
+    assert(strstr(create_sql, "`body_prefix`") != NULL);
+    assert(strstr(create_sql, "CONSTRAINT `rating_window` CHECK") != NULL);
+
+    assert_exec_succeeds(db, "CREATE DATABASE altered_export_roundtrip");
+    assert_exec_succeeds(db, "USE altered_export_roundtrip");
+    assert_exec_succeeds(db, create_sql);
+    assert_catalog_table_count(filename, "altered_export_roundtrip", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "altered_export_roundtrip",
+        "altered_export_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO altered_export_posts (title, status, rating, body) "
+        "VALUES ('Round Trip Alter', 'published', 7, 'roundtrip altered body')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM altered_export_posts WHERE title = 'Round Trip Alter'",
+        "3"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM altered_export_posts WHERE id = 3",
+        "round-trip-alter"
+    );
+    assert_query_single_value(db, "SELECT title_len FROM altered_export_posts WHERE id = 3", "16");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM altered_export_posts FORCE INDEX (slug_unique) "
+        "WHERE slug = 'round-trip-alter'",
+        "3"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM altered_export_posts FORCE INDEX (title_len_key) "
+        "WHERE title_len = 16",
+        "3"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM altered_export_posts FORCE INDEX (body_prefix) "
+        "WHERE body = 'roundtrip altered body'",
+        "3"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO altered_export_posts (title, status, rating, body) "
+        "VALUES ('Bad Status', 'archived', 5, 'bad status')",
+        "CONSTRAINT"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO altered_export_posts (title, status, rating, body) "
+        "VALUES ('Round Trip Alter', 'draft', 6, 'duplicate slug')",
+        "Duplicate"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_no_runtime_schema_directory(root, "altered_export_roundtrip");
+    assert_exec_succeeds(db, "USE altered_export_roundtrip");
+    assert_catalog_table_count(filename, "altered_export_roundtrip", 1U);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM altered_export_posts FORCE INDEX (slug_unique) "
+        "WHERE slug = 'round-trip-alter'",
+        "3"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM altered_export_posts FORCE INDEX (body_prefix) "
+        "WHERE body = 'roundtrip altered body'",
+        "3"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO altered_export_posts (title, status, rating, body) "
+        "VALUES ('Too High', 'draft', 11, 'too high')",
+        "CONSTRAINT"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO altered_export_posts (title, status, rating, body) "
+        "VALUES ('Round Trip Alter', 'published', 7, 'duplicate after reopen')",
+        "Duplicate"
     );
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");

@@ -138,14 +138,16 @@ unchanged for practical purposes.
 - Bounded generated BLOB/TEXT prefix indexes work for forced-index reads,
   duplicate checks, update/delete maintenance, standalone copy-rebuild index
   DDL, and close/reopen.
+- `SHOW CREATE TABLE` export/import works for a representative table whose
+  generated columns and generated indexes were added through copy ALTER.
 - Compatibility docs and roadmap mark generated columns as partial rather than
   planned.
 - The compatibility harness can run the generated-column evidence by name.
 
 ## Risks And Open Questions
 
-- Exhaustive expression classes, SQL-mode-sensitive expressions, broader
-  dump/export, and rollback remain uncovered.
+- Exhaustive expression classes, SQL-mode-sensitive expressions, full
+  dump/export compatibility, and rollback remain uncovered.
 - Expression/hidden generated indexes, generated full/oversized BLOB/TEXT key
   payloads, and exhaustive expression matrices need separate specs before
   support is claimed.
