@@ -36,7 +36,11 @@ slice allows MariaDB-preparable transaction `SET` controls through
 `mylite_prepare()` while keeping prepared transaction-start and completion
 commands rejected. The later
 [Prepared Transaction Lifecycle Control](../prepared-transaction-lifecycle-control/specs.md)
-slice accepts bounded prepared lifecycle controls.
+slice accepts bounded prepared lifecycle controls. The later
+[Transaction Control Rejection Matrix](../transaction-control-rejection-matrix/specs.md)
+slice adds focused coverage for the remaining unsupported direct marker,
+expression-valued, global, global/expression parameterized, and duplicate
+`SET TRANSACTION` characteristic forms.
 
 ## Problem
 

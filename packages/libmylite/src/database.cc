@@ -4583,13 +4583,19 @@ TransactionControlKind transaction_characteristic_assignment_control_kind(
             return TransactionControlKind::Unsupported;
         }
         std::string_view parameter_candidate = candidate;
-        if (allow_parameter_markers && pop_parameter_marker_assignment_value(parameter_candidate)) {
-            return scope == TransactionAssignmentScope::Session
-                       ? TransactionControlKind::SetSessionTransactionIsolationParameter
-                       : TransactionControlKind::SetNextTransactionIsolationParameter;
+        if (pop_parameter_marker_assignment_value(parameter_candidate)) {
+            if (allow_parameter_markers) {
+                return scope == TransactionAssignmentScope::Session
+                           ? TransactionControlKind::SetSessionTransactionIsolationParameter
+                           : TransactionControlKind::SetNextTransactionIsolationParameter;
+            }
+            return TransactionControlKind::Unsupported;
         }
         candidate.remove_prefix(1);
         if (skip_sql_leading_noise(candidate).empty()) {
+            return TransactionControlKind::Unsupported;
+        }
+        if (sql_span_count_parameter_markers(candidate) != 0U) {
             return TransactionControlKind::Unsupported;
         }
         return transaction_isolation_control_kind(scope == TransactionAssignmentScope::Session);

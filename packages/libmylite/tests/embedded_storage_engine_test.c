@@ -262,6 +262,11 @@ static void assert_exec_fails(mylite_db *db, const char *sql);
 static void assert_exec_fails_with_message(mylite_db *db, const char *sql, const char *message);
 static void assert_non_table_object_exec_fails(mylite_db *db, const char *sql);
 static void assert_transaction_control_exec_fails(mylite_db *db, const char *sql);
+static void assert_prepare_policy_fails_with_message(
+    mylite_db *db,
+    const char *sql,
+    const char *message
+);
 static void assert_transaction_crash_recovery(const char *root, const char *filename);
 static void assert_locking_sql_exec_fails(mylite_db *db, const char *sql);
 static void assert_online_alter_exec_fails(mylite_db *db, const char *sql);
@@ -5995,6 +6000,66 @@ static void test_row_dml_transactions(void) {
     assert_exec_succeeds(db, "ROLLBACK");
 
     assert_prepared_one_text_succeeds(db, "SET transaction_isolation=?", "READ-COMMITTED");
+
+    assert_transaction_control_exec_fails(db, "SET autocommit=?");
+    assert_transaction_control_exec_fails(db, "SET completion_type=?");
+    assert_transaction_control_exec_fails(db, "SET transaction_read_only=?");
+    assert_transaction_control_exec_fails(db, "SET transaction_isolation=?");
+    assert_transaction_control_exec_fails(db, "SET autocommit=1+0");
+    assert_transaction_control_exec_fails(db, "SET completion_type=CONCAT('NO', '_CHAIN')");
+    assert_transaction_control_exec_fails(db, "SET transaction_read_only=0+1");
+    assert_transaction_control_exec_fails(db, "SET GLOBAL completion_type=CHAIN");
+    assert_transaction_control_exec_fails(db, "SET @@global.autocommit=0");
+    assert_transaction_control_exec_fails(db, "SET @@global.completion_type=CHAIN");
+    assert_transaction_control_exec_fails(db, "SET GLOBAL transaction_read_only=1");
+    assert_transaction_control_exec_fails(
+        db,
+        "SET @@global.transaction_isolation='READ-COMMITTED'"
+    );
+    assert_transaction_control_exec_fails(db, "SET TRANSACTION READ ONLY, READ WRITE");
+    assert_transaction_control_exec_fails(
+        db,
+        "SET TRANSACTION ISOLATION LEVEL READ COMMITTED, "
+        "ISOLATION LEVEL SERIALIZABLE"
+    );
+    assert_prepare_policy_fails_with_message(db, "SET GLOBAL autocommit=?", "transaction control");
+    assert_prepare_policy_fails_with_message(
+        db,
+        "SET GLOBAL completion_type=?",
+        "transaction control"
+    );
+    assert_prepare_policy_fails_with_message(
+        db,
+        "SET @@global.transaction_read_only=?",
+        "transaction control"
+    );
+    assert_prepare_policy_fails_with_message(
+        db,
+        "SET @@global.transaction_isolation=?",
+        "transaction control"
+    );
+    assert_prepare_policy_fails_with_message(db, "SET autocommit=?+0", "transaction control");
+    assert_prepare_policy_fails_with_message(
+        db,
+        "SET transaction_isolation=?+0",
+        "transaction control"
+    );
+    assert_prepare_policy_fails_with_message(
+        db,
+        "SET completion_type=COALESCE(?, 'CHAIN')",
+        "transaction control"
+    );
+    assert_prepare_policy_fails_with_message(
+        db,
+        "SET TRANSACTION READ ONLY, READ WRITE",
+        "transaction control"
+    );
+    assert_prepare_policy_fails_with_message(
+        db,
+        "SET TRANSACTION ISOLATION LEVEL READ COMMITTED, "
+        "ISOLATION LEVEL SERIALIZABLE",
+        "transaction control"
+    );
     assert_prepared_one_int_policy_fails_with_message(
         db,
         "SET autocommit=?",
@@ -21986,6 +22051,24 @@ static void assert_transaction_control_exec_fails(mylite_db *db, const char *sql
     assert(errmsg != NULL);
     assert(strstr(errmsg, "transaction control") != NULL);
     mylite_free(errmsg);
+}
+
+static void assert_prepare_policy_fails_with_message(
+    mylite_db *db,
+    const char *sql,
+    const char *message
+) {
+    mylite_stmt *stmt = NULL;
+    const int result = mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, NULL);
+    if (result == MYLITE_OK) {
+        fprintf(stderr, "Prepared SQL unexpectedly prepared: %s\n", sql);
+    }
+    assert(result == MYLITE_ERROR);
+    assert(stmt == NULL);
+    assert(mylite_errcode(db) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 0U);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), message) != NULL);
 }
 
 static void assert_transaction_crash_recovery(const char *root, const char *filename) {

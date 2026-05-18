@@ -173,4 +173,7 @@ classification and bound-value interpretation helpers.
   MariaDB's parsed `LEX` tree for policy decisions.
 - Supporting expression-valued transaction parameters would require evaluating
   MariaDB's accepted value without letting unsupported values mutate session
-  state first; this is left for a later slice if applications need it.
+  state first; the later
+  [Transaction Control Rejection Matrix](../transaction-control-rejection-matrix/specs.md)
+  slice keeps these forms explicitly rejected until applications prove the
+  need.

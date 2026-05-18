@@ -6,7 +6,10 @@ slice accepts duplicate supported transaction variable assignments with the
 final assignment winning. The later
 [Prepared Transaction SET Control](../prepared-transaction-set-control/specs.md)
 slice accepts supported transaction-variable controls through prepared
-statements. Global transaction variables remain unsupported.
+statements. The later
+[Transaction Control Rejection Matrix](../transaction-control-rejection-matrix/specs.md)
+slice keeps direct parameter markers and prepared marker expressions for these
+variables explicitly rejected. Global transaction variables remain unsupported.
 
 ## Problem
 
