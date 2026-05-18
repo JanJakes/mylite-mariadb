@@ -65,7 +65,6 @@ if(EXISTS "${MYLITE_MARIADB_BUILD_DIR}/CMakeCache.txt")
     set(MYLITE_MARIADB_HAS_DLOPEN OFF)
   endif()
 endif()
-
 function(mylite_add_mariadb_embedded_target)
   if(NOT MYLITE_WITH_MARIADB_EMBEDDED)
     return()
@@ -94,10 +93,19 @@ function(mylite_add_mariadb_embedded_target)
   find_package(OpenSSL REQUIRED)
   find_package(PkgConfig REQUIRED)
   find_package(Threads REQUIRED)
+  find_library(MYLITE_CRYPT_LIBRARY crypt)
   if(MYLITE_MARIADB_WITH_ZLIB_COMPRESSION)
     find_package(ZLIB REQUIRED)
   endif()
   pkg_check_modules(MYLITE_PCRE2 REQUIRED IMPORTED_TARGET libpcre2-8)
+
+  if(NOT TARGET MyLite::MariaDBThreadpoolStubs)
+    add_library(mylite_mariadb_threadpool_stubs STATIC
+      "${PROJECT_SOURCE_DIR}/packages/libmylite/src/mariadb_threadpool_stubs.cc"
+    )
+    add_library(MyLite::MariaDBThreadpoolStubs ALIAS mylite_mariadb_threadpool_stubs)
+    mylite_configure_cxx_target(mylite_mariadb_threadpool_stubs)
+  endif()
 
   if(NOT TARGET MyLite::MariaDBEmbedded)
     add_library(mylite_mariadb_embedded STATIC IMPORTED GLOBAL)
@@ -113,12 +121,16 @@ function(mylite_add_mariadb_embedded_target)
       OpenSSL::SSL
       PkgConfig::MYLITE_PCRE2
       Threads::Threads
+      MyLite::MariaDBThreadpoolStubs
     )
     if(MYLITE_MARIADB_WITH_ZLIB_COMPRESSION)
       target_link_libraries(mylite_mariadb_embedded INTERFACE ZLIB::ZLIB)
     endif()
     if(NOT APPLE)
       target_link_libraries(mylite_mariadb_embedded INTERFACE m)
+      if(MYLITE_CRYPT_LIBRARY)
+        target_link_libraries(mylite_mariadb_embedded INTERFACE "${MYLITE_CRYPT_LIBRARY}")
+      endif()
       if(MYLITE_MARIADB_HAS_DLOPEN)
         target_link_libraries(mylite_mariadb_embedded INTERFACE dl)
       endif()

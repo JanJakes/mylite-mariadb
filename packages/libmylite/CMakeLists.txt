@@ -50,6 +50,15 @@ if(BUILD_TESTING)
   )
 
   if(MYLITE_WITH_MARIADB_EMBEDDED)
+    function(mylite_configure_embedded_c_test target)
+      target_link_libraries(${target} PRIVATE MyLite::mylite)
+      mylite_configure_c_target(${target})
+      target_compile_definitions(${target} PRIVATE _DEFAULT_SOURCE _XOPEN_SOURCE=700)
+      if(APPLE)
+        target_compile_definitions(${target} PRIVATE _DARWIN_C_SOURCE)
+      endif()
+    endfunction()
+
     add_executable(mylite_embedded_open_close_test
       tests/embedded_open_close_test.c
     )
@@ -57,14 +66,13 @@ if(BUILD_TESTING)
       mylite_embedded_open_close_test
       PRIVATE "${PROJECT_SOURCE_DIR}/packages/mylite-storage/src"
     )
-    target_link_libraries(mylite_embedded_open_close_test PRIVATE MyLite::mylite MyLite::storage)
-    mylite_configure_c_target(mylite_embedded_open_close_test)
+    mylite_configure_embedded_c_test(mylite_embedded_open_close_test)
+    target_link_libraries(mylite_embedded_open_close_test PRIVATE MyLite::storage)
 
     add_executable(mylite_embedded_exec_test
       tests/embedded_exec_test.c
     )
-    target_link_libraries(mylite_embedded_exec_test PRIVATE MyLite::mylite)
-    mylite_configure_c_target(mylite_embedded_exec_test)
+    mylite_configure_embedded_c_test(mylite_embedded_exec_test)
 
     add_executable(mylite_embedded_statement_test
       tests/embedded_statement_test.c
@@ -74,14 +82,12 @@ if(BUILD_TESTING)
     else()
       target_compile_definitions(mylite_embedded_statement_test PRIVATE MYLITE_TEST_HAS_MYLITE_SE=0)
     endif()
-    target_link_libraries(mylite_embedded_statement_test PRIVATE MyLite::mylite)
-    mylite_configure_c_target(mylite_embedded_statement_test)
+    mylite_configure_embedded_c_test(mylite_embedded_statement_test)
 
     add_executable(mylite_embedded_warning_test
       tests/embedded_warning_test.c
     )
-    target_link_libraries(mylite_embedded_warning_test PRIVATE MyLite::mylite)
-    mylite_configure_c_target(mylite_embedded_warning_test)
+    mylite_configure_embedded_c_test(mylite_embedded_warning_test)
 
     add_executable(mylite_embedded_comparison_test
       tests/embedded_comparison_test.cc
@@ -116,16 +122,12 @@ if(BUILD_TESTING)
       add_executable(mylite_embedded_storage_engine_test
         tests/embedded_storage_engine_test.c
       )
-      target_link_libraries(
-        mylite_embedded_storage_engine_test
-        PRIVATE MyLite::mylite MyLite::storage
-      )
+      mylite_configure_embedded_c_test(mylite_embedded_storage_engine_test)
+      target_link_libraries(mylite_embedded_storage_engine_test PRIVATE MyLite::storage)
       target_compile_definitions(
         mylite_embedded_storage_engine_test
         PRIVATE MYLITE_TEST_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures"
       )
-      mylite_configure_c_target(mylite_embedded_storage_engine_test)
-
       add_test(
         NAME libmylite.embedded-storage-engine
         COMMAND mylite_embedded_storage_engine_test
