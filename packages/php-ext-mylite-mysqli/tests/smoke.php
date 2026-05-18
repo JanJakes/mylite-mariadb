@@ -30,8 +30,11 @@ if (!defined('MYLITE_MYSQLI')) {
 
 $db = mysqli_connect(null, null, null, 'wp_smoke');
 assert_true($db instanceof mysqli, 'mysqli_connect did not return a mysqli object');
+assert_true(version_compare($db->server_info, '5.5.5', '>='), 'server_info is not WordPress-compatible');
+assert_true(mysqli_get_server_version($db) >= 50505, 'server_version is not WordPress-compatible');
 assert_true(mysqli_select_db($db, 'wp_smoke'), mysqli_error($db));
 assert_true(mysqli_set_charset($db, 'utf8mb4'), mysqli_error($db));
+assert_true(mysqli_query($db, 'SET default_storage_engine = InnoDB') === true, mysqli_error($db));
 
 $create = "CREATE TABLE wp_options (
     option_id bigint unsigned NOT NULL AUTO_INCREMENT,

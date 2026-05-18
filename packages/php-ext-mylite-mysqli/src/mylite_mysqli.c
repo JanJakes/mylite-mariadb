@@ -16,6 +16,8 @@
 #include <string.h>
 
 #define PHP_MYLITE_MYSQLI_VERSION "0.1.0"
+#define MYLITE_MYSQLI_SERVER_INFO "11.8.6-MariaDB-embedded"
+#define MYLITE_MYSQLI_SERVER_VERSION 110806
 
 #define MYLITE_MYSQLI_STORE_RESULT 0
 #define MYLITE_MYSQLI_USE_RESULT 1
@@ -418,6 +420,17 @@ ZEND_ARG_INFO(0, socket)
 ZEND_ARG_INFO(0, flags)
 ZEND_END_ARG_INFO()
 
+ZEND_BEGIN_ARG_INFO_EX(arginfo_mysqli_real_connect, 0, 0, 1)
+ZEND_ARG_INFO(0, mysql)
+ZEND_ARG_INFO(0, hostname)
+ZEND_ARG_INFO(0, username)
+ZEND_ARG_INFO(0, password)
+ZEND_ARG_INFO(0, database)
+ZEND_ARG_INFO(0, port)
+ZEND_ARG_INFO(0, socket)
+ZEND_ARG_INFO(0, flags)
+ZEND_END_ARG_INFO()
+
 ZEND_BEGIN_ARG_INFO_EX(arginfo_stmt_bind_param, 0, 0, 2)
 ZEND_ARG_INFO(0, statement)
 ZEND_ARG_TYPE_INFO(0, types, IS_STRING, 0)
@@ -471,7 +484,7 @@ static const zend_function_entry mylite_mysqli_functions
                                           mysqli_field_count,
                                           arginfo_one
                                       )
-                                          PHP_FE(mysqli_field_seek, arginfo_two) PHP_FE(mysqli_field_tell, arginfo_one) PHP_FE(mysqli_free_result, arginfo_one) PHP_FE(mysqli_get_connection_stats, arginfo_one) PHP_FE(mysqli_get_client_stats, arginfo_none) PHP_FE(mysqli_get_charset, arginfo_one) PHP_FE(mysqli_get_client_info, arginfo_none) PHP_FE(mysqli_get_client_version, arginfo_none) PHP_FE(mysqli_get_links_stats, arginfo_none) PHP_FE(mysqli_get_host_info, arginfo_one) PHP_FE(mysqli_get_proto_info, arginfo_one) PHP_FE(mysqli_get_server_info, arginfo_one) PHP_FE(mysqli_get_server_version, arginfo_one) PHP_FE(mysqli_get_warnings, arginfo_one) PHP_FE(mysqli_init, arginfo_none) PHP_FE(mysqli_info, arginfo_one) PHP_FE(mysqli_insert_id, arginfo_one) PHP_FE(mysqli_kill, arginfo_two) PHP_FE(mysqli_more_results, arginfo_one) PHP_FE(mysqli_multi_query, arginfo_two) PHP_FE(mysqli_next_result, arginfo_one) PHP_FE(mysqli_num_fields, arginfo_one) PHP_FE(mysqli_num_rows, arginfo_one) PHP_FE(mysqli_options, arginfo_three) PHP_FALIAS(mysqli_set_opt, mysqli_options, arginfo_three) PHP_FE(mysqli_ping, arginfo_one) PHP_FE(mysqli_poll, arginfo_none) PHP_FE(mysqli_prepare, arginfo_two) PHP_FE(mysqli_report, arginfo_one) PHP_FE(mysqli_query, arginfo_two) PHP_FE(mysqli_real_connect, arginfo_one) PHP_FE(mysqli_real_escape_string, arginfo_two) PHP_FALIAS(
+                                          PHP_FE(mysqli_field_seek, arginfo_two) PHP_FE(mysqli_field_tell, arginfo_one) PHP_FE(mysqli_free_result, arginfo_one) PHP_FE(mysqli_get_connection_stats, arginfo_one) PHP_FE(mysqli_get_client_stats, arginfo_none) PHP_FE(mysqli_get_charset, arginfo_one) PHP_FE(mysqli_get_client_info, arginfo_none) PHP_FE(mysqli_get_client_version, arginfo_none) PHP_FE(mysqli_get_links_stats, arginfo_none) PHP_FE(mysqli_get_host_info, arginfo_one) PHP_FE(mysqli_get_proto_info, arginfo_one) PHP_FE(mysqli_get_server_info, arginfo_one) PHP_FE(mysqli_get_server_version, arginfo_one) PHP_FE(mysqli_get_warnings, arginfo_one) PHP_FE(mysqli_init, arginfo_none) PHP_FE(mysqli_info, arginfo_one) PHP_FE(mysqli_insert_id, arginfo_one) PHP_FE(mysqli_kill, arginfo_two) PHP_FE(mysqli_more_results, arginfo_one) PHP_FE(mysqli_multi_query, arginfo_two) PHP_FE(mysqli_next_result, arginfo_one) PHP_FE(mysqli_num_fields, arginfo_one) PHP_FE(mysqli_num_rows, arginfo_one) PHP_FE(mysqli_options, arginfo_three) PHP_FALIAS(mysqli_set_opt, mysqli_options, arginfo_three) PHP_FE(mysqli_ping, arginfo_one) PHP_FE(mysqli_poll, arginfo_none) PHP_FE(mysqli_prepare, arginfo_two) PHP_FE(mysqli_report, arginfo_one) PHP_FE(mysqli_query, arginfo_two) PHP_FE(mysqli_real_connect, arginfo_mysqli_real_connect) PHP_FE(mysqli_real_escape_string, arginfo_two) PHP_FALIAS(
                                               mysqli_escape_string,
                                               mysqli_real_escape_string,
                                               arginfo_two
@@ -880,7 +893,7 @@ PHP_FUNCTION(mysqli_real_connect) {
     zval *port = NULL;
     zend_long flags = 0;
 
-    ZEND_PARSE_PARAMETERS_START(1, 7)
+    ZEND_PARSE_PARAMETERS_START(1, 8)
     Z_PARAM_OBJECT_OF_CLASS(link_zv, mylite_mysqli_link_ce)
     Z_PARAM_OPTIONAL
     Z_PARAM_STRING_OR_NULL(hostname, hostname_len)
@@ -2746,12 +2759,12 @@ PHP_FUNCTION(mysqli_get_server_info) {
     ZEND_PARSE_PARAMETERS_END();
 
     (void)link_zv;
-    RETURN_STRING(mylite_version());
+    RETURN_STRING(MYLITE_MYSQLI_SERVER_INFO);
 }
 
 PHP_METHOD(mysqli, get_server_info) {
     ZEND_PARSE_PARAMETERS_NONE();
-    RETURN_STRING(mylite_version());
+    RETURN_STRING(MYLITE_MYSQLI_SERVER_INFO);
 }
 
 PHP_FUNCTION(mysqli_get_server_version) {
@@ -2762,7 +2775,7 @@ PHP_FUNCTION(mysqli_get_server_version) {
     ZEND_PARSE_PARAMETERS_END();
 
     (void)link_zv;
-    RETURN_LONG(110806);
+    RETURN_LONG(MYLITE_MYSQLI_SERVER_VERSION);
 }
 
 PHP_FUNCTION(mysqli_get_host_info) {
@@ -4340,14 +4353,14 @@ static void mylite_mysqli_update_link_props(mylite_mysqli_link *link) {
         &link->std,
         "server_info",
         sizeof("server_info") - 1,
-        mylite_version()
+        MYLITE_MYSQLI_SERVER_INFO
     );
     zend_update_property_long(
         mylite_mysqli_link_ce,
         &link->std,
         "server_version",
         sizeof("server_version") - 1,
-        110806
+        MYLITE_MYSQLI_SERVER_VERSION
     );
     zend_update_property_str(
         mylite_mysqli_link_ce,

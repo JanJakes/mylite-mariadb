@@ -21,6 +21,11 @@ For WordPress bootstrap, keep `DB_NAME` as the SQL schema name and set:
 export MYLITE_DATABASE_PATH=/path/to/wordpress.mylite
 ```
 
+When running PHPUnit tests that use PHP process isolation, load the extension
+through PHP configuration rather than only passing `-d extension=...` to the
+parent process, so child PHP processes load the same replacement `mysqli`
+module.
+
 The adapter currently buffers result sets and implements the APIs needed for
 initial WordPress database access. Unsupported network, SSL, async, persistent
 connection, and server-process surfaces return compatibility no-ops or `false`.
