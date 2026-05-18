@@ -531,6 +531,10 @@ resumes after the reserved interval boundary.
 reservation path before duplicate-key checks. A duplicate-update row can reuse
 the statement-local generated cursor for later successful rows, while the next
 statement still resumes after the reserved interval boundary.
+`INSERT ... SELECT ... ON DUPLICATE KEY UPDATE` uses MariaDB's unknown
+source-row-count reservation growth, so durable next values resume after the
+latest reserved interval boundary even when selected duplicate rows update
+existing rows instead of inserting new ones.
 SQL-layer failures before generated value allocation, such as CHECK failures
 that MariaDB rejects before handler writes, do not reserve MyLite values.
 Failed DDL checkpoints do not inherit the row-DML preservation marker.

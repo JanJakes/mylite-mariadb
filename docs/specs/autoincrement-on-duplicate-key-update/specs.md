@@ -57,8 +57,8 @@ MariaDB base: `mariadb-11.8.6`
 
 ## Non-Goals
 
-- Exhaustive ODKU expression, trigger, view, partition, `INSERT ... SELECT`, or
-  grouped later-in-key autoincrement matrices.
+- Exhaustive ODKU expression, trigger, view, partition, source-error, or grouped
+  later-in-key autoincrement matrices.
 - Native InnoDB old-style autoincrement lock-mode parity.
 - `LAST_INSERT_ID()` / `mysql_insert_id()` API coverage.
 - Binary log, replication, or wire-protocol ODKU behavior.
@@ -77,8 +77,8 @@ non-gapless autoincrement behavior:
   that advancement across transaction rollback and close/reopen.
 
 The claim remains representative. Broader ODKU surfaces remain planned until
-insert-select, grouped-autoincrement, trigger, `LAST_INSERT_ID()`, offset,
-integer-width, and error-path matrices are covered.
+grouped-autoincrement, trigger, `LAST_INSERT_ID()`, offset, integer-width, and
+error-path matrices are covered.
 
 ## Design
 
@@ -149,5 +149,5 @@ No dependency, license, or intended size-profile change is introduced.
   the current public API coverage for insert ids is separate from storage state.
 - Grouped later-in-key autoincrement ODKU behavior may need storage-level
   prefix lookup before it can be claimed broadly.
-- ODKU `INSERT ... SELECT`, trigger, and view paths may have distinct SQL-layer
+- ODKU trigger, view, and source-error paths may have distinct SQL-layer
   ordering and remain planned.

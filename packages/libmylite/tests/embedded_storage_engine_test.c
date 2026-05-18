@@ -213,6 +213,7 @@ static void test_autoincrement_reservation_gaps(void);
 static void test_autoincrement_update_gaps(void);
 static void test_autoincrement_failed_dml_matrices(void);
 static void test_autoincrement_on_duplicate_key_update(void);
+static void test_autoincrement_insert_select_on_duplicate_key_update(void);
 static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
 static void test_index_ddl_if_exists(void);
@@ -539,6 +540,7 @@ int main(int argc, char **argv) {
     test_autoincrement_update_gaps();
     test_autoincrement_failed_dml_matrices();
     test_autoincrement_on_duplicate_key_update();
+    test_autoincrement_insert_select_on_duplicate_key_update();
     test_indexed_rows();
     test_standalone_index_ddl();
     test_index_ddl_if_exists();
@@ -12223,6 +12225,212 @@ static void test_autoincrement_on_duplicate_key_update(void) {
         db,
         "SELECT id FROM odku_explicit_posts WHERE title = 'after-reopen'",
         "152"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_autoincrement_insert_select_on_duplicate_key_update(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_odku_select");
+    assert_exec_succeeds(db, "USE auto_odku_select");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE odku_select_posts ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "body VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (id),"
+        "UNIQUE KEY title_key (title)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE odku_select_source ("
+        "ord INT NOT NULL,"
+        "title VARCHAR(64) NOT NULL,"
+        "body VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (ord)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO odku_select_posts (title, body) VALUES "
+        "('dupe', 'original')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO odku_select_source (ord, title, body) VALUES "
+        "(1, 'new-one', 'one'),"
+        "(2, 'dupe', 'updated'),"
+        "(3, 'new-two', 'two'),"
+        "(4, 'new-three', 'three'),"
+        "(5, 'new-four', 'four')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO odku_select_posts (title, body) "
+        "SELECT title, body FROM odku_select_source ORDER BY ord "
+        "ON DUPLICATE KEY UPDATE body = VALUES(body)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM odku_select_posts WHERE title = 'new-one'",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM odku_select_posts WHERE title = 'new-two'",
+        "3"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM odku_select_posts WHERE title = 'new-three'",
+        "4"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM odku_select_posts WHERE title = 'new-four'",
+        "5"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT body FROM odku_select_posts WHERE title = 'dupe'",
+        "updated"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO odku_select_posts (title, body) VALUES "
+        "('after-select-odku', 'tail')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM odku_select_posts WHERE title = 'after-select-odku'",
+        "9"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE odku_select_explicit_posts ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "body VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (id),"
+        "UNIQUE KEY title_key (title)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE odku_select_explicit_source ("
+        "title VARCHAR(64) NOT NULL,"
+        "body VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (title)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO odku_select_explicit_posts (title, body) VALUES "
+        "('dupe', 'original')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO odku_select_explicit_source (title, body) VALUES "
+        "('dupe', 'high')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO odku_select_explicit_posts (title, body) "
+        "SELECT title, body FROM odku_select_explicit_source "
+        "ON DUPLICATE KEY UPDATE id = 200, body = VALUES(body)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM odku_select_explicit_posts WHERE title = 'dupe'",
+        "200"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT body FROM odku_select_explicit_posts WHERE title = 'dupe'",
+        "high"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO odku_select_explicit_posts (title, body) VALUES "
+        "('after-explicit-select-odku', 'after')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM odku_select_explicit_posts "
+        "WHERE title = 'after-explicit-select-odku'",
+        "201"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "UPDATE odku_select_explicit_source SET title = "
+        "'after-explicit-select-odku', body = 'rolled-back'"
+    );
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO odku_select_explicit_posts (title, body) "
+        "SELECT title, body FROM odku_select_explicit_source "
+        "ON DUPLICATE KEY UPDATE id = 250, body = VALUES(body)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM odku_select_explicit_posts "
+        "WHERE title = 'after-explicit-select-odku'",
+        "250"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM odku_select_explicit_posts "
+        "WHERE title = 'after-explicit-select-odku'",
+        "201"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT body FROM odku_select_explicit_posts "
+        "WHERE title = 'after-explicit-select-odku'",
+        "after"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO odku_select_explicit_posts (title, body) VALUES "
+        "('after-rollback-select-odku', 'after rollback')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM odku_select_explicit_posts "
+        "WHERE title = 'after-rollback-select-odku'",
+        "251"
+    );
+    assert_catalog_table_count(filename, "auto_odku_select", 4U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE auto_odku_select");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO odku_select_explicit_posts (title, body) VALUES "
+        "('after-reopen', 'reopened')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM odku_select_explicit_posts WHERE title = 'after-reopen'",
+        "252"
     );
 
     assert(mylite_close(db) == MYLITE_OK);
