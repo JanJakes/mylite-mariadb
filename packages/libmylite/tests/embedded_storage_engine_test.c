@@ -11571,6 +11571,21 @@ static void test_autoincrement_failed_dml_gaps(void) {
         "5"
     );
 
+    assert_exec_fails(
+        db,
+        "INSERT INTO failed_auto_posts (id, title) VALUES (100, 'duplicate-source')"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM failed_auto_posts WHERE id = 100", "0");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO failed_auto_posts (title) VALUES ('after-explicit-failed')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM failed_auto_posts WHERE title = 'after-explicit-failed'",
+        "6"
+    );
+
     assert_exec_succeeds(
         db,
         "INSERT IGNORE INTO failed_auto_posts (id, title) VALUES (100, 'duplicate-source')"
@@ -11583,6 +11598,32 @@ static void test_autoincrement_failed_dml_gaps(void) {
     assert_query_single_value(
         db,
         "SELECT id FROM failed_auto_posts WHERE title = 'after-explicit-ignore'",
+        "7"
+    );
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO failed_auto_posts (id, title) VALUES (100, 'explicit-rolled-back')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM failed_auto_posts WHERE title = 'explicit-rolled-back'",
+        "100"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM failed_auto_posts WHERE title = 'explicit-rolled-back'",
+        "0"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO failed_auto_posts (title) VALUES ('after-explicit-rollback')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM failed_auto_posts WHERE title = 'after-explicit-rollback'",
         "101"
     );
     assert_catalog_table_count(filename, "auto_failed_dml", 1U);

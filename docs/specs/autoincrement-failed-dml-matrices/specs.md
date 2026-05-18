@@ -74,9 +74,9 @@ non-gapless autoincrement behavior:
   attempted explicit high values unused.
 
 The support claim remains representative. Broader failed-DML matrices stay
-planned until prior-success multi-row update failures, `ON DUPLICATE KEY
-UPDATE`, explicit duplicate-insert edge cases, source-driven DML, grouped
-autoincrement keys, and offset/increment cross-products are covered.
+planned until prior-success multi-row update failures, broader
+`ON DUPLICATE KEY UPDATE`, source-driven DML, grouped autoincrement keys, and
+offset/increment cross-products are covered.
 
 ## Design
 
@@ -143,9 +143,9 @@ No dependency, license, or intended size-profile change is introduced.
 
 ## Risks And Open Questions
 
-- MyLite still advances explicit insert values before duplicate checks; this
-  slice deliberately avoids broadening that claim until a dedicated MariaDB
-  comparison matrix covers explicit failed insert edge cases.
+- Explicit high-value duplicate insert failures are covered separately in
+  `docs/specs/autoincrement-explicit-duplicate-inserts/specs.md`; insert-select
+  and grouped-key variants remain planned.
 - This does not prove the harder prior-success multi-row `UPDATE` failure
   shape. The candidate duplicate, CHECK, and FK forms investigated for this
   slice failed before a prior row-level autoincrement advancement was

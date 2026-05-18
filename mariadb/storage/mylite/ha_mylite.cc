@@ -1910,11 +1910,15 @@ int ha_mylite::write_row(const uchar *buf)
   if (!primary_file)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
 
-  if (table->next_number_field && buf == table->record[0])
+  const bool auto_increment_row=
+    table->next_number_field && buf == table->record[0];
+  bool generated_auto_increment= false;
+  if (auto_increment_row)
   {
     const int error= update_auto_increment();
     if (error)
       DBUG_RETURN(error);
+    generated_auto_increment= insert_id_for_cur_row != 0ULL;
   }
 
   mylite_storage_index_entry *index_entries= NULL;
@@ -1926,7 +1930,7 @@ int ha_mylite::write_row(const uchar *buf)
   if (error)
     DBUG_RETURN(error);
 
-  if (!volatile_rows)
+  if (!volatile_rows && generated_auto_increment)
   {
     error= mylite_advance_auto_increment_from_row(primary_file,
                                                   storage_schema(),
@@ -1986,6 +1990,19 @@ int ha_mylite::write_row(const uchar *buf)
       error= mylite_storage_to_handler_error(
         mylite_volatile_advance_auto_increment(primary_file, storage_schema(),
                                                storage_table(), next_value));
+    }
+  }
+  else if (auto_increment_row && !generated_auto_increment)
+  {
+    error= mylite_advance_auto_increment_from_row(primary_file,
+                                                  storage_schema(),
+                                                  storage_table(), table);
+    if (!error)
+    {
+      const mylite_storage_result preserve_result=
+        mylite_storage_preserve_auto_increment_on_rollback(primary_file);
+      if (preserve_result != MYLITE_STORAGE_OK)
+        error= mylite_storage_to_handler_error(preserve_result);
     }
   }
   if (error)

@@ -518,9 +518,9 @@ For first-key table-local autoincrement state, completed durable transaction
 rollback and nested direct savepoint rollback remove generated rows while
 republishing advancing next values for tables that existed at the checkpoint,
 matching MariaDB/InnoDB's persistent-but-non-transactional gap behavior for
-`ROLLBACK` and `ROLLBACK TO SAVEPOINT`. Durable failed and ignored insert
-statements also preserve generated and explicit high-value gaps by marking only
-row-DML checkpoints for autoincrement preservation. Durable first-key generated
+`ROLLBACK` and `ROLLBACK TO SAVEPOINT`. Durable failed and ignored generated
+insert statements also preserve generated gaps by marking only row-DML
+checkpoints for autoincrement preservation. Durable first-key generated
 statements publish MariaDB-requested reservation intervals from
 `get_auto_increment()` before row publication, so failed multi-row inserts keep
 the reserved gap even when later generated rows never reach `write_row()`.
@@ -545,6 +545,9 @@ publication likewise leave attempted explicit high values unused.
 Duplicate-update branches that explicitly set the autoincrement column advance
 the durable next value through the ordinary MyLite update path, including
 transaction rollback preservation and close/reopen persistence.
+Explicit high-value inserts likewise advance only after MyLite duplicate-key
+and FK checks pass, so failed explicit duplicate inserts and ignored skips do
+not consume the attempted value.
 The grouped autoincrement path is correct for the supported storage subset but
 still scans append-only index entries until storage-level B-tree navigation
 exists.
@@ -713,17 +716,17 @@ pages, and catalog records appended after the checkpoint are no longer visible.
 When the restored checkpoint is an outer durable transaction or a nested direct
 savepoint frame, rollback scans appended autoincrement pages before restoring
 the checkpoint and republishes only advancing values for table IDs that existed
-in the checkpoint catalog. Durable row insert paths can also mark their current
-statement checkpoint after publishing an advancing autoincrement value and
-before duplicate-key or foreign-key checks fail, so failed or ignored inserts
-keep generated and explicit high-value gaps without making failed DDL metadata
+in the checkpoint catalog. Durable generated insert paths can also mark their
+current statement checkpoint after publishing an advancing autoincrement value
+and before duplicate-key or foreign-key checks fail, so failed or ignored
+generated inserts keep generated gaps without making failed DDL metadata
 changes durable. Durable first-key generated inserts additionally publish and
 mark the whole requested reservation interval from `get_auto_increment()`, which
 preserves MariaDB/InnoDB-style failed multi-row insert gaps even when not every
-reserved generated value is written. Successful explicit high-value updates to
-first-key autoincrement columns publish the new lower bound through the same
-ordinary autoincrement pages, so transaction rollback restores the row image
-while preserving the advanced counter for tables that existed at the
+reserved generated value is written. Successful explicit high-value inserts and
+updates to first-key autoincrement columns publish the new lower bound through
+the same ordinary autoincrement pages, so transaction rollback restores the row
+image while preserving the advanced counter for tables that existed at the
 checkpoint.
 
 This is still partial SQL transaction support. The MyLite handler still

@@ -25,10 +25,11 @@ MariaDB base: `mariadb-11.8.6`
 - `mariadb/storage/innobase/handler/ha_innodb.cc:ha_innobase::get_auto_increment()`
   can update InnoDB's persistent table autoincrement state when reserving an
   interval, before the row is finally committed.
-- `mariadb/storage/mylite/ha_mylite.cc:ha_mylite::write_row()` currently
-  advances durable MyLite autoincrement state after duplicate-key and child-FK
-  checks. A failed duplicate or FK insert therefore leaves no durable
-  autoincrement page for statement rollback to preserve.
+- `mariadb/storage/mylite/ha_mylite.cc:ha_mylite::write_row()` publishes
+  generated autoincrement state before duplicate-key and child-FK checks so
+  failed generated inserts have durable autoincrement pages for statement
+  rollback to preserve. Explicit values are handled separately and advance
+  only after MyLite duplicate/FK checks pass.
 - `packages/mylite-storage/src/storage.c:mylite_storage_rollback_statement()`
   can now preserve appended autoincrement pages for transaction and nested
   savepoint rollback. A DML-only marker can safely extend that behavior to
@@ -40,11 +41,11 @@ MariaDB base: `mariadb-11.8.6`
   should preserve advancing autoincrement pages.
 - Mark durable MyLite `write_row()` statements after successful autoincrement
   state publication and before duplicate/FK checks can fail.
-- Move durable insert autoincrement publication before duplicate/FK checks so
-  failed or ignored inserts have state to preserve.
+- Move durable generated insert autoincrement publication before duplicate/FK
+  checks so failed or ignored generated inserts have state to preserve.
 - Cover generated duplicate-key insert failure, generated `INSERT IGNORE`
-  duplicate rows, explicit high-value `INSERT IGNORE`, close/reopen
-  persistence, and the storage marker behavior.
+  duplicate rows, explicit high-value duplicate insert non-consumption,
+  close/reopen persistence, and the storage marker behavior.
 
 ## Non-Goals
 
@@ -74,10 +75,13 @@ In `ha_mylite::write_row()` for durable rows:
 
 1. let MariaDB assign the row autoincrement value with
    `update_auto_increment()`;
-2. publish any advancing table-local autoincrement value from the row;
-3. mark the active checkpoint for autoincrement preservation;
+2. publish generated table-local autoincrement values before duplicate/FK
+   checks;
+3. mark the active checkpoint for generated autoincrement preservation;
 4. run duplicate-key and FK checks;
-5. append the row and index entries when checks pass.
+5. publish explicit table-local autoincrement values only after those checks
+   pass;
+6. append the row and index entries when checks pass.
 
 The existing rollback preservation logic still republishes only values greater
 than the checkpoint-visible next value and only for table IDs that existed in
@@ -115,7 +119,8 @@ change is storage/handler code plus tests and documentation.
 - Add SQL storage-engine tests for:
   - generated duplicate-key insert failure;
   - generated duplicate-key `INSERT IGNORE`;
-  - explicit high-value `INSERT IGNORE`; and
+  - explicit high-value duplicate insert failure and `INSERT IGNORE`
+    non-consumption; and
   - close/reopen next-value persistence.
 - Keep failed table-DDL rollback tests green to prove DDL does not inherit the
   DML marker accidentally.
@@ -127,8 +132,8 @@ change is storage/handler code plus tests and documentation.
 
 - A generated value consumed by a failed duplicate insert is not reused.
 - A generated value consumed by `INSERT IGNORE` is not reused.
-- An explicit high autoincrement value in an ignored insert advances the next
-  value without making the ignored row visible.
+- Explicit high autoincrement values in failed or ignored duplicate inserts do
+  not advance the next value or make the duplicate row visible.
 - Failed DDL rollback remains covered and green.
 - Docs distinguish failed-DML gaps from unsupported failed `UPDATE` and broader
   mixed-statement matrices.
