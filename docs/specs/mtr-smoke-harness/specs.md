@@ -87,6 +87,10 @@ MariaDB base: `mariadb-11.8.6`
   `main.in_datetime_241`, `main.str_to_datetime_457`, and
   `main.type_time_6065`.
 - [MTR timezone smoke](../mtr-timezone-smoke/specs.md) adds `main.timezone4`.
+- [MTR temporal, autoincrement, and optimizer smoke](../mtr-temporal-autoincrement-optimizer-smoke/specs.md)
+  adds `main.temporal_scale_4283`, `main.second_frac-9175`,
+  `main.mdev316`, `main.insert_update_autoinc-7150`,
+  `main.strict_autoinc_3heap`, and `main.optimizer_costs2`.
 - [MTR parser and comparison smoke](../mtr-parser-comparison-smoke/specs.md)
   adds `main.brackets`, `main.comments`, and `main.compare`.
 - [MTR parser and expression smoke](../mtr-parser-expression-smoke/specs.md)
@@ -196,6 +200,8 @@ The default curated list remains intentionally baseline-oriented:
 - `main.type_time_round`.
 - `main.type_time_6065`.
 - `main.type_timestamp_round`.
+- `main.temporal_scale_4283`.
+- `main.second_frac-9175`.
 - `main.timezone4`.
 - `main.brackets`.
 - `main.comments`.
@@ -209,9 +215,12 @@ The default curated list remains intentionally baseline-oriented:
 - `main.implicit_char_to_num_conversion`.
 - `main.item_types`.
 - `main.round`.
+- `main.mdev316`.
 - `main.sql_safe_updates`.
 - `main.func_in`.
 - `main.update_ignore_216`.
+- `main.insert_update_autoinc-7150`.
+- `main.strict_autoinc_3heap`.
 - `main.replace`.
 - `main.bulk_replace`.
 - `main.create_replace_tmp`.
@@ -238,6 +247,7 @@ The default curated list remains intentionally baseline-oriented:
 - `main.order_by_zerolength-4285`.
 - `main.order_by_optimizer`.
 - `main.order_by-mdev-10122`.
+- `main.optimizer_costs2`.
 - `main.order_fill_sortbuf`.
 - `main.subselect_union_rand`.
 - `main.prepare`.

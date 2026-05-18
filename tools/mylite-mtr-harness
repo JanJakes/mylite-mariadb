@@ -37,6 +37,8 @@ default_tests=(
   main.type_time_round
   main.type_time_6065
   main.type_timestamp_round
+  main.temporal_scale_4283
+  main.second_frac-9175
   main.timezone4
   main.brackets
   main.comments
@@ -50,9 +52,12 @@ default_tests=(
   main.implicit_char_to_num_conversion
   main.item_types
   main.round
+  main.mdev316
   main.sql_safe_updates
   main.func_in
   main.update_ignore_216
+  main.insert_update_autoinc-7150
+  main.strict_autoinc_3heap
   main.replace
   main.bulk_replace
   main.create_replace_tmp
@@ -79,6 +84,7 @@ default_tests=(
   main.order_by_zerolength-4285
   main.order_by_optimizer
   main.order_by-mdev-10122
+  main.optimizer_costs2
   main.order_fill_sortbuf
   main.subselect_union_rand
   main.prepare

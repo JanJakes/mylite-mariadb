@@ -99,23 +99,26 @@ CAST/CONVERT behavior, CASE-family and ANSI SQL-mode expression behavior,
 selected numeric, character/varchar, binary-string, binary/varbinary,
 national-character, interval, and type
 behavior, selected date,
-temporal-rounding, temporal-function, alternate-timezone conversion, and
-time/datetime comparison behavior, selected parser/comment, keyword,
+temporal-rounding, temporal-function, alternate-timezone conversion,
+temporal scale, microsecond parsing, and time/datetime comparison behavior,
+selected parser/comment, keyword,
 CTE-cycle, precedence, expression, type-coercion, rounding, safe-update, and
 comparison behavior, selected `IN` / `NOT IN` predicate behavior, selected
 subquery, update-ignore, `REPLACE`, `RETURNING`, temporary create-or-replace,
 primary-key lookup, selected DDL/name and comment metadata behavior,
 selected DDL constraint/index metadata and UCA CTAS behavior,
 selected `ORDER BY` optimizer
-and aggregate-ordering behavior, UNION, and prepared-statement behavior,
-selected scalar operator behavior, selected
+and aggregate-ordering behavior, optimizer-cost metadata, UNION, and
+prepared-statement behavior, selected scalar operator behavior, selected
 bit/extraction/replacement/regexp scalar-function behavior, selected
 default-expression and weight-string behavior, selected string/format function
-behavior, selected crypto/KDF function behavior, selected disabled DES
-encryption-function behavior, selected JSON equality behavior, selected
-aggregate DISTINCT behavior, selected date-format behavior, selected ASCII,
-legacy, and UTF-32 charset edge behavior, selected filesystem charset behavior,
-and selected charset diagnostics, collation-default behavior,
+behavior, selected charset-conversion expression behavior, selected crypto/KDF
+function behavior, selected disabled DES encryption-function behavior,
+selected JSON equality behavior, selected aggregate DISTINCT behavior,
+selected autoincrement ODKU and strict HEAP autoincrement behavior, selected
+date-format behavior, selected ASCII, legacy, and UTF-32 charset edge
+behavior, selected filesystem charset behavior, and selected charset
+diagnostics, collation-default behavior,
 UTF-32 `character_set_collations`, and column/context collation behavior,
 while MariaDB MTR comparison
 suites and broader application-schema and runtime suites remain planned.
