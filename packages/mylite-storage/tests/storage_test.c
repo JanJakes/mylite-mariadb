@@ -110,6 +110,7 @@ static void test_update_and_delete_rows(void);
 static void test_index_entries(void);
 static void test_index_root_metadata(void);
 static void test_index_leaf_pages(void);
+static void test_multi_page_index_leaf_pages(void);
 static void assert_index_prefix_exists(
     const char *filename,
     const unsigned char *key_prefix,
@@ -337,6 +338,7 @@ int main(void) {
     test_index_entries();
     test_index_root_metadata();
     test_index_leaf_pages();
+    test_multi_page_index_leaf_pages();
     test_autoincrement_state();
     test_truncate_table_lifecycle();
     test_statement_checkpoints();
@@ -1909,6 +1911,148 @@ static void test_index_leaf_pages(void) {
         sizeof(secondary_key),
         delete_tail_row_ids,
         sizeof(delete_tail_row_ids) / sizeof(delete_tail_row_ids[0])
+    );
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_multi_page_index_leaf_pages(void) {
+    enum { entry_count = 400U };
+
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "multi-page-index-leaf-pages.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    unsigned long long row_ids[entry_count];
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    for (unsigned i = 0U; i < entry_count; ++i) {
+        unsigned char row[8] = {0};
+        unsigned char key[4] = {0};
+        put_test_u32_le(row, 0U, i + 1U);
+        put_test_u32_le(key, 0U, i + 1U);
+        mylite_storage_index_entry index_entry = {
+            .size = sizeof(index_entry),
+            .index_number = 0U,
+            .key = key,
+            .key_size = sizeof(key),
+        };
+        assert(
+            mylite_storage_append_row_with_index_entries(
+                filename,
+                "app",
+                "posts",
+                row,
+                sizeof(row),
+                &index_entry,
+                1U,
+                &row_ids[i]
+            ) == MYLITE_STORAGE_OK
+        );
+    }
+
+    assert(mylite_storage_rebuild_index_leaf(filename, "app", "posts", 0U) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    const size_t entry_capacity =
+        (MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET) /
+        (MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_HEADER_SIZE + 4U);
+    const size_t expected_leaf_pages = ((entry_count - 1U) / entry_capacity) + 1U;
+    assert_index_root(
+        filename,
+        "app",
+        "posts",
+        0U,
+        header.page_count - (unsigned long long)expected_leaf_pages,
+        entry_count
+    );
+
+    unsigned char first_key[4] = {0};
+    unsigned char second_page_key[4] = {0};
+    unsigned char last_key[4] = {0};
+    unsigned char missing_key[4] = {0};
+    put_test_u32_le(first_key, 0U, 1U);
+    put_test_u32_le(second_page_key, 0U, (unsigned)entry_capacity + 1U);
+    put_test_u32_le(last_key, 0U, entry_count);
+    put_test_u32_le(missing_key, 0U, entry_count + 1U);
+    assert_index_entry_lookup(
+        filename,
+        0U,
+        first_key,
+        sizeof(first_key),
+        MYLITE_STORAGE_OK,
+        row_ids[0]
+    );
+    assert_index_entry_lookup(
+        filename,
+        0U,
+        second_page_key,
+        sizeof(second_page_key),
+        MYLITE_STORAGE_OK,
+        row_ids[entry_capacity]
+    );
+    assert_index_entry_lookup(
+        filename,
+        0U,
+        last_key,
+        sizeof(last_key),
+        MYLITE_STORAGE_OK,
+        row_ids[entry_count - 1U]
+    );
+    assert_index_entry_lookup(
+        filename,
+        0U,
+        missing_key,
+        sizeof(missing_key),
+        MYLITE_STORAGE_NOTFOUND,
+        0ULL
+    );
+
+    unsigned char tail_row[8] = {0};
+    unsigned char tail_key[4] = {0};
+    unsigned long long tail_row_id = 0ULL;
+    put_test_u32_le(tail_row, 0U, entry_count + 1U);
+    put_test_u32_le(tail_key, 0U, 200U);
+    mylite_storage_index_entry tail_entry = {
+        .size = sizeof(tail_entry),
+        .index_number = 0U,
+        .key = tail_key,
+        .key_size = sizeof(tail_key),
+    };
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            tail_row,
+            sizeof(tail_row),
+            &tail_entry,
+            1U,
+            &tail_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    const unsigned long long tail_expected_row_ids[] = {row_ids[199], tail_row_id};
+    assert_exact_index_entries(
+        filename,
+        0U,
+        tail_key,
+        sizeof(tail_key),
+        tail_expected_row_ids,
+        sizeof(tail_expected_row_ids) / sizeof(tail_expected_row_ids[0])
     );
 
     assert(unlink(filename) == 0);

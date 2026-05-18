@@ -57,9 +57,9 @@ schemas usually request InnoDB even though MyLite owns the durable storage.
   measured only after the prepared routed-read coverage in
   `docs/specs/prepared-routed-select-reads/`.
 - Report published-leaf secondary exact-select rows only after verifying
-  `mylite_storage_read_index_root()` sees the root. Larger runs that exceed the
-  current single-page leaf limit print a skip note instead of labelling
-  fallback scans as leaf-backed timings.
+  `mylite_storage_read_index_root()` sees the root. Runs that cannot publish a
+  root under current leaf-run or catalog limits print a skip note instead of
+  labelling fallback scans as leaf-backed timings.
 - Use a temporary `.mylite` file and clean it up after the run.
 
 ## File Lifecycle
@@ -97,7 +97,7 @@ are true.
 - Prepared and direct timings are labelled separately.
 - Secondary exact-read rows include returned-row counts and checksums, with
   scan-fallback and published leaf-root paths labelled separately when the
-  current run can publish a single-page leaf.
+  current run can publish a leaf run.
 - No benchmark result is documented as a product performance claim.
 
 ## Risks And Open Questions
