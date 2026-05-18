@@ -47,8 +47,9 @@ Covered by this slice:
   definitions.
 - `ALTER TABLE ... ADD CONSTRAINT name UNIQUE (...)` through copy rebuilds.
 - `ALTER TABLE ... ADD CONSTRAINT name UNIQUE IF NOT EXISTS (...)` duplicate
-  skips and warning capture.
-- `ALTER TABLE ... DROP CONSTRAINT name` for a unique constraint, including
+  skips, missing adds, and warning capture where applicable.
+- `ALTER TABLE ... DROP CONSTRAINT name` and
+  `DROP CONSTRAINT IF EXISTS name` for unique constraints, including
   close/reopen before the drop.
 - `ALTER TABLE ... DROP CONSTRAINT IF EXISTS missing_name` skip behavior.
 - Duplicate-key enforcement and forced-index reads before and after close/reopen
@@ -73,8 +74,8 @@ constraint syntax arrives at MyLite as maintained key metadata:
    metadata.
 3. Add a named unique constraint with `ALTER TABLE ... ADD CONSTRAINT ...`,
    verify duplicate-key rejection, then close/reopen and repeat the checks.
-4. Exercise `ADD CONSTRAINT ... UNIQUE IF NOT EXISTS` and
-   `DROP CONSTRAINT IF EXISTS` skip paths.
+4. Exercise duplicate and missing `ADD CONSTRAINT ... UNIQUE IF NOT EXISTS`
+   paths plus existing and missing `DROP CONSTRAINT IF EXISTS` paths.
 5. Drop a unique constraint with `DROP CONSTRAINT`, verify the index disappears,
    forced-index reads fail, and duplicate values are accepted.
 6. Add another unique constraint after the drop and verify it persists after
@@ -133,8 +134,9 @@ slice adds tests and docs only unless investigation exposes a bug.
   index reads before and after close/reopen.
 - Dropping a unique constraint through `DROP CONSTRAINT` removes the maintained
   key and allows duplicate values afterward.
-- Missing and duplicate existence-option paths warn without mutating table
-  state.
+- Missing add existence-option paths publish new supported constraints, while
+  duplicate add and missing drop existence-option paths warn without mutating
+  table state.
 - Durable sidecar gates pass.
 
 ## Implementation Status
@@ -145,10 +147,12 @@ Implemented:
   `CONSTRAINT ... PRIMARY KEY` and `CONSTRAINT ... UNIQUE` definitions.
 - The test verifies `SHOW INDEX` metadata, duplicate-key rejection, forced-index
   reads, catalog metadata, and sidecar gates for the initial constraints.
-- `ALTER TABLE ... ADD CONSTRAINT ... UNIQUE` and duplicate
+- `ALTER TABLE ... ADD CONSTRAINT ... UNIQUE`, duplicate
+  `ADD CONSTRAINT ... UNIQUE IF NOT EXISTS`, and missing
   `ADD CONSTRAINT ... UNIQUE IF NOT EXISTS` are covered through copy rebuilds.
-- `ALTER TABLE ... DROP CONSTRAINT IF EXISTS missing_name` and
-  `DROP CONSTRAINT author_unique` are covered after close/reopen.
+- `ALTER TABLE ... DROP CONSTRAINT IF EXISTS missing_name`,
+  `DROP CONSTRAINT IF EXISTS slug_unique`, and `DROP CONSTRAINT author_unique`
+  are covered after close/reopen.
 - The test proves the dropped unique constraint stops enforcing duplicates and
   that a later added unique constraint survives another close/reopen cycle.
 - The `primary-key-alter-ddl` follow-up slice covers primary-key add/drop/re-add

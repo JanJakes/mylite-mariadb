@@ -7734,6 +7734,7 @@ static void test_non_check_constraint_ddl(void) {
     table_context reopened_primary_index_rows = {0};
     table_context reopened_slug_index_rows = {0};
     table_context reopened_author_index_rows = {0};
+    table_context dropped_slug_index_rows = {0};
     table_context missing_author_index_rows = {0};
     table_context category_index_rows = {0};
     table_context reopened_missing_author_index_rows = {0};
@@ -7850,6 +7851,23 @@ static void test_non_check_constraint_ddl(void) {
     );
     assert(errmsg == NULL);
     assert(reopened_slug_index_rows.rows == 1);
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE constraint_posts "
+        "DROP CONSTRAINT IF EXISTS slug_unique, ALGORITHM=COPY"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM constraint_posts WHERE Key_name = 'slug_unique'",
+            table_callback,
+            &dropped_slug_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(dropped_slug_index_rows.rows == 0);
+    assert_exec_succeeds(db, "INSERT INTO constraint_posts VALUES (30, 'beta', 'jim', 'misc')");
     assert(
         mylite_exec(
             db,
@@ -7897,7 +7915,7 @@ static void test_non_check_constraint_ddl(void) {
     assert_exec_succeeds(
         db,
         "ALTER TABLE constraint_posts "
-        "ADD CONSTRAINT category_unique UNIQUE (category), ALGORITHM=COPY"
+        "ADD CONSTRAINT category_unique UNIQUE IF NOT EXISTS (category), ALGORITHM=COPY"
     );
     assert(
         mylite_exec(

@@ -304,7 +304,9 @@ add/drop/rename including representative `ADD COLUMN IF NOT EXISTS` and
 standalone index create/drop including representative existence-option skips,
 primary-key add/drop/re-add including duplicate `ADD PRIMARY KEY IF NOT EXISTS`
 warnings and failed re-add rollback over duplicate rows, failed unique-key add
-rollback over duplicate existing rows, and autoincrement metadata updates.
+rollback over duplicate existing rows, duplicate and missing
+`ADD CONSTRAINT ... UNIQUE IF NOT EXISTS` paths, existing and missing unique-key
+`DROP CONSTRAINT IF EXISTS` paths, and autoincrement metadata updates.
 `LOCK=NONE` and in-place/instant/no-copy ALTER requests are explicitly
 rejected until MyLite has online DDL and lock integration.
 Unsupported index rebuilds and transactional DDL rollback remain planned until
