@@ -355,7 +355,10 @@ old rows, old indexes, and old autoincrement state are not SQL-visible after
 replacement. Representative failed OR REPLACE rollback covers self-LIKE
 rejection, unsupported replacement definitions, and duplicate-key replacement
 CTAS while preserving old target metadata, rows, indexes, and autoincrement
-state through the existing statement checkpoint. Representative failed
+state through the existing statement checkpoint. FK-aware OR REPLACE coverage
+rejects replacing a referenced parent without dropping parent rows, child rows,
+or FK metadata, and verifies replacing a child table removes its old FK
+metadata before publishing the replacement definition. Representative failed
 multi-table DROP/RENAME rollback preserves original target metadata, rows, and
 indexes through the same checkpoint; broader locking, temporary-table edge
 cases, and SQL transaction/savepoint semantics remain planned.
