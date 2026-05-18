@@ -56,6 +56,9 @@ Covered by this slice:
   for supported constraint-backed unique keys.
 - Composite named unique constraints added through copy ALTER, including
   duplicate tuple checks, forced-index reads, close/reopen, and drop behavior.
+- Explicit physical key-name syntax for unique constraints, where
+  `CONSTRAINT logical_name UNIQUE KEY physical_name (...)` is maintained and
+  dropped by the physical key name.
 - Generated-column unique constraints added and dropped through copy ALTER.
 
 Still planned:
@@ -158,6 +161,9 @@ Implemented:
   are covered after close/reopen.
 - The test proves the dropped unique constraint stops enforcing duplicates and
   that a later added unique constraint survives another close/reopen cycle.
+- The `unique-constraint-key-name-matrix` follow-up slice covers explicit
+  physical key names on unique constraints and verifies that `DROP CONSTRAINT`
+  resolves by the physical key name rather than the optional constraint label.
 - The `primary-key-alter-ddl` follow-up slice covers primary-key add/drop/re-add
   through copy ALTER, including duplicate `ADD PRIMARY KEY IF NOT EXISTS`
   warnings and failed re-add over duplicate rows.

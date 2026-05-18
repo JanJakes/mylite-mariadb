@@ -187,6 +187,7 @@ static void test_row_dml_transactions(void);
 static void test_create_table_persists_catalog_metadata(void);
 static void test_check_constraint_if_exists(void);
 static void test_non_check_constraint_ddl(void);
+static void test_unique_constraint_key_name_matrix(void);
 static void test_composite_unique_constraint_ddl(void);
 static void test_nullable_composite_unique_constraint_ddl(void);
 static void test_generated_unique_constraint_ddl(void);
@@ -518,6 +519,7 @@ int main(int argc, char **argv) {
     test_create_table_persists_catalog_metadata();
     test_check_constraint_if_exists();
     test_non_check_constraint_ddl();
+    test_unique_constraint_key_name_matrix();
     test_composite_unique_constraint_ddl();
     test_nullable_composite_unique_constraint_ddl();
     test_generated_unique_constraint_ddl();
@@ -8165,6 +8167,157 @@ static void test_non_check_constraint_ddl(void) {
         "InnoDB",
         "MYLITE"
     );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_unique_constraint_key_name_matrix(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    table_context physical_index_rows = {0};
+    table_context logical_index_rows = {0};
+    table_context retained_physical_index_rows = {0};
+    table_context dropped_physical_index_rows = {0};
+    table_context reopened_physical_index_rows = {0};
+    char *errmsg = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE unique_constraint_names");
+    assert_exec_succeeds(db, "USE unique_constraint_names");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE named_unique_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "code VARCHAR(32) NOT NULL, "
+        "slug VARCHAR(32) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO named_unique_posts VALUES "
+        "(1, 'code-alpha', 'slug-alpha'), "
+        "(2, 'code-beta', 'slug-beta')"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE named_unique_posts "
+        "ADD CONSTRAINT logical_code_unique "
+        "UNIQUE KEY physical_code_key (code), ALGORITHM=COPY"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM named_unique_posts WHERE Key_name = 'physical_code_key'",
+            table_callback,
+            &physical_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(physical_index_rows.rows == 1);
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM named_unique_posts WHERE Key_name = 'logical_code_unique'",
+            table_callback,
+            &logical_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(logical_index_rows.rows == 0);
+    assert_exec_fails(
+        db,
+        "INSERT INTO named_unique_posts VALUES (3, 'code-alpha', 'slug-gamma')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM named_unique_posts FORCE INDEX (physical_code_key) "
+        "WHERE code = 'code-beta'",
+        "2"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE named_unique_posts "
+        "DROP CONSTRAINT IF EXISTS logical_code_unique, ALGORITHM=COPY"
+    );
+    assert_warning_message_contains(db, "logical_code_unique");
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM named_unique_posts WHERE Key_name = 'physical_code_key'",
+            table_callback,
+            &retained_physical_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(retained_physical_index_rows.rows == 1);
+    assert_exec_fails(
+        db,
+        "INSERT INTO named_unique_posts VALUES (3, 'code-alpha', 'slug-gamma')"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE named_unique_posts DROP CONSTRAINT physical_code_key, ALGORITHM=COPY"
+    );
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM named_unique_posts WHERE Key_name = 'physical_code_key'",
+            table_callback,
+            &dropped_physical_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(dropped_physical_index_rows.rows == 0);
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO named_unique_posts VALUES (3, 'code-alpha', 'slug-gamma')"
+    );
+
+    assert_catalog_table_count(filename, "unique_constraint_names", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "unique_constraint_names",
+        "named_unique_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE unique_constraint_names");
+    assert(
+        mylite_exec(
+            db,
+            "SHOW INDEX FROM named_unique_posts WHERE Key_name = 'physical_code_key'",
+            table_callback,
+            &reopened_physical_index_rows,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(reopened_physical_index_rows.rows == 0);
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM named_unique_posts WHERE code = 'code-alpha'",
+        "2"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO named_unique_posts VALUES (4, 'code-alpha', 'slug-delta')"
+    );
+    assert_catalog_table_count(filename, "unique_constraint_names", 1U);
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 

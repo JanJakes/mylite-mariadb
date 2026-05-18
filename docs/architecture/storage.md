@@ -309,8 +309,9 @@ primary-key add/drop/re-add including duplicate `ADD PRIMARY KEY IF NOT EXISTS`
 warnings and failed re-add rollback over duplicate rows, failed unique-key add
 rollback over duplicate existing rows, duplicate and missing
 `ADD CONSTRAINT ... UNIQUE IF NOT EXISTS` paths, existing and missing unique-key
-`DROP CONSTRAINT IF EXISTS` paths, named composite unique constraints through
-copy ALTER, and autoincrement metadata updates.
+`DROP CONSTRAINT IF EXISTS` paths, explicit unique-constraint key-name
+semantics, named composite unique constraints through copy ALTER, and
+autoincrement metadata updates.
 `LOCK=NONE` and in-place/instant/no-copy ALTER requests are explicitly
 rejected until MyLite has online DDL and lock integration.
 Unsupported index rebuilds and transactional DDL rollback remain planned until
