@@ -777,16 +777,16 @@ the same ordinary autoincrement pages, so transaction rollback restores the row
 image while preserving the advanced counter for tables that existed at the
 checkpoint.
 
-This is still partial SQL transaction support. The MyLite handler still
-advertises non-transactional engine flags. Public `libmylite` SQL entry points
-continue to reject global autocommit changes, unsupported `SET TRANSACTION`
-forms, unsupported transaction modifiers, global transaction variables,
-direct-execution parameter markers, expression-valued or global parameterized
-transaction-control `SET` forms, bound `DEFAULT` / `RELEASE`
-transaction-control values, release completion defaults, XA, and durable direct
-or prepared DDL inside active transactions.
-Durable transactional DDL, isolation, WAL/checkpoint, broader native
-MEMORY/HEAP parity, and transactional engine-flag support remain planned.
+This is still partial SQL transaction support. The MyLite handler advertises
+transactional table flags for MariaDB's bounded row-DML transaction capability
+checks, while public `libmylite` SQL entry points continue to reject global
+autocommit changes, unsupported `SET TRANSACTION` forms, unsupported
+transaction modifiers, global transaction variables, direct-execution parameter
+markers, expression-valued or global parameterized transaction-control `SET`
+forms, bound `DEFAULT` / `RELEASE` transaction-control values, release
+completion defaults, XA, and durable direct or prepared DDL inside active
+transactions. Durable transactional DDL, isolation, WAL/checkpoint, and broader
+native MEMORY/HEAP parity remain planned.
 
 The storage design must preserve the full write-concurrency goal. Early
 milestones may use coarse locks for correctness, but the page, transaction,

@@ -157,6 +157,7 @@ typedef struct catalog_table_context {
 
 static void test_show_engines_reports_mylite(void);
 static void test_unsupported_engine_request_policy(void);
+static void test_transactional_engine_flags(void);
 static void test_blackhole_engine_routes_to_mylite(void);
 static void test_memory_engine_routes_to_mylite(void);
 static void test_memory_autoincrement_overflow(void);
@@ -415,6 +416,8 @@ static void assert_index_ignored(
     const char *index_name,
     const char *expected_ignored
 );
+static void assert_no_warnings(mylite_db *db);
+static void assert_no_warning_message_contains(mylite_db *db, const char *unexpected_message);
 static void assert_warning_message_contains(mylite_db *db, const char *expected_message);
 static void exec_sql_fixture(mylite_db *db, const char *fixture_name);
 static int sql_fixture_cursor_is_separator(
@@ -502,6 +505,7 @@ int main(int argc, char **argv) {
 
     test_show_engines_reports_mylite();
     test_unsupported_engine_request_policy();
+    test_transactional_engine_flags();
     test_blackhole_engine_routes_to_mylite();
     test_memory_engine_routes_to_mylite();
     test_memory_autoincrement_overflow();
@@ -737,6 +741,48 @@ static void test_unsupported_engine_request_policy(void) {
     assert_unsupported_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE SEQUENCE");
     assert_catalog_table_count(filename, "app", 1U);
     assert_catalog_table_metadata(filename, "app", "csv_comment", "InnoDB", "MYLITE");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_transactional_engine_flags(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    char *show_create = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE tx_flag_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL"
+        ") ENGINE=InnoDB TRANSACTIONAL=1"
+    );
+    assert_no_warning_message_contains(db, "transactional");
+    assert_no_warning_message_contains(db, "TRANSACTIONAL");
+    assert_catalog_table_metadata(filename, "app", "tx_flag_posts", "InnoDB", "MYLITE");
+    show_create = capture_show_create_table(db, "tx_flag_posts");
+    assert(strstr(show_create, "TRANSACTIONAL=1") != NULL);
+    assert(strstr(show_create, "/* TRANSACTIONAL=1 */") == NULL);
+    free(show_create);
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_flag_posts VALUES (1, 'rolled')");
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_no_warnings(db);
+    assert_query_single_value(db, "SELECT COUNT(*) FROM tx_flag_posts", "0");
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "CREATE TEMPORARY TABLE tx_flag_temp (id INT) ENGINE=InnoDB");
+    assert_exec_succeeds(db, "INSERT INTO tx_flag_temp VALUES (1)");
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM tx_flag_temp", "1");
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
@@ -20127,6 +20173,45 @@ static void assert_warning_message_contains(mylite_db *db, const char *expected_
         );
     }
     assert(0);
+}
+
+static void assert_no_warnings(mylite_db *db) {
+    const unsigned warning_count = mylite_warning_count(db);
+    if (warning_count == 0U) {
+        return;
+    }
+
+    for (unsigned index = 0U; index < warning_count; ++index) {
+        mylite_warning_level level = MYLITE_WARNING_NOTE;
+        unsigned code = 0U;
+        const char *message = NULL;
+        assert(mylite_warning(db, index, &level, &code, &message) == MYLITE_OK);
+        fprintf(
+            stderr,
+            "Unexpected warning %u: level=%u code=%u message=%s\n",
+            index,
+            (unsigned)level,
+            code,
+            message != NULL ? message : "(null)"
+        );
+    }
+    assert(warning_count == 0U);
+}
+
+static void assert_no_warning_message_contains(mylite_db *db, const char *unexpected_message) {
+    const unsigned warning_count = mylite_warning_count(db);
+    for (unsigned index = 0U; index < warning_count; ++index) {
+        mylite_warning_level level = MYLITE_WARNING_NOTE;
+        unsigned code = 0U;
+        const char *message = NULL;
+        assert(mylite_warning(db, index, &level, &code, &message) == MYLITE_OK);
+        (void)level;
+        (void)code;
+        if (message != NULL && strstr(message, unexpected_message) != NULL) {
+            fprintf(stderr, "Unexpected warning containing %s: %s\n", unexpected_message, message);
+            assert(0);
+        }
+    }
 }
 
 static void test_truncate_table_lifecycle(void) {
