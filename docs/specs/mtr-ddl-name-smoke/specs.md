@@ -4,18 +4,22 @@
 
 Extend the opt-in MariaDB MTR smoke runner with exact upstream tests
 `main.comment_column2`, `main.check`, `main.create_drop_db`,
-`main.lowercase_utf8`, and `main.key_diff`. This adds curated embedded
-baseline coverage for long column-comment metadata, `CHECK TABLE` behavior,
-database create/drop existence options, lowercase UTF-8 table-name lookup, and
-key comparison behavior over different character-key lengths.
+`main.lowercase_utf8`, `main.key_diff`, `main.check_constraint_show`,
+`main.constraints`, `main.create_drop_index`, `main.create-uca`, and
+`main.create_w_max_indexes_64`. This adds curated embedded baseline coverage
+for long column-comment metadata, `CHECK TABLE` behavior, database create/drop
+existence options, lowercase UTF-8 table-name lookup, key comparison behavior
+over different character-key lengths, CHECK-constraint `SHOW CREATE TABLE`
+metadata, constraint syntax and enforcement, index create/drop variants, UCA
+collation propagation through CTAS, and maximum-index DDL limits.
 
 ## Non-Goals
 
 - Broad DDL, metadata, or identifier MTR coverage.
 - Running MTR against MyLite storage-engine routing.
 - Adding MTR to default compatibility harness groups.
-- Normalizing default-engine or Aria `PAGE_CHECKSUM=1` expected-result
-  differences.
+- Normalizing result differences outside selected `SHOW CREATE TABLE`
+  default-engine and Aria `PAGE_CHECKSUM=1` output.
 - Treating server account or privilege behavior inside `main.check` as
   MyLite's final embedded account-management surface.
 
@@ -39,13 +43,26 @@ MariaDB base: `mariadb-11.8.6`
   feature guard.
 - `mariadb/mysql-test/main/key_diff.test` covers join and lookup behavior over
   different-length character keys.
+- `mariadb/mysql-test/main/check_constraint_show.test` covers column-level and
+  table-level CHECK constraints plus information-schema table-constraint
+  visibility.
+- `mariadb/mysql-test/main/constraints.test` covers CHECK constraint syntax,
+  failed constraint enforcement, named UNIQUE constraints, stored-procedure
+  ALTER paths, CTAS constraint preservation, and prepared statement table
+  creation.
+- `mariadb/mysql-test/main/create_drop_index.test` covers `CREATE INDEX IF NOT
+  EXISTS`, `DROP INDEX IF EXISTS`, and `CREATE OR REPLACE INDEX` table
+  metadata.
+- `mariadb/mysql-test/main/create-uca.test` covers UCA collation and default
+  propagation through `CREATE TABLE ... SELECT`.
+- `mariadb/mysql-test/main/create_w_max_indexes_64.test` covers the 64-key
+  limit and key-part/name limit diagnostics.
 - All selected tests pass under the MyLite MTR smoke profile without upstream
-  source changes.
+  result-file changes. The CHECK, constraint, index, UCA, and maximum-index
+  tests need narrow `SHOW CREATE TABLE` replacement rules because the smoke
+  profile runs with Aria as the default storage engine and emits
+  `PAGE_CHECKSUM=1`.
 - Probed nearby DDL/name candidates stay outside this slice:
-  - `main.check_constraint_show`, `main.constraints`, `main.create_drop_index`,
-    `main.create-uca`, and `main.create_w_max_indexes_64` have
-    default-engine or Aria `PAGE_CHECKSUM=1` result differences under the
-    embedded profile.
   - `main.comment_table`, `main.comment_column`, and `main.comment_index`
     needed profile-specific `PAGE_CHECKSUM=1` normalization and are now
     covered by [MTR comment DDL smoke](../mtr-comment-ddl-smoke/specs.md).
@@ -68,18 +85,22 @@ MariaDB base: `mariadb-11.8.6`
 
 The compatibility matrix can say the opt-in embedded MTR smoke runner covers
 selected DDL/name behavior including column comments, `CHECK TABLE`, database
-create/drop existence options, lowercase UTF-8 table lookup, and
-different-length key comparisons. This remains curated MariaDB embedded
-baseline coverage, not broad MTR-scale comparison and not MyLite
-storage-routing evidence.
+create/drop existence options, lowercase UTF-8 table lookup, different-length
+key comparisons, CHECK-constraint metadata, constraint syntax/enforcement,
+index create/drop variants, UCA collation CTAS propagation, and maximum-index
+limits. This remains curated MariaDB embedded baseline coverage, not broad
+MTR-scale comparison and not MyLite storage-routing evidence.
 
 ## Design
 
 - Add the selected DDL/name tests to `tools/mylite-mtr-harness`'s default
   curated list.
-- Do not modify upstream test files for this slice.
+- Add narrow upstream test-file `--replace_result` rules only before affected
+  `SHOW CREATE TABLE` statements, mapping the smoke profile's `ENGINE=Aria` and
+  `PAGE_CHECKSUM=1` output back to the upstream `ENGINE=MyISAM` expectation.
 - Keep skipped, debug-only, platform-only, disabled-engine, unsupported-surface,
-  hanging, and result-normalization candidates outside the default list.
+  hanging, and unrelated result-normalization candidates outside the default
+  list.
 
 ## File Lifecycle
 
@@ -99,7 +120,8 @@ still be reclaimed with `rm -rf build/mariadb-mtr-smoke` or `rm -rf build`.
 ## Test Plan
 
 - `tools/mylite-mtr-harness list`
-- `tools/mylite-mtr-harness run main.comment_column2 main.check main.create_drop_db main.lowercase_utf8 main.key_diff`
+- `tools/mylite-mtr-harness probe main.check_constraint_show main.constraints main.create_drop_index main.create-uca main.create_w_max_indexes_64`
+- `tools/mylite-mtr-harness run main.comment_column2 main.check main.create_drop_db main.lowercase_utf8 main.key_diff main.check_constraint_show main.constraints main.create_drop_index main.create-uca main.create_w_max_indexes_64`
 - `tools/mylite-mtr-harness run`
 - `bash -n tools/mariadb-embedded-build tools/mylite-mtr-harness tools/mylite-compat-harness tools/mylite-size-report`
 - `find mariadb/mysql-test -name '*.reject' -print`
@@ -109,13 +131,14 @@ still be reclaimed with `rm -rf build/mariadb-mtr-smoke` or `rm -rf build`.
 
 - The default MTR smoke list includes the selected DDL/name tests.
 - All selected tests pass under the MyLite MTR smoke profile.
-- No upstream MariaDB test files are modified for this slice.
+- Upstream MariaDB test-file changes are limited to explicit result
+  normalization for the MTR smoke profile's default-engine output.
 - Docs keep the claim scoped to curated opt-in MTR smoke coverage.
 
 ## Risks And Open Questions
 
-- Many nearby DDL tests appear mechanically admit-able only after
-  profile-specific expected-result normalization; that policy should stay
-  separate from pass-gated test admission.
+- Many nearby DDL tests appear mechanically admit-able only after additional
+  profile-specific expected-result normalization; each should still be probed
+  and documented separately before admission.
 - This remains MariaDB embedded baseline coverage and does not prove MyLite
   storage-routing DDL or metadata behavior.

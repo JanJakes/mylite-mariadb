@@ -64,6 +64,11 @@ default_tests=(
   main.comment_column
   main.comment_table
   main.comment_index
+  main.check_constraint_show
+  main.constraints
+  main.create_drop_index
+  main.create-uca
+  main.create_w_max_indexes_64
   main.comment_column2
   main.check
   main.create_drop_db

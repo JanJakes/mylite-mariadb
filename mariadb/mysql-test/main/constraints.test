@@ -2,24 +2,28 @@
 # Testing of constraints
 #
 create table t1 (a int check (a>0));
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 insert into t1 values (1);
 --error ER_CONSTRAINT_FAILED
 insert into t1 values (0);
 drop table t1;
 create table t1 (a int, b int, check (a>b));
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 insert into t1 values (1,0);
 --error ER_CONSTRAINT_FAILED
 insert into t1 values (0,1);
 drop table t1;
 create table t1 (a int ,b int, constraint abc check (a>b));
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 insert into t1 values (1,0);
 --error ER_CONSTRAINT_FAILED
 insert into t1 values (0,1);
 drop table t1;
 create table t1 (a int null);
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 insert into t1 values (1),(NULL);
 drop table t1;
@@ -27,6 +31,7 @@ create table t1 (a int null);
 alter table t1 add constraint constraint_1 unique (a);
 alter table t1 add constraint unique key_1(a);
 alter table t1 add constraint constraint_2 unique key_2(a);
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 drop table t1;
 
@@ -95,6 +100,7 @@ CONSTRAINT constr CHECK (f6 >= 0)
 );
  
 SELECT * FROM long_enough_name AS tbl;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE long_enough_name;
  
 DROP TABLE long_enough_name;
@@ -105,6 +111,7 @@ DROP TABLE long_enough_name;
 #
 
 CREATE TABLE test.t(t int COMMENT 't_comment' CHECK(t>0));
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE test.t;
 DROP table test.t;
 
@@ -112,6 +119,7 @@ SET @OLD_SQL_MODE=@@SQL_MODE;
 SET SQL_MODE='IGNORE_BAD_TABLE_OPTIONS';
 
 CREATE TABLE test.t (f int foo=bar check(f>0));
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t;
 DROP table test.t;
 SET @@SQL_MODE=@OLD_SQL_MODE;
@@ -130,11 +138,14 @@ CALL sp;
 CALL sp;
 --error ER_BAD_FIELD_ERROR
 CALL sp;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 alter table t1 add column b int;
 CALL sp;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 CALL sp;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 # Cleanup
 DROP PROCEDURE sp;
@@ -146,6 +157,7 @@ CREATE PROCEDURE sp() ALTER TABLE t1 ADD CONSTRAINT CHECK (b > 0);
 CALL sp;
 alter table t1 add column b int, add constraint check (b < 10);
 CALL sp;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 # Cleanup
 DROP PROCEDURE sp;
@@ -160,6 +172,7 @@ DROP TABLE t1;
 #
 
 create table t1 (a int check (a>10)) select 100 as 'a';
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 drop table t1;
 
@@ -182,10 +195,13 @@ drop table t1;
 create table t1 (a int, b int);
 create procedure sp() alter table t1 add constraint if not exists foo check (b > 0);
 call sp;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 call sp;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 call sp;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 drop procedure sp;
 drop table t1;

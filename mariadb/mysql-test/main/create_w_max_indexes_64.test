@@ -149,8 +149,10 @@ create table t1 (
 );
 
 # Check that the table is not corrupted
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 flush tables;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 
 # Repeat test using ALTER to add indexes
@@ -296,8 +298,10 @@ alter table t1
  add key a064_long_123456789_123456789_123456789_123456789_123456789_1234 (
   c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15,c16);
 
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 flush tables;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 
 # Test the server limits; if any of these pass, all above tests need
@@ -327,6 +331,7 @@ alter table t1 add key i1 (
 alter table t1 add key 
  a001_long_123456789_123456789_123456789_123456789_123456789_12345 (c1);
 
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 
 drop table t1;

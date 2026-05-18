@@ -106,7 +106,9 @@ MariaDB base: `mariadb-11.8.6`
   `main.replace_returning_err`.
 - [MTR DDL and name smoke](../mtr-ddl-name-smoke/specs.md) adds
   `main.comment_column2`, `main.check`, `main.create_drop_db`,
-  `main.lowercase_utf8`, and `main.key_diff`.
+  `main.lowercase_utf8`, `main.key_diff`, `main.check_constraint_show`,
+  `main.constraints`, `main.create_drop_index`, `main.create-uca`, and
+  `main.create_w_max_indexes_64`.
 - [MTR comment DDL smoke](../mtr-comment-ddl-smoke/specs.md) adds
   `main.comment_column`, `main.comment_table`, and `main.comment_index`.
 - [MTR order and union smoke](../mtr-order-union-smoke/specs.md) adds
@@ -221,6 +223,11 @@ The default curated list remains intentionally baseline-oriented:
 - `main.comment_column`.
 - `main.comment_table`.
 - `main.comment_index`.
+- `main.check_constraint_show`.
+- `main.constraints`.
+- `main.create_drop_index`.
+- `main.create-uca`.
+- `main.create_w_max_indexes_64`.
 - `main.comment_column2`.
 - `main.check`.
 - `main.create_drop_db`.
