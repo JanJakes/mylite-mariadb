@@ -156,6 +156,9 @@ static void assert_statement_checkpoint_rolls_back_row(statement_checkpoint_test
 static void assert_statement_checkpoint_commits_row(statement_checkpoint_test_context *ctx);
 static void assert_statement_checkpoint_rolls_back_catalog(statement_checkpoint_test_context *ctx);
 static void assert_nested_statement_checkpoints(statement_checkpoint_test_context *ctx);
+static void assert_statement_checkpoint_preserves_marked_auto_increment_rollback(
+    statement_checkpoint_test_context *ctx
+);
 static void test_transaction_journals(void);
 static void assert_transaction_journal_commits(const transaction_journal_test_context *ctx);
 static void assert_transaction_journal_rolls_back(const transaction_journal_test_context *ctx);
@@ -1732,6 +1735,7 @@ static void test_statement_checkpoints(void) {
     assert_statement_checkpoint_commits_row(&ctx);
     assert_statement_checkpoint_rolls_back_catalog(&ctx);
     assert_nested_statement_checkpoints(&ctx);
+    assert_statement_checkpoint_preserves_marked_auto_increment_rollback(&ctx);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
@@ -1927,6 +1931,70 @@ static void assert_nested_statement_checkpoints(statement_checkpoint_test_contex
     );
     assert(row_count == 1ULL);
     assert_row_not_found(ctx->filename, ctx->row_2_id);
+}
+
+static void assert_statement_checkpoint_preserves_marked_auto_increment_rollback(
+    statement_checkpoint_test_context *ctx
+) {
+    static const unsigned char row_3[] = {0x00U, 0x03U, 'g', 'h', 'i'};
+    static const unsigned char row_4[] = {0x00U, 0x04U, 'j', 'k', 'l'};
+    mylite_storage_statement *statement = NULL;
+    unsigned long long row_id = 0ULL;
+    unsigned long long no_marker_row_id = 0ULL;
+    unsigned long long row_count = 0ULL;
+
+    assert_auto_increment_value(ctx->filename, 1ULL);
+    assert(mylite_storage_begin_statement(ctx->filename, &statement) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_advance_auto_increment(ctx->filename, "app", "posts", 11ULL) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_preserve_auto_increment_on_rollback(ctx->filename) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            ctx->filename,
+            "app",
+            "posts",
+            row_3,
+            sizeof(row_3),
+            NULL,
+            0U,
+            &row_id
+        ) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
+    assert_auto_increment_value(ctx->filename, 11ULL);
+    assert_row_not_found(ctx->filename, row_id);
+    assert(
+        mylite_storage_count_rows(ctx->filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK
+    );
+    assert(row_count == 1ULL);
+
+    assert(mylite_storage_begin_statement(ctx->filename, &statement) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_advance_auto_increment(ctx->filename, "app", "posts", 13ULL) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            ctx->filename,
+            "app",
+            "posts",
+            row_4,
+            sizeof(row_4),
+            NULL,
+            0U,
+            &no_marker_row_id
+        ) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
+    assert_auto_increment_value(ctx->filename, 11ULL);
+    assert_row_not_found(ctx->filename, no_marker_row_id);
 }
 
 static void test_transaction_journals(void) {

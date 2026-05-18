@@ -174,6 +174,7 @@ struct mylite_storage_statement {
     unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     int owns_file;
     int owns_transaction_journal;
+    int preserve_auto_increment_rollback;
 };
 
 typedef mylite_storage_result (*mylite_storage_row_page_callback)(
@@ -3035,6 +3036,22 @@ int mylite_storage_statement_active(const char *filename) {
     return active_statement_for(filename) != NULL ? 1 : 0;
 }
 
+mylite_storage_result mylite_storage_preserve_auto_increment_on_rollback(
+    const char *filename
+) {
+    if (filename == NULL || filename[0] == '\0') {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    mylite_storage_statement *statement = active_statement_for(filename);
+    if (statement == NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    statement->preserve_auto_increment_rollback = 1;
+    return MYLITE_STORAGE_OK;
+}
+
 void mylite_storage_set_busy_timeout(unsigned milliseconds) {
     active_busy_timeout_ms = milliseconds;
 }
@@ -3112,7 +3129,8 @@ mylite_storage_result mylite_storage_rollback_statement(mylite_storage_statement
 static int checkpoint_preserves_auto_increment_rollback(
     const mylite_storage_statement *statement
 ) {
-    return statement->owns_transaction_journal || statement->parent != NULL;
+    return statement->owns_transaction_journal || statement->parent != NULL ||
+           statement->preserve_auto_increment_rollback;
 }
 
 static mylite_storage_result collect_rollback_auto_increment_values(

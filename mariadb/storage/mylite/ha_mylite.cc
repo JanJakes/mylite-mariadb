@@ -1893,6 +1893,29 @@ int ha_mylite::write_row(const uchar *buf)
   if (error)
     DBUG_RETURN(error);
 
+  if (!volatile_rows)
+  {
+    error= mylite_advance_auto_increment_from_row(primary_file,
+                                                  storage_schema(),
+                                                  storage_table(), table);
+    if (error)
+    {
+      mylite_free_index_entries(index_entries, index_key_storage);
+      DBUG_RETURN(error);
+    }
+
+    if (table->next_number_field)
+    {
+      const mylite_storage_result preserve_result=
+        mylite_storage_preserve_auto_increment_on_rollback(primary_file);
+      if (preserve_result != MYLITE_STORAGE_OK)
+      {
+        mylite_free_index_entries(index_entries, index_key_storage);
+        DBUG_RETURN(mylite_storage_to_handler_error(preserve_result));
+      }
+    }
+  }
+
   uint duplicate_key= (uint) -1;
   error= volatile_rows ?
     mylite_check_volatile_duplicate_keys(primary_file, storage_schema(),
@@ -1932,10 +1955,6 @@ int ha_mylite::write_row(const uchar *buf)
                                                storage_table(), next_value));
     }
   }
-  else
-    error= mylite_advance_auto_increment_from_row(primary_file,
-                                                  storage_schema(),
-                                                  storage_table(), table);
   if (error)
   {
     mylite_free_index_entries(index_entries, index_key_storage);

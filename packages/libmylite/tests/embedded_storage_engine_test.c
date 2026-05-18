@@ -208,6 +208,7 @@ static void test_autoincrement_integer_overflow(void);
 static void test_autoincrement_integer_width_matrix(void);
 static void test_autoincrement_bigint_unsigned_maximum(void);
 static void test_autoincrement_transaction_rollback(void);
+static void test_autoincrement_failed_dml_gaps(void);
 static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
 static void test_index_ddl_if_exists(void);
@@ -529,6 +530,7 @@ int main(int argc, char **argv) {
     test_autoincrement_integer_width_matrix();
     test_autoincrement_bigint_unsigned_maximum();
     test_autoincrement_transaction_rollback();
+    test_autoincrement_failed_dml_gaps();
     test_indexed_rows();
     test_standalone_index_ddl();
     test_index_ddl_if_exists();
@@ -11511,6 +11513,92 @@ static void test_autoincrement_transaction_rollback(void) {
     free(root);
 }
 
+static void test_autoincrement_failed_dml_gaps(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_failed_dml");
+    assert_exec_succeeds(db, "USE auto_failed_dml");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE failed_auto_posts ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (id),"
+        "UNIQUE KEY title_key (title)"
+        ") ENGINE=InnoDB"
+    );
+
+    assert_exec_succeeds(db, "INSERT INTO failed_auto_posts (title) VALUES ('duplicate-source')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM failed_auto_posts WHERE title = 'duplicate-source'",
+        "1"
+    );
+
+    assert_exec_fails(db, "INSERT INTO failed_auto_posts (title) VALUES ('duplicate-source')");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM failed_auto_posts WHERE title = 'duplicate-source'",
+        "1"
+    );
+    assert_exec_succeeds(db, "INSERT INTO failed_auto_posts (title) VALUES ('after-failed')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM failed_auto_posts WHERE title = 'after-failed'",
+        "3"
+    );
+
+    assert_exec_succeeds(db, "INSERT IGNORE INTO failed_auto_posts (title) VALUES ('duplicate-source')");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM failed_auto_posts WHERE title = 'duplicate-source'",
+        "1"
+    );
+    assert_exec_succeeds(db, "INSERT INTO failed_auto_posts (title) VALUES ('after-ignore')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM failed_auto_posts WHERE title = 'after-ignore'",
+        "5"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "INSERT IGNORE INTO failed_auto_posts (id, title) VALUES (100, 'duplicate-source')"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM failed_auto_posts WHERE id = 100", "0");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO failed_auto_posts (title) VALUES ('after-explicit-ignore')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM failed_auto_posts WHERE title = 'after-explicit-ignore'",
+        "101"
+    );
+    assert_catalog_table_count(filename, "auto_failed_dml", 1U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE auto_failed_dml");
+    assert_exec_succeeds(db, "INSERT INTO failed_auto_posts (title) VALUES ('after-reopen')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM failed_auto_posts WHERE title = 'after-reopen'",
+        "102"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_indexed_rows(void) {
     char *root = make_temp_root();
     char *filename = NULL;
@@ -13420,7 +13508,7 @@ static void test_create_table_select(void) {
         .expected_value = "010203",
     };
     single_value_context next_id = {
-        .expected_value = "3",
+        .expected_value = "4",
     };
     single_value_context reopened_count = {
         .expected_value = "3",
