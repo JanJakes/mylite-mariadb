@@ -46,9 +46,10 @@ a bounded single-level leaf snapshot first.
   - append the leaf as the next page,
   - update the index-root catalog record to that new page in the same rollback
     journal publication as the header.
-- Exact storage lookup uses the leaf only when the catalog root points at the
-  last published page. If any later page has been appended, the root is treated
-  as stale and exact lookup falls back to the existing append-only scan.
+- Exact storage lookup can use the leaf when the catalog root points at a valid
+  leaf page for the same table id and index number. The later tail-overlay
+  slice applies pages appended after the root for row-state and index-entry
+  visibility.
 - The leaf path is intentionally restricted to byte-exact storage APIs. General
   ordered reads, prefix reads, nullable-key behavior, and collation-sensitive
   comparisons remain on existing handler/materialized cursor paths.
@@ -90,8 +91,8 @@ single-page sorting, lookup helpers, and unit tests.
 
 - Add storage unit coverage for publishing a leaf root, reading exact unique
   and non-unique matches through the leaf, and missing-key lookup.
-- Cover stale-root fallback by appending a later row after publishing a leaf and
-  proving exact lookup sees the later append-log state instead of stale leaf
+- Cover later append visibility by appending a later row after publishing a
+  leaf and proving exact lookup sees the append-log state in addition to leaf
   contents.
 - Cover leaf publication after table rename through existing index-root
   lifecycle and root metadata reads.
@@ -118,9 +119,9 @@ single-page sorting, lookup helpers, and unit tests.
 
 - A durable single-page index leaf can be built from live append-only index
   entries and catalog-published as an index root.
-- Exact storage lookups use a current leaf root and fall back to append-log
-  scanning when no current root exists.
-- Stale roots are not used after later row/index/state pages are appended.
+- Exact storage lookups use a valid leaf root and fall back to append-log
+  scanning when no root exists.
+- Later row/index/state pages do not make lookups return stale leaf contents.
 - Existing SQL-visible index behavior remains unchanged.
 
 ## Risks

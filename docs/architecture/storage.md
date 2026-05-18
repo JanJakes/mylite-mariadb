@@ -222,9 +222,10 @@ recreated tables. Supported primary, unique, and secondary indexes append
 checksummed index-entry pages containing the catalog table id, MariaDB key
 number, row page id, and MariaDB key-tuple bytes. Single-page index leaf
 snapshots can be rebuilt from live append-only entries, appended as root pages,
-and catalog-published for exact byte-key lookup while they remain the last
-published page. Handler index reads build ordered in-memory cursors from live
-index entries and compare keys with MariaDB's key helpers. Current mutating
+and catalog-published as exact byte-key lookup base snapshots; lookup applies
+later row-state and index-entry tail pages before returning matches. Handler
+index reads build ordered in-memory cursors from live index entries and compare
+keys with MariaDB's key helpers. Current mutating
 publication paths are protected by a
 rollback journal before the header or catalog root page is overwritten. Active
 file-backed row-DML transactions create a transient transaction journal
@@ -635,9 +636,9 @@ unique integer entry, and use storage-level exact-entry or exact-entryset lookup
 for guarded raw equality paths so the handler does not allocate unrelated index
 entries for common integer point reads. Durable exact lookups classify each
 published append-only page once and prune candidates as later row-state pages
-hide older row ids. Current single-level index leaf roots can serve exact
-storage lookups without scanning when the root page is still current; stale or
-missing roots fall back to the append-only scan path. Cursors check
+hide older row ids. Single-level index leaf roots can serve as exact lookup base
+snapshots, with only pages appended after the root scanned as a visibility
+overlay; missing roots fall back to the append-only scan path. Cursors check
 `index_next_same()` boundaries before row materialization and reconstruct only
 the selected row buffer from row pages. This provides correct indexed insert,
 lookup, update, delete, reopen, and copy `ALTER` behavior for the supported

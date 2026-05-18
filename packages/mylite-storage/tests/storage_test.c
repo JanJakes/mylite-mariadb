@@ -1681,10 +1681,13 @@ static void test_index_leaf_pages(void) {
     static const unsigned char row_1[] = {0x00U, 0x01U, 'a'};
     static const unsigned char row_2[] = {0x00U, 0x02U, 'b'};
     static const unsigned char row_3[] = {0x00U, 0x03U, 'c'};
+    static const unsigned char updated_row_2[] = {0x00U, 0x20U, 'd'};
     static const unsigned char key_1[] = {0x01U, 0x00U, 0x00U, 0x00U};
     static const unsigned char key_2[] = {0x02U, 0x00U, 0x00U, 0x00U};
     static const unsigned char key_3[] = {0x03U, 0x00U, 0x00U, 0x00U};
+    static const unsigned char updated_key_2[] = {0x20U, 0x00U, 0x00U, 0x00U};
     static const unsigned char secondary_key[] = {0x09U, 0x00U, 0x00U, 0x00U};
+    static const unsigned char updated_secondary_key[] = {0x0aU, 0x00U, 0x00U, 0x00U};
     char *root = make_temp_root();
     char *filename = path_join(root, "index-leaf-pages.mylite");
     mylite_storage_table_definition table_definition = {
@@ -1738,9 +1741,24 @@ static void test_index_leaf_pages(void) {
             .key_size = sizeof(secondary_key),
         },
     };
+    mylite_storage_index_entry row_2_update_entries[] = {
+        {
+            .size = sizeof(row_2_update_entries[0]),
+            .index_number = 0U,
+            .key = updated_key_2,
+            .key_size = sizeof(updated_key_2),
+        },
+        {
+            .size = sizeof(row_2_update_entries[0]),
+            .index_number = 1U,
+            .key = updated_secondary_key,
+            .key_size = sizeof(updated_secondary_key),
+        },
+    };
     unsigned long long row_1_id = 0ULL;
     unsigned long long row_2_id = 0ULL;
     unsigned long long row_3_id = 0ULL;
+    unsigned long long updated_row_2_id = 0ULL;
     unsigned long long row_id = 0ULL;
     mylite_storage_header header = {
         .size = sizeof(header),
@@ -1802,14 +1820,67 @@ static void test_index_leaf_pages(void) {
             &row_3_id
         ) == MYLITE_STORAGE_OK
     );
-    const unsigned long long stale_fallback_row_ids[] = {row_1_id, row_2_id, row_3_id};
+    const unsigned long long append_tail_row_ids[] = {row_1_id, row_2_id, row_3_id};
     assert_exact_index_entries(
         filename,
         1U,
         secondary_key,
         sizeof(secondary_key),
-        stale_fallback_row_ids,
-        sizeof(stale_fallback_row_ids) / sizeof(stale_fallback_row_ids[0])
+        append_tail_row_ids,
+        sizeof(append_tail_row_ids) / sizeof(append_tail_row_ids[0])
+    );
+
+    assert(
+        mylite_storage_update_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_2_id,
+            updated_row_2,
+            sizeof(updated_row_2),
+            row_2_update_entries,
+            sizeof(row_2_update_entries) / sizeof(row_2_update_entries[0]),
+            &updated_row_2_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert_index_entry_lookup(filename, 0U, key_2, sizeof(key_2), MYLITE_STORAGE_NOTFOUND, 0ULL);
+    assert_index_entry_lookup(
+        filename,
+        0U,
+        updated_key_2,
+        sizeof(updated_key_2),
+        MYLITE_STORAGE_OK,
+        updated_row_2_id
+    );
+    const unsigned long long update_tail_row_ids[] = {row_1_id, row_3_id};
+    assert_exact_index_entries(
+        filename,
+        1U,
+        secondary_key,
+        sizeof(secondary_key),
+        update_tail_row_ids,
+        sizeof(update_tail_row_ids) / sizeof(update_tail_row_ids[0])
+    );
+    const unsigned long long updated_secondary_row_ids[] = {updated_row_2_id};
+    assert_exact_index_entries(
+        filename,
+        1U,
+        updated_secondary_key,
+        sizeof(updated_secondary_key),
+        updated_secondary_row_ids,
+        sizeof(updated_secondary_row_ids) / sizeof(updated_secondary_row_ids[0])
+    );
+
+    assert(mylite_storage_delete_row(filename, "app", "posts", row_1_id) == MYLITE_STORAGE_OK);
+    assert_index_entry_lookup(filename, 0U, key_1, sizeof(key_1), MYLITE_STORAGE_NOTFOUND, 0ULL);
+    const unsigned long long delete_tail_row_ids[] = {row_3_id};
+    assert_exact_index_entries(
+        filename,
+        1U,
+        secondary_key,
+        sizeof(secondary_key),
+        delete_tail_row_ids,
+        sizeof(delete_tail_row_ids) / sizeof(delete_tail_row_ids[0])
     );
 
     assert(mylite_storage_rebuild_index_leaf(filename, "app", "posts", 1U) == MYLITE_STORAGE_OK);
@@ -1823,12 +1894,12 @@ static void test_index_leaf_pages(void) {
             "app",
             "articles",
             0U,
-            key_1,
-            sizeof(key_1),
+            updated_key_2,
+            sizeof(updated_key_2),
             &row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(row_id == row_1_id);
+    assert(row_id == updated_row_2_id);
     assert_exact_index_entries_for_table(
         filename,
         "app",
@@ -1836,8 +1907,8 @@ static void test_index_leaf_pages(void) {
         1U,
         secondary_key,
         sizeof(secondary_key),
-        stale_fallback_row_ids,
-        sizeof(stale_fallback_row_ids) / sizeof(stale_fallback_row_ids[0])
+        delete_tail_row_ids,
+        sizeof(delete_tail_row_ids) / sizeof(delete_tail_row_ids[0])
     );
 
     assert(unlink(filename) == 0);
