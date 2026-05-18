@@ -541,9 +541,10 @@ statement still resumes after the reserved interval boundary.
 source-row-count reservation growth, so durable next values resume after the
 latest reserved interval boundary even when selected duplicate rows update
 existing rows instead of inserting new ones.
-Grouped later-in-key `INSERT ... ON DUPLICATE KEY UPDATE` keeps the
-per-prefix allocation model: generated values are derived from the current live
-prefix maximum, so duplicate-update attempts do not create a first-key-style
+Grouped later-in-key `INSERT ... ON DUPLICATE KEY UPDATE`, including
+source-driven and prepared representative forms, keeps the per-prefix
+allocation model: generated values are derived from the current live prefix
+maximum, so duplicate-update attempts do not create a first-key-style
 table-local reserved tail gap, while explicit high-value duplicate updates
 advance only their own prefix.
 SQL-layer failures before generated value allocation, such as CHECK failures

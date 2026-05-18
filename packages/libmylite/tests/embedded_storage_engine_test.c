@@ -217,6 +217,7 @@ static void test_autoincrement_prior_success_failed_update(void);
 static void test_autoincrement_prior_success_failed_update_matrices(void);
 static void test_autoincrement_on_duplicate_key_update(void);
 static void test_autoincrement_grouped_on_duplicate_key_update(void);
+static void test_autoincrement_grouped_on_duplicate_key_update_variants(void);
 static void test_autoincrement_on_duplicate_key_update_failed_dml(void);
 static void test_autoincrement_insert_select_on_duplicate_key_update(void);
 static void test_autoincrement_insert_select_failed_dml(void);
@@ -550,6 +551,7 @@ int main(int argc, char **argv) {
     test_autoincrement_prior_success_failed_update_matrices();
     test_autoincrement_on_duplicate_key_update();
     test_autoincrement_grouped_on_duplicate_key_update();
+    test_autoincrement_grouped_on_duplicate_key_update_variants();
     test_autoincrement_on_duplicate_key_update_failed_dml();
     test_autoincrement_insert_select_on_duplicate_key_update();
     test_autoincrement_insert_select_failed_dml();
@@ -12859,6 +12861,231 @@ static void test_autoincrement_grouped_on_duplicate_key_update(void) {
         db,
         "SELECT id FROM grouped_odku_posts WHERE title = 'after-reopen-other-prefix'",
         "3"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_autoincrement_grouped_on_duplicate_key_update_variants(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_grouped_odku_variants");
+    assert_exec_succeeds(db, "USE auto_grouped_odku_variants");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_variant_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "body VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (category, id),"
+        "UNIQUE KEY title_key (title)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_variant_source ("
+        "ord INT NOT NULL,"
+        "category INT NOT NULL,"
+        "title VARCHAR(64) NOT NULL,"
+        "body VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (ord)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_variant_posts (category, title, body) VALUES "
+        "(1, 'dupe', 'original'),"
+        "(2, 'other-dupe', 'other original')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_variant_source (ord, category, title, body) VALUES "
+        "(1, 1, 'source-before', 'before'),"
+        "(2, 1, 'dupe', 'source-updated'),"
+        "(3, 1, 'source-after', 'after'),"
+        "(4, 2, 'other-before', 'other before'),"
+        "(5, 2, 'other-dupe', 'other updated'),"
+        "(6, 2, 'other-after', 'other after')"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_variant_posts (category, title, body) "
+        "SELECT category, title, body FROM grouped_variant_source ORDER BY ord "
+        "ON DUPLICATE KEY UPDATE body = VALUES(body)"
+    );
+    assert(mylite_changes(db) == 8);
+    assert(mylite_last_insert_id(db) == 2U);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_variant_posts WHERE title = 'source-before'",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_variant_posts WHERE title = 'source-after'",
+        "3"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT body FROM grouped_variant_posts WHERE title = 'dupe'",
+        "source-updated"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_variant_posts WHERE title = 'other-before'",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_variant_posts WHERE title = 'other-after'",
+        "3"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT body FROM grouped_variant_posts WHERE title = 'other-dupe'",
+        "other updated"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_variant_posts (category, title, body) VALUES "
+        "(1, 'after-source-odku', 'tail')"
+    );
+    assert(mylite_last_insert_id(db) == 4U);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_variant_posts WHERE title = 'after-source-odku'",
+        "4"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_variant_posts (category, title, body) VALUES "
+        "(2, 'other-after-source-odku', 'other tail')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_variant_posts "
+        "WHERE title = 'other-after-source-odku'",
+        "4"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_variant_posts (category, title, body) "
+        "SELECT category, title, 'direct-last-id' FROM grouped_variant_source "
+        "WHERE title = 'dupe' "
+        "ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), body = VALUES(body)"
+    );
+    assert(mylite_changes(db) == 2);
+    assert(mylite_last_insert_id(db) == 1U);
+    assert_prepared_one_text_succeeds(
+        db,
+        "INSERT INTO grouped_variant_posts (category, title, body) VALUES "
+        "(1, 'dupe', ?) "
+        "ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), body = VALUES(body)",
+        "prepared-direct-last-id"
+    );
+    assert(mylite_changes(db) == 2);
+    assert(mylite_last_insert_id(db) == 1U);
+    assert_prepared_one_text_succeeds(
+        db,
+        "INSERT INTO grouped_variant_posts (category, title, body) "
+        "SELECT category, title, ? FROM grouped_variant_source "
+        "WHERE title = 'dupe' "
+        "ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), body = VALUES(body)",
+        "prepared-select-last-id"
+    );
+    assert(mylite_changes(db) == 2);
+    assert(mylite_last_insert_id(db) == 1U);
+    assert_query_single_value(
+        db,
+        "SELECT body FROM grouped_variant_posts WHERE title = 'dupe'",
+        "prepared-select-last-id"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_variant_posts (category, title, body) VALUES "
+        "(1, 'after-prepared-grouped-odku', 'after prepared')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_variant_posts "
+        "WHERE title = 'after-prepared-grouped-odku'",
+        "5"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_variant_posts (category, title, body) "
+        "SELECT category, title, 'source-high' FROM grouped_variant_source "
+        "WHERE title = 'dupe' "
+        "ON DUPLICATE KEY UPDATE id = 20, body = VALUES(body)"
+    );
+    assert(mylite_changes(db) == 2);
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_variant_posts WHERE title = 'dupe'",
+        "20"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_variant_posts (category, title, body) VALUES "
+        "(1, 'after-source-high-grouped-odku', 'after high')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_variant_posts "
+        "WHERE title = 'after-source-high-grouped-odku'",
+        "21"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_variant_posts (category, title, body) VALUES "
+        "(2, 'other-after-source-high-grouped-odku', 'other after high')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_variant_posts "
+        "WHERE title = 'other-after-source-high-grouped-odku'",
+        "5"
+    );
+    assert_catalog_table_count(filename, "auto_grouped_odku_variants", 2U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE auto_grouped_odku_variants");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_variant_posts (category, title, body) VALUES "
+        "(1, 'after-reopen-variants', 'reopened')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_variant_posts WHERE title = 'after-reopen-variants'",
+        "22"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_variant_posts (category, title, body) VALUES "
+        "(2, 'other-after-reopen-variants', 'reopened other')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_variant_posts "
+        "WHERE title = 'other-after-reopen-variants'",
+        "6"
     );
 
     assert(mylite_close(db) == MYLITE_OK);

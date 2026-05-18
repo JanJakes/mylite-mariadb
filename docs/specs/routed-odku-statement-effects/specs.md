@@ -68,8 +68,8 @@ the important routed-storage cases:
   `INSERT ... SELECT` ODKU.
 
 The claim remains representative. Broader statement-effect matrices stay
-planned for grouped insert-select/prepared variants, triggers, views,
-offset/increment, integer-width boundaries, and other ODKU expression paths.
+planned for grouped error-path variants, triggers, views, offset/increment,
+integer-width boundaries, and other ODKU expression paths.
 
 ## Design
 
@@ -134,5 +134,5 @@ No dependency, license, or intended size-profile change is introduced.
 - Prepared `mysql_stmt_insert_id()` has a documented embedded-library caveat
   when the connection insert-id state is stale; this slice covers the explicit
   `LAST_INSERT_ID(id)` idiom where MariaDB sets that state deliberately.
-- Triggers, views, and grouped insert-select/prepared variants may have
-  different statement-effect ordering and remain planned.
+- Triggers, views, and grouped error-path variants may have different
+  statement-effect ordering and remain planned.
