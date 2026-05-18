@@ -99,8 +99,8 @@ date/time, string, cast, UNION, and NULL-safe comparison result sets.
 The opt-in embedded MTR smoke runner covers MariaDB bootstrap, scalar
 CAST/CONVERT behavior, CASE-family and ANSI SQL-mode expression behavior,
 selected numeric, hex-hybrid literal/rounding, character/varchar,
-binary-string, binary/varbinary, national-character, interval, and type
-behavior, selected date,
+binary-string, binary/varbinary, national-character, interval, integer
+metadata/rounding, and type behavior, selected date,
 temporal-rounding, temporal-function, alternate-timezone conversion,
 temporal scale, microsecond parsing, and time/datetime comparison behavior,
 selected parser/comment, keyword,
@@ -120,7 +120,8 @@ selected JSON equality and normalization behavior, selected aggregate DISTINCT b
 selected autoincrement ODKU and strict HEAP autoincrement behavior, selected
 date-format behavior, selected ASCII, legacy, and UTF-32 charset edge
 behavior, selected Latin2 and UTF-8 binary/general charset, weight-string, and
-LIKE condition-propagation behavior, selected filesystem charset behavior, and selected charset
+LIKE condition-propagation behavior, selected multibyte charset recoding,
+selected filesystem charset behavior, and selected charset
 diagnostics, collation-default behavior,
 UTF-32 `character_set_collations`, and column/context collation behavior,
 while MariaDB MTR comparison

@@ -48,8 +48,10 @@ MariaDB base: `mariadb-11.8.6`
     by the harness.
   - `main.ctype_latin2` is covered separately by
     [MTR charset weight and LIKE smoke](../mtr-charset-weight-like-smoke/specs.md).
-  - `main.ctype_mb`, `main.ctype_recoding`, and `main.ctype_utf16_def` need
-    separate output-normalization review.
+  - `main.ctype_mb` and `main.ctype_recoding` are covered separately by
+    [MTR integer and multibyte smoke](../mtr-integer-multibyte-smoke/specs.md).
+  - `main.ctype_utf16_def` needs separate profile-variable normalization
+    review.
 
 ## Compatibility Impact
 

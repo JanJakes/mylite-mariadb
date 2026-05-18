@@ -66,14 +66,14 @@ excludes server surfaces that many upstream suites assume. The opt-in
 `tools/mylite-mtr-harness` runner proves the embedded MTR path with a curated
 smoke list covering the MyLite trimmed bootstrap schema, upstream scalar
 CAST/CONVERT, CASE-family and ANSI SQL-mode expression, selected numeric,
-varchar, binary-string, binary/national character, date/timezone,
+integer, varchar, binary-string, binary/national character, date/timezone,
 parser/comment, comparison, DDL/comment metadata, DDL constraint/index
 metadata, `ORDER BY`, optimizer-cost metadata, scalar
 operator, string/format, charset-conversion expressions, crypto/KDF, disabled
 DES, aggregate DISTINCT, autoincrement ODKU, strict HEAP autoincrement,
 temporal scale, microsecond parsing, date-format, ASCII charset, selected
 Latin2 and UTF-8 binary/general charset, weight-string, and LIKE
-condition-propagation behavior.
+condition-propagation behavior, and multibyte charset recoding.
 It uses a separate
 `build/mariadb-mtr-smoke`
 profile because the default embedded profile intentionally omits view, stored

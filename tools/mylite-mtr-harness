@@ -16,6 +16,7 @@ default_tests=(
   main.type_num
   main.type_uint
   main.type_hex_hybrid
+  main.type_int
   main.type_char
   main.type_binary
   main.binary
@@ -98,6 +99,8 @@ default_tests=(
   main.ctype_cp866
   main.ctype_hebrew
   main.ctype_latin2
+  main.ctype_mb
+  main.ctype_recoding
   main.ctype_utf32_def
   main.ctype_utf8mb3_bin
   main.ctype_utf8mb4_bin

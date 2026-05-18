@@ -154,6 +154,7 @@ CREATE TABLE t2 AS SELECT
   CONCAT(uint32),CONCAT(sint32),
   CONCAT(uint64),CONCAT(sint64)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -164,6 +165,7 @@ CREATE TABLE t2 AS SELECT
   CONCAT(COALESCE(uint32)),CONCAT(COALESCE(sint32)),
   CONCAT(COALESCE(uint64)),CONCAT(COALESCE(sint64))
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -186,6 +188,7 @@ CREATE TABLE t1 AS SELECT
   CONCAT(uint24()),CONCAT(sint24()),
   CONCAT(uint32()),CONCAT(sint32()),
   CONCAT(uint64()),CONCAT(sint64());
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 DROP TABLE t1;
 
@@ -195,6 +198,7 @@ CREATE TABLE t1 AS SELECT
   CONCAT(COALESCE(uint24())),CONCAT(COALESCE(sint24())),
   CONCAT(COALESCE(uint32())),CONCAT(COALESCE(sint32())),
   CONCAT(COALESCE(uint64())),CONCAT(COALESCE(sint64()));
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 DROP TABLE t1;
 
@@ -416,26 +420,46 @@ $$
 DELIMITER ;$$
 
 --vertical_results
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('tinyint');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('smallint');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('mediumint');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('int');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint(20)');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint(21)');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint(22)');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint(23)');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint(30)');
 
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('tinyint unsigned');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('smallint unsigned');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('mediumint unsigned');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('int unsigned');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint unsigned');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint(20) unsigned');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint(21) unsigned');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint(22) unsigned');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint(23) unsigned');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint(30) unsigned');
 --horizontal_results
 
@@ -447,6 +471,7 @@ DROP PROCEDURE p1;
 
 SELECT ROUND(18446744073709551615,-10), ROUND(18446744073709551615,-11);
 CREATE TABLE t1 AS SELECT ROUND(18446744073709551615,-10), ROUND(18446744073709551615,-11);
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 SELECT * FROM t1;
 DROP TABLE t1;
@@ -466,6 +491,7 @@ SELECT
   ROUND(18446744073709551615,-19) AS c19;
 
 SELECT * FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 DROP TABLE t1;
 --horizontal_results
@@ -489,26 +515,46 @@ $$
 DELIMITER ;$$
 
 --vertical_results
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('tinyint');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('smallint');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('mediumint');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('int');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint(20)');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint(21)');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint(22)');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint(23)');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint(30)');
 
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('tinyint unsigned');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('smallint unsigned');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('mediumint unsigned');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('int unsigned');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint unsigned');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint(20) unsigned');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint(21) unsigned');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint(22) unsigned');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint(23) unsigned');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL p1('bigint(30) unsigned');
 --horizontal_results
 
@@ -532,6 +578,7 @@ SELECT
   ROUND(18446744073709551615,rand()*0-19) AS c3;
 
 SELECT * FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 DROP TABLE t1;
 --horizontal_results

@@ -45,8 +45,10 @@ MariaDB base: `mariadb-11.8.6`
   - `main.ctype_cp1250_ch` reaches an explicit disabled native MyISAM section.
   - `main.ctype_dec8` reaches disabled Oracle SQL mode.
   - `main.ctype_like_range` is debug-build-only.
-  - `main.ctype_mb`, `main.ctype_recoding`, and broader charset suites need
-    separate review because their shared includes and output drift are broader.
+  - `main.ctype_mb` and `main.ctype_recoding` are covered separately by
+    [MTR integer and multibyte smoke](../mtr-integer-multibyte-smoke/specs.md).
+  - Broader charset suites still need separate review because their disabled
+    surfaces and output drift are broader.
 
 ## Compatibility Impact
 
