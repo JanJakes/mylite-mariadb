@@ -52,6 +52,12 @@ struct PreparedResult {
     std::string text_value;
 };
 
+struct PreparedExpressionResult {
+    std::vector<std::string> names;
+    std::vector<unsigned> native_types;
+    std::vector<Cell> values;
+};
+
 struct WarningRow {
     std::string level;
     unsigned code = 0;
@@ -71,6 +77,7 @@ struct Observation {
     QueryResult direct;
     std::vector<QueryResult> direct_expressions;
     PreparedResult prepared;
+    PreparedExpressionResult prepared_expressions;
     StatementEffects effects;
     unsigned warning_count = 0;
     WarningRow warning;
@@ -134,8 +141,19 @@ constexpr const char *kPreparedSql = "SELECT ? AS missing,"
                                      "CAST(? AS DOUBLE) AS double_value,"
                                      "CAST(? AS CHAR) AS text_value";
 
+constexpr const char *kPreparedExpressionSql =
+    "SELECT "
+    "CAST(CASE WHEN ? > ? THEN 'gt' ELSE 'le' END AS CHAR) AS cmp,"
+    "COALESCE(?, 'fallback') AS coalesced,"
+    "CAST(? IN (?, ?) AS CHAR) AS in_hit,"
+    "CAST(DATE_ADD(CAST(? AS DATE), INTERVAL ? DAY) AS CHAR) AS plus_days,"
+    "CONCAT(?, ?) AS joined_text";
+
 constexpr const char *kWarningSql = "SELECT CAST('not-a-number' AS UNSIGNED)";
 constexpr std::size_t kPreparedColumnCount = 5;
+constexpr std::size_t kPreparedExpressionParameterCount = 10;
+constexpr std::size_t kPreparedExpressionColumnCount = 5;
+constexpr std::size_t kPreparedExpressionOutputBufferSize = 64;
 constexpr unsigned kMissingParameter = 1;
 constexpr unsigned kSignedParameter = 2;
 constexpr unsigned kUnsignedParameter = 3;
@@ -159,6 +177,7 @@ void stop_raw_runtime(RawRuntime &runtime);
 QueryResult run_raw_query(RawRuntime &runtime, const char *sql);
 std::vector<QueryResult> run_raw_direct_expression_matrix(RawRuntime &runtime);
 PreparedResult run_raw_prepared_query(RawRuntime &runtime);
+PreparedExpressionResult run_raw_prepared_expression_query(RawRuntime &runtime);
 StatementEffects run_raw_statement_effects(RawRuntime &runtime);
 StatementEffect run_raw_effect_query(RawRuntime &runtime, const char *sql);
 StatementEffect run_raw_prepared_insert(RawRuntime &runtime);
@@ -169,6 +188,7 @@ Observation run_mylite_queries(mylite_db *database);
 QueryResult run_mylite_query(mylite_db *database, const char *sql);
 std::vector<QueryResult> run_mylite_direct_expression_matrix(mylite_db *database);
 PreparedResult run_mylite_prepared_query(mylite_db *database);
+PreparedExpressionResult run_mylite_prepared_expression_query(mylite_db *database);
 StatementEffects run_mylite_statement_effects(mylite_db *database);
 StatementEffect run_mylite_effect_query(mylite_db *database, const char *sql);
 StatementEffect run_mylite_prepared_insert(mylite_db *database);
@@ -185,6 +205,10 @@ void compare_query_result_sets(
 );
 void compare_query_results(const QueryResult &expected, const QueryResult &actual);
 void compare_prepared_results(const PreparedResult &expected, const PreparedResult &actual);
+void compare_prepared_expression_results(
+    const PreparedExpressionResult &expected,
+    const PreparedExpressionResult &actual
+);
 void compare_statement_effects(const StatementEffects &expected, const StatementEffects &actual);
 void compare_warning_rows(const WarningRow &expected, const WarningRow &actual);
 WarningRow first_raw_warning(RawRuntime &runtime);
@@ -217,6 +241,7 @@ Observation run_raw_observation(void) {
     observation.direct = run_raw_query(runtime, kDirectSql);
     observation.direct_expressions = run_raw_direct_expression_matrix(runtime);
     observation.prepared = run_raw_prepared_query(runtime);
+    observation.prepared_expressions = run_raw_prepared_expression_query(runtime);
     observation.effects = run_raw_statement_effects(runtime);
     const QueryResult warning_result = run_raw_query(runtime, kWarningSql);
     observation.warning_count = warning_result.warning_count;
@@ -239,6 +264,7 @@ void compare_observations(const Observation &expected, const Observation &actual
     compare_query_results(expected.direct, actual.direct);
     compare_query_result_sets(expected.direct_expressions, actual.direct_expressions);
     compare_prepared_results(expected.prepared, actual.prepared);
+    compare_prepared_expression_results(expected.prepared_expressions, actual.prepared_expressions);
     compare_statement_effects(expected.effects, actual.effects);
     assert(actual.warning_count == expected.warning_count);
     compare_warning_rows(expected.warning, actual.warning);
@@ -411,6 +437,123 @@ PreparedResult run_raw_prepared_query(RawRuntime &runtime) {
     return result;
 }
 
+PreparedExpressionResult run_raw_prepared_expression_query(RawRuntime &runtime) {
+    PreparedExpressionResult result = {};
+    MYSQL_STMT *statement = mysql_stmt_init(&runtime.mysql);
+    assert(statement != nullptr);
+    assert(
+        mysql_stmt_prepare(
+            statement,
+            kPreparedExpressionSql,
+            string_length(kPreparedExpressionSql)
+        ) == 0
+    );
+    assert(mysql_stmt_param_count(statement) == kPreparedExpressionParameterCount);
+
+    MYSQL_RES *metadata = mysql_stmt_result_metadata(statement);
+    assert(metadata != nullptr);
+    const unsigned column_count = mysql_num_fields(metadata);
+    assert(column_count == kPreparedExpressionColumnCount);
+    const MYSQL_FIELD *fields = mysql_fetch_fields(metadata);
+    assert(fields != nullptr);
+    for (unsigned i = 0; i < column_count; ++i) {
+        result.names.emplace_back(fields[i].name, fields[i].name_length);
+        result.native_types.push_back(static_cast<unsigned>(fields[i].type));
+    }
+    mysql_free_result(metadata);
+
+    // NOLINTBEGIN(misc-const-correctness)
+    int left_value = 7;
+    int right_value = 3;
+    my_bool coalesce_is_null = 1;
+    char in_value[] = "beta";
+    unsigned long in_value_length = 4;
+    char in_left[] = "alpha";
+    unsigned long in_left_length = 5;
+    char in_right[] = "beta";
+    unsigned long in_right_length = 4;
+    char date_value[] = "2026-05-18";
+    unsigned long date_value_length = 10;
+    int day_count = 2;
+    char text_left[] = "my";
+    unsigned long text_left_length = 2;
+    char text_right[] = "lite";
+    unsigned long text_right_length = 4;
+    // NOLINTEND(misc-const-correctness)
+
+    std::array<MYSQL_BIND, kPreparedExpressionParameterCount> parameters = {};
+    parameters[0].buffer_type = MYSQL_TYPE_LONG;
+    parameters[0].buffer = &left_value;
+    parameters[1].buffer_type = MYSQL_TYPE_LONG;
+    parameters[1].buffer = &right_value;
+    parameters[2].buffer_type = MYSQL_TYPE_NULL;
+    parameters[2].is_null = &coalesce_is_null;
+    parameters[3].buffer_type = MYSQL_TYPE_STRING;
+    parameters[3].buffer = in_value;
+    parameters[3].buffer_length = in_value_length;
+    parameters[3].length = &in_value_length;
+    parameters[4].buffer_type = MYSQL_TYPE_STRING;
+    parameters[4].buffer = in_left;
+    parameters[4].buffer_length = in_left_length;
+    parameters[4].length = &in_left_length;
+    parameters[5].buffer_type = MYSQL_TYPE_STRING;
+    parameters[5].buffer = in_right;
+    parameters[5].buffer_length = in_right_length;
+    parameters[5].length = &in_right_length;
+    parameters[6].buffer_type = MYSQL_TYPE_STRING;
+    parameters[6].buffer = date_value;
+    parameters[6].buffer_length = date_value_length;
+    parameters[6].length = &date_value_length;
+    parameters[7].buffer_type = MYSQL_TYPE_LONG;
+    parameters[7].buffer = &day_count;
+    parameters[8].buffer_type = MYSQL_TYPE_STRING;
+    parameters[8].buffer = text_left;
+    parameters[8].buffer_length = text_left_length;
+    parameters[8].length = &text_left_length;
+    parameters[9].buffer_type = MYSQL_TYPE_STRING;
+    parameters[9].buffer = text_right;
+    parameters[9].buffer_length = text_right_length;
+    parameters[9].length = &text_right_length;
+
+    assert(mysql_stmt_bind_param(statement, parameters.data()) == 0);
+    assert(mysql_stmt_execute(statement) == 0);
+
+    std::array<
+        std::array<char, kPreparedExpressionOutputBufferSize>,
+        kPreparedExpressionColumnCount>
+        output_buffers = {};
+    std::array<unsigned long, kPreparedExpressionColumnCount> output_lengths = {};
+    std::array<my_bool, kPreparedExpressionColumnCount> output_nulls = {};
+    std::array<my_bool, kPreparedExpressionColumnCount> output_errors = {};
+    std::array<MYSQL_BIND, kPreparedExpressionColumnCount> outputs = {};
+    for (std::size_t i = 0; i < outputs.size(); ++i) {
+        outputs[i].buffer_type = MYSQL_TYPE_STRING;
+        outputs[i].buffer = output_buffers[i].data();
+        outputs[i].buffer_length = static_cast<unsigned long>(output_buffers[i].size());
+        outputs[i].length = &output_lengths[i];
+        outputs[i].is_null = &output_nulls[i];
+        outputs[i].error = &output_errors[i];
+    }
+
+    assert(mysql_stmt_bind_result(statement, outputs.data()) == 0);
+    assert(mysql_stmt_fetch(statement) == 0);
+    assert(mysql_stmt_fetch(statement) == MYSQL_NO_DATA);
+
+    result.values.reserve(kPreparedExpressionColumnCount);
+    for (std::size_t i = 0; i < outputs.size(); ++i) {
+        assert(output_errors[i] == 0);
+        Cell cell = {};
+        if (output_nulls[i] == 0) {
+            cell.is_null = false;
+            cell.value.assign(output_buffers[i].data(), output_lengths[i]);
+        }
+        result.values.push_back(std::move(cell));
+    }
+
+    assert(mysql_stmt_close(statement) == 0);
+    return result;
+}
+
 StatementEffects run_raw_statement_effects(RawRuntime &runtime) {
     StatementEffects effects = {};
     effects.values.reserve(kStatementEffectCount);
@@ -539,6 +682,7 @@ Observation run_mylite_queries(mylite_db *database) {
     observation.direct = run_mylite_query(database, kDirectSql);
     observation.direct_expressions = run_mylite_direct_expression_matrix(database);
     observation.prepared = run_mylite_prepared_query(database);
+    observation.prepared_expressions = run_mylite_prepared_expression_query(database);
     observation.effects = run_mylite_statement_effects(database);
     assert(mylite_exec(database, kWarningSql, nullptr, nullptr, nullptr) == MYLITE_OK);
     observation.warning_count = mylite_warning_count(database);
@@ -598,6 +742,73 @@ PreparedResult run_mylite_prepared_query(mylite_db *database) {
     result.unsigned_value = mylite_column_uint64(statement, 2U);
     result.double_value = mylite_column_double(statement, 3U);
     result.text_value.assign(mylite_column_text(statement, 4U), mylite_column_bytes(statement, 4U));
+    assert(mylite_step(statement) == MYLITE_DONE);
+    assert(mylite_finalize(statement) == MYLITE_OK);
+    return result;
+}
+
+PreparedExpressionResult run_mylite_prepared_expression_query(mylite_db *database) {
+    PreparedExpressionResult result = {};
+    mylite_stmt *statement = nullptr;
+    assert(
+        mylite_prepare(
+            database,
+            kPreparedExpressionSql,
+            MYLITE_NUL_TERMINATED,
+            &statement,
+            nullptr
+        ) == MYLITE_OK
+    );
+    assert(statement != nullptr);
+    assert(mylite_bind_parameter_count(statement) == kPreparedExpressionParameterCount);
+    assert(mylite_column_count(statement) == kPreparedExpressionColumnCount);
+
+    assert(mylite_bind_int64(statement, 1U, 7) == MYLITE_OK);
+    assert(mylite_bind_int64(statement, 2U, 3) == MYLITE_OK);
+    assert(mylite_bind_null(statement, 3U) == MYLITE_OK);
+    assert(
+        mylite_bind_text(statement, 4U, "beta", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+        MYLITE_OK
+    );
+    assert(
+        mylite_bind_text(statement, 5U, "alpha", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+        MYLITE_OK
+    );
+    assert(
+        mylite_bind_text(statement, 6U, "beta", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+        MYLITE_OK
+    );
+    assert(
+        mylite_bind_text(statement, 7U, "2026-05-18", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+        MYLITE_OK
+    );
+    assert(mylite_bind_int64(statement, 8U, 2) == MYLITE_OK);
+    assert(
+        mylite_bind_text(statement, 9U, "my", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+        MYLITE_OK
+    );
+    assert(
+        mylite_bind_text(statement, 10U, "lite", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+        MYLITE_OK
+    );
+
+    for (unsigned i = 0; i < mylite_column_count(statement); ++i) {
+        result.names.emplace_back(mylite_column_name(statement, i));
+        result.native_types.push_back(mylite_column_mariadb_type(statement, i));
+    }
+
+    assert(mylite_step(statement) == MYLITE_ROW);
+    result.values.reserve(kPreparedExpressionColumnCount);
+    for (unsigned i = 0; i < mylite_column_count(statement); ++i) {
+        Cell cell = {};
+        if (mylite_column_type(statement, i) != MYLITE_TYPE_NULL) {
+            const char *text = mylite_column_text(statement, i);
+            assert(text != nullptr);
+            cell.is_null = false;
+            cell.value.assign(text, mylite_column_bytes(statement, i));
+        }
+        result.values.push_back(std::move(cell));
+    }
     assert(mylite_step(statement) == MYLITE_DONE);
     assert(mylite_finalize(statement) == MYLITE_OK);
     return result;
@@ -812,6 +1023,20 @@ void compare_prepared_results(const PreparedResult &expected, const PreparedResu
     assert(actual.unsigned_value == expected.unsigned_value);
     assert(std::fabs(actual.double_value - expected.double_value) < kDoubleTolerance);
     assert(actual.text_value == expected.text_value);
+}
+
+void compare_prepared_expression_results(
+    const PreparedExpressionResult &expected,
+    const PreparedExpressionResult &actual
+) {
+    assert(actual.names == expected.names);
+    assert(actual.native_types == expected.native_types);
+    assert(actual.values.size() == expected.values.size());
+    assert(actual.values.size() == kPreparedExpressionColumnCount);
+    for (std::size_t i = 0; i < expected.values.size(); ++i) {
+        assert(actual.values[i].is_null == expected.values[i].is_null);
+        assert(actual.values[i].value == expected.values[i].value);
+    }
 }
 
 void compare_statement_effects(const StatementEffects &expected, const StatementEffects &actual) {
