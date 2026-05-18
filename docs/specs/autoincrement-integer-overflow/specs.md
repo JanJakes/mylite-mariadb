@@ -9,7 +9,8 @@ and offset/increment rounding near a smaller unsigned maximum.
 ## Non-Goals
 
 - Do not claim exhaustive coverage for every integer type, signedness, offset,
-  and increment combination.
+  and increment combination. Broader width boundaries are covered by the
+  separate `autoincrement-integer-width-matrix` slice.
 - Do not cover `BIGINT UNSIGNED` maximum-value generation or explicit
   `18446744073709551615`; that is covered by the separate
   `autoincrement-bigint-unsigned-maximum` slice.
@@ -43,7 +44,8 @@ MariaDB base: `mariadb-11.8.6`
 
 This moves representative small integer-width and overflow-boundary coverage
 from planned to partial for MyLite-routed first-key and grouped-prefix
-autoincrement tables. It does not claim full integer-width compatibility.
+autoincrement tables. A follow-up width matrix extends that coverage through
+signed `BIGINT`, but exhaustive offset/increment compatibility remains planned.
 
 ## Design
 
@@ -100,11 +102,14 @@ No dependency or intended size-profile change is introduced.
 - Unsigned `SMALLINT` first-key and grouped tables round near the maximum under
   non-default offset/increment settings, accept `65535`, and reject the next
   generated value.
-- Docs narrow the remaining autoincrement gap to exhaustive matrices and
-  transaction-aware rollback.
+- Docs narrow the remaining autoincrement gap to broader width matrices,
+  exhaustive offset/increment matrices, and transaction-aware rollback.
 
 ## Risks And Unresolved Questions
 
 - `BIGINT UNSIGNED` maximum-value handling is covered by the separate
   `autoincrement-bigint-unsigned-maximum` slice.
+- Signed `SMALLINT`, signed/unsigned `MEDIUMINT`, signed/unsigned `INT`, and
+  signed `BIGINT` overflow boundaries are covered by the separate
+  `autoincrement-integer-width-matrix` slice.
 - This smoke coverage is representative, not exhaustive.

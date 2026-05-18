@@ -94,8 +94,8 @@ test and documentation slice unless coverage exposes a bug.
   before and after an explicit high id.
 - Close/reopen preserves first-key state and grouped live-row-derived next
   values.
-- Docs continue to mark exhaustive integer-width coverage and storage-level
-  B-tree navigation as planned.
+- Docs continue to mark exhaustive offset/increment coverage across integer
+  widths and storage-level B-tree navigation as planned.
 
 ## Implementation Status
 

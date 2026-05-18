@@ -89,8 +89,8 @@ No dependency or intended size-profile change is introduced.
 - MEMORY/HEAP rows remain absent from durable MyLite row storage.
 - Reopen preserves metadata, clears volatile rows, and resets volatile
   autoincrement state.
-- Docs narrow the remaining autoincrement gap to exhaustive integer-width
-  matrices.
+- Docs narrow the remaining autoincrement gap to exhaustive offset/increment
+  matrices across integer widths.
 
 ## Risks And Unresolved Questions
 

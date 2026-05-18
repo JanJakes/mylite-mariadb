@@ -115,5 +115,5 @@ requires rebuilding the storage-smoke MariaDB archive.
 - The generated failure is `ER_AUTOINC_READ_FAILED`, not
   `ER_WARN_DATA_OUT_OF_RANGE`, because that is MariaDB's sentinel behavior for
   `ULONGLONG_MAX` on the engine-generated path.
-- Exhaustive integer-width and transaction-aware rollback coverage remain
-  separate work.
+- Exhaustive offset/increment matrices across integer widths and
+  transaction-aware rollback coverage remain separate work.

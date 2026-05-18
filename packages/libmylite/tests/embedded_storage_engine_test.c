@@ -143,6 +143,13 @@ typedef struct autoincrement_offset_matrix_case {
     unsigned after_explicit;
 } autoincrement_offset_matrix_case;
 
+typedef struct autoincrement_integer_width_case {
+    const char *suffix;
+    const char *integer_type;
+    const char *penultimate_value;
+    const char *maximum_value;
+} autoincrement_integer_width_case;
+
 typedef struct catalog_table_context {
     unsigned count;
     const char *expected_schema_name;
@@ -193,6 +200,7 @@ static void test_autoincrement_offset_increment(void);
 static void test_autoincrement_offset_increment_multirow(void);
 static void test_autoincrement_offset_increment_matrix(void);
 static void test_autoincrement_integer_overflow(void);
+static void test_autoincrement_integer_width_matrix(void);
 static void test_autoincrement_bigint_unsigned_maximum(void);
 static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
@@ -418,6 +426,10 @@ static void assert_autoincrement_offset_matrix_case(
     mylite_db *db,
     const autoincrement_offset_matrix_case *test_case
 );
+static void assert_autoincrement_integer_width_case(
+    mylite_db *db,
+    const autoincrement_integer_width_case *test_case
+);
 static void assert_autoincrement_matrix_value(
     mylite_db *db,
     const char *sql,
@@ -501,6 +513,7 @@ int main(int argc, char **argv) {
     test_autoincrement_offset_increment_multirow();
     test_autoincrement_offset_increment_matrix();
     test_autoincrement_integer_overflow();
+    test_autoincrement_integer_width_matrix();
     test_autoincrement_bigint_unsigned_maximum();
     test_indexed_rows();
     test_standalone_index_ddl();
@@ -10308,6 +10321,225 @@ static void test_autoincrement_integer_overflow(void) {
     free(filename);
     remove_tree(root);
     free(root);
+}
+
+static void test_autoincrement_integer_width_matrix(void) {
+    const autoincrement_integer_width_case cases[] = {
+        {
+            .suffix = "small_signed",
+            .integer_type = "SMALLINT",
+            .penultimate_value = "32766",
+            .maximum_value = "32767",
+        },
+        {
+            .suffix = "medium_signed",
+            .integer_type = "MEDIUMINT",
+            .penultimate_value = "8388606",
+            .maximum_value = "8388607",
+        },
+        {
+            .suffix = "medium_unsigned",
+            .integer_type = "MEDIUMINT UNSIGNED",
+            .penultimate_value = "16777214",
+            .maximum_value = "16777215",
+        },
+        {
+            .suffix = "int_signed",
+            .integer_type = "INT",
+            .penultimate_value = "2147483646",
+            .maximum_value = "2147483647",
+        },
+        {
+            .suffix = "int_unsigned",
+            .integer_type = "INT UNSIGNED",
+            .penultimate_value = "4294967294",
+            .maximum_value = "4294967295",
+        },
+        {
+            .suffix = "bigint_signed",
+            .integer_type = "BIGINT",
+            .penultimate_value = "9223372036854775806",
+            .maximum_value = "9223372036854775807",
+        },
+    };
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_integer_widths");
+    assert_exec_succeeds(db, "USE auto_integer_widths");
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        assert_autoincrement_integer_width_case(db, &cases[i]);
+    }
+    assert_catalog_table_count(filename, "auto_integer_widths", 12U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void assert_autoincrement_integer_width_case(
+    mylite_db *db,
+    const autoincrement_integer_width_case *test_case
+) {
+    char sql[768];
+    int written = snprintf(
+        sql,
+        sizeof(sql),
+        "CREATE TABLE width_first_%s ("
+        "id %s NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (id)"
+        ") ENGINE=InnoDB",
+        test_case->suffix,
+        test_case->integer_type
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_exec_succeeds(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "INSERT INTO width_first_%s VALUES (%s, 'near-max')",
+        test_case->suffix,
+        test_case->penultimate_value
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_exec_succeeds(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "INSERT INTO width_first_%s (title) VALUES ('max-generated')",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_exec_succeeds(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT id FROM width_first_%s WHERE title = 'max-generated'",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_query_single_value(db, sql, test_case->maximum_value);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "INSERT INTO width_first_%s (title) VALUES ('overflow')",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_exec_fails(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT COUNT(*) FROM width_first_%s WHERE title = 'overflow'",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_query_single_value(db, sql, "0");
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "CREATE TABLE width_grouped_%s ("
+        "category INT NOT NULL,"
+        "id %s NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (category, id)"
+        ") ENGINE=MyISAM",
+        test_case->suffix,
+        test_case->integer_type
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_exec_succeeds(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "INSERT INTO width_grouped_%s VALUES (1, %s, 'near-max')",
+        test_case->suffix,
+        test_case->penultimate_value
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_exec_succeeds(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "INSERT INTO width_grouped_%s (category, title) VALUES "
+        "(1, 'max-generated')",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_exec_succeeds(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT id FROM width_grouped_%s WHERE title = 'max-generated'",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_query_single_value(db, sql, test_case->maximum_value);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "INSERT INTO width_grouped_%s (category, title) VALUES (1, 'overflow')",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_exec_fails(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT COUNT(*) FROM width_grouped_%s WHERE title = 'overflow'",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_query_single_value(db, sql, "0");
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "INSERT INTO width_grouped_%s (category, title) VALUES "
+        "(2, 'other-prefix')",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_exec_succeeds(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT id FROM width_grouped_%s WHERE title = 'other-prefix'",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_query_single_value(db, sql, "1");
 }
 
 static void test_autoincrement_bigint_unsigned_maximum(void) {

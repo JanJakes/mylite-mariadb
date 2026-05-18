@@ -90,8 +90,8 @@ No dependency or intended size-profile change is introduced.
 - Grouped allocation honors all covered pairs independently per prefix.
 - Explicit higher values round to the next value in the active sequence.
 - Offset-greater-than-increment behavior is covered.
-- Docs distinguish this matrix from remaining overflow and integer-width
-  coverage.
+- Docs distinguish this matrix from remaining overflow and exhaustive
+  offset/increment coverage across integer widths.
 
 ## Implementation Status
 
