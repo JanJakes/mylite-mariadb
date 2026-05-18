@@ -63,9 +63,10 @@ autoincrement advancement published before the later failure remains durable
 and is used by the next generated insert.
 
 The claim is still representative. A follow-up matrix covers duplicate-key and
-CHECK later failures; broader update matrices remain planned for grouped
-autoincrement, offsets, triggers, views, generated columns, and multi-table
-updates.
+CHECK later failures, and grouped later-in-key behavior is covered separately
+in `docs/specs/autoincrement-grouped-failed-dml-matrices/specs.md`; broader
+update matrices remain planned for offsets, triggers, views, generated
+columns, and multi-table updates.
 
 ## Design
 

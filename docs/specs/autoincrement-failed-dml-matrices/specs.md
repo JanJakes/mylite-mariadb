@@ -59,7 +59,9 @@ MariaDB base: `mariadb-11.8.6`
 - Exhaustive `INSERT ... ON DUPLICATE KEY UPDATE` behavior.
 - Explicit high-value duplicate insert failures that never successfully publish
   a row.
-- Grouped later-in-key autoincrement failed-DML matrices.
+- Grouped later-in-key autoincrement failed-DML matrices, which are covered
+  separately in
+  `docs/specs/autoincrement-grouped-failed-dml-matrices/specs.md`.
 - MEMORY/HEAP runtime-volatile failed-DML gaps.
 - Storage I/O failure semantics after autoincrement publication.
 - Handler-level savepoint hooks, WAL, isolation, or lock-mode changes.
@@ -76,8 +78,10 @@ non-gapless autoincrement behavior:
 
 The support claim remains representative. Broader failed-DML matrices stay
 planned until prior-success multi-row update failures, broader
-`ON DUPLICATE KEY UPDATE`, source-driven DML, grouped autoincrement keys, and
-offset/increment cross-products are covered.
+`ON DUPLICATE KEY UPDATE`, source-driven DML, and offset/increment
+cross-products are covered. Grouped later-in-key failed-DML matrices are
+covered separately in
+`docs/specs/autoincrement-grouped-failed-dml-matrices/specs.md`.
 
 ## Design
 
@@ -147,6 +151,6 @@ No dependency, license, or intended size-profile change is introduced.
 
 - Explicit high-value duplicate insert failures are covered separately in
   `docs/specs/autoincrement-explicit-duplicate-inserts/specs.md`; insert-select
-  and grouped-key variants remain planned.
+  variants remain planned.
 - Prior-success multi-row `UPDATE` failure is covered separately in
   `docs/specs/autoincrement-prior-success-failed-update/specs.md`.

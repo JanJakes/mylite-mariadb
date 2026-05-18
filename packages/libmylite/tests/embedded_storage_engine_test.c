@@ -221,6 +221,7 @@ static void test_autoincrement_grouped_on_duplicate_key_update_variants(void);
 static void test_autoincrement_grouped_on_duplicate_key_update_failed_dml(void);
 static void test_autoincrement_grouped_on_duplicate_key_update_source_update_errors(void);
 static void test_autoincrement_grouped_on_duplicate_key_update_source_read_errors(void);
+static void test_autoincrement_grouped_failed_dml_matrices(void);
 static void test_autoincrement_on_duplicate_key_update_failed_dml(void);
 static void test_autoincrement_insert_select_on_duplicate_key_update(void);
 static void test_autoincrement_insert_select_failed_dml(void);
@@ -558,6 +559,7 @@ int main(int argc, char **argv) {
     test_autoincrement_grouped_on_duplicate_key_update_failed_dml();
     test_autoincrement_grouped_on_duplicate_key_update_source_update_errors();
     test_autoincrement_grouped_on_duplicate_key_update_source_read_errors();
+    test_autoincrement_grouped_failed_dml_matrices();
     test_autoincrement_on_duplicate_key_update_failed_dml();
     test_autoincrement_insert_select_on_duplicate_key_update();
     test_autoincrement_insert_select_failed_dml();
@@ -13712,6 +13714,299 @@ static void test_autoincrement_grouped_on_duplicate_key_update_source_read_error
         "SELECT id FROM grouped_prepared_source_read_error_posts "
         "WHERE title = 'after-prepared-source-read-error-reopen'",
         "3"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_autoincrement_grouped_failed_dml_matrices(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_grouped_failed_dml_matrices");
+    assert_exec_succeeds(db, "USE auto_grouped_failed_dml_matrices");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_mixed_ignore_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (category, id),"
+        "UNIQUE KEY title_key (title)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_mixed_ignore_posts (category, title) VALUES "
+        "(1, 'dupe')"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT IGNORE INTO grouped_mixed_ignore_posts (category, title) VALUES "
+        "(1, 'kept-before'),"
+        "(1, 'dupe'),"
+        "(1, 'kept-after')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_mixed_ignore_posts WHERE title = 'kept-before'",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_mixed_ignore_posts WHERE title = 'kept-after'",
+        "3"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_mixed_ignore_posts WHERE title = 'dupe'",
+        "1"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_mixed_ignore_posts (category, title) VALUES "
+        "(1, 'after-mixed-ignore')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_mixed_ignore_posts WHERE title = 'after-mixed-ignore'",
+        "4"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_prepared_mixed_ignore_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (category, id),"
+        "UNIQUE KEY title_key (title)"
+        ") ENGINE=MyISAM"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_prepared_mixed_ignore_posts (category, title) VALUES "
+        "(1, 'dupe')"
+    );
+    assert_prepared_succeeds(
+        db,
+        "INSERT IGNORE INTO grouped_prepared_mixed_ignore_posts "
+        "(category, title) VALUES "
+        "(1, 'prepared-kept-before'),"
+        "(1, 'dupe'),"
+        "(1, 'prepared-kept-after')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_prepared_mixed_ignore_posts "
+        "WHERE title = 'prepared-kept-before'",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_prepared_mixed_ignore_posts "
+        "WHERE title = 'prepared-kept-after'",
+        "3"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_prepared_mixed_ignore_posts "
+        "WHERE title = 'dupe'",
+        "1"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_prepared_mixed_ignore_posts (category, title) VALUES "
+        "(1, 'after-prepared-mixed-ignore')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_prepared_mixed_ignore_posts "
+        "WHERE title = 'after-prepared-mixed-ignore'",
+        "4"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_failed_update_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "slug VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (category, id),"
+        "UNIQUE KEY title_key (title),"
+        "UNIQUE KEY slug_key (slug)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_failed_update_posts (category, title, slug) VALUES "
+        "(1, 'attempt-first', 'free'),"
+        "(1, 'fail-second', 'later'),"
+        "(1, 'existing-conflict', 'taken')"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "UPDATE grouped_failed_update_posts "
+        "SET id = CASE title "
+        "WHEN 'attempt-first' THEN 100 "
+        "WHEN 'fail-second' THEN 101 "
+        "ELSE id END, "
+        "slug = CASE title "
+        "WHEN 'fail-second' THEN 'taken' "
+        "ELSE slug END "
+        "WHERE title IN ('attempt-first', 'fail-second') "
+        "ORDER BY id ASC",
+        "Duplicate entry"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_failed_update_posts WHERE title = 'attempt-first'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM grouped_failed_update_posts WHERE title = 'fail-second'",
+        "later"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_failed_update_posts WHERE id IN (100, 101)",
+        "0"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_failed_update_posts (category, title, slug) VALUES "
+        "(1, 'after-update-failure', 'after-update')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_failed_update_posts "
+        "WHERE title = 'after-update-failure'",
+        "4"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_prepared_failed_update_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "slug VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (category, id),"
+        "UNIQUE KEY title_key (title),"
+        "UNIQUE KEY slug_key (slug)"
+        ") ENGINE=MyISAM"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_prepared_failed_update_posts "
+        "(category, title, slug) VALUES "
+        "(1, 'attempt-first', 'free'),"
+        "(1, 'fail-second', 'later'),"
+        "(1, 'existing-conflict', 'taken')"
+    );
+    assert_prepared_fails_with_message(
+        db,
+        "UPDATE grouped_prepared_failed_update_posts "
+        "SET id = CASE title "
+        "WHEN 'attempt-first' THEN 100 "
+        "WHEN 'fail-second' THEN 101 "
+        "ELSE id END, "
+        "slug = CASE title "
+        "WHEN 'fail-second' THEN 'taken' "
+        "ELSE slug END "
+        "WHERE title IN ('attempt-first', 'fail-second') "
+        "ORDER BY id ASC",
+        "Duplicate entry"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_prepared_failed_update_posts "
+        "WHERE title = 'attempt-first'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM grouped_prepared_failed_update_posts "
+        "WHERE title = 'fail-second'",
+        "later"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_prepared_failed_update_posts "
+        "WHERE id IN (100, 101)",
+        "0"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_prepared_failed_update_posts "
+        "(category, title, slug) VALUES "
+        "(1, 'after-prepared-update-failure', 'after-prepared-update')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_prepared_failed_update_posts "
+        "WHERE title = 'after-prepared-update-failure'",
+        "4"
+    );
+    assert_catalog_table_count(filename, "auto_grouped_failed_dml_matrices", 4U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE auto_grouped_failed_dml_matrices");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_mixed_ignore_posts (category, title) VALUES "
+        "(1, 'after-mixed-ignore-reopen')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_mixed_ignore_posts "
+        "WHERE title = 'after-mixed-ignore-reopen'",
+        "5"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_prepared_mixed_ignore_posts (category, title) VALUES "
+        "(1, 'after-prepared-mixed-ignore-reopen')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_prepared_mixed_ignore_posts "
+        "WHERE title = 'after-prepared-mixed-ignore-reopen'",
+        "5"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_failed_update_posts (category, title, slug) VALUES "
+        "(1, 'after-update-reopen', 'after-update-reopen')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_failed_update_posts "
+        "WHERE title = 'after-update-reopen'",
+        "5"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_prepared_failed_update_posts "
+        "(category, title, slug) VALUES "
+        "(1, 'after-prepared-update-reopen', 'after-prepared-update-reopen')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_prepared_failed_update_posts "
+        "WHERE title = 'after-prepared-update-reopen'",
+        "5"
     );
 
     assert(mylite_close(db) == MYLITE_OK);

@@ -43,8 +43,10 @@ MariaDB base: `mariadb-11.8.6`
 
 ## Non-Goals
 
-- Exhaustive trigger, view, generated-column, partition, grouped later-in-key,
-  offset/increment, integer-width, multi-table, or `UPDATE IGNORE` matrices.
+- Exhaustive trigger, view, generated-column, partition, offset/increment,
+  integer-width, multi-table, or `UPDATE IGNORE` matrices. Representative
+  grouped later-in-key failed-update matrices are covered separately in
+  `docs/specs/autoincrement-grouped-failed-dml-matrices/specs.md`.
 - New file format, public API, or storage checkpoint primitives.
 - Size-profile reduction work.
 
@@ -57,8 +59,10 @@ later row aborts the statement through a different failure surface. Row and
 index visibility still roll back to the statement-start state.
 
 This remains representative coverage. Broader update matrices for triggers,
-views, generated columns, multi-table updates, grouped autoincrement, and
-offset/increment variants remain planned.
+views, generated columns, multi-table updates, and offset/increment variants
+remain planned. Representative grouped autoincrement failed-update matrices
+are covered separately in
+`docs/specs/autoincrement-grouped-failed-dml-matrices/specs.md`.
 
 ## Design
 
@@ -127,5 +131,7 @@ No dependency, license, or intended size-profile change is introduced.
 - The cases deliberately avoid triggers, views, generated columns, and
   multi-table updates because those may fail or publish rows through different
   SQL paths.
-- This coverage does not prove grouped later-in-key autoincrement, offset, or
-  integer-width variants for prior-success update failures.
+- This coverage does not prove offset or integer-width variants for
+  prior-success update failures; grouped later-in-key behavior is covered
+  separately in
+  `docs/specs/autoincrement-grouped-failed-dml-matrices/specs.md`.
