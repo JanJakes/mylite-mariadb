@@ -114,6 +114,14 @@ static void assert_index_prefix_exists(
     size_t key_prefix_size,
     int expected_exists
 );
+static void assert_index_entry_lookup(
+    const char *filename,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    mylite_storage_result expected_result,
+    unsigned long long expected_row_id
+);
 static void append_index_entry_test_rows(index_entries_test_context *ctx);
 static void assert_primary_index_entries_after_insert(const index_entries_test_context *ctx);
 static void update_index_entry_test_row(index_entries_test_context *ctx);
@@ -1232,15 +1240,41 @@ static void test_index_entries(void) {
     assert_primary_index_entries_after_insert(&ctx);
     assert_index_prefix_exists(filename, key_1, sizeof(key_1), 1);
     assert_index_prefix_exists(filename, key_9, sizeof(key_9), 0);
+    assert_index_entry_lookup(filename, 0U, key_1, sizeof(key_1), MYLITE_STORAGE_OK, ctx.row_1_id);
+    assert_index_entry_lookup(filename, 0U, key_2, sizeof(key_2), MYLITE_STORAGE_OK, ctx.row_2_id);
+    assert_index_entry_lookup(filename, 0U, key_9, sizeof(key_9), MYLITE_STORAGE_NOTFOUND, 0ULL);
     update_index_entry_test_row(&ctx);
     assert_primary_index_entries_after_update(&ctx);
     assert_index_prefix_exists(filename, key_1, sizeof(key_1), 0);
     assert_index_prefix_exists(filename, key_9, sizeof(key_9), 1);
+    assert_index_entry_lookup(filename, 0U, key_1, sizeof(key_1), MYLITE_STORAGE_NOTFOUND, 0ULL);
+    assert_index_entry_lookup(
+        filename,
+        0U,
+        key_9,
+        sizeof(key_9),
+        MYLITE_STORAGE_OK,
+        ctx.updated_row_1_id
+    );
     delete_index_entry_test_row(&ctx);
     assert_secondary_index_entries_after_delete(&ctx);
     assert_index_prefix_exists(filename, key_2, sizeof(key_2), 0);
     assert_index_prefix_exists(filename, title_u, sizeof(title_u), 1);
+    assert_index_entry_lookup(filename, 0U, key_2, sizeof(key_2), MYLITE_STORAGE_NOTFOUND, 0ULL);
+    assert_index_entry_lookup(
+        filename,
+        1U,
+        title_u,
+        sizeof(title_u),
+        MYLITE_STORAGE_OK,
+        ctx.updated_row_1_id
+    );
     assert_index_entry_test_live_rows(&ctx);
+
+    assert(
+        mylite_storage_find_index_entry(filename, "app", "posts", 0U, NULL, sizeof(key_1), NULL) ==
+        MYLITE_STORAGE_MISUSE
+    );
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
@@ -1266,6 +1300,29 @@ static void assert_index_prefix_exists(
         ) == MYLITE_STORAGE_OK
     );
     assert(exists == expected_exists);
+}
+
+static void assert_index_entry_lookup(
+    const char *filename,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    mylite_storage_result expected_result,
+    unsigned long long expected_row_id
+) {
+    unsigned long long row_id = 0ULL;
+    assert(
+        mylite_storage_find_index_entry(
+            filename,
+            "app",
+            "posts",
+            index_number,
+            key,
+            key_size,
+            &row_id
+        ) == expected_result
+    );
+    assert(row_id == expected_row_id);
 }
 
 static void append_index_entry_test_rows(index_entries_test_context *ctx) {

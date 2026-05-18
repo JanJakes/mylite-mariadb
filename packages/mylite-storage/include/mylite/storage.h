@@ -352,6 +352,15 @@ mylite_storage_result mylite_storage_read_index_entries(
     unsigned index_number,
     mylite_storage_index_entryset *out_entries
 );
+mylite_storage_result mylite_storage_find_index_entry(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id
+);
 mylite_storage_result mylite_storage_index_prefix_exists(
     const char *filename,
     const char *schema_name,

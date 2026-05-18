@@ -2768,6 +2768,74 @@ mylite_storage_result mylite_storage_read_index_entries(
     return result;
 }
 
+mylite_storage_result mylite_storage_find_index_entry(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id
+) {
+    if (filename == NULL || filename[0] == '\0' || schema_name == NULL || schema_name[0] == '\0' ||
+        table_name == NULL || table_name[0] == '\0' || key == NULL || key_size == 0U ||
+        out_row_id == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    *out_row_id = 0ULL;
+
+    FILE *file = NULL;
+    mylite_storage_result result = open_existing_file(filename, &file);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_header header = {0};
+    unsigned long long table_id = 0ULL;
+    mylite_storage_row_state_map row_state_map = {0};
+    int found = 0;
+    result = read_header(file, &header);
+    if (result == MYLITE_STORAGE_OK) {
+        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = build_row_state_map(file, &header, table_id, &row_state_map);
+    }
+    for (unsigned long long page_id = MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT;
+         result == MYLITE_STORAGE_OK && page_id < header.page_count && !found;
+         ++page_id) {
+        unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        mylite_storage_index_entry_page entry_page = {0};
+        result = read_index_entry_page(file, &header, page_id, page, &entry_page);
+        if (result == MYLITE_STORAGE_NOTFOUND) {
+            result = MYLITE_STORAGE_OK;
+            continue;
+        }
+        if (result != MYLITE_STORAGE_OK) {
+            break;
+        }
+        if (entry_page.table_id != table_id || entry_page.index_number != index_number ||
+            find_row_state_entry(&row_state_map, entry_page.row_id) != NULL ||
+            entry_page.key_size != key_size || memcmp(entry_page.key, key, key_size) != 0) {
+            continue;
+        }
+
+        *out_row_id = entry_page.row_id;
+        found = 1;
+    }
+
+    free_row_state_map(&row_state_map);
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    if (result != MYLITE_STORAGE_OK) {
+        *out_row_id = 0ULL;
+        return result;
+    }
+    return found ? MYLITE_STORAGE_OK : MYLITE_STORAGE_NOTFOUND;
+}
+
 mylite_storage_result mylite_storage_index_prefix_exists(
     const char *filename,
     const char *schema_name,

@@ -543,6 +543,46 @@ mylite_storage_result mylite_volatile_read_index_entries(
   return MYLITE_STORAGE_OK;
 }
 
+mylite_storage_result mylite_volatile_find_index_entry(
+    const char *primary_file, const char *schema_name, const char *table_name,
+    unsigned index_number, const uchar *key, size_t key_size,
+    ulonglong *out_row_id)
+{
+  if (!mylite_volatile_table_args_valid(primary_file, schema_name,
+                                        table_name) ||
+      !key || key_size == 0 || !out_row_id)
+    return MYLITE_STORAGE_MISUSE;
+
+  *out_row_id= 0ULL;
+  std::lock_guard<std::mutex> guard(mylite_volatile_mutex);
+  Mylite_volatile_table *table=
+      mylite_find_volatile_table_locked(primary_file, schema_name, table_name);
+  if (!table)
+    return MYLITE_STORAGE_NOTFOUND;
+
+  for (std::vector<Mylite_volatile_row>::const_iterator row=
+           table->rows.begin();
+       row != table->rows.end(); ++row)
+  {
+    if (row->deleted)
+      continue;
+    for (std::vector<Mylite_volatile_index_entry>::const_iterator entry=
+             row->index_entries.begin();
+         entry != row->index_entries.end(); ++entry)
+    {
+      if (entry->index_number == index_number &&
+          entry->key.size() == key_size &&
+          memcmp(entry->key.data(), key, key_size) == 0)
+      {
+        *out_row_id= row->row_id;
+        return MYLITE_STORAGE_OK;
+      }
+    }
+  }
+
+  return MYLITE_STORAGE_NOTFOUND;
+}
+
 mylite_storage_result mylite_volatile_count_rows(
   const char *primary_file, const char *schema_name, const char *table_name,
   unsigned long long *out_row_count)

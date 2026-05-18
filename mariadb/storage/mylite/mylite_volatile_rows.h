@@ -54,6 +54,10 @@ mylite_storage_result mylite_volatile_read_row(
 mylite_storage_result mylite_volatile_read_index_entries(
   const char *primary_file, const char *schema_name, const char *table_name,
   unsigned index_number, mylite_storage_index_entryset *out_entries);
+mylite_storage_result mylite_volatile_find_index_entry(
+    const char *primary_file, const char *schema_name, const char *table_name,
+    unsigned index_number, const uchar *key, size_t key_size,
+    ulonglong *out_row_id);
 mylite_storage_result mylite_volatile_count_rows(
   const char *primary_file, const char *schema_name, const char *table_name,
   unsigned long long *out_row_count);
