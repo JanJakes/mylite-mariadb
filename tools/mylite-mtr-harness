@@ -17,6 +17,7 @@ default_tests=(
   main.type_char
   main.type_binary
   main.type_nchar
+  main.type_varchar
   main.type_interval
   main.type_varbinary
   main.type_year
