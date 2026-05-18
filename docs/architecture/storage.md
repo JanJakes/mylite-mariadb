@@ -550,7 +550,9 @@ successful high-value update advances the next generated value and close/reopen
 state.
 If a multi-row update publishes a successful explicit high-value advancement
 before a later row fails, statement rollback restores row/index visibility while
-preserving the published autoincrement advancement for the next generated row.
+preserving the published autoincrement advancement for the next generated row;
+representative coverage includes later foreign-key, duplicate-key, and CHECK
+failures.
 Failed multi-row updates that hit MyLite foreign-key checks before update-row
 publication likewise leave attempted explicit high values unused.
 Duplicate-update branches that explicitly set the autoincrement column advance

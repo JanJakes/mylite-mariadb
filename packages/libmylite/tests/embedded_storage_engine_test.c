@@ -213,6 +213,7 @@ static void test_autoincrement_reservation_gaps(void);
 static void test_autoincrement_update_gaps(void);
 static void test_autoincrement_failed_dml_matrices(void);
 static void test_autoincrement_prior_success_failed_update(void);
+static void test_autoincrement_prior_success_failed_update_matrices(void);
 static void test_autoincrement_on_duplicate_key_update(void);
 static void test_autoincrement_insert_select_on_duplicate_key_update(void);
 static void test_autoincrement_insert_select_failed_dml(void);
@@ -542,6 +543,7 @@ int main(int argc, char **argv) {
     test_autoincrement_update_gaps();
     test_autoincrement_failed_dml_matrices();
     test_autoincrement_prior_success_failed_update();
+    test_autoincrement_prior_success_failed_update_matrices();
     test_autoincrement_on_duplicate_key_update();
     test_autoincrement_insert_select_on_duplicate_key_update();
     test_autoincrement_insert_select_failed_dml();
@@ -12132,6 +12134,163 @@ static void test_autoincrement_prior_success_failed_update(void) {
         db,
         "SELECT id FROM prior_update_parent WHERE title = 'after-reopen'",
         "102"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_autoincrement_prior_success_failed_update_matrices(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_prior_update_matrix");
+    assert_exec_succeeds(db, "USE auto_prior_update_matrix");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE prior_update_duplicate ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "slug VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (id),"
+        "UNIQUE KEY title_key (title),"
+        "UNIQUE KEY slug_key (slug)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO prior_update_duplicate (title, slug) VALUES "
+        "('fail-second', 'later'),"
+        "('existing-conflict', 'taken'),"
+        "('attempt-first', 'free')"
+    );
+    assert_exec_fails(
+        db,
+        "UPDATE prior_update_duplicate "
+        "SET id = CASE title "
+        "WHEN 'attempt-first' THEN 100 "
+        "WHEN 'fail-second' THEN 101 "
+        "ELSE id END, "
+        "slug = CASE title "
+        "WHEN 'fail-second' THEN 'taken' "
+        "ELSE slug END "
+        "WHERE title IN ('attempt-first', 'fail-second') "
+        "ORDER BY id DESC"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM prior_update_duplicate WHERE title = 'attempt-first'",
+        "3"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM prior_update_duplicate WHERE title = 'fail-second'",
+        "later"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM prior_update_duplicate WHERE id IN (100, 101)",
+        "0"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO prior_update_duplicate (title, slug) VALUES "
+        "('after-duplicate-failure', 'after-duplicate')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM prior_update_duplicate "
+        "WHERE title = 'after-duplicate-failure'",
+        "101"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE prior_update_check ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "score INT NOT NULL,"
+        "PRIMARY KEY (id),"
+        "UNIQUE KEY title_key (title),"
+        "CONSTRAINT score_check CHECK (score < 100)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO prior_update_check (title, score) VALUES "
+        "('fail-second', 10),"
+        "('attempt-first', 20)"
+    );
+    assert_exec_fails(
+        db,
+        "UPDATE prior_update_check "
+        "SET id = CASE title "
+        "WHEN 'attempt-first' THEN 200 "
+        "WHEN 'fail-second' THEN 201 "
+        "ELSE id END, "
+        "score = CASE title "
+        "WHEN 'fail-second' THEN 150 "
+        "ELSE score END "
+        "WHERE title IN ('attempt-first', 'fail-second') "
+        "ORDER BY id DESC"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM prior_update_check WHERE title = 'attempt-first'",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT score FROM prior_update_check WHERE title = 'fail-second'",
+        "10"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM prior_update_check WHERE id IN (200, 201)",
+        "0"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO prior_update_check (title, score) VALUES "
+        "('after-check-failure', 30)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM prior_update_check WHERE title = 'after-check-failure'",
+        "201"
+    );
+    assert_catalog_table_count(filename, "auto_prior_update_matrix", 2U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE auto_prior_update_matrix");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO prior_update_duplicate (title, slug) VALUES "
+        "('after-duplicate-reopen', 'duplicate-reopen')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM prior_update_duplicate "
+        "WHERE title = 'after-duplicate-reopen'",
+        "102"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO prior_update_check (title, score) VALUES "
+        "('after-check-reopen', 40)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM prior_update_check WHERE title = 'after-check-reopen'",
+        "202"
     );
 
     assert(mylite_close(db) == MYLITE_OK);

@@ -46,7 +46,9 @@ MariaDB base: `mariadb-11.8.6`
 
 - Exhaustive duplicate-key, CHECK, trigger, view, generated-column,
   multi-table, grouped later-in-key, offset/increment, or integer-width update
-  matrices.
+  matrices. Representative duplicate-key and CHECK later-failure coverage is
+  handled separately in
+  `docs/specs/autoincrement-prior-success-failed-update-matrices/specs.md`.
 - Failed update attempts that do not pass MyLite row checks; those remain
   covered by the failed-DML matrices and should not consume attempted values.
 - Public insert-id API behavior.
@@ -60,9 +62,10 @@ from the failed statement are rolled back, but a successful explicit
 autoincrement advancement published before the later failure remains durable
 and is used by the next generated insert.
 
-The claim is still representative. Broader update matrices remain planned for
-other error types, grouped autoincrement, offsets, triggers, views, and
-multi-table updates.
+The claim is still representative. A follow-up matrix covers duplicate-key and
+CHECK later failures; broader update matrices remain planned for grouped
+autoincrement, offsets, triggers, views, generated columns, and multi-table
+updates.
 
 ## Design
 
@@ -132,4 +135,5 @@ No dependency, license, or intended size-profile change is introduced.
   after the checkpoint, so ordinary updates without such pages do not change
   state.
 - Other error paths may reveal additional ordering differences and remain
-  planned as broader update matrices.
+  planned as broader update matrices. Representative duplicate-key and CHECK
+  later failures are covered by the matrix follow-up.
