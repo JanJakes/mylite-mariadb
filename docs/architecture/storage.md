@@ -388,9 +388,10 @@ Prepared execution diagnostics are covered for representative CHECK failures.
 Representative dump-style fixture import is covered for CHECK definitions.
 Representative `SHOW CREATE TABLE` round-trip export/import is covered for
 CHECK definitions.
-Representative deterministic CHECK expression matrices are covered. Exhaustive
-CHECK expression, broader failed ALTER rollback, broader dump/export, and
-transaction rollback coverage remains planned.
+Representative deterministic CHECK expression matrices cover string,
+NULL-handling, conditional, temporal, and numeric expressions. Exhaustive CHECK
+expression, broader failed ALTER rollback, broader dump/export, and transaction
+rollback coverage remains planned.
 Basic virtual and stored generated columns follow the same catalog-backed
 table-definition path, including supported copy ALTER add/modify/drop
 operations, CTAS projections from generated source columns, and generated
@@ -413,7 +414,8 @@ Representative dump-style fixture import is covered for generated-column
 definitions and generated-column indexes.
 Representative `SHOW CREATE TABLE` round-trip export/import is covered for
 generated-column definitions and indexes.
-Representative deterministic generated-column expression matrices are covered.
+Representative deterministic generated-column expression matrices cover string,
+NULL-handling, conditional, temporal, and numeric expressions.
 The same create-time key-shape gate rejects FULLTEXT, SPATIAL, and long-unique
 hash indexes before catalog publication; MyLite must not publish a table
 definition whose index class cannot be maintained by the current storage

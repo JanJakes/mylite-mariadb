@@ -214,6 +214,7 @@ static void test_show_create_table_round_trip(void);
 static void test_show_create_foreign_key_round_trip(void);
 static void test_foreign_key_dump_import_ordering(void);
 static void test_constraint_generated_expression_matrix(void);
+static void test_constraint_generated_temporal_numeric_matrix(void);
 static void test_truncate_table_lifecycle(void);
 static void test_wordpress_shaped_schema(void);
 static void test_wordpress_installer_schema_fixture(void);
@@ -521,6 +522,7 @@ int main(int argc, char **argv) {
     test_show_create_foreign_key_round_trip();
     test_foreign_key_dump_import_ordering();
     test_constraint_generated_expression_matrix();
+    test_constraint_generated_temporal_numeric_matrix();
     test_truncate_table_lifecycle();
     test_wordpress_shaped_schema();
     test_wordpress_installer_schema_fixture();
@@ -14970,6 +14972,251 @@ static void test_constraint_generated_expression_matrix(void) {
         db,
         "INSERT INTO expression_posts (id, title, subtitle, status, rating, bonus) "
         "VALUES (4, 'Gamma Post', NULL, 'draft', 5, 1)",
+        "Duplicate"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_constraint_generated_temporal_numeric_matrix(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE temporal_numeric_matrix");
+    assert_exec_succeeds(db, "USE temporal_numeric_matrix");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE expression_orders ("
+        "id int NOT NULL,"
+        "customer varchar(64) NOT NULL,"
+        "subtotal_cents int NOT NULL,"
+        "tax_bps int NOT NULL,"
+        "placed_at datetime NOT NULL,"
+        "shipped_at datetime DEFAULT NULL,"
+        "customer_key varchar(64) AS (LOWER(TRIM(customer))) STORED,"
+        "total_cents int AS "
+        "(subtotal_cents + FLOOR(subtotal_cents * tax_bps / 10000)) STORED,"
+        "ship_days int AS "
+        "(CASE WHEN shipped_at IS NULL THEN NULL "
+        "ELSE TIMESTAMPDIFF(DAY, placed_at, shipped_at) END) VIRTUAL,"
+        "order_yyyymm int AS (YEAR(placed_at) * 100 + MONTH(placed_at)) VIRTUAL,"
+        "PRIMARY KEY (id),"
+        "UNIQUE KEY customer_key_unique (customer_key),"
+        "KEY total_cents_key (total_cents),"
+        "KEY order_month_key (order_yyyymm),"
+        "CONSTRAINT subtotal_nonnegative CHECK (subtotal_cents >= 0),"
+        "CONSTRAINT tax_window CHECK (tax_bps BETWEEN 0 AND 2500),"
+        "CONSTRAINT shipped_after_place CHECK "
+        "(shipped_at IS NULL OR shipped_at >= placed_at),"
+        "CONSTRAINT customer_not_blank CHECK (CHAR_LENGTH(TRIM(customer)) > 0),"
+        "CONSTRAINT total_cap CHECK "
+        "(subtotal_cents + FLOOR(subtotal_cents * tax_bps / 10000) <= 200000)"
+        ") ENGINE=InnoDB"
+    );
+    assert_catalog_table_count(filename, "temporal_numeric_matrix", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "temporal_numeric_matrix",
+        "expression_orders",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO expression_orders "
+        "(id, customer, subtotal_cents, tax_bps, placed_at, shipped_at) VALUES "
+        "(1, ' Alice ', 10000, 750, '2026-01-15 10:00:00', "
+        "'2026-01-17 11:00:00'),"
+        "(2, 'Bob', 2500, 0, '2026-02-01 08:00:00', NULL)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT customer_key FROM expression_orders WHERE id = 1",
+        "alice"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT total_cents FROM expression_orders WHERE id = 1",
+        "10750"
+    );
+    assert_query_single_value(db, "SELECT ship_days FROM expression_orders WHERE id = 1", "2");
+    assert_query_single_value(
+        db,
+        "SELECT COALESCE(ship_days, -1) FROM expression_orders WHERE id = 2",
+        "-1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT order_yyyymm FROM expression_orders WHERE id = 2",
+        "202602"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM expression_orders FORCE INDEX (customer_key_unique) "
+        "WHERE customer_key = 'alice'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM expression_orders FORCE INDEX (total_cents_key) "
+        "WHERE total_cents = 10750",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM expression_orders FORCE INDEX (order_month_key) "
+        "WHERE order_yyyymm = 202602",
+        "2"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO expression_orders "
+        "(id, customer, subtotal_cents, tax_bps, placed_at, shipped_at) VALUES "
+        "(3, 'Negative', -1, 0, '2026-03-01 00:00:00', NULL)",
+        "CONSTRAINT"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO expression_orders "
+        "(id, customer, subtotal_cents, tax_bps, placed_at, shipped_at) VALUES "
+        "(3, 'High Tax', 1000, 3000, '2026-03-01 00:00:00', NULL)",
+        "CONSTRAINT"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO expression_orders "
+        "(id, customer, subtotal_cents, tax_bps, placed_at, shipped_at) VALUES "
+        "(3, 'Early Ship', 1000, 0, '2026-03-02 00:00:00', "
+        "'2026-03-01 00:00:00')",
+        "CONSTRAINT"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO expression_orders "
+        "(id, customer, subtotal_cents, tax_bps, placed_at, shipped_at) VALUES "
+        "(3, '   ', 1000, 0, '2026-03-01 00:00:00', NULL)",
+        "CONSTRAINT"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO expression_orders "
+        "(id, customer, subtotal_cents, tax_bps, placed_at, shipped_at) VALUES "
+        "(3, 'Too Much', 200000, 100, '2026-03-01 00:00:00', NULL)",
+        "CONSTRAINT"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO expression_orders "
+        "(id, customer, subtotal_cents, tax_bps, placed_at, shipped_at) VALUES "
+        "(3, 'ALICE', 1000, 0, '2026-03-01 00:00:00', NULL)",
+        "Duplicate"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "UPDATE expression_orders "
+        "SET customer = 'Carol', subtotal_cents = 12000, tax_bps = 500, "
+        "placed_at = '2026-03-03 00:00:00', "
+        "shipped_at = '2026-03-08 12:00:00' "
+        "WHERE id = 1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT customer_key FROM expression_orders WHERE id = 1",
+        "carol"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT total_cents FROM expression_orders WHERE id = 1",
+        "12600"
+    );
+    assert_query_single_value(db, "SELECT ship_days FROM expression_orders WHERE id = 1", "5");
+    assert_query_single_value(
+        db,
+        "SELECT order_yyyymm FROM expression_orders WHERE id = 1",
+        "202603"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM expression_orders FORCE INDEX (customer_key_unique) "
+        "WHERE customer_key = 'alice'",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM expression_orders FORCE INDEX (customer_key_unique) "
+        "WHERE customer_key = 'carol'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM expression_orders FORCE INDEX (total_cents_key) "
+        "WHERE total_cents = 12600",
+        "1"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "UPDATE expression_orders SET shipped_at = '2026-03-01 00:00:00' "
+        "WHERE id = 1",
+        "CONSTRAINT"
+    );
+    assert_query_single_value(db, "SELECT ship_days FROM expression_orders WHERE id = 1", "5");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE temporal_numeric_matrix");
+    assert_catalog_table_count(filename, "temporal_numeric_matrix", 1U);
+    assert_catalog_table_metadata(
+        filename,
+        "temporal_numeric_matrix",
+        "expression_orders",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT customer_key FROM expression_orders WHERE id = 1",
+        "carol"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT total_cents FROM expression_orders WHERE id = 1",
+        "12600"
+    );
+    assert_query_single_value(db, "SELECT ship_days FROM expression_orders WHERE id = 1", "5");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM expression_orders FORCE INDEX (customer_key_unique) "
+        "WHERE customer_key = 'carol'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM expression_orders FORCE INDEX (order_month_key) "
+        "WHERE order_yyyymm = 202603",
+        "1"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO expression_orders "
+        "(id, customer, subtotal_cents, tax_bps, placed_at, shipped_at) VALUES "
+        "(4, 'Bad Reopen', 1000, 0, '2026-04-02 00:00:00', "
+        "'2026-04-01 00:00:00')",
+        "CONSTRAINT"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO expression_orders "
+        "(id, customer, subtotal_cents, tax_bps, placed_at, shipped_at) VALUES "
+        "(4, ' carol ', 1000, 0, '2026-04-01 00:00:00', NULL)",
         "Duplicate"
     );
 

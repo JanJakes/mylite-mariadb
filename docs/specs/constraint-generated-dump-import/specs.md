@@ -73,8 +73,8 @@ then verifies:
 ## Compatibility Impact
 
 CHECK and generated-column support remain partial, but representative
-dump-style import is now covered for supported routed table shapes. A
-representative deterministic expression matrix and representative
+dump-style import is now covered for supported routed table shapes.
+Representative deterministic expression matrices and representative
 `SHOW CREATE TABLE` round-trip export/import are covered separately; broader
 dump/export compatibility and exhaustive expression matrices remain planned.
 

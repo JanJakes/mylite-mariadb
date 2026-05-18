@@ -75,9 +75,11 @@ assertions.
 ## Compatibility Impact
 
 CHECK constraints and generated columns remain partial. The compatibility
-matrix can claim a representative expression matrix for deterministic
-CHECK/generated expressions while keeping exhaustive expression compatibility
-planned.
+matrix can claim representative deterministic CHECK/generated expression
+coverage for this string, NULL-handling, and conditional matrix, with temporal
+and numeric coverage added by the separate
+`constraint-generated-temporal-numeric-expressions` slice. Exhaustive
+expression compatibility remains planned.
 
 ## DDL Metadata Routing Impact
 
