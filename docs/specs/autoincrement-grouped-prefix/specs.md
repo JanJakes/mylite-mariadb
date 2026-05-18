@@ -53,7 +53,8 @@ support separately from the MyISAM/Aria grouped-prefix form:
 - Transaction-aware rollback of consumed generated values.
 - Cross-process allocation guarantees beyond the current file lock behavior.
 - Partition-aware grouped allocation.
-- Exhaustive `auto_increment_offset` / `auto_increment_increment` matrices.
+- Broader `auto_increment_offset` / `auto_increment_increment` matrices, which
+  are covered by follow-up offset/increment slices.
 
 ## Compatibility Impact
 

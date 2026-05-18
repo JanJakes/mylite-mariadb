@@ -133,6 +133,16 @@ typedef struct collation_restart_case {
     const char *collation_name;
 } collation_restart_case;
 
+typedef struct autoincrement_offset_matrix_case {
+    const char *suffix;
+    unsigned offset;
+    unsigned increment;
+    unsigned first;
+    unsigned second;
+    unsigned explicit_value;
+    unsigned after_explicit;
+} autoincrement_offset_matrix_case;
+
 typedef struct catalog_table_context {
     unsigned count;
     const char *expected_schema_name;
@@ -180,6 +190,7 @@ static void test_generated_primary_key_policy(void);
 static void test_autoincrement_key_policy(void);
 static void test_autoincrement_offset_increment(void);
 static void test_autoincrement_offset_increment_multirow(void);
+static void test_autoincrement_offset_increment_matrix(void);
 static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
 static void test_index_ddl_if_exists(void);
@@ -399,6 +410,15 @@ static int single_value_callback(void *ctx, int column_count, char **values, cha
 static int wordpress_post_callback(void *ctx, int column_count, char **values, char **column_names);
 static int wordpress_join_callback(void *ctx, int column_count, char **values, char **column_names);
 static int catalog_table_callback(void *ctx, const char *schema_name, const char *table_name);
+static void assert_autoincrement_offset_matrix_case(
+    mylite_db *db,
+    const autoincrement_offset_matrix_case *test_case
+);
+static void assert_autoincrement_matrix_value(
+    mylite_db *db,
+    const char *sql,
+    unsigned expected
+);
 static mylite_db *open_database(const char *root, char **filename);
 static mylite_db *open_database_with_filename(const char *root, const char *filename);
 static mylite_db *open_database_with_runtime_name(
@@ -474,6 +494,7 @@ int main(int argc, char **argv) {
     test_autoincrement_key_policy();
     test_autoincrement_offset_increment();
     test_autoincrement_offset_increment_multirow();
+    test_autoincrement_offset_increment_matrix();
     test_indexed_rows();
     test_standalone_index_ddl();
     test_index_ddl_if_exists();
@@ -9739,6 +9760,246 @@ static void test_autoincrement_offset_increment_multirow(void) {
     free(filename);
     remove_tree(root);
     free(root);
+}
+
+static void test_autoincrement_offset_increment_matrix(void) {
+    const autoincrement_offset_matrix_case cases[] = {
+        {"o1_i2", 1U, 2U, 1U, 3U, 10U, 11U},
+        {"o2_i2", 2U, 2U, 2U, 4U, 10U, 12U},
+        {"o5_i10", 5U, 10U, 5U, 15U, 21U, 25U},
+        {"o7_i3", 7U, 3U, 7U, 10U, 11U, 13U},
+    };
+    const size_t case_count = sizeof(cases) / sizeof(cases[0]);
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_offset_matrix");
+    assert_exec_succeeds(db, "USE auto_offset_matrix");
+
+    for (size_t i = 0; i < case_count; ++i) {
+        assert_autoincrement_offset_matrix_case(db, cases + i);
+    }
+    assert_catalog_table_count(
+        filename,
+        "auto_offset_matrix",
+        (unsigned)(2U * case_count)
+    );
+    assert_exec_succeeds(
+        db,
+        "SET @@session.auto_increment_increment = 1, "
+        "@@session.auto_increment_offset = 1"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void assert_autoincrement_offset_matrix_case(
+    mylite_db *db,
+    const autoincrement_offset_matrix_case *test_case
+) {
+    char sql[640];
+    int written = snprintf(
+        sql,
+        sizeof(sql),
+        "SET @@session.auto_increment_increment = %u, "
+        "@@session.auto_increment_offset = %u",
+        test_case->increment,
+        test_case->offset
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_exec_succeeds(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "CREATE TABLE first_key_%s ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (id)"
+        ") ENGINE=InnoDB",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_exec_succeeds(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "INSERT INTO first_key_%s (title) VALUES ('first'), ('second')",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_exec_succeeds(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT id FROM first_key_%s WHERE title = 'first'",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_autoincrement_matrix_value(db, sql, test_case->first);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT id FROM first_key_%s WHERE title = 'second'",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_autoincrement_matrix_value(db, sql, test_case->second);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "INSERT INTO first_key_%s VALUES (%u, 'explicit')",
+        test_case->suffix,
+        test_case->explicit_value
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_exec_succeeds(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "INSERT INTO first_key_%s (title) VALUES ('after-explicit')",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_exec_succeeds(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT id FROM first_key_%s WHERE title = 'after-explicit'",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_autoincrement_matrix_value(db, sql, test_case->after_explicit);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "CREATE TABLE grouped_%s ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (category, id)"
+        ") ENGINE=MyISAM",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_exec_succeeds(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "INSERT INTO grouped_%s (category, title) VALUES "
+        "(1, 'g1'), (1, 'g2'), (2, 'h1')",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_exec_succeeds(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT id FROM grouped_%s WHERE title = 'g1'",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_autoincrement_matrix_value(db, sql, test_case->first);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT id FROM grouped_%s WHERE title = 'g2'",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_autoincrement_matrix_value(db, sql, test_case->second);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT id FROM grouped_%s WHERE title = 'h1'",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_autoincrement_matrix_value(db, sql, test_case->first);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "INSERT INTO grouped_%s VALUES (1, %u, 'g-explicit')",
+        test_case->suffix,
+        test_case->explicit_value
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_exec_succeeds(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "INSERT INTO grouped_%s (category, title) VALUES "
+        "(1, 'g-after'), (2, 'h2')",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_exec_succeeds(db, sql);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT id FROM grouped_%s WHERE title = 'g-after'",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_autoincrement_matrix_value(db, sql, test_case->after_explicit);
+
+    written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT id FROM grouped_%s WHERE title = 'h2'",
+        test_case->suffix
+    );
+    assert(written > 0);
+    assert((size_t)written < sizeof(sql));
+    assert_autoincrement_matrix_value(db, sql, test_case->second);
+}
+
+static void assert_autoincrement_matrix_value(
+    mylite_db *db,
+    const char *sql,
+    unsigned expected
+) {
+    char expected_value[32];
+    const int written = snprintf(expected_value, sizeof(expected_value), "%u", expected);
+    assert(written > 0);
+    assert((size_t)written < sizeof(expected_value));
+    assert_query_single_value(db, sql, expected_value);
 }
 
 static void test_indexed_rows(void) {

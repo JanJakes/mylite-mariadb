@@ -10,7 +10,8 @@ later-in-key allocation.
 ## Non-Goals
 
 - Do not claim exhaustive `auto_increment_offset` /
-  `auto_increment_increment` matrices.
+  `auto_increment_increment` matrices; broader pair coverage is handled by the
+  `autoincrement-offset-increment-matrix` slice.
 - Do not cover every integer width, overflow boundary, negative explicit value,
   or offset-greater-than-increment behavior.
 - Do not add transaction-aware rollback of consumed generated values.
@@ -91,8 +92,8 @@ test and documentation slice unless coverage exposes a bug.
   before and after an explicit high id.
 - Close/reopen preserves first-key state and grouped live-row-derived next
   values.
-- Docs continue to mark exhaustive offset/increment matrices and
-  index-assisted grouped allocation as planned.
+- Docs continue to mark overflow/integer-width offset-increment coverage and
+  storage-level B-tree navigation as planned.
 
 ## Implementation Status
 

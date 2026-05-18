@@ -483,9 +483,10 @@ maximum matching row, including stale delete/update filtering and reverse-sort
 autoincrement definitions. Representative
 `auto_increment_offset` / `auto_increment_increment` coverage includes
 single-row and multi-row post-explicit allocation for both first-key and grouped
-prefix table shapes. That grouped path is correct for the supported storage
-subset but still scans append-only index entries until storage-level B-tree
-navigation exists.
+prefix table shapes plus a broader pair matrix including offset greater than
+increment. That grouped path is correct for the supported storage subset but
+still scans append-only index entries until storage-level B-tree navigation
+exists.
 Row, overflow, index-entry, and old autoincrement pages remain orphaned until
 compaction exists. Nullable fixed and variable fields are covered because the
 stored record image includes MariaDB's null bitmap. BLOB/TEXT fields are

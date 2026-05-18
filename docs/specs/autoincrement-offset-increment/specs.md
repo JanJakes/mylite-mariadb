@@ -36,7 +36,8 @@ MariaDB base: `mariadb-11.8.6`
 
 ## Non-Goals
 
-- Exhaustive matrices for every legal offset/increment pair.
+- Broader offset/increment matrices, which are covered by the separate
+  `autoincrement-offset-increment-matrix` slice.
 - Multi-row post-explicit allocation under a different offset/increment pair,
   which is covered by the separate
   `autoincrement-offset-increment-multi-row` slice.
@@ -109,8 +110,9 @@ test and documentation slice unless the new tests expose a bug.
 
 ## Risks And Open Questions
 
-- MyLite still needs broader offset/increment matrices across integer widths,
-  temporary/volatile rows, and overflow boundaries before claiming exhaustive
-  compatibility.
+- MyLite still needs integer-width, temporary/volatile-row, and overflow-boundary
+  coverage before claiming exhaustive compatibility.
 - Multi-row post-explicit first-key and grouped-prefix allocation is covered by
   the separate `autoincrement-offset-increment-multi-row` slice.
+- A broader first-key and grouped-prefix pair matrix is covered by the separate
+  `autoincrement-offset-increment-matrix` slice.
