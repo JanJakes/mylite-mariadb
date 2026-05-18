@@ -120,6 +120,7 @@ default_tests=(
   main.func_regexp_pcre
   main.func_weight_string
   main.json_equals
+  main.json_normalize
   main.func_kdf
   main.func_encrypt_nossl
 )

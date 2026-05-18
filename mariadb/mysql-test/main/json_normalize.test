@@ -1,6 +1,7 @@
 set names utf8;
 
 create table t1 (json json);
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 
 

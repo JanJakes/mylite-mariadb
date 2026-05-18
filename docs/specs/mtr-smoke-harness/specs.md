@@ -76,6 +76,8 @@ MariaDB base: `mariadb-11.8.6`
 - [MTR JSON and charset smoke](../mtr-json-charset-smoke/specs.md) adds
   `main.ctype_filesystem`, `main.ctype_collate_implicit_utf32`, and
   `main.json_equals`.
+- [MTR JSON normalize smoke](../mtr-json-normalize-smoke/specs.md) adds
+  `main.json_normalize`.
 - [MTR collation and diagnostics smoke](../mtr-collation-diagnostics-smoke/specs.md)
   adds `main.ctype_collate_database`, `main.ctype_collate_implicit`,
   `main.ctype_collate_implicit_def`, `main.ctype_collate_table`, and
@@ -283,6 +285,7 @@ The default curated list remains intentionally baseline-oriented:
 - `main.func_regexp_pcre`.
 - `main.func_weight_string`.
 - `main.json_equals`.
+- `main.json_normalize`.
 - `main.func_kdf`.
 - `main.func_encrypt_nossl`.
 
