@@ -14929,7 +14929,113 @@ static void test_autoincrement_grouped_failed_dml_matrices(void) {
         "WHERE title = 'after-prepared-update-failure'",
         "4"
     );
-    assert_catalog_table_count(filename, "auto_grouped_failed_dml_matrices", 4U);
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_update_ignore_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "slug VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (category, id),"
+        "UNIQUE KEY title_key (title),"
+        "UNIQUE KEY slug_key (slug)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_update_ignore_posts (category, title, slug) VALUES "
+        "(1, 'skip-update', 'free'),"
+        "(1, 'existing-conflict', 'taken')"
+    );
+    assert_exec_succeeds(
+        db,
+        "UPDATE IGNORE grouped_update_ignore_posts "
+        "SET id = 100, slug = 'taken' "
+        "WHERE title = 'skip-update'"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_update_ignore_posts WHERE title = 'skip-update'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM grouped_update_ignore_posts WHERE title = 'skip-update'",
+        "free"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_update_ignore_posts WHERE id = 100",
+        "0"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_update_ignore_posts (category, title, slug) VALUES "
+        "(1, 'after-update-ignore', 'after-update-ignore')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_update_ignore_posts "
+        "WHERE title = 'after-update-ignore'",
+        "3"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_prepared_update_ignore_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "slug VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (category, id),"
+        "UNIQUE KEY title_key (title),"
+        "UNIQUE KEY slug_key (slug)"
+        ") ENGINE=MyISAM"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_prepared_update_ignore_posts "
+        "(category, title, slug) VALUES "
+        "(1, 'prepared-skip-update', 'free'),"
+        "(1, 'prepared-existing-conflict', 'taken')"
+    );
+    assert_prepared_succeeds(
+        db,
+        "UPDATE IGNORE grouped_prepared_update_ignore_posts "
+        "SET id = 100, slug = 'taken' "
+        "WHERE title = 'prepared-skip-update'"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_prepared_update_ignore_posts "
+        "WHERE title = 'prepared-skip-update'",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM grouped_prepared_update_ignore_posts "
+        "WHERE title = 'prepared-skip-update'",
+        "free"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_prepared_update_ignore_posts "
+        "WHERE id = 100",
+        "0"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_prepared_update_ignore_posts "
+        "(category, title, slug) VALUES "
+        "(1, 'after-prepared-update-ignore', 'after-prepared-update-ignore')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_prepared_update_ignore_posts "
+        "WHERE title = 'after-prepared-update-ignore'",
+        "3"
+    );
+    assert_catalog_table_count(filename, "auto_grouped_failed_dml_matrices", 6U);
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
@@ -14980,6 +15086,30 @@ static void test_autoincrement_grouped_failed_dml_matrices(void) {
         "SELECT id FROM grouped_prepared_failed_update_posts "
         "WHERE title = 'after-prepared-update-reopen'",
         "5"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_update_ignore_posts (category, title, slug) VALUES "
+        "(1, 'after-update-ignore-reopen', 'after-update-ignore-reopen')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_update_ignore_posts "
+        "WHERE title = 'after-update-ignore-reopen'",
+        "4"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_prepared_update_ignore_posts "
+        "(category, title, slug) VALUES "
+        "(1, 'after-prepared-update-ignore-reopen', "
+        "'after-prepared-update-ignore-reopen')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_prepared_update_ignore_posts "
+        "WHERE title = 'after-prepared-update-ignore-reopen'",
+        "4"
     );
 
     assert(mylite_close(db) == MYLITE_OK);

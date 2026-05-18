@@ -574,6 +574,9 @@ and foreign-key checks. Failed duplicate-key updates and duplicate-key
 `UPDATE IGNORE` skips therefore leave the attempted high value unused, while a
 successful high-value update advances the next generated value and close/reopen
 state.
+Grouped later-in-key `UPDATE IGNORE` skips follow the live-prefix rule: an
+attempted explicit high grouped id is ignored with the skipped row, and the
+next generated value is derived from the live per-prefix maximum.
 If a multi-row update publishes a successful explicit high-value advancement
 before a later row fails, statement rollback restores row/index visibility while
 preserving the published autoincrement advancement for the next generated row;

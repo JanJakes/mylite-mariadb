@@ -6,7 +6,7 @@ Broaden failed-DML `AUTO_INCREMENT` coverage for grouped later-in-key
 definitions beyond ODKU-specific failures. The slice covers representative
 mixed-row insert and update failures where grouped allocation must resume from
 live per-prefix maxima rather than preserving first-key-style reserved tails or
-rolled-back explicit high values.
+rolled-back or ignored explicit high values.
 
 ## Source Findings
 
@@ -40,12 +40,14 @@ MariaDB base: `mariadb-11.8.6`
 - Direct and prepared ordered multi-row `UPDATE` statements where an earlier
   row attempts an explicit high grouped autoincrement value, a later row fails
   a duplicate-key update, and statement rollback restores visible rows.
+- Direct and prepared `UPDATE IGNORE` statements where a duplicate-key skip
+  attempts an explicit high grouped autoincrement value.
 - Close/reopen allocation from live prefix maxima after the covered statements.
 
 ## Non-Goals
 
 - Exhaustive trigger, view, partition, offset/increment, integer-width,
-  generated-column, multi-table, or `UPDATE IGNORE` matrices.
+  generated-column, multi-table, or broader `UPDATE IGNORE` matrices.
 - First-key table-local autoincrement reservation behavior, which is covered by
   `docs/specs/autoincrement-failed-dml-matrices/specs.md` and
   `docs/specs/autoincrement-prior-success-failed-update-matrices/specs.md`.
@@ -58,9 +60,9 @@ MariaDB base: `mariadb-11.8.6`
 
 This narrows the grouped failed-DML matrix gap. For grouped later-in-key
 definitions, generated values are based on live rows in the exact key prefix.
-Ignored duplicate insert rows do not create durable first-key-style reserved
-tail gaps, and explicit high values from rolled-back update rows do not affect
-the next generated grouped value after statement rollback.
+Ignored duplicate insert and update rows do not create durable first-key-style
+reserved tail gaps, and explicit high values from rolled-back update rows do
+not affect the next generated grouped value after statement rollback.
 
 The claim remains representative. Broader trigger, view, generated-column,
 offset/increment, integer-width, multi-table, and `UPDATE IGNORE` matrices
@@ -79,6 +81,11 @@ with an explicit high value before a later row fails a duplicate-key check. If
 grouped allocation accidentally used preserved table-local state, the next
 generated row would jump to the high value. Correct MyLite grouped behavior
 continues from the live prefix maximum after rollback.
+
+The `UPDATE IGNORE` tests make one row attempt an explicit high grouped value
+and a duplicate secondary-key value in the same update. MariaDB skips the row,
+so MyLite must leave the row image unchanged and derive the next generated id
+from the live prefix maximum rather than the attempted high value.
 
 ## File Lifecycle
 
@@ -108,6 +115,8 @@ No dependency, license, or intended size-profile change is introduced.
   maximum.
 - Add direct and prepared grouped prior-success failed-update coverage proving
   explicit high values are rolled back for allocation purposes.
+- Add direct and prepared grouped `UPDATE IGNORE` coverage proving skipped
+  duplicate updates do not publish attempted explicit high values.
 - Verify rows, duplicate-key targets, next generated values, and close/reopen
   persistence.
 - Run the focused storage-engine test, statement-rollback and routed-DDL/DML
@@ -120,6 +129,8 @@ No dependency, license, or intended size-profile change is introduced.
   per-prefix ids around the ignored duplicate row.
 - Failed grouped prior-success explicit high updates restore row images and do
   not make the next generated value jump to the attempted high range.
+- Grouped `UPDATE IGNORE` skips leave row images unchanged and do not make the
+  next generated value jump to the attempted high range.
 - Direct and prepared execution cover both `InnoDB` and `MyISAM` routed engine
   declarations.
 - Generated grouped values resume from live per-prefix maxima before and after
@@ -128,5 +139,5 @@ No dependency, license, or intended size-profile change is introduced.
 ## Risks And Open Questions
 
 - Trigger, view, generated-column, multi-table, offset/increment, integer-width,
-  and `UPDATE IGNORE` variants may follow different SQL-layer ordering and
-  remain separate work.
+  and broader `UPDATE IGNORE` variants may follow different SQL-layer ordering
+  and remain separate work.
