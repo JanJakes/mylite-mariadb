@@ -527,6 +527,10 @@ the reserved gap even when later generated rows never reach `write_row()`.
 Mixed generated `INSERT IGNORE` statements may assign consecutive ids to
 successful rows around a skipped duplicate row, but the next statement still
 resumes after the reserved interval boundary.
+`INSERT ... ON DUPLICATE KEY UPDATE` follows the same durable first-key
+reservation path before duplicate-key checks. A duplicate-update row can reuse
+the statement-local generated cursor for later successful rows, while the next
+statement still resumes after the reserved interval boundary.
 SQL-layer failures before generated value allocation, such as CHECK failures
 that MariaDB rejects before handler writes, do not reserve MyLite values.
 Failed DDL checkpoints do not inherit the row-DML preservation marker.
@@ -538,6 +542,9 @@ successful high-value update advances the next generated value and close/reopen
 state.
 Failed multi-row updates that hit MyLite foreign-key checks before update-row
 publication likewise leave attempted explicit high values unused.
+Duplicate-update branches that explicitly set the autoincrement column advance
+the durable next value through the ordinary MyLite update path, including
+transaction rollback preservation and close/reopen persistence.
 The grouped autoincrement path is correct for the supported storage subset but
 still scans append-only index entries until storage-level B-tree navigation
 exists.
