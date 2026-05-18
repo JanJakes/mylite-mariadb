@@ -157,6 +157,7 @@ static void test_foreign_key_self_set_null_update(void);
 static void test_foreign_key_non_self_set_null_actions(void);
 static void test_foreign_key_delete_cascade_actions(void);
 static void test_foreign_key_update_cascade_actions(void);
+static void test_foreign_key_recursive_update_cascade_actions(void);
 static void test_foreign_key_action_combinations(void);
 static void test_foreign_key_same_row_action_matrix(void);
 static void test_foreign_key_non_self_ordering(void);
@@ -441,6 +442,7 @@ int main(int argc, char **argv) {
     test_foreign_key_non_self_set_null_actions();
     test_foreign_key_delete_cascade_actions();
     test_foreign_key_update_cascade_actions();
+    test_foreign_key_recursive_update_cascade_actions();
     test_foreign_key_action_combinations();
     test_foreign_key_same_row_action_matrix();
     test_foreign_key_non_self_ordering();
@@ -3385,6 +3387,202 @@ static void test_foreign_key_update_cascade_actions(void) {
         db,
         "SELECT CONCAT(id, ':', parent_id) FROM fk_update_self",
         "2:2"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_foreign_key_recursive_update_cascade_actions(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_recursive_update_root ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_recursive_update_mid ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "CONSTRAINT fk_recursive_update_mid_root "
+        "FOREIGN KEY (id) REFERENCES fk_recursive_update_root(id) "
+        "ON UPDATE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_recursive_update_leaf ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "mid_id INT NOT NULL, "
+        "KEY fk_recursive_update_leaf_mid (mid_id), "
+        "CONSTRAINT fk_recursive_update_leaf_mid "
+        "FOREIGN KEY (mid_id) REFERENCES fk_recursive_update_mid(id) "
+        "ON UPDATE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_recursive_update_root VALUES (1)");
+    assert_exec_succeeds(db, "INSERT INTO fk_recursive_update_mid VALUES (1)");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_recursive_update_leaf VALUES (100, 1), (101, 1)"
+    );
+    assert_exec_succeeds(
+        db,
+        "UPDATE fk_recursive_update_root SET id = 10 WHERE id = 1"
+    );
+    assert_query_single_value(db, "SELECT id FROM fk_recursive_update_mid", "10");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_recursive_update_leaf "
+        "FORCE INDEX (fk_recursive_update_leaf_mid) WHERE mid_id = 10",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_recursive_update_leaf "
+        "FORCE INDEX (fk_recursive_update_leaf_mid) WHERE mid_id = 1",
+        "0"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_recursive_update_set_null_root ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_recursive_update_set_null_mid ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "CONSTRAINT fk_recursive_update_set_null_mid_root "
+        "FOREIGN KEY (id) REFERENCES fk_recursive_update_set_null_root(id) "
+        "ON UPDATE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_recursive_update_set_null_leaf ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "mid_id INT NULL, "
+        "KEY fk_recursive_update_set_null_leaf_mid (mid_id), "
+        "CONSTRAINT fk_recursive_update_set_null_leaf_mid "
+        "FOREIGN KEY (mid_id) REFERENCES fk_recursive_update_set_null_mid(id) "
+        "ON UPDATE SET NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_recursive_update_set_null_root VALUES (1)"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_recursive_update_set_null_mid VALUES (1)"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_recursive_update_set_null_leaf VALUES (200, 1)"
+    );
+    assert_exec_succeeds(
+        db,
+        "UPDATE fk_recursive_update_set_null_root SET id = 20 WHERE id = 1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM fk_recursive_update_set_null_mid",
+        "20"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT mid_id IS NULL FROM fk_recursive_update_set_null_leaf "
+        "WHERE id = 200",
+        "1"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_recursive_update_block_root ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_recursive_update_block_mid ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "CONSTRAINT fk_recursive_update_block_mid_root "
+        "FOREIGN KEY (id) REFERENCES fk_recursive_update_block_root(id) "
+        "ON UPDATE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_recursive_update_block_leaf ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "mid_id INT NOT NULL, "
+        "KEY fk_recursive_update_block_leaf_mid (mid_id), "
+        "CONSTRAINT fk_recursive_update_block_leaf_mid "
+        "FOREIGN KEY (mid_id) REFERENCES fk_recursive_update_block_mid(id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_recursive_update_block_root VALUES (1)"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_recursive_update_block_mid VALUES (1)"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO fk_recursive_update_block_leaf VALUES (300, 1)"
+    );
+    assert_exec_fails(
+        db,
+        "UPDATE fk_recursive_update_block_root SET id = 30 WHERE id = 1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM fk_recursive_update_block_root",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM fk_recursive_update_block_mid",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT mid_id FROM fk_recursive_update_block_leaf WHERE id = 300",
+        "1"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE app");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_recursive_update_leaf "
+        "FORCE INDEX (fk_recursive_update_leaf_mid) WHERE mid_id = 10",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT mid_id IS NULL FROM fk_recursive_update_set_null_leaf "
+        "WHERE id = 200",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM fk_recursive_update_block_root",
+        "1"
     );
 
     assert(mylite_close(db) == MYLITE_OK);

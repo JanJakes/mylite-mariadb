@@ -3555,11 +3555,19 @@ static int mylite_apply_update_cascade_to_child_rows(
 
   uchar *saved_record0= static_cast<uchar *>(
     malloc(child_table->s->reclength));
-  uchar *saved_record1= static_cast<uchar *>(
-    malloc(child_table->s->reclength));
-  if (!saved_record0 || !saved_record1)
+  const bool record1_aliases_record0=
+    child_table->record[1] == child_table->record[0];
+  uchar *child_old_record= record1_aliases_record0 ?
+    static_cast<uchar *>(malloc(child_table->s->reclength)) :
+    child_table->record[1];
+  uchar *saved_record1= record1_aliases_record0 ? NULL :
+    static_cast<uchar *>(malloc(child_table->s->reclength));
+  if (!saved_record0 || !child_old_record ||
+      (!record1_aliases_record0 && !saved_record1))
   {
     free(saved_record0);
+    if (record1_aliases_record0)
+      free(child_old_record);
     free(saved_record1);
     free(parent_new_data);
     free(old_key_prefix);
@@ -3569,7 +3577,9 @@ static int mylite_apply_update_cascade_to_child_rows(
     return HA_ERR_OUT_OF_MEM;
   }
   memcpy(saved_record0, child_table->record[0], child_table->s->reclength);
-  memcpy(saved_record1, child_table->record[1], child_table->s->reclength);
+  if (!record1_aliases_record0)
+    memcpy(saved_record1, child_table->record[1],
+           child_table->s->reclength);
 
   for (size_t i= 0; !error && i < row_count; ++i)
   {
@@ -3600,10 +3610,15 @@ static int mylite_apply_update_cascade_to_child_rows(
     if (!matches)
       continue;
 
-    memcpy(child_table->record[1], row, child_table->s->reclength);
+    memcpy(child_old_record, row, child_table->s->reclength);
     error= mylite_copy_foreign_key_columns(
       parent_table, parent_key, child_table, child_key,
       metadata->column_count, effective_new_data, child_table->record[0]);
+    if (error)
+      break;
+    error= mylite_apply_same_row_update_actions(
+      primary_file, metadata->schema_name, metadata->table_name, child_table,
+      child_old_record, child_table->record[0]);
     if (error)
       break;
 
@@ -3626,9 +3641,14 @@ static int mylite_apply_update_cascade_to_child_rows(
         primary_file, metadata->schema_name, metadata->table_name,
         child_table, child_table->record[0], metadata->constraint_name);
     if (!error)
+      error= mylite_apply_parent_foreign_key_actions(
+        primary_file, metadata->schema_name, metadata->table_name,
+        child_table, child_old_record, child_table->record[0],
+        row_ids[i], cascade_depth + 1U);
+    if (!error)
       error= mylite_check_parent_foreign_keys(
         primary_file, metadata->schema_name, metadata->table_name,
-        child_table, child_table->record[1], child_table->record[0],
+        child_table, child_old_record, child_table->record[0],
         row_ids[i]);
     if (!error)
     {
@@ -3656,8 +3676,11 @@ static int mylite_apply_update_cascade_to_child_rows(
   }
 
   memcpy(child_table->record[0], saved_record0, child_table->s->reclength);
-  memcpy(child_table->record[1], saved_record1, child_table->s->reclength);
+  if (!record1_aliases_record0)
+    memcpy(child_table->record[1], saved_record1, child_table->s->reclength);
   free(saved_record0);
+  if (record1_aliases_record0)
+    free(child_old_record);
   free(saved_record1);
   free(parent_new_data);
   free(old_key_prefix);
@@ -3753,9 +3776,12 @@ static int mylite_apply_delete_cascade_to_child_rows(
 
   uchar *saved_record0= static_cast<uchar *>(
     malloc(child_table->s->reclength));
-  uchar *saved_record1= child_table->record[1] ?
-    static_cast<uchar *>(malloc(child_table->s->reclength)) : NULL;
-  if (!saved_record0 || (child_table->record[1] && !saved_record1))
+  const bool has_distinct_record1= child_table->record[1] &&
+    child_table->record[1] != child_table->record[0];
+  uchar *saved_record1= has_distinct_record1 ?
+    static_cast<uchar *>(malloc(child_table->s->reclength)) :
+    NULL;
+  if (!saved_record0 || (has_distinct_record1 && !saved_record1))
   {
     free(saved_record0);
     free(saved_record1);
@@ -3766,7 +3792,7 @@ static int mylite_apply_delete_cascade_to_child_rows(
     return HA_ERR_OUT_OF_MEM;
   }
   memcpy(saved_record0, child_table->record[0], child_table->s->reclength);
-  if (child_table->record[1])
+  if (has_distinct_record1)
     memcpy(saved_record1, child_table->record[1],
            child_table->s->reclength);
 
@@ -3805,7 +3831,7 @@ static int mylite_apply_delete_cascade_to_child_rows(
   }
 
   memcpy(child_table->record[0], saved_record0, child_table->s->reclength);
-  if (child_table->record[1])
+  if (has_distinct_record1)
     memcpy(child_table->record[1], saved_record1,
            child_table->s->reclength);
   free(saved_record0);
@@ -3922,11 +3948,19 @@ static int mylite_apply_set_null_to_child_rows(
 
   uchar *saved_record0= static_cast<uchar *>(
     malloc(child_table->s->reclength));
-  uchar *saved_record1= child_table->record[1] ?
-    static_cast<uchar *>(malloc(child_table->s->reclength)) : NULL;
-  if (!saved_record0 || (child_table->record[1] && !saved_record1))
+  const bool record1_aliases_record0=
+    child_table->record[1] == child_table->record[0];
+  uchar *child_old_record= record1_aliases_record0 ?
+    static_cast<uchar *>(malloc(child_table->s->reclength)) :
+    child_table->record[1];
+  uchar *saved_record1= record1_aliases_record0 ? NULL :
+    static_cast<uchar *>(malloc(child_table->s->reclength));
+  if (!saved_record0 || !child_old_record ||
+      (!record1_aliases_record0 && !saved_record1))
   {
     free(saved_record0);
+    if (record1_aliases_record0)
+      free(child_old_record);
     free(saved_record1);
     free(old_key_prefix);
     free(rows);
@@ -3935,7 +3969,7 @@ static int mylite_apply_set_null_to_child_rows(
     return HA_ERR_OUT_OF_MEM;
   }
   memcpy(saved_record0, child_table->record[0], child_table->s->reclength);
-  if (child_table->record[1])
+  if (!record1_aliases_record0)
     memcpy(saved_record1, child_table->record[1],
            child_table->s->reclength);
 
@@ -3968,7 +4002,7 @@ static int mylite_apply_set_null_to_child_rows(
     if (!matches)
       continue;
 
-    memcpy(child_table->record[1], row, child_table->s->reclength);
+    memcpy(child_old_record, row, child_table->s->reclength);
     mylite_set_foreign_key_columns_null(child_table, child_key,
                                         metadata->column_count);
 
@@ -3993,7 +4027,7 @@ static int mylite_apply_set_null_to_child_rows(
     if (!error)
       error= mylite_check_parent_foreign_keys(
         primary_file, metadata->schema_name, metadata->table_name,
-        child_table, child_table->record[1], child_table->record[0],
+        child_table, child_old_record, child_table->record[0],
         row_ids[i]);
     if (!error)
     {
@@ -4021,10 +4055,12 @@ static int mylite_apply_set_null_to_child_rows(
   }
 
   memcpy(child_table->record[0], saved_record0, child_table->s->reclength);
-  if (child_table->record[1])
+  if (!record1_aliases_record0)
     memcpy(child_table->record[1], saved_record1,
            child_table->s->reclength);
   free(saved_record0);
+  if (record1_aliases_record0)
+    free(child_old_record);
   free(saved_record1);
   free(old_key_prefix);
   free(rows);
@@ -4046,12 +4082,13 @@ static void mylite_set_foreign_key_columns_null_at(
   if (!table || !child_key || !buf)
     return;
 
-  const my_ptrdiff_t row_offset= buf - table->record[0];
   for (size_t i= 0; i < column_count; ++i)
   {
-    Field *field= child_key->key_part[i].field;
-    if (field)
-      field->set_null(row_offset);
+    const KEY_PART_INFO *child_part= child_key->key_part + i;
+    if (child_part->field && child_part->field->real_maybe_null() &&
+        child_part->null_bit)
+      const_cast<uchar *>(buf)[child_part->null_offset]|=
+        child_part->null_bit;
   }
 }
 
@@ -4070,18 +4107,19 @@ static int mylite_copy_foreign_key_columns(
   size_t lengths[sizeof(unsigned long long) * CHAR_BIT]= {0};
   bool nulls[sizeof(unsigned long long) * CHAR_BIT]= {false};
   size_t total_length= 0;
-  const my_ptrdiff_t parent_offset= parent_data - parent_table->record[0];
-  const my_ptrdiff_t child_offset= child_data - child_table->record[0];
 
   for (size_t i= 0; i < column_count; ++i)
   {
-    Field *parent_field= parent_key->key_part[i].field;
-    Field *child_field= child_key->key_part[i].field;
+    const KEY_PART_INFO *parent_part= parent_key->key_part + i;
+    const KEY_PART_INFO *child_part= child_key->key_part + i;
+    Field *parent_field= parent_part->field;
+    Field *child_field= child_part->field;
     if (!parent_field || !child_field ||
         parent_field->pack_length() != child_field->pack_length())
       return HA_ERR_UNSUPPORTED;
 
-    nulls[i]= parent_field->is_null(parent_offset);
+    nulls[i]= parent_part->null_bit &&
+      (parent_data[parent_part->null_offset] & parent_part->null_bit);
     lengths[i]= parent_field->pack_length();
     offsets[i]= total_length;
     if (!nulls[i] && lengths[i] > SIZE_MAX - total_length)
@@ -4099,28 +4137,30 @@ static int mylite_copy_foreign_key_columns(
   {
     if (nulls[i])
       continue;
-    Field *parent_field= parent_key->key_part[i].field;
-    memcpy(values + offsets[i], parent_field->ptr + parent_offset,
+    const KEY_PART_INFO *parent_part= parent_key->key_part + i;
+    memcpy(values + offsets[i], parent_data + parent_part->offset,
            lengths[i]);
   }
 
   for (size_t i= 0; i < column_count; ++i)
   {
-    Field *child_field= child_key->key_part[i].field;
+    const KEY_PART_INFO *child_part= child_key->key_part + i;
+    Field *child_field= child_part->field;
     if (nulls[i])
     {
-      if (!child_field->real_maybe_null())
+      if (!child_field->real_maybe_null() || !child_part->null_bit)
       {
         free(values);
         return HA_ERR_ROW_IS_REFERENCED;
       }
-      child_field->set_null(child_offset);
+      child_data[child_part->null_offset]|= child_part->null_bit;
       continue;
     }
 
-    child_field->set_notnull(child_offset);
-    memcpy(child_field->ptr + child_offset, values + offsets[i],
-           lengths[i]);
+    if (child_part->null_bit)
+      child_data[child_part->null_offset]&=
+        static_cast<uchar>(~child_part->null_bit);
+    memcpy(child_data + child_part->offset, values + offsets[i], lengths[i]);
   }
 
   free(values);
