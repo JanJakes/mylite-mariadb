@@ -1,4 +1,5 @@
 #include <mylite/mylite.h>
+#include <mylite/storage.h>
 
 #include <dirent.h>
 #include <errno.h>
@@ -21,6 +22,7 @@ typedef struct benchmark_context {
     const char *root;
     char *filename;
     mylite_db *db;
+    int published_leaf_secondary_index;
 } benchmark_context;
 
 typedef struct scalar_result {
@@ -48,9 +50,30 @@ static int benchmark_point_selects(benchmark_context *ctx);
 static int benchmark_prepared_point_selects(benchmark_context *ctx);
 static int benchmark_secondary_selects(benchmark_context *ctx);
 static int benchmark_prepared_secondary_selects(benchmark_context *ctx);
+static int publish_secondary_leaf_index(benchmark_context *ctx);
+static int benchmark_leaf_secondary_selects(benchmark_context *ctx);
+static int benchmark_prepared_leaf_secondary_selects(benchmark_context *ctx);
 static int benchmark_updates(benchmark_context *ctx);
 static int benchmark_prepared_updates(benchmark_context *ctx);
 static int benchmark_ordered_scan(benchmark_context *ctx);
+static int benchmark_secondary_selects_for_index(
+    benchmark_context *ctx,
+    const char *table_name,
+    const char *index_name,
+    const char *operation,
+    const char *rows_label,
+    const char *checksum_label
+);
+static int benchmark_prepared_secondary_selects_for_index(
+    benchmark_context *ctx,
+    const char *table_name,
+    const char *index_name,
+    const char *operation,
+    const char *rows_label,
+    const char *checksum_label
+);
+static int prepare_secondary_leaf_table(benchmark_context *ctx);
+static int verify_secondary_leaf_index_root(benchmark_context *ctx);
 static size_t secondary_value_for_row(benchmark_context *ctx, size_t row_number);
 static size_t secondary_value_for_iteration(benchmark_context *ctx, size_t iteration);
 static uint64_t secondary_expected_checksum(benchmark_context *ctx, size_t value, size_t *out_rows);
@@ -117,6 +140,7 @@ static int run_benchmark(const benchmark_config *config) {
         .root = NULL,
         .filename = NULL,
         .db = NULL,
+        .published_leaf_secondary_index = 0,
     };
     int result = 1;
     uint64_t start_ns;
@@ -155,6 +179,15 @@ static int run_benchmark(const benchmark_config *config) {
         goto cleanup;
     }
     if (benchmark_prepared_secondary_selects(&ctx) != 0) {
+        goto cleanup;
+    }
+    if (publish_secondary_leaf_index(&ctx) != 0) {
+        goto cleanup;
+    }
+    if (benchmark_leaf_secondary_selects(&ctx) != 0) {
+        goto cleanup;
+    }
+    if (benchmark_prepared_leaf_secondary_selects(&ctx) != 0) {
         goto cleanup;
     }
     if (benchmark_updates(&ctx) != 0) {
@@ -388,6 +421,82 @@ cleanup:
 }
 
 static int benchmark_secondary_selects(benchmark_context *ctx) {
+    return benchmark_secondary_selects_for_index(
+        ctx,
+        "perf_rows",
+        "value_key",
+        "direct secondary-index exact selects",
+        "Secondary exact-select rows",
+        "Secondary exact-select checksum"
+    );
+}
+
+static int benchmark_prepared_secondary_selects(benchmark_context *ctx) {
+    return benchmark_prepared_secondary_selects_for_index(
+        ctx,
+        "perf_rows",
+        "value_key",
+        "prepared secondary-index exact selects",
+        "Prepared secondary exact-select rows",
+        "Prepared secondary exact-select checksum"
+    );
+}
+
+static int publish_secondary_leaf_index(benchmark_context *ctx) {
+    if (prepare_secondary_leaf_table(ctx) != 0) {
+        return 1;
+    }
+
+    const uint64_t start_ns = monotonic_ns();
+    if (exec_sql(ctx, "CREATE INDEX value_leaf_key ON perf_leaf_rows (value) ALGORITHM=COPY") !=
+        0) {
+        return 1;
+    }
+
+    print_result("publish secondary leaf index", 1U, monotonic_ns() - start_ns);
+    return verify_secondary_leaf_index_root(ctx);
+}
+
+static int benchmark_leaf_secondary_selects(benchmark_context *ctx) {
+    if (!ctx->published_leaf_secondary_index) {
+        printf("Published leaf secondary exact selects: skipped; no leaf root\n");
+        return 0;
+    }
+
+    return benchmark_secondary_selects_for_index(
+        ctx,
+        "perf_leaf_rows",
+        "value_leaf_key",
+        "direct published-leaf secondary-index exact selects",
+        "Published leaf secondary exact-select rows",
+        "Published leaf secondary exact-select checksum"
+    );
+}
+
+static int benchmark_prepared_leaf_secondary_selects(benchmark_context *ctx) {
+    if (!ctx->published_leaf_secondary_index) {
+        printf("Prepared published leaf secondary exact selects: skipped; no leaf root\n");
+        return 0;
+    }
+
+    return benchmark_prepared_secondary_selects_for_index(
+        ctx,
+        "perf_leaf_rows",
+        "value_leaf_key",
+        "prepared published-leaf secondary-index exact selects",
+        "Prepared published leaf secondary exact-select rows",
+        "Prepared published leaf secondary exact-select checksum"
+    );
+}
+
+static int benchmark_secondary_selects_for_index(
+    benchmark_context *ctx,
+    const char *table_name,
+    const char *index_name,
+    const char *operation,
+    const char *rows_label,
+    const char *checksum_label
+) {
     size_t total_rows = 0U;
     uint64_t checksum = 0U;
     const uint64_t start_ns = monotonic_ns();
@@ -404,22 +513,25 @@ static int benchmark_secondary_selects(benchmark_context *ctx) {
         const int written = snprintf(
             sql,
             sizeof(sql),
-            "SELECT id, value FROM perf_rows FORCE INDEX (value_key) "
+            "SELECT id, value FROM %s FORCE INDEX (%s) "
             "WHERE value = %zu ORDER BY id",
+            table_name,
+            index_name,
             value
         );
         if (written < 0 || (size_t)written >= sizeof(sql)) {
             return 1;
         }
         if (mylite_exec(ctx->db, sql, secondary_callback, &result, NULL) != MYLITE_OK) {
-            report_database_error(ctx, "direct secondary-index exact select");
+            report_database_error(ctx, operation);
             return 1;
         }
         if (result.rows != expected_rows || result.checksum != expected_checksum) {
             fprintf(
                 stderr,
-                "Secondary exact select for value %zu returned %zu rows/%" PRIu64
-                " checksum; expected %zu/%" PRIu64 "\n",
+                "%s for value %zu returned %zu rows/%" PRIu64 " checksum; expected %zu/%" PRIu64
+                "\n",
+                operation,
                 value,
                 result.rows,
                 result.checksum,
@@ -432,31 +544,39 @@ static int benchmark_secondary_selects(benchmark_context *ctx) {
         checksum += result.checksum;
     }
 
-    print_result(
-        "direct secondary-index exact selects",
-        ctx->config->iterations,
-        monotonic_ns() - start_ns
-    );
-    printf("Secondary exact-select rows: %zu\n", total_rows);
-    printf("Secondary exact-select checksum: %" PRIu64 "\n", checksum);
+    print_result(operation, ctx->config->iterations, monotonic_ns() - start_ns);
+    printf("%s: %zu\n", rows_label, total_rows);
+    printf("%s: %" PRIu64 "\n", checksum_label, checksum);
     return 0;
 }
 
-static int benchmark_prepared_secondary_selects(benchmark_context *ctx) {
+static int benchmark_prepared_secondary_selects_for_index(
+    benchmark_context *ctx,
+    const char *table_name,
+    const char *index_name,
+    const char *operation,
+    const char *rows_label,
+    const char *checksum_label
+) {
     mylite_stmt *stmt = NULL;
     size_t total_rows = 0U;
     uint64_t checksum = 0U;
     int result = 1;
+    char sql[160];
+    const int written = snprintf(
+        sql,
+        sizeof(sql),
+        "SELECT id, value FROM %s FORCE INDEX (%s) "
+        "WHERE value = ? ORDER BY id",
+        table_name,
+        index_name
+    );
+    if (written < 0 || (size_t)written >= sizeof(sql)) {
+        return 1;
+    }
 
-    if (mylite_prepare(
-            ctx->db,
-            "SELECT id, value FROM perf_rows FORCE INDEX (value_key) "
-            "WHERE value = ? ORDER BY id",
-            MYLITE_NUL_TERMINATED,
-            &stmt,
-            NULL
-        ) != MYLITE_OK) {
-        report_database_error(ctx, "prepare secondary-index exact select");
+    if (mylite_prepare(ctx->db, sql, MYLITE_NUL_TERMINATED, &stmt, NULL) != MYLITE_OK) {
+        report_database_error(ctx, operation);
         return 1;
     }
 
@@ -470,7 +590,7 @@ static int benchmark_prepared_secondary_selects(benchmark_context *ctx) {
         size_t expected_rows = 0U;
         const uint64_t expected_checksum = secondary_expected_checksum(ctx, value, &expected_rows);
         if (mylite_bind_int64(stmt, 1U, (long long)value) != MYLITE_OK) {
-            report_database_error(ctx, "bind prepared secondary-index exact select");
+            report_database_error(ctx, operation);
             goto cleanup;
         }
 
@@ -480,20 +600,13 @@ static int benchmark_prepared_secondary_selects(benchmark_context *ctx) {
                 break;
             }
             if (step_result != MYLITE_ROW) {
-                fprintf(
-                    stderr,
-                    "Prepared secondary-index exact select failed for value %zu\n",
-                    value
-                );
-                report_database_error(ctx, "prepared secondary-index exact select");
+                fprintf(stderr, "%s failed for value %zu\n", operation, value);
+                report_database_error(ctx, operation);
                 goto cleanup;
             }
             if (mylite_column_type(stmt, 0U) != MYLITE_TYPE_INT64 ||
                 mylite_column_type(stmt, 1U) != MYLITE_TYPE_INT64) {
-                fprintf(
-                    stderr,
-                    "Prepared secondary-index exact select returned non-integer values\n"
-                );
+                fprintf(stderr, "%s returned non-integer values\n", operation);
                 goto cleanup;
             }
             selected.checksum +=
@@ -504,8 +617,9 @@ static int benchmark_prepared_secondary_selects(benchmark_context *ctx) {
         if (selected.rows != expected_rows || selected.checksum != expected_checksum) {
             fprintf(
                 stderr,
-                "Prepared secondary exact select for value %zu returned %zu rows/%" PRIu64
-                " checksum; expected %zu/%" PRIu64 "\n",
+                "%s for value %zu returned %zu rows/%" PRIu64 " checksum; expected %zu/%" PRIu64
+                "\n",
+                operation,
                 value,
                 selected.rows,
                 selected.checksum,
@@ -517,26 +631,114 @@ static int benchmark_prepared_secondary_selects(benchmark_context *ctx) {
         total_rows += selected.rows;
         checksum += selected.checksum;
         if (mylite_reset(stmt) != MYLITE_OK) {
-            report_database_error(ctx, "reset prepared secondary-index exact select");
+            report_database_error(ctx, operation);
             goto cleanup;
         }
     }
 
-    print_result(
-        "prepared secondary-index exact selects",
-        ctx->config->iterations,
-        monotonic_ns() - start_ns
-    );
-    printf("Prepared secondary exact-select rows: %zu\n", total_rows);
-    printf("Prepared secondary exact-select checksum: %" PRIu64 "\n", checksum);
+    print_result(operation, ctx->config->iterations, monotonic_ns() - start_ns);
+    printf("%s: %zu\n", rows_label, total_rows);
+    printf("%s: %" PRIu64 "\n", checksum_label, checksum);
     result = 0;
 
 cleanup:
     if (mylite_finalize(stmt) != MYLITE_OK) {
-        report_database_error(ctx, "finalize prepared secondary-index exact select");
+        report_database_error(ctx, operation);
         return 1;
     }
     return result;
+}
+
+static int prepare_secondary_leaf_table(benchmark_context *ctx) {
+    uint64_t start_ns;
+    int result = 1;
+
+    if (exec_sql(
+            ctx,
+            "CREATE TABLE perf_leaf_rows ("
+            "id INT NOT NULL PRIMARY KEY,"
+            "value INT NOT NULL,"
+            "pad VARCHAR(64) NOT NULL"
+            ") ENGINE=InnoDB"
+        ) != 0) {
+        return 1;
+    }
+    if (exec_sql(ctx, "BEGIN") != 0) {
+        return 1;
+    }
+
+    start_ns = monotonic_ns();
+    for (size_t i = 0; i < ctx->config->rows; ++i) {
+        char sql[176];
+        const int written = snprintf(
+            sql,
+            sizeof(sql),
+            "INSERT INTO perf_leaf_rows (id, value, pad) VALUES (%zu, %zu, 'row-%zu')",
+            i + 1U,
+            secondary_value_for_row(ctx, i + 1U),
+            i + 1U
+        );
+        if (written < 0 || (size_t)written >= sizeof(sql) || exec_sql(ctx, sql) != 0) {
+            goto rollback;
+        }
+    }
+    print_result(
+        "prepare secondary leaf benchmark rows",
+        ctx->config->rows,
+        monotonic_ns() - start_ns
+    );
+
+    if (exec_sql(ctx, "COMMIT") != 0) {
+        return 1;
+    }
+    result = 0;
+
+rollback:
+    if (result != 0) {
+        (void)mylite_exec(ctx->db, "ROLLBACK", NULL, NULL, NULL);
+    }
+    return result;
+}
+
+static int verify_secondary_leaf_index_root(benchmark_context *ctx) {
+    enum { value_leaf_key_index_number = 1U };
+
+    mylite_storage_index_root_metadata metadata = {
+        .size = sizeof(metadata),
+    };
+    const mylite_storage_result result = mylite_storage_read_index_root(
+        ctx->filename,
+        "perf",
+        "perf_leaf_rows",
+        value_leaf_key_index_number,
+        &metadata
+    );
+
+    if (result == MYLITE_STORAGE_NOTFOUND) {
+        printf("Published leaf root: skipped; not available under current single-page limits\n");
+        return 0;
+    }
+    if (result != MYLITE_STORAGE_OK) {
+        fprintf(stderr, "Failed to read published leaf root metadata: %d\n", result);
+        return 1;
+    }
+    if (metadata.entry_count != (unsigned long long)ctx->config->rows) {
+        fprintf(
+            stderr,
+            "Published leaf root has %llu entries; expected %zu\n",
+            metadata.entry_count,
+            ctx->config->rows
+        );
+        return 1;
+    }
+
+    ctx->published_leaf_secondary_index = 1;
+    printf(
+        "Published leaf root: table perf_leaf_rows index %u, entries %llu\n",
+        value_leaf_key_index_number,
+        metadata.entry_count
+    );
+    return 0;
 }
 
 static size_t secondary_value_for_row(benchmark_context *ctx, size_t row_number) {

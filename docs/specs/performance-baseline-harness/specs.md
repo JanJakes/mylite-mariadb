@@ -6,8 +6,9 @@ Add a repeatable developer harness for measuring the current MyLite routed
 storage path before storage-level performance work. The harness should report
 simple elapsed-time baselines for file open/schema setup, direct inserts,
 direct and prepared primary-key point selects, direct and prepared secondary-key
-exact selects, direct and prepared primary-key updates, and ordered scans
-through the public `libmylite` API.
+exact selects including scan-fallback and published leaf-root paths when
+available, direct and prepared primary-key updates, and ordered scans through
+the public `libmylite` API.
 
 ## Non-Goals
 
@@ -55,6 +56,10 @@ schemas usually request InnoDB even though MyLite owns the durable storage.
 - Report direct and prepared timing rows separately. The prepared rows are
   measured only after the prepared routed-read coverage in
   `docs/specs/prepared-routed-select-reads/`.
+- Report published-leaf secondary exact-select rows only after verifying
+  `mylite_storage_read_index_root()` sees the root. Larger runs that exceed the
+  current single-page leaf limit print a skip note instead of labelling
+  fallback scans as leaf-backed timings.
 - Use a temporary `.mylite` file and clean it up after the run.
 
 ## File Lifecycle
@@ -90,7 +95,9 @@ are true.
 - Output includes operation counts, total milliseconds, and microseconds per
   operation.
 - Prepared and direct timings are labelled separately.
-- Secondary exact-read rows include returned-row counts and checksums.
+- Secondary exact-read rows include returned-row counts and checksums, with
+  scan-fallback and published leaf-root paths labelled separately when the
+  current run can publish a single-page leaf.
 - No benchmark result is documented as a product performance claim.
 
 ## Risks And Open Questions
