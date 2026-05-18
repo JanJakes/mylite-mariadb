@@ -12324,11 +12324,15 @@ static void test_autoincrement_on_duplicate_key_update(void) {
         db,
         "INSERT INTO odku_posts (title, body) VALUES ('seed', 'original')"
     );
+    assert(mylite_changes(db) == 1);
+    assert(mylite_last_insert_id(db) == 1U);
     assert_exec_succeeds(
         db,
         "INSERT INTO odku_posts (title, body) VALUES ('seed', 'updated') "
         "ON DUPLICATE KEY UPDATE body = VALUES(body)"
     );
+    assert(mylite_changes(db) == 2);
+    assert(mylite_last_insert_id(db) == 1U);
     assert_query_single_value(
         db,
         "SELECT id FROM odku_posts WHERE title = 'seed'",
@@ -12344,10 +12348,24 @@ static void test_autoincrement_on_duplicate_key_update(void) {
         "INSERT INTO odku_posts (title, body) VALUES "
         "('after-duplicate-update', 'after')"
     );
+    assert(mylite_changes(db) == 1);
+    assert(mylite_last_insert_id(db) == 3U);
     assert_query_single_value(
         db,
         "SELECT id FROM odku_posts WHERE title = 'after-duplicate-update'",
         "3"
+    );
+    assert_prepared_succeeds(
+        db,
+        "INSERT INTO odku_posts (title, body) VALUES ('seed', 'prepared-last-id') "
+        "ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), body = VALUES(body)"
+    );
+    assert(mylite_changes(db) == 2);
+    assert(mylite_last_insert_id(db) == 1U);
+    assert_query_single_value(
+        db,
+        "SELECT body FROM odku_posts WHERE title = 'seed'",
+        "prepared-last-id"
     );
 
     assert_exec_succeeds(
@@ -12365,6 +12383,8 @@ static void test_autoincrement_on_duplicate_key_update(void) {
         "INSERT INTO odku_multi_posts (title, body) VALUES "
         "('dupe', 'original')"
     );
+    assert(mylite_changes(db) == 1);
+    assert(mylite_last_insert_id(db) == 1U);
     assert_exec_succeeds(
         db,
         "INSERT INTO odku_multi_posts (title, body) VALUES "
@@ -12372,6 +12392,8 @@ static void test_autoincrement_on_duplicate_key_update(void) {
         "('new-after', 'after') "
         "ON DUPLICATE KEY UPDATE body = VALUES(body)"
     );
+    assert(mylite_changes(db) == 4);
+    assert(mylite_last_insert_id(db) == 2U);
     assert_query_single_value(
         db,
         "SELECT id FROM odku_multi_posts WHERE title = 'new-before'",
@@ -12392,6 +12414,8 @@ static void test_autoincrement_on_duplicate_key_update(void) {
         "INSERT INTO odku_multi_posts (title, body) VALUES "
         "('after-multi-odku', 'tail')"
     );
+    assert(mylite_changes(db) == 1);
+    assert(mylite_last_insert_id(db) == 5U);
     assert_query_single_value(
         db,
         "SELECT id FROM odku_multi_posts WHERE title = 'after-multi-odku'",
@@ -12413,12 +12437,15 @@ static void test_autoincrement_on_duplicate_key_update(void) {
         "INSERT INTO odku_explicit_posts (title, body) VALUES "
         "('seed', 'original')"
     );
+    assert(mylite_changes(db) == 1);
+    assert(mylite_last_insert_id(db) == 1U);
     assert_exec_succeeds(
         db,
         "INSERT INTO odku_explicit_posts (title, body) VALUES "
         "('seed', 'high') "
         "ON DUPLICATE KEY UPDATE id = 100, body = VALUES(body)"
     );
+    assert(mylite_changes(db) == 2);
     assert_query_single_value(
         db,
         "SELECT id FROM odku_explicit_posts WHERE title = 'seed'",
@@ -12434,11 +12461,21 @@ static void test_autoincrement_on_duplicate_key_update(void) {
         "INSERT INTO odku_explicit_posts (title, body) VALUES "
         "('after-explicit-odku', 'after')"
     );
+    assert(mylite_changes(db) == 1);
+    assert(mylite_last_insert_id(db) == 101U);
     assert_query_single_value(
         db,
         "SELECT id FROM odku_explicit_posts WHERE title = 'after-explicit-odku'",
         "101"
     );
+    assert_prepared_succeeds(
+        db,
+        "INSERT INTO odku_explicit_posts (title, body) VALUES "
+        "('seed', 'prepared-last-id') "
+        "ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id), body = VALUES(body)"
+    );
+    assert(mylite_changes(db) == 2);
+    assert(mylite_last_insert_id(db) == 100U);
 
     assert_exec_succeeds(db, "BEGIN");
     assert_exec_succeeds(

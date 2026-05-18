@@ -103,6 +103,8 @@ the embedded MariaDB archive.
 
 ## Risks And Open Questions
 
-- This is representative coverage over temporary tables. Durable routed
-  storage DML compatibility remains covered by storage-smoke tests and should
-  not be inferred from this comparison alone.
+- This is representative coverage over temporary tables. Representative durable
+  routed ODKU statement-effect coverage lives in
+  `docs/specs/routed-odku-statement-effects/specs.md`; other durable storage
+  DML compatibility remains covered by storage-smoke tests and should not be
+  inferred from this comparison alone.

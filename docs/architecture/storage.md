@@ -558,6 +558,10 @@ publication likewise leave attempted explicit high values unused.
 Duplicate-update branches that explicitly set the autoincrement column advance
 the durable next value through the ordinary MyLite update path, including
 transaction rollback preservation and close/reopen persistence.
+Representative direct and prepared routed ODKU statement effects expose
+MariaDB-compatible affected-row counts and insert ids through the public
+`libmylite` APIs, including duplicate updates, multi-row generated inserts,
+and explicit `LAST_INSERT_ID(id)` duplicate-update branches.
 Failed duplicate-update branches after earlier generated row publication roll
 back visible row/index changes while preserving the generated reservation
 boundary for both `INSERT ... VALUES` and `INSERT ... SELECT` ODKU statements.

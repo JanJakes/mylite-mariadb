@@ -52,6 +52,9 @@ MariaDB base: `mariadb-11.8.6`
   statement while the next statement resumes after the reserved interval.
 - Duplicate-update branches that explicitly set the autoincrement column to a
   high value.
+- Representative direct and prepared public statement effects for routed ODKU
+  statements are covered separately in
+  `docs/specs/routed-odku-statement-effects/specs.md`.
 - Close/reopen persistence and transaction rollback preservation for the
   explicit high-value duplicate-update path.
 
@@ -62,9 +65,8 @@ MariaDB base: `mariadb-11.8.6`
   earlier generated row publication are covered separately in
   `docs/specs/autoincrement-on-duplicate-key-update-failed-dml/specs.md`.
 - Native InnoDB old-style autoincrement lock-mode parity.
-- Durable routed-storage `LAST_INSERT_ID()` / `mysql_insert_id()` matrices.
-  Representative temporary-table SQL API comparison coverage lives in
-  `docs/specs/sql-api-statement-effects-comparison/specs.md`.
+- Exhaustive durable routed-storage `LAST_INSERT_ID()` / `mysql_insert_id()`
+  matrices beyond the representative direct/prepared coverage.
 - Binary log, replication, or wire-protocol ODKU behavior.
 
 ## Compatibility Impact
@@ -149,9 +151,10 @@ No dependency, license, or intended size-profile change is introduced.
 
 ## Risks And Open Questions
 
-- The slice does not compare durable routed-storage `LAST_INSERT_ID()` /
-  `mysql_insert_id()` because the public SQL API comparison for representative
-  temporary-table ODKU insert ids is separate from storage state.
+- Representative durable routed-storage `LAST_INSERT_ID()` /
+  `mysql_insert_id()` coverage lives in
+  `docs/specs/routed-odku-statement-effects/specs.md`; broader matrices remain
+  planned.
 - Failed duplicate-update branches after earlier generated row publication are
   covered by the failed-DML ODKU follow-up slice.
 - Grouped later-in-key autoincrement ODKU behavior may need storage-level
