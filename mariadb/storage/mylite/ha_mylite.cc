@@ -6390,96 +6390,100 @@ static bool mylite_next_auto_increment_value_from_field(Field *auto_field,
   return true;
 }
 
-static int mylite_find_index_entry(TABLE *table,
-                                   const Mylite_index_cursor_entry *entries,
-                                   size_t entry_count, const uchar *keys,
-                                   uint index_number, const uchar *key,
-                                   uint key_length,
-                                   enum ha_rkey_function find_flag,
-                                   size_t *out_entry_index)
+static int mylite_find_index_entry(
+    TABLE *table, const Mylite_index_cursor_entry *entries, size_t entry_count,
+    const uchar *keys, uint index_number, const uchar *key, uint key_length,
+    enum ha_rkey_function find_flag, size_t *out_entry_index)
 {
-  if (!entries || !keys)
+  if (!entries || !keys || !key)
     return HA_ERR_KEY_NOT_FOUND;
 
-  bool found= false;
-  size_t found_index= 0;
-  for (size_t i= 0; i < entry_count; ++i)
+  size_t first_ge= 0;
+  size_t upper= entry_count;
+  while (first_ge < upper)
   {
+    const size_t mid= first_ge + ((upper - first_ge) / 2);
     int cmp= 0;
-    int error=
-      mylite_compare_key_tuple(table, index_number, keys + entries[i].key_offset,
-                               entries[i].key_size, key, key_length,
-                               key_length, &cmp);
+    int error= mylite_compare_key_tuple(
+        table, index_number, keys + entries[mid].key_offset,
+        entries[mid].key_size, key, key_length, key_length, &cmp);
     if (error)
       return error;
-
-    switch (find_flag) {
-    case HA_READ_KEY_EXACT:
-    case HA_READ_PREFIX:
-      if (cmp == 0)
-      {
-        *out_entry_index= i;
-        return 0;
-      }
-      break;
-    case HA_READ_KEY_OR_NEXT:
-      if (cmp >= 0)
-      {
-        *out_entry_index= i;
-        return 0;
-      }
-      break;
-    case HA_READ_AFTER_KEY:
-      if (cmp > 0)
-      {
-        *out_entry_index= i;
-        return 0;
-      }
-      break;
-    case HA_READ_KEY_OR_PREV:
-      if (cmp <= 0)
-      {
-        found= true;
-        found_index= i;
-      }
-      else if (found)
-        i= entry_count;
-      break;
-    case HA_READ_BEFORE_KEY:
-      if (cmp < 0)
-      {
-        found= true;
-        found_index= i;
-      }
-      else if (found)
-        i= entry_count;
-      break;
-    case HA_READ_PREFIX_LAST:
-      if (cmp == 0)
-      {
-        found= true;
-        found_index= i;
-      }
-      else if (found)
-        i= entry_count;
-      break;
-    case HA_READ_PREFIX_LAST_OR_PREV:
-      if (cmp <= 0)
-      {
-        found= true;
-        found_index= i;
-      }
-      else if (found)
-        i= entry_count;
-      break;
-    default:
-      return HA_ERR_UNSUPPORTED;
-    }
+    if (cmp < 0)
+      first_ge= mid + 1;
+    else
+      upper= mid;
   }
 
-  if (found)
+  size_t first_gt= first_ge;
+  switch (find_flag)
   {
-    *out_entry_index= found_index;
+  case HA_READ_AFTER_KEY:
+  case HA_READ_KEY_OR_PREV:
+  case HA_READ_PREFIX_LAST:
+  case HA_READ_PREFIX_LAST_OR_PREV: {
+    first_gt= 0;
+    upper= entry_count;
+    while (first_gt < upper)
+    {
+      const size_t mid= first_gt + ((upper - first_gt) / 2);
+      int cmp= 0;
+      int error= mylite_compare_key_tuple(
+          table, index_number, keys + entries[mid].key_offset,
+          entries[mid].key_size, key, key_length, key_length, &cmp);
+      if (error)
+        return error;
+      if (cmp <= 0)
+        first_gt= mid + 1;
+      else
+        upper= mid;
+    }
+    break;
+  }
+  default:
+    break;
+  }
+
+  switch (find_flag)
+  {
+  case HA_READ_KEY_EXACT:
+  case HA_READ_PREFIX:
+    if (first_ge >= entry_count)
+      return HA_ERR_KEY_NOT_FOUND;
+    break;
+  case HA_READ_KEY_OR_NEXT:
+  case HA_READ_AFTER_KEY:
+    *out_entry_index= find_flag == HA_READ_KEY_OR_NEXT ? first_ge : first_gt;
+    return *out_entry_index < entry_count ? 0 : HA_ERR_KEY_NOT_FOUND;
+  case HA_READ_KEY_OR_PREV:
+  case HA_READ_PREFIX_LAST_OR_PREV:
+    if (first_gt == 0)
+      return HA_ERR_KEY_NOT_FOUND;
+    *out_entry_index= first_gt - 1;
+    return 0;
+  case HA_READ_BEFORE_KEY:
+    if (first_ge == 0)
+      return HA_ERR_KEY_NOT_FOUND;
+    *out_entry_index= first_ge - 1;
+    return 0;
+  case HA_READ_PREFIX_LAST:
+    if (first_gt == 0)
+      return HA_ERR_KEY_NOT_FOUND;
+    first_ge= first_gt - 1;
+    break;
+  default:
+    return HA_ERR_UNSUPPORTED;
+  }
+
+  int cmp= 0;
+  int error= mylite_compare_key_tuple(
+      table, index_number, keys + entries[first_ge].key_offset,
+      entries[first_ge].key_size, key, key_length, key_length, &cmp);
+  if (error)
+    return error;
+  if (cmp == 0)
+  {
+    *out_entry_index= first_ge;
     return 0;
   }
 

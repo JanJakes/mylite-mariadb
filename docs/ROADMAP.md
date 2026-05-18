@@ -43,8 +43,9 @@ not in a MariaDB datadir or existing engine sidecars.
 
 Recent row and index storage performance slices include lazy handler row
 materialization from index cursors and deferred durable row-page validation for
-index entryset scans. These reduce current scan-based point lookup overhead
-without changing the planned B-tree navigation work.
+index entryset scans, plus bound searches over sorted in-memory cursors. These
+reduce current scan-based point lookup overhead without changing the planned
+B-tree navigation work.
 
 ## Size And Profile Direction
 
