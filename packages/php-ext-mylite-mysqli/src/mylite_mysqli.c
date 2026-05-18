@@ -30,7 +30,6 @@
 #define MYLITE_MYSQLI_OPT_INT_AND_FLOAT_NATIVE 201
 
 typedef struct {
-    zend_object std;
     mylite_db *db;
     zend_string *filename;
     zend_string *schema;
@@ -45,20 +44,20 @@ typedef struct {
     bool connected;
     bool int_and_float_native;
     zval pending_result;
+    zend_object std;
 } mylite_mysqli_link;
 
 typedef struct {
-    zend_object std;
     zval rows;
     zval fields;
     zval lengths;
     zend_long current_row;
     zend_long current_field;
     zend_long type;
+    zend_object std;
 } mylite_mysqli_result;
 
 typedef struct {
-    zend_object std;
     zval link;
     mylite_stmt *stmt;
     zend_string *query;
@@ -75,12 +74,13 @@ typedef struct {
     zend_long param_count;
     zend_long field_count;
     bool executed;
+    zend_object std;
 } mylite_mysqli_stmt;
 
 typedef struct {
-    zend_object std;
     zval link;
     unsigned index;
+    zend_object std;
 } mylite_mysqli_warning;
 
 ZEND_BEGIN_MODULE_GLOBALS(mylite_mysqli)
@@ -375,10 +375,13 @@ static void mylite_mysqli_warning_free_obj(zend_object *object);
 static PHP_MINIT_FUNCTION(mylite_mysqli);
 static PHP_MSHUTDOWN_FUNCTION(mylite_mysqli);
 static PHP_MINFO_FUNCTION(mylite_mysqli);
-static PHP_GINIT_FUNCTION(mylite_mysqli);
-static PHP_GSHUTDOWN_FUNCTION(mylite_mysqli);
+static void zm_globals_ctor_mylite_mysqli(zend_mylite_mysqli_globals *globals);
+static void zm_globals_dtor_mylite_mysqli(zend_mylite_mysqli_globals *globals);
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_none, 0, 0, 0)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_INFO_EX(arginfo_mysqli_result_get_iterator, 0, 0, Traversable, 0)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO_EX(arginfo_one, 0, 0, 1)
@@ -415,134 +418,128 @@ ZEND_ARG_INFO(0, socket)
 ZEND_ARG_INFO(0, flags)
 ZEND_END_ARG_INFO()
 
-ZEND_BEGIN_ARG_INFO_EX(arginfo_variadic, 0, 0, 1)
-ZEND_ARG_INFO(0, arg)
+ZEND_BEGIN_ARG_INFO_EX(arginfo_stmt_bind_param, 0, 0, 2)
+ZEND_ARG_INFO(0, statement)
+ZEND_ARG_TYPE_INFO(0, types, IS_STRING, 0)
 ZEND_ARG_VARIADIC_INFO(1, vars)
 ZEND_END_ARG_INFO()
 
-static const zend_function_entry mylite_mysqli_functions[] =
-    {PHP_FE(mysqli_affected_rows, arginfo_one) PHP_FE(mysqli_autocommit, arginfo_two) PHP_FE(
+ZEND_BEGIN_ARG_INFO_EX(arginfo_stmt_method_bind_param, 0, 0, 1)
+ZEND_ARG_TYPE_INFO(0, types, IS_STRING, 0)
+ZEND_ARG_VARIADIC_INFO(1, vars)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_stmt_bind_result, 0, 0, 1)
+ZEND_ARG_INFO(0, statement)
+ZEND_ARG_VARIADIC_INFO(1, vars)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_stmt_method_bind_result, 0, 0, 0)
+ZEND_ARG_VARIADIC_INFO(1, vars)
+ZEND_END_ARG_INFO()
+
+static const zend_function_entry mylite_mysqli_functions
+    [] = {PHP_FE(mysqli_affected_rows, arginfo_one) PHP_FE(mysqli_autocommit, arginfo_two) PHP_FE(
         mysqli_begin_transaction,
         arginfo_one
     ) PHP_FE(mysqli_change_user, arginfo_three) PHP_FE(mysqli_character_set_name, arginfo_one)
-         PHP_FE(mysqli_close, arginfo_one) PHP_FE(mysqli_commit, arginfo_one) PHP_FE(
-             mysqli_connect,
-             arginfo_connect
-         ) PHP_FE(mysqli_connect_errno, arginfo_none) PHP_FE(mysqli_connect_error, arginfo_none)
-             PHP_FE(mysqli_data_seek, arginfo_two) PHP_FE(
-                 mysqli_dump_debug_info,
-                 arginfo_one
-             ) PHP_FE(mysqli_debug, arginfo_one) PHP_FE(mysqli_errno, arginfo_one)
-                 PHP_FE(mysqli_error, arginfo_one) PHP_FE(mysqli_error_list, arginfo_one) PHP_FE(
-                     mysqli_stmt_execute,
-                     arginfo_one
-                 ) PHP_FALIAS(mysqli_execute, mysqli_stmt_execute, arginfo_one)
-                     PHP_FE(mysqli_execute_query, arginfo_two) PHP_FE(
-                         mysqli_fetch_field,
-                         arginfo_one
-                     ) PHP_FE(mysqli_fetch_fields, arginfo_one)
-                         PHP_FE(mysqli_fetch_field_direct, arginfo_two) PHP_FE(
-                             mysqli_fetch_lengths,
-                             arginfo_one
-                         ) PHP_FE(mysqli_fetch_all, arginfo_one)
-                             PHP_FE(mysqli_fetch_array, arginfo_one) PHP_FE(
-                                 mysqli_fetch_assoc,
-                                 arginfo_one
-                             ) PHP_FE(mysqli_fetch_object, arginfo_one) PHP_FE(mysqli_fetch_row, arginfo_one)
-                                 PHP_FE(mysqli_fetch_column, arginfo_one) PHP_FE(
-                                     mysqli_field_count,
-                                     arginfo_one
-                                 ) PHP_FE(mysqli_field_seek, arginfo_two)
-                                     PHP_FE(
-                                         mysqli_field_tell,
-                                         arginfo_one
-                                     ) PHP_FE(mysqli_free_result, arginfo_one)
-                                         PHP_FE(mysqli_get_connection_stats, arginfo_one) PHP_FE(
-                                             mysqli_get_client_stats,
-                                             arginfo_none
-                                         ) PHP_FE(mysqli_get_charset, arginfo_one)
-                                             PHP_FE(mysqli_get_client_info, arginfo_none) PHP_FE(
-                                                 mysqli_get_client_version,
-                                                 arginfo_none
-                                             ) PHP_FE(mysqli_get_links_stats, arginfo_none)
-                                                 PHP_FE(mysqli_get_host_info, arginfo_one) PHP_FE(
-                                                     mysqli_get_proto_info,
-                                                     arginfo_one
-                                                 ) PHP_FE(mysqli_get_server_info, arginfo_one)
-                                                     PHP_FE(mysqli_get_server_version, arginfo_one) PHP_FE(
-                                                         mysqli_get_warnings,
-                                                         arginfo_one
-                                                     ) PHP_FE(mysqli_init, arginfo_none) PHP_FE(mysqli_info, arginfo_one)
-                                                         PHP_FE(mysqli_insert_id, arginfo_one) PHP_FE(
-                                                             mysqli_kill,
-                                                             arginfo_two
-                                                         ) PHP_FE(mysqli_more_results, arginfo_one)
-                                                             PHP_FE(mysqli_multi_query, arginfo_two) PHP_FE(
-                                                                 mysqli_next_result,
-                                                                 arginfo_one
-                                                             ) PHP_FE(mysqli_num_fields, arginfo_one) PHP_FE(mysqli_num_rows, arginfo_one)
-                                                                 PHP_FE(mysqli_options, arginfo_three) PHP_FALIAS(
-                                                                     mysqli_set_opt,
-                                                                     mysqli_options,
-                                                                     arginfo_three
-                                                                 ) PHP_FE(mysqli_ping, arginfo_one)
-                                                                     PHP_FE(mysqli_poll, arginfo_none) PHP_FE(
-                                                                         mysqli_prepare,
-                                                                         arginfo_two
-                                                                     ) PHP_FE(mysqli_report, arginfo_one)
-                                                                         PHP_FE(mysqli_query, arginfo_two) PHP_FE(
-                                                                             mysqli_real_connect,
-                                                                             arginfo_one
-                                                                         ) PHP_FE(mysqli_real_escape_string, arginfo_two)
-                                                                             PHP_FALIAS(
-                                                                                 mysqli_escape_string,
-                                                                                 mysqli_real_escape_string,
-                                                                                 arginfo_two
-                                                                             ) PHP_FE(mysqli_real_query, arginfo_two)
-                                                                                 PHP_FE(mysqli_reap_async_query, arginfo_one) PHP_FE(
-                                                                                     mysqli_release_savepoint,
-                                                                                     arginfo_two
-                                                                                 ) PHP_FE(mysqli_rollback, arginfo_one)
-                                                                                     PHP_FE(
-                                                                                         mysqli_savepoint,
-                                                                                         arginfo_two
-                                                                                     ) PHP_FE(mysqli_select_db, arginfo_two)
-                                                                                         PHP_FE(
-                                                                                             mysqli_set_charset,
-                                                                                             arginfo_two
-                                                                                         ) PHP_FE(mysqli_stmt_affected_rows, arginfo_one)
-                                                                                             PHP_FE(
-                                                                                                 mysqli_stmt_attr_get,
-                                                                                                 arginfo_two
-                                                                                             ) PHP_FE(mysqli_stmt_attr_set, arginfo_three)
-                                                                                                 PHP_FE(mysqli_stmt_bind_param, arginfo_variadic) PHP_FE(mysqli_stmt_bind_result, arginfo_variadic) PHP_FE(mysqli_stmt_close, arginfo_one) PHP_FE(mysqli_stmt_data_seek, arginfo_two) PHP_FE(mysqli_stmt_errno, arginfo_one) PHP_FE(mysqli_stmt_error, arginfo_one) PHP_FE(mysqli_stmt_error_list, arginfo_one) PHP_FE(mysqli_stmt_fetch, arginfo_one) PHP_FE(mysqli_stmt_field_count, arginfo_one) PHP_FE(mysqli_stmt_free_result, arginfo_one) PHP_FE(mysqli_stmt_get_result, arginfo_one) PHP_FE(mysqli_stmt_get_warnings, arginfo_one) PHP_FE(mysqli_stmt_init, arginfo_one) PHP_FE(mysqli_stmt_insert_id, arginfo_one) PHP_FE(mysqli_stmt_more_results, arginfo_one) PHP_FE(mysqli_stmt_next_result, arginfo_one) PHP_FE(mysqli_stmt_num_rows, arginfo_one) PHP_FE(mysqli_stmt_param_count, arginfo_one) PHP_FE(mysqli_stmt_prepare, arginfo_two) PHP_FE(mysqli_stmt_reset, arginfo_one) PHP_FE(mysqli_stmt_result_metadata, arginfo_one) PHP_FE(
-                                                                                                     mysqli_stmt_send_long_data,
-                                                                                                     arginfo_three
-                                                                                                 ) PHP_FE(mysqli_stmt_store_result, arginfo_one)
-                                                                                                     PHP_FE(mysqli_stmt_sqlstate, arginfo_one) PHP_FE(
-                                                                                                         mysqli_sqlstate,
-                                                                                                         arginfo_one
-                                                                                                     ) PHP_FE(mysqli_ssl_set, arginfo_one)
-                                                                                                         PHP_FE(
-                                                                                                             mysqli_stat,
-                                                                                                             arginfo_one
-                                                                                                         ) PHP_FE(mysqli_store_result, arginfo_one)
-                                                                                                             PHP_FE(
-                                                                                                                 mysqli_thread_id,
-                                                                                                                 arginfo_one
-                                                                                                             ) PHP_FE(mysqli_thread_safe, arginfo_none)
-                                                                                                                 PHP_FE(
-                                                                                                                     mysqli_use_result,
-                                                                                                                     arginfo_one
-                                                                                                                 )
-                                                                                                                     PHP_FE(
-                                                                                                                         mysqli_warning_count,
-                                                                                                                         arginfo_one
-                                                                                                                     )
-                                                                                                                         PHP_FE(
-                                                                                                                             mysqli_refresh,
-                                                                                                                             arginfo_two
-                                                                                                                         ) PHP_FE_END};
+              PHP_FE(mysqli_close, arginfo_one) PHP_FE(mysqli_commit, arginfo_one) PHP_FE(
+                  mysqli_connect,
+                  arginfo_connect
+              ) PHP_FE(mysqli_connect_errno, arginfo_none)
+                  PHP_FE(mysqli_connect_error, arginfo_none) PHP_FE(
+                      mysqli_data_seek,
+                      arginfo_two
+                  ) PHP_FE(mysqli_dump_debug_info, arginfo_one) PHP_FE(mysqli_debug, arginfo_one)
+                      PHP_FE(mysqli_errno, arginfo_one) PHP_FE(mysqli_error, arginfo_one) PHP_FE(
+                          mysqli_error_list,
+                          arginfo_one
+                      ) PHP_FE(mysqli_stmt_execute, arginfo_one)
+                          PHP_FALIAS(mysqli_execute, mysqli_stmt_execute, arginfo_one) PHP_FE(
+                              mysqli_execute_query,
+                              arginfo_two
+                          ) PHP_FE(mysqli_fetch_field, arginfo_one) PHP_FE(mysqli_fetch_fields, arginfo_one)
+                              PHP_FE(mysqli_fetch_field_direct, arginfo_two) PHP_FE(
+                                  mysqli_fetch_lengths,
+                                  arginfo_one
+                              ) PHP_FE(mysqli_fetch_all, arginfo_one)
+                                  PHP_FE(mysqli_fetch_array, arginfo_one) PHP_FE(
+                                      mysqli_fetch_assoc,
+                                      arginfo_one
+                                  ) PHP_FE(mysqli_fetch_object, arginfo_one) PHP_FE(mysqli_fetch_row, arginfo_one)
+                                      PHP_FE(mysqli_fetch_column, arginfo_one) PHP_FE(
+                                          mysqli_field_count,
+                                          arginfo_one
+                                      )
+                                          PHP_FE(mysqli_field_seek, arginfo_two) PHP_FE(mysqli_field_tell, arginfo_one) PHP_FE(mysqli_free_result, arginfo_one) PHP_FE(mysqli_get_connection_stats, arginfo_one) PHP_FE(mysqli_get_client_stats, arginfo_none) PHP_FE(mysqli_get_charset, arginfo_one) PHP_FE(mysqli_get_client_info, arginfo_none) PHP_FE(mysqli_get_client_version, arginfo_none) PHP_FE(mysqli_get_links_stats, arginfo_none) PHP_FE(mysqli_get_host_info, arginfo_one) PHP_FE(mysqli_get_proto_info, arginfo_one) PHP_FE(mysqli_get_server_info, arginfo_one) PHP_FE(mysqli_get_server_version, arginfo_one) PHP_FE(mysqli_get_warnings, arginfo_one) PHP_FE(mysqli_init, arginfo_none) PHP_FE(mysqli_info, arginfo_one) PHP_FE(mysqli_insert_id, arginfo_one) PHP_FE(mysqli_kill, arginfo_two) PHP_FE(mysqli_more_results, arginfo_one) PHP_FE(mysqli_multi_query, arginfo_two) PHP_FE(mysqli_next_result, arginfo_one) PHP_FE(mysqli_num_fields, arginfo_one) PHP_FE(mysqli_num_rows, arginfo_one) PHP_FE(mysqli_options, arginfo_three) PHP_FALIAS(mysqli_set_opt, mysqli_options, arginfo_three) PHP_FE(mysqli_ping, arginfo_one) PHP_FE(mysqli_poll, arginfo_none) PHP_FE(mysqli_prepare, arginfo_two) PHP_FE(mysqli_report, arginfo_one) PHP_FE(mysqli_query, arginfo_two) PHP_FE(mysqli_real_connect, arginfo_one) PHP_FE(mysqli_real_escape_string, arginfo_two) PHP_FALIAS(
+                                              mysqli_escape_string,
+                                              mysqli_real_escape_string,
+                                              arginfo_two
+                                          ) PHP_FE(mysqli_real_query, arginfo_two)
+                                              PHP_FE(mysqli_reap_async_query, arginfo_one) PHP_FE(mysqli_release_savepoint, arginfo_two) PHP_FE(mysqli_rollback, arginfo_one) PHP_FE(mysqli_savepoint, arginfo_two) PHP_FE(mysqli_select_db, arginfo_two) PHP_FE(mysqli_set_charset, arginfo_two) PHP_FE(mysqli_stmt_affected_rows, arginfo_one) PHP_FE(mysqli_stmt_attr_get, arginfo_two) PHP_FE(mysqli_stmt_attr_set, arginfo_three) PHP_FE(
+                                                  mysqli_stmt_bind_param,
+                                                  arginfo_stmt_bind_param
+                                              ) PHP_FE(mysqli_stmt_bind_result, arginfo_stmt_bind_result)
+                                                  PHP_FE(
+                                                      mysqli_stmt_close,
+                                                      arginfo_one
+                                                  ) PHP_FE(mysqli_stmt_data_seek, arginfo_two)
+                                                      PHP_FE(
+                                                          mysqli_stmt_errno,
+                                                          arginfo_one
+                                                      ) PHP_FE(mysqli_stmt_error, arginfo_one)
+                                                          PHP_FE(
+                                                              mysqli_stmt_error_list,
+                                                              arginfo_one
+                                                          ) PHP_FE(mysqli_stmt_fetch, arginfo_one)
+                                                              PHP_FE(mysqli_stmt_field_count, arginfo_one) PHP_FE(
+                                                                  mysqli_stmt_free_result,
+                                                                  arginfo_one
+                                                              ) PHP_FE(mysqli_stmt_get_result, arginfo_one)
+                                                                  PHP_FE(
+                                                                      mysqli_stmt_get_warnings,
+                                                                      arginfo_one
+                                                                  ) PHP_FE(mysqli_stmt_init, arginfo_one)
+                                                                      PHP_FE(
+                                                                          mysqli_stmt_insert_id,
+                                                                          arginfo_one
+                                                                      ) PHP_FE(mysqli_stmt_more_results, arginfo_one)
+                                                                          PHP_FE(mysqli_stmt_next_result, arginfo_one) PHP_FE(
+                                                                              mysqli_stmt_num_rows,
+                                                                              arginfo_one
+                                                                          ) PHP_FE(mysqli_stmt_param_count, arginfo_one)
+                                                                              PHP_FE(mysqli_stmt_prepare, arginfo_two) PHP_FE(
+                                                                                  mysqli_stmt_reset,
+                                                                                  arginfo_one
+                                                                              ) PHP_FE(mysqli_stmt_result_metadata, arginfo_one)
+                                                                                  PHP_FE(
+                                                                                      mysqli_stmt_send_long_data,
+                                                                                      arginfo_three
+                                                                                  ) PHP_FE(mysqli_stmt_store_result, arginfo_one)
+                                                                                      PHP_FE(
+                                                                                          mysqli_stmt_sqlstate,
+                                                                                          arginfo_one
+                                                                                      ) PHP_FE(mysqli_sqlstate, arginfo_one)
+                                                                                          PHP_FE(
+                                                                                              mysqli_ssl_set,
+                                                                                              arginfo_one
+                                                                                          ) PHP_FE(mysqli_stat, arginfo_one)
+                                                                                              PHP_FE(
+                                                                                                  mysqli_store_result,
+                                                                                                  arginfo_one
+                                                                                              ) PHP_FE(mysqli_thread_id, arginfo_one)
+                                                                                                  PHP_FE(
+                                                                                                      mysqli_thread_safe,
+                                                                                                      arginfo_none
+                                                                                                  ) PHP_FE(mysqli_use_result, arginfo_one)
+                                                                                                      PHP_FE(
+                                                                                                          mysqli_warning_count,
+                                                                                                          arginfo_one
+                                                                                                      )
+                                                                                                          PHP_FE(
+                                                                                                              mysqli_refresh,
+                                                                                                              arginfo_two
+                                                                                                          ) PHP_FE_END};
 
 static const zend_function_entry mylite_mysqli_link_methods[] = {
     PHP_ME(mysqli, __construct, arginfo_connect, ZEND_ACC_PUBLIC) PHP_ME(
@@ -702,8 +699,12 @@ static const zend_function_entry mylite_mysqli_result_methods[] = {
                     PHP_ME(mysqli_result, fetch_column, arginfo_none, ZEND_ACC_PUBLIC)
                         PHP_ME(mysqli_result, field_seek, arginfo_one, ZEND_ACC_PUBLIC)
                             PHP_ME(mysqli_result, free_result, arginfo_none, ZEND_ACC_PUBLIC)
-                                PHP_ME(mysqli_result, getIterator, arginfo_none, ZEND_ACC_PUBLIC)
-                                    PHP_FE_END
+                                PHP_ME(
+                                    mysqli_result,
+                                    getIterator,
+                                    arginfo_mysqli_result_get_iterator,
+                                    ZEND_ACC_PUBLIC
+                                ) PHP_FE_END
 };
 
 static const zend_function_entry mylite_mysqli_stmt_methods[] = {
@@ -713,10 +714,10 @@ static const zend_function_entry mylite_mysqli_stmt_methods[] = {
         arginfo_one,
         ZEND_ACC_PUBLIC
     ) PHP_ME(mysqli_stmt, attr_set, arginfo_two, ZEND_ACC_PUBLIC)
-        PHP_ME(mysqli_stmt, bind_param, arginfo_variadic, ZEND_ACC_PUBLIC) PHP_ME(
+        PHP_ME(mysqli_stmt, bind_param, arginfo_stmt_method_bind_param, ZEND_ACC_PUBLIC) PHP_ME(
             mysqli_stmt,
             bind_result,
-            arginfo_variadic,
+            arginfo_stmt_method_bind_result,
             ZEND_ACC_PUBLIC
         ) PHP_ME(mysqli_stmt, close, arginfo_none, ZEND_ACC_PUBLIC)
             PHP_ME(mysqli_stmt, data_seek, arginfo_one, ZEND_ACC_PUBLIC) PHP_ME(
@@ -4754,7 +4755,6 @@ static zend_object *mylite_mysqli_link_create_object(zend_class_entry *class_typ
     link->connected = false;
     link->int_and_float_native = false;
     ZVAL_UNDEF(&link->pending_result);
-    mylite_mysqli_update_link_props(link);
     return &link->std;
 }
 
@@ -4796,7 +4796,6 @@ static zend_object *mylite_mysqli_result_create_object(zend_class_entry *class_t
     result->current_row = 0;
     result->current_field = 0;
     result->type = MYLITE_MYSQLI_STORE_RESULT;
-    mylite_mysqli_update_result_props(result);
     return &result->std;
 }
 
@@ -4831,7 +4830,6 @@ static zend_object *mylite_mysqli_stmt_create_object(zend_class_entry *class_typ
     stmt->param_count = 0;
     stmt->field_count = 0;
     stmt->executed = false;
-    mylite_mysqli_update_stmt_props(stmt);
     return &stmt->std;
 }
 
@@ -4885,19 +4883,19 @@ static void mylite_mysqli_warning_free_obj(zend_object *object) {
     zend_object_std_dtor(&warning->std);
 }
 
-static PHP_GINIT_FUNCTION(mylite_mysqli) {
+static void zm_globals_ctor_mylite_mysqli(zend_mylite_mysqli_globals *globals) {
 #if defined(COMPILE_DL_MYSQLI) && defined(ZTS)
     ZEND_TSRMLS_CACHE_UPDATE();
 #endif
-    mylite_mysqli_globals->report_mode = MYLITE_MYSQLI_REPORT_OFF;
-    mylite_mysqli_globals->connect_errno = 0;
-    mylite_mysqli_globals->connect_error = NULL;
+    globals->report_mode = MYLITE_MYSQLI_REPORT_OFF;
+    globals->connect_errno = 0;
+    globals->connect_error = NULL;
 }
 
-static PHP_GSHUTDOWN_FUNCTION(mylite_mysqli) {
-    if (mylite_mysqli_globals->connect_error != NULL) {
-        zend_string_release(mylite_mysqli_globals->connect_error);
-        mylite_mysqli_globals->connect_error = NULL;
+static void zm_globals_dtor_mylite_mysqli(zend_mylite_mysqli_globals *globals) {
+    if (globals->connect_error != NULL) {
+        zend_string_release(globals->connect_error);
+        globals->connect_error = NULL;
     }
 }
 

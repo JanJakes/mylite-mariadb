@@ -9,6 +9,9 @@ add_library(mylite STATIC
   src/version.c
 )
 add_library(MyLite::mylite ALIAS mylite)
+if(MYLITE_BUILD_PHP_EXTENSIONS)
+  set_target_properties(mylite PROPERTIES POSITION_INDEPENDENT_CODE ON)
+endif()
 
 target_include_directories(mylite
   PUBLIC
