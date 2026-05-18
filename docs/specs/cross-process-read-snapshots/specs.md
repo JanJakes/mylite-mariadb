@@ -63,7 +63,8 @@ it as a live snapshot.
 - `packages/mylite-storage`: read open/recovery fallback, snapshot-bound page
   reads, storage tests.
 - `packages/libmylite`: no public API change; routed SQL reads inherit the
-  storage behavior.
+  storage behavior and get storage-smoke coverage through separate process
+  runtime roots.
 - Architecture, compatibility, roadmap, and harness docs.
 
 ## Compatibility Impact
@@ -118,6 +119,10 @@ logic and one thread-local snapshot structure.
   - reads the transaction-start committed row and index snapshot;
   - cannot write while the child owns the writer lock;
   - sees the committed child row and index entry after the child commits.
+- Add `libmylite` storage-smoke coverage proving that a child process can hold
+  an active SQL transaction while a parent process opens the same `.mylite` file
+  through a separate runtime root and reads the transaction-start committed
+  snapshot through public SQL.
 - Preserve existing stale-journal recovery behavior: ordinary recovery journals
   and transaction journals without an active writer still require exclusive
   recovery rather than being mistaken for live snapshots.
@@ -129,6 +134,7 @@ logic and one thread-local snapshot structure.
 
 - Cross-process reads no longer return busy solely because a cooperating MyLite
   writer has an active row-DML transaction journal and writer lock.
+- Public routed SQL reads get the same bounded cross-process snapshot behavior.
 - Snapshot reads use the saved transaction-start header and catalog root page.
 - Cross-process writes still return busy during the active writer transaction.
 - Stale transaction journals are recovered by the existing exclusive recovery

@@ -796,9 +796,8 @@ transaction modifiers, global transaction variables, direct-execution parameter
 markers, expression-valued or global parameterized transaction-control `SET`
 forms, bound `DEFAULT` / `RELEASE` transaction-control values, release
 completion defaults, XA, and durable direct or prepared DDL inside active
-transactions. Durable transactional DDL, SQL-level cross-process isolation
-harnesses, full isolation-level semantics, WAL/checkpoint, and broader native
-MEMORY/HEAP parity remain planned.
+transactions. Durable transactional DDL, full isolation-level semantics,
+WAL/checkpoint, and broader native MEMORY/HEAP parity remain planned.
 
 The storage design must preserve the full write-concurrency goal. Early
 milestones may use coarse locks for correctness, but the page, transaction,

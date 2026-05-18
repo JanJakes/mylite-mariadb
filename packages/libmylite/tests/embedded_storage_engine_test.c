@@ -22,6 +22,11 @@ typedef struct timed_lock_request {
     unsigned milliseconds;
 } timed_lock_request;
 
+typedef struct sql_transaction_child {
+    pid_t pid;
+    int release_fd;
+} sql_transaction_child;
+
 static const unsigned k_busy_timeout_release_ms = 50U;
 static const unsigned k_busy_timeout_wait_ms = 1000U;
 static const useconds_t k_microseconds_per_millisecond = 1000U;
@@ -187,6 +192,7 @@ static void test_foreign_key_multi_table_action_matrix(void);
 static void test_foreign_key_handler_metadata(void);
 static void test_row_dml_transactions(void);
 static void test_two_handle_transaction_owner_isolation(void);
+static void test_cross_process_transaction_read_snapshot(void);
 static void test_create_table_persists_catalog_metadata(void);
 static void test_check_constraint_if_exists(void);
 static void test_non_check_constraint_ddl(void);
@@ -480,6 +486,17 @@ static mylite_db *open_database_with_runtime_name(
 );
 static mylite_open_config open_config(const char *runtime_root);
 static void run_transaction_crash_child(const char *root, const char *filename);
+static void run_transaction_read_snapshot_child(
+    const char *root,
+    const char *filename,
+    int ready_fd,
+    int release_fd
+);
+static sql_transaction_child start_transaction_read_snapshot_child(
+    const char *root,
+    const char *filename
+);
+static void release_transaction_read_snapshot_child(sql_transaction_child child);
 static pid_t hold_test_lock_for(const char *filename, timed_lock_request request);
 static void wait_test_lock_child(pid_t pid);
 static char *make_temp_root(void);
@@ -499,6 +516,9 @@ static void remove_tree_entry(const char *path);
 int main(int argc, char **argv) {
     if (argc == 4 && strcmp(argv[1], "--transaction-crash-child") == 0) {
         run_transaction_crash_child(argv[2], argv[3]);
+    }
+    if (argc == 6 && strcmp(argv[1], "--transaction-read-snapshot-child") == 0) {
+        run_transaction_read_snapshot_child(argv[2], argv[3], atoi(argv[4]), atoi(argv[5]));
     }
 
     assert(argc == 1);
@@ -536,6 +556,7 @@ int main(int argc, char **argv) {
     test_foreign_key_handler_metadata();
     test_row_dml_transactions();
     test_two_handle_transaction_owner_isolation();
+    test_cross_process_transaction_read_snapshot();
     test_create_table_persists_catalog_metadata();
     test_check_constraint_if_exists();
     test_non_check_constraint_ddl();
@@ -7112,6 +7133,58 @@ static void test_two_handle_transaction_owner_isolation(void) {
     assert_no_durable_sidecars(root, "two-handle-isolation.mylite");
     free(filename);
     free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_cross_process_transaction_read_snapshot(void) {
+    char *root = make_temp_root();
+    char *filename = path_join(root, "cross-process-isolation.mylite");
+    char *writer_runtime_root = path_join(root, "snapshot-writer-runtime");
+    char *reader_runtime_root = path_join(root, "snapshot-reader-runtime");
+    mylite_db *setup = open_database_with_filename(root, filename);
+
+    assert_exec_succeeds(setup, "CREATE DATABASE tx_process_app");
+    assert_exec_succeeds(setup, "USE tx_process_app");
+    assert_exec_succeeds(
+        setup,
+        "CREATE TABLE tx_process_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(setup, "INSERT INTO tx_process_posts VALUES (1, 'committed')");
+    assert(mylite_close(setup) == MYLITE_OK);
+
+    sql_transaction_child child = start_transaction_read_snapshot_child(root, filename);
+    mylite_db *reader =
+        open_database_with_runtime_name(root, filename, "snapshot-reader-runtime");
+    assert_exec_succeeds(reader, "USE tx_process_app");
+    assert_query_single_value(
+        reader,
+        "SELECT COUNT(*) FROM tx_process_posts WHERE title = 'committed'",
+        "1"
+    );
+    assert_query_single_value(
+        reader,
+        "SELECT COUNT(*) FROM tx_process_posts WHERE title = 'cross-process-uncommitted'",
+        "0"
+    );
+
+    release_transaction_read_snapshot_child(child);
+    assert_query_single_value(
+        reader,
+        "SELECT COUNT(*) FROM tx_process_posts WHERE title = 'cross-process-uncommitted'",
+        "1"
+    );
+
+    assert(mylite_close(reader) == MYLITE_OK);
+    assert(is_directory_empty(writer_runtime_root));
+    assert(is_directory_empty(reader_runtime_root));
+    assert_no_forbidden_sidecars(root);
+    free(reader_runtime_root);
+    free(writer_runtime_root);
+    free(filename);
     remove_tree(root);
     free(root);
 }
@@ -23577,6 +23650,102 @@ static void run_transaction_crash_child(const char *root, const char *filename) 
         _exit(4);
     }
     _exit(0);
+}
+
+static void run_transaction_read_snapshot_child(
+    const char *root,
+    const char *filename,
+    int ready_fd,
+    int release_fd
+) {
+    mylite_db *db = open_database_with_runtime_name(root, filename, "snapshot-writer-runtime");
+
+    if (mylite_exec(db, "USE tx_process_app", NULL, NULL, NULL) != MYLITE_OK) {
+        _exit(2);
+    }
+    if (mylite_exec(db, "BEGIN", NULL, NULL, NULL) != MYLITE_OK) {
+        _exit(3);
+    }
+    if (mylite_exec(
+            db,
+            "INSERT INTO tx_process_posts VALUES (2, 'cross-process-uncommitted')",
+            NULL,
+            NULL,
+            NULL
+        ) != MYLITE_OK) {
+        _exit(4);
+    }
+
+    const unsigned char ready = 1U;
+    if (write(ready_fd, &ready, sizeof(ready)) != (ssize_t)sizeof(ready)) {
+        _exit(5);
+    }
+    unsigned char release = 0U;
+    if (read(release_fd, &release, sizeof(release)) != (ssize_t)sizeof(release)) {
+        _exit(6);
+    }
+
+    if (mylite_exec(db, "COMMIT", NULL, NULL, NULL) != MYLITE_OK) {
+        _exit(7);
+    }
+    if (mylite_close(db) != MYLITE_OK) {
+        _exit(8);
+    }
+    _exit(0);
+}
+
+static sql_transaction_child start_transaction_read_snapshot_child(
+    const char *root,
+    const char *filename
+) {
+    int ready_pipe[2];
+    int release_pipe[2];
+    assert(pipe(ready_pipe) == 0);
+    assert(pipe(release_pipe) == 0);
+
+    const pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        close(ready_pipe[0]);
+        close(release_pipe[1]);
+        char ready_fd[32];
+        char release_fd[32];
+        snprintf(ready_fd, sizeof(ready_fd), "%d", ready_pipe[1]);
+        snprintf(release_fd, sizeof(release_fd), "%d", release_pipe[0]);
+        execl(
+            g_test_program_path,
+            g_test_program_path,
+            "--transaction-read-snapshot-child",
+            root,
+            filename,
+            ready_fd,
+            release_fd,
+            (char *)NULL
+        );
+        _exit(127);
+    }
+
+    close(ready_pipe[1]);
+    close(release_pipe[0]);
+    unsigned char ready = 0U;
+    assert(read(ready_pipe[0], &ready, sizeof(ready)) == (ssize_t)sizeof(ready));
+    assert(ready == 1U);
+    close(ready_pipe[0]);
+    return (sql_transaction_child){
+        .pid = pid,
+        .release_fd = release_pipe[1],
+    };
+}
+
+static void release_transaction_read_snapshot_child(sql_transaction_child child) {
+    const unsigned char release = 1U;
+    assert(write(child.release_fd, &release, sizeof(release)) == (ssize_t)sizeof(release));
+    assert(close(child.release_fd) == 0);
+
+    int status = 0;
+    assert(waitpid(child.pid, &status, 0) == child.pid);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
 }
 
 static pid_t hold_test_lock_for(const char *filename, timed_lock_request request) {
