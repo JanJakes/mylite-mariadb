@@ -27,6 +27,8 @@ MariaDB base: `mariadb-11.8.6`
   `handler::ha_update_row()`.
 - `mariadb/sql/table.cc:TABLE::update_virtual_fields()` computes virtual and
   stored generated values for write and read paths.
+- MariaDB's `mysql-test/suite/vcol/t/vcol_misc.test` covers strict-mode
+  generated-value overflow for a stored generated `TINYINT`.
 - `mariadb/sql/table.cc:TABLE::verify_constraints()` reports CHECK failures
   before handler publication for the failing row.
 - `mariadb/sql/handler.cc:handler::ha_write_row()` and
@@ -44,8 +46,9 @@ Generated columns remain partial, but MyLite gains direct evidence that
 generated-column DML participates in the same statement rollback boundary as
 ordinary row and index DML. The compatibility matrix should say generated
 column coverage now includes representative failed multi-row insert and update
-rollback over generated indexes, while exhaustive expression, trigger, view,
-and partition matrices remain planned.
+rollback over generated indexes plus a representative strict-mode generated
+expression failure, while broader expression, trigger, view, and partition
+matrices remain planned.
 
 ## Design
 
@@ -54,20 +57,24 @@ routed `ENGINE=InnoDB` table with:
 
 - a stored generated slug,
 - a virtual generated slug,
+- a stored generated numeric expression that can fail in strict mode,
 - a unique generated-column index,
 - ordinary base rows that make statement-start visibility easy to assert.
 
-The test covers two failure shapes:
+The test covers three failure shapes:
 
 1. A direct multi-row insert writes a first row with a new generated slug, then
    fails a later row through the generated unique index.
 2. A prepared ordered multi-row update changes the first row's base column and
    generated slug, then fails a later row through the same generated unique
    index.
+3. A direct insert and prepared ordered update attempt a generated `TINYINT`
+   overflow after an earlier row in the statement would otherwise publish.
 
-Both cases assert that generated values, base row values, and forced generated
-index reads match the statement-start state before and after close/reopen for
-both stored and virtual generated-column definitions.
+The assertions verify that generated values, base row values, and forced
+generated-index reads match the statement-start state before and after
+close/reopen for stored generated-column definitions, with duplicate-key
+rollback also covered for virtual generated-column definitions.
 
 ## File Lifecycle
 
@@ -100,6 +107,8 @@ No dependency, license, or size-profile change is intended.
   generated-index entry for it.
 - A failed prepared ordered multi-row update restores the first updated row's
   base column, generated value, and generated-index entry.
+- A strict-mode generated expression failure restores the first row attempted
+  by the failed statement.
 - The failing row's attempted generated value is not visible.
 - The same visibility holds after close/reopen.
 - Roadmap, compatibility, and harness docs describe the added representative
@@ -107,8 +116,8 @@ No dependency, license, or size-profile change is intended.
 
 ## Risks And Open Questions
 
-- Generated-column expression errors, triggers, views, and partitioned tables
-  can take different SQL paths and remain separate compatibility work.
+- Broader generated-column expression errors, triggers, views, and partitioned
+  tables can take different SQL paths and remain separate compatibility work.
 - This proves visible rollback through statement checkpoints, not physical page
   reclamation or crash-safe logical undo for a process interrupted during
   rollback.

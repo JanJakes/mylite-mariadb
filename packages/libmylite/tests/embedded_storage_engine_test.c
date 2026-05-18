@@ -9703,11 +9703,84 @@ static void test_generated_column_dml_rollback(void) {
         "WHERE slug = 'virtual-gamma'",
         "40"
     );
-    assert_catalog_table_count(filename, "generated_dml_rollback", 2U);
+    assert_exec_succeeds(db, "SET sql_mode='STRICT_ALL_TABLES'");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE generated_expression_error_posts ("
+        "id INT NOT NULL PRIMARY KEY,"
+        "score TINYINT NOT NULL,"
+        "next_score TINYINT AS (score + 1) STORED,"
+        "UNIQUE KEY next_score_key (next_score)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO generated_expression_error_posts (id, score) VALUES "
+        "(1, 1), (2, 2)"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO generated_expression_error_posts (id, score) VALUES "
+        "(3, 3), (4, 127)",
+        "Out of range"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM generated_expression_error_posts WHERE id = 3",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM generated_expression_error_posts "
+        "FORCE INDEX (next_score_key) WHERE next_score = 4",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT next_score FROM generated_expression_error_posts WHERE id = 2",
+        "3"
+    );
+    assert_prepared_fails_with_message(
+        db,
+        "UPDATE generated_expression_error_posts "
+        "SET score = CASE id WHEN 2 THEN 10 WHEN 1 THEN 127 ELSE score END "
+        "WHERE id IN (1, 2) "
+        "ORDER BY id DESC",
+        "Out of range"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT score FROM generated_expression_error_posts WHERE id = 2",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT next_score FROM generated_expression_error_posts WHERE id = 2",
+        "3"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM generated_expression_error_posts "
+        "FORCE INDEX (next_score_key) WHERE next_score = 11",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT score FROM generated_expression_error_posts WHERE id = 1",
+        "1"
+    );
+    assert_catalog_table_count(filename, "generated_dml_rollback", 3U);
     assert_catalog_table_metadata(
         filename,
         "generated_dml_rollback",
         "generated_dml_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "generated_dml_rollback",
+        "generated_expression_error_posts",
         "InnoDB",
         "MYLITE"
     );
@@ -9782,11 +9855,50 @@ static void test_generated_column_dml_rollback(void) {
         "FORCE INDEX (slug_key) WHERE slug = 'virtual-delta'",
         "0"
     );
-    assert_catalog_table_count(filename, "generated_dml_rollback", 2U);
+    assert_exec_succeeds(db, "SET sql_mode='STRICT_ALL_TABLES'");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM generated_expression_error_posts WHERE id = 3",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT next_score FROM generated_expression_error_posts WHERE id = 1",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT next_score FROM generated_expression_error_posts WHERE id = 2",
+        "3"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM generated_expression_error_posts "
+        "FORCE INDEX (next_score_key) WHERE next_score IN (4, 11)",
+        "0"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO generated_expression_error_posts (id, score) VALUES (5, 127)",
+        "Out of range"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM generated_expression_error_posts WHERE id = 5",
+        "0"
+    );
+    assert_catalog_table_count(filename, "generated_dml_rollback", 3U);
     assert_catalog_table_metadata(
         filename,
         "generated_dml_rollback",
         "generated_dml_posts",
+        "InnoDB",
+        "MYLITE"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "generated_dml_rollback",
+        "generated_expression_error_posts",
         "InnoDB",
         "MYLITE"
     );

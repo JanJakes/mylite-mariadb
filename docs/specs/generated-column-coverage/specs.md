@@ -119,6 +119,8 @@ unchanged for practical purposes.
   added through standalone copy-rebuild index DDL.
 - Storage-engine smoke verifies representative failed direct and prepared
   multi-row DML rollback for stored and virtual generated-column indexes.
+- Storage-engine smoke verifies representative strict-mode generated
+  expression failure rollback.
 - Add a compatibility harness group for generated columns.
 - Run formatting, tidy, configured CTest presets, the named harness report, and
   `git diff --check`.
@@ -151,14 +153,18 @@ unchanged for practical purposes.
   generated columns and generated indexes were added through copy ALTER.
 - Representative failed direct insert and prepared update statements restore
   stored and virtual generated values and generated-index visibility.
+- Representative strict-mode generated expression failures restore row and
+  generated-index visibility after earlier attempted writes in the failed
+  statement.
 - Compatibility docs and roadmap mark generated columns as partial rather than
   planned.
 - The compatibility harness can run the generated-column evidence by name.
 
 ## Risks And Open Questions
 
-- Exhaustive expression classes, SQL-mode-sensitive expressions, full
-  dump/export compatibility, and broader rollback matrices remain uncovered.
+- Exhaustive expression classes, broader SQL-mode-sensitive expression
+  matrices, full dump/export compatibility, and broader rollback matrices
+  remain uncovered.
 - Expression/hidden generated indexes, generated full/oversized BLOB/TEXT key
   payloads, and exhaustive expression matrices need separate specs before
   support is claimed.

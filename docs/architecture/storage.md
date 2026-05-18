@@ -434,6 +434,9 @@ original generated metadata, generated index entries, and rows visible.
 Representative failed multi-row direct insert and prepared update statements
 restore stored and virtual generated base values and generated-index visibility
 through statement rollback checkpoints.
+Representative strict-mode generated expression failures also restore row and
+generated-index visibility after earlier attempted writes in the failed
+statement.
 Nullable composite unique constraints preserve MariaDB NULL semantics through
 the same retained-key and key-tuple paths: exact non-NULL duplicates reject, but
 rows with NULL in nullable key parts do not conflict.
