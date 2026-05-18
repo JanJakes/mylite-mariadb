@@ -64,6 +64,7 @@ struct Mylite_trx_context
 {
   mylite_storage_statement *transaction;
   mylite_storage_statement *statement;
+  Mylite_volatile_snapshot *statement_snapshot;
   Mylite_volatile_snapshot *transaction_snapshot;
   Mylite_savepoint_frame *savepoints;
 };
@@ -3010,34 +3011,63 @@ static int mylite_begin_transaction_checkpoint(THD *thd,
 static int mylite_begin_statement_checkpoint(THD *thd,
                                              const char *primary_file)
 {
-  if (mylite_storage_statement_active(primary_file))
-    return 0;
-
   Mylite_trx_context *ctx= mylite_trx_context(thd, true);
   if (!ctx)
     return HA_ERR_OUT_OF_MEM;
-  if (ctx->statement)
+  if (ctx->statement_snapshot)
     return 0;
 
+  bool began_statement= false;
+  if (!mylite_storage_statement_active(primary_file) && !ctx->statement)
+  {
+    mylite_storage_result result=
+      mylite_storage_begin_statement(primary_file, &ctx->statement);
+    int error= mylite_storage_to_handler_error(result);
+    if (error)
+      return error;
+    began_statement= true;
+  }
+
+  Mylite_volatile_snapshot *snapshot= NULL;
   mylite_storage_result result=
-    mylite_storage_begin_statement(primary_file, &ctx->statement);
-  return mylite_storage_to_handler_error(result);
+    mylite_volatile_begin_snapshot(primary_file, &snapshot);
+  int error= mylite_storage_to_handler_error(result);
+  if (error)
+  {
+    if (began_statement)
+    {
+      mylite_storage_rollback_statement(ctx->statement);
+      ctx->statement= NULL;
+    }
+    return error;
+  }
+  ctx->statement_snapshot= snapshot;
+  return 0;
 }
 
 static int mylite_finish_statement_checkpoint(THD *thd, bool commit)
 {
   Mylite_trx_context *ctx= mylite_trx_context(thd, false);
-  if (!ctx || !ctx->statement)
+  if (!ctx || (!ctx->statement && !ctx->statement_snapshot))
     return 0;
 
   mylite_storage_statement *statement= ctx->statement;
+  Mylite_volatile_snapshot *snapshot= ctx->statement_snapshot;
   ctx->statement= NULL;
-  mylite_storage_result result;
-  if (commit)
-    result= mylite_storage_commit_statement(statement);
-  else
-    result= mylite_storage_rollback_statement(statement);
-  return mylite_storage_to_handler_error(result);
+  ctx->statement_snapshot= NULL;
+
+  mylite_storage_result storage_result= MYLITE_STORAGE_OK;
+  if (statement)
+  {
+    if (commit)
+      storage_result= mylite_storage_commit_statement(statement);
+    else
+      storage_result= mylite_storage_rollback_statement(statement);
+  }
+
+  int volatile_error= mylite_finish_volatile_snapshot(snapshot, commit);
+  int storage_error= mylite_storage_to_handler_error(storage_result);
+  return storage_error ? storage_error : volatile_error;
 }
 
 static int mylite_finish_savepoints(THD *thd, bool commit)

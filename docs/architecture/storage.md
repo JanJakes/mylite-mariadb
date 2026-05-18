@@ -678,6 +678,10 @@ handlerton in MariaDB's statement transaction list, and releases or restores
 the checkpoint from MariaDB's statement commit/rollback hooks. DDL and catalog
 paths that do not reliably enter `external_lock()` keep the outer `libmylite`
 checkpoint before MariaDB execution.
+The handler statement context also owns a volatile snapshot for routed
+MEMORY/HEAP rows, so failed statements restore process-local row and supported
+index visibility at the same MariaDB statement boundary. User temporary
+volatile tables stay excluded from these snapshots.
 
 Direct or prepared `libmylite` `BEGIN` / `START TRANSACTION` / `COMMIT` /
 `ROLLBACK` and supported direct or prepared session

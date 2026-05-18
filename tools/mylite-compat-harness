@@ -34,7 +34,7 @@ group_spec() {
       echo "storage-smoke-dev|compat-transaction|Direct row-DML transaction commit/rollback, MEMORY/HEAP volatile transaction/savepoint rollback, generated, explicit-insert/update, and INSERT ... VALUES / INSERT ... SELECT ON DUPLICATE KEY UPDATE explicit-update autoincrement rollback and reservation gaps, supported direct and prepared session autocommit mode, read-only/read-write, isolation-level, transaction variable, temporary row-DML, and completion-type transaction SET controls, direct and prepared case-insensitive quoted savepoint rollback/release, active transaction crash recovery, and unsupported transaction-control policy"
       ;;
     transaction-hooks)
-      echo "storage-smoke-dev|compat-transaction-hooks|MariaDB statement transaction and handler savepoint hook integration, including representative MEMORY volatile savepoint rollback"
+      echo "storage-smoke-dev|compat-transaction-hooks|MariaDB statement transaction and handler savepoint hook integration, including representative MEMORY volatile failed-statement and savepoint rollback"
       ;;
     statement-rollback)
       echo "storage-smoke-dev|compat-statement-rollback|Failed statement rollback for routed MyLite storage, including prepared row-DML, failed-DML autoincrement generated reservation, source-driven insert-select reservation growth, failed first-key ODKU reservation preservation, grouped ODKU source-read/update-expression rollback and mixed grouped failed-DML matrices to live prefix maxima, prior-success update preservation across representative FK, duplicate-key, and CHECK failures, explicit duplicate non-consumption, and update gaps, representative mixed-row autoincrement matrices, row REPLACE, OR REPLACE replacement, failed copy ALTER conversion, and table-DDL failures"
@@ -79,7 +79,7 @@ group_spec() {
       echo "embedded-dev|compat-sql-comparison|MariaDB baseline SQL API comparison"
       ;;
     storage-engine)
-      echo "storage-smoke-dev|compat-storage-engine|Static MyLite handler registration, routed engine metadata, BLACKHOLE row-discard smoke, and MEMORY/HEAP volatile-row smoke including transaction snapshots"
+      echo "storage-smoke-dev|compat-storage-engine|Static MyLite handler registration, routed engine metadata, BLACKHOLE row-discard smoke, and MEMORY/HEAP volatile-row smoke including statement and transaction snapshots"
       ;;
     sidecar)
       echo "storage-smoke-dev|compat-sidecar|Forbidden durable sidecar gates around routed SQL"

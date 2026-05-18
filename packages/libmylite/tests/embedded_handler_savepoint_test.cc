@@ -45,6 +45,7 @@ void start_raw_runtime(RawRuntime &runtime);
 void stop_raw_runtime(RawRuntime &runtime);
 void run_savepoint_queries(MYSQL &mysql);
 void assert_query_succeeds(MYSQL &mysql, const char *sql);
+void assert_query_fails(MYSQL &mysql, const char *sql);
 void assert_single_count(MYSQL &mysql, const char *sql, int expected);
 std::filesystem::path make_temp_root(void);
 void create_runtime_directories(const std::filesystem::path &runtime_dir);
@@ -217,6 +218,17 @@ void run_savepoint_queries(MYSQL &mysql) {
         "WHERE title IN ('memory-full', 'memory-full-after')",
         0
     );
+
+    assert_query_fails(
+        mysql,
+        "INSERT INTO raw_memory_posts (title) VALUES "
+        "('memory-statement-rolled'), ('memory-statement-rolled')"
+    );
+    assert_single_count(
+        mysql,
+        "SELECT COUNT(*) FROM raw_memory_posts WHERE title = 'memory-statement-rolled'",
+        0
+    );
 }
 
 void assert_query_succeeds(MYSQL &mysql, const char *sql) {
@@ -230,6 +242,15 @@ void assert_query_succeeds(MYSQL &mysql, const char *sql) {
     } else {
         assert(mysql_field_count(&mysql) == 0U);
     }
+}
+
+void assert_query_fails(MYSQL &mysql, const char *sql) {
+    const int status = mysql_query(&mysql, sql);
+    if (status == 0) {
+        std::fprintf(stderr, "SQL unexpectedly succeeded: %s\n", sql);
+    }
+    assert(status != 0);
+    assert(mysql_errno(&mysql) != 0U);
 }
 
 void assert_single_count(MYSQL &mysql, const char *sql, int expected) {

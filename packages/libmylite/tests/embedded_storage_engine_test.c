@@ -830,7 +830,10 @@ static void test_memory_engine_routes_to_mylite(void) {
     );
     assert_exec_succeeds(
         db,
-        "CREATE TABLE heap_posts (id INT NOT NULL, title VARCHAR(64) NOT NULL) ENGINE=HEAP"
+        "CREATE TABLE heap_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL UNIQUE KEY"
+        ") ENGINE=HEAP"
     );
     assert_catalog_table_count(filename, "app", 2U);
     assert_catalog_table_metadata(filename, "app", "memory_posts", "MEMORY", "MYLITE");
@@ -879,6 +882,25 @@ static void test_memory_engine_routes_to_mylite(void) {
     assert_query_single_value(db, "SELECT COUNT(*) FROM heap_posts", "1");
     assert_exec_fails(db, "INSERT INTO memory_posts (title) VALUES ('first')");
     assert_query_single_value(db, "SELECT COUNT(*) FROM memory_posts", "2");
+    assert_exec_fails(
+        db,
+        "INSERT INTO memory_posts (title) VALUES ('statement-rolled'), ('statement-rolled')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM memory_posts WHERE title = 'statement-rolled'",
+        "0"
+    );
+    assert_exec_fails(
+        db,
+        "INSERT INTO heap_posts VALUES (2, 'heap-statement-rolled'), "
+        "(3, 'heap-statement-rolled')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM heap_posts WHERE title = 'heap-statement-rolled'",
+        "0"
+    );
     assert_exec_succeeds(db, "UPDATE memory_posts SET title = 'updated' WHERE id = 11");
     assert_query_single_value(
         db,
