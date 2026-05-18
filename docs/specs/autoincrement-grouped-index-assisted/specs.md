@@ -127,13 +127,16 @@ None.
 
 ## Implementation Status
 
-Implemented. `mylite_read_grouped_auto_increment()` now reads live index
-entries for the grouped key, filters them by the current serialized prefix, and
-fetches only matching rows to compute the prefix maximum.
+Implemented, then tightened by
+[Autoincrement Grouped Prefix Maximum Lookup](../autoincrement-grouped-prefix-maximum/specs.md).
+The first implementation read live index entries for the grouped key, filtered
+them by the current serialized prefix, and fetched matching rows to compute the
+prefix maximum. The follow-up maximum-lookup slice now chooses the maximum by
+comparing matching live entries and fetches only the selected maximum row.
 
 ## Risks And Unresolved Questions
 
-- The implementation scans the append-only index-entry stream. It is not a
-  final B-tree or prefix-maximum access path.
+- The follow-up maximum lookup still scans the append-only index-entry stream.
+  It is not a durable B-tree page implementation.
 - Grouped autoincrement still lacks transaction-aware rollback of consumed
   generated values.

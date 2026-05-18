@@ -9405,6 +9405,17 @@ static void test_autoincrement_key_policy(void) {
     assert_exec_succeeds(db, "DELETE FROM grouped_auto_posts WHERE category = 8 AND id = 50");
     assert_exec_succeeds(db, "INSERT INTO grouped_auto_posts (category, title) VALUES (8, 'e1')");
     assert_query_single_value(db, "SELECT id FROM grouped_auto_posts WHERE category = 8", "1");
+    assert_exec_succeeds(db, "INSERT INTO grouped_auto_posts VALUES (7, 70, 'g70')");
+    assert_exec_succeeds(
+        db,
+        "UPDATE grouped_auto_posts SET id = 5 WHERE category = 7 AND id = 70"
+    );
+    assert_exec_succeeds(db, "INSERT INTO grouped_auto_posts (category, title) VALUES (7, 'g6')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_auto_posts WHERE category = 7 ORDER BY id DESC LIMIT 1",
+        "6"
+    );
     assert_exec_succeeds(
         db,
         "CREATE TABLE grouped_auto_aria_posts ("
@@ -9462,7 +9473,43 @@ static void test_autoincrement_key_policy(void) {
         "InnoDB",
         "MYLITE"
     );
-    assert_catalog_table_count(filename, "auto_policy", 5U);
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_auto_desc_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (category, id DESC)"
+        ") ENGINE=MyISAM"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_auto_desc_posts (category, title) VALUES "
+        "(11, 'desc-a'), (11, 'desc-b')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_auto_desc_posts WHERE category = 11 AND id = 2",
+        "1"
+    );
+    assert_exec_succeeds(db, "INSERT INTO grouped_auto_desc_posts VALUES (11, 8, 'desc-h')");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_auto_desc_posts (category, title) VALUES (11, 'desc-next')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_auto_desc_posts WHERE category = 11 AND id = 9",
+        "1"
+    );
+    assert_catalog_table_metadata(
+        filename,
+        "auto_policy",
+        "grouped_auto_desc_posts",
+        "MyISAM",
+        "MYLITE"
+    );
+    assert_catalog_table_count(filename, "auto_policy", 6U);
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");

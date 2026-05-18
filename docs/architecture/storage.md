@@ -478,13 +478,14 @@ accepted when the autoincrement column is the first part of a supported key,
 including single-column and first-key compound keys. Grouped later-in-key
 autoincrement definitions are also accepted for routed tables; MyLite advertises
 MariaDB's auto-part-key handler capability and allocates generated values by
-reading live index entries for the current key prefix and fetching only matching
-rows. Representative
+comparing live index entries for the current key prefix and fetching the
+maximum matching row, including stale delete/update filtering and reverse-sort
+autoincrement definitions. Representative
 `auto_increment_offset` / `auto_increment_increment` coverage includes
 single-row and multi-row post-explicit allocation for both first-key and grouped
 prefix table shapes. That grouped path is correct for the supported storage
-subset but still scans append-only index entries until a B-tree-style prefix
-maximum lookup exists.
+subset but still scans append-only index entries until storage-level B-tree
+navigation exists.
 Row, overflow, index-entry, and old autoincrement pages remain orphaned until
 compaction exists. Nullable fixed and variable fields are covered because the
 stored record image includes MariaDB's null bitmap. BLOB/TEXT fields are

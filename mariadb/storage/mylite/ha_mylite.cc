@@ -160,6 +160,10 @@ static ulonglong mylite_first_auto_increment_value(ulonglong next_value,
 static int mylite_read_grouped_auto_increment(
   const char *primary_file, const char *schema_name, const char *table_name,
   bool volatile_rows, TABLE *table, ulonglong *out_next_value);
+static int mylite_find_grouped_auto_increment_row(
+  TABLE *table, const KEY *auto_key,
+  const mylite_storage_index_entryset *entryset, const uchar *target_prefix,
+  size_t target_prefix_size, ulonglong *out_row_id, bool *out_found);
 static int mylite_copy_stored_row_to_record(TABLE *table, const uchar *payload,
                                             size_t payload_size,
                                             uchar *record,
@@ -3255,8 +3259,21 @@ static int mylite_read_grouped_auto_increment(
     return HA_ERR_CRASHED_ON_USAGE;
   }
 
-  uchar *saved_record0= static_cast<uchar *>(
-    malloc(table->s->reclength));
+  ulonglong row_id= 0ULL;
+  bool found= false;
+  error= mylite_find_grouped_auto_increment_row(
+    table, auto_key, &entryset, target_prefix, target_prefix_size, &row_id,
+    &found);
+  if (error || !found)
+  {
+    mylite_storage_free_index_entryset(&entryset);
+    free(target_prefix);
+    if (!error)
+      *out_next_value= 1ULL;
+    return error;
+  }
+
+  uchar *saved_record0= static_cast<uchar *>(malloc(table->s->reclength));
   if (!saved_record0)
   {
     mylite_storage_free_index_entryset(&entryset);
@@ -3270,61 +3287,48 @@ static int mylite_read_grouped_auto_increment(
   if (!auto_field)
     error= HA_ERR_CRASHED_ON_USAGE;
 
-  for (size_t i= 0; !error && i < entryset.entry_count; ++i)
+  if (!error)
   {
-    if (entryset.key_sizes[i] != auto_key->key_length ||
-        entryset.key_offsets[i] > entryset.key_bytes ||
-        entryset.key_sizes[i] > entryset.key_bytes - entryset.key_offsets[i] ||
-        target_prefix_size > entryset.key_sizes[i])
-    {
-      error= HA_ERR_CRASHED_ON_USAGE;
-      break;
-    }
-
-    const uchar *entry_key= entryset.keys + entryset.key_offsets[i];
-    if (memcmp(entry_key, target_prefix, target_prefix_size) != 0)
-      continue;
-
     uchar *row_payload= NULL;
     size_t row_payload_size= 0;
     const mylite_storage_result row_result= volatile_rows ?
       mylite_volatile_read_row(primary_file, schema_name, table_name,
-                               entryset.row_ids[i], &row_payload,
-                               &row_payload_size) :
+                               row_id, &row_payload, &row_payload_size) :
       mylite_storage_read_row(primary_file, schema_name, table_name,
-                              entryset.row_ids[i], &row_payload,
-                              &row_payload_size);
+                              row_id, &row_payload, &row_payload_size);
     if (row_result != MYLITE_STORAGE_OK)
-    {
       error= mylite_storage_to_handler_error(row_result);
-      break;
-    }
 
-    uchar *row_blob_payloads= NULL;
-    error= mylite_copy_stored_row_to_record(table, row_payload,
-                                            row_payload_size,
-                                            table->record[0],
-                                            &row_blob_payloads);
-    mylite_storage_free(row_payload);
-    if (error)
+    if (!error)
     {
-      free(row_blob_payloads);
-      break;
+      uchar *row_blob_payloads= NULL;
+      error= mylite_copy_stored_row_to_record(table, row_payload,
+                                              row_payload_size,
+                                              table->record[0],
+                                              &row_blob_payloads);
+      mylite_storage_free(row_payload);
+      if (error)
+      {
+        free(row_blob_payloads);
+      }
+      else
+      {
+        const longlong signed_value= auto_field->val_int();
+        if (signed_value >= 0 || (auto_field->flags & UNSIGNED_FLAG))
+        {
+          const ulonglong value= (ulonglong) signed_value;
+          if (value == ULONGLONG_MAX)
+            error= HA_ERR_AUTOINC_ERANGE;
+          else
+            next_value= value + 1ULL;
+        }
+        free(row_blob_payloads);
+      }
     }
-
-    const longlong signed_value= auto_field->val_int();
-    free(row_blob_payloads);
-    if (signed_value < 0 && !(auto_field->flags & UNSIGNED_FLAG))
-      continue;
-
-    const ulonglong value= (ulonglong) signed_value;
-    if (value == ULONGLONG_MAX)
+    else
     {
-      error= HA_ERR_AUTOINC_ERANGE;
-      break;
+      mylite_storage_free(row_payload);
     }
-    if (value >= next_value)
-      next_value= value + 1ULL;
   }
 
   memcpy(table->record[0], saved_record0, table->s->reclength);
@@ -3334,6 +3338,59 @@ static int mylite_read_grouped_auto_increment(
   if (!error)
     *out_next_value= next_value;
   return error;
+}
+
+static int mylite_find_grouped_auto_increment_row(
+  TABLE *table, const KEY *auto_key,
+  const mylite_storage_index_entryset *entryset, const uchar *target_prefix,
+  size_t target_prefix_size, ulonglong *out_row_id, bool *out_found)
+{
+  *out_row_id= 0ULL;
+  *out_found= false;
+
+  if (entryset->entry_count == 0)
+    return 0;
+  if (!entryset->keys || !entryset->key_offsets || !entryset->key_sizes ||
+      !entryset->row_ids)
+    return HA_ERR_CRASHED_ON_USAGE;
+
+  size_t found_key_offset= 0;
+  size_t found_key_size= 0;
+  for (size_t i= 0; i < entryset->entry_count; ++i)
+  {
+    if (entryset->key_sizes[i] != auto_key->key_length ||
+        entryset->key_offsets[i] > entryset->key_bytes ||
+        entryset->key_sizes[i] > entryset->key_bytes -
+                                  entryset->key_offsets[i] ||
+        target_prefix_size > entryset->key_sizes[i])
+    {
+      return HA_ERR_CRASHED_ON_USAGE;
+    }
+
+    const uchar *entry_key= entryset->keys + entryset->key_offsets[i];
+    if (memcmp(entry_key, target_prefix, target_prefix_size) != 0)
+      continue;
+
+    if (*out_found)
+    {
+      int cmp= 0;
+      const int error= mylite_compare_key_tuple(
+        table, table->s->next_number_index,
+        entryset->keys + found_key_offset, found_key_size, entry_key,
+        entryset->key_sizes[i], auto_key->key_length, &cmp);
+      if (error)
+        return error;
+      if (cmp >= 0)
+        continue;
+    }
+
+    found_key_offset= entryset->key_offsets[i];
+    found_key_size= entryset->key_sizes[i];
+    *out_row_id= entryset->row_ids[i];
+    *out_found= true;
+  }
+
+  return 0;
 }
 
 static int mylite_copy_stored_row_to_record(TABLE *table, const uchar *payload,
