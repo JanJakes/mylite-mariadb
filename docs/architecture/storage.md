@@ -514,6 +514,13 @@ MyLite row pages.
 Explicit `BIGINT UNSIGNED` maximum values are allowed for first-key,
 grouped-prefix, and MEMORY/HEAP tables; the following generated value fails
 through MariaDB's `ULONGLONG_MAX` autoincrement read-failed sentinel.
+For first-key table-local autoincrement state, completed durable transaction
+rollback and nested direct savepoint rollback remove generated rows while
+republishing advancing next values for tables that existed at the checkpoint,
+matching MariaDB/InnoDB's persistent-but-non-transactional gap behavior for
+`ROLLBACK` and `ROLLBACK TO SAVEPOINT`. Top-level failed-statement gaps remain
+planned because the same checkpoint primitive is also used by failed DDL
+rollback.
 That grouped path is correct for the supported storage subset but still scans
 append-only index entries until storage-level B-tree navigation exists.
 Row, overflow, index-entry, and old autoincrement pages remain orphaned until
@@ -678,6 +685,11 @@ and use it to restore transaction-start visibility after an unclean process
 exit. If MariaDB reports statement failure, MyLite restores the saved
 catalog/header pages so rows, row-state pages, index entries, autoincrement
 pages, and catalog records appended after the checkpoint are no longer visible.
+When the restored checkpoint is an outer durable transaction or a nested direct
+savepoint frame, rollback scans appended autoincrement pages before restoring
+the checkpoint and republishes only advancing values for table IDs that existed
+in the checkpoint catalog. That keeps generated autoincrement gaps without
+making failed DDL metadata changes durable.
 
 This is still partial SQL transaction support. The MyLite handler still
 advertises non-transactional engine flags. Public `libmylite` SQL entry points

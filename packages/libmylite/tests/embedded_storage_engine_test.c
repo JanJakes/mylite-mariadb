@@ -207,6 +207,7 @@ static void test_autoincrement_offset_increment_matrix(void);
 static void test_autoincrement_integer_overflow(void);
 static void test_autoincrement_integer_width_matrix(void);
 static void test_autoincrement_bigint_unsigned_maximum(void);
+static void test_autoincrement_transaction_rollback(void);
 static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
 static void test_index_ddl_if_exists(void);
@@ -527,6 +528,7 @@ int main(int argc, char **argv) {
     test_autoincrement_integer_overflow();
     test_autoincrement_integer_width_matrix();
     test_autoincrement_bigint_unsigned_maximum();
+    test_autoincrement_transaction_rollback();
     test_indexed_rows();
     test_standalone_index_ddl();
     test_index_ddl_if_exists();
@@ -11368,6 +11370,137 @@ static void test_autoincrement_bigint_unsigned_maximum(void) {
         db,
         "SELECT id FROM memory_max WHERE title = 'after-reopen'",
         "1"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_autoincrement_transaction_rollback(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_tx_rollback");
+    assert_exec_succeeds(db, "USE auto_tx_rollback");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE tx_auto_posts ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "PRIMARY KEY (id),"
+        "UNIQUE KEY title_key (title)"
+        ") ENGINE=InnoDB"
+    );
+
+    assert_exec_succeeds(db, "INSERT INTO tx_auto_posts (title) VALUES ('committed')");
+    assert_query_single_value(db, "SELECT id FROM tx_auto_posts WHERE title = 'committed'", "1");
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO tx_auto_posts (title) VALUES ('rolled-back')");
+    assert_query_single_value(db, "SELECT id FROM tx_auto_posts WHERE title = 'rolled-back'", "2");
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_auto_posts WHERE title = 'rolled-back'",
+        "0"
+    );
+    assert_exec_succeeds(db, "INSERT INTO tx_auto_posts (title) VALUES ('after-rollback')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM tx_auto_posts WHERE title = 'after-rollback'",
+        "3"
+    );
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "SAVEPOINT auto_gap");
+    assert_exec_succeeds(db, "INSERT INTO tx_auto_posts (title) VALUES ('savepoint-rolled')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM tx_auto_posts WHERE title = 'savepoint-rolled'",
+        "4"
+    );
+    assert_exec_succeeds(db, "ROLLBACK TO SAVEPOINT auto_gap");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_auto_posts WHERE title = 'savepoint-rolled'",
+        "0"
+    );
+    assert_exec_succeeds(db, "INSERT INTO tx_auto_posts (title) VALUES ('after-savepoint')");
+    assert_exec_succeeds(db, "COMMIT");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM tx_auto_posts WHERE title = 'after-savepoint'",
+        "5"
+    );
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_prepared_succeeds(db, "SAVEPOINT prepared_auto_gap");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO tx_auto_posts (title) VALUES ('prepared-savepoint-rolled')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM tx_auto_posts WHERE title = 'prepared-savepoint-rolled'",
+        "6"
+    );
+    assert_prepared_succeeds(db, "ROLLBACK TO SAVEPOINT prepared_auto_gap");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_auto_posts WHERE title = 'prepared-savepoint-rolled'",
+        "0"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO tx_auto_posts (title) VALUES ('after-prepared-savepoint')"
+    );
+    assert_exec_succeeds(db, "COMMIT");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM tx_auto_posts WHERE title = 'after-prepared-savepoint'",
+        "7"
+    );
+
+    assert_exec_succeeds(db, "BEGIN");
+    assert_prepared_one_text_succeeds(
+        db,
+        "INSERT INTO tx_auto_posts (title) VALUES (?)",
+        "prepared-rolled-back"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM tx_auto_posts WHERE title = 'prepared-rolled-back'",
+        "8"
+    );
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_auto_posts WHERE title = 'prepared-rolled-back'",
+        "0"
+    );
+    assert_exec_succeeds(db, "INSERT INTO tx_auto_posts (title) VALUES ('after-prepared')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM tx_auto_posts WHERE title = 'after-prepared'",
+        "9"
+    );
+    assert_catalog_table_count(filename, "auto_tx_rollback", 1U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE auto_tx_rollback");
+    assert_exec_succeeds(db, "INSERT INTO tx_auto_posts (title) VALUES ('after-reopen')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM tx_auto_posts WHERE title = 'after-reopen'",
+        "10"
     );
 
     assert(mylite_close(db) == MYLITE_OK);

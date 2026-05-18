@@ -144,6 +144,17 @@ typedef struct mylite_storage_schema_list {
     size_t count;
 } mylite_storage_schema_list;
 
+typedef struct mylite_storage_autoincrement_rollback_value {
+    unsigned long long table_id;
+    unsigned long long next_value;
+} mylite_storage_autoincrement_rollback_value;
+
+typedef struct mylite_storage_autoincrement_rollback_values {
+    mylite_storage_autoincrement_rollback_value *entries;
+    size_t count;
+    size_t capacity;
+} mylite_storage_autoincrement_rollback_values;
+
 typedef struct mylite_storage_table_identity {
     const char *schema_name;
     const char *table_name;
@@ -256,6 +267,29 @@ static mylite_storage_result initialize_checkpoint_statement(
 static mylite_storage_result read_checkpoint_snapshot(mylite_storage_statement *statement);
 static mylite_storage_result close_statement(mylite_storage_statement *statement);
 static void free_statement(mylite_storage_statement *statement);
+static int checkpoint_preserves_auto_increment_rollback(
+    const mylite_storage_statement *statement
+);
+static mylite_storage_result collect_rollback_auto_increment_values(
+    const mylite_storage_statement *statement,
+    mylite_storage_autoincrement_rollback_values *out_values
+);
+static mylite_storage_result append_rollback_auto_increment_value(
+    mylite_storage_autoincrement_rollback_values *values,
+    unsigned long long table_id,
+    unsigned long long next_value
+);
+static mylite_storage_result publish_rollback_auto_increment_values(
+    mylite_storage_statement *statement,
+    const mylite_storage_autoincrement_rollback_values *values
+);
+static int catalog_contains_table_id(
+    const unsigned char *catalog_page,
+    unsigned long long table_id
+);
+static void free_rollback_auto_increment_values(
+    mylite_storage_autoincrement_rollback_values *values
+);
 static char *copy_filename(const char *filename);
 static mylite_storage_result read_header(FILE *file, mylite_storage_header *out_header);
 static mylite_storage_result read_page_at(
@@ -3033,7 +3067,15 @@ mylite_storage_result mylite_storage_rollback_statement(mylite_storage_statement
         return MYLITE_STORAGE_MISUSE;
     }
 
-    mylite_storage_result result = write_page_at(
+    mylite_storage_autoincrement_rollback_values auto_increment_values = {0};
+    mylite_storage_result result =
+        collect_rollback_auto_increment_values(statement, &auto_increment_values);
+    if (result != MYLITE_STORAGE_OK) {
+        free_rollback_auto_increment_values(&auto_increment_values);
+        return result;
+    }
+
+    result = write_page_at(
         statement->file,
         statement->header.catalog_root_page,
         statement->header.page_size,
@@ -3048,6 +3090,10 @@ mylite_storage_result mylite_storage_rollback_statement(mylite_storage_statement
         );
     }
     if (result == MYLITE_STORAGE_OK) {
+        result = publish_rollback_auto_increment_values(statement, &auto_increment_values);
+    }
+    free_rollback_auto_increment_values(&auto_increment_values);
+    if (result == MYLITE_STORAGE_OK) {
         result = flush_file(statement->file);
     }
     if (result == MYLITE_STORAGE_OK && statement->owns_transaction_journal) {
@@ -3061,6 +3107,154 @@ mylite_storage_result mylite_storage_rollback_statement(mylite_storage_statement
     mylite_storage_result close_result = close_statement(statement);
     free_statement(statement);
     return close_result;
+}
+
+static int checkpoint_preserves_auto_increment_rollback(
+    const mylite_storage_statement *statement
+) {
+    return statement->owns_transaction_journal || statement->parent != NULL;
+}
+
+static mylite_storage_result collect_rollback_auto_increment_values(
+    const mylite_storage_statement *statement,
+    mylite_storage_autoincrement_rollback_values *out_values
+) {
+    if (!checkpoint_preserves_auto_increment_rollback(statement)) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    mylite_storage_header current_header = {0};
+    mylite_storage_result result = read_header(statement->file, &current_header);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    if (current_header.page_count <= statement->header.page_count) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    for (unsigned long long page_id = statement->header.page_count;
+         result == MYLITE_STORAGE_OK && page_id < current_header.page_count;
+         ++page_id) {
+        unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        mylite_storage_autoincrement_page autoincrement_page = {0};
+        result = read_autoincrement_page(
+            statement->file,
+            &current_header,
+            page_id,
+            page,
+            &autoincrement_page
+        );
+        if (result == MYLITE_STORAGE_NOTFOUND) {
+            result = MYLITE_STORAGE_OK;
+            continue;
+        }
+        if (result == MYLITE_STORAGE_OK &&
+            catalog_contains_table_id(statement->catalog_page, autoincrement_page.table_id)) {
+            result = append_rollback_auto_increment_value(
+                out_values,
+                autoincrement_page.table_id,
+                autoincrement_page.next_value
+            );
+        }
+    }
+    return result;
+}
+
+static mylite_storage_result append_rollback_auto_increment_value(
+    mylite_storage_autoincrement_rollback_values *values,
+    unsigned long long table_id,
+    unsigned long long next_value
+) {
+    for (size_t i = 0U; i < values->count; ++i) {
+        if (values->entries[i].table_id == table_id) {
+            values->entries[i].next_value = next_value;
+            return MYLITE_STORAGE_OK;
+        }
+    }
+
+    if (values->count == values->capacity) {
+        const size_t next_capacity = values->capacity == 0U ? 4U : values->capacity * 2U;
+        if (next_capacity <= values->capacity ||
+            next_capacity > SIZE_MAX / sizeof(*values->entries)) {
+            return MYLITE_STORAGE_FULL;
+        }
+        mylite_storage_autoincrement_rollback_value *entries =
+            (mylite_storage_autoincrement_rollback_value *)realloc(
+                values->entries,
+                next_capacity * sizeof(*values->entries)
+            );
+        if (entries == NULL) {
+            return MYLITE_STORAGE_NOMEM;
+        }
+        values->entries = entries;
+        values->capacity = next_capacity;
+    }
+
+    values->entries[values->count++] = (mylite_storage_autoincrement_rollback_value){
+        .table_id = table_id,
+        .next_value = next_value,
+    };
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result publish_rollback_auto_increment_values(
+    mylite_storage_statement *statement,
+    const mylite_storage_autoincrement_rollback_values *values
+) {
+    mylite_storage_header header = statement->header;
+    for (size_t i = 0U; i < values->count; ++i) {
+        unsigned long long checkpoint_next_value = 0ULL;
+        mylite_storage_result result = latest_auto_increment_value(
+            statement->file,
+            &statement->header,
+            values->entries[i].table_id,
+            &checkpoint_next_value
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+        if (values->entries[i].next_value <= checkpoint_next_value) {
+            continue;
+        }
+
+        result = publish_auto_increment_value(
+            statement->file,
+            statement->filename,
+            &header,
+            values->entries[i].table_id,
+            values->entries[i].next_value
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+    }
+    return MYLITE_STORAGE_OK;
+}
+
+static int catalog_contains_table_id(
+    const unsigned char *catalog_page,
+    unsigned long long table_id
+) {
+    size_t offset = MYLITE_STORAGE_FORMAT_CATALOG_HEADER_SIZE;
+    const unsigned long long record_count = catalog_record_count(catalog_page);
+    for (unsigned long long i = 0ULL; i < record_count; ++i) {
+        const unsigned char *record = catalog_page + offset;
+        if (record_is_table(record) &&
+            get_u64_le(record, MYLITE_STORAGE_FORMAT_RECORD_TABLE_ID_OFFSET) == table_id) {
+            return 1;
+        }
+        offset += get_u32_le(record, MYLITE_STORAGE_FORMAT_RECORD_SIZE_OFFSET);
+    }
+    return 0;
+}
+
+static void free_rollback_auto_increment_values(
+    mylite_storage_autoincrement_rollback_values *values
+) {
+    free(values->entries);
+    values->entries = NULL;
+    values->count = 0U;
+    values->capacity = 0U;
 }
 
 static mylite_storage_result begin_checkpoint(
