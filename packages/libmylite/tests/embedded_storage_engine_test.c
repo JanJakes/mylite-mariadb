@@ -220,6 +220,7 @@ static void test_autoincrement_grouped_on_duplicate_key_update(void);
 static void test_autoincrement_grouped_on_duplicate_key_update_variants(void);
 static void test_autoincrement_grouped_on_duplicate_key_update_failed_dml(void);
 static void test_autoincrement_grouped_on_duplicate_key_update_source_update_errors(void);
+static void test_autoincrement_grouped_on_duplicate_key_update_source_read_errors(void);
 static void test_autoincrement_on_duplicate_key_update_failed_dml(void);
 static void test_autoincrement_insert_select_on_duplicate_key_update(void);
 static void test_autoincrement_insert_select_failed_dml(void);
@@ -556,6 +557,7 @@ int main(int argc, char **argv) {
     test_autoincrement_grouped_on_duplicate_key_update_variants();
     test_autoincrement_grouped_on_duplicate_key_update_failed_dml();
     test_autoincrement_grouped_on_duplicate_key_update_source_update_errors();
+    test_autoincrement_grouped_on_duplicate_key_update_source_read_errors();
     test_autoincrement_on_duplicate_key_update_failed_dml();
     test_autoincrement_insert_select_on_duplicate_key_update();
     test_autoincrement_insert_select_failed_dml();
@@ -13502,6 +13504,213 @@ static void test_autoincrement_grouped_on_duplicate_key_update_source_update_err
         db,
         "SELECT id FROM grouped_prepared_source_update_error_posts "
         "WHERE title = 'after-prepared-source-update-error-reopen'",
+        "3"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_autoincrement_grouped_on_duplicate_key_update_source_read_errors(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_grouped_odku_source_read_errors");
+    assert_exec_succeeds(db, "USE auto_grouped_odku_source_read_errors");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_source_read_error_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "marker INT NOT NULL,"
+        "PRIMARY KEY (category, id),"
+        "UNIQUE KEY title_key (title)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_source_read_error_source ("
+        "ord INT NOT NULL,"
+        "category INT NOT NULL,"
+        "marker INT NOT NULL,"
+        "PRIMARY KEY (ord)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_source_read_error_lookup ("
+        "ord INT NOT NULL,"
+        "title VARCHAR(64) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_source_read_error_posts (category, title, marker) VALUES "
+        "(1, 'dupe', 10)"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_source_read_error_source "
+        "(ord, category, marker) VALUES "
+        "(1, 1, 101),"
+        "(2, 1, 102)"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_source_read_error_lookup VALUES "
+        "(1, 'source-before-read-error'),"
+        "(2, 'dupe'),"
+        "(2, 'dupe-again')"
+    );
+    assert_exec_fails_with_message(
+        db,
+        "INSERT INTO grouped_source_read_error_posts (category, title, marker) "
+        "SELECT s.category, "
+        "(SELECT l.title FROM grouped_source_read_error_lookup l "
+        "WHERE l.ord = s.ord), "
+        "s.marker FROM grouped_source_read_error_source s ORDER BY s.ord "
+        "ON DUPLICATE KEY UPDATE marker = VALUES(marker)",
+        "Subquery returns"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_source_read_error_posts "
+        "WHERE title = 'source-before-read-error'",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT marker FROM grouped_source_read_error_posts WHERE title = 'dupe'",
+        "10"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_source_read_error_posts (category, title, marker) VALUES "
+        "(1, 'after-source-read-error', 103)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_source_read_error_posts "
+        "WHERE title = 'after-source-read-error'",
+        "2"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_prepared_source_read_error_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(64) NOT NULL,"
+        "marker INT NOT NULL,"
+        "PRIMARY KEY (category, id),"
+        "UNIQUE KEY title_key (title)"
+        ") ENGINE=MyISAM"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_prepared_source_read_error_source ("
+        "ord INT NOT NULL,"
+        "category INT NOT NULL,"
+        "marker INT NOT NULL,"
+        "PRIMARY KEY (ord)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_prepared_source_read_error_lookup ("
+        "ord INT NOT NULL,"
+        "title VARCHAR(64) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_prepared_source_read_error_posts "
+        "(category, title, marker) VALUES "
+        "(1, 'dupe', 20)"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_prepared_source_read_error_source "
+        "(ord, category, marker) VALUES "
+        "(1, 1, 201),"
+        "(2, 1, 202)"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_prepared_source_read_error_lookup VALUES "
+        "(1, 'prepared-source-before-read-error'),"
+        "(2, 'dupe'),"
+        "(2, 'dupe-again')"
+    );
+    assert_prepared_fails_with_message(
+        db,
+        "INSERT INTO grouped_prepared_source_read_error_posts "
+        "(category, title, marker) "
+        "SELECT s.category, "
+        "(SELECT l.title FROM grouped_prepared_source_read_error_lookup l "
+        "WHERE l.ord = s.ord), "
+        "s.marker FROM grouped_prepared_source_read_error_source s ORDER BY s.ord "
+        "ON DUPLICATE KEY UPDATE marker = VALUES(marker)",
+        "Subquery returns"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM grouped_prepared_source_read_error_posts "
+        "WHERE title = 'prepared-source-before-read-error'",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT marker FROM grouped_prepared_source_read_error_posts "
+        "WHERE title = 'dupe'",
+        "20"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_prepared_source_read_error_posts "
+        "(category, title, marker) VALUES "
+        "(1, 'after-prepared-source-read-error', 203)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_prepared_source_read_error_posts "
+        "WHERE title = 'after-prepared-source-read-error'",
+        "2"
+    );
+    assert_catalog_table_count(filename, "auto_grouped_odku_source_read_errors", 6U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE auto_grouped_odku_source_read_errors");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_source_read_error_posts (category, title, marker) VALUES "
+        "(1, 'after-source-read-error-reopen', 104)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_source_read_error_posts "
+        "WHERE title = 'after-source-read-error-reopen'",
+        "3"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_prepared_source_read_error_posts "
+        "(category, title, marker) VALUES "
+        "(1, 'after-prepared-source-read-error-reopen', 204)"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM grouped_prepared_source_read_error_posts "
+        "WHERE title = 'after-prepared-source-read-error-reopen'",
         "3"
     );
 

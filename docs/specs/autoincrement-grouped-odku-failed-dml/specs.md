@@ -40,7 +40,9 @@ MariaDB base: `mariadb-11.8.6`
 
 - Exhaustive grouped ODKU expression, trigger, view, partition,
   offset/increment, integer-width, or prepared parameter-shape matrices.
-- Source-read errors that occur before the target handler is called.
+- Source-read errors that occur before the target handler is called, which are
+  covered separately in
+  `docs/specs/autoincrement-grouped-odku-source-read-errors/specs.md`.
 - Native MyISAM/Aria/InnoDB sidecar storage behavior.
 - Changing first-key autoincrement ODKU reservation behavior.
 - Size-profile reduction work.
@@ -55,8 +57,10 @@ value resumes from the current live prefix maximum.
 
 The claim remains representative. Broader matrices stay planned for triggers,
 views, generated-column update expressions, offsets, integer widths, prepared
-parameter-shape expansion, and source-read error paths. Source-driven
-update-expression errors are covered separately in
+parameter-shape expansion, and broader source-error paths. Source-driven
+source-read errors are covered separately in
+`docs/specs/autoincrement-grouped-odku-source-read-errors/specs.md`, and
+source-driven update-expression errors are covered separately in
 `docs/specs/autoincrement-grouped-odku-source-driven-update-expression-errors/specs.md`.
 
 ## Design
@@ -112,5 +116,5 @@ No dependency, license, or intended size-profile change is introduced.
 
 ## Risks And Open Questions
 
-- Trigger, view, generated-column update-expression, and source-read variants
-  may have distinct SQL-layer ordering and remain planned.
+- Trigger, view, generated-column update-expression, and broader source-error
+  variants may have distinct SQL-layer ordering and remain planned.

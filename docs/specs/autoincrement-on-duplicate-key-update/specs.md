@@ -68,6 +68,8 @@ MariaDB base: `mariadb-11.8.6`
   `docs/specs/autoincrement-on-duplicate-key-update-failed-dml/specs.md`.
   Representative grouped failed-update paths are covered in
   `docs/specs/autoincrement-grouped-odku-failed-dml/specs.md`.
+  Representative grouped source-read errors are covered in
+  `docs/specs/autoincrement-grouped-odku-source-read-errors/specs.md`.
   Representative grouped source-driven update-expression errors are covered in
   `docs/specs/autoincrement-grouped-odku-source-driven-update-expression-errors/specs.md`.
 - Native InnoDB old-style autoincrement lock-mode parity.
@@ -165,6 +167,7 @@ No dependency, license, or intended size-profile change is introduced.
 - Failed duplicate-update branches after earlier generated row publication are
   covered by the failed-DML ODKU follow-up slice.
 - Grouped later-in-key ODKU now has representative direct, source-driven,
-  prepared, failed-update, and source-driven update-expression error coverage.
-- ODKU trigger, view, source-read, and broader expression-error paths may have
-  distinct SQL-layer ordering and remain planned.
+  prepared, failed-update, source-read error, and source-driven
+  update-expression error coverage.
+- ODKU trigger, view, and broader expression-error paths may have distinct
+  SQL-layer ordering and remain planned.
