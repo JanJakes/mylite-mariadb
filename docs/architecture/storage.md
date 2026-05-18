@@ -131,6 +131,10 @@ update/delete ordering checks cover failed-statement rollback when an earlier
 unreferenced parent row was processed before a later referenced parent row.
 Representative multi-table update/delete ordering checks cover parent-first
 rejection and child-first success when the target-table order is forced.
+Representative parent-target multi-table action checks cover `ON DELETE
+CASCADE`, `ON DELETE SET NULL`, `ON UPDATE CASCADE`, and `ON UPDATE SET NULL`
+dispatch from joined statements while child rows are mutated only by the
+foreign-key action.
 Bounded self-referencing, same-row self-referencing, and non-self
 `ON DELETE SET NULL` / `ON UPDATE SET NULL` actions, bounded
 `ON DELETE CASCADE`, bounded recursive `ON UPDATE CASCADE` over acyclic action

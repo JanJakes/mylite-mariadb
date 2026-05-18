@@ -163,6 +163,7 @@ static void test_foreign_key_action_combinations(void);
 static void test_foreign_key_same_row_action_matrix(void);
 static void test_foreign_key_non_self_ordering(void);
 static void test_foreign_key_multi_table_ordering(void);
+static void test_foreign_key_multi_table_action_matrix(void);
 static void test_foreign_key_handler_metadata(void);
 static void test_row_dml_transactions(void);
 static void test_create_table_persists_catalog_metadata(void);
@@ -449,6 +450,7 @@ int main(int argc, char **argv) {
     test_foreign_key_same_row_action_matrix();
     test_foreign_key_non_self_ordering();
     test_foreign_key_multi_table_ordering();
+    test_foreign_key_multi_table_action_matrix();
     test_foreign_key_handler_metadata();
     test_row_dml_transactions();
     test_create_table_persists_catalog_metadata();
@@ -4323,6 +4325,186 @@ static void test_foreign_key_multi_table_ordering(void) {
     );
     assert_exec_fails(db, "INSERT INTO fk_multi_child VALUES (3, 20)");
     assert_exec_succeeds(db, "INSERT INTO fk_multi_child VALUES (3, 120)");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_foreign_key_multi_table_action_matrix(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_mt_del_cascade_parent ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_mt_del_cascade_child ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT NOT NULL, "
+        "KEY fk_mt_del_cascade_child_parent (parent_id), "
+        "CONSTRAINT fk_mt_del_cascade_child_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_mt_del_cascade_parent(id) "
+        "ON DELETE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_mt_del_cascade_parent VALUES (1)");
+    assert_exec_succeeds(db, "INSERT INTO fk_mt_del_cascade_child VALUES (10, 1)");
+    assert_exec_succeeds(
+        db,
+        "DELETE fk_mt_del_cascade_parent "
+        "FROM fk_mt_del_cascade_parent STRAIGHT_JOIN fk_mt_del_cascade_child "
+        "ON fk_mt_del_cascade_child.parent_id = fk_mt_del_cascade_parent.id "
+        "WHERE fk_mt_del_cascade_parent.id = 1"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM fk_mt_del_cascade_parent", "0");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM fk_mt_del_cascade_child", "0");
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_mt_del_null_parent ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_mt_del_null_child ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT NULL, "
+        "KEY fk_mt_del_null_child_parent (parent_id), "
+        "CONSTRAINT fk_mt_del_null_child_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_mt_del_null_parent(id) "
+        "ON DELETE SET NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_mt_del_null_parent VALUES (2)");
+    assert_exec_succeeds(db, "INSERT INTO fk_mt_del_null_child VALUES (20, 2)");
+    assert_exec_succeeds(
+        db,
+        "DELETE fk_mt_del_null_parent "
+        "FROM fk_mt_del_null_parent STRAIGHT_JOIN fk_mt_del_null_child "
+        "ON fk_mt_del_null_child.parent_id = fk_mt_del_null_parent.id "
+        "WHERE fk_mt_del_null_parent.id = 2"
+    );
+    assert_query_single_value(db, "SELECT COUNT(*) FROM fk_mt_del_null_parent", "0");
+    assert_query_single_value(
+        db,
+        "SELECT parent_id IS NULL FROM fk_mt_del_null_child WHERE id = 20",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_mt_del_null_child "
+        "FORCE INDEX (fk_mt_del_null_child_parent) WHERE parent_id = 2",
+        "0"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_mt_update_cascade_parent ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_mt_update_cascade_child ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT NOT NULL, "
+        "KEY fk_mt_update_cascade_child_parent (parent_id), "
+        "CONSTRAINT fk_mt_update_cascade_child_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_mt_update_cascade_parent(id) "
+        "ON UPDATE CASCADE"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_mt_update_cascade_parent VALUES (3)");
+    assert_exec_succeeds(db, "INSERT INTO fk_mt_update_cascade_child VALUES (30, 3)");
+    assert_exec_succeeds(
+        db,
+        "UPDATE fk_mt_update_cascade_parent STRAIGHT_JOIN fk_mt_update_cascade_child "
+        "ON fk_mt_update_cascade_child.parent_id = fk_mt_update_cascade_parent.id "
+        "SET fk_mt_update_cascade_parent.id = 103 "
+        "WHERE fk_mt_update_cascade_parent.id = 3"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_id FROM fk_mt_update_cascade_child WHERE id = 30",
+        "103"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_mt_update_cascade_child "
+        "FORCE INDEX (fk_mt_update_cascade_child_parent) WHERE parent_id = 3",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_mt_update_cascade_child "
+        "FORCE INDEX (fk_mt_update_cascade_child_parent) WHERE parent_id = 103",
+        "1"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_mt_update_null_parent ("
+        "id INT NOT NULL PRIMARY KEY"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE fk_mt_update_null_child ("
+        "id INT NOT NULL PRIMARY KEY, parent_id INT NULL, "
+        "KEY fk_mt_update_null_child_parent (parent_id), "
+        "CONSTRAINT fk_mt_update_null_child_parent "
+        "FOREIGN KEY (parent_id) REFERENCES fk_mt_update_null_parent(id) "
+        "ON UPDATE SET NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO fk_mt_update_null_parent VALUES (4)");
+    assert_exec_succeeds(db, "INSERT INTO fk_mt_update_null_child VALUES (40, 4)");
+    assert_exec_succeeds(
+        db,
+        "UPDATE fk_mt_update_null_parent STRAIGHT_JOIN fk_mt_update_null_child "
+        "ON fk_mt_update_null_child.parent_id = fk_mt_update_null_parent.id "
+        "SET fk_mt_update_null_parent.id = 104 "
+        "WHERE fk_mt_update_null_parent.id = 4"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_id IS NULL FROM fk_mt_update_null_child WHERE id = 40",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM fk_mt_update_null_child "
+        "FORCE INDEX (fk_mt_update_null_child_parent) WHERE parent_id = 4",
+        "0"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE app");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM fk_mt_del_cascade_child", "0");
+    assert_query_single_value(
+        db,
+        "SELECT parent_id IS NULL FROM fk_mt_del_null_child WHERE id = 20",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_id FROM fk_mt_update_cascade_child WHERE id = 30",
+        "103"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT parent_id IS NULL FROM fk_mt_update_null_child WHERE id = 40",
+        "1"
+    );
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
