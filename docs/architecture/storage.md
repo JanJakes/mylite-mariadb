@@ -628,13 +628,14 @@ row ids, use bound searches for key positioning, build filtered cursors for
 exact-key and prefix reads, stop after the first matching non-nullable full-key
 unique integer entry, and use storage-level exact-entry or exact-entryset lookup
 for guarded raw equality paths so the handler does not allocate unrelated index
-entries for common integer point reads. Cursors check `index_next_same()`
-boundaries before row materialization and reconstruct only the selected row
-buffer from row pages.
+entries for common integer point reads. Durable exact lookups classify each
+published append-only page once and prune candidates as later row-state pages
+hide older row ids. Cursors check `index_next_same()` boundaries before row
+materialization and reconstruct only the selected row buffer from row pages.
 This provides correct indexed insert, lookup, update, delete, reopen, and copy
 `ALTER` behavior for the supported shapes, but it is still an interim
-performance structure because exact lookup still scans live append-only entry
-pages. Standalone
+performance structure because exact lookup still scans append-only index and
+row-state pages. Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, free-space reclamation, multi-statement transaction
 rollback, and transaction-aware index maintenance remain planned.

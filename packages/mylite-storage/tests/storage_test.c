@@ -1269,6 +1269,14 @@ static void test_index_entries(void) {
     assert_index_entry_lookup(filename, 0U, key_1, sizeof(key_1), MYLITE_STORAGE_NOTFOUND, 0ULL);
     assert_index_entry_lookup(
         filename,
+        1U,
+        title_a,
+        sizeof(title_a),
+        MYLITE_STORAGE_OK,
+        ctx.row_2_id
+    );
+    assert_index_entry_lookup(
+        filename,
         0U,
         key_9,
         sizeof(key_9),
