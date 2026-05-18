@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+storage_build_dir="${root_dir}/build/mariadb-mylite-storage-smoke"
+archive="${storage_build_dir}/libmysqld/libmariadbd.a"
+cache="${storage_build_dir}/CMakeCache.txt"
+
+if [ -f "${archive}" ] &&
+  [ -f "${cache}" ] &&
+  grep -q '^PLUGIN_MYLITE_SE:STRING=STATIC$' "${cache}"; then
+  cmake --build "${storage_build_dir}" --target mysqlserver
+else
+  BUILD_DIR="${storage_build_dir}" TARGET=mysqlserver \
+    "${root_dir}/tools/mariadb-embedded-build" all -DPLUGIN_MYLITE_SE=STATIC
+fi
+
+cmake --preset storage-smoke-dev
+cmake --build --preset storage-smoke-dev --target mylite_perf_baseline
+
+exec "${root_dir}/build/storage-smoke-dev/tools/mylite_perf_baseline" "$@"
