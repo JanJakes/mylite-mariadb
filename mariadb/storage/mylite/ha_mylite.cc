@@ -442,6 +442,7 @@ static bool mylite_key_prefix_equals(const uchar *left, size_t left_size,
 static bool mylite_unique_key_allows_duplicate_null(TABLE *table,
                                                     const KEY *key,
                                                     const uchar *buf);
+static bool mylite_key_uses_raw_exact_filter(const KEY *key);
 static int mylite_advance_auto_increment_from_row(const char *primary_file,
                                                   const char *schema_name,
                                                   const char *table_name,
@@ -1151,8 +1152,8 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
       scan_row_size(0), scan_row_count(0), scan_row_index(0),
       scan_blob_payloads_size(0), record_blob_payloads_size{0, 0},
       index_row_count(0), index_row_index(0), index_cursor_number(MAX_KEY),
-      current_row_id(0), duplicate_key_index((uint) -1), discard_rows(false),
-      volatile_rows(false)
+      current_row_id(0), duplicate_key_index((uint) -1),
+      index_cursor_filtered(false), discard_rows(false), volatile_rows(false)
 {
   storage_schema_name[0]= '\0';
   storage_table_name[0]= '\0';
@@ -1193,6 +1194,7 @@ void ha_mylite::clear_index_cursor()
   index_row_count= 0;
   index_row_index= 0;
   index_cursor_number= MAX_KEY;
+  index_cursor_filtered= false;
 }
 
 void ha_mylite::clear_record_blob_payloads()
@@ -1225,17 +1227,20 @@ ulong ha_mylite::index_flags(uint index_number, uint, bool) const
   return HA_READ_NEXT | HA_READ_PREV | HA_READ_ORDER | HA_READ_RANGE;
 }
 
-int ha_mylite::build_index_cursor(uint index_number)
+int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
+                                  uint key_filter_length)
 {
   DBUG_ENTER("ha_mylite::build_index_cursor");
 
   clear_index_cursor();
+  const bool filter_cursor= key_filter != NULL && key_filter_length > 0;
   if (index_number >= table->s->keys ||
       !mylite_key_is_supported(table->key_info + index_number))
     DBUG_RETURN(HA_ERR_UNSUPPORTED);
   if (discard_rows)
   {
     index_cursor_number= index_number;
+    index_cursor_filtered= filter_cursor;
     DBUG_RETURN(0);
   }
 
@@ -1244,13 +1249,14 @@ int ha_mylite::build_index_cursor(uint index_number)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
 
   mylite_storage_index_entryset entryset= {sizeof(entryset), NULL, 0, 0};
-  mylite_storage_result storage_result= volatile_rows ?
-    mylite_volatile_read_index_entries(primary_file, storage_schema(),
-                                       storage_table(), index_number,
-                                       &entryset) :
-    mylite_storage_read_index_entries(primary_file, storage_schema(),
-                                      storage_table(), index_number,
-                                      &entryset);
+  mylite_storage_result storage_result=
+      volatile_rows
+          ? mylite_volatile_read_index_entries(primary_file, storage_schema(),
+                                               storage_table(), index_number,
+                                               &entryset)
+          : mylite_storage_read_index_entries(primary_file, storage_schema(),
+                                              storage_table(), index_number,
+                                              &entryset);
   if (storage_result != MYLITE_STORAGE_OK)
     DBUG_RETURN(mylite_storage_to_handler_error(storage_result));
 
@@ -1258,6 +1264,7 @@ int ha_mylite::build_index_cursor(uint index_number)
   {
     mylite_storage_free_index_entryset(&entryset);
     index_cursor_number= index_number;
+    index_cursor_filtered= filter_cursor;
     DBUG_RETURN(0);
   }
   if (!entryset.key_offsets || !entryset.key_sizes || !entryset.row_ids ||
@@ -1269,6 +1276,11 @@ int ha_mylite::build_index_cursor(uint index_number)
   }
 
   KEY *key_info= table->key_info + index_number;
+  const bool unique_full_key_filter=
+      filter_cursor && key_filter_length == key_info->key_length &&
+      (key_info->flags & HA_NOSAME) && !(key_info->flags & HA_NULL_PART_KEY);
+  const bool raw_exact_filter=
+      unique_full_key_filter && mylite_key_uses_raw_exact_filter(key_info);
   Mylite_index_cursor_entry *entries= static_cast<Mylite_index_cursor_entry *>(
       malloc(entryset.entry_count * sizeof(Mylite_index_cursor_entry)));
   if (!entries)
@@ -1277,6 +1289,7 @@ int ha_mylite::build_index_cursor(uint index_number)
     DBUG_RETURN(HA_ERR_OUT_OF_MEM);
   }
 
+  size_t cursor_entry_count= 0;
   for (size_t i= 0; i < entryset.entry_count; ++i)
   {
     if (entryset.key_sizes[i] != key_info->key_length ||
@@ -1287,13 +1300,41 @@ int ha_mylite::build_index_cursor(uint index_number)
       mylite_storage_free_index_entryset(&entryset);
       DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
     }
-    entries[i].key_offset= entryset.key_offsets[i];
-    entries[i].key_size= entryset.key_sizes[i];
-    entries[i].row_id= entryset.row_ids[i];
+    if (filter_cursor)
+    {
+      const uchar *entry_key= entryset.keys + entryset.key_offsets[i];
+      if (raw_exact_filter)
+      {
+        if (memcmp(entry_key, key_filter, key_filter_length) != 0)
+          continue;
+      }
+      else
+      {
+        int cmp= 0;
+        int error= mylite_compare_key_tuple(
+            table, index_number, entry_key, entryset.key_sizes[i], key_filter,
+            key_filter_length, key_filter_length, &cmp);
+        if (error)
+        {
+          free(entries);
+          mylite_storage_free_index_entryset(&entryset);
+          DBUG_RETURN(error);
+        }
+        if (cmp != 0)
+          continue;
+      }
+    }
+
+    entries[cursor_entry_count].key_offset= entryset.key_offsets[i];
+    entries[cursor_entry_count].key_size= entryset.key_sizes[i];
+    entries[cursor_entry_count].row_id= entryset.row_ids[i];
+    ++cursor_entry_count;
+    if (unique_full_key_filter)
+      break;
   }
 
   int error= mylite_sort_index_entries(table, index_number, entryset.keys,
-                                       entries, entryset.entry_count);
+                                       entries, cursor_entry_count);
   if (error)
   {
     free(entries);
@@ -1303,8 +1344,9 @@ int ha_mylite::build_index_cursor(uint index_number)
 
   index_keys= entryset.keys;
   index_entries= entries;
-  index_row_count= entryset.entry_count;
+  index_row_count= cursor_entry_count;
   index_cursor_number= index_number;
+  index_cursor_filtered= filter_cursor;
   entryset.keys= NULL;
   mylite_storage_free_index_entryset(&entryset);
   DBUG_RETURN(0);
@@ -1557,7 +1599,10 @@ int ha_mylite::close(void)
 int ha_mylite::index_init(uint idx, bool)
 {
   DBUG_ENTER("ha_mylite::index_init");
-  DBUG_RETURN(build_index_cursor(idx));
+  clear_index_cursor();
+  if (idx >= table->s->keys || !mylite_key_is_supported(table->key_info + idx))
+    DBUG_RETURN(HA_ERR_UNSUPPORTED);
+  DBUG_RETURN(0);
 }
 
 int ha_mylite::index_end()
@@ -1572,22 +1617,36 @@ int ha_mylite::index_read_map(uchar *buf, const uchar *key,
                               enum ha_rkey_function find_flag)
 {
   DBUG_ENTER("ha_mylite::index_read_map");
-  if (index_cursor_number != active_index)
+  if (!key)
   {
-    const int error= build_index_cursor(active_index);
+    if (index_cursor_number != active_index || index_cursor_filtered)
+    {
+      const int error= build_index_cursor(active_index, NULL, 0);
+      if (error)
+        DBUG_RETURN(error);
+    }
+    DBUG_RETURN(index_first(buf));
+  }
+
+  const uint key_length=
+      calculate_key_len(table, active_index, key, keypart_map);
+  const bool filter_cursor=
+      key_length > 0 &&
+      (find_flag == HA_READ_KEY_EXACT || find_flag == HA_READ_PREFIX);
+  if (filter_cursor || index_cursor_number != active_index ||
+      index_cursor_filtered)
+  {
+    const int error=
+        build_index_cursor(active_index, filter_cursor ? key : NULL,
+                           filter_cursor ? key_length : 0);
     if (error)
       DBUG_RETURN(error);
   }
-  if (!key)
-    DBUG_RETURN(index_first(buf));
 
-  const uint key_length= calculate_key_len(table, active_index, key,
-                                           keypart_map);
   size_t entry_index= 0;
-  const int error=
-    mylite_find_index_entry(table, index_entries, index_row_count, index_keys,
-                            active_index, key, key_length, find_flag,
-                            &entry_index);
+  const int error= mylite_find_index_entry(
+      table, index_entries, index_row_count, index_keys, active_index, key,
+      key_length, find_flag, &entry_index);
   if (error)
     DBUG_RETURN(error);
 
@@ -1600,17 +1659,27 @@ int ha_mylite::index_read_idx_map(uchar *buf, uint index, const uchar *key,
 {
   DBUG_ENTER("ha_mylite::index_read_idx_map");
 
-  int error= build_index_cursor(index);
-  if (error)
-    DBUG_RETURN(error);
   if (!key)
+  {
+    int error= build_index_cursor(index, NULL, 0);
+    if (error)
+      DBUG_RETURN(error);
     DBUG_RETURN(index_first(buf));
+  }
 
   const uint key_length= calculate_key_len(table, index, key, keypart_map);
+  const bool filter_cursor=
+      key_length > 0 &&
+      (find_flag == HA_READ_KEY_EXACT || find_flag == HA_READ_PREFIX);
+  int error= build_index_cursor(index, filter_cursor ? key : NULL,
+                                filter_cursor ? key_length : 0);
+  if (error)
+    DBUG_RETURN(error);
+
   size_t entry_index= 0;
-  error=
-    mylite_find_index_entry(table, index_entries, index_row_count, index_keys,
-                            index, key, key_length, find_flag, &entry_index);
+  error= mylite_find_index_entry(table, index_entries, index_row_count,
+                                 index_keys, index, key, key_length, find_flag,
+                                 &entry_index);
   if (error)
     DBUG_RETURN(error);
 
@@ -1620,6 +1689,12 @@ int ha_mylite::index_read_idx_map(uchar *buf, uint index, const uchar *key,
 int ha_mylite::index_next(uchar *buf)
 {
   DBUG_ENTER("ha_mylite::index_next");
+  if (index_cursor_number == MAX_KEY)
+  {
+    const int error= build_index_cursor(active_index, NULL, 0);
+    if (error)
+      DBUG_RETURN(error);
+  }
   if (index_row_count == 0 || index_row_index + 1 >= index_row_count)
     DBUG_RETURN(HA_ERR_END_OF_FILE);
 
@@ -1637,8 +1712,8 @@ int ha_mylite::index_next_same(uchar *buf, const uchar *key, uint keylen)
   const Mylite_index_cursor_entry *entry= index_entries + next_index;
   int cmp= 0;
   const int error= mylite_compare_key_tuple(
-      table, active_index, index_keys + entry->key_offset, entry->key_size,
-      key, keylen, keylen, &cmp);
+      table, index_cursor_number, index_keys + entry->key_offset,
+      entry->key_size, key, keylen, keylen, &cmp);
   if (error)
     DBUG_RETURN(error);
   if (cmp != 0)
@@ -1650,6 +1725,12 @@ int ha_mylite::index_next_same(uchar *buf, const uchar *key, uint keylen)
 int ha_mylite::index_prev(uchar *buf)
 {
   DBUG_ENTER("ha_mylite::index_prev");
+  if (index_cursor_number == MAX_KEY)
+  {
+    const int error= build_index_cursor(active_index, NULL, 0);
+    if (error)
+      DBUG_RETURN(error);
+  }
   if (index_row_count == 0 || index_row_index == 0)
     DBUG_RETURN(HA_ERR_END_OF_FILE);
 
@@ -1659,6 +1740,14 @@ int ha_mylite::index_prev(uchar *buf)
 int ha_mylite::index_first(uchar *buf)
 {
   DBUG_ENTER("ha_mylite::index_first");
+  if (index_cursor_number == MAX_KEY || index_cursor_filtered)
+  {
+    const int error= build_index_cursor(
+        index_cursor_number == MAX_KEY ? active_index : index_cursor_number,
+        NULL, 0);
+    if (error)
+      DBUG_RETURN(error);
+  }
   if (index_row_count == 0)
     DBUG_RETURN(HA_ERR_END_OF_FILE);
 
@@ -1668,6 +1757,14 @@ int ha_mylite::index_first(uchar *buf)
 int ha_mylite::index_last(uchar *buf)
 {
   DBUG_ENTER("ha_mylite::index_last");
+  if (index_cursor_number == MAX_KEY || index_cursor_filtered)
+  {
+    const int error= build_index_cursor(
+        index_cursor_number == MAX_KEY ? active_index : index_cursor_number,
+        NULL, 0);
+    if (error)
+      DBUG_RETURN(error);
+  }
   if (index_row_count == 0)
     DBUG_RETURN(HA_ERR_END_OF_FILE);
 
@@ -6378,6 +6475,34 @@ static bool mylite_unique_key_allows_duplicate_null(TABLE *table,
   }
 
   return false;
+}
+
+static bool mylite_key_uses_raw_exact_filter(const KEY *key)
+{
+  if (!key || !key->key_part)
+    return false;
+
+  for (uint i= 0; i < key->user_defined_key_parts; ++i)
+  {
+    Field *field= key->key_part[i].field;
+    if (!field)
+      return false;
+
+    switch (field->real_type())
+    {
+    case MYSQL_TYPE_TINY:
+    case MYSQL_TYPE_SHORT:
+    case MYSQL_TYPE_INT24:
+    case MYSQL_TYPE_LONG:
+    case MYSQL_TYPE_LONGLONG:
+    case MYSQL_TYPE_YEAR:
+      break;
+    default:
+      return false;
+    }
+  }
+
+  return true;
 }
 
 static int mylite_advance_auto_increment_from_row(const char *primary_file,

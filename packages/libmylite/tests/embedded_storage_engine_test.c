@@ -16178,6 +16178,11 @@ static void test_indexed_rows(void) {
         .expected_count = 3,
         .expected_ids = score_desc_ids,
     };
+    const char *news_ids[] = {"1", "3"};
+    id_sequence_context news_sequence = {
+        .expected_count = 2,
+        .expected_ids = news_ids,
+    };
     const char *nullable_ids[] = {"1", "2"};
     id_sequence_context nullable_sequence = {
         .expected_count = 2,
@@ -16251,6 +16256,18 @@ static void test_indexed_rows(void) {
     );
     assert(errmsg == NULL);
     assert(news_rows.rows == 2);
+    assert(
+        mylite_exec(
+            db,
+            "SELECT id FROM indexed_posts FORCE INDEX (category_key) "
+            "WHERE category = 'news' ORDER BY id",
+            id_sequence_callback,
+            &news_sequence,
+            &errmsg
+        ) == MYLITE_OK
+    );
+    assert(errmsg == NULL);
+    assert(news_sequence.rows == 2);
     assert(
         mylite_exec(
             db,

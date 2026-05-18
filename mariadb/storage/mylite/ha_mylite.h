@@ -66,6 +66,7 @@ class ha_mylite: public handler
   uint index_cursor_number;
   ulonglong current_row_id;
   uint duplicate_key_index;
+  bool index_cursor_filtered;
   bool discard_rows;
   bool volatile_rows;
 
@@ -75,7 +76,8 @@ class ha_mylite: public handler
   void clear_record_blob_payloads();
   const char *storage_schema() const;
   const char *storage_table() const;
-  int build_index_cursor(uint index_number);
+  int build_index_cursor(uint index_number, const uchar *key_filter,
+                         uint key_filter_length);
   int read_index_cursor_row(uchar *buf, size_t row_index);
   int record_blob_payload_slot(const uchar *buf, size_t *out_slot) const;
   int preserve_record_blob_payloads(uchar *buf);
