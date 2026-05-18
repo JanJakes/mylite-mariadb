@@ -47,6 +47,8 @@ MariaDB base: `mariadb-11.8.6`
 - Support representative insert, full scan, forced-index lookup, update,
   delete, truncate, duplicate-key, and autoincrement behavior during the
   current runtime.
+- Cover representative autoincrement overflow rejection during the current
+  runtime without publishing failed rows.
 - Keep no-durable-sidecar gates clean.
 
 ## Non-Goals
@@ -140,6 +142,8 @@ BLACKHOLE plus MEMORY/HEAP. Durable common-engine routing remains unchanged.
   reporting.
 - Verify insert/select, forced-index lookup, duplicate-key rejection,
   update/delete, truncate, and autoincrement reset during the current runtime.
+- Verify MEMORY/HEAP autoincrement overflow rejects without durable row
+  publication.
 - Verify MEMORY/HEAP row contents are empty after final close/reopen while
   table metadata survives.
 - Verify no durable sidecars after close/reopen.
@@ -154,6 +158,7 @@ BLACKHOLE plus MEMORY/HEAP. Durable common-engine routing remains unchanged.
 - MEMORY/HEAP metadata and empty-table reopen behavior survive final
   close/reopen.
 - Supported indexes and autoincrement work for representative volatile rows.
+- Representative autoincrement overflow rejects without publishing rows.
 - Roadmap, compatibility, and architecture docs distinguish MEMORY/HEAP
   volatile support from durable MyLite engine routing and BLACKHOLE row
   discard.

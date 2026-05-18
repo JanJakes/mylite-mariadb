@@ -101,8 +101,7 @@ No dependency or intended size-profile change is introduced.
   non-default offset/increment settings, accept `65535`, and reject the next
   generated value.
 - Docs narrow the remaining autoincrement gap to exhaustive matrices,
-  temporary/volatile rows, transaction-aware rollback, and `BIGINT UNSIGNED`
-  maximum-state design.
+  transaction-aware rollback, and `BIGINT UNSIGNED` maximum-state design.
 
 ## Risks And Unresolved Questions
 

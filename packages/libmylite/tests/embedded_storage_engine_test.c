@@ -152,6 +152,7 @@ static void test_show_engines_reports_mylite(void);
 static void test_unsupported_engine_request_policy(void);
 static void test_blackhole_engine_routes_to_mylite(void);
 static void test_memory_engine_routes_to_mylite(void);
+static void test_memory_autoincrement_overflow(void);
 static void test_memory_database_has_empty_mylite_discovery(void);
 static void test_schema_namespaces(void);
 static void test_prepared_schema_namespaces(void);
@@ -457,6 +458,7 @@ int main(int argc, char **argv) {
     test_unsupported_engine_request_policy();
     test_blackhole_engine_routes_to_mylite();
     test_memory_engine_routes_to_mylite();
+    test_memory_autoincrement_overflow();
     test_memory_database_has_empty_mylite_discovery();
     test_schema_namespaces();
     test_prepared_schema_namespaces();
@@ -843,6 +845,117 @@ static void test_memory_engine_routes_to_mylite(void) {
         MYLITE_STORAGE_OK
     );
     assert(durable_row_count == 0ULL);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_memory_autoincrement_overflow(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    unsigned long long durable_row_count = 0ULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE memory_tiny_auto ("
+        "id TINYINT UNSIGNED NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (id)"
+        ") ENGINE=MEMORY AUTO_INCREMENT=254"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE heap_small_auto ("
+        "id SMALLINT UNSIGNED NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (id)"
+        ") ENGINE=HEAP"
+    );
+    assert_catalog_table_count(filename, "app", 2U);
+    assert_catalog_table_metadata(filename, "app", "memory_tiny_auto", "MEMORY", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "heap_small_auto", "HEAP", "MYLITE");
+
+    assert_exec_succeeds(db, "INSERT INTO memory_tiny_auto (title) VALUES ('near-max')");
+    assert_exec_succeeds(db, "INSERT INTO memory_tiny_auto (title) VALUES ('max-generated')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM memory_tiny_auto WHERE title = 'near-max'",
+        "254"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM memory_tiny_auto WHERE title = 'max-generated'",
+        "255"
+    );
+    assert_exec_fails(db, "INSERT INTO memory_tiny_auto (title) VALUES ('overflow')");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM memory_tiny_auto WHERE title = 'overflow'",
+        "0"
+    );
+    assert(
+        mylite_storage_count_rows(filename, "app", "memory_tiny_auto", &durable_row_count) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(durable_row_count == 0ULL);
+
+    assert_exec_succeeds(
+        db,
+        "SET @@session.auto_increment_increment = 10, "
+        "@@session.auto_increment_offset = 5"
+    );
+    assert_exec_succeeds(db, "INSERT INTO heap_small_auto VALUES (65521, 'near-max')");
+    assert_exec_succeeds(db, "INSERT INTO heap_small_auto (title) VALUES ('rounded-low')");
+    assert_exec_succeeds(db, "INSERT INTO heap_small_auto (title) VALUES ('rounded-max')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM heap_small_auto WHERE title = 'rounded-low'",
+        "65525"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM heap_small_auto WHERE title = 'rounded-max'",
+        "65535"
+    );
+    assert_exec_fails(db, "INSERT INTO heap_small_auto (title) VALUES ('overflow')");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM heap_small_auto WHERE title = 'overflow'",
+        "0"
+    );
+    assert(
+        mylite_storage_count_rows(filename, "app", "heap_small_auto", &durable_row_count) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(durable_row_count == 0ULL);
+    assert_exec_succeeds(
+        db,
+        "SET @@session.auto_increment_increment = 1, "
+        "@@session.auto_increment_offset = 1"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE app");
+    assert_catalog_table_count(filename, "app", 2U);
+    assert_catalog_table_metadata(filename, "app", "memory_tiny_auto", "MEMORY", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "heap_small_auto", "HEAP", "MYLITE");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM memory_tiny_auto", "0");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM heap_small_auto", "0");
+    assert_exec_succeeds(db, "INSERT INTO memory_tiny_auto (title) VALUES ('after-reopen')");
+    assert_query_single_value(
+        db,
+        "SELECT id FROM memory_tiny_auto WHERE title = 'after-reopen'",
+        "1"
+    );
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");

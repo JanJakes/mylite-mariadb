@@ -487,6 +487,9 @@ prefix table shapes plus a broader pair matrix including offset greater than
 increment. Representative small integer-width overflow coverage verifies the
 last valid generated value and next generated overflow for signed and unsigned
 `TINYINT` plus unsigned `SMALLINT` with non-default offset/increment settings.
+Runtime-volatile MEMORY/HEAP autoincrement overflow uses the same SQL-layer
+boundary behavior while keeping rows and autoincrement state out of durable
+MyLite row pages.
 That grouped path is correct for the supported storage subset but still scans
 append-only index entries until storage-level B-tree navigation exists.
 Row, overflow, index-entry, and old autoincrement pages remain orphaned until
