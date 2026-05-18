@@ -178,6 +178,7 @@ static void test_generated_column_alter_ddl(void);
 static void test_generated_primary_key_policy(void);
 static void test_autoincrement_key_policy(void);
 static void test_autoincrement_offset_increment(void);
+static void test_autoincrement_offset_increment_multirow(void);
 static void test_indexed_rows(void);
 static void test_standalone_index_ddl(void);
 static void test_index_ddl_if_exists(void);
@@ -469,6 +470,7 @@ int main(int argc, char **argv) {
     test_generated_primary_key_policy();
     test_autoincrement_key_policy();
     test_autoincrement_offset_increment();
+    test_autoincrement_offset_increment_multirow();
     test_indexed_rows();
     test_standalone_index_ddl();
     test_index_ddl_if_exists();
@@ -9409,6 +9411,129 @@ static void test_autoincrement_offset_increment(void) {
     assert_exec_succeeds(db, "INSERT INTO grouped_posts (category, title) VALUES (3, 'c2')");
     assert_query_single_value(db, "SELECT id FROM grouped_posts WHERE title = 'a26'", "26");
     assert_query_single_value(db, "SELECT id FROM grouped_posts WHERE title = 'c2'", "2");
+    assert_exec_succeeds(
+        db,
+        "SET @@session.auto_increment_increment = 1, "
+        "@@session.auto_increment_offset = 1"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_autoincrement_offset_increment_multirow(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE auto_offset_multi");
+    assert_exec_succeeds(db, "USE auto_offset_multi");
+    assert_exec_succeeds(
+        db,
+        "SET @@session.auto_increment_increment = 4, "
+        "@@session.auto_increment_offset = 3"
+    );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE first_key_posts ("
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "category INT NOT NULL,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO first_key_posts (category, title) VALUES "
+        "(1, 'first'), (1, 'second'), (1, 'third')"
+    );
+    assert_query_single_value(db, "SELECT id FROM first_key_posts WHERE title = 'first'", "3");
+    assert_query_single_value(db, "SELECT id FROM first_key_posts WHERE title = 'second'", "7");
+    assert_query_single_value(db, "SELECT id FROM first_key_posts WHERE title = 'third'", "11");
+    assert_exec_succeeds(db, "INSERT INTO first_key_posts VALUES (30, 2, 'explicit')");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO first_key_posts (category, title) VALUES "
+        "(2, 'after-explicit-one'), (2, 'after-explicit-two')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM first_key_posts WHERE title = 'after-explicit-one'",
+        "31"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM first_key_posts WHERE title = 'after-explicit-two'",
+        "35"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE grouped_posts ("
+        "category INT NOT NULL,"
+        "id INT NOT NULL AUTO_INCREMENT,"
+        "title VARCHAR(32) NOT NULL,"
+        "PRIMARY KEY (category, id)"
+        ") ENGINE=MyISAM"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_posts (category, title) VALUES "
+        "(1, 'g1'), (1, 'g2'), (2, 'h1'), (1, 'g3'), (2, 'h2')"
+    );
+    assert_query_single_value(db, "SELECT id FROM grouped_posts WHERE title = 'g1'", "3");
+    assert_query_single_value(db, "SELECT id FROM grouped_posts WHERE title = 'g2'", "7");
+    assert_query_single_value(db, "SELECT id FROM grouped_posts WHERE title = 'g3'", "11");
+    assert_query_single_value(db, "SELECT id FROM grouped_posts WHERE title = 'h1'", "3");
+    assert_query_single_value(db, "SELECT id FROM grouped_posts WHERE title = 'h2'", "7");
+    assert_exec_succeeds(db, "INSERT INTO grouped_posts VALUES (1, 30, 'g30')");
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_posts (category, title) VALUES "
+        "(1, 'g31'), (1, 'g35'), (2, 'h11'), (3, 'i3')"
+    );
+    assert_query_single_value(db, "SELECT id FROM grouped_posts WHERE title = 'g31'", "31");
+    assert_query_single_value(db, "SELECT id FROM grouped_posts WHERE title = 'g35'", "35");
+    assert_query_single_value(db, "SELECT id FROM grouped_posts WHERE title = 'h11'", "11");
+    assert_query_single_value(db, "SELECT id FROM grouped_posts WHERE title = 'i3'", "3");
+    assert_catalog_table_count(filename, "auto_offset_multi", 2U);
+    assert_exec_succeeds(
+        db,
+        "SET @@session.auto_increment_increment = 1, "
+        "@@session.auto_increment_offset = 1"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE auto_offset_multi");
+    assert_exec_succeeds(
+        db,
+        "SET @@session.auto_increment_increment = 4, "
+        "@@session.auto_increment_offset = 3"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO first_key_posts (category, title) VALUES (3, 'after-reopen')"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT id FROM first_key_posts WHERE title = 'after-reopen'",
+        "39"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO grouped_posts (category, title) VALUES "
+        "(1, 'g39'), (2, 'h15'), (4, 'j3')"
+    );
+    assert_query_single_value(db, "SELECT id FROM grouped_posts WHERE title = 'g39'", "39");
+    assert_query_single_value(db, "SELECT id FROM grouped_posts WHERE title = 'h15'", "15");
+    assert_query_single_value(db, "SELECT id FROM grouped_posts WHERE title = 'j3'", "3");
     assert_exec_succeeds(
         db,
         "SET @@session.auto_increment_increment = 1, "
