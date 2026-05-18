@@ -7170,6 +7170,21 @@ static void test_cross_process_transaction_read_snapshot(void) {
         "SELECT COUNT(*) FROM tx_process_posts WHERE title = 'cross-process-uncommitted'",
         "0"
     );
+    char *blocked_write_error = NULL;
+    const int blocked_write_result = mylite_exec(
+        reader,
+        "INSERT INTO tx_process_posts VALUES (3, 'blocked-cross-process-writer')",
+        NULL,
+        NULL,
+        &blocked_write_error
+    );
+    assert(blocked_write_result != MYLITE_OK);
+    mylite_free(blocked_write_error);
+    assert_query_single_value(
+        reader,
+        "SELECT COUNT(*) FROM tx_process_posts WHERE title = 'blocked-cross-process-writer'",
+        "0"
+    );
 
     release_transaction_read_snapshot_child(child);
     assert_query_single_value(
