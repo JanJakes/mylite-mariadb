@@ -300,7 +300,9 @@ secondary cursor materialization can reuse payloads that were already read and
 checksummed for the same durable file state. Each cache keeps an in-memory
 row-id index so cache hits stay near constant time. The cache is disabled for
 active statements and read snapshots, and it is cleared by durable mutation
-invalidation.
+invalidation. Indexed-row batch materialization builds rowsets through an
+internal builder that preallocates metadata for the known row-id batch and grows
+row bytes amortized, avoiding per-row metadata reallocations.
 
 Non-active durable index-leaf reads use the same file header fingerprint model
 for a bounded thread-local leaf page cache. Published leaf-root exact lookups

@@ -87,8 +87,9 @@ checkpoints now cache row ids proven live by the active view so handler-driven
 update/delete validation does not rescan and checksum later row-state pages on
 every row. Non-active durable indexed-row reads now cache row payloads by file
 header fingerprint, reducing repeated secondary cursor row-page checksums until
-a real pager replaces the bounded cache, with a small row-id index keeping
-payload cache hits from becoming another per-row scan. Published index leaf
+an internal rowset builder now avoids per-row metadata reallocations during
+known indexed-row batches, with a small row-id index keeping payload cache hits
+from becoming another per-row scan. Published index leaf
 pages are also cached by durable file header fingerprint so repeated exact
 leaf-root lookups avoid repeating leaf page reads, checksums, and decode work.
 Handler instances now cache proven child and parent foreign-key metadata
