@@ -76,7 +76,10 @@ rebuilding full row-state maps. SQLite-like row-write and point-read performance
 still requires the planned navigable index and pager work. Durable handler
 index cursors also materialize their current row payloads in one ordered batch,
 removing repeated per-row file open/header/catalog overhead from secondary
-cursor reads while maintained navigable indexes are still pending.
+cursor reads while maintained navigable indexes are still pending. Active
+checkpoints now cache row ids proven live by the active view so handler-driven
+update/delete validation does not rescan and checksum later row-state pages on
+every row.
 
 ## Size And Profile Direction
 

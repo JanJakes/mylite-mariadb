@@ -276,6 +276,15 @@ reads from reopening the primary file and revalidating header/catalog state for
 each row while the storage layer still works from the same single `.mylite`
 file and the same live row ids returned by index-entry reads.
 
+Active storage checkpoints also maintain a live-row validation cache per table
+and catalog generation. Rows proven live by visibility-checked storage reads,
+index-entry reads, exact-index lookups, and table scans can be trusted by later
+update/delete validation after the row page is confirmed to still belong to the
+target table. Successful mutations remove hidden source row ids and add
+replacement row ids. Non-checkpointed direct storage calls keep the row-state
+scan path, and truncate/catalog invalidation or savepoint rollback clears
+cached live rows.
+
 The catalog stores:
 
 - schemas,
