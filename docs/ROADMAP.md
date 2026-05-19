@@ -114,12 +114,14 @@ storage row-count APIs remain exact. A small transient durable exact-index read
 cache now amortizes
 repeated primary-key and secondary exact lookups for append-only indexes without
 published roots while preserving active-checkpoint visibility rules. Active
-checkpoint exact-index caches are now maintained across update/delete mutations,
-and update/delete validation uses direct row-id visibility checks instead of
-rebuilding full row-state maps. Transient row-state maps now hash hidden source
-row ids, removing the per-candidate linear visibility lookup that dominated
-full scans after many updates, and full rowset reads now collect live row ids in
-one file pass before materializing only surviving row pages. SQLite-like
+checkpoint exact-index caches are now maintained across update/delete
+mutations, can seed from matching durable exact-index caches, and publish
+maintained complete cache views on top-level commit; update/delete validation
+uses direct row-id visibility checks instead of rebuilding full row-state maps.
+Transient row-state maps now hash hidden source row ids, removing the
+per-candidate linear visibility lookup that dominated full scans after many
+updates, and full rowset reads now collect live row ids in one file pass before
+materializing only surviving row pages. SQLite-like
 row-write and point-read performance still requires the planned navigable index
 and pager work. Durable handler
 index cursors also materialize their current row payloads in one ordered batch,

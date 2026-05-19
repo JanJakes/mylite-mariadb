@@ -103,6 +103,14 @@ cache, maintain insert/update/delete changes in process memory, and promote the
 updated list on top-level commit. Rollback, catalog changes, truncate, cache
 overflow, or any inconsistent mutation state discards the active list and keeps
 the existing append-history scan fallback.
+Active exact-index caches follow the same transient handoff shape: a new active
+cache can seed from a durable exact-index cache only when the filename, catalog
+root, catalog generation, page count, table id, index number, and key width all
+match the checkpoint header. Mutation hooks maintain already-loaded active
+exact-index caches, and top-level commit promotes those complete maintained
+caches under the committed header fingerprint. Rollback and cache invalidation
+discard them instead of publishing uncertain duplicate-key or point-lookup
+state.
 
 MariaDB table-discovery callbacks also use scoped read sessions while they read
 table definitions, discovered table names, or table existence from the MyLite
