@@ -317,6 +317,11 @@ Repeated read statements over an unchanged file also reuse a thread-local
 decoded checkpoint snapshot after comparing raw header and catalog bytes. This
 keeps repeated point-select statements from paying header/catalog checksum
 costs when no storage page publication changed the durable view.
+Normal read statements also keep a thread-local unlocked read file handle after
+the read statement ends. The next read statement can reuse that handle only
+after confirming the filename still resolves to the same device and inode, then
+it takes the ordinary shared lock and reads the checkpoint snapshot as usual.
+The cache is cleared on same-file creation and durable mutation paths.
 
 Catalog discovery for table-open flows uses the same scoped read-session cache,
 so repeated prepared statements avoid a separate header/catalog validation path

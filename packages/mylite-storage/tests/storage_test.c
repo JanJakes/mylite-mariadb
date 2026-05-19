@@ -214,6 +214,7 @@ static void assert_statement_checkpoint_preserves_marked_auto_increment_rollback
 );
 static void test_read_statement_storage_session(void);
 static void test_read_checkpoint_snapshot_cache(void);
+static void test_read_statement_file_cache_path_replacement(void);
 static void test_transaction_journals(void);
 static void test_transaction_owner_isolation(void);
 static void test_cross_process_transaction_read_snapshot(void);
@@ -367,6 +368,7 @@ int main(void) {
     test_statement_checkpoints();
     test_read_statement_storage_session();
     test_read_checkpoint_snapshot_cache();
+    test_read_statement_file_cache_path_replacement();
     test_transaction_journals();
     test_transaction_owner_isolation();
     test_cross_process_transaction_read_snapshot();
@@ -3154,6 +3156,68 @@ static void test_read_checkpoint_snapshot_cache(void) {
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_read_statement_file_cache_path_replacement(void) {
+    static const unsigned char posts_definition[] = {0x01U, 'p', 'o', 's', 't'};
+    static const unsigned char comments_definition[] = {0x01U, 'c', 'm', 't', 's'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "read-file-cache.mylite");
+    char *replacement_filename = path_join(root, "replacement.mylite");
+    mylite_storage_statement *read_statement = NULL;
+    unsigned char *stored_definition = NULL;
+    size_t stored_definition_size = 0U;
+    mylite_storage_table_definition posts = {
+        .size = sizeof(posts),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = posts_definition,
+        .definition_size = sizeof(posts_definition),
+    };
+    mylite_storage_table_definition comments = {
+        .size = sizeof(comments),
+        .schema_name = "app",
+        .table_name = "comments",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = comments_definition,
+        .definition_size = sizeof(comments_definition),
+    };
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &posts) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_begin_read_statement(filename, &read_statement) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_end_read_statement(read_statement) == MYLITE_STORAGE_OK);
+    read_statement = NULL;
+
+    assert(mylite_storage_create_empty(replacement_filename) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_store_table_definition(replacement_filename, &comments) == MYLITE_STORAGE_OK
+    );
+    assert(rename(replacement_filename, filename) == 0);
+
+    assert(mylite_storage_begin_read_statement(filename, &read_statement) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_read_table_definition(
+            filename,
+            "app",
+            "comments",
+            &stored_definition,
+            &stored_definition_size
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(stored_definition_size == sizeof(comments_definition));
+    assert(memcmp(stored_definition, comments_definition, sizeof(comments_definition)) == 0);
+    mylite_storage_free(stored_definition);
+    assert(mylite_storage_end_read_statement(read_statement) == MYLITE_STORAGE_OK);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(replacement_filename);
     free(filename);
     free(root);
 }

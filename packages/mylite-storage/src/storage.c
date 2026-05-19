@@ -312,6 +312,7 @@ struct mylite_storage_statement {
     int owns_recovery_journal;
     int owns_transaction_journal;
     int preserve_auto_increment_rollback;
+    int cache_file_on_close;
     mylite_storage_exact_index_cache_set exact_index_caches;
     mylite_storage_live_row_cache_set live_row_caches;
 };
@@ -336,6 +337,11 @@ typedef struct mylite_storage_read_checkpoint_cache {
     int has_current_catalog_page;
 } mylite_storage_read_checkpoint_cache;
 
+typedef struct mylite_storage_read_file_cache {
+    FILE *file;
+    char *filename;
+} mylite_storage_read_file_cache;
+
 typedef mylite_storage_result (*mylite_storage_row_page_callback)(
     void *ctx,
     const mylite_storage_row_page *row_page
@@ -347,6 +353,7 @@ static _Thread_local mylite_storage_statement *active_read_statement;
 static _Thread_local mylite_storage_statement *active_read_snapshot;
 static _Thread_local mylite_storage_transaction_journal_snapshot active_transaction_journal_snapshot;
 static _Thread_local mylite_storage_read_checkpoint_cache active_read_checkpoint_cache;
+static _Thread_local mylite_storage_read_file_cache active_read_file_cache;
 static _Thread_local mylite_storage_exact_index_cache_set durable_exact_index_caches;
 static _Thread_local mylite_storage_row_payload_cache_set durable_row_payload_caches;
 static _Thread_local mylite_storage_index_leaf_page_cache_set durable_index_leaf_page_caches;
@@ -488,6 +495,10 @@ static mylite_storage_read_checkpoint_cache *read_checkpoint_cache_for(const cha
 static void store_read_checkpoint_cache(const mylite_storage_statement *statement);
 static void clear_read_checkpoint_cache(void);
 static mylite_storage_result close_statement(mylite_storage_statement *statement);
+static int take_cached_read_file(const char *filename, FILE **out_file);
+static mylite_storage_result cache_read_file(const char *filename, FILE *file);
+static void clear_cached_read_file(const char *filename);
+static int cached_read_file_matches_path(FILE *file, const char *filename);
 static mylite_storage_result write_statement_current_header(mylite_storage_statement *statement);
 static void clear_statement_chain_catalog_root_caches(mylite_storage_statement *statement);
 static void clear_catalog_root_cache(mylite_storage_statement *statement);
@@ -1636,6 +1647,7 @@ mylite_storage_result mylite_storage_create_empty(const char *filename) {
     if (filename == NULL || filename[0] == '\0') {
         return MYLITE_STORAGE_MISUSE;
     }
+    clear_cached_read_file(filename);
 
     int exists = 0;
     mylite_storage_result result = path_exists(filename, &exists);
@@ -4973,12 +4985,18 @@ static mylite_storage_result initialize_read_statement(
         return result;
     }
 
-    errno = 0;
-    statement->file = fopen(filename, "r+b");
-    if (statement->file == NULL) {
-        return errno == ENOENT ? MYLITE_STORAGE_NOTFOUND : MYLITE_STORAGE_IOERR;
+    FILE *cached_file = NULL;
+    if (take_cached_read_file(filename, &cached_file)) {
+        statement->file = cached_file;
+    } else {
+        errno = 0;
+        statement->file = fopen(filename, "r+b");
+        if (statement->file == NULL) {
+            return errno == ENOENT ? MYLITE_STORAGE_NOTFOUND : MYLITE_STORAGE_IOERR;
+        }
     }
     statement->owns_file = 1;
+    statement->cache_file_on_close = 1;
 
     result = lock_file(statement->file, LOCK_SH);
     if (result != MYLITE_STORAGE_OK) {
@@ -6285,7 +6303,78 @@ static mylite_storage_result close_statement(mylite_storage_statement *statement
 
     FILE *file = statement->file;
     statement->file = NULL;
+    if (statement->cache_file_on_close) {
+        return cache_read_file(statement->filename, file);
+    }
     return fclose(file) == 0 ? MYLITE_STORAGE_OK : MYLITE_STORAGE_IOERR;
+}
+
+static int take_cached_read_file(const char *filename, FILE **out_file) {
+    *out_file = NULL;
+    if (active_read_file_cache.file == NULL || active_read_file_cache.filename == NULL ||
+        strcmp(active_read_file_cache.filename, filename) != 0) {
+        return 0;
+    }
+    if (!cached_read_file_matches_path(active_read_file_cache.file, filename)) {
+        clear_cached_read_file(filename);
+        return 0;
+    }
+
+    *out_file = active_read_file_cache.file;
+    active_read_file_cache.file = NULL;
+    clearerr(*out_file);
+    return 1;
+}
+
+static mylite_storage_result cache_read_file(const char *filename, FILE *file) {
+    if (file == NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+    if (flock(fileno(file), LOCK_UN) != 0) {
+        fclose(file);
+        return MYLITE_STORAGE_IOERR;
+    }
+    clearerr(file);
+
+    if (active_read_file_cache.filename == NULL ||
+        strcmp(active_read_file_cache.filename, filename) != 0) {
+        char *filename_copy = copy_filename(filename);
+        if (filename_copy == NULL) {
+            return fclose(file) == 0 ? MYLITE_STORAGE_OK : MYLITE_STORAGE_IOERR;
+        }
+        clear_cached_read_file(NULL);
+        active_read_file_cache.filename = filename_copy;
+    } else if (active_read_file_cache.file != NULL && active_read_file_cache.file != file) {
+        fclose(active_read_file_cache.file);
+        active_read_file_cache.file = NULL;
+    }
+
+    active_read_file_cache.file = file;
+    return MYLITE_STORAGE_OK;
+}
+
+static void clear_cached_read_file(const char *filename) {
+    if (filename != NULL && (active_read_file_cache.filename == NULL ||
+                             strcmp(active_read_file_cache.filename, filename) != 0)) {
+        return;
+    }
+
+    FILE *file = active_read_file_cache.file;
+    active_read_file_cache.file = NULL;
+    free(active_read_file_cache.filename);
+    active_read_file_cache.filename = NULL;
+    if (file != NULL) {
+        fclose(file);
+    }
+}
+
+static int cached_read_file_matches_path(FILE *file, const char *filename) {
+    struct stat path_stat;
+    struct stat file_stat;
+    if (stat(filename, &path_stat) != 0 || fstat(fileno(file), &file_stat) != 0) {
+        return 0;
+    }
+    return path_stat.st_dev == file_stat.st_dev && path_stat.st_ino == file_stat.st_ino;
 }
 
 static mylite_storage_result write_statement_current_header(mylite_storage_statement *statement) {
@@ -12151,6 +12240,7 @@ static void free_index_leaf_page_cache(mylite_storage_index_leaf_page_cache *cac
 }
 
 static void clear_durable_exact_index_caches(const char *filename) {
+    clear_cached_read_file(filename);
     clear_durable_row_payload_caches(filename);
     clear_durable_index_leaf_page_caches(filename);
 
