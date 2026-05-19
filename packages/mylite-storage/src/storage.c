@@ -5977,6 +5977,22 @@ static char *copy_filename(const char *filename) {
 }
 
 static mylite_storage_result read_header(FILE *file, mylite_storage_header *out_header) {
+    if (active_read_snapshot_has_file(file)) {
+        *out_header = active_read_snapshot->header;
+        return MYLITE_STORAGE_OK;
+    }
+
+    if (active_transaction_journal_snapshot_has_file(file)) {
+        *out_header = active_transaction_journal_snapshot.header;
+        return MYLITE_STORAGE_OK;
+    }
+
+    mylite_storage_statement *statement = active_statement_for_file(file);
+    if (statement != NULL && statement->has_current_header) {
+        *out_header = statement->current_header;
+        return MYLITE_STORAGE_OK;
+    }
+
     unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     mylite_storage_result result = read_page_at(
         file,

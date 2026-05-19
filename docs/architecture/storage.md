@@ -57,7 +57,9 @@ storage layer keeps their mutable header state in memory and publishes page `0`
 only at checkpoint commit, rollback, or savepoint propagation boundaries.
 Ordinary active statements reuse one recovery journal for the checkpoint, while
 active durable transactions use their transaction journal instead of creating a
-normal recovery journal per row append.
+normal recovery journal per row append. Header reads inside active checkpoints
+and transaction/read snapshots return the already-decoded in-memory header
+instead of re-encoding and re-validating page `0`.
 
 The initial handler is opt-in. It is disabled in the default embedded baseline
 and covered by a separate storage smoke build. That build verifies the

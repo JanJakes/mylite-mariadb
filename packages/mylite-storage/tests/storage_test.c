@@ -2661,12 +2661,16 @@ static void test_statement_checkpoints(void) {
 
 static void assert_statement_checkpoint_rolls_back_row(statement_checkpoint_test_context *ctx) {
     mylite_storage_statement *statement = NULL;
+    mylite_storage_header checkpoint_header = {0};
+    mylite_storage_header active_header = {0};
+    mylite_storage_header rollback_header = {0};
     unsigned long long row_count = 0ULL;
     mylite_storage_index_entryset entries = {
         .size = sizeof(entries),
     };
     const long long checkpoint_file_size = file_size(ctx->filename);
 
+    assert(mylite_storage_open_header(ctx->filename, &checkpoint_header) == MYLITE_STORAGE_OK);
     assert(!mylite_storage_statement_active(ctx->filename));
     assert(mylite_storage_begin_statement(ctx->filename, &statement) == MYLITE_STORAGE_OK);
     assert(statement != NULL);
@@ -2684,6 +2688,8 @@ static void assert_statement_checkpoint_rolls_back_row(statement_checkpoint_test
         ) == MYLITE_STORAGE_OK
     );
     assert(access(ctx->journal_filename, F_OK) == 0);
+    assert(mylite_storage_open_header(ctx->filename, &active_header) == MYLITE_STORAGE_OK);
+    assert(active_header.page_count > checkpoint_header.page_count);
     assert(
         mylite_storage_count_rows(ctx->filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK
     );
@@ -2693,6 +2699,8 @@ static void assert_statement_checkpoint_rolls_back_row(statement_checkpoint_test
     assert(!mylite_storage_statement_active(ctx->filename));
     assert(file_size(ctx->filename) == checkpoint_file_size);
     assert_file_size_matches_header(ctx->filename);
+    assert(mylite_storage_open_header(ctx->filename, &rollback_header) == MYLITE_STORAGE_OK);
+    assert(rollback_header.page_count == checkpoint_header.page_count);
 
     assert(
         mylite_storage_count_rows(ctx->filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK

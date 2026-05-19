@@ -62,7 +62,9 @@ write amortization now reuses one statement recovery journal, defers header
 publication to checkpoint boundaries, and caches guarded exact duplicate-key
 probes on the outer active checkpoint across nested libmylite statement
 checkpoints. This materially improves explicit fixed-width index publication
-and routed indexed insert throughput. Handler index cursors now materialize
+and routed indexed insert throughput. Active checkpoint and snapshot header
+reads now reuse the decoded in-memory header instead of re-encoding and
+re-checksumming page `0`. Handler index cursors now materialize
 storage-filtered row ids without repeating per-row row-state visibility scans,
 improving exact secondary reads that return many rows. Durable handler row
 statistics now use cheap primary-file size estimates for optimizer planning
