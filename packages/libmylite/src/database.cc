@@ -488,6 +488,25 @@ bool is_unsigned_column(unsigned int flags);
 mylite_warning_level map_warning_level(const char *level);
 std::string field_string(const char *value, unsigned int length);
 const char *unsupported_sql_surface_message(std::string_view sql);
+struct UnsupportedSqlTokenScan {
+    bool file_import_function = false;
+    bool file_export_marker = false;
+    bool server_utility_function = false;
+    bool gis_sql_function = false;
+    bool vector_sql_function = false;
+    bool sformat_sql_function = false;
+    bool json_schema_valid_function = false;
+    bool json_table_function = false;
+    bool dynamic_column_function = false;
+    bool sequence_value_surface = false;
+    bool user_statistics_information_schema_table = false;
+    bool statement_profiling_information_schema_table = false;
+    bool optimizer_trace_information_schema_table = false;
+    bool xml_sql_function = false;
+    bool select_locking_marker = false;
+    bool named_lock_function = false;
+};
+UnsupportedSqlTokenScan scan_unsupported_sql_tokens(std::string_view sql);
 TransactionControlKind direct_transaction_control_kind(
     std::string_view sql,
     bool ansi_quotes,
@@ -523,25 +542,15 @@ bool is_backup_sql(std::string_view sql);
 bool is_replication_filter_sql(std::string_view sql);
 bool is_binlog_replication_variable_sql(std::string_view sql);
 bool is_query_cache_sql(std::string_view sql);
-bool is_statement_profiling_sql(std::string_view sql);
-bool is_optimizer_trace_sql(std::string_view sql);
+bool is_statement_profiling_command_sql(std::string_view sql);
+bool is_optimizer_trace_command_sql(std::string_view sql);
 bool is_table_maintenance_sql(std::string_view sql);
 bool is_sql_handler_command_sql(std::string_view sql);
 bool is_help_command_sql(std::string_view sql);
 bool is_static_show_info_sql(std::string_view sql);
 bool is_processlist_metadata_sql(std::string_view sql);
-bool is_file_import_sql(std::string_view sql);
-bool is_file_export_sql(std::string_view sql);
-bool is_server_utility_function_sql(std::string_view sql);
-bool is_gis_sql_function_sql(std::string_view sql);
-bool is_vector_sql_function_sql(std::string_view sql);
-bool is_sformat_sql_function_sql(std::string_view sql);
-bool is_json_schema_valid_sql(std::string_view sql);
-bool is_json_table_sql(std::string_view sql);
-bool is_dynamic_column_sql(std::string_view sql);
-bool is_sequence_sql(std::string_view sql);
-bool is_user_statistics_sql(std::string_view sql);
-bool is_xml_sql_function_sql(std::string_view sql);
+bool is_file_import_command_sql(std::string_view sql);
+bool is_user_statistics_command_sql(std::string_view sql);
 bool is_oracle_sql_mode_sql(std::string_view sql);
 bool sql_set_assignment_has_oracle_sql_mode(std::string_view assignment);
 std::string_view sql_set_assignment_policy_span(std::string_view sql);
@@ -556,7 +565,7 @@ bool sql_set_assignment_targets_variable(std::string_view &assignment, const cha
 bool is_non_table_object_sql(std::string_view sql);
 bool is_procedure_analyse_sql(std::string_view sql);
 bool is_select_procedure_sql(std::string_view sql);
-bool is_locking_sql(std::string_view sql);
+bool is_locking_command_sql(std::string_view sql);
 bool is_online_alter_sql(std::string_view sql);
 const char *unsupported_engine_request_message(std::string_view sql);
 bool is_partition_sql(std::string_view sql);
@@ -623,26 +632,10 @@ bool sql_token_is_autocommit_off(std::string_view token);
 bool sql_token_is_autocommit_on(std::string_view token);
 bool sql_has_statement_tail_after_semicolon(std::string_view sql);
 bool sql_rest_is_statement_end(std::string_view sql);
-bool sql_tokens_contain_file_import_function(std::string_view sql);
-bool sql_tokens_contain_file_export_marker(std::string_view sql);
-bool sql_tokens_contain_server_utility_function(std::string_view sql);
-bool sql_tokens_contain_gis_sql_function(std::string_view sql);
-bool sql_tokens_contain_vector_sql_function(std::string_view sql);
-bool sql_tokens_contain_sformat_sql_function(std::string_view sql);
-bool sql_tokens_contain_json_schema_valid_function(std::string_view sql);
-bool sql_tokens_contain_json_table_function(std::string_view sql);
-bool sql_tokens_contain_dynamic_column_function(std::string_view sql);
 bool sql_token_is_dynamic_column_function(std::string_view token);
-bool sql_tokens_contain_sequence_value_surface(std::string_view sql);
-bool sql_tokens_contain_user_statistics_information_schema_table(std::string_view sql);
-bool sql_tokens_contain_statement_profiling_information_schema_table(std::string_view sql);
-bool sql_tokens_contain_optimizer_trace_information_schema_table(std::string_view sql);
 bool sql_token_is_user_statistics_table(std::string_view token);
 bool pop_sql_identifier_token(std::string_view &sql, std::string_view &out_token);
 bool consume_sql_reference_dot(std::string_view &sql);
-bool sql_tokens_contain_xml_sql_function(std::string_view sql);
-bool sql_tokens_contain_locking_marker(std::string_view sql);
-bool sql_tokens_contain_named_lock_function(std::string_view sql);
 bool sql_token_is_gis_sql_function(std::string_view token);
 bool sql_token_is_vector_sql_function(std::string_view token);
 bool sql_span_contains_token(std::string_view sql, const char *keyword);
@@ -3155,10 +3148,13 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_query_cache_sql(sql)) {
         return "unsupported query-cache SQL surface";
     }
-    if (is_statement_profiling_sql(sql)) {
+    const UnsupportedSqlTokenScan token_scan = scan_unsupported_sql_tokens(sql);
+    if (is_statement_profiling_command_sql(sql) ||
+        token_scan.statement_profiling_information_schema_table) {
         return "unsupported statement-profiling SQL surface";
     }
-    if (is_optimizer_trace_sql(sql)) {
+    if (is_optimizer_trace_command_sql(sql) ||
+        token_scan.optimizer_trace_information_schema_table) {
         return "unsupported optimizer-trace SQL surface";
     }
     if (is_table_maintenance_sql(sql)) {
@@ -3176,40 +3172,41 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_processlist_metadata_sql(sql)) {
         return "unsupported process-list metadata SQL surface";
     }
-    if (is_file_import_sql(sql)) {
+    if (is_file_import_command_sql(sql) || token_scan.file_import_function) {
         return "unsupported SQL file import surface";
     }
-    if (is_file_export_sql(sql)) {
+    if (token_scan.file_export_marker) {
         return "unsupported SQL file export surface";
     }
-    if (is_server_utility_function_sql(sql)) {
+    if (token_scan.server_utility_function) {
         return "unsupported server utility SQL function";
     }
-    if (is_gis_sql_function_sql(sql)) {
+    if (token_scan.gis_sql_function) {
         return "unsupported GIS SQL function";
     }
-    if (is_vector_sql_function_sql(sql)) {
+    if (token_scan.vector_sql_function) {
         return "unsupported vector SQL function";
     }
-    if (is_sformat_sql_function_sql(sql)) {
+    if (token_scan.sformat_sql_function) {
         return "unsupported SFORMAT SQL function";
     }
-    if (is_json_schema_valid_sql(sql)) {
+    if (token_scan.json_schema_valid_function) {
         return "unsupported JSON_SCHEMA_VALID SQL function";
     }
-    if (is_json_table_sql(sql)) {
+    if (token_scan.json_table_function) {
         return "unsupported JSON_TABLE table function";
     }
-    if (is_dynamic_column_sql(sql)) {
+    if (token_scan.dynamic_column_function) {
         return "unsupported dynamic column SQL function";
     }
-    if (is_sequence_sql(sql)) {
+    if (token_scan.sequence_value_surface) {
         return "unsupported SQL sequence surface";
     }
-    if (is_user_statistics_sql(sql)) {
+    if (is_user_statistics_command_sql(sql) ||
+        token_scan.user_statistics_information_schema_table) {
         return "unsupported user-statistics SQL surface";
     }
-    if (is_xml_sql_function_sql(sql)) {
+    if (token_scan.xml_sql_function) {
         return "unsupported XML SQL function";
     }
     if (is_oracle_sql_mode_sql(sql)) {
@@ -3224,7 +3221,8 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
     if (is_select_procedure_sql(sql)) {
         return "unsupported SELECT PROCEDURE SQL clause";
     }
-    if (is_locking_sql(sql)) {
+    if (is_locking_command_sql(sql) || token_scan.select_locking_marker ||
+        token_scan.named_lock_function) {
         return "unsupported SQL locking surface";
     }
     if (is_online_alter_sql(sql)) {
@@ -3240,6 +3238,120 @@ const char *unsupported_sql_surface_message(std::string_view sql) {
         return foreign_key_message;
     }
     return nullptr;
+}
+
+UnsupportedSqlTokenScan scan_unsupported_sql_tokens(std::string_view sql) {
+    UnsupportedSqlTokenScan result;
+    std::string_view leading = skip_sql_leading_noise(sql);
+    const std::string_view first = pop_sql_token(leading);
+    const bool scan_file_export_marker = !sql_token_equals(first, "EXPLAIN");
+    const bool scan_select_locking_marker = sql_token_equals(first, "SELECT");
+
+    std::string_view scan = sql;
+    std::string_view token;
+    while (pop_sql_scanned_token(scan, token)) {
+        if (scan_file_export_marker && sql_token_equals(token, "INTO") &&
+            (sql_starts_with_token(scan, "OUTFILE") ||
+             sql_starts_with_token(scan, "DUMPFILE"))) {
+            result.file_export_marker = true;
+        }
+
+        if (sql_token_equals(token, "NEXT") || sql_token_equals(token, "PREVIOUS")) {
+            std::string_view after_direction = scan;
+            std::string_view value_token;
+            std::string_view for_token;
+            if (pop_sql_scanned_token(after_direction, value_token) &&
+                sql_token_equals(value_token, "VALUE") &&
+                pop_sql_scanned_token(after_direction, for_token) &&
+                sql_token_equals(for_token, "FOR")) {
+                result.sequence_value_surface = true;
+            }
+        }
+
+        if (scan_select_locking_marker && sql_token_equals(token, "FOR")) {
+            std::string_view after_for = scan;
+            std::string_view next;
+            if (pop_sql_scanned_token(after_for, next) && sql_token_equals(next, "UPDATE")) {
+                result.select_locking_marker = true;
+            }
+        }
+
+        if (scan_select_locking_marker && sql_token_equals(token, "LOCK")) {
+            std::string_view after_lock = scan;
+            std::string_view next;
+            if (pop_sql_scanned_token(after_lock, next) && sql_token_equals(next, "IN") &&
+                pop_sql_scanned_token(after_lock, next) && sql_token_equals(next, "SHARE") &&
+                pop_sql_scanned_token(after_lock, next) && sql_token_equals(next, "MODE")) {
+                result.select_locking_marker = true;
+            }
+        }
+
+        if (!sql_next_non_noise_is(scan, '(')) {
+            continue;
+        }
+
+        if (sql_token_equals(token, "LOAD_FILE")) {
+            result.file_import_function = true;
+        } else if (sql_token_equals(token, "BENCHMARK") || sql_token_equals(token, "SLEEP") ||
+                   sql_token_equals(token, "UUID_SHORT") ||
+                   sql_token_equals(token, "MASTER_POS_WAIT") ||
+                   sql_token_equals(token, "MASTER_GTID_WAIT")) {
+            result.server_utility_function = true;
+        } else if (sql_token_is_gis_sql_function(token)) {
+            result.gis_sql_function = true;
+        } else if (sql_token_is_vector_sql_function(token)) {
+            result.vector_sql_function = true;
+        } else if (sql_token_equals(token, "SFORMAT")) {
+            result.sformat_sql_function = true;
+        } else if (sql_token_equals(token, "JSON_SCHEMA_VALID")) {
+            result.json_schema_valid_function = true;
+        } else if (sql_token_equals(token, "JSON_TABLE")) {
+            result.json_table_function = true;
+        } else if (sql_token_is_dynamic_column_function(token)) {
+            result.dynamic_column_function = true;
+        } else if (sql_token_equals(token, "NEXTVAL") || sql_token_equals(token, "LASTVAL") ||
+                   sql_token_equals(token, "SETVAL")) {
+            result.sequence_value_surface = true;
+        } else if (sql_token_equals(token, "EXTRACTVALUE") ||
+                   sql_token_equals(token, "UPDATEXML")) {
+            result.xml_sql_function = true;
+        } else if (sql_token_equals(token, "GET_LOCK") ||
+                   sql_token_equals(token, "RELEASE_LOCK") ||
+                   sql_token_equals(token, "RELEASE_ALL_LOCKS") ||
+                   sql_token_equals(token, "IS_FREE_LOCK") ||
+                   sql_token_equals(token, "IS_USED_LOCK")) {
+            result.named_lock_function = true;
+        }
+    }
+
+    std::string_view identifiers = sql;
+    while (!identifiers.empty()) {
+        if (!pop_sql_identifier_token(identifiers, token)) {
+            if (!identifiers.empty()) {
+                identifiers.remove_prefix(1);
+            }
+            continue;
+        }
+
+        if (!sql_token_equals(token, "INFORMATION_SCHEMA")) {
+            continue;
+        }
+
+        std::string_view after_schema = identifiers;
+        std::string_view table_token;
+        if (!consume_sql_reference_dot(after_schema) ||
+            !pop_sql_identifier_token(after_schema, table_token)) {
+            continue;
+        }
+        if (sql_token_equals(table_token, "PROFILING")) {
+            result.statement_profiling_information_schema_table = true;
+        } else if (sql_token_equals(table_token, "OPTIMIZER_TRACE")) {
+            result.optimizer_trace_information_schema_table = true;
+        } else if (sql_token_is_user_statistics_table(table_token)) {
+            result.user_statistics_information_schema_table = true;
+        }
+    }
+    return result;
 }
 
 bool is_server_surface_sql(std::string_view sql) {
@@ -3379,7 +3491,7 @@ bool is_query_cache_sql(std::string_view sql) {
     return false;
 }
 
-bool is_statement_profiling_sql(std::string_view sql) {
+bool is_statement_profiling_command_sql(std::string_view sql) {
     std::string_view rest = sql;
     std::string_view token;
     if (!pop_sql_scanned_token(rest, token)) {
@@ -3402,10 +3514,10 @@ bool is_statement_profiling_sql(std::string_view sql) {
         }
     }
 
-    return sql_tokens_contain_statement_profiling_information_schema_table(sql);
+    return false;
 }
 
-bool is_optimizer_trace_sql(std::string_view sql) {
+bool is_optimizer_trace_command_sql(std::string_view sql) {
     std::string_view rest = sql;
     std::string_view token;
     if (!pop_sql_scanned_token(rest, token)) {
@@ -3421,7 +3533,7 @@ bool is_optimizer_trace_sql(std::string_view sql) {
         }
     }
 
-    return sql_tokens_contain_optimizer_trace_information_schema_table(sql);
+    return false;
 }
 
 bool is_table_maintenance_sql(std::string_view sql) {
@@ -3490,7 +3602,7 @@ bool is_processlist_metadata_sql(std::string_view sql) {
            sql_token_equals(third, "PROCESSLIST");
 }
 
-bool is_file_import_sql(std::string_view sql) {
+bool is_file_import_command_sql(std::string_view sql) {
     std::string_view rest = sql;
     std::string_view first;
     std::string_view second;
@@ -3501,53 +3613,10 @@ bool is_file_import_sql(std::string_view sql) {
         return true;
     }
 
-    return sql_tokens_contain_file_import_function(sql);
+    return false;
 }
 
-bool is_file_export_sql(std::string_view sql) {
-    std::string_view rest = skip_sql_leading_noise(sql);
-    const std::string_view first = pop_sql_token(rest);
-
-    if (sql_token_equals(first, "EXPLAIN")) {
-        return false;
-    }
-
-    return sql_tokens_contain_file_export_marker(rest);
-}
-
-bool is_server_utility_function_sql(std::string_view sql) {
-    return sql_tokens_contain_server_utility_function(sql);
-}
-
-bool is_gis_sql_function_sql(std::string_view sql) {
-    return sql_tokens_contain_gis_sql_function(sql);
-}
-
-bool is_vector_sql_function_sql(std::string_view sql) {
-    return sql_tokens_contain_vector_sql_function(sql);
-}
-
-bool is_sformat_sql_function_sql(std::string_view sql) {
-    return sql_tokens_contain_sformat_sql_function(sql);
-}
-
-bool is_json_schema_valid_sql(std::string_view sql) {
-    return sql_tokens_contain_json_schema_valid_function(sql);
-}
-
-bool is_json_table_sql(std::string_view sql) {
-    return sql_tokens_contain_json_table_function(sql);
-}
-
-bool is_dynamic_column_sql(std::string_view sql) {
-    return sql_tokens_contain_dynamic_column_function(sql);
-}
-
-bool is_sequence_sql(std::string_view sql) {
-    return sql_tokens_contain_sequence_value_surface(sql);
-}
-
-bool is_user_statistics_sql(std::string_view sql) {
+bool is_user_statistics_command_sql(std::string_view sql) {
     std::string_view rest = sql;
     std::string_view token;
     if (!pop_sql_scanned_token(rest, token)) {
@@ -3577,11 +3646,7 @@ bool is_user_statistics_sql(std::string_view sql) {
         return false;
     }
 
-    return sql_tokens_contain_user_statistics_information_schema_table(sql);
-}
-
-bool is_xml_sql_function_sql(std::string_view sql) {
-    return sql_tokens_contain_xml_sql_function(sql);
+    return false;
 }
 
 bool is_oracle_sql_mode_sql(std::string_view sql) {
@@ -5335,127 +5400,6 @@ bool sql_rest_is_statement_end(std::string_view sql) {
     return skip_sql_leading_noise(sql).empty();
 }
 
-bool sql_tokens_contain_file_import_function(std::string_view sql) {
-    std::string_view token;
-    while (pop_sql_scanned_token(sql, token)) {
-        if (sql_token_equals(token, "LOAD_FILE") && sql_next_non_noise_is(sql, '(')) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool sql_tokens_contain_file_export_marker(std::string_view sql) {
-    std::string_view token;
-    while (pop_sql_scanned_token(sql, token)) {
-        if (sql_token_equals(token, "INTO") &&
-            (sql_starts_with_token(sql, "OUTFILE") || sql_starts_with_token(sql, "DUMPFILE"))) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool sql_tokens_contain_server_utility_function(std::string_view sql) {
-    std::string_view token;
-    while (pop_sql_scanned_token(sql, token)) {
-        if (!sql_next_non_noise_is(sql, '(')) {
-            continue;
-        }
-
-        if (sql_token_equals(token, "BENCHMARK") || sql_token_equals(token, "SLEEP") ||
-            sql_token_equals(token, "UUID_SHORT") || sql_token_equals(token, "MASTER_POS_WAIT") ||
-            sql_token_equals(token, "MASTER_GTID_WAIT")) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool sql_tokens_contain_gis_sql_function(std::string_view sql) {
-    std::string_view token;
-    while (pop_sql_scanned_token(sql, token)) {
-        if (!sql_next_non_noise_is(sql, '(')) {
-            continue;
-        }
-
-        if (sql_token_is_gis_sql_function(token)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool sql_tokens_contain_vector_sql_function(std::string_view sql) {
-    std::string_view token;
-    while (pop_sql_scanned_token(sql, token)) {
-        if (!sql_next_non_noise_is(sql, '(')) {
-            continue;
-        }
-
-        if (sql_token_is_vector_sql_function(token)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool sql_tokens_contain_sformat_sql_function(std::string_view sql) {
-    std::string_view token;
-    while (pop_sql_scanned_token(sql, token)) {
-        if (!sql_next_non_noise_is(sql, '(')) {
-            continue;
-        }
-
-        if (sql_token_equals(token, "SFORMAT")) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool sql_tokens_contain_json_schema_valid_function(std::string_view sql) {
-    std::string_view token;
-    while (pop_sql_scanned_token(sql, token)) {
-        if (!sql_next_non_noise_is(sql, '(')) {
-            continue;
-        }
-
-        if (sql_token_equals(token, "JSON_SCHEMA_VALID")) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool sql_tokens_contain_json_table_function(std::string_view sql) {
-    std::string_view token;
-    while (pop_sql_scanned_token(sql, token)) {
-        if (!sql_next_non_noise_is(sql, '(')) {
-            continue;
-        }
-
-        if (sql_token_equals(token, "JSON_TABLE")) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool sql_tokens_contain_dynamic_column_function(std::string_view sql) {
-    std::string_view token;
-    while (pop_sql_scanned_token(sql, token)) {
-        if (!sql_next_non_noise_is(sql, '(')) {
-            continue;
-        }
-
-        if (sql_token_is_dynamic_column_function(token)) {
-            return true;
-        }
-    }
-    return false;
-}
-
 bool sql_token_is_dynamic_column_function(std::string_view token) {
     return sql_token_equals(token, "COLUMN_ADD") || sql_token_equals(token, "COLUMN_CHECK") ||
            sql_token_equals(token, "COLUMN_CREATE") || sql_token_equals(token, "COLUMN_DELETE") ||
@@ -5463,115 +5407,11 @@ bool sql_token_is_dynamic_column_function(std::string_view token) {
            sql_token_equals(token, "COLUMN_JSON") || sql_token_equals(token, "COLUMN_LIST");
 }
 
-bool sql_tokens_contain_sequence_value_surface(std::string_view sql) {
-    std::string_view token;
-    while (pop_sql_scanned_token(sql, token)) {
-        if (sql_token_equals(token, "NEXT") || sql_token_equals(token, "PREVIOUS")) {
-            std::string_view after_direction = sql;
-            std::string_view value_token;
-            std::string_view for_token;
-            if (pop_sql_scanned_token(after_direction, value_token) &&
-                sql_token_equals(value_token, "VALUE") &&
-                pop_sql_scanned_token(after_direction, for_token) &&
-                sql_token_equals(for_token, "FOR")) {
-                return true;
-            }
-        }
-
-        if (!sql_next_non_noise_is(sql, '(')) {
-            continue;
-        }
-
-        if (sql_token_equals(token, "NEXTVAL") || sql_token_equals(token, "LASTVAL") ||
-            sql_token_equals(token, "SETVAL")) {
-            return true;
-        }
-    }
-    return false;
-}
-
 bool sql_token_is_user_statistics_table(std::string_view token) {
     return sql_token_equals(token, "CLIENT_STATISTICS") ||
            sql_token_equals(token, "INDEX_STATISTICS") ||
            sql_token_equals(token, "TABLE_STATISTICS") ||
            sql_token_equals(token, "USER_STATISTICS");
-}
-
-bool sql_tokens_contain_user_statistics_information_schema_table(std::string_view sql) {
-    std::string_view token;
-    while (!sql.empty()) {
-        if (!pop_sql_identifier_token(sql, token)) {
-            if (!sql.empty()) {
-                sql.remove_prefix(1);
-            }
-            continue;
-        }
-
-        if (!sql_token_equals(token, "INFORMATION_SCHEMA")) {
-            continue;
-        }
-
-        std::string_view after_schema = sql;
-        if (!consume_sql_reference_dot(after_schema)) {
-            continue;
-        }
-        if (pop_sql_identifier_token(after_schema, token) &&
-            sql_token_is_user_statistics_table(token)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool sql_tokens_contain_statement_profiling_information_schema_table(std::string_view sql) {
-    std::string_view token;
-    while (!sql.empty()) {
-        if (!pop_sql_identifier_token(sql, token)) {
-            if (!sql.empty()) {
-                sql.remove_prefix(1);
-            }
-            continue;
-        }
-
-        if (!sql_token_equals(token, "INFORMATION_SCHEMA")) {
-            continue;
-        }
-
-        std::string_view after_schema = sql;
-        if (!consume_sql_reference_dot(after_schema)) {
-            continue;
-        }
-        if (pop_sql_identifier_token(after_schema, token) && sql_token_equals(token, "PROFILING")) {
-            return true;
-        }
-    }
-    return false;
-}
-
-bool sql_tokens_contain_optimizer_trace_information_schema_table(std::string_view sql) {
-    std::string_view token;
-    while (!sql.empty()) {
-        if (!pop_sql_identifier_token(sql, token)) {
-            if (!sql.empty()) {
-                sql.remove_prefix(1);
-            }
-            continue;
-        }
-
-        if (!sql_token_equals(token, "INFORMATION_SCHEMA")) {
-            continue;
-        }
-
-        std::string_view after_schema = sql;
-        if (!consume_sql_reference_dot(after_schema)) {
-            continue;
-        }
-        if (pop_sql_identifier_token(after_schema, token) &&
-            sql_token_equals(token, "OPTIMIZER_TRACE")) {
-            return true;
-        }
-    }
-    return false;
 }
 
 bool pop_sql_identifier_token(std::string_view &sql, std::string_view &out_token) {
@@ -5627,20 +5467,6 @@ bool consume_sql_reference_dot(std::string_view &sql) {
     }
     sql.remove_prefix(1);
     return true;
-}
-
-bool sql_tokens_contain_xml_sql_function(std::string_view sql) {
-    std::string_view token;
-    while (pop_sql_scanned_token(sql, token)) {
-        if (!sql_next_non_noise_is(sql, '(')) {
-            continue;
-        }
-
-        if (sql_token_equals(token, "EXTRACTVALUE") || sql_token_equals(token, "UPDATEXML")) {
-            return true;
-        }
-    }
-    return false;
 }
 
 bool sql_token_is_gis_sql_function(std::string_view token) {
@@ -5824,61 +5650,13 @@ bool sql_token_is_vector_sql_function(std::string_view token) {
            sql_token_equals(token, "VEC_FROMTEXT") || sql_token_equals(token, "VEC_TOTEXT");
 }
 
-bool is_locking_sql(std::string_view sql) {
+bool is_locking_command_sql(std::string_view sql) {
     std::string_view rest = skip_sql_leading_noise(sql);
     const std::string_view first = pop_sql_token(rest);
 
     if (sql_token_equals(first, "LOCK") || sql_token_equals(first, "UNLOCK")) {
         const std::string_view second = pop_sql_token(rest);
         return sql_token_equals(second, "TABLE") || sql_token_equals(second, "TABLES");
-    }
-    if (sql_tokens_contain_named_lock_function(sql)) {
-        return true;
-    }
-
-    return sql_token_equals(first, "SELECT") && sql_tokens_contain_locking_marker(rest);
-}
-
-bool sql_tokens_contain_locking_marker(std::string_view sql) {
-    std::string_view token;
-    while (pop_sql_scanned_token(sql, token)) {
-        if (sql_token_equals(token, "FOR")) {
-            std::string_view after_for = sql;
-            std::string_view next;
-            if (pop_sql_scanned_token(after_for, next) && sql_token_equals(next, "UPDATE")) {
-                return true;
-            }
-        }
-
-        if (sql_token_equals(token, "LOCK")) {
-            std::string_view after_lock = sql;
-            std::string_view next;
-            if (!pop_sql_scanned_token(after_lock, next) || !sql_token_equals(next, "IN")) {
-                continue;
-            }
-            if (!pop_sql_scanned_token(after_lock, next) || !sql_token_equals(next, "SHARE")) {
-                continue;
-            }
-            if (pop_sql_scanned_token(after_lock, next) && sql_token_equals(next, "MODE")) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-bool sql_tokens_contain_named_lock_function(std::string_view sql) {
-    std::string_view token;
-    while (pop_sql_scanned_token(sql, token)) {
-        if (!sql_next_non_noise_is(sql, '(')) {
-            continue;
-        }
-
-        if (sql_token_equals(token, "GET_LOCK") || sql_token_equals(token, "RELEASE_LOCK") ||
-            sql_token_equals(token, "RELEASE_ALL_LOCKS") ||
-            sql_token_equals(token, "IS_FREE_LOCK") || sql_token_equals(token, "IS_USED_LOCK")) {
-            return true;
-        }
     }
     return false;
 }

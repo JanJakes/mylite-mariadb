@@ -85,6 +85,10 @@ prepared statement table-open validation before cursor execution.
 File-backed `libmylite` sessions now default `use_stat_tables=NEVER`, avoiding
 repeated MariaDB persistent `mysql.*_stats` table discovery for ordinary query
 planning until MyLite has file-owned statistics.
+Direct and prepared SQL entry points now summarize token-wide unsupported
+surface checks through one shared dispatch helper while preserving the existing
+command-specific diagnostic priority, reducing repeated MyLite policy preflight
+work before MariaDB execution.
 Durable exact-index cache reads now bulk-grow matching entrysets in one pass,
 removing per-match array reallocations from many-match secondary cursors that do
 not use published leaf roots. Exact-index caches now add transient hash buckets
