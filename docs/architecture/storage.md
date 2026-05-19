@@ -216,6 +216,9 @@ the primary file. Update/delete appends checksummed row-state pages that hide
 deleted or superseded row page ids; replacement row payloads are appended as
 new row pages. Table scans validate those pages, filter hidden row ids, and
 reconstruct MariaDB row buffers before returning them to the SQL layer.
+Direct row-id reads validate the target row page first and scan only later
+row-state pages that could hide that row, avoiding full row-state map rebuilds
+for each selected index cursor row.
 Autoincrement tables append checksummed state pages keyed by catalog table id so
 generated values survive close/reopen and dropped table ids do not leak into
 recreated tables. Supported primary, unique, and secondary indexes append
@@ -630,7 +633,9 @@ unbounded BLOB/TEXT keys.
 Duplicate checks read live index entries, use MariaDB key comparison, and
 preserve nullable unique-key semantics. Durable index-entry scans use the
 index-entry table id and row-state tombstone map for visibility, then defer
-row-page validation until a selected row is materialized. Ordered index reads
+row-page validation until a selected row is materialized. Direct selected-row
+materialization validates the requested row page by id and scans only later
+row-state pages for a hiding state. Ordered index reads
 build in-memory cursors from live index entries, keep sorted key metadata plus
 row ids, use bound searches for key positioning, build filtered cursors for
 exact-key and prefix reads, stop after the first matching non-nullable full-key

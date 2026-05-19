@@ -927,6 +927,14 @@ static mylite_storage_result validate_live_row(
     unsigned char *page,
     mylite_storage_row_page *out_row_page
 );
+static mylite_storage_result row_is_hidden_after(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned long long row_id,
+    unsigned long long first_page_id,
+    int *out_hidden
+);
 static void encode_row_state_page(
     unsigned char *page,
     unsigned long long page_id,
@@ -3070,28 +3078,31 @@ mylite_storage_result mylite_storage_read_row(
 
     mylite_storage_header header = {0};
     unsigned long long table_id = 0ULL;
-    mylite_storage_row_state_map row_state_map = {0};
     mylite_storage_row_page row_page = {0};
     unsigned char row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    int row_hidden = 0;
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
         result = find_table_id(file, &header, schema_name, table_name, &table_id);
     }
-    if (result == MYLITE_STORAGE_OK) {
-        result = build_row_state_map(file, &header, table_id, &row_state_map);
+    if (result == MYLITE_STORAGE_OK &&
+        (row_id <= header.catalog_root_page || row_id >= header.page_count)) {
+        result = MYLITE_STORAGE_NOTFOUND;
     }
     if (result == MYLITE_STORAGE_OK) {
-        result = validate_live_row(
-            file,
-            &header,
-            &row_state_map,
-            (mylite_storage_live_row_request){
-                .table_id = table_id,
-                .row_id = row_id,
-            },
-            row_buffer,
-            &row_page
-        );
+        result = read_row_page(file, &header, row_id, row_buffer, &row_page);
+    }
+    if (result == MYLITE_STORAGE_OK && row_page.table_id != table_id) {
+        result = MYLITE_STORAGE_NOTFOUND;
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        const unsigned long long first_state_page_id =
+            row_id == ULLONG_MAX ? header.page_count : row_id + 1ULL;
+        result =
+            row_is_hidden_after(file, &header, table_id, row_id, first_state_page_id, &row_hidden);
+    }
+    if (result == MYLITE_STORAGE_OK && row_hidden) {
+        result = MYLITE_STORAGE_NOTFOUND;
     }
     if (result == MYLITE_STORAGE_OK) {
         unsigned char *row = (unsigned char *)malloc(row_page.row_size);
@@ -3105,7 +3116,6 @@ mylite_storage_result mylite_storage_read_row(
     }
 
     free(row_page.owned_payload);
-    free_row_state_map(&row_state_map);
     if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
@@ -9088,6 +9098,34 @@ static mylite_storage_result validate_live_row(
     }
 
     *out_row_page = row_page;
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result row_is_hidden_after(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned long long row_id,
+    unsigned long long first_page_id,
+    int *out_hidden
+) {
+    *out_hidden = 0;
+    for (unsigned long long page_id = first_page_id; page_id < header->page_count; ++page_id) {
+        unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        mylite_storage_row_state_page row_state_page = {0};
+        mylite_storage_result result =
+            read_row_state_page(file, header, page_id, page, &row_state_page);
+        if (result == MYLITE_STORAGE_NOTFOUND) {
+            continue;
+        }
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+        if (row_state_page.table_id == table_id && row_state_page.source_row_id == row_id) {
+            *out_hidden = 1;
+            return MYLITE_STORAGE_OK;
+        }
+    }
     return MYLITE_STORAGE_OK;
 }
 
