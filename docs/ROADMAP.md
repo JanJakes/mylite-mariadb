@@ -67,8 +67,11 @@ storage-filtered row ids without repeating per-row row-state visibility scans,
 improving exact secondary reads that return many rows. Durable handler row
 statistics now use cheap primary-file size estimates for optimizer planning
 instead of exact table row scans; SQL `COUNT(*)` and storage row-count APIs
-remain exact. SQLite-like row-write and point-read performance still requires
-the planned navigable index and pager work.
+remain exact. A small transient durable exact-index read cache now amortizes
+repeated primary-key and secondary exact lookups for append-only indexes without
+published roots while preserving active-checkpoint visibility rules. SQLite-like
+row-write and point-read performance still requires the planned navigable index
+and pager work.
 
 ## Size And Profile Direction
 

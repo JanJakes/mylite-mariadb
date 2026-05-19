@@ -255,6 +255,14 @@ exact row visibility paths when they need exact results. Volatile
 `MEMORY` / `HEAP` routed tables keep exact in-memory handler counts because
 those counts do not touch the primary file.
 
+Exact durable index reads also keep a small transient per-thread read cache for
+lookups outside active MyLite storage checkpoints. The cache is tied to the
+primary filename and observed header fingerprint, is cleared by durable writes
+and catalog publications, and is skipped while active statements or transaction
+snapshots are in scope. Published leaf roots remain the preferred path when
+available; the cache amortizes repeated exact lookups over append-only indexes
+that do not yet have maintained navigable pages.
+
 The catalog stores:
 
 - schemas,
