@@ -69,9 +69,11 @@ statistics now use cheap primary-file size estimates for optimizer planning
 instead of exact table row scans; SQL `COUNT(*)` and storage row-count APIs
 remain exact. A small transient durable exact-index read cache now amortizes
 repeated primary-key and secondary exact lookups for append-only indexes without
-published roots while preserving active-checkpoint visibility rules. SQLite-like
-row-write and point-read performance still requires the planned navigable index
-and pager work.
+published roots while preserving active-checkpoint visibility rules. Active
+checkpoint exact-index caches are now maintained across update/delete mutations,
+and update/delete validation uses direct row-id visibility checks instead of
+rebuilding full row-state maps. SQLite-like row-write and point-read performance
+still requires the planned navigable index and pager work.
 
 ## Size And Profile Direction
 

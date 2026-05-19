@@ -263,6 +263,13 @@ snapshots are in scope. Published leaf roots remain the preferred path when
 available; the cache amortizes repeated exact lookups over append-only indexes
 that do not yet have maintained navigable pages.
 
+Active storage checkpoints maintain their exact-index caches across row updates
+and deletes by removing hidden row ids and appending replacement row entries
+instead of reloading the whole index after every mutation. Update/delete row
+validation uses direct row-id visibility checks over later row-state pages, so
+single-row DML no longer rebuilds a full table row-state map just to prove the
+current row is live.
+
 The catalog stores:
 
 - schemas,
