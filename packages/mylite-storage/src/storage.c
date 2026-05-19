@@ -486,6 +486,7 @@ static mylite_storage_result read_page_at(
     unsigned page_size,
     unsigned char *out_page
 );
+static mylite_storage_result publish_header(FILE *file, const mylite_storage_header *header);
 static mylite_storage_result write_page_at(
     FILE *file,
     unsigned long long page_id,
@@ -3343,14 +3344,7 @@ mylite_storage_result mylite_storage_append_row_with_index_entries(
     }
     if (result == MYLITE_STORAGE_OK) {
         header.page_count = next_page_id;
-        unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-        encode_header_page(header_page, &header);
-        result = write_page_at(
-            file,
-            MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
-            header.page_size,
-            header_page
-        );
+        result = publish_header(file, &header);
         if (result == MYLITE_STORAGE_OK) {
             result = finish_write_journal(file, filename);
         }
@@ -3755,14 +3749,7 @@ mylite_storage_result mylite_storage_update_row_with_index_entries(
     }
     if (result == MYLITE_STORAGE_OK) {
         header.page_count = next_page_id;
-        unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-        encode_header_page(header_page, &header);
-        result = write_page_at(
-            file,
-            MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
-            header.page_size,
-            header_page
-        );
+        result = publish_header(file, &header);
         if (result == MYLITE_STORAGE_OK) {
             result = finish_write_journal(file, filename);
         }
@@ -3838,14 +3825,7 @@ mylite_storage_result mylite_storage_delete_row(
         result = write_page_at(file, state_page_id, header.page_size, state_page);
         if (result == MYLITE_STORAGE_OK) {
             ++header.page_count;
-            unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-            encode_header_page(header_page, &header);
-            result = write_page_at(
-                file,
-                MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
-                header.page_size,
-                header_page
-            );
+            result = publish_header(file, &header);
             if (result == MYLITE_STORAGE_OK) {
                 result = finish_write_journal(file, filename);
             }
@@ -6092,6 +6072,30 @@ static mylite_storage_result read_page_at(
     }
 
     return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result publish_header(FILE *file, const mylite_storage_header *header) {
+    mylite_storage_statement *statement = active_statement_for_file(file);
+    if (statement != NULL) {
+        if (!statement->has_current_header ||
+            header->catalog_root_page != statement->current_header.catalog_root_page ||
+            header->catalog_generation != statement->current_header.catalog_generation) {
+            clear_statement_chain_catalog_root_caches(statement);
+        }
+        statement->current_header = *header;
+        statement->has_current_header = 1;
+        statement->current_header_dirty = 1;
+        return MYLITE_STORAGE_OK;
+    }
+
+    unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    encode_header_page(header_page, header);
+    return write_page_at_raw(
+        file,
+        MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
+        header->page_size,
+        header_page
+    );
 }
 
 static mylite_storage_result write_page_at(
@@ -10601,14 +10605,7 @@ static mylite_storage_result publish_header_page_count(
     unsigned long long page_count
 ) {
     header->page_count = page_count;
-    unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    encode_header_page(header_page, header);
-    return write_page_at(
-        file,
-        MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
-        header->page_size,
-        header_page
-    );
+    return publish_header(file, header);
 }
 
 static mylite_storage_result append_row_to_rowset(

@@ -63,7 +63,10 @@ instead of re-encoding and re-validating page `0`. Active statements also
 cache validated catalog root pages by root page id and catalog generation so
 row-DML and duplicate-key probes do not repeatedly checksum unchanged catalog
 metadata; catalog root writes and catalog-generation header changes invalidate
-the active statement chain before later metadata reads.
+the active statement chain before later metadata reads. Row append, update,
+delete, truncate, and autoincrement publication paths publish decoded headers
+directly into the active checkpoint instead of encoding and immediately
+decoding page `0`.
 
 The initial handler is opt-in. It is disabled in the default embedded baseline
 and covered by a separate storage smoke build. That build verifies the
