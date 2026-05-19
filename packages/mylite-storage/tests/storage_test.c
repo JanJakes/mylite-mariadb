@@ -277,6 +277,21 @@ static void assert_indexed_row_equals(
     const unsigned char *expected_row,
     size_t expected_row_size
 );
+static void assert_find_indexed_row_equals(
+    const char *filename,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long expected_row_id,
+    const unsigned char *expected_row,
+    size_t expected_row_size
+);
+static void assert_find_indexed_row_not_found(
+    const char *filename,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size
+);
 static void assert_index_entry(
     const mylite_storage_index_entryset *index_entries,
     size_t entry_index,
@@ -1387,9 +1402,19 @@ static void test_index_entries(void) {
     assert_index_prefix_exists(filename, key_1, sizeof(key_1), 1);
     assert_index_prefix_exists(filename, key_9, sizeof(key_9), 0);
     assert_index_entry_lookup(filename, 0U, key_1, sizeof(key_1), MYLITE_STORAGE_OK, ctx.row_1_id);
+    assert_find_indexed_row_equals(
+        filename,
+        0U,
+        key_1,
+        sizeof(key_1),
+        ctx.row_1_id,
+        row_1,
+        sizeof(row_1)
+    );
     assert_indexed_row_equals(filename, ctx.row_1_id, row_1, sizeof(row_1));
     assert_index_entry_lookup(filename, 0U, key_2, sizeof(key_2), MYLITE_STORAGE_OK, ctx.row_2_id);
     assert_index_entry_lookup(filename, 0U, key_9, sizeof(key_9), MYLITE_STORAGE_NOTFOUND, 0ULL);
+    assert_find_indexed_row_not_found(filename, 0U, key_9, sizeof(key_9));
     assert_exact_index_entries(
         filename,
         1U,
@@ -1415,6 +1440,7 @@ static void test_index_entries(void) {
     assert_index_prefix_exists(filename, key_1, sizeof(key_1), 0);
     assert_index_prefix_exists(filename, key_9, sizeof(key_9), 1);
     assert_index_entry_lookup(filename, 0U, key_1, sizeof(key_1), MYLITE_STORAGE_NOTFOUND, 0ULL);
+    assert_find_indexed_row_not_found(filename, 0U, key_1, sizeof(key_1));
     assert_index_entry_lookup(
         filename,
         1U,
@@ -1430,6 +1456,15 @@ static void test_index_entries(void) {
         sizeof(key_9),
         MYLITE_STORAGE_OK,
         ctx.updated_row_1_id
+    );
+    assert_find_indexed_row_equals(
+        filename,
+        0U,
+        key_9,
+        sizeof(key_9),
+        ctx.updated_row_1_id,
+        updated_row_1,
+        sizeof(updated_row_1)
     );
     assert_exact_index_entries(
         filename,
@@ -1453,6 +1488,7 @@ static void test_index_entries(void) {
     assert_index_prefix_exists(filename, key_2, sizeof(key_2), 0);
     assert_index_prefix_exists(filename, title_u, sizeof(title_u), 1);
     assert_index_entry_lookup(filename, 0U, key_2, sizeof(key_2), MYLITE_STORAGE_NOTFOUND, 0ULL);
+    assert_find_indexed_row_not_found(filename, 0U, key_2, sizeof(key_2));
     assert_index_entry_lookup(
         filename,
         1U,
@@ -1460,6 +1496,15 @@ static void test_index_entries(void) {
         sizeof(title_u),
         MYLITE_STORAGE_OK,
         ctx.updated_row_1_id
+    );
+    assert_find_indexed_row_equals(
+        filename,
+        1U,
+        title_u,
+        sizeof(title_u),
+        ctx.updated_row_1_id,
+        updated_row_1,
+        sizeof(updated_row_1)
     );
     assert_exact_index_entries(filename, 0U, key_2, sizeof(key_2), NULL, 0U);
     assert_exact_index_entries(filename, 1U, title_a, sizeof(title_a), NULL, 0U);
@@ -1476,6 +1521,22 @@ static void test_index_entries(void) {
     assert(
         mylite_storage_find_index_entry(filename, "app", "posts", 0U, NULL, sizeof(key_1), NULL) ==
         MYLITE_STORAGE_MISUSE
+    );
+    unsigned long long misuse_row_id = 0ULL;
+    unsigned char *misuse_row = NULL;
+    size_t misuse_row_size = 0U;
+    assert(
+        mylite_storage_find_indexed_row(
+            filename,
+            "app",
+            "posts",
+            0U,
+            NULL,
+            sizeof(key_1),
+            &misuse_row_id,
+            &misuse_row,
+            &misuse_row_size
+        ) == MYLITE_STORAGE_MISUSE
     );
     mylite_storage_index_entryset misuse_entries = {
         .size = sizeof(misuse_entries),
@@ -4879,6 +4940,66 @@ static void assert_indexed_row_equals(
     assert(stored_row_size == expected_row_size);
     assert(memcmp(stored_row, expected_row, expected_row_size) == 0);
     mylite_storage_free(stored_row);
+}
+
+static void assert_find_indexed_row_equals(
+    const char *filename,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long expected_row_id,
+    const unsigned char *expected_row,
+    size_t expected_row_size
+) {
+    unsigned long long row_id = 0ULL;
+    unsigned char *stored_row = NULL;
+    size_t stored_row_size = 0U;
+
+    assert(
+        mylite_storage_find_indexed_row(
+            filename,
+            "app",
+            "posts",
+            index_number,
+            key,
+            key_size,
+            &row_id,
+            &stored_row,
+            &stored_row_size
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(row_id == expected_row_id);
+    assert(stored_row_size == expected_row_size);
+    assert(memcmp(stored_row, expected_row, expected_row_size) == 0);
+    mylite_storage_free(stored_row);
+}
+
+static void assert_find_indexed_row_not_found(
+    const char *filename,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size
+) {
+    unsigned long long row_id = 0ULL;
+    unsigned char *stored_row = NULL;
+    size_t stored_row_size = 0U;
+
+    assert(
+        mylite_storage_find_indexed_row(
+            filename,
+            "app",
+            "posts",
+            index_number,
+            key,
+            key_size,
+            &row_id,
+            &stored_row,
+            &stored_row_size
+        ) == MYLITE_STORAGE_NOTFOUND
+    );
+    assert(row_id == 0ULL);
+    assert(stored_row == NULL);
+    assert(stored_row_size == 0U);
 }
 
 static void assert_index_entry(

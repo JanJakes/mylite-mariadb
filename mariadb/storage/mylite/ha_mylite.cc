@@ -1428,15 +1428,25 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
 
   if (raw_exact_unique_filter)
   {
+    const bool inline_durable_row= !volatile_rows &&
+                                   !mylite_table_has_blob_fields(table);
     ulonglong row_id= 0ULL;
-    mylite_storage_result storage_result=
-        volatile_rows
-            ? mylite_volatile_find_index_entry(
-                  primary_file, storage_schema(), storage_table(),
-                  index_number, key_filter, key_filter_length, &row_id)
-            : mylite_storage_find_index_entry(
-                  primary_file, storage_schema(), storage_table(),
-                  index_number, key_filter, key_filter_length, &row_id);
+    uchar *row_payload= NULL;
+    size_t row_payload_size= 0;
+    mylite_storage_result storage_result;
+    if (volatile_rows)
+      storage_result= mylite_volatile_find_index_entry(
+          primary_file, storage_schema(), storage_table(), index_number,
+          key_filter, key_filter_length, &row_id);
+    else if (!inline_durable_row)
+      storage_result= mylite_storage_find_index_entry(
+          primary_file, storage_schema(), storage_table(), index_number,
+          key_filter, key_filter_length, &row_id);
+    else
+      storage_result= mylite_storage_find_indexed_row(
+          primary_file, storage_schema(), storage_table(), index_number,
+          key_filter, key_filter_length, &row_id, &row_payload,
+          &row_payload_size);
     if (storage_result == MYLITE_STORAGE_NOTFOUND)
     {
       index_cursor_number= index_number;
@@ -1450,10 +1460,29 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
     Mylite_index_cursor_entry *entries=
         static_cast<Mylite_index_cursor_entry *>(
             malloc(sizeof(Mylite_index_cursor_entry)));
+    size_t *row_offsets= NULL;
+    size_t *row_sizes= NULL;
+    if (inline_durable_row)
+    {
+      row_offsets= static_cast<size_t *>(malloc(sizeof(size_t)));
+      row_sizes= static_cast<size_t *>(malloc(sizeof(size_t)));
+    }
     if (!keys || !entries)
     {
       free(keys);
       free(entries);
+      free(row_offsets);
+      free(row_sizes);
+      mylite_storage_free(row_payload);
+      DBUG_RETURN(HA_ERR_OUT_OF_MEM);
+    }
+    if (inline_durable_row && (!row_offsets || !row_sizes))
+    {
+      free(keys);
+      free(entries);
+      free(row_offsets);
+      free(row_sizes);
+      mylite_storage_free(row_payload);
       DBUG_RETURN(HA_ERR_OUT_OF_MEM);
     }
     memcpy(keys, key_filter, key_filter_length);
@@ -1465,11 +1494,23 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
     index_row_count= 1;
     index_cursor_number= index_number;
     index_cursor_filtered= filter_cursor;
-    int error= materialize_index_cursor_rows(primary_file);
-    if (error)
+    if (!inline_durable_row)
     {
-      clear_index_cursor();
-      DBUG_RETURN(error);
+      int error= materialize_index_cursor_rows(primary_file);
+      if (error)
+      {
+        clear_index_cursor();
+        DBUG_RETURN(error);
+      }
+    }
+    else
+    {
+      row_offsets[0]= 0;
+      row_sizes[0]= row_payload_size;
+      index_rows= row_payload;
+      index_row_offsets= row_offsets;
+      index_row_sizes= row_sizes;
+      index_row_bytes= row_payload_size;
     }
     DBUG_RETURN(0);
   }
