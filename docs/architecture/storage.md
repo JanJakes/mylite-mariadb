@@ -111,6 +111,13 @@ exact-index caches, and top-level commit promotes those complete maintained
 caches under the committed header fingerprint. Rollback and cache invalidation
 discard them instead of publishing uncertain duplicate-key or point-lookup
 state.
+Durable row-id, row-payload, exact-index, and published leaf-page caches are
+retargeted after successful row insert, update, and delete when the mutation is
+limited to a known table. Caches for that table are cleared or maintained by the
+active checkpoint, while caches for other tables in the same file keep their
+table-local contents and adopt the new committed header fingerprint. Catalog
+changes, truncate, rollback, and cache-limit rotation keep broad file-level
+invalidation.
 
 MariaDB table-discovery callbacks also use scoped read sessions while they read
 table definitions, discovered table names, or table existence from the MyLite
