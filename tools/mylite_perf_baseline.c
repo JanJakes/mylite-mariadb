@@ -46,6 +46,7 @@ static void print_usage(const char *program);
 static void print_result(const char *operation, size_t count, uint64_t elapsed_ns);
 static int setup_database(benchmark_context *ctx);
 static int benchmark_insert_rows(benchmark_context *ctx);
+static int benchmark_prepared_insert_rows(benchmark_context *ctx);
 static int benchmark_point_selects(benchmark_context *ctx);
 static int benchmark_prepared_point_selects(benchmark_context *ctx);
 static int benchmark_secondary_selects(benchmark_context *ctx);
@@ -167,6 +168,9 @@ static int run_benchmark(const benchmark_config *config) {
         goto cleanup;
     }
     if (verify_row_count(&ctx, config->rows) != 0) {
+        goto cleanup;
+    }
+    if (benchmark_prepared_insert_rows(&ctx) != 0) {
         goto cleanup;
     }
     if (benchmark_point_selects(&ctx) != 0) {
@@ -321,6 +325,98 @@ static int benchmark_insert_rows(benchmark_context *ctx) {
     result = 0;
 
 rollback:
+    if (result != 0) {
+        (void)mylite_exec(ctx->db, "ROLLBACK", NULL, NULL, NULL);
+    }
+    return result;
+}
+
+static int benchmark_prepared_insert_rows(benchmark_context *ctx) {
+    mylite_stmt *stmt = NULL;
+    int result = 1;
+
+    if (exec_sql(
+            ctx,
+            "CREATE TABLE perf_prepared_rows ("
+            "id INT NOT NULL PRIMARY KEY,"
+            "value INT NOT NULL,"
+            "pad VARCHAR(64) NOT NULL,"
+            "KEY value_key (value)"
+            ") ENGINE=InnoDB"
+        ) != 0) {
+        return 1;
+    }
+    if (exec_sql(ctx, "BEGIN") != 0) {
+        return 1;
+    }
+    if (mylite_prepare(
+            ctx->db,
+            "INSERT INTO perf_prepared_rows (id, value, pad) VALUES (?, ?, ?)",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) != MYLITE_OK) {
+        report_database_error(ctx, "prepare row insert");
+        goto rollback;
+    }
+
+    const uint64_t start_ns = monotonic_ns();
+    for (size_t i = 0; i < ctx->config->rows; ++i) {
+        char pad[32];
+        const size_t row_id = i + 1U;
+        const int written = snprintf(pad, sizeof(pad), "row-%zu", row_id);
+        if (written < 0 || (size_t)written >= sizeof(pad)) {
+            goto rollback;
+        }
+        if (mylite_bind_int64(stmt, 1U, (long long)row_id) != MYLITE_OK ||
+            mylite_bind_int64(stmt, 2U, (long long)secondary_value_for_row(ctx, row_id)) !=
+                MYLITE_OK ||
+            mylite_bind_text(stmt, 3U, pad, MYLITE_NUL_TERMINATED, MYLITE_TRANSIENT) != MYLITE_OK) {
+            report_database_error(ctx, "bind prepared row insert");
+            goto rollback;
+        }
+
+        const int step_result = mylite_step(stmt);
+        if (step_result != MYLITE_DONE) {
+            fprintf(stderr, "Prepared row insert failed for id %zu\n", row_id);
+            report_database_error(ctx, "prepared row insert");
+            goto rollback;
+        }
+        if (mylite_reset(stmt) != MYLITE_OK) {
+            report_database_error(ctx, "reset prepared row insert");
+            goto rollback;
+        }
+    }
+    print_result(
+        "prepared inserts in one transaction",
+        ctx->config->rows,
+        monotonic_ns() - start_ns
+    );
+
+    if (mylite_finalize(stmt) != MYLITE_OK) {
+        stmt = NULL;
+        report_database_error(ctx, "finalize prepared row insert");
+        goto rollback;
+    }
+    stmt = NULL;
+    if (exec_sql(ctx, "COMMIT") != 0) {
+        return 1;
+    }
+    unsigned long long row_count = 0U;
+    if (query_uint64(ctx, "SELECT COUNT(*) FROM perf_prepared_rows", &row_count) != 0) {
+        return 1;
+    }
+    if (row_count != (unsigned long long)ctx->config->rows) {
+        fprintf(stderr, "Expected %zu prepared rows, got %llu\n", ctx->config->rows, row_count);
+        return 1;
+    }
+    result = 0;
+
+rollback:
+    if (stmt != NULL && mylite_finalize(stmt) != MYLITE_OK) {
+        report_database_error(ctx, "finalize prepared row insert");
+        result = 1;
+    }
     if (result != 0) {
         (void)mylite_exec(ctx->db, "ROLLBACK", NULL, NULL, NULL);
     }

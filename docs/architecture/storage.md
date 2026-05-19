@@ -661,11 +661,13 @@ scan fallback. Cursors check
 `index_next_same()` boundaries before row materialization and reconstruct only
 the selected row buffer from row pages. Active checkpoints reuse statement
 journals, defer header publication to checkpoint boundaries, and cache guarded
-exact duplicate-key probes during root active checkpoints. This provides correct
-indexed insert, lookup, update, delete, reopen, and copy `ALTER` behavior for
-the supported shapes, but it is still an interim performance structure because
-maintained B-tree navigation and pager-style write paths are not implemented.
-Standalone
+exact duplicate-key probes on the outer active checkpoint so nested libmylite
+statement checkpoints do not force full exact-index scans for every row insert.
+Nested checkpoint rollback invalidates parent exact-key caches before restored
+header state is propagated. This provides correct indexed insert, lookup,
+update, delete, reopen, and copy `ALTER` behavior for the supported shapes, but
+it is still an interim performance structure because maintained B-tree
+navigation and pager-style write paths are not implemented. Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, multi-page catalog storage, free-space reclamation,
 multi-statement transaction

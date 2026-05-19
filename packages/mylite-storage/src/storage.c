@@ -363,6 +363,7 @@ static mylite_storage_result read_checkpoint_snapshot(mylite_storage_statement *
 static mylite_storage_result close_statement(mylite_storage_statement *statement);
 static mylite_storage_result write_statement_current_header(mylite_storage_statement *statement);
 static void free_statement(mylite_storage_statement *statement);
+static void clear_statement_chain_exact_index_caches(mylite_storage_statement *statement);
 static void clear_exact_index_caches(mylite_storage_statement *statement);
 static void free_exact_index_cache(mylite_storage_exact_index_cache *cache);
 static int checkpoint_preserves_auto_increment_rollback(
@@ -4099,6 +4100,7 @@ mylite_storage_result mylite_storage_rollback_statement(mylite_storage_statement
     }
 
     if (statement->parent != NULL) {
+        clear_statement_chain_exact_index_caches(statement->parent);
         statement->parent->current_header = statement->current_header;
         statement->parent->has_current_header = 1;
         statement->parent->current_header_dirty = 1;
@@ -4275,10 +4277,6 @@ static mylite_storage_result begin_checkpoint(
     if (durable_transaction && parent != NULL) {
         return MYLITE_STORAGE_MISUSE;
     }
-    for (mylite_storage_statement *current = parent; current != NULL; current = current->parent) {
-        clear_exact_index_caches(current);
-    }
-
     mylite_storage_statement *statement =
         (mylite_storage_statement *)calloc(1U, sizeof(*statement));
     if (statement == NULL) {
@@ -4737,7 +4735,7 @@ static mylite_storage_result begin_write_journal(
         return begin_recovery_journal(file, filename, header, include_catalog);
     }
     if (include_catalog) {
-        clear_exact_index_caches(statement);
+        clear_statement_chain_exact_index_caches(statement);
     }
     if (statement_chain_has_write_journal(statement)) {
         return MYLITE_STORAGE_OK;
@@ -5374,11 +5372,19 @@ static mylite_storage_statement *active_read_snapshot_for(const char *filename) 
 }
 
 static mylite_storage_statement *active_exact_index_cache_statement_for(const char *filename) {
-    mylite_storage_statement *statement = active_statement_for(filename);
-    if (statement == NULL || statement->parent != NULL) {
+    if (filename == NULL) {
         return NULL;
     }
-    return statement;
+
+    mylite_storage_statement *cache_statement = NULL;
+    for (mylite_storage_statement *statement = active_statement; statement != NULL;
+         statement = statement->parent) {
+        if (strcmp(statement->filename, filename) == 0 &&
+            statement->owner == active_context_owner) {
+            cache_statement = statement;
+        }
+    }
+    return cache_statement;
 }
 
 static mylite_storage_statement *active_statement_for_file(FILE *file) {
@@ -5457,6 +5463,13 @@ static void free_statement(mylite_storage_statement *statement) {
     clear_exact_index_caches(statement);
     free(statement->filename);
     free(statement);
+}
+
+static void clear_statement_chain_exact_index_caches(mylite_storage_statement *statement) {
+    for (mylite_storage_statement *current = statement; current != NULL;
+         current = current->parent) {
+        clear_exact_index_caches(current);
+    }
 }
 
 static void clear_exact_index_caches(mylite_storage_statement *statement) {
@@ -9992,7 +10005,7 @@ static mylite_storage_result append_active_exact_index_cache_entries(
 }
 
 static void invalidate_active_exact_index_caches(const char *filename) {
-    clear_exact_index_caches(active_statement_for(filename));
+    clear_exact_index_caches(active_exact_index_cache_statement_for(filename));
 }
 
 static mylite_storage_exact_index_cache *find_exact_index_cache(

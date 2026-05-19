@@ -47,14 +47,17 @@ of appending useful row or index pages.
     autoincrement rollback gaps, truncates to the restored header, and then
     propagates the resulting current header to the parent checkpoint when one
     exists.
-- Cache exact index probes during the root active checkpoint.
-  - A root active statement can build an in-memory exact-index cache from live
-    durable index entries for one table/index/key-size tuple.
+- Cache exact index probes on the outer active checkpoint.
+  - An outer active statement or transaction can build an in-memory exact-index
+    cache from live durable index entries for one table/index/key-size tuple.
   - Successful inserts append new matching key/row-id pairs to loaded caches.
-  - Update, delete, truncate, catalog writes, and nested checkpoints invalidate
-    active exact-index caches.
-  - Nested savepoints deliberately do not use the cache; their rollback and
-    release behavior remains driven by checkpoint state.
+  - Nested statement checkpoints use the outer cache so libmylite's
+    per-statement rollback checkpoints do not force a full exact-index scan for
+    every inserted row.
+  - Update, delete, truncate, catalog writes, and nested checkpoint rollbacks
+    invalidate active exact-index caches.
+  - Nested savepoint release keeps the cache; nested savepoint rollback clears
+    parent caches before the restored header is propagated.
 - Use storage-level exact lookup for guarded duplicate-key checks in the handler
   before falling back to the existing entryset scan.
 
@@ -110,10 +113,11 @@ publication.
 - `cmake --build --preset storage-smoke-dev --target mylite_perf_baseline mylite_embedded_storage_engine_test`
 - `tools/mylite-compat-harness run storage-engine`
 - `build/storage-smoke-dev/tools/mylite_perf_baseline 1000 1`
-  - Direct inserts in one transaction: `7374.720 us/op`.
-  - Prepare secondary leaf benchmark rows: `18278.628 us/op`.
-  - Publish secondary leaf index: `290.346 ms`.
-  - Direct ordered full scan: `59.706 us/op`.
+  - Direct inserts in one transaction: `190.450 us/op`.
+  - Prepared inserts in one transaction: `185.285 us/op`.
+  - Prepare secondary leaf benchmark rows: `206.192 us/op`.
+  - Publish secondary leaf index: `397.811 ms`.
+  - Direct ordered full scan: `83.899 us/op`.
 - `/opt/homebrew/opt/llvm/bin/git-clang-format --diff HEAD -- packages/mylite-storage/src/storage.c mariadb/storage/mylite/ha_mylite.cc packages/mylite-storage/tests/storage_test.c`
 - `git diff --check`
 
@@ -124,7 +128,7 @@ publication.
 - Active statements and transactions defer repeated header-page writes until
   checkpoint boundaries while preserving rollback and savepoint behavior.
 - Guarded duplicate-key checks can use exact storage probes without broad
-  entryset scans.
+  entryset scans, including inside libmylite's nested per-statement checkpoints.
 - The storage-engine compatibility harness passes, including native handler
   savepoint coverage.
 - The local performance baseline records a material improvement in explicit

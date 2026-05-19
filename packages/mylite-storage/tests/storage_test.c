@@ -212,6 +212,9 @@ static void assert_transaction_journal_rolls_back(const transaction_journal_test
 static void assert_transaction_journal_preserves_auto_increment_rollback(
     const transaction_journal_test_context *ctx
 );
+static void assert_transaction_exact_cache_invalidates_on_savepoint_rollback(
+    const transaction_journal_test_context *ctx
+);
 static void assert_transaction_journal_recovers_child_exit(
     const transaction_journal_test_context *ctx
 );
@@ -2889,6 +2892,7 @@ static void test_transaction_journals(void) {
     assert_transaction_journal_commits(&ctx);
     assert_transaction_journal_rolls_back(&ctx);
     assert_transaction_journal_preserves_auto_increment_rollback(&ctx);
+    assert_transaction_exact_cache_invalidates_on_savepoint_rollback(&ctx);
     assert_transaction_journal_recovers_child_exit(&ctx);
     assert_transaction_and_statement_journals_recover_in_order(&ctx);
 
@@ -3254,6 +3258,110 @@ static void assert_transaction_journal_preserves_auto_increment_rollback(
     assert(mylite_storage_commit_statement(transaction) == MYLITE_STORAGE_OK);
     assert_auto_increment_value(ctx->filename, 13ULL);
     assert_row_not_found(ctx->filename, row_id);
+}
+
+static void assert_transaction_exact_cache_invalidates_on_savepoint_rollback(
+    const transaction_journal_test_context *ctx
+) {
+    static const unsigned char row_1[] = {0x00U, 0xf1U, 'c', 'a', 'c'};
+    static const unsigned char row_2[] = {0x00U, 0xf2U, 'c', 'a', 'd'};
+    static const unsigned char key_1[] = {0xf1U};
+    static const unsigned char key_2[] = {0xf2U};
+    mylite_storage_index_entry row_1_entry = {
+        .size = sizeof(row_1_entry),
+        .index_number = 0U,
+        .key = key_1,
+        .key_size = sizeof(key_1),
+    };
+    mylite_storage_index_entry row_2_entry = {
+        .size = sizeof(row_2_entry),
+        .index_number = 0U,
+        .key = key_2,
+        .key_size = sizeof(key_2),
+    };
+    mylite_storage_statement *transaction = NULL;
+    mylite_storage_statement *savepoint = NULL;
+    unsigned long long row_1_id = 0ULL;
+    unsigned long long row_2_id = 0ULL;
+
+    assert(mylite_storage_begin_transaction(ctx->filename, &transaction) == MYLITE_STORAGE_OK);
+    assert_index_entry_lookup(
+        ctx->filename,
+        0U,
+        key_1,
+        sizeof(key_1),
+        MYLITE_STORAGE_NOTFOUND,
+        0ULL
+    );
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            ctx->filename,
+            "app",
+            "posts",
+            row_1,
+            sizeof(row_1),
+            &row_1_entry,
+            1U,
+            &row_1_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert_index_entry_lookup(ctx->filename, 0U, key_1, sizeof(key_1), MYLITE_STORAGE_OK, row_1_id);
+
+    assert(mylite_storage_begin_statement(ctx->filename, &savepoint) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            ctx->filename,
+            "app",
+            "posts",
+            row_2,
+            sizeof(row_2),
+            &row_2_entry,
+            1U,
+            &row_2_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert_index_entry_lookup(ctx->filename, 0U, key_2, sizeof(key_2), MYLITE_STORAGE_OK, row_2_id);
+    assert(mylite_storage_rollback_statement(savepoint) == MYLITE_STORAGE_OK);
+    assert_index_entry_lookup(
+        ctx->filename,
+        0U,
+        key_2,
+        sizeof(key_2),
+        MYLITE_STORAGE_NOTFOUND,
+        0ULL
+    );
+
+    row_2_id = 0ULL;
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            ctx->filename,
+            "app",
+            "posts",
+            row_2,
+            sizeof(row_2),
+            &row_2_entry,
+            1U,
+            &row_2_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert_index_entry_lookup(ctx->filename, 0U, key_2, sizeof(key_2), MYLITE_STORAGE_OK, row_2_id);
+    assert(mylite_storage_rollback_statement(transaction) == MYLITE_STORAGE_OK);
+    assert_index_entry_lookup(
+        ctx->filename,
+        0U,
+        key_1,
+        sizeof(key_1),
+        MYLITE_STORAGE_NOTFOUND,
+        0ULL
+    );
+    assert_index_entry_lookup(
+        ctx->filename,
+        0U,
+        key_2,
+        sizeof(key_2),
+        MYLITE_STORAGE_NOTFOUND,
+        0ULL
+    );
 }
 
 static void assert_transaction_journal_recovers_child_exit(
