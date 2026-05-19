@@ -95,6 +95,12 @@ typedef struct mylite_storage_row_payload_cache_entry {
     size_t row_size;
 } mylite_storage_row_payload_cache_entry;
 
+typedef struct mylite_storage_row_payload_cache_bucket {
+    unsigned long long row_id;
+    size_t entry_index;
+    int occupied;
+} mylite_storage_row_payload_cache_bucket;
+
 typedef struct mylite_storage_row_payload_cache {
     char *filename;
     unsigned long long catalog_root_page;
@@ -102,8 +108,10 @@ typedef struct mylite_storage_row_payload_cache {
     unsigned long long page_count;
     unsigned long long table_id;
     mylite_storage_row_payload_cache_entry *entries;
+    mylite_storage_row_payload_cache_bucket *buckets;
     size_t count;
     size_t capacity;
+    size_t bucket_capacity;
 } mylite_storage_row_payload_cache;
 
 typedef struct mylite_storage_row_payload_cache_set {
@@ -1256,6 +1264,24 @@ static mylite_storage_result append_row_payload_cache_entry(
     const unsigned char *row,
     size_t row_size
 );
+static const mylite_storage_row_payload_cache_entry *find_row_payload_cache_entry(
+    const mylite_storage_row_payload_cache *cache,
+    unsigned long long row_id
+);
+static mylite_storage_result ensure_row_payload_cache_buckets(
+    mylite_storage_row_payload_cache *cache,
+    size_t next_count
+);
+static mylite_storage_result rebuild_row_payload_cache_buckets(
+    mylite_storage_row_payload_cache *cache,
+    size_t bucket_capacity
+);
+static mylite_storage_result insert_row_payload_cache_bucket(
+    mylite_storage_row_payload_cache *cache,
+    unsigned long long row_id,
+    size_t entry_index
+);
+static size_t hash_row_id(unsigned long long row_id);
 static void free_row_payload_cache(mylite_storage_row_payload_cache *cache);
 static mylite_storage_exact_index_cache *find_durable_exact_index_cache(
     const char *filename,
@@ -10725,11 +10751,9 @@ static mylite_storage_result append_cached_durable_row_payload(
         return MYLITE_STORAGE_OK;
     }
 
-    for (size_t i = 0U; i < cache->count; ++i) {
-        const mylite_storage_row_payload_cache_entry *entry = cache->entries + i;
-        if (entry->row_id != row_id) {
-            continue;
-        }
+    const mylite_storage_row_payload_cache_entry *entry =
+        find_row_payload_cache_entry(cache, row_id);
+    if (entry != NULL) {
         *out_used_cache = 1;
         return append_row_to_rowset(out_rows, row_id, entry->row, entry->row_size);
     }
@@ -10870,10 +10894,8 @@ static mylite_storage_result append_row_payload_cache_entry(
     const unsigned char *row,
     size_t row_size
 ) {
-    for (size_t i = 0U; i < cache->count; ++i) {
-        if (cache->entries[i].row_id == row_id) {
-            return MYLITE_STORAGE_OK;
-        }
+    if (find_row_payload_cache_entry(cache, row_id) != NULL) {
+        return MYLITE_STORAGE_OK;
     }
     if (cache->count == cache->capacity) {
         const size_t next_capacity = cache->capacity == 0U ? 64U : cache->capacity * 2U;
@@ -10889,18 +10911,145 @@ static mylite_storage_result append_row_payload_cache_entry(
         cache->entries = entries;
         cache->capacity = next_capacity;
     }
+    mylite_storage_result result = ensure_row_payload_cache_buckets(cache, cache->count + 1U);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
 
     unsigned char *row_copy = (unsigned char *)malloc(row_size);
     if (row_copy == NULL) {
         return MYLITE_STORAGE_NOMEM;
     }
     memcpy(row_copy, row, row_size);
-    cache->entries[cache->count++] = (mylite_storage_row_payload_cache_entry){
+    const size_t entry_index = cache->count;
+    cache->entries[entry_index] = (mylite_storage_row_payload_cache_entry){
         .row_id = row_id,
         .row = row_copy,
         .row_size = row_size,
     };
+    ++cache->count;
+    result = insert_row_payload_cache_bucket(cache, row_id, entry_index);
+    if (result != MYLITE_STORAGE_OK) {
+        free(row_copy);
+        cache->entries[entry_index] = (mylite_storage_row_payload_cache_entry){0};
+        --cache->count;
+        return result;
+    }
     return MYLITE_STORAGE_OK;
+}
+
+static const mylite_storage_row_payload_cache_entry *find_row_payload_cache_entry(
+    const mylite_storage_row_payload_cache *cache,
+    unsigned long long row_id
+) {
+    if (cache->bucket_capacity == 0U) {
+        return NULL;
+    }
+
+    const size_t mask = cache->bucket_capacity - 1U;
+    size_t bucket_index = hash_row_id(row_id) & mask;
+    for (size_t probes = 0U; probes < cache->bucket_capacity; ++probes) {
+        const mylite_storage_row_payload_cache_bucket *bucket = cache->buckets + bucket_index;
+        if (!bucket->occupied) {
+            return NULL;
+        }
+        if (bucket->row_id == row_id) {
+            return cache->entries + bucket->entry_index;
+        }
+        bucket_index = (bucket_index + 1U) & mask;
+    }
+    return NULL;
+}
+
+static mylite_storage_result ensure_row_payload_cache_buckets(
+    mylite_storage_row_payload_cache *cache,
+    size_t next_count
+) {
+    if (next_count > SIZE_MAX / 2U) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    const size_t minimum_capacity = next_count * 2U;
+    if (cache->bucket_capacity >= minimum_capacity) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    size_t next_capacity = cache->bucket_capacity == 0U ? 128U : cache->bucket_capacity;
+    while (next_capacity < minimum_capacity) {
+        if (next_capacity > SIZE_MAX / 2U) {
+            return MYLITE_STORAGE_FULL;
+        }
+        next_capacity *= 2U;
+    }
+    return rebuild_row_payload_cache_buckets(cache, next_capacity);
+}
+
+static mylite_storage_result rebuild_row_payload_cache_buckets(
+    mylite_storage_row_payload_cache *cache,
+    size_t bucket_capacity
+) {
+    if (bucket_capacity > SIZE_MAX / sizeof(*cache->buckets)) {
+        return MYLITE_STORAGE_FULL;
+    }
+    mylite_storage_row_payload_cache_bucket *buckets =
+        (mylite_storage_row_payload_cache_bucket *)calloc(bucket_capacity, sizeof(*buckets));
+    if (buckets == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    free(cache->buckets);
+    cache->buckets = buckets;
+    cache->bucket_capacity = bucket_capacity;
+    for (size_t i = 0U; i < cache->count; ++i) {
+        const mylite_storage_result result =
+            insert_row_payload_cache_bucket(cache, cache->entries[i].row_id, i);
+        if (result != MYLITE_STORAGE_OK) {
+            free(cache->buckets);
+            cache->buckets = NULL;
+            cache->bucket_capacity = 0U;
+            return result;
+        }
+    }
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result insert_row_payload_cache_bucket(
+    mylite_storage_row_payload_cache *cache,
+    unsigned long long row_id,
+    size_t entry_index
+) {
+    if (cache->bucket_capacity == 0U) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    const size_t mask = cache->bucket_capacity - 1U;
+    size_t bucket_index = hash_row_id(row_id) & mask;
+    for (size_t probes = 0U; probes < cache->bucket_capacity; ++probes) {
+        mylite_storage_row_payload_cache_bucket *bucket = cache->buckets + bucket_index;
+        if (!bucket->occupied) {
+            *bucket = (mylite_storage_row_payload_cache_bucket){
+                .row_id = row_id,
+                .entry_index = entry_index,
+                .occupied = 1,
+            };
+            return MYLITE_STORAGE_OK;
+        }
+        if (bucket->row_id == row_id) {
+            bucket->entry_index = entry_index;
+            return MYLITE_STORAGE_OK;
+        }
+        bucket_index = (bucket_index + 1U) & mask;
+    }
+    return MYLITE_STORAGE_FULL;
+}
+
+static size_t hash_row_id(unsigned long long row_id) {
+    row_id ^= row_id >> 33U;
+    row_id *= 0xff51afd7ed558ccdULL;
+    row_id ^= row_id >> 33U;
+    row_id *= 0xc4ceb9fe1a85ec53ULL;
+    row_id ^= row_id >> 33U;
+    return (size_t)row_id;
 }
 
 static void free_row_payload_cache(mylite_storage_row_payload_cache *cache) {
@@ -10908,6 +11057,7 @@ static void free_row_payload_cache(mylite_storage_row_payload_cache *cache) {
         free(cache->entries[i].row);
     }
     free(cache->entries);
+    free(cache->buckets);
     free(cache->filename);
     *cache = (mylite_storage_row_payload_cache){0};
 }

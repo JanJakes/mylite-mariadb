@@ -24,6 +24,8 @@ decoded again for each cursor build.
 
 - Add a bounded thread-local durable row-payload cache keyed by filename,
   catalog root, catalog generation, page count, table id, and row id.
+- Give each cache a small open-addressed row-id index so repeated hits do not
+  turn the bounded cache into a linear per-row scan.
 - Use the cache only for non-active reads. Active statements and read snapshots
   keep their existing file/snapshot semantics.
 - Populate the cache from successful `mylite_storage_read_indexed_rows()` row
@@ -32,8 +34,8 @@ decoded again for each cursor build.
 - Clear the payload cache through the durable exact-index invalidation path so
   append, update, delete, truncate, and catalog publications cannot reuse stale
   payloads.
-- Bound cache count and entries to keep the optimization transient and
-  predictable until a real pager owns this behavior.
+- Bound cache count, entries, and hash buckets to keep the optimization
+  transient and predictable until a real pager owns this behavior.
 
 ## Compatibility Impact
 
@@ -58,7 +60,8 @@ memory and is invalidated by durable mutations.
 ## Acceptance Criteria
 
 - Repeated durable secondary exact-select cursor materialization avoids
-  repeated row page checksums for cached row ids.
+  repeated row page checksums and linear row-payload cache scans for cached row
+  ids.
 - Existing storage and routed-engine compatibility tests pass.
 - Secondary exact-select timings improve materially in the local benchmark.
 

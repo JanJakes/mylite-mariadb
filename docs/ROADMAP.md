@@ -81,7 +81,8 @@ checkpoints now cache row ids proven live by the active view so handler-driven
 update/delete validation does not rescan and checksum later row-state pages on
 every row. Non-active durable indexed-row reads now cache row payloads by file
 header fingerprint, reducing repeated secondary cursor row-page checksums until
-a real pager replaces the bounded cache.
+a real pager replaces the bounded cache, with a small row-id index keeping
+payload cache hits from becoming another per-row scan.
 
 ## Size And Profile Direction
 

@@ -288,8 +288,9 @@ cached live rows.
 Non-active durable indexed-row reads use a bounded thread-local row-payload
 cache keyed by the primary file header fingerprint and table id. Repeated
 secondary cursor materialization can reuse payloads that were already read and
-checksummed for the same durable file state. The cache is disabled for active
-statements and read snapshots, and it is cleared by durable mutation
+checksummed for the same durable file state. Each cache keeps an in-memory
+row-id index so cache hits stay near constant time. The cache is disabled for
+active statements and read snapshots, and it is cleared by durable mutation
 invalidation.
 
 The catalog stores:
