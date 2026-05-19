@@ -246,6 +246,15 @@ ordinary rollback journal first, then the transaction journal. Richer
 transaction state, free-space metadata, and B-tree-style index navigation are
 still planned slices.
 
+MariaDB handler row statistics are estimates for durable MyLite tables. MyLite
+does not advertise `HA_STATS_RECORDS_IS_EXACT`, and `ha_mylite::info()` answers
+optimizer `HA_STATUS_VARIABLE` requests from cheap primary-file size metadata
+instead of scanning every table row page. SQL `COUNT(*)`, scans, index reads,
+duplicate checks, FK checks, and the first-party storage row-count API still use
+exact row visibility paths when they need exact results. Volatile
+`MEMORY` / `HEAP` routed tables keep exact in-memory handler counts because
+those counts do not touch the primary file.
+
 The catalog stores:
 
 - schemas,

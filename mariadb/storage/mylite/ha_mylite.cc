@@ -19,6 +19,7 @@
 #include <m_ctype.h>
 #include <mylite/storage.h>
 #include <mysql/plugin.h>
+#include <mysql/psi/mysql_file.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -70,6 +71,10 @@ struct Mylite_trx_context
 };
 
 struct Mylite_foreign_key_row_check_context;
+
+static const ulong mylite_stats_block_size= 8192;
+static const ulonglong mylite_stats_estimate_bytes_per_row= 8192ULL;
+static const ha_rows mylite_stats_min_record_estimate= 2;
 
 static handler *mylite_create_handler(handlerton *hton,
                                       TABLE_SHARE *table,
@@ -2003,9 +2008,14 @@ int ha_mylite::info(uint flag)
   stats.data_file_length= 0;
   stats.index_file_length= 0;
   stats.auto_increment_value= 0;
+  stats.block_size= mylite_stats_block_size;
   if (discard_rows)
   {
-    stats.block_size= 8192;
+    if (flag & HA_STATUS_VARIABLE)
+    {
+      stats.records= mylite_stats_min_record_estimate;
+      stats.mean_rec_length= table && table->s ? table->s->reclength : 0;
+    }
     if (flag & HA_STATUS_AUTO)
       stats.auto_increment_value= 1;
     DBUG_RETURN(0);
@@ -2015,16 +2025,43 @@ int ha_mylite::info(uint flag)
   if (!primary_file)
     DBUG_RETURN(0);
 
-  unsigned long long row_count= 0;
-  const mylite_storage_result result= volatile_rows ?
-    mylite_volatile_count_rows(primary_file, storage_schema(), storage_table(),
-                               &row_count) :
-    mylite_storage_count_rows(primary_file, storage_schema(), storage_table(),
-                              &row_count);
-  if (result != MYLITE_STORAGE_OK)
-    DBUG_RETURN(mylite_storage_to_handler_error(result));
-
-  stats.records= (ha_rows) row_count;
+  if (flag & HA_STATUS_VARIABLE)
+  {
+    if (volatile_rows)
+    {
+      unsigned long long row_count= 0;
+      const mylite_storage_result result= mylite_volatile_count_rows(
+          primary_file, storage_schema(), storage_table(), &row_count);
+      if (result != MYLITE_STORAGE_OK)
+        DBUG_RETURN(mylite_storage_to_handler_error(result));
+      stats.records= (ha_rows) row_count;
+    }
+    else
+    {
+      /*
+        MyLite does not set HA_STATS_RECORDS_IS_EXACT. MariaDB calls this
+        path during SELECT planning, so durable stats must stay approximate.
+      */
+      MY_STAT file_stat;
+      stats.records= mylite_stats_min_record_estimate;
+      if (mysql_file_stat(0, primary_file, &file_stat, MYF(0)))
+      {
+        const ulonglong file_size=
+            file_stat.st_size > 0 ? (ulonglong) file_stat.st_size : 0ULL;
+        ulonglong estimated_records=
+            (file_size + mylite_stats_estimate_bytes_per_row - 1) /
+            mylite_stats_estimate_bytes_per_row;
+        if (estimated_records < mylite_stats_min_record_estimate &&
+            !(flag & HA_STATUS_OPEN))
+          estimated_records= mylite_stats_min_record_estimate;
+        if (estimated_records >= HA_POS_ERROR)
+          estimated_records= HA_POS_ERROR - 1;
+        stats.records= (ha_rows) estimated_records;
+        stats.data_file_length= file_size;
+      }
+    }
+    stats.mean_rec_length= table && table->s ? table->s->reclength : 0;
+  }
 
   if ((flag & HA_STATUS_AUTO) && mylite_auto_increment_field(table))
   {
