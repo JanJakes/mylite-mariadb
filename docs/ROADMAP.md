@@ -79,7 +79,9 @@ removing repeated per-row file open/header/catalog overhead from secondary
 cursor reads while maintained navigable indexes are still pending. Active
 checkpoints now cache row ids proven live by the active view so handler-driven
 update/delete validation does not rescan and checksum later row-state pages on
-every row.
+every row. Non-active durable indexed-row reads now cache row payloads by file
+header fingerprint, reducing repeated secondary cursor row-page checksums until
+a real pager replaces the bounded cache.
 
 ## Size And Profile Direction
 

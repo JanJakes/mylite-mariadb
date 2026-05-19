@@ -285,6 +285,13 @@ replacement row ids. Non-checkpointed direct storage calls keep the row-state
 scan path, and truncate/catalog invalidation or savepoint rollback clears
 cached live rows.
 
+Non-active durable indexed-row reads use a bounded thread-local row-payload
+cache keyed by the primary file header fingerprint and table id. Repeated
+secondary cursor materialization can reuse payloads that were already read and
+checksummed for the same durable file state. The cache is disabled for active
+statements and read snapshots, and it is cleared by durable mutation
+invalidation.
+
 The catalog stores:
 
 - schemas,
