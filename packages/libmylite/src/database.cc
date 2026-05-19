@@ -314,6 +314,8 @@ struct mylite_stmt {
     bool executed = false;
     bool done = false;
     bool has_current_row = false;
+    bool parameter_binds_bound = false;
+    bool parameter_binds_dirty = true;
     bool result_active = false;
     bool reusable_result_binds = false;
     bool result_binds_bound = false;
@@ -866,7 +868,6 @@ int mylite_reset(mylite_stmt *statement) {
     statement->executed = false;
     statement->done = false;
     statement->has_current_row = false;
-    reset_statement_bindings(*statement);
     if (statement->database != nullptr) {
         set_ok(*statement->database);
     }
@@ -920,7 +921,11 @@ int mylite_bind_null(mylite_stmt *statement, unsigned index) {
     if (parameter < 0) {
         return MYLITE_MISUSE;
     }
-    statement->parameters[static_cast<std::size_t>(parameter)].reset_to_null();
+    BoundValue &bound = statement->parameters[static_cast<std::size_t>(parameter)];
+    if (bound.kind != BoundValueKind::Null) {
+        statement->parameter_binds_dirty = true;
+    }
+    bound.reset_to_null();
     set_ok(*statement->database);
     return MYLITE_OK;
 }
@@ -933,6 +938,9 @@ int mylite_bind_int64(mylite_stmt *statement, unsigned index, long long value) {
     }
 
     BoundValue &bound = statement->parameters[static_cast<std::size_t>(parameter)];
+    if (bound.kind != BoundValueKind::Int64) {
+        statement->parameter_binds_dirty = true;
+    }
     bound.reset_to_null();
     bound.kind = BoundValueKind::Int64;
     bound.int64_value = value;
@@ -948,6 +956,9 @@ int mylite_bind_uint64(mylite_stmt *statement, unsigned index, unsigned long lon
     }
 
     BoundValue &bound = statement->parameters[static_cast<std::size_t>(parameter)];
+    if (bound.kind != BoundValueKind::UInt64) {
+        statement->parameter_binds_dirty = true;
+    }
     bound.reset_to_null();
     bound.kind = BoundValueKind::UInt64;
     bound.uint64_value = value;
@@ -963,6 +974,9 @@ int mylite_bind_double(mylite_stmt *statement, unsigned index, double value) {
     }
 
     BoundValue &bound = statement->parameters[static_cast<std::size_t>(parameter)];
+    if (bound.kind != BoundValueKind::Double) {
+        statement->parameter_binds_dirty = true;
+    }
     bound.reset_to_null();
     bound.kind = BoundValueKind::Double;
     bound.double_value = value;
@@ -1918,13 +1932,19 @@ int bind_statement_parameters(mylite_stmt &statement) {
         return MYLITE_OK;
     }
 
-    statement.parameter_binds.assign(parameter_count, MYSQL_BIND{});
+    if (statement.parameter_binds_bound && !statement.parameter_binds_dirty) {
+        return MYLITE_OK;
+    }
+    if (statement.parameter_binds.size() != parameter_count) {
+        statement.parameter_binds.assign(parameter_count, MYSQL_BIND{});
+    }
     for (std::size_t i = 0; i < parameter_count; ++i) {
         BoundValue &value = statement.parameters[i];
         value.mysql_length = static_cast<unsigned long>(value.length);
         value.mysql_is_null = value.kind == BoundValueKind::Null ? 1 : 0;
 
         MYSQL_BIND &bind = statement.parameter_binds[i];
+        bind = MYSQL_BIND{};
         bind.buffer_type = bound_value_type(value);
         bind.buffer = const_cast<void *>(bound_value_data(value));
         bind.length = &value.mysql_length;
@@ -1937,6 +1957,8 @@ int bind_statement_parameters(mylite_stmt &statement) {
         set_mariadb_statement_error(statement);
         return MYLITE_ERROR;
     }
+    statement.parameter_binds_bound = true;
+    statement.parameter_binds_dirty = false;
     return MYLITE_OK;
 }
 
@@ -7022,6 +7044,7 @@ int bind_bytes(
 
     try {
         BoundValue &bound = statement->parameters[static_cast<std::size_t>(parameter)];
+        statement->parameter_binds_dirty = true;
         bound.reset_to_null();
         bound.kind = kind;
         bound.length = value_len;
@@ -7061,6 +7084,7 @@ void reset_statement_bindings(mylite_stmt &statement) {
     for (BoundValue &parameter : statement.parameters) {
         parameter.reset_to_null();
     }
+    statement.parameter_binds_dirty = true;
 }
 
 void set_ok(mylite_db &database) {

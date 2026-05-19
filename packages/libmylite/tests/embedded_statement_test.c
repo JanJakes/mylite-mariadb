@@ -333,10 +333,21 @@ static void test_reset_reuse_and_destructors(void) {
         mylite_bind_text(stmt, 1U, borrowed, MYLITE_NUL_TERMINATED, counting_destructor) ==
         MYLITE_OK
     );
+    assert(mylite_reset(stmt) == MYLITE_OK);
+    assert(destructor_calls == 0);
     assert(mylite_clear_bindings(stmt) == MYLITE_OK);
     assert(destructor_calls == 1);
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(mylite_column_type(stmt, 0U) == MYLITE_TYPE_NULL);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_reset(stmt) == MYLITE_OK);
 
     assert(mylite_bind_int64(stmt, 1U, 7) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(stmt, 0U) == 7);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+
     assert(mylite_step(stmt) == MYLITE_ROW);
     assert(mylite_column_int64(stmt, 0U) == 7);
     assert(mylite_step(stmt) == MYLITE_DONE);

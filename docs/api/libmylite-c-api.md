@@ -341,13 +341,13 @@ int mylite_bind_blob(
     mylite_destructor destructor);
 ```
 
-`MYLITE_STATIC` borrows bytes until the statement is reset, rebound, or
-finalized. `MYLITE_TRANSIENT` copies bytes before the call returns. A custom
-destructor is called after MyLite no longer needs the input.
+`MYLITE_STATIC` borrows bytes until the value is rebound, bindings are cleared,
+or the statement is finalized. `MYLITE_TRANSIENT` copies bytes before the call
+returns. A custom destructor is called after MyLite no longer needs the input.
 
-The current implementation clears bindings on `mylite_reset()`, so callers
-should rebind before the next execution. This keeps borrowed `MYLITE_STATIC`
-input lifetimes explicit.
+`mylite_reset()` preserves bindings for reuse. Call `mylite_clear_bindings()`
+to clear parameters explicitly, release custom destructors, and reset all
+parameters to NULL.
 
 Typed date, time, decimal, JSON, and geometry bindings can be added without
 forcing those values through text.
