@@ -299,6 +299,14 @@ can reuse validated leaf pages without repeating the file read, checksum, and
 decode work for every cursor build. The cache is disabled for active statements
 and read snapshots, and it is cleared by durable mutation invalidation.
 
+MariaDB handler instances also cache proven child and parent foreign-key
+metadata absence for their opened table. Ordinary non-FK row-DML paths use that
+cache to avoid repeating catalog-listing work before every write, update,
+delete, or parent-reference probe, while tables with matching FK metadata keep
+the existing enforcement and action paths. Successful local table-DDL mutations
+bump a process-wide FK metadata epoch so already-open handlers refresh cached
+presence results before later DML.
+
 The catalog stores:
 
 - schemas,

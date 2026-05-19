@@ -70,6 +70,11 @@ class ha_mylite: public handler
   uint index_cursor_number;
   ulonglong current_row_id;
   uint duplicate_key_index;
+  mutable ulonglong foreign_key_presence_epoch;
+  mutable bool child_foreign_key_presence_known;
+  mutable bool child_foreign_key_presence;
+  mutable bool parent_foreign_key_presence_known;
+  mutable bool parent_foreign_key_presence;
   bool index_cursor_filtered;
   bool discard_rows;
   bool volatile_rows;
@@ -86,6 +91,10 @@ class ha_mylite: public handler
   int read_index_cursor_row(uchar *buf, size_t row_index);
   int record_blob_payload_slot(const uchar *buf, size_t *out_slot) const;
   int preserve_record_blob_payloads(uchar *buf);
+  void clear_foreign_key_presence_cache() const;
+  void invalidate_foreign_key_presence_cache() const;
+  int has_child_foreign_keys(bool *out_has) const;
+  int has_parent_foreign_keys(bool *out_has) const;
 
 public:
   ha_mylite(handlerton *hton, TABLE_SHARE *table_arg);

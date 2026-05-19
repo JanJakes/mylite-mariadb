@@ -23,6 +23,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+#include <atomic>
+
 #include "ha_mylite.h"
 #include "field.h"
 #include "handler.h"
@@ -60,6 +62,8 @@ struct Mylite_savepoint_reference
 {
   Mylite_savepoint_frame *frame;
 };
+
+static std::atomic<unsigned long long> mylite_foreign_key_presence_epoch(1ULL);
 
 struct Mylite_trx_context
 {
@@ -1175,7 +1179,11 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
       scan_blob_payloads_size(0), record_blob_payloads_size{0, 0},
       index_row_bytes(0), index_row_count(0), index_row_index(0),
       index_cursor_number(MAX_KEY), current_row_id(0),
-      duplicate_key_index((uint) -1), index_cursor_filtered(false),
+      duplicate_key_index((uint) -1), foreign_key_presence_epoch(0ULL),
+      child_foreign_key_presence_known(false),
+      child_foreign_key_presence(false),
+      parent_foreign_key_presence_known(false),
+      parent_foreign_key_presence(false), index_cursor_filtered(false),
       discard_rows(false), volatile_rows(false)
 {
   storage_schema_name[0]= '\0';
@@ -1235,6 +1243,88 @@ void ha_mylite::clear_record_blob_payloads()
     record_blob_payloads[i]= NULL;
     record_blob_payloads_size[i]= 0;
   }
+}
+
+void ha_mylite::clear_foreign_key_presence_cache() const
+{
+  foreign_key_presence_epoch=
+      mylite_foreign_key_presence_epoch.load(std::memory_order_acquire);
+  child_foreign_key_presence_known= false;
+  child_foreign_key_presence= false;
+  parent_foreign_key_presence_known= false;
+  parent_foreign_key_presence= false;
+}
+
+void ha_mylite::invalidate_foreign_key_presence_cache() const
+{
+  mylite_foreign_key_presence_epoch.fetch_add(1ULL, std::memory_order_acq_rel);
+  clear_foreign_key_presence_cache();
+}
+
+int ha_mylite::has_child_foreign_keys(bool *out_has) const
+{
+  DBUG_ASSERT(out_has);
+  *out_has= false;
+
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    return HA_ERR_NO_CONNECTION;
+  if (volatile_rows)
+    return 0;
+  if (foreign_key_presence_epoch !=
+      mylite_foreign_key_presence_epoch.load(std::memory_order_acquire))
+    clear_foreign_key_presence_cache();
+  if (child_foreign_key_presence_known)
+  {
+    *out_has= child_foreign_key_presence;
+    return 0;
+  }
+
+  Mylite_foreign_key_presence_context ctx= {false};
+  const mylite_storage_result result= mylite_storage_list_foreign_keys(
+      primary_file, storage_schema(), storage_table(),
+      mylite_detect_foreign_key_presence, &ctx);
+  if (result != MYLITE_STORAGE_OK &&
+      !(result == MYLITE_STORAGE_ERROR && ctx.found))
+    return mylite_storage_to_handler_error(result);
+
+  child_foreign_key_presence= ctx.found;
+  child_foreign_key_presence_known= true;
+  *out_has= child_foreign_key_presence;
+  return 0;
+}
+
+int ha_mylite::has_parent_foreign_keys(bool *out_has) const
+{
+  DBUG_ASSERT(out_has);
+  *out_has= false;
+
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    return HA_ERR_NO_CONNECTION;
+  if (volatile_rows)
+    return 0;
+  if (foreign_key_presence_epoch !=
+      mylite_foreign_key_presence_epoch.load(std::memory_order_acquire))
+    clear_foreign_key_presence_cache();
+  if (parent_foreign_key_presence_known)
+  {
+    *out_has= parent_foreign_key_presence;
+    return 0;
+  }
+
+  Mylite_foreign_key_presence_context ctx= {false};
+  const mylite_storage_result result= mylite_storage_list_parent_foreign_keys(
+      primary_file, storage_schema(), storage_table(),
+      mylite_detect_foreign_key_presence, &ctx);
+  if (result != MYLITE_STORAGE_OK &&
+      !(result == MYLITE_STORAGE_ERROR && ctx.found))
+    return mylite_storage_to_handler_error(result);
+
+  parent_foreign_key_presence= ctx.found;
+  parent_foreign_key_presence_known= true;
+  *out_has= parent_foreign_key_presence;
+  return 0;
 }
 
 const char *ha_mylite::storage_schema() const
@@ -1700,6 +1790,8 @@ int ha_mylite::open(const char *name, int, uint)
 {
   DBUG_ENTER("ha_mylite::open");
 
+  clear_foreign_key_presence_cache();
+
   int path_error= mylite_table_name_from_path(name, storage_schema_name,
                                               sizeof(storage_schema_name),
                                               storage_table_name,
@@ -1759,6 +1851,7 @@ int ha_mylite::close(void)
   clear_scan_rows();
   clear_index_cursor();
   clear_record_blob_payloads();
+  clear_foreign_key_presence_cache();
   discard_rows= false;
   volatile_rows= false;
   DBUG_RETURN(0);
@@ -2384,8 +2477,11 @@ int ha_mylite::write_row(const uchar *buf)
 
   if (!volatile_rows && !mylite_foreign_key_checks_disabled(ha_thd()))
   {
-    error= mylite_check_child_foreign_keys(primary_file, storage_schema(),
-                                           storage_table(), table, buf);
+    bool has_child_constraints= false;
+    error= has_child_foreign_keys(&has_child_constraints);
+    if (!error && has_child_constraints)
+      error= mylite_check_child_foreign_keys(primary_file, storage_schema(),
+                                             storage_table(), table, buf);
     if (error)
     {
       mylite_free_index_entries(index_entries, index_key_storage);
@@ -2469,9 +2565,12 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
   int error= 0;
   if (!volatile_rows && !mylite_foreign_key_checks_disabled(ha_thd()))
   {
-    error= mylite_apply_same_row_update_actions(
-      primary_file, storage_schema(), storage_table(), table, old_data,
-      new_data);
+    bool has_parent_constraints= false;
+    error= has_parent_foreign_keys(&has_parent_constraints);
+    if (!error && has_parent_constraints)
+      error= mylite_apply_same_row_update_actions(
+          primary_file, storage_schema(), storage_table(), table, old_data,
+          new_data);
     if (error)
       DBUG_RETURN(error);
   }
@@ -2505,13 +2604,20 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
 
   if (!volatile_rows && !mylite_foreign_key_checks_disabled(ha_thd()))
   {
-    error= mylite_check_child_foreign_keys(primary_file, storage_schema(),
-                                           storage_table(), table, new_data);
+    bool has_child_constraints= false;
+    error= has_child_foreign_keys(&has_child_constraints);
+    if (!error && has_child_constraints)
+      error= mylite_check_child_foreign_keys(primary_file, storage_schema(),
+                                             storage_table(), table, new_data);
+
+    bool has_parent_constraints= false;
     if (!error)
+      error= has_parent_foreign_keys(&has_parent_constraints);
+    if (!error && has_parent_constraints)
       error= mylite_apply_parent_foreign_key_actions(
         primary_file, storage_schema(), storage_table(), table, old_data,
         new_data, current_row_id, 0);
-    if (!error)
+    if (!error && has_parent_constraints)
       error= mylite_check_parent_foreign_keys(primary_file, storage_schema(),
                                               storage_table(), table,
                                               old_data, new_data,
@@ -2600,11 +2706,13 @@ int ha_mylite::delete_row(const uchar *buf)
 
   if (!volatile_rows && !mylite_foreign_key_checks_disabled(ha_thd()))
   {
-    int error=
-      mylite_apply_parent_foreign_key_actions(
-        primary_file, storage_schema(), storage_table(), table, buf,
-        NULL, current_row_id, 0);
-    if (!error)
+    bool has_parent_constraints= false;
+    int error= has_parent_foreign_keys(&has_parent_constraints);
+    if (!error && has_parent_constraints)
+      error= mylite_apply_parent_foreign_key_actions(
+          primary_file, storage_schema(), storage_table(), table, buf, NULL,
+          current_row_id, 0);
+    if (!error && has_parent_constraints)
       error= mylite_check_parent_foreign_keys(primary_file, storage_schema(),
                                              storage_table(), table, buf,
                                              NULL, 0);
@@ -2732,13 +2840,9 @@ bool ha_mylite::referenced_by_foreign_key() const noexcept
   if (!primary_file || volatile_rows)
     return false;
 
-  Mylite_foreign_key_presence_context ctx= {false};
-  const mylite_storage_result result=
-    mylite_storage_list_parent_foreign_keys(primary_file, storage_schema(),
-                                            storage_table(),
-                                            mylite_detect_foreign_key_presence,
-                                            &ctx);
-  return ctx.found || result != MYLITE_STORAGE_OK;
+  bool has_parent_constraints= false;
+  const int error= has_parent_foreign_keys(&has_parent_constraints);
+  return error || has_parent_constraints;
 }
 
 enum_alter_inplace_result ha_mylite::check_if_supported_inplace_alter(
@@ -2916,6 +3020,7 @@ int ha_mylite::create(const char *name, TABLE *form, HA_CREATE_INFO *create_info
       DBUG_RETURN(mylite_storage_to_handler_error(auto_result));
   }
 
+  invalidate_foreign_key_presence_cache();
   DBUG_RETURN(0);
 }
 
@@ -2953,7 +3058,10 @@ int ha_mylite::delete_table(const char *name)
     const mylite_storage_result alias_result=
       mylite_volatile_drop_table_alias(primary_file, schema_name, table_name);
     if (alias_result == MYLITE_STORAGE_OK)
+    {
+      invalidate_foreign_key_presence_cache();
       DBUG_RETURN(0);
+    }
     if (alias_result != MYLITE_STORAGE_NOTFOUND)
       DBUG_RETURN(mylite_storage_to_handler_error(alias_result));
 
@@ -2965,7 +3073,10 @@ int ha_mylite::delete_table(const char *name)
 
   const mylite_storage_result volatile_result=
     mylite_volatile_drop_table(primary_file, schema_name, table_name);
-  DBUG_RETURN(mylite_storage_to_handler_error(volatile_result));
+  const int error= mylite_storage_to_handler_error(volatile_result);
+  if (!error)
+    invalidate_foreign_key_presence_cache();
+  DBUG_RETURN(error);
 }
 
 int ha_mylite::rename_table(const char *from, const char *to)
@@ -3028,6 +3139,7 @@ int ha_mylite::rename_table(const char *from, const char *to)
     if (error)
       DBUG_RETURN(error);
   }
+  invalidate_foreign_key_presence_cache();
   DBUG_RETURN(0);
 }
 
