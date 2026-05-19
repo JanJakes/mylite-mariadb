@@ -392,7 +392,13 @@ format, page order, and FNV checksum values stay unchanged. Fresh page encoders
 hash the meaningful prefix and mathematically skip the known-zero tail, while
 decode paths still verify the full page so corruption in unused bytes remains
 detectable. Large overflow payload updates keep the existing per-page writer
-until blob payload batching has its own design.
+until blob payload batching has its own design. Active checkpoints keep a
+bounded transient append-page buffer for those contiguous unpublished page
+runs. Nested statement commits inside a durable transaction can accumulate into
+the outer checkpoint, readers in the same checkpoint consult the buffer before
+the primary file, top-level commit flushes it before publishing page `0`, and
+rollback flushes any retained prefix before truncation while discarding pages
+past the restored checkpoint.
 
 Non-active durable indexed-row reads use a bounded thread-local row-payload
 cache keyed by the primary file header fingerprint and table id. Repeated
@@ -1019,6 +1025,12 @@ pages, and catalog records appended after the checkpoint are no longer visible.
 After rollback finishes, the primary file is truncated to the restored header
 page count, or to the later page count if rollback intentionally republishes
 advancing autoincrement pages.
+When active append pages are still buffered in process memory, rollback first
+flushes any buffered prefix that belongs before the restored page count, drops
+buffered pages after the restored checkpoint, and then uses the same primary
+file truncation rule. That keeps savepoint rollback deterministic even when a
+successful earlier statement in the same transaction has not yet forced its
+append run to disk.
 When the restored checkpoint is an outer durable transaction or a nested direct
 savepoint frame, rollback scans appended autoincrement pages before restoring
 the checkpoint and republishes only advancing values for table IDs that existed

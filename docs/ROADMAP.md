@@ -147,7 +147,11 @@ publish the maintained list on commit, avoiding the first post-commit live-row
 scan when the pre-transaction checkpoint was already cached. The
 common inline update path now writes replacement row, row-state, and
 replacement index-entry pages as one contiguous append run, reducing per-update
-write syscall overhead without changing the durable page format. Fresh page
+write syscall overhead without changing the durable page format. Active
+checkpoints now buffer bounded contiguous append runs across nested statement
+commits and flush them before top-level header publication, reducing large
+transaction update syscall overhead while preserving savepoint rollback by
+flushing retained prefixes before truncation. Fresh page
 encoders now compute the same full-page FNV checksum by hashing the meaningful
 prefix and skipping known-zero tails, reducing append-page CPU cost while read
 paths still verify complete pages. The

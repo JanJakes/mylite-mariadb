@@ -5368,6 +5368,26 @@ static void test_row_dml_transactions(void) {
         "UNIQUE KEY title_key (title)"
         ") ENGINE=InnoDB"
     );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE tx_batch_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(64) NOT NULL, "
+        "UNIQUE KEY title_key (title)"
+        ") ENGINE=InnoDB"
+    );
+    for (unsigned i = 1U; i <= 80U; ++i) {
+        char sql[160];
+        const int written = snprintf(
+            sql,
+            sizeof(sql),
+            "INSERT INTO tx_batch_posts VALUES (%u, 'initial-%u')",
+            i,
+            i
+        );
+        assert(written > 0 && (size_t)written < sizeof(sql));
+        assert_exec_succeeds(db, sql);
+    }
 
     assert_exec_succeeds(
         db,
@@ -6732,6 +6752,55 @@ static void test_row_dml_transactions(void) {
     assert(count.rows == 1);
 
     assert_exec_succeeds(db, "BEGIN");
+    for (unsigned i = 1U; i <= 40U; ++i) {
+        char sql[160];
+        const int written = snprintf(
+            sql,
+            sizeof(sql),
+            "UPDATE tx_batch_posts SET title = 'pre-%u' WHERE id = %u",
+            i,
+            i
+        );
+        assert(written > 0 && (size_t)written < sizeof(sql));
+        assert_exec_succeeds(db, sql);
+    }
+    assert_exec_succeeds(db, "SAVEPOINT buffered_update_sp");
+    for (unsigned i = 41U; i <= 80U; ++i) {
+        char sql[160];
+        const int written = snprintf(
+            sql,
+            sizeof(sql),
+            "UPDATE tx_batch_posts SET title = 'rolled-%u' WHERE id = %u",
+            i,
+            i
+        );
+        assert(written > 0 && (size_t)written < sizeof(sql));
+        assert_exec_succeeds(db, sql);
+    }
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_batch_posts WHERE title LIKE 'rolled-%'",
+        "40"
+    );
+    assert_exec_succeeds(db, "ROLLBACK TO SAVEPOINT buffered_update_sp");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_batch_posts WHERE title LIKE 'rolled-%'",
+        "0"
+    );
+    assert_exec_succeeds(db, "COMMIT");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_batch_posts WHERE title LIKE 'pre-%'",
+        "40"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_batch_posts WHERE title LIKE 'initial-%'",
+        "40"
+    );
+
+    assert_exec_succeeds(db, "BEGIN");
     assert_exec_succeeds(db, "SAVEPOINT `quoted sp`");
     assert_exec_succeeds(db, "INSERT INTO tx_posts VALUES (23, 'quoted-savepoint-after')");
     assert_exec_succeeds(db, "ROLLBACK TO SAVEPOINT `quoted sp`");
@@ -7149,6 +7218,16 @@ static void test_row_dml_transactions(void) {
         MYLITE_OK
     );
     assert(count.rows == 1);
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_batch_posts WHERE title LIKE 'pre-%'",
+        "40"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM tx_batch_posts WHERE title LIKE 'rolled-%'",
+        "0"
+    );
 
     assert_exec_succeeds(db, "SET autocommit=0");
     assert_exec_succeeds(db, "SAVEPOINT autocommit_close_sp");
