@@ -132,7 +132,9 @@ indexed-row batches, with a small row-id index keeping payload cache hits from
 becoming another per-row scan. Row-id batch materialization now reuses the same
 durable row-payload cache for all selected rows, avoiding repeated
 filename/header/table cache discovery while the cache set generation remains
-stable and preserving the same durable-view guards. Published index leaf pages
+stable and preserving the same durable-view guards. BLOB/TEXT index cursors
+stay on the lazy per-row payload path until batch materialization owns BLOB
+payload lifetimes explicitly. Published index leaf pages
 are also cached by durable file header fingerprint so repeated exact leaf-root
 lookups avoid repeating leaf page reads, checksums, and decode work.
 Handler instances now cache proven child and parent foreign-key metadata

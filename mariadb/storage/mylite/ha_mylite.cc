@@ -1408,6 +1408,7 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
                                mylite_key_uses_raw_exact_filter(key_info);
   const bool raw_exact_unique_filter=
       raw_exact_filter && (key_info->flags & HA_NOSAME);
+  const bool materialize_index_rows= !mylite_table_has_blob_fields(table);
   if (discard_rows)
   {
     index_cursor_number= index_number;
@@ -1494,7 +1495,7 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
     index_row_count= 1;
     index_cursor_number= index_number;
     index_cursor_filtered= filter_cursor;
-    if (!inline_durable_row)
+    if (!inline_durable_row && materialize_index_rows)
     {
       int error= materialize_index_cursor_rows(primary_file);
       if (error)
@@ -1503,7 +1504,7 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
         DBUG_RETURN(error);
       }
     }
-    else
+    else if (inline_durable_row)
     {
       row_offsets[0]= 0;
       row_sizes[0]= row_payload_size;
@@ -1618,7 +1619,7 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
   index_cursor_filtered= filter_cursor;
   entryset.keys= NULL;
   mylite_storage_free_index_entryset(&entryset);
-  if (cursor_entry_count > 0)
+  if (cursor_entry_count > 0 && materialize_index_rows)
   {
     error= materialize_index_cursor_rows(primary_file);
     if (error)
