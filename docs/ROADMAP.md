@@ -82,7 +82,9 @@ catalog table-definition, table-list, and existence reads, reducing repeated
 prepared statement table-open validation before cursor execution.
 Durable exact-index cache reads now bulk-grow matching entrysets in one pass,
 removing per-match array reallocations from many-match secondary cursors that do
-not use published leaf roots.
+not use published leaf roots. Exact-index caches now add transient hash buckets
+for repeated exact probes, avoiding full cache scans while preserving result
+order.
 Handler index cursors now materialize
 storage-filtered row ids without repeating per-row row-state visibility scans,
 improving exact secondary reads that return many rows. Durable handler row

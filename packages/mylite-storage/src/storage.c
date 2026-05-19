@@ -82,6 +82,10 @@ typedef struct mylite_storage_exact_index_cache {
     unsigned long long *row_ids;
     size_t count;
     size_t capacity;
+    size_t *bucket_heads;
+    size_t *bucket_next;
+    size_t bucket_count;
+    int buckets_valid;
 } mylite_storage_exact_index_cache;
 
 typedef struct mylite_storage_exact_index_cache_set {
@@ -364,6 +368,7 @@ static _Thread_local mylite_storage_index_leaf_page_cache_set durable_index_leaf
 #define MYLITE_STORAGE_DURABLE_ROW_PAYLOAD_ENTRY_LIMIT 4096U
 #define MYLITE_STORAGE_DURABLE_INDEX_LEAF_PAGE_CACHE_LIMIT 16U
 #define MYLITE_STORAGE_DURABLE_INDEX_LEAF_PAGE_ENTRY_LIMIT 256U
+#define MYLITE_STORAGE_CACHE_BUCKET_EMPTY SIZE_MAX
 
 static mylite_storage_result path_exists(const char *filename, int *exists);
 static mylite_storage_result write_empty_database(FILE *file);
@@ -1313,8 +1318,13 @@ static mylite_storage_result append_cached_durable_exact_index_entries(
     mylite_storage_index_entryset *out_entries,
     int *out_used_cache
 );
+static mylite_storage_result find_exact_index_cache_entry_row_id(
+    mylite_storage_exact_index_cache *cache,
+    const unsigned char *key,
+    unsigned long long *out_row_id
+);
 static mylite_storage_result append_exact_index_cache_matches_to_entryset(
-    const mylite_storage_exact_index_cache *cache,
+    mylite_storage_exact_index_cache *cache,
     const unsigned char *key,
     mylite_storage_index_entryset *out_entries
 );
@@ -1484,6 +1494,16 @@ static void remove_exact_index_cache_entries_by_row_id(
     mylite_storage_exact_index_cache *cache,
     unsigned long long row_id
 );
+static mylite_storage_result ensure_exact_index_cache_buckets(
+    mylite_storage_exact_index_cache *cache
+);
+static size_t exact_index_cache_bucket_for_key(
+    const mylite_storage_exact_index_cache *cache,
+    const unsigned char *key
+);
+static size_t exact_index_cache_bucket_count(size_t entry_count);
+static size_t hash_key_bytes(const unsigned char *key, size_t key_size);
+static void clear_exact_index_cache_buckets(mylite_storage_exact_index_cache *cache);
 static mylite_storage_result append_index_entry_to_entryset(
     mylite_storage_index_entryset *entryset,
     const mylite_storage_index_entry_page *entry_page
@@ -6446,6 +6466,8 @@ static void free_exact_index_cache(mylite_storage_exact_index_cache *cache) {
     free(cache->filename);
     free(cache->keys);
     free(cache->row_ids);
+    free(cache->bucket_heads);
+    free(cache->bucket_next);
     *cache = (mylite_storage_exact_index_cache){0};
 }
 
@@ -11434,15 +11456,7 @@ static mylite_storage_result find_cached_exact_index_entry(
     }
 
     *out_used_cache = 1;
-    *out_row_id = 0ULL;
-    for (size_t i = 0U; i < cache->count; ++i) {
-        const unsigned char *entry_key = cache->keys + (i * cache->key_size);
-        if (memcmp(entry_key, key, cache->key_size) == 0) {
-            *out_row_id = cache->row_ids[i];
-            break;
-        }
-    }
-    return MYLITE_STORAGE_OK;
+    return find_exact_index_cache_entry_row_id(cache, key, out_row_id);
 }
 
 static mylite_storage_result find_cached_durable_exact_index_entry(
@@ -11472,15 +11486,7 @@ static mylite_storage_result find_cached_durable_exact_index_entry(
     }
 
     *out_used_cache = 1;
-    *out_row_id = 0ULL;
-    for (size_t i = 0U; i < cache->count; ++i) {
-        const unsigned char *entry_key = cache->keys + (i * cache->key_size);
-        if (memcmp(entry_key, key, cache->key_size) == 0) {
-            *out_row_id = cache->row_ids[i];
-            break;
-        }
-    }
-    return MYLITE_STORAGE_OK;
+    return find_exact_index_cache_entry_row_id(cache, key, out_row_id);
 }
 
 static mylite_storage_result append_cached_durable_exact_index_entries(
@@ -11513,18 +11519,57 @@ static mylite_storage_result append_cached_durable_exact_index_entries(
     return append_exact_index_cache_matches_to_entryset(cache, key, out_entries);
 }
 
+static mylite_storage_result find_exact_index_cache_entry_row_id(
+    mylite_storage_exact_index_cache *cache,
+    const unsigned char *key,
+    unsigned long long *out_row_id
+) {
+    *out_row_id = 0ULL;
+    if (cache->count == 0U) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    mylite_storage_result result = ensure_exact_index_cache_buckets(cache);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    const size_t bucket_index = exact_index_cache_bucket_for_key(cache, key);
+    for (size_t entry_index = cache->bucket_heads[bucket_index];
+         entry_index != MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+         entry_index = cache->bucket_next[entry_index]) {
+        const unsigned char *entry_key = cache->keys + (entry_index * cache->key_size);
+        if (memcmp(entry_key, key, cache->key_size) == 0) {
+            *out_row_id = cache->row_ids[entry_index];
+            break;
+        }
+    }
+    return MYLITE_STORAGE_OK;
+}
+
 static mylite_storage_result append_exact_index_cache_matches_to_entryset(
-    const mylite_storage_exact_index_cache *cache,
+    mylite_storage_exact_index_cache *cache,
     const unsigned char *key,
     mylite_storage_index_entryset *out_entries
 ) {
     if (cache->key_size == 0U) {
         return MYLITE_STORAGE_CORRUPT;
     }
+    if (cache->count == 0U) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    mylite_storage_result result = ensure_exact_index_cache_buckets(cache);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
 
     size_t match_count = 0U;
-    for (size_t i = 0U; i < cache->count; ++i) {
-        const unsigned char *entry_key = cache->keys + (i * cache->key_size);
+    const size_t bucket_index = exact_index_cache_bucket_for_key(cache, key);
+    for (size_t entry_index = cache->bucket_heads[bucket_index];
+         entry_index != MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+         entry_index = cache->bucket_next[entry_index]) {
+        const unsigned char *entry_key = cache->keys + (entry_index * cache->key_size);
         if (memcmp(entry_key, key, cache->key_size) != 0) {
             continue;
         }
@@ -11540,7 +11585,7 @@ static mylite_storage_result append_exact_index_cache_matches_to_entryset(
     const size_t additional_key_bytes = match_count * cache->key_size;
     size_t first_entry = 0U;
     size_t first_key_offset = 0U;
-    mylite_storage_result result = grow_index_entryset_for_append(
+    result = grow_index_entryset_for_append(
         out_entries,
         match_count,
         additional_key_bytes,
@@ -11552,18 +11597,20 @@ static mylite_storage_result append_exact_index_cache_matches_to_entryset(
     }
 
     size_t match_index = 0U;
-    for (size_t i = 0U; i < cache->count; ++i) {
-        const unsigned char *entry_key = cache->keys + (i * cache->key_size);
+    for (size_t entry_index = cache->bucket_heads[bucket_index];
+         entry_index != MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+         entry_index = cache->bucket_next[entry_index]) {
+        const unsigned char *entry_key = cache->keys + (entry_index * cache->key_size);
         if (memcmp(entry_key, key, cache->key_size) != 0) {
             continue;
         }
 
-        const size_t entry_index = first_entry + match_index;
+        const size_t out_entry_index = first_entry + match_index;
         const size_t key_offset = first_key_offset + (match_index * cache->key_size);
         memcpy(out_entries->keys + key_offset, entry_key, cache->key_size);
-        out_entries->key_offsets[entry_index] = key_offset;
-        out_entries->key_sizes[entry_index] = cache->key_size;
-        out_entries->row_ids[entry_index] = cache->row_ids[i];
+        out_entries->key_offsets[out_entry_index] = key_offset;
+        out_entries->key_sizes[out_entry_index] = cache->key_size;
+        out_entries->row_ids[out_entry_index] = cache->row_ids[entry_index];
         ++match_index;
     }
     out_entries->entry_count = first_entry + match_count;
@@ -12420,6 +12467,7 @@ static mylite_storage_result append_exact_index_cache_entry(
     memcpy(cache->keys + (cache->count * cache->key_size), key, cache->key_size);
     cache->row_ids[cache->count] = row_id;
     ++cache->count;
+    clear_exact_index_cache_buckets(cache);
     return MYLITE_STORAGE_OK;
 }
 
@@ -12443,6 +12491,98 @@ static void remove_exact_index_cache_entries_by_row_id(
         ++write_index;
     }
     cache->count = write_index;
+    clear_exact_index_cache_buckets(cache);
+}
+
+static mylite_storage_result ensure_exact_index_cache_buckets(
+    mylite_storage_exact_index_cache *cache
+) {
+    if (cache->buckets_valid) {
+        return MYLITE_STORAGE_OK;
+    }
+    clear_exact_index_cache_buckets(cache);
+    if (cache->count == 0U) {
+        cache->buckets_valid = 1;
+        return MYLITE_STORAGE_OK;
+    }
+
+    const size_t bucket_count = exact_index_cache_bucket_count(cache->count);
+    if (bucket_count == 0U || bucket_count > SIZE_MAX / sizeof(*cache->bucket_heads) ||
+        cache->count > SIZE_MAX / sizeof(*cache->bucket_next)) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    size_t *bucket_heads = (size_t *)malloc(bucket_count * sizeof(*bucket_heads));
+    if (bucket_heads == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+    size_t *bucket_next = (size_t *)malloc(cache->count * sizeof(*bucket_next));
+    if (bucket_next == NULL) {
+        free(bucket_heads);
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    for (size_t i = 0U; i < bucket_count; ++i) {
+        bucket_heads[i] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+    }
+    for (size_t i = 0U; i < cache->count; ++i) {
+        bucket_next[i] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+    }
+    for (size_t i = cache->count; i > 0U; --i) {
+        const size_t entry_index = i - 1U;
+        const unsigned char *entry_key = cache->keys + (entry_index * cache->key_size);
+        const size_t bucket_index =
+            hash_key_bytes(entry_key, cache->key_size) & (bucket_count - 1U);
+        bucket_next[entry_index] = bucket_heads[bucket_index];
+        bucket_heads[bucket_index] = entry_index;
+    }
+
+    cache->bucket_heads = bucket_heads;
+    cache->bucket_next = bucket_next;
+    cache->bucket_count = bucket_count;
+    cache->buckets_valid = 1;
+    return MYLITE_STORAGE_OK;
+}
+
+static size_t exact_index_cache_bucket_for_key(
+    const mylite_storage_exact_index_cache *cache,
+    const unsigned char *key
+) {
+    return hash_key_bytes(key, cache->key_size) & (cache->bucket_count - 1U);
+}
+
+static size_t exact_index_cache_bucket_count(size_t entry_count) {
+    if (entry_count > SIZE_MAX / 2U) {
+        return 0U;
+    }
+
+    const size_t target_count = entry_count * 2U;
+    size_t bucket_count = 16U;
+    while (bucket_count < target_count) {
+        if (bucket_count > SIZE_MAX / 2U) {
+            return 0U;
+        }
+        bucket_count *= 2U;
+    }
+    return bucket_count;
+}
+
+static size_t hash_key_bytes(const unsigned char *key, size_t key_size) {
+    uint64_t hash = 1469598103934665603ULL;
+    for (size_t i = 0U; i < key_size; ++i) {
+        hash ^= key[i];
+        hash *= 1099511628211ULL;
+    }
+    return (size_t)hash;
+}
+
+static void clear_exact_index_cache_buckets(mylite_storage_exact_index_cache *cache) {
+    free(cache->bucket_heads);
+    free(cache->bucket_next);
+    cache->bucket_heads = NULL;
+    cache->bucket_next = NULL;
+    cache->bucket_count = 0U;
+    cache->buckets_valid = 0;
 }
 
 static mylite_storage_result append_index_entry_to_entryset(

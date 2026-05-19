@@ -1510,6 +1510,14 @@ static void test_cached_exact_index_entryset_bulk_append(void) {
     }
     mylite_storage_free_index_entryset(&entries);
 
+    assert_index_entry_lookup(
+        filename,
+        1U,
+        duplicate_key,
+        sizeof(duplicate_key),
+        MYLITE_STORAGE_OK,
+        expected_row_ids[0]
+    );
     assert_exact_index_entries(filename, 1U, missing_key, sizeof(missing_key), NULL, 0U);
 
     assert(unlink(filename) == 0);
