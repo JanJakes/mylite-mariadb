@@ -1406,6 +1406,13 @@ static mylite_storage_result append_index_entry_to_entryset(
     mylite_storage_index_entryset *entryset,
     const mylite_storage_index_entry_page *entry_page
 );
+static mylite_storage_result grow_index_entryset_for_append(
+    mylite_storage_index_entryset *entryset,
+    size_t additional_entry_count,
+    size_t additional_key_bytes,
+    size_t *out_first_entry,
+    size_t *out_first_key_offset
+);
 static void remove_index_entries_by_row_id(
     mylite_storage_index_entryset *entryset,
     unsigned long long row_id
@@ -9410,23 +9417,49 @@ static mylite_storage_result append_index_leaf_matches_to_entryset(
         }
     }
 
+    size_t match_count = 0U;
     for (size_t i = lower; i < leaf_page->entry_count; ++i) {
         if (compare_leaf_key(leaf_page, i, key, key_size) != 0) {
             break;
         }
-        const mylite_storage_index_entry_page entry_page = {
-            .table_id = leaf_page->table_id,
-            .row_id = index_leaf_entry_row_id(leaf_page, i),
-            .index_number = leaf_page->index_number,
-            .key_size = leaf_page->key_size,
-            .key = index_leaf_entry_key(leaf_page, i),
-        };
-        const mylite_storage_result result =
-            append_index_entry_to_entryset(out_entries, &entry_page);
-        if (result != MYLITE_STORAGE_OK) {
-            return result;
-        }
+        ++match_count;
     }
+    if (match_count == 0U) {
+        return MYLITE_STORAGE_OK;
+    }
+    if (key_size != 0U && match_count > SIZE_MAX / key_size) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    const size_t additional_key_bytes = match_count * key_size;
+    size_t first_entry = 0U;
+    size_t first_key_offset = 0U;
+    mylite_storage_result result = grow_index_entryset_for_append(
+        out_entries,
+        match_count,
+        additional_key_bytes,
+        &first_entry,
+        &first_key_offset
+    );
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    for (size_t i = 0U; i < match_count; ++i) {
+        const size_t leaf_entry = lower + i;
+        const size_t entry_index = first_entry + i;
+        const size_t key_offset = first_key_offset + (i * key_size);
+        memcpy(
+            out_entries->keys + key_offset,
+            index_leaf_entry_key(leaf_page, leaf_entry),
+            key_size
+        );
+        out_entries->key_offsets[entry_index] = key_offset;
+        out_entries->key_sizes[entry_index] = key_size;
+        out_entries->row_ids[entry_index] = index_leaf_entry_row_id(leaf_page, leaf_entry);
+    }
+    out_entries->entry_count = first_entry + match_count;
+    out_entries->key_bytes = first_key_offset + additional_key_bytes;
     return MYLITE_STORAGE_OK;
 }
 
@@ -11608,50 +11641,75 @@ static mylite_storage_result append_index_entry_to_entryset(
     mylite_storage_index_entryset *entryset,
     const mylite_storage_index_entry_page *entry_page
 ) {
-    if (entryset->entry_count == SIZE_MAX ||
-        entry_page->key_size > SIZE_MAX - entryset->key_bytes) {
+    size_t entry_index = 0U;
+    size_t key_offset = 0U;
+    mylite_storage_result result = grow_index_entryset_for_append(
+        entryset,
+        1U,
+        entry_page->key_size,
+        &entry_index,
+        &key_offset
+    );
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    memcpy(entryset->keys + key_offset, entry_page->key, entry_page->key_size);
+    entryset->key_offsets[entry_index] = key_offset;
+    entryset->key_sizes[entry_index] = entry_page->key_size;
+    entryset->row_ids[entry_index] = entry_page->row_id;
+    entryset->entry_count = entry_index + 1U;
+    entryset->key_bytes = key_offset + entry_page->key_size;
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result grow_index_entryset_for_append(
+    mylite_storage_index_entryset *entryset,
+    size_t additional_entry_count,
+    size_t additional_key_bytes,
+    size_t *out_first_entry,
+    size_t *out_first_key_offset
+) {
+    if (entryset->entry_count > SIZE_MAX - additional_entry_count ||
+        entryset->key_bytes > SIZE_MAX - additional_key_bytes) {
         return MYLITE_STORAGE_FULL;
     }
 
-    const size_t new_entry_count = entryset->entry_count + 1U;
-    const size_t new_key_bytes = entryset->key_bytes + entry_page->key_size;
+    const size_t new_entry_count = entryset->entry_count + additional_entry_count;
+    const size_t new_key_bytes = entryset->key_bytes + additional_key_bytes;
     if (new_entry_count > SIZE_MAX / sizeof(size_t) ||
         new_entry_count > SIZE_MAX / sizeof(unsigned long long)) {
         return MYLITE_STORAGE_FULL;
     }
 
     unsigned char *keys = (unsigned char *)realloc(entryset->keys, new_key_bytes);
-    if (keys == NULL) {
+    if (keys == NULL && new_key_bytes != 0U) {
         return MYLITE_STORAGE_NOMEM;
     }
     entryset->keys = keys;
 
     size_t *key_offsets =
         (size_t *)realloc(entryset->key_offsets, new_entry_count * sizeof(size_t));
-    if (key_offsets == NULL) {
+    if (key_offsets == NULL && new_entry_count != 0U) {
         return MYLITE_STORAGE_NOMEM;
     }
     entryset->key_offsets = key_offsets;
 
     size_t *key_sizes = (size_t *)realloc(entryset->key_sizes, new_entry_count * sizeof(size_t));
-    if (key_sizes == NULL) {
+    if (key_sizes == NULL && new_entry_count != 0U) {
         return MYLITE_STORAGE_NOMEM;
     }
     entryset->key_sizes = key_sizes;
 
     unsigned long long *row_ids = (unsigned long long *)
         realloc(entryset->row_ids, new_entry_count * sizeof(unsigned long long));
-    if (row_ids == NULL) {
+    if (row_ids == NULL && new_entry_count != 0U) {
         return MYLITE_STORAGE_NOMEM;
     }
     entryset->row_ids = row_ids;
 
-    memcpy(entryset->keys + entryset->key_bytes, entry_page->key, entry_page->key_size);
-    entryset->key_offsets[entryset->entry_count] = entryset->key_bytes;
-    entryset->key_sizes[entryset->entry_count] = entry_page->key_size;
-    entryset->row_ids[entryset->entry_count] = entry_page->row_id;
-    entryset->entry_count = new_entry_count;
-    entryset->key_bytes = new_key_bytes;
+    *out_first_entry = entryset->entry_count;
+    *out_first_key_offset = entryset->key_bytes;
     return MYLITE_STORAGE_OK;
 }
 

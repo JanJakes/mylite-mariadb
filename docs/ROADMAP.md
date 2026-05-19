@@ -88,7 +88,9 @@ leaf-root lookups avoid repeating leaf page reads, checksums, and decode work.
 Handler instances now cache proven child and parent foreign-key metadata
 absence for opened tables, removing repeated no-op FK catalog scans from
 ordinary non-FK row-DML paths, with successful local table DDL invalidating
-already-open handler caches through a process-wide FK metadata epoch.
+already-open handler caches through a process-wide FK metadata epoch. Published
+leaf-root exact reads now bulk-grow matching entrysets per leaf page, removing
+per-row-id array reallocations from many-match secondary lookups.
 
 ## Size And Profile Direction
 

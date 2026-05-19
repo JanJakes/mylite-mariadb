@@ -296,8 +296,10 @@ invalidation.
 Non-active durable index-leaf reads use the same file header fingerprint model
 for a bounded thread-local leaf page cache. Published leaf-root exact lookups
 can reuse validated leaf pages without repeating the file read, checksum, and
-decode work for every cursor build. The cache is disabled for active statements
-and read snapshots, and it is cleared by durable mutation invalidation.
+decode work for every cursor build. Exact leaf-page matches bulk-grow their
+index entryset result arrays once per matching leaf page instead of reallocating
+per matched row id. The cache is disabled for active statements and read
+snapshots, and it is cleared by durable mutation invalidation.
 
 MariaDB handler instances also cache proven child and parent foreign-key
 metadata absence for their opened table. Ordinary non-FK row-DML paths use that
