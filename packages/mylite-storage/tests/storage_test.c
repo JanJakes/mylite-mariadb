@@ -43,6 +43,7 @@ typedef struct index_entries_test_context {
 
 typedef struct statement_checkpoint_test_context {
     const char *filename;
+    const char *journal_filename;
     const unsigned char *row_1;
     size_t row_1_size;
     const unsigned char *row_2;
@@ -2536,6 +2537,7 @@ static void test_statement_checkpoints(void) {
     static const unsigned char key_2[] = {0x02U};
     char *root = make_temp_root();
     char *filename = path_join(root, "statement-checkpoint.mylite");
+    char *journal_filename = journal_path(filename);
     mylite_storage_table_definition table_definition = {
         .size = sizeof(table_definition),
         .schema_name = "app",
@@ -2568,6 +2570,7 @@ static void test_statement_checkpoints(void) {
     };
     statement_checkpoint_test_context ctx = {
         .filename = filename,
+        .journal_filename = journal_filename,
         .row_1 = row_1,
         .row_1_size = sizeof(row_1),
         .row_2 = row_2,
@@ -2590,6 +2593,7 @@ static void test_statement_checkpoints(void) {
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
+    free(journal_filename);
     free(filename);
     free(root);
 }
@@ -2618,11 +2622,13 @@ static void assert_statement_checkpoint_rolls_back_row(statement_checkpoint_test
             &ctx->row_1_id
         ) == MYLITE_STORAGE_OK
     );
+    assert(access(ctx->journal_filename, F_OK) == 0);
     assert(
         mylite_storage_count_rows(ctx->filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK
     );
     assert(row_count == 1ULL);
     assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
+    assert_file_missing(ctx->journal_filename);
     assert(!mylite_storage_statement_active(ctx->filename));
     assert(file_size(ctx->filename) == checkpoint_file_size);
     assert_file_size_matches_header(ctx->filename);
@@ -2661,7 +2667,9 @@ static void assert_statement_checkpoint_commits_row(statement_checkpoint_test_co
             &ctx->row_1_id
         ) == MYLITE_STORAGE_OK
     );
+    assert(access(ctx->journal_filename, F_OK) == 0);
     assert(mylite_storage_commit_statement(statement) == MYLITE_STORAGE_OK);
+    assert_file_missing(ctx->journal_filename);
     assert(!mylite_storage_statement_active(ctx->filename));
 
     assert(
@@ -3129,6 +3137,7 @@ static void assert_transaction_journal_commits(const transaction_journal_test_co
             &row_id
         ) == MYLITE_STORAGE_OK
     );
+    assert_file_missing(ctx->journal_filename);
     assert(mylite_storage_commit_statement(transaction) == MYLITE_STORAGE_OK);
     assert_file_missing(ctx->transaction_journal_filename);
     assert(mylite_storage_read_rows(ctx->filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
@@ -3167,6 +3176,7 @@ static void assert_transaction_journal_rolls_back(const transaction_journal_test
             &row_id
         ) == MYLITE_STORAGE_OK
     );
+    assert_file_missing(ctx->journal_filename);
     assert(mylite_storage_rollback_statement(transaction) == MYLITE_STORAGE_OK);
     assert_file_missing(ctx->transaction_journal_filename);
     assert_file_size_matches_header(ctx->filename);

@@ -4052,6 +4052,26 @@ static int mylite_check_duplicate_keys(
         mylite_unique_key_allows_duplicate_null(table, key_info, buf))
       continue;
 
+    if (!(key_info->flags & HA_NULL_PART_KEY) &&
+        index_entries[i].key_size == key_info->key_length &&
+        mylite_key_uses_raw_exact_filter(key_info))
+    {
+      ulonglong row_id= 0ULL;
+      const mylite_storage_result storage_result=
+          mylite_storage_find_index_entry(primary_file, schema_name,
+                                          table_name, i, index_entries[i].key,
+                                          index_entries[i].key_size, &row_id);
+      if (storage_result == MYLITE_STORAGE_NOTFOUND)
+        continue;
+      if (storage_result != MYLITE_STORAGE_OK)
+        return mylite_storage_to_handler_error(storage_result);
+      if (skip_row_id && row_id == skip_row_id)
+        continue;
+
+      *out_duplicate_key= i;
+      return HA_ERR_FOUND_DUPP_KEY;
+    }
+
     mylite_storage_index_entryset entryset= {sizeof(entryset), NULL, 0, 0};
     const mylite_storage_result storage_result=
       mylite_storage_read_index_entries(primary_file, schema_name, table_name,
@@ -4103,6 +4123,26 @@ static int mylite_check_volatile_duplicate_keys(
     if (!(key_info->flags & HA_NOSAME) ||
         mylite_unique_key_allows_duplicate_null(table, key_info, buf))
       continue;
+
+    if (!(key_info->flags & HA_NULL_PART_KEY) &&
+        index_entries[i].key_size == key_info->key_length &&
+        mylite_key_uses_raw_exact_filter(key_info))
+    {
+      ulonglong row_id= 0ULL;
+      const mylite_storage_result storage_result=
+          mylite_volatile_find_index_entry(primary_file, schema_name,
+                                           table_name, i, index_entries[i].key,
+                                           index_entries[i].key_size, &row_id);
+      if (storage_result == MYLITE_STORAGE_NOTFOUND)
+        continue;
+      if (storage_result != MYLITE_STORAGE_OK)
+        return mylite_storage_to_handler_error(storage_result);
+      if (skip_row_id && row_id == skip_row_id)
+        continue;
+
+      *out_duplicate_key= i;
+      return HA_ERR_FOUND_DUPP_KEY;
+    }
 
     mylite_storage_index_entryset entryset= {sizeof(entryset), NULL, 0, 0};
     const mylite_storage_result storage_result=

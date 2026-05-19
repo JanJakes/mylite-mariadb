@@ -52,6 +52,13 @@ errors, and preserve upstream registration conventions.
 This split keeps catalog, page, transaction, lock, and recovery code outside the
 MariaDB import while limiting the long-lived fork delta under `mariadb/`.
 
+Active file-backed statements and transactions are storage checkpoints. The
+storage layer keeps their mutable header state in memory and publishes page `0`
+only at checkpoint commit, rollback, or savepoint propagation boundaries.
+Ordinary active statements reuse one recovery journal for the checkpoint, while
+active durable transactions use their transaction journal instead of creating a
+normal recovery journal per row append.
+
 The initial handler is opt-in. It is disabled in the default embedded baseline
 and covered by a separate storage smoke build. That build verifies the
 `MYLITE` row from `SHOW ENGINES`, explicit `CREATE TABLE ... ENGINE=MYLITE`
@@ -652,10 +659,13 @@ opportunistically publish supported fixed-width leaf roots when catalog headroom
 allows, while generated FK helper keys plus rename/drop rebuilds keep using the
 scan fallback. Cursors check
 `index_next_same()` boundaries before row materialization and reconstruct only
-the selected row buffer from row pages. This provides correct indexed insert,
-lookup, update, delete, reopen, and copy `ALTER` behavior for the supported
-shapes, but it is still an interim performance structure because maintained
-B-tree navigation is not implemented. Standalone
+the selected row buffer from row pages. Active checkpoints reuse statement
+journals, defer header publication to checkpoint boundaries, and cache guarded
+exact duplicate-key probes during root active checkpoints. This provides correct
+indexed insert, lookup, update, delete, reopen, and copy `ALTER` behavior for
+the supported shapes, but it is still an interim performance structure because
+maintained B-tree navigation and pager-style write paths are not implemented.
+Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, multi-page catalog storage, free-space reclamation,
 multi-statement transaction

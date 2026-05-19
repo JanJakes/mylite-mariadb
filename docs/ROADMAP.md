@@ -57,7 +57,12 @@ pages, and contiguous leaf runs now serve exact byte-key base snapshots with
 page-range lookup and append-tail visibility overlay. SQL copy-rebuild DDL now
 opportunistically
 publishes those roots for explicit fixed-width `CREATE INDEX` and
-`ALTER TABLE ... ADD KEY` paths when catalog headroom allows.
+`ALTER TABLE ... ADD KEY` paths when catalog headroom allows. Active checkpoint
+write amortization now reuses one statement recovery journal, defers header
+publication to checkpoint boundaries, and caches guarded exact duplicate-key
+probes during root active checkpoints. This materially improves explicit
+fixed-width index publication, while SQLite-like row-write performance still
+requires the planned navigable index and pager work.
 
 ## Size And Profile Direction
 
