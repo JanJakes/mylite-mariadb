@@ -3237,6 +3237,67 @@ mylite_storage_result mylite_storage_read_indexed_row(
     return read_row_payload(filename, schema_name, table_name, row_id, 0, out_row, out_row_size);
 }
 
+mylite_storage_result mylite_storage_read_indexed_rows(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    const unsigned long long *row_ids,
+    size_t row_id_count,
+    mylite_storage_rowset *out_rows
+) {
+    if (filename == NULL || filename[0] == '\0' || schema_name == NULL || schema_name[0] == '\0' ||
+        table_name == NULL || table_name[0] == '\0' || out_rows == NULL ||
+        (row_id_count > 0U && row_ids == NULL)) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    *out_rows = (mylite_storage_rowset){
+        .size = sizeof(*out_rows),
+    };
+    if (row_id_count == 0U) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    FILE *file = NULL;
+    mylite_storage_result result = open_existing_file(filename, &file);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_header header = {0};
+    unsigned long long table_id = 0ULL;
+    result = read_header(file, &header);
+    if (result == MYLITE_STORAGE_OK) {
+        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+    }
+    for (size_t i = 0U; result == MYLITE_STORAGE_OK && i < row_id_count; ++i) {
+        const unsigned long long row_id = row_ids[i];
+        mylite_storage_row_page row_page = {0};
+        unsigned char row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        if (row_id <= header.catalog_root_page || row_id >= header.page_count) {
+            result = MYLITE_STORAGE_NOTFOUND;
+        }
+        if (result == MYLITE_STORAGE_OK) {
+            result = read_row_page(file, &header, row_id, row_buffer, &row_page);
+        }
+        if (result == MYLITE_STORAGE_OK && row_page.table_id != table_id) {
+            result = MYLITE_STORAGE_NOTFOUND;
+        }
+        if (result == MYLITE_STORAGE_OK) {
+            result = append_row_to_rowset(out_rows, row_id, row_page.payload, row_page.row_size);
+        }
+        free(row_page.owned_payload);
+    }
+
+    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    if (result != MYLITE_STORAGE_OK) {
+        mylite_storage_free_rowset(out_rows);
+    }
+    return result;
+}
+
 static mylite_storage_result read_row_payload(
     const char *filename,
     const char *schema_name,

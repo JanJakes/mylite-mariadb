@@ -270,6 +270,12 @@ validation uses direct row-id visibility checks over later row-state pages, so
 single-row DML no longer rebuilds a full table row-state map just to prove the
 current row is live.
 
+Durable handler index cursors materialize their matching row payloads in one
+ordered batch after cursor construction. This keeps repeated secondary cursor
+reads from reopening the primary file and revalidating header/catalog state for
+each row while the storage layer still works from the same single `.mylite`
+file and the same live row ids returned by index-entry reads.
+
 The catalog stores:
 
 - schemas,

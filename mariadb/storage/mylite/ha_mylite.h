@@ -52,6 +52,9 @@ class ha_mylite: public handler
   unsigned char *record_blob_payloads[2];
   unsigned char *index_keys;
   Mylite_index_cursor_entry *index_entries;
+  unsigned char *index_rows;
+  size_t *index_row_offsets;
+  size_t *index_row_sizes;
   char storage_schema_name[NAME_LEN + 1];
   char storage_table_name[NAME_LEN + 1];
   char display_engine_name[NAME_LEN + 1];
@@ -61,6 +64,7 @@ class ha_mylite: public handler
   size_t scan_row_index;
   size_t scan_blob_payloads_size;
   size_t record_blob_payloads_size[2];
+  size_t index_row_bytes;
   size_t index_row_count;
   size_t index_row_index;
   uint index_cursor_number;
@@ -78,6 +82,7 @@ class ha_mylite: public handler
   const char *storage_table() const;
   int build_index_cursor(uint index_number, const uchar *key_filter,
                          uint key_filter_length);
+  int materialize_index_cursor_rows(const char *primary_file);
   int read_index_cursor_row(uchar *buf, size_t row_index);
   int record_blob_payload_slot(const uchar *buf, size_t *out_slot) const;
   int preserve_record_blob_payloads(uchar *buf);

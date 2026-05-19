@@ -135,6 +135,13 @@ static void assert_exact_index_entries(
     const unsigned long long *expected_row_ids,
     size_t expected_count
 );
+static void assert_indexed_rows_equal(
+    const char *filename,
+    const unsigned long long *row_ids,
+    size_t row_id_count,
+    const unsigned char *const *expected_rows,
+    const size_t *expected_row_sizes
+);
 static void append_index_entry_test_rows(index_entries_test_context *ctx);
 static void assert_primary_index_entries_after_insert(const index_entries_test_context *ctx);
 static void update_index_entry_test_row(index_entries_test_context *ctx);
@@ -1298,6 +1305,15 @@ static void test_index_entries(void) {
         title_a_row_ids,
         sizeof(title_a_row_ids) / sizeof(title_a_row_ids[0])
     );
+    const unsigned char *const title_a_rows[] = {row_1, row_2};
+    const size_t title_a_row_sizes[] = {sizeof(row_1), sizeof(row_2)};
+    assert_indexed_rows_equal(
+        filename,
+        title_a_row_ids,
+        sizeof(title_a_row_ids) / sizeof(title_a_row_ids[0]),
+        title_a_rows,
+        title_a_row_sizes
+    );
     assert_exact_index_entries(filename, 0U, key_9, sizeof(key_9), NULL, 0U);
     update_index_entry_test_row(&ctx);
     const unsigned long long title_a_after_update_row_ids[] = {ctx.row_2_id};
@@ -1382,6 +1398,13 @@ static void test_index_entries(void) {
             &misuse_entries
         ) == MYLITE_STORAGE_MISUSE
     );
+    mylite_storage_rowset misuse_rows = {
+        .size = sizeof(misuse_rows),
+    };
+    assert(
+        mylite_storage_read_indexed_rows(filename, "app", "posts", NULL, 1U, &misuse_rows) ==
+        MYLITE_STORAGE_MISUSE
+    );
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
@@ -1460,6 +1483,34 @@ static void assert_exact_index_entries(
         assert_index_entry(&index_entries, i, expected_row_ids[i], key, key_size);
     }
     mylite_storage_free_index_entryset(&index_entries);
+}
+
+static void assert_indexed_rows_equal(
+    const char *filename,
+    const unsigned long long *row_ids,
+    size_t row_id_count,
+    const unsigned char *const *expected_rows,
+    const size_t *expected_row_sizes
+) {
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+
+    assert(
+        mylite_storage_read_indexed_rows(filename, "app", "posts", row_ids, row_id_count, &rows) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(rows.row_count == row_id_count);
+    for (size_t i = 0U; i < row_id_count; ++i) {
+        assert(rows.row_ids[i] == row_ids[i]);
+        assert(rows.row_sizes[i] == expected_row_sizes[i]);
+        assert(rows.row_offsets[i] <= rows.row_bytes);
+        assert(rows.row_sizes[i] <= rows.row_bytes - rows.row_offsets[i]);
+        assert(
+            memcmp(rows.rows + rows.row_offsets[i], expected_rows[i], expected_row_sizes[i]) == 0
+        );
+    }
+    mylite_storage_free_rowset(&rows);
 }
 
 static void append_index_entry_test_rows(index_entries_test_context *ctx) {

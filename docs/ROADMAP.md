@@ -73,7 +73,10 @@ published roots while preserving active-checkpoint visibility rules. Active
 checkpoint exact-index caches are now maintained across update/delete mutations,
 and update/delete validation uses direct row-id visibility checks instead of
 rebuilding full row-state maps. SQLite-like row-write and point-read performance
-still requires the planned navigable index and pager work.
+still requires the planned navigable index and pager work. Durable handler
+index cursors also materialize their current row payloads in one ordered batch,
+removing repeated per-row file open/header/catalog overhead from secondary
+cursor reads while maintained navigable indexes are still pending.
 
 ## Size And Profile Direction
 
