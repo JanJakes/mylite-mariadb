@@ -126,8 +126,11 @@ cursor reads while maintained navigable indexes are still pending. Active
 checkpoints now cache row ids proven live by the active view, plus a stronger
 payload-validated row-id set, so handler-driven update/delete validation avoids
 old row-page rereads when the row payload was already validated and avoids
-rescanning later row-state pages for visibility-only index proofs. Non-active
-durable indexed-row reads now cache row payloads by file header fingerprint,
+rescanning later row-state pages for visibility-only index proofs. Active
+checkpoints also cache indexed row payloads after materialization and replace
+those cached payloads after successful updates, reducing repeated row-page
+reads in transaction-local update loops. Non-active durable indexed-row reads
+now cache row payloads by file header fingerprint,
 reducing repeated secondary cursor row-page checksums. The
 common inline update path now writes replacement row, row-state, and
 replacement index-entry pages as one contiguous append run, reducing per-update

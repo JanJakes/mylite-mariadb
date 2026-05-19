@@ -66,7 +66,12 @@ metadata; catalog root writes and catalog-generation header changes invalidate
 the active statement chain before later metadata reads. Row append, update,
 delete, truncate, and autoincrement publication paths publish decoded headers
 directly into the active checkpoint instead of encoding and immediately
-decoding page `0`.
+decoding page `0`. Active checkpoints also keep a transaction-local row-payload
+cache for indexed row reads, replacing cached payloads after successful updates
+and dropping them after deletes, savepoint rollback, truncate, or catalog
+invalidation. This lets repeated handler-driven updates reuse the current row
+image without rereading and rechecksumming the row page while preserving the
+same rollback and visibility rules.
 
 Durable index cursor construction opens a scoped storage read session while the
 handler finds matching index row ids and materializes the selected row payload
