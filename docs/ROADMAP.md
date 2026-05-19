@@ -80,6 +80,9 @@ shared locks between cursor builds.
 MariaDB table-discovery callbacks now use the same scoped read sessions for
 catalog table-definition, table-list, and existence reads, reducing repeated
 prepared statement table-open validation before cursor execution.
+File-backed `libmylite` sessions now default `use_stat_tables=NEVER`, avoiding
+repeated MariaDB persistent `mysql.*_stats` table discovery for ordinary query
+planning until MyLite has file-owned statistics.
 Durable exact-index cache reads now bulk-grow matching entrysets in one pass,
 removing per-match array reallocations from many-match secondary cursors that do
 not use published leaf roots. Exact-index caches now add transient hash buckets

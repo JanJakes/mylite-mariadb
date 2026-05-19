@@ -161,6 +161,7 @@ typedef struct catalog_table_context {
 } catalog_table_context;
 
 static void test_show_engines_reports_mylite(void);
+static void test_embedded_session_defaults(void);
 static void test_unsupported_engine_request_policy(void);
 static void test_transactional_engine_flags(void);
 static void test_blackhole_engine_routes_to_mylite(void);
@@ -552,6 +553,7 @@ int main(int argc, char **argv) {
     g_test_program_path = argv[0];
 
     test_show_engines_reports_mylite();
+    test_embedded_session_defaults();
     test_unsupported_engine_request_policy();
     test_transactional_engine_flags();
     test_blackhole_engine_routes_to_mylite();
@@ -685,6 +687,19 @@ static void test_show_engines_reports_mylite(void) {
     assert_catalog_table_metadata(filename, "app", "seq_1_to_10", "DEFAULT", "MYLITE");
     assert_exec_succeeds(db, "INSERT INTO seq_1_to_10 VALUES (42)");
     assert_query_single_value(db, "SELECT seq FROM seq_1_to_10", "42");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_embedded_session_defaults(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_query_single_value(db, "SELECT @@session.use_stat_tables", "NEVER");
 
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);

@@ -6983,7 +6983,8 @@ int configure_connection(mylite_db &database) {
 
     if (mysql_query(&database.mysql, "SET SESSION sql_mode=''") != 0 ||
         mysql_query(&database.mysql, "SET SESSION default_storage_engine=MYLITE") != 0 ||
-        mysql_query(&database.mysql, "SET SESSION enforce_storage_engine=MYLITE") != 0) {
+        mysql_query(&database.mysql, "SET SESSION enforce_storage_engine=MYLITE") != 0 ||
+        mysql_query(&database.mysql, "SET SESSION use_stat_tables=NEVER") != 0) {
         set_mariadb_error(database);
         return MYLITE_ERROR;
     }

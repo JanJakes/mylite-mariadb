@@ -628,7 +628,10 @@ The default embedded profile does not expose server account administration,
 dynamic plugin installation, replication metadata, or the event scheduler.
 `information_schema` remains virtual. Any required `mysql.*` system surface
 must be implemented as MyLite-backed metadata or a read-only virtual surface,
-not as Aria tables in a datadir.
+not as Aria tables in a datadir. File-backed `libmylite` sessions therefore
+default `use_stat_tables=NEVER`, so ordinary query planning does not repeatedly
+open inherited persistent `mysql.*_stats` tables that are not MyLite-owned
+state.
 
 ## Rows And Indexes
 
