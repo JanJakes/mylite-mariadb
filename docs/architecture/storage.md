@@ -350,6 +350,11 @@ ids and add replacement row ids. Non-checkpointed direct storage calls keep the
 row-page and row-state scan path, and truncate/catalog invalidation or
 savepoint rollback clears cached live rows.
 
+Small inline row updates append the replacement row page, row-state page, and
+replacement index-entry pages as one contiguous page run. The durable page
+format and page order stay unchanged; large overflow payload updates keep the
+existing per-page writer until blob payload batching has its own design.
+
 Non-active durable indexed-row reads use a bounded thread-local row-payload
 cache keyed by the primary file header fingerprint and table id. Repeated
 secondary cursor materialization can reuse payloads that were already read and

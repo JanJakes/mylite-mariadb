@@ -129,6 +129,9 @@ old row-page rereads when the row payload was already validated and avoids
 rescanning later row-state pages for visibility-only index proofs. Non-active
 durable indexed-row reads now cache row payloads by file header fingerprint,
 reducing repeated secondary cursor row-page checksums. The
+common inline update path now writes replacement row, row-state, and
+replacement index-entry pages as one contiguous append run, reducing per-update
+write syscall overhead without changing the durable page format. The
 internal rowset builder avoids per-row metadata reallocations during known
 indexed-row batches, with a small row-id index keeping payload cache hits from
 becoming another per-row scan. Row-id batch materialization now reuses the same
