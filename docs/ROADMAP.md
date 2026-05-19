@@ -74,6 +74,9 @@ primary-file header and catalog root for point lookups and exact-index cursor
 builds. Repeated read statements over unchanged durable header/catalog bytes
 also reuse a thread-local decoded checkpoint snapshot after raw page comparison,
 avoiding repeated header/catalog checksum validation on hot point-select loops.
+MariaDB table-discovery callbacks now use the same scoped read sessions for
+catalog table-definition, table-list, and existence reads, reducing repeated
+prepared statement table-open validation before cursor execution.
 Handler index cursors now materialize
 storage-filtered row ids without repeating per-row row-state visibility scans,
 improving exact secondary reads that return many rows. Durable handler row

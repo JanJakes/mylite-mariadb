@@ -83,6 +83,11 @@ match a previously validated snapshot, it reuses the decoded header/catalog
 state instead of checksumming the same pages again. If either page differs,
 normal validation runs and replaces the cache.
 
+MariaDB table-discovery callbacks also use scoped read sessions while they read
+table definitions, discovered table names, or table existence from the MyLite
+catalog. This keeps table-open discovery on the same cached checkpoint view as
+cursor construction without extending read locks across the SQL statement.
+
 The initial handler is opt-in. It is disabled in the default embedded baseline
 and covered by a separate storage smoke build. That build verifies the
 `MYLITE` row from `SHOW ENGINES`, explicit `CREATE TABLE ... ENGINE=MYLITE`
@@ -310,6 +315,10 @@ Repeated read statements over an unchanged file also reuse a thread-local
 decoded checkpoint snapshot after comparing raw header and catalog bytes. This
 keeps repeated point-select statements from paying header/catalog checksum
 costs when no storage page publication changed the durable view.
+
+Catalog discovery for table-open flows uses the same scoped read-session cache,
+so repeated prepared statements avoid a separate header/catalog validation path
+before the handler reaches the index cursor.
 
 Active storage checkpoints also maintain a live-row validation cache per table
 and catalog generation. Rows proven live by visibility-checked storage reads,

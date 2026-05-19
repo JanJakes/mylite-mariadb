@@ -934,6 +934,10 @@ static int mylite_discover_table(handlerton *, THD *thd, TABLE_SHARE *share)
   if (path_error)
     DBUG_RETURN(path_error);
 
+  Mylite_read_statement_scope read_scope(primary_file, true);
+  if (read_scope.error())
+    DBUG_RETURN(read_scope.error());
+
   unsigned char *frm= NULL;
   size_t frm_len= 0;
   mylite_storage_result storage_result=
@@ -957,6 +961,10 @@ static int mylite_discover_table_names(handlerton *, const LEX_CSTRING *db,
   if (!primary_file)
     DBUG_RETURN(0);
 
+  Mylite_read_statement_scope read_scope(primary_file, true);
+  if (read_scope.error())
+    DBUG_RETURN(1);
+
   Mylite_discover_context ctx= {result};
   mylite_storage_result storage_result=
     mylite_storage_list_tables(primary_file, db->str, mylite_add_discovered_table,
@@ -971,6 +979,10 @@ static int mylite_discover_table_existence(handlerton *, const char *db,
 
   const char *primary_file= mylite_primary_file_path();
   if (!primary_file)
+    DBUG_RETURN(0);
+
+  Mylite_read_statement_scope read_scope(primary_file, true);
+  if (read_scope.error())
     DBUG_RETURN(0);
 
   mylite_storage_result storage_result=
