@@ -123,6 +123,11 @@ typedef struct single_value_context {
     const char *expected_value;
 } single_value_context;
 
+typedef struct explain_key_context {
+    int rows;
+    const char *expected_key;
+} explain_key_context;
+
 typedef struct wordpress_post_context {
     int rows;
     const char *expected_status;
@@ -162,6 +167,7 @@ typedef struct catalog_table_context {
 
 static void test_show_engines_reports_mylite(void);
 static void test_embedded_session_defaults(void);
+static void test_stat_free_estimates_keep_secondary_plan(void);
 static void test_unsupported_engine_request_policy(void);
 static void test_transactional_engine_flags(void);
 static void test_blackhole_engine_routes_to_mylite(void);
@@ -437,6 +443,7 @@ static void assert_table_collation(
     const char *expected_collation
 );
 static void assert_query_single_value(mylite_db *db, const char *sql, const char *expected_value);
+static void assert_explain_uses_key(mylite_db *db, const char *sql, const char *expected_key);
 static void assert_check_constraint_count(
     mylite_db *db,
     const char *schema_name,
@@ -465,6 +472,7 @@ static void exec_sql_statement_if_present(mylite_db *db, const char *statement);
 static int is_sql_statement_empty(const char *statement);
 static char *read_text_file(const char *path);
 static int engine_callback(void *ctx, int column_count, char **values, char **column_names);
+static int explain_key_callback(void *ctx, int column_count, char **values, char **column_names);
 static int schema_callback(void *ctx, int column_count, char **values, char **column_names);
 static int schema_option_callback(void *ctx, int column_count, char **values, char **column_names);
 static int show_create_schema_callback(
@@ -554,6 +562,7 @@ int main(int argc, char **argv) {
 
     test_show_engines_reports_mylite();
     test_embedded_session_defaults();
+    test_stat_free_estimates_keep_secondary_plan();
     test_unsupported_engine_request_policy();
     test_transactional_engine_flags();
     test_blackhole_engine_routes_to_mylite();
@@ -700,6 +709,56 @@ static void test_embedded_session_defaults(void) {
     mylite_db *db = open_database(root, &filename);
 
     assert_query_single_value(db, "SELECT @@session.use_stat_tables", "NEVER");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_stat_free_estimates_keep_secondary_plan(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE stats_plan_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "category_id INT NOT NULL, "
+        "title VARCHAR(32) NOT NULL, "
+        "KEY stats_plan_posts_category (category_id)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "BEGIN");
+    for (unsigned i = 1U; i <= 100U; ++i) {
+        char sql[160];
+        const int written = snprintf(
+            sql,
+            sizeof(sql),
+            "INSERT INTO stats_plan_posts VALUES (%u, %u, 'post-%u')",
+            i,
+            i % 10U,
+            i
+        );
+        assert(written > 0);
+        assert((size_t)written < sizeof(sql));
+        assert_exec_succeeds(db, sql);
+    }
+    assert_exec_succeeds(db, "COMMIT");
+
+    assert_explain_uses_key(
+        db,
+        "EXPLAIN SELECT id FROM stats_plan_posts WHERE category_id = 5",
+        "stats_plan_posts_category"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM stats_plan_posts WHERE category_id = 5",
+        "10"
+    );
 
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);
@@ -21583,6 +21642,21 @@ static void assert_query_single_value(mylite_db *db, const char *sql, const char
     assert(value.rows == 1);
 }
 
+static void assert_explain_uses_key(mylite_db *db, const char *sql, const char *expected_key) {
+    explain_key_context key = {
+        .expected_key = expected_key,
+    };
+    char *errmsg = NULL;
+
+    const int result = mylite_exec(db, sql, explain_key_callback, &key, &errmsg);
+    if (result != MYLITE_OK) {
+        fprintf(stderr, "EXPLAIN failed: %s\n%s\n", sql, errmsg != NULL ? errmsg : "(no error)");
+    }
+    assert(result == MYLITE_OK);
+    assert(errmsg == NULL);
+    assert(key.rows == 1);
+}
+
 static void assert_warning_message_contains(mylite_db *db, const char *expected_message) {
     const unsigned warning_count = mylite_warning_count(db);
     assert(warning_count >= 1U);
@@ -24917,6 +24991,33 @@ static int id_sequence_callback(void *ctx, int column_count, char **values, char
     assert(sequence_ctx->rows < sequence_ctx->expected_count);
     assert(strcmp(values[0], sequence_ctx->expected_ids[sequence_ctx->rows]) == 0);
     ++sequence_ctx->rows;
+    return 0;
+}
+
+static int explain_key_callback(void *ctx, int column_count, char **values, char **column_names) {
+    explain_key_context *key_ctx = (explain_key_context *)ctx;
+    int key_column = -1;
+
+    for (int i = 0; i < column_count; ++i) {
+        if (column_names[i] != NULL && strcmp(column_names[i], "key") == 0) {
+            key_column = i;
+            break;
+        }
+    }
+
+    assert(key_column >= 0);
+    assert(values[key_column] != NULL);
+    assert(key_ctx->expected_key != NULL);
+    if (strcmp(values[key_column], key_ctx->expected_key) != 0) {
+        fprintf(
+            stderr,
+            "unexpected EXPLAIN key: got '%s', expected '%s'\n",
+            values[key_column],
+            key_ctx->expected_key
+        );
+    }
+    assert(strcmp(values[key_column], key_ctx->expected_key) == 0);
+    ++key_ctx->rows;
     return 0;
 }
 

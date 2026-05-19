@@ -91,9 +91,10 @@ order.
 Handler index cursors now materialize
 storage-filtered row ids without repeating per-row row-state visibility scans,
 improving exact secondary reads that return many rows. Durable handler row
-statistics now use cheap primary-file size estimates for optimizer planning
-instead of exact table row scans; SQL `COUNT(*)` and storage row-count APIs
-remain exact. A small transient durable exact-index read cache now amortizes
+statistics now use stat-free nonzero estimates for optimizer planning instead
+of exact table row scans or primary-file filesystem stats; SQL `COUNT(*)` and
+storage row-count APIs remain exact. A small transient durable exact-index read
+cache now amortizes
 repeated primary-key and secondary exact lookups for append-only indexes without
 published roots while preserving active-checkpoint visibility rules. Active
 checkpoint exact-index caches are now maintained across update/delete mutations,

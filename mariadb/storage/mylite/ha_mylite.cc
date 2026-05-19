@@ -19,7 +19,6 @@
 #include <m_ctype.h>
 #include <mylite/storage.h>
 #include <mysql/plugin.h>
-#include <mysql/psi/mysql_file.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -79,6 +78,9 @@ struct Mylite_foreign_key_row_check_context;
 static const ulong mylite_stats_block_size= 8192;
 static const ulonglong mylite_stats_estimate_bytes_per_row= 8192ULL;
 static const ha_rows mylite_stats_min_record_estimate= 2;
+static const ha_rows mylite_stats_default_record_estimate= 1024;
+static const ulonglong mylite_stats_default_data_file_length=
+    mylite_stats_estimate_bytes_per_row * mylite_stats_default_record_estimate;
 
 static handler *mylite_create_handler(handlerton *hton,
                                       TABLE_SHARE *table,
@@ -2269,25 +2271,11 @@ int ha_mylite::info(uint flag)
     {
       /*
         MyLite does not set HA_STATS_RECORDS_IS_EXACT. MariaDB calls this
-        path during SELECT planning, so durable stats must stay approximate.
+        path during SELECT planning, so durable stats must be approximate and
+        syscall-free until MyLite maintains table-owned statistics.
       */
-      MY_STAT file_stat;
-      stats.records= mylite_stats_min_record_estimate;
-      if (mysql_file_stat(0, primary_file, &file_stat, MYF(0)))
-      {
-        const ulonglong file_size=
-            file_stat.st_size > 0 ? (ulonglong) file_stat.st_size : 0ULL;
-        ulonglong estimated_records=
-            (file_size + mylite_stats_estimate_bytes_per_row - 1) /
-            mylite_stats_estimate_bytes_per_row;
-        if (estimated_records < mylite_stats_min_record_estimate &&
-            !(flag & HA_STATUS_OPEN))
-          estimated_records= mylite_stats_min_record_estimate;
-        if (estimated_records >= HA_POS_ERROR)
-          estimated_records= HA_POS_ERROR - 1;
-        stats.records= (ha_rows) estimated_records;
-        stats.data_file_length= file_size;
-      }
+      stats.records= mylite_stats_default_record_estimate;
+      stats.data_file_length= mylite_stats_default_data_file_length;
     }
     stats.mean_rec_length= table && table->s ? table->s->reclength : 0;
   }

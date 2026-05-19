@@ -94,3 +94,6 @@ uses existing primary-file metadata and leaves durable row storage untouched.
 - File-size-derived estimates are database-wide rather than per-table. This is
   intentionally temporary and should be replaced by maintained per-table stats
   when the pager/catalog metadata grows.
+- Follow-up slice `stat-free-handler-estimates` replaced the primary-file-size
+  stat proxy with a fixed nonzero planning estimate so ordinary optimizer stats
+  requests do not perform filesystem stats.
