@@ -255,6 +255,8 @@ reconstruct MariaDB row buffers before returning them to the SQL layer.
 In-memory row-state maps use transient hash buckets keyed by source row id, so
 scans and index overlays do not linearly search every hidden row for each row
 candidate after update-heavy workloads.
+Full rowset reads collect live row ids in one file pass, compact those ids
+against the row-state map, and then materialize only the surviving row pages.
 Direct row-id reads validate the target row page first and scan only later
 row-state pages that could hide that row, avoiding full row-state map rebuilds
 for each selected index cursor row.

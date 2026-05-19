@@ -101,8 +101,10 @@ checkpoint exact-index caches are now maintained across update/delete mutations,
 and update/delete validation uses direct row-id visibility checks instead of
 rebuilding full row-state maps. Transient row-state maps now hash hidden source
 row ids, removing the per-candidate linear visibility lookup that dominated
-full scans after many updates. SQLite-like row-write and point-read performance
-still requires the planned navigable index and pager work. Durable handler
+full scans after many updates, and full rowset reads now collect live row ids in
+one file pass before materializing only surviving row pages. SQLite-like
+row-write and point-read performance still requires the planned navigable index
+and pager work. Durable handler
 index cursors also materialize their current row payloads in one ordered batch,
 removing repeated per-row file open/header/catalog overhead from secondary
 cursor reads while maintained navigable indexes are still pending. Active
