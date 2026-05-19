@@ -76,6 +76,13 @@ root pages for repeated storage calls in that phase. This avoids reopening the
 `.mylite` file and revalidating unchanged root pages for every point lookup
 helper while preserving the same single-file visibility rules.
 
+Read-statement startup also keeps a process-local checkpoint snapshot cache for
+the current thread and storage owner. A new read statement reads the durable
+header and catalog root bytes under the normal shared lock; when those bytes
+match a previously validated snapshot, it reuses the decoded header/catalog
+state instead of checksumming the same pages again. If either page differs,
+normal validation runs and replaces the cache.
+
 The initial handler is opt-in. It is disabled in the default embedded baseline
 and covered by a separate storage smoke build. That build verifies the
 `MYLITE` row from `SHOW ENGINES`, explicit `CREATE TABLE ... ENGINE=MYLITE`
@@ -298,6 +305,11 @@ lookup and row materialization. Primary-key point lookups and secondary exact
 cursor builds reuse that scoped file view and cached header/catalog pages. If a
 same-owner write checkpoint is already active, reads use the write checkpoint's
 current view instead of opening a separate read session.
+
+Repeated read statements over an unchanged file also reuse a thread-local
+decoded checkpoint snapshot after comparing raw header and catalog bytes. This
+keeps repeated point-select statements from paying header/catalog checksum
+costs when no storage page publication changed the durable view.
 
 Active storage checkpoints also maintain a live-row validation cache per table
 and catalog generation. Rows proven live by visibility-checked storage reads,
