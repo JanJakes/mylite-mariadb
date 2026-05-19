@@ -456,6 +456,23 @@ static mylite_storage_result validate_recovery_journal_pages(
     mylite_storage_header *out_header
 );
 static mylite_storage_result write_page(FILE *file, const unsigned char *page, size_t size);
+static mylite_storage_result read_file_at(
+    FILE *file,
+    off_t offset,
+    unsigned char *out,
+    size_t size
+);
+static mylite_storage_result write_file_at(
+    FILE *file,
+    off_t offset,
+    const unsigned char *data,
+    size_t size
+);
+static mylite_storage_result page_offset_for_io(
+    unsigned long long page_id,
+    unsigned page_size,
+    off_t *out_offset
+);
 static mylite_storage_result lock_file(FILE *file, int operation);
 static int is_lock_conflict(int error_number);
 static mylite_storage_result flush_file(FILE *file);
@@ -6678,24 +6695,13 @@ static mylite_storage_result read_page_at(
         }
     }
 
-    if (page_size == 0U || page_id > ULLONG_MAX / page_size) {
-        return MYLITE_STORAGE_CORRUPT;
+    off_t offset = 0;
+    mylite_storage_result result = page_offset_for_io(page_id, page_size, &offset);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
     }
 
-    const unsigned long long offset = page_id * (unsigned long long)page_size;
-    if (offset > (unsigned long long)LONG_MAX) {
-        return MYLITE_STORAGE_UNSUPPORTED;
-    }
-    if (fseek(file, (long)offset, SEEK_SET) != 0) {
-        return MYLITE_STORAGE_IOERR;
-    }
-
-    const size_t read_count = fread(out_page, 1U, page_size, file);
-    if (read_count != page_size) {
-        return ferror(file) ? MYLITE_STORAGE_IOERR : MYLITE_STORAGE_CORRUPT;
-    }
-
-    return MYLITE_STORAGE_OK;
+    return read_file_at(file, offset, out_page, page_size);
 }
 
 static mylite_storage_result publish_header(FILE *file, const mylite_storage_header *header) {
@@ -6815,18 +6821,92 @@ static mylite_storage_result write_page_at_raw(
     unsigned page_size,
     const unsigned char *page
 ) {
+    off_t offset = 0;
+    mylite_storage_result result = page_offset_for_io(page_id, page_size, &offset);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    return write_file_at(file, offset, page, page_size);
+}
+
+static mylite_storage_result read_file_at(
+    FILE *file,
+    off_t offset,
+    unsigned char *out,
+    size_t size
+) {
+    const int file_descriptor = fileno(file);
+    if (file_descriptor < 0) {
+        return MYLITE_STORAGE_IOERR;
+    }
+
+    size_t bytes_read = 0U;
+    while (bytes_read < size) {
+        const ssize_t count =
+            pread(file_descriptor, out + bytes_read, size - bytes_read, offset + (off_t)bytes_read);
+        if (count > 0) {
+            bytes_read += (size_t)count;
+            continue;
+        }
+        if (count == 0) {
+            return MYLITE_STORAGE_CORRUPT;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        return MYLITE_STORAGE_IOERR;
+    }
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result write_file_at(
+    FILE *file,
+    off_t offset,
+    const unsigned char *data,
+    size_t size
+) {
+    const int file_descriptor = fileno(file);
+    if (file_descriptor < 0) {
+        return MYLITE_STORAGE_IOERR;
+    }
+
+    size_t bytes_written = 0U;
+    while (bytes_written < size) {
+        const ssize_t count = pwrite(
+            file_descriptor,
+            data + bytes_written,
+            size - bytes_written,
+            offset + (off_t)bytes_written
+        );
+        if (count > 0) {
+            bytes_written += (size_t)count;
+            continue;
+        }
+        if (count < 0 && errno == EINTR) {
+            continue;
+        }
+        return MYLITE_STORAGE_IOERR;
+    }
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result page_offset_for_io(
+    unsigned long long page_id,
+    unsigned page_size,
+    off_t *out_offset
+) {
     if (page_size == 0U || page_id > ULLONG_MAX / page_size) {
         return MYLITE_STORAGE_CORRUPT;
     }
 
     const unsigned long long offset = page_id * (unsigned long long)page_size;
-    if (offset > (unsigned long long)LONG_MAX) {
+    if (offset > (unsigned long long)LONG_MAX ||
+        (unsigned long long)page_size > (unsigned long long)LONG_MAX - offset) {
         return MYLITE_STORAGE_UNSUPPORTED;
     }
-    if (fseek(file, (long)offset, SEEK_SET) != 0) {
-        return MYLITE_STORAGE_IOERR;
-    }
-    return write_page(file, page, page_size);
+
+    *out_offset = (off_t)offset;
+    return MYLITE_STORAGE_OK;
 }
 
 static mylite_storage_result decode_header_page(

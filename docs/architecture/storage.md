@@ -330,6 +330,10 @@ the read statement ends. The next read statement can reuse that handle only
 after confirming the filename still resolves to the same device and inode, then
 it takes the ordinary shared lock and reads the checkpoint snapshot as usual.
 The cache is cleared on same-file creation and durable mutation paths.
+Random page reads and writes use offset-addressed `pread()` / `pwrite()` calls
+instead of moving stdio stream position for each fixed-size page. Sequential
+stream writes remain limited to empty database initialization and rollback
+journal construction.
 
 Catalog discovery for table-open flows uses the same scoped read-session cache,
 so repeated prepared statements avoid a separate header/catalog validation path
