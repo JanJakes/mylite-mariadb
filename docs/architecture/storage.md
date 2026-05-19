@@ -68,6 +68,14 @@ delete, truncate, and autoincrement publication paths publish decoded headers
 directly into the active checkpoint instead of encoding and immediately
 decoding page `0`.
 
+Durable index cursor construction opens a scoped storage read session while the
+handler finds matching index row ids and materializes the selected row payload
+batch. The session holds one read-capable primary-file handle, keeps the shared
+advisory lock for the cursor build, and reuses the validated header and catalog
+root pages for repeated storage calls in that phase. This avoids reopening the
+`.mylite` file and revalidating unchanged root pages for every point lookup
+helper while preserving the same single-file visibility rules.
+
 The initial handler is opt-in. It is disabled in the default embedded baseline
 and covered by a separate storage smoke build. That build verifies the
 `MYLITE` row from `SHOW ENGINES`, explicit `CREATE TABLE ... ENGINE=MYLITE`
@@ -284,6 +292,12 @@ ordered batch after cursor construction. This keeps repeated secondary cursor
 reads from reopening the primary file and revalidating header/catalog state for
 each row while the storage layer still works from the same single `.mylite`
 file and the same live row ids returned by index-entry reads.
+
+File-backed index cursor builds also keep the primary file open across exact
+lookup and row materialization. Primary-key point lookups and secondary exact
+cursor builds reuse that scoped file view and cached header/catalog pages. If a
+same-owner write checkpoint is already active, reads use the write checkpoint's
+current view instead of opening a separate read session.
 
 Active storage checkpoints also maintain a live-row validation cache per table
 and catalog generation. Rows proven live by visibility-checked storage reads,
@@ -806,11 +820,13 @@ pages. Conflicts return busy errors after the current thread's configured busy
 timeout expires; a zero timeout keeps immediate non-blocking behavior. No
 durable lock sidecar is created. These locks protect cooperating MyLite
 processes from unsafe concurrent access but are not the final multi-writer lock
-manager. If a cooperating writer holds an active row-DML transaction lock and
-has published a valid transaction journal, cross-process storage reads use the
-journal's transaction-start header and catalog root pages as a read-only
-snapshot; stale journals without an active exclusive writer still require the
-exclusive recovery path.
+manager. Scoped handler cursor builds can keep a shared lock across the exact
+index lookup and row materialization helpers rather than for each individual
+storage helper call. If a cooperating writer holds an active row-DML
+transaction lock and has published a valid transaction journal, cross-process
+storage reads use the journal's transaction-start header and catalog root pages
+as a read-only snapshot; stale journals without an active exclusive writer
+still require the exclusive recovery path.
 
 File-backed MyLite statements that can mutate storage now take in-process
 statement checkpoints. Autocommit row DML begins that checkpoint from the

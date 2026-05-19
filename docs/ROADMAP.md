@@ -68,6 +68,10 @@ re-checksumming page `0`. Active statements now reuse validated catalog root
 pages until catalog writes or catalog-generation header changes invalidate the
 statement chain. Active row mutation publication now updates decoded
 checkpoint headers directly instead of encode/decode round-tripping page `0`.
+Durable handler index cursor builds now keep one scoped read session open
+across exact-index lookup and row materialization, reusing the validated
+primary-file header and catalog root for point lookups and exact-index cursor
+builds.
 Handler index cursors now materialize
 storage-filtered row ids without repeating per-row row-state visibility scans,
 improving exact secondary reads that return many rows. Durable handler row

@@ -471,6 +471,10 @@ mylite_storage_result mylite_storage_begin_transaction(
     const char *filename,
     mylite_storage_statement **out_statement
 );
+mylite_storage_result mylite_storage_begin_read_statement(
+    const char *filename,
+    mylite_storage_statement **out_statement
+);
 int mylite_storage_statement_active(const char *filename);
 mylite_storage_result mylite_storage_preserve_auto_increment_on_rollback(
     const char *filename
@@ -481,6 +485,7 @@ void mylite_storage_set_busy_timeout(unsigned milliseconds);
 unsigned mylite_storage_busy_timeout(void);
 mylite_storage_result mylite_storage_commit_statement(mylite_storage_statement *statement);
 mylite_storage_result mylite_storage_rollback_statement(mylite_storage_statement *statement);
+mylite_storage_result mylite_storage_end_read_statement(mylite_storage_statement *statement);
 void mylite_storage_free(void *ptr);
 void mylite_storage_free_rowset(mylite_storage_rowset *rowset);
 void mylite_storage_free_index_entryset(mylite_storage_index_entryset *entryset);

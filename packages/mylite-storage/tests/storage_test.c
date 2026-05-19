@@ -211,6 +211,7 @@ static void assert_nested_statement_checkpoints(statement_checkpoint_test_contex
 static void assert_statement_checkpoint_preserves_marked_auto_increment_rollback(
     statement_checkpoint_test_context *ctx
 );
+static void test_read_statement_storage_session(void);
 static void test_transaction_journals(void);
 static void test_transaction_owner_isolation(void);
 static void test_cross_process_transaction_read_snapshot(void);
@@ -361,6 +362,7 @@ int main(void) {
     test_autoincrement_state();
     test_truncate_table_lifecycle();
     test_statement_checkpoints();
+    test_read_statement_storage_session();
     test_transaction_journals();
     test_transaction_owner_isolation();
     test_cross_process_transaction_read_snapshot();
@@ -2928,6 +2930,67 @@ static void assert_statement_checkpoint_preserves_marked_auto_increment_rollback
     assert_auto_increment_value(ctx->filename, 11ULL);
     assert_file_size_matches_header(ctx->filename);
     assert_row_not_found(ctx->filename, no_marker_row_id);
+}
+
+static void test_read_statement_storage_session(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "read-statement-session.mylite");
+    int reader_owner = 0;
+    int writer_owner = 0;
+    mylite_storage_statement *read_statement = NULL;
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+
+    mylite_storage_set_context_owner(&reader_owner);
+    assert(mylite_storage_begin_read_statement(filename, &read_statement) == MYLITE_STORAGE_OK);
+    assert(read_statement != NULL);
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
+    assert(rows.row_count == 0U);
+    mylite_storage_free_rowset(&rows);
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", row, sizeof(row)) == MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
+    assert(rows.row_count == 1U);
+    assert(rows.row_bytes == sizeof(row));
+    assert(rows.row_sizes[0] == sizeof(row));
+    assert(memcmp(rows.rows, row, sizeof(row)) == 0);
+    mylite_storage_free_rowset(&rows);
+
+    mylite_storage_set_context_owner(&writer_owner);
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", row, sizeof(row)) == MYLITE_STORAGE_BUSY
+    );
+
+    mylite_storage_set_context_owner(&reader_owner);
+    assert(mylite_storage_end_read_statement(read_statement) == MYLITE_STORAGE_OK);
+    read_statement = NULL;
+
+    mylite_storage_set_context_owner(&writer_owner);
+    assert(
+        mylite_storage_append_row(filename, "app", "posts", row, sizeof(row)) == MYLITE_STORAGE_OK
+    );
+    mylite_storage_set_context_owner(NULL);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
 }
 
 static void test_transaction_journals(void) {

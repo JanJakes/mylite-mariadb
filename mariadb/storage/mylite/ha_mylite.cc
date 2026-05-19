@@ -811,6 +811,32 @@ static handler *mylite_create_handler(handlerton *hton,
   return new (mem_root) ha_mylite(hton, table);
 }
 
+class Mylite_read_statement_scope
+{
+  mylite_storage_statement *statement;
+  int begin_error;
+
+public:
+  Mylite_read_statement_scope(const char *primary_file, bool enabled)
+      : statement(NULL), begin_error(0)
+  {
+    if (!enabled)
+      return;
+    mylite_storage_result result=
+        mylite_storage_begin_read_statement(primary_file, &statement);
+    if (result != MYLITE_STORAGE_OK)
+      begin_error= mylite_storage_to_handler_error(result);
+  }
+
+  ~Mylite_read_statement_scope()
+  {
+    if (statement)
+      mylite_storage_end_read_statement(statement);
+  }
+
+  int error() const { return begin_error; }
+};
+
 struct Mylite_discover_context
 {
   handlerton::discovered_list *result;
@@ -1378,6 +1404,13 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
   const char *primary_file= mylite_primary_file_path();
   if (!primary_file)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
+
+  /* Keep this scoped to cursor construction; statement-wide read locks break
+     MariaDB flows that interleave reads and writes through separate handlers.
+   */
+  Mylite_read_statement_scope read_scope(primary_file, !volatile_rows);
+  if (read_scope.error())
+    DBUG_RETURN(read_scope.error());
 
   if (raw_exact_unique_filter)
   {
