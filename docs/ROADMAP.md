@@ -64,7 +64,9 @@ probes on the outer active checkpoint across nested libmylite statement
 checkpoints. This materially improves explicit fixed-width index publication
 and routed indexed insert throughput. Active checkpoint and snapshot header
 reads now reuse the decoded in-memory header instead of re-encoding and
-re-checksumming page `0`. Handler index cursors now materialize
+re-checksumming page `0`. Active statements now reuse validated catalog root
+pages until catalog writes or catalog-generation header changes invalidate the
+statement chain. Handler index cursors now materialize
 storage-filtered row ids without repeating per-row row-state visibility scans,
 improving exact secondary reads that return many rows. Durable handler row
 statistics now use cheap primary-file size estimates for optimizer planning

@@ -59,7 +59,11 @@ Ordinary active statements reuse one recovery journal for the checkpoint, while
 active durable transactions use their transaction journal instead of creating a
 normal recovery journal per row append. Header reads inside active checkpoints
 and transaction/read snapshots return the already-decoded in-memory header
-instead of re-encoding and re-validating page `0`.
+instead of re-encoding and re-validating page `0`. Active statements also
+cache validated catalog root pages by root page id and catalog generation so
+row-DML and duplicate-key probes do not repeatedly checksum unchanged catalog
+metadata; catalog root writes and catalog-generation header changes invalidate
+the active statement chain before later metadata reads.
 
 The initial handler is opt-in. It is disabled in the default embedded baseline
 and covered by a separate storage smoke build. That build verifies the
