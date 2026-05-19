@@ -15,6 +15,7 @@
 typedef struct benchmark_config {
     size_t rows;
     size_t iterations;
+    int updates_only;
 } benchmark_config;
 
 typedef struct benchmark_context {
@@ -41,6 +42,7 @@ typedef struct secondary_result {
 } secondary_result;
 
 static int parse_config(int argc, char **argv, benchmark_config *config);
+static int parse_phase_argument(const char *argument, benchmark_config *config);
 static int run_benchmark(const benchmark_config *config);
 static void print_usage(const char *program);
 static void print_result(const char *operation, size_t count, uint64_t elapsed_ns);
@@ -96,6 +98,7 @@ int main(int argc, char **argv) {
     benchmark_config config = {
         .rows = 100U,
         .iterations = 100U,
+        .updates_only = 0,
     };
 
     if (parse_config(argc, argv, &config) != 0) {
@@ -106,7 +109,7 @@ int main(int argc, char **argv) {
 }
 
 static int parse_config(int argc, char **argv, benchmark_config *config) {
-    if (argc > 3) {
+    if (argc > 4) {
         print_usage(argv[0]);
         return 1;
     }
@@ -115,7 +118,16 @@ static int parse_config(int argc, char **argv, benchmark_config *config) {
         exit(0);
     }
 
+    int numeric_argument = 0;
     for (int i = 1; i < argc; ++i) {
+        if (strncmp(argv[i], "--phase=", 8U) == 0) {
+            if (parse_phase_argument(argv[i] + 8U, config) != 0) {
+                print_usage(argv[0]);
+                return 1;
+            }
+            continue;
+        }
+
         char *end = NULL;
         errno = 0;
         const unsigned long long value = strtoull(argv[i], &end, 10);
@@ -125,14 +137,32 @@ static int parse_config(int argc, char **argv, benchmark_config *config) {
             return 1;
         }
 
-        if (i == 1) {
+        ++numeric_argument;
+        if (numeric_argument == 1) {
             config->rows = (size_t)value;
-        } else {
+        } else if (numeric_argument == 2) {
             config->iterations = (size_t)value;
+        } else {
+            print_usage(argv[0]);
+            return 1;
         }
     }
 
     return 0;
+}
+
+static int parse_phase_argument(const char *argument, benchmark_config *config) {
+    if (strcmp(argument, "all") == 0) {
+        config->updates_only = 0;
+        return 0;
+    }
+    if (strcmp(argument, "updates") == 0) {
+        config->updates_only = 1;
+        return 0;
+    }
+
+    fprintf(stderr, "Expected phase `all` or `updates`, got: %s\n", argument);
+    return 1;
 }
 
 static int run_benchmark(const benchmark_config *config) {
@@ -154,6 +184,7 @@ static int run_benchmark(const benchmark_config *config) {
     printf("# MyLite Performance Baseline\n\n");
     printf("Rows: %zu\n", config->rows);
     printf("Iterations: %zu\n", config->iterations);
+    printf("Phase: %s\n", config->updates_only ? "updates" : "all");
     printf("Storage route: `ENGINE=InnoDB` through the MyLite storage engine\n\n");
     printf("| Operation | Count | Total ms | us/op |\n");
     printf("| --- | ---: | ---: | ---: |\n");
@@ -172,6 +203,9 @@ static int run_benchmark(const benchmark_config *config) {
     }
     if (benchmark_prepared_insert_rows(&ctx) != 0) {
         goto cleanup;
+    }
+    if (config->updates_only) {
+        goto updates;
     }
     if (benchmark_point_selects(&ctx) != 0) {
         goto cleanup;
@@ -194,6 +228,7 @@ static int run_benchmark(const benchmark_config *config) {
     if (benchmark_prepared_leaf_secondary_selects(&ctx) != 0) {
         goto cleanup;
     }
+updates:
     if (benchmark_updates(&ctx) != 0) {
         goto cleanup;
     }
@@ -215,7 +250,11 @@ cleanup:
         result = 1;
     }
     free(ctx.filename);
-    remove_tree(ctx.root);
+    if (getenv("MYLITE_PERF_KEEP_ROOT") != NULL) {
+        fprintf(stderr, "Keeping benchmark root: %s\n", ctx.root);
+    } else {
+        remove_tree(ctx.root);
+    }
     free((void *)ctx.root);
     return result;
 }
@@ -223,9 +262,11 @@ cleanup:
 static void print_usage(const char *program) {
     fprintf(
         stderr,
-        "Usage: %s [rows] [iterations]\n"
+        "Usage: %s [--phase=all|updates] [rows] [iterations]\n"
         "\n"
-        "Defaults: rows=100 iterations=100.\n",
+        "Defaults: phase=all rows=100 iterations=100.\n"
+        "The updates phase skips point-read and secondary-index read timings after setup.\n"
+        "Set MYLITE_PERF_KEEP_ROOT=1 to keep the temporary benchmark directory.\n",
         program
     );
 }

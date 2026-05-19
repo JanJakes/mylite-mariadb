@@ -149,7 +149,11 @@ published-leaf secondary index reads labelled separately:
 ```sh
 tools/mylite-perf-baseline
 tools/mylite-perf-baseline 1000 1000
+tools/mylite-perf-baseline --phase=updates 1000 10000
 ```
+
+Set `MYLITE_PERF_KEEP_ROOT=1` when investigating a failed benchmark run and
+the generated temporary `.mylite` file should be preserved for inspection.
 
 See [docs/architecture/monorepo.md](docs/architecture/monorepo.md) for the
 repository layout and import discipline.
