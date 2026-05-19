@@ -88,6 +88,14 @@ match a previously validated snapshot, it reuses the decoded header/catalog
 state instead of checksumming the same pages again. If either page differs,
 normal validation runs and replaces the cache.
 
+Durable full-row and count reads also keep a small process-local live-row-id
+cache keyed by the durable header fingerprint and table id. When an unchanged
+checkpoint has already produced a compacted live row-id list, later non-active
+reads can reuse that list instead of scanning the append history and
+rechecksumming every row and row-state page again. Mutations, truncate, catalog
+changes, and cache-limit rotation clear the cache; active checkpoints and read
+snapshots bypass it.
+
 MariaDB table-discovery callbacks also use scoped read sessions while they read
 table definitions, discovered table names, or table existence from the MyLite
 catalog. This keeps table-open discovery on the same cached checkpoint view as

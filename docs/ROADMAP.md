@@ -131,7 +131,10 @@ checkpoints also cache indexed row payloads after materialization and replace
 those cached payloads after successful updates, reducing repeated row-page
 reads in transaction-local update loops. Non-active durable indexed-row reads
 now cache row payloads by file header fingerprint,
-reducing repeated secondary cursor row-page checksums. The
+reducing repeated secondary cursor row-page checksums. Non-active durable
+full-row and count reads now cache compacted live row-id lists by durable
+header fingerprint, avoiding repeated append-history scans for unchanged
+checkpoints after an initial count or scan. The
 common inline update path now writes replacement row, row-state, and
 replacement index-entry pages as one contiguous append run, reducing per-update
 write syscall overhead without changing the durable page format. The
