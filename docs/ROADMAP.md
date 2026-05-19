@@ -73,9 +73,10 @@ headers directly instead of encode/decode round-tripping page `0`.
 Durable handler index cursor builds now keep one scoped read session open
 across exact-index lookup and row materialization, reusing the validated
 primary-file header and catalog root for point lookups and exact-index cursor
-builds. Repeated read statements over unchanged durable header/catalog bytes
-also reuse a thread-local decoded checkpoint snapshot after raw page comparison,
-avoiding repeated header/catalog checksum validation on hot point-select loops.
+builds. Repeated read statements over unchanged durable header bytes and the
+same file identity also reuse a thread-local decoded checkpoint snapshot after
+raw header-page comparison, avoiding repeated header/catalog checksum
+validation and redundant catalog-page reads on hot point-select loops.
 Normal read statements now reuse a thread-local unlocked read file handle after
 device/inode validation, reducing repeated `fopen()` overhead without holding
 shared locks between cursor builds. That read handle now stores its device and

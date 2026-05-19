@@ -343,6 +343,8 @@ typedef struct mylite_storage_append_page_buffer {
 struct mylite_storage_statement {
     FILE *file;
     char *filename;
+    dev_t device;
+    ino_t inode;
     struct mylite_storage_statement *parent;
     const void *owner;
     mylite_storage_header header;
@@ -360,6 +362,7 @@ struct mylite_storage_statement {
     int owns_transaction_journal;
     int preserve_auto_increment_rollback;
     int cache_file_on_close;
+    int has_identity;
     mylite_storage_exact_index_cache_set exact_index_caches;
     mylite_storage_live_row_cache_set live_row_caches;
     mylite_storage_live_row_id_cache_set live_row_id_caches;
@@ -377,6 +380,8 @@ typedef struct mylite_storage_transaction_journal_snapshot {
 typedef struct mylite_storage_read_checkpoint_cache {
     char *filename;
     const void *owner;
+    dev_t device;
+    ino_t inode;
     mylite_storage_header header;
     unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
@@ -385,6 +390,7 @@ typedef struct mylite_storage_read_checkpoint_cache {
     unsigned long long current_catalog_generation;
     int has_snapshot;
     int has_current_catalog_page;
+    int has_identity;
 } mylite_storage_read_checkpoint_cache;
 
 typedef struct mylite_storage_read_file_cache {
@@ -594,7 +600,9 @@ static void copy_read_checkpoint_cache_to_statement(
     const mylite_storage_read_checkpoint_cache *cache,
     mylite_storage_statement *statement
 );
-static mylite_storage_read_checkpoint_cache *read_checkpoint_cache_for(const char *filename);
+static mylite_storage_read_checkpoint_cache *read_checkpoint_cache_for(
+    const mylite_storage_statement *statement
+);
 static void store_read_checkpoint_cache(const mylite_storage_statement *statement);
 static void clear_read_checkpoint_cache(void);
 static mylite_storage_result close_statement(mylite_storage_statement *statement);
@@ -610,8 +618,19 @@ static void trim_statement_append_page_buffer(
     unsigned long long page_count
 );
 static void clear_append_page_buffer(mylite_storage_statement *statement);
-static int take_cached_read_file(const char *filename, FILE **out_file);
-static mylite_storage_result cache_read_file(const char *filename, FILE *file);
+static int take_cached_read_file(
+    const char *filename,
+    FILE **out_file,
+    dev_t *out_device,
+    ino_t *out_inode
+);
+static mylite_storage_result cache_read_file(
+    const char *filename,
+    FILE *file,
+    dev_t device,
+    ino_t inode,
+    int has_identity
+);
 static void clear_cached_read_file(const char *filename);
 static int cached_read_file_matches_path(const char *filename);
 static mylite_storage_result write_statement_current_header(mylite_storage_statement *statement);
@@ -5718,6 +5737,8 @@ static mylite_storage_result initialize_read_statement(
 ) {
     if (same_file_parent != NULL) {
         statement->file = same_file_parent->file;
+        statement->device = same_file_parent->device;
+        statement->inode = same_file_parent->inode;
         statement->owns_file = 0;
         statement->header = same_file_parent->header;
         statement->current_header = same_file_parent->current_header;
@@ -5740,6 +5761,7 @@ static mylite_storage_result initialize_read_statement(
         statement->current_catalog_generation = same_file_parent->current_catalog_generation;
         statement->has_current_header = same_file_parent->has_current_header;
         statement->has_current_catalog_page = same_file_parent->has_current_catalog_page;
+        statement->has_identity = same_file_parent->has_identity;
         return MYLITE_STORAGE_OK;
     }
 
@@ -5785,8 +5807,13 @@ static mylite_storage_result initialize_read_statement(
     }
 
     FILE *cached_file = NULL;
-    if (take_cached_read_file(filename, &cached_file)) {
+    dev_t cached_device = 0;
+    ino_t cached_inode = 0;
+    if (take_cached_read_file(filename, &cached_file, &cached_device, &cached_inode)) {
         statement->file = cached_file;
+        statement->device = cached_device;
+        statement->inode = cached_inode;
+        statement->has_identity = 1;
     } else {
         errno = 0;
         statement->file = fopen(filename, "r+b");
@@ -5796,6 +5823,15 @@ static mylite_storage_result initialize_read_statement(
     }
     statement->owns_file = 1;
     statement->cache_file_on_close = 1;
+    if (!statement->has_identity) {
+        struct stat file_stat;
+        if (fstat(fileno(statement->file), &file_stat) != 0) {
+            return MYLITE_STORAGE_IOERR;
+        }
+        statement->device = file_stat.st_dev;
+        statement->inode = file_stat.st_ino;
+        statement->has_identity = 1;
+    }
 
     result = lock_file(statement->file, LOCK_SH);
     if (result != MYLITE_STORAGE_OK) {
@@ -5830,26 +5866,13 @@ static mylite_storage_result read_cached_checkpoint_snapshot(mylite_storage_stat
         return result;
     }
 
-    mylite_storage_read_checkpoint_cache *cache = read_checkpoint_cache_for(statement->filename);
+    mylite_storage_read_checkpoint_cache *cache = read_checkpoint_cache_for(statement);
     if (cache != NULL && memcmp(header_page, cache->header_page, sizeof(cache->header_page)) == 0) {
         if (cache->header.page_size > sizeof(statement->catalog_page)) {
             return MYLITE_STORAGE_CORRUPT;
         }
-
-        unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-        result = read_page_at(
-            statement->file,
-            cache->header.catalog_root_page,
-            cache->header.page_size,
-            catalog_page
-        );
-        if (result != MYLITE_STORAGE_OK) {
-            return result;
-        }
-        if (memcmp(catalog_page, cache->catalog_page, cache->header.page_size) == 0) {
-            copy_read_checkpoint_cache_to_statement(cache, statement);
-            return MYLITE_STORAGE_OK;
-        }
+        copy_read_checkpoint_cache_to_statement(cache, statement);
+        return MYLITE_STORAGE_OK;
     }
 
     result = read_checkpoint_snapshot_from_header_page(statement, header_page);
@@ -5912,11 +5935,16 @@ static void copy_read_checkpoint_cache_to_statement(
     statement->has_current_catalog_page = cache->has_current_catalog_page;
 }
 
-static mylite_storage_read_checkpoint_cache *read_checkpoint_cache_for(const char *filename) {
+static mylite_storage_read_checkpoint_cache *read_checkpoint_cache_for(
+    const mylite_storage_statement *statement
+) {
     if (!active_read_checkpoint_cache.has_snapshot ||
         active_read_checkpoint_cache.owner != active_context_owner ||
         active_read_checkpoint_cache.filename == NULL ||
-        strcmp(active_read_checkpoint_cache.filename, filename) != 0) {
+        strcmp(active_read_checkpoint_cache.filename, statement->filename) != 0 ||
+        !active_read_checkpoint_cache.has_identity || !statement->has_identity ||
+        active_read_checkpoint_cache.device != statement->device ||
+        active_read_checkpoint_cache.inode != statement->inode) {
         return NULL;
     }
     return &active_read_checkpoint_cache;
@@ -5934,6 +5962,8 @@ static void store_read_checkpoint_cache(const mylite_storage_statement *statemen
     }
 
     active_read_checkpoint_cache.owner = active_context_owner;
+    active_read_checkpoint_cache.device = statement->device;
+    active_read_checkpoint_cache.inode = statement->inode;
     active_read_checkpoint_cache.header = statement->header;
     memcpy(
         active_read_checkpoint_cache.header_page,
@@ -5954,6 +5984,7 @@ static void store_read_checkpoint_cache(const mylite_storage_statement *statemen
     active_read_checkpoint_cache.current_catalog_generation = statement->current_catalog_generation;
     active_read_checkpoint_cache.has_current_catalog_page = statement->has_current_catalog_page;
     active_read_checkpoint_cache.has_snapshot = 1;
+    active_read_checkpoint_cache.has_identity = statement->has_identity;
 }
 
 static void clear_read_checkpoint_cache(void) {
@@ -7210,7 +7241,13 @@ static mylite_storage_result close_statement(mylite_storage_statement *statement
     FILE *file = statement->file;
     statement->file = NULL;
     if (statement->cache_file_on_close) {
-        return cache_read_file(statement->filename, file);
+        return cache_read_file(
+            statement->filename,
+            file,
+            statement->device,
+            statement->inode,
+            statement->has_identity
+        );
     }
     return fclose(file) == 0 ? MYLITE_STORAGE_OK : MYLITE_STORAGE_IOERR;
 }
@@ -7294,8 +7331,15 @@ static void clear_append_page_buffer(mylite_storage_statement *statement) {
     statement->append_pages = (mylite_storage_append_page_buffer){0};
 }
 
-static int take_cached_read_file(const char *filename, FILE **out_file) {
+static int take_cached_read_file(
+    const char *filename,
+    FILE **out_file,
+    dev_t *out_device,
+    ino_t *out_inode
+) {
     *out_file = NULL;
+    *out_device = 0;
+    *out_inode = 0;
     if (active_read_file_cache.file == NULL || active_read_file_cache.filename == NULL ||
         strcmp(active_read_file_cache.filename, filename) != 0) {
         return 0;
@@ -7306,12 +7350,20 @@ static int take_cached_read_file(const char *filename, FILE **out_file) {
     }
 
     *out_file = active_read_file_cache.file;
+    *out_device = active_read_file_cache.device;
+    *out_inode = active_read_file_cache.inode;
     active_read_file_cache.file = NULL;
     clearerr(*out_file);
     return 1;
 }
 
-static mylite_storage_result cache_read_file(const char *filename, FILE *file) {
+static mylite_storage_result cache_read_file(
+    const char *filename,
+    FILE *file,
+    dev_t device,
+    ino_t inode,
+    int has_identity
+) {
     if (file == NULL) {
         return MYLITE_STORAGE_OK;
     }
@@ -7321,10 +7373,15 @@ static mylite_storage_result cache_read_file(const char *filename, FILE *file) {
     }
     clearerr(file);
 
-    struct stat file_stat;
-    if (fstat(fileno(file), &file_stat) != 0) {
-        fclose(file);
-        return MYLITE_STORAGE_IOERR;
+    if (!has_identity) {
+        struct stat file_stat;
+        if (fstat(fileno(file), &file_stat) != 0) {
+            fclose(file);
+            return MYLITE_STORAGE_IOERR;
+        }
+        device = file_stat.st_dev;
+        inode = file_stat.st_ino;
+        has_identity = 1;
     }
 
     if (active_read_file_cache.filename == NULL ||
@@ -7341,9 +7398,9 @@ static mylite_storage_result cache_read_file(const char *filename, FILE *file) {
     }
 
     active_read_file_cache.file = file;
-    active_read_file_cache.device = file_stat.st_dev;
-    active_read_file_cache.inode = file_stat.st_ino;
-    active_read_file_cache.has_identity = 1;
+    active_read_file_cache.device = device;
+    active_read_file_cache.inode = inode;
+    active_read_file_cache.has_identity = has_identity;
     return MYLITE_STORAGE_OK;
 }
 

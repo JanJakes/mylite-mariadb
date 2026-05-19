@@ -361,9 +361,13 @@ same-owner write checkpoint is already active, reads use the write checkpoint's
 current view instead of opening a separate read session.
 
 Repeated read statements over an unchanged file also reuse a thread-local
-decoded checkpoint snapshot after comparing raw header and catalog bytes. This
-keeps repeated point-select statements from paying header/catalog checksum
-costs when no storage page publication changed the durable view.
+decoded checkpoint snapshot after comparing the raw header page. A byte-identical
+header is enough to reuse the cached catalog snapshot because the header records
+the catalog root and generation; the cache is also tied to the database file's
+device and inode so path replacement with a separate file cannot reuse a stale
+catalog snapshot. This keeps repeated point-select statements from paying
+header/catalog checksum costs when no storage page publication changed the
+durable view.
 Normal read statements also keep a thread-local unlocked read file handle after
 the read statement ends. The next read statement can reuse that handle only
 after confirming the filename still resolves to the cached device and inode,
