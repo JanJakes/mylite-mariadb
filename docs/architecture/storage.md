@@ -59,16 +59,19 @@ Ordinary active statements reuse one recovery journal for the checkpoint, while
 active durable transactions use their transaction journal instead of creating a
 normal recovery journal per row append. Header reads inside active checkpoints
 and transaction/read snapshots return the already-decoded in-memory header
-instead of re-encoding and re-validating page `0`. Active statements also
-cache validated catalog root pages by root page id and catalog generation so
-row-DML and duplicate-key probes do not repeatedly checksum unchanged catalog
-metadata; catalog root writes and catalog-generation header changes invalidate
-the active statement chain before later metadata reads. Row append, update,
-delete, truncate, and autoincrement publication paths publish decoded headers
-directly into the active checkpoint instead of encoding and immediately
-decoding page `0`. Active checkpoints also keep a transaction-local row-payload
-cache for indexed row reads, replacing cached payloads after successful updates
-and dropping them after deletes, savepoint rollback, truncate, or catalog
+instead of re-encoding and re-validating page `0`. Nested checkpoints clone the
+parent checkpoint's current header/catalog snapshot under the same owner and
+exclusive lock, so prepared row-DML savepoints do not re-read or re-checksum a
+snapshot the parent already validated. Active statements also cache validated
+catalog root pages by root page id and catalog generation so row-DML and
+duplicate-key probes do not repeatedly checksum unchanged catalog metadata;
+catalog root writes and catalog-generation header changes invalidate the active
+statement chain before later metadata reads. Row append, update, delete,
+truncate, and autoincrement publication paths publish decoded headers directly
+into the active checkpoint instead of encoding and immediately decoding page
+`0`. Active checkpoints also keep a transaction-local row-payload cache for
+indexed row reads, replacing cached payloads after successful updates and
+dropping them after deletes, savepoint rollback, truncate, or catalog
 invalidation. This lets repeated handler-driven updates reuse the current row
 image without rereading and rechecksumming the row page while preserving the
 same rollback and visibility rules.

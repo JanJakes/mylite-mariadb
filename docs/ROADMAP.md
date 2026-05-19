@@ -64,10 +64,12 @@ probes on the outer active checkpoint across nested libmylite statement
 checkpoints. This materially improves explicit fixed-width index publication
 and routed indexed insert throughput. Active checkpoint and snapshot header
 reads now reuse the decoded in-memory header instead of re-encoding and
-re-checksumming page `0`. Active statements now reuse validated catalog root
+re-checksumming page `0`; nested write checkpoints now clone the parent
+header/catalog snapshot instead of revalidating the same active pages for every
+prepared row-DML savepoint. Active statements now reuse validated catalog root
 pages until catalog writes or catalog-generation header changes invalidate the
-statement chain. Active row mutation publication now updates decoded
-checkpoint headers directly instead of encode/decode round-tripping page `0`.
+statement chain. Active row mutation publication now updates decoded checkpoint
+headers directly instead of encode/decode round-tripping page `0`.
 Durable handler index cursor builds now keep one scoped read session open
 across exact-index lookup and row materialization, reusing the validated
 primary-file header and catalog root for point lookups and exact-index cursor
