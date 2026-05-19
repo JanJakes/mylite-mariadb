@@ -293,6 +293,12 @@ row-id index so cache hits stay near constant time. The cache is disabled for
 active statements and read snapshots, and it is cleared by durable mutation
 invalidation.
 
+Non-active durable index-leaf reads use the same file header fingerprint model
+for a bounded thread-local leaf page cache. Published leaf-root exact lookups
+can reuse validated leaf pages without repeating the file read, checksum, and
+decode work for every cursor build. The cache is disabled for active statements
+and read snapshots, and it is cleared by durable mutation invalidation.
+
 The catalog stores:
 
 - schemas,
