@@ -252,6 +252,9 @@ the primary file. Update/delete appends checksummed row-state pages that hide
 deleted or superseded row page ids; replacement row payloads are appended as
 new row pages. Table scans validate those pages, filter hidden row ids, and
 reconstruct MariaDB row buffers before returning them to the SQL layer.
+In-memory row-state maps use transient hash buckets keyed by source row id, so
+scans and index overlays do not linearly search every hidden row for each row
+candidate after update-heavy workloads.
 Direct row-id reads validate the target row page first and scan only later
 row-state pages that could hide that row, avoiding full row-state map rebuilds
 for each selected index cursor row.

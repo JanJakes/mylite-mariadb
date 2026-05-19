@@ -45,9 +45,18 @@ typedef struct mylite_storage_row_state_entry {
     unsigned state_kind;
 } mylite_storage_row_state_entry;
 
+typedef struct mylite_storage_row_state_map_bucket {
+    unsigned long long row_id;
+    size_t entry_index;
+    int occupied;
+} mylite_storage_row_state_map_bucket;
+
 typedef struct mylite_storage_row_state_map {
     mylite_storage_row_state_entry *entries;
     size_t count;
+    size_t capacity;
+    mylite_storage_row_state_map_bucket *buckets;
+    size_t bucket_capacity;
 } mylite_storage_row_state_map;
 
 typedef struct mylite_storage_live_row_cache {
@@ -1205,6 +1214,30 @@ static mylite_storage_row_state_entry *find_row_state_entry(
 static mylite_storage_result set_row_state_entry(
     mylite_storage_row_state_map *row_state_map,
     const mylite_storage_row_state_page *row_state_page
+);
+static mylite_storage_result ensure_row_state_map_entry_capacity(
+    mylite_storage_row_state_map *row_state_map,
+    size_t minimum_capacity
+);
+static mylite_storage_result ensure_row_state_map_buckets(
+    mylite_storage_row_state_map *row_state_map,
+    size_t minimum_entry_count
+);
+static size_t row_state_map_bucket_capacity(size_t entry_count);
+static mylite_storage_result rebuild_row_state_map_buckets(
+    mylite_storage_row_state_map *row_state_map,
+    size_t bucket_capacity
+);
+static mylite_storage_result insert_row_state_map_bucket(
+    mylite_storage_row_state_map *row_state_map,
+    unsigned long long row_id,
+    size_t entry_index
+);
+static int place_row_state_map_bucket(
+    mylite_storage_row_state_map_bucket *buckets,
+    size_t bucket_capacity,
+    unsigned long long row_id,
+    size_t entry_index
 );
 static void free_row_state_map(mylite_storage_row_state_map *row_state_map);
 static mylite_storage_result append_row_page_to_rowset(
@@ -11013,6 +11046,23 @@ static mylite_storage_row_state_entry *find_row_state_entry(
     const mylite_storage_row_state_map *row_state_map,
     unsigned long long row_id
 ) {
+    if (row_state_map->bucket_capacity > 0U) {
+        const size_t mask = row_state_map->bucket_capacity - 1U;
+        size_t bucket_index = hash_row_id(row_id) & mask;
+        for (size_t probes = 0U; probes < row_state_map->bucket_capacity; ++probes) {
+            const mylite_storage_row_state_map_bucket *bucket =
+                row_state_map->buckets + bucket_index;
+            if (!bucket->occupied) {
+                return NULL;
+            }
+            if (bucket->row_id == row_id) {
+                return row_state_map->entries + bucket->entry_index;
+            }
+            bucket_index = (bucket_index + 1U) & mask;
+        }
+        return NULL;
+    }
+
     for (size_t i = 0U; i < row_state_map->count; ++i) {
         if (row_state_map->entries[i].source_row_id == row_id) {
             return row_state_map->entries + i;
@@ -11026,6 +11076,16 @@ static mylite_storage_result set_row_state_entry(
     mylite_storage_row_state_map *row_state_map,
     const mylite_storage_row_state_page *row_state_page
 ) {
+    if (row_state_map->count == SIZE_MAX) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    mylite_storage_result result =
+        ensure_row_state_map_buckets(row_state_map, row_state_map->count + 1U);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
     mylite_storage_row_state_entry *entry =
         find_row_state_entry(row_state_map, row_state_page->source_row_id);
     if (entry != NULL) {
@@ -11037,29 +11097,168 @@ static mylite_storage_result set_row_state_entry(
         return MYLITE_STORAGE_OK;
     }
 
-    if (row_state_map->count == SIZE_MAX) {
-        return MYLITE_STORAGE_FULL;
-    }
-
     const size_t new_count = row_state_map->count + 1U;
-    mylite_storage_row_state_entry *entries = (mylite_storage_row_state_entry *)
-        realloc(row_state_map->entries, new_count * sizeof(mylite_storage_row_state_entry));
-    if (entries == NULL) {
-        return MYLITE_STORAGE_NOMEM;
+    result = ensure_row_state_map_entry_capacity(row_state_map, new_count);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
     }
 
-    row_state_map->entries = entries;
     row_state_map->entries[row_state_map->count] = (mylite_storage_row_state_entry){
         .source_row_id = row_state_page->source_row_id,
         .replacement_row_id = row_state_page->replacement_row_id,
         .state_kind = row_state_page->state_kind,
     };
     row_state_map->count = new_count;
+    result =
+        insert_row_state_map_bucket(row_state_map, row_state_page->source_row_id, new_count - 1U);
+    if (result != MYLITE_STORAGE_OK) {
+        row_state_map->count = new_count - 1U;
+        row_state_map->entries[row_state_map->count] = (mylite_storage_row_state_entry){0};
+    }
+    return result;
+}
+
+static mylite_storage_result ensure_row_state_map_entry_capacity(
+    mylite_storage_row_state_map *row_state_map,
+    size_t minimum_capacity
+) {
+    if (row_state_map->capacity >= minimum_capacity) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    size_t next_capacity = row_state_map->capacity == 0U ? 128U : row_state_map->capacity;
+    while (next_capacity < minimum_capacity) {
+        if (next_capacity > SIZE_MAX / 2U) {
+            return MYLITE_STORAGE_FULL;
+        }
+        next_capacity *= 2U;
+    }
+    if (next_capacity > SIZE_MAX / sizeof(*row_state_map->entries)) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    mylite_storage_row_state_entry *entries = (mylite_storage_row_state_entry *)
+        realloc(row_state_map->entries, next_capacity * sizeof(*row_state_map->entries));
+    if (entries == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    row_state_map->entries = entries;
+    row_state_map->capacity = next_capacity;
     return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result ensure_row_state_map_buckets(
+    mylite_storage_row_state_map *row_state_map,
+    size_t minimum_entry_count
+) {
+    const size_t minimum_bucket_capacity = row_state_map_bucket_capacity(minimum_entry_count);
+    if (minimum_bucket_capacity == 0U) {
+        return MYLITE_STORAGE_FULL;
+    }
+    if (row_state_map->bucket_capacity >= minimum_bucket_capacity) {
+        return MYLITE_STORAGE_OK;
+    }
+    return rebuild_row_state_map_buckets(row_state_map, minimum_bucket_capacity);
+}
+
+static size_t row_state_map_bucket_capacity(size_t entry_count) {
+    if (entry_count > SIZE_MAX / 2U) {
+        return 0U;
+    }
+
+    const size_t target_count = entry_count * 2U;
+    size_t bucket_capacity = 128U;
+    while (bucket_capacity < target_count) {
+        if (bucket_capacity > SIZE_MAX / 2U) {
+            return 0U;
+        }
+        bucket_capacity *= 2U;
+    }
+    return bucket_capacity;
+}
+
+static mylite_storage_result rebuild_row_state_map_buckets(
+    mylite_storage_row_state_map *row_state_map,
+    size_t bucket_capacity
+) {
+    if (bucket_capacity > SIZE_MAX / sizeof(*row_state_map->buckets)) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    mylite_storage_row_state_map_bucket *buckets =
+        (mylite_storage_row_state_map_bucket *)calloc(bucket_capacity, sizeof(*buckets));
+    if (buckets == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    for (size_t i = 0U; i < row_state_map->count; ++i) {
+        if (!place_row_state_map_bucket(
+                buckets,
+                bucket_capacity,
+                row_state_map->entries[i].source_row_id,
+                i
+            )) {
+            free(buckets);
+            return MYLITE_STORAGE_FULL;
+        }
+    }
+
+    free(row_state_map->buckets);
+    row_state_map->buckets = buckets;
+    row_state_map->bucket_capacity = bucket_capacity;
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result insert_row_state_map_bucket(
+    mylite_storage_row_state_map *row_state_map,
+    unsigned long long row_id,
+    size_t entry_index
+) {
+    if (row_state_map->bucket_capacity == 0U) {
+        return MYLITE_STORAGE_FULL;
+    }
+    return place_row_state_map_bucket(
+               row_state_map->buckets,
+               row_state_map->bucket_capacity,
+               row_id,
+               entry_index
+           )
+               ? MYLITE_STORAGE_OK
+               : MYLITE_STORAGE_FULL;
+}
+
+static int place_row_state_map_bucket(
+    mylite_storage_row_state_map_bucket *buckets,
+    size_t bucket_capacity,
+    unsigned long long row_id,
+    size_t entry_index
+) {
+    const size_t mask = bucket_capacity - 1U;
+    size_t bucket_index = hash_row_id(row_id) & mask;
+    for (size_t probes = 0U; probes < bucket_capacity; ++probes) {
+        mylite_storage_row_state_map_bucket *bucket = buckets + bucket_index;
+        if (!bucket->occupied) {
+            *bucket = (mylite_storage_row_state_map_bucket){
+                .row_id = row_id,
+                .entry_index = entry_index,
+                .occupied = 1,
+            };
+            return 1;
+        }
+        if (bucket->row_id == row_id) {
+            bucket->entry_index = entry_index;
+            return 1;
+        }
+        bucket_index = (bucket_index + 1U) & mask;
+    }
+
+    return 0;
 }
 
 static void free_row_state_map(mylite_storage_row_state_map *row_state_map) {
     free(row_state_map->entries);
+    free(row_state_map->buckets);
     *row_state_map = (mylite_storage_row_state_map){0};
 }
 
