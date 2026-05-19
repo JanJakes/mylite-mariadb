@@ -2002,6 +2002,12 @@ static unsigned long long get_u64_le(const unsigned char *page, size_t offset);
 static void put_u32_le(unsigned char *page, size_t offset, unsigned value);
 static void put_u64_le(unsigned char *page, size_t offset, unsigned long long value);
 static uint64_t checksum_page(const unsigned char *page, size_t checksum_offset);
+static uint64_t checksum_page_zero_tail(
+    const unsigned char *page,
+    size_t checksum_offset,
+    size_t used_size
+);
+static uint64_t advance_checksum_zero_bytes(uint64_t checksum, size_t byte_count);
 
 static const unsigned char k_header_magic[8] = {'M', 'Y', 'L', 'I', 'T', 'E', '1', '\0'};
 static const unsigned char k_catalog_magic[8] = {'M', 'Y', 'L', 'C', 'A', 'T', '1', '\0'};
@@ -2013,6 +2019,8 @@ static const unsigned char k_index_magic[8] = {'M', 'Y', 'L', 'I', 'D', 'X', '1'
 static const unsigned char k_journal_magic[8] = {'M', 'Y', 'L', 'J', 'N', 'L', '1', '\0'};
 static const unsigned k_lock_retry_sleep_ms = 5U;
 static const useconds_t k_microseconds_per_millisecond = 1000U;
+static const uint64_t k_fnv1a64_offset_basis = UINT64_C(1469598103934665603);
+static const uint64_t k_fnv1a64_prime = UINT64_C(1099511628211);
 static _Thread_local unsigned active_busy_timeout_ms = 0U;
 
 const char *mylite_storage_engine_name(void) {
@@ -9697,7 +9705,11 @@ static void encode_blob_page(
     put_u64_le(
         page,
         MYLITE_STORAGE_FORMAT_BLOB_CHECKSUM_OFFSET,
-        checksum_page(page, MYLITE_STORAGE_FORMAT_BLOB_CHECKSUM_OFFSET)
+        checksum_page_zero_tail(
+            page,
+            MYLITE_STORAGE_FORMAT_BLOB_CHECKSUM_OFFSET,
+            MYLITE_STORAGE_FORMAT_BLOB_PAYLOAD_OFFSET + payload_size
+        )
     );
 }
 
@@ -9753,10 +9765,13 @@ static void encode_row_page(
         memcpy(page + MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET, row.row, row.row_size);
     }
     put_u64_le(page, MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET, 0ULL);
+    const size_t used_size = row.overflow_root_page == 0ULL
+                                 ? MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET + row.row_size
+                                 : MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET;
     put_u64_le(
         page,
         MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET,
-        checksum_page(page, MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET)
+        checksum_page_zero_tail(page, MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET, used_size)
     );
 }
 
@@ -9981,7 +9996,11 @@ static void encode_index_entry_page(
     put_u64_le(
         page,
         MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET,
-        checksum_page(page, MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET)
+        checksum_page_zero_tail(
+            page,
+            MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET,
+            MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET + index_entry->key_size
+        )
     );
 }
 
@@ -10203,7 +10222,7 @@ static void encode_index_leaf_page(
     put_u64_le(
         page,
         MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET,
-        checksum_page(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET)
+        checksum_page_zero_tail(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET, used_bytes)
     );
 }
 
@@ -12473,7 +12492,11 @@ static void encode_row_state_page(
     put_u64_le(
         page,
         MYLITE_STORAGE_FORMAT_ROW_STATE_CHECKSUM_OFFSET,
-        checksum_page(page, MYLITE_STORAGE_FORMAT_ROW_STATE_CHECKSUM_OFFSET)
+        checksum_page_zero_tail(
+            page,
+            MYLITE_STORAGE_FORMAT_ROW_STATE_CHECKSUM_OFFSET,
+            MYLITE_STORAGE_FORMAT_ROW_STATE_KIND_OFFSET + sizeof(uint32_t)
+        )
     );
 }
 
@@ -14865,7 +14888,11 @@ static void encode_autoincrement_page(
     put_u64_le(
         page,
         MYLITE_STORAGE_FORMAT_AUTOINCREMENT_CHECKSUM_OFFSET,
-        checksum_page(page, MYLITE_STORAGE_FORMAT_AUTOINCREMENT_CHECKSUM_OFFSET)
+        checksum_page_zero_tail(
+            page,
+            MYLITE_STORAGE_FORMAT_AUTOINCREMENT_CHECKSUM_OFFSET,
+            MYLITE_STORAGE_FORMAT_AUTOINCREMENT_NEXT_VALUE_OFFSET + sizeof(uint64_t)
+        )
     );
 }
 
@@ -15536,12 +15563,45 @@ static void put_u64_le(unsigned char *page, size_t offset, unsigned long long va
 }
 
 static uint64_t checksum_page(const unsigned char *page, size_t checksum_offset) {
-    uint64_t checksum = UINT64_C(1469598103934665603);
+    uint64_t checksum = k_fnv1a64_offset_basis;
     for (size_t i = 0U; i < MYLITE_STORAGE_FORMAT_PAGE_SIZE; ++i) {
         const unsigned char byte =
             i >= checksum_offset && i < checksum_offset + sizeof(uint64_t) ? 0U : page[i];
         checksum ^= byte;
-        checksum *= UINT64_C(1099511628211);
+        checksum *= k_fnv1a64_prime;
+    }
+    return checksum;
+}
+
+static uint64_t checksum_page_zero_tail(
+    const unsigned char *page,
+    size_t checksum_offset,
+    size_t used_size
+) {
+    if (used_size > MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+        return checksum_page(page, checksum_offset);
+    }
+
+    uint64_t checksum = k_fnv1a64_offset_basis;
+    for (size_t i = 0U; i < used_size; ++i) {
+        const unsigned char byte =
+            i >= checksum_offset && i < checksum_offset + sizeof(uint64_t) ? 0U : page[i];
+        checksum ^= byte;
+        checksum *= k_fnv1a64_prime;
+    }
+    return advance_checksum_zero_bytes(checksum, MYLITE_STORAGE_FORMAT_PAGE_SIZE - used_size);
+}
+
+static uint64_t advance_checksum_zero_bytes(uint64_t checksum, size_t byte_count) {
+    uint64_t factor = k_fnv1a64_prime;
+    while (byte_count > 0U) {
+        if ((byte_count & 1U) != 0U) {
+            checksum *= factor;
+        }
+        byte_count >>= 1U;
+        if (byte_count > 0U) {
+            factor *= factor;
+        }
     }
     return checksum;
 }

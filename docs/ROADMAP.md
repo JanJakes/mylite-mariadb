@@ -140,7 +140,10 @@ publish the maintained list on commit, avoiding the first post-commit live-row
 scan when the pre-transaction checkpoint was already cached. The
 common inline update path now writes replacement row, row-state, and
 replacement index-entry pages as one contiguous append run, reducing per-update
-write syscall overhead without changing the durable page format. The
+write syscall overhead without changing the durable page format. Fresh page
+encoders now compute the same full-page FNV checksum by hashing the meaningful
+prefix and skipping known-zero tails, reducing append-page CPU cost while read
+paths still verify complete pages. The
 internal rowset builder avoids per-row metadata reallocations during known
 indexed-row batches, with a small row-id index keeping payload cache hits from
 becoming another per-row scan. Row-id batch materialization now reuses the same
