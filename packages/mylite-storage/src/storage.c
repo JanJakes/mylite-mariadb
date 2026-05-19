@@ -1713,10 +1713,8 @@ static mylite_storage_result copy_exact_index_cache_entries(
     mylite_storage_exact_index_cache *destination,
     const mylite_storage_exact_index_cache *source
 );
-static mylite_storage_result append_cached_active_row_payload_to_builder(
-    const char *filename,
-    const mylite_storage_header *header,
-    unsigned long long table_id,
+static mylite_storage_result append_cached_row_payload_to_builder(
+    const mylite_storage_row_payload_cache *cache,
     unsigned long long row_id,
     mylite_storage_rowset_builder *builder,
     int *out_used_cache
@@ -4131,23 +4129,34 @@ mylite_storage_result mylite_storage_read_indexed_rows(
     }
     mylite_storage_row_payload_cache *row_payload_cache = NULL;
     unsigned long long row_payload_cache_generation = 0ULL;
+    mylite_storage_statement *active_row_payload_statement = NULL;
+    mylite_storage_row_payload_cache *active_row_payload_cache = NULL;
     if (result == MYLITE_STORAGE_OK) {
         row_payload_cache = durable_row_payload_cache_for(filename, &header, table_id);
         row_payload_cache_generation = durable_row_payload_caches_generation;
+        active_row_payload_statement = active_row_payload_cache_statement_for(filename);
+        if (active_row_payload_statement != NULL) {
+            active_row_payload_cache = find_active_row_payload_cache(
+                &active_row_payload_statement->row_payload_caches,
+                filename,
+                &header,
+                table_id
+            );
+        }
     }
     for (size_t i = 0U; result == MYLITE_STORAGE_OK && i < row_id_count; ++i) {
         const unsigned long long row_id = row_ids[i];
         int used_cache = 0;
-        result = append_cached_active_row_payload_to_builder(
-            filename,
-            &header,
-            table_id,
-            row_id,
-            &builder,
-            &used_cache
-        );
-        if (result != MYLITE_STORAGE_OK || used_cache) {
-            continue;
+        if (active_row_payload_cache != NULL) {
+            result = append_cached_row_payload_to_builder(
+                active_row_payload_cache,
+                row_id,
+                &builder,
+                &used_cache
+            );
+            if (result != MYLITE_STORAGE_OK || used_cache) {
+                continue;
+            }
         }
 
         result = append_cached_durable_row_payload_to_builder(
@@ -4187,6 +4196,14 @@ mylite_storage_result mylite_storage_read_indexed_rows(
                     row_page.payload,
                     row_page.row_size
                 );
+                if (active_row_payload_statement != NULL) {
+                    active_row_payload_cache = find_active_row_payload_cache(
+                        &active_row_payload_statement->row_payload_caches,
+                        filename,
+                        &header,
+                        table_id
+                    );
+                }
                 store_durable_row_payload(
                     filename,
                     &header,
@@ -14038,17 +14055,19 @@ static void invalidate_exact_index_caches(const char *filename) {
     clear_durable_exact_index_caches(filename);
 }
 
-static mylite_storage_result append_cached_active_row_payload_to_builder(
-    const char *filename,
-    const mylite_storage_header *header,
-    unsigned long long table_id,
+static mylite_storage_result append_cached_row_payload_to_builder(
+    const mylite_storage_row_payload_cache *cache,
     unsigned long long row_id,
     mylite_storage_rowset_builder *builder,
     int *out_used_cache
 ) {
     *out_used_cache = 0;
+    if (cache == NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+
     const mylite_storage_row_payload_cache_entry *entry =
-        active_row_payload_cache_entry_for(filename, header, table_id, row_id);
+        find_row_payload_cache_entry(cache, row_id);
     if (entry == NULL) {
         return MYLITE_STORAGE_OK;
     }
@@ -14276,17 +14295,7 @@ static mylite_storage_result append_cached_durable_row_payload_to_builder(
         cache,
         cache_generation
     );
-    if (resolved_cache == NULL) {
-        return MYLITE_STORAGE_OK;
-    }
-
-    const mylite_storage_row_payload_cache_entry *entry =
-        find_row_payload_cache_entry(resolved_cache, row_id);
-    if (entry != NULL) {
-        *out_used_cache = 1;
-        return append_row_to_rowset_builder(builder, row_id, entry->row, entry->row_size);
-    }
-    return MYLITE_STORAGE_OK;
+    return append_cached_row_payload_to_builder(resolved_cache, row_id, builder, out_used_cache);
 }
 
 static void store_durable_row_payload(
@@ -14418,14 +14427,14 @@ static mylite_storage_row_payload_cache *durable_row_payload_cache_for_batch(
     mylite_storage_row_payload_cache **cache,
     unsigned long long *cache_generation
 ) {
+    /* Cache pointers are reusable only until the cache set moves or compacts. */
+    if (*cache_generation == durable_row_payload_caches_generation) {
+        return *cache;
+    }
     if (!durable_row_payload_cache_available(filename)) {
         *cache = NULL;
         *cache_generation = durable_row_payload_caches_generation;
         return NULL;
-    }
-    /* Cache pointers are reusable only until the cache set moves or compacts. */
-    if (*cache != NULL && *cache_generation == durable_row_payload_caches_generation) {
-        return *cache;
     }
 
     *cache = find_durable_row_payload_cache(filename, header, table_id);

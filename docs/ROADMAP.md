@@ -167,6 +167,10 @@ stay on the lazy per-row payload path until batch materialization owns BLOB
 payload lifetimes explicitly. Published index leaf pages
 are also cached by durable file header fingerprint so repeated exact leaf-root
 lookups avoid repeating leaf page reads, checksums, and decode work.
+Indexed row materialization now resolves active and durable row-payload cache
+availability once per batch and reuses durable cache pointers while the cache
+generation remains stable, reducing repeated cache-control work for many-row
+secondary exact reads.
 Handler instances now cache proven child and parent foreign-key metadata
 absence for opened tables, removing repeated no-op FK catalog scans from
 ordinary non-FK row-DML paths, with successful local table DDL invalidating

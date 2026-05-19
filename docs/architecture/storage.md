@@ -117,7 +117,10 @@ limited to a known table. Caches for that table are cleared or maintained by the
 active checkpoint, while caches for other tables in the same file keep their
 table-local contents and adopt the new committed header fingerprint. Catalog
 changes, truncate, rollback, and cache-limit rotation keep broad file-level
-invalidation.
+invalidation. Indexed row materialization resolves active and durable
+row-payload cache availability once per batch and reuses durable cache pointers
+while the cache-set generation is stable, avoiding per-row control-plane probes
+when secondary cursors return many row ids.
 
 MariaDB table-discovery callbacks also use scoped read sessions while they read
 table definitions, discovered table names, or table existence from the MyLite
