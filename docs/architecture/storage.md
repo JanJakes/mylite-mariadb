@@ -220,10 +220,12 @@ Autoincrement tables append checksummed state pages keyed by catalog table id so
 generated values survive close/reopen and dropped table ids do not leak into
 recreated tables. Supported primary, unique, and secondary indexes append
 checksummed index-entry pages containing the catalog table id, MariaDB key
-number, row page id, and MariaDB key-tuple bytes. Single-page index leaf
-snapshots can be rebuilt from live append-only entries, appended as root pages,
-and catalog-published as exact byte-key lookup base snapshots; lookup applies
-later row-state and index-entry tail pages before returning matches. Handler
+number, row page id, and MariaDB key-tuple bytes. Contiguous index leaf runs
+can be rebuilt from live append-only entries, appended as root pages, and
+catalog-published as exact byte-key lookup base snapshots. Exact lookup derives
+the run length from root metadata, searches leaf page key ranges, scans only
+pages that can contain the requested key, then applies later row-state and
+index-entry tail pages before returning matches. Handler
 index reads build ordered in-memory cursors from live index entries and compare
 keys with MariaDB's key helpers. Current mutating
 publication paths are protected by a
@@ -637,7 +639,8 @@ for guarded raw equality paths so the handler does not allocate unrelated index
 entries for common integer point reads. Durable exact lookups classify each
 published append-only page once and prune candidates as later row-state pages
 hide older row ids. Contiguous index leaf runs can serve as exact lookup base
-snapshots, with only pages appended after the published run scanned as a
+snapshots by searching run page key ranges and walking only duplicate-spanning
+neighbor pages, with only pages appended after the published run scanned as a
 visibility overlay; missing roots fall back to the append-only scan path. Explicit
 standalone `CREATE INDEX` and `ALTER TABLE ... ADD KEY` copy rebuilds can
 opportunistically publish supported fixed-width leaf roots when catalog headroom

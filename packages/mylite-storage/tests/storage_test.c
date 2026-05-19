@@ -111,6 +111,7 @@ static void test_index_entries(void);
 static void test_index_root_metadata(void);
 static void test_index_leaf_pages(void);
 static void test_multi_page_index_leaf_pages(void);
+static void test_multi_page_index_leaf_duplicate_boundaries(void);
 static void assert_index_prefix_exists(
     const char *filename,
     const unsigned char *key_prefix,
@@ -339,6 +340,7 @@ int main(void) {
     test_index_root_metadata();
     test_index_leaf_pages();
     test_multi_page_index_leaf_pages();
+    test_multi_page_index_leaf_duplicate_boundaries();
     test_autoincrement_state();
     test_truncate_table_lifecycle();
     test_statement_checkpoints();
@@ -2053,6 +2055,95 @@ static void test_multi_page_index_leaf_pages(void) {
         sizeof(tail_key),
         tail_expected_row_ids,
         sizeof(tail_expected_row_ids) / sizeof(tail_expected_row_ids[0])
+    );
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_multi_page_index_leaf_duplicate_boundaries(void) {
+    enum { entry_count = 420U };
+
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "multi-page-index-leaf-duplicate-boundaries.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    unsigned long long row_ids[entry_count];
+    const size_t entry_capacity =
+        (MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET) /
+        (MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_HEADER_SIZE + 4U);
+    const unsigned duplicate_count = (unsigned)entry_capacity + 4U;
+    assert(duplicate_count < entry_count);
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    for (unsigned i = 0U; i < entry_count; ++i) {
+        unsigned char row[8] = {0};
+        unsigned char key[4] = {0};
+        const unsigned key_value = i < duplicate_count ? 7U : 8U + i - duplicate_count;
+        put_test_u32_le(row, 0U, i + 1U);
+        put_test_u32_le(key, 0U, key_value);
+        mylite_storage_index_entry index_entry = {
+            .size = sizeof(index_entry),
+            .index_number = 0U,
+            .key = key,
+            .key_size = sizeof(key),
+        };
+        assert(
+            mylite_storage_append_row_with_index_entries(
+                filename,
+                "app",
+                "posts",
+                row,
+                sizeof(row),
+                &index_entry,
+                1U,
+                &row_ids[i]
+            ) == MYLITE_STORAGE_OK
+        );
+    }
+
+    assert(mylite_storage_rebuild_index_leaf(filename, "app", "posts", 0U) == MYLITE_STORAGE_OK);
+
+    unsigned char duplicate_key[4] = {0};
+    unsigned char last_key[4] = {0};
+    unsigned char missing_key[4] = {0};
+    put_test_u32_le(duplicate_key, 0U, 7U);
+    put_test_u32_le(last_key, 0U, 8U + entry_count - duplicate_count - 1U);
+    put_test_u32_le(missing_key, 0U, 6U);
+    assert_exact_index_entries(
+        filename,
+        0U,
+        duplicate_key,
+        sizeof(duplicate_key),
+        row_ids,
+        duplicate_count
+    );
+    assert_index_entry_lookup(
+        filename,
+        0U,
+        last_key,
+        sizeof(last_key),
+        MYLITE_STORAGE_OK,
+        row_ids[entry_count - 1U]
+    );
+    assert_index_entry_lookup(
+        filename,
+        0U,
+        missing_key,
+        sizeof(missing_key),
+        MYLITE_STORAGE_NOTFOUND,
+        0ULL
     );
 
     assert(unlink(filename) == 0);

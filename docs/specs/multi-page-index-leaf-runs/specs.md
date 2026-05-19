@@ -43,8 +43,10 @@ run.
   until the root metadata `entry_count` is satisfied.
 - For empty indexes, still publish one empty leaf page so the root metadata has
   a concrete page to validate and the append-tail scan starts after that page.
-- Change exact lookup to read the full published run before scanning the append
-  tail. Each page keeps the existing binary-search-with-local-duplicate-walk
+- Change exact lookup to use the published run before scanning the append tail.
+  The follow-up page-search slice derives the run length from root metadata,
+  searches page key ranges, and walks only duplicate-spanning neighbor pages.
+  Each visited page keeps the existing binary-search-with-local-duplicate-walk
   behavior.
 - Treat a missing or malformed page inside a published run as corruption, not a
   fallback. Fallback is only valid when no root exists.
