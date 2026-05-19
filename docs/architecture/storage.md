@@ -95,6 +95,11 @@ reads can reuse that list instead of scanning the append history and
 rechecksumming every row and row-state page again. Mutations, truncate, catalog
 changes, and cache-limit rotation clear the cache; active checkpoints and read
 snapshots bypass it.
+Active checkpoints can seed a complete live-row-id list from that durable
+cache, maintain insert/update/delete changes in process memory, and promote the
+updated list on top-level commit. Rollback, catalog changes, truncate, cache
+overflow, or any inconsistent mutation state discards the active list and keeps
+the existing append-history scan fallback.
 
 MariaDB table-discovery callbacks also use scoped read sessions while they read
 table definitions, discovered table names, or table existence from the MyLite

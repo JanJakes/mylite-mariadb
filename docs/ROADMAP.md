@@ -134,7 +134,10 @@ now cache row payloads by file header fingerprint,
 reducing repeated secondary cursor row-page checksums. Non-active durable
 full-row and count reads now cache compacted live row-id lists by durable
 header fingerprint, avoiding repeated append-history scans for unchanged
-checkpoints after an initial count or scan. The
+checkpoints after an initial count or scan. Active transactions can now maintain
+those seeded live row-id lists through insert/update/delete mutations and
+publish the maintained list on commit, avoiding the first post-commit live-row
+scan when the pre-transaction checkpoint was already cached. The
 common inline update path now writes replacement row, row-state, and
 replacement index-entry pages as one contiguous append run, reducing per-update
 write syscall overhead without changing the durable page format. The

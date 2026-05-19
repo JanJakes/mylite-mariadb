@@ -112,6 +112,7 @@ static void test_many_row_state_pages_scan(void);
 static void test_active_live_row_validation_cache(void);
 static void test_active_row_payload_cache(void);
 static void test_durable_live_row_cache(void);
+static void test_active_live_row_list_maintenance(void);
 static void test_index_entries(void);
 static void test_cached_exact_index_entryset_bulk_append(void);
 static void test_indexed_row_batch_cache_reuses_duplicates(void);
@@ -381,6 +382,7 @@ int main(void) {
     test_active_live_row_validation_cache();
     test_active_row_payload_cache();
     test_durable_live_row_cache();
+    test_active_live_row_list_maintenance();
     test_index_entries();
     test_cached_exact_index_entryset_bulk_append();
     test_indexed_row_batch_cache_reuses_duplicates();
@@ -1699,6 +1701,148 @@ static void test_durable_live_row_cache(void) {
     assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
     assert(rows.row_count == 0U);
     mylite_storage_free_rowset(&rows);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_active_live_row_list_maintenance(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row_1[] = {0x00U, 0x11U, 'a'};
+    static const unsigned char row_2[] = {0x00U, 0x22U, 'b'};
+    static const unsigned char row_3[] = {0x00U, 0x33U, 'c'};
+    static const unsigned char row_4[] = {0x00U, 0x44U, 'd'};
+    static const unsigned char row_5[] = {0x00U, 0x55U, 'e'};
+    static const unsigned char row_6[] = {0x00U, 0x66U, 'f'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "active-live-row-list-cache.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_statement *transaction = NULL;
+    mylite_storage_statement *savepoint = NULL;
+    unsigned long long row_1_id = 0ULL;
+    unsigned long long row_2_id = 0ULL;
+    unsigned long long row_3_id = 0ULL;
+    unsigned long long row_4_id = 0ULL;
+    unsigned long long row_5_id = 0ULL;
+    unsigned long long row_6_id = 0ULL;
+    unsigned long long row_count = 0ULL;
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_1,
+            sizeof(row_1),
+            NULL,
+            0U,
+            &row_1_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_2,
+            sizeof(row_2),
+            NULL,
+            0U,
+            &row_2_id
+        ) == MYLITE_STORAGE_OK
+    );
+
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 2ULL);
+
+    assert(mylite_storage_begin_transaction(filename, &transaction) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_update_row(
+            filename,
+            "app",
+            "posts",
+            row_1_id,
+            row_3,
+            sizeof(row_3),
+            &row_3_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_delete_row(filename, "app", "posts", row_2_id) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_4,
+            sizeof(row_4),
+            NULL,
+            0U,
+            &row_4_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_commit_statement(transaction) == MYLITE_STORAGE_OK);
+
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
+    assert(rows.row_count == 2U);
+    assert(rows.row_ids[0] == row_3_id);
+    assert(rows.row_ids[1] == row_4_id);
+    assert(memcmp(rows.rows + rows.row_offsets[0], row_3, sizeof(row_3)) == 0);
+    assert(memcmp(rows.rows + rows.row_offsets[1], row_4, sizeof(row_4)) == 0);
+    mylite_storage_free_rowset(&rows);
+
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 2ULL);
+
+    assert(mylite_storage_begin_transaction(filename, &transaction) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_update_row(
+            filename,
+            "app",
+            "posts",
+            row_3_id,
+            row_5,
+            sizeof(row_5),
+            &row_5_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_begin_statement(filename, &savepoint) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_update_row(
+            filename,
+            "app",
+            "posts",
+            row_4_id,
+            row_6,
+            sizeof(row_6),
+            &row_6_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_rollback_statement(savepoint) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_commit_statement(transaction) == MYLITE_STORAGE_OK);
+
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
+    assert(rows.row_count == 2U);
+    assert(rows.row_ids[0] == row_4_id);
+    assert(rows.row_ids[1] == row_5_id);
+    assert(memcmp(rows.rows + rows.row_offsets[0], row_4, sizeof(row_4)) == 0);
+    assert(memcmp(rows.rows + rows.row_offsets[1], row_5, sizeof(row_5)) == 0);
+    mylite_storage_free_rowset(&rows);
+    assert_row_not_found(filename, row_6_id);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);

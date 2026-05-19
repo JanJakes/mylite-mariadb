@@ -355,6 +355,7 @@ struct mylite_storage_statement {
     int cache_file_on_close;
     mylite_storage_exact_index_cache_set exact_index_caches;
     mylite_storage_live_row_cache_set live_row_caches;
+    mylite_storage_live_row_id_cache_set live_row_id_caches;
     mylite_storage_row_payload_cache_set row_payload_caches;
 };
 
@@ -525,6 +526,7 @@ static mylite_storage_statement *active_read_statement_for(const char *filename)
 static mylite_storage_statement *active_read_statement_for_any_owner(const char *filename);
 static mylite_storage_statement *active_read_snapshot_for(const char *filename);
 static mylite_storage_statement *active_exact_index_cache_statement_for(const char *filename);
+static mylite_storage_statement *active_live_row_id_cache_statement_for(const char *filename);
 static mylite_storage_statement *active_row_payload_cache_statement_for(const char *filename);
 static mylite_storage_statement *active_statement_for_file(FILE *file);
 static mylite_storage_statement *active_read_statement_for_file(FILE *file);
@@ -575,6 +577,8 @@ static void free_exact_index_cache(mylite_storage_exact_index_cache *cache);
 static void clear_statement_chain_live_row_caches(mylite_storage_statement *statement);
 static void clear_live_row_caches(mylite_storage_statement *statement);
 static void free_live_row_cache(mylite_storage_live_row_cache *cache);
+static void clear_statement_chain_live_row_id_caches(mylite_storage_statement *statement);
+static void clear_live_row_id_caches(mylite_storage_statement *statement);
 static void clear_statement_chain_row_payload_caches(mylite_storage_statement *statement);
 static void clear_row_payload_caches(mylite_storage_statement *statement);
 static int checkpoint_preserves_auto_increment_rollback(
@@ -1212,6 +1216,62 @@ static void store_durable_live_row_ids(
     const mylite_storage_row_id_list *row_ids
 );
 static void clear_durable_live_row_id_caches(const char *filename);
+static void promote_statement_live_row_id_caches(const mylite_storage_statement *statement);
+static void seed_active_live_row_id_cache(
+    const char *filename,
+    const mylite_storage_header *header,
+    unsigned long long table_id
+);
+static void append_active_live_row_id(
+    const char *filename,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned long long row_id
+);
+static void replace_active_live_row_id(
+    const char *filename,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned long long old_row_id,
+    unsigned long long new_row_id
+);
+static void remove_active_live_row_id(
+    const char *filename,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned long long row_id
+);
+static mylite_storage_live_row_id_cache *active_live_row_id_cache_for(
+    const char *filename,
+    const mylite_storage_header *header,
+    unsigned long long table_id
+);
+static mylite_storage_live_row_id_cache *find_active_live_row_id_cache(
+    mylite_storage_live_row_id_cache_set *caches,
+    const char *filename,
+    const mylite_storage_header *header,
+    unsigned long long table_id
+);
+static mylite_storage_result append_active_live_row_id_cache(
+    mylite_storage_live_row_id_cache_set *caches,
+    const char *filename,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    mylite_storage_live_row_id_cache **out_cache
+);
+static int append_row_id_to_cache(
+    mylite_storage_live_row_id_cache *cache,
+    unsigned long long row_id
+);
+static int replace_row_id_in_cache(
+    mylite_storage_live_row_id_cache *cache,
+    unsigned long long old_row_id,
+    unsigned long long new_row_id
+);
+static int remove_row_id_from_cache(
+    mylite_storage_live_row_id_cache *cache,
+    unsigned long long row_id
+);
 static int durable_live_row_id_cache_available(const char *filename);
 static mylite_storage_live_row_id_cache *find_durable_live_row_id_cache(
     const char *filename,
@@ -3734,6 +3794,9 @@ mylite_storage_result mylite_storage_append_row_with_index_entries(
     }
     mylite_storage_row_write_position position = {0};
     if (result == MYLITE_STORAGE_OK) {
+        seed_active_live_row_id_cache(filename, &header, table_id);
+    }
+    if (result == MYLITE_STORAGE_OK) {
         result = begin_write_journal(file, filename, &header, 0);
     }
     if (result == MYLITE_STORAGE_OK) {
@@ -3772,6 +3835,7 @@ mylite_storage_result mylite_storage_append_row_with_index_entries(
     }
     if (result == MYLITE_STORAGE_OK) {
         (void)mark_active_validated_live_row(file, &header, table_id, position.row_page_id);
+        append_active_live_row_id(filename, &header, table_id, position.row_page_id);
         clear_durable_exact_index_caches(filename);
     }
 
@@ -4271,6 +4335,9 @@ mylite_storage_result mylite_storage_update_row_with_index_entries(
         result = find_table_id(file, &header, schema_name, table_name, &table_id);
     }
     if (result == MYLITE_STORAGE_OK) {
+        seed_active_live_row_id_cache(filename, &header, table_id);
+    }
+    if (result == MYLITE_STORAGE_OK) {
         result = validate_direct_live_row(
             file,
             &header,
@@ -4351,6 +4418,7 @@ mylite_storage_result mylite_storage_update_row_with_index_entries(
             index_entry_count
         );
         replace_active_live_row(file, &header, table_id, row_id, position.row_page_id);
+        replace_active_live_row_id(filename, &header, table_id, row_id, position.row_page_id);
         replace_active_row_payload(
             filename,
             &header,
@@ -4399,6 +4467,9 @@ mylite_storage_result mylite_storage_delete_row(
         result = find_table_id(file, &header, schema_name, table_name, &table_id);
     }
     if (result == MYLITE_STORAGE_OK) {
+        seed_active_live_row_id_cache(filename, &header, table_id);
+    }
+    if (result == MYLITE_STORAGE_OK) {
         result = validate_direct_live_row(file, &header, table_id, row_id, row_buffer, &row_page);
     }
     if (result == MYLITE_STORAGE_OK && header.page_count == ULLONG_MAX) {
@@ -4431,6 +4502,7 @@ mylite_storage_result mylite_storage_delete_row(
     if (result == MYLITE_STORAGE_OK) {
         replace_active_exact_index_cache_entries(filename, table_id, row_id, 0ULL, NULL, 0U);
         replace_active_live_row(file, &header, table_id, row_id, 0ULL);
+        remove_active_live_row_id(filename, &header, table_id, row_id);
         remove_active_row_payload(filename, &header, table_id, row_id);
         clear_durable_exact_index_caches(filename);
     }
@@ -5142,8 +5214,12 @@ mylite_storage_result mylite_storage_commit_statement(mylite_storage_statement *
         }
     }
 
+    const int promote_live_row_id_caches = statement->parent == NULL;
     active_statement = statement->parent;
     mylite_storage_result result = close_statement(statement);
+    if (result == MYLITE_STORAGE_OK && promote_live_row_id_caches) {
+        promote_statement_live_row_id_caches(statement);
+    }
     free_statement(statement);
     return result;
 }
@@ -5206,6 +5282,7 @@ mylite_storage_result mylite_storage_rollback_statement(mylite_storage_statement
     if (statement->parent != NULL) {
         clear_statement_chain_exact_index_caches(statement->parent);
         clear_statement_chain_live_row_caches(statement->parent);
+        clear_statement_chain_live_row_id_caches(statement->parent);
         clear_statement_chain_row_payload_caches(statement->parent);
         statement->parent->current_header = statement->current_header;
         statement->parent->has_current_header = 1;
@@ -6080,6 +6157,7 @@ static mylite_storage_result begin_write_journal(
     }
     if (include_catalog) {
         clear_statement_chain_exact_index_caches(statement);
+        clear_statement_chain_live_row_id_caches(statement);
         clear_statement_chain_row_payload_caches(statement);
         clear_durable_exact_index_caches(filename);
     }
@@ -6784,6 +6862,22 @@ static mylite_storage_statement *active_exact_index_cache_statement_for(const ch
     return cache_statement;
 }
 
+static mylite_storage_statement *active_live_row_id_cache_statement_for(const char *filename) {
+    if (filename == NULL) {
+        return NULL;
+    }
+
+    mylite_storage_statement *cache_statement = NULL;
+    for (mylite_storage_statement *statement = active_statement; statement != NULL;
+         statement = statement->parent) {
+        if (strcmp(statement->filename, filename) == 0 &&
+            statement->owner == active_context_owner) {
+            cache_statement = statement;
+        }
+    }
+    return cache_statement;
+}
+
 static mylite_storage_statement *active_row_payload_cache_statement_for(const char *filename) {
     if (filename == NULL) {
         return NULL;
@@ -6986,6 +7080,7 @@ static void free_statement(mylite_storage_statement *statement) {
     }
     clear_exact_index_caches(statement);
     clear_live_row_caches(statement);
+    clear_live_row_id_caches(statement);
     clear_row_payload_caches(statement);
     free(statement->filename);
     free(statement);
@@ -7042,6 +7137,25 @@ static void free_live_row_cache(mylite_storage_live_row_cache *cache) {
     free(cache->row_ids);
     free(cache->validated_row_ids);
     *cache = (mylite_storage_live_row_cache){0};
+}
+
+static void clear_statement_chain_live_row_id_caches(mylite_storage_statement *statement) {
+    for (mylite_storage_statement *current = statement; current != NULL;
+         current = current->parent) {
+        clear_live_row_id_caches(current);
+    }
+}
+
+static void clear_live_row_id_caches(mylite_storage_statement *statement) {
+    if (statement == NULL) {
+        return;
+    }
+
+    for (size_t i = 0U; i < statement->live_row_id_caches.count; ++i) {
+        free_live_row_id_cache(statement->live_row_id_caches.entries + i);
+    }
+    free(statement->live_row_id_caches.entries);
+    statement->live_row_id_caches = (mylite_storage_live_row_id_cache_set){0};
 }
 
 static void clear_statement_chain_row_payload_caches(mylite_storage_statement *statement) {
@@ -11373,6 +11487,251 @@ static void clear_durable_live_row_id_caches(const char *filename) {
     }
 }
 
+static void promote_statement_live_row_id_caches(const mylite_storage_statement *statement) {
+    if (statement == NULL || statement->live_row_id_caches.count == 0U) {
+        return;
+    }
+
+    const mylite_storage_header *header =
+        statement->has_current_header ? &statement->current_header : &statement->header;
+    for (size_t i = 0U; i < statement->live_row_id_caches.count; ++i) {
+        const mylite_storage_live_row_id_cache *cache =
+            statement->live_row_id_caches.entries + i;
+        mylite_storage_row_id_list row_ids = {
+            .row_ids = cache->row_ids,
+            .count = cache->count,
+        };
+        store_durable_live_row_ids(statement->filename, header, cache->table_id, &row_ids);
+    }
+}
+
+static void seed_active_live_row_id_cache(
+    const char *filename,
+    const mylite_storage_header *header,
+    unsigned long long table_id
+) {
+    mylite_storage_statement *statement = active_live_row_id_cache_statement_for(filename);
+    if (statement == NULL ||
+        find_active_live_row_id_cache(&statement->live_row_id_caches, filename, header, table_id) !=
+            NULL) {
+        return;
+    }
+
+    const mylite_storage_live_row_id_cache *durable_cache =
+        find_durable_live_row_id_cache(filename, header, table_id);
+    if (durable_cache == NULL) {
+        return;
+    }
+    if (statement->live_row_id_caches.count >= MYLITE_STORAGE_DURABLE_LIVE_ROW_ID_CACHE_LIMIT) {
+        clear_live_row_id_caches(statement);
+    }
+
+    mylite_storage_live_row_id_cache *cache = NULL;
+    if (append_active_live_row_id_cache(
+            &statement->live_row_id_caches,
+            filename,
+            header,
+            table_id,
+            &cache
+        ) != MYLITE_STORAGE_OK) {
+        return;
+    }
+    if (assign_live_row_id_cache(
+            cache,
+            &(mylite_storage_row_id_list){
+                .row_ids = durable_cache->row_ids,
+                .count = durable_cache->count,
+            }
+        ) != MYLITE_STORAGE_OK) {
+        free_live_row_id_cache(cache);
+        if (statement->live_row_id_caches.count > 0U) {
+            --statement->live_row_id_caches.count;
+        }
+    }
+}
+
+static void append_active_live_row_id(
+    const char *filename,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned long long row_id
+) {
+    mylite_storage_live_row_id_cache *cache =
+        active_live_row_id_cache_for(filename, header, table_id);
+    if (cache == NULL) {
+        return;
+    }
+    if (!append_row_id_to_cache(cache, row_id)) {
+        clear_live_row_id_caches(active_live_row_id_cache_statement_for(filename));
+    }
+}
+
+static void replace_active_live_row_id(
+    const char *filename,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned long long old_row_id,
+    unsigned long long new_row_id
+) {
+    mylite_storage_live_row_id_cache *cache =
+        active_live_row_id_cache_for(filename, header, table_id);
+    if (cache == NULL) {
+        return;
+    }
+    if (!replace_row_id_in_cache(cache, old_row_id, new_row_id)) {
+        clear_live_row_id_caches(active_live_row_id_cache_statement_for(filename));
+    }
+}
+
+static void remove_active_live_row_id(
+    const char *filename,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned long long row_id
+) {
+    mylite_storage_live_row_id_cache *cache =
+        active_live_row_id_cache_for(filename, header, table_id);
+    if (cache == NULL) {
+        return;
+    }
+    if (!remove_row_id_from_cache(cache, row_id)) {
+        clear_live_row_id_caches(active_live_row_id_cache_statement_for(filename));
+    }
+}
+
+static mylite_storage_live_row_id_cache *active_live_row_id_cache_for(
+    const char *filename,
+    const mylite_storage_header *header,
+    unsigned long long table_id
+) {
+    mylite_storage_statement *statement = active_live_row_id_cache_statement_for(filename);
+    if (statement == NULL) {
+        return NULL;
+    }
+    return find_active_live_row_id_cache(
+        &statement->live_row_id_caches,
+        filename,
+        header,
+        table_id
+    );
+}
+
+static mylite_storage_live_row_id_cache *find_active_live_row_id_cache(
+    mylite_storage_live_row_id_cache_set *caches,
+    const char *filename,
+    const mylite_storage_header *header,
+    unsigned long long table_id
+) {
+    for (size_t i = 0U; i < caches->count; ++i) {
+        mylite_storage_live_row_id_cache *cache = caches->entries + i;
+        if (cache->filename != NULL && strcmp(cache->filename, filename) == 0 &&
+            cache->catalog_root_page == header->catalog_root_page &&
+            cache->catalog_generation == header->catalog_generation &&
+            cache->table_id == table_id) {
+            return cache;
+        }
+    }
+    return NULL;
+}
+
+static mylite_storage_result append_active_live_row_id_cache(
+    mylite_storage_live_row_id_cache_set *caches,
+    const char *filename,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    mylite_storage_live_row_id_cache **out_cache
+) {
+    if (caches->count == caches->capacity) {
+        const size_t next_capacity = caches->capacity == 0U ? 4U : caches->capacity * 2U;
+        if (next_capacity <= caches->capacity ||
+            next_capacity > SIZE_MAX / sizeof(*caches->entries)) {
+            return MYLITE_STORAGE_FULL;
+        }
+        mylite_storage_live_row_id_cache *entries = (mylite_storage_live_row_id_cache *)realloc(
+            caches->entries,
+            next_capacity * sizeof(*caches->entries)
+        );
+        if (entries == NULL) {
+            return MYLITE_STORAGE_NOMEM;
+        }
+        caches->entries = entries;
+        caches->capacity = next_capacity;
+    }
+
+    mylite_storage_live_row_id_cache *cache = caches->entries + caches->count;
+    *cache = (mylite_storage_live_row_id_cache){
+        .filename = copy_filename(filename),
+        .catalog_root_page = header->catalog_root_page,
+        .catalog_generation = header->catalog_generation,
+        .page_count = header->page_count,
+        .table_id = table_id,
+    };
+    if (cache->filename == NULL) {
+        *cache = (mylite_storage_live_row_id_cache){0};
+        return MYLITE_STORAGE_NOMEM;
+    }
+    ++caches->count;
+    *out_cache = cache;
+    return MYLITE_STORAGE_OK;
+}
+
+static int append_row_id_to_cache(
+    mylite_storage_live_row_id_cache *cache,
+    unsigned long long row_id
+) {
+    for (size_t i = 0U; i < cache->count; ++i) {
+        if (cache->row_ids[i] == row_id) {
+            return 1;
+        }
+    }
+    if (cache->count >= MYLITE_STORAGE_DURABLE_LIVE_ROW_ID_ENTRY_LIMIT ||
+        cache->count >= SIZE_MAX / sizeof(*cache->row_ids)) {
+        return 0;
+    }
+
+    const size_t new_count = cache->count + 1U;
+    unsigned long long *row_ids =
+        (unsigned long long *)realloc(cache->row_ids, new_count * sizeof(*cache->row_ids));
+    if (row_ids == NULL) {
+        return 0;
+    }
+    cache->row_ids = row_ids;
+    cache->row_ids[cache->count] = row_id;
+    cache->count = new_count;
+    return 1;
+}
+
+static int replace_row_id_in_cache(
+    mylite_storage_live_row_id_cache *cache,
+    unsigned long long old_row_id,
+    unsigned long long new_row_id
+) {
+    for (size_t i = 0U; i < cache->count; ++i) {
+        if (cache->row_ids[i] == old_row_id) {
+            cache->row_ids[i] = new_row_id;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int remove_row_id_from_cache(
+    mylite_storage_live_row_id_cache *cache,
+    unsigned long long row_id
+) {
+    size_t write_index = 0U;
+    int removed = 0;
+    for (size_t read_index = 0U; read_index < cache->count; ++read_index) {
+        if (cache->row_ids[read_index] == row_id) {
+            removed = 1;
+            continue;
+        }
+        cache->row_ids[write_index++] = cache->row_ids[read_index];
+    }
+    cache->count = write_index;
+    return removed;
+}
+
 static int durable_live_row_id_cache_available(const char *filename) {
     return active_statement_for_any_owner(filename) == NULL && !active_read_snapshot_for(filename);
 }
@@ -13145,6 +13504,7 @@ static void replace_active_exact_index_cache_entries(
 static void invalidate_exact_index_caches(const char *filename) {
     clear_exact_index_caches(active_exact_index_cache_statement_for(filename));
     clear_statement_chain_live_row_caches(active_statement_for(filename));
+    clear_statement_chain_live_row_id_caches(active_statement_for(filename));
     clear_statement_chain_row_payload_caches(active_statement_for(filename));
     clear_durable_exact_index_caches(filename);
 }
