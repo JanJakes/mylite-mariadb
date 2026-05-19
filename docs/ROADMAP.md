@@ -113,12 +113,15 @@ cursor reads while maintained navigable indexes are still pending. Active
 checkpoints now cache row ids proven live by the active view so handler-driven
 update/delete validation does not rescan and checksum later row-state pages on
 every row. Non-active durable indexed-row reads now cache row payloads by file
-header fingerprint, reducing repeated secondary cursor row-page checksums until
-an internal rowset builder now avoids per-row metadata reallocations during
-known indexed-row batches, with a small row-id index keeping payload cache hits
-from becoming another per-row scan. Published index leaf
-pages are also cached by durable file header fingerprint so repeated exact
-leaf-root lookups avoid repeating leaf page reads, checksums, and decode work.
+header fingerprint, reducing repeated secondary cursor row-page checksums. The
+internal rowset builder avoids per-row metadata reallocations during known
+indexed-row batches, with a small row-id index keeping payload cache hits from
+becoming another per-row scan. Row-id batch materialization now reuses the same
+durable row-payload cache for all selected rows, avoiding repeated
+filename/header/table cache discovery while the cache set generation remains
+stable and preserving the same durable-view guards. Published index leaf pages
+are also cached by durable file header fingerprint so repeated exact leaf-root
+lookups avoid repeating leaf page reads, checksums, and decode work.
 Handler instances now cache proven child and parent foreign-key metadata
 absence for opened tables, removing repeated no-op FK catalog scans from
 ordinary non-FK row-DML paths, with successful local table DDL invalidating

@@ -111,6 +111,7 @@ static void test_update_and_delete_rows(void);
 static void test_many_row_state_pages_scan(void);
 static void test_index_entries(void);
 static void test_cached_exact_index_entryset_bulk_append(void);
+static void test_indexed_row_batch_cache_reuses_duplicates(void);
 static void test_index_root_metadata(void);
 static void test_index_leaf_pages(void);
 static void test_multi_page_index_leaf_pages(void);
@@ -361,6 +362,7 @@ int main(void) {
     test_many_row_state_pages_scan();
     test_index_entries();
     test_cached_exact_index_entryset_bulk_append();
+    test_indexed_row_batch_cache_reuses_duplicates();
     test_index_root_metadata();
     test_index_leaf_pages();
     test_multi_page_index_leaf_pages();
@@ -1602,6 +1604,74 @@ static void test_cached_exact_index_entryset_bulk_append(void) {
         expected_row_ids[0]
     );
     assert_exact_index_entries(filename, 1U, missing_key, sizeof(missing_key), NULL, 0U);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_indexed_row_batch_cache_reuses_duplicates(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row_1[] = {0x00U, 0x01U, 'a'};
+    static const unsigned char row_2[] = {0x00U, 0x02U, 'b', 'b'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "indexed-row-batch-cache.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    unsigned long long row_1_id = 0ULL;
+    unsigned long long row_2_id = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_1,
+            sizeof(row_1),
+            NULL,
+            0U,
+            &row_1_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_2,
+            sizeof(row_2),
+            NULL,
+            0U,
+            &row_2_id
+        ) == MYLITE_STORAGE_OK
+    );
+
+    const unsigned long long row_ids[] = {row_1_id, row_2_id, row_1_id, row_2_id, row_1_id};
+    const unsigned char *const expected_rows[] = {row_1, row_2, row_1, row_2, row_1};
+    const size_t expected_row_sizes[] = {
+        sizeof(row_1),
+        sizeof(row_2),
+        sizeof(row_1),
+        sizeof(row_2),
+        sizeof(row_1),
+    };
+    assert_indexed_rows_equal(
+        filename,
+        row_ids,
+        sizeof(row_ids) / sizeof(row_ids[0]),
+        expected_rows,
+        expected_row_sizes
+    );
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
