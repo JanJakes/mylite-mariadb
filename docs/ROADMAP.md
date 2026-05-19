@@ -62,8 +62,11 @@ write amortization now reuses one statement recovery journal, defers header
 publication to checkpoint boundaries, and caches guarded exact duplicate-key
 probes on the outer active checkpoint across nested libmylite statement
 checkpoints. This materially improves explicit fixed-width index publication
-and routed indexed insert throughput, while SQLite-like row-write performance
-still requires the planned navigable index and pager work.
+and routed indexed insert throughput. Handler index cursors now materialize
+storage-filtered row ids without repeating per-row row-state visibility scans,
+improving exact secondary reads that return many rows. SQLite-like row-write
+and point-read performance still requires the planned navigable index and pager
+work.
 
 ## Size And Profile Direction
 

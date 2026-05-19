@@ -664,10 +664,13 @@ journals, defer header publication to checkpoint boundaries, and cache guarded
 exact duplicate-key probes on the outer active checkpoint so nested libmylite
 statement checkpoints do not force full exact-index scans for every row insert.
 Nested checkpoint rollback invalidates parent exact-key caches before restored
-header state is propagated. This provides correct indexed insert, lookup,
-update, delete, reopen, and copy `ALTER` behavior for the supported shapes, but
-it is still an interim performance structure because maintained B-tree
-navigation and pager-style write paths are not implemented. Standalone
+header state is propagated. Handler index cursors materialize row ids returned
+by storage-filtered index entrysets through an indexed-row read path that
+validates the row page and table id without repeating the row-state visibility
+scan. This provides correct indexed insert, lookup, update, delete, reopen, and
+copy `ALTER` behavior for the supported shapes, but it is still an interim
+performance structure because maintained B-tree navigation and pager-style write
+paths are not implemented. Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, multi-page catalog storage, free-space reclamation,
 multi-statement transaction

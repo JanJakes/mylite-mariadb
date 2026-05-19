@@ -354,6 +354,14 @@ mylite_storage_result mylite_storage_read_row(
     unsigned char **out_row,
     size_t *out_row_size
 );
+mylite_storage_result mylite_storage_read_indexed_row(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long row_id,
+    unsigned char **out_row,
+    size_t *out_row_size
+);
 mylite_storage_result mylite_storage_update_row(
     const char *filename,
     const char *schema_name,

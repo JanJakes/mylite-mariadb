@@ -1058,6 +1058,15 @@ static mylite_storage_result append_row_to_rowset(
     const unsigned char *row,
     size_t row_size
 );
+static mylite_storage_result read_row_payload(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long row_id,
+    int validate_visibility,
+    unsigned char **out_row,
+    size_t *out_row_size
+);
 static mylite_storage_result append_row_id_to_list(
     mylite_storage_row_id_list *list,
     unsigned long long row_id
@@ -3151,6 +3160,29 @@ mylite_storage_result mylite_storage_read_row(
     unsigned char **out_row,
     size_t *out_row_size
 ) {
+    return read_row_payload(filename, schema_name, table_name, row_id, 1, out_row, out_row_size);
+}
+
+mylite_storage_result mylite_storage_read_indexed_row(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long row_id,
+    unsigned char **out_row,
+    size_t *out_row_size
+) {
+    return read_row_payload(filename, schema_name, table_name, row_id, 0, out_row, out_row_size);
+}
+
+static mylite_storage_result read_row_payload(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long row_id,
+    int validate_visibility,
+    unsigned char **out_row,
+    size_t *out_row_size
+) {
     if (filename == NULL || filename[0] == '\0' || schema_name == NULL || schema_name[0] == '\0' ||
         table_name == NULL || table_name[0] == '\0' || row_id == 0ULL || out_row == NULL ||
         out_row_size == NULL) {
@@ -3185,7 +3217,7 @@ mylite_storage_result mylite_storage_read_row(
     if (result == MYLITE_STORAGE_OK && row_page.table_id != table_id) {
         result = MYLITE_STORAGE_NOTFOUND;
     }
-    if (result == MYLITE_STORAGE_OK) {
+    if (result == MYLITE_STORAGE_OK && validate_visibility) {
         const unsigned long long first_state_page_id =
             row_id == ULLONG_MAX ? header.page_count : row_id + 1ULL;
         result =

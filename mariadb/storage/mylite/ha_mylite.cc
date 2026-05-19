@@ -1438,12 +1438,13 @@ int ha_mylite::read_index_cursor_row(uchar *buf, size_t row_index)
   uchar *row_payload= NULL;
   size_t row_payload_size= 0;
   mylite_storage_result result=
-      volatile_rows ? mylite_volatile_read_row(primary_file, storage_schema(),
-                                               storage_table(), entry->row_id,
-                                               &row_payload, &row_payload_size)
-                    : mylite_storage_read_row(primary_file, storage_schema(),
-                                              storage_table(), entry->row_id,
-                                              &row_payload, &row_payload_size);
+      volatile_rows
+          ? mylite_volatile_read_row(primary_file, storage_schema(),
+                                     storage_table(), entry->row_id,
+                                     &row_payload, &row_payload_size)
+          : mylite_storage_read_indexed_row(primary_file, storage_schema(),
+                                            storage_table(), entry->row_id,
+                                            &row_payload, &row_payload_size);
   if (result != MYLITE_STORAGE_OK)
     DBUG_RETURN(mylite_storage_to_handler_error(result));
 
