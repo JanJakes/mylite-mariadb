@@ -314,6 +314,9 @@ struct mylite_stmt {
     bool executed = false;
     bool done = false;
     bool has_current_row = false;
+    bool result_active = false;
+    bool reusable_result_binds = false;
+    bool result_binds_bound = false;
     TransactionControlKind prepared_transaction_control = TransactionControlKind::None;
     std::string prepared_transaction_control_name;
     TransactionControlKind statement_transaction_control = TransactionControlKind::None;
@@ -846,7 +849,13 @@ int mylite_reset(mylite_stmt *statement) {
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
     if (statement->statement != nullptr && statement->executed) {
-        mysql_stmt_free_result(statement->statement);
+        if (statement->result_active) {
+            if (mysql_stmt_free_result(statement->statement) != 0) {
+                set_mariadb_statement_error(*statement);
+                return MYLITE_ERROR;
+            }
+            statement->result_active = false;
+        }
         if (mysql_stmt_reset(statement->statement) != 0) {
             set_mariadb_statement_error(*statement);
             return MYLITE_ERROR;
@@ -872,8 +881,9 @@ int mylite_finalize(mylite_stmt *statement) {
     mylite_db *database = statement->database;
 #if MYLITE_WITH_MARIADB_EMBEDDED
     if (statement->statement != nullptr) {
-        if (statement->executed && !statement->columns.empty()) {
+        if (statement->result_active) {
             mysql_stmt_free_result(statement->statement);
+            statement->result_active = false;
         }
         mysql_stmt_close(statement->statement);
         statement->statement = nullptr;
@@ -1890,6 +1900,14 @@ int initialize_statement_metadata(mylite_stmt &statement) {
         return MYLITE_NOMEM;
     }
 
+    statement.reusable_result_binds = true;
+    for (const ColumnInfo &column : statement.columns) {
+        if (is_variable_column_type(map_column_type(column))) {
+            statement.reusable_result_binds = false;
+            break;
+        }
+    }
+
     mysql_free_result(metadata);
     return MYLITE_OK;
 }
@@ -1987,6 +2005,7 @@ int execute_statement(mylite_stmt &statement) {
     }
 
     statement.executed = true;
+    statement.result_active = !statement.columns.empty();
     statement.database->changes = 0;
     statement.database->last_insert_id =
         static_cast<unsigned long long>(mysql_stmt_insert_id(statement.statement));
@@ -2756,6 +2775,7 @@ int fetch_statement_row(mylite_stmt &statement) {
         statement.done = true;
         const unsigned warning_count = mysql_warning_count(&statement.database->mysql);
         mysql_stmt_free_result(statement.statement);
+        statement.result_active = false;
         const int warning_result = capture_warnings(*statement.database, warning_count);
         return warning_result == MYLITE_OK ? MYLITE_DONE : warning_result;
     }
@@ -2797,7 +2817,12 @@ int fetch_statement_row(mylite_stmt &statement) {
 }
 
 int bind_statement_results(mylite_stmt &statement) {
-    statement.result_binds.assign(statement.columns.size(), MYSQL_BIND{});
+    if (statement.reusable_result_binds && statement.result_binds_bound) {
+        return MYLITE_OK;
+    }
+    if (!statement.reusable_result_binds || statement.result_binds.empty()) {
+        statement.result_binds.assign(statement.columns.size(), MYSQL_BIND{});
+    }
     for (std::size_t i = 0; i < statement.columns.size(); ++i) {
         ColumnValue &value = statement.values[i];
         const mylite_value_type type = map_column_type(statement.columns[i]);
@@ -2847,6 +2872,9 @@ int bind_statement_results(mylite_stmt &statement) {
     if (mysql_stmt_bind_result(statement.statement, statement.result_binds.data()) != 0) {
         set_mariadb_statement_error(statement);
         return MYLITE_ERROR;
+    }
+    if (statement.reusable_result_binds) {
+        statement.result_binds_bound = true;
     }
     return MYLITE_OK;
 }

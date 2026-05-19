@@ -14,6 +14,8 @@ static void test_table_roundtrip(void);
 static void test_statement_effects(void);
 static void test_segment_reads(void);
 static void test_reset_reuse_and_destructors(void);
+static void test_reset_before_drain_reuse(void);
+static void test_variable_result_reset_reuse(void);
 static void test_finalize_before_drain(void);
 static void test_close_rejects_active_statement(void);
 static void test_status_metadata_is_empty(void);
@@ -49,6 +51,8 @@ int main(void) {
     test_statement_effects();
     test_segment_reads();
     test_reset_reuse_and_destructors();
+    test_reset_before_drain_reuse();
+    test_variable_result_reset_reuse();
     test_finalize_before_drain();
     test_close_rejects_active_statement();
     test_status_metadata_is_empty();
@@ -341,6 +345,53 @@ static void test_reset_reuse_and_destructors(void) {
     assert(mylite_bind_int64(stmt, 1U, 8) == MYLITE_OK);
     assert(mylite_step(stmt) == MYLITE_ROW);
     assert(mylite_column_int64(stmt, 0U) == 8);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_reset_before_drain_reuse(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    mylite_stmt *stmt = prepare_statement(db, "SELECT 1 UNION ALL SELECT 2");
+
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(stmt, 0U) == 1);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(stmt, 0U) == 1);
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(stmt, 0U) == 2);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_variable_result_reset_reuse(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    mylite_stmt *stmt = prepare_statement(db, "SELECT CAST(? AS CHAR)");
+
+    assert(mylite_bind_text(stmt, 1U, "alpha", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(strcmp(mylite_column_text(stmt, 0U), "alpha") == 0);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+
+    assert(mylite_bind_text(stmt, 1U, "beta", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(strcmp(mylite_column_text(stmt, 0U), "beta") == 0);
     assert(mylite_step(stmt) == MYLITE_DONE);
     assert(mylite_finalize(stmt) == MYLITE_OK);
 
