@@ -109,6 +109,7 @@ static void test_append_and_read_rows(void);
 static void test_append_and_read_large_row_payload(void);
 static void test_update_and_delete_rows(void);
 static void test_index_entries(void);
+static void test_cached_exact_index_entryset_bulk_append(void);
 static void test_index_root_metadata(void);
 static void test_index_leaf_pages(void);
 static void test_multi_page_index_leaf_pages(void);
@@ -356,6 +357,7 @@ int main(void) {
     test_append_and_read_large_row_payload();
     test_update_and_delete_rows();
     test_index_entries();
+    test_cached_exact_index_entryset_bulk_append();
     test_index_root_metadata();
     test_index_leaf_pages();
     test_multi_page_index_leaf_pages();
@@ -1409,6 +1411,104 @@ static void test_index_entries(void) {
         mylite_storage_read_indexed_rows(filename, "app", "posts", NULL, 1U, &misuse_rows) ==
         MYLITE_STORAGE_MISUSE
     );
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_cached_exact_index_entryset_bulk_append(void) {
+    enum { DUPLICATE_ENTRY_COUNT = 48 };
+
+    const size_t duplicate_entry_count = (size_t)DUPLICATE_ENTRY_COUNT;
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char duplicate_key[] = {'d', 'u', 'p'};
+    static const unsigned char missing_key[] = {'m', 'i', 's'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "cached-exact-entryset.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    unsigned long long expected_row_ids[DUPLICATE_ENTRY_COUNT] = {0};
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    for (size_t i = 0U; i < duplicate_entry_count; ++i) {
+        const unsigned char row[] = {
+            0x00U,
+            (unsigned char)i,
+            (unsigned char)(i >> 8U),
+        };
+        const mylite_storage_index_entry secondary_entry = {
+            .size = sizeof(secondary_entry),
+            .index_number = 1U,
+            .key = duplicate_key,
+            .key_size = sizeof(duplicate_key),
+        };
+        assert(
+            mylite_storage_append_row_with_index_entries(
+                filename,
+                "app",
+                "posts",
+                row,
+                sizeof(row),
+                &secondary_entry,
+                1U,
+                &expected_row_ids[i]
+            ) == MYLITE_STORAGE_OK
+        );
+    }
+
+    mylite_storage_index_entryset entries = {
+        .size = sizeof(entries),
+    };
+    assert(
+        mylite_storage_read_exact_index_entries(
+            filename,
+            "app",
+            "posts",
+            1U,
+            duplicate_key,
+            sizeof(duplicate_key),
+            &entries
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == duplicate_entry_count);
+    assert(entries.key_bytes == duplicate_entry_count * sizeof(duplicate_key));
+    for (size_t i = 0U; i < duplicate_entry_count; ++i) {
+        assert_index_entry(&entries, i, expected_row_ids[i], duplicate_key, sizeof(duplicate_key));
+    }
+    mylite_storage_free_index_entryset(&entries);
+
+    entries = (mylite_storage_index_entryset){
+        .size = sizeof(entries),
+    };
+    assert(
+        mylite_storage_read_exact_index_entries(
+            filename,
+            "app",
+            "posts",
+            1U,
+            duplicate_key,
+            sizeof(duplicate_key),
+            &entries
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == duplicate_entry_count);
+    assert(entries.key_bytes == duplicate_entry_count * sizeof(duplicate_key));
+    for (size_t i = 0U; i < duplicate_entry_count; ++i) {
+        assert_index_entry(&entries, i, expected_row_ids[i], duplicate_key, sizeof(duplicate_key));
+    }
+    mylite_storage_free_index_entryset(&entries);
+
+    assert_exact_index_entries(filename, 1U, missing_key, sizeof(missing_key), NULL, 0U);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);

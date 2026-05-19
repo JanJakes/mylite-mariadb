@@ -290,7 +290,9 @@ primary filename and observed header fingerprint, is cleared by durable writes
 and catalog publications, and is skipped while active statements or transaction
 snapshots are in scope. Published leaf roots remain the preferred path when
 available; the cache amortizes repeated exact lookups over append-only indexes
-that do not yet have maintained navigable pages.
+that do not yet have maintained navigable pages. Cached exact-entryset reads
+bulk-grow result arrays for all matching key images in one pass, so many-match
+secondary reads do not pay per-row-id array reallocations.
 
 Active storage checkpoints maintain their exact-index caches across row updates
 and deletes by removing hidden row ids and appending replacement row entries
