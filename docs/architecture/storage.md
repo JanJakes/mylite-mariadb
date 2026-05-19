@@ -366,9 +366,16 @@ keeps repeated point-select statements from paying header/catalog checksum
 costs when no storage page publication changed the durable view.
 Normal read statements also keep a thread-local unlocked read file handle after
 the read statement ends. The next read statement can reuse that handle only
-after confirming the filename still resolves to the same device and inode, then
-it takes the ordinary shared lock and reads the checkpoint snapshot as usual.
-The cache is cleared on same-file creation and durable mutation paths.
+after confirming the filename still resolves to the cached device and inode,
+then it takes the ordinary shared lock and reads the checkpoint snapshot as
+usual. The cache records the handle identity when it is stored, so reuse does
+not repeat `fstat()` on every read statement. The cache is cleared on same-file
+creation and durable mutation paths.
+Read-statement startup also keeps cached deterministic recovery and transaction
+journal path strings for the current filename. It still checks both journal
+paths on every startup before taking a shared read lock, preserving
+cross-process recovery behavior without rebuilding those path strings for hot
+read loops.
 Random page reads and writes use offset-addressed `pread()` / `pwrite()` calls
 instead of moving stdio stream position for each fixed-size page. Sequential
 stream writes remain limited to empty database initialization and rollback

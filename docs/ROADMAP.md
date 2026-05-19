@@ -78,9 +78,12 @@ also reuse a thread-local decoded checkpoint snapshot after raw page comparison,
 avoiding repeated header/catalog checksum validation on hot point-select loops.
 Normal read statements now reuse a thread-local unlocked read file handle after
 device/inode validation, reducing repeated `fopen()` overhead without holding
-shared locks between cursor builds. Fixed-size random page reads and writes now
-use offset-addressed `pread()` / `pwrite()` calls, avoiding per-page stdio seek
-and refill overhead while leaving sequential journal writes on the stream path.
+shared locks between cursor builds. That read handle now stores its device and
+inode when cached, avoiding repeated `fstat()` during reuse, and read startup
+reuses deterministic journal path strings while still checking both journal
+paths each time. Fixed-size random page reads and writes now use
+offset-addressed `pread()` / `pwrite()` calls, avoiding per-page stdio seek and
+refill overhead while leaving sequential journal writes on the stream path.
 MariaDB table-discovery callbacks now use the same scoped read sessions for
 catalog table-definition, table-list, and existence reads, reducing repeated
 prepared statement table-open validation before cursor execution.

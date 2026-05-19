@@ -390,7 +390,16 @@ typedef struct mylite_storage_read_checkpoint_cache {
 typedef struct mylite_storage_read_file_cache {
     FILE *file;
     char *filename;
+    dev_t device;
+    ino_t inode;
+    int has_identity;
 } mylite_storage_read_file_cache;
+
+typedef struct mylite_storage_journal_path_cache {
+    char *filename;
+    char *recovery_journal_filename;
+    char *transaction_journal_filename;
+} mylite_storage_journal_path_cache;
 
 typedef mylite_storage_result (*mylite_storage_row_page_callback)(
     void *ctx,
@@ -404,6 +413,7 @@ static _Thread_local mylite_storage_statement *active_read_snapshot;
 static _Thread_local mylite_storage_transaction_journal_snapshot active_transaction_journal_snapshot;
 static _Thread_local mylite_storage_read_checkpoint_cache active_read_checkpoint_cache;
 static _Thread_local mylite_storage_read_file_cache active_read_file_cache;
+static _Thread_local mylite_storage_journal_path_cache active_journal_path_cache;
 static _Thread_local mylite_storage_live_row_id_cache_set durable_live_row_id_caches;
 static _Thread_local mylite_storage_exact_index_cache_set durable_exact_index_caches;
 static _Thread_local mylite_storage_row_payload_cache_set durable_row_payload_caches;
@@ -432,9 +442,18 @@ static void update_catalog_checksum(unsigned char *page);
 static char *recovery_journal_path(const char *filename);
 static char *transaction_journal_path(const char *filename);
 static char *journal_path_with_suffix(const char *filename, const char *suffix, size_t suffix_size);
+static mylite_storage_result cached_journal_paths(
+    const char *filename,
+    const char **out_recovery_journal_filename,
+    const char **out_transaction_journal_filename
+);
+static void clear_journal_path_cache(const char *filename);
 static mylite_storage_result recover_pending_journals(const char *filename);
 static mylite_storage_result recover_pending_journals_locked(FILE *file, const char *filename);
-static mylite_storage_result recover_pending_journal_locked(FILE *file, char *journal_filename);
+static mylite_storage_result recover_pending_journal_locked(
+    FILE *file,
+    const char *journal_filename
+);
 static mylite_storage_result read_recovery_journal(
     FILE *journal_file,
     mylite_storage_recovery_journal *out_journal,
@@ -594,7 +613,7 @@ static void clear_append_page_buffer(mylite_storage_statement *statement);
 static int take_cached_read_file(const char *filename, FILE **out_file);
 static mylite_storage_result cache_read_file(const char *filename, FILE *file);
 static void clear_cached_read_file(const char *filename);
-static int cached_read_file_matches_path(FILE *file, const char *filename);
+static int cached_read_file_matches_path(const char *filename);
 static mylite_storage_result write_statement_current_header(mylite_storage_statement *statement);
 static void clear_statement_chain_catalog_root_caches(mylite_storage_statement *statement);
 static void clear_catalog_root_cache(mylite_storage_statement *statement);
@@ -5993,14 +6012,13 @@ void mylite_storage_free_foreign_key_metadata(mylite_storage_foreign_key_metadat
 }
 
 static mylite_storage_result path_exists(const char *filename, int *exists) {
-    struct stat file_stat;
     errno = 0;
-    if (stat(filename, &file_stat) == 0) {
+    if (access(filename, F_OK) == 0) {
         *exists = 1;
         return MYLITE_STORAGE_OK;
     }
 
-    if (errno == ENOENT) {
+    if (errno == ENOENT || errno == ENOTDIR) {
         *exists = 0;
         return MYLITE_STORAGE_OK;
     }
@@ -6169,25 +6187,69 @@ static char *journal_path_with_suffix(
     return journal_filename;
 }
 
-static mylite_storage_result recover_pending_journals(const char *filename) {
-    char *journal_filename = recovery_journal_path(filename);
-    if (journal_filename == NULL) {
-        return MYLITE_STORAGE_NOMEM;
+static mylite_storage_result cached_journal_paths(
+    const char *filename,
+    const char **out_recovery_journal_filename,
+    const char **out_transaction_journal_filename
+) {
+    if (active_journal_path_cache.filename == NULL ||
+        strcmp(active_journal_path_cache.filename, filename) != 0) {
+        char *filename_copy = copy_filename(filename);
+        if (filename_copy == NULL) {
+            return MYLITE_STORAGE_NOMEM;
+        }
+        char *recovery_filename = recovery_journal_path(filename);
+        if (recovery_filename == NULL) {
+            free(filename_copy);
+            return MYLITE_STORAGE_NOMEM;
+        }
+        char *transaction_filename = transaction_journal_path(filename);
+        if (transaction_filename == NULL) {
+            free(recovery_filename);
+            free(filename_copy);
+            return MYLITE_STORAGE_NOMEM;
+        }
+
+        clear_journal_path_cache(NULL);
+        active_journal_path_cache = (mylite_storage_journal_path_cache){
+            .filename = filename_copy,
+            .recovery_journal_filename = recovery_filename,
+            .transaction_journal_filename = transaction_filename,
+        };
     }
-    char *transaction_filename = transaction_journal_path(filename);
-    if (transaction_filename == NULL) {
-        free(journal_filename);
-        return MYLITE_STORAGE_NOMEM;
+
+    *out_recovery_journal_filename = active_journal_path_cache.recovery_journal_filename;
+    *out_transaction_journal_filename = active_journal_path_cache.transaction_journal_filename;
+    return MYLITE_STORAGE_OK;
+}
+
+static void clear_journal_path_cache(const char *filename) {
+    if (filename != NULL && (active_journal_path_cache.filename == NULL ||
+                             strcmp(active_journal_path_cache.filename, filename) != 0)) {
+        return;
+    }
+
+    free(active_journal_path_cache.filename);
+    free(active_journal_path_cache.recovery_journal_filename);
+    free(active_journal_path_cache.transaction_journal_filename);
+    active_journal_path_cache = (mylite_storage_journal_path_cache){0};
+}
+
+static mylite_storage_result recover_pending_journals(const char *filename) {
+    const char *journal_filename = NULL;
+    const char *transaction_filename = NULL;
+    mylite_storage_result result =
+        cached_journal_paths(filename, &journal_filename, &transaction_filename);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
     }
 
     int journal_exists = 0;
     int transaction_exists = 0;
-    mylite_storage_result result = path_exists(journal_filename, &journal_exists);
+    result = path_exists(journal_filename, &journal_exists);
     if (result == MYLITE_STORAGE_OK) {
         result = path_exists(transaction_filename, &transaction_exists);
     }
-    free(journal_filename);
-    free(transaction_filename);
     if (result != MYLITE_STORAGE_OK || (!journal_exists && !transaction_exists)) {
         return result;
     }
@@ -6209,26 +6271,26 @@ static mylite_storage_result recover_pending_journals(const char *filename) {
 }
 
 static mylite_storage_result recover_pending_journals_locked(FILE *file, const char *filename) {
-    char *journal_filename = recovery_journal_path(filename);
-    if (journal_filename == NULL) {
-        return MYLITE_STORAGE_NOMEM;
-    }
-    mylite_storage_result result = recover_pending_journal_locked(file, journal_filename);
-    free(journal_filename);
+    const char *journal_filename = NULL;
+    const char *transaction_filename = NULL;
+    mylite_storage_result result =
+        cached_journal_paths(filename, &journal_filename, &transaction_filename);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
 
-    journal_filename = transaction_journal_path(filename);
-    if (journal_filename == NULL) {
-        return MYLITE_STORAGE_NOMEM;
-    }
     result = recover_pending_journal_locked(file, journal_filename);
-    free(journal_filename);
-    return result;
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    return recover_pending_journal_locked(file, transaction_filename);
 }
 
-static mylite_storage_result recover_pending_journal_locked(FILE *file, char *journal_filename) {
+static mylite_storage_result recover_pending_journal_locked(
+    FILE *file,
+    const char *journal_filename
+) {
     errno = 0;
     FILE *journal_file = fopen(journal_filename, "rb");
     if (journal_file == NULL) {
@@ -7238,7 +7300,7 @@ static int take_cached_read_file(const char *filename, FILE **out_file) {
         strcmp(active_read_file_cache.filename, filename) != 0) {
         return 0;
     }
-    if (!cached_read_file_matches_path(active_read_file_cache.file, filename)) {
+    if (!cached_read_file_matches_path(filename)) {
         clear_cached_read_file(filename);
         return 0;
     }
@@ -7259,6 +7321,12 @@ static mylite_storage_result cache_read_file(const char *filename, FILE *file) {
     }
     clearerr(file);
 
+    struct stat file_stat;
+    if (fstat(fileno(file), &file_stat) != 0) {
+        fclose(file);
+        return MYLITE_STORAGE_IOERR;
+    }
+
     if (active_read_file_cache.filename == NULL ||
         strcmp(active_read_file_cache.filename, filename) != 0) {
         char *filename_copy = copy_filename(filename);
@@ -7273,6 +7341,9 @@ static mylite_storage_result cache_read_file(const char *filename, FILE *file) {
     }
 
     active_read_file_cache.file = file;
+    active_read_file_cache.device = file_stat.st_dev;
+    active_read_file_cache.inode = file_stat.st_ino;
+    active_read_file_cache.has_identity = 1;
     return MYLITE_STORAGE_OK;
 }
 
@@ -7286,18 +7357,25 @@ static void clear_cached_read_file(const char *filename) {
     active_read_file_cache.file = NULL;
     free(active_read_file_cache.filename);
     active_read_file_cache.filename = NULL;
+    active_read_file_cache.device = 0;
+    active_read_file_cache.inode = 0;
+    active_read_file_cache.has_identity = 0;
     if (file != NULL) {
         fclose(file);
     }
 }
 
-static int cached_read_file_matches_path(FILE *file, const char *filename) {
-    struct stat path_stat;
-    struct stat file_stat;
-    if (stat(filename, &path_stat) != 0 || fstat(fileno(file), &file_stat) != 0) {
+static int cached_read_file_matches_path(const char *filename) {
+    if (!active_read_file_cache.has_identity) {
         return 0;
     }
-    return path_stat.st_dev == file_stat.st_dev && path_stat.st_ino == file_stat.st_ino;
+
+    struct stat path_stat;
+    if (stat(filename, &path_stat) != 0) {
+        return 0;
+    }
+    return path_stat.st_dev == active_read_file_cache.device &&
+           path_stat.st_ino == active_read_file_cache.inode;
 }
 
 static mylite_storage_result write_statement_current_header(mylite_storage_statement *statement) {
