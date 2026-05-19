@@ -27,8 +27,13 @@ checksummed later row-state pages for every update.
 - Add a live-row validation cache to active storage checkpoints.
 - Mark row ids live when they are returned by exact index lookups, index entry
   reads, visibility-checked row reads, and table scans.
-- During update/delete validation, trust a cached live row id after confirming
-  the row page still belongs to the target table.
+- Track two active-checkpoint proofs:
+  - index-entry reads prove row visibility for the table/catalog generation;
+  - payload reads and successful mutations also prove the row page belongs to
+    the table.
+- During update/delete validation, skip the old row-page read only for cached
+  row ids with the stronger payload/table proof. Visibility-only cache entries
+  still read the row page and then skip the row-state scan.
 - Maintain the cache across successful mutations by removing the hidden source
   row id and adding the replacement row id.
 - Keep non-checkpointed direct storage calls on the existing row-state scan
@@ -58,8 +63,10 @@ close.
 
 ## Acceptance Criteria
 
-- Handler-driven active-checkpoint update/delete validation avoids full repeated
-  row-state rescans after the row id was read from the same checkpoint view.
+- Handler-driven active-checkpoint update/delete validation avoids repeated old
+  row-page reads after the row payload was read from the same checkpoint view,
+  and avoids full repeated row-state rescans for rows proven live by index
+  entry reads.
 - Existing rollback and savepoint behavior remains correct.
 - Existing storage and routed-engine compatibility tests pass.
 - Primary-key update timings improve materially in the local benchmark.

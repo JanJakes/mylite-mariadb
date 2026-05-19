@@ -123,10 +123,12 @@ and pager work. Durable handler
 index cursors also materialize their current row payloads in one ordered batch,
 removing repeated per-row file open/header/catalog overhead from secondary
 cursor reads while maintained navigable indexes are still pending. Active
-checkpoints now cache row ids proven live by the active view so handler-driven
-update/delete validation does not rescan and checksum later row-state pages on
-every row. Non-active durable indexed-row reads now cache row payloads by file
-header fingerprint, reducing repeated secondary cursor row-page checksums. The
+checkpoints now cache row ids proven live by the active view, plus a stronger
+payload-validated row-id set, so handler-driven update/delete validation avoids
+old row-page rereads when the row payload was already validated and avoids
+rescanning later row-state pages for visibility-only index proofs. Non-active
+durable indexed-row reads now cache row payloads by file header fingerprint,
+reducing repeated secondary cursor row-page checksums. The
 internal rowset builder avoids per-row metadata reallocations during known
 indexed-row batches, with a small row-id index keeping payload cache hits from
 becoming another per-row scan. Row-id batch materialization now reuses the same

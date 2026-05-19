@@ -342,11 +342,13 @@ before the handler reaches the index cursor.
 Active storage checkpoints also maintain a live-row validation cache per table
 and catalog generation. Rows proven live by visibility-checked storage reads,
 index-entry reads, exact-index lookups, and table scans can be trusted by later
-update/delete validation after the row page is confirmed to still belong to the
-target table. Successful mutations remove hidden source row ids and add
-replacement row ids. Non-checkpointed direct storage calls keep the row-state
-scan path, and truncate/catalog invalidation or savepoint rollback clears
-cached live rows.
+update/delete validation without rescanning later row-state pages. Rows whose
+payloads were read, or whose row pages were just written by a successful
+mutation, also carry a stronger table-validation proof, so later validation can
+skip rereading the old row page. Successful mutations remove hidden source row
+ids and add replacement row ids. Non-checkpointed direct storage calls keep the
+row-page and row-state scan path, and truncate/catalog invalidation or
+savepoint rollback clears cached live rows.
 
 Non-active durable indexed-row reads use a bounded thread-local row-payload
 cache keyed by the primary file header fingerprint and table id. Repeated
