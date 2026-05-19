@@ -908,7 +908,11 @@ the parent directory is synced after journal create/remove, and every storage
 open first recovers and removes a valid pending journal. Recovery restores the
 previously committed header/catalog state and truncates the primary file to the
 restored header page count. Committed orphan pages from update/delete/truncate
-history still wait for free-space reclamation.
+history still wait for free-space reclamation. Physical write, flush, sync, and
+truncate paths classify no-space, quota, and file-size-limit failures as
+`MYLITE_STORAGE_FULL`, leaving generic I/O errors for non-capacity failures.
+The MariaDB handler maps that storage result to a file-full condition rather
+than reporting a crashed table or index.
 
 Storage operations now use advisory locks on the primary `.mylite` file
 descriptor. Read APIs take a shared lock after pending recovery is handled,

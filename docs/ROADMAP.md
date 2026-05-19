@@ -151,10 +151,12 @@ write syscall overhead without changing the durable page format. Active
 checkpoints now buffer bounded contiguous append runs across nested statement
 commits and flush them before top-level header publication, reducing large
 transaction update syscall overhead while preserving savepoint rollback by
-flushing retained prefixes before truncation. Fresh page
-encoders now compute the same full-page FNV checksum by hashing the meaningful
-prefix and skipping known-zero tails, reducing append-page CPU cost while read
-paths still verify complete pages. The
+flushing retained prefixes before truncation. Capacity failures from physical
+primary-file writes, sequential journal writes, flushes, syncs, and truncation
+now surface as storage-full errors instead of crashed-table I/O errors. Fresh
+page encoders now compute the same full-page FNV checksum by hashing the
+meaningful prefix and skipping known-zero tails, reducing append-page CPU cost
+while read paths still verify complete pages. The
 internal rowset builder avoids per-row metadata reallocations during known
 indexed-row batches, with a small row-id index keeping payload cache hits from
 becoming another per-row scan. Row-id batch materialization now reuses the same

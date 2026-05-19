@@ -516,6 +516,8 @@ static mylite_storage_result truncate_file_to_header_page_count(
     FILE *file,
     const mylite_storage_header *header
 );
+static mylite_storage_result io_error_result_from_errno(int error_number);
+static int is_storage_full_error(int error_number);
 static mylite_storage_result flush_parent_directory(const char *filename);
 static mylite_storage_result close_created_file(FILE *file, const char *filename);
 static mylite_storage_result open_existing_file(const char *filename, FILE **out_file);
@@ -6603,8 +6605,9 @@ static mylite_storage_result validate_recovery_journal_pages(
 }
 
 static mylite_storage_result write_page(FILE *file, const unsigned char *page, size_t size) {
+    errno = 0;
     if (fwrite(page, 1U, size, file) != size) {
-        return MYLITE_STORAGE_IOERR;
+        return io_error_result_from_errno(errno);
     }
     return MYLITE_STORAGE_OK;
 }
@@ -6643,11 +6646,13 @@ static int is_lock_conflict(int error_number) {
 }
 
 static mylite_storage_result flush_file(FILE *file) {
+    errno = 0;
     if (fflush(file) != 0) {
-        return MYLITE_STORAGE_IOERR;
+        return io_error_result_from_errno(errno);
     }
+    errno = 0;
     if (fsync(fileno(file)) != 0) {
-        return MYLITE_STORAGE_IOERR;
+        return io_error_result_from_errno(errno);
     }
     return MYLITE_STORAGE_OK;
 }
@@ -6668,8 +6673,12 @@ static mylite_storage_result truncate_file_to_header_page_count(
     }
 
     const int file_descriptor = fileno(file);
-    if (file_descriptor < 0 || ftruncate(file_descriptor, (off_t)file_size) != 0) {
+    if (file_descriptor < 0) {
         return MYLITE_STORAGE_IOERR;
+    }
+    errno = 0;
+    if (ftruncate(file_descriptor, (off_t)file_size) != 0) {
+        return io_error_result_from_errno(errno);
     }
     return MYLITE_STORAGE_OK;
 }
@@ -6721,7 +6730,7 @@ static mylite_storage_result close_created_file(FILE *file, const char *filename
     }
 
     remove(filename);
-    return MYLITE_STORAGE_IOERR;
+    return result;
 }
 
 static mylite_storage_result open_existing_file(const char *filename, FILE **out_file) {
@@ -7894,12 +7903,31 @@ static mylite_storage_result write_file_at(
             bytes_written += (size_t)count;
             continue;
         }
-        if (count < 0 && errno == EINTR) {
-            continue;
+        if (count < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            return io_error_result_from_errno(errno);
         }
         return MYLITE_STORAGE_IOERR;
     }
     return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result io_error_result_from_errno(int error_number) {
+    return is_storage_full_error(error_number) ? MYLITE_STORAGE_FULL : MYLITE_STORAGE_IOERR;
+}
+
+static int is_storage_full_error(int error_number) {
+    if (error_number == ENOSPC || error_number == EFBIG) {
+        return 1;
+    }
+#ifdef EDQUOT
+    if (error_number == EDQUOT) {
+        return 1;
+    }
+#endif
+    return 0;
 }
 
 static mylite_storage_result page_offset_for_io(

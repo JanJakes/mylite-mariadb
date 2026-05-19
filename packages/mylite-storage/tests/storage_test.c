@@ -3,11 +3,13 @@
 #include <assert.h>
 #include <errno.h>
 #include <limits.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/file.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -248,6 +250,7 @@ static void test_recovery_requires_exclusive_file_lock(void);
 static void test_transaction_recovery_requires_exclusive_file_lock(void);
 static void test_busy_timeout_expires_while_lock_held(void);
 static void test_busy_timeout_waits_for_lock_release(void);
+static void test_write_size_limit_returns_full(void);
 static void test_rejects_corrupt_row_page(void);
 static void test_rejects_corrupt_row_payload_page(void);
 static void test_rejects_corrupt_row_state_page(void);
@@ -409,6 +412,7 @@ int main(void) {
     test_transaction_recovery_requires_exclusive_file_lock();
     test_busy_timeout_expires_while_lock_held();
     test_busy_timeout_waits_for_lock_release();
+    test_write_size_limit_returns_full();
     test_rejects_corrupt_row_page();
     test_rejects_corrupt_row_payload_page();
     test_rejects_corrupt_row_state_page();
@@ -4620,6 +4624,67 @@ static void test_cleans_recovery_journal_after_mutations(void) {
     assert_file_missing(journal_filename);
     assert(mylite_storage_drop_table(filename, "app", "posts") == MYLITE_STORAGE_OK);
     assert_file_missing(journal_filename);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(journal_filename);
+    free(filename);
+    free(root);
+}
+
+static void test_write_size_limit_returns_full(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row[] = {0x00U, 0x01U, 'a', 'b', 'c'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "size-limit-full.mylite");
+    char *journal_filename = journal_path(filename);
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "InnoDB",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+
+    const long long current_file_size = file_size(filename);
+    assert(current_file_size > 0);
+
+    struct rlimit original_limit;
+    assert(getrlimit(RLIMIT_FSIZE, &original_limit) == 0);
+    assert(
+        original_limit.rlim_max == RLIM_INFINITY ||
+        (rlim_t)current_file_size <= original_limit.rlim_max
+    );
+
+    struct sigaction ignore_action;
+    memset(&ignore_action, 0, sizeof(ignore_action));
+    ignore_action.sa_handler = SIG_IGN;
+    assert(sigemptyset(&ignore_action.sa_mask) == 0);
+    struct sigaction original_action;
+    assert(sigaction(SIGXFSZ, &ignore_action, &original_action) == 0);
+
+    struct rlimit limited = original_limit;
+    limited.rlim_cur = (rlim_t)current_file_size;
+    assert(setrlimit(RLIMIT_FSIZE, &limited) == 0);
+    const mylite_storage_result result =
+        mylite_storage_append_row(filename, "app", "posts", row, sizeof(row));
+    assert(setrlimit(RLIMIT_FSIZE, &original_limit) == 0);
+    assert(sigaction(SIGXFSZ, &original_action, NULL) == 0);
+
+    assert(result == MYLITE_STORAGE_FULL);
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
+    assert(rows.row_count == 0U);
+    mylite_storage_free_rowset(&rows);
+    assert_file_missing(journal_filename);
+    assert_file_size_matches_header(filename);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
