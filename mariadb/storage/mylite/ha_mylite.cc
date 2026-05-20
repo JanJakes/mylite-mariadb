@@ -207,6 +207,10 @@ static int mylite_prepare_row_payload(TABLE *table, const uchar *buf,
 static int mylite_prepare_index_entries(
   TABLE *table, const uchar *buf, mylite_storage_index_entry **out_entries,
   size_t *out_entry_count, uchar **out_key_storage);
+static int mylite_prepare_index_entry_changes(
+    TABLE *table, const uchar *old_buf,
+    const mylite_storage_index_entry *new_entries, size_t new_entry_count,
+    uchar *entry_changed, size_t entry_changed_count);
 static void mylite_free_index_entries(mylite_storage_index_entry *entries,
                                       uchar *key_storage);
 static int mylite_prepare_scan_rows(TABLE *table,
@@ -2652,11 +2656,31 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
 
   mylite_storage_index_entry *index_entries= NULL;
   uchar *index_key_storage= NULL;
+  uchar stack_index_entry_changed[64];
+  uchar *index_entry_changed= NULL;
   size_t index_entry_count= 0;
   error= mylite_prepare_index_entries(table, new_data, &index_entries,
                                       &index_entry_count, &index_key_storage);
   if (error)
     DBUG_RETURN(error);
+
+  if (index_entry_count <= sizeof(stack_index_entry_changed))
+    index_entry_changed= stack_index_entry_changed;
+  else
+    index_entry_changed= static_cast<uchar *>(malloc(index_entry_count));
+  if (index_entry_count != 0 && !index_entry_changed)
+    error= HA_ERR_OUT_OF_MEM;
+  if (!error)
+    error= mylite_prepare_index_entry_changes(
+        table, old_data, index_entries, index_entry_count, index_entry_changed,
+        index_entry_count);
+  if (error)
+  {
+    if (index_entry_changed != stack_index_entry_changed)
+      free(index_entry_changed);
+    mylite_free_index_entries(index_entries, index_key_storage);
+    DBUG_RETURN(error);
+  }
 
   uint duplicate_key= (uint) -1;
   error= volatile_rows ?
@@ -2672,6 +2696,8 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
                                 &duplicate_key);
   if (error)
   {
+    if (index_entry_changed != stack_index_entry_changed)
+      free(index_entry_changed);
     mylite_free_index_entries(index_entries, index_key_storage);
     duplicate_key_index= duplicate_key;
     DBUG_RETURN(error);
@@ -2699,6 +2725,8 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
                                               current_row_id);
     if (error)
     {
+      if (index_entry_changed != stack_index_entry_changed)
+        free(index_entry_changed);
       mylite_free_index_entries(index_entries, index_key_storage);
       DBUG_RETURN(error);
     }
@@ -2730,6 +2758,8 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
   }
   if (error)
   {
+    if (index_entry_changed != stack_index_entry_changed)
+      free(index_entry_changed);
     mylite_free_index_entries(index_entries, index_key_storage);
     DBUG_RETURN(error);
   }
@@ -2741,21 +2771,26 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
                                     &row_payload_size, &owned_row_payload);
   if (error)
   {
+    if (index_entry_changed != stack_index_entry_changed)
+      free(index_entry_changed);
     mylite_free_index_entries(index_entries, index_key_storage);
     DBUG_RETURN(error);
   }
 
   unsigned long long new_row_id= 0ULL;
-  const mylite_storage_result result= volatile_rows ?
-    mylite_volatile_update_row_with_index_entries(
-      primary_file, storage_schema(), storage_table(), current_row_id,
-      row_payload, row_payload_size, index_entries, index_entry_count,
-      &new_row_id) :
-    mylite_storage_update_row_with_index_entries(
-      primary_file, storage_schema(), storage_table(), current_row_id,
-      row_payload, row_payload_size, index_entries, index_entry_count,
-      &new_row_id);
+  const mylite_storage_result result=
+      volatile_rows
+          ? mylite_volatile_update_row_with_index_entries(
+                primary_file, storage_schema(), storage_table(),
+                current_row_id, row_payload, row_payload_size, index_entries,
+                index_entry_count, &new_row_id)
+          : mylite_storage_update_row_with_index_entry_changes(
+                primary_file, storage_schema(), storage_table(),
+                current_row_id, row_payload, row_payload_size, index_entries,
+                index_entry_count, index_entry_changed, &new_row_id);
   mylite_storage_free(owned_row_payload);
+  if (index_entry_changed != stack_index_entry_changed)
+    free(index_entry_changed);
   mylite_free_index_entries(index_entries, index_key_storage);
   if (result != MYLITE_STORAGE_OK)
     DBUG_RETURN(mylite_storage_to_handler_error(result));
@@ -3991,6 +4026,34 @@ static int mylite_prepare_index_entries(
   *out_entries= entries;
   *out_entry_count= table->s->keys;
   *out_key_storage= key_storage;
+  return 0;
+}
+
+static int mylite_prepare_index_entry_changes(
+    TABLE *table, const uchar *old_buf,
+    const mylite_storage_index_entry *new_entries, size_t new_entry_count,
+    uchar *entry_changed, size_t entry_changed_count)
+{
+  if (new_entry_count == 0)
+    return 0;
+  if (!entry_changed || entry_changed_count < new_entry_count ||
+      table->s->keys != new_entry_count)
+    return HA_ERR_CRASHED_ON_USAGE;
+
+  for (size_t i= 0; i < new_entry_count; ++i)
+  {
+    KEY *key_info= table->key_info + i;
+    if (new_entries[i].index_number != i ||
+        key_info->key_length != new_entries[i].key_size ||
+        key_info->key_length > MYLITE_STORAGE_MAX_INDEX_KEY_SIZE)
+      return HA_ERR_CRASHED_ON_USAGE;
+
+    uchar old_key[MYLITE_STORAGE_MAX_INDEX_KEY_SIZE];
+    key_copy(old_key, old_buf, key_info, 0);
+    entry_changed[i]=
+        memcmp(old_key, new_entries[i].key, new_entries[i].key_size) != 0;
+  }
+
   return 0;
 }
 

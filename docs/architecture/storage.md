@@ -419,6 +419,12 @@ transaction can accumulate into the outer checkpoint, readers in the same
 checkpoint consult the buffer before the primary file, top-level commit flushes
 it before publishing page `0`, and rollback flushes any retained prefix before
 truncation while discarding pages past the restored checkpoint.
+Durable updates compare MariaDB's old and new serialized key images and omit
+replacement index-entry pages for unchanged keys. Exact-index, live-index, and
+published-leaf tail overlays inherit omitted unchanged entries through the
+row-state replacement id, while later physical replacement entries for changed
+keys supersede the inherited entry. This reduces common non-key update write
+volume without changing the durable page format.
 If an active update targets an inline replacement row that was created inside
 the current rollback frame and whose replacement page run is still resident in
 the active append-page buffer, the storage layer rewrites that buffered row page

@@ -121,6 +121,7 @@ static void test_cached_exact_index_entryset_bulk_append(void);
 static void test_active_exact_index_cache_many_replacements(void);
 static void test_large_append_buffer_savepoint_rollback(void);
 static void test_active_update_rewrite(void);
+static void test_unchanged_index_update_elision(void);
 static void test_indexed_row_batch_cache_reuses_duplicates(void);
 static void test_index_root_metadata(void);
 static void test_index_leaf_pages(void);
@@ -396,6 +397,7 @@ int main(void) {
     test_active_exact_index_cache_many_replacements();
     test_large_append_buffer_savepoint_rollback();
     test_active_update_rewrite();
+    test_unchanged_index_update_elision();
     test_indexed_row_batch_cache_reuses_duplicates();
     test_index_root_metadata();
     test_index_leaf_pages();
@@ -3077,6 +3079,204 @@ static void test_active_update_rewrite(void) {
         initial_secondary_key,
         sizeof(initial_secondary_key)
     );
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_unchanged_index_update_elision(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char primary_key[] = {0x10U, 0x01U};
+    static const unsigned char initial_secondary_key[] = {0x20U, 0x01U};
+    static const unsigned char changed_secondary_key[] = {0x30U, 0x01U};
+    static const unsigned char initial_row[] = {0x01U, 'i', 'n', 'i', 't'};
+    static const unsigned char payload_update_row[] = {0x02U, 'p', 'a', 'y'};
+    static const unsigned char secondary_update_row[] = {0x03U, 's', 'e', 'c'};
+    static const unsigned char unchanged_entries[] = {0U, 0U};
+    static const unsigned char changed_secondary_entries[] = {0U, 1U};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "unchanged-index-update-elision.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_index_entry initial_entries[] = {
+        {.size = sizeof(initial_entries[0]),
+         .index_number = 0U,
+         .key = primary_key,
+         .key_size = sizeof(primary_key)},
+        {.size = sizeof(initial_entries[1]),
+         .index_number = 1U,
+         .key = initial_secondary_key,
+         .key_size = sizeof(initial_secondary_key)},
+    };
+    mylite_storage_index_entry changed_entries[] = {
+        {.size = sizeof(changed_entries[0]),
+         .index_number = 0U,
+         .key = primary_key,
+         .key_size = sizeof(primary_key)},
+        {.size = sizeof(changed_entries[1]),
+         .index_number = 1U,
+         .key = changed_secondary_key,
+         .key_size = sizeof(changed_secondary_key)},
+    };
+    unsigned long long row_id = 0ULL;
+    unsigned long long payload_update_row_id = 0ULL;
+    unsigned long long secondary_update_row_id = 0ULL;
+    unsigned long long row_count = 0ULL;
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            initial_row,
+            sizeof(initial_row),
+            initial_entries,
+            sizeof(initial_entries) / sizeof(initial_entries[0]),
+            &row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_rebuild_index_leaf(filename, "app", "posts", 0U) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_rebuild_index_leaf(filename, "app", "posts", 1U) == MYLITE_STORAGE_OK);
+
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    const unsigned long long before_payload_update_pages = header.page_count;
+    assert(
+        mylite_storage_update_row_with_index_entry_changes(
+            filename,
+            "app",
+            "posts",
+            row_id,
+            payload_update_row,
+            sizeof(payload_update_row),
+            initial_entries,
+            sizeof(initial_entries) / sizeof(initial_entries[0]),
+            unchanged_entries,
+            &payload_update_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(payload_update_row_id != row_id);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_payload_update_pages + 2ULL);
+
+    const unsigned long long payload_update_row_ids[] = {payload_update_row_id};
+    assert_exact_index_entries(
+        filename,
+        0U,
+        primary_key,
+        sizeof(primary_key),
+        payload_update_row_ids,
+        sizeof(payload_update_row_ids) / sizeof(payload_update_row_ids[0])
+    );
+    assert_exact_index_entries(
+        filename,
+        1U,
+        initial_secondary_key,
+        sizeof(initial_secondary_key),
+        payload_update_row_ids,
+        sizeof(payload_update_row_ids) / sizeof(payload_update_row_ids[0])
+    );
+    assert_index_prefix_exists(filename, initial_secondary_key, sizeof(initial_secondary_key), 1);
+    assert_row_not_found(filename, row_id);
+    assert_row_equals(
+        filename,
+        payload_update_row_id,
+        payload_update_row,
+        sizeof(payload_update_row)
+    );
+
+    const unsigned long long before_secondary_update_pages = header.page_count;
+    assert(
+        mylite_storage_update_row_with_index_entry_changes(
+            filename,
+            "app",
+            "posts",
+            payload_update_row_id,
+            secondary_update_row,
+            sizeof(secondary_update_row),
+            changed_entries,
+            sizeof(changed_entries) / sizeof(changed_entries[0]),
+            changed_secondary_entries,
+            &secondary_update_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(secondary_update_row_id != payload_update_row_id);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_secondary_update_pages + 3ULL);
+
+    const unsigned long long secondary_update_row_ids[] = {secondary_update_row_id};
+    assert_exact_index_entries(
+        filename,
+        0U,
+        primary_key,
+        sizeof(primary_key),
+        secondary_update_row_ids,
+        sizeof(secondary_update_row_ids) / sizeof(secondary_update_row_ids[0])
+    );
+    assert_exact_index_entries(
+        filename,
+        1U,
+        initial_secondary_key,
+        sizeof(initial_secondary_key),
+        NULL,
+        0U
+    );
+    assert_index_prefix_exists(filename, initial_secondary_key, sizeof(initial_secondary_key), 0);
+    assert_exact_index_entries(
+        filename,
+        1U,
+        changed_secondary_key,
+        sizeof(changed_secondary_key),
+        secondary_update_row_ids,
+        sizeof(secondary_update_row_ids) / sizeof(secondary_update_row_ids[0])
+    );
+    assert_index_prefix_exists(filename, changed_secondary_key, sizeof(changed_secondary_key), 1);
+    assert_find_indexed_row_equals(
+        filename,
+        0U,
+        primary_key,
+        sizeof(primary_key),
+        secondary_update_row_id,
+        secondary_update_row,
+        sizeof(secondary_update_row)
+    );
+    assert_find_indexed_row_not_found(
+        filename,
+        1U,
+        initial_secondary_key,
+        sizeof(initial_secondary_key)
+    );
+    assert_find_indexed_row_equals(
+        filename,
+        1U,
+        changed_secondary_key,
+        sizeof(changed_secondary_key),
+        secondary_update_row_id,
+        secondary_update_row,
+        sizeof(secondary_update_row)
+    );
+    assert_row_not_found(filename, payload_update_row_id);
+    assert_row_equals(
+        filename,
+        secondary_update_row_id,
+        secondary_update_row,
+        sizeof(secondary_update_row)
+    );
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == 1ULL);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);

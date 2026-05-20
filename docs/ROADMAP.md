@@ -163,6 +163,10 @@ checkpoints now buffer bounded contiguous append runs across nested statement
 commits with a 4 MiB transient flush window and flush them before top-level
 header publication, reducing large transaction update syscall overhead while
 preserving savepoint rollback by flushing retained prefixes before truncation.
+Durable non-key updates now omit unchanged replacement index-entry pages and
+let exact/live index overlays inherit unchanged keys through row-state
+replacement ids, reducing the common update path to the replacement row and
+row-state pages when indexed key bytes are stable.
 Repeated active updates of inline replacement rows created inside the current
 rollback frame now reuse the same row id and rewrite the buffered unpublished
 row and changed index-entry pages while those pages are still resident in the
