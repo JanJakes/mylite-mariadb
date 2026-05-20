@@ -163,6 +163,11 @@ checkpoints now buffer bounded contiguous append runs across nested statement
 commits with a 4 MiB transient flush window and flush them before top-level
 header publication, reducing large transaction update syscall overhead while
 preserving savepoint rollback by flushing retained prefixes before truncation.
+Repeated active updates of inline replacement rows created inside the current
+rollback frame now reuse the same row id and rewrite the buffered unpublished
+row and changed index-entry pages while those pages are still resident in the
+active append buffer, while already-flushed runs and updates to rows predating
+the current savepoint keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation
 now surface as storage-full errors instead of crashed-table I/O errors. Fresh

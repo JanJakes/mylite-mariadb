@@ -419,6 +419,15 @@ transaction can accumulate into the outer checkpoint, readers in the same
 checkpoint consult the buffer before the primary file, top-level commit flushes
 it before publishing page `0`, and rollback flushes any retained prefix before
 truncation while discarding pages past the restored checkpoint.
+If an active update targets an inline replacement row that was created inside
+the current rollback frame and whose replacement page run is still resident in
+the active append-page buffer, the storage layer rewrites that buffered row page
+and any changed matching index-entry pages instead of appending another
+replacement chain. The row-state page remains unchanged, the row id is reused,
+and savepoint rollback remains safe because rows created before the current
+savepoint frame still fall back to append-only replacement. Already-flushed
+replacement runs keep the append-only path until a logged page-rewrite design
+exists.
 
 Non-active durable indexed-row reads use a bounded thread-local row-payload
 cache keyed by the primary file header fingerprint and table id. Repeated
