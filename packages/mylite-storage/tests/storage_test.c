@@ -5352,8 +5352,11 @@ static void assert_nested_statement_checkpoints(statement_checkpoint_test_contex
     };
     mylite_storage_statement *outer = NULL;
     mylite_storage_statement *inner = NULL;
+    mylite_storage_statement *reentrant = NULL;
     unsigned long long row_count = 0ULL;
 
+    assert(mylite_storage_begin_nested_statement(NULL, &inner) == MYLITE_STORAGE_MISUSE);
+    assert(inner == NULL);
     assert(mylite_storage_begin_statement(ctx->filename, &outer) == MYLITE_STORAGE_OK);
     assert(outer != NULL);
     assert(mylite_storage_statement_active(ctx->filename));
@@ -5374,9 +5377,11 @@ static void assert_nested_statement_checkpoints(statement_checkpoint_test_contex
     );
     assert(row_count == 2ULL);
 
-    assert(mylite_storage_begin_statement(ctx->filename, &inner) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_begin_nested_statement(outer, &inner) == MYLITE_STORAGE_OK);
     assert(inner != NULL);
     assert(mylite_storage_commit_statement(outer) == MYLITE_STORAGE_MISUSE);
+    assert(mylite_storage_begin_nested_statement(outer, &reentrant) == MYLITE_STORAGE_MISUSE);
+    assert(reentrant == NULL);
     assert(mylite_storage_table_exists(ctx->filename, "app", "posts") == MYLITE_STORAGE_OK);
     assert(
         mylite_storage_store_table_definition(ctx->filename, ctx->rollback_definition) ==
@@ -5397,7 +5402,7 @@ static void assert_nested_statement_checkpoints(statement_checkpoint_test_contex
     );
     assert(row_count == 2ULL);
 
-    assert(mylite_storage_begin_statement(ctx->filename, &inner) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_begin_nested_statement(outer, &inner) == MYLITE_STORAGE_OK);
     assert(
         mylite_storage_store_table_definition(ctx->filename, ctx->rollback_definition) ==
         MYLITE_STORAGE_OK
@@ -5425,7 +5430,7 @@ static void assert_nested_statement_checkpoints(statement_checkpoint_test_contex
         mylite_storage_store_table_definition(ctx->filename, &outer_catalog_definition) ==
         MYLITE_STORAGE_OK
     );
-    assert(mylite_storage_begin_statement(ctx->filename, &inner) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_begin_nested_statement(outer, &inner) == MYLITE_STORAGE_OK);
     assert(
         mylite_storage_store_table_definition(ctx->filename, &inner_catalog_definition) ==
         MYLITE_STORAGE_OK

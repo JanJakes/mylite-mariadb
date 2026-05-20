@@ -6203,6 +6203,38 @@ mylite_storage_result mylite_storage_begin_statement(
     return begin_checkpoint(filename, out_statement, 0);
 }
 
+mylite_storage_result mylite_storage_begin_nested_statement(
+    mylite_storage_statement *parent,
+    mylite_storage_statement **out_statement
+) {
+    if (parent == NULL || out_statement == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+    *out_statement = NULL;
+    if (active_statement != parent || parent->owner != active_context_owner) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    mylite_storage_statement *statement = allocate_checkpoint_statement(parent);
+    if (statement == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+    statement->filename = parent->filename;
+    statement->owns_filename = 0;
+    statement->owner = active_context_owner;
+
+    mylite_storage_result result =
+        initialize_checkpoint_statement(statement, parent->filename, parent);
+    if (result != MYLITE_STORAGE_OK) {
+        free_statement(statement);
+        return result;
+    }
+
+    active_statement = statement;
+    *out_statement = statement;
+    return MYLITE_STORAGE_OK;
+}
+
 mylite_storage_result mylite_storage_begin_transaction(
     const char *filename,
     mylite_storage_statement **out_statement

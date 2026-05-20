@@ -502,6 +502,10 @@ mylite_storage_result mylite_storage_begin_statement(
     const char *filename,
     mylite_storage_statement **out_statement
 );
+mylite_storage_result mylite_storage_begin_nested_statement(
+    mylite_storage_statement *parent,
+    mylite_storage_statement **out_statement
+);
 mylite_storage_result mylite_storage_begin_transaction(
     const char *filename,
     mylite_storage_statement **out_statement

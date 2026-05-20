@@ -344,6 +344,9 @@ statement-chain walk from `FILE *` on each prepared point update.
 Row-only active buffered rewrites now use a dedicated no-index helper after the
 row/state shape has been validated, avoiding generic changed-index shape checks
 on stable-key prepared updates.
+Nested statement checkpoints inside active transactions now begin from the
+known transaction or savepoint parent, avoiding filename-based active-statement
+rediscovery on prepared row-DML loops.
 
 ## Size And Profile Direction
 

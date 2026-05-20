@@ -523,6 +523,7 @@ int finish_volatile_snapshot(
     const char *commit_message,
     const char *rollback_message
 );
+mylite_storage_statement *active_storage_checkpoint_parent(mylite_db &database);
 #  endif
 void clear_current_row(mylite_stmt &statement);
 bool is_variable_column_type(mylite_value_type type);
@@ -2760,8 +2761,10 @@ int StorageStatementCheckpoint::begin(
         return MYLITE_OK;
     }
 
+    mylite_storage_statement *parent = active_storage_checkpoint_parent(database);
     const mylite_storage_result result =
-        mylite_storage_begin_statement(database.filename.c_str(), &statement_);
+        parent != nullptr ? mylite_storage_begin_nested_statement(parent, &statement_)
+                          : mylite_storage_begin_statement(database.filename.c_str(), &statement_);
     if (result != MYLITE_STORAGE_OK) {
         set_error(database, map_storage_result(result), "statement checkpoint failed");
         return database.errcode;
@@ -3061,8 +3064,11 @@ int begin_direct_savepoint_frame(mylite_db &database, std::string_view name) {
     }
 
     if (database.filename != ":memory:") {
+        mylite_storage_statement *parent = active_storage_checkpoint_parent(database);
         mylite_storage_result result =
-            mylite_storage_begin_statement(database.filename.c_str(), &savepoint.statement);
+            parent != nullptr
+                ? mylite_storage_begin_nested_statement(parent, &savepoint.statement)
+                : mylite_storage_begin_statement(database.filename.c_str(), &savepoint.statement);
         if (result != MYLITE_STORAGE_OK) {
             set_error(database, map_storage_result(result), "savepoint checkpoint failed");
             return database.errcode;
@@ -3092,6 +3098,13 @@ int begin_direct_savepoint_frame(mylite_db &database, std::string_view name) {
         return MYLITE_NOMEM;
     }
     return MYLITE_OK;
+}
+
+mylite_storage_statement *active_storage_checkpoint_parent(mylite_db &database) {
+    if (!database.savepoints.empty()) {
+        return database.savepoints.back().statement;
+    }
+    return database.transaction_statement;
 }
 
 int finish_volatile_snapshot(
