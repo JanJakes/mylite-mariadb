@@ -30,8 +30,10 @@ static void insert_prepared_rows(mylite_db *db, mylite_stmt *stmt);
 static void insert_first_prepared_row(mylite_db *db, mylite_stmt *stmt);
 static void insert_second_prepared_row(mylite_db *db, mylite_stmt *stmt);
 static void insert_large_prepared_row(mylite_db *db, mylite_stmt *stmt);
+static void insert_empty_prepared_row(mylite_db *db, mylite_stmt *stmt);
 static void assert_prepared_row(mylite_stmt *stmt);
 static void assert_large_payload_row(mylite_stmt *stmt);
+static void assert_empty_payload_row(mylite_stmt *stmt);
 static void assert_warning_access(mylite_db *db);
 static void fill_large_payload(unsigned char *payload, size_t payload_size);
 static void exec_ok(mylite_db *db, const char *sql);
@@ -86,6 +88,12 @@ static void test_prepared_statement_bindings_and_columns(void) {
     assert(mylite_bind_int64(select_stmt, 1, 3) == MYLITE_OK);
     assert(mylite_step(select_stmt) == MYLITE_ROW);
     assert_large_payload_row(select_stmt);
+    assert(mylite_step(select_stmt) == MYLITE_DONE);
+    assert(mylite_reset(select_stmt) == MYLITE_OK);
+
+    assert(mylite_bind_int64(select_stmt, 1, 4) == MYLITE_OK);
+    assert(mylite_step(select_stmt) == MYLITE_ROW);
+    assert_empty_payload_row(select_stmt);
     assert(mylite_step(select_stmt) == MYLITE_DONE);
     assert(mylite_reset(select_stmt) == MYLITE_OK);
 
@@ -146,6 +154,7 @@ static void insert_prepared_rows(mylite_db *db, mylite_stmt *stmt) {
     insert_first_prepared_row(db, stmt);
     insert_second_prepared_row(db, stmt);
     insert_large_prepared_row(db, stmt);
+    insert_empty_prepared_row(db, stmt);
 }
 
 static void insert_first_prepared_row(mylite_db *db, mylite_stmt *stmt) {
@@ -203,6 +212,19 @@ static void insert_large_prepared_row(mylite_db *db, mylite_stmt *stmt) {
     free(large_payload);
 }
 
+static void insert_empty_prepared_row(mylite_db *db, mylite_stmt *stmt) {
+    assert(mylite_clear_bindings(stmt) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 1, 4) == MYLITE_OK);
+    assert(mylite_bind_uint64(stmt, 2, 0U) == MYLITE_OK);
+    assert(mylite_bind_double(stmt, 3, 0.0) == MYLITE_OK);
+    assert(mylite_bind_text(stmt, 4, NULL, 0, MYLITE_STATIC) == MYLITE_OK);
+    assert(mylite_bind_blob(stmt, 5, NULL, 0, MYLITE_STATIC) == MYLITE_OK);
+    assert(mylite_bind_text(stmt, 6, "", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+}
+
 static void assert_prepared_row(mylite_stmt *stmt) {
     const unsigned char expected_payload[] = {'A', '\0', 'Z'};
 
@@ -242,6 +264,21 @@ static void assert_large_payload_row(mylite_stmt *stmt) {
     for (size_t index = 0; index < MYLITE_TEST_LARGE_PAYLOAD_SIZE; ++index) {
         assert(payload[index] == (unsigned char)(index % k_payload_pattern_modulus));
     }
+}
+
+static void assert_empty_payload_row(mylite_stmt *stmt) {
+    assert(mylite_column_int64(stmt, 0) == 4);
+    assert(mylite_column_type(stmt, 3) == MYLITE_TYPE_TEXT);
+    assert(mylite_column_text(stmt, 3) != NULL);
+    assert(strcmp(mylite_column_text(stmt, 3), "") == 0);
+    assert(mylite_column_bytes(stmt, 3) == 0U);
+    assert(mylite_column_type(stmt, 4) == MYLITE_TYPE_BLOB);
+    assert(mylite_column_blob(stmt, 4) != NULL);
+    assert(mylite_column_bytes(stmt, 4) == 0U);
+    assert(mylite_column_type(stmt, 5) == MYLITE_TYPE_TEXT);
+    assert(mylite_column_text(stmt, 5) != NULL);
+    assert(strcmp(mylite_column_text(stmt, 5), "") == 0);
+    assert(mylite_column_bytes(stmt, 5) == 0U);
 }
 
 static void assert_warning_access(mylite_db *db) {

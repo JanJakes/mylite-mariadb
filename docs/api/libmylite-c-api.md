@@ -239,8 +239,9 @@ destructor is called after MyLite no longer needs the input.
 Initial implementation status: MyLite copies text and blob bytes during binding
 for all destructor modes. Custom destructors are called after the copy. Text may
 use `MYLITE_NUL_TERMINATED`; blob bindings require an explicit byte length.
-Bindings may be changed before the first `mylite_step()` or after a successful
-`mylite_reset()`.
+Passing `NULL` with an explicit zero byte length binds an empty text or blob
+value, not SQL `NULL`; use `mylite_bind_null()` for SQL `NULL`. Bindings may be
+changed before the first `mylite_step()` or after a successful `mylite_reset()`.
 
 Typed date, time, decimal, JSON, and geometry bindings can be added without
 forcing those values through text.

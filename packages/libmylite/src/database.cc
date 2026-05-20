@@ -590,7 +590,7 @@ int mylite_bind_text(
     std::size_t value_len,
     mylite_destructor destructor
 ) {
-    if (stmt == nullptr || stmt->db == nullptr || value == nullptr) {
+    if (stmt == nullptr || stmt->db == nullptr || (value == nullptr && value_len != 0U)) {
         return MYLITE_MISUSE;
     }
 
@@ -614,7 +614,7 @@ int mylite_bind_blob(
     std::size_t value_len,
     mylite_destructor destructor
 ) {
-    if (stmt == nullptr || stmt->db == nullptr || value == nullptr ||
+    if (stmt == nullptr || stmt->db == nullptr || (value == nullptr && value_len != 0U) ||
         value_len == MYLITE_NUL_TERMINATED) {
         return MYLITE_MISUSE;
     }
@@ -1784,7 +1784,10 @@ int bind_bytes(
     }
 
     const auto *bytes = static_cast<const unsigned char *>(value);
-    parameter->bytes.assign(bytes, bytes + value_len);
+    parameter->bytes.clear();
+    if (value_len > 0U) {
+        parameter->bytes.assign(bytes, bytes + value_len);
+    }
     if (parameter->bytes.empty()) {
         parameter->bytes.push_back(0U);
     }
@@ -1797,7 +1800,7 @@ int bind_bytes(
 
     // MYLITE_TRANSIENT mirrors SQLite's public -1 destructor sentinel.
     // NOLINTBEGIN(performance-no-int-to-ptr)
-    if (destructor != MYLITE_STATIC && destructor != MYLITE_TRANSIENT) {
+    if (value != nullptr && destructor != MYLITE_STATIC && destructor != MYLITE_TRANSIENT) {
         destructor(const_cast<void *>(value));
     }
     // NOLINTEND(performance-no-int-to-ptr)
