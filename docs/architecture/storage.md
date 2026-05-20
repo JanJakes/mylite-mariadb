@@ -161,12 +161,14 @@ WordPress-shaped InnoDB DDL.
 
 The default embedded profile does not expose server account administration,
 dynamic plugin installation, replication metadata, binlog administration, or
-the event scheduler. Direct execution and prepared-statement preparation reject
-those top-level SQL command families before they can create server sidecars or
-depend on `mysql.*` system tables. `information_schema` remains virtual. Any
-future required `mysql.*` system surface should be created or maintained inside
-the MyLite database directory, or exposed as a read-only virtual surface when
-persistent server tables are unnecessary.
+the event scheduler. Server help-table lookup, statement profiling, and
+query-cache management are also outside the core embedded storage profile.
+Direct execution and prepared-statement preparation reject those top-level SQL
+command families before they can create server sidecars, depend on `mysql.*`
+system tables, or expose server-owned tuning state. `information_schema`
+remains virtual. Any future required `mysql.*` system surface should be created
+or maintained inside the MyLite database directory, or exposed as a read-only
+virtual surface when persistent server tables are unnecessary.
 
 ## Transactions, Recovery, And Concurrency
 

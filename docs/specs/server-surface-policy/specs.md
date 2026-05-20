@@ -6,9 +6,9 @@ MyLite's core API is an embedded, directory-owned database runtime. Server-owned
 surfaces such as account management, dynamic plugin installation, replication,
 binlog inspection, event scheduling, server help-table lookup, and statement
 profiling do not fit that lifetime model. Server tuning surfaces such as query
-cache management are also outside the core embedded contract and can
-also create durable sidecar files or system-table dependencies. This slice makes
-those boundaries explicit and covered by tests.
+cache management are also outside the core embedded contract. Some of these
+surfaces can create durable sidecar files or system-table dependencies. This
+slice makes those boundaries explicit and covered by tests.
 
 ## Source Findings
 

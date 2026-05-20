@@ -35,7 +35,7 @@ native storage files inside that directory.
 | 12 | Compatibility harness | ✅&nbsp;Done | Run embedded lifecycle, directory-boundary detection, MariaDB-reference, crash/reopen, application-query, and query-surface coverage in repeatable CTest label groups. |
 | 13 | Prepared SQL API | ✅&nbsp;Done | Add reusable prepared statements, parameter bindings, typed column access, warning lookup, binary-safe values, reset/finalize behavior, and close-time statement lifetime enforcement. |
 | 14 | Engine support and application schemas | ✅&nbsp;Done | Test supported explicit `ENGINE=` clauses, default-engine resolution, MEMORY reopen semantics, and representative WordPress-shaped InnoDB DDL. |
-| 15 | Server-surface policy | ✅&nbsp;Done | Explicitly reject users/auth, replication/binlog, dynamic plugins, events, and server-owned metadata surfaces, while disabling performance schema and server topology features at startup. |
+| 15 | Server-surface policy | ✅&nbsp;Done | Explicitly reject users/auth, replication/binlog, dynamic plugins, events, server-owned metadata, SQL help, profiling, and query-cache management, while disabling server topology features at startup. |
 | 16 | Size profile hardening | 🟡&nbsp;In&nbsp;progress | Trim safe archive/package overhead first, then evaluate daemon-only and low-value optional components after the embedded runtime and storage shape are measurable. |
 
 ## Size And Profile Direction
@@ -47,7 +47,7 @@ surface that does not fit a local directory-owned library:
 - network listener and server account administration,
 - replication, binlog, relay log, and Galera/wsrep,
 - dynamic plugin loading and external durable storage engines,
-- performance schema and server audit plugins,
+- performance schema, statement profiling, query cache, and server audit plugins,
 - rarely used optional engines or plugins unless a slice justifies them.
 
 The minimal embedded build establishes the first baseline. Later slices record
