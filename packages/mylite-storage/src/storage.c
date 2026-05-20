@@ -372,10 +372,15 @@ typedef struct mylite_storage_buffered_page_undo_list {
     size_t capacity;
 } mylite_storage_buffered_page_undo_list;
 
+typedef struct mylite_storage_buffered_update_rewrite_bucket {
+    unsigned long long row_id;
+    int occupied;
+} mylite_storage_buffered_update_rewrite_bucket;
+
 typedef struct mylite_storage_buffered_update_rewrite_cache {
-    unsigned long long *row_ids;
+    mylite_storage_buffered_update_rewrite_bucket *buckets;
     size_t count;
-    size_t capacity;
+    size_t bucket_capacity;
 } mylite_storage_buffered_update_rewrite_cache;
 
 struct mylite_storage_statement {
@@ -781,6 +786,20 @@ static int buffered_update_rewrite_row_state_known(
 );
 static mylite_storage_result mark_buffered_update_rewrite_row_state(
     mylite_storage_statement *statement,
+    unsigned long long row_id
+);
+static mylite_storage_result ensure_buffered_update_rewrite_buckets(
+    mylite_storage_buffered_update_rewrite_cache *cache,
+    size_t next_count
+);
+static size_t buffered_update_rewrite_bucket_capacity(size_t entry_count);
+static mylite_storage_result rebuild_buffered_update_rewrite_buckets(
+    mylite_storage_buffered_update_rewrite_cache *cache,
+    size_t bucket_capacity
+);
+static int place_buffered_update_rewrite_bucket(
+    mylite_storage_buffered_update_rewrite_bucket *buckets,
+    size_t bucket_capacity,
     unsigned long long row_id
 );
 static mylite_storage_result ensure_append_page_buffer_capacity(
@@ -7663,7 +7682,7 @@ static void clear_buffered_update_rewrites(mylite_storage_statement *statement) 
         return;
     }
 
-    free(statement->buffered_update_rewrites.row_ids);
+    free(statement->buffered_update_rewrites.buckets);
     statement->buffered_update_rewrites = (mylite_storage_buffered_update_rewrite_cache){0};
 }
 
@@ -8427,10 +8446,23 @@ static int buffered_update_rewrite_row_state_known(
         return 0;
     }
 
-    for (size_t i = 0U; i < statement->buffered_update_rewrites.count; ++i) {
-        if (statement->buffered_update_rewrites.row_ids[i] == row_id) {
+    const mylite_storage_buffered_update_rewrite_cache *cache =
+        &statement->buffered_update_rewrites;
+    if (cache->bucket_capacity == 0U) {
+        return 0;
+    }
+
+    const size_t mask = cache->bucket_capacity - 1U;
+    size_t bucket_index = hash_row_id(row_id) & mask;
+    for (size_t probes = 0U; probes < cache->bucket_capacity; ++probes) {
+        const mylite_storage_buffered_update_rewrite_bucket *bucket = cache->buckets + bucket_index;
+        if (!bucket->occupied) {
+            return 0;
+        }
+        if (bucket->row_id == row_id) {
             return 1;
         }
+        bucket_index = (bucket_index + 1U) & mask;
     }
     return 0;
 }
@@ -8443,28 +8475,108 @@ static mylite_storage_result mark_buffered_update_rewrite_row_state(
         return MYLITE_STORAGE_OK;
     }
 
-    if (statement->buffered_update_rewrites.count == statement->buffered_update_rewrites.capacity) {
-        const size_t next_capacity = statement->buffered_update_rewrites.capacity == 0U
-                                         ? 16U
-                                         : statement->buffered_update_rewrites.capacity * 2U;
-        if (next_capacity <= statement->buffered_update_rewrites.capacity ||
-            next_capacity > SIZE_MAX / sizeof(*statement->buffered_update_rewrites.row_ids)) {
-            return MYLITE_STORAGE_FULL;
-        }
-        unsigned long long *row_ids = (unsigned long long *)realloc(
-            statement->buffered_update_rewrites.row_ids,
-            next_capacity * sizeof(*statement->buffered_update_rewrites.row_ids)
-        );
-        if (row_ids == NULL) {
-            return MYLITE_STORAGE_NOMEM;
-        }
-        statement->buffered_update_rewrites.row_ids = row_ids;
-        statement->buffered_update_rewrites.capacity = next_capacity;
+    mylite_storage_buffered_update_rewrite_cache *cache = &statement->buffered_update_rewrites;
+    mylite_storage_result result = ensure_buffered_update_rewrite_buckets(cache, cache->count + 1U);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    if (!place_buffered_update_rewrite_bucket(cache->buckets, cache->bucket_capacity, row_id)) {
+        return MYLITE_STORAGE_FULL;
+    }
+    ++cache->count;
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result ensure_buffered_update_rewrite_buckets(
+    mylite_storage_buffered_update_rewrite_cache *cache,
+    size_t next_count
+) {
+    if (next_count <= cache->count) {
+        return MYLITE_STORAGE_OK;
+    }
+    if (next_count > SIZE_MAX / 2U) {
+        return MYLITE_STORAGE_FULL;
     }
 
-    statement->buffered_update_rewrites.row_ids[statement->buffered_update_rewrites.count] = row_id;
-    ++statement->buffered_update_rewrites.count;
+    const size_t next_capacity = buffered_update_rewrite_bucket_capacity(next_count);
+    if (next_capacity == 0U) {
+        return MYLITE_STORAGE_FULL;
+    }
+    if (cache->bucket_capacity >= next_capacity) {
+        return MYLITE_STORAGE_OK;
+    }
+    return rebuild_buffered_update_rewrite_buckets(cache, next_capacity);
+}
+
+static size_t buffered_update_rewrite_bucket_capacity(size_t entry_count) {
+    const size_t target_count = entry_count * 2U;
+    size_t bucket_capacity = 16U;
+    while (bucket_capacity < target_count) {
+        if (bucket_capacity > SIZE_MAX / 2U) {
+            return 0U;
+        }
+        bucket_capacity *= 2U;
+    }
+    return bucket_capacity;
+}
+
+static mylite_storage_result rebuild_buffered_update_rewrite_buckets(
+    mylite_storage_buffered_update_rewrite_cache *cache,
+    size_t bucket_capacity
+) {
+    if (bucket_capacity > SIZE_MAX / sizeof(*cache->buckets)) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    mylite_storage_buffered_update_rewrite_bucket *buckets =
+        (mylite_storage_buffered_update_rewrite_bucket *)calloc(bucket_capacity, sizeof(*buckets));
+    if (buckets == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    for (size_t i = 0U; i < cache->bucket_capacity; ++i) {
+        const mylite_storage_buffered_update_rewrite_bucket *bucket = cache->buckets + i;
+        if (!bucket->occupied) {
+            continue;
+        }
+        if (!place_buffered_update_rewrite_bucket(buckets, bucket_capacity, bucket->row_id)) {
+            free(buckets);
+            return MYLITE_STORAGE_FULL;
+        }
+    }
+
+    free(cache->buckets);
+    cache->buckets = buckets;
+    cache->bucket_capacity = bucket_capacity;
     return MYLITE_STORAGE_OK;
+}
+
+static int place_buffered_update_rewrite_bucket(
+    mylite_storage_buffered_update_rewrite_bucket *buckets,
+    size_t bucket_capacity,
+    unsigned long long row_id
+) {
+    if (bucket_capacity == 0U) {
+        return 0;
+    }
+
+    const size_t mask = bucket_capacity - 1U;
+    size_t bucket_index = hash_row_id(row_id) & mask;
+    for (size_t probes = 0U; probes < bucket_capacity; ++probes) {
+        mylite_storage_buffered_update_rewrite_bucket *bucket = buckets + bucket_index;
+        if (!bucket->occupied) {
+            *bucket = (mylite_storage_buffered_update_rewrite_bucket){
+                .row_id = row_id,
+                .occupied = 1,
+            };
+            return 1;
+        }
+        if (bucket->row_id == row_id) {
+            return 1;
+        }
+        bucket_index = (bucket_index + 1U) & mask;
+    }
+    return 0;
 }
 
 static mylite_storage_result ensure_append_page_buffer_capacity(

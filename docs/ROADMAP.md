@@ -174,8 +174,8 @@ rows created by earlier nested statements in the same outer checkpoint.
 Per-statement buffered-page preimages preserve savepoint rollback, and buffered
 rewrite validation skips redundant full-page checksum scans for unpublished
 in-memory row and index pages. Row-state pages keep a first-use checksum guard
-and then use a validated-row cache for later rewrites. Already-flushed
-replacement runs keep the append-only path.
+and then use a hash-backed validated-row cache for later rewrites.
+Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation
 now surface as storage-full errors instead of crashed-table I/O errors. Fresh

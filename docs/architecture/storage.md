@@ -436,9 +436,10 @@ captured buffered preimages before truncating or flushing the retained prefix.
 The buffered rewrite preflight uses checksum-free metadata validation only for
 unpublished in-memory row and index pages. Row-state pages are fully
 checksummed the first time a buffered replacement row is rewritten, then that
-validated row id is cached on the append-buffer owner so later rewrites can use
-metadata-only row-state validation until rollback or statement cleanup clears
-the cache. Durable reads keep full page checksum validation. Already-flushed
+validated row id is cached in a hash-backed set on the append-buffer owner so
+later rewrites can use metadata-only row-state validation until rollback or
+statement cleanup clears the cache. Durable reads keep full page checksum
+validation. Already-flushed
 replacement runs keep the append-only path until a logged page-rewrite design
 exists.
 
