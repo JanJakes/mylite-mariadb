@@ -75,6 +75,10 @@ static const ulint FTS_WORD_NODES_INIT_SIZE = 64;
 
 /** Last time we did check whether system need a sync */
 static time_t	last_check_sync_time;
+static ulint	fts_optimize_current;
+static bool	fts_optimize_done;
+static ulint	fts_optimize_n_optimize;
+static ulint	fts_optimize_n_tables;
 
 /** FTS optimize thread message types. */
 enum fts_msg_type_t {
@@ -2819,25 +2823,19 @@ static void fts_optimize_callback(void *)
 {
 	ut_ad(!srv_read_only_mode);
 
-	static ulint	current;
-	static bool	done;
-	static ulint	n_optimize;
-
-	if (!fts_optimize_wq || done) {
+	if (!fts_optimize_wq || fts_optimize_done) {
 		/* Possibly timer initiated callback, can come after FTS_MSG_STOP.*/
 		return;
 	}
 
-	static ulint		n_tables = ib_vector_size(fts_slots);
-
-	while (!done && srv_shutdown_state <= SRV_SHUTDOWN_INITIATED) {
+	while (!fts_optimize_done && srv_shutdown_state <= SRV_SHUTDOWN_INITIATED) {
 		/* If there is no message in the queue and we have tables
 		to optimize then optimize the tables. */
 
-		if (!done
+		if (!fts_optimize_done
 		    && ib_wqueue_is_empty(fts_optimize_wq)
-		    && n_tables > 0
-		    && n_optimize > 0) {
+		    && fts_optimize_n_tables > 0
+		    && fts_optimize_n_optimize > 0) {
 
 			/* The queue is empty but we have tables
 			to optimize. */
@@ -2846,14 +2844,14 @@ retry_later:
 				if (fts_is_sync_needed()) {
 					fts_need_sync = true;
 				}
-				if (n_tables) {
+				if (fts_optimize_n_tables) {
 					timer->set_time(5000, 0);
 				}
 				return;
 			}
 
 			fts_slot_t* slot = static_cast<fts_slot_t*>(
-				ib_vector_get(fts_slots, current));
+				ib_vector_get(fts_slots, fts_optimize_current));
 
 			/* Handle the case of empty slots. */
 			if (slot->table) {
@@ -2862,11 +2860,11 @@ retry_later:
 			}
 
 			/* Wrap around the counter. */
-			if (++current >= ib_vector_size(fts_slots)) {
-				n_optimize = fts_optimize_how_many();
-				current = 0;
+			if (++fts_optimize_current >= ib_vector_size(fts_slots)) {
+				fts_optimize_n_optimize = fts_optimize_how_many();
+				fts_optimize_current = 0;
 			}
-		} else if (n_optimize == 0
+		} else if (fts_optimize_n_optimize == 0
 			   || !ib_wqueue_is_empty(fts_optimize_wq)) {
 			fts_msg_t* msg = static_cast<fts_msg_t*>
 				(ib_wqueue_nowait(fts_optimize_wq));
@@ -2877,15 +2875,15 @@ retry_later:
 
 			switch (msg->type) {
 			case FTS_MSG_STOP:
-				done = true;
+				fts_optimize_done = true;
 				break;
 
 			case FTS_MSG_ADD_TABLE:
-				ut_a(!done);
+				ut_a(!fts_optimize_done);
 				if (fts_optimize_new_table(
 					    static_cast<dict_table_t*>(
 						    msg->ptr))) {
-					++n_tables;
+					++fts_optimize_n_tables;
 				}
 				break;
 
@@ -2893,7 +2891,7 @@ retry_later:
 				if (fts_optimize_del_table(
 					    static_cast<fts_msg_del_t*>(
 						    msg->ptr))) {
-					--n_tables;
+					--fts_optimize_n_tables;
 				}
 				break;
 
@@ -2919,13 +2917,14 @@ retry_later:
 			}
 
 			mem_heap_free(msg->heap);
-			n_optimize = done ? 0 : fts_optimize_how_many();
+			fts_optimize_n_optimize =
+				fts_optimize_done ? 0 : fts_optimize_how_many();
 		}
 	}
 
 	/* Server is being shutdown, sync the data from FTS cache to disk
 	if needed */
-	if (n_tables > 0) {
+	if (fts_optimize_n_tables > 0) {
 		for (ulint i = 0; i < ib_vector_size(fts_slots); i++) {
 			fts_slot_t* slot = static_cast<fts_slot_t*>(
 				ib_vector_get(fts_slots, i));
@@ -2962,6 +2961,10 @@ fts_optimize_init(void)
 	/* Create FTS optimize work queue */
 	fts_optimize_wq = ib_wqueue_create();
 	timer = srv_thread_pool->create_timer(timer_callback);
+	fts_opt_start_shutdown = false;
+	fts_optimize_current = 0;
+	fts_optimize_done = false;
+	fts_optimize_n_optimize = 0;
 
 	/* Create FTS vector to store fts_slot_t */
 	heap = mem_heap_create(sizeof(dict_table_t*) * 64);
@@ -2988,6 +2991,7 @@ fts_optimize_init(void)
 		table->fts->in_queue = true;
 	}
 	dict_sys.unfreeze();
+	fts_optimize_n_tables = ib_vector_size(fts_slots);
 
 	pthread_cond_init(&fts_opt_shutdown_cond, nullptr);
 	last_check_sync_time = time(NULL);

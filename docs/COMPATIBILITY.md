@@ -28,7 +28,7 @@ for drop-in application expectations.
 | --- | --- | --- |
 | Open and close a database directory | 🟡&nbsp;Partial | Implemented for read/write local directory paths with one active database directory per process, a `.mylite/` naming convention, validated format-1 metadata, and a native-storage baseline layout under the database directory |
 | Read-only opens | ⚪&nbsp;Planned | Reserved until native storage can enforce read-only engine access |
-| Direct SQL execution | 🟡&nbsp;Partial | `mylite_exec()` executes controlled one-shot SQL with textual result callbacks in embedded builds; native-storage coverage verifies MyISAM DDL/DML, row/index operations, and lifecycle behavior across reopen |
+| Direct SQL execution | 🟡&nbsp;Partial | `mylite_exec()` executes controlled one-shot SQL with textual result callbacks in embedded builds; native-storage coverage verifies MyISAM DDL/DML, row/index operations, and explicit InnoDB transaction/recovery behavior across reopen |
 | Prepared statements | ⚪&nbsp;Planned | Reusable statements with 1-based parameter binding |
 | Binary-safe values | ⚪&nbsp;Planned | Explicit BLOB/TEXT byte counts; no NUL-terminated-value assumptions |
 | Diagnostics | 🟡&nbsp;Partial | Open handles expose stable MyLite result codes, MariaDB errno, SQLSTATE, and message text |
@@ -42,7 +42,7 @@ for drop-in application expectations.
 | --- | --- | --- |
 | No explicit engine | 🟡&nbsp;Partial | The baseline configures MariaDB's native MyISAM engine as the temporary default while broader engine policy is designed |
 | `ENGINE=MYLITE` | ➖&nbsp;Out&nbsp;of&nbsp;scope | No separate MyLite engine in the native-storage directory model |
-| `ENGINE=InnoDB` | ⚪&nbsp;Planned | Use native InnoDB files inside the MyLite database directory where supported |
+| `ENGINE=InnoDB` | 🟡&nbsp;Partial | Explicit InnoDB tables use native InnoDB files inside the MyLite database directory; controlled transaction and recovery behavior is covered, while broader InnoDB features remain planned |
 | `ENGINE=MyISAM` | 🟡&nbsp;Partial | Controlled create/alter/rename/drop/reopen and row/index coverage verifies `.frm`, `.MYD`, and `.MYI` files inside `datadir/` |
 | `ENGINE=Aria` | ⚪&nbsp;Planned | Use native Aria files and logs inside the MyLite database directory where supported |
 | Dynamic external engines | ➖&nbsp;Out&nbsp;of&nbsp;scope | Default embedded profile does not load storage-engine plugins |
@@ -53,7 +53,7 @@ for drop-in application expectations.
 | --- | --- | --- |
 | Primary portable database directory | 🟡&nbsp;Partial | Open/create establishes and validates a MyLite-owned directory with `mylite.meta`, `datadir/`, `tmp/`, and process-local `run/`; `.mylite/` is recommended but not enforced |
 | MariaDB metadata files | 🟡&nbsp;Partial | Controlled schema and MyISAM table metadata lifecycle is covered for `db.opt`, `.frm`, create, alter, rename, and drop paths inside `datadir/` |
-| InnoDB files | ⚪&nbsp;Planned | Tablespaces, redo, undo, and recovery files stay inside the MyLite database directory |
+| InnoDB files | 🟡&nbsp;Partial | Representative InnoDB tablespace, redo, undo, and temporary files are configured and covered inside the MyLite database directory |
 | MyISAM files | 🟡&nbsp;Partial | Controlled lifecycle and native table operation coverage verifies `.MYD` and `.MYI` table files stay inside `datadir/` across create, row DML, copy alter, rename, drop, and reopen |
 | Aria files | 🟡&nbsp;Partial | Runtime startup sets `--aria-log-dir-path=<db>/datadir`; explicit Aria table coverage remains planned |
 | MyLite-owned transient paths | 🟡&nbsp;Partial | Durable database paths use `tmp/` and `run/` inside the database directory; clean close removes `run/` and clears `tmp/`, and clean open replaces stale inactive `run/` state |
@@ -93,10 +93,10 @@ for drop-in application expectations.
 
 | Capability | MyLite status | Compatibility target |
 | --- | --- | --- |
-| Atomic commit | ⚪&nbsp;Planned | Native engine atomicity within the MyLite database directory |
-| Rollback | ⚪&nbsp;Planned | Native engine rollback behavior for failed statements and transactions |
-| Savepoints | ⚪&nbsp;Planned | Match MariaDB transaction behavior for supported MyLite tables |
-| Crash recovery | ⚪&nbsp;Planned | Recover native engine files and logs inside the MyLite database directory |
+| Atomic commit | 🟡&nbsp;Partial | Explicit InnoDB transactions commit through native MariaDB/InnoDB hooks inside the MyLite database directory |
+| Rollback | 🟡&nbsp;Partial | Explicit InnoDB transaction rollback is covered; MyISAM remains non-transactional |
+| Savepoints | 🟡&nbsp;Partial | Explicit InnoDB savepoint rollback and release savepoint are covered through SQL transaction statements |
+| Crash recovery | 🟡&nbsp;Partial | Parent-process reopen after child-process exit covers committed InnoDB rows surviving and uncommitted rows rolling back |
 | Multiple readers | ⚪&nbsp;Planned | Safe readers over stable committed state |
 | Concurrent writers | ⚪&nbsp;Planned | Preserve the selected native engine's write-concurrency behavior |
 | Cross-process unsafe writers | ➖&nbsp;Out&nbsp;of&nbsp;scope | Reject or block unsafe opens until locking and recovery prove safety |

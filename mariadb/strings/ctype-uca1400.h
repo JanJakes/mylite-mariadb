@@ -306,6 +306,8 @@ uint my_uca1400_collation_id_uca400_compat(uint id);
 
 my_bool my_uca1400_collation_definitions_add(MY_CHARSET_LOADER *loader);
 
+void my_uca1400_collation_reset(void);
+
 
 /* Exported data */
 #define MY_UCA1400_COLLATION_DEFINITION_COUNT 26

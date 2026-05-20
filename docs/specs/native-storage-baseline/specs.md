@@ -49,7 +49,8 @@ app.mylite/
     plugins/
 ```
 
-The embedded runtime starts with MyLite-owned arguments:
+This baseline initially starts the embedded runtime with MyLite-owned
+arguments:
 
 - `--no-defaults`
 - `--datadir=<db>/datadir`
@@ -61,6 +62,10 @@ The embedded runtime starts with MyLite-owned arguments:
 - `--default-storage-engine=MyISAM`
 - `--innodb=OFF`
 - explicit message and character-set directories from the MariaDB build/source
+
+The later transactions and recovery slice replaces the temporary `--innodb=OFF`
+argument with explicit InnoDB paths under the MyLite database directory while
+keeping MyISAM as the default engine.
 
 `mylite.meta` is a MyLite lifecycle marker. The first version records the layout
 format and MariaDB base tag; future directory-version policy can expand it

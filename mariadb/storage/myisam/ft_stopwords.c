@@ -29,6 +29,13 @@ typedef struct st_ft_stopwords
 } FT_STOPWORD;
 
 static TREE *stopwords3=NULL;
+static const char *builtin_stopword_file="(built-in)";
+
+static my_bool use_stopword_file()
+{
+  return ft_stopword_file && *ft_stopword_file &&
+         strcmp(ft_stopword_file, builtin_stopword_file);
+}
 
 static int FT_STOPWORD_cmp(void *cmp_arg __attribute__((unused)),
                            const void *w1_, const void *w2_)
@@ -59,13 +66,16 @@ static int ft_add_stopword(const char *w)
 int ft_init_stopwords()
 {
   DBUG_ENTER("ft_init_stopwords");
+  my_bool stopword_file_configured= use_stopword_file();
+
   if (!stopwords3)
   {
     if (!(stopwords3=(TREE *)my_malloc(mi_key_memory_ft_stopwords,
                                        sizeof(TREE), MYF(0))))
       DBUG_RETURN(-1);
     init_tree(stopwords3,0,0,sizeof(FT_STOPWORD),&FT_STOPWORD_cmp,
-              (ft_stopword_file ? (tree_element_free)&FT_STOPWORD_free : 0),
+              (stopword_file_configured ? (tree_element_free)&FT_STOPWORD_free
+                                        : 0),
               NULL, MYF(0));
     /*
       Stopword engine currently does not support tricky
@@ -73,20 +83,20 @@ int ft_init_stopwords()
       Use latin1 to compare stopwords in case of these character sets.
       It's also fine to use latin1 with the built-in stopwords.
     */
-    ft_stopword_cs= default_charset_info->mbminlen == 1 ?
+    ft_stopword_cs= stopword_file_configured && default_charset_info->mbminlen == 1 ?
                     default_charset_info : &my_charset_latin1;
   }
 
-  if (ft_stopword_file)
+  if (ft_stopword_file && !*ft_stopword_file)
+    DBUG_RETURN(0);
+
+  if (stopword_file_configured)
   {
     File fd;
     size_t len;
     uchar *buffer, *start, *end;
     FT_WORD w;
     int error=-1;
-
-    if (!*ft_stopword_file)
-      DBUG_RETURN(0);
 
     if ((fd=my_open(ft_stopword_file, O_RDONLY, MYF(MY_WME))) == -1)
       DBUG_RETURN(-1);
@@ -120,7 +130,7 @@ err0:
       if (ft_add_stopword(*sws))
         DBUG_RETURN(-1);
     }
-    ft_stopword_file="(built-in)"; /* for SHOW VARIABLES */
+    ft_stopword_file=builtin_stopword_file; /* for SHOW VARIABLES */
   }
   DBUG_RETURN(0);
 }

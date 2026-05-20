@@ -68,9 +68,10 @@ app.mylite/
 
 The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 `--tmpdir=app.mylite/tmp`, `--plugin-dir=app.mylite/run/plugins`, and
-`--aria-log-dir-path=app.mylite/datadir`. Clean shutdown removes `run/` and
-clears temporary files under `tmp/`; durable native storage remains in
-`datadir/`.
+`--aria-log-dir-path=app.mylite/datadir`. InnoDB data, redo, undo, and
+temporary paths are also pinned under `datadir/` and `tmp/`. Clean shutdown
+removes `run/` and clears temporary files under `tmp/`; durable native storage
+remains in `datadir/`.
 
 Format 1 uses `mylite.meta` as the directory identity marker:
 
@@ -134,8 +135,15 @@ Native table operation coverage validates controlled MyISAM row DML, scans,
 primary and secondary indexes, duplicate-key diagnostics, nullable unique keys,
 autoincrement state across reopen, `TEXT` and `BLOB` values, and copy-style
 `ALTER TABLE` rebuilds through MariaDB's native handler path. This is still
-MyISAM-specific evidence; transaction, recovery, concurrency, InnoDB, and Aria
-table behavior require separate slices.
+MyISAM-specific evidence; concurrency, broader InnoDB behavior, and Aria table
+behavior require separate slices.
+
+Transaction and recovery coverage validates explicit `ENGINE=InnoDB` tables for
+commit, rollback, savepoint rollback, release savepoint, clean reopen, and
+child-process recovery. That coverage proves representative native InnoDB
+transaction behavior and file containment inside the MyLite database directory;
+it does not make InnoDB the default engine, prove all isolation levels, prove
+foreign keys or online DDL, or claim cross-process writer safety.
 
 The default embedded profile does not expose server account administration,
 dynamic plugin installation, replication metadata, or the event scheduler.

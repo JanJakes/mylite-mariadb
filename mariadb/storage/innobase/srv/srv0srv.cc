@@ -1043,6 +1043,10 @@ void srv_monitor_task(void*)
 	where the lsn seems to decrease at times */
 
 	lsn_t new_lsn = log_get_lsn();
+#ifdef EMBEDDED_LIBRARY
+	if (new_lsn < old_lsn)
+		old_lsn = new_lsn;
+#endif
 	ut_a(new_lsn >= old_lsn);
 	old_lsn = new_lsn;
 

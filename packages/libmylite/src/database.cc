@@ -47,6 +47,7 @@ constexpr const char *k_rundir_name = "run";
 constexpr const char *k_plugin_directory_name = "plugins";
 constexpr const char *k_mariadb_base_ref = "mariadb-11.8.6";
 constexpr const char *k_metadata_format_line = "format=1";
+constexpr const char *k_innodb_temp_data_file_path = "ibtmp1:12M:autoextend";
 constexpr int k_runtime_directory_attempts = 100;
 
 struct RuntimeLayout {
@@ -836,10 +837,16 @@ std::vector<std::string> runtime_arguments(const RuntimeLayout &layout) {
         "--tmpdir=" + layout.tmp_directory.string(),
         "--plugin-dir=" + layout.plugin_directory.string(),
         "--aria-log-dir-path=" + layout.data_directory.string(),
+        "--innodb-data-home-dir=" + layout.data_directory.string(),
+        "--innodb-log-group-home-dir=" + layout.data_directory.string(),
+        "--innodb-undo-directory=" + layout.data_directory.string(),
+        "--innodb-tmpdir=" + layout.tmp_directory.string(),
+        std::string("--innodb-temp-data-file-path=") + k_innodb_temp_data_file_path,
+        "--innodb-flush-log-at-trx-commit=1",
+        "--innodb-fast-shutdown=1",
         "--skip-grant-tables",
         "--skip-networking",
         "--default-storage-engine=MyISAM",
-        "--innodb=OFF",
         std::string("--lc-messages-dir=") + MYLITE_MARIADB_MESSAGES_DIR,
         std::string("--character-sets-dir=") + MYLITE_MARIADB_CHARSETS_DIR,
     };

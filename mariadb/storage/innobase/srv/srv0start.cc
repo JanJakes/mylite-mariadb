@@ -88,6 +88,7 @@ Created 2/16/1996 Heikki Tuuri
 #include "btr0pcur.h"
 #include "ibuf0ibuf.h"
 #include "zlib.h"
+#include "log0log.h"
 #include "log.h"
 
 /** Log sequence number at shutdown */
@@ -108,6 +109,9 @@ bool	srv_is_being_started;
 bool	srv_was_started;
 /** whether srv_start() has been called */
 static bool		srv_start_has_been_called;
+#ifdef EMBEDDED_LIBRARY
+static bool		innodb_preshutdown_done;
+#endif
 
 /** Whether any undo log records can be generated */
 bool	srv_undo_sources;
@@ -1306,6 +1310,9 @@ dberr_t srv_start(bool create_new_db)
 	      || srv_operation == SRV_OPERATION_RESTORE
 	      || srv_operation == SRV_OPERATION_RESTORE_EXPORT);
 
+	srv_shutdown_state = SRV_SHUTDOWN_NONE;
+	log_group_commit_locks_reset();
+
 	if (srv_force_recovery) {
 		ib::info() << "!!! innodb_force_recovery is set to "
 			<< srv_force_recovery << " !!!";
@@ -2040,10 +2047,16 @@ PRAGMA_REENABLE_CHECK_STACK_FRAME
 */
 void innodb_preshutdown()
 {
+#ifdef EMBEDDED_LIBRARY
+  if (innodb_preshutdown_done)
+    return;
+  innodb_preshutdown_done= true;
+#else
   static bool first_time= true;
   if (!first_time)
     return;
   first_time= false;
+#endif
 
   if (srv_read_only_mode)
     return;
@@ -2190,6 +2203,9 @@ void innodb_shutdown()
 	srv_started_redo = false;
 	srv_was_started = false;
 	srv_start_has_been_called = false;
+#ifdef EMBEDDED_LIBRARY
+	innodb_preshutdown_done = false;
+#endif
 }
 
 /** Get the meta-data filename from the table name for a

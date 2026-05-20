@@ -59,6 +59,12 @@ static group_commit_lock flush_lock;
 alignas(CPU_LEVEL1_DCACHE_LINESIZE)
 static group_commit_lock write_lock;
 
+void log_group_commit_locks_reset() noexcept
+{
+  flush_lock.reset();
+  write_lock.reset();
+}
+
 /** Redo log system */
 log_t	log_sys;
 

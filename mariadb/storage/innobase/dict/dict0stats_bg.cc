@@ -89,8 +89,10 @@ static void dict_stats_recalc_pool_deinit()
 	recalc_pool_t recalc_empty_pool;
 	recalc_pool.swap(recalc_empty_pool);
 
-	if (dict_stats_thd)
+	if (dict_stats_thd) {
 		destroy_background_thd(dict_stats_thd);
+		dict_stats_thd = nullptr;
+	}
 }
 
 /*****************************************************************//**

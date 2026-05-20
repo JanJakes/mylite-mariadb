@@ -407,6 +407,7 @@ static int expected_result_callback(
     ++result->seen_rows;
     return 0;
 }
+
 // NOLINTEND(bugprone-easily-swappable-parameters)
 
 static char *make_temp_root(void) {

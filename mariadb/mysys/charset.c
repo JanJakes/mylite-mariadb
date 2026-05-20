@@ -29,6 +29,8 @@
 #include <locale.h>
 #endif
 
+void my_uca1400_collation_reset(void);
+
 static HASH charset_name_hash;
 
 /*
@@ -737,6 +739,7 @@ static void init_available_charsets(void)
 void free_charsets(void)
 {
   charsets_initialized= charsets_template;
+  my_uca1400_collation_reset();
   my_hash_free(&charset_name_hash);
 }
 

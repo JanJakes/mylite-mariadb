@@ -90,6 +90,7 @@ public:
   };
   lock_return_code acquire(value_type num, const completion_callback *cb);
   value_type release(value_type num);
+  void reset();
   value_type value() const;
   value_type pending() const;
   void set_pending(value_type num);

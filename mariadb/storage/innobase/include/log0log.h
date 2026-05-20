@@ -43,6 +43,8 @@ static const char LOG_FILE_NAME[] = "ib_logfile0";
 @return path with log file name*/
 std::string get_log_file_path(const char *filename= LOG_FILE_NAME);
 
+void log_group_commit_locks_reset() noexcept;
+
 /** Delete log file.
 @param[in]	suffix	suffix of the file name */
 static inline void delete_log_file(const char* suffix)

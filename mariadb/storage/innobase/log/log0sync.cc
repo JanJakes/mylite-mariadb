@@ -399,6 +399,19 @@ group_commit_lock::value_type group_commit_lock::release(value_type num)
   return ret;
 }
 
+void group_commit_lock::reset()
+{
+  std::unique_lock<std::mutex> lk(m_mtx);
+  m_value.store(0, std::memory_order_relaxed);
+  m_pending_value.store(0, std::memory_order_relaxed);
+  m_lock= false;
+  m_waiters_list= nullptr;
+  m_pending_callbacks.clear();
+#ifndef DBUG_OFF
+  m_owner_id= {};
+#endif
+}
+
 PRAGMA_REENABLE_CHECK_STACK_FRAME
 
 #ifndef DBUG_OFF
@@ -407,4 +420,3 @@ bool group_commit_lock::is_owner()
   return m_lock && std::this_thread::get_id() == m_owner_id;
 }
 #endif
-

@@ -119,11 +119,12 @@ valid `mylite.meta`, or with missing required layout directories, returns
 For durable database paths, the embedded runtime starts with MariaDB native
 storage under the database directory: `--datadir=<db>/datadir`,
 `--tmpdir=<db>/tmp`, `--plugin-dir=<db>/run/plugins`, and
-`--aria-log-dir-path=<db>/datadir`. The final close removes `run/` and clears
-temporary files under `tmp/`; durable metadata and table files remain in
-`datadir/`. A clean open replaces stale inactive `run/` state before runtime
-startup. `mylite_open_config.temp_directory` is currently used only by the
-`:memory:` bootstrap path.
+`--aria-log-dir-path=<db>/datadir`. InnoDB data, redo, undo, and temporary
+paths are also pinned under `datadir/` and `tmp/`. The final close removes
+`run/` and clears temporary files under `tmp/`; durable metadata and table
+files remain in `datadir/`. A clean open replaces stale inactive `run/` state
+before runtime startup. `mylite_open_config.temp_directory` is currently used
+only by the `:memory:` bootstrap path.
 
 ## Direct Execution
 
@@ -153,8 +154,11 @@ Initial implementation status: `mylite_exec()` runs through the embedded
 MariaDB connection in `embedded-dev` builds, returns text result rows, preserves
 SQL `NULL` values as `NULL` callback entries, and populates MariaDB diagnostics
 on query failure. Native-storage smoke coverage verifies controlled
-`ENGINE=MyISAM` DDL and DML persist across close and reopen. Broader DDL,
-transactions, prepared statements, and engine coverage remain later slices.
+`ENGINE=MyISAM` DDL and DML persist across close and reopen. Explicit
+`ENGINE=InnoDB` coverage verifies commit, rollback, savepoints, clean reopen,
+and child-process recovery through SQL transaction statements. Broader DDL,
+prepared statements, binary-safe values, and engine coverage remain later
+slices.
 
 ## Prepared Statements
 

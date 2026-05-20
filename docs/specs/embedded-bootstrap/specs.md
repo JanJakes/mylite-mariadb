@@ -102,10 +102,10 @@ Runtime startup uses MyLite-owned arguments:
 - `--innodb=OFF`
 - explicit message and character-set directories from the MariaDB build/source
 
-`--default-storage-engine=MyISAM` and `--innodb=OFF` are temporary bootstrap
-choices. They avoid non-final InnoDB sidecars in open/close and SQL smoke tests;
-they do not resolve the later compatibility requirement to configure native
-InnoDB storage inside the MyLite database directory.
+`--default-storage-engine=MyISAM` and `--innodb=OFF` were temporary bootstrap
+choices for this early slice. Later native-storage work keeps MyISAM as the
+default engine but enables explicit InnoDB tables with InnoDB paths contained
+inside the MyLite database directory.
 
 MariaDB embedded restart required two narrow fork patches:
 

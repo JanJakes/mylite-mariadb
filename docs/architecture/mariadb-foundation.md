@@ -39,20 +39,33 @@ diagnostics, and configuration.
 The first MyLite bootstrap used a temporary runtime directory while open/close
 behavior was being proven. The native-storage baseline now starts durable
 database paths with MariaDB's `datadir`, `tmpdir`, plugin directory, and Aria
-log directory under the MyLite database directory. That runtime still uses
-`--no-defaults`, `--skip-grant-tables`, `--skip-networking`,
-`--default-storage-engine=MyISAM`, and `--innodb=OFF`. Disabling InnoDB here is
-a temporary baseline limitation, not a compatibility decision for application
-DDL; it avoids uncontrolled InnoDB files until the InnoDB lifecycle is designed
-and tested inside the MyLite directory.
+log directory under the MyLite database directory. InnoDB is enabled for
+explicit `ENGINE=InnoDB` tables, with data, redo, undo, and temporary paths
+pinned under the same directory. The default storage engine remains MyISAM
+until the broader engine policy is designed.
 
-MariaDB 11.8.6 needed two narrow embedded-restart fixes for repeated
+MariaDB 11.8.6 needed narrow embedded-restart fixes for repeated
 `mylite_open()` / `mylite_close()` tests in one process:
 
 - `mariadb/sql/mysqld.cc` restores the embedded scheduler pointers after
   `mysql_server_end()` cleanup.
 - `mariadb/sql/sql_locale.cc` keeps the active error-message table alive until
   the next embedded initialization releases it through `init_errmessage()`.
+- `mariadb/storage/innobase/dict/dict0dict.cc` resets dictionary system table
+  pointers before recreating the InnoDB dictionary cache.
+- `mariadb/storage/innobase/dict/dict0stats_bg.cc` clears the persistent
+  statistics background THD pointer after destroying it.
+- `mariadb/storage/innobase/fts/fts0opt.cc` resets FTS optimizer static state
+  between embedded lifecycles.
+- `mariadb/storage/innobase/log/` resets redo group commit locks before InnoDB
+  startup.
+- `mariadb/storage/innobase/srv/` resets shutdown, pre-shutdown, and monitor
+  LSN state that otherwise survives embedded shutdown.
+- `mariadb/strings/ctype-uca1400.c` and `mariadb/mysys/charset.c` reset shared
+  UCA 14.0 collation state before charset memory is released.
+- `mariadb/storage/myisam/ft_stopwords.c` keeps built-in stopwords on the
+  single-byte latin1 charset unless an external stopword file is configured,
+  avoiding restart-sensitive UCA scanner state for static ASCII words.
 
 ## Metadata And Native Storage
 

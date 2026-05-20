@@ -920,6 +920,13 @@ void dict_sys_t::create() noexcept
 {
   ut_ad(this == &dict_sys);
   ut_ad(!is_initialised());
+  sys_tables= nullptr;
+  sys_columns= nullptr;
+  sys_indexes= nullptr;
+  sys_fields= nullptr;
+  sys_foreign= nullptr;
+  sys_foreign_cols= nullptr;
+  sys_virtual= nullptr;
   m_initialised= true;
   UT_LIST_INIT(table_LRU, &dict_table_t::table_LRU);
   UT_LIST_INIT(table_non_LRU, &dict_table_t::table_LRU);

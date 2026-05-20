@@ -167,6 +167,11 @@ MY_UCA_INFO
 my_uca1400_info_tailored[MY_CS_ENCODING_LAST+1]
                         [MY_UCA1400_COLLATION_DEFINITION_COUNT];
 
+void my_uca1400_collation_reset(void)
+{
+  bzero(&my_uca1400_info_tailored, sizeof(my_uca1400_info_tailored));
+}
+
 
 /*
   Make an UCA-14.0.0 collation ID using its properties.
