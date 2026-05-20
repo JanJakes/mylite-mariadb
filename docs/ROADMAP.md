@@ -250,6 +250,9 @@ checkpoint header.
 Scoped exact-index and indexed-row lookup paths also mark statement live-row
 caches through the captured active statement instead of rediscovering the same
 ownership from `FILE *`.
+Validated live-row marking now resolves or appends its statement live-row cache
+once before recording both live and validated row ids, removing a duplicate
+cache lookup from routed point-update reads.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation

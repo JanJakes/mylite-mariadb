@@ -1873,6 +1873,12 @@ static mylite_storage_result mark_active_validated_live_row_in_statement(
     unsigned long long table_id,
     unsigned long long row_id
 );
+static mylite_storage_result ensure_live_row_cache_for_statement(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    mylite_storage_live_row_cache **out_cache
+);
 static void replace_active_live_row(
     FILE *file,
     const mylite_storage_header *header,
@@ -15463,17 +15469,11 @@ static mylite_storage_result mark_active_live_row_in_statement(
     unsigned long long table_id,
     unsigned long long row_id
 ) {
-    mylite_storage_live_row_cache *cache =
-        live_row_cache_for_statement(statement, header, table_id);
-    if (cache == NULL) {
-        if (statement == NULL) {
-            return MYLITE_STORAGE_OK;
-        }
-        mylite_storage_result result =
-            append_live_row_cache(&statement->live_row_caches, header, table_id, &cache);
-        if (result != MYLITE_STORAGE_OK) {
-            return result;
-        }
+    mylite_storage_live_row_cache *cache = NULL;
+    mylite_storage_result result =
+        ensure_live_row_cache_for_statement(statement, header, table_id, &cache);
+    if (result != MYLITE_STORAGE_OK || cache == NULL) {
+        return result;
     }
 
     return add_live_row_id(cache, row_id);
@@ -15499,15 +15499,34 @@ static mylite_storage_result mark_active_validated_live_row_in_statement(
     unsigned long long table_id,
     unsigned long long row_id
 ) {
+    mylite_storage_live_row_cache *cache = NULL;
     mylite_storage_result result =
-        mark_active_live_row_in_statement(statement, header, table_id, row_id);
-    if (result != MYLITE_STORAGE_OK) {
+        ensure_live_row_cache_for_statement(statement, header, table_id, &cache);
+    if (result != MYLITE_STORAGE_OK || cache == NULL) {
         return result;
     }
 
-    mylite_storage_live_row_cache *cache =
-        live_row_cache_for_statement(statement, header, table_id);
-    return cache == NULL ? MYLITE_STORAGE_OK : add_validated_live_row_id(cache, row_id);
+    result = add_live_row_id(cache, row_id);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    return add_validated_live_row_id(cache, row_id);
+}
+
+static mylite_storage_result ensure_live_row_cache_for_statement(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    mylite_storage_live_row_cache **out_cache
+) {
+    *out_cache = live_row_cache_for_statement(statement, header, table_id);
+    if (*out_cache != NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+    if (statement == NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+    return append_live_row_cache(&statement->live_row_caches, header, table_id, out_cache);
 }
 
 static void replace_active_live_row(
