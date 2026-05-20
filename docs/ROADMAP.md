@@ -179,9 +179,10 @@ Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation
 now surface as storage-full errors instead of crashed-table I/O errors. Fresh
-page encoders now compute the same full-page FNV checksum by hashing the
-meaningful prefix and skipping known-zero tails, reducing append-page CPU cost
-while read paths still verify complete pages. The
+page encoders and full-page validators now compute the same FNV checksum with
+checksum-free byte spans around the stored checksum slot, and fresh encoders
+still skip known-zero tails, reducing append-page and validation CPU cost
+without changing stored checksum values. The
 internal rowset builder avoids per-row metadata reallocations during known
 indexed-row batches, with a small row-id index keeping payload cache hits from
 becoming another per-row scan. Row-id batch materialization now reuses the same

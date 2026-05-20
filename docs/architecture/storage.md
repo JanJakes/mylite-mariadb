@@ -408,10 +408,11 @@ savepoint rollback clears cached live rows.
 Small inline row updates append the replacement row page, row-state page, and
 replacement index-entry pages as one contiguous page run. The durable page
 format, page order, and FNV checksum values stay unchanged. Fresh page encoders
-hash the meaningful prefix and mathematically skip the known-zero tail, while
-decode paths still verify the full page so corruption in unused bytes remains
-detectable. Large overflow payload updates keep the existing per-page writer
-until blob payload batching has its own design. Active checkpoints keep a
+hash the meaningful prefix as checksum-free spans and mathematically skip the
+known-zero tail, while decode paths still verify the full page with the same
+span-based checksum stream so corruption in unused bytes remains detectable.
+Large overflow payload updates keep the existing per-page writer until blob
+payload batching has its own design. Active checkpoints keep a
 bounded transient append-page buffer for those contiguous unpublished page
 runs. The current performance profile uses a 4096-page window, which is 16 MiB
 at the 4096-byte page size. Nested statement commits inside a durable

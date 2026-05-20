@@ -17962,11 +17962,23 @@ static void put_u64_le(unsigned char *page, size_t offset, unsigned long long va
 
 static uint64_t checksum_page(const unsigned char *page, size_t checksum_offset) {
     uint64_t checksum = k_fnv1a64_offset_basis;
-    for (size_t i = 0U; i < MYLITE_STORAGE_FORMAT_PAGE_SIZE; ++i) {
-        const unsigned char byte =
-            i >= checksum_offset && i < checksum_offset + sizeof(uint64_t) ? 0U : page[i];
-        checksum ^= byte;
+    const size_t prefix_size = checksum_offset < MYLITE_STORAGE_FORMAT_PAGE_SIZE
+                                   ? checksum_offset
+                                   : MYLITE_STORAGE_FORMAT_PAGE_SIZE;
+    for (size_t i = 0U; i < prefix_size; ++i) {
+        checksum ^= page[i];
         checksum *= k_fnv1a64_prime;
+    }
+    if (checksum_offset < MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+        const size_t remaining_size = MYLITE_STORAGE_FORMAT_PAGE_SIZE - checksum_offset;
+        const size_t checksum_size =
+            remaining_size < sizeof(uint64_t) ? remaining_size : sizeof(uint64_t);
+        checksum = advance_checksum_zero_bytes(checksum, checksum_size);
+        const unsigned char *suffix = page + checksum_offset + checksum_size;
+        for (size_t i = 0U; i < remaining_size - checksum_size; ++i) {
+            checksum ^= suffix[i];
+            checksum *= k_fnv1a64_prime;
+        }
     }
     return checksum;
 }
@@ -17981,11 +17993,21 @@ static uint64_t checksum_page_zero_tail(
     }
 
     uint64_t checksum = k_fnv1a64_offset_basis;
-    for (size_t i = 0U; i < used_size; ++i) {
-        const unsigned char byte =
-            i >= checksum_offset && i < checksum_offset + sizeof(uint64_t) ? 0U : page[i];
-        checksum ^= byte;
+    const size_t prefix_size = checksum_offset < used_size ? checksum_offset : used_size;
+    for (size_t i = 0U; i < prefix_size; ++i) {
+        checksum ^= page[i];
         checksum *= k_fnv1a64_prime;
+    }
+    if (checksum_offset < used_size) {
+        const size_t remaining_size = used_size - checksum_offset;
+        const size_t checksum_size =
+            remaining_size < sizeof(uint64_t) ? remaining_size : sizeof(uint64_t);
+        checksum = advance_checksum_zero_bytes(checksum, checksum_size);
+        const unsigned char *suffix = page + checksum_offset + checksum_size;
+        for (size_t i = 0U; i < remaining_size - checksum_size; ++i) {
+            checksum ^= suffix[i];
+            checksum *= k_fnv1a64_prime;
+        }
     }
     return advance_checksum_zero_bytes(checksum, MYLITE_STORAGE_FORMAT_PAGE_SIZE - used_size);
 }
