@@ -115,7 +115,9 @@ discard them instead of publishing uncertain duplicate-key or point-lookup
 state. Exact-index cache entries are tombstone-aware and keep valid lookup
 and row-id invalidation buckets across active row replacement and delete
 maintenance when possible, with order-preserving compaction only after dead
-entries outnumber live entries.
+entries outnumber live entries. In-place active rewrites that keep the same row
+id skip exact-index cache maintenance for unchanged matching key images and
+skip live-row cache retargeting because the row remains live under that id.
 Durable row-id, row-payload, exact-index, and published leaf-page caches are
 retargeted after successful row insert, update, and delete when the mutation is
 limited to a known table. Caches for that table are cleared or maintained by the

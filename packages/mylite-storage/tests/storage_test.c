@@ -3116,6 +3116,15 @@ static void test_active_update_rewrite(void) {
         middle_row,
         sizeof(middle_row)
     );
+    assert_find_indexed_row_equals(
+        filename,
+        0U,
+        primary_key,
+        sizeof(primary_key),
+        middle_row_id,
+        middle_row,
+        sizeof(middle_row)
+    );
     assert(
         mylite_storage_update_row_with_index_entries(
             filename,
@@ -3151,6 +3160,15 @@ static void test_active_update_rewrite(void) {
         1U,
         final_secondary_key,
         sizeof(final_secondary_key),
+        final_row_id,
+        final_row,
+        sizeof(final_row)
+    );
+    assert_find_indexed_row_equals(
+        filename,
+        0U,
+        primary_key,
+        sizeof(primary_key),
         final_row_id,
         final_row,
         sizeof(final_row)
@@ -3236,6 +3254,15 @@ static void test_active_update_rewrite(void) {
         savepoint_row,
         sizeof(savepoint_row)
     );
+    assert_find_indexed_row_equals(
+        filename,
+        0U,
+        primary_key,
+        sizeof(primary_key),
+        savepoint_row_id,
+        savepoint_row,
+        sizeof(savepoint_row)
+    );
     assert(mylite_storage_rollback_statement(savepoint) == MYLITE_STORAGE_OK);
     assert_find_indexed_row_not_found(
         filename,
@@ -3248,6 +3275,15 @@ static void test_active_update_rewrite(void) {
         1U,
         middle_secondary_key,
         sizeof(middle_secondary_key),
+        middle_row_id,
+        middle_row,
+        sizeof(middle_row)
+    );
+    assert_find_indexed_row_equals(
+        filename,
+        0U,
+        primary_key,
+        sizeof(primary_key),
         middle_row_id,
         middle_row,
         sizeof(middle_row)

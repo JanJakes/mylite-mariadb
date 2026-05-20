@@ -201,7 +201,9 @@ dirty until a generic read or buffer flush needs a valid checksum, avoiding
 per-update checksum recomputation while pages remain unpublished. The hot
 rewrite path now also passes the resolved append-buffer owner through local
 helpers instead of rediscovering it from the `FILE *` for each buffered page and
-dirty-flag operation.
+dirty-flag operation. In-place active row rewrites now skip exact-index cache
+maintenance for unchanged matching key images and live-row retargeting for an
+unchanged row id.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation

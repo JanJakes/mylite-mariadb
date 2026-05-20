@@ -2005,7 +2005,8 @@ static void replace_active_exact_index_cache_entries(
     unsigned long long old_row_id,
     unsigned long long new_row_id,
     const mylite_storage_index_entry *index_entries,
-    size_t index_entry_count
+    size_t index_entry_count,
+    const unsigned char *index_entry_changed
 );
 static void invalidate_exact_index_caches(const char *filename);
 static void clear_durable_exact_index_caches(const char *filename);
@@ -4977,10 +4978,14 @@ static mylite_storage_result update_row_with_index_entries(
             row_id,
             position.row_page_id,
             index_entries,
-            index_entry_count
+            index_entry_count,
+            index_entry_changed
         );
-        replace_active_live_row(file, &header, table_id, row_id, position.row_page_id);
-        replace_active_live_row_id(filename, &header, table_id, row_id, position.row_page_id);
+        const int active_row_id_unchanged = position.row_page_id == row_id;
+        if (!active_row_id_unchanged) {
+            replace_active_live_row(file, &header, table_id, row_id, position.row_page_id);
+            replace_active_live_row_id(filename, &header, table_id, row_id, position.row_page_id);
+        }
         replace_active_row_payload(
             filename,
             &header,
@@ -5062,7 +5067,7 @@ mylite_storage_result mylite_storage_delete_row(
 
     free(row_page.owned_payload);
     if (result == MYLITE_STORAGE_OK) {
-        replace_active_exact_index_cache_entries(filename, table_id, row_id, 0ULL, NULL, 0U);
+        replace_active_exact_index_cache_entries(filename, table_id, row_id, 0ULL, NULL, 0U, NULL);
         replace_active_live_row(file, &header, table_id, row_id, 0ULL);
         remove_active_live_row_id(filename, &header, table_id, row_id);
         remove_active_row_payload(filename, &header, table_id, row_id);
@@ -16008,7 +16013,8 @@ static void replace_active_exact_index_cache_entries(
     unsigned long long old_row_id,
     unsigned long long new_row_id,
     const mylite_storage_index_entry *index_entries,
-    size_t index_entry_count
+    size_t index_entry_count,
+    const unsigned char *index_entry_changed
 ) {
     mylite_storage_statement *statement = active_exact_index_cache_statement_for(filename);
     if (statement == NULL || statement->exact_index_caches.count == 0U) {
@@ -16018,6 +16024,23 @@ static void replace_active_exact_index_cache_entries(
     for (size_t i = 0U; i < statement->exact_index_caches.count; ++i) {
         mylite_storage_exact_index_cache *cache = statement->exact_index_caches.entries + i;
         if (cache->table_id != table_id) {
+            continue;
+        }
+        int cache_entry_matched = 0;
+        int cache_entry_changed = 0;
+        for (size_t entry_index = 0U; entry_index < index_entry_count; ++entry_index) {
+            const mylite_storage_index_entry *index_entry = index_entries + entry_index;
+            if (index_entry->index_number != cache->index_number ||
+                index_entry->key_size != cache->key_size) {
+                continue;
+            }
+            cache_entry_matched = 1;
+            if (is_index_entry_changed(index_entry_changed, entry_index)) {
+                cache_entry_changed = 1;
+                break;
+            }
+        }
+        if (old_row_id == new_row_id && cache_entry_matched && !cache_entry_changed) {
             continue;
         }
         remove_exact_index_cache_entries_by_row_id(cache, old_row_id);
