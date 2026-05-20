@@ -398,6 +398,11 @@ typedef struct mylite_storage_buffered_page_undo_list {
 } mylite_storage_buffered_page_undo_list;
 
 enum {
+    MYLITE_STORAGE_LIVE_ROW_CACHE_INITIAL_CAPACITY = 4U,
+    MYLITE_STORAGE_LIVE_ROW_ID_INITIAL_CAPACITY = 16U,
+    MYLITE_STORAGE_REUSABLE_LIVE_ROW_CACHE_CAPACITY =
+        MYLITE_STORAGE_LIVE_ROW_CACHE_INITIAL_CAPACITY,
+    MYLITE_STORAGE_REUSABLE_LIVE_ROW_ID_CAPACITY = MYLITE_STORAGE_LIVE_ROW_ID_INITIAL_CAPACITY,
     MYLITE_STORAGE_BUFFERED_PAGE_UNDO_INITIAL_CAPACITY = 4U,
     MYLITE_STORAGE_BUFFERED_PAGE_UNDO_BUCKET_MIN_COUNT = 8U,
     MYLITE_STORAGE_REUSABLE_BUFFERED_PAGE_UNDO_CAPACITY =
@@ -531,6 +536,7 @@ static _Thread_local mylite_storage_row_payload_cache_set durable_row_payload_ca
 static _Thread_local unsigned long long durable_row_payload_caches_generation;
 static _Thread_local mylite_storage_index_leaf_page_cache_set durable_index_leaf_page_caches;
 static _Thread_local mylite_storage_statement *reusable_nested_checkpoint_statement;
+static _Thread_local mylite_storage_live_row_cache_set reusable_live_row_caches;
 static _Thread_local mylite_storage_buffered_page_undo_list reusable_buffered_page_undos;
 
 #define MYLITE_STORAGE_INDEX_ROOT_CATALOG_RESERVE_BYTES 1024U
@@ -810,6 +816,10 @@ static void clear_exact_index_caches(mylite_storage_statement *statement);
 static void free_exact_index_cache(mylite_storage_exact_index_cache *cache);
 static void clear_statement_chain_live_row_caches(mylite_storage_statement *statement);
 static void clear_live_row_caches(mylite_storage_statement *statement);
+static void adopt_reusable_live_row_caches(mylite_storage_live_row_cache_set *caches);
+static void release_live_row_caches(mylite_storage_live_row_cache_set *caches);
+static int live_row_caches_fit_reuse_limit(const mylite_storage_live_row_cache_set *caches);
+static void reset_live_row_caches_for_reuse(mylite_storage_live_row_cache_set *caches);
 static void free_live_row_cache(mylite_storage_live_row_cache *cache);
 static void clear_statement_chain_live_row_id_caches(mylite_storage_statement *statement);
 static void clear_live_row_id_caches(mylite_storage_statement *statement);
@@ -8685,11 +8695,61 @@ static void clear_live_row_caches(mylite_storage_statement *statement) {
         return;
     }
 
-    for (size_t i = 0U; i < statement->live_row_caches.count; ++i) {
-        free_live_row_cache(statement->live_row_caches.entries + i);
+    release_live_row_caches(&statement->live_row_caches);
+}
+
+static void adopt_reusable_live_row_caches(mylite_storage_live_row_cache_set *caches) {
+    if (caches->entries != NULL || reusable_live_row_caches.entries == NULL) {
+        return;
     }
-    free(statement->live_row_caches.entries);
-    statement->live_row_caches = (mylite_storage_live_row_cache_set){0};
+
+    *caches = reusable_live_row_caches;
+    reset_live_row_caches_for_reuse(caches);
+    reusable_live_row_caches = (mylite_storage_live_row_cache_set){0};
+}
+
+static void release_live_row_caches(mylite_storage_live_row_cache_set *caches) {
+    if (caches->entries == NULL) {
+        *caches = (mylite_storage_live_row_cache_set){0};
+        return;
+    }
+
+    if (reusable_live_row_caches.entries == NULL &&
+        caches->capacity <= MYLITE_STORAGE_REUSABLE_LIVE_ROW_CACHE_CAPACITY &&
+        live_row_caches_fit_reuse_limit(caches)) {
+        reset_live_row_caches_for_reuse(caches);
+        reusable_live_row_caches = *caches;
+        *caches = (mylite_storage_live_row_cache_set){0};
+        return;
+    }
+
+    for (size_t i = 0U; i < caches->count; ++i) {
+        free_live_row_cache(caches->entries + i);
+    }
+    free(caches->entries);
+    *caches = (mylite_storage_live_row_cache_set){0};
+}
+
+static int live_row_caches_fit_reuse_limit(const mylite_storage_live_row_cache_set *caches) {
+    if (caches->count > 1U) {
+        return 0;
+    }
+
+    for (size_t i = 0U; i < caches->count; ++i) {
+        const mylite_storage_live_row_cache *cache = caches->entries + i;
+        if (cache->capacity > MYLITE_STORAGE_REUSABLE_LIVE_ROW_ID_CAPACITY ||
+            cache->validated_capacity > MYLITE_STORAGE_REUSABLE_LIVE_ROW_ID_CAPACITY) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static void reset_live_row_caches_for_reuse(mylite_storage_live_row_cache_set *caches) {
+    for (size_t i = 0U; i < caches->count; ++i) {
+        caches->entries[i].count = 0U;
+        caches->entries[i].validated_count = 0U;
+    }
 }
 
 static void free_live_row_cache(mylite_storage_live_row_cache *cache) {
@@ -15392,7 +15452,20 @@ static mylite_storage_result append_live_row_cache(
     mylite_storage_live_row_cache **out_cache
 ) {
     if (caches->count == caches->capacity) {
-        const size_t next_capacity = caches->capacity == 0U ? 4U : caches->capacity * 2U;
+        if (caches->capacity == 0U) {
+            adopt_reusable_live_row_caches(caches);
+            mylite_storage_live_row_cache *cache = find_live_row_cache(caches, header, table_id);
+            if (cache != NULL) {
+                *out_cache = cache;
+                return MYLITE_STORAGE_OK;
+            }
+        }
+    }
+
+    if (caches->count == caches->capacity) {
+        const size_t next_capacity = caches->capacity == 0U
+                                         ? MYLITE_STORAGE_LIVE_ROW_CACHE_INITIAL_CAPACITY
+                                         : caches->capacity * 2U;
         if (next_capacity <= caches->capacity ||
             next_capacity > SIZE_MAX / sizeof(*caches->entries)) {
             return MYLITE_STORAGE_FULL;
@@ -15428,7 +15501,9 @@ static mylite_storage_result add_live_row_id(
     }
 
     if (cache->count == cache->capacity) {
-        const size_t next_capacity = cache->capacity == 0U ? 16U : cache->capacity * 2U;
+        const size_t next_capacity = cache->capacity == 0U
+                                         ? MYLITE_STORAGE_LIVE_ROW_ID_INITIAL_CAPACITY
+                                         : cache->capacity * 2U;
         if (next_capacity <= cache->capacity ||
             next_capacity > SIZE_MAX / sizeof(*cache->row_ids)) {
             return MYLITE_STORAGE_FULL;
@@ -15457,8 +15532,9 @@ static mylite_storage_result add_validated_live_row_id(
     }
 
     if (cache->validated_count == cache->validated_capacity) {
-        const size_t next_capacity =
-            cache->validated_capacity == 0U ? 16U : cache->validated_capacity * 2U;
+        const size_t next_capacity = cache->validated_capacity == 0U
+                                         ? MYLITE_STORAGE_LIVE_ROW_ID_INITIAL_CAPACITY
+                                         : cache->validated_capacity * 2U;
         if (next_capacity <= cache->validated_capacity ||
             next_capacity > SIZE_MAX / sizeof(*cache->validated_row_ids)) {
             return MYLITE_STORAGE_FULL;

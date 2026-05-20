@@ -233,7 +233,10 @@ per thread for reuse by the next nested statement. Nested checkpoints now also
 defer materializing their current catalog cache until catalog metadata is read,
 while keeping the rollback catalog snapshot eager. Hot row-DML and exact-index
 lookup paths now pass resolved active cache statements into table-entry cache
-helpers instead of rediscovering them by filename.
+helpers instead of rediscovering them by filename. Nested statement cleanup now
+retains one small cleared live-row cache set per thread, preserving the active
+row validation shortcut while avoiding repeated allocation/free in ordinary
+single-row prepared updates.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation
