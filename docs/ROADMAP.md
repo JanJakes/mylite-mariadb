@@ -212,7 +212,9 @@ rewrite path now also passes the resolved append-buffer owner through local
 helpers instead of rediscovering it from the `FILE *` for each buffered page and
 dirty-flag operation. In-place active row rewrites now skip exact-index cache
 maintenance for unchanged matching key images and live-row retargeting for an
-unchanged row id.
+unchanged row id. Prepared primary-key updates now reuse resolved active
+file/cache statement scopes for row validation and active cache maintenance
+instead of repeatedly walking active statement chains.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation
