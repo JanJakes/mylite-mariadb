@@ -20,7 +20,9 @@ because it is a server-owned extension surface, not core embedded application
 behavior. Binary-log transaction/event runtime is treated the same way after
 policy coverage proves replication and binlog SQL are outside the core API.
 Legacy `PROCEDURE ANALYSE()` is omitted because it is an obsolete diagnostic
-SELECT extension rather than application data behavior.
+SELECT extension rather than application data behavior. Long system-variable
+help comments are omitted because they are descriptive server help text rather
+than variable behavior.
 
 ## Source Findings
 
@@ -110,6 +112,17 @@ SELECT extension rather than application data behavior.
   `MYLITE_WITH_PROCEDURE_ANALYSE=0` replaces `sql_analyse.cc.o` with a small
   unsupported stub and reduces the stripped archive to 27,226,608 bytes,
   25.97 MiB, and 705 members.
+- System-variable definitions in `mariadb/sql/sys_vars.cc` pass long
+  human-readable comments through `Sys_var_*` constructors in
+  `mariadb/sql/sys_vars.inl` into `sys_var::option.comment`. `fill_sysvars()`
+  exposes that pointer through
+  `INFORMATION_SCHEMA.SYSTEM_VARIABLES.VARIABLE_COMMENT`, while `SHOW
+  VARIABLES`, `INFORMATION_SCHEMA.GLOBAL_VARIABLES`, and
+  `INFORMATION_SCHEMA.SESSION_VARIABLES` use variable names and value pointers.
+- Disabling system-variable help text behind
+  `MYLITE_WITH_SYSVAR_HELP_TEXT=0` removes read-only string data from existing
+  objects and reduces the stripped archive to 27,170,568 bytes, 25.91 MiB, and
+  705 members.
 
 ## Proposed Design
 
@@ -181,6 +194,16 @@ MyLite rejects straightforward direct and prepared
 `SELECT ... PROCEDURE ANALYSE()` before dispatch, while the MariaDB stub
 remains the fail-closed backstop.
 
+The embedded archive omits long system-variable help comments by setting
+`MYLITE_WITH_SYSVAR_HELP_TEXT=0` in the MyLite baseline. The option defaults to
+`ON` so normal MariaDB server builds keep upstream comments.
+`mariadb/libmysqld/CMakeLists.txt` defines
+`MYLITE_DISABLE_SYSVAR_HELP_TEXT` for the embedded profile, and
+`mariadb/sql/sys_vars.inl` maps `MYLITE_SYSVAR_HELP_TEXT(...)` to an empty
+string under that macro. `mariadb/sql/sys_vars.cc` wraps system-variable
+comment arguments at the declaration site so the long string literals are
+discarded before compilation.
+
 The wrapper keeps this behavior enabled by default because it is the
 distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
 need an unstripped archive for local inspection.
@@ -194,7 +217,8 @@ disabled or omitted surfaces, and the compiled objects use size-oriented
 release flags. The embedded SQL target also uses `-fno-exceptions`, omits
 unwind tables, and omits dynamic UDF lookup, execution, and DDL runtime. The
 embedded baseline also disables binlog transaction/event runtime behind a
-MyLite-owned profile flag.
+MyLite-owned profile flag and omits long system-variable help comments from
+`sys_vars.cc`.
 
 ## Compatibility Impact
 
@@ -227,6 +251,13 @@ engine coverage intact.
 `PROCEDURE ANALYSE()` is a legacy diagnostic SELECT extension. Omitting it does
 not affect ordinary SELECT execution, DDL, DML, native storage engines, JSON,
 GEOMETRY/GIS, or the public C API.
+System-variable help comments are descriptive metadata. Omitting them leaves
+system variables, values, defaults, validation, `SHOW VARIABLES`,
+`INFORMATION_SCHEMA.GLOBAL_VARIABLES`, and
+`INFORMATION_SCHEMA.SESSION_VARIABLES` available. The only SQL-visible
+difference is that
+`INFORMATION_SCHEMA.SYSTEM_VARIABLES.VARIABLE_COMMENT` is empty in the default
+embedded profile.
 
 ## Database-Directory And Lifecycle Impact
 
@@ -284,6 +315,11 @@ Omitting `PROCEDURE ANALYSE()` brings the current archive to 27,226,608 bytes /
 Schema disabled, 5,903,032 bytes smaller than the symbol-stripped baseline with
 Performance Schema still built, and 6,615,712 bytes smaller than the original
 broad archive.
+Omitting system-variable help text brings the current archive to 27,170,568
+bytes / 25.91 MiB, 4,359,136 bytes smaller than the Release build with
+Performance Schema disabled, 5,959,072 bytes smaller than the symbol-stripped
+baseline with Performance Schema still built, and 6,671,752 bytes smaller than
+the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -332,6 +368,9 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Direct and prepared `SELECT ... PROCEDURE ANALYSE()` fail predictably, quoted
   literal mentions remain normal SQL, and the embedded archive omits
   `sql_analyse.cc.o`.
+- System-variable rows and values remain queryable, and
+  `INFORMATION_SCHEMA.SYSTEM_VARIABLES.VARIABLE_COMMENT` is empty in the
+  default embedded profile.
 - The stripped archive still links `libmylite` and all embedded tests.
 - The measured archive size and member count are recorded in the build
   documentation.
@@ -355,3 +394,6 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
   link evidence rather than file-name pruning.
 - The generic SELECT procedure dispatch remains linked after omitting
   `PROCEDURE ANALYSE()`. Removing it should be a separate slice.
+- Clients that build help UIs from
+  `INFORMATION_SCHEMA.SYSTEM_VARIABLES.VARIABLE_COMMENT` lose those comments
+  in the default embedded profile. Variable rows and values remain available.

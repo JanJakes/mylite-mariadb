@@ -52,6 +52,7 @@ surface that does not fit a local directory-owned library:
 - optional Oracle SQL compatibility mode,
 - optional fmtlib-backed SQL helpers such as `SFORMAT()`,
 - legacy diagnostic SELECT procedures such as `PROCEDURE ANALYSE()`,
+- server help text such as system-variable comments,
 - rarely used optional engines or plugins unless a slice justifies them.
 
 The minimal embedded build establishes the first baseline. Later slices record
@@ -80,6 +81,9 @@ references remain for later, narrower review.
 Legacy `PROCEDURE ANALYSE()` support is omitted after policy coverage proves it
 is an obsolete diagnostic SELECT extension rather than application data
 functionality; normal SELECT execution remains supported.
+System-variable help comments are omitted after coverage proves variable rows
+and values remain queryable and only
+`INFORMATION_SCHEMA.SYSTEM_VARIABLES.VARIABLE_COMMENT` becomes empty.
 Compatibility-sensitive code removals require separate evidence before they
 are accepted.
 

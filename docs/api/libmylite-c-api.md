@@ -406,9 +406,13 @@ stable MyLite diagnostic. Query-cache SELECT hints remain accepted no-op
 syntax. The default embedded profile also omits `SFORMAT()`, which fails as an
 unknown SQL function; ordinary `FORMAT()` remains available. The legacy
 `PROCEDURE ANALYSE()` SELECT extension is rejected as an unsupported diagnostic
-surface while ordinary SELECT queries remain supported. Startup variables also
-cover disabled binlog, performance schema, query cache, statement profiling,
-grant tables, networking, and the transient database-local plugin directory.
+surface while ordinary SELECT queries remain supported. Long system-variable
+help comments are omitted from the default embedded profile; `SHOW VARIABLES`
+and system-variable values remain available, but
+`INFORMATION_SCHEMA.SYSTEM_VARIABLES.VARIABLE_COMMENT` is empty. Startup
+variables also cover disabled binlog, performance schema, query cache,
+statement profiling, grant tables, networking, and the transient
+database-local plugin directory.
 
 ## Compatibility Adapter
 

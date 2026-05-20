@@ -47,6 +47,7 @@ typedef struct root_entries {
 static void test_server_surfaces_are_disabled_or_contained(void);
 static mylite_db *open_database(open_database_paths paths);
 static void assert_runtime_policy_variables(mylite_db *db, const char *database_path);
+static void assert_system_variable_help_text_omitted(mylite_db *db);
 static void assert_performance_schema_omitted_or_disabled(mylite_db *db);
 static int performance_schema_variable_callback(
     void *ctx,
@@ -107,6 +108,7 @@ static void test_server_surfaces_are_disabled_or_contained(void) {
 
     db = open_database(paths);
     assert_runtime_policy_variables(db, database_path);
+    assert_system_variable_help_text_omitted(db);
     assert_server_sql_rejected(db);
     assert_no_server_sidecar_files(database_path);
     assert(mylite_close(db) == MYLITE_OK);
@@ -180,6 +182,24 @@ static void assert_runtime_policy_variables(mylite_db *db, const char *database_
     );
 
     free(plugin_directory);
+}
+
+static void assert_system_variable_help_text_omitted(mylite_db *db) {
+    static const char *const comment_columns[] = {"comment"};
+    static const char *const comment_values[] = {""};
+
+    query_expect(
+        db,
+        (expected_query){
+            .sql = "SELECT VARIABLE_COMMENT AS comment "
+                   "FROM information_schema.SYSTEM_VARIABLES "
+                   "WHERE VARIABLE_NAME = 'VERSION'",
+            .column_count = 1,
+            .row_count = 1,
+            .column_names = comment_columns,
+            .values = comment_values,
+        }
+    );
 }
 
 static void assert_performance_schema_omitted_or_disabled(mylite_db *db) {

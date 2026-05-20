@@ -37,6 +37,7 @@ PLUGIN_FEEDBACK=NO
 ENABLED_PROFILING=OFF
 MYLITE_WITH_BINLOG_CORE=OFF
 MYLITE_WITH_PROCEDURE_ANALYSE=OFF
+MYLITE_WITH_SYSVAR_HELP_TEXT=OFF
 ```
 
 `CMAKE_BUILD_TYPE=MinSizeRel` makes the embedded MariaDB archive optimize for
@@ -62,7 +63,9 @@ loading is omitted from the embedded archive. The embedded baseline disables
 the active binary-log transaction/event core behind `MYLITE_WITH_BINLOG_CORE=0`
 while preserving the normal MariaDB server build path. It also omits the
 legacy `PROCEDURE ANALYSE()` implementation behind
-`MYLITE_WITH_PROCEDURE_ANALYSE=0`.
+`MYLITE_WITH_PROCEDURE_ANALYSE=0`. Long system-variable help comments are
+omitted behind `MYLITE_WITH_SYSVAR_HELP_TEXT=0`; variable names, values,
+defaults, validation, and `SHOW VARIABLES` remain intact.
 
 ## Measurement
 
@@ -78,7 +81,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 27,226,608 bytes / 25.97 MiB |
+| Archive size | 27,170,568 bytes / 25.91 MiB |
 | Archive members | 705 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -92,18 +95,21 @@ pre-strip archive is 28,026,280 bytes / 26.73 MiB. Omitting dynamic UDF
 runtime reduces the pre-strip archive to 27,938,032 bytes / 26.64 MiB.
 Omitting the embedded binary-log core reduces the pre-strip archive to
 27,864,688 bytes / 26.57 MiB. Omitting `PROCEDURE ANALYSE()` reduces the
-pre-strip archive to 27,825,136 bytes / 26.54 MiB. Post-build `strip -S -x`
-plus `ranlib` saves another 598,528 bytes without changing archive membership
-or runtime behavior. The `SFORMAT()` and exception cut accounts for 1,808,240
+pre-strip archive to 27,825,136 bytes / 26.54 MiB. Omitting system-variable
+help text reduces the pre-strip archive to 27,767,568 bytes / 26.48 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 597,000 bytes without
+changing archive membership or runtime behavior. The `SFORMAT()` and exception
+cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
 runtime omission saves 87,416 bytes and one archive member. The embedded
 binary-log core trim saves 72,232 bytes and one archive member. Omitting
 `PROCEDURE ANALYSE()` saves 39,120 bytes with no member-count change because
-the implementation object is replaced by a small stub. The final archive is
-4,303,096 bytes smaller than the Release build with Performance Schema
-disabled, 5,903,032 bytes smaller than the symbol-stripped baseline that still
-built Performance Schema, and 6,615,712 bytes smaller than the original broad
-archive.
+the implementation object is replaced by a small stub. Omitting
+system-variable help text saves 56,040 bytes with no member-count change. The
+final archive is 4,359,136 bytes smaller than the Release build with
+Performance Schema disabled, 5,959,072 bytes smaller than the symbol-stripped
+baseline that still built Performance Schema, and 6,671,752 bytes smaller than
+the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
 GSSAPI, BZip2, LZ4, LibLZMA, LZO, PCRE2, and Zstandard support on this
@@ -148,7 +154,10 @@ MariaDB logging, transaction coordination, or retained parser/runtime code
 still reference them; this slice does not claim full event-object removal.
 `PROCEDURE ANALYSE()` is omitted from the default embedded archive and linked
 to an unsupported stub; ordinary SELECT execution and the generic retained
-SELECT procedure dispatch continue to link.
+SELECT procedure dispatch continue to link. System-variable names, values,
+defaults, validation, and `SHOW VARIABLES` remain available; only
+`INFORMATION_SCHEMA.SYSTEM_VARIABLES.VARIABLE_COMMENT` is empty in the default
+embedded profile.
 
 ## Disabled Or Missing Surface
 
@@ -166,6 +175,7 @@ The baseline explicitly disables:
 - Dynamic UDF shared-library loading
 - Active binary-log transaction/event core
 - `PROCEDURE ANALYSE()`
+- System-variable help text
 - MariaDB upstream unit-test targets
 
 Configure also reports unavailable optional features on this host, including
