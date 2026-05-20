@@ -244,6 +244,9 @@ Handler update changed-key detection now uses MariaDB's write set to skip
 old-key image reconstruction for indexes whose key-part fields were not
 written, while handler-owned same-row foreign-key rewrites mark their locally
 mutated key columns before the filter runs.
+Nested storage checkpoints now materialize rollback header-page bytes lazily,
+removing eager page-0 encoding and checksumming from successful prepared
+row-DML statements inside an active transaction.
 
 ## Size And Profile Direction
 

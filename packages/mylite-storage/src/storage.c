@@ -422,6 +422,7 @@ struct mylite_storage_statement {
     unsigned char current_catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     unsigned long long current_catalog_root_page;
     unsigned long long current_catalog_generation;
+    int has_header_page;
     int owns_file;
     int has_current_header;
     int current_header_dirty;
@@ -661,6 +662,7 @@ static void clone_parent_checkpoint_snapshot(
     mylite_storage_statement *statement,
     const mylite_storage_statement *parent
 );
+static void materialize_statement_header_page(mylite_storage_statement *statement);
 static mylite_storage_result initialize_read_statement(
     mylite_storage_statement *statement,
     const char *filename,
@@ -5948,6 +5950,7 @@ mylite_storage_result mylite_storage_rollback_statement(mylite_storage_statement
         return result;
     }
 
+    materialize_statement_header_page(statement);
     result = write_page_at(
         statement->file,
         statement->header.catalog_root_page,
@@ -6272,7 +6275,7 @@ static void clone_parent_checkpoint_snapshot(
     statement->current_header = statement->header;
     statement->has_current_header = 1;
     statement->current_header_dirty = 0;
-    encode_header_page(statement->header_page, &statement->header);
+    statement->has_header_page = 0;
 
     const unsigned char *catalog_page =
         parent->has_current_catalog_page ? parent->current_catalog_page : parent->catalog_page;
@@ -6281,6 +6284,15 @@ static void clone_parent_checkpoint_snapshot(
     statement->current_catalog_root_page = statement->header.catalog_root_page;
     statement->current_catalog_generation = statement->header.catalog_generation;
     statement->has_current_catalog_page = 1;
+}
+
+static void materialize_statement_header_page(mylite_storage_statement *statement) {
+    if (statement->has_header_page) {
+        return;
+    }
+
+    encode_header_page(statement->header_page, &statement->header);
+    statement->has_header_page = 1;
 }
 
 static mylite_storage_result initialize_read_statement(
@@ -6300,6 +6312,7 @@ static mylite_storage_result initialize_read_statement(
             same_file_parent->header_page,
             sizeof(statement->header_page)
         );
+        statement->has_header_page = same_file_parent->has_header_page;
         memcpy(
             statement->catalog_page,
             same_file_parent->catalog_page,
@@ -6343,6 +6356,7 @@ static mylite_storage_result initialize_read_statement(
         statement->header = snapshot.header;
         statement->current_header = snapshot.header;
         memcpy(statement->header_page, snapshot.header_page, sizeof(statement->header_page));
+        statement->has_header_page = 1;
         memcpy(statement->catalog_page, snapshot.catalog_page, sizeof(statement->catalog_page));
         memcpy(
             statement->current_catalog_page,
@@ -6440,6 +6454,7 @@ static mylite_storage_result read_checkpoint_snapshot_from_header_page(
     const unsigned char *header_page
 ) {
     memcpy(statement->header_page, header_page, sizeof(statement->header_page));
+    statement->has_header_page = 1;
     mylite_storage_result result = decode_header_page(statement->header_page, &statement->header);
     if (result == MYLITE_STORAGE_OK) {
         result = read_page_at(
@@ -6475,6 +6490,7 @@ static void copy_read_checkpoint_cache_to_statement(
     statement->header = cache->header;
     statement->current_header = cache->header;
     memcpy(statement->header_page, cache->header_page, sizeof(statement->header_page));
+    statement->has_header_page = 1;
     memcpy(statement->catalog_page, cache->catalog_page, sizeof(statement->catalog_page));
     memcpy(
         statement->current_catalog_page,
@@ -8410,6 +8426,7 @@ static mylite_storage_result read_page_at(
     if (read_statement != NULL) {
         if (page_id == MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID &&
             page_size == MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+            materialize_statement_header_page(read_statement);
             memcpy(out_page, read_statement->header_page, page_size);
             return MYLITE_STORAGE_OK;
         }
@@ -8498,6 +8515,7 @@ static mylite_storage_result publish_header(FILE *file, const mylite_storage_hea
         read_statement->header = *header;
         read_statement->current_header = *header;
         memcpy(read_statement->header_page, header_page, sizeof(read_statement->header_page));
+        read_statement->has_header_page = 1;
         read_statement->has_current_header = 1;
     }
     return result;
@@ -8547,6 +8565,7 @@ static mylite_storage_result write_page_at(
         read_statement->header = header;
         read_statement->current_header = header;
         memcpy(read_statement->header_page, page, sizeof(read_statement->header_page));
+        read_statement->has_header_page = 1;
         read_statement->has_current_header = 1;
         return MYLITE_STORAGE_OK;
     }
