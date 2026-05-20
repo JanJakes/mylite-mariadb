@@ -196,6 +196,7 @@ typedef struct mylite_storage_row_payload_cache {
     mylite_storage_row_payload_cache_bucket *buckets;
     size_t count;
     size_t capacity;
+    size_t row_bytes;
     size_t bucket_capacity;
     size_t tombstone_count;
 } mylite_storage_row_payload_cache;
@@ -566,7 +567,8 @@ static _Thread_local mylite_storage_buffered_page_undo_list reusable_buffered_pa
 
 #define MYLITE_STORAGE_INDEX_ROOT_CATALOG_RESERVE_BYTES 1024U
 #define MYLITE_STORAGE_ACTIVE_ROW_PAYLOAD_CACHE_LIMIT 16U
-#define MYLITE_STORAGE_ACTIVE_ROW_PAYLOAD_ENTRY_LIMIT 4096U
+#define MYLITE_STORAGE_ACTIVE_ROW_PAYLOAD_ENTRY_LIMIT 32768U
+#define MYLITE_STORAGE_ACTIVE_ROW_PAYLOAD_BYTES_LIMIT (16U * 1024U * 1024U)
 #define MYLITE_STORAGE_DURABLE_LIVE_ROW_ID_CACHE_LIMIT 16U
 #define MYLITE_STORAGE_DURABLE_LIVE_ROW_ID_ENTRY_LIMIT 4096U
 #define MYLITE_STORAGE_DURABLE_EXACT_INDEX_CACHE_LIMIT 16U
@@ -17794,13 +17796,18 @@ static void store_active_row_payload(
     const unsigned char *row,
     size_t row_size
 ) {
+    if (row_size > MYLITE_STORAGE_ACTIVE_ROW_PAYLOAD_BYTES_LIMIT) {
+        return;
+    }
+
     mylite_storage_row_payload_cache *cache =
         ensure_active_row_payload_cache(filename, header, table_id);
     if (cache == NULL) {
         return;
     }
 
-    if (cache->count >= MYLITE_STORAGE_ACTIVE_ROW_PAYLOAD_ENTRY_LIMIT) {
+    if (cache->count >= MYLITE_STORAGE_ACTIVE_ROW_PAYLOAD_ENTRY_LIMIT ||
+        cache->row_bytes > MYLITE_STORAGE_ACTIVE_ROW_PAYLOAD_BYTES_LIMIT - row_size) {
         mylite_storage_statement *statement = active_row_payload_cache_statement_for(filename);
         clear_row_payload_caches(statement);
         cache = ensure_active_row_payload_cache(filename, header, table_id);
@@ -17819,6 +17826,18 @@ static void replace_active_row_payload_in_cache(
     size_t new_row_size
 ) {
     if (cache == NULL) {
+        return;
+    }
+    const mylite_storage_row_payload_cache_entry *entry =
+        find_row_payload_cache_entry(cache, old_row_id);
+    if (entry == NULL) {
+        return;
+    }
+    const size_t retained_bytes =
+        cache->row_bytes >= entry->row_size ? cache->row_bytes - entry->row_size : 0U;
+    if (new_row_size > MYLITE_STORAGE_ACTIVE_ROW_PAYLOAD_BYTES_LIMIT ||
+        retained_bytes > MYLITE_STORAGE_ACTIVE_ROW_PAYLOAD_BYTES_LIMIT - new_row_size) {
+        remove_row_payload_cache_entry(cache, old_row_id);
         return;
     }
     if (new_row_id == 0ULL ||
@@ -18315,6 +18334,9 @@ static mylite_storage_result append_row_payload_cache_entry(
     if (find_row_payload_cache_entry(cache, row_id) != NULL) {
         return MYLITE_STORAGE_OK;
     }
+    if (row_size > SIZE_MAX - cache->row_bytes) {
+        return MYLITE_STORAGE_FULL;
+    }
     if (cache->count == cache->capacity) {
         const size_t next_capacity = cache->capacity == 0U ? 64U : cache->capacity * 2U;
         if (next_capacity <= cache->capacity ||
@@ -18353,6 +18375,7 @@ static mylite_storage_result append_row_payload_cache_entry(
         --cache->count;
         return result;
     }
+    cache->row_bytes += row_size;
     return MYLITE_STORAGE_OK;
 }
 
@@ -18381,6 +18404,13 @@ static mylite_storage_result replace_row_payload_cache_entry(
 
     const size_t entry_index = bucket->entry_index;
     mylite_storage_row_payload_cache_entry *entry = cache->entries + entry_index;
+    const size_t old_row_size = entry->row_size;
+    const size_t retained_bytes =
+        cache->row_bytes >= old_row_size ? cache->row_bytes - old_row_size : 0U;
+    if (new_row_size > SIZE_MAX - retained_bytes) {
+        return MYLITE_STORAGE_FULL;
+    }
+
     unsigned char *row = entry->row;
     if (entry->row_size != new_row_size) {
         row = (unsigned char *)malloc(new_row_size);
@@ -18404,10 +18434,11 @@ static mylite_storage_result replace_row_payload_cache_entry(
     if (row != entry->row) {
         free(entry->row);
         entry->row = row;
-        entry->row_size = new_row_size;
     }
     memcpy(entry->row, new_row, new_row_size);
+    entry->row_size = new_row_size;
     entry->row_id = new_row_id;
+    cache->row_bytes = retained_bytes + new_row_size;
     if (old_row_id != new_row_id) {
         maybe_rebuild_row_payload_cache_buckets_after_tombstone(cache);
     }
@@ -18427,6 +18458,9 @@ static void remove_row_payload_cache_entry(
     const size_t removed_index = bucket->entry_index;
     const size_t last_index = cache->count - 1U;
     int rebuild_buckets = 0;
+    const size_t removed_row_size = cache->entries[removed_index].row_size;
+    cache->row_bytes =
+        cache->row_bytes >= removed_row_size ? cache->row_bytes - removed_row_size : 0U;
     free(cache->entries[removed_index].row);
     remove_row_payload_cache_bucket(cache, row_id);
     if (removed_index != last_index) {

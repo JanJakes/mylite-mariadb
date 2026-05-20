@@ -77,6 +77,9 @@ image without rereading and rechecksumming the row page while preserving the
 same rollback and visibility rules. Row-payload cache buckets use
 tombstone-aware replacement and swap-removal, so changing a cached old row id to
 its replacement row id does not rebuild the full bucket table on every update.
+The active cache keeps a larger small-row working set, currently up to 32768
+entries or 16 MiB of row bytes per table cache, and drops oversized rows rather
+than retaining unbounded BLOB/TEXT payloads.
 
 Durable index cursor construction opens a scoped storage read session while the
 handler finds matching index row ids and materializes the selected row payload

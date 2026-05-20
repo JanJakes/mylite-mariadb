@@ -114,6 +114,7 @@ static void test_many_row_state_pages_scan(void);
 static void test_active_live_row_validation_cache(void);
 static void test_reusable_live_row_cache_clears_row_ids(void);
 static void test_active_row_payload_cache(void);
+static void test_active_row_payload_cache_large_window(void);
 static void test_active_table_entry_cache_catalog_invalidation(void);
 static void test_active_row_payload_cache_many_replacements(void);
 static void test_durable_live_row_cache(void);
@@ -394,6 +395,7 @@ int main(void) {
     test_active_live_row_validation_cache();
     test_reusable_live_row_cache_clears_row_ids();
     test_active_row_payload_cache();
+    test_active_row_payload_cache_large_window();
     test_active_table_entry_cache_catalog_invalidation();
     test_active_row_payload_cache_many_replacements();
     test_durable_live_row_cache();
@@ -1708,6 +1710,92 @@ static void test_active_row_payload_cache(void) {
     assert_row_not_found(filename, row_1_id);
     assert_row_not_found(filename, row_2_id);
 
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_active_row_payload_cache_large_window(void) {
+    enum { ROW_COUNT = 5000 };
+
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    unsigned char keys[ROW_COUNT][2];
+    unsigned char rows[ROW_COUNT][4];
+    unsigned long long row_ids[ROW_COUNT] = {0};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "active-row-payload-cache-large-window.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_statement *transaction = NULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    for (size_t i = 0U; i < ROW_COUNT; ++i) {
+        keys[i][0] = (unsigned char)(i >> CHAR_BIT);
+        keys[i][1] = (unsigned char)(i & UINT8_MAX);
+        rows[i][0] = 0x00U;
+        rows[i][1] = keys[i][0];
+        rows[i][2] = keys[i][1];
+        rows[i][3] = 0x11U;
+
+        mylite_storage_index_entry row_entry = {
+            .size = sizeof(row_entry),
+            .index_number = 0U,
+            .key = keys[i],
+            .key_size = sizeof(keys[i]),
+        };
+        assert(
+            mylite_storage_append_row_with_index_entries(
+                filename,
+                "app",
+                "posts",
+                rows[i],
+                sizeof(rows[i]),
+                &row_entry,
+                1U,
+                &row_ids[i]
+            ) == MYLITE_STORAGE_OK
+        );
+    }
+
+    assert(mylite_storage_begin_transaction(filename, &transaction) == MYLITE_STORAGE_OK);
+    for (size_t i = 0U; i < ROW_COUNT; ++i) {
+        assert_find_indexed_row_equals(
+            filename,
+            0U,
+            keys[i],
+            sizeof(keys[i]),
+            row_ids[i],
+            rows[i],
+            sizeof(rows[i])
+        );
+    }
+
+    assert(row_ids[0] <= (unsigned long long)LONG_MAX / MYLITE_STORAGE_FORMAT_PAGE_SIZE);
+    flip_file_byte(
+        filename,
+        (long)(row_ids[0] * MYLITE_STORAGE_FORMAT_PAGE_SIZE) +
+            MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET
+    );
+    assert_find_indexed_row_equals(
+        filename,
+        0U,
+        keys[0],
+        sizeof(keys[0]),
+        row_ids[0],
+        rows[0],
+        sizeof(rows[0])
+    );
+
+    assert(mylite_storage_rollback_statement(transaction) == MYLITE_STORAGE_OK);
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
     free(filename);

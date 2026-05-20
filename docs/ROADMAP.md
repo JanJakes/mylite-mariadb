@@ -353,6 +353,10 @@ the cheaper linear path.
 The transient active append-page buffer now uses a 32768-page window, keeping a
 10k-row replacement generation resident for repeated update rewrites at the
 cost of a 128 MiB worst-case per-checkpoint memory window.
+Active row-payload caches now also keep a larger byte-bounded small-row working
+set, so repeated indexed updates over 10k rows do not thrash the old 4096-entry
+payload-cache window while large payloads remain bounded by a 16 MiB per-table
+cache budget.
 
 ## Size And Profile Direction
 
