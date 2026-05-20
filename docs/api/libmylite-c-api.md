@@ -122,12 +122,15 @@ For durable database paths, the embedded runtime starts with MariaDB native
 storage under the database directory: `--datadir=<db>/datadir`,
 `--tmpdir=<db>/tmp`, `--plugin-dir=<db>/run/plugins`, and
 `--aria-log-dir-path=<db>/datadir`. InnoDB data, redo, undo, and temporary
-paths are also pinned under `datadir/` and `tmp/`. The final close removes
-`run/` and clears temporary files under `tmp/`; durable metadata and table
-files remain in `datadir/`. `mylite.lock` is an advisory lock anchor and may
-remain after close or process exit. A clean open replaces stale inactive `run/`
-state after taking the directory lock. `mylite_open_config.temp_directory` is
-currently used only by the `:memory:` bootstrap path.
+paths are also pinned under `datadir/` and `tmp/`. Server topology and account
+surfaces are disabled with startup options such as `--skip-grant-tables`,
+`--skip-networking`, `--skip-log-bin`, `--skip-slave-start`, and
+`--performance-schema=OFF`. The final close removes `run/` and clears
+temporary files under `tmp/`; durable metadata and table files remain in
+`datadir/`. `mylite.lock` is an advisory lock anchor and may remain after close
+or process exit. A clean open replaces stale inactive `run/` state after taking
+the directory lock. `mylite_open_config.temp_directory` is currently used only
+by the `:memory:` bootstrap path.
 
 ## Direct Execution
 
@@ -379,8 +382,12 @@ fit the embedded library model:
 - event scheduler,
 - performance schema.
 
-When a rejected feature reaches the SQL layer, it should fail with stable
-MyLite result codes and MariaDB diagnostics where possible.
+Top-level SQL command families for users, roles, grants, password changes,
+dynamic plugins, events, replication, binlog administration, and foreign-server
+metadata are rejected before direct execution or prepared-statement preparation.
+They fail with `MYLITE_ERROR` and a stable MyLite diagnostic. Startup variables
+also cover disabled binlog, performance schema, grant tables, networking, and
+the transient database-local plugin directory.
 
 ## Compatibility Adapter
 

@@ -35,6 +35,7 @@ preset:
 | Crash/reopen behavior | `ctest --preset embedded-dev -L compat.crash-reopen` |
 | Application queries | `ctest --preset embedded-dev -L compat.application-query` |
 | Engine clauses | `ctest --preset embedded-dev -L compat.engine` |
+| Server surfaces | `ctest --preset embedded-dev -L compat.server-surface` |
 | Current SQL query surface | `ctest --preset embedded-dev -L compat.query` |
 
 The MariaDB-reference group uses expected result vectors pinned to MariaDB 11.8
@@ -77,7 +78,7 @@ behavior. It does not require a daemon in the default test path.
 | Aria files | 🟡&nbsp;Partial | Runtime startup sets `--aria-log-dir-path=<db>/datadir`; explicit Aria table coverage verifies `.MAI` and `.MAD` files under `datadir/` |
 | MEMORY definitions | 🟡&nbsp;Partial | Explicit MEMORY table coverage verifies persistent table metadata under `datadir/` and empty row state after reopen |
 | MyLite-owned transient paths | 🟡&nbsp;Partial | Durable database paths use `tmp/`, `run/`, and `mylite.lock` inside the database directory; clean close removes `run/` and clears `tmp/`, and clean open replaces stale inactive `run/` state after taking the directory lock |
-| Durable files outside the database directory | ➖&nbsp;Out&nbsp;of&nbsp;scope | Reject or reconfigure surfaces that would write durable state outside the MyLite directory |
+| Durable files outside the database directory | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server-surface policy coverage rejects or disables known server-owned paths that could create replication, binlog, performance-schema, or `mysql.*` sidecars outside the supported application-storage model |
 
 ## SQL Surface
 
@@ -91,9 +92,10 @@ behavior. It does not require a daemon in the default test path.
 | Schemas/databases | 🟡&nbsp;Partial | Controlled `CREATE DATABASE`, qualified table access, and `DROP DATABASE` lifecycle are covered inside `datadir/`; broader schema behavior remains planned |
 | Representative application schemas | 🟡&nbsp;Partial | WordPress-shaped InnoDB `wp_options`, `wp_posts`, and `wp_postmeta` DDL and queries are covered as representative application-schema evidence |
 | Views, triggers, and routines | ⚪&nbsp;Planned | Persist through MariaDB native metadata inside the MyLite directory where supported |
-| Events and scheduler | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server scheduler is not part of the core embedded profile |
-| Users, grants, and password auth | ➖&nbsp;Out&nbsp;of&nbsp;scope | Local embedded directory ownership replaces server account management |
-| Replication and binlog | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server topology feature, not core library behavior |
+| Events and scheduler | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server scheduler is not part of the core embedded profile; event DDL and scheduler variables are rejected by policy coverage |
+| Users, grants, and password auth | ➖&nbsp;Out&nbsp;of&nbsp;scope | Local embedded directory ownership replaces server account management; account, role, grant, revoke, and password statements are rejected by policy coverage |
+| Replication and binlog | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server topology feature, not core library behavior; replication and binlog command families are rejected and `@@log_bin=0` is covered |
+| Dynamic plugin installation | ➖&nbsp;Out&nbsp;of&nbsp;scope | The embedded core uses a transient database-local plugin directory and rejects `INSTALL PLUGIN` / `UNINSTALL PLUGIN` through policy coverage |
 
 ## Rows, Indexes, And Constraints
 

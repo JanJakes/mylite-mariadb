@@ -77,6 +77,8 @@ CONNECT, Example, Federated, FederatedX, Mroonga, Sphinx, Spider, and many
 server plugins. The `libmariadbd.a` target does not build every configured
 module, but the enabled list is still important size-profile evidence because
 future profile hardening should disable unwanted surfaces intentionally.
+Performance Schema is listed here as archive content; the server-surface policy
+turns it off at runtime with `--performance-schema=OFF`.
 
 ## Disabled Or Missing Surface
 

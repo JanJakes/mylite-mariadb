@@ -35,7 +35,7 @@ native storage files inside that directory.
 | 12 | Compatibility harness | ✅&nbsp;Done | Run embedded lifecycle, directory-boundary detection, MariaDB-reference, crash/reopen, application-query, and query-surface coverage in repeatable CTest label groups. |
 | 13 | Prepared SQL API | ✅&nbsp;Done | Add reusable prepared statements, parameter bindings, typed column access, warning lookup, binary-safe values, reset/finalize behavior, and close-time statement lifetime enforcement. |
 | 14 | Engine support and application schemas | ✅&nbsp;Done | Test supported explicit `ENGINE=` clauses, default-engine resolution, MEMORY reopen semantics, and representative WordPress-shaped InnoDB DDL. |
-| 15 | Server-surface policy | ⚪&nbsp;Planned | Explicitly reject or replace users/auth, replication/binlog, dynamic plugins, events, performance schema, and durable files outside the MyLite database directory. |
+| 15 | Server-surface policy | ✅&nbsp;Done | Explicitly reject users/auth, replication/binlog, dynamic plugins, events, and server-owned metadata surfaces, while disabling performance schema and server topology features at startup. |
 | 16 | Size profile hardening | ⚪&nbsp;Planned | Trim daemon-only and low-value optional components after the embedded runtime and storage shape are measurable. |
 
 ## Size And Profile Direction

@@ -92,6 +92,11 @@ if(BUILD_TESTING)
     )
     mylite_configure_embedded_c_test(mylite_embedded_prepared_statement_test)
 
+    add_executable(mylite_embedded_server_surface_policy_test
+      tests/embedded_server_surface_policy_test.c
+    )
+    mylite_configure_embedded_c_test(mylite_embedded_server_surface_policy_test)
+
     add_executable(mylite_embedded_transactions_recovery_test
       tests/embedded_transactions_recovery_test.c
     )
@@ -119,6 +124,10 @@ if(BUILD_TESTING)
     add_test(
       NAME libmylite.embedded-prepared-statement
       COMMAND mylite_embedded_prepared_statement_test
+    )
+    add_test(
+      NAME libmylite.embedded-server-surface-policy
+      COMMAND mylite_embedded_server_surface_policy_test
     )
     add_test(NAME libmylite.embedded-open-close COMMAND mylite_embedded_open_close_test)
     add_test(NAME libmylite.embedded-storage COMMAND mylite_embedded_storage_test)
@@ -150,6 +159,9 @@ if(BUILD_TESTING)
     )
     set_tests_properties(libmylite.embedded-prepared-statement PROPERTIES
       LABELS "compat.query"
+    )
+    set_tests_properties(libmylite.embedded-server-surface-policy PROPERTIES
+      LABELS "compat.server-surface;compat.directory-boundary;compat.query"
     )
     set_tests_properties(libmylite.embedded-transactions-recovery PROPERTIES
       LABELS "compat.directory-boundary;compat.crash-reopen;compat.query"

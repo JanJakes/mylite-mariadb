@@ -72,9 +72,12 @@ app.mylite/
 The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 `--tmpdir=app.mylite/tmp`, `--plugin-dir=app.mylite/run/plugins`, and
 `--aria-log-dir-path=app.mylite/datadir`. InnoDB data, redo, undo, and
-temporary paths are also pinned under `datadir/` and `tmp/`. Clean shutdown
-removes `run/` and clears temporary files under `tmp/`; durable native storage
-remains in `datadir/`. `mylite.lock` remains as a stable lock anchor.
+temporary paths are also pinned under `datadir/` and `tmp/`. Startup disables
+server-owned topology and instrumentation surfaces with `--skip-grant-tables`,
+`--skip-networking`, `--skip-log-bin`, `--skip-slave-start`, and
+`--performance-schema=OFF`. Clean shutdown removes `run/` and clears temporary
+files under `tmp/`; durable native storage remains in `datadir/`. `mylite.lock`
+remains as a stable lock anchor.
 
 Format 1 uses `mylite.meta` as the directory identity marker:
 
@@ -153,15 +156,16 @@ Engine and application-schema coverage validates explicit `ENGINE=InnoDB`,
 `ENGINE=MyISAM`, `ENGINE=Aria`, and `ENGINE=MEMORY` table creation, MyISAM
 default-engine resolution, durable row state for durable engines, MEMORY table
 definitions with empty row state after reopen, and representative
-WordPress-shaped InnoDB DDL. Dynamic external engines are still outside the
-default embedded profile until the server-surface policy is designed and
-tested.
+WordPress-shaped InnoDB DDL.
 
 The default embedded profile does not expose server account administration,
-dynamic plugin installation, replication metadata, or the event scheduler.
-`information_schema` remains virtual. Any required `mysql.*` system surface
-should be created or maintained inside the MyLite database directory, or exposed
-as a read-only virtual surface when persistent server tables are unnecessary.
+dynamic plugin installation, replication metadata, binlog administration, or
+the event scheduler. Direct execution and prepared-statement preparation reject
+those top-level SQL command families before they can create server sidecars or
+depend on `mysql.*` system tables. `information_schema` remains virtual. Any
+future required `mysql.*` system surface should be created or maintained inside
+the MyLite database directory, or exposed as a read-only virtual surface when
+persistent server tables are unnecessary.
 
 ## Transactions, Recovery, And Concurrency
 

@@ -1,6 +1,7 @@
 #include <mylite/mylite.h>
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <climits>
@@ -14,6 +15,7 @@
 #include <mutex>
 #include <new>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <thread>
 #include <vector>
@@ -46,6 +48,7 @@ constexpr const char *k_bad_db_handle = "bad database handle";
 constexpr int k_decimal_base = 10;
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
+constexpr std::size_t k_sql_policy_token_count = 16;
 constexpr const char *k_memory_database_path = ":memory:";
 constexpr const char *k_meta_filename = "mylite.meta";
 constexpr const char *k_lock_filename = "mylite.lock";
@@ -93,6 +96,11 @@ struct ResultColumn {
     unsigned long length = 0;
     my_bool is_null = 0;
     my_bool error = 0;
+};
+
+struct SqlPolicyTokens {
+    std::array<std::string_view, k_sql_policy_token_count> values = {};
+    std::size_t count = 0;
 };
 #endif
 
@@ -222,6 +230,42 @@ int bind_parameters(mylite_stmt &stmt);
 mylite_value_type column_type(const ResultColumn &column);
 const ResultColumn *column_at(const mylite_stmt *stmt, unsigned column);
 void set_mariadb_statement_error(mylite_stmt &stmt);
+int reject_unsupported_server_surface_sql(mylite_db &db, std::string_view sql);
+bool is_unsupported_server_surface_sql(std::string_view sql);
+bool is_unsupported_account_or_event_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_plugin_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_replication_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_binlog_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_server_set_statement(const SqlPolicyTokens &tokens);
+SqlPolicyTokens collect_sql_policy_tokens(std::string_view sql);
+bool next_sql_token(std::string_view sql, std::size_t &offset, std::string_view &token);
+void skip_sql_spacing_and_comments(std::string_view sql, std::size_t &offset);
+bool enter_executable_sql_comment(std::string_view sql, std::size_t &offset);
+bool skip_dash_sql_comment(std::string_view sql, std::size_t &offset);
+bool skip_hash_sql_comment(std::string_view sql, std::size_t &offset);
+bool skip_block_sql_comment(std::string_view sql, std::size_t &offset);
+void skip_quoted_sql_token(std::string_view sql, std::size_t &offset);
+bool is_sql_space(char value);
+bool is_sql_identifier_char(char value);
+bool is_sql_identifier_token(std::string_view token);
+std::string_view identifier_token_at(const SqlPolicyTokens &tokens, std::size_t index);
+bool has_identifier_token(
+    const SqlPolicyTokens &tokens,
+    const char *keyword,
+    std::size_t start_index
+);
+bool token_equals(std::string_view token, const char *keyword);
+bool token_in(std::string_view token, const char *first, const char *second);
+bool token_in(std::string_view token, const char *first, const char *second, const char *third);
+bool token_in(
+    std::string_view token,
+    const char *first,
+    const char *second,
+    const char *third,
+    const char *fourth
+);
+bool is_server_variable_token(std::string_view token);
+bool is_system_variable_qualified_token(const SqlPolicyTokens &tokens, std::size_t index);
 std::filesystem::path normalize_database_path(const char *path);
 bool is_memory_database_path(const std::filesystem::path &database_path);
 void initialize_database_layout(const std::filesystem::path &database_path);
@@ -909,6 +953,9 @@ int exec_impl(
     return copy_error_message(*db, errmsg);
 #else
     set_ok(*db);
+    if (reject_unsupported_server_surface_sql(*db, sql) != MYLITE_OK) {
+        return copy_error_message(*db, errmsg);
+    }
     if (mysql_query(&db->mysql, sql) != 0) {
         set_mariadb_error(*db);
         return copy_error_message(*db, errmsg);
@@ -959,6 +1006,11 @@ int prepare_impl(
     if (resolved_len > ULONG_MAX) {
         return MYLITE_MISUSE;
     }
+    set_ok(*db);
+    if (reject_unsupported_server_surface_sql(*db, std::string_view(sql, resolved_len)) !=
+        MYLITE_OK) {
+        return MYLITE_ERROR;
+    }
 
     std::unique_ptr<mylite_stmt> statement(new mylite_stmt());
     statement->db = db;
@@ -1001,6 +1053,347 @@ int prepare_impl(
 }
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
+int reject_unsupported_server_surface_sql(mylite_db &db, std::string_view sql) {
+    if (!is_unsupported_server_surface_sql(sql)) {
+        return MYLITE_OK;
+    }
+
+    set_error(db, MYLITE_ERROR, "server-owned SQL surface is not supported by MyLite");
+    return MYLITE_ERROR;
+}
+
+bool is_unsupported_server_surface_sql(std::string_view sql) {
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    if (identifier_token_at(tokens, 0).empty()) {
+        return false;
+    }
+
+    return is_unsupported_account_or_event_statement(tokens) ||
+           is_unsupported_plugin_statement(tokens) ||
+           is_unsupported_replication_statement(tokens) ||
+           is_unsupported_binlog_statement(tokens) || is_unsupported_server_set_statement(tokens);
+}
+
+bool is_unsupported_account_or_event_statement(const SqlPolicyTokens &tokens) {
+    const std::string_view first = identifier_token_at(tokens, 0);
+    const std::string_view second = identifier_token_at(tokens, 1);
+    const std::string_view third = identifier_token_at(tokens, 2);
+    const std::string_view fourth = identifier_token_at(tokens, 3);
+
+    if (token_in(first, "GRANT", "REVOKE")) {
+        return true;
+    }
+    if (token_equals(first, "CREATE")) {
+        if (token_equals(second, "DEFINER")) {
+            return has_identifier_token(tokens, "EVENT", 2);
+        }
+        if (token_equals(second, "OR") && token_equals(third, "REPLACE")) {
+            return token_equals(fourth, "DEFINER")
+                       ? has_identifier_token(tokens, "EVENT", 4)
+                       : token_in(fourth, "USER", "ROLE", "EVENT", "SERVER");
+        }
+        return token_in(second, "USER", "ROLE", "EVENT", "SERVER");
+    }
+    if (token_equals(first, "ALTER")) {
+        if (token_equals(second, "DEFINER")) {
+            return has_identifier_token(tokens, "EVENT", 2);
+        }
+        return token_in(second, "USER", "EVENT", "SERVER");
+    }
+    if (token_equals(first, "DROP")) {
+        return token_in(second, "USER", "ROLE", "EVENT", "SERVER");
+    }
+    return token_equals(first, "RENAME") && token_equals(second, "USER");
+}
+
+bool is_unsupported_plugin_statement(const SqlPolicyTokens &tokens) {
+    const std::string_view first = identifier_token_at(tokens, 0);
+    const std::string_view second = identifier_token_at(tokens, 1);
+
+    return (token_equals(first, "INSTALL") || token_equals(first, "UNINSTALL")) &&
+           token_in(second, "PLUGIN", "SONAME");
+}
+
+bool is_unsupported_replication_statement(const SqlPolicyTokens &tokens) {
+    const std::string_view first = identifier_token_at(tokens, 0);
+    const std::string_view second = identifier_token_at(tokens, 1);
+
+    if (token_equals(first, "CHANGE") && token_in(second, "MASTER", "REPLICATION")) {
+        return true;
+    }
+    if (token_equals(first, "RESET") && token_equals(second, "MASTER")) {
+        return true;
+    }
+    return token_in(first, "START", "STOP", "RESET") && token_in(second, "SLAVE", "REPLICA");
+}
+
+bool is_unsupported_binlog_statement(const SqlPolicyTokens &tokens) {
+    const std::string_view first = identifier_token_at(tokens, 0);
+    const std::string_view second = identifier_token_at(tokens, 1);
+    const std::string_view third = identifier_token_at(tokens, 2);
+
+    if (token_equals(first, "SHOW") && token_equals(second, "BINARY")) {
+        return token_in(third, "LOGS", "STATUS");
+    }
+    if (token_equals(first, "SHOW") && token_equals(second, "BINLOG")) {
+        return token_equals(third, "EVENTS");
+    }
+    if (token_equals(first, "SHOW") && token_in(second, "MASTER", "SLAVE", "REPLICA")) {
+        return token_equals(third, "STATUS");
+    }
+    if (token_equals(first, "FLUSH") && token_equals(second, "BINARY")) {
+        return token_equals(third, "LOGS");
+    }
+    if (token_equals(first, "RESET") && token_equals(second, "MASTER")) {
+        return true;
+    }
+    return token_equals(first, "PURGE") && token_in(second, "BINARY", "MASTER");
+}
+
+bool is_unsupported_server_set_statement(const SqlPolicyTokens &tokens) {
+    if (!token_equals(identifier_token_at(tokens, 0), "SET")) {
+        return false;
+    }
+
+    for (std::size_t index = 1; index < tokens.count; ++index) {
+        if (token_equals(tokens.values[index], "PASSWORD")) {
+            return true;
+        }
+        if (is_server_variable_token(tokens.values[index]) &&
+            is_system_variable_qualified_token(tokens, index)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+SqlPolicyTokens collect_sql_policy_tokens(std::string_view sql) {
+    std::size_t offset = 0;
+    SqlPolicyTokens tokens = {};
+    while (tokens.count < tokens.values.size() &&
+           next_sql_token(sql, offset, tokens.values[tokens.count])) {
+        ++tokens.count;
+    }
+    return tokens;
+}
+
+bool next_sql_token(std::string_view sql, std::size_t &offset, std::string_view &token) {
+    skip_sql_spacing_and_comments(sql, offset);
+    if (offset >= sql.size()) {
+        token = {};
+        return false;
+    }
+
+    const std::size_t start = offset;
+    if (sql[offset] == '\'' || sql[offset] == '"' || sql[offset] == '`') {
+        skip_quoted_sql_token(sql, offset);
+        token = sql.substr(start, offset - start);
+        return true;
+    }
+
+    if (is_sql_identifier_char(sql[offset])) {
+        while (offset < sql.size() && is_sql_identifier_char(sql[offset])) {
+            ++offset;
+        }
+        token = sql.substr(start, offset - start);
+        return true;
+    }
+
+    ++offset;
+    token = sql.substr(start, 1);
+    return true;
+}
+
+void skip_sql_spacing_and_comments(std::string_view sql, std::size_t &offset) {
+    for (;;) {
+        while (offset < sql.size() && is_sql_space(sql[offset])) {
+            ++offset;
+        }
+        if (enter_executable_sql_comment(sql, offset)) {
+            continue;
+        }
+        if (skip_dash_sql_comment(sql, offset)) {
+            continue;
+        }
+        if (skip_hash_sql_comment(sql, offset)) {
+            continue;
+        }
+        if (skip_block_sql_comment(sql, offset)) {
+            continue;
+        }
+        return;
+    }
+}
+
+bool enter_executable_sql_comment(std::string_view sql, std::size_t &offset) {
+    if (offset + 2U < sql.size() && sql[offset] == '/' && sql[offset + 1U] == '*' &&
+        sql[offset + 2U] == '!') {
+        offset += 3U;
+    } else if (
+        offset + 3U < sql.size() && sql[offset] == '/' && sql[offset + 1U] == '*' &&
+        (sql[offset + 2U] == 'M' || sql[offset + 2U] == 'm') && sql[offset + 3U] == '!'
+    ) {
+        offset += 4U;
+    } else {
+        return false;
+    }
+
+    while (offset < sql.size() && sql[offset] >= '0' && sql[offset] <= '9') {
+        ++offset;
+    }
+    return true;
+}
+
+bool skip_dash_sql_comment(std::string_view sql, std::size_t &offset) {
+    if (offset + 1U >= sql.size() || sql[offset] != '-' || sql[offset + 1U] != '-') {
+        return false;
+    }
+    offset += 2U;
+    while (offset < sql.size() && sql[offset] != '\n') {
+        ++offset;
+    }
+    return true;
+}
+
+bool skip_hash_sql_comment(std::string_view sql, std::size_t &offset) {
+    if (offset >= sql.size() || sql[offset] != '#') {
+        return false;
+    }
+    ++offset;
+    while (offset < sql.size() && sql[offset] != '\n') {
+        ++offset;
+    }
+    return true;
+}
+
+bool skip_block_sql_comment(std::string_view sql, std::size_t &offset) {
+    if (offset + 1U >= sql.size() || sql[offset] != '/' || sql[offset + 1U] != '*') {
+        return false;
+    }
+    offset += 2U;
+    while (offset + 1U < sql.size() && (sql[offset] != '*' || sql[offset + 1U] != '/')) {
+        ++offset;
+    }
+    if (offset + 1U < sql.size()) {
+        offset += 2U;
+    }
+    return true;
+}
+
+void skip_quoted_sql_token(std::string_view sql, std::size_t &offset) {
+    const char quote = sql[offset++];
+    while (offset < sql.size()) {
+        if (sql[offset] == '\\' && offset + 1U < sql.size()) {
+            offset += 2U;
+            continue;
+        }
+        if (sql[offset++] == quote) {
+            return;
+        }
+    }
+}
+
+bool is_sql_space(char value) {
+    return value == ' ' || value == '\t' || value == '\n' || value == '\r' || value == '\f';
+}
+
+bool is_sql_identifier_char(char value) {
+    return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') ||
+           (value >= '0' && value <= '9') || value == '_';
+}
+
+bool is_sql_identifier_token(std::string_view token) {
+    return !token.empty() && is_sql_identifier_char(token[0]);
+}
+
+std::string_view identifier_token_at(const SqlPolicyTokens &tokens, std::size_t index) {
+    std::size_t identifier_index = 0;
+    for (std::size_t raw_index = 0; raw_index < tokens.count; ++raw_index) {
+        if (!is_sql_identifier_token(tokens.values[raw_index])) {
+            continue;
+        }
+        if (identifier_index == index) {
+            return tokens.values[raw_index];
+        }
+        ++identifier_index;
+    }
+    return {};
+}
+
+bool has_identifier_token(
+    const SqlPolicyTokens &tokens,
+    const char *keyword,
+    std::size_t start_index
+) {
+    for (std::size_t index = start_index; !identifier_token_at(tokens, index).empty(); ++index) {
+        if (token_equals(identifier_token_at(tokens, index), keyword)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool token_equals(std::string_view token, const char *keyword) {
+    const std::size_t keyword_length = std::strlen(keyword);
+    if (token.size() != keyword_length) {
+        return false;
+    }
+    for (std::size_t index = 0; index < token.size(); ++index) {
+        char left = token[index];
+        char right = keyword[index];
+        if (left >= 'a' && left <= 'z') {
+            left = static_cast<char>(left - ('a' - 'A'));
+        }
+        if (right >= 'a' && right <= 'z') {
+            right = static_cast<char>(right - ('a' - 'A'));
+        }
+        if (left != right) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool token_in(std::string_view token, const char *first, const char *second) {
+    return token_equals(token, first) || token_equals(token, second);
+}
+
+bool token_in(std::string_view token, const char *first, const char *second, const char *third) {
+    return token_equals(token, first) || token_equals(token, second) || token_equals(token, third);
+}
+
+bool token_in(
+    std::string_view token,
+    const char *first,
+    const char *second,
+    const char *third,
+    const char *fourth
+) {
+    return token_equals(token, first) || token_equals(token, second) ||
+           token_equals(token, third) || token_equals(token, fourth);
+}
+
+bool is_server_variable_token(std::string_view token) {
+    return token_in(token, "EVENT_SCHEDULER", "SQL_LOG_BIN", "LOG_BIN", "BINLOG_FORMAT");
+}
+
+bool is_system_variable_qualified_token(const SqlPolicyTokens &tokens, std::size_t index) {
+    if (index == 1U) {
+        return true;
+    }
+    if (token_in(tokens.values[index - 1U], "GLOBAL", "SESSION", "LOCAL")) {
+        return true;
+    }
+    if (index >= 2U && token_equals(tokens.values[index - 1U], "@") &&
+        token_equals(tokens.values[index - 2U], "@")) {
+        return true;
+    }
+    return index >= 4U && token_equals(tokens.values[index - 1U], ".") &&
+           token_in(tokens.values[index - 2U], "GLOBAL", "SESSION", "LOCAL") &&
+           token_equals(tokens.values[index - 3U], "@") &&
+           token_equals(tokens.values[index - 4U], "@");
+}
+
 int validate_runtime_database_path(mylite_db &db) {
     const std::lock_guard<std::mutex> guard(g_runtime.mutex);
     if (g_runtime.ref_count > 0U && g_runtime.database_path != db.database_path) {
@@ -1792,8 +2185,11 @@ std::vector<std::string> runtime_arguments(const RuntimeLayout &layout) {
         std::string("--innodb-temp-data-file-path=") + k_innodb_temp_data_file_path,
         "--innodb-flush-log-at-trx-commit=1",
         "--innodb-fast-shutdown=1",
+        "--skip-log-bin",
+        "--skip-slave-start",
         "--skip-grant-tables",
         "--skip-networking",
+        "--performance-schema=OFF",
         "--default-storage-engine=MyISAM",
         std::string("--lc-messages-dir=") + MYLITE_MARIADB_MESSAGES_DIR,
         std::string("--character-sets-dir=") + MYLITE_MARIADB_CHARSETS_DIR,

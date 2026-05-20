@@ -44,6 +44,13 @@ explicit `ENGINE=InnoDB` tables, with data, redo, undo, and temporary paths
 pinned under the same directory. The default storage engine remains MyISAM
 until the broader engine policy is designed.
 
+The core startup path also disables server topology and server-management
+surfaces that do not fit `mylite_open()`: grant tables, networking, binlog,
+replication slave auto-start, and performance schema. `libmylite` rejects
+top-level SQL command families for users, roles, grants, events, dynamic
+plugins, replication, binlog administration, and foreign-server metadata before
+dispatching them to MariaDB.
+
 MariaDB 11.8.6 needed narrow embedded-restart fixes for repeated
 `mylite_open()` / `mylite_close()` tests in one process:
 
