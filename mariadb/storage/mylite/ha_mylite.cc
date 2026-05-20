@@ -216,6 +216,7 @@ static int mylite_prepare_index_entry_changes(
     TABLE *table, const uchar *old_buf,
     const mylite_storage_index_entry *new_entries, size_t new_entry_count,
     uchar *entry_changed, size_t entry_changed_count);
+static bool mylite_key_fields_may_change(TABLE *table, const KEY *key);
 static void mylite_free_index_entries(mylite_storage_index_entry *entries,
                                       uchar *key_storage);
 static void mylite_free_index_entries_with_scratch(
@@ -436,6 +437,8 @@ static int mylite_apply_same_row_update_set_null(
 static int mylite_apply_same_row_update_cascade(
   TABLE *table, const mylite_storage_foreign_key_metadata *metadata,
   const uchar *old_data, const uchar *new_data);
+static void mylite_mark_key_prefix_written(TABLE *table, const KEY *key,
+                                           size_t column_count);
 static int mylite_check_child_foreign_key(
   void *ctx, const mylite_storage_foreign_key_metadata *metadata);
 static int mylite_check_parent_foreign_key(
@@ -4145,6 +4148,12 @@ static int mylite_prepare_index_entry_changes(
         key_info->key_length > MYLITE_STORAGE_MAX_INDEX_KEY_SIZE)
       return HA_ERR_CRASHED_ON_USAGE;
 
+    if (!mylite_key_fields_may_change(table, key_info))
+    {
+      entry_changed[i]= 0;
+      continue;
+    }
+
     uchar old_key[MYLITE_STORAGE_MAX_INDEX_KEY_SIZE];
     key_copy(old_key, old_buf, key_info, 0);
     entry_changed[i]=
@@ -4152,6 +4161,23 @@ static int mylite_prepare_index_entry_changes(
   }
 
   return 0;
+}
+
+static bool mylite_key_fields_may_change(TABLE *table, const KEY *key)
+{
+  if (!table || !table->write_set || !key || !key->key_part)
+    return true;
+
+  for (uint part= 0; part < key->user_defined_key_parts; ++part)
+  {
+    const KEY_PART_INFO *key_part= key->key_part + part;
+    if (!key_part->field || key_part->field->field_index >= table->s->fields)
+      return true;
+    if (bitmap_is_set(table->write_set, key_part->field->field_index))
+      return true;
+  }
+
+  return false;
 }
 
 static void mylite_free_index_entries(mylite_storage_index_entry *entries,
@@ -5696,8 +5722,11 @@ static int mylite_apply_same_row_update_set_null(
   free(new_child_prefix);
   free(old_parent_prefix);
   if (new_child_still_references_old_parent)
+  {
+    mylite_mark_key_prefix_written(table, child_key, metadata->column_count);
     mylite_set_foreign_key_columns_null_at(
       table, child_key, metadata->column_count, new_data);
+  }
   return 0;
 }
 
@@ -5800,9 +5829,26 @@ static int mylite_apply_same_row_update_cascade(
   if (!new_child_still_references_old_parent)
     return 0;
 
+  mylite_mark_key_prefix_written(table, child_key, metadata->column_count);
   return mylite_copy_foreign_key_columns(
     table, parent_key, table, child_key, metadata->column_count, new_data,
     const_cast<uchar *>(new_data));
+}
+
+static void mylite_mark_key_prefix_written(TABLE *table, const KEY *key,
+                                           size_t column_count)
+{
+  if (!table || !table->write_set || !key || !key->key_part)
+    return;
+
+  const size_t part_count=
+    MY_MIN(column_count, static_cast<size_t>(key->user_defined_key_parts));
+  for (size_t i= 0; i < part_count; ++i)
+  {
+    const KEY_PART_INFO *key_part= key->key_part + i;
+    if (key_part->field && key_part->field->field_index < table->s->fields)
+      bitmap_set_bit(table->write_set, key_part->field->field_index);
+  }
 }
 
 static int mylite_check_parent_foreign_keys(const char *primary_file,

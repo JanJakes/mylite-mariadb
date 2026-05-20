@@ -240,6 +240,10 @@ per-row-id array reallocations from many-match secondary lookups.
 Handler row-DML now prepares small index-entry/key buffers on the stack for
 common fixed-width tables, avoiding hot per-row heap churn while larger key
 sets still use the existing heap path.
+Handler update changed-key detection now uses MariaDB's write set to skip
+old-key image reconstruction for indexes whose key-part fields were not
+written, while handler-owned same-row foreign-key rewrites mark their locally
+mutated key columns before the filter runs.
 
 ## Size And Profile Direction
 
