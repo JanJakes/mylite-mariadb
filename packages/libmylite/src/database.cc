@@ -265,6 +265,12 @@ struct DirectSavepoint {
     Mylite_volatile_snapshot *volatile_snapshot = nullptr;
     bool active = true;
 };
+
+struct TrackedTableEngine {
+    std::string schema_name;
+    std::string table_name;
+    std::string requested_engine_name;
+};
 #endif
 
 } // namespace
@@ -272,11 +278,14 @@ struct DirectSavepoint {
 struct mylite_db {
 #if MYLITE_WITH_MARIADB_EMBEDDED
     MYSQL mysql = {};
+    std::string current_schema;
 #endif
 #if MYLITE_WITH_MARIADB_EMBEDDED && MYLITE_MARIADB_HAS_MYLITE_SE
     mylite_storage_statement *transaction_statement = nullptr;
     Mylite_volatile_snapshot *transaction_volatile_snapshot = nullptr;
     std::vector<DirectSavepoint> savepoints;
+    std::vector<TrackedTableEngine> table_engines;
+    unsigned long long storage_metadata_epoch = 0;
 #endif
     std::string filename;
     unsigned busy_timeout_ms = 0;
@@ -323,9 +332,13 @@ struct mylite_stmt {
     TransactionControlKind prepared_transaction_control = TransactionControlKind::None;
     std::string prepared_transaction_control_name;
     TransactionControlKind statement_transaction_control = TransactionControlKind::None;
+    bool selects_schema = false;
 #if MYLITE_WITH_MARIADB_EMBEDDED && MYLITE_MARIADB_HAS_MYLITE_SE
     std::string temporary_table_to_remember;
     std::vector<std::string> temporary_tables_to_forget;
+    unsigned long long storage_metadata_epoch = 0;
+    bool transaction_statement_checkpoint_plan_valid = false;
+    bool transaction_statement_needs_volatile_snapshot = true;
 #endif
     bool sync_schema_catalog_after_execute = false;
     bool writes_storage = false;
@@ -344,7 +357,7 @@ class StorageStatementCheckpoint {
     StorageStatementCheckpoint &operator=(const StorageStatementCheckpoint &) = delete;
     ~StorageStatementCheckpoint();
 
-    int begin(mylite_db &database, bool enabled);
+    int begin(mylite_db &database, bool enabled, bool needs_volatile_snapshot);
     int commit(mylite_db &database);
     int rollback(mylite_db &database);
 
@@ -457,6 +470,8 @@ int apply_successful_single_autocommit_control(
     mylite_db &database,
     TransactionControlKind transaction_control
 );
+bool is_use_schema_sql(std::string_view sql);
+void apply_successful_schema_selection(mylite_db &database, std::string_view sql);
 int fetch_statement_row(mylite_stmt &statement);
 int bind_statement_results(mylite_stmt &statement);
 int fetch_truncated_column(mylite_stmt &statement, unsigned column);
@@ -466,6 +481,25 @@ bool mylite_session_ansi_quotes(const mylite_db &database);
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
 void initialize_prepared_temporary_table_lifecycle(mylite_stmt &statement, std::string_view sql);
 void apply_prepared_temporary_table_lifecycle(mylite_db &database, const mylite_stmt &statement);
+void refresh_prepared_statement_checkpoint_plan(mylite_stmt &statement);
+bool prepared_statement_changes_temporary_table_lifecycle(const mylite_stmt &statement);
+bool row_dml_needs_volatile_snapshot(const mylite_db &database, std::string_view sql);
+bool storage_engine_name_is_volatile(std::string_view engine_name);
+void apply_successful_storage_metadata_lifecycle(mylite_db &database, std::string_view sql);
+bool remember_created_table_engine(mylite_db &database, std::string_view sql);
+void remember_table_engine(
+    mylite_db &database,
+    std::string schema_name,
+    std::string table_name,
+    std::string requested_engine_name
+);
+bool tracked_table_engine_needs_volatile_snapshot(
+    const mylite_db &database,
+    std::string_view schema_name,
+    std::string_view table_name,
+    bool *out_needs_snapshot
+);
+void note_storage_metadata_may_change(mylite_db &database);
 int execute_prepared_savepoint_control(mylite_stmt &statement);
 int begin_direct_transaction(mylite_db &database);
 int finish_direct_transaction(mylite_db &database, bool commit);
@@ -679,6 +713,8 @@ bool is_schema_catalog_sql(std::string_view sql);
 bool is_storage_outer_checkpoint_sql(std::string_view sql);
 bool is_row_dml_checkpoint_sql(std::string_view sql);
 bool is_temporary_table_ddl_sql(std::string_view sql);
+bool use_schema_name(std::string_view sql, std::string *out_name);
+bool create_table_name(std::string_view sql, std::string *out_name);
 bool row_dml_targets_tracked_temporary_table(const mylite_db &database, std::string_view sql);
 void apply_temporary_table_lifecycle(mylite_db &database, std::string_view sql);
 bool create_temporary_table_name(std::string_view sql, std::string *out_name);
@@ -1577,9 +1613,11 @@ int exec_impl(
     StorageContextScope storage_context(database);
     set_ok(*database);
     clear_warnings(*database);
+    const std::string_view sql_view(sql);
+    const bool schema_selection_sql = is_use_schema_sql(sql_view);
     const bool ansi_quotes = mylite_session_ansi_quotes(*database);
     const TransactionControlKind transaction_control =
-        direct_transaction_control_kind(std::string_view(sql), ansi_quotes);
+        direct_transaction_control_kind(sql_view, ansi_quotes);
     if (transaction_control == TransactionControlKind::Unsupported) {
         set_error(*database, MYLITE_ERROR, "unsupported SQL transaction control");
         return copy_error_message(*database, errmsg);
@@ -1595,7 +1633,7 @@ int exec_impl(
             bool parsed_savepoint_name = false;
             try {
                 parsed_savepoint_name = direct_savepoint_control_name(
-                    std::string_view(sql),
+                    sql_view,
                     transaction_control,
                     savepoint_name,
                     ansi_quotes
@@ -1620,16 +1658,16 @@ int exec_impl(
 #  endif
     }
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
+    const bool row_dml_checkpoint_sql = is_row_dml_checkpoint_sql(sql_view);
     if (database->transaction_active && database->transaction_read_only &&
-        transaction_control == TransactionControlKind::None &&
-        is_row_dml_checkpoint_sql(std::string_view(sql)) &&
-        !row_dml_targets_tracked_temporary_table(*database, std::string_view(sql))) {
+        transaction_control == TransactionControlKind::None && row_dml_checkpoint_sql &&
+        !row_dml_targets_tracked_temporary_table(*database, sql_view)) {
         set_error(*database, MYLITE_ERROR, "unsupported read-only transaction write SQL surface");
         return copy_error_message(*database, errmsg);
     }
-    const bool temporary_table_ddl = is_temporary_table_ddl_sql(std::string_view(sql));
+    const bool temporary_table_ddl = is_temporary_table_ddl_sql(sql_view);
     const bool storage_outer_checkpoint_sql =
-        is_storage_outer_checkpoint_sql(std::string_view(sql)) && !temporary_table_ddl;
+        is_storage_outer_checkpoint_sql(sql_view) && !temporary_table_ddl;
     if (database->transaction_active && transaction_control == TransactionControlKind::None &&
         storage_outer_checkpoint_sql) {
         set_error(*database, MYLITE_ERROR, "unsupported transactional DDL SQL surface");
@@ -1645,9 +1683,13 @@ int exec_impl(
     StorageStatementCheckpoint checkpoint;
     const bool checkpoint_enabled =
         database->filename != ":memory:" &&
-        (storage_outer_checkpoint_sql ||
-         (database->transaction_active && is_row_dml_checkpoint_sql(std::string_view(sql))));
-    int checkpoint_result = checkpoint.begin(*database, checkpoint_enabled);
+        (storage_outer_checkpoint_sql || (database->transaction_active && row_dml_checkpoint_sql));
+    bool checkpoint_needs_volatile_snapshot = checkpoint_enabled;
+    if (checkpoint_enabled && !storage_outer_checkpoint_sql) {
+        checkpoint_needs_volatile_snapshot = row_dml_needs_volatile_snapshot(*database, sql_view);
+    }
+    int checkpoint_result =
+        checkpoint.begin(*database, checkpoint_enabled, checkpoint_needs_volatile_snapshot);
     if (checkpoint_result != MYLITE_OK) {
         return copy_error_message(*database, errmsg);
     }
@@ -1701,7 +1743,7 @@ int exec_impl(
         return copy_error_message(*database, errmsg);
     }
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
-    if (database->filename != ":memory:" && is_schema_catalog_sql(std::string_view(sql))) {
+    if (database->filename != ":memory:" && is_schema_catalog_sql(sql_view)) {
         const int sync_result = sync_schema_catalog(*database);
         if (sync_result != MYLITE_OK) {
             checkpoint_result = checkpoint.rollback(*database);
@@ -1711,12 +1753,21 @@ int exec_impl(
             return copy_error_message(*database, errmsg);
         }
     }
-    apply_temporary_table_lifecycle(*database, std::string_view(sql));
+    apply_temporary_table_lifecycle(*database, sql_view);
     checkpoint_result = checkpoint.commit(*database);
     if (checkpoint_result != MYLITE_OK) {
         return copy_error_message(*database, errmsg);
     }
+    if (storage_outer_checkpoint_sql) {
+        apply_successful_storage_metadata_lifecycle(*database, sql_view);
+    }
+    if (temporary_table_ddl) {
+        note_storage_metadata_may_change(*database);
+    }
 #  endif
+    if (schema_selection_sql) {
+        apply_successful_schema_selection(*database, sql_view);
+    }
     if (transaction_control != TransactionControlKind::None) {
         const int transaction_result = apply_successful_transaction_control(
             *database,
@@ -1807,6 +1858,7 @@ int prepare_impl(
         std::unique_ptr<mylite_stmt> statement(new mylite_stmt());
         statement->database = database;
         statement->sql.assign(sql, sql_len);
+        statement->selects_schema = is_use_schema_sql(sql_view);
         statement->statement_transaction_control =
             prepared_savepoint_control ? TransactionControlKind::None : transaction_control;
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
@@ -1852,6 +1904,9 @@ int prepare_impl(
             }
             return MYLITE_ERROR;
         }
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        refresh_prepared_statement_checkpoint_plan(*statement);
+#  endif
 
         const unsigned long parameter_count = mysql_stmt_param_count(statement->statement);
         if (parameter_count > static_cast<unsigned long>(UINT_MAX)) {
@@ -2031,11 +2086,21 @@ int execute_statement(mylite_stmt &statement) {
     }
 
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
+    refresh_prepared_statement_checkpoint_plan(statement);
     StorageStatementCheckpoint checkpoint;
     const bool checkpoint_enabled =
         statement.uses_statement_checkpoint ||
         (statement.database->transaction_active && statement.uses_transaction_statement_checkpoint);
-    int checkpoint_result = checkpoint.begin(*statement.database, checkpoint_enabled);
+    const bool checkpoint_needs_volatile_snapshot =
+        statement.uses_statement_checkpoint ||
+        (statement.database->transaction_active &&
+         statement.uses_transaction_statement_checkpoint &&
+         statement.transaction_statement_needs_volatile_snapshot);
+    int checkpoint_result = checkpoint.begin(
+        *statement.database,
+        checkpoint_enabled,
+        checkpoint_needs_volatile_snapshot
+    );
     if (checkpoint_result != MYLITE_OK) {
         return checkpoint_result;
     }
@@ -2097,7 +2162,17 @@ int execute_statement(mylite_stmt &statement) {
         if (checkpoint_result != MYLITE_OK) {
             return checkpoint_result;
         }
+        if (statement.uses_storage_outer_checkpoint) {
+            apply_successful_storage_metadata_lifecycle(*statement.database, statement.sql);
+        }
+        if (!statement.uses_storage_outer_checkpoint &&
+            prepared_statement_changes_temporary_table_lifecycle(statement)) {
+            note_storage_metadata_may_change(*statement.database);
+        }
 #  endif
+        if (statement.selects_schema) {
+            apply_successful_schema_selection(*statement.database, statement.sql);
+        }
         int transaction_result = MYLITE_OK;
         if (statement.statement_transaction_control ==
             TransactionControlKind::SetParameterizedTransactionControl) {
@@ -2428,6 +2503,13 @@ int apply_successful_single_autocommit_control(
     return MYLITE_OK;
 }
 
+void apply_successful_schema_selection(mylite_db &database, std::string_view sql) {
+    std::string schema_name;
+    if (use_schema_name(sql, &schema_name)) {
+        database.current_schema = std::move(schema_name);
+    }
+}
+
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
 void apply_prepared_temporary_table_lifecycle(mylite_db &database, const mylite_stmt &statement) {
     if (!statement.temporary_table_to_remember.empty()) {
@@ -2436,6 +2518,205 @@ void apply_prepared_temporary_table_lifecycle(mylite_db &database, const mylite_
     for (const std::string &name : statement.temporary_tables_to_forget) {
         forget_temporary_table(database, name);
     }
+}
+
+void refresh_prepared_statement_checkpoint_plan(mylite_stmt &statement) {
+    if (!statement.uses_transaction_statement_checkpoint) {
+        return;
+    }
+
+    mylite_db &database = *statement.database;
+    if (statement.transaction_statement_checkpoint_plan_valid &&
+        statement.storage_metadata_epoch == database.storage_metadata_epoch) {
+        return;
+    }
+
+    statement.transaction_statement_needs_volatile_snapshot =
+        row_dml_needs_volatile_snapshot(database, statement.sql);
+    statement.storage_metadata_epoch = database.storage_metadata_epoch;
+    statement.transaction_statement_checkpoint_plan_valid = true;
+}
+
+bool prepared_statement_changes_temporary_table_lifecycle(const mylite_stmt &statement) {
+    return !statement.temporary_table_to_remember.empty() ||
+           !statement.temporary_tables_to_forget.empty();
+}
+
+bool row_dml_needs_volatile_snapshot(const mylite_db &database, std::string_view sql) {
+    if (database.filename == ":memory:") {
+        return false;
+    }
+
+    try {
+        std::string table_name;
+        if (!row_dml_target_table_name(sql, &table_name)) {
+            return true;
+        }
+        if (has_tracked_temporary_table(database, table_name)) {
+            return true;
+        }
+
+        const char *schema_name =
+            !database.current_schema.empty() ? database.current_schema.c_str() : database.mysql.db;
+        if (schema_name == nullptr || schema_name[0] == '\0') {
+            return true;
+        }
+
+        bool tracked_needs_snapshot = true;
+        if (tracked_table_engine_needs_volatile_snapshot(
+                database,
+                schema_name,
+                table_name,
+                &tracked_needs_snapshot
+            )) {
+            return tracked_needs_snapshot;
+        }
+
+        mylite_storage_table_metadata metadata = {};
+        metadata.size = sizeof(metadata);
+        const mylite_storage_result result = mylite_storage_read_table_metadata(
+            database.filename.c_str(),
+            schema_name,
+            table_name.c_str(),
+            &metadata
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            return true;
+        }
+
+        const bool needs_volatile_snapshot =
+            metadata.requested_engine_name != nullptr &&
+            storage_engine_name_is_volatile(metadata.requested_engine_name);
+        mylite_storage_free(metadata.requested_engine_name);
+        mylite_storage_free(metadata.effective_engine_name);
+        return needs_volatile_snapshot;
+    } catch (const std::bad_alloc &) {
+        return true;
+    }
+}
+
+bool storage_engine_name_is_volatile(std::string_view engine_name) {
+    return sql_token_equals(engine_name, "MEMORY") || sql_token_equals(engine_name, "HEAP");
+}
+
+void apply_successful_storage_metadata_lifecycle(mylite_db &database, std::string_view sql) {
+    if (remember_created_table_engine(database, sql)) {
+        note_storage_metadata_may_change(database);
+        return;
+    }
+
+    std::vector<std::string> dropped_table_names;
+    if (drop_table_names(sql, &dropped_table_names)) {
+        for (const std::string &table_name : dropped_table_names) {
+            database.table_engines.erase(
+                std::remove_if(
+                    database.table_engines.begin(),
+                    database.table_engines.end(),
+                    [&table_name](const TrackedTableEngine &entry) {
+                        return entry.table_name == table_name;
+                    }
+                ),
+                database.table_engines.end()
+            );
+        }
+        note_storage_metadata_may_change(database);
+        return;
+    }
+
+    database.table_engines.clear();
+    note_storage_metadata_may_change(database);
+}
+
+bool remember_created_table_engine(mylite_db &database, std::string_view sql) {
+    if (database.current_schema.empty()) {
+        return false;
+    }
+
+    std::string table_name;
+    if (!create_table_name(sql, &table_name)) {
+        return false;
+    }
+
+    mylite_storage_table_metadata metadata = {};
+    metadata.size = sizeof(metadata);
+    const mylite_storage_result result = mylite_storage_read_table_metadata(
+        database.filename.c_str(),
+        database.current_schema.c_str(),
+        table_name.c_str(),
+        &metadata
+    );
+    if (result != MYLITE_STORAGE_OK || metadata.requested_engine_name == nullptr) {
+        mylite_storage_free(metadata.requested_engine_name);
+        mylite_storage_free(metadata.effective_engine_name);
+        return false;
+    }
+
+    try {
+        remember_table_engine(
+            database,
+            database.current_schema,
+            std::move(table_name),
+            metadata.requested_engine_name
+        );
+    } catch (const std::bad_alloc &) {
+        mylite_storage_free(metadata.requested_engine_name);
+        mylite_storage_free(metadata.effective_engine_name);
+        throw;
+    }
+
+    mylite_storage_free(metadata.requested_engine_name);
+    mylite_storage_free(metadata.effective_engine_name);
+    return true;
+}
+
+void remember_table_engine(
+    mylite_db &database,
+    std::string schema_name,
+    std::string table_name,
+    std::string requested_engine_name
+) {
+    auto existing = std::find_if(
+        database.table_engines.begin(),
+        database.table_engines.end(),
+        [&schema_name, &table_name](const TrackedTableEngine &entry) {
+            return entry.schema_name == schema_name && entry.table_name == table_name;
+        }
+    );
+    TrackedTableEngine entry = {
+        std::move(schema_name),
+        std::move(table_name),
+        std::move(requested_engine_name),
+    };
+    if (existing == database.table_engines.end()) {
+        database.table_engines.push_back(std::move(entry));
+        return;
+    }
+    *existing = std::move(entry);
+}
+
+bool tracked_table_engine_needs_volatile_snapshot(
+    const mylite_db &database,
+    std::string_view schema_name,
+    std::string_view table_name,
+    bool *out_needs_snapshot
+) {
+    const auto entry = std::find_if(
+        database.table_engines.begin(),
+        database.table_engines.end(),
+        [schema_name, table_name](const TrackedTableEngine &candidate) {
+            return candidate.schema_name == schema_name && candidate.table_name == table_name;
+        }
+    );
+    if (entry == database.table_engines.end()) {
+        return false;
+    }
+
+    *out_needs_snapshot = storage_engine_name_is_volatile(entry->requested_engine_name);
+    return true;
+}
+
+void note_storage_metadata_may_change(mylite_db &database) {
+    ++database.storage_metadata_epoch;
 }
 
 int execute_prepared_savepoint_control(mylite_stmt &statement) {
@@ -2470,7 +2751,11 @@ StorageStatementCheckpoint::~StorageStatementCheckpoint() {
     }
 }
 
-int StorageStatementCheckpoint::begin(mylite_db &database, bool enabled) {
+int StorageStatementCheckpoint::begin(
+    mylite_db &database,
+    bool enabled,
+    bool needs_volatile_snapshot
+) {
     if (!enabled || database.filename == ":memory:") {
         return MYLITE_OK;
     }
@@ -2480,6 +2765,9 @@ int StorageStatementCheckpoint::begin(mylite_db &database, bool enabled) {
     if (result != MYLITE_STORAGE_OK) {
         set_error(database, map_storage_result(result), "statement checkpoint failed");
         return database.errcode;
+    }
+    if (!needs_volatile_snapshot) {
+        return MYLITE_OK;
     }
     const mylite_storage_result snapshot_result =
         mylite_volatile_begin_snapshot(database.filename.c_str(), &volatile_snapshot_);
@@ -6413,6 +6701,44 @@ bool is_temporary_table_ddl_sql(std::string_view sql) {
     }
 
     return false;
+}
+
+bool is_use_schema_sql(std::string_view sql) {
+    std::string_view rest = skip_sql_leading_noise(sql);
+    return sql_token_equals(pop_sql_token(rest), "USE");
+}
+
+bool use_schema_name(std::string_view sql, std::string *out_name) {
+    std::string_view rest = skip_sql_leading_noise(sql);
+    if (!sql_token_equals(pop_sql_token(rest), "USE")) {
+        return false;
+    }
+    if (!pop_sql_identifier_name(rest, out_name)) {
+        return false;
+    }
+    return sql_rest_is_statement_end(rest);
+}
+
+bool create_table_name(std::string_view sql, std::string *out_name) {
+    std::string_view rest = skip_sql_leading_noise(sql);
+    if (!sql_token_equals(pop_sql_token(rest), "CREATE")) {
+        return false;
+    }
+    if (skip_optional_sql_token(rest, "OR") && !skip_optional_sql_token(rest, "REPLACE")) {
+        return false;
+    }
+    if (skip_optional_sql_token(rest, "TEMPORARY")) {
+        return false;
+    }
+    if (!skip_optional_sql_token(rest, "TABLE")) {
+        return false;
+    }
+    if (skip_optional_sql_token(rest, "IF")) {
+        if (!skip_optional_sql_token(rest, "NOT") || !skip_optional_sql_token(rest, "EXISTS")) {
+            return false;
+        }
+    }
+    return pop_sql_table_reference_name(rest, out_name);
 }
 
 bool row_dml_targets_tracked_temporary_table(const mylite_db &database, std::string_view sql) {

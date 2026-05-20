@@ -271,6 +271,9 @@ lookup on prepared point updates.
 Durable handler write locks now defer MEMORY/HEAP statement snapshots until a
 volatile table participates, while transaction and savepoint snapshots remain
 eager at their SQL boundaries.
+The libmylite prepared-statement checkpoint wrapper now reuses catalog metadata
+to skip statement-level MEMORY/HEAP snapshots for proven durable row-DML targets,
+while keeping unknown and volatile targets conservative.
 Cached active rewrite shapes now skip the redundant row-state page lookup that
 was only needed for uncached shape validation.
 Transient row-id cache buckets now use a one-multiply hash with high-bit folding

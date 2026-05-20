@@ -12,6 +12,7 @@
 static void test_scalar_select(void);
 static void test_table_roundtrip(void);
 static void test_statement_effects(void);
+static void test_transaction_statement_checkpoints(void);
 static void test_segment_reads(void);
 static void test_reset_reuse_and_destructors(void);
 static void test_reset_before_drain_reuse(void);
@@ -34,6 +35,7 @@ static void assert_prepare_one_text_step_succeeds(
     const char *value
 );
 static void assert_prepare_savepoint_control_policy(mylite_db *db, const char *sql);
+static void assert_query_single_int(mylite_db *db, const char *sql, long long value);
 static mylite_stmt *prepare_statement(mylite_db *db, const char *sql);
 static mylite_db *open_database(const char *root, char **filename);
 static char *make_temp_root(void);
@@ -49,6 +51,7 @@ int main(void) {
     test_scalar_select();
     test_table_roundtrip();
     test_statement_effects();
+    test_transaction_statement_checkpoints();
     test_segment_reads();
     test_reset_reuse_and_destructors();
     test_reset_before_drain_reuse();
@@ -248,6 +251,108 @@ static void test_statement_effects(void) {
     assert(mylite_column_int64(select, 2U) == 3);
     assert(mylite_step(select) == MYLITE_DONE);
     assert(mylite_finalize(select) == MYLITE_OK);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_transaction_statement_checkpoints(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    mylite_stmt *durable_insert = NULL;
+    mylite_stmt *memory_insert = NULL;
+    mylite_stmt *memory_duplicate_insert = NULL;
+
+    assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "USE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(
+            db,
+            "CREATE TABLE durable_posts ("
+            "id INT NOT NULL PRIMARY KEY,"
+            "title VARCHAR(32) NOT NULL UNIQUE"
+            ") ENGINE=InnoDB",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(
+        mylite_exec(
+            db,
+            "CREATE TABLE memory_posts ("
+            "id INT NOT NULL PRIMARY KEY,"
+            "title VARCHAR(32) NOT NULL UNIQUE"
+            ") ENGINE=MEMORY",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+
+    durable_insert = prepare_statement(db, "INSERT INTO durable_posts VALUES (?, ?)");
+    memory_insert = prepare_statement(db, "INSERT INTO memory_posts VALUES (?, ?)");
+
+    assert(mylite_exec(db, "BEGIN", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_bind_int64(durable_insert, 1U, 1) == MYLITE_OK);
+    assert(
+        mylite_bind_text(
+            durable_insert,
+            2U,
+            "durable-rolled",
+            MYLITE_NUL_TERMINATED,
+            MYLITE_STATIC
+        ) == MYLITE_OK
+    );
+    assert(mylite_step(durable_insert) == MYLITE_DONE);
+    assert(mylite_bind_int64(memory_insert, 1U, 1) == MYLITE_OK);
+    assert(
+        mylite_bind_text(
+            memory_insert,
+            2U,
+            "memory-rolled",
+            MYLITE_NUL_TERMINATED,
+            MYLITE_STATIC
+        ) == MYLITE_OK
+    );
+    assert(mylite_step(memory_insert) == MYLITE_DONE);
+    assert(mylite_exec(db, "ROLLBACK", NULL, NULL, NULL) == MYLITE_OK);
+
+    assert_query_single_int(db, "SELECT COUNT(*) FROM durable_posts", 0);
+    assert_query_single_int(db, "SELECT COUNT(*) FROM memory_posts", 0);
+    assert(mylite_finalize(durable_insert) == MYLITE_OK);
+    assert(mylite_finalize(memory_insert) == MYLITE_OK);
+
+    memory_duplicate_insert =
+        prepare_statement(db, "INSERT INTO memory_posts (id, title) VALUES (?, ?), (?, ?)");
+    assert(mylite_exec(db, "BEGIN", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_bind_int64(memory_duplicate_insert, 1U, 2) == MYLITE_OK);
+    assert(
+        mylite_bind_text(
+            memory_duplicate_insert,
+            2U,
+            "duplicate",
+            MYLITE_NUL_TERMINATED,
+            MYLITE_STATIC
+        ) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(memory_duplicate_insert, 3U, 3) == MYLITE_OK);
+    assert(
+        mylite_bind_text(
+            memory_duplicate_insert,
+            4U,
+            "duplicate",
+            MYLITE_NUL_TERMINATED,
+            MYLITE_STATIC
+        ) == MYLITE_OK
+    );
+    assert(mylite_step(memory_duplicate_insert) == MYLITE_ERROR);
+    assert_query_single_int(db, "SELECT COUNT(*) FROM memory_posts WHERE title = 'duplicate'", 0);
+    assert(mylite_exec(db, "ROLLBACK", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_finalize(memory_duplicate_insert) == MYLITE_OK);
 
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);
@@ -1478,6 +1583,15 @@ static void assert_prepare_savepoint_control_policy(mylite_db *db, const char *s
     assert(mylite_mariadb_errno(db) == 0U);
     assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
     assert(strstr(mylite_errmsg(db), "transaction control") != NULL);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+}
+
+static void assert_query_single_int(mylite_db *db, const char *sql, long long value) {
+    mylite_stmt *stmt = prepare_statement(db, sql);
+    assert(mylite_column_count(stmt) == 1U);
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(stmt, 0U) == value);
+    assert(mylite_step(stmt) == MYLITE_DONE);
     assert(mylite_finalize(stmt) == MYLITE_OK);
 }
 
