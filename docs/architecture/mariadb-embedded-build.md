@@ -1,9 +1,9 @@
 # MariaDB Embedded Build
 
 This document records the reproducible MariaDB embedded-library baseline for
-MyLite. The baseline is intentionally broad: it proves the imported MariaDB
-source can build an embedded archive before MyLite starts trimming server
-surface or removing compatibility-sensitive code.
+MyLite. The baseline keeps core SQL, native storage, and application-facing
+types intact while trimming server-only surfaces that do not fit the embedded
+runtime.
 
 ## Command
 
@@ -34,6 +34,7 @@ WITH_WSREP=OFF
 PLUGIN_S3=NO
 PLUGIN_PERFSCHEMA=NO
 PLUGIN_FEEDBACK=NO
+ENABLED_PROFILING=OFF
 ```
 
 `CMAKE_BUILD_TYPE=MinSizeRel` makes the embedded MariaDB archive optimize for
@@ -48,7 +49,9 @@ omits `wsrep-lib` and `storage/maria/libmarias3`.
 from the embedded archive. If a custom MariaDB build includes Performance
 Schema, MyLite still passes `--performance-schema=OFF`; otherwise the omitted
 plugin is the disabled contract. `PLUGIN_FEEDBACK=NO` omits MariaDB's telemetry
-and usage-reporting plugin from the embedded profile.
+and usage-reporting plugin from the embedded profile. `ENABLED_PROFILING=OFF`
+omits statement-profiling implementation code while preserving MariaDB's
+disabled `@@have_profiling=NO` contract.
 
 ## Measurement
 
@@ -64,19 +67,20 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 30,296,952 bytes / 28.89 MiB |
+| Archive size | 30,228,928 bytes / 28.83 MiB |
 | Archive members | 707 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
 32.27 MiB. With `MinSizeRel`, the unused Performance Schema static plugin
-disabled, the Feedback plugin omitted, and embedded `HELP` compiled to an
-unsupported-command stub, the pre-strip archive is 30,947,928 bytes / 29.51
-MiB. Post-build `strip -S -x` plus `ranlib` saves another 650,976 bytes
+disabled, the Feedback plugin omitted, statement profiling disabled, and
+embedded `HELP` compiled to an unsupported-command stub, the pre-strip archive
+is 30,879,320 bytes / 29.45 MiB. Post-build `strip -S -x` plus `ranlib` saves
+another 650,392 bytes
 without changing archive membership or runtime behavior. The final archive is
-62,160 bytes smaller than the same profile with `HELP` still built, 1,232,752
-bytes smaller than the Release build with Performance Schema disabled,
-2,832,688 bytes smaller than the symbol-stripped baseline that still built
-Performance Schema, and 3,545,368 bytes smaller than the original broad
+68,024 bytes smaller than the same profile with statement profiling enabled,
+1,300,776 bytes smaller than the Release build with Performance Schema
+disabled, 2,900,712 bytes smaller than the symbol-stripped baseline that still
+built Performance Schema, and 3,613,392 bytes smaller than the original broad
 archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
@@ -106,7 +110,8 @@ future profile hardening should disable unwanted surfaces intentionally.
 Performance Schema is not part of the default embedded archive; the
 server-surface policy treats it as either omitted by the build profile or
 disabled when a custom build includes it. `HELP` is present only as a small
-unsupported-command shim in the embedded archive.
+unsupported-command shim in the embedded archive. Statement profiling reports
+`@@have_profiling=NO` and top-level profiling commands are rejected by policy.
 
 ## Disabled Or Missing Surface
 
@@ -117,6 +122,7 @@ The baseline explicitly disables:
 - Performance Schema
 - Feedback reporting
 - SQL `HELP` table lookup
+- Statement profiling
 - MariaDB upstream unit-test targets
 
 Configure also reports unavailable optional features on this host, including

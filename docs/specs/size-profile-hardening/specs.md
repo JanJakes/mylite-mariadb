@@ -7,9 +7,9 @@ important MySQL/MariaDB behavior. The first safe steps are packaging hygiene,
 size-oriented compilation, and omission of already-disabled server surfaces:
 remove debug and local-symbol metadata from the embedded static archive, build
 the embedded archive with size-oriented release flags, and avoid building the
-unused Performance Schema and Feedback static plugins. Server help-table
-lookup is also replaced with an unsupported-command shim because `HELP` is not
-part of the embedded application SQL profile.
+unused Performance Schema and Feedback static plugins. Server help-table lookup
+and statement profiling are also compiled to disabled surfaces because neither
+belongs to the embedded application SQL profile.
 
 ## Source Findings
 
@@ -42,6 +42,10 @@ part of the embedded application SQL profile.
   28.95 MiB, and 707 members.
 - Replacing embedded `HELP` execution with unsupported-command stubs reduces
   the stripped archive to 30,296,952 bytes, 28.89 MiB, and 707 members.
+- Disabling statement profiling with MariaDB's `ENABLED_PROFILING=OFF` switch
+  reduces the stripped archive to 30,228,928 bytes, 28.83 MiB, and 707
+  members. The stripped `sql_profile.cc.o` member drops from 48,152 bytes to
+  7,376 bytes while preserving MariaDB's `@@have_profiling=NO` contract.
 
 ## Proposed Design
 
@@ -67,6 +71,11 @@ The embedded `sql_help.cc` build keeps only small unsupported-command stubs.
 MyLite rejects `HELP` in the SQL policy before dispatch, and the MariaDB stubs
 preserve fail-closed behavior if the policy is bypassed.
 
+The embedded baseline disables statement profiling with `ENABLED_PROFILING=OFF`.
+MyLite rejects top-level `SHOW PROFILE`, `SHOW PROFILES`, and profiling
+variable assignment before dispatch so profiling remains unsupported even if a
+custom MariaDB build enables the upstream profiling code.
+
 The wrapper keeps this behavior enabled by default because it is the
 distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
 need an unstripped archive for local inspection.
@@ -74,8 +83,9 @@ need an unstripped archive for local inspection.
 ## Affected MariaDB Subsystems
 
 The Performance Schema storage-engine plugin and Feedback reporting plugin are
-omitted by CMake configuration, embedded `HELP` is compiled to stubs, and the
-compiled objects use size-oriented release flags.
+omitted by CMake configuration, embedded `HELP` and statement profiling are
+compiled to disabled surfaces, and the compiled objects use size-oriented
+release flags.
 
 ## Compatibility Impact
 
@@ -84,7 +94,9 @@ syntax, functions, data types, collations, supported storage engines,
 diagnostics, or public C API behavior. Performance Schema remains outside the
 core embedded profile, and Feedback reporting is not part of the embedded
 runtime contract. SQL `HELP` is a server help-table surface and is explicitly
-unsupported in the embedded profile.
+unsupported in the embedded profile. Statement profiling is a diagnostic
+server surface, not application data behavior, and is explicitly unsupported in
+the embedded profile.
 
 ## Database-Directory And Lifecycle Impact
 
@@ -105,10 +117,11 @@ run against the same native engine members.
 The first step is archive-only: 712,680 bytes from debug/local-symbol
 stripping. Disabling Performance Schema removes unused static plugin members.
 Switching the same profile to `MinSizeRel`, omitting Feedback, and compiling
-embedded `HELP` to stubs brings the current archive to 30,296,952 bytes / 28.89
-MiB, 1,232,752 bytes smaller than the Release build with Performance Schema
-disabled and 2,832,688 bytes smaller than the symbol-stripped baseline with
-Performance Schema still built.
+embedded `HELP` to stubs brings the archive to 30,296,952 bytes / 28.89 MiB.
+Disabling statement profiling brings the current archive to 30,228,928 bytes /
+28.83 MiB, 1,300,776 bytes smaller than the Release build with Performance
+Schema disabled and 2,900,712 bytes smaller than the symbol-stripped baseline
+with Performance Schema still built.
 
 ## License Or Dependency Impact
 
@@ -137,11 +150,12 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
   or disabled at runtime.
 - Feedback reporting is omitted from the embedded archive.
 - SQL `HELP` fails through the MyLite policy and the embedded MariaDB stub.
+- Statement profiling is disabled in the embedded archive and profiling SQL
+  fails through the MyLite policy.
 - The stripped archive still links `libmylite` and all embedded tests.
 - The measured archive size and member count are recorded in the build
   documentation.
-- Compatibility documentation remains unchanged because no runtime behavior is
-  removed.
+- Compatibility documentation records unsupported server diagnostic surfaces.
 
 ## Risks And Unresolved Questions
 

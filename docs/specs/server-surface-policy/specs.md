@@ -4,8 +4,8 @@
 
 MyLite's core API is an embedded, directory-owned database runtime. Server-owned
 surfaces such as account management, dynamic plugin installation, replication,
-binlog inspection, event scheduling, and server help-table lookup do not fit
-that lifetime model and can
+binlog inspection, event scheduling, server help-table lookup, and statement
+profiling do not fit that lifetime model and can
 also create durable sidecar files or system-table dependencies. This slice makes
 those boundaries explicit and covered by tests.
 
@@ -35,6 +35,11 @@ those boundaries explicit and covered by tests.
 - `mariadb/sql/events.cc` implements the event scheduler and event metadata
   paths around `mysql.event`; scheduler behavior is outside the core embedded
   profile.
+- `mariadb/sql/sql_parse.cc`, `mariadb/sql/sql_profile.cc`, and
+  `mariadb/sql/sys_vars.cc` wire `SHOW PROFILE`, `SHOW PROFILES`,
+  `profiling`, and `profiling_history_size` behind MariaDB's
+  `ENABLED_PROFILING` option. MyLite treats this as a server diagnostic
+  surface and keeps `@@have_profiling=NO` in the default profile.
 
 ## Proposed Design
 
@@ -51,7 +56,7 @@ Use two layers:
    prepared-statement preparation for command families that are server-owned:
    users, roles, grants, password changes, dynamic plugins, events, replication,
    binlog administration and inspection, foreign-server metadata, SQL help-table
-   lookup, and selected server-surface variables.
+   lookup, statement profiling, and selected server-surface variables.
 
 The gate is not a general SQL parser. It is a narrow first-token policy check
 for statement families whose top-level MariaDB commands are incompatible with
@@ -64,6 +69,7 @@ MariaDB.
 - Dynamic plugin loader.
 - Replication and binlog command paths.
 - Event scheduler and help-table command paths.
+- Statement profiling command paths and variables.
 - Performance schema startup.
 - Embedded startup option handling.
 
@@ -124,12 +130,13 @@ No new dependencies or license changes.
 - Label it `compat.server-surface`, `compat.directory-boundary`, and
   `compat.query`.
 - Cover startup variables for disabled binlog, performance schema, grant
-  tables, networking, and database-local plugin directory.
+  tables, networking, statement profiling, and database-local plugin directory.
 - Cover rejected direct SQL for account, grant, event, plugin, replication, and
   binlog command families, including executable-comment wrappers that MariaDB
   treats as SQL and common syntax variants such as `CREATE OR REPLACE`,
   `CREATE DEFINER ... EVENT`, `INSTALL SONAME`, `SET SQL_LOG_BIN`, and
-  `@@GLOBAL` variable assignment, and `HELP`.
+  `@@GLOBAL` variable assignment, `HELP`, `SHOW PROFILE`, `SHOW PROFILES`, and
+  profiling variable assignment.
 - Cover rejected prepared SQL for at least one server-owned statement family.
 - Assert server-sidecar files and system-table directories are absent.
 - Run:
@@ -147,9 +154,12 @@ No new dependencies or license changes.
 ## Acceptance Criteria
 
 - Startup variables prove disabled binlog, disabled performance schema,
-  disabled grant tables, disabled networking, and contained plugin directory.
+  disabled statement profiling, disabled grant tables, disabled networking, and
+  contained plugin directory.
 - Account, grant, event, plugin, replication, and binlog command families fail
   through a stable MyLite policy diagnostic.
+- SQL help and statement-profiling command families fail through the same
+  policy diagnostic.
 - MySQL/MariaDB executable comments cannot bypass the server-surface policy.
 - Direct execution and prepared statements share the same policy.
 - Rejected server commands do not create durable server sidecars or system-table
@@ -161,8 +171,7 @@ No new dependencies or license changes.
 
 - The policy gate is intentionally narrow. More server-owned statement families
   may be added as later compatibility work exposes them.
-- Performance schema code remains in the MariaDB archive until the later size
-  profile hardening slice. This slice disables it at startup and tests the
-  runtime contract only.
+- Size-profile slices may omit code for server surfaces only after this policy
+  coverage proves the unsupported runtime contract.
 - A future wire-protocol integration may need different user-facing diagnostics,
   but it should still preserve the same unsupported core behavior.

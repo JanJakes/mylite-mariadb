@@ -147,10 +147,11 @@ static mylite_db *open_database(open_database_paths paths) {
 static void assert_runtime_policy_variables(mylite_db *db, const char *database_path) {
     static const char *const variable_columns[] = {
         "log_bin",
+        "have_profiling",
         "skip_grant_tables",
         "skip_networking",
     };
-    static const char *const variable_values[] = {"0", "1", "1"};
+    static const char *const variable_values[] = {"0", "NO", "1", "1"};
     char *plugin_directory = path_join(database_path, "run/plugins");
 
     query_expect(
@@ -158,9 +159,10 @@ static void assert_runtime_policy_variables(mylite_db *db, const char *database_
         (expected_query){
             .sql = "SELECT "
                    "@@log_bin AS log_bin, "
+                   "@@have_profiling AS have_profiling, "
                    "@@skip_grant_tables AS skip_grant_tables, "
                    "@@skip_networking AS skip_networking",
-            .column_count = 3,
+            .column_count = 4,
             .row_count = 1,
             .column_names = variable_columns,
             .values = variable_values,
@@ -303,6 +305,11 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_error(db, "SHOW BINARY LOGS", "server-owned SQL surface");
     expect_error(db, "SHOW BINLOG EVENTS", "server-owned SQL surface");
     expect_error(db, "HELP SELECT", "server-owned SQL surface");
+    expect_error(db, "SHOW PROFILES", "server-owned SQL surface");
+    expect_error(db, "SHOW PROFILE CPU FOR QUERY 1", "server-owned SQL surface");
+    expect_error(db, "SET profiling = 1", "server-owned SQL surface");
+    expect_error(db, "SET @@session.profiling = 1", "server-owned SQL surface");
+    expect_error(db, "SET profiling_history_size = 10", "server-owned SQL surface");
     expect_prepare_error(
         db,
         "CREATE USER 'prepared_user'@'localhost' IDENTIFIED BY 'secret'",
@@ -315,6 +322,8 @@ static void assert_server_sql_rejected(mylite_db *db) {
     );
     expect_prepare_error(db, "SET @@GLOBAL.SQL_LOG_BIN = 1", "server-owned SQL surface");
     expect_prepare_error(db, "HELP SELECT", "server-owned SQL surface");
+    expect_prepare_error(db, "SHOW PROFILES", "server-owned SQL surface");
+    expect_prepare_error(db, "SET profiling = 1", "server-owned SQL surface");
 }
 
 static void assert_no_server_sidecar_files(const char *database_path) {
