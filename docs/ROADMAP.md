@@ -239,7 +239,10 @@ row validation shortcut while avoiding repeated allocation/free in ordinary
 single-row prepared updates. Active row DML now defers durable cache retargeting
 to statement commit, so prepared updates in a transaction do not rescan durable
 cache sets on every row mutation while rollback still discards pending cache
-work.
+work. Cached-shape buffered row rewrites with unchanged index entries now skip
+replacement state-page and index-page checks after the shape has been validated
+once in the active append buffer, while still capturing per-statement rollback
+preimages before mutation.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation

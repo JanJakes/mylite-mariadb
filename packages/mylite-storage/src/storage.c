@@ -12636,6 +12636,25 @@ static mylite_storage_result rewrite_active_update_pages(
             return MYLITE_STORAGE_OK;
         }
     }
+    if (use_cached_shape && changed_entry_count == 0U) {
+        result = capture_buffered_page_undo_from_page(
+            statement,
+            row_id,
+            current_page_ref.page,
+            current_page_ref.checksum_dirty,
+            buffered_row_page_undo_used_size(current_page_ref.page)
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+
+        rewrite_buffered_row_page(current_page_ref.page, row, row_size);
+        if (current_page_ref.checksum_dirty != NULL) {
+            *current_page_ref.checksum_dirty = 1U;
+        }
+        *out_rewritten = 1;
+        return MYLITE_STORAGE_OK;
+    }
 
     const unsigned char *state_page =
         buffered_append_page_in_statement(buffer_statement, state_page_id, header->page_size);
