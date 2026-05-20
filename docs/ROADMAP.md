@@ -256,6 +256,8 @@ cache lookup from routed point-update reads.
 Indexed-row payload lookup now relies on the successful validated live-row mark
 as its single cache update, since that mark already records the row as both
 live and validated.
+Exact-index cache probes now compare 1/2/4/8-byte key images with fixed-size
+loads, keeping `memcmp()` only for larger or variable-width keys.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation

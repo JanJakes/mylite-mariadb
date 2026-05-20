@@ -120,6 +120,7 @@ static void test_durable_live_row_cache(void);
 static void test_deferred_durable_cache_retarget(void);
 static void test_active_live_row_list_maintenance(void);
 static void test_index_entries(void);
+static void test_exact_index_cache_fixed_size_keys(void);
 static void test_cached_exact_index_entryset_bulk_append(void);
 static void test_active_exact_index_cache_many_replacements(void);
 static void test_large_append_buffer_savepoint_rollback(void);
@@ -399,6 +400,7 @@ int main(void) {
     test_deferred_durable_cache_retarget();
     test_active_live_row_list_maintenance();
     test_index_entries();
+    test_exact_index_cache_fixed_size_keys();
     test_cached_exact_index_entryset_bulk_append();
     test_active_exact_index_cache_many_replacements();
     test_large_append_buffer_savepoint_rollback();
@@ -2676,6 +2678,124 @@ static void test_index_entries(void) {
         mylite_storage_read_indexed_rows(filename, "app", "posts", NULL, 1U, &misuse_rows) ==
         MYLITE_STORAGE_MISUSE
     );
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_exact_index_cache_fixed_size_keys(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row[] = {0x41U, 0x42U};
+    static const unsigned char key_1[] = {0x1aU};
+    static const unsigned char missing_key_1[] = {0x1bU};
+    static const unsigned char key_2[] = {0x2aU, 0x2bU};
+    static const unsigned char missing_key_2[] = {0x2aU, 0x2cU};
+    static const unsigned char key_4[] = {0x4aU, 0x4bU, 0x4cU, 0x4dU};
+    static const unsigned char missing_key_4[] = {0x4aU, 0x4bU, 0x4cU, 0x4eU};
+    static const unsigned char key_8[] = {
+        0x8aU,
+        0x8bU,
+        0x8cU,
+        0x8dU,
+        0x8eU,
+        0x8fU,
+        0x90U,
+        0x91U,
+    };
+    static const unsigned char missing_key_8[] = {
+        0x8aU,
+        0x8bU,
+        0x8cU,
+        0x8dU,
+        0x8eU,
+        0x8fU,
+        0x90U,
+        0x92U,
+    };
+    char *root = make_temp_root();
+    char *filename = path_join(root, "exact-index-cache-fixed-size-keys.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_index_entry entries[] = {
+        {.size = sizeof(entries[0]), .index_number = 0U, .key = key_1, .key_size = sizeof(key_1)},
+        {.size = sizeof(entries[1]), .index_number = 1U, .key = key_2, .key_size = sizeof(key_2)},
+        {.size = sizeof(entries[2]), .index_number = 2U, .key = key_4, .key_size = sizeof(key_4)},
+        {.size = sizeof(entries[3]), .index_number = 3U, .key = key_8, .key_size = sizeof(key_8)},
+    };
+    unsigned long long row_id = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row,
+            sizeof(row),
+            entries,
+            sizeof(entries) / sizeof(entries[0]),
+            &row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    const unsigned long long expected_row_ids[] = {row_id};
+
+    assert_index_entry_lookup(filename, 0U, key_1, sizeof(key_1), MYLITE_STORAGE_OK, row_id);
+    assert_index_entry_lookup(
+        filename,
+        0U,
+        missing_key_1,
+        sizeof(missing_key_1),
+        MYLITE_STORAGE_NOTFOUND,
+        0ULL
+    );
+    assert_exact_index_entries(filename, 0U, key_1, sizeof(key_1), expected_row_ids, 1U);
+    assert_exact_index_entries(filename, 0U, missing_key_1, sizeof(missing_key_1), NULL, 0U);
+
+    assert_index_entry_lookup(filename, 1U, key_2, sizeof(key_2), MYLITE_STORAGE_OK, row_id);
+    assert_index_entry_lookup(
+        filename,
+        1U,
+        missing_key_2,
+        sizeof(missing_key_2),
+        MYLITE_STORAGE_NOTFOUND,
+        0ULL
+    );
+    assert_exact_index_entries(filename, 1U, key_2, sizeof(key_2), expected_row_ids, 1U);
+    assert_exact_index_entries(filename, 1U, missing_key_2, sizeof(missing_key_2), NULL, 0U);
+
+    assert_index_entry_lookup(filename, 2U, key_4, sizeof(key_4), MYLITE_STORAGE_OK, row_id);
+    assert_index_entry_lookup(
+        filename,
+        2U,
+        missing_key_4,
+        sizeof(missing_key_4),
+        MYLITE_STORAGE_NOTFOUND,
+        0ULL
+    );
+    assert_exact_index_entries(filename, 2U, key_4, sizeof(key_4), expected_row_ids, 1U);
+    assert_exact_index_entries(filename, 2U, missing_key_4, sizeof(missing_key_4), NULL, 0U);
+
+    assert_index_entry_lookup(filename, 3U, key_8, sizeof(key_8), MYLITE_STORAGE_OK, row_id);
+    assert_index_entry_lookup(
+        filename,
+        3U,
+        missing_key_8,
+        sizeof(missing_key_8),
+        MYLITE_STORAGE_NOTFOUND,
+        0ULL
+    );
+    assert_exact_index_entries(filename, 3U, key_8, sizeof(key_8), expected_row_ids, 1U);
+    assert_exact_index_entries(filename, 3U, missing_key_8, sizeof(missing_key_8), NULL, 0U);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);

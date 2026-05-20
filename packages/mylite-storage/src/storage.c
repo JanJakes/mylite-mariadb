@@ -2538,6 +2538,7 @@ static size_t exact_index_cache_bucket_for_key(
     const unsigned char *key
 );
 static size_t exact_index_cache_bucket_count(size_t entry_count);
+static int key_bytes_equal(const unsigned char *left, const unsigned char *right, size_t key_size);
 static size_t hash_key_bytes(const unsigned char *key, size_t key_size);
 static void clear_exact_index_cache_buckets(mylite_storage_exact_index_cache *cache);
 static void unlink_exact_index_cache_row_id_bucket_entry(
@@ -16775,7 +16776,7 @@ static mylite_storage_result find_exact_index_cache_entry_row_id(
             continue;
         }
         const unsigned char *entry_key = cache->keys + (entry_index * cache->key_size);
-        if (memcmp(entry_key, key, cache->key_size) == 0) {
+        if (key_bytes_equal(entry_key, key, cache->key_size)) {
             *out_row_id = cache->row_ids[entry_index];
             break;
         }
@@ -16809,7 +16810,7 @@ static mylite_storage_result append_exact_index_cache_matches_to_entryset(
             continue;
         }
         const unsigned char *entry_key = cache->keys + (entry_index * cache->key_size);
-        if (memcmp(entry_key, key, cache->key_size) != 0) {
+        if (!key_bytes_equal(entry_key, key, cache->key_size)) {
             continue;
         }
         ++match_count;
@@ -18875,6 +18876,36 @@ static size_t exact_index_cache_bucket_count(size_t entry_count) {
         bucket_count *= 2U;
     }
     return bucket_count;
+}
+
+static int key_bytes_equal(const unsigned char *left, const unsigned char *right, size_t key_size) {
+    switch (key_size) {
+    case 1U:
+        return left[0] == right[0];
+    case 2U: {
+        uint16_t left_value = 0U;
+        uint16_t right_value = 0U;
+        memcpy(&left_value, left, sizeof(left_value));
+        memcpy(&right_value, right, sizeof(right_value));
+        return left_value == right_value;
+    }
+    case 4U: {
+        uint32_t left_value = 0U;
+        uint32_t right_value = 0U;
+        memcpy(&left_value, left, sizeof(left_value));
+        memcpy(&right_value, right, sizeof(right_value));
+        return left_value == right_value;
+    }
+    case 8U: {
+        uint64_t left_value = 0ULL;
+        uint64_t right_value = 0ULL;
+        memcpy(&left_value, left, sizeof(left_value));
+        memcpy(&right_value, right, sizeof(right_value));
+        return left_value == right_value;
+    }
+    default:
+        return memcmp(left, right, key_size) == 0;
+    }
 }
 
 static size_t hash_key_bytes(const unsigned char *key, size_t key_size) {
