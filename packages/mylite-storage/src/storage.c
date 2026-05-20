@@ -650,6 +650,11 @@ static mylite_storage_statement *active_row_payload_cache_statement_for(const ch
 static mylite_storage_statement *active_statement_for_file(FILE *file);
 static mylite_storage_statement *active_read_statement_for_file(FILE *file);
 static mylite_storage_statement *append_page_buffer_statement_for_file(FILE *file);
+static void active_statement_and_append_buffer_for_file(
+    FILE *file,
+    mylite_storage_statement **out_active,
+    mylite_storage_statement **out_append_buffer
+);
 static int active_statement_has_file(FILE *file);
 static int active_read_statement_has_file(FILE *file);
 static int active_read_snapshot_has_file(FILE *file);
@@ -7803,6 +7808,29 @@ static mylite_storage_statement *append_page_buffer_statement_for_file(FILE *fil
     return buffer_statement;
 }
 
+static void active_statement_and_append_buffer_for_file(
+    FILE *file,
+    mylite_storage_statement **out_active,
+    mylite_storage_statement **out_append_buffer
+) {
+    *out_active = NULL;
+    *out_append_buffer = NULL;
+    if (file == NULL || active_read_snapshot_has_file(file)) {
+        return;
+    }
+
+    for (mylite_storage_statement *statement = active_statement; statement != NULL;
+         statement = statement->parent) {
+        if (statement->file != file || statement->owner != active_context_owner) {
+            continue;
+        }
+        if (*out_active == NULL) {
+            *out_active = statement;
+        }
+        *out_append_buffer = statement;
+    }
+}
+
 static int active_statement_has_file(FILE *file) {
     if (file == NULL) {
         return 0;
@@ -8689,8 +8717,9 @@ static mylite_storage_result buffer_append_pages_at_raw(
         return MYLITE_STORAGE_OK;
     }
 
-    mylite_storage_statement *active = active_statement_for_file(file);
-    mylite_storage_statement *buffer_statement = append_page_buffer_statement_for_file(file);
+    mylite_storage_statement *active = NULL;
+    mylite_storage_statement *buffer_statement = NULL;
+    active_statement_and_append_buffer_for_file(file, &active, &buffer_statement);
     if (active == NULL || buffer_statement == NULL) {
         return MYLITE_STORAGE_OK;
     }
@@ -11920,8 +11949,9 @@ static mylite_storage_result rewrite_active_update_pages(
 ) {
     *out_rewritten = 0;
 
-    mylite_storage_statement *statement = active_statement_for_file(file);
-    mylite_storage_statement *buffer_statement = append_page_buffer_statement_for_file(file);
+    mylite_storage_statement *statement = NULL;
+    mylite_storage_statement *buffer_statement = NULL;
+    active_statement_and_append_buffer_for_file(file, &statement, &buffer_statement);
     const size_t row_payload_capacity =
         MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET;
     if (statement == NULL || header->page_size != MYLITE_STORAGE_FORMAT_PAGE_SIZE ||

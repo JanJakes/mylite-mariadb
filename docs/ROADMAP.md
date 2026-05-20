@@ -250,6 +250,9 @@ row-DML statements inside an active transaction.
 Storage page integer accessors now use hot inline definitions while keeping the
 existing byte-wise little-endian encoding, removing tiny helper call overhead
 from hot row/index page update paths without relying on unaligned host loads.
+Buffered row-DML now coalesces adjacent active-statement and append-buffer
+lookups for hot append/rewrite paths, preserving nearest active statement versus
+outermost append-buffer semantics while avoiding duplicate statement-chain scans.
 
 ## Size And Profile Direction
 
