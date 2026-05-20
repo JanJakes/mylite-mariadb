@@ -523,6 +523,7 @@ static _Thread_local mylite_storage_exact_index_cache_set durable_exact_index_ca
 static _Thread_local mylite_storage_row_payload_cache_set durable_row_payload_caches;
 static _Thread_local unsigned long long durable_row_payload_caches_generation;
 static _Thread_local mylite_storage_index_leaf_page_cache_set durable_index_leaf_page_caches;
+static _Thread_local mylite_storage_statement *reusable_nested_checkpoint_statement;
 static _Thread_local mylite_storage_buffered_page_undo_list reusable_buffered_page_undos;
 
 #define MYLITE_STORAGE_INDEX_ROOT_CATALOG_RESERVE_BYTES 1024U
@@ -696,6 +697,10 @@ static mylite_storage_result begin_checkpoint(
     mylite_storage_statement **out_statement,
     int durable_transaction
 );
+static mylite_storage_statement *allocate_checkpoint_statement(
+    const mylite_storage_statement *parent
+);
+static void initialize_nested_checkpoint_storage(mylite_storage_statement *statement);
 static mylite_storage_result initialize_checkpoint_statement(
     mylite_storage_statement *statement,
     const char *filename,
@@ -6398,8 +6403,7 @@ static mylite_storage_result begin_checkpoint(
     if (durable_transaction && parent != NULL) {
         return MYLITE_STORAGE_MISUSE;
     }
-    mylite_storage_statement *statement =
-        (mylite_storage_statement *)calloc(1U, sizeof(*statement));
+    mylite_storage_statement *statement = allocate_checkpoint_statement(parent);
     if (statement == NULL) {
         return MYLITE_STORAGE_NOMEM;
     }
@@ -6435,6 +6439,57 @@ static mylite_storage_result begin_checkpoint(
     active_statement = statement;
     *out_statement = statement;
     return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_statement *allocate_checkpoint_statement(
+    const mylite_storage_statement *parent
+) {
+    if (parent == NULL) {
+        return (mylite_storage_statement *)calloc(1U, sizeof(mylite_storage_statement));
+    }
+
+    mylite_storage_statement *statement = reusable_nested_checkpoint_statement;
+    if (statement != NULL) {
+        reusable_nested_checkpoint_statement = NULL;
+    } else {
+        statement = (mylite_storage_statement *)malloc(sizeof(mylite_storage_statement));
+    }
+    if (statement != NULL) {
+        initialize_nested_checkpoint_storage(statement);
+    }
+    return statement;
+}
+
+static void initialize_nested_checkpoint_storage(mylite_storage_statement *statement) {
+    statement->file = NULL;
+    statement->filename = NULL;
+    statement->device = 0;
+    statement->inode = 0;
+    statement->parent = NULL;
+    statement->owner = NULL;
+    statement->header = (mylite_storage_header){0};
+    statement->current_header = (mylite_storage_header){0};
+    statement->current_catalog_root_page = 0ULL;
+    statement->current_catalog_generation = 0ULL;
+    statement->has_header_page = 0;
+    statement->owns_file = 0;
+    statement->owns_filename = 0;
+    statement->has_current_header = 0;
+    statement->current_header_dirty = 0;
+    statement->has_current_catalog_page = 0;
+    statement->owns_recovery_journal = 0;
+    statement->owns_transaction_journal = 0;
+    statement->preserve_auto_increment_rollback = 0;
+    statement->cache_file_on_close = 0;
+    statement->has_identity = 0;
+    statement->exact_index_caches = (mylite_storage_exact_index_cache_set){0};
+    statement->live_row_caches = (mylite_storage_live_row_cache_set){0};
+    statement->live_row_id_caches = (mylite_storage_live_row_id_cache_set){0};
+    statement->row_payload_caches = (mylite_storage_row_payload_cache_set){0};
+    statement->table_entry_cache = (mylite_storage_table_entry_cache){0};
+    statement->append_pages = (mylite_storage_append_page_buffer){0};
+    statement->buffered_page_undos = (mylite_storage_buffered_page_undo_list){0};
+    statement->buffered_update_rewrites = (mylite_storage_buffered_update_rewrite_cache){0};
 }
 
 static mylite_storage_result initialize_checkpoint_statement(
@@ -8401,6 +8456,8 @@ static void free_statement(mylite_storage_statement *statement) {
         return;
     }
 
+    const int reuse_nested_storage =
+        statement->parent != NULL && !statement->owns_file && !statement->owns_filename;
     if (statement->file != NULL && statement->owns_file) {
         fclose(statement->file);
     }
@@ -8414,6 +8471,11 @@ static void free_statement(mylite_storage_statement *statement) {
     clear_buffered_update_rewrites(statement);
     if (statement->owns_filename) {
         free(statement->filename);
+    }
+    if (reuse_nested_storage && reusable_nested_checkpoint_statement == NULL) {
+        initialize_nested_checkpoint_storage(statement);
+        reusable_nested_checkpoint_statement = statement;
+        return;
     }
     free(statement);
 }

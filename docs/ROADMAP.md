@@ -226,7 +226,10 @@ row-payload cache reads before update execution. Prepared update storage now
 reuses the write/read statement scope discovered while opening the primary file
 for journal start and header publication. Nested write checkpoints now borrow
 the parent checkpoint filename instead of allocating an identical filename copy
-for every prepared row-DML savepoint.
+for every prepared row-DML savepoint. They also use narrow initialization for
+nested checkpoint state instead of clearing unused page buffers on every
+prepared row-DML savepoint, and retain one cleaned-up nested checkpoint object
+per thread for reuse by the next nested statement.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation
