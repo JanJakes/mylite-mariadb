@@ -359,7 +359,9 @@ payload-cache window while large payloads remain bounded by a 16 MiB per-table
 cache budget.
 Rows retained by that active payload cache now also act as the direct
 row-validation proof for the same active checkpoint view, reducing duplicate
-live-row validation cache work after indexed row reads.
+live-row validation cache work after indexed row reads. Row-update validation
+now also reuses the already-resolved active payload cache pointer instead of
+rediscovering that cache owner for each mutation.
 
 ## Size And Profile Direction
 

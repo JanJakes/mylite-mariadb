@@ -82,7 +82,9 @@ entries or 16 MiB of row bytes per table cache, and drops oversized rows rather
 than retaining unbounded BLOB/TEXT payloads. A row retained in that active
 payload cache is also accepted as the direct row-validation proof for the same
 active checkpoint view, avoiding duplicate live-row validation bookkeeping after
-indexed row reads.
+indexed row reads. The hot row-update path passes its already-resolved active
+payload cache into validation, so that proof does not rediscover the same
+active cache owner per mutation.
 
 Durable index cursor construction opens a scoped storage read session while the
 handler finds matching index row ids and materializes the selected row payload

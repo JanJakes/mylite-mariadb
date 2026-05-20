@@ -1888,6 +1888,8 @@ static mylite_storage_result validate_direct_live_row_in_statement(
 static mylite_storage_result validate_direct_live_row_in_statement_cache(
     mylite_storage_statement *statement,
     mylite_storage_live_row_cache **inout_cache,
+    int active_row_payload_cache_resolved,
+    const mylite_storage_row_payload_cache *active_row_payload_cache,
     FILE *file,
     const mylite_storage_header *header,
     unsigned long long table_id,
@@ -5279,6 +5281,8 @@ static mylite_storage_result update_row_with_index_entries(
         result = validate_direct_live_row_in_statement_cache(
             active_file_statement,
             &active_live_row_cache,
+            1,
+            active_row_payload_cache,
             file,
             &header,
             table_id,
@@ -15763,6 +15767,8 @@ static mylite_storage_result validate_direct_live_row_in_statement(
     return validate_direct_live_row_in_statement_cache(
         statement,
         &cache,
+        0,
+        NULL,
         file,
         header,
         table_id,
@@ -15775,6 +15781,8 @@ static mylite_storage_result validate_direct_live_row_in_statement(
 static mylite_storage_result validate_direct_live_row_in_statement_cache(
     mylite_storage_statement *statement,
     mylite_storage_live_row_cache **inout_cache,
+    int active_row_payload_cache_resolved,
+    const mylite_storage_row_payload_cache *active_row_payload_cache,
     FILE *file,
     const mylite_storage_header *header,
     unsigned long long table_id,
@@ -15785,10 +15793,16 @@ static mylite_storage_result validate_direct_live_row_in_statement_cache(
     if (row_id <= header->catalog_root_page || row_id >= header->page_count) {
         return MYLITE_STORAGE_NOTFOUND;
     }
-    mylite_storage_statement *active_cache_statement =
-        active_cache_statement_from_statement(statement);
-    mylite_storage_row_payload_cache *payload_cache =
-        active_row_payload_cache_for_resolved_statement(active_cache_statement, header, table_id);
+    const mylite_storage_row_payload_cache *payload_cache = active_row_payload_cache;
+    if (!active_row_payload_cache_resolved) {
+        mylite_storage_statement *active_cache_statement =
+            active_cache_statement_from_statement(statement);
+        payload_cache = active_row_payload_cache_for_resolved_statement(
+            active_cache_statement,
+            header,
+            table_id
+        );
+    }
     if (payload_cache != NULL && find_row_payload_cache_entry(payload_cache, row_id) != NULL) {
         *out_row_page = (mylite_storage_row_page){
             .row_id = row_id,
