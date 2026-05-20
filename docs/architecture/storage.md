@@ -439,8 +439,11 @@ unpublished in-memory row and index pages. Row-state pages are fully
 checksummed the first time a buffered replacement row is rewritten, then that
 validated row id is cached in a hash-backed set on the append-buffer owner so
 later rewrites can use metadata-only row-state validation until rollback or
-statement cleanup clears the cache. Durable reads keep full page checksum
-validation. Already-flushed
+statement cleanup clears the cache. After validation, the rewrite mutates the
+row page and changed index-entry pages directly in the active append buffer,
+capturing per-statement full-page preimages first when rollback needs them.
+The generic buffered read and write helpers still copy pages for other callers,
+and durable reads keep full page checksum validation. Already-flushed
 replacement runs keep the append-only path until a logged page-rewrite design
 exists.
 
