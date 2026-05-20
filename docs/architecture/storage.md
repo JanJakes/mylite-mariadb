@@ -427,7 +427,9 @@ replacement chain. The row-state page remains unchanged, the row id is reused,
 and savepoint rollback remains safe because rows created before the current
 savepoint frame still fall back to append-only replacement. Already-flushed
 replacement runs keep the append-only path until a logged page-rewrite design
-exists.
+exists. Buffered rewrites mutate the append-buffer pages directly after checking
+the relevant row, row-state, and index-entry identity fields, avoiding the
+generic page-copy read/write path for unpublished pages.
 
 Non-active durable indexed-row reads use a bounded thread-local row-payload
 cache keyed by the primary file header fingerprint and table id. Repeated

@@ -167,7 +167,9 @@ Repeated active updates of inline replacement rows created inside the current
 rollback frame now reuse the same row id and rewrite the buffered unpublished
 row and changed index-entry pages while those pages are still resident in the
 active append buffer, while already-flushed runs and updates to rows predating
-the current savepoint keep the append-only path.
+the current savepoint keep the append-only path. Buffered rewrites now mutate
+append-buffer pages directly after checking page identity fields, avoiding the
+generic copy-out/copy-back page path for unpublished update runs.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation
 now surface as storage-full errors instead of crashed-table I/O errors. Fresh
