@@ -384,8 +384,15 @@ typedef struct mylite_storage_buffered_page_undo_list {
     size_t capacity;
 } mylite_storage_buffered_page_undo_list;
 
+enum { MYLITE_STORAGE_BUFFERED_UPDATE_REWRITE_INLINE_INDEXES = 4U };
+
 typedef struct mylite_storage_buffered_update_rewrite_bucket {
     unsigned long long row_id;
+    unsigned long long table_id;
+    size_t changed_index_count;
+    unsigned index_numbers[MYLITE_STORAGE_BUFFERED_UPDATE_REWRITE_INLINE_INDEXES];
+    size_t key_sizes[MYLITE_STORAGE_BUFFERED_UPDATE_REWRITE_INLINE_INDEXES];
+    int has_shape;
     int occupied;
 } mylite_storage_buffered_update_rewrite_bucket;
 
@@ -842,9 +849,25 @@ static int buffered_update_rewrite_row_state_known(
     mylite_storage_statement *statement,
     unsigned long long row_id
 );
+static int buffered_update_rewrite_shape_known(
+    mylite_storage_statement *statement,
+    unsigned long long row_id,
+    unsigned long long table_id,
+    const mylite_storage_index_entry *index_entries,
+    size_t index_entry_count,
+    const unsigned char *index_entry_changed
+);
 static mylite_storage_result mark_buffered_update_rewrite_row_state(
     mylite_storage_statement *statement,
     unsigned long long row_id
+);
+static void mark_buffered_update_rewrite_shape(
+    mylite_storage_statement *statement,
+    unsigned long long row_id,
+    unsigned long long table_id,
+    const mylite_storage_index_entry *index_entries,
+    size_t index_entry_count,
+    const unsigned char *index_entry_changed
 );
 static mylite_storage_result ensure_buffered_update_rewrite_buckets(
     mylite_storage_buffered_update_rewrite_cache *cache,
@@ -855,10 +878,14 @@ static mylite_storage_result rebuild_buffered_update_rewrite_buckets(
     mylite_storage_buffered_update_rewrite_cache *cache,
     size_t bucket_capacity
 );
+static mylite_storage_buffered_update_rewrite_bucket *find_buffered_update_rewrite_bucket(
+    mylite_storage_buffered_update_rewrite_cache *cache,
+    unsigned long long row_id
+);
 static int place_buffered_update_rewrite_bucket(
     mylite_storage_buffered_update_rewrite_bucket *buckets,
     size_t bucket_capacity,
-    unsigned long long row_id
+    const mylite_storage_buffered_update_rewrite_bucket *entry
 );
 static mylite_storage_result ensure_append_page_buffer_capacity(
     mylite_storage_statement *statement,
@@ -8886,25 +8913,44 @@ static int buffered_update_rewrite_row_state_known(
         return 0;
     }
 
-    const mylite_storage_buffered_update_rewrite_cache *cache =
-        &statement->buffered_update_rewrites;
-    if (cache->bucket_capacity == 0U) {
+    return find_buffered_update_rewrite_bucket(&statement->buffered_update_rewrites, row_id) !=
+           NULL;
+}
+
+static int buffered_update_rewrite_shape_known(
+    mylite_storage_statement *statement,
+    unsigned long long row_id,
+    unsigned long long table_id,
+    const mylite_storage_index_entry *index_entries,
+    size_t index_entry_count,
+    const unsigned char *index_entry_changed
+) {
+    if (statement == NULL) {
         return 0;
     }
 
-    const size_t mask = cache->bucket_capacity - 1U;
-    size_t bucket_index = hash_row_id(row_id) & mask;
-    for (size_t probes = 0U; probes < cache->bucket_capacity; ++probes) {
-        const mylite_storage_buffered_update_rewrite_bucket *bucket = cache->buckets + bucket_index;
-        if (!bucket->occupied) {
+    const mylite_storage_buffered_update_rewrite_bucket *bucket =
+        find_buffered_update_rewrite_bucket(&statement->buffered_update_rewrites, row_id);
+    if (bucket == NULL || !bucket->has_shape || bucket->table_id != table_id) {
+        return 0;
+    }
+
+    size_t changed_index = 0U;
+    for (size_t i = 0U; i < index_entry_count; ++i) {
+        if (!is_index_entry_changed(index_entry_changed, i)) {
+            continue;
+        }
+        if (changed_index >= bucket->changed_index_count ||
+            changed_index >= MYLITE_STORAGE_BUFFERED_UPDATE_REWRITE_INLINE_INDEXES) {
             return 0;
         }
-        if (bucket->row_id == row_id) {
-            return 1;
+        if (bucket->index_numbers[changed_index] != index_entries[i].index_number ||
+            bucket->key_sizes[changed_index] != index_entries[i].key_size) {
+            return 0;
         }
-        bucket_index = (bucket_index + 1U) & mask;
+        ++changed_index;
     }
-    return 0;
+    return changed_index == bucket->changed_index_count ? 1 : 0;
 }
 
 static mylite_storage_result mark_buffered_update_rewrite_row_state(
@@ -8920,11 +8966,80 @@ static mylite_storage_result mark_buffered_update_rewrite_row_state(
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
-    if (!place_buffered_update_rewrite_bucket(cache->buckets, cache->bucket_capacity, row_id)) {
+    const mylite_storage_buffered_update_rewrite_bucket entry = {
+        .row_id = row_id,
+        .occupied = 1,
+    };
+    if (!place_buffered_update_rewrite_bucket(cache->buckets, cache->bucket_capacity, &entry)) {
         return MYLITE_STORAGE_FULL;
     }
     ++cache->count;
     return MYLITE_STORAGE_OK;
+}
+
+static void mark_buffered_update_rewrite_shape(
+    mylite_storage_statement *statement,
+    unsigned long long row_id,
+    unsigned long long table_id,
+    const mylite_storage_index_entry *index_entries,
+    size_t index_entry_count,
+    const unsigned char *index_entry_changed
+) {
+    if (statement == NULL) {
+        return;
+    }
+
+    size_t changed_index_count = 0U;
+    for (size_t i = 0U; i < index_entry_count; ++i) {
+        if (is_index_entry_changed(index_entry_changed, i)) {
+            ++changed_index_count;
+        }
+    }
+    if (changed_index_count > MYLITE_STORAGE_BUFFERED_UPDATE_REWRITE_INLINE_INDEXES) {
+        (void)mark_buffered_update_rewrite_row_state(statement, row_id);
+        mylite_storage_buffered_update_rewrite_bucket *bucket =
+            find_buffered_update_rewrite_bucket(&statement->buffered_update_rewrites, row_id);
+        if (bucket != NULL) {
+            bucket->has_shape = 0;
+        }
+        return;
+    }
+
+    mylite_storage_buffered_update_rewrite_cache *cache = &statement->buffered_update_rewrites;
+    mylite_storage_buffered_update_rewrite_bucket *bucket =
+        find_buffered_update_rewrite_bucket(cache, row_id);
+    if (bucket == NULL) {
+        mylite_storage_result result =
+            ensure_buffered_update_rewrite_buckets(cache, cache->count + 1U);
+        if (result != MYLITE_STORAGE_OK) {
+            return;
+        }
+        const mylite_storage_buffered_update_rewrite_bucket entry = {
+            .row_id = row_id,
+            .occupied = 1,
+        };
+        if (!place_buffered_update_rewrite_bucket(cache->buckets, cache->bucket_capacity, &entry)) {
+            return;
+        }
+        ++cache->count;
+        bucket = find_buffered_update_rewrite_bucket(cache, row_id);
+        if (bucket == NULL) {
+            return;
+        }
+    }
+
+    bucket->table_id = table_id;
+    bucket->changed_index_count = changed_index_count;
+    bucket->has_shape = 1;
+    size_t changed_index = 0U;
+    for (size_t i = 0U; i < index_entry_count; ++i) {
+        if (!is_index_entry_changed(index_entry_changed, i)) {
+            continue;
+        }
+        bucket->index_numbers[changed_index] = index_entries[i].index_number;
+        bucket->key_sizes[changed_index] = index_entries[i].key_size;
+        ++changed_index;
+    }
 }
 
 static mylite_storage_result ensure_buffered_update_rewrite_buckets(
@@ -8979,7 +9094,7 @@ static mylite_storage_result rebuild_buffered_update_rewrite_buckets(
         if (!bucket->occupied) {
             continue;
         }
-        if (!place_buffered_update_rewrite_bucket(buckets, bucket_capacity, bucket->row_id)) {
+        if (!place_buffered_update_rewrite_bucket(buckets, bucket_capacity, bucket)) {
             free(buckets);
             return MYLITE_STORAGE_FULL;
         }
@@ -8991,27 +9106,50 @@ static mylite_storage_result rebuild_buffered_update_rewrite_buckets(
     return MYLITE_STORAGE_OK;
 }
 
+static mylite_storage_buffered_update_rewrite_bucket *find_buffered_update_rewrite_bucket(
+    mylite_storage_buffered_update_rewrite_cache *cache,
+    unsigned long long row_id
+) {
+    if (cache == NULL || cache->bucket_capacity == 0U) {
+        return NULL;
+    }
+
+    const size_t mask = cache->bucket_capacity - 1U;
+    size_t bucket_index = hash_row_id(row_id) & mask;
+    for (size_t probes = 0U; probes < cache->bucket_capacity; ++probes) {
+        mylite_storage_buffered_update_rewrite_bucket *bucket = cache->buckets + bucket_index;
+        if (!bucket->occupied) {
+            return NULL;
+        }
+        if (bucket->row_id == row_id) {
+            return bucket;
+        }
+        bucket_index = (bucket_index + 1U) & mask;
+    }
+    return NULL;
+}
+
 static int place_buffered_update_rewrite_bucket(
     mylite_storage_buffered_update_rewrite_bucket *buckets,
     size_t bucket_capacity,
-    unsigned long long row_id
+    const mylite_storage_buffered_update_rewrite_bucket *entry
 ) {
-    if (bucket_capacity == 0U) {
+    if (bucket_capacity == 0U || entry == NULL) {
         return 0;
     }
 
     const size_t mask = bucket_capacity - 1U;
-    size_t bucket_index = hash_row_id(row_id) & mask;
+    size_t bucket_index = hash_row_id(entry->row_id) & mask;
     for (size_t probes = 0U; probes < bucket_capacity; ++probes) {
         mylite_storage_buffered_update_rewrite_bucket *bucket = buckets + bucket_index;
         if (!bucket->occupied) {
-            *bucket = (mylite_storage_buffered_update_rewrite_bucket){
-                .row_id = row_id,
-                .occupied = 1,
-            };
+            *bucket = *entry;
+            bucket->occupied = 1;
             return 1;
         }
-        if (bucket->row_id == row_id) {
+        if (bucket->row_id == entry->row_id) {
+            *bucket = *entry;
+            bucket->occupied = 1;
             return 1;
         }
         bucket_index = (bucket_index + 1U) & mask;
@@ -11636,46 +11774,58 @@ static mylite_storage_result rewrite_active_update_pages(
     if (!buffered_append_page_range_contains(file, row_id, rewritten_page_count)) {
         return MYLITE_STORAGE_OK;
     }
+    const int use_cached_shape = buffered_update_rewrite_shape_known(
+        buffer_statement,
+        row_id,
+        table_id,
+        index_entries,
+        index_entry_count,
+        index_entry_changed
+    );
 
     unsigned char *current_page = buffered_append_page(file, row_id, header->page_size);
     if (current_page == NULL) {
         return MYLITE_STORAGE_OK;
     }
-    mylite_storage_row_page_metadata current_metadata = {0};
-    mylite_storage_result result =
-        decode_buffered_row_page_metadata(header, row_id, current_page, &current_metadata);
-    if (result == MYLITE_STORAGE_NOTFOUND) {
-        return MYLITE_STORAGE_OK;
-    }
-    if (result != MYLITE_STORAGE_OK) {
-        return result;
-    }
-    if (current_metadata.table_id != table_id || current_metadata.overflow_root_page != 0ULL) {
-        return MYLITE_STORAGE_OK;
+    mylite_storage_result result = MYLITE_STORAGE_OK;
+    if (!use_cached_shape) {
+        mylite_storage_row_page_metadata current_metadata = {0};
+        result = decode_buffered_row_page_metadata(header, row_id, current_page, &current_metadata);
+        if (result == MYLITE_STORAGE_NOTFOUND) {
+            return MYLITE_STORAGE_OK;
+        }
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+        if (current_metadata.table_id != table_id || current_metadata.overflow_root_page != 0ULL) {
+            return MYLITE_STORAGE_OK;
+        }
     }
 
     const unsigned char *state_page = buffered_append_page(file, state_page_id, header->page_size);
     if (state_page == NULL) {
         return MYLITE_STORAGE_OK;
     }
-    mylite_storage_row_state_page row_state = {0};
-    if (buffered_update_rewrite_row_state_known(buffer_statement, row_id)) {
-        result = decode_buffered_row_state_page(header, state_page_id, state_page, &row_state);
-    } else {
-        result = decode_row_state_page(header, state_page_id, state_page, &row_state);
-        if (result == MYLITE_STORAGE_OK) {
-            (void)mark_buffered_update_rewrite_row_state(buffer_statement, row_id);
+    if (!use_cached_shape) {
+        mylite_storage_row_state_page row_state = {0};
+        if (buffered_update_rewrite_row_state_known(buffer_statement, row_id)) {
+            result = decode_buffered_row_state_page(header, state_page_id, state_page, &row_state);
+        } else {
+            result = decode_row_state_page(header, state_page_id, state_page, &row_state);
+            if (result == MYLITE_STORAGE_OK) {
+                (void)mark_buffered_update_rewrite_row_state(buffer_statement, row_id);
+            }
         }
-    }
-    if (result == MYLITE_STORAGE_NOTFOUND) {
-        return MYLITE_STORAGE_OK;
-    }
-    if (result != MYLITE_STORAGE_OK) {
-        return result;
-    }
-    if (row_state.table_id != table_id || row_state.replacement_row_id != row_id ||
-        row_state.state_kind != MYLITE_STORAGE_FORMAT_ROW_STATE_KIND_REPLACE) {
-        return MYLITE_STORAGE_OK;
+        if (result == MYLITE_STORAGE_NOTFOUND) {
+            return MYLITE_STORAGE_OK;
+        }
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+        if (row_state.table_id != table_id || row_state.replacement_row_id != row_id ||
+            row_state.state_kind != MYLITE_STORAGE_FORMAT_ROW_STATE_KIND_REPLACE) {
+            return MYLITE_STORAGE_OK;
+        }
     }
 
     unsigned char *index_pages_stack[4U];
@@ -11705,20 +11855,22 @@ static mylite_storage_result rewrite_active_update_pages(
             can_rewrite = 0;
             goto done;
         }
-        result = decode_buffered_index_entry_page(header, index_page_id, page, &index_page);
-        if (result == MYLITE_STORAGE_NOTFOUND) {
-            result = MYLITE_STORAGE_OK;
-            can_rewrite = 0;
-            goto done;
-        }
-        if (result != MYLITE_STORAGE_OK) {
-            break;
-        }
-        if (index_page.table_id != table_id || index_page.row_id != row_id ||
-            index_page.index_number != index_entries[i].index_number ||
-            index_page.key_size != index_entries[i].key_size) {
-            can_rewrite = 0;
-            goto done;
+        if (!use_cached_shape) {
+            result = decode_buffered_index_entry_page(header, index_page_id, page, &index_page);
+            if (result == MYLITE_STORAGE_NOTFOUND) {
+                result = MYLITE_STORAGE_OK;
+                can_rewrite = 0;
+                goto done;
+            }
+            if (result != MYLITE_STORAGE_OK) {
+                break;
+            }
+            if (index_page.table_id != table_id || index_page.row_id != row_id ||
+                index_page.index_number != index_entries[i].index_number ||
+                index_page.key_size != index_entries[i].key_size) {
+                can_rewrite = 0;
+                goto done;
+            }
         }
         index_pages[changed_index] = page;
         ++changed_index;
@@ -11728,6 +11880,16 @@ static mylite_storage_result rewrite_active_update_pages(
     }
     if (!can_rewrite) {
         goto done;
+    }
+    if (!use_cached_shape) {
+        mark_buffered_update_rewrite_shape(
+            buffer_statement,
+            row_id,
+            table_id,
+            index_entries,
+            index_entry_count,
+            index_entry_changed
+        );
     }
 
     result = capture_buffered_page_undo(statement, file, row_id);

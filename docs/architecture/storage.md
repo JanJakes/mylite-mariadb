@@ -454,15 +454,19 @@ unpublished in-memory row and index pages. Row-state pages are fully
 checksummed the first time a buffered replacement row is rewritten, then that
 validated row id is cached in a hash-backed set on the append-buffer owner so
 later rewrites can use metadata-only row-state validation until rollback or
-statement cleanup clears the cache. After validation, the rewrite mutates the
-row page and changed index-entry pages directly in the active append buffer,
-refreshing only the mutable payload/key bytes and any stale shrunken tail, and
-capturing per-statement preimages first when rollback needs them. Row and
-index-entry preimages store only the meaningful checksummed prefix plus an
-implicit zero tail, while other page types keep full-page undo. Rewritten
-buffered row and index-entry pages mark their checksums dirty and refresh them
-only before a generic checksum-validating read or append-buffer flush, so
-repeated in-memory rewrites do not rehash the same pages on every update.
+statement cleanup clears the cache. After the buffered row, row-state, and
+small changed-index page shape is validated once, later matching rewrites can
+skip repeated metadata decodes until rollback, statement cleanup, append-buffer
+miss, or changed-index shape mismatch returns them to the validated fallback
+path. After validation, the rewrite mutates the row page and changed
+index-entry pages directly in the active append buffer, refreshing only the
+mutable payload/key bytes and any stale shrunken tail, and capturing
+per-statement preimages first when rollback needs them. Row and index-entry
+preimages store only the meaningful checksummed prefix plus an implicit zero
+tail, while other page types keep full-page undo. Rewritten buffered row and
+index-entry pages mark their checksums dirty and refresh them only before a
+generic checksum-validating read or append-buffer flush, so repeated in-memory
+rewrites do not rehash the same pages on every update.
 The generic buffered read and write helpers still copy pages for other callers,
 and durable reads keep full page checksum validation. Already-flushed
 replacement runs keep the append-only path until a logged page-rewrite design

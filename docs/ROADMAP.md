@@ -183,12 +183,14 @@ rows created by earlier nested statements in the same outer checkpoint.
 Per-statement buffered-page preimages preserve savepoint rollback, and buffered
 rewrite validation skips redundant full-page checksum scans for unpublished
 in-memory row and index pages. Row-state pages keep a first-use checksum guard
-and then use a hash-backed validated-row cache for later rewrites. Validated
-row and changed index-entry pages are now encoded directly in the active append
-buffer, removing the temporary read/write page copies from repeated buffered
-update rewrites. Those in-buffer rewrites refresh only the row payload or index
-key bytes plus any shrunken stale tail instead of rebuilding the whole page
-image before recomputing the page checksum. Buffered row and index-entry undo
+and then use a hash-backed validated-row and small page-shape cache for later
+rewrites, avoiding repeated row, row-state, and changed index-entry metadata
+decodes after the same buffered pages are validated once. Validated row and
+changed index-entry pages are now encoded directly in the active append buffer,
+removing the temporary read/write page copies from repeated buffered update
+rewrites. Those in-buffer rewrites refresh only the row payload or index key
+bytes plus any shrunken stale tail instead of rebuilding the whole page image
+before recomputing the page checksum. Buffered row and index-entry undo
 preimages now copy only the meaningful checksummed prefix and restore an
 implicit zero tail, reducing repeated nested-statement rollback bookkeeping.
 Those repeated buffered rewrites now also leave row and index-entry checksums
