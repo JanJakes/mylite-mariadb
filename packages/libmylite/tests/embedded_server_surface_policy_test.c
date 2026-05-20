@@ -252,6 +252,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SET @password = 'local'");
     exec_ok(db, "SET sql_mode = @@sql_mode");
     exec_ok(db, "SELECT 'PROCEDURE ANALYSE()' AS literal");
+    exec_ok(db, "SHOW VARIABLES LIKE 'version'");
 
     expect_error(
         db,
@@ -350,6 +351,9 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_error(db, "SHOW BINARY LOGS", "server-owned SQL surface");
     expect_error(db, "SHOW BINLOG EVENTS", "server-owned SQL surface");
     expect_error(db, "HELP SELECT", "server-owned SQL surface");
+    expect_error(db, "SHOW AUTHORS", "server-owned SQL surface");
+    expect_error(db, "SHOW CONTRIBUTORS", "server-owned SQL surface");
+    expect_error(db, "SHOW PRIVILEGES", "server-owned SQL surface");
     expect_error(db, "SHOW PROFILES", "server-owned SQL surface");
     expect_error(db, "SHOW PROFILE CPU FOR QUERY 1", "server-owned SQL surface");
     expect_error(db, "SET profiling = 1", "server-owned SQL surface");
@@ -385,6 +389,9 @@ static void assert_server_sql_rejected(mylite_db *db) {
         "server-owned SQL surface"
     );
     expect_prepare_error(db, "HELP SELECT", "server-owned SQL surface");
+    expect_prepare_error(db, "SHOW AUTHORS", "server-owned SQL surface");
+    expect_prepare_error(db, "SHOW CONTRIBUTORS", "server-owned SQL surface");
+    expect_prepare_error(db, "SHOW PRIVILEGES", "server-owned SQL surface");
     expect_prepare_error(
         db,
         "CREATE FUNCTION prepared_udf RETURNS INTEGER SONAME 'prepared_udf.so'",

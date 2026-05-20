@@ -38,6 +38,7 @@ ENABLED_PROFILING=OFF
 MYLITE_WITH_BINLOG_CORE=OFF
 MYLITE_WITH_PROCEDURE_ANALYSE=OFF
 MYLITE_WITH_SYSVAR_HELP_TEXT=OFF
+MYLITE_WITH_STATIC_SHOW_INFO=OFF
 ```
 
 `CMAKE_BUILD_TYPE=MinSizeRel` makes the embedded MariaDB archive optimize for
@@ -65,7 +66,9 @@ while preserving the normal MariaDB server build path. It also omits the
 legacy `PROCEDURE ANALYSE()` implementation behind
 `MYLITE_WITH_PROCEDURE_ANALYSE=0`. Long system-variable help comments are
 omitted behind `MYLITE_WITH_SYSVAR_HELP_TEXT=0`; variable names, values,
-defaults, validation, and `SHOW VARIABLES` remain intact.
+defaults, validation, and `SHOW VARIABLES` remain intact. Static `SHOW
+AUTHORS`, `SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES` result producers are
+omitted behind `MYLITE_WITH_STATIC_SHOW_INFO=0`.
 
 ## Measurement
 
@@ -81,7 +84,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 27,170,568 bytes / 25.91 MiB |
+| Archive size | 27,137,632 bytes / 25.88 MiB |
 | Archive members | 705 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -97,19 +100,21 @@ Omitting the embedded binary-log core reduces the pre-strip archive to
 27,864,688 bytes / 26.57 MiB. Omitting `PROCEDURE ANALYSE()` reduces the
 pre-strip archive to 27,825,136 bytes / 26.54 MiB. Omitting system-variable
 help text reduces the pre-strip archive to 27,767,568 bytes / 26.48 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 597,000 bytes without
-changing archive membership or runtime behavior. The `SFORMAT()` and exception
-cut accounts for 1,808,240
+Omitting static `SHOW` information reduces the pre-strip archive to 27,732,624
+bytes / 26.45 MiB. Post-build `strip -S -x` plus `ranlib` saves another
+594,992 bytes without changing archive membership or runtime behavior. The
+`SFORMAT()` and exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
 runtime omission saves 87,416 bytes and one archive member. The embedded
 binary-log core trim saves 72,232 bytes and one archive member. Omitting
 `PROCEDURE ANALYSE()` saves 39,120 bytes with no member-count change because
 the implementation object is replaced by a small stub. Omitting
-system-variable help text saves 56,040 bytes with no member-count change. The
-final archive is 4,359,136 bytes smaller than the Release build with
-Performance Schema disabled, 5,959,072 bytes smaller than the symbol-stripped
-baseline that still built Performance Schema, and 6,671,752 bytes smaller than
-the original broad archive.
+system-variable help text saves 56,040 bytes with no member-count change.
+Omitting static `SHOW` information saves 32,936 bytes with no member-count
+change. The final archive is 4,392,072 bytes smaller than the Release build
+with Performance Schema disabled, 5,992,008 bytes smaller than the
+symbol-stripped baseline that still built Performance Schema, and 6,704,688
+bytes smaller than the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
 GSSAPI, BZip2, LZ4, LibLZMA, LZO, PCRE2, and Zstandard support on this
@@ -157,7 +162,10 @@ to an unsupported stub; ordinary SELECT execution and the generic retained
 SELECT procedure dispatch continue to link. System-variable names, values,
 defaults, validation, and `SHOW VARIABLES` remain available; only
 `INFORMATION_SCHEMA.SYSTEM_VARIABLES.VARIABLE_COMMENT` is empty in the default
-embedded profile.
+embedded profile. Static `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and
+`SHOW PRIVILEGES` are omitted from the default embedded archive and rejected by
+policy; ordinary supported `SHOW` surfaces such as `SHOW VARIABLES` remain
+available.
 
 ## Disabled Or Missing Surface
 
@@ -176,6 +184,8 @@ The baseline explicitly disables:
 - Active binary-log transaction/event core
 - `PROCEDURE ANALYSE()`
 - System-variable help text
+- Static `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES`
+  information producers
 - MariaDB upstream unit-test targets
 
 Configure also reports unavailable optional features on this host, including

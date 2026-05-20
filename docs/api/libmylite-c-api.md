@@ -389,7 +389,9 @@ compatibility features that do not fit the embedded library model:
 - statement profiling,
 - query-cache management,
 - the optional `SFORMAT()` SQL helper,
-- legacy `PROCEDURE ANALYSE()` SELECT diagnostics.
+- legacy `PROCEDURE ANALYSE()` SELECT diagnostics,
+- static `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES`
+  information.
 
 Top-level SQL command families for users, roles, grants, password changes,
 dynamic plugins, events, replication, binlog administration, and foreign-server
@@ -412,7 +414,9 @@ and system-variable values remain available, but
 `INFORMATION_SCHEMA.SYSTEM_VARIABLES.VARIABLE_COMMENT` is empty. Startup
 variables also cover disabled binlog, performance schema, query cache,
 statement profiling, grant tables, networking, and the transient
-database-local plugin directory.
+database-local plugin directory. Static `SHOW AUTHORS`, `SHOW CONTRIBUTORS`,
+and `SHOW PRIVILEGES` are rejected as server-information surfaces; ordinary
+supported `SHOW` commands remain available.
 
 ## Compatibility Adapter
 

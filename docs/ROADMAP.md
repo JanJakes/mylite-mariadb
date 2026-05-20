@@ -53,6 +53,7 @@ surface that does not fit a local directory-owned library:
 - optional fmtlib-backed SQL helpers such as `SFORMAT()`,
 - legacy diagnostic SELECT procedures such as `PROCEDURE ANALYSE()`,
 - server help text such as system-variable comments,
+- static server-information `SHOW` commands,
 - rarely used optional engines or plugins unless a slice justifies them.
 
 The minimal embedded build establishes the first baseline. Later slices record
@@ -84,6 +85,9 @@ functionality; normal SELECT execution remains supported.
 System-variable help comments are omitted after coverage proves variable rows
 and values remain queryable and only
 `INFORMATION_SCHEMA.SYSTEM_VARIABLES.VARIABLE_COMMENT` becomes empty.
+Static `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES` are omitted
+after coverage proves ordinary supported `SHOW` surfaces such as `SHOW
+VARIABLES` remain available.
 Compatibility-sensitive code removals require separate evidence before they
 are accepted.
 

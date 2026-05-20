@@ -104,6 +104,7 @@ behavior. It does not require a daemon in the default test path.
 | `SFORMAT()` | ➖&nbsp;Out&nbsp;of&nbsp;scope | Optional MariaDB fmtlib-backed formatting helper; omitted from the embedded profile so the embedded SQL target can build without C++ exceptions, while ordinary `FORMAT()` remains available |
 | `PROCEDURE ANALYSE()` | ➖&nbsp;Out&nbsp;of&nbsp;scope | Legacy diagnostic SELECT extension; rejected by policy and omitted from the default embedded archive while ordinary SELECT queries remain supported |
 | System-variable help comments | 🟡&nbsp;Partial | `SHOW VARIABLES` and system-variable rows, values, defaults, and validation remain available; `INFORMATION_SCHEMA.SYSTEM_VARIABLES.VARIABLE_COMMENT` is empty in the default embedded profile to omit server help text |
+| Static `SHOW` information | ➖&nbsp;Out&nbsp;of&nbsp;scope | `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES` expose static server attribution and privilege-help metadata; they are rejected by policy and omitted from the default embedded archive while ordinary supported `SHOW` surfaces remain available |
 
 ## Rows, Indexes, And Constraints
 
