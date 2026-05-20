@@ -236,7 +236,10 @@ lookup paths now pass resolved active cache statements into table-entry cache
 helpers instead of rediscovering them by filename. Nested statement cleanup now
 retains one small cleared live-row cache set per thread, preserving the active
 row validation shortcut while avoiding repeated allocation/free in ordinary
-single-row prepared updates.
+single-row prepared updates. Active row DML now defers durable cache retargeting
+to statement commit, so prepared updates in a transaction do not rescan durable
+cache sets on every row mutation while rollback still discards pending cache
+work.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation

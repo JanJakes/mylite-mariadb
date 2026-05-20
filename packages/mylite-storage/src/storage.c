@@ -441,6 +441,7 @@ struct mylite_storage_statement {
     const void *owner;
     mylite_storage_header header;
     mylite_storage_header current_header;
+    mylite_storage_header deferred_durable_cache_retarget_header;
     unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     unsigned char current_catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
@@ -457,6 +458,9 @@ struct mylite_storage_statement {
     int preserve_auto_increment_rollback;
     int cache_file_on_close;
     int has_identity;
+    int has_deferred_durable_cache_retarget;
+    int deferred_durable_cache_retarget_all_tables;
+    unsigned long long deferred_durable_cache_retarget_table_id;
     mylite_storage_exact_index_cache_set exact_index_caches;
     mylite_storage_live_row_cache_set live_row_caches;
     mylite_storage_live_row_id_cache_set live_row_id_caches;
@@ -2187,6 +2191,22 @@ static void replace_active_exact_index_cache_entries_in_statement(
 );
 static void invalidate_exact_index_caches(const char *filename);
 static void clear_durable_exact_index_caches(const char *filename);
+static void retarget_durable_caches_after_table_mutation_in_statement(
+    mylite_storage_statement *statement,
+    const char *filename,
+    const mylite_storage_header *header,
+    unsigned long long table_id
+);
+static void defer_durable_cache_retarget_after_table_mutation(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    unsigned long long table_id
+);
+static void merge_deferred_durable_cache_retarget(
+    mylite_storage_statement *parent,
+    const mylite_storage_statement *child
+);
+static void apply_deferred_durable_cache_retarget(mylite_storage_statement *statement);
 static void retarget_durable_caches_after_table_mutation(
     const char *filename,
     const mylite_storage_header *header,
@@ -4504,7 +4524,12 @@ mylite_storage_result mylite_storage_append_row_with_index_entries(
     if (result == MYLITE_STORAGE_OK) {
         (void)mark_active_validated_live_row(file, &header, table_id, position.row_page_id);
         append_active_live_row_id(filename, &header, table_id, position.row_page_id);
-        retarget_durable_caches_after_table_mutation(filename, &header, table_id);
+        retarget_durable_caches_after_table_mutation_in_statement(
+            active_statement_for_file(file),
+            filename,
+            &header,
+            table_id
+        );
     }
 
     if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
@@ -5243,7 +5268,12 @@ static mylite_storage_result update_row_with_index_entries(
             row,
             row_size
         );
-        retarget_durable_caches_after_table_mutation(filename, &header, table_id);
+        retarget_durable_caches_after_table_mutation_in_statement(
+            active_file_statement,
+            filename,
+            &header,
+            table_id
+        );
     }
 
     free(old_row_page.owned_payload);
@@ -5319,7 +5349,12 @@ mylite_storage_result mylite_storage_delete_row(
         replace_active_live_row(file, &header, table_id, row_id, 0ULL);
         remove_active_live_row_id(filename, &header, table_id, row_id);
         remove_active_row_payload(filename, &header, table_id, row_id);
-        retarget_durable_caches_after_table_mutation(filename, &header, table_id);
+        retarget_durable_caches_after_table_mutation_in_statement(
+            active_statement_for_file(file),
+            filename,
+            &header,
+            table_id
+        );
     }
     if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
@@ -6183,6 +6218,12 @@ mylite_storage_result mylite_storage_commit_statement(mylite_storage_statement *
     const int promote_active_caches = statement->parent == NULL;
     active_statement = statement->parent;
     mylite_storage_result result = close_statement(statement);
+    if (result == MYLITE_STORAGE_OK && statement->parent != NULL) {
+        merge_deferred_durable_cache_retarget(statement->parent, statement);
+    }
+    if (result == MYLITE_STORAGE_OK && promote_active_caches) {
+        apply_deferred_durable_cache_retarget(statement);
+    }
     if (result == MYLITE_STORAGE_OK && promote_active_caches) {
         promote_statement_exact_index_caches(statement);
         promote_statement_live_row_id_caches(statement);
@@ -6521,6 +6562,7 @@ static void initialize_nested_checkpoint_storage(mylite_storage_statement *state
     statement->owner = NULL;
     statement->header = (mylite_storage_header){0};
     statement->current_header = (mylite_storage_header){0};
+    statement->deferred_durable_cache_retarget_header = (mylite_storage_header){0};
     statement->current_catalog_root_page = 0ULL;
     statement->current_catalog_generation = 0ULL;
     statement->has_header_page = 0;
@@ -6534,6 +6576,9 @@ static void initialize_nested_checkpoint_storage(mylite_storage_statement *state
     statement->preserve_auto_increment_rollback = 0;
     statement->cache_file_on_close = 0;
     statement->has_identity = 0;
+    statement->has_deferred_durable_cache_retarget = 0;
+    statement->deferred_durable_cache_retarget_all_tables = 0;
+    statement->deferred_durable_cache_retarget_table_id = 0ULL;
     statement->exact_index_caches = (mylite_storage_exact_index_cache_set){0};
     statement->live_row_caches = (mylite_storage_live_row_cache_set){0};
     statement->live_row_id_caches = (mylite_storage_live_row_id_cache_set){0};
@@ -18050,6 +18095,87 @@ static void clear_durable_exact_index_caches(const char *filename) {
         free(durable_exact_index_caches.entries);
         durable_exact_index_caches = (mylite_storage_exact_index_cache_set){0};
     }
+}
+
+static void retarget_durable_caches_after_table_mutation_in_statement(
+    mylite_storage_statement *statement,
+    const char *filename,
+    const mylite_storage_header *header,
+    unsigned long long table_id
+) {
+    if (statement == NULL) {
+        retarget_durable_caches_after_table_mutation(filename, header, table_id);
+        return;
+    }
+
+    defer_durable_cache_retarget_after_table_mutation(statement, header, table_id);
+}
+
+static void defer_durable_cache_retarget_after_table_mutation(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    unsigned long long table_id
+) {
+    if (statement == NULL || header == NULL) {
+        return;
+    }
+
+    if (!statement->has_deferred_durable_cache_retarget) {
+        statement->deferred_durable_cache_retarget_table_id = table_id;
+        statement->deferred_durable_cache_retarget_all_tables = 0;
+    } else if (
+        !statement->deferred_durable_cache_retarget_all_tables &&
+        statement->deferred_durable_cache_retarget_table_id != table_id
+    ) {
+        statement->deferred_durable_cache_retarget_all_tables = 1;
+    }
+    statement->deferred_durable_cache_retarget_header = *header;
+    statement->has_deferred_durable_cache_retarget = 1;
+}
+
+static void merge_deferred_durable_cache_retarget(
+    mylite_storage_statement *parent,
+    const mylite_storage_statement *child
+) {
+    if (parent == NULL || child == NULL || !child->has_deferred_durable_cache_retarget) {
+        return;
+    }
+
+    if (!parent->has_deferred_durable_cache_retarget) {
+        parent->deferred_durable_cache_retarget_table_id =
+            child->deferred_durable_cache_retarget_table_id;
+        parent->deferred_durable_cache_retarget_all_tables =
+            child->deferred_durable_cache_retarget_all_tables;
+    } else if (
+        child->deferred_durable_cache_retarget_all_tables ||
+        (!parent->deferred_durable_cache_retarget_all_tables &&
+         parent->deferred_durable_cache_retarget_table_id !=
+             child->deferred_durable_cache_retarget_table_id)
+    ) {
+        parent->deferred_durable_cache_retarget_all_tables = 1;
+    }
+    parent->deferred_durable_cache_retarget_header = child->deferred_durable_cache_retarget_header;
+    parent->has_deferred_durable_cache_retarget = 1;
+}
+
+static void apply_deferred_durable_cache_retarget(mylite_storage_statement *statement) {
+    if (statement == NULL || !statement->has_deferred_durable_cache_retarget) {
+        return;
+    }
+
+    if (statement->deferred_durable_cache_retarget_all_tables) {
+        clear_durable_exact_index_caches(statement->filename);
+    } else {
+        retarget_durable_caches_after_table_mutation(
+            statement->filename,
+            &statement->deferred_durable_cache_retarget_header,
+            statement->deferred_durable_cache_retarget_table_id
+        );
+    }
+    statement->has_deferred_durable_cache_retarget = 0;
+    statement->deferred_durable_cache_retarget_all_tables = 0;
+    statement->deferred_durable_cache_retarget_table_id = 0ULL;
+    statement->deferred_durable_cache_retarget_header = (mylite_storage_header){0};
 }
 
 static void retarget_durable_caches_after_table_mutation(
