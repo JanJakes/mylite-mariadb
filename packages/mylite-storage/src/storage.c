@@ -87,16 +87,21 @@ typedef struct mylite_storage_row_state_map {
     size_t bucket_capacity;
 } mylite_storage_row_state_map;
 
+typedef struct mylite_storage_live_row_id_set {
+    unsigned long long *row_ids;
+    size_t count;
+    size_t capacity;
+    size_t *bucket_heads;
+    size_t *bucket_next;
+    size_t bucket_count;
+} mylite_storage_live_row_id_set;
+
 typedef struct mylite_storage_live_row_cache {
     unsigned long long table_id;
     unsigned long long catalog_root_page;
     unsigned long long catalog_generation;
-    unsigned long long *row_ids;
-    size_t count;
-    size_t capacity;
-    unsigned long long *validated_row_ids;
-    size_t validated_count;
-    size_t validated_capacity;
+    mylite_storage_live_row_id_set live_rows;
+    mylite_storage_live_row_id_set validated_rows;
 } mylite_storage_live_row_cache;
 
 typedef struct mylite_storage_live_row_cache_set {
@@ -414,6 +419,7 @@ typedef struct mylite_storage_buffered_page_undo_list {
 enum {
     MYLITE_STORAGE_LIVE_ROW_CACHE_INITIAL_CAPACITY = 4U,
     MYLITE_STORAGE_LIVE_ROW_ID_INITIAL_CAPACITY = 16U,
+    MYLITE_STORAGE_LIVE_ROW_ID_BUCKET_MIN_COUNT = 32U,
     MYLITE_STORAGE_REUSABLE_LIVE_ROW_CACHE_CAPACITY =
         MYLITE_STORAGE_LIVE_ROW_CACHE_INITIAL_CAPACITY,
     MYLITE_STORAGE_REUSABLE_LIVE_ROW_ID_CAPACITY = MYLITE_STORAGE_LIVE_ROW_ID_INITIAL_CAPACITY,
@@ -1991,6 +1997,49 @@ static void remove_validated_live_row_id(
     mylite_storage_live_row_cache *cache,
     unsigned long long row_id
 );
+static int live_row_id_set_contains(
+    const mylite_storage_live_row_id_set *set,
+    unsigned long long row_id
+);
+static mylite_storage_result add_live_row_id_to_set(
+    mylite_storage_live_row_id_set *set,
+    unsigned long long row_id
+);
+static void remove_live_row_id_from_set(
+    mylite_storage_live_row_id_set *set,
+    unsigned long long row_id
+);
+static size_t find_live_row_id_entry(
+    const mylite_storage_live_row_id_set *set,
+    unsigned long long row_id
+);
+static mylite_storage_result ensure_live_row_id_set_capacity(mylite_storage_live_row_id_set *set);
+static mylite_storage_result ensure_live_row_id_set_buckets(
+    mylite_storage_live_row_id_set *set,
+    size_t next_count
+);
+static mylite_storage_result rebuild_live_row_id_set_buckets(
+    mylite_storage_live_row_id_set *set,
+    size_t bucket_capacity
+);
+static mylite_storage_result insert_live_row_id_bucket(
+    mylite_storage_live_row_id_set *set,
+    unsigned long long row_id,
+    size_t entry_index
+);
+static void remove_live_row_id_bucket_entry(
+    mylite_storage_live_row_id_set *set,
+    unsigned long long row_id,
+    size_t entry_index
+);
+static int move_live_row_id_bucket_entry(
+    mylite_storage_live_row_id_set *set,
+    unsigned long long row_id,
+    size_t old_entry_index,
+    size_t new_entry_index
+);
+static void reset_live_row_id_set_for_reuse(mylite_storage_live_row_id_set *set);
+static void free_live_row_id_set(mylite_storage_live_row_id_set *set);
 static void encode_row_state_page(
     unsigned char *page,
     unsigned long long page_id,
@@ -9074,8 +9123,8 @@ static int live_row_caches_fit_reuse_limit(const mylite_storage_live_row_cache_s
 
     for (size_t i = 0U; i < caches->count; ++i) {
         const mylite_storage_live_row_cache *cache = caches->entries + i;
-        if (cache->capacity > MYLITE_STORAGE_REUSABLE_LIVE_ROW_ID_CAPACITY ||
-            cache->validated_capacity > MYLITE_STORAGE_REUSABLE_LIVE_ROW_ID_CAPACITY) {
+        if (cache->live_rows.capacity > MYLITE_STORAGE_REUSABLE_LIVE_ROW_ID_CAPACITY ||
+            cache->validated_rows.capacity > MYLITE_STORAGE_REUSABLE_LIVE_ROW_ID_CAPACITY) {
             return 0;
         }
     }
@@ -9084,14 +9133,14 @@ static int live_row_caches_fit_reuse_limit(const mylite_storage_live_row_cache_s
 
 static void reset_live_row_caches_for_reuse(mylite_storage_live_row_cache_set *caches) {
     for (size_t i = 0U; i < caches->count; ++i) {
-        caches->entries[i].count = 0U;
-        caches->entries[i].validated_count = 0U;
+        reset_live_row_id_set_for_reuse(&caches->entries[i].live_rows);
+        reset_live_row_id_set_for_reuse(&caches->entries[i].validated_rows);
     }
 }
 
 static void free_live_row_cache(mylite_storage_live_row_cache *cache) {
-    free(cache->row_ids);
-    free(cache->validated_row_ids);
+    free_live_row_id_set(&cache->live_rows);
+    free_live_row_id_set(&cache->validated_rows);
     *cache = (mylite_storage_live_row_cache){0};
 }
 
@@ -15812,30 +15861,14 @@ static int active_live_row_known_in_cache(
     const mylite_storage_live_row_cache *cache,
     unsigned long long row_id
 ) {
-    if (cache == NULL) {
-        return 0;
-    }
-    for (size_t i = 0U; i < cache->count; ++i) {
-        if (cache->row_ids[i] == row_id) {
-            return 1;
-        }
-    }
-    return 0;
+    return cache != NULL && live_row_id_set_contains(&cache->live_rows, row_id);
 }
 
 static int active_validated_live_row_known_in_cache(
     const mylite_storage_live_row_cache *cache,
     unsigned long long row_id
 ) {
-    if (cache == NULL) {
-        return 0;
-    }
-    for (size_t i = 0U; i < cache->validated_count; ++i) {
-        if (cache->validated_row_ids[i] == row_id) {
-            return 1;
-        }
-    }
-    return 0;
+    return cache != NULL && live_row_id_set_contains(&cache->validated_rows, row_id);
 }
 
 static mylite_storage_result mark_active_live_row(
@@ -16062,89 +16095,322 @@ static mylite_storage_result add_live_row_id(
     mylite_storage_live_row_cache *cache,
     unsigned long long row_id
 ) {
-    for (size_t i = 0U; i < cache->count; ++i) {
-        if (cache->row_ids[i] == row_id) {
-            return MYLITE_STORAGE_OK;
-        }
-    }
-
-    if (cache->count == cache->capacity) {
-        const size_t next_capacity = cache->capacity == 0U
-                                         ? MYLITE_STORAGE_LIVE_ROW_ID_INITIAL_CAPACITY
-                                         : cache->capacity * 2U;
-        if (next_capacity <= cache->capacity ||
-            next_capacity > SIZE_MAX / sizeof(*cache->row_ids)) {
-            return MYLITE_STORAGE_FULL;
-        }
-        unsigned long long *row_ids =
-            (unsigned long long *)realloc(cache->row_ids, next_capacity * sizeof(*cache->row_ids));
-        if (row_ids == NULL) {
-            return MYLITE_STORAGE_NOMEM;
-        }
-        cache->row_ids = row_ids;
-        cache->capacity = next_capacity;
-    }
-
-    cache->row_ids[cache->count++] = row_id;
-    return MYLITE_STORAGE_OK;
+    return add_live_row_id_to_set(&cache->live_rows, row_id);
 }
 
 static mylite_storage_result add_validated_live_row_id(
     mylite_storage_live_row_cache *cache,
     unsigned long long row_id
 ) {
-    for (size_t i = 0U; i < cache->validated_count; ++i) {
-        if (cache->validated_row_ids[i] == row_id) {
-            return MYLITE_STORAGE_OK;
-        }
-    }
-
-    if (cache->validated_count == cache->validated_capacity) {
-        const size_t next_capacity = cache->validated_capacity == 0U
-                                         ? MYLITE_STORAGE_LIVE_ROW_ID_INITIAL_CAPACITY
-                                         : cache->validated_capacity * 2U;
-        if (next_capacity <= cache->validated_capacity ||
-            next_capacity > SIZE_MAX / sizeof(*cache->validated_row_ids)) {
-            return MYLITE_STORAGE_FULL;
-        }
-        unsigned long long *row_ids = (unsigned long long *)realloc(
-            cache->validated_row_ids,
-            next_capacity * sizeof(*cache->validated_row_ids)
-        );
-        if (row_ids == NULL) {
-            return MYLITE_STORAGE_NOMEM;
-        }
-        cache->validated_row_ids = row_ids;
-        cache->validated_capacity = next_capacity;
-    }
-
-    cache->validated_row_ids[cache->validated_count++] = row_id;
-    return MYLITE_STORAGE_OK;
+    return add_live_row_id_to_set(&cache->validated_rows, row_id);
 }
 
 static void remove_live_row_id(mylite_storage_live_row_cache *cache, unsigned long long row_id) {
-    size_t write_index = 0U;
-    for (size_t read_index = 0U; read_index < cache->count; ++read_index) {
-        if (cache->row_ids[read_index] == row_id) {
-            continue;
-        }
-        cache->row_ids[write_index++] = cache->row_ids[read_index];
-    }
-    cache->count = write_index;
+    remove_live_row_id_from_set(&cache->live_rows, row_id);
 }
 
 static void remove_validated_live_row_id(
     mylite_storage_live_row_cache *cache,
     unsigned long long row_id
 ) {
-    size_t write_index = 0U;
-    for (size_t read_index = 0U; read_index < cache->validated_count; ++read_index) {
-        if (cache->validated_row_ids[read_index] == row_id) {
-            continue;
-        }
-        cache->validated_row_ids[write_index++] = cache->validated_row_ids[read_index];
+    remove_live_row_id_from_set(&cache->validated_rows, row_id);
+}
+
+static int live_row_id_set_contains(
+    const mylite_storage_live_row_id_set *set,
+    unsigned long long row_id
+) {
+    return find_live_row_id_entry(set, row_id) != SIZE_MAX;
+}
+
+static mylite_storage_result add_live_row_id_to_set(
+    mylite_storage_live_row_id_set *set,
+    unsigned long long row_id
+) {
+    if (live_row_id_set_contains(set, row_id)) {
+        return MYLITE_STORAGE_OK;
     }
-    cache->validated_count = write_index;
+
+    mylite_storage_result result = ensure_live_row_id_set_capacity(set);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    const size_t entry_index = set->count;
+    result = ensure_live_row_id_set_buckets(set, entry_index + 1U);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    set->row_ids[entry_index] = row_id;
+    ++set->count;
+    if (set->bucket_count != 0U) {
+        result = insert_live_row_id_bucket(set, row_id, entry_index);
+        if (result != MYLITE_STORAGE_OK) {
+            --set->count;
+            set->row_ids[entry_index] = 0ULL;
+        }
+    }
+    return result;
+}
+
+static void remove_live_row_id_from_set(
+    mylite_storage_live_row_id_set *set,
+    unsigned long long row_id
+) {
+    size_t removed_index = SIZE_MAX;
+    if (set->bucket_count == 0U) {
+        for (size_t i = 0U; i < set->count; ++i) {
+            if (set->row_ids[i] == row_id) {
+                removed_index = i;
+                break;
+            }
+        }
+        if (removed_index == SIZE_MAX) {
+            return;
+        }
+    } else {
+        removed_index = find_live_row_id_entry(set, row_id);
+        if (removed_index == SIZE_MAX) {
+            return;
+        }
+        remove_live_row_id_bucket_entry(set, row_id, removed_index);
+    }
+
+    const size_t last_index = set->count - 1U;
+    if (removed_index != last_index) {
+        const unsigned long long moved_row_id = set->row_ids[last_index];
+        set->row_ids[removed_index] = moved_row_id;
+        if (set->bucket_count != 0U) {
+            if (!move_live_row_id_bucket_entry(set, moved_row_id, last_index, removed_index)) {
+                set->bucket_next[removed_index] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+                set->row_ids[last_index] = 0ULL;
+                --set->count;
+                (void)rebuild_live_row_id_set_buckets(set, set->bucket_count);
+                return;
+            }
+            set->bucket_next[removed_index] = set->bucket_next[last_index];
+        }
+    }
+    set->row_ids[last_index] = 0ULL;
+    if (set->bucket_next != NULL) {
+        set->bucket_next[last_index] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+    }
+    --set->count;
+}
+
+static size_t find_live_row_id_entry(
+    const mylite_storage_live_row_id_set *set,
+    unsigned long long row_id
+) {
+    if (set->bucket_count == 0U) {
+        for (size_t i = 0U; i < set->count; ++i) {
+            if (set->row_ids[i] == row_id) {
+                return i;
+            }
+        }
+        return SIZE_MAX;
+    }
+
+    const size_t bucket_index = hash_row_id(row_id) & (set->bucket_count - 1U);
+    for (size_t entry_index = set->bucket_heads[bucket_index];
+         entry_index != MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+         entry_index = set->bucket_next[entry_index]) {
+        if (entry_index >= set->count) {
+            return SIZE_MAX;
+        }
+        if (set->row_ids[entry_index] == row_id) {
+            return entry_index;
+        }
+    }
+    return SIZE_MAX;
+}
+
+static mylite_storage_result ensure_live_row_id_set_capacity(mylite_storage_live_row_id_set *set) {
+    if (set->count < set->capacity) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    const size_t next_capacity =
+        set->capacity == 0U ? MYLITE_STORAGE_LIVE_ROW_ID_INITIAL_CAPACITY : set->capacity * 2U;
+    if (next_capacity <= set->capacity || next_capacity > SIZE_MAX / sizeof(*set->row_ids)) {
+        return MYLITE_STORAGE_FULL;
+    }
+    unsigned long long *row_ids =
+        (unsigned long long *)realloc(set->row_ids, next_capacity * sizeof(*set->row_ids));
+    if (row_ids == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+    set->row_ids = row_ids;
+
+    if (set->bucket_count != 0U) {
+        if (next_capacity > SIZE_MAX / sizeof(*set->bucket_next)) {
+            return MYLITE_STORAGE_FULL;
+        }
+        size_t *bucket_next =
+            (size_t *)realloc(set->bucket_next, next_capacity * sizeof(*set->bucket_next));
+        if (bucket_next == NULL) {
+            return MYLITE_STORAGE_NOMEM;
+        }
+        for (size_t i = set->capacity; i < next_capacity; ++i) {
+            bucket_next[i] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+        }
+        set->bucket_next = bucket_next;
+    }
+
+    set->capacity = next_capacity;
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result ensure_live_row_id_set_buckets(
+    mylite_storage_live_row_id_set *set,
+    size_t next_count
+) {
+    if (next_count > SIZE_MAX / 2U) {
+        return MYLITE_STORAGE_FULL;
+    }
+    if (next_count < MYLITE_STORAGE_LIVE_ROW_ID_BUCKET_MIN_COUNT) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    const size_t minimum_bucket_count = next_count * 2U;
+    if (set->bucket_count >= minimum_bucket_count) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    size_t next_bucket_count = set->bucket_count == 0U ? 32U : set->bucket_count;
+    while (next_bucket_count < minimum_bucket_count) {
+        if (next_bucket_count > SIZE_MAX / 2U) {
+            return MYLITE_STORAGE_FULL;
+        }
+        next_bucket_count *= 2U;
+    }
+    return rebuild_live_row_id_set_buckets(set, next_bucket_count);
+}
+
+static mylite_storage_result rebuild_live_row_id_set_buckets(
+    mylite_storage_live_row_id_set *set,
+    size_t bucket_count
+) {
+    if (bucket_count > SIZE_MAX / sizeof(*set->bucket_heads) ||
+        set->capacity > SIZE_MAX / sizeof(*set->bucket_next)) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    size_t *bucket_heads = (size_t *)malloc(bucket_count * sizeof(*bucket_heads));
+    size_t *bucket_next = (size_t *)malloc(set->capacity * sizeof(*bucket_next));
+    if (bucket_heads == NULL || bucket_next == NULL) {
+        free(bucket_heads);
+        free(bucket_next);
+        return MYLITE_STORAGE_NOMEM;
+    }
+    for (size_t i = 0U; i < bucket_count; ++i) {
+        bucket_heads[i] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+    }
+    for (size_t i = 0U; i < set->capacity; ++i) {
+        bucket_next[i] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+    }
+
+    size_t *old_bucket_heads = set->bucket_heads;
+    size_t *old_bucket_next = set->bucket_next;
+    const size_t old_bucket_count = set->bucket_count;
+    set->bucket_heads = bucket_heads;
+    set->bucket_next = bucket_next;
+    set->bucket_count = bucket_count;
+    for (size_t i = 0U; i < set->count; ++i) {
+        const mylite_storage_result result = insert_live_row_id_bucket(set, set->row_ids[i], i);
+        if (result != MYLITE_STORAGE_OK) {
+            free(bucket_heads);
+            free(bucket_next);
+            set->bucket_heads = old_bucket_heads;
+            set->bucket_next = old_bucket_next;
+            set->bucket_count = old_bucket_count;
+            return result;
+        }
+    }
+
+    free(old_bucket_heads);
+    free(old_bucket_next);
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result insert_live_row_id_bucket(
+    mylite_storage_live_row_id_set *set,
+    unsigned long long row_id,
+    size_t entry_index
+) {
+    if (set->bucket_count == 0U || entry_index >= set->capacity) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    const size_t bucket_index = hash_row_id(row_id) & (set->bucket_count - 1U);
+    set->bucket_next[entry_index] = set->bucket_heads[bucket_index];
+    set->bucket_heads[bucket_index] = entry_index;
+    return MYLITE_STORAGE_OK;
+}
+
+static void remove_live_row_id_bucket_entry(
+    mylite_storage_live_row_id_set *set,
+    unsigned long long row_id,
+    size_t entry_index
+) {
+    if (set->bucket_count == 0U) {
+        return;
+    }
+
+    const size_t bucket_index = hash_row_id(row_id) & (set->bucket_count - 1U);
+    size_t *entry_link = set->bucket_heads + bucket_index;
+    while (*entry_link != MYLITE_STORAGE_CACHE_BUCKET_EMPTY) {
+        if (*entry_link == entry_index) {
+            *entry_link = set->bucket_next[entry_index];
+            set->bucket_next[entry_index] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+            return;
+        }
+        entry_link = set->bucket_next + *entry_link;
+    }
+}
+
+static int move_live_row_id_bucket_entry(
+    mylite_storage_live_row_id_set *set,
+    unsigned long long row_id,
+    size_t old_entry_index,
+    size_t new_entry_index
+) {
+    if (set->bucket_count == 0U) {
+        return 0;
+    }
+
+    const size_t bucket_index = hash_row_id(row_id) & (set->bucket_count - 1U);
+    size_t *entry_link = set->bucket_heads + bucket_index;
+    while (*entry_link != MYLITE_STORAGE_CACHE_BUCKET_EMPTY) {
+        if (*entry_link == old_entry_index) {
+            *entry_link = new_entry_index;
+            return 1;
+        }
+        entry_link = set->bucket_next + *entry_link;
+    }
+    return 0;
+}
+
+static void reset_live_row_id_set_for_reuse(mylite_storage_live_row_id_set *set) {
+    set->count = 0U;
+    if (set->bucket_heads != NULL) {
+        for (size_t i = 0U; i < set->bucket_count; ++i) {
+            set->bucket_heads[i] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+        }
+    }
+    if (set->bucket_next != NULL) {
+        for (size_t i = 0U; i < set->capacity; ++i) {
+            set->bucket_next[i] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+        }
+    }
+}
+
+static void free_live_row_id_set(mylite_storage_live_row_id_set *set) {
+    free(set->row_ids);
+    free(set->bucket_heads);
+    free(set->bucket_next);
+    *set = (mylite_storage_live_row_id_set){0};
 }
 
 static void encode_row_state_page(

@@ -347,6 +347,9 @@ on stable-key prepared updates.
 Nested statement checkpoints inside active transactions now begin from the
 known transaction or savepoint parent, avoiding filename-based active-statement
 rediscovery on prepared row-DML loops.
+Active live-row caches now keep hash-backed row-id membership for larger live
+and payload-validated row-id sets, while small nested statement caches stay on
+the cheaper linear path.
 
 ## Size And Profile Direction
 
