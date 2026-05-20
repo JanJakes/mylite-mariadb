@@ -253,6 +253,9 @@ ownership from `FILE *`.
 Validated live-row marking now resolves or appends its statement live-row cache
 once before recording both live and validated row ids, removing a duplicate
 cache lookup from routed point-update reads.
+Indexed-row payload lookup now relies on the successful validated live-row mark
+as its single cache update, since that mark already records the row as both
+live and validated.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation

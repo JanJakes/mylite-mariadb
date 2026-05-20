@@ -5700,12 +5700,6 @@ static mylite_storage_result find_indexed_row_payload(
         );
     }
     if (result == MYLITE_STORAGE_OK && *out_row_id != 0ULL) {
-        (void)mark_active_live_row_in_statement(
-            file_scope.active_statement,
-            &header,
-            table_entry.table_id,
-            *out_row_id
-        );
         result = read_indexed_row_payload_from_open_file(
             file,
             filename,
