@@ -223,6 +223,9 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "CREATE DATABASE app");
     exec_ok(db, "SELECT SQL_CACHE 1");
     exec_ok(db, "SELECT SQL_NO_CACHE 1");
+    exec_ok(db, "SET @profiling = 1");
+    exec_ok(db, "SET @profiling_history_size = 10");
+    exec_ok(db, "SET @query_cache_size = 1048576");
     exec_ok(db, "SET @query_cache_type = 'local'");
 
     expect_error(
