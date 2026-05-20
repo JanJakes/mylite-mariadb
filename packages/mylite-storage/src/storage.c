@@ -711,6 +711,10 @@ static void clone_parent_checkpoint_snapshot(
     const mylite_storage_statement *parent
 );
 static void materialize_statement_header_page(mylite_storage_statement *statement);
+static int materialize_lazy_checkpoint_catalog_page(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header
+);
 static mylite_storage_result initialize_read_statement(
     mylite_storage_statement *statement,
     const char *filename,
@@ -6538,10 +6542,9 @@ static void clone_parent_checkpoint_snapshot(
     const unsigned char *catalog_page =
         parent->has_current_catalog_page ? parent->current_catalog_page : parent->catalog_page;
     memcpy(statement->catalog_page, catalog_page, sizeof(statement->catalog_page));
-    memcpy(statement->current_catalog_page, catalog_page, sizeof(statement->current_catalog_page));
     statement->current_catalog_root_page = statement->header.catalog_root_page;
     statement->current_catalog_generation = statement->header.catalog_generation;
-    statement->has_current_catalog_page = 1;
+    statement->has_current_catalog_page = 0;
 }
 
 static void materialize_statement_header_page(mylite_storage_statement *statement) {
@@ -6551,6 +6554,26 @@ static void materialize_statement_header_page(mylite_storage_statement *statemen
 
     encode_header_page(statement->header_page, &statement->header);
     statement->has_header_page = 1;
+}
+
+static int materialize_lazy_checkpoint_catalog_page(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header
+) {
+    if (statement == NULL || statement->has_current_catalog_page || statement->parent == NULL ||
+        statement->current_catalog_root_page != header->catalog_root_page ||
+        statement->current_catalog_generation != header->catalog_generation ||
+        header->page_size != MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+        return 0;
+    }
+
+    memcpy(
+        statement->current_catalog_page,
+        statement->catalog_page,
+        sizeof(statement->catalog_page)
+    );
+    statement->has_current_catalog_page = 1;
+    return 1;
 }
 
 static mylite_storage_result initialize_read_statement(
@@ -10435,6 +10458,10 @@ static mylite_storage_result read_catalog_root(
         statement->current_catalog_root_page == header->catalog_root_page &&
         statement->current_catalog_generation == header->catalog_generation &&
         header->page_size == MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+        memcpy(out_page, statement->current_catalog_page, header->page_size);
+        return MYLITE_STORAGE_OK;
+    }
+    if (materialize_lazy_checkpoint_catalog_page(statement, header)) {
         memcpy(out_page, statement->current_catalog_page, header->page_size);
         return MYLITE_STORAGE_OK;
     }

@@ -4988,6 +4988,7 @@ static void assert_nested_statement_checkpoints(statement_checkpoint_test_contex
     assert(mylite_storage_begin_statement(ctx->filename, &inner) == MYLITE_STORAGE_OK);
     assert(inner != NULL);
     assert(mylite_storage_commit_statement(outer) == MYLITE_STORAGE_MISUSE);
+    assert(mylite_storage_table_exists(ctx->filename, "app", "posts") == MYLITE_STORAGE_OK);
     assert(
         mylite_storage_store_table_definition(ctx->filename, ctx->rollback_definition) ==
         MYLITE_STORAGE_OK

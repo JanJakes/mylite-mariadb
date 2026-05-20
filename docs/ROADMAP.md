@@ -229,7 +229,9 @@ the parent checkpoint filename instead of allocating an identical filename copy
 for every prepared row-DML savepoint. They also use narrow initialization for
 nested checkpoint state instead of clearing unused page buffers on every
 prepared row-DML savepoint, and retain one cleaned-up nested checkpoint object
-per thread for reuse by the next nested statement.
+per thread for reuse by the next nested statement. Nested checkpoints now also
+defer materializing their current catalog cache until catalog metadata is read,
+while keeping the rollback catalog snapshot eager.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation
