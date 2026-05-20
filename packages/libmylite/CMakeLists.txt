@@ -72,6 +72,11 @@ if(BUILD_TESTING)
     )
     mylite_configure_embedded_c_test(mylite_embedded_locking_concurrency_test)
 
+    add_executable(mylite_embedded_compatibility_harness_test
+      tests/embedded_compatibility_harness_test.c
+    )
+    mylite_configure_embedded_c_test(mylite_embedded_compatibility_harness_test)
+
     add_executable(mylite_embedded_native_table_operations_test
       tests/embedded_native_table_operations_test.c
     )
@@ -89,6 +94,14 @@ if(BUILD_TESTING)
       COMMAND mylite_embedded_locking_concurrency_test
     )
     add_test(
+      NAME libmylite.compat.mariadb-comparison
+      COMMAND mylite_embedded_compatibility_harness_test mariadb-comparison
+    )
+    add_test(
+      NAME libmylite.compat.application-queries
+      COMMAND mylite_embedded_compatibility_harness_test application-queries
+    )
+    add_test(
       NAME libmylite.embedded-native-table-operations
       COMMAND mylite_embedded_native_table_operations_test
     )
@@ -97,6 +110,34 @@ if(BUILD_TESTING)
     add_test(
       NAME libmylite.embedded-transactions-recovery
       COMMAND mylite_embedded_transactions_recovery_test
+    )
+
+    set_tests_properties(libmylite.embedded-open-close PROPERTIES
+      LABELS "compat.lifecycle;compat.directory-boundary"
+    )
+    set_tests_properties(libmylite.embedded-storage PROPERTIES
+      LABELS "compat.lifecycle;compat.directory-boundary;compat.query"
+    )
+    set_tests_properties(libmylite.embedded-exec PROPERTIES
+      LABELS "compat.lifecycle;compat.query"
+    )
+    set_tests_properties(libmylite.embedded-ddl-lifecycle PROPERTIES
+      LABELS "compat.directory-boundary;compat.query"
+    )
+    set_tests_properties(libmylite.embedded-locking-concurrency PROPERTIES
+      LABELS "compat.directory-boundary;compat.crash-reopen"
+    )
+    set_tests_properties(libmylite.embedded-native-table-operations PROPERTIES
+      LABELS "compat.directory-boundary;compat.query"
+    )
+    set_tests_properties(libmylite.embedded-transactions-recovery PROPERTIES
+      LABELS "compat.directory-boundary;compat.crash-reopen;compat.query"
+    )
+    set_tests_properties(libmylite.compat.mariadb-comparison PROPERTIES
+      LABELS "compat.mariadb-comparison;compat.query"
+    )
+    set_tests_properties(libmylite.compat.application-queries PROPERTIES
+      LABELS "compat.application-query;compat.directory-boundary;compat.query"
     )
   endif()
 endif()

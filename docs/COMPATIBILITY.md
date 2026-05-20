@@ -22,6 +22,23 @@ for drop-in application expectations.
 | Primary API | `libmylite` directory-owned C API |
 | MariaDB C API | Optional adapter, not the primary lifetime model |
 
+## Harness
+
+Compatibility coverage is grouped with CTest labels under the `embedded-dev`
+preset:
+
+| Group | Command |
+| --- | --- |
+| Embedded lifecycle | `ctest --preset embedded-dev -L compat.lifecycle` |
+| Directory-boundary detection | `ctest --preset embedded-dev -L compat.directory-boundary` |
+| MariaDB-reference SQL results | `ctest --preset embedded-dev -L compat.mariadb-comparison` |
+| Crash/reopen behavior | `ctest --preset embedded-dev -L compat.crash-reopen` |
+| Application queries | `ctest --preset embedded-dev -L compat.application-query` |
+| Current SQL query surface | `ctest --preset embedded-dev -L compat.query` |
+
+The MariaDB-reference group uses expected result vectors pinned to MariaDB 11.8
+behavior. It does not require a daemon in the default test path.
+
 ## Public API
 
 | Capability | MyLite status | Compatibility target |
