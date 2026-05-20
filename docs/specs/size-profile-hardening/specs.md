@@ -25,6 +25,8 @@ help comments are omitted because they are descriptive server help text rather
 than variable behavior. Static `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and
 `SHOW PRIVILEGES` producers are omitted because they expose server
 attribution and privilege help metadata rather than application data.
+Command-line option help text is omitted because it is inherited server
+documentation prose, while option names and parser metadata remain available.
 
 ## Source Findings
 
@@ -136,6 +138,15 @@ attribution and privilege help metadata rather than application data.
 - Disabling static `SHOW` information behind
   `MYLITE_WITH_STATIC_SHOW_INFO=0` removes those static result producers and
   reduces the stripped archive to 27,137,632 bytes, 25.88 MiB, and 705 members.
+- `mariadb/sql/mysqld.cc` defines the server `my_long_options[]` option table.
+  Its `my_option::comment` field feeds automated `--help` text through
+  `my_print_help()` in `mariadb/mysys/my_getopt.c`; option parsing uses the
+  same table's names, variables, types, argument policy, defaults, bounds, and
+  aliases.
+- Disabling command-line option help text behind
+  `MYLITE_WITH_OPTION_HELP_TEXT=0` maps only those hardcoded option comments to
+  empty strings and reduces the stripped archive to 27,128,952 bytes,
+  25.87 MiB, and 705 members.
 
 ## Proposed Design
 
@@ -225,6 +236,14 @@ direct and prepared static `SHOW` information SQL before dispatch, while
 `sql_parse.cc` remains the fail-closed backstop if the public policy is
 bypassed.
 
+The embedded archive omits hardcoded command-line option help text by setting
+`MYLITE_WITH_OPTION_HELP_TEXT=0` in the MyLite baseline. The option defaults to
+`ON` so normal MariaDB server builds keep upstream `--help` prose. The embedded
+profile wraps only `my_long_options[]` comment strings in
+`MYLITE_OPTION_HELP_TEXT(...)`; option names, aliases, value pointers, argument
+types, defaults, bounds, deprecation aliases, and parsing behavior remain
+compiled normally.
+
 The wrapper keeps this behavior enabled by default because it is the
 distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
 need an unstripped archive for local inspection.
@@ -240,7 +259,8 @@ unwind tables, and omits dynamic UDF lookup, execution, and DDL runtime. The
 embedded baseline also disables binlog transaction/event runtime behind a
 MyLite-owned profile flag and omits long system-variable help comments from
 `sys_vars.cc`. Static server-information `SHOW` producers are compiled out of
-`sql_show.cc`.
+`sql_show.cc`. Hardcoded command-line option help strings are compiled out of
+the embedded `mysqld.cc` option table.
 
 ## Compatibility Impact
 
@@ -284,6 +304,9 @@ Static `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES` are
 server-information and privilege-help surfaces. Omitting them leaves ordinary
 supported `SHOW` surfaces such as `SHOW VARIABLES`, table metadata inspection,
 and warnings available.
+Command-line option help text is documentation metadata. Omitting it leaves
+embedded startup option parsing, names, aliases, types, defaults, and limits
+available; inherited `--help` descriptions are empty in the embedded archive.
 
 ## Database-Directory And Lifecycle Impact
 
@@ -351,6 +374,11 @@ bytes / 25.88 MiB, 4,392,072 bytes smaller than the Release build with
 Performance Schema disabled, 5,992,008 bytes smaller than the symbol-stripped
 baseline with Performance Schema still built, and 6,704,688 bytes smaller than
 the original broad archive.
+Omitting command-line option help text brings the current archive to 27,128,952
+bytes / 25.87 MiB, 4,400,752 bytes smaller than the Release build with
+Performance Schema disabled, 6,000,688 bytes smaller than the symbol-stripped
+baseline with Performance Schema still built, and 6,713,368 bytes smaller than
+the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -405,6 +433,8 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Direct and prepared `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and
   `SHOW PRIVILEGES` fail through MyLite policy, while ordinary `SHOW
   VARIABLES` remains available.
+- Embedded startup option parsing remains covered by the embedded test suite,
+  and inherited option help strings are absent from the measured archive.
 - The stripped archive still links `libmylite` and all embedded tests.
 - The measured archive size and member count are recorded in the build
   documentation.
@@ -434,3 +464,6 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Clients that display static server attribution or privilege help from
   `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, or `SHOW PRIVILEGES` lose those
   commands in the default embedded profile.
+- Users inspecting MariaDB-style command-line help from the embedded archive
+  lose inherited prose descriptions. The option parser still accepts the
+  retained embedded startup options.

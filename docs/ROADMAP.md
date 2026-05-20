@@ -54,6 +54,7 @@ surface that does not fit a local directory-owned library:
 - legacy diagnostic SELECT procedures such as `PROCEDURE ANALYSE()`,
 - server help text such as system-variable comments,
 - static server-information `SHOW` commands,
+- command-line option help prose,
 - rarely used optional engines or plugins unless a slice justifies them.
 
 The minimal embedded build establishes the first baseline. Later slices record
@@ -88,6 +89,9 @@ and values remain queryable and only
 Static `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES` are omitted
 after coverage proves ordinary supported `SHOW` surfaces such as `SHOW
 VARIABLES` remain available.
+Command-line option help prose is omitted after measurement proves startup
+option parsing remains intact and only inherited `--help` descriptions become
+empty in the embedded archive.
 Compatibility-sensitive code removals require separate evidence before they
 are accepted.
 
