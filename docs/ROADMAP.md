@@ -214,7 +214,10 @@ dirty-flag operation. In-place active row rewrites now skip exact-index cache
 maintenance for unchanged matching key images and live-row retargeting for an
 unchanged row id. Prepared primary-key updates now reuse resolved active
 file/cache statement scopes for row validation and active cache maintenance
-instead of repeatedly walking active statement chains.
+instead of repeatedly walking active statement chains. Active buffered rewrite
+validation now carries append-buffer page refs with checksum-dirty slots through
+undo capture and mutation, avoiding repeated page-range and dirty-slot lookup
+for already-resolved row and changed index-entry pages.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation
