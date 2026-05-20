@@ -118,6 +118,7 @@ static void test_durable_live_row_cache(void);
 static void test_active_live_row_list_maintenance(void);
 static void test_index_entries(void);
 static void test_cached_exact_index_entryset_bulk_append(void);
+static void test_active_exact_index_cache_many_replacements(void);
 static void test_indexed_row_batch_cache_reuses_duplicates(void);
 static void test_index_root_metadata(void);
 static void test_index_leaf_pages(void);
@@ -390,6 +391,7 @@ int main(void) {
     test_active_live_row_list_maintenance();
     test_index_entries();
     test_cached_exact_index_entryset_bulk_append();
+    test_active_exact_index_cache_many_replacements();
     test_indexed_row_batch_cache_reuses_duplicates();
     test_index_root_metadata();
     test_index_leaf_pages();
@@ -2352,6 +2354,186 @@ static void test_cached_exact_index_entryset_bulk_append(void) {
         expected_row_ids[0]
     );
     assert_exact_index_entries(filename, 1U, missing_key, sizeof(missing_key), NULL, 0U);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_active_exact_index_cache_many_replacements(void) {
+    enum { ROW_COUNT = 96 };
+
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char old_secondary_key[] = {'o', 'l', 'd'};
+    static const unsigned char new_secondary_key[] = {'n', 'e', 'w'};
+    unsigned char primary_keys[ROW_COUNT][2];
+    unsigned char rows[ROW_COUNT][3];
+    unsigned char replacement_rows[ROW_COUNT][4];
+    unsigned long long row_ids[ROW_COUNT] = {0};
+    unsigned long long replacement_row_ids[ROW_COUNT] = {0};
+    unsigned long long live_replacement_row_ids[ROW_COUNT] = {0};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "active-exact-index-cache-many-replacements.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_statement *transaction = NULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    for (size_t i = 0U; i < ROW_COUNT; ++i) {
+        primary_keys[i][0] = 0x30U;
+        primary_keys[i][1] = (unsigned char)i;
+        rows[i][0] = 0x00U;
+        rows[i][1] = (unsigned char)i;
+        rows[i][2] = 0x41U;
+        replacement_rows[i][0] = 0x00U;
+        replacement_rows[i][1] = (unsigned char)i;
+        replacement_rows[i][2] = 0x42U;
+        replacement_rows[i][3] = 0x43U;
+        mylite_storage_index_entry row_entries[] = {
+            {.size = sizeof(row_entries[0]),
+             .index_number = 0U,
+             .key = primary_keys[i],
+             .key_size = sizeof(primary_keys[i])},
+            {.size = sizeof(row_entries[1]),
+             .index_number = 1U,
+             .key = old_secondary_key,
+             .key_size = sizeof(old_secondary_key)},
+        };
+        assert(
+            mylite_storage_append_row_with_index_entries(
+                filename,
+                "app",
+                "posts",
+                rows[i],
+                sizeof(rows[i]),
+                row_entries,
+                sizeof(row_entries) / sizeof(row_entries[0]),
+                &row_ids[i]
+            ) == MYLITE_STORAGE_OK
+        );
+    }
+
+    assert(mylite_storage_begin_transaction(filename, &transaction) == MYLITE_STORAGE_OK);
+    assert_exact_index_entries(
+        filename,
+        1U,
+        old_secondary_key,
+        sizeof(old_secondary_key),
+        row_ids,
+        ROW_COUNT
+    );
+    assert_index_entry_lookup(
+        filename,
+        1U,
+        old_secondary_key,
+        sizeof(old_secondary_key),
+        MYLITE_STORAGE_OK,
+        row_ids[0]
+    );
+    for (size_t i = 0U; i < ROW_COUNT; ++i) {
+        mylite_storage_index_entry replacement_entries[] = {
+            {.size = sizeof(replacement_entries[0]),
+             .index_number = 0U,
+             .key = primary_keys[i],
+             .key_size = sizeof(primary_keys[i])},
+            {.size = sizeof(replacement_entries[1]),
+             .index_number = 1U,
+             .key = new_secondary_key,
+             .key_size = sizeof(new_secondary_key)},
+        };
+        assert(
+            mylite_storage_update_row_with_index_entries(
+                filename,
+                "app",
+                "posts",
+                row_ids[i],
+                replacement_rows[i],
+                sizeof(replacement_rows[i]),
+                replacement_entries,
+                sizeof(replacement_entries) / sizeof(replacement_entries[0]),
+                &replacement_row_ids[i]
+            ) == MYLITE_STORAGE_OK
+        );
+    }
+    assert_index_entry_lookup(
+        filename,
+        1U,
+        old_secondary_key,
+        sizeof(old_secondary_key),
+        MYLITE_STORAGE_NOTFOUND,
+        0ULL
+    );
+    assert_index_entry_lookup(
+        filename,
+        1U,
+        new_secondary_key,
+        sizeof(new_secondary_key),
+        MYLITE_STORAGE_OK,
+        replacement_row_ids[0]
+    );
+    assert_exact_index_entries(
+        filename,
+        1U,
+        old_secondary_key,
+        sizeof(old_secondary_key),
+        NULL,
+        0U
+    );
+    assert_exact_index_entries(
+        filename,
+        1U,
+        new_secondary_key,
+        sizeof(new_secondary_key),
+        replacement_row_ids,
+        ROW_COUNT
+    );
+
+    size_t live_count = 0U;
+    for (size_t i = 0U; i < ROW_COUNT; ++i) {
+        if (i % 4U == 0U) {
+            assert(
+                mylite_storage_delete_row(filename, "app", "posts", replacement_row_ids[i]) ==
+                MYLITE_STORAGE_OK
+            );
+            continue;
+        }
+        live_replacement_row_ids[live_count++] = replacement_row_ids[i];
+    }
+    assert_index_entry_lookup(
+        filename,
+        1U,
+        new_secondary_key,
+        sizeof(new_secondary_key),
+        MYLITE_STORAGE_OK,
+        replacement_row_ids[1]
+    );
+    assert_exact_index_entries(
+        filename,
+        1U,
+        new_secondary_key,
+        sizeof(new_secondary_key),
+        live_replacement_row_ids,
+        live_count
+    );
+    assert(mylite_storage_commit_statement(transaction) == MYLITE_STORAGE_OK);
+
+    assert_exact_index_entries(
+        filename,
+        1U,
+        new_secondary_key,
+        sizeof(new_secondary_key),
+        live_replacement_row_ids,
+        live_count
+    );
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
