@@ -33,7 +33,7 @@ native storage files inside that directory.
 | 10 | Transactions and recovery | ✅&nbsp;Done | Enable explicit InnoDB tables under the MyLite directory and cover commit, rollback, savepoints, clean reopen, child-process recovery, and representative engine companions. |
 | 11 | Locking and concurrency | ✅&nbsp;Done | Add exclusive cross-process directory locking for read/write opens, preserve live runtime state on failed lock attempts, and document planned multiple-reader and concurrent-writer modes. |
 | 12 | Compatibility harness | ✅&nbsp;Done | Run embedded lifecycle, directory-boundary detection, MariaDB-reference, crash/reopen, application-query, and query-surface coverage in repeatable CTest label groups. |
-| 13 | Prepared SQL API | ⚪&nbsp;Planned | Add prepared statements, bindings, typed columns, warnings, and binary-safe values after direct SQL is sufficient for storage smoke coverage. |
+| 13 | Prepared SQL API | ✅&nbsp;Done | Add reusable prepared statements, parameter bindings, typed column access, warning lookup, binary-safe values, reset/finalize behavior, and close-time statement lifetime enforcement. |
 | 14 | Engine support and application schemas | ⚪&nbsp;Planned | Test common `ENGINE=` clauses with supported MariaDB native engines and representative application schemas, including WordPress-shaped DDL. |
 | 15 | Server-surface policy | ⚪&nbsp;Planned | Explicitly reject or replace users/auth, replication/binlog, dynamic plugins, events, performance schema, and durable files outside the MyLite database directory. |
 | 16 | Size profile hardening | ⚪&nbsp;Planned | Trim daemon-only and low-value optional components after the embedded runtime and storage shape are measurable. |

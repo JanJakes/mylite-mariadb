@@ -159,9 +159,8 @@ SQL `NULL` values as `NULL` callback entries, and populates MariaDB diagnostics
 on query failure. Native-storage smoke coverage verifies controlled
 `ENGINE=MyISAM` DDL and DML persist across close and reopen. Explicit
 `ENGINE=InnoDB` coverage verifies commit, rollback, savepoints, clean reopen,
-and child-process recovery through SQL transaction statements. Broader DDL,
-prepared statements, binary-safe values, and engine coverage remain later
-slices.
+and child-process recovery through SQL transaction statements. Broader DDL and
+engine coverage remain later slices.
 
 ## Prepared Statements
 
@@ -190,6 +189,11 @@ Return values:
 
 `sql_len == MYLITE_NUL_TERMINATED` means `sql` is NUL-terminated. `tail`, when
 non-NULL, receives the first uncompiled byte.
+
+Initial implementation status: `mylite_prepare()` wraps MariaDB prepared
+statements in embedded builds. `tail` is set to the end of the resolved SQL
+text on successful single-statement prepares. `mylite_close()` returns
+`MYLITE_BUSY` while statements are active.
 
 ## Bindings
 
@@ -226,6 +230,12 @@ int mylite_bind_blob(
 finalized. `MYLITE_TRANSIENT` copies bytes before the call returns. A custom
 destructor is called after MyLite no longer needs the input.
 
+Initial implementation status: MyLite copies text and blob bytes during binding
+for all destructor modes. Custom destructors are called after the copy. Text may
+use `MYLITE_NUL_TERMINATED`; blob bindings require an explicit byte length.
+Bindings may be changed before the first `mylite_step()` or after a successful
+`mylite_reset()`.
+
 Typed date, time, decimal, JSON, and geometry bindings can be added without
 forcing those values through text.
 
@@ -255,6 +265,8 @@ size_t mylite_column_bytes(mylite_stmt *stmt, unsigned column);
 
 Column indexes are 0-based. Column values are valid until the next
 `mylite_step()`, `mylite_reset()`, or `mylite_finalize()` on that statement.
+The first implementation exposes primary value classes and byte counts; richer
+metadata remains future work.
 
 MariaDB exposes richer type metadata than this primary value classification.
 Later metadata APIs should expose original MariaDB field type, charset,
@@ -289,6 +301,10 @@ SQLSTATE remain available for callers that need server-compatible diagnostics.
 
 `mylite_warning()` uses a zero-based index. It returns `MYLITE_NOTFOUND` when
 the requested warning is not stored.
+
+Initial implementation status: warning count comes from MariaDB and indexed
+warning lookup reads `SHOW WARNINGS` on demand, returning level, code, and
+message text owned by the database handle.
 
 ## Statement Effects
 

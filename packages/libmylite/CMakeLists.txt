@@ -82,6 +82,11 @@ if(BUILD_TESTING)
     )
     mylite_configure_embedded_c_test(mylite_embedded_native_table_operations_test)
 
+    add_executable(mylite_embedded_prepared_statement_test
+      tests/embedded_prepared_statement_test.c
+    )
+    mylite_configure_embedded_c_test(mylite_embedded_prepared_statement_test)
+
     add_executable(mylite_embedded_transactions_recovery_test
       tests/embedded_transactions_recovery_test.c
     )
@@ -104,6 +109,10 @@ if(BUILD_TESTING)
     add_test(
       NAME libmylite.embedded-native-table-operations
       COMMAND mylite_embedded_native_table_operations_test
+    )
+    add_test(
+      NAME libmylite.embedded-prepared-statement
+      COMMAND mylite_embedded_prepared_statement_test
     )
     add_test(NAME libmylite.embedded-open-close COMMAND mylite_embedded_open_close_test)
     add_test(NAME libmylite.embedded-storage COMMAND mylite_embedded_storage_test)
@@ -129,6 +138,9 @@ if(BUILD_TESTING)
     )
     set_tests_properties(libmylite.embedded-native-table-operations PROPERTIES
       LABELS "compat.directory-boundary;compat.query"
+    )
+    set_tests_properties(libmylite.embedded-prepared-statement PROPERTIES
+      LABELS "compat.query"
     )
     set_tests_properties(libmylite.embedded-transactions-recovery PROPERTIES
       LABELS "compat.directory-boundary;compat.crash-reopen;compat.query"
