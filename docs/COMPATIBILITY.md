@@ -26,7 +26,7 @@ for drop-in application expectations.
 
 | Capability | MyLite status | Compatibility target |
 | --- | --- | --- |
-| Open and close a database directory | 🟡&nbsp;Partial | Implemented for read/write local directory paths with one active database directory per process, a `.mylite/` naming convention, validated format-1 metadata, and a native-storage baseline layout under the database directory |
+| Open and close a database directory | 🟡&nbsp;Partial | Implemented for read/write local directory paths with one active database directory per process, a `.mylite/` naming convention, validated format-1 metadata, an advisory directory lock, and a native-storage baseline layout under the database directory |
 | Read-only opens | ⚪&nbsp;Planned | Reserved until native storage can enforce read-only engine access |
 | Direct SQL execution | 🟡&nbsp;Partial | `mylite_exec()` executes controlled one-shot SQL with textual result callbacks in embedded builds; native-storage coverage verifies MyISAM DDL/DML, row/index operations, and explicit InnoDB transaction/recovery behavior across reopen |
 | Prepared statements | ⚪&nbsp;Planned | Reusable statements with 1-based parameter binding |
@@ -51,12 +51,12 @@ for drop-in application expectations.
 
 | Capability | MyLite status | Target behavior |
 | --- | --- | --- |
-| Primary portable database directory | 🟡&nbsp;Partial | Open/create establishes and validates a MyLite-owned directory with `mylite.meta`, `datadir/`, `tmp/`, and process-local `run/`; `.mylite/` is recommended but not enforced |
+| Primary portable database directory | 🟡&nbsp;Partial | Open/create establishes and validates a MyLite-owned directory with `mylite.meta`, `mylite.lock`, `datadir/`, `tmp/`, and process-local `run/`; `.mylite/` is recommended but not enforced |
 | MariaDB metadata files | 🟡&nbsp;Partial | Controlled schema and MyISAM table metadata lifecycle is covered for `db.opt`, `.frm`, create, alter, rename, and drop paths inside `datadir/` |
 | InnoDB files | 🟡&nbsp;Partial | Representative InnoDB tablespace, redo, undo, and temporary files are configured and covered inside the MyLite database directory |
 | MyISAM files | 🟡&nbsp;Partial | Controlled lifecycle and native table operation coverage verifies `.MYD` and `.MYI` table files stay inside `datadir/` across create, row DML, copy alter, rename, drop, and reopen |
 | Aria files | 🟡&nbsp;Partial | Runtime startup sets `--aria-log-dir-path=<db>/datadir`; explicit Aria table coverage remains planned |
-| MyLite-owned transient paths | 🟡&nbsp;Partial | Durable database paths use `tmp/` and `run/` inside the database directory; clean close removes `run/` and clears `tmp/`, and clean open replaces stale inactive `run/` state |
+| MyLite-owned transient paths | 🟡&nbsp;Partial | Durable database paths use `tmp/`, `run/`, and `mylite.lock` inside the database directory; clean close removes `run/` and clears `tmp/`, and clean open replaces stale inactive `run/` state after taking the directory lock |
 | Durable files outside the database directory | ➖&nbsp;Out&nbsp;of&nbsp;scope | Reject or reconfigure surfaces that would write durable state outside the MyLite directory |
 
 ## SQL Surface
@@ -99,4 +99,4 @@ for drop-in application expectations.
 | Crash recovery | 🟡&nbsp;Partial | Parent-process reopen after child-process exit covers committed InnoDB rows surviving and uncommitted rows rolling back |
 | Multiple readers | ⚪&nbsp;Planned | Safe readers over stable committed state |
 | Concurrent writers | ⚪&nbsp;Planned | Preserve the selected native engine's write-concurrency behavior |
-| Cross-process unsafe writers | ➖&nbsp;Out&nbsp;of&nbsp;scope | Reject or block unsafe opens until locking and recovery prove safety |
+| Cross-process unsafe writers | 🟡&nbsp;Partial | A second read/write process open is rejected with `MYLITE_BUSY` while another process owns the MyLite directory lock |

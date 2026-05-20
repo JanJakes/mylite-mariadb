@@ -51,6 +51,7 @@ The first durable layout makes the directory roles explicit:
 ```text
 app.mylite/
   mylite.meta
+  mylite.lock
   datadir/
   tmp/
   run/
@@ -59,6 +60,8 @@ app.mylite/
 - `mylite.meta` records MyLite directory version, base MariaDB version,
   lifecycle flags, and compatibility metadata that MyLite needs before starting
   the embedded runtime.
+- `mylite.lock` is a MyLite-owned advisory lock anchor for cross-process
+  directory ownership. It may remain after clean or unclean shutdown.
 - `datadir/` contains MariaDB-native database directories, metadata files,
   engine files, redo/undo/log files, and other durable storage-engine state.
 - `tmp/` is the default location for MyLite-owned temporary files and query
@@ -71,7 +74,7 @@ The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 `--aria-log-dir-path=app.mylite/datadir`. InnoDB data, redo, undo, and
 temporary paths are also pinned under `datadir/` and `tmp/`. Clean shutdown
 removes `run/` and clears temporary files under `tmp/`; durable native storage
-remains in `datadir/`.
+remains in `datadir/`. `mylite.lock` remains as a stable lock anchor.
 
 Format 1 uses `mylite.meta` as the directory identity marker:
 
@@ -84,9 +87,10 @@ Opening an existing directory without `mylite.meta` is allowed only when the
 directory is empty and the caller passes `MYLITE_OPEN_CREATE`. Non-empty
 directories without valid metadata, or directories missing required `datadir/`
 or `tmp/` entries, are treated as invalid MyLite database directories rather
-than being silently repaired. Stale inactive `run/` state is replaced on open;
-live `run/` state is preserved for additional handles to the same active
-directory.
+than being silently repaired. Stale inactive `run/` state is replaced only
+after the process acquires `mylite.lock`; live `run/` state is preserved for
+additional handles to the same active directory and for other processes that
+fail to acquire the lock.
 
 The layout must be validated by tests that open a database, execute DDL and DML,
 close it, and assert that durable state did not appear outside the MyLite
@@ -163,12 +167,14 @@ Minimum MyLite responsibilities:
 - place engine recovery files inside the MyLite database directory,
 - configure temporary and runtime paths deliberately,
 - reject or serialize opens that would violate native engine locking rules,
+  including cross-process read/write opens while another process owns the
+  MyLite directory lock,
 - test clean open/close, crash/reopen, and recovery-file cleanup behavior,
 - document per-engine limits rather than hiding them behind broad compatibility
   claims.
 
-Cross-process and multi-writer behavior require explicit tests before support is
-claimed. Early milestones may restrict opens for correctness.
+Cross-process read/write ownership is exclusive. Multiple readers and
+concurrent writers require explicit tests before support is claimed.
 
 ## Temporary Data
 

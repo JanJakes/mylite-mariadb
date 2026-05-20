@@ -65,6 +65,8 @@ The durable format-1 layout requires:
   tmp/
 ```
 
+The later locking slice adds `mylite.lock` as a stable advisory lock anchor.
+
 `run/` is runtime state. It exists while the embedded runtime is active and is
 removed on final close. On open, stale `run/` is removed before runtime startup
 only when no MyLite runtime is already active in the process; opening a second
@@ -119,8 +121,8 @@ cleanup helpers use POSIX `nftw()` through existing embedded test targets only.
 
 ## Risks And Open Questions
 
-- Cross-process stale `run/` detection is not safe until the locking slice
-  defines process ownership and lock recovery.
+- Cross-process stale `run/` detection is safe only after the locking slice
+  takes the directory lock before replacing inactive `run/` state.
 - Future metadata-format migration needs a dedicated slice before MyLite can
   open format versions other than `1`.
 - Missing `datadir/` or `tmp/` currently means `MYLITE_CORRUPT`; a later repair

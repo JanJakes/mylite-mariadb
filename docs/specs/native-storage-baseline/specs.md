@@ -49,6 +49,9 @@ app.mylite/
     plugins/
 ```
 
+The later locking slice adds `mylite.lock` as a stable advisory lock anchor in
+the database directory.
+
 This baseline initially starts the embedded runtime with MyLite-owned
 arguments:
 
@@ -115,6 +118,7 @@ are otherwise valid.
   temporary directory.
 - `mylite.meta`, `datadir/`, and `tmp/` survive clean close.
 - `run/` is removed on clean close.
+- A later locking slice keeps `mylite.lock` as a non-application lock anchor.
 - Controlled MyISAM DDL/DML persists across close and reopen.
 - Documentation and compatibility tables describe the `.mylite/` naming
   convention and the remaining engine/DDL limits.

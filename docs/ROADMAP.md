@@ -31,7 +31,7 @@ native storage files inside that directory.
 | 8 | Directory lifecycle policy | ✅&nbsp;Done | Define database-directory layout, initialization markers, existing-directory policy, cleanup rules, and version policy. |
 | 9 | Native table operations | ✅&nbsp;Done | Validate table scans, row DML, primary/secondary indexes, uniqueness, autoincrement, BLOB/TEXT overflow, and copy `ALTER` rebuilds through native engines. |
 | 10 | Transactions and recovery | ✅&nbsp;Done | Enable explicit InnoDB tables under the MyLite directory and cover commit, rollback, savepoints, clean reopen, child-process recovery, and representative engine companions. |
-| 11 | Locking and concurrency | ⚪&nbsp;Planned | Validate safe directory locking, multiple-reader behavior, and MariaDB native storage-engine writer guarantees. |
+| 11 | Locking and concurrency | ✅&nbsp;Done | Add exclusive cross-process directory locking for read/write opens, preserve live runtime state on failed lock attempts, and document planned multiple-reader and concurrent-writer modes. |
 | 12 | Compatibility harness | ⚪&nbsp;Planned | Run embedded lifecycle, directory-boundary detection, MariaDB comparison, crash/reopen, and application-query coverage in repeatable groups. |
 | 13 | Prepared SQL API | ⚪&nbsp;Planned | Add prepared statements, bindings, typed columns, warnings, and binary-safe values after direct SQL is sufficient for storage smoke coverage. |
 | 14 | Engine support and application schemas | ⚪&nbsp;Planned | Test common `ENGINE=` clauses with supported MariaDB native engines and representative application schemas, including WordPress-shaped DDL. |

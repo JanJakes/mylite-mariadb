@@ -28,7 +28,9 @@ typedef struct mylite_stmt mylite_stmt;
 directory. Multiple handles for the same directory coordinate through a shared
 directory runtime. The current embedded implementation supports one open
 database directory per process at a time; opening a different directory while
-the runtime is active returns `MYLITE_BUSY`.
+the runtime is active returns `MYLITE_BUSY`. A second process opening the same
+durable directory for read/write access also returns `MYLITE_BUSY` while the
+directory lock is held.
 
 `mylite_stmt` owns one prepared statement.
 
@@ -108,7 +110,7 @@ Initial implementation status: open/close is backed by MariaDB embedded startup
 when the `embedded-dev` CMake preset enables it. MyLite passes owned startup
 options, ignores ambient option files with `--no-defaults`, establishes the
 requested MyLite database directory, and creates the baseline layout:
-`mylite.meta`, `datadir/`, `tmp/`, and `run/`.
+`mylite.meta`, `mylite.lock`, `datadir/`, `tmp/`, and `run/`.
 
 Existing directories must either already be valid MyLite directories or be empty
 and opened with `MYLITE_OPEN_CREATE`. A pre-existing empty directory without
@@ -122,9 +124,10 @@ storage under the database directory: `--datadir=<db>/datadir`,
 `--aria-log-dir-path=<db>/datadir`. InnoDB data, redo, undo, and temporary
 paths are also pinned under `datadir/` and `tmp/`. The final close removes
 `run/` and clears temporary files under `tmp/`; durable metadata and table
-files remain in `datadir/`. A clean open replaces stale inactive `run/` state
-before runtime startup. `mylite_open_config.temp_directory` is currently used
-only by the `:memory:` bootstrap path.
+files remain in `datadir/`. `mylite.lock` is an advisory lock anchor and may
+remain after close or process exit. A clean open replaces stale inactive `run/`
+state after taking the directory lock. `mylite_open_config.temp_directory` is
+currently used only by the `:memory:` bootstrap path.
 
 ## Direct Execution
 
@@ -336,8 +339,10 @@ The public API exposes MyLite concepts, not raw `my.cnf` option names.
 - Different handles may be used on different threads.
 - Handles opened on the same directory coordinate through the shared directory
   runtime.
-- Cross-process and multi-writer behavior require storage locking and recovery
-  tests before they are exposed as supported modes.
+- Cross-process read/write opens are rejected with `MYLITE_BUSY` while another
+  process owns the directory lock.
+- Multiple-reader and concurrent-writer modes remain planned until read-only
+  startup and engine-specific concurrency behavior are covered.
 
 SQLite-style threading modes can be added when backed by tests.
 

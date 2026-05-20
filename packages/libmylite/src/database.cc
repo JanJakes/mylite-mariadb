@@ -1,6 +1,7 @@
 #include <mylite/mylite.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <climits>
 #include <cstddef>
@@ -14,7 +15,12 @@
 #include <new>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <vector>
+
+#include <fcntl.h>
+#include <sys/file.h>
+#include <unistd.h>
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
 #  include <mysql.h>
@@ -41,6 +47,7 @@ constexpr const char *k_bad_db_handle = "bad database handle";
 #if MYLITE_WITH_MARIADB_EMBEDDED
 constexpr const char *k_memory_database_path = ":memory:";
 constexpr const char *k_meta_filename = "mylite.meta";
+constexpr const char *k_lock_filename = "mylite.lock";
 constexpr const char *k_datadir_name = "datadir";
 constexpr const char *k_tmpdir_name = "tmp";
 constexpr const char *k_rundir_name = "run";
@@ -49,6 +56,7 @@ constexpr const char *k_mariadb_base_ref = "mariadb-11.8.6";
 constexpr const char *k_metadata_format_line = "format=1";
 constexpr const char *k_innodb_temp_data_file_path = "ibtmp1:12M:autoextend";
 constexpr int k_runtime_directory_attempts = 100;
+constexpr unsigned k_lock_poll_interval_ms = 10;
 
 struct RuntimeLayout {
     std::filesystem::path cleanup_directory;
@@ -56,6 +64,11 @@ struct RuntimeLayout {
     std::filesystem::path data_directory;
     std::filesystem::path tmp_directory;
     std::filesystem::path plugin_directory;
+};
+
+struct DatabaseLockWait {
+    int lock_fd = -1;
+    unsigned busy_timeout_ms = 0;
 };
 #endif
 
@@ -67,6 +80,7 @@ struct RuntimeState {
     std::string database_path;
     std::vector<std::string> arguments;
     std::vector<char *> argv;
+    int lock_fd = -1;
 };
 
 RuntimeState g_runtime;
@@ -113,9 +127,16 @@ bool database_directory_is_empty(
     const std::filesystem::path &database_path,
     std::error_code &error
 );
-bool has_active_runtime(void);
 int start_runtime(mylite_db &db, const mylite_open_config *config);
 int connect_runtime(mylite_db &db);
+int acquire_database_lock(
+    mylite_db &db,
+    const std::filesystem::path &database_path,
+    const mylite_open_config *config
+);
+int wait_for_database_lock(DatabaseLockWait wait);
+void release_database_lock(int lock_fd);
+unsigned configured_busy_timeout_ms(const mylite_open_config *config);
 #endif
 void close_connection(mylite_db &db);
 void release_runtime(void);
@@ -498,9 +519,6 @@ int prepare_existing_database_directory(
     if (layout_result != MYLITE_OK) {
         return layout_result;
     }
-    if (!has_active_runtime()) {
-        remove_directory_if_present(database_path / k_rundir_name);
-    }
     return MYLITE_OK;
 }
 
@@ -584,11 +602,6 @@ bool database_directory_is_empty(
     return entry == std::filesystem::directory_iterator();
 }
 
-bool has_active_runtime(void) {
-    const std::lock_guard<std::mutex> guard(g_runtime.mutex);
-    return g_runtime.ref_count > 0U;
-}
-
 int start_runtime(mylite_db &db, const mylite_open_config *config) {
     const std::lock_guard<std::mutex> guard(g_runtime.mutex);
     if (g_runtime.ref_count > 0U) {
@@ -600,26 +613,52 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
         return MYLITE_OK;
     }
 
-    const RuntimeLayout layout = create_runtime_layout(db.database_path, config);
-    g_runtime.arguments = runtime_arguments(layout);
-    g_runtime.argv = mutable_arguments(g_runtime.arguments);
-    char *groups[] = {const_cast<char *>("server"), const_cast<char *>("embedded"), nullptr};
-
-    const int init_result =
-        mysql_server_init(static_cast<int>(g_runtime.argv.size()), g_runtime.argv.data(), groups);
-    if (init_result != 0) {
-        g_runtime.argv.clear();
-        g_runtime.arguments.clear();
-        remove_directory_if_present(layout.cleanup_directory);
-        set_error(db, MYLITE_ERROR, "MariaDB embedded runtime initialization failed");
-        return MYLITE_ERROR;
+    int lock_fd = -1;
+    if (!is_memory_database_path(db.database_path)) {
+        lock_fd = acquire_database_lock(db, db.database_path, config);
+        if (lock_fd < 0) {
+            return db.errcode;
+        }
     }
 
-    g_runtime.cleanup_directory = layout.cleanup_directory;
-    g_runtime.persistent_tmp_directory = layout.persistent_tmp_directory;
-    g_runtime.database_path = db.database_path;
-    g_runtime.ref_count = 1;
-    return MYLITE_OK;
+    try {
+        const RuntimeLayout layout = create_runtime_layout(db.database_path, config);
+        g_runtime.arguments = runtime_arguments(layout);
+        g_runtime.argv = mutable_arguments(g_runtime.arguments);
+        g_runtime.cleanup_directory = layout.cleanup_directory;
+        g_runtime.persistent_tmp_directory = layout.persistent_tmp_directory;
+        g_runtime.database_path = db.database_path;
+        char *groups[] = {const_cast<char *>("server"), const_cast<char *>("embedded"), nullptr};
+
+        const int init_result = mysql_server_init(
+            static_cast<int>(g_runtime.argv.size()),
+            g_runtime.argv.data(),
+            groups
+        );
+        if (init_result != 0) {
+            g_runtime.argv.clear();
+            g_runtime.arguments.clear();
+            g_runtime.cleanup_directory.clear();
+            g_runtime.persistent_tmp_directory.clear();
+            g_runtime.database_path.clear();
+            remove_directory_if_present(layout.cleanup_directory);
+            release_database_lock(lock_fd);
+            set_error(db, MYLITE_ERROR, "MariaDB embedded runtime initialization failed");
+            return MYLITE_ERROR;
+        }
+
+        g_runtime.ref_count = 1;
+        g_runtime.lock_fd = lock_fd;
+        return MYLITE_OK;
+    } catch (...) {
+        g_runtime.argv.clear();
+        g_runtime.arguments.clear();
+        g_runtime.cleanup_directory.clear();
+        g_runtime.persistent_tmp_directory.clear();
+        g_runtime.database_path.clear();
+        release_database_lock(lock_fd);
+        throw;
+    }
 }
 
 int connect_runtime(mylite_db &db) {
@@ -652,33 +691,31 @@ void close_connection(mylite_db &db) {
 }
 
 void release_runtime(void) {
-    std::filesystem::path cleanup_dir;
-    std::filesystem::path tmp_dir;
-    {
-        const std::lock_guard<std::mutex> guard(g_runtime.mutex);
-        if (g_runtime.ref_count == 0U) {
-            return;
-        }
-
-        --g_runtime.ref_count;
-        if (g_runtime.ref_count > 0U) {
-            return;
-        }
-
-        cleanup_dir = g_runtime.cleanup_directory;
-        tmp_dir = g_runtime.persistent_tmp_directory;
-#if MYLITE_WITH_MARIADB_EMBEDDED
-        mysql_server_end();
-#endif
-        g_runtime.cleanup_directory.clear();
-        g_runtime.persistent_tmp_directory.clear();
-        g_runtime.database_path.clear();
-        g_runtime.argv.clear();
-        g_runtime.arguments.clear();
+    const std::lock_guard<std::mutex> guard(g_runtime.mutex);
+    if (g_runtime.ref_count == 0U) {
+        return;
     }
 
-    remove_directory_if_present(cleanup_dir);
-    remove_directory_contents_if_present(tmp_dir);
+    --g_runtime.ref_count;
+    if (g_runtime.ref_count > 0U) {
+        return;
+    }
+
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    mysql_server_end();
+#endif
+    remove_directory_if_present(g_runtime.cleanup_directory);
+    remove_directory_contents_if_present(g_runtime.persistent_tmp_directory);
+#if MYLITE_WITH_MARIADB_EMBEDDED
+    release_database_lock(g_runtime.lock_fd);
+    g_runtime.lock_fd = -1;
+#endif
+
+    g_runtime.cleanup_directory.clear();
+    g_runtime.persistent_tmp_directory.clear();
+    g_runtime.database_path.clear();
+    g_runtime.argv.clear();
+    g_runtime.arguments.clear();
 }
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
@@ -801,6 +838,70 @@ RuntimeLayout create_persistent_runtime_layout(const std::filesystem::path &data
     create_runtime_subdirectory(layout.tmp_directory, "create database temporary directory");
     create_runtime_subdirectory(layout.plugin_directory, "create database plugin directory");
     return layout;
+}
+
+int acquire_database_lock(
+    mylite_db &db,
+    const std::filesystem::path &database_path,
+    const mylite_open_config *config
+) {
+    const std::filesystem::path lock_path = database_path / k_lock_filename;
+    const std::string lock_name = lock_path.string();
+    const int lock_fd = ::open(lock_name.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);
+    if (lock_fd < 0) {
+        set_error(db, MYLITE_IOERR, "database lock file could not be opened");
+        return -1;
+    }
+
+    DatabaseLockWait wait = {};
+    wait.lock_fd = lock_fd;
+    wait.busy_timeout_ms = configured_busy_timeout_ms(config);
+    const int lock_result = wait_for_database_lock(wait);
+    if (lock_result == MYLITE_OK) {
+        return lock_fd;
+    }
+
+    release_database_lock(lock_fd);
+    if (lock_result == MYLITE_BUSY) {
+        set_error(db, MYLITE_BUSY, "database directory is locked by another process");
+    } else {
+        set_error(db, MYLITE_IOERR, "database lock could not be acquired");
+    }
+    return -1;
+}
+
+int wait_for_database_lock(DatabaseLockWait wait) {
+    const auto start = std::chrono::steady_clock::now();
+    const auto timeout = std::chrono::milliseconds(wait.busy_timeout_ms);
+    for (;;) {
+        if (::flock(wait.lock_fd, LOCK_EX | LOCK_NB) == 0) {
+            return MYLITE_OK;
+        }
+        if (errno != EWOULDBLOCK && errno != EAGAIN) {
+            return MYLITE_IOERR;
+        }
+        if (wait.busy_timeout_ms == 0U || std::chrono::steady_clock::now() - start >= timeout) {
+            return MYLITE_BUSY;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(k_lock_poll_interval_ms));
+    }
+}
+
+void release_database_lock(int lock_fd) {
+    if (lock_fd >= 0) {
+        static_cast<void>(::flock(lock_fd, LOCK_UN));
+        static_cast<void>(::close(lock_fd));
+    }
+}
+
+unsigned configured_busy_timeout_ms(const mylite_open_config *config) {
+    if (has_config_field(
+            config,
+            offsetof(mylite_open_config, busy_timeout_ms) + sizeof(config->busy_timeout_ms)
+        )) {
+        return config->busy_timeout_ms;
+    }
+    return 0U;
 }
 
 std::filesystem::path runtime_root(const mylite_open_config *config) {

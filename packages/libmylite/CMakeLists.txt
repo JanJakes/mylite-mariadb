@@ -67,6 +67,11 @@ if(BUILD_TESTING)
     )
     mylite_configure_embedded_c_test(mylite_embedded_ddl_lifecycle_test)
 
+    add_executable(mylite_embedded_locking_concurrency_test
+      tests/embedded_locking_concurrency_test.c
+    )
+    mylite_configure_embedded_c_test(mylite_embedded_locking_concurrency_test)
+
     add_executable(mylite_embedded_native_table_operations_test
       tests/embedded_native_table_operations_test.c
     )
@@ -79,6 +84,10 @@ if(BUILD_TESTING)
 
     add_test(NAME libmylite.embedded-ddl-lifecycle COMMAND mylite_embedded_ddl_lifecycle_test)
     add_test(NAME libmylite.embedded-exec COMMAND mylite_embedded_exec_test)
+    add_test(
+      NAME libmylite.embedded-locking-concurrency
+      COMMAND mylite_embedded_locking_concurrency_test
+    )
     add_test(
       NAME libmylite.embedded-native-table-operations
       COMMAND mylite_embedded_native_table_operations_test
