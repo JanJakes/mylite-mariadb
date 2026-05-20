@@ -12728,12 +12728,13 @@ static mylite_storage_result rewrite_active_update_pages(
         return MYLITE_STORAGE_OK;
     }
 
-    const unsigned char *state_page =
-        buffered_append_page_in_statement(buffer_statement, state_page_id, header->page_size);
-    if (state_page == NULL) {
-        return MYLITE_STORAGE_OK;
-    }
     if (!use_cached_shape) {
+        const unsigned char *state_page =
+            buffered_append_page_in_statement(buffer_statement, state_page_id, header->page_size);
+        if (state_page == NULL) {
+            return MYLITE_STORAGE_OK;
+        }
+
         mylite_storage_row_state_page row_state = {0};
         if (buffered_update_rewrite_row_state_known(buffer_statement, row_id)) {
             result = decode_buffered_row_state_page(header, state_page_id, state_page, &row_state);

@@ -258,6 +258,8 @@ as its single cache update, since that mark already records the row as both
 live and validated.
 Exact-index cache probes now compare 1/2/4/8-byte key images with fixed-size
 loads, keeping `memcmp()` only for larger or variable-width keys.
+Cached active rewrite shapes now skip the redundant row-state page lookup that
+was only needed for uncached shape validation.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation
