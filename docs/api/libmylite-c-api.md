@@ -159,8 +159,10 @@ SQL `NULL` values as `NULL` callback entries, and populates MariaDB diagnostics
 on query failure. Native-storage smoke coverage verifies controlled
 `ENGINE=MyISAM` DDL and DML persist across close and reopen. Explicit
 `ENGINE=InnoDB` coverage verifies commit, rollback, savepoints, clean reopen,
-and child-process recovery through SQL transaction statements. Broader DDL and
-engine coverage remain later slices.
+and child-process recovery through SQL transaction statements. Additional engine
+coverage verifies explicit InnoDB, MyISAM, Aria, MEMORY, and default-engine
+table creation plus representative WordPress-shaped InnoDB DDL. Broader DDL
+forms remain later slices.
 
 ## Prepared Statements
 

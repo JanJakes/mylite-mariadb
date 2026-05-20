@@ -34,6 +34,7 @@ preset:
 | MariaDB-reference SQL results | `ctest --preset embedded-dev -L compat.mariadb-comparison` |
 | Crash/reopen behavior | `ctest --preset embedded-dev -L compat.crash-reopen` |
 | Application queries | `ctest --preset embedded-dev -L compat.application-query` |
+| Engine clauses | `ctest --preset embedded-dev -L compat.engine` |
 | Current SQL query surface | `ctest --preset embedded-dev -L compat.query` |
 
 The MariaDB-reference group uses expected result vectors pinned to MariaDB 11.8
@@ -57,12 +58,13 @@ behavior. It does not require a daemon in the default test path.
 
 | SQL engine request | MyLite status | Target behavior |
 | --- | --- | --- |
-| No explicit engine | 🟡&nbsp;Partial | The baseline configures MariaDB's native MyISAM engine as the temporary default while broader engine policy is designed |
+| No explicit engine | 🟡&nbsp;Partial | The baseline configures MariaDB's native MyISAM engine as the temporary default; default-engine table creation and persistence are covered while broader engine policy is designed |
 | `ENGINE=MYLITE` | ➖&nbsp;Out&nbsp;of&nbsp;scope | No separate MyLite engine in the native-storage directory model |
-| `ENGINE=InnoDB` | 🟡&nbsp;Partial | Explicit InnoDB tables use native InnoDB files inside the MyLite database directory; controlled transaction and recovery behavior is covered, while broader InnoDB features remain planned |
+| `ENGINE=InnoDB` | 🟡&nbsp;Partial | Explicit InnoDB tables use native InnoDB files inside the MyLite database directory; controlled transaction/recovery behavior and WordPress-shaped DDL are covered, while broader InnoDB features remain planned |
 | `ENGINE=MyISAM` | 🟡&nbsp;Partial | Controlled create/alter/rename/drop/reopen and row/index coverage verifies `.frm`, `.MYD`, and `.MYI` files inside `datadir/` |
-| `ENGINE=Aria` | ⚪&nbsp;Planned | Use native Aria files and logs inside the MyLite database directory where supported |
-| Dynamic external engines | ➖&nbsp;Out&nbsp;of&nbsp;scope | Default embedded profile does not load storage-engine plugins |
+| `ENGINE=Aria` | 🟡&nbsp;Partial | Explicit Aria table creation, row persistence, and `.MAI`/`.MAD` files under `datadir/` are covered |
+| `ENGINE=MEMORY` | 🟡&nbsp;Partial | Explicit MEMORY table creation is covered; table definitions survive reopen while rows remain process-local and empty after reopen |
+| Dynamic external engines | ➖&nbsp;Out&nbsp;of&nbsp;scope | Default embedded profile does not load storage-engine plugins; explicit `ENGINE=BLACKHOLE` and `ENGINE=ARCHIVE` requests are covered as rejected |
 
 ## Directory Ownership
 
@@ -72,7 +74,8 @@ behavior. It does not require a daemon in the default test path.
 | MariaDB metadata files | 🟡&nbsp;Partial | Controlled schema and MyISAM table metadata lifecycle is covered for `db.opt`, `.frm`, create, alter, rename, and drop paths inside `datadir/` |
 | InnoDB files | 🟡&nbsp;Partial | Representative InnoDB tablespace, redo, undo, and temporary files are configured and covered inside the MyLite database directory |
 | MyISAM files | 🟡&nbsp;Partial | Controlled lifecycle and native table operation coverage verifies `.MYD` and `.MYI` table files stay inside `datadir/` across create, row DML, copy alter, rename, drop, and reopen |
-| Aria files | 🟡&nbsp;Partial | Runtime startup sets `--aria-log-dir-path=<db>/datadir`; explicit Aria table coverage remains planned |
+| Aria files | 🟡&nbsp;Partial | Runtime startup sets `--aria-log-dir-path=<db>/datadir`; explicit Aria table coverage verifies `.MAI` and `.MAD` files under `datadir/` |
+| MEMORY definitions | 🟡&nbsp;Partial | Explicit MEMORY table coverage verifies persistent table metadata under `datadir/` and empty row state after reopen |
 | MyLite-owned transient paths | 🟡&nbsp;Partial | Durable database paths use `tmp/`, `run/`, and `mylite.lock` inside the database directory; clean close removes `run/` and clears `tmp/`, and clean open replaces stale inactive `run/` state after taking the directory lock |
 | Durable files outside the database directory | ➖&nbsp;Out&nbsp;of&nbsp;scope | Reject or reconfigure surfaces that would write durable state outside the MyLite directory |
 
@@ -80,12 +83,13 @@ behavior. It does not require a daemon in the default test path.
 
 | Capability | MyLite status | Compatibility target |
 | --- | --- | --- |
-| `CREATE TABLE`, `DROP TABLE`, `RENAME TABLE` | 🟡&nbsp;Partial | Controlled MyISAM create, drop, and rename lifecycle is covered for native metadata and engine files; broader DDL forms remain planned |
+| `CREATE TABLE`, `DROP TABLE`, `RENAME TABLE` | 🟡&nbsp;Partial | Controlled MyISAM create, drop, and rename lifecycle is covered for native metadata and engine files; explicit InnoDB, Aria, MEMORY, and default-engine create coverage is also present, while broader DDL forms remain planned |
 | `ALTER TABLE` | 🟡&nbsp;Partial | Controlled MyISAM `ADD COLUMN` and copy-style `ADD KEY` lifecycle is covered across close and reopen; broader algorithms and engines remain planned |
 | Standalone `CREATE INDEX` / `DROP INDEX` | ⚪&nbsp;Planned | Route through MariaDB DDL and native engine index updates |
 | `CREATE TABLE ... LIKE` | ⚪&nbsp;Planned | Preserve MariaDB table definition behavior |
 | `CREATE TABLE ... SELECT` | ⚪&nbsp;Planned | Preserve MariaDB statement semantics over MyLite tables |
 | Schemas/databases | 🟡&nbsp;Partial | Controlled `CREATE DATABASE`, qualified table access, and `DROP DATABASE` lifecycle are covered inside `datadir/`; broader schema behavior remains planned |
+| Representative application schemas | 🟡&nbsp;Partial | WordPress-shaped InnoDB `wp_options`, `wp_posts`, and `wp_postmeta` DDL and queries are covered as representative application-schema evidence |
 | Views, triggers, and routines | ⚪&nbsp;Planned | Persist through MariaDB native metadata inside the MyLite directory where supported |
 | Events and scheduler | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server scheduler is not part of the core embedded profile |
 | Users, grants, and password auth | ➖&nbsp;Out&nbsp;of&nbsp;scope | Local embedded directory ownership replaces server account management |

@@ -149,6 +149,14 @@ transaction behavior and file containment inside the MyLite database directory;
 it does not make InnoDB the default engine, prove all isolation levels, prove
 foreign keys or online DDL, or claim cross-process writer safety.
 
+Engine and application-schema coverage validates explicit `ENGINE=InnoDB`,
+`ENGINE=MyISAM`, `ENGINE=Aria`, and `ENGINE=MEMORY` table creation, MyISAM
+default-engine resolution, durable row state for durable engines, MEMORY table
+definitions with empty row state after reopen, and representative
+WordPress-shaped InnoDB DDL. Dynamic external engines are still outside the
+default embedded profile until the server-surface policy is designed and
+tested.
+
 The default embedded profile does not expose server account administration,
 dynamic plugin installation, replication metadata, or the event scheduler.
 `information_schema` remains virtual. Any required `mysql.*` system surface
