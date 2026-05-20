@@ -74,7 +74,9 @@ indexed row reads, replacing cached payloads after successful updates and
 dropping them after deletes, savepoint rollback, truncate, or catalog
 invalidation. This lets repeated handler-driven updates reuse the current row
 image without rereading and rechecksumming the row page while preserving the
-same rollback and visibility rules.
+same rollback and visibility rules. Row-payload cache buckets use
+tombstone-aware replacement and swap-removal, so changing a cached old row id to
+its replacement row id does not rebuild the full bucket table on every update.
 
 Durable index cursor construction opens a scoped storage read session while the
 handler finds matching index row ids and materializes the selected row payload

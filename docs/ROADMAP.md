@@ -140,7 +140,9 @@ old row-page rereads when the row payload was already validated and avoids
 rescanning later row-state pages for visibility-only index proofs. Active
 checkpoints also cache indexed row payloads after materialization and replace
 those cached payloads after successful updates, reducing repeated row-page
-reads in transaction-local update loops. Non-active durable indexed-row reads
+reads in transaction-local update loops. Active row-payload bucket maintenance
+now replaces row ids and swap-removes deleted entries without a full bucket
+rebuild per cached update/delete. Non-active durable indexed-row reads
 now cache row payloads by file header fingerprint,
 reducing repeated secondary cursor row-page checksums. Non-active durable
 full-row and count reads now cache compacted live row-id lists by durable
