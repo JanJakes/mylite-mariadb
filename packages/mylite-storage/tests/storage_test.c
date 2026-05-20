@@ -5331,6 +5331,25 @@ static void assert_statement_checkpoint_rolls_back_catalog(statement_checkpoint_
 }
 
 static void assert_nested_statement_checkpoints(statement_checkpoint_test_context *ctx) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    mylite_storage_table_definition outer_catalog_definition = {
+        .size = sizeof(outer_catalog_definition),
+        .schema_name = "app",
+        .table_name = "outer_catalog_posts",
+        .requested_engine_name = "InnoDB",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_table_definition inner_catalog_definition = {
+        .size = sizeof(inner_catalog_definition),
+        .schema_name = "app",
+        .table_name = "inner_catalog_posts",
+        .requested_engine_name = "InnoDB",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
     mylite_storage_statement *outer = NULL;
     mylite_storage_statement *inner = NULL;
     unsigned long long row_count = 0ULL;
@@ -5400,6 +5419,39 @@ static void assert_nested_statement_checkpoints(statement_checkpoint_test_contex
     );
     assert(row_count == 1ULL);
     assert_row_not_found(ctx->filename, ctx->row_2_id);
+
+    assert(mylite_storage_begin_statement(ctx->filename, &outer) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_store_table_definition(ctx->filename, &outer_catalog_definition) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_begin_statement(ctx->filename, &inner) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_store_table_definition(ctx->filename, &inner_catalog_definition) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_table_exists(ctx->filename, "app", "inner_catalog_posts") ==
+        MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_rollback_statement(inner) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_table_exists(ctx->filename, "app", "inner_catalog_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert(
+        mylite_storage_table_exists(ctx->filename, "app", "outer_catalog_posts") ==
+        MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_commit_statement(outer) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_table_exists(ctx->filename, "app", "outer_catalog_posts") ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_table_exists(ctx->filename, "app", "inner_catalog_posts") ==
+        MYLITE_STORAGE_NOTFOUND
+    );
 }
 
 static void assert_statement_checkpoint_preserves_marked_auto_increment_rollback(
