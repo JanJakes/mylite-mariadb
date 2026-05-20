@@ -38,23 +38,29 @@ if(BUILD_TESTING)
   add_test(NAME libmylite.version COMMAND mylite_version_test)
 
   if(MYLITE_WITH_MARIADB_EMBEDDED)
+    function(mylite_configure_embedded_c_test target)
+      target_link_libraries(${target} PRIVATE MyLite::mylite)
+      mylite_configure_c_target(${target})
+      target_compile_definitions(${target} PRIVATE _XOPEN_SOURCE=700)
+      if(APPLE)
+        target_compile_definitions(${target} PRIVATE _DARWIN_C_SOURCE)
+      endif()
+    endfunction()
+
     add_executable(mylite_embedded_open_close_test
       tests/embedded_open_close_test.c
     )
-    target_link_libraries(mylite_embedded_open_close_test PRIVATE MyLite::mylite)
-    mylite_configure_c_target(mylite_embedded_open_close_test)
+    mylite_configure_embedded_c_test(mylite_embedded_open_close_test)
 
     add_executable(mylite_embedded_exec_test
       tests/embedded_exec_test.c
     )
-    target_link_libraries(mylite_embedded_exec_test PRIVATE MyLite::mylite)
-    mylite_configure_c_target(mylite_embedded_exec_test)
+    mylite_configure_embedded_c_test(mylite_embedded_exec_test)
 
     add_executable(mylite_embedded_storage_test
       tests/embedded_storage_test.c
     )
-    target_link_libraries(mylite_embedded_storage_test PRIVATE MyLite::mylite)
-    mylite_configure_c_target(mylite_embedded_storage_test)
+    mylite_configure_embedded_c_test(mylite_embedded_storage_test)
 
     add_test(NAME libmylite.embedded-exec COMMAND mylite_embedded_exec_test)
     add_test(NAME libmylite.embedded-open-close COMMAND mylite_embedded_open_close_test)

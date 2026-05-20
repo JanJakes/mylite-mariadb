@@ -46,6 +46,7 @@ constexpr const char *k_tmpdir_name = "tmp";
 constexpr const char *k_rundir_name = "run";
 constexpr const char *k_plugin_directory_name = "plugins";
 constexpr const char *k_mariadb_base_ref = "mariadb-11.8.6";
+constexpr int k_runtime_directory_attempts = 100;
 
 struct RuntimeLayout {
     std::filesystem::path cleanup_directory;
@@ -372,7 +373,7 @@ int exec_impl(
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
 int validate_runtime_database_path(mylite_db &db) {
-    std::lock_guard<std::mutex> guard(g_runtime.mutex);
+    const std::lock_guard<std::mutex> guard(g_runtime.mutex);
     if (g_runtime.ref_count > 0U && g_runtime.database_path != db.database_path) {
         set_error(db, MYLITE_BUSY, "embedded runtime is already open for another database");
         return MYLITE_BUSY;
@@ -405,7 +406,7 @@ int store_and_emit_result(
 
     std::vector<char *> column_names;
     column_names.reserve(field_count);
-    MYSQL_FIELD *fields = mysql_fetch_fields(result);
+    const MYSQL_FIELD *fields = mysql_fetch_fields(result);
     for (unsigned i = 0; i < field_count; ++i) {
         column_names.push_back(fields[i].name);
     }
@@ -461,7 +462,7 @@ int prepare_database_directory(const std::filesystem::path &database_path, unsig
 }
 
 int start_runtime(mylite_db &db, const mylite_open_config *config) {
-    std::lock_guard<std::mutex> guard(g_runtime.mutex);
+    const std::lock_guard<std::mutex> guard(g_runtime.mutex);
     if (g_runtime.ref_count > 0U) {
         if (g_runtime.database_path != db.database_path) {
             set_error(db, MYLITE_BUSY, "embedded runtime is already open for another database");
@@ -471,7 +472,6 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
         return MYLITE_OK;
     }
 
-#  if MYLITE_WITH_MARIADB_EMBEDDED
     const RuntimeLayout layout = create_runtime_layout(db.database_path, config);
     g_runtime.arguments = runtime_arguments(layout);
     g_runtime.argv = mutable_arguments(g_runtime.arguments);
@@ -492,21 +492,15 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
     g_runtime.database_path = db.database_path;
     g_runtime.ref_count = 1;
     return MYLITE_OK;
-#  else
-    (void)config;
-    set_error(db, MYLITE_ERROR, "MariaDB embedded backend is not enabled");
-    return MYLITE_ERROR;
-#  endif
 }
 
 int connect_runtime(mylite_db &db) {
-#  if MYLITE_WITH_MARIADB_EMBEDDED
     if (mysql_init(&db.mysql) == nullptr) {
         set_error(db, MYLITE_NOMEM, "MariaDB connection allocation failed");
         return MYLITE_NOMEM;
     }
 
-    MYSQL *connection =
+    const MYSQL *connection =
         mysql_real_connect(&db.mysql, nullptr, nullptr, nullptr, nullptr, 0, nullptr, 0);
     if (connection == nullptr) {
         set_mariadb_error(db);
@@ -515,7 +509,6 @@ int connect_runtime(mylite_db &db) {
 
     db.connected = true;
     return MYLITE_OK;
-#  endif
 }
 #endif
 
@@ -640,15 +633,15 @@ RuntimeLayout create_runtime_layout(
 }
 
 RuntimeLayout create_memory_runtime_layout(const mylite_open_config *config) {
-    std::filesystem::path root = runtime_root(config);
+    const std::filesystem::path root = runtime_root(config);
     std::error_code error;
     std::filesystem::create_directories(root, error);
     if (error) {
         throw std::filesystem::filesystem_error("create runtime root", root, error);
     }
 
-    for (int attempt = 0; attempt < 100; ++attempt) {
-        std::filesystem::path candidate = root / unique_runtime_name();
+    for (int attempt = 0; attempt < k_runtime_directory_attempts; ++attempt) {
+        const std::filesystem::path candidate = root / unique_runtime_name();
         if (std::filesystem::create_directory(candidate, error)) {
             RuntimeLayout layout = {};
             layout.cleanup_directory = candidate;
@@ -724,8 +717,8 @@ std::vector<std::string> runtime_arguments(const RuntimeLayout &layout) {
         "--skip-networking",
         "--default-storage-engine=MyISAM",
         "--innodb=OFF",
-        "--lc-messages-dir=" MYLITE_MARIADB_MESSAGES_DIR,
-        "--character-sets-dir=" MYLITE_MARIADB_CHARSETS_DIR,
+        std::string("--lc-messages-dir=") + MYLITE_MARIADB_MESSAGES_DIR,
+        std::string("--character-sets-dir=") + MYLITE_MARIADB_CHARSETS_DIR,
     };
 }
 

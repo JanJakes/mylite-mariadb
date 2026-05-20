@@ -3,12 +3,20 @@
 #include <assert.h>
 #include <dirent.h>
 #include <errno.h>
+#include <ftw.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+#define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
+
+typedef struct text_file {
+    const char *path;
+    const char *contents;
+} text_file;
 
 static void test_open_close_repeatedly(void);
 static void test_memory_path_open_close(void);
@@ -28,9 +36,14 @@ static void assert_closed_database_layout(const char *database_path);
 static int is_directory_empty(const char *path);
 static int is_directory(const char *path);
 static int path_exists(const char *path);
-static void write_file(const char *path, const char *contents);
+static void write_file(text_file file_data);
 static void remove_tree(const char *path);
-static void remove_tree_entry(const char *path);
+static int remove_tree_entry(
+    const char *path,
+    const struct stat *path_stat,
+    int type_flag,
+    struct FTW *walk
+);
 
 int main(void) {
     test_open_close_repeatedly();
@@ -228,7 +241,10 @@ static void test_no_defaults_ignores_ambient_option_files(void) {
 
     assert(mkdir(runtime_root, 0700) == 0);
     assert(mkdir(home, 0700) == 0);
-    write_file(defaults, "[server]\ndatadir=/path/that/must/not/be/read\nunknown_mylite_probe=1\n");
+    write_file((text_file){
+        .path = defaults,
+        .contents = "[server]\ndatadir=/path/that/must/not/be/read\nunknown_mylite_probe=1\n",
+    });
     assert(setenv("HOME", home, 1) == 0);
     assert(setenv("MYSQL_HOME", home, 1) == 0);
 
@@ -277,7 +293,7 @@ static void test_existing_file_path_fails(void) {
     mylite_db *db = NULL;
 
     assert(mkdir(runtime_root, 0700) == 0);
-    write_file(database_path, "");
+    write_file((text_file){.path = database_path, .contents = ""});
 
     assert(
         mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
@@ -417,39 +433,26 @@ static int path_exists(const char *path) {
     return 0;
 }
 
-static void write_file(const char *path, const char *contents) {
-    FILE *file = fopen(path, "w");
+static void write_file(text_file file_data) {
+    FILE *file = fopen(file_data.path, "w");
     assert(file != NULL);
-    assert(fputs(contents, file) >= 0);
+    assert(fputs(file_data.contents, file) >= 0);
     assert(fclose(file) == 0);
 }
 
 static void remove_tree(const char *path) {
-    remove_tree_entry(path);
+    assert(
+        nftw(path, remove_tree_entry, MYLITE_TEST_REMOVE_TREE_MAX_FDS, FTW_DEPTH | FTW_PHYS) == 0
+    );
 }
 
-static void remove_tree_entry(const char *path) {
-    struct stat path_stat;
-    assert(lstat(path, &path_stat) == 0);
-
-    if (S_ISDIR(path_stat.st_mode)) {
-        DIR *directory = opendir(path);
-        assert(directory != NULL);
-
-        for (struct dirent *entry = readdir(directory); entry != NULL; entry = readdir(directory)) {
-            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-                continue;
-            }
-
-            char *child = path_join(path, entry->d_name);
-            remove_tree_entry(child);
-            free(child);
-        }
-
-        assert(closedir(directory) == 0);
-        assert(rmdir(path) == 0);
-        return;
-    }
-
-    assert(unlink(path) == 0);
+static int remove_tree_entry(
+    const char *path,
+    const struct stat *path_stat,
+    int type_flag,
+    struct FTW *walk
+) {
+    (void)path_stat;
+    (void)walk;
+    return type_flag == FTW_DP ? rmdir(path) : unlink(path);
 }

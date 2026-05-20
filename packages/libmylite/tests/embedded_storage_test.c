@@ -3,22 +3,26 @@
 #include <assert.h>
 #include <dirent.h>
 #include <errno.h>
+#include <ftw.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
+#define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
+
 typedef struct text_context {
     int rows;
 } text_context;
 
+typedef struct open_database_paths {
+    const char *database_path;
+    const char *runtime_root;
+} open_database_paths;
+
 static void test_myisam_table_persists_after_reopen(void);
-static mylite_db *open_database(
-    const char *database_path,
-    const char *runtime_root,
-    unsigned flags
-);
+static mylite_db *open_database(open_database_paths paths, unsigned flags);
 static void exec_ok(mylite_db *db, const char *sql);
 static int text_callback(void *ctx, int column_count, char **values, char **column_names);
 static char *make_temp_root(void);
@@ -29,7 +33,12 @@ static int is_directory(const char *path);
 static int is_directory_empty(const char *path);
 static int path_exists(const char *path);
 static void remove_tree(const char *path);
-static void remove_tree_entry(const char *path);
+static int remove_tree_entry(
+    const char *path,
+    const struct stat *path_stat,
+    int type_flag,
+    struct FTW *walk
+);
 
 int main(void) {
     test_myisam_table_persists_after_reopen();
@@ -47,10 +56,11 @@ static void test_myisam_table_persists_after_reopen(void) {
     char *table_data_path = NULL;
     char *table_index_path = NULL;
     text_context ctx = {.rows = 0};
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
 
     assert(mkdir(runtime_root, 0700) == 0);
 
-    db = open_database(database_path, runtime_root, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE);
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE);
     assert_database_open_layout(database_path);
     assert(is_directory_empty(runtime_root));
     exec_ok(db, "CREATE DATABASE app");
@@ -75,7 +85,7 @@ static void test_myisam_table_persists_after_reopen(void) {
     assert(path_exists(table_data_path));
     assert(path_exists(table_index_path));
 
-    db = open_database(database_path, runtime_root, MYLITE_OPEN_READWRITE);
+    db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert_database_open_layout(database_path);
     assert(
         mylite_exec(db, "SELECT body FROM app.notes WHERE id = 1", text_callback, &ctx, NULL) ==
@@ -97,21 +107,17 @@ static void test_myisam_table_persists_after_reopen(void) {
     free(root);
 }
 
-static mylite_db *open_database(
-    const char *database_path,
-    const char *runtime_root,
-    unsigned flags
-) {
+static mylite_db *open_database(open_database_paths paths, unsigned flags) {
     mylite_open_config config = {
         .size = sizeof(config),
         .profile = MYLITE_PROFILE_DEFAULT,
         .busy_timeout_ms = 0,
         .durability = MYLITE_DURABILITY_FULL,
-        .temp_directory = runtime_root,
+        .temp_directory = paths.runtime_root,
     };
     mylite_db *db = NULL;
 
-    assert(mylite_open(database_path, &db, flags, &config) == MYLITE_OK);
+    assert(mylite_open(paths.database_path, &db, flags, &config) == MYLITE_OK);
     assert(db != NULL);
     return db;
 }
@@ -122,6 +128,7 @@ static void exec_ok(mylite_db *db, const char *sql) {
     assert(errmsg == NULL);
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): required callback signature.
 static int text_callback(void *ctx, int column_count, char **values, char **column_names) {
     text_context *text_ctx = (text_context *)ctx;
     assert(column_count == 1);
@@ -221,31 +228,18 @@ static int path_exists(const char *path) {
 }
 
 static void remove_tree(const char *path) {
-    remove_tree_entry(path);
+    assert(
+        nftw(path, remove_tree_entry, MYLITE_TEST_REMOVE_TREE_MAX_FDS, FTW_DEPTH | FTW_PHYS) == 0
+    );
 }
 
-static void remove_tree_entry(const char *path) {
-    struct stat path_stat;
-    assert(lstat(path, &path_stat) == 0);
-
-    if (S_ISDIR(path_stat.st_mode)) {
-        DIR *directory = opendir(path);
-        assert(directory != NULL);
-
-        for (struct dirent *entry = readdir(directory); entry != NULL; entry = readdir(directory)) {
-            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-                continue;
-            }
-
-            char *child = path_join(path, entry->d_name);
-            remove_tree_entry(child);
-            free(child);
-        }
-
-        assert(closedir(directory) == 0);
-        assert(rmdir(path) == 0);
-        return;
-    }
-
-    assert(unlink(path) == 0);
+static int remove_tree_entry(
+    const char *path,
+    const struct stat *path_stat,
+    int type_flag,
+    struct FTW *walk
+) {
+    (void)path_stat;
+    (void)walk;
+    return type_flag == FTW_DP ? rmdir(path) : unlink(path);
 }

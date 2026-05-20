@@ -2,11 +2,14 @@
 
 #include <assert.h>
 #include <dirent.h>
+#include <ftw.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+#define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
 
 typedef struct select_context {
     int rows;
@@ -23,7 +26,12 @@ static char *path_join(const char *directory, const char *name);
 static int is_directory(const char *path);
 static int is_directory_empty(const char *path);
 static void remove_tree(const char *path);
-static void remove_tree_entry(const char *path);
+static int remove_tree_entry(
+    const char *path,
+    const struct stat *path_stat,
+    int type_flag,
+    struct FTW *walk
+);
 
 int main(void) {
     test_select_callback();
@@ -91,6 +99,7 @@ static void test_syntax_error_diagnostics(void) {
     free(root);
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): required callback signature.
 static int select_callback(void *ctx, int column_count, char **values, char **column_names) {
     select_context *select_ctx = (select_context *)ctx;
     assert(column_count == 2);
@@ -103,6 +112,7 @@ static int select_callback(void *ctx, int column_count, char **values, char **co
     return 0;
 }
 
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): required callback signature.
 static int abort_callback(void *ctx, int column_count, char **values, char **column_names) {
     int *callback_count = (int *)ctx;
     (void)column_count;
@@ -180,31 +190,18 @@ static void remove_tree(const char *path) {
     char *runtime_root = path_join(path, "runtime");
     assert(is_directory_empty(runtime_root));
     free(runtime_root);
-    remove_tree_entry(path);
+    assert(
+        nftw(path, remove_tree_entry, MYLITE_TEST_REMOVE_TREE_MAX_FDS, FTW_DEPTH | FTW_PHYS) == 0
+    );
 }
 
-static void remove_tree_entry(const char *path) {
-    struct stat path_stat;
-    assert(lstat(path, &path_stat) == 0);
-
-    if (S_ISDIR(path_stat.st_mode)) {
-        DIR *directory = opendir(path);
-        assert(directory != NULL);
-
-        for (struct dirent *entry = readdir(directory); entry != NULL; entry = readdir(directory)) {
-            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
-                continue;
-            }
-
-            char *child = path_join(path, entry->d_name);
-            remove_tree_entry(child);
-            free(child);
-        }
-
-        assert(closedir(directory) == 0);
-        assert(rmdir(path) == 0);
-        return;
-    }
-
-    assert(unlink(path) == 0);
+static int remove_tree_entry(
+    const char *path,
+    const struct stat *path_stat,
+    int type_flag,
+    struct FTW *walk
+) {
+    (void)path_stat;
+    (void)walk;
+    return type_flag == FTW_DP ? rmdir(path) : unlink(path);
 }
