@@ -126,6 +126,11 @@ typedef struct mylite_storage_exact_index_cache {
     size_t bucket_count;
     size_t bucket_next_capacity;
     int buckets_valid;
+    size_t *row_id_bucket_heads;
+    size_t *row_id_bucket_next;
+    size_t row_id_bucket_count;
+    size_t row_id_bucket_next_capacity;
+    int row_id_buckets_valid;
 } mylite_storage_exact_index_cache;
 
 typedef struct mylite_storage_exact_index_cache_set {
@@ -2041,6 +2046,22 @@ static size_t exact_index_cache_bucket_for_key(
 static size_t exact_index_cache_bucket_count(size_t entry_count);
 static size_t hash_key_bytes(const unsigned char *key, size_t key_size);
 static void clear_exact_index_cache_buckets(mylite_storage_exact_index_cache *cache);
+static void unlink_exact_index_cache_row_id_bucket_entry(
+    mylite_storage_exact_index_cache *cache,
+    size_t entry_index
+);
+static void link_exact_index_cache_row_id_bucket_entry(
+    mylite_storage_exact_index_cache *cache,
+    size_t entry_index
+);
+static mylite_storage_result ensure_exact_index_cache_row_id_buckets(
+    mylite_storage_exact_index_cache *cache
+);
+static size_t exact_index_cache_bucket_for_row_id(
+    const mylite_storage_exact_index_cache *cache,
+    unsigned long long row_id
+);
+static void clear_exact_index_cache_row_id_buckets(mylite_storage_exact_index_cache *cache);
 static mylite_storage_result append_index_entry_to_entryset(
     mylite_storage_index_entryset *entryset,
     const mylite_storage_index_entry_page *entry_page
@@ -7543,6 +7564,8 @@ static void free_exact_index_cache(mylite_storage_exact_index_cache *cache) {
     free(cache->entry_live);
     free(cache->bucket_heads);
     free(cache->bucket_next);
+    free(cache->row_id_bucket_heads);
+    free(cache->row_id_bucket_next);
     *cache = (mylite_storage_exact_index_cache){0};
 }
 
@@ -15486,6 +15509,7 @@ static mylite_storage_result copy_exact_index_cache_entries(
     free(destination->row_ids);
     free(destination->entry_live);
     clear_exact_index_cache_buckets(destination);
+    clear_exact_index_cache_row_id_buckets(destination);
     destination->keys = keys;
     destination->row_ids = row_ids;
     destination->entry_live = entry_live;
@@ -15593,6 +15617,15 @@ static mylite_storage_result append_exact_index_cache_entry(
             clear_exact_index_cache_buckets(cache);
         }
     }
+    if (cache->row_id_buckets_valid) {
+        const size_t needed_bucket_count = exact_index_cache_bucket_count(cache->live_count + 1U);
+        if (needed_bucket_count == 0U) {
+            return MYLITE_STORAGE_FULL;
+        }
+        if (needed_bucket_count > cache->row_id_bucket_count) {
+            clear_exact_index_cache_row_id_buckets(cache);
+        }
+    }
 
     memcpy(cache->keys + (entry_index * cache->key_size), key, cache->key_size);
     cache->row_ids[entry_index] = row_id;
@@ -15602,6 +15635,9 @@ static mylite_storage_result append_exact_index_cache_entry(
     if (cache->buckets_valid) {
         link_exact_index_cache_bucket_entry(cache, entry_index);
     }
+    if (cache->row_id_buckets_valid) {
+        link_exact_index_cache_row_id_bucket_entry(cache, entry_index);
+    }
     return MYLITE_STORAGE_OK;
 }
 
@@ -15609,6 +15645,42 @@ static void remove_exact_index_cache_entries_by_row_id(
     mylite_storage_exact_index_cache *cache,
     unsigned long long row_id
 ) {
+    if (cache->live_count == 0U) {
+        return;
+    }
+
+    if (cache->row_id_buckets_valid ||
+        ensure_exact_index_cache_row_id_buckets(cache) == MYLITE_STORAGE_OK) {
+        const size_t bucket_index = exact_index_cache_bucket_for_row_id(cache, row_id);
+        size_t *current = cache->row_id_bucket_heads + bucket_index;
+        while (*current != MYLITE_STORAGE_CACHE_BUCKET_EMPTY) {
+            const size_t entry_index = *current;
+            if (entry_index >= cache->count) {
+                clear_exact_index_cache_row_id_buckets(cache);
+                break;
+            }
+
+            size_t *next = cache->row_id_bucket_next + entry_index;
+            if ((cache->entry_live != NULL && !cache->entry_live[entry_index]) ||
+                cache->row_ids[entry_index] == row_id) {
+                *current = *next;
+                *next = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+                if (cache->entry_live != NULL && cache->entry_live[entry_index]) {
+                    if (cache->buckets_valid) {
+                        unlink_exact_index_cache_bucket_entry(cache, entry_index);
+                    }
+                    cache->entry_live[entry_index] = 0U;
+                    --cache->live_count;
+                    ++cache->dead_count;
+                }
+                continue;
+            }
+            current = next;
+        }
+        maybe_compact_exact_index_cache_entries(cache);
+        return;
+    }
+
     for (size_t entry_index = 0U; entry_index < cache->count; ++entry_index) {
         if (cache->entry_live != NULL && !cache->entry_live[entry_index]) {
             continue;
@@ -15618,6 +15690,9 @@ static void remove_exact_index_cache_entries_by_row_id(
         }
         if (cache->buckets_valid) {
             unlink_exact_index_cache_bucket_entry(cache, entry_index);
+        }
+        if (cache->row_id_buckets_valid) {
+            unlink_exact_index_cache_row_id_bucket_entry(cache, entry_index);
         }
         cache->entry_live[entry_index] = 0U;
         --cache->live_count;
@@ -15676,6 +15751,15 @@ static mylite_storage_result grow_exact_index_cache_entry_capacity(
         cache->bucket_next = bucket_next;
         cache->bucket_next_capacity = next_capacity;
     }
+    if (cache->row_id_buckets_valid) {
+        size_t *row_id_bucket_next = (size_t *)
+            realloc(cache->row_id_bucket_next, next_capacity * sizeof(*cache->row_id_bucket_next));
+        if (row_id_bucket_next == NULL) {
+            return MYLITE_STORAGE_NOMEM;
+        }
+        cache->row_id_bucket_next = row_id_bucket_next;
+        cache->row_id_bucket_next_capacity = next_capacity;
+    }
 
     cache->capacity = next_capacity;
     return MYLITE_STORAGE_OK;
@@ -15690,6 +15774,7 @@ static void maybe_compact_exact_index_cache_entries(mylite_storage_exact_index_c
 static void compact_exact_index_cache_entries(mylite_storage_exact_index_cache *cache) {
     size_t write_index = 0U;
     const int rebuild_buckets = cache->buckets_valid;
+    const int rebuild_row_id_buckets = cache->row_id_buckets_valid;
     for (size_t read_index = 0U; read_index < cache->count; ++read_index) {
         if (cache->entry_live != NULL && !cache->entry_live[read_index]) {
             continue;
@@ -15712,6 +15797,12 @@ static void compact_exact_index_cache_entries(mylite_storage_exact_index_cache *
         clear_exact_index_cache_buckets(cache);
         if (ensure_exact_index_cache_buckets(cache) != MYLITE_STORAGE_OK) {
             clear_exact_index_cache_buckets(cache);
+        }
+    }
+    if (rebuild_row_id_buckets) {
+        clear_exact_index_cache_row_id_buckets(cache);
+        if (ensure_exact_index_cache_row_id_buckets(cache) != MYLITE_STORAGE_OK) {
+            clear_exact_index_cache_row_id_buckets(cache);
         }
     }
 }
@@ -15856,6 +15947,121 @@ static void clear_exact_index_cache_buckets(mylite_storage_exact_index_cache *ca
     cache->bucket_count = 0U;
     cache->bucket_next_capacity = 0U;
     cache->buckets_valid = 0;
+}
+
+static void unlink_exact_index_cache_row_id_bucket_entry(
+    mylite_storage_exact_index_cache *cache,
+    size_t entry_index
+) {
+    if (cache->row_id_bucket_count == 0U || entry_index >= cache->count) {
+        return;
+    }
+
+    const size_t bucket_index =
+        exact_index_cache_bucket_for_row_id(cache, cache->row_ids[entry_index]);
+    size_t *current = cache->row_id_bucket_heads + bucket_index;
+    while (*current != MYLITE_STORAGE_CACHE_BUCKET_EMPTY) {
+        if (*current >= cache->count) {
+            return;
+        }
+        if (*current == entry_index) {
+            *current = cache->row_id_bucket_next[entry_index];
+            cache->row_id_bucket_next[entry_index] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+            return;
+        }
+        current = cache->row_id_bucket_next + *current;
+    }
+}
+
+static void link_exact_index_cache_row_id_bucket_entry(
+    mylite_storage_exact_index_cache *cache,
+    size_t entry_index
+) {
+    if (cache->row_id_bucket_count == 0U || entry_index >= cache->count) {
+        return;
+    }
+
+    const size_t bucket_index =
+        exact_index_cache_bucket_for_row_id(cache, cache->row_ids[entry_index]);
+    size_t *current = cache->row_id_bucket_heads + bucket_index;
+    while (*current != MYLITE_STORAGE_CACHE_BUCKET_EMPTY) {
+        if (*current >= cache->count) {
+            return;
+        }
+        current = cache->row_id_bucket_next + *current;
+    }
+    *current = entry_index;
+    cache->row_id_bucket_next[entry_index] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+}
+
+static mylite_storage_result ensure_exact_index_cache_row_id_buckets(
+    mylite_storage_exact_index_cache *cache
+) {
+    if (cache->row_id_buckets_valid) {
+        return MYLITE_STORAGE_OK;
+    }
+    clear_exact_index_cache_row_id_buckets(cache);
+    if (cache->live_count == 0U) {
+        cache->row_id_buckets_valid = 1;
+        return MYLITE_STORAGE_OK;
+    }
+
+    const size_t bucket_count = exact_index_cache_bucket_count(cache->live_count);
+    if (bucket_count == 0U || bucket_count > SIZE_MAX / sizeof(*cache->row_id_bucket_heads) ||
+        cache->capacity > SIZE_MAX / sizeof(*cache->row_id_bucket_next)) {
+        return MYLITE_STORAGE_FULL;
+    }
+
+    size_t *bucket_heads = (size_t *)malloc(bucket_count * sizeof(*bucket_heads));
+    if (bucket_heads == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+    const size_t bucket_next_capacity = cache->capacity == 0U ? cache->count : cache->capacity;
+    size_t *bucket_next = (size_t *)malloc(bucket_next_capacity * sizeof(*bucket_next));
+    if (bucket_next == NULL) {
+        free(bucket_heads);
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    for (size_t i = 0U; i < bucket_count; ++i) {
+        bucket_heads[i] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+    }
+    for (size_t i = 0U; i < bucket_next_capacity; ++i) {
+        bucket_next[i] = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+    }
+    for (size_t i = cache->count; i > 0U; --i) {
+        const size_t entry_index = i - 1U;
+        if (cache->entry_live != NULL && !cache->entry_live[entry_index]) {
+            continue;
+        }
+        const size_t bucket_index = hash_row_id(cache->row_ids[entry_index]) & (bucket_count - 1U);
+        bucket_next[entry_index] = bucket_heads[bucket_index];
+        bucket_heads[bucket_index] = entry_index;
+    }
+
+    cache->row_id_bucket_heads = bucket_heads;
+    cache->row_id_bucket_next = bucket_next;
+    cache->row_id_bucket_count = bucket_count;
+    cache->row_id_bucket_next_capacity = bucket_next_capacity;
+    cache->row_id_buckets_valid = 1;
+    return MYLITE_STORAGE_OK;
+}
+
+static size_t exact_index_cache_bucket_for_row_id(
+    const mylite_storage_exact_index_cache *cache,
+    unsigned long long row_id
+) {
+    return hash_row_id(row_id) & (cache->row_id_bucket_count - 1U);
+}
+
+static void clear_exact_index_cache_row_id_buckets(mylite_storage_exact_index_cache *cache) {
+    free(cache->row_id_bucket_heads);
+    free(cache->row_id_bucket_next);
+    cache->row_id_bucket_heads = NULL;
+    cache->row_id_bucket_next = NULL;
+    cache->row_id_bucket_count = 0U;
+    cache->row_id_bucket_next_capacity = 0U;
+    cache->row_id_buckets_valid = 0;
 }
 
 static mylite_storage_result append_index_entry_to_entryset(

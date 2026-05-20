@@ -124,7 +124,9 @@ maintained complete cache views on top-level commit; update/delete validation
 uses direct row-id visibility checks instead of rebuilding full row-state maps.
 Active exact-index caches now keep lookup buckets valid across row replacement
 and delete maintenance, tombstoning removed entries and compacting only after
-dead entries outnumber live entries.
+dead entries outnumber live entries. Those caches now keep a separate
+transient row-id bucket index for source-row invalidation, avoiding a full
+exact-index cache scan per maintained replacement/delete.
 Transient row-state maps now hash hidden source row ids, removing the
 per-candidate linear visibility lookup that dominated full scans after many
 updates, and full rowset reads now collect live row ids in one file pass before
