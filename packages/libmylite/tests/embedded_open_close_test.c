@@ -15,6 +15,7 @@ static void test_memory_path_open_close(void);
 static void test_readonly_open_fails(void);
 static void test_two_handles_share_runtime(void);
 static void test_second_database_fails_while_runtime_open(void);
+static void test_directory_suffix_is_not_enforced(void);
 static void test_no_defaults_ignores_ambient_option_files(void);
 static void test_missing_file_without_create_fails(void);
 static void test_existing_file_path_fails(void);
@@ -22,6 +23,8 @@ static void test_exclusive_existing_directory_fails(void);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static mylite_open_config open_config(const char *temp_directory);
+static void assert_open_database_layout(const char *database_path);
+static void assert_closed_database_layout(const char *database_path);
 static int is_directory_empty(const char *path);
 static int is_directory(const char *path);
 static int path_exists(const char *path);
@@ -35,6 +38,7 @@ int main(void) {
     test_readonly_open_fails();
     test_two_handles_share_runtime();
     test_second_database_fails_while_runtime_open();
+    test_directory_suffix_is_not_enforced();
     test_no_defaults_ignores_ambient_option_files();
     test_missing_file_without_create_fails();
     test_existing_file_path_fails();
@@ -58,12 +62,14 @@ static void test_open_close_repeatedly(void) {
         );
         assert(db != NULL);
         assert(is_directory(database_path));
+        assert_open_database_layout(database_path);
         assert(mylite_errcode(db) == MYLITE_OK);
         assert(mylite_extended_errcode(db) == MYLITE_OK);
         assert(mylite_mariadb_errno(db) == 0U);
         assert(strcmp(mylite_sqlstate(db), "00000") == 0);
         assert(strcmp(mylite_errmsg(db), "not an error") == 0);
         assert(mylite_close(db) == MYLITE_OK);
+        assert_closed_database_layout(database_path);
         assert(is_directory_empty(runtime_root));
     }
 
@@ -134,10 +140,13 @@ static void test_two_handles_share_runtime(void) {
     assert(first != NULL);
     assert(second != NULL);
     assert(is_directory(database_path));
+    assert_open_database_layout(database_path);
 
     assert(mylite_close(first) == MYLITE_OK);
-    assert(!is_directory_empty(runtime_root));
+    assert_open_database_layout(database_path);
+    assert(is_directory_empty(runtime_root));
     assert(mylite_close(second) == MYLITE_OK);
+    assert_closed_database_layout(database_path);
     assert(is_directory_empty(runtime_root));
 
     free(database_path);
@@ -163,6 +172,7 @@ static void test_second_database_fails_while_runtime_open(void) {
     );
     assert(first != NULL);
     assert(is_directory(first_path));
+    assert_open_database_layout(first_path);
 
     assert(
         mylite_open(second_path, &second, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
@@ -172,10 +182,36 @@ static void test_second_database_fails_while_runtime_open(void) {
     assert(!path_exists(second_path));
 
     assert(mylite_close(first) == MYLITE_OK);
+    assert_closed_database_layout(first_path);
     assert(is_directory_empty(runtime_root));
 
     free(second_path);
     free(first_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_directory_suffix_is_not_enforced(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "database-without-suffix");
+    mylite_open_config config = open_config(runtime_root);
+    mylite_db *db = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+
+    assert(
+        mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
+        MYLITE_OK
+    );
+    assert(db != NULL);
+    assert_open_database_layout(database_path);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_closed_database_layout(database_path);
+    assert(is_directory_empty(runtime_root));
+
+    free(database_path);
     free(runtime_root);
     remove_tree(root);
     free(root);
@@ -202,7 +238,9 @@ static void test_no_defaults_ignores_ambient_option_files(void) {
     );
     assert(db != NULL);
     assert(is_directory(database_path));
+    assert_open_database_layout(database_path);
     assert(mylite_close(db) == MYLITE_OK);
+    assert_closed_database_layout(database_path);
     assert(is_directory_empty(runtime_root));
 
     free(defaults);
@@ -310,6 +348,43 @@ static mylite_open_config open_config(const char *temp_directory) {
         .temp_directory = temp_directory,
     };
     return config;
+}
+
+static void assert_open_database_layout(const char *database_path) {
+    char *metadata_path = path_join(database_path, "mylite.meta");
+    char *data_path = path_join(database_path, "datadir");
+    char *tmp_path = path_join(database_path, "tmp");
+    char *run_path = path_join(database_path, "run");
+    char *plugin_path = path_join(run_path, "plugins");
+
+    assert(path_exists(metadata_path));
+    assert(is_directory(data_path));
+    assert(is_directory(tmp_path));
+    assert(is_directory(run_path));
+    assert(is_directory(plugin_path));
+
+    free(plugin_path);
+    free(run_path);
+    free(tmp_path);
+    free(data_path);
+    free(metadata_path);
+}
+
+static void assert_closed_database_layout(const char *database_path) {
+    char *metadata_path = path_join(database_path, "mylite.meta");
+    char *data_path = path_join(database_path, "datadir");
+    char *tmp_path = path_join(database_path, "tmp");
+    char *run_path = path_join(database_path, "run");
+
+    assert(path_exists(metadata_path));
+    assert(is_directory(data_path));
+    assert(is_directory(tmp_path));
+    assert(!path_exists(run_path));
+
+    free(run_path);
+    free(tmp_path);
+    free(data_path);
+    free(metadata_path);
 }
 
 static int is_directory_empty(const char *path) {

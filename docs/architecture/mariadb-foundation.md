@@ -36,13 +36,15 @@ MyLite uses this embedded foundation but does not expose `mysql_library_init()`
 as the product API. `libmylite` owns directory-oriented open/close,
 diagnostics, and configuration.
 
-The first MyLite bootstrap keeps MariaDB's server-shaped state inside a
-MyLite-owned temporary runtime directory. That runtime starts with
+The first MyLite bootstrap used a temporary runtime directory while open/close
+behavior was being proven. The native-storage baseline now starts durable
+database paths with MariaDB's `datadir`, `tmpdir`, plugin directory, and Aria
+log directory under the MyLite database directory. That runtime still uses
 `--no-defaults`, `--skip-grant-tables`, `--skip-networking`,
 `--default-storage-engine=MyISAM`, and `--innodb=OFF`. Disabling InnoDB here is
-a temporary bootstrap limitation, not a compatibility decision for application
-DDL; it only avoids uncontrolled InnoDB files before the native-storage
-directory lifecycle is configured and tested.
+a temporary baseline limitation, not a compatibility decision for application
+DDL; it avoids uncontrolled InnoDB files until the InnoDB lifecycle is designed
+and tested inside the MyLite directory.
 
 MariaDB 11.8.6 needed two narrow embedded-restart fixes for repeated
 `mylite_open()` / `mylite_close()` tests in one process:

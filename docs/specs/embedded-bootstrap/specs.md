@@ -132,14 +132,12 @@ documented as transient bootstrap debt. The user-provided MyLite path is the
 product boundary and must not silently become a server datadir outside MyLite
 ownership.
 
-The implemented bootstrap removes the temporary runtime directory on the final
-close. With InnoDB disabled, MariaDB still creates Aria control/log files during
-startup; those files remain confined to the temporary runtime directory and are
-not durable MyLite state.
-
-Once native storage directory lifecycle exists, durable metadata and table state
-must stay inside the MyLite database directory and this bootstrap layer should
-stop creating durable MariaDB-owned state in a temporary runtime directory.
+The implemented bootstrap originally removed the temporary runtime directory on
+the final close. The native-storage baseline supersedes that for durable
+database paths: MariaDB now starts with `--datadir=<db>/datadir`,
+`--tmpdir=<db>/tmp`, `--plugin-dir=<db>/run/plugins`, and
+`--aria-log-dir-path=<db>/datadir`. `run/` is removed on clean shutdown and
+`tmp/` is cleared; durable metadata and table state stay under `datadir/`.
 
 ## Compatibility Impact
 

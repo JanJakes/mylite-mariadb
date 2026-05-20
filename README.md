@@ -77,6 +77,9 @@ with the following properties:
 
 - **Single directory:** Durable database state is stored inside one
   MyLite-owned directory.
+- **Named as a database asset:** The recommended directory name ends in
+  `.mylite`, such as `app.mylite/`. This is a best-practice convention, not a
+  validity rule.
 - **Native engine files:** InnoDB, MyISAM, Aria, and other supported engines use
   their MariaDB-native file formats.
 - **No external durable state:** All MariaDB data and companion files must stay
@@ -91,9 +94,10 @@ The current goal is to support MariaDB-native `InnoDB`, `MyISAM`, `Aria`, and
 engines belong in the default profile only when their build shape, ownership,
 and compatibility behavior are designed and tested.
 
-The directory path must be configurable, similarly to SQLite database file location.
-The key difference is that MyLite's directory can hold multiple databases, following
-MariaDB engine capabilities.
+The directory path must be configurable, similarly to SQLite database file
+location. The key difference is that MyLite's directory can hold multiple
+databases, following MariaDB engine capabilities. Use a `.mylite/` directory
+name for new databases unless there is a project-specific reason not to.
 
 MyLite should also be capable of setting up a full in-memory database regardless
 of what engines are defined for table storage in the SQL. This should be

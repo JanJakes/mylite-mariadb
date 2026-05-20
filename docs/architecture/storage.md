@@ -14,6 +14,9 @@ stay within the documented boundary.
 server installation.
 
 - The portable durable asset is one directory, such as `app.mylite/`.
+- New database directories should use the `.mylite` suffix as a convention,
+  for example `app.mylite/`. MyLite should not reject other directory names
+  unless a later compatibility slice adds an explicit migration or policy check.
 - Durable MariaDB data, metadata, engine files, logs, locks, journals, and
   recovery state stay inside the MyLite database directory.
 - Durable files outside the MyLite database directory are outside the final
@@ -43,8 +46,7 @@ Reasons:
 
 ## Directory Layout
 
-The exact directory names are implementation details, but the first durable
-layout should make these roles explicit:
+The first durable layout makes the directory roles explicit:
 
 ```text
 app.mylite/
@@ -63,6 +65,12 @@ app.mylite/
   spill that must not escape the database directory.
 - `run/` is for lock files, process-local markers, or runtime state that is
   safe to remove after clean shutdown.
+
+The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
+`--tmpdir=app.mylite/tmp`, `--plugin-dir=app.mylite/run/plugins`, and
+`--aria-log-dir-path=app.mylite/datadir`. Clean shutdown removes `run/` and
+clears temporary files under `tmp/`; durable native storage remains in
+`datadir/`.
 
 The layout must be validated by tests that open a database, execute DDL and DML,
 close it, and assert that durable state did not appear outside the MyLite

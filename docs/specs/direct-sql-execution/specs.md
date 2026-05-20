@@ -78,10 +78,11 @@ convenience API; typed values belong to prepared statements.
 
 ## File Lifecycle
 
-The executed SQL runs inside the same temporary MariaDB runtime directory used
-by the open/close slice. Tests must avoid creating durable application tables
-until native storage directory lifecycle is configured and tested. Any MariaDB
-runtime files remain bootstrap debt and must be removed on final close.
+This slice originally avoided durable application tables because storage still
+used bootstrap runtime scaffolding. The native-storage baseline now runs durable
+database paths inside the MyLite database directory, so later direct-execution
+tests may create controlled tables when the relevant storage and lifecycle
+behavior is covered by the slice spec.
 
 ## Test Plan
 

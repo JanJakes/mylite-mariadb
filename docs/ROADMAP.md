@@ -26,7 +26,7 @@ native storage files inside that directory.
 | 3 | Embedded bootstrap | ✅&nbsp;Done | Start the MariaDB-derived runtime under MyLite-owned defaults and reject daemon-only startup surfaces. |
 | 4 | Public open/close API | ✅&nbsp;Done | Add `libmylite` database handles, diagnostics, open flags, and close behavior. |
 | 5 | Direct SQL execution | ✅&nbsp;Done | Add one-shot SQL execution, textual result callbacks, diagnostics, affected rows, and insert ids so embedded storage smoke tests can run SQL. |
-| 6 | Native storage baseline | ⚪&nbsp;Planned | Configure MariaDB native storage engines inside the MyLite database directory and add controlled smoke coverage. |
+| 6 | Native storage baseline | ✅&nbsp;Done | Configure MariaDB native storage under the MyLite database directory and cover controlled MyISAM DDL/DML persistence across reopen. |
 | 7 | Metadata and DDL lifecycle | ⚪&nbsp;Planned | Keep `CREATE`, `ALTER`, `DROP`, and `RENAME` metadata and engine files inside the MyLite database directory. |
 | 8 | Directory lifecycle policy | ⚪&nbsp;Planned | Define database-directory layout, initialization markers, schema namespaces, cleanup rules, and version policy. |
 | 9 | Native table operations | ⚪&nbsp;Planned | Validate table scans, row DML, primary/secondary indexes, uniqueness, autoincrement, BLOB/TEXT overflow, and copy `ALTER` rebuilds through native engines. |

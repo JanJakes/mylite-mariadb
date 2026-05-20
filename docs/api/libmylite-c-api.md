@@ -7,6 +7,8 @@ rows, insert ids, and richer data types.
 ## Principles
 
 - Open a database by directory path.
+- Prefer database directory names ending in `.mylite`, such as `app.mylite/`.
+  This is a convention, not an enforced suffix.
 - Own all handles explicitly.
 - Do not require a daemon, socket, server account, password handshake, or
   network connection for local embedded use.
@@ -105,10 +107,16 @@ separately if a real use case appears.
 Initial implementation status: open/close is backed by MariaDB embedded startup
 when the `embedded-dev` CMake preset enables it. MyLite passes owned startup
 options, ignores ambient option files with `--no-defaults`, establishes the
-requested MyLite database directory, creates a temporary runtime directory for
-MariaDB bootstrap files, and removes that runtime directory on the final close.
-Durable native storage inside the MyLite database directory is not claimed until
-the native-storage directory lifecycle is configured and tested.
+requested MyLite database directory, and creates the baseline layout:
+`mylite.meta`, `datadir/`, `tmp/`, and `run/`.
+
+For durable database paths, the embedded runtime starts with MariaDB native
+storage under the database directory: `--datadir=<db>/datadir`,
+`--tmpdir=<db>/tmp`, `--plugin-dir=<db>/run/plugins`, and
+`--aria-log-dir-path=<db>/datadir`. The final close removes `run/` and clears
+temporary files under `tmp/`; durable metadata and table files remain in
+`datadir/`. `mylite_open_config.temp_directory` is currently used only by the
+`:memory:` bootstrap path.
 
 ## Direct Execution
 
@@ -137,8 +145,9 @@ with `mylite_free()`.
 Initial implementation status: `mylite_exec()` runs through the embedded
 MariaDB connection in `embedded-dev` builds, returns text result rows, preserves
 SQL `NULL` values as `NULL` callback entries, and populates MariaDB diagnostics
-on query failure. It does not claim persistent DDL or DML until native storage
-and directory lifecycle are configured and tested.
+on query failure. Native-storage smoke coverage verifies controlled
+`ENGINE=MyISAM` DDL and DML persist across close and reopen. Broader DDL,
+transactions, prepared statements, and engine coverage remain later slices.
 
 ## Prepared Statements
 

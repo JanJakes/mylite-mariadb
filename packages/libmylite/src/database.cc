@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -37,10 +38,29 @@ constexpr const char *k_sqlstate_general = "HY000";
 constexpr const char *k_not_an_error = "not an error";
 constexpr const char *k_bad_db_handle = "bad database handle";
 
+#if MYLITE_WITH_MARIADB_EMBEDDED
+constexpr const char *k_memory_database_path = ":memory:";
+constexpr const char *k_meta_filename = "mylite.meta";
+constexpr const char *k_datadir_name = "datadir";
+constexpr const char *k_tmpdir_name = "tmp";
+constexpr const char *k_rundir_name = "run";
+constexpr const char *k_plugin_directory_name = "plugins";
+constexpr const char *k_mariadb_base_ref = "mariadb-11.8.6";
+
+struct RuntimeLayout {
+    std::filesystem::path cleanup_directory;
+    std::filesystem::path persistent_tmp_directory;
+    std::filesystem::path data_directory;
+    std::filesystem::path tmp_directory;
+    std::filesystem::path plugin_directory;
+};
+#endif
+
 struct RuntimeState {
     std::mutex mutex;
     unsigned ref_count = 0;
-    std::filesystem::path directory;
+    std::filesystem::path cleanup_directory;
+    std::filesystem::path persistent_tmp_directory;
     std::string database_path;
     std::vector<std::string> arguments;
     std::vector<char *> argv;
@@ -102,14 +122,24 @@ int store_and_emit_result(
     bool *has_result
 );
 std::filesystem::path normalize_database_path(const char *path);
-std::filesystem::path create_runtime_directory(const mylite_open_config *config);
+bool is_memory_database_path(const std::filesystem::path &database_path);
+void initialize_database_layout(const std::filesystem::path &database_path);
+void create_layout_directory(const std::filesystem::path &directory, const char *message);
+void write_database_metadata(const std::filesystem::path &metadata_path);
+RuntimeLayout create_runtime_layout(
+    const std::filesystem::path &database_path,
+    const mylite_open_config *config
+);
+RuntimeLayout create_memory_runtime_layout(const mylite_open_config *config);
+RuntimeLayout create_persistent_runtime_layout(const std::filesystem::path &database_path);
 std::filesystem::path runtime_root(const mylite_open_config *config);
 std::string unique_runtime_name(void);
 void create_runtime_subdirectory(const std::filesystem::path &directory, const char *message);
-std::vector<std::string> runtime_arguments(const std::filesystem::path &runtime_dir);
+std::vector<std::string> runtime_arguments(const RuntimeLayout &layout);
 std::vector<char *> mutable_arguments(std::vector<std::string> &arguments);
 #endif
 void remove_directory_if_present(const std::filesystem::path &directory);
+void remove_directory_contents_if_present(const std::filesystem::path &directory);
 int copy_error_message(mylite_db &db, char **errmsg);
 #if MYLITE_WITH_MARIADB_EMBEDDED
 void set_ok(mylite_db &db);
@@ -394,7 +424,7 @@ int store_and_emit_result(
 }
 
 int prepare_database_directory(const std::filesystem::path &database_path, unsigned flags) {
-    if (database_path == ":memory:") {
+    if (is_memory_database_path(database_path)) {
         return MYLITE_OK;
     }
 
@@ -417,6 +447,7 @@ int prepare_database_directory(const std::filesystem::path &database_path, unsig
         if (error || !is_directory) {
             return MYLITE_IOERR;
         }
+        initialize_database_layout(database_path);
         return MYLITE_OK;
     }
 
@@ -424,6 +455,7 @@ int prepare_database_directory(const std::filesystem::path &database_path, unsig
     if (error) {
         return MYLITE_IOERR;
     }
+    initialize_database_layout(database_path);
 
     return MYLITE_OK;
 }
@@ -440,8 +472,8 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
     }
 
 #  if MYLITE_WITH_MARIADB_EMBEDDED
-    const std::filesystem::path runtime_dir = create_runtime_directory(config);
-    g_runtime.arguments = runtime_arguments(runtime_dir);
+    const RuntimeLayout layout = create_runtime_layout(db.database_path, config);
+    g_runtime.arguments = runtime_arguments(layout);
     g_runtime.argv = mutable_arguments(g_runtime.arguments);
     char *groups[] = {const_cast<char *>("server"), const_cast<char *>("embedded"), nullptr};
 
@@ -450,12 +482,13 @@ int start_runtime(mylite_db &db, const mylite_open_config *config) {
     if (init_result != 0) {
         g_runtime.argv.clear();
         g_runtime.arguments.clear();
-        remove_directory_if_present(runtime_dir);
+        remove_directory_if_present(layout.cleanup_directory);
         set_error(db, MYLITE_ERROR, "MariaDB embedded runtime initialization failed");
         return MYLITE_ERROR;
     }
 
-    g_runtime.directory = runtime_dir;
+    g_runtime.cleanup_directory = layout.cleanup_directory;
+    g_runtime.persistent_tmp_directory = layout.persistent_tmp_directory;
     g_runtime.database_path = db.database_path;
     g_runtime.ref_count = 1;
     return MYLITE_OK;
@@ -498,7 +531,8 @@ void close_connection(mylite_db &db) {
 }
 
 void release_runtime(void) {
-    std::filesystem::path runtime_dir;
+    std::filesystem::path cleanup_dir;
+    std::filesystem::path tmp_dir;
     {
         const std::lock_guard<std::mutex> guard(g_runtime.mutex);
         if (g_runtime.ref_count == 0U) {
@@ -510,28 +544,102 @@ void release_runtime(void) {
             return;
         }
 
-        runtime_dir = g_runtime.directory;
+        cleanup_dir = g_runtime.cleanup_directory;
+        tmp_dir = g_runtime.persistent_tmp_directory;
 #if MYLITE_WITH_MARIADB_EMBEDDED
         mysql_server_end();
 #endif
-        g_runtime.directory.clear();
+        g_runtime.cleanup_directory.clear();
+        g_runtime.persistent_tmp_directory.clear();
         g_runtime.database_path.clear();
         g_runtime.argv.clear();
         g_runtime.arguments.clear();
     }
 
-    remove_directory_if_present(runtime_dir);
+    remove_directory_if_present(cleanup_dir);
+    remove_directory_contents_if_present(tmp_dir);
 }
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
 std::filesystem::path normalize_database_path(const char *path) {
-    if (std::strcmp(path, ":memory:") == 0) {
-        return std::filesystem::path(":memory:");
+    if (std::strcmp(path, k_memory_database_path) == 0) {
+        return std::filesystem::path(k_memory_database_path);
     }
     return std::filesystem::absolute(std::filesystem::path(path));
 }
 
-std::filesystem::path create_runtime_directory(const mylite_open_config *config) {
+bool is_memory_database_path(const std::filesystem::path &database_path) {
+    return database_path == std::filesystem::path(k_memory_database_path);
+}
+
+void initialize_database_layout(const std::filesystem::path &database_path) {
+    create_layout_directory(database_path / k_datadir_name, "create database data directory");
+    create_layout_directory(database_path / k_tmpdir_name, "create database temporary directory");
+    create_layout_directory(database_path / k_rundir_name, "create database runtime directory");
+    create_layout_directory(
+        database_path / k_rundir_name / k_plugin_directory_name,
+        "create database plugin directory"
+    );
+
+    const std::filesystem::path metadata_path = database_path / k_meta_filename;
+    std::error_code error;
+    if (std::filesystem::exists(metadata_path, error)) {
+        if (error || !std::filesystem::is_regular_file(metadata_path, error) || error) {
+            throw std::filesystem::filesystem_error(
+                "validate database metadata",
+                metadata_path,
+                error ? error : std::make_error_code(std::errc::invalid_argument)
+            );
+        }
+        return;
+    }
+    if (error) {
+        throw std::filesystem::filesystem_error("validate database metadata", metadata_path, error);
+    }
+
+    write_database_metadata(metadata_path);
+}
+
+void create_layout_directory(const std::filesystem::path &directory, const char *message) {
+    std::error_code error;
+    std::filesystem::create_directories(directory, error);
+    if (error) {
+        throw std::filesystem::filesystem_error(message, directory, error);
+    }
+}
+
+void write_database_metadata(const std::filesystem::path &metadata_path) {
+    std::ofstream metadata(metadata_path, std::ios::binary | std::ios::trunc);
+    if (!metadata) {
+        throw std::filesystem::filesystem_error(
+            "create database metadata",
+            metadata_path,
+            std::make_error_code(std::errc::io_error)
+        );
+    }
+
+    metadata << "format=1\n";
+    metadata << "mariadb_base=" << k_mariadb_base_ref << "\n";
+    if (!metadata) {
+        throw std::filesystem::filesystem_error(
+            "write database metadata",
+            metadata_path,
+            std::make_error_code(std::errc::io_error)
+        );
+    }
+}
+
+RuntimeLayout create_runtime_layout(
+    const std::filesystem::path &database_path,
+    const mylite_open_config *config
+) {
+    if (is_memory_database_path(database_path)) {
+        return create_memory_runtime_layout(config);
+    }
+    return create_persistent_runtime_layout(database_path);
+}
+
+RuntimeLayout create_memory_runtime_layout(const mylite_open_config *config) {
     std::filesystem::path root = runtime_root(config);
     std::error_code error;
     std::filesystem::create_directories(root, error);
@@ -542,10 +650,15 @@ std::filesystem::path create_runtime_directory(const mylite_open_config *config)
     for (int attempt = 0; attempt < 100; ++attempt) {
         std::filesystem::path candidate = root / unique_runtime_name();
         if (std::filesystem::create_directory(candidate, error)) {
-            create_runtime_subdirectory(candidate / "data", "create runtime data directory");
-            create_runtime_subdirectory(candidate / "tmp", "create runtime temporary directory");
-            create_runtime_subdirectory(candidate / "plugins", "create runtime plugin directory");
-            return candidate;
+            RuntimeLayout layout = {};
+            layout.cleanup_directory = candidate;
+            layout.data_directory = candidate / "data";
+            layout.tmp_directory = candidate / "tmp";
+            layout.plugin_directory = candidate / "plugins";
+            create_runtime_subdirectory(layout.data_directory, "create runtime data directory");
+            create_runtime_subdirectory(layout.tmp_directory, "create runtime temporary directory");
+            create_runtime_subdirectory(layout.plugin_directory, "create runtime plugin directory");
+            return layout;
         }
         if (error) {
             throw std::filesystem::filesystem_error("create runtime directory", candidate, error);
@@ -557,6 +670,20 @@ std::filesystem::path create_runtime_directory(const mylite_open_config *config)
         root,
         std::make_error_code(std::errc::file_exists)
     );
+}
+
+RuntimeLayout create_persistent_runtime_layout(const std::filesystem::path &database_path) {
+    RuntimeLayout layout = {};
+    layout.cleanup_directory = database_path / k_rundir_name;
+    layout.persistent_tmp_directory = database_path / k_tmpdir_name;
+    layout.data_directory = database_path / k_datadir_name;
+    layout.tmp_directory = layout.persistent_tmp_directory;
+    layout.plugin_directory = layout.cleanup_directory / k_plugin_directory_name;
+
+    create_runtime_subdirectory(layout.cleanup_directory, "create database runtime directory");
+    create_runtime_subdirectory(layout.tmp_directory, "create database temporary directory");
+    create_runtime_subdirectory(layout.plugin_directory, "create database plugin directory");
+    return layout;
 }
 
 std::filesystem::path runtime_root(const mylite_open_config *config) {
@@ -585,17 +712,14 @@ void create_runtime_subdirectory(const std::filesystem::path &directory, const c
     }
 }
 
-std::vector<std::string> runtime_arguments(const std::filesystem::path &runtime_dir) {
-    const std::filesystem::path data_dir = runtime_dir / "data";
-    const std::filesystem::path tmp_dir = runtime_dir / "tmp";
-    const std::filesystem::path plugin_dir = runtime_dir / "plugins";
-
+std::vector<std::string> runtime_arguments(const RuntimeLayout &layout) {
     return {
         "mylite",
         "--no-defaults",
-        "--datadir=" + data_dir.string(),
-        "--tmpdir=" + tmp_dir.string(),
-        "--plugin-dir=" + plugin_dir.string(),
+        "--datadir=" + layout.data_directory.string(),
+        "--tmpdir=" + layout.tmp_directory.string(),
+        "--plugin-dir=" + layout.plugin_directory.string(),
+        "--aria-log-dir-path=" + layout.data_directory.string(),
         "--skip-grant-tables",
         "--skip-networking",
         "--default-storage-engine=MyISAM",
@@ -625,6 +749,24 @@ void remove_directory_if_present(const std::filesystem::path &directory) {
 
     std::error_code ignored;
     std::filesystem::remove_all(directory, ignored);
+}
+
+void remove_directory_contents_if_present(const std::filesystem::path &directory) {
+    if (directory.empty()) {
+        return;
+    }
+
+    std::error_code error;
+    if (!std::filesystem::is_directory(directory, error) || error) {
+        return;
+    }
+
+    std::filesystem::directory_iterator entry(directory, error);
+    const std::filesystem::directory_iterator end;
+    for (; entry != end && !error; entry.increment(error)) {
+        std::error_code ignored;
+        std::filesystem::remove_all(entry->path(), ignored);
+    }
 }
 
 int copy_error_message(mylite_db &db, char **errmsg) {

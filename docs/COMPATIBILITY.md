@@ -26,9 +26,9 @@ for drop-in application expectations.
 
 | Capability | MyLite status | Compatibility target |
 | --- | --- | --- |
-| Open and close a database directory | 🟡&nbsp;Partial | Implemented for read/write local directory paths with one active database directory per process and a temporary MariaDB runtime directory that is removed on final close |
+| Open and close a database directory | 🟡&nbsp;Partial | Implemented for read/write local directory paths with one active database directory per process, a `.mylite/` naming convention, and a native-storage baseline layout under the database directory |
 | Read-only opens | ⚪&nbsp;Planned | Reserved until native storage can enforce read-only engine access |
-| Direct SQL execution | 🟡&nbsp;Partial | `mylite_exec()` executes controlled one-shot SQL with textual result callbacks in embedded builds |
+| Direct SQL execution | 🟡&nbsp;Partial | `mylite_exec()` executes controlled one-shot SQL with textual result callbacks in embedded builds; native-storage smoke coverage verifies MyISAM DDL/DML persistence across reopen |
 | Prepared statements | ⚪&nbsp;Planned | Reusable statements with 1-based parameter binding |
 | Binary-safe values | ⚪&nbsp;Planned | Explicit BLOB/TEXT byte counts; no NUL-terminated-value assumptions |
 | Diagnostics | 🟡&nbsp;Partial | Open handles expose stable MyLite result codes, MariaDB errno, SQLSTATE, and message text |
@@ -40,10 +40,10 @@ for drop-in application expectations.
 
 | SQL engine request | MyLite status | Target behavior |
 | --- | --- | --- |
-| No explicit engine | ⚪&nbsp;Planned | Create a table with MyLite's configured native MariaDB default engine |
+| No explicit engine | 🟡&nbsp;Partial | The baseline configures MariaDB's native MyISAM engine as the temporary default while broader engine policy is designed |
 | `ENGINE=MYLITE` | ➖&nbsp;Out&nbsp;of&nbsp;scope | No separate MyLite engine in the native-storage directory model |
 | `ENGINE=InnoDB` | ⚪&nbsp;Planned | Use native InnoDB files inside the MyLite database directory where supported |
-| `ENGINE=MyISAM` | ⚪&nbsp;Planned | Use native MyISAM files inside the MyLite database directory where supported |
+| `ENGINE=MyISAM` | 🟡&nbsp;Partial | Controlled create/insert/select/reopen smoke coverage verifies `.MYD` and `.MYI` files inside `datadir/` |
 | `ENGINE=Aria` | ⚪&nbsp;Planned | Use native Aria files and logs inside the MyLite database directory where supported |
 | Dynamic external engines | ➖&nbsp;Out&nbsp;of&nbsp;scope | Default embedded profile does not load storage-engine plugins |
 
@@ -51,24 +51,24 @@ for drop-in application expectations.
 
 | Capability | MyLite status | Target behavior |
 | --- | --- | --- |
-| Primary portable database directory | 🟡&nbsp;Partial | Open/create establishes a MyLite-owned directory; durable native storage layout is still being defined |
-| MariaDB metadata files | ⚪&nbsp;Planned | Allowed when created inside the MyLite database directory |
+| Primary portable database directory | 🟡&nbsp;Partial | Open/create establishes a MyLite-owned directory with `mylite.meta`, `datadir/`, `tmp/`, and clean-runtime `run/`; `.mylite/` is recommended but not enforced |
+| MariaDB metadata files | 🟡&nbsp;Partial | Controlled schema and table metadata are created inside `datadir/`; broader DDL lifecycle is still planned |
 | InnoDB files | ⚪&nbsp;Planned | Tablespaces, redo, undo, and recovery files stay inside the MyLite database directory |
-| MyISAM files | ⚪&nbsp;Planned | `.MYD` and `.MYI` files stay inside the MyLite database directory |
-| Aria files | ⚪&nbsp;Planned | `.MAI`, `.MAD`, `aria_log.*`, and Aria control state stay inside the MyLite database directory |
-| MyLite-owned transient paths | 🟡&nbsp;Partial | Bootstrap uses a MyLite-owned temporary MariaDB runtime directory and removes it on final close |
+| MyISAM files | 🟡&nbsp;Partial | Smoke coverage verifies `.MYD` and `.MYI` table files stay inside `datadir/` across reopen |
+| Aria files | 🟡&nbsp;Partial | Runtime startup sets `--aria-log-dir-path=<db>/datadir`; explicit Aria table coverage remains planned |
+| MyLite-owned transient paths | 🟡&nbsp;Partial | Durable database paths use `tmp/` and `run/` inside the database directory; clean close removes `run/` and clears `tmp/` |
 | Durable files outside the database directory | ➖&nbsp;Out&nbsp;of&nbsp;scope | Reject or reconfigure surfaces that would write durable state outside the MyLite directory |
 
 ## SQL Surface
 
 | Capability | MyLite status | Compatibility target |
 | --- | --- | --- |
-| `CREATE TABLE`, `DROP TABLE`, `RENAME TABLE` | ⚪&nbsp;Planned | MariaDB DDL semantics with durable metadata and engine files inside the MyLite directory |
+| `CREATE TABLE`, `DROP TABLE`, `RENAME TABLE` | 🟡&nbsp;Partial | Controlled MyISAM `CREATE TABLE` is covered; drop, rename, alter, and broader metadata lifecycle remain planned |
 | `ALTER TABLE` | ⚪&nbsp;Planned | Preserve MariaDB native-engine behavior for supported algorithms |
 | Standalone `CREATE INDEX` / `DROP INDEX` | ⚪&nbsp;Planned | Route through MariaDB DDL and native engine index updates |
 | `CREATE TABLE ... LIKE` | ⚪&nbsp;Planned | Preserve MariaDB table definition behavior |
 | `CREATE TABLE ... SELECT` | ⚪&nbsp;Planned | Preserve MariaDB statement semantics over MyLite tables |
-| Schemas/databases | ⚪&nbsp;Planned | MariaDB schema behavior inside the MyLite database directory |
+| Schemas/databases | 🟡&nbsp;Partial | Controlled `CREATE DATABASE` and qualified table access are covered inside `datadir/`; full schema lifecycle remains planned |
 | Views, triggers, and routines | ⚪&nbsp;Planned | Persist through MariaDB native metadata inside the MyLite directory where supported |
 | Events and scheduler | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server scheduler is not part of the core embedded profile |
 | Users, grants, and password auth | ➖&nbsp;Out&nbsp;of&nbsp;scope | Local embedded directory ownership replaces server account management |
