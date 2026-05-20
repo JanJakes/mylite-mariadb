@@ -237,6 +237,9 @@ ordinary non-FK row-DML paths, with successful local table DDL invalidating
 already-open handler caches through a process-wide FK metadata epoch. Published
 leaf-root exact reads now bulk-grow matching entrysets per leaf page, removing
 per-row-id array reallocations from many-match secondary lookups.
+Handler row-DML now prepares small index-entry/key buffers on the stack for
+common fixed-width tables, avoiding hot per-row heap churn while larger key
+sets still use the existing heap path.
 
 ## Size And Profile Direction
 

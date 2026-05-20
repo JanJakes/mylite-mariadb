@@ -207,12 +207,20 @@ static int mylite_prepare_row_payload(TABLE *table, const uchar *buf,
 static int mylite_prepare_index_entries(
   TABLE *table, const uchar *buf, mylite_storage_index_entry **out_entries,
   size_t *out_entry_count, uchar **out_key_storage);
+static int mylite_prepare_index_entries_with_scratch(
+  TABLE *table, const uchar *buf, mylite_storage_index_entry **out_entries,
+  size_t *out_entry_count, uchar **out_key_storage,
+  mylite_storage_index_entry *entry_scratch, size_t entry_scratch_count,
+  uchar *key_storage_scratch, size_t key_storage_scratch_size);
 static int mylite_prepare_index_entry_changes(
     TABLE *table, const uchar *old_buf,
     const mylite_storage_index_entry *new_entries, size_t new_entry_count,
     uchar *entry_changed, size_t entry_changed_count);
 static void mylite_free_index_entries(mylite_storage_index_entry *entries,
                                       uchar *key_storage);
+static void mylite_free_index_entries_with_scratch(
+  mylite_storage_index_entry *entries, uchar *key_storage,
+  mylite_storage_index_entry *entry_scratch, uchar *key_storage_scratch);
 static int mylite_prepare_scan_rows(TABLE *table,
                                     const mylite_storage_rowset *rowset,
                                     uchar **out_rows,
@@ -565,6 +573,8 @@ static const uchar mylite_blob_row_magic[8]=
   {'M', 'Y', 'L', 'R', 'B', '1', '\0', '\0'};
 static const unsigned MYLITE_BLOB_ROW_VERSION= 1U;
 static const uint MYLITE_FOREIGN_KEY_MAX_CASCADE_DEPTH= 15U;
+static const size_t MYLITE_STACK_INDEX_ENTRY_COUNT= 8U;
+static const size_t MYLITE_STACK_INDEX_KEY_STORAGE_SIZE= 1024U;
 static const size_t MYLITE_BLOB_ROW_MAGIC_OFFSET= 0U;
 static const size_t MYLITE_BLOB_ROW_VERSION_OFFSET= 8U;
 static const size_t MYLITE_BLOB_ROW_RECORD_SIZE_OFFSET= 12U;
@@ -2538,12 +2548,16 @@ int ha_mylite::write_row(const uchar *buf)
     generated_auto_increment= insert_id_for_cur_row != 0ULL;
   }
 
+  mylite_storage_index_entry stack_index_entries[MYLITE_STACK_INDEX_ENTRY_COUNT];
+  uchar stack_index_key_storage[MYLITE_STACK_INDEX_KEY_STORAGE_SIZE];
   mylite_storage_index_entry *index_entries= NULL;
   uchar *index_key_storage= NULL;
   size_t index_entry_count= 0;
-  int error= mylite_prepare_index_entries(table, buf, &index_entries,
-                                          &index_entry_count,
-                                          &index_key_storage);
+  int error= mylite_prepare_index_entries_with_scratch(
+      table, buf, &index_entries, &index_entry_count, &index_key_storage,
+      stack_index_entries,
+      sizeof(stack_index_entries) / sizeof(stack_index_entries[0]),
+      stack_index_key_storage, sizeof(stack_index_key_storage));
   if (error)
     DBUG_RETURN(error);
 
@@ -2554,7 +2568,9 @@ int ha_mylite::write_row(const uchar *buf)
                                                   storage_table(), table);
     if (error)
     {
-      mylite_free_index_entries(index_entries, index_key_storage);
+      mylite_free_index_entries_with_scratch(index_entries, index_key_storage,
+                                             stack_index_entries,
+                                             stack_index_key_storage);
       DBUG_RETURN(error);
     }
 
@@ -2564,7 +2580,9 @@ int ha_mylite::write_row(const uchar *buf)
         mylite_storage_preserve_auto_increment_on_rollback(primary_file);
       if (preserve_result != MYLITE_STORAGE_OK)
       {
-        mylite_free_index_entries(index_entries, index_key_storage);
+        mylite_free_index_entries_with_scratch(index_entries, index_key_storage,
+                                               stack_index_entries,
+                                               stack_index_key_storage);
         DBUG_RETURN(mylite_storage_to_handler_error(preserve_result));
       }
     }
@@ -2582,7 +2600,9 @@ int ha_mylite::write_row(const uchar *buf)
                                            NULL, buf, 0ULL, &duplicate_key);
   if (error)
   {
-    mylite_free_index_entries(index_entries, index_key_storage);
+    mylite_free_index_entries_with_scratch(index_entries, index_key_storage,
+                                           stack_index_entries,
+                                           stack_index_key_storage);
     duplicate_key_index= duplicate_key;
     DBUG_RETURN(error);
   }
@@ -2596,7 +2616,9 @@ int ha_mylite::write_row(const uchar *buf)
                                              storage_table(), table, buf);
     if (error)
     {
-      mylite_free_index_entries(index_entries, index_key_storage);
+      mylite_free_index_entries_with_scratch(index_entries, index_key_storage,
+                                             stack_index_entries,
+                                             stack_index_key_storage);
       DBUG_RETURN(error);
     }
   }
@@ -2627,7 +2649,9 @@ int ha_mylite::write_row(const uchar *buf)
   }
   if (error)
   {
-    mylite_free_index_entries(index_entries, index_key_storage);
+    mylite_free_index_entries_with_scratch(index_entries, index_key_storage,
+                                           stack_index_entries,
+                                           stack_index_key_storage);
     DBUG_RETURN(error);
   }
 
@@ -2638,7 +2662,9 @@ int ha_mylite::write_row(const uchar *buf)
                                     &row_payload_size, &owned_row_payload);
   if (error)
   {
-    mylite_free_index_entries(index_entries, index_key_storage);
+    mylite_free_index_entries_with_scratch(index_entries, index_key_storage,
+                                           stack_index_entries,
+                                           stack_index_key_storage);
     DBUG_RETURN(error);
   }
 
@@ -2651,7 +2677,9 @@ int ha_mylite::write_row(const uchar *buf)
       primary_file, storage_schema(), storage_table(), row_payload,
       row_payload_size, index_entries, index_entry_count, &row_id);
   mylite_storage_free(owned_row_payload);
-  mylite_free_index_entries(index_entries, index_key_storage);
+  mylite_free_index_entries_with_scratch(index_entries, index_key_storage,
+                                         stack_index_entries,
+                                         stack_index_key_storage);
   if (result == MYLITE_STORAGE_OK)
     current_row_id= row_id;
   DBUG_RETURN(mylite_storage_to_handler_error(result));
@@ -2687,13 +2715,18 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
       DBUG_RETURN(error);
   }
 
+  mylite_storage_index_entry stack_index_entries[MYLITE_STACK_INDEX_ENTRY_COUNT];
+  uchar stack_index_key_storage[MYLITE_STACK_INDEX_KEY_STORAGE_SIZE];
   mylite_storage_index_entry *index_entries= NULL;
   uchar *index_key_storage= NULL;
   uchar stack_index_entry_changed[64];
   uchar *index_entry_changed= NULL;
   size_t index_entry_count= 0;
-  error= mylite_prepare_index_entries(table, new_data, &index_entries,
-                                      &index_entry_count, &index_key_storage);
+  error= mylite_prepare_index_entries_with_scratch(
+      table, new_data, &index_entries, &index_entry_count, &index_key_storage,
+      stack_index_entries,
+      sizeof(stack_index_entries) / sizeof(stack_index_entries[0]),
+      stack_index_key_storage, sizeof(stack_index_key_storage));
   if (error)
     DBUG_RETURN(error);
 
@@ -2711,7 +2744,9 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
   {
     if (index_entry_changed != stack_index_entry_changed)
       free(index_entry_changed);
-    mylite_free_index_entries(index_entries, index_key_storage);
+    mylite_free_index_entries_with_scratch(index_entries, index_key_storage,
+                                           stack_index_entries,
+                                           stack_index_key_storage);
     DBUG_RETURN(error);
   }
 
@@ -2729,7 +2764,9 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
   {
     if (index_entry_changed != stack_index_entry_changed)
       free(index_entry_changed);
-    mylite_free_index_entries(index_entries, index_key_storage);
+    mylite_free_index_entries_with_scratch(index_entries, index_key_storage,
+                                           stack_index_entries,
+                                           stack_index_key_storage);
     duplicate_key_index= duplicate_key;
     DBUG_RETURN(error);
   }
@@ -2758,7 +2795,9 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
     {
       if (index_entry_changed != stack_index_entry_changed)
         free(index_entry_changed);
-      mylite_free_index_entries(index_entries, index_key_storage);
+      mylite_free_index_entries_with_scratch(index_entries, index_key_storage,
+                                             stack_index_entries,
+                                             stack_index_key_storage);
       DBUG_RETURN(error);
     }
   }
@@ -2791,7 +2830,9 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
   {
     if (index_entry_changed != stack_index_entry_changed)
       free(index_entry_changed);
-    mylite_free_index_entries(index_entries, index_key_storage);
+    mylite_free_index_entries_with_scratch(index_entries, index_key_storage,
+                                           stack_index_entries,
+                                           stack_index_key_storage);
     DBUG_RETURN(error);
   }
 
@@ -2804,7 +2845,9 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
   {
     if (index_entry_changed != stack_index_entry_changed)
       free(index_entry_changed);
-    mylite_free_index_entries(index_entries, index_key_storage);
+    mylite_free_index_entries_with_scratch(index_entries, index_key_storage,
+                                           stack_index_entries,
+                                           stack_index_key_storage);
     DBUG_RETURN(error);
   }
 
@@ -2822,7 +2865,9 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
   mylite_storage_free(owned_row_payload);
   if (index_entry_changed != stack_index_entry_changed)
     free(index_entry_changed);
-  mylite_free_index_entries(index_entries, index_key_storage);
+  mylite_free_index_entries_with_scratch(index_entries, index_key_storage,
+                                         stack_index_entries,
+                                         stack_index_key_storage);
   if (result != MYLITE_STORAGE_OK)
     DBUG_RETURN(mylite_storage_to_handler_error(result));
 
@@ -4009,6 +4054,17 @@ static int mylite_prepare_index_entries(
   TABLE *table, const uchar *buf, mylite_storage_index_entry **out_entries,
   size_t *out_entry_count, uchar **out_key_storage)
 {
+  return mylite_prepare_index_entries_with_scratch(
+      table, buf, out_entries, out_entry_count, out_key_storage, NULL, 0, NULL,
+      0);
+}
+
+static int mylite_prepare_index_entries_with_scratch(
+  TABLE *table, const uchar *buf, mylite_storage_index_entry **out_entries,
+  size_t *out_entry_count, uchar **out_key_storage,
+  mylite_storage_index_entry *entry_scratch, size_t entry_scratch_count,
+  uchar *key_storage_scratch, size_t key_storage_scratch_size)
+{
   *out_entries= NULL;
   *out_entry_count= 0;
   *out_key_storage= NULL;
@@ -4031,14 +4087,24 @@ static int mylite_prepare_index_entries(
   if (key_count > SIZE_MAX / sizeof(mylite_storage_index_entry))
     return HA_ERR_RECORD_FILE_FULL;
 
-  mylite_storage_index_entry *entries=
-    static_cast<mylite_storage_index_entry *>(
+  mylite_storage_index_entry *entries= NULL;
+  if (entry_scratch && key_count <= entry_scratch_count)
+    entries= entry_scratch;
+  else
+    entries= static_cast<mylite_storage_index_entry *>(
       malloc(key_count * sizeof(mylite_storage_index_entry)));
-  uchar *key_storage= static_cast<uchar *>(malloc(key_storage_size));
+
+  uchar *key_storage= NULL;
+  if (key_storage_scratch && key_storage_size <= key_storage_scratch_size)
+    key_storage= key_storage_scratch;
+  else
+    key_storage= static_cast<uchar *>(malloc(key_storage_size));
   if (!entries || !key_storage)
   {
-    free(entries);
-    free(key_storage);
+    if (entries != entry_scratch)
+      free(entries);
+    if (key_storage != key_storage_scratch)
+      free(key_storage);
     return HA_ERR_OUT_OF_MEM;
   }
 
@@ -4093,6 +4159,16 @@ static void mylite_free_index_entries(mylite_storage_index_entry *entries,
 {
   free(entries);
   free(key_storage);
+}
+
+static void mylite_free_index_entries_with_scratch(
+  mylite_storage_index_entry *entries, uchar *key_storage,
+  mylite_storage_index_entry *entry_scratch, uchar *key_storage_scratch)
+{
+  if (entries != entry_scratch)
+    free(entries);
+  if (key_storage != key_storage_scratch)
+    free(key_storage);
 }
 
 static int mylite_prepare_scan_rows(TABLE *table,
