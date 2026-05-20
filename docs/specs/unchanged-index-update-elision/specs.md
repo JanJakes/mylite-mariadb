@@ -3,10 +3,11 @@
 ## Problem
 
 The routed update path still appends replacement index-entry pages for every
-index even when an update changes only non-key columns. The local update
-benchmark exercises that common case with primary-key updates of a payload
-column, so each durable update still writes a row page, row-state page, and a
-redundant replacement index page.
+index even when an update leaves some indexed keys unchanged. The local update
+benchmark changes the `value` column, which is also a secondary index, so each
+durable update still needs the replacement row page, row-state page, and changed
+secondary-index entry, but it does not need to write a redundant replacement
+primary-key entry.
 
 The active update rewrite slice removes repeated replacement chains only while
 the current replacement run remains in the active append buffer. Once a row is
@@ -128,8 +129,8 @@ First-party storage C and MyLite handler changes only. No new dependency.
 
 ## Acceptance Criteria
 
-- Durable SQL updates that do not change key bytes avoid redundant index-entry
-  page writes.
+- Durable SQL updates avoid redundant index-entry page writes for any indexed
+  keys whose serialized key bytes do not change.
 - Exact index and live index scans resolve unchanged inherited keys to the
   current row id.
 - Changed keys hide the inherited old key even when an older leaf root supplies
