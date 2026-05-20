@@ -5540,7 +5540,12 @@ mylite_storage_result mylite_storage_find_index_entry(
         );
     }
     if (result == MYLITE_STORAGE_OK && *out_row_id != 0ULL) {
-        (void)mark_active_live_row(file, &header, table_entry.table_id, *out_row_id);
+        (void)mark_active_live_row_in_statement(
+            file_scope.active_statement,
+            &header,
+            table_entry.table_id,
+            *out_row_id
+        );
     }
 
     if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
@@ -5689,7 +5694,12 @@ static mylite_storage_result find_indexed_row_payload(
         );
     }
     if (result == MYLITE_STORAGE_OK && *out_row_id != 0ULL) {
-        (void)mark_active_live_row(file, &header, table_entry.table_id, *out_row_id);
+        (void)mark_active_live_row_in_statement(
+            file_scope.active_statement,
+            &header,
+            table_entry.table_id,
+            *out_row_id
+        );
         result = read_indexed_row_payload_from_open_file(
             file,
             filename,
@@ -5705,7 +5715,12 @@ static mylite_storage_result find_indexed_row_payload(
             result = MYLITE_STORAGE_CORRUPT;
         }
         if (result == MYLITE_STORAGE_OK) {
-            (void)mark_active_validated_live_row(file, &header, table_entry.table_id, *out_row_id);
+            (void)mark_active_validated_live_row_in_statement(
+                file_scope.active_statement,
+                &header,
+                table_entry.table_id,
+                *out_row_id
+            );
         }
     }
     if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {

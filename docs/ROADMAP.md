@@ -247,6 +247,9 @@ Exact index-entry lookup, indexed-row lookup, and row-update execution now
 reuse scoped header state captured while opening the file scope instead of
 rediscovering active statement ownership from `FILE *` before reading the
 checkpoint header.
+Scoped exact-index and indexed-row lookup paths also mark statement live-row
+caches through the captured active statement instead of rediscovering the same
+ownership from `FILE *`.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation
