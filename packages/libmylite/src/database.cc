@@ -233,6 +233,7 @@ void set_mariadb_statement_error(mylite_stmt &stmt);
 int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql);
 bool is_unsupported_server_surface_sql(std::string_view sql);
 bool is_unsupported_oracle_sql_mode_statement(std::string_view sql);
+bool is_unsupported_procedure_analyse_statement(std::string_view sql);
 bool is_unsupported_account_or_event_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_plugin_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_udf_statement(const SqlPolicyTokens &tokens);
@@ -1066,6 +1067,11 @@ int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql) {
         return MYLITE_ERROR;
     }
 
+    if (is_unsupported_procedure_analyse_statement(sql)) {
+        set_error(db, MYLITE_ERROR, "PROCEDURE ANALYSE is not supported by MyLite");
+        return MYLITE_ERROR;
+    }
+
     if (is_unsupported_server_surface_sql(sql)) {
         set_error(db, MYLITE_ERROR, "server-owned SQL surface is not supported by MyLite");
         return MYLITE_ERROR;
@@ -1084,6 +1090,22 @@ bool is_unsupported_oracle_sql_mode_statement(std::string_view sql) {
         if (token_equals(tokens.values[index], "SQL_MODE") &&
             is_sql_mode_assignment_target(tokens, index) &&
             sql_mode_assignment_mentions_oracle(tokens, index)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool is_unsupported_procedure_analyse_statement(std::string_view sql) {
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    if (!token_equals(identifier_token_at(tokens, 0), "SELECT")) {
+        return false;
+    }
+
+    for (std::size_t index = 1; index + 2U < tokens.count; ++index) {
+        if (token_equals(tokens.values[index], "PROCEDURE") &&
+            token_equals(tokens.values[index + 1U], "ANALYSE") &&
+            token_equals(tokens.values[index + 2U], "(")) {
             return true;
         }
     }

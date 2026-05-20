@@ -102,6 +102,7 @@ behavior. It does not require a daemon in the default test path.
 | Statement profiling | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server diagnostic surface; `@@have_profiling=NO` is covered and profiling commands or variables are rejected by policy coverage |
 | Query cache | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server-side result-cache optimization; `@@have_query_cache=NO` is covered, management commands and variables are rejected, and `SQL_CACHE` / `SQL_NO_CACHE` remain accepted no-op hints |
 | `SFORMAT()` | ➖&nbsp;Out&nbsp;of&nbsp;scope | Optional MariaDB fmtlib-backed formatting helper; omitted from the embedded profile so the embedded SQL target can build without C++ exceptions, while ordinary `FORMAT()` remains available |
+| `PROCEDURE ANALYSE()` | ➖&nbsp;Out&nbsp;of&nbsp;scope | Legacy diagnostic SELECT extension; rejected by policy and omitted from the default embedded archive while ordinary SELECT queries remain supported |
 
 ## Rows, Indexes, And Constraints
 

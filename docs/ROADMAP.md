@@ -51,6 +51,7 @@ surface that does not fit a local directory-owned library:
 - performance schema, statement profiling, query cache, and server audit plugins,
 - optional Oracle SQL compatibility mode,
 - optional fmtlib-backed SQL helpers such as `SFORMAT()`,
+- legacy diagnostic SELECT procedures such as `PROCEDURE ANALYSE()`,
 - rarely used optional engines or plugins unless a slice justifies them.
 
 The minimal embedded build establishes the first baseline. Later slices record
@@ -76,6 +77,9 @@ The binary-log transaction/event core is compiled to embedded no-op paths after
 policy coverage proves replication and binlog command families are outside the
 core library contract; shared log/event objects that other MariaDB code still
 references remain for later, narrower review.
+Legacy `PROCEDURE ANALYSE()` support is omitted after policy coverage proves it
+is an obsolete diagnostic SELECT extension rather than application data
+functionality; normal SELECT execution remains supported.
 Compatibility-sensitive code removals require separate evidence before they
 are accepted.
 

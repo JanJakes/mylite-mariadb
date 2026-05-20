@@ -81,6 +81,9 @@ Use two layers:
    size-profile slice omits from the embedded function registry. The first such
    case is `SFORMAT()`, which fails predictably while ordinary `FORMAT()`
    remains available.
+5. Keep direct and prepared regression coverage for omitted legacy diagnostic
+   SELECT extensions. The first such case is `PROCEDURE ANALYSE()`, which fails
+   predictably while ordinary SELECT queries remain available.
 
 The gate is not a general SQL parser. It is a narrow first-token policy check
 for statement families and explicit mode switches whose MariaDB behavior is
@@ -173,6 +176,8 @@ No new dependencies or license changes.
   variables named `sql_mode` accepted.
 - Cover rejected direct and prepared `SFORMAT()` after the embedded size
   profile omits it.
+- Cover rejected direct and prepared `PROCEDURE ANALYSE()` after the embedded
+  size profile omits it.
 - Cover rejected prepared SQL for at least one server-owned statement family.
 - Assert server-sidecar files and system-table directories are absent.
 - Run:
@@ -204,6 +209,8 @@ No new dependencies or license changes.
 - Oracle SQL mode fails through a stable MyLite policy diagnostic while normal
   SQL modes and user variables named `sql_mode` remain available.
 - Optional `SFORMAT()` fails predictably in direct execution and prepared
+  statements after the embedded size profile omits it.
+- `PROCEDURE ANALYSE()` fails predictably in direct execution and prepared
   statements after the embedded size profile omits it.
 - MySQL/MariaDB executable comments cannot bypass the server-surface policy.
 - Direct execution and prepared statements share the same policy.

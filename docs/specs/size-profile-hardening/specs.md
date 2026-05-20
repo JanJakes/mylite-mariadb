@@ -19,6 +19,8 @@ omits non-semantic unwind tables. Dynamic UDF shared-library loading is omitted
 because it is a server-owned extension surface, not core embedded application
 behavior. Binary-log transaction/event runtime is treated the same way after
 policy coverage proves replication and binlog SQL are outside the core API.
+Legacy `PROCEDURE ANALYSE()` is omitted because it is an obsolete diagnostic
+SELECT extension rather than application data behavior.
 
 ## Source Findings
 
@@ -100,6 +102,14 @@ policy coverage proves replication and binlog SQL are outside the core API.
   and reduces the stripped archive to 27,265,728 bytes, 26.00 MiB, and 705
   members. Shared log/event symbols remain where retained MariaDB code still
   references them.
+- `mariadb/sql/procedure.cc` registers the built-in `analyse` SELECT procedure
+  and dispatches it to `proc_analyse_init()`. `mariadb/sql/sql_analyse.cc`
+  implements that analyzer and is included in the embedded SQL archive by
+  `mariadb/libmysqld/CMakeLists.txt`.
+- Disabling `PROCEDURE ANALYSE()` behind
+  `MYLITE_WITH_PROCEDURE_ANALYSE=0` replaces `sql_analyse.cc.o` with a small
+  unsupported stub and reduces the stripped archive to 27,226,608 bytes,
+  25.97 MiB, and 705 members.
 
 ## Proposed Design
 
@@ -163,6 +173,14 @@ transaction, row-event, GTID-state, event-write, and table-map entry points to
 no-op or fail-closed behavior. The option defaults to `ON` so normal MariaDB
 server builds keep upstream binlog behavior.
 
+The embedded archive disables `PROCEDURE ANALYSE()` by setting
+`MYLITE_WITH_PROCEDURE_ANALYSE=0` in the MyLite baseline, replacing
+`sql_analyse.cc` with a small `proc_analyse_init()` unsupported stub. The
+option defaults to `ON` so normal MariaDB server builds keep upstream behavior.
+MyLite rejects straightforward direct and prepared
+`SELECT ... PROCEDURE ANALYSE()` before dispatch, while the MariaDB stub
+remains the fail-closed backstop.
+
 The wrapper keeps this behavior enabled by default because it is the
 distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
 need an unstripped archive for local inspection.
@@ -171,11 +189,12 @@ need an unstripped archive for local inspection.
 
 The Performance Schema storage-engine plugin and Feedback reporting plugin are
 omitted by CMake configuration, embedded `HELP`, statement profiling, query
-cache, Oracle SQL mode, and `SFORMAT()` are compiled to disabled or omitted
-surfaces, and the compiled objects use size-oriented release flags. The
-embedded SQL target also uses `-fno-exceptions`, omits unwind tables, and omits
-dynamic UDF lookup, execution, and DDL runtime. The embedded baseline also
-disables binlog transaction/event runtime behind a MyLite-owned profile flag.
+cache, Oracle SQL mode, `SFORMAT()`, and `PROCEDURE ANALYSE()` are compiled to
+disabled or omitted surfaces, and the compiled objects use size-oriented
+release flags. The embedded SQL target also uses `-fno-exceptions`, omits
+unwind tables, and omits dynamic UDF lookup, execution, and DDL runtime. The
+embedded baseline also disables binlog transaction/event runtime behind a
+MyLite-owned profile flag.
 
 ## Compatibility Impact
 
@@ -205,6 +224,9 @@ rejects replication and binlog command families, starts with `@@log_bin=0`,
 and verifies that no binlog or relay-log sidecars are created. The no-binlog
 core keeps supported DDL, DML, transactions, crash/reopen behavior, and native
 engine coverage intact.
+`PROCEDURE ANALYSE()` is a legacy diagnostic SELECT extension. Omitting it does
+not affect ordinary SELECT execution, DDL, DML, native storage engines, JSON,
+GEOMETRY/GIS, or the public C API.
 
 ## Database-Directory And Lifecycle Impact
 
@@ -257,6 +279,11 @@ the embedded binary-log core brings the current archive to 27,265,728 bytes /
 Schema disabled, 5,863,912 bytes smaller than the symbol-stripped baseline with
 Performance Schema still built, and 6,576,592 bytes smaller than the original
 broad archive.
+Omitting `PROCEDURE ANALYSE()` brings the current archive to 27,226,608 bytes /
+25.97 MiB, 4,303,096 bytes smaller than the Release build with Performance
+Schema disabled, 5,903,032 bytes smaller than the symbol-stripped baseline with
+Performance Schema still built, and 6,615,712 bytes smaller than the original
+broad archive.
 
 ## License Or Dependency Impact
 
@@ -266,6 +293,8 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 ## Test And Verification Plan
 
 - Run `tools/mariadb-embedded-build all`.
+- Confirm `sql_analyse.cc.o` is absent and
+  `mylite_procedure_analyse_stub.cc.o` is present in `libmariadbd.a`.
 - Run `cmake --build --preset dev`.
 - Run `ctest --preset dev --output-on-failure`.
 - Run `cmake --build --preset embedded-dev`.
@@ -300,6 +329,9 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Replication and binlog command families remain rejected, `@@log_bin=0`
   remains covered, no binlog/relay-log sidecars are created, and the embedded
   archive omits the active binlog transaction/event core.
+- Direct and prepared `SELECT ... PROCEDURE ANALYSE()` fail predictably, quoted
+  literal mentions remain normal SQL, and the embedded archive omits
+  `sql_analyse.cc.o`.
 - The stripped archive still links `libmylite` and all embedded tests.
 - The measured archive size and member count are recorded in the build
   documentation.
@@ -321,3 +353,5 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - `log.cc`, `log_event.cc`, GTID helpers, and binlog plugin symbols still have
   shared references. Removing more binlog/event code needs separate source and
   link evidence rather than file-name pruning.
+- The generic SELECT procedure dispatch remains linked after omitting
+  `PROCEDURE ANALYSE()`. Removing it should be a separate slice.

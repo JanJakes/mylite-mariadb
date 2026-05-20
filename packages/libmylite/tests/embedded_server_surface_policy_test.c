@@ -231,6 +231,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SET @sql_mode = 'ORACLE'");
     exec_ok(db, "SET @password = 'local'");
     exec_ok(db, "SET sql_mode = @@sql_mode");
+    exec_ok(db, "SELECT 'PROCEDURE ANALYSE()' AS literal");
 
     expect_error(
         db,
@@ -346,6 +347,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
         "Oracle SQL mode"
     );
     expect_error(db, "SELECT SFORMAT('{}', 1)", "SFORMAT");
+    expect_error(db, "SELECT 1 PROCEDURE ANALYSE()", "PROCEDURE ANALYSE");
     expect_prepare_error(
         db,
         "CREATE USER 'prepared_user'@'localhost' IDENTIFIED BY 'secret'",
@@ -374,6 +376,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_prepare_error(db, "RESET QUERY CACHE", "server-owned SQL surface");
     expect_prepare_error(db, "SET sql_mode = 'ORACLE'", "Oracle SQL mode");
     expect_prepare_error(db, "SELECT SFORMAT('{}', 1)", "SFORMAT");
+    expect_prepare_error(db, "SELECT 1 PROCEDURE ANALYSE()", "PROCEDURE ANALYSE");
 }
 
 static void assert_no_server_sidecar_files(const char *database_path) {
