@@ -53,8 +53,12 @@ class ha_mylite: public handler
   unsigned char *index_keys;
   Mylite_index_cursor_entry *index_entries;
   unsigned char *index_rows;
+  unsigned char index_inline_key[MAX_KEY_LENGTH];
+  Mylite_index_cursor_entry index_inline_entry;
   size_t *index_row_offsets;
   size_t *index_row_sizes;
+  size_t index_inline_row_offset;
+  size_t index_inline_row_size;
   char storage_schema_name[NAME_LEN + 1];
   char storage_table_name[NAME_LEN + 1];
   char display_engine_name[NAME_LEN + 1];

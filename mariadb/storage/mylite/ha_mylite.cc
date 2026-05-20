@@ -1218,11 +1218,12 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
     : handler(hton, table_arg), share(NULL), scan_rows(NULL),
       scan_blob_payloads(NULL), scan_row_ids(NULL),
       record_blob_payloads{NULL, NULL}, index_keys(NULL), index_entries(NULL),
-      index_rows(NULL), index_row_offsets(NULL), index_row_sizes(NULL),
-      scan_row_size(0), scan_row_count(0), scan_row_index(0),
-      scan_blob_payloads_size(0), record_blob_payloads_size{0, 0},
-      index_row_bytes(0), index_row_count(0), index_row_index(0),
-      index_cursor_number(MAX_KEY), current_row_id(0),
+      index_rows(NULL), index_inline_entry{0, 0, 0}, index_row_offsets(NULL),
+      index_row_sizes(NULL), index_inline_row_offset(0),
+      index_inline_row_size(0), scan_row_size(0), scan_row_count(0),
+      scan_row_index(0), scan_blob_payloads_size(0),
+      record_blob_payloads_size{0, 0}, index_row_bytes(0), index_row_count(0),
+      index_row_index(0), index_cursor_number(MAX_KEY), current_row_id(0),
       duplicate_key_index((uint) -1), foreign_key_presence_epoch(0ULL),
       child_foreign_key_presence_known(false),
       child_foreign_key_presence(false),
@@ -1262,11 +1263,15 @@ void ha_mylite::clear_scan_rows()
 
 void ha_mylite::clear_index_cursor()
 {
-  mylite_storage_free(index_keys);
-  mylite_storage_free(index_entries);
+  if (index_keys != index_inline_key)
+    mylite_storage_free(index_keys);
+  if (index_entries != &index_inline_entry)
+    mylite_storage_free(index_entries);
   mylite_storage_free(index_rows);
-  mylite_storage_free(index_row_offsets);
-  mylite_storage_free(index_row_sizes);
+  if (index_row_offsets != &index_inline_row_offset)
+    mylite_storage_free(index_row_offsets);
+  if (index_row_sizes != &index_inline_row_size)
+    mylite_storage_free(index_row_sizes);
   index_keys= NULL;
   index_entries= NULL;
   index_rows= NULL;
@@ -1461,32 +1466,48 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
     if (storage_result != MYLITE_STORAGE_OK)
       DBUG_RETURN(mylite_storage_to_handler_error(storage_result));
 
-    uchar *keys= static_cast<uchar *>(malloc(key_filter_length));
+    const bool use_inline_cursor_storage=
+        key_filter_length <= sizeof(index_inline_key);
+    uchar *keys= use_inline_cursor_storage
+                     ? index_inline_key
+                     : static_cast<uchar *>(malloc(key_filter_length));
     Mylite_index_cursor_entry *entries=
-        static_cast<Mylite_index_cursor_entry *>(
-            malloc(sizeof(Mylite_index_cursor_entry)));
+        use_inline_cursor_storage
+            ? &index_inline_entry
+            : static_cast<Mylite_index_cursor_entry *>(
+                  malloc(sizeof(Mylite_index_cursor_entry)));
     size_t *row_offsets= NULL;
     size_t *row_sizes= NULL;
     if (inline_durable_row)
     {
-      row_offsets= static_cast<size_t *>(malloc(sizeof(size_t)));
-      row_sizes= static_cast<size_t *>(malloc(sizeof(size_t)));
+      row_offsets= use_inline_cursor_storage
+                       ? &index_inline_row_offset
+                       : static_cast<size_t *>(malloc(sizeof(size_t)));
+      row_sizes= use_inline_cursor_storage
+                     ? &index_inline_row_size
+                     : static_cast<size_t *>(malloc(sizeof(size_t)));
     }
     if (!keys || !entries)
     {
-      free(keys);
-      free(entries);
-      free(row_offsets);
-      free(row_sizes);
+      if (!use_inline_cursor_storage)
+      {
+        free(keys);
+        free(entries);
+        free(row_offsets);
+        free(row_sizes);
+      }
       mylite_storage_free(row_payload);
       DBUG_RETURN(HA_ERR_OUT_OF_MEM);
     }
     if (inline_durable_row && (!row_offsets || !row_sizes))
     {
-      free(keys);
-      free(entries);
-      free(row_offsets);
-      free(row_sizes);
+      if (!use_inline_cursor_storage)
+      {
+        free(keys);
+        free(entries);
+        free(row_offsets);
+        free(row_sizes);
+      }
       mylite_storage_free(row_payload);
       DBUG_RETURN(HA_ERR_OUT_OF_MEM);
     }
