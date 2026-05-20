@@ -36,7 +36,7 @@ native storage files inside that directory.
 | 13 | Prepared SQL API | ✅&nbsp;Done | Add reusable prepared statements, parameter bindings, typed column access, warning lookup, binary-safe values, reset/finalize behavior, and close-time statement lifetime enforcement. |
 | 14 | Engine support and application schemas | ✅&nbsp;Done | Test supported explicit `ENGINE=` clauses, default-engine resolution, MEMORY reopen semantics, and representative WordPress-shaped InnoDB DDL. |
 | 15 | Server-surface policy | ✅&nbsp;Done | Explicitly reject users/auth, replication/binlog, dynamic plugins, events, and server-owned metadata surfaces, while disabling performance schema and server topology features at startup. |
-| 16 | Size profile hardening | ⚪&nbsp;Planned | Trim daemon-only and low-value optional components after the embedded runtime and storage shape are measurable. |
+| 16 | Size profile hardening | 🟡&nbsp;In&nbsp;progress | Trim safe archive/package overhead first, then evaluate daemon-only and low-value optional components after the embedded runtime and storage shape are measurable. |
 
 ## Size And Profile Direction
 
@@ -52,6 +52,10 @@ surface that does not fit a local directory-owned library:
 
 The minimal embedded build establishes the first baseline. Later slices record
 meaningful size changes when they add or remove runtime surface.
+The first safe hardening step strips debug and local-symbol metadata from the
+embedded static archive without removing runtime functionality.
+Compatibility-sensitive code removals require separate evidence before they are
+accepted.
 
 Historical branch-level size research is archived in
 [Bundle size reduction attempts](architecture/bundle-size-research.md). Treat

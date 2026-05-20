@@ -1,9 +1,9 @@
 # MariaDB Embedded Build
 
-This document records the first reproducible MariaDB embedded-library baseline
-for MyLite. The baseline is intentionally broad: it proves the imported MariaDB
+This document records the reproducible MariaDB embedded-library baseline for
+MyLite. The baseline is intentionally broad: it proves the imported MariaDB
 source can build an embedded archive before MyLite starts trimming server
-surface or adding storage patches.
+surface or removing compatibility-sensitive code.
 
 ## Command
 
@@ -13,7 +13,11 @@ tools/mariadb-embedded-build all
 
 The wrapper configures MariaDB with
 `cmake/mariadb-embedded-baseline.cmake`, builds only the `libmariadbd.a` target,
-and reports archive size evidence. It does not update MariaDB submodules.
+strips debug and local-symbol metadata from the archive, and reports archive
+size evidence. It does not update MariaDB submodules.
+
+Set `STRIP_ARCHIVE=0` when an unstripped archive is needed for local
+inspection.
 
 ## Profile
 
@@ -39,8 +43,9 @@ omits `wsrep-lib` and `storage/maria/libmarias3`.
 
 ## Measurement
 
-Measured on 2026-05-14 from the imported MariaDB 11.8.6 source tree with the
-MyLite embedded-restart patches applied.
+Measured on 2026-05-20 from the imported MariaDB 11.8.6 source tree with the
+MyLite embedded-restart patches applied and post-build archive stripping
+enabled.
 
 | Field | Value |
 | --- | --- |
@@ -50,8 +55,12 @@ MyLite embedded-restart patches applied.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 33,842,320 bytes / 32.27 MiB |
+| Archive size | 33,129,640 bytes / 31.59 MiB |
 | Archive members | 822 |
+
+The pre-strip archive for the same build was 33,842,320 bytes / 32.27 MiB.
+Post-build `strip -S -x` plus `ranlib` saved 712,680 bytes without changing
+archive membership or runtime behavior.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
 GSSAPI, BZip2, LZ4, LibLZMA, LZO, PCRE2, and Zstandard support on this
@@ -59,8 +68,9 @@ machine.
 
 ## Enabled Surface
 
-The profile leaves most MariaDB defaults intact. The embedded archive includes
-the static embedded server library and static embedded engines/plugins such as:
+The profile leaves most MariaDB defaults intact. Apart from packaging-only
+symbol stripping, the embedded archive includes the static embedded server
+library and static embedded engines/plugins such as:
 
 - Aria
 - CSV
@@ -104,4 +114,5 @@ fully offline builds become a requirement.
 
 Use this baseline as the comparison point for later profile changes. Each
 future trimming slice should record the same archive path, size, member count,
-cache options, and compatibility rationale.
+cache options, and compatibility rationale. Runtime-functionality cuts remain
+separate decisions from packaging-only archive stripping.

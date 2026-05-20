@@ -1,8 +1,8 @@
 # Initial cache for the first MyLite MariaDB embedded-library baseline.
 #
 # Keep this file limited to reproducibility settings and options required by
-# the intentionally partial MariaDB submodule import. Size trimming belongs in
-# later measured slices.
+# the intentionally partial MariaDB submodule import. The build wrapper handles
+# packaging-only archive stripping after the normal MariaDB build.
 
 set(CMAKE_BUILD_TYPE "Release" CACHE STRING "MariaDB baseline build type" FORCE)
 

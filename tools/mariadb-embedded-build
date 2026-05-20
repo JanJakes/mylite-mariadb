@@ -12,10 +12,11 @@ usage() {
 Usage: tools/mariadb-embedded-build [configure|build|measure|all] [cmake args...]
 
 Environment:
-  BUILD_DIR   Build directory. Defaults to build/mariadb-embedded.
-  GENERATOR   CMake generator. Defaults to Ninja.
-  PROFILE     Initial cache file. Defaults to cmake/mariadb-embedded-baseline.cmake.
-  TARGET      Build target. Defaults to libmariadbd.a.
+  BUILD_DIR       Build directory. Defaults to build/mariadb-embedded.
+  GENERATOR       CMake generator. Defaults to Ninja.
+  PROFILE         Initial cache file. Defaults to cmake/mariadb-embedded-baseline.cmake.
+  TARGET          Build target. Defaults to libmariadbd.a.
+  STRIP_ARCHIVE   Strip libmariadbd.a debug/local symbols after build. Defaults to 1.
 EOF
 }
 
@@ -57,6 +58,7 @@ build() {
   prefer_homebrew_bison
 
   cmake --build "${build_dir}" --target "${target}"
+  strip_archive
 }
 
 measure() {
@@ -68,10 +70,7 @@ measure() {
 
   require_command ar
 
-  archive="${build_dir}/libmysqld/libmariadbd.a"
-  if [ ! -f "${archive}" ]; then
-    archive="$(find "${build_dir}" -name libmariadbd.a -type f -print -quit 2>/dev/null || true)"
-  fi
+  archive="$(embedded_archive)"
 
   if [ -z "${archive}" ] || [ ! -f "${archive}" ]; then
     echo "Could not find libmariadbd.a under ${build_dir}" >&2
@@ -107,6 +106,49 @@ file_size() {
   fi
 
   stat -c %s "${path}"
+}
+
+embedded_archive() {
+  local archive
+
+  archive="${build_dir}/libmysqld/libmariadbd.a"
+  if [ -f "${archive}" ]; then
+    echo "${archive}"
+    return
+  fi
+
+  find "${build_dir}" -name libmariadbd.a -type f -print -quit 2>/dev/null || true
+}
+
+strip_archive() {
+  local archive
+  local size_after
+  local size_before
+
+  if [ "${STRIP_ARCHIVE:-1}" = "0" ]; then
+    return
+  fi
+
+  if [ "${target}" != "libmariadbd.a" ]; then
+    return
+  fi
+
+  archive="$(embedded_archive)"
+  if [ -z "${archive}" ] || [ ! -f "${archive}" ]; then
+    echo "Could not find libmariadbd.a under ${build_dir}" >&2
+    exit 1
+  fi
+
+  require_command strip
+  require_command ranlib
+
+  size_before="$(file_size "${archive}")"
+  strip -S -x "${archive}"
+  ranlib "${archive}"
+  size_after="$(file_size "${archive}")"
+
+  echo "stripped_archive=${archive}"
+  echo "stripped_saved_bytes=$((size_before - size_after))"
 }
 
 command_name="${1:-all}"
