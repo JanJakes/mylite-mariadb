@@ -24,7 +24,7 @@ inspection.
 The committed baseline cache sets:
 
 ```text
-CMAKE_BUILD_TYPE=Release
+CMAKE_BUILD_TYPE=MinSizeRel
 UPDATE_SUBMODULES=OFF
 WITH_EMBEDDED_SERVER=ON
 WITH_SSL=system
@@ -35,9 +35,11 @@ PLUGIN_S3=NO
 PLUGIN_PERFSCHEMA=NO
 ```
 
-`WITH_ZLIB=bundled` prevents the system zlib lookup from adding the macOS SDK
-root include directory as a normal `-I` path. The embedded archive includes the
-bundled zlib objects, so `libmylite` does not add a separate host zlib link.
+`CMAKE_BUILD_TYPE=MinSizeRel` makes the embedded MariaDB archive optimize for
+size without changing compiled runtime surface. `WITH_ZLIB=bundled` prevents
+the system zlib lookup from adding the macOS SDK root include directory as a
+normal `-I` path. The embedded archive includes the bundled zlib objects, so
+`libmylite` does not add a separate host zlib link.
 `WITH_WSREP=OFF` and
 `PLUGIN_S3=NO` are required because the initial MariaDB import intentionally
 omits `wsrep-lib` and `storage/maria/libmarias3`.
@@ -60,16 +62,18 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 31,529,704 bytes / 30.07 MiB |
+| Archive size | 30,403,000 bytes / 28.99 MiB |
 | Archive members | 712 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
-32.27 MiB. With the unused Performance Schema static plugin disabled, the
-pre-strip archive is 32,201,416 bytes / 30.71 MiB. Post-build `strip -S -x`
-plus `ranlib` saves another 671,712 bytes without changing archive membership
-or runtime behavior. The final archive is 1,599,936 bytes smaller than the
-symbol-stripped baseline that still built Performance Schema, and 2,312,616
-bytes smaller than the original broad archive.
+32.27 MiB. With `MinSizeRel` and the unused Performance Schema static plugin
+disabled, the pre-strip archive is 31,057,680 bytes / 29.62 MiB. Post-build
+`strip -S -x` plus `ranlib` saves another 654,680 bytes without changing
+archive membership or runtime behavior. The final archive is 1,126,704 bytes
+smaller than the Release build with the same Performance Schema profile,
+2,726,640 bytes smaller than the symbol-stripped baseline that still built
+Performance Schema, and 3,439,320 bytes smaller than the original broad
+archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
 GSSAPI, BZip2, LZ4, LibLZMA, LZO, PCRE2, and Zstandard support on this

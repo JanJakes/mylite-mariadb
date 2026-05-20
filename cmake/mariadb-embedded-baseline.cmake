@@ -4,7 +4,7 @@
 # the intentionally partial MariaDB submodule import. The build wrapper handles
 # packaging-only archive stripping after the normal MariaDB build.
 
-set(CMAKE_BUILD_TYPE "Release" CACHE STRING "MariaDB baseline build type" FORCE)
+set(CMAKE_BUILD_TYPE "MinSizeRel" CACHE STRING "MariaDB baseline build type" FORCE)
 
 set(UPDATE_SUBMODULES OFF CACHE BOOL "Do not fetch MariaDB submodules during configure" FORCE)
 set(WITH_EMBEDDED_SERVER ON CACHE BOOL "Build MariaDB's embedded server library" FORCE)

@@ -3,10 +3,11 @@
 ## Problem Statement
 
 MyLite should start reducing binary size only where the change does not remove
-important MySQL/MariaDB behavior. The first safe steps are packaging hygiene
-and omission of already-disabled server surfaces: remove debug and local-symbol
-metadata from the embedded static archive after the normal MariaDB build, and
-avoid building the unused Performance Schema static plugin.
+important MySQL/MariaDB behavior. The first safe steps are packaging hygiene,
+size-oriented compilation, and omission of already-disabled server surfaces:
+remove debug and local-symbol metadata from the embedded static archive, build
+the embedded archive with size-oriented release flags, and avoid building the
+unused Performance Schema static plugin.
 
 ## Source Findings
 
@@ -32,12 +33,17 @@ avoid building the unused Performance Schema static plugin.
   membership.
 - Setting `PLUGIN_PERFSCHEMA=NO` and keeping archive stripping enabled reduces
   the current archive to 31,529,704 bytes, 30.07 MiB, and 712 members.
+- Building the same profile with `CMAKE_BUILD_TYPE=MinSizeRel` reduces the
+  stripped archive to 30,403,000 bytes, 28.99 MiB, and 712 members.
 
 ## Proposed Design
 
 After building the embedded archive, `tools/mariadb-embedded-build` strips
 debug and local symbols from `libmariadbd.a` and refreshes the archive index
 with `ranlib`.
+
+The embedded baseline uses `CMAKE_BUILD_TYPE=MinSizeRel` so MariaDB compiles
+the same runtime surface with size-oriented release flags.
 
 The embedded baseline also disables the Performance Schema storage engine at
 configure time. The runtime only passes `--performance-schema=OFF` when the
@@ -52,7 +58,8 @@ need an unstripped archive for local inspection.
 ## Affected MariaDB Subsystems
 
 No MariaDB source files are changed. The Performance Schema storage-engine
-plugin is omitted by CMake configuration.
+plugin is omitted by CMake configuration, and the compiled objects use
+size-oriented release flags.
 
 ## Compatibility Impact
 
@@ -78,9 +85,11 @@ run against the same native engine members.
 ## Binary-Size Impact
 
 The first step is archive-only: 712,680 bytes from debug/local-symbol
-stripping. Disabling Performance Schema removes unused static plugin members
-and brings the current archive to 31,529,704 bytes / 30.07 MiB, 1,599,936 bytes
-smaller than the symbol-stripped baseline with Performance Schema still built.
+stripping. Disabling Performance Schema removes unused static plugin members.
+Switching the same profile to `MinSizeRel` brings the current archive to
+30,403,000 bytes / 28.99 MiB, 1,126,704 bytes smaller than the Release build
+with the same Performance Schema profile and 2,726,640 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built.
 
 ## License Or Dependency Impact
 
@@ -104,6 +113,7 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 
 - The embedded build wrapper produces a stripped `libmariadbd.a` by default.
 - `STRIP_ARCHIVE=0` preserves an unstripped archive for diagnostics.
+- The embedded archive builds with size-oriented release flags.
 - Performance Schema is omitted from the embedded archive and remains omitted
   or disabled at runtime.
 - The stripped archive still links `libmylite` and all embedded tests.
