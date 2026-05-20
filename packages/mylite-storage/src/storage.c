@@ -384,6 +384,12 @@ typedef struct mylite_storage_buffered_page_undo_list {
     size_t capacity;
 } mylite_storage_buffered_page_undo_list;
 
+enum {
+    MYLITE_STORAGE_BUFFERED_PAGE_UNDO_INITIAL_CAPACITY = 4U,
+    MYLITE_STORAGE_REUSABLE_BUFFERED_PAGE_UNDO_CAPACITY =
+        MYLITE_STORAGE_BUFFERED_PAGE_UNDO_INITIAL_CAPACITY,
+};
+
 enum { MYLITE_STORAGE_BUFFERED_UPDATE_REWRITE_INLINE_INDEXES = 4U };
 
 typedef struct mylite_storage_buffered_update_rewrite_bucket {
@@ -490,6 +496,7 @@ static _Thread_local mylite_storage_exact_index_cache_set durable_exact_index_ca
 static _Thread_local mylite_storage_row_payload_cache_set durable_row_payload_caches;
 static _Thread_local unsigned long long durable_row_payload_caches_generation;
 static _Thread_local mylite_storage_index_leaf_page_cache_set durable_index_leaf_page_caches;
+static _Thread_local mylite_storage_buffered_page_undo_list reusable_buffered_page_undos;
 
 #define MYLITE_STORAGE_INDEX_ROOT_CATALOG_RESERVE_BYTES 1024U
 #define MYLITE_STORAGE_ACTIVE_ROW_PAYLOAD_CACHE_LIMIT 16U
@@ -692,6 +699,8 @@ static void trim_statement_append_page_buffer(
 static mylite_storage_result restore_buffered_page_undos(mylite_storage_statement *statement);
 static void clear_append_page_buffer(mylite_storage_statement *statement);
 static void clear_buffered_page_undos(mylite_storage_statement *statement);
+static void adopt_reusable_buffered_page_undos(mylite_storage_buffered_page_undo_list *undos);
+static void release_buffered_page_undos(mylite_storage_buffered_page_undo_list *undos);
 static void clear_buffered_update_rewrites(mylite_storage_statement *statement);
 static void clear_statement_chain_buffered_update_rewrites(mylite_storage_statement *statement);
 static int take_cached_read_file(
@@ -7959,8 +7968,35 @@ static void clear_buffered_page_undos(mylite_storage_statement *statement) {
         return;
     }
 
-    free(statement->buffered_page_undos.entries);
-    statement->buffered_page_undos = (mylite_storage_buffered_page_undo_list){0};
+    release_buffered_page_undos(&statement->buffered_page_undos);
+}
+
+static void adopt_reusable_buffered_page_undos(mylite_storage_buffered_page_undo_list *undos) {
+    if (undos->entries != NULL || reusable_buffered_page_undos.entries == NULL) {
+        return;
+    }
+
+    *undos = reusable_buffered_page_undos;
+    undos->count = 0U;
+    reusable_buffered_page_undos = (mylite_storage_buffered_page_undo_list){0};
+}
+
+static void release_buffered_page_undos(mylite_storage_buffered_page_undo_list *undos) {
+    if (undos->entries == NULL) {
+        *undos = (mylite_storage_buffered_page_undo_list){0};
+        return;
+    }
+
+    if (reusable_buffered_page_undos.entries == NULL &&
+        undos->capacity <= MYLITE_STORAGE_REUSABLE_BUFFERED_PAGE_UNDO_CAPACITY) {
+        reusable_buffered_page_undos = *undos;
+        reusable_buffered_page_undos.count = 0U;
+        *undos = (mylite_storage_buffered_page_undo_list){0};
+        return;
+    }
+
+    free(undos->entries);
+    *undos = (mylite_storage_buffered_page_undo_list){0};
 }
 
 static void clear_buffered_update_rewrites(mylite_storage_statement *statement) {
@@ -8771,8 +8807,14 @@ static mylite_storage_result capture_buffered_page_undo_with_used_size(
     }
 
     if (statement->buffered_page_undos.count == statement->buffered_page_undos.capacity) {
+        if (statement->buffered_page_undos.capacity == 0U) {
+            adopt_reusable_buffered_page_undos(&statement->buffered_page_undos);
+        }
+    }
+
+    if (statement->buffered_page_undos.count == statement->buffered_page_undos.capacity) {
         const size_t next_capacity = statement->buffered_page_undos.capacity == 0U
-                                         ? 4U
+                                         ? MYLITE_STORAGE_BUFFERED_PAGE_UNDO_INITIAL_CAPACITY
                                          : statement->buffered_page_undos.capacity * 2U;
         if (next_capacity <= statement->buffered_page_undos.capacity ||
             next_capacity > SIZE_MAX / sizeof(*statement->buffered_page_undos.entries)) {
