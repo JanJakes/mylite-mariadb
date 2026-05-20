@@ -17,6 +17,13 @@
 ADD_DEFINITIONS(-DMYSQL_SERVER -DEMBEDDED_LIBRARY -DMYLITE_WITH_UDF_RUNTIME=0
  ${SSL_DEFINES})
 
+OPTION(MYLITE_WITH_BINLOG_CORE "Build binary log transaction and event core" ON)
+IF(MYLITE_WITH_BINLOG_CORE)
+  ADD_DEFINITIONS(-DMYLITE_WITH_BINLOG_CORE=1)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_BINLOG_CORE=0)
+ENDIF()
+
 INCLUDE_DIRECTORIES(
 ${CMAKE_SOURCE_DIR}/include 
 ${CMAKE_SOURCE_DIR}/libmysqld
@@ -158,9 +165,14 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
 )
 
 
+IF(NOT MYLITE_WITH_BINLOG_CORE)
+  LIST(REMOVE_ITEM SQL_EMBEDDED_SOURCES ../sql/rpl_record.cc)
+ENDIF()
+
 ADD_CONVENIENCE_LIBRARY(sql_embedded ${SQL_EMBEDDED_SOURCES})
-# MyLite omits dynamic UDF runtime and embedded SFORMAT(), keeping the profile
-# serverless and exception-free. Unwind tables are non-semantic in this target.
+# MyLite omits server topology surfaces, dynamic UDF runtime, and embedded
+# SFORMAT(), keeping the profile serverless and exception-free. Unwind tables
+# are non-semantic in this target.
 TARGET_COMPILE_OPTIONS(sql_embedded PRIVATE
   "$<$<COMPILE_LANGUAGE:C>:-fno-asynchronous-unwind-tables>"
   "$<$<COMPILE_LANGUAGE:CXX>:-fno-asynchronous-unwind-tables>"

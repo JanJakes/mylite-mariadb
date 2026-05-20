@@ -72,6 +72,10 @@ embedded SQL target compile without C++ exceptions or unwind tables.
 Dynamic UDF shared-library loading is omitted after policy coverage proves
 `CREATE FUNCTION ... SONAME` fails predictably; stored functions remain a
 separate application SQL surface.
+The binary-log transaction/event core is compiled to embedded no-op paths after
+policy coverage proves replication and binlog command families are outside the
+core library contract; shared log/event objects that other MariaDB code still
+references remain for later, narrower review.
 Compatibility-sensitive code removals require separate evidence before they
 are accepted.
 

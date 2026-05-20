@@ -56,7 +56,9 @@ to no-op stubs and reports `@@have_query_cache=NO`. The embedded archive links
 a small Oracle SQL-mode parser stub instead of the generated Oracle parser. It
 also omits the fmtlib-backed `SFORMAT()` SQL function and builds the embedded
 SQL target without C++ exceptions or unwind tables. Dynamic UDF shared-library
-loading is omitted from the embedded archive.
+loading is omitted from the embedded archive. The embedded baseline disables
+the active binary-log transaction/event core behind `MYLITE_WITH_BINLOG_CORE=0`
+while preserving the normal MariaDB server build path.
 
 ## Measurement
 
@@ -72,8 +74,8 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 27,337,960 bytes / 26.07 MiB |
-| Archive members | 706 |
+| Archive size | 27,265,728 bytes / 26.00 MiB |
+| Archive members | 705 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
 32.27 MiB. With `MinSizeRel`, the unused Performance Schema static plugin
@@ -84,13 +86,16 @@ embedded `SFORMAT()` omitted so the embedded SQL target can compile without C++
 exceptions, and unwind tables omitted from that exception-free target, the
 pre-strip archive is 28,026,280 bytes / 26.73 MiB. Omitting dynamic UDF
 runtime reduces the pre-strip archive to 27,938,032 bytes / 26.64 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 600,072 bytes without
+Omitting the embedded binary-log core reduces the pre-strip archive to
+27,864,688 bytes / 26.57 MiB. Post-build `strip -S -x` plus `ranlib` saves
+another 598,960 bytes without
 changing archive membership or runtime behavior. The `SFORMAT()` and exception
 cut accounts for 1,808,240 bytes, unwind-table omission saves another
 10,840 bytes, and dynamic UDF runtime omission saves 87,416 bytes and one
-archive member. The final archive is 4,191,744 bytes smaller than the Release
-build with Performance Schema disabled, 5,791,680 bytes smaller than the
-symbol-stripped baseline that still built Performance Schema, and 6,504,360
+archive member. The embedded binary-log core trim saves 72,232 bytes and one
+archive member. The final archive is 4,263,976 bytes smaller than the Release
+build with Performance Schema disabled, 5,863,912 bytes smaller than the
+symbol-stripped baseline that still built Performance Schema, and 6,576,592
 bytes smaller than the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
@@ -130,6 +135,10 @@ continues to use the generated MariaDB parser. `SFORMAT()` is omitted from the
 embedded function registry, while ordinary `FORMAT()` remains available.
 Dynamic UDF lookup, execution, and registration are omitted; stored functions
 remain a separate SQL routine surface.
+The active binary-log transaction/event core is disabled in the default
+embedded archive. `log.cc` and shared binlog/event symbols remain where generic
+MariaDB logging, transaction coordination, or retained parser/runtime code
+still reference them; this slice does not claim full event-object removal.
 
 ## Disabled Or Missing Surface
 
@@ -145,6 +154,7 @@ The baseline explicitly disables:
 - Oracle SQL mode
 - `SFORMAT()`
 - Dynamic UDF shared-library loading
+- Active binary-log transaction/event core
 - MariaDB upstream unit-test targets
 
 Configure also reports unavailable optional features on this host, including

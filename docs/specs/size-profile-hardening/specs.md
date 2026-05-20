@@ -17,7 +17,8 @@ the embedded SQL target can build without C++ exceptions; ordinary `FORMAT()`
 and core string functions remain available. The same exception-free target also
 omits non-semantic unwind tables. Dynamic UDF shared-library loading is omitted
 because it is a server-owned extension surface, not core embedded application
-behavior.
+behavior. Binary-log transaction/event runtime is treated the same way after
+policy coverage proves replication and binlog SQL are outside the core API.
 
 ## Source Findings
 
@@ -88,6 +89,17 @@ behavior.
   `sql_udf.cc.o`, reduces the stripped archive to 27,337,960 bytes,
   26.07 MiB, and 706 members, and leaves stored functions as a separate
   application SQL surface.
+- The embedded baseline starts MariaDB with `--skip-log-bin`, policy-rejects
+  replication and binlog command families, and verifies `@@log_bin=0` plus
+  absent binlog/relay-log sidecars. `mariadb/sql/log.cc`,
+  `mariadb/sql/handler.cc`, `mariadb/sql/sql_class.cc`, and
+  `mariadb/sql/sql_builtin.cc.in` still retain binlog transaction, row-event,
+  GTID-state, and mandatory plugin entry points unless guarded.
+- Disabling the embedded binary-log core behind `MYLITE_WITH_BINLOG_CORE=0`
+  removes `rpl_record.cc.o`, compiles supported no-op/fail-closed entry points,
+  and reduces the stripped archive to 27,265,728 bytes, 26.00 MiB, and 705
+  members. Shared log/event symbols remain where retained MariaDB code still
+  references them.
 
 ## Proposed Design
 
@@ -144,6 +156,13 @@ and function builders keep upstream behavior outside the embedded profile.
 MyLite rejects `CREATE FUNCTION ... SONAME` before dispatch so no UDF shared
 library or `mysql.func` metadata path is exposed through the core API.
 
+The embedded archive disables binary-log core runtime by setting
+`MYLITE_WITH_BINLOG_CORE=0` in the MyLite baseline, omitting `rpl_record.cc`,
+skipping mandatory binlog plugin registration, and compiling binlog
+transaction, row-event, GTID-state, event-write, and table-map entry points to
+no-op or fail-closed behavior. The option defaults to `ON` so normal MariaDB
+server builds keep upstream binlog behavior.
+
 The wrapper keeps this behavior enabled by default because it is the
 distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
 need an unstripped archive for local inspection.
@@ -155,7 +174,8 @@ omitted by CMake configuration, embedded `HELP`, statement profiling, query
 cache, Oracle SQL mode, and `SFORMAT()` are compiled to disabled or omitted
 surfaces, and the compiled objects use size-oriented release flags. The
 embedded SQL target also uses `-fno-exceptions`, omits unwind tables, and omits
-dynamic UDF lookup, execution, and DDL runtime.
+dynamic UDF lookup, execution, and DDL runtime. The embedded baseline also
+disables binlog transaction/event runtime behind a MyLite-owned profile flag.
 
 ## Compatibility Impact
 
@@ -180,6 +200,11 @@ Dynamic UDF registration is a server extension surface based on shared-library
 loading and `mysql.func` metadata. MyLite rejects `CREATE FUNCTION ... SONAME`
 directly and in prepared statements; stored functions and built-in SQL
 functions are not removed by this slice.
+Replication and binary logging are server-topology surfaces. MyLite already
+rejects replication and binlog command families, starts with `@@log_bin=0`,
+and verifies that no binlog or relay-log sidecars are created. The no-binlog
+core keeps supported DDL, DML, transactions, crash/reopen behavior, and native
+engine coverage intact.
 
 ## Database-Directory And Lifecycle Impact
 
@@ -226,7 +251,12 @@ bytes smaller than the original broad archive. Omitting dynamic UDF runtime
 brings the current archive to 27,337,960 bytes / 26.07 MiB, 4,191,744 bytes
 smaller than the Release build with Performance Schema disabled, 5,791,680
 bytes smaller than the symbol-stripped baseline with Performance Schema still
-built, and 6,504,360 bytes smaller than the original broad archive.
+built, and 6,504,360 bytes smaller than the original broad archive. Disabling
+the embedded binary-log core brings the current archive to 27,265,728 bytes /
+26.00 MiB, 4,263,976 bytes smaller than the Release build with Performance
+Schema disabled, 5,863,912 bytes smaller than the symbol-stripped baseline with
+Performance Schema still built, and 6,576,592 bytes smaller than the original
+broad archive.
 
 ## License Or Dependency Impact
 
@@ -267,6 +297,9 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Dynamic UDF registration through `CREATE FUNCTION ... SONAME` fails through
   MyLite policy, and the embedded archive omits UDF lookup, execution, and DDL
   runtime.
+- Replication and binlog command families remain rejected, `@@log_bin=0`
+  remains covered, no binlog/relay-log sidecars are created, and the embedded
+  archive omits the active binlog transaction/event core.
 - The stripped archive still links `libmylite` and all embedded tests.
 - The measured archive size and member count are recorded in the build
   documentation.
@@ -285,3 +318,6 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Unwind-table omission should stay scoped to targets where it is non-semantic.
 - Stored functions remain planned application SQL. Dynamic UDF policy and size
   trimming must stay scoped to shared-library UDF registration and execution.
+- `log.cc`, `log_event.cc`, GTID helpers, and binlog plugin symbols still have
+  shared references. Removing more binlog/event code needs separate source and
+  link evidence rather than file-name pruning.

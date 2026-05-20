@@ -374,7 +374,7 @@ The core directory-owned API rejects or omits server-owned and optional
 compatibility features that do not fit the embedded library model:
 
 - network users and authentication,
-- replication and binlog,
+- replication, relay log, and binary-log runtime,
 - Galera/wsrep,
 - dynamic plugin installation,
 - dynamic UDF shared-library registration,
@@ -392,17 +392,20 @@ compatibility features that do not fit the embedded library model:
 Top-level SQL command families for users, roles, grants, password changes,
 dynamic plugins, events, replication, binlog administration, and foreign-server
 metadata are rejected before direct execution or prepared-statement
-preparation. Dynamic UDF registration through `CREATE FUNCTION ... SONAME` is
-rejected through the same policy because it loads server-owned shared
-libraries and persists metadata in server system tables. Attempts to enable
-Oracle SQL mode, SQL `HELP`, statement-profiling commands, and query-cache
-management commands are also rejected through the same policy. They fail with
-`MYLITE_ERROR` and a stable MyLite diagnostic. Query-cache SELECT hints remain
-accepted no-op syntax. The default embedded profile also omits `SFORMAT()`,
-which fails as an unknown SQL function; ordinary `FORMAT()` remains available.
-Startup variables also cover disabled binlog, performance schema, query cache,
-statement profiling, grant tables, networking, and the transient
-database-local plugin directory.
+preparation. The default embedded profile starts with binary logging disabled
+and compiles binlog transaction, row-event, and GTID-state entry points to
+embedded no-ops where they are unreachable through supported MyLite behavior.
+Dynamic UDF registration through `CREATE FUNCTION ... SONAME` is rejected
+through the same policy because it loads server-owned shared libraries and
+persists metadata in server system tables. Attempts to enable Oracle SQL mode,
+SQL `HELP`, statement-profiling commands, and query-cache management commands
+are also rejected through the same policy. They fail with `MYLITE_ERROR` and a
+stable MyLite diagnostic. Query-cache SELECT hints remain accepted no-op
+syntax. The default embedded profile also omits `SFORMAT()`, which fails as an
+unknown SQL function; ordinary `FORMAT()` remains available. Startup variables
+also cover disabled binlog, performance schema, query cache, statement
+profiling, grant tables, networking, and the transient database-local plugin
+directory.
 
 ## Compatibility Adapter
 

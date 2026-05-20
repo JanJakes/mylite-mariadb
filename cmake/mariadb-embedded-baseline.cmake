@@ -19,3 +19,4 @@ set(PLUGIN_S3 "NO" CACHE STRING "Disable Aria S3 support for the embedded baseli
 set(PLUGIN_PERFSCHEMA "NO" CACHE STRING "Disable Performance Schema in the embedded baseline" FORCE)
 set(PLUGIN_FEEDBACK "NO" CACHE STRING "Disable MariaDB feedback reporting in the embedded baseline" FORCE)
 set(ENABLED_PROFILING OFF CACHE BOOL "Disable statement profiling in the embedded baseline" FORCE)
+set(MYLITE_WITH_BINLOG_CORE OFF CACHE BOOL "Disable binary log runtime core in the embedded baseline" FORCE)
