@@ -11,6 +11,12 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#if defined(__GNUC__) || defined(__clang__)
+#define MYLITE_STORAGE_HOT_INLINE static inline __attribute__((always_inline))
+#else
+#define MYLITE_STORAGE_HOT_INLINE static inline
+#endif
+
 typedef struct mylite_storage_catalog_entry {
     const unsigned char *record;
     unsigned long long table_id;
@@ -2472,17 +2478,31 @@ static mylite_storage_result list_catalog_tables(
     mylite_storage_table_callback callback,
     void *ctx
 );
-static unsigned get_u32_le(const unsigned char *page, size_t offset);
-static unsigned long long get_u64_le(const unsigned char *page, size_t offset);
-static void put_u32_le(unsigned char *page, size_t offset, unsigned value);
-static void put_u64_le(unsigned char *page, size_t offset, unsigned long long value);
+MYLITE_STORAGE_HOT_INLINE unsigned get_u32_le(const unsigned char *page, size_t offset);
+MYLITE_STORAGE_HOT_INLINE unsigned long long get_u64_le(
+    const unsigned char *page,
+    size_t offset
+);
+MYLITE_STORAGE_HOT_INLINE void put_u32_le(
+    unsigned char *page,
+    size_t offset,
+    unsigned value
+);
+MYLITE_STORAGE_HOT_INLINE void put_u64_le(
+    unsigned char *page,
+    size_t offset,
+    unsigned long long value
+);
 static uint64_t checksum_page(const unsigned char *page, size_t checksum_offset);
 static uint64_t checksum_page_zero_tail(
     const unsigned char *page,
     size_t checksum_offset,
     size_t used_size
 );
-static uint64_t advance_checksum_zero_bytes(uint64_t checksum, size_t byte_count);
+MYLITE_STORAGE_HOT_INLINE uint64_t advance_checksum_zero_bytes(
+    uint64_t checksum,
+    size_t byte_count
+);
 
 static const unsigned char k_header_magic[8] = {'M', 'Y', 'L', 'I', 'T', 'E', '1', '\0'};
 static const unsigned char k_catalog_magic[8] = {'M', 'Y', 'L', 'C', 'A', 'T', '1', '\0'};
@@ -18799,7 +18819,7 @@ static mylite_storage_result list_catalog_tables(
     return MYLITE_STORAGE_OK;
 }
 
-static unsigned get_u32_le(const unsigned char *page, size_t offset) {
+MYLITE_STORAGE_HOT_INLINE unsigned get_u32_le(const unsigned char *page, size_t offset) {
     unsigned value = 0U;
     for (size_t i = 0U; i < sizeof(uint32_t); ++i) {
         value |= (unsigned)page[offset + i] << (unsigned)(i * CHAR_BIT);
@@ -18807,7 +18827,10 @@ static unsigned get_u32_le(const unsigned char *page, size_t offset) {
     return value;
 }
 
-static unsigned long long get_u64_le(const unsigned char *page, size_t offset) {
+MYLITE_STORAGE_HOT_INLINE unsigned long long get_u64_le(
+    const unsigned char *page,
+    size_t offset
+) {
     unsigned long long value = 0ULL;
     for (size_t i = 0U; i < sizeof(uint64_t); ++i) {
         value |= (unsigned long long)page[offset + i] << (unsigned)(i * CHAR_BIT);
@@ -18815,13 +18838,21 @@ static unsigned long long get_u64_le(const unsigned char *page, size_t offset) {
     return value;
 }
 
-static void put_u32_le(unsigned char *page, size_t offset, unsigned value) {
+MYLITE_STORAGE_HOT_INLINE void put_u32_le(
+    unsigned char *page,
+    size_t offset,
+    unsigned value
+) {
     for (size_t i = 0U; i < sizeof(uint32_t); ++i) {
         page[offset + i] = (unsigned char)((value >> (unsigned)(i * CHAR_BIT)) & UINT8_MAX);
     }
 }
 
-static void put_u64_le(unsigned char *page, size_t offset, unsigned long long value) {
+MYLITE_STORAGE_HOT_INLINE void put_u64_le(
+    unsigned char *page,
+    size_t offset,
+    unsigned long long value
+) {
     for (size_t i = 0U; i < sizeof(uint64_t); ++i) {
         page[offset + i] = (unsigned char)((value >> (unsigned)(i * CHAR_BIT)) & UINT8_MAX);
     }
@@ -18879,7 +18910,10 @@ static uint64_t checksum_page_zero_tail(
     return advance_checksum_zero_bytes(checksum, MYLITE_STORAGE_FORMAT_PAGE_SIZE - used_size);
 }
 
-static uint64_t advance_checksum_zero_bytes(uint64_t checksum, size_t byte_count) {
+MYLITE_STORAGE_HOT_INLINE uint64_t advance_checksum_zero_bytes(
+    uint64_t checksum,
+    size_t byte_count
+) {
     uint64_t factor = k_fnv1a64_prime;
     while (byte_count > 0U) {
         if ((byte_count & 1U) != 0U) {

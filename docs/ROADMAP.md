@@ -247,6 +247,9 @@ mutated key columns before the filter runs.
 Nested storage checkpoints now materialize rollback header-page bytes lazily,
 removing eager page-0 encoding and checksumming from successful prepared
 row-DML statements inside an active transaction.
+Storage page integer accessors now use hot inline definitions while keeping the
+existing byte-wise little-endian encoding, removing tiny helper call overhead
+from hot row/index page update paths without relying on unaligned host loads.
 
 ## Size And Profile Direction
 
