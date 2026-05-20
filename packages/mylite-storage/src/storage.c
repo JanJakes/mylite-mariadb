@@ -1147,6 +1147,15 @@ static mylite_storage_result rewrite_active_update_pages(
     const unsigned char *index_entry_changed,
     int *out_rewritten
 );
+static void rewrite_buffered_row_page(
+    unsigned char *page,
+    const unsigned char *row,
+    size_t row_size
+);
+static void rewrite_buffered_index_entry_page(
+    unsigned char *page,
+    const mylite_storage_index_entry *index_entry
+);
 static mylite_storage_result write_index_entry_pages(
     FILE *file,
     const mylite_storage_header *header,
@@ -11277,15 +11286,7 @@ static mylite_storage_result rewrite_active_update_pages(
         goto done;
     }
 
-    encode_row_page(
-        current_page,
-        row_id,
-        table_id,
-        (mylite_storage_row_write){
-            .row = row,
-            .row_size = row_size,
-        }
-    );
+    rewrite_buffered_row_page(current_page, row, row_size);
     changed_index = 0U;
     for (size_t i = 0U; result == MYLITE_STORAGE_OK && i < index_entry_count; ++i) {
         if (!is_index_entry_changed(index_entry_changed, i)) {
@@ -11306,13 +11307,7 @@ static mylite_storage_result rewrite_active_update_pages(
         if (result != MYLITE_STORAGE_OK) {
             break;
         }
-        encode_index_entry_page(
-            page,
-            first_index_page_id + (unsigned long long)changed_index,
-            table_id,
-            row_id,
-            index_entries + i
-        );
+        rewrite_buffered_index_entry_page(page, index_entries + i);
         ++changed_index;
     }
     if (result == MYLITE_STORAGE_OK) {
@@ -11324,6 +11319,61 @@ done:
         free(index_pages);
     }
     return result;
+}
+
+static void rewrite_buffered_row_page(
+    unsigned char *page,
+    const unsigned char *row,
+    size_t row_size
+) {
+    const size_t old_row_size = get_u32_le(page, MYLITE_STORAGE_FORMAT_ROW_RECORD_SIZE_OFFSET);
+    put_u32_le(page, MYLITE_STORAGE_FORMAT_ROW_RECORD_SIZE_OFFSET, (unsigned)row_size);
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_ROW_OVERFLOW_ROOT_PAGE_OFFSET, 0ULL);
+    memcpy(page + MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET, row, row_size);
+    if (old_row_size > row_size) {
+        memset(
+            page + MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET + row_size,
+            0,
+            old_row_size - row_size
+        );
+    }
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET, 0ULL);
+    put_u64_le(
+        page,
+        MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET,
+        checksum_page_zero_tail(
+            page,
+            MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET,
+            MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET + row_size
+        )
+    );
+}
+
+static void rewrite_buffered_index_entry_page(
+    unsigned char *page,
+    const mylite_storage_index_entry *index_entry
+) {
+    const size_t old_key_size = get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_KEY_SIZE_OFFSET);
+    put_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_NUMBER_OFFSET, index_entry->index_number);
+    put_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_KEY_SIZE_OFFSET, (unsigned)index_entry->key_size);
+    memcpy(page + MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET, index_entry->key, index_entry->key_size);
+    if (old_key_size > index_entry->key_size) {
+        memset(
+            page + MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET + index_entry->key_size,
+            0,
+            old_key_size - index_entry->key_size
+        );
+    }
+    put_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET, 0ULL);
+    put_u64_le(
+        page,
+        MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET,
+        checksum_page_zero_tail(
+            page,
+            MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET,
+            MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET + index_entry->key_size
+        )
+    );
 }
 
 static mylite_storage_result write_index_entry_pages(
