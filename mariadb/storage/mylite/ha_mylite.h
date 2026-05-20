@@ -53,10 +53,12 @@ class ha_mylite: public handler
   unsigned char *index_keys;
   Mylite_index_cursor_entry *index_entries;
   unsigned char *index_rows;
+  unsigned char *index_row_scratch;
   unsigned char index_inline_key[MAX_KEY_LENGTH];
   Mylite_index_cursor_entry index_inline_entry;
   size_t *index_row_offsets;
   size_t *index_row_sizes;
+  size_t index_row_scratch_capacity;
   size_t index_inline_row_offset;
   size_t index_inline_row_size;
   char storage_schema_name[NAME_LEN + 1];
@@ -86,6 +88,7 @@ class ha_mylite: public handler
   Mylite_share *get_share();
   void clear_scan_rows();
   void clear_index_cursor();
+  void clear_index_row_scratch();
   void clear_record_blob_payloads();
   const char *storage_schema() const;
   const char *storage_table() const;

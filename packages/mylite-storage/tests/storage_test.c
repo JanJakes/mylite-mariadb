@@ -2106,6 +2106,66 @@ static void test_index_entries(void) {
         row_1,
         sizeof(row_1)
     );
+    unsigned long long reusable_row_id = 0ULL;
+    unsigned char *reusable_row = NULL;
+    size_t reusable_row_capacity = 0U;
+    size_t reusable_row_size = 0U;
+    assert(
+        mylite_storage_find_indexed_row_reuse(
+            filename,
+            "app",
+            "posts",
+            0U,
+            key_1,
+            sizeof(key_1),
+            &reusable_row_id,
+            &reusable_row,
+            &reusable_row_capacity,
+            &reusable_row_size
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(reusable_row_id == ctx.row_1_id);
+    assert(reusable_row != NULL);
+    assert(reusable_row_capacity >= sizeof(row_1));
+    assert(reusable_row_size == sizeof(row_1));
+    assert(memcmp(reusable_row, row_1, sizeof(row_1)) == 0);
+    unsigned char *const first_reusable_row = reusable_row;
+    assert(
+        mylite_storage_find_indexed_row_reuse(
+            filename,
+            "app",
+            "posts",
+            0U,
+            key_2,
+            sizeof(key_2),
+            &reusable_row_id,
+            &reusable_row,
+            &reusable_row_capacity,
+            &reusable_row_size
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(reusable_row_id == ctx.row_2_id);
+    assert(reusable_row == first_reusable_row);
+    assert(reusable_row_size == sizeof(row_2));
+    assert(memcmp(reusable_row, row_2, sizeof(row_2)) == 0);
+    assert(
+        mylite_storage_find_indexed_row_reuse(
+            filename,
+            "app",
+            "posts",
+            0U,
+            key_9,
+            sizeof(key_9),
+            &reusable_row_id,
+            &reusable_row,
+            &reusable_row_capacity,
+            &reusable_row_size
+        ) == MYLITE_STORAGE_NOTFOUND
+    );
+    assert(reusable_row_id == 0ULL);
+    assert(reusable_row == first_reusable_row);
+    assert(reusable_row_size == 0U);
+    mylite_storage_free(reusable_row);
     assert_indexed_row_equals(filename, ctx.row_1_id, row_1, sizeof(row_1));
     assert_index_entry_lookup(filename, 0U, key_2, sizeof(key_2), MYLITE_STORAGE_OK, ctx.row_2_id);
     assert_index_entry_lookup(filename, 0U, key_9, sizeof(key_9), MYLITE_STORAGE_NOTFOUND, 0ULL);

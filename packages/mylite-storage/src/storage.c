@@ -1802,6 +1802,19 @@ static mylite_storage_result read_indexed_row_payload_from_open_file(
     unsigned long long table_id,
     unsigned long long row_id,
     unsigned char **out_row,
+    size_t *inout_row_capacity,
+    size_t *out_row_size
+);
+static mylite_storage_result find_indexed_row_payload(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id,
+    unsigned char **out_row,
+    size_t *inout_row_capacity,
     size_t *out_row_size
 );
 static mylite_storage_result append_row_id_to_list(
@@ -1984,6 +1997,14 @@ static void remove_active_row_payload(
 static mylite_storage_result copy_cached_row_payload(
     const mylite_storage_row_payload_cache_entry *entry,
     unsigned char **out_row,
+    size_t *inout_row_capacity,
+    size_t *out_row_size
+);
+static mylite_storage_result copy_row_payload_to_output(
+    const unsigned char *row,
+    size_t row_size,
+    unsigned char **out_row,
+    size_t *inout_row_capacity,
     size_t *out_row_size
 );
 static mylite_storage_row_payload_cache *active_row_payload_cache_for(
@@ -4592,15 +4613,18 @@ static mylite_storage_result read_indexed_row_payload_from_open_file(
     unsigned long long table_id,
     unsigned long long row_id,
     unsigned char **out_row,
+    size_t *inout_row_capacity,
     size_t *out_row_size
 ) {
-    *out_row = NULL;
+    if (inout_row_capacity == NULL) {
+        *out_row = NULL;
+    }
     *out_row_size = 0U;
 
     const mylite_storage_row_payload_cache_entry *active_entry =
         active_row_payload_cache_entry_for(filename, header, table_id, row_id);
     if (active_entry != NULL) {
-        return copy_cached_row_payload(active_entry, out_row, out_row_size);
+        return copy_cached_row_payload(active_entry, out_row, inout_row_capacity, out_row_size);
     }
 
     mylite_storage_row_payload_cache *row_payload_cache =
@@ -4610,14 +4634,7 @@ static mylite_storage_result read_indexed_row_payload_from_open_file(
         const mylite_storage_row_payload_cache_entry *entry =
             find_row_payload_cache_entry(row_payload_cache, row_id);
         if (entry != NULL) {
-            unsigned char *row = (unsigned char *)malloc(entry->row_size);
-            if (row == NULL) {
-                return MYLITE_STORAGE_NOMEM;
-            }
-            memcpy(row, entry->row, entry->row_size);
-            *out_row = row;
-            *out_row_size = entry->row_size;
-            return MYLITE_STORAGE_OK;
+            return copy_cached_row_payload(entry, out_row, inout_row_capacity, out_row_size);
         }
     }
 
@@ -4634,13 +4651,14 @@ static mylite_storage_result read_indexed_row_payload_from_open_file(
         result = MYLITE_STORAGE_NOTFOUND;
     }
     if (result == MYLITE_STORAGE_OK) {
-        unsigned char *row = (unsigned char *)malloc(row_page.row_size);
-        if (row == NULL) {
-            result = MYLITE_STORAGE_NOMEM;
-        } else {
-            memcpy(row, row_page.payload, row_page.row_size);
-            *out_row = row;
-            *out_row_size = row_page.row_size;
+        result = copy_row_payload_to_output(
+            row_page.payload,
+            row_page.row_size,
+            out_row,
+            inout_row_capacity,
+            out_row_size
+        );
+        if (result == MYLITE_STORAGE_OK) {
             store_active_row_payload(
                 filename,
                 header,
@@ -5163,8 +5181,69 @@ mylite_storage_result mylite_storage_find_indexed_row(
         return MYLITE_STORAGE_MISUSE;
     }
 
+    return find_indexed_row_payload(
+        filename,
+        schema_name,
+        table_name,
+        index_number,
+        key,
+        key_size,
+        out_row_id,
+        out_row,
+        NULL,
+        out_row_size
+    );
+}
+
+mylite_storage_result mylite_storage_find_indexed_row_reuse(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id,
+    unsigned char **inout_row,
+    size_t *inout_row_capacity,
+    size_t *out_row_size
+) {
+    if (filename == NULL || filename[0] == '\0' || schema_name == NULL || schema_name[0] == '\0' ||
+        table_name == NULL || table_name[0] == '\0' || key == NULL || key_size == 0U ||
+        out_row_id == NULL || inout_row == NULL || inout_row_capacity == NULL ||
+        out_row_size == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    return find_indexed_row_payload(
+        filename,
+        schema_name,
+        table_name,
+        index_number,
+        key,
+        key_size,
+        out_row_id,
+        inout_row,
+        inout_row_capacity,
+        out_row_size
+    );
+}
+
+static mylite_storage_result find_indexed_row_payload(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id,
+    unsigned char **out_row,
+    size_t *inout_row_capacity,
+    size_t *out_row_size
+) {
     *out_row_id = 0ULL;
-    *out_row = NULL;
+    if (inout_row_capacity == NULL) {
+        *out_row = NULL;
+    }
     *out_row_size = 0U;
 
     FILE *file = NULL;
@@ -5207,6 +5286,7 @@ mylite_storage_result mylite_storage_find_indexed_row(
             table_entry.table_id,
             *out_row_id,
             out_row,
+            inout_row_capacity,
             out_row_size
         );
         if (result == MYLITE_STORAGE_NOTFOUND) {
@@ -5220,9 +5300,11 @@ mylite_storage_result mylite_storage_find_indexed_row(
         result = MYLITE_STORAGE_IOERR;
     }
     if (result != MYLITE_STORAGE_OK) {
-        free(*out_row);
+        if (inout_row_capacity == NULL) {
+            free(*out_row);
+            *out_row = NULL;
+        }
         *out_row_id = 0ULL;
-        *out_row = NULL;
         *out_row_size = 0U;
         return result;
     }
@@ -15666,15 +15748,55 @@ static void remove_active_row_payload(
 static mylite_storage_result copy_cached_row_payload(
     const mylite_storage_row_payload_cache_entry *entry,
     unsigned char **out_row,
+    size_t *inout_row_capacity,
     size_t *out_row_size
 ) {
-    unsigned char *row = (unsigned char *)malloc(entry->row_size);
-    if (row == NULL) {
+    return copy_row_payload_to_output(
+        entry->row,
+        entry->row_size,
+        out_row,
+        inout_row_capacity,
+        out_row_size
+    );
+}
+
+static mylite_storage_result copy_row_payload_to_output(
+    const unsigned char *row,
+    size_t row_size,
+    unsigned char **out_row,
+    size_t *inout_row_capacity,
+    size_t *out_row_size
+) {
+    if (row_size == 0U) {
+        *out_row_size = 0U;
+        return MYLITE_STORAGE_OK;
+    }
+
+    unsigned char *target = NULL;
+    if (inout_row_capacity != NULL) {
+        if (*out_row == NULL || *inout_row_capacity < row_size) {
+            target = (unsigned char *)realloc(*out_row, row_size);
+            if (target == NULL) {
+                return MYLITE_STORAGE_NOMEM;
+            }
+            *out_row = target;
+            *inout_row_capacity = row_size;
+        } else {
+            target = *out_row;
+        }
+    } else {
+        target = (unsigned char *)malloc(row_size);
+        if (target == NULL) {
+            return MYLITE_STORAGE_NOMEM;
+        }
+        *out_row = target;
+    }
+
+    if (target == NULL) {
         return MYLITE_STORAGE_NOMEM;
     }
-    memcpy(row, entry->row, entry->row_size);
-    *out_row = row;
-    *out_row_size = entry->row_size;
+    memcpy(target, row, row_size);
+    *out_row_size = row_size;
     return MYLITE_STORAGE_OK;
 }
 

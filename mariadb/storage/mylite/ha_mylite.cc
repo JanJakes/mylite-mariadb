@@ -1218,8 +1218,9 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
     : handler(hton, table_arg), share(NULL), scan_rows(NULL),
       scan_blob_payloads(NULL), scan_row_ids(NULL),
       record_blob_payloads{NULL, NULL}, index_keys(NULL), index_entries(NULL),
-      index_rows(NULL), index_inline_entry{0, 0, 0}, index_row_offsets(NULL),
-      index_row_sizes(NULL), index_inline_row_offset(0),
+      index_rows(NULL), index_row_scratch(NULL), index_inline_entry{0, 0, 0},
+      index_row_offsets(NULL), index_row_sizes(NULL),
+      index_row_scratch_capacity(0), index_inline_row_offset(0),
       index_inline_row_size(0), scan_row_size(0), scan_row_count(0),
       scan_row_index(0), scan_blob_payloads_size(0),
       record_blob_payloads_size{0, 0}, index_row_bytes(0), index_row_count(0),
@@ -1243,6 +1244,7 @@ ha_mylite::~ha_mylite()
 {
   clear_scan_rows();
   clear_index_cursor();
+  clear_index_row_scratch();
   clear_record_blob_payloads();
 }
 
@@ -1267,7 +1269,8 @@ void ha_mylite::clear_index_cursor()
     mylite_storage_free(index_keys);
   if (index_entries != &index_inline_entry)
     mylite_storage_free(index_entries);
-  mylite_storage_free(index_rows);
+  if (index_rows != index_row_scratch)
+    mylite_storage_free(index_rows);
   if (index_row_offsets != &index_inline_row_offset)
     mylite_storage_free(index_row_offsets);
   if (index_row_sizes != &index_inline_row_size)
@@ -1282,6 +1285,13 @@ void ha_mylite::clear_index_cursor()
   index_row_index= 0;
   index_cursor_number= MAX_KEY;
   index_cursor_filtered= false;
+}
+
+void ha_mylite::clear_index_row_scratch()
+{
+  mylite_storage_free(index_row_scratch);
+  index_row_scratch= NULL;
+  index_row_scratch_capacity= 0;
 }
 
 void ha_mylite::clear_record_blob_payloads()
@@ -1453,10 +1463,13 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
           primary_file, storage_schema(), storage_table(), index_number,
           key_filter, key_filter_length, &row_id);
     else
-      storage_result= mylite_storage_find_indexed_row(
+    {
+      storage_result= mylite_storage_find_indexed_row_reuse(
           primary_file, storage_schema(), storage_table(), index_number,
-          key_filter, key_filter_length, &row_id, &row_payload,
-          &row_payload_size);
+          key_filter, key_filter_length, &row_id, &index_row_scratch,
+          &index_row_scratch_capacity, &row_payload_size);
+      row_payload= index_row_scratch;
+    }
     if (storage_result == MYLITE_STORAGE_NOTFOUND)
     {
       index_cursor_number= index_number;
@@ -1496,7 +1509,6 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
         free(row_offsets);
         free(row_sizes);
       }
-      mylite_storage_free(row_payload);
       DBUG_RETURN(HA_ERR_OUT_OF_MEM);
     }
     if (inline_durable_row && (!row_offsets || !row_sizes))
@@ -1508,7 +1520,6 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
         free(row_offsets);
         free(row_sizes);
       }
-      mylite_storage_free(row_payload);
       DBUG_RETURN(HA_ERR_OUT_OF_MEM);
     }
     memcpy(keys, key_filter, key_filter_length);
@@ -1964,6 +1975,7 @@ int ha_mylite::close(void)
   DBUG_ENTER("ha_mylite::close");
   clear_scan_rows();
   clear_index_cursor();
+  clear_index_row_scratch();
   clear_record_blob_payloads();
   clear_foreign_key_presence_cache();
   discard_rows= false;

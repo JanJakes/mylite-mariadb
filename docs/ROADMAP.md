@@ -100,7 +100,8 @@ index key and materializes the row payload through one storage operation,
 avoiding a second open/header/catalog pass for primary-key point reads. Those
 single-entry exact unique cursors now also keep small key, entry, and row-offset
 metadata inline in the handler, avoiding per-lookup heap allocation on the
-primary-key point-read path.
+primary-key point-read path, and reuse a handler-owned serialized-row scratch
+buffer for fixed-record point lookups.
 Fixed-width prepared result statements now reuse their result bindings across
 reset/re-execute loops and avoid freeing already-drained results a second time,
 leaving parameter binding/reset semantics as the next prepared-path bottleneck.

@@ -365,8 +365,11 @@ cursor builds reuse that scoped file view and cached header/catalog pages.
 Single-entry exact unique cursors keep their copied key, cursor entry, and
 one-row materialization offsets inline in the handler when the key fits
 MariaDB's normal key buffer, avoiding per-lookup heap allocation on primary-key
-point reads. If a same-owner write checkpoint is already active, reads use the
-write checkpoint's current view instead of opening a separate read session.
+point reads. They also materialize the selected stored row into a handler-owned
+scratch buffer that grows only when needed, so fixed-record point updates do not
+allocate and free a new serialized row payload for every lookup. If a same-owner
+write checkpoint is already active, reads use the write checkpoint's current
+view instead of opening a separate read session.
 
 Repeated read statements over an unchanged file also reuse a thread-local
 decoded checkpoint snapshot after comparing the raw header page. A byte-identical
