@@ -1461,8 +1461,7 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
 
   if (raw_exact_unique_filter)
   {
-    const bool inline_durable_row= !volatile_rows &&
-                                   !mylite_table_has_blob_fields(table);
+    const bool inline_durable_row= !volatile_rows && materialize_index_rows;
     ulonglong row_id= 0ULL;
     uchar *row_payload= NULL;
     size_t row_payload_size= 0;
