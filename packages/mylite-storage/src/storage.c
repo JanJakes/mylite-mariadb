@@ -343,6 +343,15 @@ typedef struct mylite_storage_table_identity {
     const char *table_name;
 } mylite_storage_table_identity;
 
+typedef struct mylite_storage_table_entry_cache {
+    char *schema_name;
+    char *table_name;
+    unsigned long long catalog_root_page;
+    unsigned long long catalog_generation;
+    mylite_storage_catalog_entry entry;
+    int has_entry;
+} mylite_storage_table_entry_cache;
+
 typedef struct mylite_storage_rowset_builder {
     mylite_storage_rowset *rowset;
     size_t row_capacity;
@@ -413,6 +422,7 @@ struct mylite_storage_statement {
     mylite_storage_live_row_cache_set live_row_caches;
     mylite_storage_live_row_id_cache_set live_row_id_caches;
     mylite_storage_row_payload_cache_set row_payload_caches;
+    mylite_storage_table_entry_cache table_entry_cache;
     mylite_storage_append_page_buffer append_pages;
     mylite_storage_buffered_page_undo_list buffered_page_undos;
     mylite_storage_buffered_update_rewrite_cache buffered_update_rewrites;
@@ -612,6 +622,7 @@ static mylite_storage_statement *active_statement_for_any_owner(const char *file
 static mylite_storage_statement *active_read_statement_for(const char *filename);
 static mylite_storage_statement *active_read_statement_for_any_owner(const char *filename);
 static mylite_storage_statement *active_read_snapshot_for(const char *filename);
+static mylite_storage_statement *active_table_entry_cache_statement_for(const char *filename);
 static mylite_storage_statement *active_exact_index_cache_statement_for(const char *filename);
 static mylite_storage_statement *active_live_row_id_cache_statement_for(const char *filename);
 static mylite_storage_statement *active_row_payload_cache_statement_for(const char *filename);
@@ -695,6 +706,21 @@ static mylite_storage_result write_statement_current_header(mylite_storage_state
 static void clear_statement_chain_catalog_root_caches(mylite_storage_statement *statement);
 static void clear_catalog_root_cache(mylite_storage_statement *statement);
 static void free_statement(mylite_storage_statement *statement);
+static int find_active_table_entry_cache(
+    const char *filename,
+    const mylite_storage_header *header,
+    const char *schema_name,
+    const char *table_name,
+    mylite_storage_catalog_entry *out_entry
+);
+static void store_active_table_entry_cache(
+    const char *filename,
+    const mylite_storage_header *header,
+    const char *schema_name,
+    const char *table_name,
+    const mylite_storage_catalog_entry *entry
+);
+static void clear_table_entry_cache(mylite_storage_table_entry_cache *cache);
 static void clear_statement_chain_exact_index_caches(mylite_storage_statement *statement);
 static void clear_exact_index_caches(mylite_storage_statement *statement);
 static void free_exact_index_cache(mylite_storage_exact_index_cache *cache);
@@ -728,6 +754,7 @@ static int catalog_contains_table_id(
 static void free_rollback_auto_increment_values(
     mylite_storage_autoincrement_rollback_values *values
 );
+static char *copy_string(const char *value);
 static char *copy_filename(const char *filename);
 static mylite_storage_result read_header(FILE *file, mylite_storage_header *out_header);
 static mylite_storage_result read_page_at(
@@ -1128,6 +1155,7 @@ static void encode_blob_page(
 );
 static mylite_storage_result find_table_id(
     FILE *file,
+    const char *filename,
     const mylite_storage_header *header,
     const char *schema_name,
     const char *table_name,
@@ -4187,7 +4215,7 @@ mylite_storage_result mylite_storage_append_row_with_index_entries(
     unsigned long long table_id = 0ULL;
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
     }
     mylite_storage_row_write_position position = {0};
     if (result == MYLITE_STORAGE_OK) {
@@ -4271,7 +4299,7 @@ mylite_storage_result mylite_storage_read_rows(
     unsigned long long table_id = 0ULL;
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
     }
     mylite_storage_row_id_list live_rows = {0};
     int used_live_row_cache = 0;
@@ -4330,7 +4358,7 @@ mylite_storage_result mylite_storage_count_rows(
     unsigned long long table_id = 0ULL;
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
     }
     mylite_storage_row_id_list live_rows = {0};
     int used_live_row_cache = 0;
@@ -4425,7 +4453,7 @@ mylite_storage_result mylite_storage_read_indexed_rows(
     unsigned long long table_id = 0ULL;
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
     }
     mylite_storage_row_payload_cache *row_payload_cache = NULL;
     unsigned long long row_payload_cache_generation = 0ULL;
@@ -4559,7 +4587,7 @@ static mylite_storage_result read_row_payload(
     int row_hidden = 0;
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
     }
     if (result == MYLITE_STORAGE_OK &&
         (row_id <= header.catalog_root_page || row_id >= header.page_count)) {
@@ -4797,7 +4825,7 @@ static mylite_storage_result update_row_with_index_entries(
     mylite_storage_row_write_position position = {0};
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
     }
     if (result == MYLITE_STORAGE_OK) {
         seed_active_live_row_id_cache(filename, &header, table_id);
@@ -4955,7 +4983,7 @@ mylite_storage_result mylite_storage_delete_row(
     unsigned char row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
     }
     if (result == MYLITE_STORAGE_OK) {
         seed_active_live_row_id_cache(filename, &header, table_id);
@@ -5025,7 +5053,7 @@ mylite_storage_result mylite_storage_truncate_table(
     unsigned long long current_next_value = 0ULL;
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
     }
     if (result == MYLITE_STORAGE_OK) {
         result = scan_table_row_pages(file, &header, table_id, append_live_row_id, &live_rows);
@@ -5084,7 +5112,7 @@ mylite_storage_result mylite_storage_read_index_entries(
     unsigned long long table_id = 0ULL;
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
     }
     if (result == MYLITE_STORAGE_OK) {
         result = read_live_index_entries(file, &header, table_id, index_number, out_entries);
@@ -5130,17 +5158,30 @@ mylite_storage_result mylite_storage_find_index_entry(
     mylite_storage_catalog_entry table_entry = {0};
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = read_catalog_root(file, &header, catalog_page);
-    }
-    if (result == MYLITE_STORAGE_OK) {
-        result = find_table_record(catalog_page, schema_name, table_name, &table_entry);
+        const int used_cached_table_entry =
+            find_active_table_entry_cache(filename, &header, schema_name, table_name, &table_entry);
+        if (!used_cached_table_entry) {
+            result = read_catalog_root(file, &header, catalog_page);
+            if (result == MYLITE_STORAGE_OK) {
+                result = find_table_record(catalog_page, schema_name, table_name, &table_entry);
+            }
+            if (result == MYLITE_STORAGE_OK) {
+                store_active_table_entry_cache(
+                    filename,
+                    &header,
+                    schema_name,
+                    table_name,
+                    &table_entry
+                );
+            }
+        }
     }
     if (result == MYLITE_STORAGE_OK) {
         result = find_exact_index_row_id(
             file,
             filename,
             &header,
-            catalog_page,
+            table_entry.record != NULL ? catalog_page : NULL,
             &table_entry,
             schema_name,
             table_name,
@@ -5257,17 +5298,30 @@ static mylite_storage_result find_indexed_row_payload(
     mylite_storage_catalog_entry table_entry = {0};
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = read_catalog_root(file, &header, catalog_page);
-    }
-    if (result == MYLITE_STORAGE_OK) {
-        result = find_table_record(catalog_page, schema_name, table_name, &table_entry);
+        const int used_cached_table_entry =
+            find_active_table_entry_cache(filename, &header, schema_name, table_name, &table_entry);
+        if (!used_cached_table_entry) {
+            result = read_catalog_root(file, &header, catalog_page);
+            if (result == MYLITE_STORAGE_OK) {
+                result = find_table_record(catalog_page, schema_name, table_name, &table_entry);
+            }
+            if (result == MYLITE_STORAGE_OK) {
+                store_active_table_entry_cache(
+                    filename,
+                    &header,
+                    schema_name,
+                    table_name,
+                    &table_entry
+                );
+            }
+        }
     }
     if (result == MYLITE_STORAGE_OK) {
         result = find_exact_index_row_id(
             file,
             filename,
             &header,
-            catalog_page,
+            table_entry.record != NULL ? catalog_page : NULL,
             &table_entry,
             schema_name,
             table_name,
@@ -5429,7 +5483,7 @@ mylite_storage_result mylite_storage_index_prefix_exists(
     mylite_storage_index_prefix_match_list matches = {0};
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
     }
     for (unsigned long long page_id = MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT;
          result == MYLITE_STORAGE_OK && page_id < header.page_count;
@@ -5523,7 +5577,7 @@ mylite_storage_result mylite_storage_read_auto_increment(
     unsigned long long table_id = 0ULL;
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
     }
     if (result == MYLITE_STORAGE_OK) {
         result = latest_auto_increment_value(file, &header, table_id, out_next_value);
@@ -5560,7 +5614,7 @@ mylite_storage_result mylite_storage_set_auto_increment(
     unsigned long long current_next_value = 0ULL;
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
     }
     if (result == MYLITE_STORAGE_OK) {
         result = latest_auto_increment_value(file, &header, table_id, &current_next_value);
@@ -5597,7 +5651,7 @@ mylite_storage_result mylite_storage_advance_auto_increment(
     unsigned long long current_next_value = 0ULL;
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, &header, schema_name, table_name, &table_id);
+        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
     }
     if (result == MYLITE_STORAGE_OK) {
         result = latest_auto_increment_value(file, &header, table_id, &current_next_value);
@@ -7546,6 +7600,22 @@ static mylite_storage_statement *active_read_snapshot_for(const char *filename) 
     return snapshot;
 }
 
+static mylite_storage_statement *active_table_entry_cache_statement_for(const char *filename) {
+    if (filename == NULL) {
+        return NULL;
+    }
+
+    mylite_storage_statement *cache_statement = NULL;
+    for (mylite_storage_statement *statement = active_statement; statement != NULL;
+         statement = statement->parent) {
+        if (strcmp(statement->filename, filename) == 0 &&
+            statement->owner == active_context_owner) {
+            cache_statement = statement;
+        }
+    }
+    return cache_statement;
+}
+
 static mylite_storage_statement *active_exact_index_cache_statement_for(const char *filename) {
     if (filename == NULL) {
         return NULL;
@@ -7991,6 +8061,7 @@ static void clear_catalog_root_cache(mylite_storage_statement *statement) {
     statement->has_current_catalog_page = 0;
     statement->current_catalog_root_page = 0ULL;
     statement->current_catalog_generation = 0ULL;
+    clear_table_entry_cache(&statement->table_entry_cache);
 }
 
 static void free_statement(mylite_storage_statement *statement) {
@@ -8005,11 +8076,87 @@ static void free_statement(mylite_storage_statement *statement) {
     clear_live_row_caches(statement);
     clear_live_row_id_caches(statement);
     clear_row_payload_caches(statement);
+    clear_table_entry_cache(&statement->table_entry_cache);
     clear_append_page_buffer(statement);
     clear_buffered_page_undos(statement);
     clear_buffered_update_rewrites(statement);
     free(statement->filename);
     free(statement);
+}
+
+static int find_active_table_entry_cache(
+    const char *filename,
+    const mylite_storage_header *header,
+    const char *schema_name,
+    const char *table_name,
+    mylite_storage_catalog_entry *out_entry
+) {
+    mylite_storage_statement *statement = active_table_entry_cache_statement_for(filename);
+    if (statement == NULL) {
+        return 0;
+    }
+
+    const mylite_storage_table_entry_cache *cache = &statement->table_entry_cache;
+    if (!cache->has_entry || cache->schema_name == NULL || cache->table_name == NULL ||
+        cache->catalog_root_page != header->catalog_root_page ||
+        cache->catalog_generation != header->catalog_generation ||
+        strcmp(cache->schema_name, schema_name) != 0 ||
+        strcmp(cache->table_name, table_name) != 0) {
+        return 0;
+    }
+
+    *out_entry = cache->entry;
+    out_entry->record = NULL;
+    return 1;
+}
+
+static void store_active_table_entry_cache(
+    const char *filename,
+    const mylite_storage_header *header,
+    const char *schema_name,
+    const char *table_name,
+    const mylite_storage_catalog_entry *entry
+) {
+    mylite_storage_statement *statement = active_table_entry_cache_statement_for(filename);
+    if (statement == NULL) {
+        return;
+    }
+
+    mylite_storage_table_entry_cache *cache = &statement->table_entry_cache;
+    if (cache->has_entry && cache->schema_name != NULL && cache->table_name != NULL &&
+        strcmp(cache->schema_name, schema_name) == 0 &&
+        strcmp(cache->table_name, table_name) == 0) {
+        cache->catalog_root_page = header->catalog_root_page;
+        cache->catalog_generation = header->catalog_generation;
+        cache->entry = *entry;
+        cache->entry.record = NULL;
+        return;
+    }
+
+    char *schema_name_copy = copy_string(schema_name);
+    if (schema_name_copy == NULL) {
+        return;
+    }
+    char *table_name_copy = copy_string(table_name);
+    if (table_name_copy == NULL) {
+        free(schema_name_copy);
+        return;
+    }
+
+    clear_table_entry_cache(cache);
+    cache->schema_name = schema_name_copy;
+    cache->table_name = table_name_copy;
+    cache->catalog_root_page = header->catalog_root_page;
+    cache->catalog_generation = header->catalog_generation;
+    cache->entry = *entry;
+    cache->entry.record = NULL;
+    cache->has_entry = 1;
+}
+
+static void clear_table_entry_cache(mylite_storage_table_entry_cache *cache) {
+    free(cache->schema_name);
+    free(cache->table_name);
+    *cache = (mylite_storage_table_entry_cache){0};
 }
 
 static void clear_statement_chain_exact_index_caches(mylite_storage_statement *statement) {
@@ -8106,15 +8253,19 @@ static void clear_row_payload_caches(mylite_storage_statement *statement) {
     statement->row_payload_caches = (mylite_storage_row_payload_cache_set){0};
 }
 
-static char *copy_filename(const char *filename) {
-    const size_t filename_size = strlen(filename) + 1U;
-    char *copy = (char *)malloc(filename_size);
+static char *copy_string(const char *value) {
+    const size_t value_size = strlen(value) + 1U;
+    char *copy = (char *)malloc(value_size);
     if (copy == NULL) {
         return NULL;
     }
 
-    memcpy(copy, filename, filename_size);
+    memcpy(copy, value, value_size);
     return copy;
+}
+
+static char *copy_filename(const char *filename) {
+    return copy_string(filename);
 }
 
 static mylite_storage_result read_header(FILE *file, mylite_storage_header *out_header) {
@@ -11218,6 +11369,7 @@ static void encode_blob_page(
 
 static mylite_storage_result find_table_id(
     FILE *file,
+    const char *filename,
     const mylite_storage_header *header,
     const char *schema_name,
     const char *table_name,
@@ -11225,11 +11377,17 @@ static mylite_storage_result find_table_id(
 ) {
     unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     mylite_storage_catalog_entry entry = {0};
+    if (find_active_table_entry_cache(filename, header, schema_name, table_name, &entry)) {
+        *out_table_id = entry.table_id;
+        return MYLITE_STORAGE_OK;
+    }
+
     mylite_storage_result result = read_catalog_root(file, header, catalog_page);
     if (result == MYLITE_STORAGE_OK) {
         result = find_table_record(catalog_page, schema_name, table_name, &entry);
     }
     if (result == MYLITE_STORAGE_OK) {
+        store_active_table_entry_cache(filename, header, schema_name, table_name, &entry);
         *out_table_id = entry.table_id;
     }
     return result;
@@ -15205,7 +15363,7 @@ static mylite_storage_result find_exact_index_row_id(
         out_row_id,
         &used_cache
     );
-    if (result == MYLITE_STORAGE_OK && !used_cache) {
+    if (result == MYLITE_STORAGE_OK && !used_cache && catalog_page != NULL) {
         result = read_index_leaf_exact_row_ids(
             file,
             filename,

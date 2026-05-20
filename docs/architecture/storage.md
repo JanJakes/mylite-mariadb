@@ -367,9 +367,15 @@ one-row materialization offsets inline in the handler when the key fits
 MariaDB's normal key buffer, avoiding per-lookup heap allocation on primary-key
 point reads. They also materialize the selected stored row into a handler-owned
 scratch buffer that grows only when needed, so fixed-record point updates do not
-allocate and free a new serialized row payload for every lookup. If a same-owner
-write checkpoint is already active, reads use the write checkpoint's current
-view instead of opening a separate read session.
+allocate and free a new serialized row payload for every lookup. Active
+same-owner checkpoints also cache the current table's catalog entry by schema,
+table, catalog root page, and catalog generation, so repeated exact cursor
+builds can reach the active exact-index cache without recopying and rescanning
+the catalog root. The same cache serves active row-write table-id resolution,
+so repeated inserts, updates, deletes, truncates, and autoincrement operations
+on the same table do not rescan catalog metadata while the catalog fingerprint
+is unchanged. If a same-owner write checkpoint is already active, reads use the
+write checkpoint's current view instead of opening a separate read session.
 
 Repeated read statements over an unchanged file also reuse a thread-local
 decoded checkpoint snapshot after comparing the raw header page. A byte-identical
