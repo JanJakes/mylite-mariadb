@@ -341,6 +341,9 @@ same storage update call.
 Active buffered row-update rewrites now receive the already-resolved active
 statement and append-buffer scope from row-update execution, avoiding another
 statement-chain walk from `FILE *` on each prepared point update.
+Row-only active buffered rewrites now use a dedicated no-index helper after the
+row/state shape has been validated, avoiding generic changed-index shape checks
+on stable-key prepared updates.
 
 ## Size And Profile Direction
 
