@@ -109,6 +109,12 @@ information schema listing should follow MariaDB behavior over the embedded
 directory. The important MyLite guarantee is lifecycle containment, not hiding
 MariaDB's internal metadata layout.
 
+The first metadata lifecycle coverage validates controlled MyISAM
+`CREATE TABLE`, `ALTER TABLE`, `RENAME TABLE`, and `DROP TABLE` behavior by
+checking MariaDB `db.opt`, `.frm`, `.MYD`, and `.MYI` files under `datadir/`.
+It does not claim broader engine, metadata-object, crash-recovery, or
+concurrency behavior.
+
 The default embedded profile does not expose server account administration,
 dynamic plugin installation, replication metadata, or the event scheduler.
 `information_schema` remains virtual. Any required `mysql.*` system surface

@@ -62,6 +62,12 @@ if(BUILD_TESTING)
     )
     mylite_configure_embedded_c_test(mylite_embedded_storage_test)
 
+    add_executable(mylite_embedded_ddl_lifecycle_test
+      tests/embedded_ddl_lifecycle_test.c
+    )
+    mylite_configure_embedded_c_test(mylite_embedded_ddl_lifecycle_test)
+
+    add_test(NAME libmylite.embedded-ddl-lifecycle COMMAND mylite_embedded_ddl_lifecycle_test)
     add_test(NAME libmylite.embedded-exec COMMAND mylite_embedded_exec_test)
     add_test(NAME libmylite.embedded-open-close COMMAND mylite_embedded_open_close_test)
     add_test(NAME libmylite.embedded-storage COMMAND mylite_embedded_storage_test)
