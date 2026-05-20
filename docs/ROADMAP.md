@@ -259,6 +259,9 @@ as its single cache update, since that mark already records the row as both
 live and validated.
 Exact-index cache probes now compare 1/2/4/8-byte key images with fixed-size
 loads, keeping `memcmp()` only for larger or variable-width keys.
+Indexed-row payload lookup and row-update execution now also close borrowed
+active-statement file scopes through the captured scope metadata, avoiding
+repeated no-op active statement chain rediscovery on prepared point updates.
 Cached active rewrite shapes now skip the redundant row-state page lookup that
 was only needed for uncached shape validation.
 Transient row-id cache buckets now use a one-multiply hash with high-bit folding

@@ -705,6 +705,10 @@ static mylite_storage_result open_existing_file_for_update_scope(
     const char *filename,
     mylite_storage_update_file_scope *out_scope
 );
+static mylite_storage_result close_existing_file_scope(mylite_storage_file_scope *scope);
+static mylite_storage_result close_existing_update_file_scope(
+    mylite_storage_update_file_scope *scope
+);
 static mylite_storage_result close_existing_file(FILE *file);
 static mylite_storage_statement *active_statement_for(const char *filename);
 static mylite_storage_statement *active_statement_for_any_owner(const char *filename);
@@ -5312,7 +5316,8 @@ static mylite_storage_result update_row_with_index_entries(
     }
 
     free(old_row_page.owned_payload);
-    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+    if (close_existing_update_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     if (result != MYLITE_STORAGE_OK) {
@@ -5744,7 +5749,8 @@ static mylite_storage_result find_indexed_row_payload(
             );
         }
     }
-    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     if (result != MYLITE_STORAGE_OK) {
@@ -8105,6 +8111,41 @@ static mylite_storage_result open_existing_file_for_update_scope(
 
     out_scope->file = file;
     return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result close_existing_file_scope(mylite_storage_file_scope *scope) {
+    if (scope == NULL || scope->file == NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    FILE *file = scope->file;
+    scope->file = NULL;
+    if (scope->active_statement != NULL || scope->active_read_statement != NULL) {
+        clearerr(file);
+        return MYLITE_STORAGE_OK;
+    }
+    if (scope->active_read_snapshot != NULL) {
+        active_read_snapshot = NULL;
+        clearerr(file);
+        return MYLITE_STORAGE_OK;
+    }
+    return close_existing_file(file);
+}
+
+static mylite_storage_result close_existing_update_file_scope(
+    mylite_storage_update_file_scope *scope
+) {
+    if (scope == NULL || scope->file == NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    FILE *file = scope->file;
+    scope->file = NULL;
+    if (scope->active_statement != NULL || scope->active_read_statement != NULL) {
+        clearerr(file);
+        return MYLITE_STORAGE_OK;
+    }
+    return close_existing_file(file);
 }
 
 static mylite_storage_result close_existing_file(FILE *file) {
