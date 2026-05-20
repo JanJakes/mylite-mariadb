@@ -33,6 +33,7 @@ WITH_UNIT_TESTS=OFF
 WITH_WSREP=OFF
 PLUGIN_S3=NO
 PLUGIN_PERFSCHEMA=NO
+PLUGIN_FEEDBACK=NO
 ```
 
 `CMAKE_BUILD_TYPE=MinSizeRel` makes the embedded MariaDB archive optimize for
@@ -46,7 +47,8 @@ omits `wsrep-lib` and `storage/maria/libmarias3`.
 `PLUGIN_PERFSCHEMA=NO` removes the unused Performance Schema static plugin
 from the embedded archive. If a custom MariaDB build includes Performance
 Schema, MyLite still passes `--performance-schema=OFF`; otherwise the omitted
-plugin is the disabled contract.
+plugin is the disabled contract. `PLUGIN_FEEDBACK=NO` omits MariaDB's telemetry
+and usage-reporting plugin from the embedded profile.
 
 ## Measurement
 
@@ -62,18 +64,19 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 30,403,000 bytes / 28.99 MiB |
-| Archive members | 712 |
+| Archive size | 30,359,112 bytes / 28.95 MiB |
+| Archive members | 707 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
-32.27 MiB. With `MinSizeRel` and the unused Performance Schema static plugin
-disabled, the pre-strip archive is 31,057,680 bytes / 29.62 MiB. Post-build
-`strip -S -x` plus `ranlib` saves another 654,680 bytes without changing
-archive membership or runtime behavior. The final archive is 1,126,704 bytes
-smaller than the Release build with the same Performance Schema profile,
-2,726,640 bytes smaller than the symbol-stripped baseline that still built
-Performance Schema, and 3,439,320 bytes smaller than the original broad
-archive.
+32.27 MiB. With `MinSizeRel`, the unused Performance Schema static plugin
+disabled, and the Feedback plugin omitted, the pre-strip archive is 31,011,216
+bytes / 29.57 MiB. Post-build `strip -S -x` plus `ranlib` saves another
+652,104 bytes without changing archive membership or runtime behavior. The
+final archive is 43,888 bytes smaller than the same profile with Feedback
+still built, 1,170,592 bytes smaller than the Release build with Performance
+Schema disabled, 2,770,528 bytes smaller than the symbol-stripped baseline that
+still built Performance Schema, and 3,483,208 bytes smaller than the original
+broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
 GSSAPI, BZip2, LZ4, LibLZMA, LZO, PCRE2, and Zstandard support on this
@@ -91,8 +94,8 @@ library and static embedded engines/plugins such as:
 - InnoDB
 - MyISAM and MRG_MyISAM
 - Sequence and partition support
-- selected static server plugins such as auth socket, feedback, type handlers,
-  user variables, userstat, and thread-pool info
+- selected static server plugins such as auth socket, type handlers, user
+  variables, userstat, and thread-pool info
 
 Configure also enables many module targets, including Archive, Blackhole,
 CONNECT, Example, Federated, FederatedX, Mroonga, Sphinx, Spider, and many
@@ -110,6 +113,7 @@ The baseline explicitly disables:
 - WSREP/Galera
 - Aria S3 support
 - Performance Schema
+- Feedback reporting
 - MariaDB upstream unit-test targets
 
 Configure also reports unavailable optional features on this host, including

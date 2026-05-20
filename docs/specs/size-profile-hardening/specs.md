@@ -7,7 +7,7 @@ important MySQL/MariaDB behavior. The first safe steps are packaging hygiene,
 size-oriented compilation, and omission of already-disabled server surfaces:
 remove debug and local-symbol metadata from the embedded static archive, build
 the embedded archive with size-oriented release flags, and avoid building the
-unused Performance Schema static plugin.
+unused Performance Schema and Feedback static plugins.
 
 ## Source Findings
 
@@ -35,6 +35,9 @@ unused Performance Schema static plugin.
   the current archive to 31,529,704 bytes, 30.07 MiB, and 712 members.
 - Building the same profile with `CMAKE_BUILD_TYPE=MinSizeRel` reduces the
   stripped archive to 30,403,000 bytes, 28.99 MiB, and 712 members.
+- Disabling the Feedback plugin removes telemetry/reporting code from the
+  embedded archive and reduces the stripped archive to 30,359,112 bytes,
+  28.95 MiB, and 707 members.
 
 ## Proposed Design
 
@@ -51,6 +54,11 @@ MariaDB build exposes that option, preserving the explicit disabled
 server-surface contract for custom builds while avoiding the unused static
 Performance Schema archive members in the default profile.
 
+The embedded baseline also disables MariaDB's Feedback plugin at configure
+time. Feedback is a server reporting surface, not SQL, type, or storage-engine
+functionality, so omitting it removes low-value embedded code without changing
+the supported runtime contract.
+
 The wrapper keeps this behavior enabled by default because it is the
 distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
 need an unstripped archive for local inspection.
@@ -58,15 +66,16 @@ need an unstripped archive for local inspection.
 ## Affected MariaDB Subsystems
 
 No MariaDB source files are changed. The Performance Schema storage-engine
-plugin is omitted by CMake configuration, and the compiled objects use
-size-oriented release flags.
+plugin and Feedback reporting plugin are omitted by CMake configuration, and
+the compiled objects use size-oriented release flags.
 
 ## Compatibility Impact
 
 No application compatibility impact is expected. This slice does not remove SQL
 syntax, functions, data types, collations, supported storage engines,
 diagnostics, or public C API behavior. Performance Schema remains outside the
-core embedded profile.
+core embedded profile, and Feedback reporting is not part of the embedded
+runtime contract.
 
 ## Database-Directory And Lifecycle Impact
 
@@ -86,10 +95,10 @@ run against the same native engine members.
 
 The first step is archive-only: 712,680 bytes from debug/local-symbol
 stripping. Disabling Performance Schema removes unused static plugin members.
-Switching the same profile to `MinSizeRel` brings the current archive to
-30,403,000 bytes / 28.99 MiB, 1,126,704 bytes smaller than the Release build
-with the same Performance Schema profile and 2,726,640 bytes smaller than the
-symbol-stripped baseline with Performance Schema still built.
+Switching the same profile to `MinSizeRel` and omitting Feedback brings the
+current archive to 30,359,112 bytes / 28.95 MiB, 1,170,592 bytes smaller than
+the Release build with Performance Schema disabled and 2,770,528 bytes smaller
+than the symbol-stripped baseline with Performance Schema still built.
 
 ## License Or Dependency Impact
 
@@ -116,6 +125,7 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - The embedded archive builds with size-oriented release flags.
 - Performance Schema is omitted from the embedded archive and remains omitted
   or disabled at runtime.
+- Feedback reporting is omitted from the embedded archive.
 - The stripped archive still links `libmylite` and all embedded tests.
 - The measured archive size and member count are recorded in the build
   documentation.
