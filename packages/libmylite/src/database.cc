@@ -16,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
@@ -322,6 +323,10 @@ struct mylite_stmt {
     TransactionControlKind prepared_transaction_control = TransactionControlKind::None;
     std::string prepared_transaction_control_name;
     TransactionControlKind statement_transaction_control = TransactionControlKind::None;
+#if MYLITE_WITH_MARIADB_EMBEDDED && MYLITE_MARIADB_HAS_MYLITE_SE
+    std::string temporary_table_to_remember;
+    std::vector<std::string> temporary_tables_to_forget;
+#endif
     bool sync_schema_catalog_after_execute = false;
     bool writes_storage = false;
     bool uses_storage_outer_checkpoint = false;
@@ -459,6 +464,8 @@ int materialize_column_value(mylite_stmt &statement, unsigned column);
 int capture_warnings(mylite_db &database, unsigned warning_count, bool force_query = false);
 bool mylite_session_ansi_quotes(const mylite_db &database);
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
+void initialize_prepared_temporary_table_lifecycle(mylite_stmt &statement, std::string_view sql);
+void apply_prepared_temporary_table_lifecycle(mylite_db &database, const mylite_stmt &statement);
 int execute_prepared_savepoint_control(mylite_stmt &statement);
 int begin_direct_transaction(mylite_db &database);
 int finish_direct_transaction(mylite_db &database, bool commit);
@@ -1710,10 +1717,15 @@ int exec_impl(
         return copy_error_message(*database, errmsg);
     }
 #  endif
-    const int transaction_result =
-        apply_successful_transaction_control(*database, std::string_view(sql), transaction_control);
-    if (transaction_result != MYLITE_OK) {
-        return copy_error_message(*database, errmsg);
+    if (transaction_control != TransactionControlKind::None) {
+        const int transaction_result = apply_successful_transaction_control(
+            *database,
+            std::string_view(sql),
+            transaction_control
+        );
+        if (transaction_result != MYLITE_OK) {
+            return copy_error_message(*database, errmsg);
+        }
     }
     return MYLITE_OK;
 #endif
@@ -1820,6 +1832,7 @@ int prepare_impl(
             database->filename != ":memory:" && storage_outer_checkpoint_sql;
         statement->uses_transaction_statement_checkpoint =
             database->filename != ":memory:" && row_dml_checkpoint_sql;
+        initialize_prepared_temporary_table_lifecycle(*statement, sql_view);
 #  endif
         statement->statement = mysql_stmt_init(&database->mysql);
         if (statement->statement == nullptr) {
@@ -1868,6 +1881,20 @@ int prepare_impl(
     }
 #endif
 }
+
+#if MYLITE_WITH_MARIADB_EMBEDDED && MYLITE_MARIADB_HAS_MYLITE_SE
+void initialize_prepared_temporary_table_lifecycle(mylite_stmt &statement, std::string_view sql) {
+    statement.temporary_table_to_remember.clear();
+    statement.temporary_tables_to_forget.clear();
+
+    std::string temporary_table_name;
+    if (create_temporary_table_name(sql, &temporary_table_name)) {
+        statement.temporary_table_to_remember = std::move(temporary_table_name);
+        return;
+    }
+    drop_table_names(sql, &statement.temporary_tables_to_forget);
+}
+#endif
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
 int initialize_statement_metadata(mylite_stmt &statement) {
@@ -2065,24 +2092,26 @@ int execute_statement(mylite_stmt &statement) {
                 return sync_result;
             }
         }
-        apply_temporary_table_lifecycle(*statement.database, statement.sql);
+        apply_prepared_temporary_table_lifecycle(*statement.database, statement);
         checkpoint_result = checkpoint.commit(*statement.database);
         if (checkpoint_result != MYLITE_OK) {
             return checkpoint_result;
         }
 #  endif
-        const int transaction_result =
-            statement.statement_transaction_control ==
-                    TransactionControlKind::SetParameterizedTransactionControl
-                ? apply_successful_resolved_transaction_controls(
-                      *statement.database,
-                      resolved_transaction_controls
-                  )
-                : apply_successful_transaction_control(
-                      *statement.database,
-                      statement.sql,
-                      statement.statement_transaction_control
-                  );
+        int transaction_result = MYLITE_OK;
+        if (statement.statement_transaction_control ==
+            TransactionControlKind::SetParameterizedTransactionControl) {
+            transaction_result = apply_successful_resolved_transaction_controls(
+                *statement.database,
+                resolved_transaction_controls
+            );
+        } else if (statement.statement_transaction_control != TransactionControlKind::None) {
+            transaction_result = apply_successful_transaction_control(
+                *statement.database,
+                statement.sql,
+                statement.statement_transaction_control
+            );
+        }
         if (transaction_result != MYLITE_OK) {
             return transaction_result;
         }
@@ -2400,6 +2429,15 @@ int apply_successful_single_autocommit_control(
 }
 
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
+void apply_prepared_temporary_table_lifecycle(mylite_db &database, const mylite_stmt &statement) {
+    if (!statement.temporary_table_to_remember.empty()) {
+        remember_temporary_table(database, statement.temporary_table_to_remember);
+    }
+    for (const std::string &name : statement.temporary_tables_to_forget) {
+        forget_temporary_table(database, name);
+    }
+}
+
 int execute_prepared_savepoint_control(mylite_stmt &statement) {
     mylite_db &database = *statement.database;
     if (!database.transaction_active || database.filename == ":memory:") {

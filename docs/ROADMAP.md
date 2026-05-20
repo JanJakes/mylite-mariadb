@@ -112,7 +112,10 @@ bindings for reuse, clear-bindings releases them explicitly, and repeated
 same-type scalar binds avoid redundant MariaDB `mysql_stmt_bind_param()` calls.
 Successful non-result prepared resets also avoid a redundant MariaDB statement
 reset before re-execution while result-producing statements keep the full reset
-path.
+path. Prepared non-result execution now also reuses the immutable SQL policy
+classified at prepare time, so ordinary prepared DML no longer reparses its SQL
+text for no-op transaction or temporary-table lifecycle updates after every
+successful step.
 Durable exact-index cache reads now bulk-grow matching entrysets in one pass,
 removing per-match array reallocations from many-match secondary cursors that do
 not use published leaf roots. Exact-index caches now add transient hash buckets
