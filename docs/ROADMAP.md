@@ -268,6 +268,9 @@ repeated no-op active statement chain rediscovery on prepared point updates.
 Row-update execution now also finishes active-checkpoint write journals through
 the captured statement scope, avoiding another filename-based active-statement
 lookup on prepared point updates.
+Durable handler write locks now defer MEMORY/HEAP statement snapshots until a
+volatile table participates, while transaction and savepoint snapshots remain
+eager at their SQL boundaries.
 Cached active rewrite shapes now skip the redundant row-state page lookup that
 was only needed for uncached shape validation.
 Transient row-id cache buckets now use a one-multiply hash with high-bit folding

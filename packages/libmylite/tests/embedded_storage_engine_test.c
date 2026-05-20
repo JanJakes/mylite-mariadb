@@ -1301,8 +1301,22 @@ static void test_memory_savepoint_transactions(void) {
         "UNIQUE KEY title_key USING BTREE (title)"
         ") ENGINE=HEAP"
     );
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE durable_posts ("
+        "id INT NOT NULL PRIMARY KEY,"
+        "title VARCHAR(64) NOT NULL"
+        ") ENGINE=InnoDB"
+    );
     assert_catalog_table_metadata(filename, "memory_savepoints", "memory_posts", "MEMORY", "MYLITE");
     assert_catalog_table_metadata(filename, "memory_savepoints", "heap_posts", "HEAP", "MYLITE");
+    assert_catalog_table_metadata(
+        filename,
+        "memory_savepoints",
+        "durable_posts",
+        "InnoDB",
+        "MYLITE"
+    );
 
     assert_exec_succeeds(db, "BEGIN");
     assert_exec_succeeds(db, "INSERT INTO memory_posts (title) VALUES ('before')");
@@ -1376,6 +1390,21 @@ static void test_memory_savepoint_transactions(void) {
         "17"
     );
 
+    assert_exec_succeeds(db, "BEGIN");
+    assert_exec_succeeds(db, "INSERT INTO durable_posts VALUES (1, 'durable-before-volatile')");
+    assert_exec_succeeds(db, "INSERT INTO memory_posts (title) VALUES ('lazy-volatile-rollback')");
+    assert_exec_succeeds(db, "ROLLBACK");
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM durable_posts WHERE title = 'durable-before-volatile'",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM memory_posts WHERE title = 'lazy-volatile-rollback'",
+        "0"
+    );
+
     assert(
         mylite_storage_count_rows(filename, "memory_savepoints", "memory_posts", &durable_row_count) ==
         MYLITE_STORAGE_OK
@@ -1389,8 +1418,16 @@ static void test_memory_savepoint_transactions(void) {
     assert_exec_succeeds(db, "USE memory_savepoints");
     assert_catalog_table_metadata(filename, "memory_savepoints", "memory_posts", "MEMORY", "MYLITE");
     assert_catalog_table_metadata(filename, "memory_savepoints", "heap_posts", "HEAP", "MYLITE");
+    assert_catalog_table_metadata(
+        filename,
+        "memory_savepoints",
+        "durable_posts",
+        "InnoDB",
+        "MYLITE"
+    );
     assert_query_single_value(db, "SELECT COUNT(*) FROM memory_posts", "0");
     assert_query_single_value(db, "SELECT COUNT(*) FROM heap_posts", "0");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM durable_posts", "0");
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
