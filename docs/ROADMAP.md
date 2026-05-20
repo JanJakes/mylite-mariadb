@@ -362,6 +362,9 @@ row-validation proof for the same active checkpoint view, reducing duplicate
 live-row validation cache work after indexed row reads. Row-update validation
 now also reuses the already-resolved active payload cache pointer instead of
 rediscovering that cache owner for each mutation.
+The local performance baseline now accepts opt-in per-metric microsecond
+thresholds, giving performance slices a reusable regression gate while keeping
+default runs descriptive and machine-local.
 
 ## Size And Profile Direction
 

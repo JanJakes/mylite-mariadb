@@ -19,10 +19,34 @@ typedef enum benchmark_phase {
     BENCHMARK_PHASE_PREPARED_UPDATES,
 } benchmark_phase;
 
+typedef enum benchmark_metric {
+    BENCHMARK_METRIC_OPEN_SETUP,
+    BENCHMARK_METRIC_DIRECT_INSERTS,
+    BENCHMARK_METRIC_PREPARED_INSERTS,
+    BENCHMARK_METRIC_DIRECT_PK_SELECTS,
+    BENCHMARK_METRIC_PREPARED_PK_SELECTS,
+    BENCHMARK_METRIC_DIRECT_SECONDARY_SELECTS,
+    BENCHMARK_METRIC_PREPARED_SECONDARY_SELECTS,
+    BENCHMARK_METRIC_PREPARE_LEAF_ROWS,
+    BENCHMARK_METRIC_PUBLISH_LEAF_INDEX,
+    BENCHMARK_METRIC_DIRECT_LEAF_SECONDARY_SELECTS,
+    BENCHMARK_METRIC_PREPARED_LEAF_SECONDARY_SELECTS,
+    BENCHMARK_METRIC_DIRECT_UPDATES,
+    BENCHMARK_METRIC_PREPARED_UPDATES,
+    BENCHMARK_METRIC_ORDERED_SCAN,
+    BENCHMARK_METRIC_COUNT,
+} benchmark_metric;
+
+typedef struct benchmark_metric_definition {
+    benchmark_metric metric;
+    const char *name;
+} benchmark_metric_definition;
+
 typedef struct benchmark_config {
     size_t rows;
     size_t iterations;
     benchmark_phase phase;
+    double max_us[BENCHMARK_METRIC_COUNT];
 } benchmark_config;
 
 typedef struct benchmark_context {
@@ -50,10 +74,19 @@ typedef struct secondary_result {
 
 static int parse_config(int argc, char **argv, benchmark_config *config);
 static int parse_phase_argument(const char *argument, benchmark_config *config);
+static int parse_threshold_argument(const char *argument, benchmark_config *config);
+static int find_metric_by_name(const char *name, size_t name_size, benchmark_metric *out_metric);
 static const char *benchmark_phase_name(benchmark_phase phase);
+static const char *benchmark_metric_name(benchmark_metric metric);
 static int run_benchmark(const benchmark_config *config);
 static void print_usage(const char *program);
-static void print_result(const char *operation, size_t count, uint64_t elapsed_ns);
+static int print_result(
+    const benchmark_config *config,
+    benchmark_metric metric,
+    const char *operation,
+    size_t count,
+    uint64_t elapsed_ns
+);
 static int setup_database(benchmark_context *ctx);
 static int benchmark_insert_rows(benchmark_context *ctx);
 static int benchmark_prepared_insert_rows(benchmark_context *ctx);
@@ -71,6 +104,7 @@ static int benchmark_secondary_selects_for_index(
     benchmark_context *ctx,
     const char *table_name,
     const char *index_name,
+    benchmark_metric metric,
     const char *operation,
     const char *rows_label,
     const char *checksum_label
@@ -79,6 +113,7 @@ static int benchmark_prepared_secondary_selects_for_index(
     benchmark_context *ctx,
     const char *table_name,
     const char *index_name,
+    benchmark_metric metric,
     const char *operation,
     const char *rows_label,
     const char *checksum_label
@@ -102,6 +137,23 @@ static char *path_join(const char *directory, const char *name);
 static void remove_tree(const char *path);
 static void remove_tree_entry(const char *path);
 
+static const benchmark_metric_definition k_metric_definitions[] = {
+    {BENCHMARK_METRIC_OPEN_SETUP, "open-setup"},
+    {BENCHMARK_METRIC_DIRECT_INSERTS, "direct-inserts"},
+    {BENCHMARK_METRIC_PREPARED_INSERTS, "prepared-inserts"},
+    {BENCHMARK_METRIC_DIRECT_PK_SELECTS, "direct-pk-selects"},
+    {BENCHMARK_METRIC_PREPARED_PK_SELECTS, "prepared-pk-selects"},
+    {BENCHMARK_METRIC_DIRECT_SECONDARY_SELECTS, "direct-secondary-selects"},
+    {BENCHMARK_METRIC_PREPARED_SECONDARY_SELECTS, "prepared-secondary-selects"},
+    {BENCHMARK_METRIC_PREPARE_LEAF_ROWS, "prepare-leaf-rows"},
+    {BENCHMARK_METRIC_PUBLISH_LEAF_INDEX, "publish-leaf-index"},
+    {BENCHMARK_METRIC_DIRECT_LEAF_SECONDARY_SELECTS, "direct-leaf-secondary-selects"},
+    {BENCHMARK_METRIC_PREPARED_LEAF_SECONDARY_SELECTS, "prepared-leaf-secondary-selects"},
+    {BENCHMARK_METRIC_DIRECT_UPDATES, "direct-updates"},
+    {BENCHMARK_METRIC_PREPARED_UPDATES, "prepared-updates"},
+    {BENCHMARK_METRIC_ORDERED_SCAN, "ordered-scan"},
+};
+
 int main(int argc, char **argv) {
     benchmark_config config = {
         .rows = 100U,
@@ -117,23 +169,30 @@ int main(int argc, char **argv) {
 }
 
 static int parse_config(int argc, char **argv, benchmark_config *config) {
-    if (argc > 4) {
-        print_usage(argv[0]);
-        return 1;
-    }
-    if (argc > 1 && strcmp(argv[1], "--help") == 0) {
-        print_usage(argv[0]);
-        exit(0);
-    }
-
     int numeric_argument = 0;
     for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--help") == 0) {
+            print_usage(argv[0]);
+            exit(0);
+        }
         if (strncmp(argv[i], "--phase=", 8U) == 0) {
             if (parse_phase_argument(argv[i] + 8U, config) != 0) {
                 print_usage(argv[0]);
                 return 1;
             }
             continue;
+        }
+        if (strncmp(argv[i], "--max-us=", 9U) == 0) {
+            if (parse_threshold_argument(argv[i] + 9U, config) != 0) {
+                print_usage(argv[0]);
+                return 1;
+            }
+            continue;
+        }
+        if (strncmp(argv[i], "--", 2U) == 0) {
+            fprintf(stderr, "Unknown option: %s\n", argv[i]);
+            print_usage(argv[0]);
+            return 1;
         }
 
         char *end = NULL;
@@ -185,6 +244,48 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
     return 1;
 }
 
+static int parse_threshold_argument(const char *argument, benchmark_config *config) {
+    const char *separator = strchr(argument, ':');
+    if (separator == NULL || separator == argument || separator[1] == '\0') {
+        fprintf(stderr, "Expected threshold as <metric>:<max_us>, got: %s\n", argument);
+        return 1;
+    }
+
+    benchmark_metric metric = BENCHMARK_METRIC_COUNT;
+    if (find_metric_by_name(argument, (size_t)(separator - argument), &metric) != 0) {
+        fprintf(
+            stderr,
+            "Unknown benchmark metric in threshold: %.*s\n",
+            (int)(separator - argument),
+            argument
+        );
+        return 1;
+    }
+
+    char *end = NULL;
+    errno = 0;
+    const double max_us = strtod(separator + 1, &end);
+    if (errno != 0 || end == separator + 1 || *end != '\0' || max_us <= 0.0 || max_us != max_us ||
+        max_us > 1000000000.0) {
+        fprintf(stderr, "Expected positive threshold microseconds, got: %s\n", separator + 1);
+        return 1;
+    }
+
+    config->max_us[metric] = max_us;
+    return 0;
+}
+
+static int find_metric_by_name(const char *name, size_t name_size, benchmark_metric *out_metric) {
+    for (size_t i = 0U; i < sizeof(k_metric_definitions) / sizeof(k_metric_definitions[0]); ++i) {
+        const char *candidate = k_metric_definitions[i].name;
+        if (strlen(candidate) == name_size && strncmp(candidate, name, name_size) == 0) {
+            *out_metric = k_metric_definitions[i].metric;
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static const char *benchmark_phase_name(benchmark_phase phase) {
     switch (phase) {
     case BENCHMARK_PHASE_ALL:
@@ -227,7 +328,15 @@ static int run_benchmark(const benchmark_config *config) {
     if (setup_database(&ctx) != 0) {
         goto cleanup;
     }
-    print_result("open and schema setup", 1U, monotonic_ns() - start_ns);
+    if (print_result(
+            config,
+            BENCHMARK_METRIC_OPEN_SETUP,
+            "open and schema setup",
+            1U,
+            monotonic_ns() - start_ns
+        ) != 0) {
+        goto cleanup;
+    }
 
     if (benchmark_insert_rows(&ctx) != 0) {
         goto cleanup;
@@ -300,21 +409,53 @@ cleanup:
 static void print_usage(const char *program) {
     fprintf(
         stderr,
-        "Usage: %s [--phase=all|updates|direct-updates|prepared-updates] [rows] [iterations]\n"
+        "Usage: %s [--phase=all|updates|direct-updates|prepared-updates] "
+        "[--max-us=<metric>:<value>] [rows] [iterations]\n"
         "\n"
         "Defaults: phase=all rows=100 iterations=100.\n"
         "The update phases skip point-read and secondary-index read timings after setup.\n"
+        "Thresholds are opt-in and may be supplied more than once. Metrics: "
+        "open-setup, direct-inserts, prepared-inserts, direct-pk-selects, "
+        "prepared-pk-selects, direct-secondary-selects, prepared-secondary-selects, "
+        "prepare-leaf-rows, publish-leaf-index, direct-leaf-secondary-selects, "
+        "prepared-leaf-secondary-selects, direct-updates, prepared-updates, ordered-scan.\n"
         "Set MYLITE_PERF_KEEP_ROOT=1 to keep the temporary benchmark directory.\n",
         program
     );
 }
 
-static void print_result(const char *operation, size_t count, uint64_t elapsed_ns) {
+static int print_result(
+    const benchmark_config *config,
+    benchmark_metric metric,
+    const char *operation,
+    size_t count,
+    uint64_t elapsed_ns
+) {
     const double total_ms = (double)elapsed_ns / 1000000.0;
     const double micros_per_operation =
         count == 0U ? 0.0 : (double)elapsed_ns / (double)count / 1000.0;
 
     printf("| %s | %zu | %.3f | %.3f |\n", operation, count, total_ms, micros_per_operation);
+    if (config->max_us[metric] > 0.0 && micros_per_operation > config->max_us[metric]) {
+        fprintf(
+            stderr,
+            "Benchmark metric %s exceeded %.3f us/op: %.3f us/op\n",
+            benchmark_metric_name(metric),
+            config->max_us[metric],
+            micros_per_operation
+        );
+        return 1;
+    }
+    return 0;
+}
+
+static const char *benchmark_metric_name(benchmark_metric metric) {
+    for (size_t i = 0U; i < sizeof(k_metric_definitions) / sizeof(k_metric_definitions[0]); ++i) {
+        if (k_metric_definitions[i].metric == metric) {
+            return k_metric_definitions[i].name;
+        }
+    }
+    return "unknown";
 }
 
 static int setup_database(benchmark_context *ctx) {
@@ -396,7 +537,15 @@ static int benchmark_insert_rows(benchmark_context *ctx) {
             goto rollback;
         }
     }
-    print_result("direct inserts in one transaction", ctx->config->rows, monotonic_ns() - start_ns);
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_DIRECT_INSERTS,
+            "direct inserts in one transaction",
+            ctx->config->rows,
+            monotonic_ns() - start_ns
+        ) != 0) {
+        goto rollback;
+    }
 
     if (exec_sql(ctx, "COMMIT") != 0) {
         return 1;
@@ -466,11 +615,15 @@ static int benchmark_prepared_insert_rows(benchmark_context *ctx) {
             goto rollback;
         }
     }
-    print_result(
-        "prepared inserts in one transaction",
-        ctx->config->rows,
-        monotonic_ns() - start_ns
-    );
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_INSERTS,
+            "prepared inserts in one transaction",
+            ctx->config->rows,
+            monotonic_ns() - start_ns
+        ) != 0) {
+        goto rollback;
+    }
 
     if (mylite_finalize(stmt) != MYLITE_OK) {
         stmt = NULL;
@@ -518,11 +671,15 @@ static int benchmark_point_selects(benchmark_context *ctx) {
         checksum += (uint64_t)value;
     }
 
-    print_result(
-        "direct primary-key point selects",
-        ctx->config->iterations,
-        monotonic_ns() - start_ns
-    );
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_DIRECT_PK_SELECTS,
+            "direct primary-key point selects",
+            ctx->config->iterations,
+            monotonic_ns() - start_ns
+        ) != 0) {
+        return 1;
+    }
     printf("Point-select checksum: %" PRIu64 "\n", checksum);
     return 0;
 }
@@ -579,11 +736,15 @@ static int benchmark_prepared_point_selects(benchmark_context *ctx) {
         }
     }
 
-    print_result(
-        "prepared primary-key point selects",
-        ctx->config->iterations,
-        monotonic_ns() - start_ns
-    );
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_PK_SELECTS,
+            "prepared primary-key point selects",
+            ctx->config->iterations,
+            monotonic_ns() - start_ns
+        ) != 0) {
+        goto cleanup;
+    }
     printf("Prepared point-select checksum: %" PRIu64 "\n", checksum);
     result = 0;
 
@@ -600,6 +761,7 @@ static int benchmark_secondary_selects(benchmark_context *ctx) {
         ctx,
         "perf_rows",
         "value_key",
+        BENCHMARK_METRIC_DIRECT_SECONDARY_SELECTS,
         "direct secondary-index exact selects",
         "Secondary exact-select rows",
         "Secondary exact-select checksum"
@@ -611,6 +773,7 @@ static int benchmark_prepared_secondary_selects(benchmark_context *ctx) {
         ctx,
         "perf_rows",
         "value_key",
+        BENCHMARK_METRIC_PREPARED_SECONDARY_SELECTS,
         "prepared secondary-index exact selects",
         "Prepared secondary exact-select rows",
         "Prepared secondary exact-select checksum"
@@ -628,7 +791,15 @@ static int publish_secondary_leaf_index(benchmark_context *ctx) {
         return 1;
     }
 
-    print_result("publish secondary leaf index", 1U, monotonic_ns() - start_ns);
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PUBLISH_LEAF_INDEX,
+            "publish secondary leaf index",
+            1U,
+            monotonic_ns() - start_ns
+        ) != 0) {
+        return 1;
+    }
     return verify_secondary_leaf_index_root(ctx);
 }
 
@@ -642,6 +813,7 @@ static int benchmark_leaf_secondary_selects(benchmark_context *ctx) {
         ctx,
         "perf_leaf_rows",
         "value_leaf_key",
+        BENCHMARK_METRIC_DIRECT_LEAF_SECONDARY_SELECTS,
         "direct published-leaf secondary-index exact selects",
         "Published leaf secondary exact-select rows",
         "Published leaf secondary exact-select checksum"
@@ -658,6 +830,7 @@ static int benchmark_prepared_leaf_secondary_selects(benchmark_context *ctx) {
         ctx,
         "perf_leaf_rows",
         "value_leaf_key",
+        BENCHMARK_METRIC_PREPARED_LEAF_SECONDARY_SELECTS,
         "prepared published-leaf secondary-index exact selects",
         "Prepared published leaf secondary exact-select rows",
         "Prepared published leaf secondary exact-select checksum"
@@ -668,6 +841,7 @@ static int benchmark_secondary_selects_for_index(
     benchmark_context *ctx,
     const char *table_name,
     const char *index_name,
+    benchmark_metric metric,
     const char *operation,
     const char *rows_label,
     const char *checksum_label
@@ -719,7 +893,15 @@ static int benchmark_secondary_selects_for_index(
         checksum += result.checksum;
     }
 
-    print_result(operation, ctx->config->iterations, monotonic_ns() - start_ns);
+    if (print_result(
+            ctx->config,
+            metric,
+            operation,
+            ctx->config->iterations,
+            monotonic_ns() - start_ns
+        ) != 0) {
+        return 1;
+    }
     printf("%s: %zu\n", rows_label, total_rows);
     printf("%s: %" PRIu64 "\n", checksum_label, checksum);
     return 0;
@@ -729,6 +911,7 @@ static int benchmark_prepared_secondary_selects_for_index(
     benchmark_context *ctx,
     const char *table_name,
     const char *index_name,
+    benchmark_metric metric,
     const char *operation,
     const char *rows_label,
     const char *checksum_label
@@ -811,7 +994,15 @@ static int benchmark_prepared_secondary_selects_for_index(
         }
     }
 
-    print_result(operation, ctx->config->iterations, monotonic_ns() - start_ns);
+    if (print_result(
+            ctx->config,
+            metric,
+            operation,
+            ctx->config->iterations,
+            monotonic_ns() - start_ns
+        ) != 0) {
+        goto cleanup;
+    }
     printf("%s: %zu\n", rows_label, total_rows);
     printf("%s: %" PRIu64 "\n", checksum_label, checksum);
     result = 0;
@@ -857,11 +1048,15 @@ static int prepare_secondary_leaf_table(benchmark_context *ctx) {
             goto rollback;
         }
     }
-    print_result(
-        "prepare secondary leaf benchmark rows",
-        ctx->config->rows,
-        monotonic_ns() - start_ns
-    );
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARE_LEAF_ROWS,
+            "prepare secondary leaf benchmark rows",
+            ctx->config->rows,
+            monotonic_ns() - start_ns
+        ) != 0) {
+        goto rollback;
+    }
 
     if (exec_sql(ctx, "COMMIT") != 0) {
         return 1;
@@ -964,11 +1159,15 @@ static int benchmark_updates(benchmark_context *ctx) {
             goto rollback;
         }
     }
-    print_result(
-        "direct primary-key updates in one transaction",
-        ctx->config->iterations,
-        monotonic_ns() - start_ns
-    );
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_DIRECT_UPDATES,
+            "direct primary-key updates in one transaction",
+            ctx->config->iterations,
+            monotonic_ns() - start_ns
+        ) != 0) {
+        goto rollback;
+    }
 
     if (exec_sql(ctx, "COMMIT") != 0) {
         return 1;
@@ -1019,11 +1218,15 @@ static int benchmark_prepared_updates(benchmark_context *ctx) {
             goto rollback;
         }
     }
-    print_result(
-        "prepared primary-key updates in one transaction",
-        ctx->config->iterations,
-        monotonic_ns() - start_ns
-    );
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_UPDATES,
+            "prepared primary-key updates in one transaction",
+            ctx->config->iterations,
+            monotonic_ns() - start_ns
+        ) != 0) {
+        goto rollback;
+    }
 
     if (mylite_finalize(stmt) != MYLITE_OK) {
         stmt = NULL;
@@ -1065,7 +1268,15 @@ static int benchmark_ordered_scan(benchmark_context *ctx) {
         return 1;
     }
 
-    print_result("direct ordered full scan", scan.rows, monotonic_ns() - start_ns);
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_ORDERED_SCAN,
+            "direct ordered full scan",
+            scan.rows,
+            monotonic_ns() - start_ns
+        ) != 0) {
+        return 1;
+    }
     printf("Scan checksum: %" PRIu64 "\n", scan.checksum);
     if (scan.rows != ctx->config->rows) {
         fprintf(stderr, "Expected %zu scan rows, got %zu\n", ctx->config->rows, scan.rows);

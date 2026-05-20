@@ -137,6 +137,11 @@ row-payload cache availability once per batch and reuses durable cache pointers
 while the cache-set generation is stable, avoiding per-row control-plane probes
 when secondary cursors return many row ids.
 
+The local storage performance baseline remains machine-dependent, but it now
+accepts opt-in `--max-us=<metric>:<value>` thresholds so a slice can record an
+explicit local regression gate without making default benchmark runs fail on
+slower hardware.
+
 MariaDB table-discovery callbacks also use scoped read sessions while they read
 table definitions, discovered table names, or table existence from the MyLite
 catalog. This keeps table-open discovery on the same cached checkpoint view as
