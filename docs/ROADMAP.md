@@ -262,6 +262,9 @@ Cached active rewrite shapes now skip the redundant row-state page lookup that
 was only needed for uncached shape validation.
 Transient row-id cache buckets now use a one-multiply hash with high-bit folding
 instead of a heavier two-multiply finalizer.
+Native little-endian builds now load fixed-width storage fields and store
+32-bit fields with unaligned-safe `memcpy()` fast paths while preserving
+byte-loop fallbacks for other targets and 64-bit stores.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation

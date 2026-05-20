@@ -17,6 +17,20 @@
 #define MYLITE_STORAGE_HOT_INLINE static inline
 #endif
 
+#if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) &&                                 \
+    __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#  define MYLITE_STORAGE_NATIVE_LITTLE_ENDIAN 1
+#else
+#  define MYLITE_STORAGE_NATIVE_LITTLE_ENDIAN 0
+#endif
+
+#if MYLITE_STORAGE_NATIVE_LITTLE_ENDIAN
+_Static_assert(
+    sizeof(unsigned long long) == sizeof(uint64_t),
+    "native little-endian storage accessors require 64-bit unsigned long long"
+);
+#endif
+
 typedef struct mylite_storage_catalog_entry {
     const unsigned char *record;
     unsigned long long table_id;
@@ -19837,22 +19851,34 @@ static mylite_storage_result list_catalog_tables(
 }
 
 MYLITE_STORAGE_HOT_INLINE unsigned get_u32_le(const unsigned char *page, size_t offset) {
+#if MYLITE_STORAGE_NATIVE_LITTLE_ENDIAN
+    uint32_t value = 0U;
+    memcpy(&value, page + offset, sizeof(value));
+    return value;
+#else
     unsigned value = 0U;
     for (size_t i = 0U; i < sizeof(uint32_t); ++i) {
         value |= (unsigned)page[offset + i] << (unsigned)(i * CHAR_BIT);
     }
     return value;
+#endif
 }
 
 MYLITE_STORAGE_HOT_INLINE unsigned long long get_u64_le(
     const unsigned char *page,
     size_t offset
 ) {
+#if MYLITE_STORAGE_NATIVE_LITTLE_ENDIAN
+    unsigned long long value = 0ULL;
+    memcpy(&value, page + offset, sizeof(uint64_t));
+    return value;
+#else
     unsigned long long value = 0ULL;
     for (size_t i = 0U; i < sizeof(uint64_t); ++i) {
         value |= (unsigned long long)page[offset + i] << (unsigned)(i * CHAR_BIT);
     }
     return value;
+#endif
 }
 
 MYLITE_STORAGE_HOT_INLINE void put_u32_le(
@@ -19860,9 +19886,14 @@ MYLITE_STORAGE_HOT_INLINE void put_u32_le(
     size_t offset,
     unsigned value
 ) {
+#if MYLITE_STORAGE_NATIVE_LITTLE_ENDIAN
+    const uint32_t stored_value = (uint32_t)value;
+    memcpy(page + offset, &stored_value, sizeof(stored_value));
+#else
     for (size_t i = 0U; i < sizeof(uint32_t); ++i) {
         page[offset + i] = (unsigned char)((value >> (unsigned)(i * CHAR_BIT)) & UINT8_MAX);
     }
+#endif
 }
 
 MYLITE_STORAGE_HOT_INLINE void put_u64_le(
