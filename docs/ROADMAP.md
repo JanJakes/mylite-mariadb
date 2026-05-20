@@ -243,6 +243,10 @@ work. Cached-shape buffered row rewrites with unchanged index entries now skip
 replacement state-page and index-page checks after the shape has been validated
 once in the active append buffer, while still capturing per-statement rollback
 preimages before mutation.
+Exact index-entry lookup, indexed-row lookup, and row-update execution now
+reuse scoped header state captured while opening the file scope instead of
+rediscovering active statement ownership from `FILE *` before reading the
+checkpoint header.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation

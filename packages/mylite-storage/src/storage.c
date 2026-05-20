@@ -854,6 +854,14 @@ static void free_rollback_auto_increment_values(
 );
 static char *copy_string(const char *value);
 static char *copy_filename(const char *filename);
+static mylite_storage_result read_header_from_file_scope(
+    const mylite_storage_file_scope *scope,
+    mylite_storage_header *out_header
+);
+static mylite_storage_result read_header_from_update_file_scope(
+    const mylite_storage_update_file_scope *scope,
+    mylite_storage_header *out_header
+);
 static mylite_storage_result read_header(FILE *file, mylite_storage_header *out_header);
 static mylite_storage_result read_page_at(
     FILE *file,
@@ -5102,7 +5110,7 @@ static mylite_storage_result update_row_with_index_entries(
     mylite_storage_row_page old_row_page = {0};
     unsigned char old_row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     mylite_storage_row_write_position position = {0};
-    result = read_header(file, &header);
+    result = read_header_from_update_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
         result = find_table_id_in_statement(
             file,
@@ -5490,7 +5498,7 @@ mylite_storage_result mylite_storage_find_index_entry(
     mylite_storage_catalog_entry table_entry = {0};
     mylite_storage_statement *active_cache_statement =
         active_cache_statement_from_statement(file_scope.active_statement);
-    result = read_header(file, &header);
+    result = read_header_from_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
         const int used_cached_table_entry = find_active_table_entry_cache_in_statement(
             active_cache_statement,
@@ -5639,7 +5647,7 @@ static mylite_storage_result find_indexed_row_payload(
     mylite_storage_catalog_entry table_entry = {0};
     mylite_storage_statement *active_cache_statement =
         active_cache_statement_from_statement(file_scope.active_statement);
-    result = read_header(file, &header);
+    result = read_header_from_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
         const int used_cached_table_entry = find_active_table_entry_cache_in_statement(
             active_cache_statement,
@@ -8854,6 +8862,54 @@ static char *copy_string(const char *value) {
 
 static char *copy_filename(const char *filename) {
     return copy_string(filename);
+}
+
+static mylite_storage_result read_header_from_file_scope(
+    const mylite_storage_file_scope *scope,
+    mylite_storage_header *out_header
+) {
+    if (scope == NULL || scope->file == NULL || out_header == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+    if (scope->active_statement != NULL && scope->active_statement->has_current_header) {
+        *out_header = scope->active_statement->current_header;
+        return MYLITE_STORAGE_OK;
+    }
+    if (scope->active_read_statement != NULL) {
+        *out_header = scope->active_read_statement->header;
+        return MYLITE_STORAGE_OK;
+    }
+    if (scope->active_read_snapshot != NULL) {
+        *out_header = scope->active_read_snapshot->header;
+        return MYLITE_STORAGE_OK;
+    }
+    if (active_transaction_journal_snapshot_has_file(scope->file)) {
+        *out_header = active_transaction_journal_snapshot.header;
+        return MYLITE_STORAGE_OK;
+    }
+    return read_header(scope->file, out_header);
+}
+
+static mylite_storage_result read_header_from_update_file_scope(
+    const mylite_storage_update_file_scope *scope,
+    mylite_storage_header *out_header
+) {
+    if (scope == NULL || scope->file == NULL || out_header == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+    if (scope->active_statement != NULL && scope->active_statement->has_current_header) {
+        *out_header = scope->active_statement->current_header;
+        return MYLITE_STORAGE_OK;
+    }
+    if (scope->active_read_statement != NULL) {
+        *out_header = scope->active_read_statement->header;
+        return MYLITE_STORAGE_OK;
+    }
+    if (active_transaction_journal_snapshot_has_file(scope->file)) {
+        *out_header = active_transaction_journal_snapshot.header;
+        return MYLITE_STORAGE_OK;
+    }
+    return read_header(scope->file, out_header);
 }
 
 static mylite_storage_result read_header(FILE *file, mylite_storage_header *out_header) {
