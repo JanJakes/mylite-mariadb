@@ -413,7 +413,7 @@ decode paths still verify the full page so corruption in unused bytes remains
 detectable. Large overflow payload updates keep the existing per-page writer
 until blob payload batching has its own design. Active checkpoints keep a
 bounded transient append-page buffer for those contiguous unpublished page
-runs. The current performance profile uses a 1024-page window, which is 4 MiB
+runs. The current performance profile uses a 4096-page window, which is 16 MiB
 at the 4096-byte page size. Nested statement commits inside a durable
 transaction can accumulate into the outer checkpoint, readers in the same
 checkpoint consult the buffer before the primary file, top-level commit flushes
@@ -425,13 +425,20 @@ published-leaf tail overlays inherit omitted unchanged entries through the
 row-state replacement id, while later physical replacement entries for changed
 keys supersede the inherited entry. This reduces common non-key update write
 volume without changing the durable page format.
-If an active update targets an inline replacement row that was created inside
-the current rollback frame and whose replacement page run is still resident in
-the active append-page buffer, the storage layer rewrites that buffered row page
-and any changed matching index-entry pages instead of appending another
-replacement chain. The row-state page remains unchanged, the row id is reused,
-and savepoint rollback remains safe because rows created before the current
-savepoint frame still fall back to append-only replacement. Already-flushed
+If an active update targets an inline replacement row whose replacement page run
+is still resident in the active append-page buffer, the storage layer rewrites
+that buffered row page and any changed matching index-entry pages instead of
+appending another replacement chain. This works across nested statement frames
+inside the same outer checkpoint by capturing per-statement buffered-page
+preimages before rewriting pages that predate the current savepoint. The
+row-state page remains unchanged, the row id is reused, and rollback restores
+captured buffered preimages before truncating or flushing the retained prefix.
+The buffered rewrite preflight uses checksum-free metadata validation only for
+unpublished in-memory row and index pages. Row-state pages are fully
+checksummed the first time a buffered replacement row is rewritten, then that
+validated row id is cached on the append-buffer owner so later rewrites can use
+metadata-only row-state validation until rollback or statement cleanup clears
+the cache. Durable reads keep full page checksum validation. Already-flushed
 replacement runs keep the append-only path until a logged page-rewrite design
 exists.
 

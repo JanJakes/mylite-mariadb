@@ -160,18 +160,22 @@ common inline update path now writes replacement row, row-state, and
 replacement index-entry pages as one contiguous append run, reducing per-update
 write syscall overhead without changing the durable page format. Active
 checkpoints now buffer bounded contiguous append runs across nested statement
-commits with a 4 MiB transient flush window and flush them before top-level
+commits with a 16 MiB transient flush window and flush them before top-level
 header publication, reducing large transaction update syscall overhead while
 preserving savepoint rollback by flushing retained prefixes before truncation.
 Durable updates now omit unchanged replacement index-entry pages and let
 exact/live index overlays inherit unchanged keys through row-state replacement
 ids, reducing write volume for any update where one or more indexed key images
 stay stable.
-Repeated active updates of inline replacement rows created inside the current
-rollback frame now reuse the same row id and rewrite the buffered unpublished
-row and changed index-entry pages while those pages are still resident in the
-active append buffer, while already-flushed runs and updates to rows predating
-the current savepoint keep the append-only path.
+Repeated active updates of inline replacement rows now reuse the same row id and
+rewrite buffered unpublished row and changed index-entry pages while those
+pages are still resident in the active append buffer, including replacement
+rows created by earlier nested statements in the same outer checkpoint.
+Per-statement buffered-page preimages preserve savepoint rollback, and buffered
+rewrite validation skips redundant full-page checksum scans for unpublished
+in-memory row and index pages. Row-state pages keep a first-use checksum guard
+and then use a validated-row cache for later rewrites. Already-flushed
+replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation
 now surface as storage-full errors instead of crashed-table I/O errors. Fresh

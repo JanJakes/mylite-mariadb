@@ -2873,12 +2873,20 @@ static void test_active_update_rewrite(void) {
          .key_size = sizeof(savepoint_secondary_key)},
     };
     mylite_storage_statement *transaction = NULL;
+    mylite_storage_statement *prior_statement = NULL;
+    mylite_storage_statement *outer_savepoint = NULL;
     mylite_storage_statement *savepoint = NULL;
     unsigned long long row_id = 0ULL;
     unsigned long long middle_row_id = 0ULL;
     unsigned long long final_row_id = 0ULL;
     unsigned long long savepoint_row_id = 0ULL;
     unsigned long long row_count = 0ULL;
+    mylite_storage_header before_savepoint_update_header = {
+        .size = sizeof(before_savepoint_update_header),
+    };
+    mylite_storage_header after_savepoint_update_header = {
+        .size = sizeof(after_savepoint_update_header),
+    };
 
     assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
     assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
@@ -2999,6 +3007,7 @@ static void test_active_update_rewrite(void) {
     );
 
     assert(mylite_storage_begin_transaction(filename, &transaction) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_begin_statement(filename, &prior_statement) == MYLITE_STORAGE_OK);
     assert(
         mylite_storage_update_row_with_index_entries(
             filename,
@@ -3013,6 +3022,7 @@ static void test_active_update_rewrite(void) {
         ) == MYLITE_STORAGE_OK
     );
     assert(middle_row_id != row_id);
+    assert(mylite_storage_commit_statement(prior_statement) == MYLITE_STORAGE_OK);
     assert_find_indexed_row_equals(
         filename,
         1U,
@@ -3022,7 +3032,11 @@ static void test_active_update_rewrite(void) {
         middle_row,
         sizeof(middle_row)
     );
+    assert(mylite_storage_begin_statement(filename, &outer_savepoint) == MYLITE_STORAGE_OK);
     assert(mylite_storage_begin_statement(filename, &savepoint) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_open_header(filename, &before_savepoint_update_header) == MYLITE_STORAGE_OK
+    );
     assert(
         mylite_storage_update_row_with_index_entries(
             filename,
@@ -3036,7 +3050,11 @@ static void test_active_update_rewrite(void) {
             &savepoint_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(savepoint_row_id != middle_row_id);
+    assert(savepoint_row_id == middle_row_id);
+    assert(
+        mylite_storage_open_header(filename, &after_savepoint_update_header) == MYLITE_STORAGE_OK
+    );
+    assert(after_savepoint_update_header.page_count == before_savepoint_update_header.page_count);
     assert_find_indexed_row_equals(
         filename,
         1U,
@@ -3062,6 +3080,7 @@ static void test_active_update_rewrite(void) {
         middle_row,
         sizeof(middle_row)
     );
+    assert(mylite_storage_commit_statement(outer_savepoint) == MYLITE_STORAGE_OK);
     assert(mylite_storage_commit_statement(transaction) == MYLITE_STORAGE_OK);
     assert_file_size_matches_header(filename);
     assert_find_indexed_row_equals(
