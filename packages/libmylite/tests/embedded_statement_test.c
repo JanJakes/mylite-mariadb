@@ -214,6 +214,11 @@ static void test_statement_effects(void) {
     assert(mylite_bind_int64(update, 2U, 2) == MYLITE_OK);
     assert(mylite_step(update) == MYLITE_DONE);
     assert(mylite_changes(db) == 1);
+    assert(mylite_reset(update) == MYLITE_OK);
+    assert(mylite_bind_int64(update, 1U, 3) == MYLITE_OK);
+    assert(mylite_bind_int64(update, 2U, 1) == MYLITE_OK);
+    assert(mylite_step(update) == MYLITE_DONE);
+    assert(mylite_changes(db) == 2);
     assert(mylite_finalize(update) == MYLITE_OK);
 
     delete_stmt = prepare_statement(db, "DELETE FROM prepared_effects WHERE qty < ?");
@@ -236,7 +241,7 @@ static void test_statement_effects(void) {
     assert(mylite_step(select) == MYLITE_ROW);
     assert(mylite_column_uint64(select, 0U) == 2U);
     assert(strcmp(mylite_column_text(select, 1U), "beta") == 0);
-    assert(mylite_column_int64(select, 2U) == 12);
+    assert(mylite_column_int64(select, 2U) == 15);
     assert(mylite_step(select) == MYLITE_ROW);
     assert(mylite_column_uint64(select, 0U) == 3U);
     assert(strcmp(mylite_column_text(select, 1U), "gamma") == 0);

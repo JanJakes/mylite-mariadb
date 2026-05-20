@@ -858,7 +858,8 @@ int mylite_reset(mylite_stmt *statement) {
             }
             statement->result_active = false;
         }
-        if (mysql_stmt_reset(statement->statement) != 0) {
+        const bool successful_non_result_statement = statement->done && statement->columns.empty();
+        if (!successful_non_result_statement && mysql_stmt_reset(statement->statement) != 0) {
             set_mariadb_statement_error(*statement);
             return MYLITE_ERROR;
         }

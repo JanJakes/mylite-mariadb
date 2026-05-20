@@ -110,6 +110,9 @@ leaving parameter binding/reset semantics as the next prepared-path bottleneck.
 Prepared parameter bindings now follow SQLite-style reset semantics: reset keeps
 bindings for reuse, clear-bindings releases them explicitly, and repeated
 same-type scalar binds avoid redundant MariaDB `mysql_stmt_bind_param()` calls.
+Successful non-result prepared resets also avoid a redundant MariaDB statement
+reset before re-execution while result-producing statements keep the full reset
+path.
 Durable exact-index cache reads now bulk-grow matching entrysets in one pass,
 removing per-match array reallocations from many-match secondary cursors that do
 not use published leaf roots. Exact-index caches now add transient hash buckets
