@@ -337,6 +337,9 @@ Prepared row-update execution now threads resolved active live-row and
 row-payload cache pointers through validation and post-update cache maintenance,
 avoiding repeated cache-set scans and filename/catalog comparisons inside the
 same storage update call.
+Active buffered row-update rewrites now receive the already-resolved active
+statement and append-buffer scope from row-update execution, avoiding another
+statement-chain walk from `FILE *` on each prepared point update.
 
 ## Size And Profile Direction
 

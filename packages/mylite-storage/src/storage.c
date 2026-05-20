@@ -724,6 +724,9 @@ static mylite_storage_statement *active_cache_statement_for(const char *filename
 static mylite_storage_statement *active_cache_statement_from_statement(
     mylite_storage_statement *statement
 );
+static mylite_storage_statement *append_page_buffer_statement_from_statement(
+    mylite_storage_statement *statement
+);
 static mylite_storage_statement *active_table_entry_cache_statement_for(const char *filename);
 static mylite_storage_statement *active_exact_index_cache_statement_for(const char *filename);
 static mylite_storage_statement *active_live_row_id_cache_statement_for(const char *filename);
@@ -1403,7 +1406,8 @@ static mylite_storage_result write_inline_update_pages(
     int *out_used_fast_path
 );
 static mylite_storage_result rewrite_active_update_pages(
-    FILE *file,
+    mylite_storage_statement *statement,
+    mylite_storage_statement *buffer_statement,
     const mylite_storage_header *header,
     unsigned long long table_id,
     unsigned long long row_id,
@@ -5161,6 +5165,8 @@ static mylite_storage_result update_row_with_index_entries(
     }
     FILE *file = file_scope.file;
     mylite_storage_statement *active_file_statement = file_scope.active_statement;
+    mylite_storage_statement *active_append_buffer_statement =
+        append_page_buffer_statement_from_statement(active_file_statement);
     mylite_storage_statement *active_cache_statement =
         active_cache_statement_from_statement(active_file_statement);
 
@@ -5225,7 +5231,8 @@ static mylite_storage_result update_row_with_index_entries(
     int used_active_update_rewrite = 0;
     if (result == MYLITE_STORAGE_OK) {
         result = rewrite_active_update_pages(
-            file,
+            active_file_statement,
+            active_append_buffer_statement,
             &header,
             table_id,
             row_id,
@@ -8322,6 +8329,23 @@ static mylite_storage_statement *active_cache_statement_from_statement(
         }
     }
     return cache_statement;
+}
+
+static mylite_storage_statement *append_page_buffer_statement_from_statement(
+    mylite_storage_statement *statement
+) {
+    if (statement == NULL) {
+        return NULL;
+    }
+
+    FILE *file = statement->file;
+    mylite_storage_statement *buffer_statement = NULL;
+    for (; statement != NULL; statement = statement->parent) {
+        if (statement->file == file && statement->owner == active_context_owner) {
+            buffer_statement = statement;
+        }
+    }
+    return buffer_statement;
 }
 
 static mylite_storage_statement *active_table_entry_cache_statement_for(const char *filename) {
@@ -12839,7 +12863,8 @@ static mylite_storage_result write_inline_update_pages(
 }
 
 static mylite_storage_result rewrite_active_update_pages(
-    FILE *file,
+    mylite_storage_statement *statement,
+    mylite_storage_statement *buffer_statement,
     const mylite_storage_header *header,
     unsigned long long table_id,
     unsigned long long row_id,
@@ -12852,9 +12877,6 @@ static mylite_storage_result rewrite_active_update_pages(
 ) {
     *out_rewritten = 0;
 
-    mylite_storage_statement *statement = NULL;
-    mylite_storage_statement *buffer_statement = NULL;
-    active_statement_and_append_buffer_for_file(file, &statement, &buffer_statement);
     const size_t row_payload_capacity =
         MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET;
     if (statement == NULL || header->page_size != MYLITE_STORAGE_FORMAT_PAGE_SIZE ||
