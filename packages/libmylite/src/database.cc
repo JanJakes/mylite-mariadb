@@ -1239,7 +1239,8 @@ bool is_unsupported_server_set_statement(const SqlPolicyTokens &tokens) {
     }
 
     for (std::size_t index = 1; index < tokens.count; ++index) {
-        if (token_equals(tokens.values[index], "PASSWORD")) {
+        if (token_equals(tokens.values[index], "PASSWORD") &&
+            is_system_variable_qualified_token(tokens, index)) {
             return true;
         }
         if (is_server_variable_token(tokens.values[index]) &&

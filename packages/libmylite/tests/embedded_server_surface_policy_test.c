@@ -229,6 +229,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SET @query_cache_size = 1048576");
     exec_ok(db, "SET @query_cache_type = 'local'");
     exec_ok(db, "SET @sql_mode = 'ORACLE'");
+    exec_ok(db, "SET @password = 'local'");
     exec_ok(db, "SET sql_mode = @@sql_mode");
 
     expect_error(
@@ -290,6 +291,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
         "server-owned SQL surface"
     );
     expect_error(db, "SET GLOBAL event_scheduler = ON", "server-owned SQL surface");
+    expect_error(db, "SET PASSWORD = PASSWORD('secret')", "server-owned SQL surface");
     expect_error(db, "SET SQL_LOG_BIN = 1", "server-owned SQL surface");
     expect_error(db, "SET @@GLOBAL.SQL_LOG_BIN = 1", "server-owned SQL surface");
     exec_ok(db, "SET @SQL_LOG_BIN = 1");
@@ -355,6 +357,11 @@ static void assert_server_sql_rejected(mylite_db *db) {
         "server-owned SQL surface"
     );
     expect_prepare_error(db, "SET @@GLOBAL.SQL_LOG_BIN = 1", "server-owned SQL surface");
+    expect_prepare_error(
+        db,
+        "SET PASSWORD = PASSWORD('prepared-secret')",
+        "server-owned SQL surface"
+    );
     expect_prepare_error(db, "HELP SELECT", "server-owned SQL surface");
     expect_prepare_error(
         db,
