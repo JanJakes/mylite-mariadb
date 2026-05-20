@@ -333,6 +333,10 @@ outermost append-buffer semantics while avoiding duplicate statement-chain scans
 Buffered row and index-entry rewrite helpers now use hot inline definitions,
 removing another pair of tiny MyLite-owned leaf calls from the prepared-update
 fast path without changing page bytes or checksum-dirty ownership.
+Prepared row-update execution now threads resolved active live-row and
+row-payload cache pointers through validation and post-update cache maintenance,
+avoiding repeated cache-set scans and filename/catalog comparisons inside the
+same storage update call.
 
 ## Size And Profile Direction
 
