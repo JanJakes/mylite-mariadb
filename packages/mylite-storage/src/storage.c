@@ -6582,12 +6582,15 @@ static mylite_storage_statement *allocate_checkpoint_statement(
     mylite_storage_statement *statement = reusable_nested_checkpoint_statement;
     if (statement != NULL) {
         reusable_nested_checkpoint_statement = NULL;
-    } else {
-        statement = (mylite_storage_statement *)malloc(sizeof(mylite_storage_statement));
+        return statement;
     }
-    if (statement != NULL) {
-        initialize_nested_checkpoint_storage(statement);
+
+    statement = (mylite_storage_statement *)malloc(sizeof(mylite_storage_statement));
+    if (statement == NULL) {
+        return NULL;
     }
+
+    initialize_nested_checkpoint_storage(statement);
     return statement;
 }
 

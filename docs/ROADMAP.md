@@ -265,6 +265,8 @@ instead of a heavier two-multiply finalizer.
 Native little-endian builds now load fixed-width storage fields and store
 32-bit fields with unaligned-safe `memcpy()` fast paths while preserving
 byte-loop fallbacks for other targets and 64-bit stores.
+Reused nested checkpoint objects now skip a second reset when they are taken
+back out of the thread-local reusable slot.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation
