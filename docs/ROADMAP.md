@@ -217,7 +217,9 @@ file/cache statement scopes for row validation and active cache maintenance
 instead of repeatedly walking active statement chains. Active buffered rewrite
 validation now carries append-buffer page refs with checksum-dirty slots through
 undo capture and mutation, avoiding repeated page-range and dirty-slot lookup
-for already-resolved row and changed index-entry pages.
+for already-resolved row and changed index-entry pages. Indexed row lookup now
+reuses the resolved active cache statement across exact-index cache probes and
+row-payload cache reads before update execution.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation
