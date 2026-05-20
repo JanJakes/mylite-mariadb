@@ -185,6 +185,9 @@ key bytes plus any shrunken stale tail instead of rebuilding the whole page
 image before recomputing the page checksum. Buffered row and index-entry undo
 preimages now copy only the meaningful checksummed prefix and restore an
 implicit zero tail, reducing repeated nested-statement rollback bookkeeping.
+Those repeated buffered rewrites now also leave row and index-entry checksums
+dirty until a generic read or buffer flush needs a valid checksum, avoiding
+per-update checksum recomputation while pages remain unpublished.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation
