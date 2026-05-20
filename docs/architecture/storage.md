@@ -428,8 +428,8 @@ span-based checksum stream so corruption in unused bytes remains detectable.
 Large overflow payload updates keep the existing per-page writer until blob
 payload batching has its own design. Active checkpoints keep a
 bounded transient append-page buffer for those contiguous unpublished page
-runs. The current performance profile uses a 4096-page window, which is 16 MiB
-at the 4096-byte page size. Nested statement commits inside a durable
+runs. The current performance profile uses a 32768-page window, which is
+128 MiB at the 4096-byte page size. Nested statement commits inside a durable
 transaction can accumulate into the outer checkpoint, readers in the same
 checkpoint consult the buffer before the primary file, top-level commit flushes
 it before publishing page `0`, and rollback flushes any retained prefix before

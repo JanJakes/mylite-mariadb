@@ -350,6 +350,9 @@ rediscovery on prepared row-DML loops.
 Active live-row caches now keep hash-backed row-id membership for larger live
 and payload-validated row-id sets, while small nested statement caches stay on
 the cheaper linear path.
+The transient active append-page buffer now uses a 32768-page window, keeping a
+10k-row replacement generation resident for repeated update rewrites at the
+cost of a 128 MiB worst-case per-checkpoint memory window.
 
 ## Size And Profile Direction
 
