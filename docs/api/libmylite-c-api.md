@@ -124,13 +124,14 @@ storage under the database directory: `--datadir=<db>/datadir`,
 `--aria-log-dir-path=<db>/datadir`. InnoDB data, redo, undo, and temporary
 paths are also pinned under `datadir/` and `tmp/`. Server topology and account
 surfaces are disabled with startup options such as `--skip-grant-tables`,
-`--skip-networking`, `--skip-log-bin`, `--skip-slave-start`, and
-`--performance-schema=OFF`. The final close removes `run/` and clears
-temporary files under `tmp/`; durable metadata and table files remain in
-`datadir/`. `mylite.lock` is an advisory lock anchor and may remain after close
-or process exit. A clean open replaces stale inactive `run/` state after taking
-the directory lock. `mylite_open_config.temp_directory` is currently used only
-by the `:memory:` bootstrap path.
+`--skip-networking`, `--skip-log-bin`, and `--skip-slave-start`; Performance
+Schema is omitted by the default build profile or disabled when a custom build
+includes it. The final close removes `run/` and clears temporary files under
+`tmp/`; durable metadata and table files remain in `datadir/`. `mylite.lock` is
+an advisory lock anchor and may remain after close or process exit. A clean
+open replaces stale inactive `run/` state after taking the directory lock.
+`mylite_open_config.temp_directory` is currently used only by the `:memory:`
+bootstrap path.
 
 ## Direct Execution
 

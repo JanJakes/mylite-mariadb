@@ -47,6 +47,13 @@ typedef struct root_entries {
 static void test_server_surfaces_are_disabled_or_contained(void);
 static mylite_db *open_database(open_database_paths paths);
 static void assert_runtime_policy_variables(mylite_db *db, const char *database_path);
+static void assert_performance_schema_omitted_or_disabled(mylite_db *db);
+static int performance_schema_variable_callback(
+    void *ctx,
+    int column_count,
+    char **values,
+    char **column_names
+);
 static void assert_server_sql_rejected(mylite_db *db);
 static void assert_no_server_sidecar_files(const char *database_path);
 static void assert_test_root_contains_only_database_and_runtime(root_entries entries);
@@ -140,11 +147,10 @@ static mylite_db *open_database(open_database_paths paths) {
 static void assert_runtime_policy_variables(mylite_db *db, const char *database_path) {
     static const char *const variable_columns[] = {
         "log_bin",
-        "performance_schema",
         "skip_grant_tables",
         "skip_networking",
     };
-    static const char *const variable_values[] = {"0", "0", "1", "1"};
+    static const char *const variable_values[] = {"0", "1", "1"};
     char *plugin_directory = path_join(database_path, "run/plugins");
 
     query_expect(
@@ -152,15 +158,15 @@ static void assert_runtime_policy_variables(mylite_db *db, const char *database_
         (expected_query){
             .sql = "SELECT "
                    "@@log_bin AS log_bin, "
-                   "@@performance_schema AS performance_schema, "
                    "@@skip_grant_tables AS skip_grant_tables, "
                    "@@skip_networking AS skip_networking",
-            .column_count = 4,
+            .column_count = 3,
             .row_count = 1,
             .column_names = variable_columns,
             .values = variable_values,
         }
     );
+    assert_performance_schema_omitted_or_disabled(db);
     query_single_value_contains(
         db,
         "SELECT @@plugin_dir AS plugin_dir",
@@ -170,6 +176,43 @@ static void assert_runtime_policy_variables(mylite_db *db, const char *database_
 
     free(plugin_directory);
 }
+
+static void assert_performance_schema_omitted_or_disabled(mylite_db *db) {
+    int seen_rows = 0;
+
+    assert(
+        mylite_exec(
+            db,
+            "SHOW VARIABLES LIKE 'performance_schema'",
+            performance_schema_variable_callback,
+            &seen_rows,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(seen_rows <= 1);
+}
+
+// NOLINTBEGIN(bugprone-easily-swappable-parameters): required callback signature.
+static int performance_schema_variable_callback(
+    void *ctx,
+    int column_count,
+    char **values,
+    char **column_names
+) {
+    int *seen_rows = (int *)ctx;
+
+    assert(column_count == 2);
+    assert(strcmp(column_names[0], "Variable_name") == 0);
+    assert(strcmp(column_names[1], "Value") == 0);
+    assert(values[0] != NULL);
+    assert(values[1] != NULL);
+    assert(strcmp(values[0], "performance_schema") == 0);
+    assert(strcmp(values[1], "OFF") == 0 || strcmp(values[1], "0") == 0);
+    ++(*seen_rows);
+    return 0;
+}
+
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
 static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "CREATE DATABASE app");

@@ -32,6 +32,7 @@ WITH_ZLIB=bundled
 WITH_UNIT_TESTS=OFF
 WITH_WSREP=OFF
 PLUGIN_S3=NO
+PLUGIN_PERFSCHEMA=NO
 ```
 
 `WITH_ZLIB=bundled` prevents the system zlib lookup from adding the macOS SDK
@@ -40,6 +41,10 @@ bundled zlib objects, so `libmylite` does not add a separate host zlib link.
 `WITH_WSREP=OFF` and
 `PLUGIN_S3=NO` are required because the initial MariaDB import intentionally
 omits `wsrep-lib` and `storage/maria/libmarias3`.
+`PLUGIN_PERFSCHEMA=NO` removes the unused Performance Schema static plugin
+from the embedded archive. If a custom MariaDB build includes Performance
+Schema, MyLite still passes `--performance-schema=OFF`; otherwise the omitted
+plugin is the disabled contract.
 
 ## Measurement
 
@@ -55,12 +60,16 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 33,129,640 bytes / 31.59 MiB |
-| Archive members | 822 |
+| Archive size | 31,529,704 bytes / 30.07 MiB |
+| Archive members | 712 |
 
-The pre-strip archive for the same build was 33,842,320 bytes / 32.27 MiB.
-Post-build `strip -S -x` plus `ranlib` saved 712,680 bytes without changing
-archive membership or runtime behavior.
+The original broad archive before safe size hardening was 33,842,320 bytes /
+32.27 MiB. With the unused Performance Schema static plugin disabled, the
+pre-strip archive is 32,201,416 bytes / 30.71 MiB. Post-build `strip -S -x`
+plus `ranlib` saves another 671,712 bytes without changing archive membership
+or runtime behavior. The final archive is 1,599,936 bytes smaller than the
+symbol-stripped baseline that still built Performance Schema, and 2,312,616
+bytes smaller than the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
 GSSAPI, BZip2, LZ4, LibLZMA, LZO, PCRE2, and Zstandard support on this
@@ -77,7 +86,6 @@ library and static embedded engines/plugins such as:
 - HEAP/MEMORY
 - InnoDB
 - MyISAM and MRG_MyISAM
-- Performance Schema
 - Sequence and partition support
 - selected static server plugins such as auth socket, feedback, type handlers,
   user variables, userstat, and thread-pool info
@@ -87,8 +95,9 @@ CONNECT, Example, Federated, FederatedX, Mroonga, Sphinx, Spider, and many
 server plugins. The `libmariadbd.a` target does not build every configured
 module, but the enabled list is still important size-profile evidence because
 future profile hardening should disable unwanted surfaces intentionally.
-Performance Schema is listed here as archive content; the server-surface policy
-turns it off at runtime with `--performance-schema=OFF`.
+Performance Schema is not part of the default embedded archive; the
+server-surface policy treats it as either omitted by the build profile or
+disabled when a custom build includes it.
 
 ## Disabled Or Missing Surface
 
@@ -96,6 +105,7 @@ The baseline explicitly disables:
 
 - WSREP/Galera
 - Aria S3 support
+- Performance Schema
 - MariaDB upstream unit-test targets
 
 Configure also reports unavailable optional features on this host, including

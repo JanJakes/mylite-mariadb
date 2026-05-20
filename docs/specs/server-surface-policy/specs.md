@@ -25,8 +25,9 @@ those boundaries explicit and covered by tests.
   installation is still server-owned behavior and should not be exposed through
   the core API.
 - `mariadb/sql/sys_vars.cc` exposes `log_bin`, `skip_grant_tables`,
-  `skip_networking`, `performance_schema`, and `plugin_dir`. MyLite can prove
-  these startup choices through SQL variables in the embedded harness.
+  `skip_networking`, and `plugin_dir`. It exposes `performance_schema` only
+  when MariaDB is built with the Performance Schema storage engine. MyLite can
+  prove these startup choices through SQL variables in the embedded harness.
 - `mariadb/sql/sql_repl.cc` implements replication commands such as
   `CHANGE MASTER` and `START SLAVE`, which can depend on replication metadata
   files and server topology state.
@@ -43,7 +44,7 @@ Use two layers:
    - `--skip-networking`,
    - `--skip-log-bin`,
    - `--skip-slave-start`,
-   - `--performance-schema=OFF`,
+   - `--performance-schema=OFF` when the MariaDB build exposes that option,
    - `--plugin-dir=<db>/run/plugins`.
 2. Add a conservative MyLite SQL policy gate before direct execution and
    prepared-statement preparation for command families that are server-owned:

@@ -2189,7 +2189,9 @@ std::vector<std::string> runtime_arguments(const RuntimeLayout &layout) {
         "--skip-slave-start",
         "--skip-grant-tables",
         "--skip-networking",
+#  ifdef WITH_PERFSCHEMA_STORAGE_ENGINE
         "--performance-schema=OFF",
+#  endif
         "--default-storage-engine=MyISAM",
         std::string("--lc-messages-dir=") + MYLITE_MARIADB_MESSAGES_DIR,
         std::string("--character-sets-dir=") + MYLITE_MARIADB_CHARSETS_DIR,

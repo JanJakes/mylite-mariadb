@@ -74,10 +74,11 @@ The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 `--aria-log-dir-path=app.mylite/datadir`. InnoDB data, redo, undo, and
 temporary paths are also pinned under `datadir/` and `tmp/`. Startup disables
 server-owned topology and instrumentation surfaces with `--skip-grant-tables`,
-`--skip-networking`, `--skip-log-bin`, `--skip-slave-start`, and
-`--performance-schema=OFF`. Clean shutdown removes `run/` and clears temporary
-files under `tmp/`; durable native storage remains in `datadir/`. `mylite.lock`
-remains as a stable lock anchor.
+`--skip-networking`, `--skip-log-bin`, and `--skip-slave-start`; Performance
+Schema is omitted by the default build profile or disabled when a custom build
+includes it. Clean shutdown removes `run/` and clears temporary files under
+`tmp/`; durable native storage remains in `datadir/`. `mylite.lock` remains as
+a stable lock anchor.
 
 Format 1 uses `mylite.meta` as the directory identity marker:
 
