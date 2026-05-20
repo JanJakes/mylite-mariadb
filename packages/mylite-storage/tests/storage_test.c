@@ -119,6 +119,7 @@ static void test_active_live_row_list_maintenance(void);
 static void test_index_entries(void);
 static void test_cached_exact_index_entryset_bulk_append(void);
 static void test_active_exact_index_cache_many_replacements(void);
+static void test_large_append_buffer_savepoint_rollback(void);
 static void test_indexed_row_batch_cache_reuses_duplicates(void);
 static void test_index_root_metadata(void);
 static void test_index_leaf_pages(void);
@@ -392,6 +393,7 @@ int main(void) {
     test_index_entries();
     test_cached_exact_index_entryset_bulk_append();
     test_active_exact_index_cache_many_replacements();
+    test_large_append_buffer_savepoint_rollback();
     test_indexed_row_batch_cache_reuses_duplicates();
     test_index_root_metadata();
     test_index_leaf_pages();
@@ -2534,6 +2536,204 @@ static void test_active_exact_index_cache_many_replacements(void) {
         live_replacement_row_ids,
         live_count
     );
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_large_append_buffer_savepoint_rollback(void) {
+    enum { ROW_COUNT = 560, SAVEPOINT_UPDATE_COUNT = 24 };
+
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    unsigned char primary_keys[ROW_COUNT][3];
+    unsigned char initial_secondary_keys[ROW_COUNT][3];
+    unsigned char middle_secondary_keys[ROW_COUNT][3];
+    unsigned char final_secondary_keys[SAVEPOINT_UPDATE_COUNT][3];
+    unsigned char initial_rows[ROW_COUNT][4];
+    unsigned char middle_rows[ROW_COUNT][4];
+    unsigned char final_rows[SAVEPOINT_UPDATE_COUNT][4];
+    unsigned long long row_ids[ROW_COUNT] = {0};
+    unsigned long long middle_row_ids[ROW_COUNT] = {0};
+    unsigned long long final_row_ids[SAVEPOINT_UPDATE_COUNT] = {0};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "large-append-buffer-savepoint-rollback.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_statement *transaction = NULL;
+    mylite_storage_statement *savepoint = NULL;
+    unsigned long long row_count = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    for (size_t i = 0U; i < ROW_COUNT; ++i) {
+        primary_keys[i][0] = 0x10U;
+        primary_keys[i][1] = (unsigned char)(i >> 8U);
+        primary_keys[i][2] = (unsigned char)i;
+        initial_secondary_keys[i][0] = 0x20U;
+        initial_secondary_keys[i][1] = (unsigned char)(i >> 8U);
+        initial_secondary_keys[i][2] = (unsigned char)i;
+        middle_secondary_keys[i][0] = 0x40U;
+        middle_secondary_keys[i][1] = (unsigned char)(i >> 8U);
+        middle_secondary_keys[i][2] = (unsigned char)i;
+        initial_rows[i][0] = 0x00U;
+        initial_rows[i][1] = (unsigned char)(i >> 8U);
+        initial_rows[i][2] = (unsigned char)i;
+        initial_rows[i][3] = 0x21U;
+        middle_rows[i][0] = 0x00U;
+        middle_rows[i][1] = (unsigned char)(i >> 8U);
+        middle_rows[i][2] = (unsigned char)i;
+        middle_rows[i][3] = 0x41U;
+
+        mylite_storage_index_entry entries[] = {
+            {.size = sizeof(entries[0]),
+             .index_number = 0U,
+             .key = primary_keys[i],
+             .key_size = sizeof(primary_keys[i])},
+            {.size = sizeof(entries[1]),
+             .index_number = 1U,
+             .key = initial_secondary_keys[i],
+             .key_size = sizeof(initial_secondary_keys[i])},
+        };
+        assert(
+            mylite_storage_append_row_with_index_entries(
+                filename,
+                "app",
+                "posts",
+                initial_rows[i],
+                sizeof(initial_rows[i]),
+                entries,
+                sizeof(entries) / sizeof(entries[0]),
+                &row_ids[i]
+            ) == MYLITE_STORAGE_OK
+        );
+    }
+
+    assert(mylite_storage_begin_transaction(filename, &transaction) == MYLITE_STORAGE_OK);
+    for (size_t i = 0U; i < ROW_COUNT; ++i) {
+        mylite_storage_index_entry replacement_entries[] = {
+            {.size = sizeof(replacement_entries[0]),
+             .index_number = 0U,
+             .key = primary_keys[i],
+             .key_size = sizeof(primary_keys[i])},
+            {.size = sizeof(replacement_entries[1]),
+             .index_number = 1U,
+             .key = middle_secondary_keys[i],
+             .key_size = sizeof(middle_secondary_keys[i])},
+        };
+        assert(
+            mylite_storage_update_row_with_index_entries(
+                filename,
+                "app",
+                "posts",
+                row_ids[i],
+                middle_rows[i],
+                sizeof(middle_rows[i]),
+                replacement_entries,
+                sizeof(replacement_entries) / sizeof(replacement_entries[0]),
+                &middle_row_ids[i]
+            ) == MYLITE_STORAGE_OK
+        );
+    }
+
+    assert_find_indexed_row_not_found(
+        filename,
+        1U,
+        initial_secondary_keys[0],
+        sizeof(initial_secondary_keys[0])
+    );
+    assert_find_indexed_row_equals(
+        filename,
+        1U,
+        middle_secondary_keys[ROW_COUNT - 1U],
+        sizeof(middle_secondary_keys[ROW_COUNT - 1U]),
+        middle_row_ids[ROW_COUNT - 1U],
+        middle_rows[ROW_COUNT - 1U],
+        sizeof(middle_rows[ROW_COUNT - 1U])
+    );
+
+    assert(mylite_storage_begin_statement(filename, &savepoint) == MYLITE_STORAGE_OK);
+    for (size_t i = 0U; i < SAVEPOINT_UPDATE_COUNT; ++i) {
+        final_secondary_keys[i][0] = 0x60U;
+        final_secondary_keys[i][1] = (unsigned char)(i >> 8U);
+        final_secondary_keys[i][2] = (unsigned char)i;
+        final_rows[i][0] = 0x00U;
+        final_rows[i][1] = (unsigned char)(i >> 8U);
+        final_rows[i][2] = (unsigned char)i;
+        final_rows[i][3] = 0x61U;
+        mylite_storage_index_entry replacement_entries[] = {
+            {.size = sizeof(replacement_entries[0]),
+             .index_number = 0U,
+             .key = primary_keys[i],
+             .key_size = sizeof(primary_keys[i])},
+            {.size = sizeof(replacement_entries[1]),
+             .index_number = 1U,
+             .key = final_secondary_keys[i],
+             .key_size = sizeof(final_secondary_keys[i])},
+        };
+        assert(
+            mylite_storage_update_row_with_index_entries(
+                filename,
+                "app",
+                "posts",
+                middle_row_ids[i],
+                final_rows[i],
+                sizeof(final_rows[i]),
+                replacement_entries,
+                sizeof(replacement_entries) / sizeof(replacement_entries[0]),
+                &final_row_ids[i]
+            ) == MYLITE_STORAGE_OK
+        );
+    }
+    assert_find_indexed_row_equals(
+        filename,
+        1U,
+        final_secondary_keys[SAVEPOINT_UPDATE_COUNT - 1U],
+        sizeof(final_secondary_keys[SAVEPOINT_UPDATE_COUNT - 1U]),
+        final_row_ids[SAVEPOINT_UPDATE_COUNT - 1U],
+        final_rows[SAVEPOINT_UPDATE_COUNT - 1U],
+        sizeof(final_rows[SAVEPOINT_UPDATE_COUNT - 1U])
+    );
+
+    assert(mylite_storage_rollback_statement(savepoint) == MYLITE_STORAGE_OK);
+    assert_find_indexed_row_not_found(
+        filename,
+        1U,
+        final_secondary_keys[SAVEPOINT_UPDATE_COUNT - 1U],
+        sizeof(final_secondary_keys[SAVEPOINT_UPDATE_COUNT - 1U])
+    );
+    assert_find_indexed_row_equals(
+        filename,
+        1U,
+        middle_secondary_keys[SAVEPOINT_UPDATE_COUNT - 1U],
+        sizeof(middle_secondary_keys[SAVEPOINT_UPDATE_COUNT - 1U]),
+        middle_row_ids[SAVEPOINT_UPDATE_COUNT - 1U],
+        middle_rows[SAVEPOINT_UPDATE_COUNT - 1U],
+        sizeof(middle_rows[SAVEPOINT_UPDATE_COUNT - 1U])
+    );
+    assert_file_size_matches_header(filename);
+
+    assert(mylite_storage_commit_statement(transaction) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
+    assert(row_count == ROW_COUNT);
+    assert_find_indexed_row_equals(
+        filename,
+        1U,
+        middle_secondary_keys[ROW_COUNT - 1U],
+        sizeof(middle_secondary_keys[ROW_COUNT - 1U]),
+        middle_row_ids[ROW_COUNT - 1U],
+        middle_rows[ROW_COUNT - 1U],
+        sizeof(middle_rows[ROW_COUNT - 1U])
+    );
+    assert_file_size_matches_header(filename);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);

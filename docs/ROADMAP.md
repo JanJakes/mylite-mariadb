@@ -158,9 +158,10 @@ common inline update path now writes replacement row, row-state, and
 replacement index-entry pages as one contiguous append run, reducing per-update
 write syscall overhead without changing the durable page format. Active
 checkpoints now buffer bounded contiguous append runs across nested statement
-commits and flush them before top-level header publication, reducing large
-transaction update syscall overhead while preserving savepoint rollback by
-flushing retained prefixes before truncation. Capacity failures from physical
+commits with a 4 MiB transient flush window and flush them before top-level
+header publication, reducing large transaction update syscall overhead while
+preserving savepoint rollback by flushing retained prefixes before truncation.
+Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation
 now surface as storage-full errors instead of crashed-table I/O errors. Fresh
 page encoders now compute the same full-page FNV checksum by hashing the
