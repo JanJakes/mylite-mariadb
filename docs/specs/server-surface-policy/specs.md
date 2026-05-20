@@ -4,7 +4,8 @@
 
 MyLite's core API is an embedded, directory-owned database runtime. Server-owned
 surfaces such as account management, dynamic plugin installation, replication,
-binlog inspection, and event scheduling do not fit that lifetime model and can
+binlog inspection, event scheduling, and server help-table lookup do not fit
+that lifetime model and can
 also create durable sidecar files or system-table dependencies. This slice makes
 those boundaries explicit and covered by tests.
 
@@ -13,9 +14,9 @@ those boundaries explicit and covered by tests.
 - Base ref: MariaDB `mariadb-11.8.6`
   (`9bfea48ce1214cc4470f6f6f8a4e30352cef84e7`).
 - `mariadb/sql/sql_yacc.yy` maps account, plugin, replication, binlog, and
-  event statements to distinct command families, including `CREATE USER`,
-  `GRANT`, `INSTALL PLUGIN`, `CHANGE MASTER`, `START SLAVE`,
-  `SHOW BINARY LOGS`, and `CREATE EVENT`.
+  event and help statements to distinct command families, including
+  `CREATE USER`, `GRANT`, `INSTALL PLUGIN`, `CHANGE MASTER`, `START SLAVE`,
+  `SHOW BINARY LOGS`, `CREATE EVENT`, and `HELP`.
 - `mariadb/sql/sql_acl.cc` contains several `--skip-grant-tables` checks, but
   embedded startup without system grant tables does not reject every account
   command before execution. MyLite must therefore gate account SQL families
@@ -49,8 +50,8 @@ Use two layers:
 2. Add a conservative MyLite SQL policy gate before direct execution and
    prepared-statement preparation for command families that are server-owned:
    users, roles, grants, password changes, dynamic plugins, events, replication,
-   binlog administration and inspection, foreign-server metadata, and selected
-   server-surface variables.
+   binlog administration and inspection, foreign-server metadata, SQL help-table
+   lookup, and selected server-surface variables.
 
 The gate is not a general SQL parser. It is a narrow first-token policy check
 for statement families whose top-level MariaDB commands are incompatible with
@@ -62,7 +63,7 @@ MariaDB.
 - ACL and account-management SQL.
 - Dynamic plugin loader.
 - Replication and binlog command paths.
-- Event scheduler command paths.
+- Event scheduler and help-table command paths.
 - Performance schema startup.
 - Embedded startup option handling.
 
@@ -79,9 +80,9 @@ or writing server topology sidecars.
 
 ## DDL Metadata Routing Impact
 
-Application table DDL is unchanged. Server-owned DDL for users, roles, events,
-plugins, and foreign servers is rejected before it can create or depend on
-`mysql.*` metadata tables.
+Application table DDL is unchanged. Server-owned statements for users, roles,
+events, plugins, foreign servers, and SQL help tables are rejected before they
+can create or depend on `mysql.*` metadata tables.
 
 ## Database-Directory And Lifecycle Impact
 
@@ -128,7 +129,7 @@ No new dependencies or license changes.
   binlog command families, including executable-comment wrappers that MariaDB
   treats as SQL and common syntax variants such as `CREATE OR REPLACE`,
   `CREATE DEFINER ... EVENT`, `INSTALL SONAME`, `SET SQL_LOG_BIN`, and
-  `@@GLOBAL` variable assignment.
+  `@@GLOBAL` variable assignment, and `HELP`.
 - Cover rejected prepared SQL for at least one server-owned statement family.
 - Assert server-sidecar files and system-table directories are absent.
 - Run:

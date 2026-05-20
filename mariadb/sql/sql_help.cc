@@ -22,6 +22,23 @@
 #include "opt_range.h"              // SQL_SELECT
 #include "records.h"          // init_read_record, end_read_record
 
+#ifdef EMBEDDED_LIBRARY
+
+bool mysqld_help_prepare(THD *, const char *, List<Item> *)
+{
+  my_error(ER_NOT_SUPPORTED_YET, MYF(0), "HELP");
+  return true;
+}
+
+
+bool mysqld_help(THD *, const char *)
+{
+  my_error(ER_NOT_SUPPORTED_YET, MYF(0), "HELP");
+  return true;
+}
+
+#else
+
 struct st_find_field
 {
   const char *table_name, *field_name;
@@ -1114,3 +1131,5 @@ bool mysqld_help(THD *thd, const char *mask)
   bool rc= mysqld_help_internal(thd, mask);
   return rc;
 }
+
+#endif

@@ -7,7 +7,9 @@ important MySQL/MariaDB behavior. The first safe steps are packaging hygiene,
 size-oriented compilation, and omission of already-disabled server surfaces:
 remove debug and local-symbol metadata from the embedded static archive, build
 the embedded archive with size-oriented release flags, and avoid building the
-unused Performance Schema and Feedback static plugins.
+unused Performance Schema and Feedback static plugins. Server help-table
+lookup is also replaced with an unsupported-command shim because `HELP` is not
+part of the embedded application SQL profile.
 
 ## Source Findings
 
@@ -38,6 +40,8 @@ unused Performance Schema and Feedback static plugins.
 - Disabling the Feedback plugin removes telemetry/reporting code from the
   embedded archive and reduces the stripped archive to 30,359,112 bytes,
   28.95 MiB, and 707 members.
+- Replacing embedded `HELP` execution with unsupported-command stubs reduces
+  the stripped archive to 30,296,952 bytes, 28.89 MiB, and 707 members.
 
 ## Proposed Design
 
@@ -59,15 +63,19 @@ time. Feedback is a server reporting surface, not SQL, type, or storage-engine
 functionality, so omitting it removes low-value embedded code without changing
 the supported runtime contract.
 
+The embedded `sql_help.cc` build keeps only small unsupported-command stubs.
+MyLite rejects `HELP` in the SQL policy before dispatch, and the MariaDB stubs
+preserve fail-closed behavior if the policy is bypassed.
+
 The wrapper keeps this behavior enabled by default because it is the
 distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
 need an unstripped archive for local inspection.
 
 ## Affected MariaDB Subsystems
 
-No MariaDB source files are changed. The Performance Schema storage-engine
-plugin and Feedback reporting plugin are omitted by CMake configuration, and
-the compiled objects use size-oriented release flags.
+The Performance Schema storage-engine plugin and Feedback reporting plugin are
+omitted by CMake configuration, embedded `HELP` is compiled to stubs, and the
+compiled objects use size-oriented release flags.
 
 ## Compatibility Impact
 
@@ -75,7 +83,8 @@ No application compatibility impact is expected. This slice does not remove SQL
 syntax, functions, data types, collations, supported storage engines,
 diagnostics, or public C API behavior. Performance Schema remains outside the
 core embedded profile, and Feedback reporting is not part of the embedded
-runtime contract.
+runtime contract. SQL `HELP` is a server help-table surface and is explicitly
+unsupported in the embedded profile.
 
 ## Database-Directory And Lifecycle Impact
 
@@ -95,10 +104,11 @@ run against the same native engine members.
 
 The first step is archive-only: 712,680 bytes from debug/local-symbol
 stripping. Disabling Performance Schema removes unused static plugin members.
-Switching the same profile to `MinSizeRel` and omitting Feedback brings the
-current archive to 30,359,112 bytes / 28.95 MiB, 1,170,592 bytes smaller than
-the Release build with Performance Schema disabled and 2,770,528 bytes smaller
-than the symbol-stripped baseline with Performance Schema still built.
+Switching the same profile to `MinSizeRel`, omitting Feedback, and compiling
+embedded `HELP` to stubs brings the current archive to 30,296,952 bytes / 28.89
+MiB, 1,232,752 bytes smaller than the Release build with Performance Schema
+disabled and 2,832,688 bytes smaller than the symbol-stripped baseline with
+Performance Schema still built.
 
 ## License Or Dependency Impact
 
@@ -126,6 +136,7 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Performance Schema is omitted from the embedded archive and remains omitted
   or disabled at runtime.
 - Feedback reporting is omitted from the embedded archive.
+- SQL `HELP` fails through the MyLite policy and the embedded MariaDB stub.
 - The stripped archive still links `libmylite` and all embedded tests.
 - The measured archive size and member count are recorded in the build
   documentation.

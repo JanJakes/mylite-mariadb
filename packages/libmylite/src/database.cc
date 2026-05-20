@@ -236,6 +236,7 @@ bool is_unsupported_account_or_event_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_plugin_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_replication_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_binlog_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_help_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_server_set_statement(const SqlPolicyTokens &tokens);
 SqlPolicyTokens collect_sql_policy_tokens(std::string_view sql);
 bool next_sql_token(std::string_view sql, std::size_t &offset, std::string_view &token);
@@ -1071,7 +1072,8 @@ bool is_unsupported_server_surface_sql(std::string_view sql) {
     return is_unsupported_account_or_event_statement(tokens) ||
            is_unsupported_plugin_statement(tokens) ||
            is_unsupported_replication_statement(tokens) ||
-           is_unsupported_binlog_statement(tokens) || is_unsupported_server_set_statement(tokens);
+           is_unsupported_binlog_statement(tokens) || is_unsupported_help_statement(tokens) ||
+           is_unsupported_server_set_statement(tokens);
 }
 
 bool is_unsupported_account_or_event_statement(const SqlPolicyTokens &tokens) {
@@ -1148,6 +1150,10 @@ bool is_unsupported_binlog_statement(const SqlPolicyTokens &tokens) {
         return true;
     }
     return token_equals(first, "PURGE") && token_in(second, "BINARY", "MASTER");
+}
+
+bool is_unsupported_help_statement(const SqlPolicyTokens &tokens) {
+    return token_equals(identifier_token_at(tokens, 0), "HELP");
 }
 
 bool is_unsupported_server_set_statement(const SqlPolicyTokens &tokens) {

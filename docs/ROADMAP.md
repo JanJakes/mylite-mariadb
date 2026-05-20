@@ -54,9 +54,10 @@ The minimal embedded build establishes the first baseline. Later slices record
 meaningful size changes when they add or remove runtime surface.
 The first safe hardening steps use size-oriented release flags, strip debug and
 local-symbol metadata from the embedded static archive, and omit unused
-Performance Schema and Feedback static plugins without removing supported
-runtime functionality. Compatibility-sensitive code removals require separate
-evidence before they are accepted.
+Performance Schema and Feedback static plugins. Server help-table lookup is
+stubbed only after policy coverage proves `HELP` is outside the embedded
+application SQL profile. Compatibility-sensitive code removals require
+separate evidence before they are accepted.
 
 Historical branch-level size research is archived in
 [Bundle size reduction attempts](architecture/bundle-size-research.md). Treat

@@ -302,6 +302,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_error(db, "FLUSH BINARY LOGS", "server-owned SQL surface");
     expect_error(db, "SHOW BINARY LOGS", "server-owned SQL surface");
     expect_error(db, "SHOW BINLOG EVENTS", "server-owned SQL surface");
+    expect_error(db, "HELP SELECT", "server-owned SQL surface");
     expect_prepare_error(
         db,
         "CREATE USER 'prepared_user'@'localhost' IDENTIFIED BY 'secret'",
@@ -313,6 +314,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
         "server-owned SQL surface"
     );
     expect_prepare_error(db, "SET @@GLOBAL.SQL_LOG_BIN = 1", "server-owned SQL surface");
+    expect_prepare_error(db, "HELP SELECT", "server-owned SQL surface");
 }
 
 static void assert_no_server_sidecar_files(const char *database_path) {

@@ -96,6 +96,7 @@ behavior. It does not require a daemon in the default test path.
 | Users, grants, and password auth | ➖&nbsp;Out&nbsp;of&nbsp;scope | Local embedded directory ownership replaces server account management; account, role, grant, revoke, and password statements are rejected by policy coverage |
 | Replication and binlog | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server topology feature, not core library behavior; replication and binlog command families are rejected and `@@log_bin=0` is covered |
 | Dynamic plugin installation | ➖&nbsp;Out&nbsp;of&nbsp;scope | The embedded core uses a transient database-local plugin directory and rejects `INSTALL PLUGIN` / `UNINSTALL PLUGIN` through policy coverage |
+| SQL `HELP` | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server help-table lookup depends on `mysql.*` help tables and is rejected by policy coverage |
 
 ## Rows, Indexes, And Constraints
 
