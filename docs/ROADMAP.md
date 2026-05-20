@@ -196,6 +196,9 @@ bytes plus any shrunken stale tail instead of rebuilding the whole page image
 before recomputing the page checksum. Buffered row and index-entry undo
 preimages now copy only the meaningful checksummed prefix and restore an
 implicit zero tail, reducing repeated nested-statement rollback bookkeeping.
+Active buffered row and changed index-entry rewrites now pass typed prefix
+sizes into undo capture, avoiding generic page-type rediscovery before copying
+those rollback preimages.
 Those repeated buffered rewrites now also leave row and index-entry checksums
 dirty until a generic read or buffer flush needs a valid checksum, avoiding
 per-update checksum recomputation while pages remain unpublished. The hot

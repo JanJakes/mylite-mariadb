@@ -465,13 +465,15 @@ index-entry pages directly in the active append buffer, refreshing only the
 mutable payload/key bytes and any stale shrunken tail, and capturing
 per-statement preimages first when rollback needs them. Row and index-entry
 preimages store only the meaningful checksummed prefix plus an implicit zero
-tail, while other page types keep full-page undo. Rewritten buffered row and
-index-entry pages mark their checksums dirty and refresh them only before a
-generic checksum-validating read or append-buffer flush, so repeated in-memory
-rewrites do not rehash the same pages on every update. The same rewrite path
-resolves the append-buffer owner once and passes that statement through local
-page, range, undo, and dirty-flag helpers instead of scanning active statements
-for every buffered-page access.
+tail, while other page types keep full-page undo. The active row/index rewrite
+path passes typed prefix sizes into undo capture instead of rediscovering the
+page type from the full preimage. Rewritten buffered row and index-entry pages
+mark their checksums dirty and refresh them only before a generic
+checksum-validating read or append-buffer flush, so repeated in-memory rewrites
+do not rehash the same pages on every update. The same rewrite path resolves
+the append-buffer owner once and passes that statement through local page,
+range, undo, and dirty-flag helpers instead of scanning active statements for
+every buffered-page access.
 The generic buffered read and write helpers still copy pages for other callers,
 and durable reads keep full page checksum validation. Already-flushed
 replacement runs keep the append-only path until a logged page-rewrite design

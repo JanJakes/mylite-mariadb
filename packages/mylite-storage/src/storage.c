@@ -855,11 +855,14 @@ static int buffered_append_page_range_contains_in_statement(
     unsigned long long first_page_id,
     unsigned long long page_count
 );
-static mylite_storage_result capture_buffered_page_undo(
+static mylite_storage_result capture_buffered_page_undo_with_used_size(
     mylite_storage_statement *statement,
     mylite_storage_statement *buffer_statement,
-    unsigned long long page_id
+    unsigned long long page_id,
+    size_t used_size
 );
+static size_t buffered_row_page_undo_used_size(const unsigned char *page);
+static size_t buffered_index_entry_page_undo_used_size(const unsigned char *page);
 static size_t buffered_page_undo_used_size(const unsigned char *page);
 static int buffered_update_rewrite_row_state_known(
     mylite_storage_statement *statement,
@@ -8751,10 +8754,11 @@ static int buffered_append_page_range_contains_in_statement(
     return first_page_id + page_count <= buffered_end ? 1 : 0;
 }
 
-static mylite_storage_result capture_buffered_page_undo(
+static mylite_storage_result capture_buffered_page_undo_with_used_size(
     mylite_storage_statement *statement,
     mylite_storage_statement *buffer_statement,
-    unsigned long long page_id
+    unsigned long long page_id,
+    size_t used_size
 ) {
     if (statement == NULL || page_id >= statement->header.page_count) {
         return MYLITE_STORAGE_OK;
@@ -8801,25 +8805,39 @@ static mylite_storage_result capture_buffered_page_undo(
         page_id,
         MYLITE_STORAGE_FORMAT_PAGE_SIZE
     );
-    undo->used_size = buffered_page_undo_used_size(page);
+    if (used_size == 0U) {
+        used_size = buffered_page_undo_used_size(page);
+    } else if (used_size > MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+        used_size = MYLITE_STORAGE_FORMAT_PAGE_SIZE;
+    }
+    undo->used_size = used_size;
     memcpy(undo->page, page, undo->used_size);
     ++statement->buffered_page_undos.count;
     return MYLITE_STORAGE_OK;
 }
 
+static size_t buffered_row_page_undo_used_size(const unsigned char *page) {
+    const size_t row_size = get_u32_le(page, MYLITE_STORAGE_FORMAT_ROW_RECORD_SIZE_OFFSET);
+    if (row_size <= MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET) {
+        return MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET + row_size;
+    }
+    return MYLITE_STORAGE_FORMAT_PAGE_SIZE;
+}
+
+static size_t buffered_index_entry_page_undo_used_size(const unsigned char *page) {
+    const size_t key_size = get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_KEY_SIZE_OFFSET);
+    if (key_size <= MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET) {
+        return MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET + key_size;
+    }
+    return MYLITE_STORAGE_FORMAT_PAGE_SIZE;
+}
+
 static size_t buffered_page_undo_used_size(const unsigned char *page) {
     if (is_row_page(page)) {
-        const size_t row_size = get_u32_le(page, MYLITE_STORAGE_FORMAT_ROW_RECORD_SIZE_OFFSET);
-        if (row_size <=
-            MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET) {
-            return MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET + row_size;
-        }
+        return buffered_row_page_undo_used_size(page);
     }
     if (is_index_entry_page(page)) {
-        const size_t key_size = get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_KEY_SIZE_OFFSET);
-        if (key_size <= MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET) {
-            return MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET + key_size;
-        }
+        return buffered_index_entry_page_undo_used_size(page);
     }
     return MYLITE_STORAGE_FORMAT_PAGE_SIZE;
 }
@@ -11970,7 +11988,12 @@ static mylite_storage_result rewrite_active_update_pages(
         );
     }
 
-    result = capture_buffered_page_undo(statement, buffer_statement, row_id);
+    result = capture_buffered_page_undo_with_used_size(
+        statement,
+        buffer_statement,
+        row_id,
+        buffered_row_page_undo_used_size(current_page)
+    );
     if (result != MYLITE_STORAGE_OK) {
         goto done;
     }
@@ -11994,10 +12017,11 @@ static mylite_storage_result rewrite_active_update_pages(
             continue;
         }
 
-        result = capture_buffered_page_undo(
+        result = capture_buffered_page_undo_with_used_size(
             statement,
             buffer_statement,
-            first_index_page_id + (unsigned long long)changed_index
+            first_index_page_id + (unsigned long long)changed_index,
+            buffered_index_entry_page_undo_used_size(page)
         );
         if (result != MYLITE_STORAGE_OK) {
             break;
