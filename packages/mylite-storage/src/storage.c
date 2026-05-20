@@ -443,6 +443,7 @@ struct mylite_storage_statement {
     unsigned long long current_catalog_generation;
     int has_header_page;
     int owns_file;
+    int owns_filename;
     int has_current_header;
     int current_header_dirty;
     int has_current_catalog_page;
@@ -6032,6 +6033,7 @@ mylite_storage_result mylite_storage_begin_read_statement(
         free(statement);
         return MYLITE_STORAGE_NOMEM;
     }
+    statement->owns_filename = 1;
     statement->owner = active_context_owner;
     statement->parent = active_read_statement;
 
@@ -6402,10 +6404,16 @@ static mylite_storage_result begin_checkpoint(
         return MYLITE_STORAGE_NOMEM;
     }
 
-    statement->filename = copy_filename(filename);
-    if (statement->filename == NULL) {
-        free(statement);
-        return MYLITE_STORAGE_NOMEM;
+    if (parent != NULL) {
+        statement->filename = parent->filename;
+        statement->owns_filename = 0;
+    } else {
+        statement->filename = copy_filename(filename);
+        if (statement->filename == NULL) {
+            free(statement);
+            return MYLITE_STORAGE_NOMEM;
+        }
+        statement->owns_filename = 1;
     }
     statement->owner = active_context_owner;
 
@@ -8404,7 +8412,9 @@ static void free_statement(mylite_storage_statement *statement) {
     clear_append_page_buffer(statement);
     clear_buffered_page_undos(statement);
     clear_buffered_update_rewrites(statement);
-    free(statement->filename);
+    if (statement->owns_filename) {
+        free(statement->filename);
+    }
     free(statement);
 }
 
