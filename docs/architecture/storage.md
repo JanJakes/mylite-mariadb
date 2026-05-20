@@ -79,7 +79,10 @@ tombstone-aware replacement and swap-removal, so changing a cached old row id to
 its replacement row id does not rebuild the full bucket table on every update.
 The active cache keeps a larger small-row working set, currently up to 32768
 entries or 16 MiB of row bytes per table cache, and drops oversized rows rather
-than retaining unbounded BLOB/TEXT payloads.
+than retaining unbounded BLOB/TEXT payloads. A row retained in that active
+payload cache is also accepted as the direct row-validation proof for the same
+active checkpoint view, avoiding duplicate live-row validation bookkeeping after
+indexed row reads.
 
 Durable index cursor construction opens a scoped storage read session while the
 handler finds matching index row ids and materializes the selected row payload

@@ -115,6 +115,7 @@ static void test_active_live_row_validation_cache(void);
 static void test_reusable_live_row_cache_clears_row_ids(void);
 static void test_active_row_payload_cache(void);
 static void test_active_row_payload_cache_large_window(void);
+static void test_active_row_payload_cache_validates_update(void);
 static void test_active_table_entry_cache_catalog_invalidation(void);
 static void test_active_row_payload_cache_many_replacements(void);
 static void test_durable_live_row_cache(void);
@@ -396,6 +397,7 @@ int main(void) {
     test_reusable_live_row_cache_clears_row_ids();
     test_active_row_payload_cache();
     test_active_row_payload_cache_large_window();
+    test_active_row_payload_cache_validates_update();
     test_active_table_entry_cache_catalog_invalidation();
     test_active_row_payload_cache_many_replacements();
     test_durable_live_row_cache();
@@ -1793,6 +1795,102 @@ static void test_active_row_payload_cache_large_window(void) {
         row_ids[0],
         rows[0],
         sizeof(rows[0])
+    );
+
+    assert(mylite_storage_rollback_statement(transaction) == MYLITE_STORAGE_OK);
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_active_row_payload_cache_validates_update(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row_1[] = {0x00U, 0x11U, 'a'};
+    static const unsigned char row_2[] = {0x00U, 0x22U, 'b'};
+    static const unsigned char key_1[] = {0x11U};
+    static const unsigned char key_2[] = {0x22U};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "active-row-payload-cache-validates-update.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_index_entry row_1_entry = {
+        .size = sizeof(row_1_entry),
+        .index_number = 0U,
+        .key = key_1,
+        .key_size = sizeof(key_1),
+    };
+    mylite_storage_index_entry row_2_entry = {
+        .size = sizeof(row_2_entry),
+        .index_number = 0U,
+        .key = key_2,
+        .key_size = sizeof(key_2),
+    };
+    mylite_storage_statement *transaction = NULL;
+    unsigned long long row_1_id = 0ULL;
+    unsigned long long row_2_id = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_1,
+            sizeof(row_1),
+            &row_1_entry,
+            1U,
+            &row_1_id
+        ) == MYLITE_STORAGE_OK
+    );
+
+    assert(mylite_storage_begin_transaction(filename, &transaction) == MYLITE_STORAGE_OK);
+    assert_find_indexed_row_equals(
+        filename,
+        0U,
+        key_1,
+        sizeof(key_1),
+        row_1_id,
+        row_1,
+        sizeof(row_1)
+    );
+    assert(row_1_id <= (unsigned long long)LONG_MAX / MYLITE_STORAGE_FORMAT_PAGE_SIZE);
+    flip_file_byte(
+        filename,
+        (long)(row_1_id * MYLITE_STORAGE_FORMAT_PAGE_SIZE) +
+            MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET
+    );
+
+    assert(
+        mylite_storage_update_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_1_id,
+            row_2,
+            sizeof(row_2),
+            &row_2_entry,
+            1U,
+            &row_2_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert_find_indexed_row_not_found(filename, 0U, key_1, sizeof(key_1));
+    assert_find_indexed_row_equals(
+        filename,
+        0U,
+        key_2,
+        sizeof(key_2),
+        row_2_id,
+        row_2,
+        sizeof(row_2)
     );
 
     assert(mylite_storage_rollback_statement(transaction) == MYLITE_STORAGE_OK);

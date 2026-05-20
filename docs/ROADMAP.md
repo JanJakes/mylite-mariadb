@@ -357,6 +357,9 @@ Active row-payload caches now also keep a larger byte-bounded small-row working
 set, so repeated indexed updates over 10k rows do not thrash the old 4096-entry
 payload-cache window while large payloads remain bounded by a 16 MiB per-table
 cache budget.
+Rows retained by that active payload cache now also act as the direct
+row-validation proof for the same active checkpoint view, reducing duplicate
+live-row validation cache work after indexed row reads.
 
 ## Size And Profile Direction
 
