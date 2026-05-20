@@ -641,6 +641,11 @@ static mylite_storage_result begin_journal_at_path(
 );
 static mylite_storage_result finish_recovery_journal(FILE *file, const char *filename);
 static mylite_storage_result finish_write_journal(FILE *file, const char *filename);
+static mylite_storage_result finish_write_journal_for_statement(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_statement *statement
+);
 static mylite_storage_result finish_transaction_journal(FILE *file, const char *filename);
 static mylite_storage_result finish_journal_at_path(FILE *file, char *journal_filename);
 static int statement_chain_has_write_journal(const mylite_storage_statement *statement);
@@ -5265,7 +5270,7 @@ static mylite_storage_result update_row_with_index_entries(
             file_scope.active_read_statement
         );
         if (result == MYLITE_STORAGE_OK) {
-            result = finish_write_journal(file, filename);
+            result = finish_write_journal_for_statement(file, filename, active_file_statement);
         }
     }
     if (result == MYLITE_STORAGE_OK) {
@@ -7597,7 +7602,15 @@ static mylite_storage_result begin_journal_at_path(
 }
 
 static mylite_storage_result finish_write_journal(FILE *file, const char *filename) {
-    if (active_statement_for(filename) != NULL) {
+    return finish_write_journal_for_statement(file, filename, active_statement_for(filename));
+}
+
+static mylite_storage_result finish_write_journal_for_statement(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_statement *statement
+) {
+    if (statement != NULL) {
         return MYLITE_STORAGE_OK;
     }
     return finish_recovery_journal(file, filename);
