@@ -14,7 +14,8 @@ The optional Oracle SQL-mode parser is treated the same way after policy
 coverage proves attempts to enable `sql_mode=ORACLE` fail explicitly. The
 fmtlib-backed `SFORMAT()` helper is also omitted from the embedded profile so
 the embedded SQL target can build without C++ exceptions; ordinary `FORMAT()`
-and core string functions remain available.
+and core string functions remain available. The same exception-free target also
+omits non-semantic unwind tables.
 
 ## Source Findings
 
@@ -72,6 +73,9 @@ and core string functions remain available.
   reduces the stripped archive to 27,436,216 bytes, 26.17 MiB, and 707
   members. The stripped `item_strfunc.cc.o` member is 497,216 bytes and
   `item_create.cc.o` is 341,768 bytes in the resulting archive.
+- Adding `-fno-asynchronous-unwind-tables` and `-fno-unwind-tables` to the same
+  exception-free embedded SQL target reduces the stripped archive to 27,425,376
+  bytes, 26.15 MiB, and 707 members.
 
 ## Proposed Design
 
@@ -118,6 +122,10 @@ exception-using implementation absent, `sql_embedded` is compiled with
 `-fno-exceptions`. Non-embedded MariaDB targets keep the upstream `SFORMAT()`
 implementation.
 
+The same embedded SQL target uses `-fno-asynchronous-unwind-tables` and
+`-fno-unwind-tables` to omit non-semantic unwind metadata. This is scoped to the
+exception-free target, not applied globally.
+
 The wrapper keeps this behavior enabled by default because it is the
 distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
 need an unstripped archive for local inspection.
@@ -128,7 +136,7 @@ The Performance Schema storage-engine plugin and Feedback reporting plugin are
 omitted by CMake configuration, embedded `HELP`, statement profiling, query
 cache, Oracle SQL mode, and `SFORMAT()` are compiled to disabled or omitted
 surfaces, and the compiled objects use size-oriented release flags. The
-embedded SQL target also uses `-fno-exceptions`.
+embedded SQL target also uses `-fno-exceptions` and omits unwind tables.
 
 ## Compatibility Impact
 
@@ -147,6 +155,8 @@ and keeps the normal MariaDB parser intact.
 `SFORMAT()` is an optional fmtlib-backed helper rather than core application
 SQL behavior; ordinary `FORMAT()` remains available, and direct or prepared
 `SFORMAT()` fails predictably in the default embedded profile.
+Omitting unwind tables from the exception-free embedded SQL target has no SQL,
+storage, public API, or diagnostics impact.
 
 ## Database-Directory And Lifecycle Impact
 
@@ -184,7 +194,12 @@ than the symbol-stripped baseline with Performance Schema still built, and
 the current archive to 27,436,216 bytes / 26.17 MiB, 4,093,488 bytes smaller
 than the Release build with Performance Schema disabled, 5,693,424 bytes
 smaller than the symbol-stripped baseline with Performance Schema still built,
-and 6,406,104 bytes smaller than the original broad archive.
+and 6,406,104 bytes smaller than the original broad archive. Omitting unwind
+tables from the same exception-free target brings the current archive to
+27,425,376 bytes / 26.15 MiB, 4,104,328 bytes smaller than the Release build
+with Performance Schema disabled, 5,704,264 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 6,416,944
+bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -220,7 +235,8 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Oracle SQL mode fails through the MyLite policy and the embedded parser stub.
 - Embedded `SFORMAT()` is omitted, direct and prepared `SFORMAT()` fail
   predictably, and ordinary `FORMAT()` remains available.
-- The embedded SQL target builds with `-fno-exceptions`.
+- The embedded SQL target builds with `-fno-exceptions` and without unwind
+  tables.
 - The stripped archive still links `libmylite` and all embedded tests.
 - The measured archive size and member count are recorded in the build
   documentation.
@@ -236,3 +252,4 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Compiling the embedded SQL target without exceptions is valid only while
   exception-using SQL surfaces remain outside the embedded profile and covered
   by tests.
+- Unwind-table omission should stay scoped to targets where it is non-semantic.

@@ -67,8 +67,9 @@ an unsupported embedded stub after policy coverage proves normal SQL modes and
 user variables remain unaffected. The optional `SFORMAT()` helper is omitted
 from the embedded function registry after coverage proves direct and prepared
 calls fail predictably and ordinary `FORMAT()` remains available; that lets the
-embedded SQL target compile without C++ exceptions. Compatibility-sensitive
-code removals require separate evidence before they are accepted.
+embedded SQL target compile without C++ exceptions or unwind tables.
+Compatibility-sensitive code removals require separate evidence before they
+are accepted.
 
 Historical branch-level size research is archived in
 [Bundle size reduction attempts](architecture/bundle-size-research.md). Treat

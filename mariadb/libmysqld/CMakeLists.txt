@@ -160,7 +160,13 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
 
 ADD_CONVENIENCE_LIBRARY(sql_embedded ${SQL_EMBEDDED_SOURCES})
 # MyLite omits embedded SFORMAT(), keeping fmt and exceptions out.
-TARGET_COMPILE_OPTIONS(sql_embedded PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>")
+# Unwind tables are non-semantic in this exception-free embedded target.
+TARGET_COMPILE_OPTIONS(sql_embedded PRIVATE
+  "$<$<COMPILE_LANGUAGE:C>:-fno-asynchronous-unwind-tables>"
+  "$<$<COMPILE_LANGUAGE:CXX>:-fno-asynchronous-unwind-tables>"
+  "$<$<COMPILE_LANGUAGE:C>:-fno-unwind-tables>"
+  "$<$<COMPILE_LANGUAGE:CXX>:-fno-unwind-tables>"
+  "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>")
 DTRACE_INSTRUMENT(sql_embedded)
 ADD_DEPENDENCIES(sql_embedded GenError GenServerSource)
 IF(TARGET pcre2)
