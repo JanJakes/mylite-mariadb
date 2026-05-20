@@ -368,10 +368,10 @@ The public API exposes MyLite concepts, not raw `my.cnf` option names.
 
 SQLite-style threading modes can be added when backed by tests.
 
-## Server Features Outside The Core API
+## Features Outside The Core API
 
-The core directory-owned API rejects or omits server-owned features that do not
-fit the embedded library model:
+The core directory-owned API rejects or omits server-owned and optional
+compatibility features that do not fit the embedded library model:
 
 - network users and authentication,
 - replication and binlog,
@@ -382,6 +382,7 @@ fit the embedded library model:
 - network-protocol `LOAD DATA LOCAL`,
 - event scheduler,
 - performance schema,
+- Oracle SQL mode,
 - SQL help-table lookup,
 - statement profiling,
 - query-cache management.
@@ -389,12 +390,13 @@ fit the embedded library model:
 Top-level SQL command families for users, roles, grants, password changes,
 dynamic plugins, events, replication, binlog administration, and foreign-server
 metadata are rejected before direct execution or prepared-statement
-preparation. SQL `HELP`, statement-profiling commands, and query-cache
-management commands are rejected through the same policy. They fail with
-`MYLITE_ERROR` and a stable MyLite diagnostic. Query-cache SELECT hints remain
-accepted no-op syntax. Startup variables also cover disabled binlog,
-performance schema, query cache, statement profiling, grant tables, networking,
-and the transient database-local plugin directory.
+preparation. Attempts to enable Oracle SQL mode, SQL `HELP`,
+statement-profiling commands, and query-cache management commands are rejected
+through the same policy. They fail with `MYLITE_ERROR` and a stable MyLite
+diagnostic. Query-cache SELECT hints remain accepted no-op syntax. Startup
+variables also cover disabled binlog, performance schema, query cache,
+statement profiling, grant tables, networking, and the transient
+database-local plugin directory.
 
 ## Compatibility Adapter
 

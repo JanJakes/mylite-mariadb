@@ -65,11 +65,15 @@ Use two layers:
    binlog administration and inspection, foreign-server metadata, SQL help-table
    lookup, statement profiling, query-cache management, and selected
    server-surface variables.
+3. Reuse the same pre-dispatch policy boundary for optional compatibility modes
+   when a size-profile slice omits their implementation. The first such case is
+   Oracle SQL mode, where `sql_mode=ORACLE` is rejected while ordinary SQL modes
+   and user variables named `sql_mode` remain valid.
 
 The gate is not a general SQL parser. It is a narrow first-token policy check
-for statement families whose top-level MariaDB commands are incompatible with
-the core embedded contract. Normal application DDL and DML continue to route to
-MariaDB.
+for statement families and explicit mode switches whose MariaDB behavior is
+incompatible with the core embedded contract. Normal application DDL and DML
+continue to route to MariaDB.
 
 ## Affected MariaDB Subsystems
 
@@ -149,6 +153,8 @@ No new dependencies or license changes.
   profiling variable assignment. Cover `RESET QUERY CACHE`, `FLUSH QUERY
   CACHE`, and query-cache variable assignment while keeping `SQL_CACHE` and
   `SQL_NO_CACHE` SELECT hints accepted.
+- Cover rejected direct and prepared `sql_mode=ORACLE` while keeping user
+  variables named `sql_mode` accepted.
 - Cover rejected prepared SQL for at least one server-owned statement family.
 - Assert server-sidecar files and system-table directories are absent.
 - Run:
@@ -174,6 +180,8 @@ No new dependencies or license changes.
   policy diagnostic.
 - Query-cache management fails through the same policy diagnostic while
   query-cache SELECT hints remain no-op syntax.
+- Oracle SQL mode fails through a stable MyLite policy diagnostic while normal
+  SQL modes and user variables named `sql_mode` remain available.
 - MySQL/MariaDB executable comments cannot bypass the server-surface policy.
 - Direct execution and prepared statements share the same policy.
 - Rejected server commands do not create durable server sidecars or system-table
@@ -184,8 +192,10 @@ No new dependencies or license changes.
 ## Risks And Unresolved Questions
 
 - The policy gate is intentionally narrow. More server-owned statement families
-  may be added as later compatibility work exposes them.
-- Size-profile slices may omit code for server surfaces only after this policy
-  coverage proves the unsupported runtime contract.
+  or optional compatibility modes may be added as later compatibility work
+  exposes them.
+- Size-profile slices may omit code for server surfaces or optional
+  compatibility modes only after this policy coverage proves the unsupported
+  runtime contract.
 - A future wire-protocol integration may need different user-facing diagnostics,
   but it should still preserve the same unsupported core behavior.

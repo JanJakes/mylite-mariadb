@@ -48,7 +48,7 @@ constexpr const char *k_bad_db_handle = "bad database handle";
 constexpr int k_decimal_base = 10;
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
-constexpr std::size_t k_sql_policy_token_count = 16;
+constexpr std::size_t k_sql_policy_token_count = 32;
 constexpr const char *k_memory_database_path = ":memory:";
 constexpr const char *k_meta_filename = "mylite.meta";
 constexpr const char *k_lock_filename = "mylite.lock";
@@ -230,8 +230,9 @@ int bind_parameters(mylite_stmt &stmt);
 mylite_value_type column_type(const ResultColumn &column);
 const ResultColumn *column_at(const mylite_stmt *stmt, unsigned column);
 void set_mariadb_statement_error(mylite_stmt &stmt);
-int reject_unsupported_server_surface_sql(mylite_db &db, std::string_view sql);
+int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql);
 bool is_unsupported_server_surface_sql(std::string_view sql);
+bool is_unsupported_oracle_sql_mode_statement(std::string_view sql);
 bool is_unsupported_account_or_event_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_plugin_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_replication_statement(const SqlPolicyTokens &tokens);
@@ -257,6 +258,9 @@ bool has_identifier_token(
     const char *keyword,
     std::size_t start_index
 );
+bool is_sql_mode_assignment_target(const SqlPolicyTokens &tokens, std::size_t index);
+bool sql_mode_assignment_mentions_oracle(const SqlPolicyTokens &tokens, std::size_t index);
+bool token_contains_sql_mode_name(std::string_view token, const char *mode_name);
 bool token_equals(std::string_view token, const char *keyword);
 bool token_in(std::string_view token, const char *first, const char *second);
 bool token_in(std::string_view token, const char *first, const char *second, const char *third);
@@ -956,7 +960,7 @@ int exec_impl(
     return copy_error_message(*db, errmsg);
 #else
     set_ok(*db);
-    if (reject_unsupported_server_surface_sql(*db, sql) != MYLITE_OK) {
+    if (reject_unsupported_sql_policy(*db, sql) != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
     }
     if (mysql_query(&db->mysql, sql) != 0) {
@@ -1010,8 +1014,7 @@ int prepare_impl(
         return MYLITE_MISUSE;
     }
     set_ok(*db);
-    if (reject_unsupported_server_surface_sql(*db, std::string_view(sql, resolved_len)) !=
-        MYLITE_OK) {
+    if (reject_unsupported_sql_policy(*db, std::string_view(sql, resolved_len)) != MYLITE_OK) {
         return MYLITE_ERROR;
     }
 
@@ -1056,13 +1059,34 @@ int prepare_impl(
 }
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
-int reject_unsupported_server_surface_sql(mylite_db &db, std::string_view sql) {
-    if (!is_unsupported_server_surface_sql(sql)) {
-        return MYLITE_OK;
+int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql) {
+    if (is_unsupported_oracle_sql_mode_statement(sql)) {
+        set_error(db, MYLITE_ERROR, "Oracle SQL mode is not supported by MyLite");
+        return MYLITE_ERROR;
     }
 
-    set_error(db, MYLITE_ERROR, "server-owned SQL surface is not supported by MyLite");
-    return MYLITE_ERROR;
+    if (is_unsupported_server_surface_sql(sql)) {
+        set_error(db, MYLITE_ERROR, "server-owned SQL surface is not supported by MyLite");
+        return MYLITE_ERROR;
+    }
+
+    return MYLITE_OK;
+}
+
+bool is_unsupported_oracle_sql_mode_statement(std::string_view sql) {
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    if (!token_equals(identifier_token_at(tokens, 0), "SET")) {
+        return false;
+    }
+
+    for (std::size_t index = 1; index < tokens.count; ++index) {
+        if (token_equals(tokens.values[index], "SQL_MODE") &&
+            is_sql_mode_assignment_target(tokens, index) &&
+            sql_mode_assignment_mentions_oracle(tokens, index)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool is_unsupported_server_surface_sql(std::string_view sql) {
@@ -1366,6 +1390,86 @@ bool has_identifier_token(
 ) {
     for (std::size_t index = start_index; !identifier_token_at(tokens, index).empty(); ++index) {
         if (token_equals(identifier_token_at(tokens, index), keyword)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool is_sql_mode_assignment_target(const SqlPolicyTokens &tokens, std::size_t index) {
+    if (index + 1U >= tokens.count || !token_equals(tokens.values[index + 1U], "=")) {
+        return false;
+    }
+    if (index == 1U || token_equals(tokens.values[index - 1U], ",")) {
+        return true;
+    }
+    if (token_in(tokens.values[index - 1U], "GLOBAL", "SESSION", "LOCAL")) {
+        return index == 2U || token_equals(tokens.values[index - 2U], ",");
+    }
+    if (index >= 2U && token_equals(tokens.values[index - 1U], "@") &&
+        token_equals(tokens.values[index - 2U], "@")) {
+        return true;
+    }
+    return index >= 4U && token_equals(tokens.values[index - 1U], ".") &&
+           token_in(tokens.values[index - 2U], "GLOBAL", "SESSION", "LOCAL") &&
+           token_equals(tokens.values[index - 3U], "@") &&
+           token_equals(tokens.values[index - 4U], "@");
+}
+
+bool sql_mode_assignment_mentions_oracle(const SqlPolicyTokens &tokens, std::size_t index) {
+    int paren_depth = 0;
+    for (std::size_t value_index = index + 2U; value_index < tokens.count; ++value_index) {
+        const std::string_view token = tokens.values[value_index];
+        if (token_equals(token, "(")) {
+            ++paren_depth;
+            continue;
+        }
+        if (token_equals(token, ")")) {
+            if (paren_depth > 0) {
+                --paren_depth;
+            }
+            continue;
+        }
+        if (paren_depth == 0 && token_equals(token, ",")) {
+            return false;
+        }
+        if (token_contains_sql_mode_name(token, "ORACLE")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool token_contains_sql_mode_name(std::string_view token, const char *mode_name) {
+    const std::size_t mode_length = std::strlen(mode_name);
+    if (mode_length == 0U || token.size() < mode_length) {
+        return false;
+    }
+
+    for (std::size_t start = 0; start + mode_length <= token.size(); ++start) {
+        bool matches = true;
+        for (std::size_t offset = 0; offset < mode_length; ++offset) {
+            char left = token[start + offset];
+            char right = mode_name[offset];
+            if (left >= 'a' && left <= 'z') {
+                left = static_cast<char>(left - ('a' - 'A'));
+            }
+            if (right >= 'a' && right <= 'z') {
+                right = static_cast<char>(right - ('a' - 'A'));
+            }
+            if (left != right) {
+                matches = false;
+                break;
+            }
+        }
+        if (!matches) {
+            continue;
+        }
+
+        const bool left_boundary = start == 0U || !is_sql_identifier_char(token[start - 1U]);
+        const std::size_t end = start + mode_length;
+        const bool right_boundary = end == token.size() || !is_sql_identifier_char(token[end]);
+        if (left_boundary && right_boundary) {
             return true;
         }
     }

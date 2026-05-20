@@ -48,6 +48,7 @@ surface that does not fit a local directory-owned library:
 - replication, binlog, relay log, and Galera/wsrep,
 - dynamic plugin loading and external durable storage engines,
 - performance schema, statement profiling, query cache, and server audit plugins,
+- optional Oracle SQL compatibility mode,
 - rarely used optional engines or plugins unless a slice justifies them.
 
 The minimal embedded build establishes the first baseline. Later slices record
@@ -60,7 +61,9 @@ application SQL profile. Statement profiling is disabled after policy coverage
 proves profiling SQL is a server diagnostic surface, not application data
 behavior. The query cache is stubbed after policy coverage proves query-cache
 management is a server tuning surface and `SQL_CACHE` / `SQL_NO_CACHE` can
-remain no-op parser hints. Compatibility-sensitive code removals require
+remain no-op parser hints. The optional Oracle SQL-mode parser is replaced with
+an unsupported embedded stub after policy coverage proves normal SQL modes and
+user variables remain unaffected. Compatibility-sensitive code removals require
 separate evidence before they are accepted.
 
 Historical branch-level size research is archived in

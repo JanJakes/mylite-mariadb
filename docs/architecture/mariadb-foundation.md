@@ -50,7 +50,9 @@ replication slave auto-start, performance schema, statement profiling, and the
 query cache. `libmylite` rejects top-level SQL command families for users,
 roles, grants, events, dynamic plugins, replication, binlog administration,
 foreign-server metadata, SQL help-table lookup, statement profiling, and
-query-cache management before dispatching them to MariaDB.
+query-cache management before dispatching them to MariaDB. MyLite also rejects
+Oracle SQL mode because that optional MariaDB compatibility parser is outside
+the embedded application profile.
 
 MariaDB 11.8.6 needed narrow embedded-restart fixes for repeated
 `mylite_open()` / `mylite_close()` tests in one process:

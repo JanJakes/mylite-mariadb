@@ -52,7 +52,8 @@ plugin is the disabled contract. `PLUGIN_FEEDBACK=NO` omits MariaDB's telemetry
 and usage-reporting plugin from the embedded profile. `ENABLED_PROFILING=OFF`
 omits statement-profiling implementation code while preserving MariaDB's
 disabled `@@have_profiling=NO` contract. The embedded query cache is compiled
-to no-op stubs and reports `@@have_query_cache=NO`.
+to no-op stubs and reports `@@have_query_cache=NO`. The embedded archive links
+a small Oracle SQL-mode parser stub instead of the generated Oracle parser.
 
 ## Measurement
 
@@ -68,21 +69,23 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 30,188,592 bytes / 28.79 MiB |
+| Archive size | 29,244,456 bytes / 27.89 MiB |
 | Archive members | 707 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
 32.27 MiB. With `MinSizeRel`, the unused Performance Schema static plugin
 disabled, the Feedback plugin omitted, statement profiling disabled, and
 embedded `HELP` compiled to an unsupported-command stub, the pre-strip archive
-with the embedded query cache stubbed is 30,838,712 bytes / 29.41 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 650,120 bytes
+with the embedded query cache stubbed and the Oracle SQL-mode parser replaced
+by an unsupported stub is 29,888,104 bytes / 28.50 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 643,648 bytes
 without changing archive membership or runtime behavior. The final archive is
-40,336 bytes smaller than the same profile with full query-cache code,
-1,341,112 bytes smaller than the Release build with Performance Schema
-disabled, 2,941,048 bytes smaller than the symbol-stripped baseline that still
-built Performance Schema, and 3,653,728 bytes smaller than the original broad
-archive.
+944,136 bytes smaller than the same profile with the generated Oracle parser,
+984,472 bytes smaller than the profile with statement profiling disabled but
+full query-cache and Oracle-parser code, 2,285,248 bytes smaller than the
+Release build with Performance Schema disabled, 3,885,184 bytes smaller than
+the symbol-stripped baseline that still built Performance Schema, and 4,597,864
+bytes smaller than the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
 GSSAPI, BZip2, LZ4, LibLZMA, LZO, PCRE2, and Zstandard support on this
@@ -115,7 +118,9 @@ unsupported-command shim in the embedded archive. Statement profiling reports
 `@@have_profiling=NO` and top-level profiling commands are rejected by policy.
 Query-cache implementation code is stubbed for the embedded archive; `SQL_CACHE`
 and `SQL_NO_CACHE` remain accepted parser hints, while query-cache management
-commands and variables are rejected by policy.
+commands and variables are rejected by policy. Oracle SQL mode is rejected by
+policy and linked to an unsupported parser stub; normal MariaDB/MySQL parsing
+continues to use the generated MariaDB parser.
 
 ## Disabled Or Missing Surface
 
@@ -128,6 +133,7 @@ The baseline explicitly disables:
 - SQL `HELP` table lookup
 - Statement profiling
 - Query cache
+- Oracle SQL mode
 - MariaDB upstream unit-test targets
 
 Configure also reports unavailable optional features on this host, including

@@ -10,6 +10,8 @@ the embedded archive with size-oriented release flags, and avoid building the
 unused Performance Schema and Feedback static plugins. Server help-table
 lookup, statement profiling, and the query cache are also compiled to disabled
 surfaces because they do not belong to the embedded application SQL profile.
+The optional Oracle SQL-mode parser is treated the same way after policy
+coverage proves attempts to enable `sql_mode=ORACLE` fail explicitly.
 
 ## Source Findings
 
@@ -20,8 +22,9 @@ surfaces because they do not belong to the embedded application SQL profile.
   32.27 MiB, 822 members.
 - The largest original archive members include charset/collation tables,
   generated parsers, core SQL item files, JSON, GEOMETRY/GIS, and native engine
-  code. Those are not safe first cuts because they remove observable SQL,
-  type, collation, or storage behavior.
+  code. The generated MariaDB parser remains compatibility-critical. The
+  generated Oracle parser is different: it serves optional Oracle SQL mode,
+  which is outside the embedded MySQL/MariaDB application profile.
 - Performance Schema accounts for about 1.28 MiB and 112 archive members in
   the symbol-stripped archive. It is already outside the default embedded
   profile, can be disabled at startup when present, and is covered by
@@ -52,6 +55,10 @@ surfaces because they do not belong to the embedded application SQL profile.
   `emb_qcache.cc.o` drops from 7,168 bytes to 320 bytes while preserving
   no-op `SQL_CACHE` / `SQL_NO_CACHE` parser hints and the
   `@@have_query_cache=NO` contract.
+- Replacing the generated embedded Oracle parser with an unsupported stub
+  reduces the stripped archive to 29,244,456 bytes, 27.89 MiB, and 707
+  members. The stripped `yy_oracle.cc.o` member is replaced by a 784-byte
+  `mylite_oracle_parser_stub.cc.o` member.
 
 ## Proposed Design
 
@@ -87,6 +94,11 @@ keeps `SQL_CACHE` and `SQL_NO_CACHE` as accepted parser hints, reports
 `@@have_query_cache=NO`, and rejects query-cache management commands and
 variables before dispatch.
 
+The embedded archive links a MyLite-owned Oracle parser stub instead of the
+generated `yy_oracle.cc` parser. MyLite rejects attempts to enable
+`sql_mode=ORACLE` before dispatch, while normal SQL modes and user variables
+named `sql_mode` continue through the generated MariaDB parser.
+
 The wrapper keeps this behavior enabled by default because it is the
 distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
 need an unstripped archive for local inspection.
@@ -94,9 +106,9 @@ need an unstripped archive for local inspection.
 ## Affected MariaDB Subsystems
 
 The Performance Schema storage-engine plugin and Feedback reporting plugin are
-omitted by CMake configuration, embedded `HELP`, statement profiling, and query
-cache are compiled to disabled surfaces, and the compiled objects use
-size-oriented release flags.
+omitted by CMake configuration, embedded `HELP`, statement profiling, query
+cache, and Oracle SQL mode are compiled to disabled surfaces, and the compiled
+objects use size-oriented release flags.
 
 ## Compatibility Impact
 
@@ -109,7 +121,9 @@ unsupported in the embedded profile. Statement profiling is a diagnostic
 server surface, not application data behavior, and is explicitly unsupported in
 the embedded profile. Query-cache management is a server-side result-cache
 optimization; MyLite keeps query-cache SELECT hints as no-op syntax and omits
-the cache implementation.
+the cache implementation. Oracle SQL mode is an optional MariaDB compatibility
+mode, not core MySQL/MariaDB application behavior; MyLite rejects it explicitly
+and keeps the normal MariaDB parser intact.
 
 ## Database-Directory And Lifecycle Impact
 
@@ -138,6 +152,11 @@ with Performance Schema still built. Stubbing the embedded query cache brings
 the current archive to 30,188,592 bytes / 28.79 MiB, 1,341,112 bytes smaller
 than the Release build with Performance Schema disabled and 2,941,048 bytes
 smaller than the symbol-stripped baseline with Performance Schema still built.
+Replacing the generated Oracle parser with an unsupported stub brings the
+current archive to 29,244,456 bytes / 27.89 MiB, 2,285,248 bytes smaller than
+the Release build with Performance Schema disabled, 3,885,184 bytes smaller
+than the symbol-stripped baseline with Performance Schema still built, and
+4,597,864 bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -170,6 +189,7 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
   fails through the MyLite policy.
 - Query cache reports unavailable, query-cache management fails through the
   MyLite policy, and query-cache SELECT hints remain no-op syntax.
+- Oracle SQL mode fails through the MyLite policy and the embedded parser stub.
 - The stripped archive still links `libmylite` and all embedded tests.
 - The measured archive size and member count are recorded in the build
   documentation.
