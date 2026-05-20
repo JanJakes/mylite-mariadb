@@ -302,6 +302,16 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_error(db, "UNINSTALL PLUGIN mylite_missing", "server-owned SQL surface");
     expect_error(
         db,
+        "CREATE FUNCTION mylite_udf RETURNS INTEGER SONAME 'mylite_udf.so'",
+        "server-owned SQL surface"
+    );
+    expect_error(
+        db,
+        "CREATE AGGREGATE FUNCTION mylite_udf_sum RETURNS REAL SONAME 'mylite_udf.so'",
+        "server-owned SQL surface"
+    );
+    expect_error(
+        db,
         "CHANGE MASTER TO MASTER_HOST = '127.0.0.1', "
         "MASTER_USER = 'mylite', MASTER_PASSWORD = 'mylite'",
         "server-owned SQL surface"
@@ -346,6 +356,11 @@ static void assert_server_sql_rejected(mylite_db *db) {
     );
     expect_prepare_error(db, "SET @@GLOBAL.SQL_LOG_BIN = 1", "server-owned SQL surface");
     expect_prepare_error(db, "HELP SELECT", "server-owned SQL surface");
+    expect_prepare_error(
+        db,
+        "CREATE FUNCTION prepared_udf RETURNS INTEGER SONAME 'prepared_udf.so'",
+        "server-owned SQL surface"
+    );
     expect_prepare_error(db, "SHOW PROFILES", "server-owned SQL surface");
     expect_prepare_error(db, "SET profiling = 1", "server-owned SQL surface");
     expect_prepare_error(db, "SET query_cache_type = ON", "server-owned SQL surface");

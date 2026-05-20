@@ -47,6 +47,7 @@ surface that does not fit a local directory-owned library:
 - network listener and server account administration,
 - replication, binlog, relay log, and Galera/wsrep,
 - dynamic plugin loading and external durable storage engines,
+- dynamic UDF shared-library loading,
 - performance schema, statement profiling, query cache, and server audit plugins,
 - optional Oracle SQL compatibility mode,
 - optional fmtlib-backed SQL helpers such as `SFORMAT()`,
@@ -68,6 +69,9 @@ user variables remain unaffected. The optional `SFORMAT()` helper is omitted
 from the embedded function registry after coverage proves direct and prepared
 calls fail predictably and ordinary `FORMAT()` remains available; that lets the
 embedded SQL target compile without C++ exceptions or unwind tables.
+Dynamic UDF shared-library loading is omitted after policy coverage proves
+`CREATE FUNCTION ... SONAME` fails predictably; stored functions remain a
+separate application SQL surface.
 Compatibility-sensitive code removals require separate evidence before they
 are accepted.
 

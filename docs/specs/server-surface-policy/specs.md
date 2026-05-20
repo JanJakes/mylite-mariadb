@@ -7,7 +7,9 @@ surfaces such as account management, dynamic plugin installation, replication,
 binlog inspection, event scheduling, server help-table lookup, and statement
 profiling do not fit that lifetime model. Server tuning surfaces such as query
 cache management are also outside the core embedded contract. Some of these
-surfaces can create durable sidecar files or system-table dependencies. This
+surfaces can create durable sidecar files or system-table dependencies.
+Dynamic UDF registration is the same kind of server-owned extension surface
+because it loads shared libraries and persists metadata in `mysql.func`. This
 slice makes those boundaries explicit and covered by tests.
 
 ## Source Findings
@@ -26,6 +28,12 @@ slice makes those boundaries explicit and covered by tests.
   MyLite already points `plugin_dir` at `<db>/run/plugins`, but dynamic plugin
   installation is still server-owned behavior and should not be exposed through
   the core API.
+- `mariadb/sql/sql_yacc.yy`, `mariadb/sql/sql_udf.cc`,
+  `mariadb/sql/item_create.cc`, `mariadb/sql/item_func.cc`, and
+  `mariadb/sql/item_sum.cc` implement dynamic UDF registration and execution.
+  `CREATE FUNCTION ... SONAME` and `CREATE AGGREGATE FUNCTION ... SONAME`
+  load shared libraries through the server plugin path and use the `mysql.func`
+  system table.
 - `mariadb/sql/sys_vars.cc` exposes `log_bin`, `skip_grant_tables`,
   `skip_networking`, and `plugin_dir`. It exposes `performance_schema` only
   when MariaDB is built with the Performance Schema storage engine. MyLite can
@@ -62,9 +70,9 @@ Use two layers:
 2. Add a conservative MyLite SQL policy gate before direct execution and
    prepared-statement preparation for command families that are server-owned:
    users, roles, grants, password changes, dynamic plugins, events, replication,
-   binlog administration and inspection, foreign-server metadata, SQL help-table
-   lookup, statement profiling, query-cache management, and selected
-   server-surface variables.
+   binlog administration and inspection, foreign-server metadata, dynamic UDF
+   registration, SQL help-table lookup, statement profiling, query-cache
+   management, and selected server-surface variables.
 3. Reuse the same pre-dispatch policy boundary for optional compatibility modes
    when a size-profile slice omits their implementation. The first such case is
    Oracle SQL mode, where `sql_mode=ORACLE` is rejected while ordinary SQL modes
@@ -83,6 +91,7 @@ continue to route to MariaDB.
 
 - ACL and account-management SQL.
 - Dynamic plugin loader.
+- Dynamic UDF shared-library registration and execution.
 - Replication and binlog command paths.
 - Event scheduler and help-table command paths.
 - Statement profiling command paths and variables.
@@ -94,8 +103,9 @@ continue to route to MariaDB.
 
 This slice intentionally reduces the server-compatible surface of the core
 library. Applications that need a MySQL/MariaDB wire-protocol server,
-server-side users, replication, or dynamic plugins need a later integration
-layer around `libmylite`, not the primary `mylite_open()` contract.
+server-side users, replication, dynamic plugins, or dynamic shared-library UDFs
+need a later integration layer around `libmylite`, not the primary
+`mylite_open()` contract.
 
 The compatibility benefit is that unsupported server behavior fails
 predictably instead of partially succeeding, creating system-table dependencies,
@@ -104,8 +114,8 @@ or writing server topology sidecars.
 ## DDL Metadata Routing Impact
 
 Application table DDL is unchanged. Server-owned statements for users, roles,
-events, plugins, foreign servers, and SQL help tables are rejected before they
-can create or depend on `mysql.*` metadata tables.
+events, plugins, dynamic UDFs, foreign servers, and SQL help tables are
+rejected before they can create or depend on `mysql.*` metadata tables.
 
 ## Database-Directory And Lifecycle Impact
 
@@ -157,6 +167,8 @@ No new dependencies or license changes.
   profiling variable assignment. Cover `RESET QUERY CACHE`, `FLUSH QUERY
   CACHE`, and query-cache variable assignment while keeping `SQL_CACHE` and
   `SQL_NO_CACHE` SELECT hints accepted.
+- Cover rejected direct and prepared dynamic UDF registration through
+  `CREATE FUNCTION ... SONAME`, including aggregate UDF syntax.
 - Cover rejected direct and prepared `sql_mode=ORACLE` while keeping user
   variables named `sql_mode` accepted.
 - Cover rejected direct and prepared `SFORMAT()` after the embedded size
@@ -186,6 +198,9 @@ No new dependencies or license changes.
   policy diagnostic.
 - Query-cache management fails through the same policy diagnostic while
   query-cache SELECT hints remain no-op syntax.
+- Dynamic UDF registration through `CREATE FUNCTION ... SONAME` and
+  `CREATE AGGREGATE FUNCTION ... SONAME` fails through the same policy
+  diagnostic.
 - Oracle SQL mode fails through a stable MyLite policy diagnostic while normal
   SQL modes and user variables named `sql_mode` remain available.
 - Optional `SFORMAT()` fails predictably in direct execution and prepared

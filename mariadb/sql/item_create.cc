@@ -2866,7 +2866,8 @@ Create_qfunc::create_func(THD *thd, const LEX_CSTRING *name,
 }
 
 
-#ifdef HAVE_DLOPEN
+#if defined(HAVE_DLOPEN) && \
+    (!defined(MYLITE_WITH_UDF_RUNTIME) || MYLITE_WITH_UDF_RUNTIME)
 Create_udf_func Create_udf_func::s_singleton;
 
 Item*

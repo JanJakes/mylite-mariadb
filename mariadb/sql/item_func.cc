@@ -744,7 +744,8 @@ my_decimal *Item_real_func::val_decimal(my_decimal *decimal_value)
 }
 
 
-#ifdef HAVE_DLOPEN
+#if defined(HAVE_DLOPEN) && \
+    (!defined(MYLITE_WITH_UDF_RUNTIME) || MYLITE_WITH_UDF_RUNTIME)
 void Item_udf_func::fix_num_length_and_dec()
 {
   uint fl_length= 0;
@@ -3542,7 +3543,8 @@ bool Item_func_bit_count::fix_length_and_dec(THD *thd)
 ** Rewritten by monty.
 ****************************************************************************/
 
-#ifdef HAVE_DLOPEN
+#if defined(HAVE_DLOPEN) && \
+    (!defined(MYLITE_WITH_UDF_RUNTIME) || MYLITE_WITH_UDF_RUNTIME)
 
 void udf_handler::cleanup()
 {
@@ -3969,8 +3971,10 @@ udf_handler::~udf_handler()
 }
 
 #else
+#if !defined(MYLITE_WITH_UDF_RUNTIME) || MYLITE_WITH_UDF_RUNTIME
 bool udf_handler::get_arguments() { return 0; }
-#endif /* HAVE_DLOPEN */
+#endif
+#endif /* HAVE_DLOPEN && MYLITE_WITH_UDF_RUNTIME */
 
 
 longlong Item_master_pos_wait::val_int()

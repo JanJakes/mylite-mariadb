@@ -10932,7 +10932,8 @@ function_call_conflict:
 function_call_generic:
           ident_func '('
           {
-#ifdef HAVE_DLOPEN
+#if defined(HAVE_DLOPEN) && \
+    (!defined(MYLITE_WITH_UDF_RUNTIME) || MYLITE_WITH_UDF_RUNTIME)
             udf_func *udf= 0;
             LEX *lex= Lex;
             if (using_udf_functions &&
@@ -10987,7 +10988,8 @@ function_call_generic:
             }
             else
             {
-#ifdef HAVE_DLOPEN
+#if defined(HAVE_DLOPEN) && \
+    (!defined(MYLITE_WITH_UDF_RUNTIME) || MYLITE_WITH_UDF_RUNTIME)
               /* Retrieving the result of find_udf */
               udf_func *udf= $<udf>3;
 

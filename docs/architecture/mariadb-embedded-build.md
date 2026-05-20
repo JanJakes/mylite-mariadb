@@ -55,7 +55,8 @@ disabled `@@have_profiling=NO` contract. The embedded query cache is compiled
 to no-op stubs and reports `@@have_query_cache=NO`. The embedded archive links
 a small Oracle SQL-mode parser stub instead of the generated Oracle parser. It
 also omits the fmtlib-backed `SFORMAT()` SQL function and builds the embedded
-SQL target without C++ exceptions or unwind tables.
+SQL target without C++ exceptions or unwind tables. Dynamic UDF shared-library
+loading is omitted from the embedded archive.
 
 ## Measurement
 
@@ -71,8 +72,8 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 27,425,376 bytes / 26.15 MiB |
-| Archive members | 707 |
+| Archive size | 27,337,960 bytes / 26.07 MiB |
+| Archive members | 706 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
 32.27 MiB. With `MinSizeRel`, the unused Performance Schema static plugin
@@ -81,13 +82,15 @@ embedded `HELP` compiled to an unsupported-command stub, the embedded query
 cache stubbed, the Oracle SQL-mode parser replaced by an unsupported stub, and
 embedded `SFORMAT()` omitted so the embedded SQL target can compile without C++
 exceptions, and unwind tables omitted from that exception-free target, the
-pre-strip archive is 28,026,280 bytes / 26.73 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 600,904 bytes without
+pre-strip archive is 28,026,280 bytes / 26.73 MiB. Omitting dynamic UDF
+runtime reduces the pre-strip archive to 27,938,032 bytes / 26.64 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 600,072 bytes without
 changing archive membership or runtime behavior. The `SFORMAT()` and exception
-cut accounts for 1,808,240 bytes, and unwind-table omission saves another
-10,840 bytes. The final archive is 4,104,328 bytes smaller than the Release
-build with Performance Schema disabled, 5,704,264 bytes smaller than the
-symbol-stripped baseline that still built Performance Schema, and 6,416,944
+cut accounts for 1,808,240 bytes, unwind-table omission saves another
+10,840 bytes, and dynamic UDF runtime omission saves 87,416 bytes and one
+archive member. The final archive is 4,191,744 bytes smaller than the Release
+build with Performance Schema disabled, 5,791,680 bytes smaller than the
+symbol-stripped baseline that still built Performance Schema, and 6,504,360
 bytes smaller than the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
@@ -125,6 +128,8 @@ commands and variables are rejected by policy. Oracle SQL mode is rejected by
 policy and linked to an unsupported parser stub; normal MariaDB/MySQL parsing
 continues to use the generated MariaDB parser. `SFORMAT()` is omitted from the
 embedded function registry, while ordinary `FORMAT()` remains available.
+Dynamic UDF lookup, execution, and registration are omitted; stored functions
+remain a separate SQL routine surface.
 
 ## Disabled Or Missing Surface
 
@@ -139,6 +144,7 @@ The baseline explicitly disables:
 - Query cache
 - Oracle SQL mode
 - `SFORMAT()`
+- Dynamic UDF shared-library loading
 - MariaDB upstream unit-test targets
 
 Configure also reports unavailable optional features on this host, including

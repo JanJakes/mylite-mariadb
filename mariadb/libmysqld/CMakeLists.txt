@@ -14,7 +14,7 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335 USA
 
-ADD_DEFINITIONS(-DMYSQL_SERVER -DEMBEDDED_LIBRARY
+ADD_DEFINITIONS(-DMYSQL_SERVER -DEMBEDDED_LIBRARY -DMYLITE_WITH_UDF_RUNTIME=0
  ${SSL_DEFINES})
 
 INCLUDE_DIRECTORIES(
@@ -100,7 +100,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/sql_statistics.cc ../sql/sql_string.cc
            ../sql/sql_table.cc ../sql/sql_test.cc
            ../sql/ddl_log.cc ../sql/item_vectorfunc.cc
-           ../sql/sql_trigger.cc ../sql/sql_udf.cc ../sql/sql_union.cc
+           ../sql/sql_trigger.cc ../sql/sql_union.cc
            ../sql/sql_update.cc ../sql/sql_view.cc ../sql/sql_profile.cc
            ../sql/gcalc_tools.cc ../sql/gcalc_slicescan.cc
            ../sql/strfunc.cc ../sql/table.cc ../sql/thr_malloc.cc
@@ -159,8 +159,8 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
 
 
 ADD_CONVENIENCE_LIBRARY(sql_embedded ${SQL_EMBEDDED_SOURCES})
-# MyLite omits embedded SFORMAT(), keeping fmt and exceptions out.
-# Unwind tables are non-semantic in this exception-free embedded target.
+# MyLite omits dynamic UDF runtime and embedded SFORMAT(), keeping the profile
+# serverless and exception-free. Unwind tables are non-semantic in this target.
 TARGET_COMPILE_OPTIONS(sql_embedded PRIVATE
   "$<$<COMPILE_LANGUAGE:C>:-fno-asynchronous-unwind-tables>"
   "$<$<COMPILE_LANGUAGE:CXX>:-fno-asynchronous-unwind-tables>"

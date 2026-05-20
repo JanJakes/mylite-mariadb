@@ -20,6 +20,10 @@
 
 /* This file defines structures needed by udf functions */
 
+#ifndef MYLITE_WITH_UDF_RUNTIME
+#define MYLITE_WITH_UDF_RUNTIME 1
+#endif
+
 enum Item_udftype {UDFTYPE_FUNCTION=1,UDFTYPE_AGGREGATE};
 
 typedef void (*Udf_func_clear)(UDF_INIT *, uchar *, uchar *);
@@ -160,20 +164,32 @@ class udf_handler :public Sql_alloc
 };
 
 
-#ifdef HAVE_DLOPEN
-void udf_init(void),udf_free(void);
-udf_func *find_udf(const char *name, size_t size, bool mark_used=0);
-void free_udf(udf_func *udf);
-int mysql_create_function(THD *thd,udf_func *udf);
 enum drop_udf_result
 {
   UDF_DEL_RESULT_ABSENT,
   UDF_DEL_RESULT_DELETED,
   UDF_DEL_RESULT_ERROR
 };
+
+#if defined(HAVE_DLOPEN) && MYLITE_WITH_UDF_RUNTIME
+void udf_init(void),udf_free(void);
+udf_func *find_udf(const char *name, size_t size, bool mark_used=0);
+void free_udf(udf_func *udf);
+int mysql_create_function(THD *thd,udf_func *udf);
 enum drop_udf_result mysql_drop_function(THD *thd, const LEX_CSTRING *name);
 #else
 static inline void udf_init(void) { }
 static inline void udf_free(void) { }
+static inline udf_func *find_udf(const char *, size_t, bool= 0)
+{
+  return NULL;
+}
+static inline void free_udf(udf_func *) { }
+static inline int mysql_create_function(THD *, udf_func *) { return 1; }
+static inline enum drop_udf_result
+mysql_drop_function(THD *, const LEX_CSTRING *)
+{
+  return UDF_DEL_RESULT_ABSENT;
+}
 #endif
 #endif /* SQL_UDF_INCLUDED */

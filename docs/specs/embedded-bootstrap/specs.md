@@ -37,8 +37,10 @@ database directory in the product architecture.
 - `mariadb/libmysqld/lib_sql.cc:532` implements `init_embedded_server()`. It
   creates fake argv/groups when missing, calls `load_defaults()` at line 574,
   initializes common server state at lines 591-617, initializes ACL and grant
-  state at lines 624-629, initializes UDF support at lines 639-644, and runs DDL
-  recovery before marking the embedded server initialized at lines 663-669.
+  state at lines 624-629, calls the UDF init hooks at lines 639-644, and runs
+  DDL recovery before marking the embedded server initialized at lines 663-669.
+  The current embedded profile stubs the dynamic UDF runtime; the bootstrap
+  source finding remains relevant as a lifecycle hook.
 - `mariadb/libmysqld/libmysqld.c:75` implements embedded
   `mysql_real_connect()`. Lines 98-103 route non-local connections to the
   client path, line 105 selects `embedded_methods`, lines 155-157 force port and

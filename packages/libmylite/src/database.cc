@@ -235,6 +235,7 @@ bool is_unsupported_server_surface_sql(std::string_view sql);
 bool is_unsupported_oracle_sql_mode_statement(std::string_view sql);
 bool is_unsupported_account_or_event_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_plugin_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_udf_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_replication_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_binlog_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_help_statement(const SqlPolicyTokens &tokens);
@@ -1096,7 +1097,7 @@ bool is_unsupported_server_surface_sql(std::string_view sql) {
     }
 
     return is_unsupported_account_or_event_statement(tokens) ||
-           is_unsupported_plugin_statement(tokens) ||
+           is_unsupported_plugin_statement(tokens) || is_unsupported_udf_statement(tokens) ||
            is_unsupported_replication_statement(tokens) ||
            is_unsupported_binlog_statement(tokens) || is_unsupported_help_statement(tokens) ||
            is_unsupported_statement_profiling_statement(tokens) ||
@@ -1142,6 +1143,25 @@ bool is_unsupported_plugin_statement(const SqlPolicyTokens &tokens) {
 
     return (token_equals(first, "INSTALL") || token_equals(first, "UNINSTALL")) &&
            token_in(second, "PLUGIN", "SONAME");
+}
+
+bool is_unsupported_udf_statement(const SqlPolicyTokens &tokens) {
+    const std::string_view first = identifier_token_at(tokens, 0);
+    const std::string_view second = identifier_token_at(tokens, 1);
+    const std::string_view third = identifier_token_at(tokens, 2);
+    std::size_t function_index = 1;
+
+    if (!token_equals(first, "CREATE")) {
+        return false;
+    }
+    if (token_equals(second, "OR") && token_equals(third, "REPLACE")) {
+        function_index = 3;
+    }
+    if (token_equals(identifier_token_at(tokens, function_index), "AGGREGATE")) {
+        ++function_index;
+    }
+    return token_equals(identifier_token_at(tokens, function_index), "FUNCTION") &&
+           has_identifier_token(tokens, "SONAME", function_index + 1U);
 }
 
 bool is_unsupported_replication_statement(const SqlPolicyTokens &tokens) {

@@ -15,7 +15,9 @@ coverage proves attempts to enable `sql_mode=ORACLE` fail explicitly. The
 fmtlib-backed `SFORMAT()` helper is also omitted from the embedded profile so
 the embedded SQL target can build without C++ exceptions; ordinary `FORMAT()`
 and core string functions remain available. The same exception-free target also
-omits non-semantic unwind tables.
+omits non-semantic unwind tables. Dynamic UDF shared-library loading is omitted
+because it is a server-owned extension surface, not core embedded application
+behavior.
 
 ## Source Findings
 
@@ -76,6 +78,16 @@ omits non-semantic unwind tables.
 - Adding `-fno-asynchronous-unwind-tables` and `-fno-unwind-tables` to the same
   exception-free embedded SQL target reduces the stripped archive to 27,425,376
   bytes, 26.15 MiB, and 707 members.
+- MariaDB dynamic UDF support is implemented by `mariadb/sql/sql_udf.cc`,
+  `udf_handler` execution paths in `mariadb/sql/item_func.cc` and
+  `mariadb/sql/item_sum.cc`, and parser/function-builder hooks in
+  `mariadb/sql/sql_yacc.yy` and `mariadb/sql/item_create.cc`. UDF registration
+  uses `CREATE FUNCTION ... SONAME`, loads shared libraries from the server
+  plugin directory, and updates the `mysql.func` system table.
+- Omitting embedded dynamic UDF lookup, execution, and DDL runtime removes
+  `sql_udf.cc.o`, reduces the stripped archive to 27,337,960 bytes,
+  26.07 MiB, and 706 members, and leaves stored functions as a separate
+  application SQL surface.
 
 ## Proposed Design
 
@@ -126,6 +138,12 @@ The same embedded SQL target uses `-fno-asynchronous-unwind-tables` and
 `-fno-unwind-tables` to omit non-semantic unwind metadata. This is scoped to the
 exception-free target, not applied globally.
 
+The embedded archive omits dynamic UDF runtime by compiling the embedded SQL
+target with `MYLITE_WITH_UDF_RUNTIME=0` and excluding `sql_udf.cc`. The parser
+and function builders keep upstream behavior outside the embedded profile.
+MyLite rejects `CREATE FUNCTION ... SONAME` before dispatch so no UDF shared
+library or `mysql.func` metadata path is exposed through the core API.
+
 The wrapper keeps this behavior enabled by default because it is the
 distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
 need an unstripped archive for local inspection.
@@ -136,7 +154,8 @@ The Performance Schema storage-engine plugin and Feedback reporting plugin are
 omitted by CMake configuration, embedded `HELP`, statement profiling, query
 cache, Oracle SQL mode, and `SFORMAT()` are compiled to disabled or omitted
 surfaces, and the compiled objects use size-oriented release flags. The
-embedded SQL target also uses `-fno-exceptions` and omits unwind tables.
+embedded SQL target also uses `-fno-exceptions`, omits unwind tables, and omits
+dynamic UDF lookup, execution, and DDL runtime.
 
 ## Compatibility Impact
 
@@ -157,6 +176,10 @@ SQL behavior; ordinary `FORMAT()` remains available, and direct or prepared
 `SFORMAT()` fails predictably in the default embedded profile.
 Omitting unwind tables from the exception-free embedded SQL target has no SQL,
 storage, public API, or diagnostics impact.
+Dynamic UDF registration is a server extension surface based on shared-library
+loading and `mysql.func` metadata. MyLite rejects `CREATE FUNCTION ... SONAME`
+directly and in prepared statements; stored functions and built-in SQL
+functions are not removed by this slice.
 
 ## Database-Directory And Lifecycle Impact
 
@@ -199,7 +222,11 @@ tables from the same exception-free target brings the current archive to
 27,425,376 bytes / 26.15 MiB, 4,104,328 bytes smaller than the Release build
 with Performance Schema disabled, 5,704,264 bytes smaller than the
 symbol-stripped baseline with Performance Schema still built, and 6,416,944
-bytes smaller than the original broad archive.
+bytes smaller than the original broad archive. Omitting dynamic UDF runtime
+brings the current archive to 27,337,960 bytes / 26.07 MiB, 4,191,744 bytes
+smaller than the Release build with Performance Schema disabled, 5,791,680
+bytes smaller than the symbol-stripped baseline with Performance Schema still
+built, and 6,504,360 bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -237,6 +264,9 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
   predictably, and ordinary `FORMAT()` remains available.
 - The embedded SQL target builds with `-fno-exceptions` and without unwind
   tables.
+- Dynamic UDF registration through `CREATE FUNCTION ... SONAME` fails through
+  MyLite policy, and the embedded archive omits UDF lookup, execution, and DDL
+  runtime.
 - The stripped archive still links `libmylite` and all embedded tests.
 - The measured archive size and member count are recorded in the build
   documentation.
@@ -253,3 +283,5 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
   exception-using SQL surfaces remain outside the embedded profile and covered
   by tests.
 - Unwind-table omission should stay scoped to targets where it is non-semantic.
+- Stored functions remain planned application SQL. Dynamic UDF policy and size
+  trimming must stay scoped to shared-library UDF registration and execution.
