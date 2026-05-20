@@ -195,7 +195,10 @@ preimages now copy only the meaningful checksummed prefix and restore an
 implicit zero tail, reducing repeated nested-statement rollback bookkeeping.
 Those repeated buffered rewrites now also leave row and index-entry checksums
 dirty until a generic read or buffer flush needs a valid checksum, avoiding
-per-update checksum recomputation while pages remain unpublished.
+per-update checksum recomputation while pages remain unpublished. The hot
+rewrite path now also passes the resolved append-buffer owner through local
+helpers instead of rediscovering it from the `FILE *` for each buffered page and
+dirty-flag operation.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation
