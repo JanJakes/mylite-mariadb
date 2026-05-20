@@ -1269,12 +1269,12 @@ static mylite_storage_result rewrite_active_update_pages(
     const unsigned char *index_entry_changed,
     int *out_rewritten
 );
-static void rewrite_buffered_row_page(
+MYLITE_STORAGE_HOT_INLINE void rewrite_buffered_row_page(
     unsigned char *page,
     const unsigned char *row,
     size_t row_size
 );
-static void rewrite_buffered_index_entry_page(
+MYLITE_STORAGE_HOT_INLINE void rewrite_buffered_index_entry_page(
     unsigned char *page,
     const mylite_storage_index_entry *index_entry
 );
@@ -12157,7 +12157,7 @@ done:
     return result;
 }
 
-static void rewrite_buffered_row_page(
+MYLITE_STORAGE_HOT_INLINE void rewrite_buffered_row_page(
     unsigned char *page,
     const unsigned char *row,
     size_t row_size
@@ -12175,7 +12175,7 @@ static void rewrite_buffered_row_page(
     }
 }
 
-static void rewrite_buffered_index_entry_page(
+MYLITE_STORAGE_HOT_INLINE void rewrite_buffered_index_entry_page(
     unsigned char *page,
     const mylite_storage_index_entry *index_entry
 ) {

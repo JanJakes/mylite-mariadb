@@ -253,6 +253,9 @@ from hot row/index page update paths without relying on unaligned host loads.
 Buffered row-DML now coalesces adjacent active-statement and append-buffer
 lookups for hot append/rewrite paths, preserving nearest active statement versus
 outermost append-buffer semantics while avoiding duplicate statement-chain scans.
+Buffered row and index-entry rewrite helpers now use hot inline definitions,
+removing another pair of tiny MyLite-owned leaf calls from the prepared-update
+fast path without changing page bytes or checksum-dirty ownership.
 
 ## Size And Profile Direction
 
