@@ -425,7 +425,10 @@ replacement index-entry pages for unchanged keys. Exact-index, live-index, and
 published-leaf tail overlays inherit omitted unchanged entries through the
 row-state replacement id, while later physical replacement entries for changed
 keys supersede the inherited entry. This reduces common non-key update write
-volume without changing the durable page format.
+volume without changing the durable page format. The handler uses the same
+changed-key vector to skip duplicate-key probes for unique keys whose serialized
+image is unchanged, while inserts and changed unique keys keep the normal
+duplicate checks.
 If an active update targets an inline replacement row whose replacement page run
 is still resident in the active append-page buffer, the storage layer rewrites
 that buffered row page and any changed matching index-entry pages instead of

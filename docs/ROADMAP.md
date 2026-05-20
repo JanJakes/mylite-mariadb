@@ -166,7 +166,10 @@ preserving savepoint rollback by flushing retained prefixes before truncation.
 Durable updates now omit unchanged replacement index-entry pages and let
 exact/live index overlays inherit unchanged keys through row-state replacement
 ids, reducing write volume for any update where one or more indexed key images
-stay stable.
+stay stable. The handler also reuses that changed-key vector to skip
+duplicate-key probes for unchanged unique keys on updates, avoiding repeated
+exact-index checks for stable primary keys while preserving checks for inserts
+and changed unique keys.
 Repeated active updates of inline replacement rows now reuse the same row id and
 rewrite buffered unpublished row and changed index-entry pages while those
 pages are still resident in the active append buffer, including replacement

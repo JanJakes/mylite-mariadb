@@ -239,15 +239,15 @@ static int mylite_copy_stored_row_to_record(TABLE *table, const uchar *payload,
                                             uchar *record,
                                             uchar **out_blob_payloads);
 static int mylite_check_duplicate_keys(
-  const char *primary_file, const char *schema_name, const char *table_name,
-  TABLE *table, const mylite_storage_index_entry *index_entries,
-  size_t index_entry_count, const uchar *buf, ulonglong skip_row_id,
-  uint *out_duplicate_key);
+    const char *primary_file, const char *schema_name, const char *table_name,
+    TABLE *table, const mylite_storage_index_entry *index_entries,
+    size_t index_entry_count, const uchar *index_entry_changed,
+    const uchar *buf, ulonglong skip_row_id, uint *out_duplicate_key);
 static int mylite_check_volatile_duplicate_keys(
-  const char *primary_file, const char *schema_name, const char *table_name,
-  TABLE *table, const mylite_storage_index_entry *index_entries,
-  size_t index_entry_count, const uchar *buf, ulonglong skip_row_id,
-  uint *out_duplicate_key);
+    const char *primary_file, const char *schema_name, const char *table_name,
+    TABLE *table, const mylite_storage_index_entry *index_entries,
+    size_t index_entry_count, const uchar *index_entry_changed,
+    const uchar *buf, ulonglong skip_row_id, uint *out_duplicate_key);
 static int mylite_index_prefix_exists(const char *primary_file,
                                       const char *schema_name,
                                       const char *table_name,
@@ -2538,15 +2538,15 @@ int ha_mylite::write_row(const uchar *buf)
   }
 
   uint duplicate_key= (uint) -1;
-  error= volatile_rows ?
-    mylite_check_volatile_duplicate_keys(primary_file, storage_schema(),
-                                         storage_table(), table, index_entries,
-                                         index_entry_count, buf, 0ULL,
-                                         &duplicate_key) :
-    mylite_check_duplicate_keys(primary_file, storage_schema(),
-                                storage_table(), table, index_entries,
-                                index_entry_count, buf, 0ULL,
-                                &duplicate_key);
+  error= volatile_rows
+             ? mylite_check_volatile_duplicate_keys(
+                   primary_file, storage_schema(), storage_table(), table,
+                   index_entries, index_entry_count, NULL, buf, 0ULL,
+                   &duplicate_key)
+             : mylite_check_duplicate_keys(primary_file, storage_schema(),
+                                           storage_table(), table,
+                                           index_entries, index_entry_count,
+                                           NULL, buf, 0ULL, &duplicate_key);
   if (error)
   {
     mylite_free_index_entries(index_entries, index_key_storage);
@@ -2683,17 +2683,15 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
   }
 
   uint duplicate_key= (uint) -1;
-  error= volatile_rows ?
-    mylite_check_volatile_duplicate_keys(primary_file, storage_schema(),
-                                         storage_table(), table, index_entries,
-                                         index_entry_count, new_data,
-                                         current_row_id,
-                                         &duplicate_key) :
-    mylite_check_duplicate_keys(primary_file, storage_schema(),
-                                storage_table(), table, index_entries,
-                                index_entry_count, new_data,
-                                current_row_id,
-                                &duplicate_key);
+  error= volatile_rows
+             ? mylite_check_volatile_duplicate_keys(
+                   primary_file, storage_schema(), storage_table(), table,
+                   index_entries, index_entry_count, index_entry_changed,
+                   new_data, current_row_id, &duplicate_key)
+             : mylite_check_duplicate_keys(
+                   primary_file, storage_schema(), storage_table(), table,
+                   index_entries, index_entry_count, index_entry_changed,
+                   new_data, current_row_id, &duplicate_key);
   if (error)
   {
     if (index_entry_changed != stack_index_entry_changed)
@@ -4413,10 +4411,10 @@ static int mylite_copy_stored_row_to_record(TABLE *table, const uchar *payload,
 }
 
 static int mylite_check_duplicate_keys(
-  const char *primary_file, const char *schema_name, const char *table_name,
-  TABLE *table, const mylite_storage_index_entry *index_entries,
-  size_t index_entry_count, const uchar *buf, ulonglong skip_row_id,
-  uint *out_duplicate_key)
+    const char *primary_file, const char *schema_name, const char *table_name,
+    TABLE *table, const mylite_storage_index_entry *index_entries,
+    size_t index_entry_count, const uchar *index_entry_changed,
+    const uchar *buf, ulonglong skip_row_id, uint *out_duplicate_key)
 {
   *out_duplicate_key= (uint) -1;
   if (table->s->keys == 0)
@@ -4427,6 +4425,8 @@ static int mylite_check_duplicate_keys(
   for (uint i= 0; i < table->s->keys; ++i)
   {
     KEY *key_info= table->key_info + i;
+    if (index_entry_changed && !index_entry_changed[i])
+      continue;
     if (!(key_info->flags & HA_NOSAME) ||
         mylite_unique_key_allows_duplicate_null(table, key_info, buf))
       continue;
@@ -4485,10 +4485,10 @@ static int mylite_check_duplicate_keys(
 }
 
 static int mylite_check_volatile_duplicate_keys(
-  const char *primary_file, const char *schema_name, const char *table_name,
-  TABLE *table, const mylite_storage_index_entry *index_entries,
-  size_t index_entry_count, const uchar *buf, ulonglong skip_row_id,
-  uint *out_duplicate_key)
+    const char *primary_file, const char *schema_name, const char *table_name,
+    TABLE *table, const mylite_storage_index_entry *index_entries,
+    size_t index_entry_count, const uchar *index_entry_changed,
+    const uchar *buf, ulonglong skip_row_id, uint *out_duplicate_key)
 {
   *out_duplicate_key= (uint) -1;
   if (table->s->keys == 0)
@@ -4499,6 +4499,8 @@ static int mylite_check_volatile_duplicate_keys(
   for (uint i= 0; i < table->s->keys; ++i)
   {
     KEY *key_info= table->key_info + i;
+    if (index_entry_changed && !index_entry_changed[i])
+      continue;
     if (!(key_info->flags & HA_NOSAME) ||
         mylite_unique_key_allows_duplicate_null(table, key_info, buf))
       continue;
@@ -4935,9 +4937,9 @@ static int mylite_apply_update_cascade_to_child_rows(
     {
       uint duplicate_key= (uint) -1;
       error= mylite_check_duplicate_keys(
-        primary_file, metadata->schema_name, metadata->table_name,
-        child_table, index_entries, index_entry_count,
-        child_table->record[0], row_ids[i], &duplicate_key);
+          primary_file, metadata->schema_name, metadata->table_name,
+          child_table, index_entries, index_entry_count, NULL,
+          child_table->record[0], row_ids[i], &duplicate_key);
     }
     if (!error)
       error= mylite_check_child_foreign_keys_except(
@@ -5319,9 +5321,9 @@ static int mylite_apply_set_null_to_child_rows(
     {
       uint duplicate_key= (uint) -1;
       error= mylite_check_duplicate_keys(
-        primary_file, metadata->schema_name, metadata->table_name,
-        child_table, index_entries, index_entry_count,
-        child_table->record[0], row_ids[i], &duplicate_key);
+          primary_file, metadata->schema_name, metadata->table_name,
+          child_table, index_entries, index_entry_count, NULL,
+          child_table->record[0], row_ids[i], &duplicate_key);
     }
     if (!error)
       error= mylite_check_child_foreign_keys(

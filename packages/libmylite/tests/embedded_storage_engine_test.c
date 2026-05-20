@@ -16522,12 +16522,14 @@ static void test_indexed_rows(void) {
         "UPDATE indexed_posts SET slug = 'beta-updated', category = 'tech', score = 25 "
         "WHERE slug = 'beta'"
     );
+    assert_exec_succeeds(db, "UPDATE indexed_posts SET score = 26 WHERE slug = 'beta-updated'");
+    assert_exec_fails(db, "UPDATE indexed_posts SET slug = 'gamma' WHERE id = 2");
     rows = (table_context){0};
     assert(
         mylite_exec(
             db,
             "SELECT id FROM indexed_posts FORCE INDEX (slug_key) "
-            "WHERE slug = 'beta-updated' AND category = 'tech' AND score = 25",
+            "WHERE slug = 'beta-updated' AND category = 'tech' AND score = 26",
             row_callback,
             &rows,
             &errmsg
