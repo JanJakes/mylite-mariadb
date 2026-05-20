@@ -150,6 +150,7 @@ published-leaf secondary index reads labelled separately:
 tools/mylite-perf-baseline
 tools/mylite-perf-baseline 1000 1000
 tools/mylite-perf-baseline --phase=updates 1000 10000
+tools/mylite-perf-baseline --phase=prepared-updates 1000 10000
 ```
 
 Set `MYLITE_PERF_KEEP_ROOT=1` when investigating a failed benchmark run and

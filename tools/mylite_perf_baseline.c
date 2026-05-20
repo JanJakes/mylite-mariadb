@@ -12,10 +12,17 @@
 #include <time.h>
 #include <unistd.h>
 
+typedef enum benchmark_phase {
+    BENCHMARK_PHASE_ALL,
+    BENCHMARK_PHASE_UPDATES,
+    BENCHMARK_PHASE_DIRECT_UPDATES,
+    BENCHMARK_PHASE_PREPARED_UPDATES,
+} benchmark_phase;
+
 typedef struct benchmark_config {
     size_t rows;
     size_t iterations;
-    int updates_only;
+    benchmark_phase phase;
 } benchmark_config;
 
 typedef struct benchmark_context {
@@ -43,6 +50,7 @@ typedef struct secondary_result {
 
 static int parse_config(int argc, char **argv, benchmark_config *config);
 static int parse_phase_argument(const char *argument, benchmark_config *config);
+static const char *benchmark_phase_name(benchmark_phase phase);
 static int run_benchmark(const benchmark_config *config);
 static void print_usage(const char *program);
 static void print_result(const char *operation, size_t count, uint64_t elapsed_ns);
@@ -98,7 +106,7 @@ int main(int argc, char **argv) {
     benchmark_config config = {
         .rows = 100U,
         .iterations = 100U,
-        .updates_only = 0,
+        .phase = BENCHMARK_PHASE_ALL,
     };
 
     if (parse_config(argc, argv, &config) != 0) {
@@ -153,16 +161,42 @@ static int parse_config(int argc, char **argv, benchmark_config *config) {
 
 static int parse_phase_argument(const char *argument, benchmark_config *config) {
     if (strcmp(argument, "all") == 0) {
-        config->updates_only = 0;
+        config->phase = BENCHMARK_PHASE_ALL;
         return 0;
     }
     if (strcmp(argument, "updates") == 0) {
-        config->updates_only = 1;
+        config->phase = BENCHMARK_PHASE_UPDATES;
+        return 0;
+    }
+    if (strcmp(argument, "direct-updates") == 0) {
+        config->phase = BENCHMARK_PHASE_DIRECT_UPDATES;
+        return 0;
+    }
+    if (strcmp(argument, "prepared-updates") == 0) {
+        config->phase = BENCHMARK_PHASE_PREPARED_UPDATES;
         return 0;
     }
 
-    fprintf(stderr, "Expected phase `all` or `updates`, got: %s\n", argument);
+    fprintf(
+        stderr,
+        "Expected phase `all`, `updates`, `direct-updates`, or `prepared-updates`, got: %s\n",
+        argument
+    );
     return 1;
+}
+
+static const char *benchmark_phase_name(benchmark_phase phase) {
+    switch (phase) {
+    case BENCHMARK_PHASE_ALL:
+        return "all";
+    case BENCHMARK_PHASE_UPDATES:
+        return "updates";
+    case BENCHMARK_PHASE_DIRECT_UPDATES:
+        return "direct-updates";
+    case BENCHMARK_PHASE_PREPARED_UPDATES:
+        return "prepared-updates";
+    }
+    return "unknown";
 }
 
 static int run_benchmark(const benchmark_config *config) {
@@ -184,7 +218,7 @@ static int run_benchmark(const benchmark_config *config) {
     printf("# MyLite Performance Baseline\n\n");
     printf("Rows: %zu\n", config->rows);
     printf("Iterations: %zu\n", config->iterations);
-    printf("Phase: %s\n", config->updates_only ? "updates" : "all");
+    printf("Phase: %s\n", benchmark_phase_name(config->phase));
     printf("Storage route: `ENGINE=InnoDB` through the MyLite storage engine\n\n");
     printf("| Operation | Count | Total ms | us/op |\n");
     printf("| --- | ---: | ---: | ---: |\n");
@@ -204,7 +238,7 @@ static int run_benchmark(const benchmark_config *config) {
     if (benchmark_prepared_insert_rows(&ctx) != 0) {
         goto cleanup;
     }
-    if (config->updates_only) {
+    if (config->phase != BENCHMARK_PHASE_ALL) {
         goto updates;
     }
     if (benchmark_point_selects(&ctx) != 0) {
@@ -229,11 +263,15 @@ static int run_benchmark(const benchmark_config *config) {
         goto cleanup;
     }
 updates:
-    if (benchmark_updates(&ctx) != 0) {
-        goto cleanup;
+    if (config->phase != BENCHMARK_PHASE_PREPARED_UPDATES) {
+        if (benchmark_updates(&ctx) != 0) {
+            goto cleanup;
+        }
     }
-    if (benchmark_prepared_updates(&ctx) != 0) {
-        goto cleanup;
+    if (config->phase != BENCHMARK_PHASE_DIRECT_UPDATES) {
+        if (benchmark_prepared_updates(&ctx) != 0) {
+            goto cleanup;
+        }
     }
     if (verify_row_count(&ctx, config->rows) != 0) {
         goto cleanup;
@@ -262,10 +300,10 @@ cleanup:
 static void print_usage(const char *program) {
     fprintf(
         stderr,
-        "Usage: %s [--phase=all|updates] [rows] [iterations]\n"
+        "Usage: %s [--phase=all|updates|direct-updates|prepared-updates] [rows] [iterations]\n"
         "\n"
         "Defaults: phase=all rows=100 iterations=100.\n"
-        "The updates phase skips point-read and secondary-index read timings after setup.\n"
+        "The update phases skip point-read and secondary-index read timings after setup.\n"
         "Set MYLITE_PERF_KEEP_ROOT=1 to keep the temporary benchmark directory.\n",
         program
     );
