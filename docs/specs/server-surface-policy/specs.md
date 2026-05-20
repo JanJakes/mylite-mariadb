@@ -69,6 +69,10 @@ Use two layers:
    when a size-profile slice omits their implementation. The first such case is
    Oracle SQL mode, where `sql_mode=ORACLE` is rejected while ordinary SQL modes
    and user variables named `sql_mode` remain valid.
+4. Keep direct and prepared regression coverage for optional SQL helpers that a
+   size-profile slice omits from the embedded function registry. The first such
+   case is `SFORMAT()`, which fails predictably while ordinary `FORMAT()`
+   remains available.
 
 The gate is not a general SQL parser. It is a narrow first-token policy check
 for statement families and explicit mode switches whose MariaDB behavior is
@@ -155,6 +159,8 @@ No new dependencies or license changes.
   `SQL_NO_CACHE` SELECT hints accepted.
 - Cover rejected direct and prepared `sql_mode=ORACLE` while keeping user
   variables named `sql_mode` accepted.
+- Cover rejected direct and prepared `SFORMAT()` after the embedded size
+  profile omits it.
 - Cover rejected prepared SQL for at least one server-owned statement family.
 - Assert server-sidecar files and system-table directories are absent.
 - Run:
@@ -182,6 +188,8 @@ No new dependencies or license changes.
   query-cache SELECT hints remain no-op syntax.
 - Oracle SQL mode fails through a stable MyLite policy diagnostic while normal
   SQL modes and user variables named `sql_mode` remain available.
+- Optional `SFORMAT()` fails predictably in direct execution and prepared
+  statements after the embedded size profile omits it.
 - MySQL/MariaDB executable comments cannot bypass the server-surface policy.
 - Direct execution and prepared statements share the same policy.
 - Rejected server commands do not create durable server sidecars or system-table

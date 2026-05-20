@@ -2305,6 +2305,7 @@ protected:
   ~Create_func_sec_to_time() override = default;
 };
 
+#ifndef EMBEDDED_LIBRARY
 class Create_func_sformat : public Create_native_func
 {
 public:
@@ -2315,6 +2316,7 @@ protected:
   Create_func_sformat() = default;
   virtual ~Create_func_sformat() = default;
 };
+#endif
 
 class Create_func_sha : public Create_func_arg1
 {
@@ -5720,6 +5722,7 @@ Create_func_sec_to_time::create_1_arg(THD *thd, Item *arg1)
   return new (thd->mem_root) Item_func_sec_to_time(thd, arg1);
 }
 
+#ifndef EMBEDDED_LIBRARY
 Create_func_sformat Create_func_sformat::s_singleton;
 
 Item*
@@ -5740,6 +5743,7 @@ Create_func_sformat::create_native(THD *thd, const LEX_CSTRING *name,
   return new (thd->mem_root) Item_func_sformat(thd, *item_list);
 }
 
+#endif
 
 Create_func_sha Create_func_sha::s_singleton;
 
@@ -6529,7 +6533,9 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("RTRIM") }, BUILDER(Create_func_rtrim)},
   { { STRING_WITH_LEN("RTRIM_ORACLE") }, BUILDER(Create_func_rtrim_oracle)},
   { { STRING_WITH_LEN("SEC_TO_TIME") }, BUILDER(Create_func_sec_to_time)},
+#ifndef EMBEDDED_LIBRARY
   { { STRING_WITH_LEN("SFORMAT") }, BUILDER(Create_func_sformat)},
+#endif
   { { STRING_WITH_LEN("SCHEMA") }, BUILDER(Create_func_database)},
   { { STRING_WITH_LEN("SCHEMAS") }, BUILDER(Create_func_database)},
   { { STRING_WITH_LEN("SHA") }, BUILDER(Create_func_sha)},

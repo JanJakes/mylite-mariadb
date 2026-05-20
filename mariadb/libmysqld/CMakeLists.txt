@@ -23,7 +23,6 @@ ${CMAKE_SOURCE_DIR}/libmysqld
 ${CMAKE_SOURCE_DIR}/sql
 ${CMAKE_BINARY_DIR}/sql 
 ${PCRE_INCLUDE_DIRS}
-${LIBFMT_INCLUDE_DIR}
 ${ZLIB_INCLUDE_DIRS}
 ${SSL_INCLUDE_DIRS}
 ${SSL_INTERNAL_INCLUDE_DIRS}
@@ -160,13 +159,12 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
 
 
 ADD_CONVENIENCE_LIBRARY(sql_embedded ${SQL_EMBEDDED_SOURCES})
+# MyLite omits embedded SFORMAT(), keeping fmt and exceptions out.
+TARGET_COMPILE_OPTIONS(sql_embedded PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>")
 DTRACE_INSTRUMENT(sql_embedded)
 ADD_DEPENDENCIES(sql_embedded GenError GenServerSource)
 IF(TARGET pcre2)
   ADD_DEPENDENCIES(sql_embedded pcre2)
-ENDIF()
-IF(TARGET libfmt)
-  ADD_DEPENDENCIES(sql_embedded libfmt)
 ENDIF()
 TARGET_LINK_LIBRARIES(sql_embedded LINK_PRIVATE tpool ${CRC32_LIBRARY})
 

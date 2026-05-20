@@ -223,6 +223,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "CREATE DATABASE app");
     exec_ok(db, "SELECT SQL_CACHE 1");
     exec_ok(db, "SELECT SQL_NO_CACHE 1");
+    exec_ok(db, "SELECT FORMAT(1234.5, 2)");
     exec_ok(db, "SET @profiling = 1");
     exec_ok(db, "SET @profiling_history_size = 10");
     exec_ok(db, "SET @query_cache_size = 1048576");
@@ -332,6 +333,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
         "SET autocommit = 1, sql_mode = CONCAT(@@sql_mode, ',ORACLE')",
         "Oracle SQL mode"
     );
+    expect_error(db, "SELECT SFORMAT('{}', 1)", "SFORMAT");
     expect_prepare_error(
         db,
         "CREATE USER 'prepared_user'@'localhost' IDENTIFIED BY 'secret'",
@@ -349,6 +351,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_prepare_error(db, "SET query_cache_type = ON", "server-owned SQL surface");
     expect_prepare_error(db, "RESET QUERY CACHE", "server-owned SQL surface");
     expect_prepare_error(db, "SET sql_mode = 'ORACLE'", "Oracle SQL mode");
+    expect_prepare_error(db, "SELECT SFORMAT('{}', 1)", "SFORMAT");
 }
 
 static void assert_no_server_sidecar_files(const char *database_path) {

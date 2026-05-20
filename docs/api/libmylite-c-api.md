@@ -385,7 +385,8 @@ compatibility features that do not fit the embedded library model:
 - Oracle SQL mode,
 - SQL help-table lookup,
 - statement profiling,
-- query-cache management.
+- query-cache management,
+- the optional `SFORMAT()` SQL helper.
 
 Top-level SQL command families for users, roles, grants, password changes,
 dynamic plugins, events, replication, binlog administration, and foreign-server
@@ -393,10 +394,11 @@ metadata are rejected before direct execution or prepared-statement
 preparation. Attempts to enable Oracle SQL mode, SQL `HELP`,
 statement-profiling commands, and query-cache management commands are rejected
 through the same policy. They fail with `MYLITE_ERROR` and a stable MyLite
-diagnostic. Query-cache SELECT hints remain accepted no-op syntax. Startup
-variables also cover disabled binlog, performance schema, query cache,
-statement profiling, grant tables, networking, and the transient
-database-local plugin directory.
+diagnostic. Query-cache SELECT hints remain accepted no-op syntax. The default
+embedded profile also omits `SFORMAT()`, which fails as an unknown SQL
+function; ordinary `FORMAT()` remains available. Startup variables also cover
+disabled binlog, performance schema, query cache, statement profiling, grant
+tables, networking, and the transient database-local plugin directory.
 
 ## Compatibility Adapter
 

@@ -49,6 +49,7 @@ surface that does not fit a local directory-owned library:
 - dynamic plugin loading and external durable storage engines,
 - performance schema, statement profiling, query cache, and server audit plugins,
 - optional Oracle SQL compatibility mode,
+- optional fmtlib-backed SQL helpers such as `SFORMAT()`,
 - rarely used optional engines or plugins unless a slice justifies them.
 
 The minimal embedded build establishes the first baseline. Later slices record
@@ -63,8 +64,11 @@ behavior. The query cache is stubbed after policy coverage proves query-cache
 management is a server tuning surface and `SQL_CACHE` / `SQL_NO_CACHE` can
 remain no-op parser hints. The optional Oracle SQL-mode parser is replaced with
 an unsupported embedded stub after policy coverage proves normal SQL modes and
-user variables remain unaffected. Compatibility-sensitive code removals require
-separate evidence before they are accepted.
+user variables remain unaffected. The optional `SFORMAT()` helper is omitted
+from the embedded function registry after coverage proves direct and prepared
+calls fail predictably and ordinary `FORMAT()` remains available; that lets the
+embedded SQL target compile without C++ exceptions. Compatibility-sensitive
+code removals require separate evidence before they are accepted.
 
 Historical branch-level size research is archived in
 [Bundle size reduction attempts](architecture/bundle-size-research.md). Treat

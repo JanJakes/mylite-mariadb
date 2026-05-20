@@ -11,7 +11,10 @@ unused Performance Schema and Feedback static plugins. Server help-table
 lookup, statement profiling, and the query cache are also compiled to disabled
 surfaces because they do not belong to the embedded application SQL profile.
 The optional Oracle SQL-mode parser is treated the same way after policy
-coverage proves attempts to enable `sql_mode=ORACLE` fail explicitly.
+coverage proves attempts to enable `sql_mode=ORACLE` fail explicitly. The
+fmtlib-backed `SFORMAT()` helper is also omitted from the embedded profile so
+the embedded SQL target can build without C++ exceptions; ordinary `FORMAT()`
+and core string functions remain available.
 
 ## Source Findings
 
@@ -59,6 +62,16 @@ coverage proves attempts to enable `sql_mode=ORACLE` fail explicitly.
   reduces the stripped archive to 29,244,456 bytes, 27.89 MiB, and 707
   members. The stripped `yy_oracle.cc.o` member is replaced by a 784-byte
   `mylite_oracle_parser_stub.cc.o` member.
+- `SFORMAT()` is a MariaDB-specific fmtlib-backed formatting helper implemented
+  in `mariadb/sql/item_strfunc.cc`, registered from
+  `mariadb/sql/item_create.cc`, and protected by a `fmt::format_error`
+  `try`/`catch`. It is not core MySQL/MariaDB application behavior, while the
+  ordinary numeric `FORMAT()` SQL function remains separate and supported.
+- Omitting embedded `SFORMAT()` removes the embedded target's fmt include and
+  dependency and allows `sql_embedded` to compile with `-fno-exceptions`. That
+  reduces the stripped archive to 27,436,216 bytes, 26.17 MiB, and 707
+  members. The stripped `item_strfunc.cc.o` member is 497,216 bytes and
+  `item_create.cc.o` is 341,768 bytes in the resulting archive.
 
 ## Proposed Design
 
@@ -99,6 +112,12 @@ generated `yy_oracle.cc` parser. MyLite rejects attempts to enable
 `sql_mode=ORACLE` before dispatch, while normal SQL modes and user variables
 named `sql_mode` continue through the generated MariaDB parser.
 
+The embedded SQL function registry omits `SFORMAT()` and the embedded
+`item_strfunc.cc` build excludes the fmtlib-backed implementation. With the
+exception-using implementation absent, `sql_embedded` is compiled with
+`-fno-exceptions`. Non-embedded MariaDB targets keep the upstream `SFORMAT()`
+implementation.
+
 The wrapper keeps this behavior enabled by default because it is the
 distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
 need an unstripped archive for local inspection.
@@ -107,8 +126,9 @@ need an unstripped archive for local inspection.
 
 The Performance Schema storage-engine plugin and Feedback reporting plugin are
 omitted by CMake configuration, embedded `HELP`, statement profiling, query
-cache, and Oracle SQL mode are compiled to disabled surfaces, and the compiled
-objects use size-oriented release flags.
+cache, Oracle SQL mode, and `SFORMAT()` are compiled to disabled or omitted
+surfaces, and the compiled objects use size-oriented release flags. The
+embedded SQL target also uses `-fno-exceptions`.
 
 ## Compatibility Impact
 
@@ -124,6 +144,9 @@ optimization; MyLite keeps query-cache SELECT hints as no-op syntax and omits
 the cache implementation. Oracle SQL mode is an optional MariaDB compatibility
 mode, not core MySQL/MariaDB application behavior; MyLite rejects it explicitly
 and keeps the normal MariaDB parser intact.
+`SFORMAT()` is an optional fmtlib-backed helper rather than core application
+SQL behavior; ordinary `FORMAT()` remains available, and direct or prepared
+`SFORMAT()` fails predictably in the default embedded profile.
 
 ## Database-Directory And Lifecycle Impact
 
@@ -156,7 +179,12 @@ Replacing the generated Oracle parser with an unsupported stub brings the
 current archive to 29,244,456 bytes / 27.89 MiB, 2,285,248 bytes smaller than
 the Release build with Performance Schema disabled, 3,885,184 bytes smaller
 than the symbol-stripped baseline with Performance Schema still built, and
-4,597,864 bytes smaller than the original broad archive.
+4,597,864 bytes smaller than the original broad archive. Omitting embedded
+`SFORMAT()` and compiling the embedded SQL target with `-fno-exceptions` brings
+the current archive to 27,436,216 bytes / 26.17 MiB, 4,093,488 bytes smaller
+than the Release build with Performance Schema disabled, 5,693,424 bytes
+smaller than the symbol-stripped baseline with Performance Schema still built,
+and 6,406,104 bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -190,6 +218,9 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Query cache reports unavailable, query-cache management fails through the
   MyLite policy, and query-cache SELECT hints remain no-op syntax.
 - Oracle SQL mode fails through the MyLite policy and the embedded parser stub.
+- Embedded `SFORMAT()` is omitted, direct and prepared `SFORMAT()` fail
+  predictably, and ordinary `FORMAT()` remains available.
+- The embedded SQL target builds with `-fno-exceptions`.
 - The stripped archive still links `libmylite` and all embedded tests.
 - The measured archive size and member count are recorded in the build
   documentation.
@@ -202,3 +233,6 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
   matters.
 - Larger size wins require removing or stubbing code. Those changes need
   separate compatibility decisions before they are accepted.
+- Compiling the embedded SQL target without exceptions is valid only while
+  exception-using SQL surfaces remain outside the embedded profile and covered
+  by tests.

@@ -796,6 +796,7 @@ protected:
   { return get_item_copy<Item_func_substr>(thd, this); }
 };
 
+#ifndef EMBEDDED_LIBRARY
 class Item_func_sformat :public Item_str_func
 {
   String *val_arg;
@@ -812,6 +813,7 @@ public:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_sformat>(thd, this); }
 };
+#endif
 
 class Item_func_substr_oracle :public Item_func_substr
 {

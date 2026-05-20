@@ -53,7 +53,9 @@ and usage-reporting plugin from the embedded profile. `ENABLED_PROFILING=OFF`
 omits statement-profiling implementation code while preserving MariaDB's
 disabled `@@have_profiling=NO` contract. The embedded query cache is compiled
 to no-op stubs and reports `@@have_query_cache=NO`. The embedded archive links
-a small Oracle SQL-mode parser stub instead of the generated Oracle parser.
+a small Oracle SQL-mode parser stub instead of the generated Oracle parser. It
+also omits the fmtlib-backed `SFORMAT()` SQL function and builds the embedded
+SQL target without C++ exceptions.
 
 ## Measurement
 
@@ -69,23 +71,23 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 29,244,456 bytes / 27.89 MiB |
+| Archive size | 27,436,216 bytes / 26.17 MiB |
 | Archive members | 707 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
 32.27 MiB. With `MinSizeRel`, the unused Performance Schema static plugin
 disabled, the Feedback plugin omitted, statement profiling disabled, and
-embedded `HELP` compiled to an unsupported-command stub, the pre-strip archive
-with the embedded query cache stubbed and the Oracle SQL-mode parser replaced
-by an unsupported stub is 29,888,104 bytes / 28.50 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 643,648 bytes
-without changing archive membership or runtime behavior. The final archive is
-944,136 bytes smaller than the same profile with the generated Oracle parser,
-984,472 bytes smaller than the profile with statement profiling disabled but
-full query-cache and Oracle-parser code, 2,285,248 bytes smaller than the
-Release build with Performance Schema disabled, 3,885,184 bytes smaller than
-the symbol-stripped baseline that still built Performance Schema, and 4,597,864
-bytes smaller than the original broad archive.
+embedded `HELP` compiled to an unsupported-command stub, the embedded query
+cache stubbed, the Oracle SQL-mode parser replaced by an unsupported stub, and
+embedded `SFORMAT()` omitted so the embedded SQL target can compile without C++
+exceptions, the pre-strip archive is 28,037,328 bytes / 26.74 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 601,112 bytes without
+changing archive membership or runtime behavior. The final archive is 1,808,240
+bytes smaller than the same profile before `SFORMAT()` and exception metadata
+were removed, 4,093,488 bytes smaller than the Release build with Performance
+Schema disabled, 5,693,424 bytes smaller than the symbol-stripped baseline that
+still built Performance Schema, and 6,406,104 bytes smaller than the original
+broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
 GSSAPI, BZip2, LZ4, LibLZMA, LZO, PCRE2, and Zstandard support on this
@@ -120,7 +122,8 @@ Query-cache implementation code is stubbed for the embedded archive; `SQL_CACHE`
 and `SQL_NO_CACHE` remain accepted parser hints, while query-cache management
 commands and variables are rejected by policy. Oracle SQL mode is rejected by
 policy and linked to an unsupported parser stub; normal MariaDB/MySQL parsing
-continues to use the generated MariaDB parser.
+continues to use the generated MariaDB parser. `SFORMAT()` is omitted from the
+embedded function registry, while ordinary `FORMAT()` remains available.
 
 ## Disabled Or Missing Surface
 
@@ -134,6 +137,7 @@ The baseline explicitly disables:
 - Statement profiling
 - Query cache
 - Oracle SQL mode
+- `SFORMAT()`
 - MariaDB upstream unit-test targets
 
 Configure also reports unavailable optional features on this host, including
@@ -142,11 +146,11 @@ RocksDB, OQGraph, AWS key management, CONNECT JDBC, and Snappy.
 ## Offline Build Caveat
 
 This profile does not fetch MariaDB submodules, but upstream MariaDB's
-`cmake/libfmt.cmake` downloads `fmt` 12.1.0 when a usable system `fmt` is not
-configured. That download is a small third-party dependency fetch, not a MariaDB
-source-tree expansion. A future CI/release slice should either configure a
-system `fmt`, cache the external project, or vendor a reviewed dependency if
-fully offline builds become a requirement.
+`cmake/libfmt.cmake` can still check or configure `fmt` 12.1.0 when a usable
+system `fmt` is not configured. The embedded `libmariadbd.a` target no longer
+includes or depends on fmt after `SFORMAT()` is omitted, but a future CI/release
+slice should still audit the top-level MariaDB configure path if fully offline
+builds become a requirement.
 
 ## Follow-Up
 
