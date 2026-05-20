@@ -17923,11 +17923,8 @@ static void maybe_rebuild_row_payload_cache_buckets_after_tombstone(
 }
 
 static size_t hash_row_id(unsigned long long row_id) {
-    row_id ^= row_id >> 33U;
-    row_id *= 0xff51afd7ed558ccdULL;
-    row_id ^= row_id >> 33U;
-    row_id *= 0xc4ceb9fe1a85ec53ULL;
-    row_id ^= row_id >> 33U;
+    row_id *= 0x9e3779b97f4a7c15ULL;
+    row_id ^= row_id >> 32U;
     return (size_t)row_id;
 }
 

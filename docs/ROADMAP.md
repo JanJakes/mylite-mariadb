@@ -260,6 +260,8 @@ Exact-index cache probes now compare 1/2/4/8-byte key images with fixed-size
 loads, keeping `memcmp()` only for larger or variable-width keys.
 Cached active rewrite shapes now skip the redundant row-state page lookup that
 was only needed for uncached shape validation.
+Transient row-id cache buckets now use a one-multiply hash with high-bit folding
+instead of a heavier two-multiply finalizer.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation
