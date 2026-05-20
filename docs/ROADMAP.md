@@ -182,7 +182,9 @@ row and changed index-entry pages are now encoded directly in the active append
 buffer, removing the temporary read/write page copies from repeated buffered
 update rewrites. Those in-buffer rewrites refresh only the row payload or index
 key bytes plus any shrunken stale tail instead of rebuilding the whole page
-image before recomputing the page checksum.
+image before recomputing the page checksum. Buffered row and index-entry undo
+preimages now copy only the meaningful checksummed prefix and restore an
+implicit zero tail, reducing repeated nested-statement rollback bookkeeping.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation

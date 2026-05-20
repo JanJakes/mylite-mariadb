@@ -445,7 +445,9 @@ later rewrites can use metadata-only row-state validation until rollback or
 statement cleanup clears the cache. After validation, the rewrite mutates the
 row page and changed index-entry pages directly in the active append buffer,
 refreshing only the mutable payload/key bytes and any stale shrunken tail, and
-capturing per-statement full-page preimages first when rollback needs them.
+capturing per-statement preimages first when rollback needs them. Row and
+index-entry preimages store only the meaningful checksummed prefix plus an
+implicit zero tail, while other page types keep full-page undo.
 The generic buffered read and write helpers still copy pages for other callers,
 and durable reads keep full page checksum validation. Already-flushed
 replacement runs keep the append-only path until a logged page-rewrite design

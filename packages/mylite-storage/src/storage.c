@@ -363,6 +363,7 @@ typedef struct mylite_storage_append_page_buffer {
 
 typedef struct mylite_storage_buffered_page_undo {
     unsigned long long page_id;
+    size_t used_size;
     unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
 } mylite_storage_buffered_page_undo;
 
@@ -785,6 +786,7 @@ static mylite_storage_result capture_buffered_page_undo(
     FILE *file,
     unsigned long long page_id
 );
+static size_t buffered_page_undo_used_size(const unsigned char *page);
 static int buffered_update_rewrite_row_state_known(
     mylite_storage_statement *statement,
     unsigned long long row_id
@@ -7660,6 +7662,23 @@ static mylite_storage_result restore_buffered_page_undos(mylite_storage_statemen
 
     for (size_t i = 0U; i < statement->buffered_page_undos.count; ++i) {
         const mylite_storage_buffered_page_undo *undo = statement->buffered_page_undos.entries + i;
+        if (undo->used_size == 0U || undo->used_size > MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+            return MYLITE_STORAGE_CORRUPT;
+        }
+        if (undo->used_size < MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+            unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+            memset(page, 0, sizeof(page));
+            memcpy(page, undo->page, undo->used_size);
+            if (!replace_buffered_append_page(
+                    statement->file,
+                    undo->page_id,
+                    MYLITE_STORAGE_FORMAT_PAGE_SIZE,
+                    page
+                )) {
+                return MYLITE_STORAGE_CORRUPT;
+            }
+            continue;
+        }
         if (!replace_buffered_append_page(
                 statement->file,
                 undo->page_id,
@@ -8416,9 +8435,27 @@ static mylite_storage_result capture_buffered_page_undo(
     if (page == NULL) {
         return MYLITE_STORAGE_CORRUPT;
     }
-    memcpy(undo->page, page, sizeof(undo->page));
+    undo->used_size = buffered_page_undo_used_size(page);
+    memcpy(undo->page, page, undo->used_size);
     ++statement->buffered_page_undos.count;
     return MYLITE_STORAGE_OK;
+}
+
+static size_t buffered_page_undo_used_size(const unsigned char *page) {
+    if (is_row_page(page)) {
+        const size_t row_size = get_u32_le(page, MYLITE_STORAGE_FORMAT_ROW_RECORD_SIZE_OFFSET);
+        if (row_size <=
+            MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET) {
+            return MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET + row_size;
+        }
+    }
+    if (is_index_entry_page(page)) {
+        const size_t key_size = get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_KEY_SIZE_OFFSET);
+        if (key_size <= MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET) {
+            return MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET + key_size;
+        }
+    }
+    return MYLITE_STORAGE_FORMAT_PAGE_SIZE;
 }
 
 static unsigned char *buffered_append_page(
