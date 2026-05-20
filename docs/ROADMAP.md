@@ -219,7 +219,9 @@ validation now carries append-buffer page refs with checksum-dirty slots through
 undo capture and mutation, avoiding repeated page-range and dirty-slot lookup
 for already-resolved row and changed index-entry pages. Indexed row lookup now
 reuses the resolved active cache statement across exact-index cache probes and
-row-payload cache reads before update execution.
+row-payload cache reads before update execution. Prepared update storage now
+reuses the write/read statement scope discovered while opening the primary file
+for journal start and header publication.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation

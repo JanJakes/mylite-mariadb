@@ -461,6 +461,12 @@ struct mylite_storage_statement {
     mylite_storage_buffered_update_rewrite_cache buffered_update_rewrites;
 };
 
+typedef struct mylite_storage_update_file_scope {
+    FILE *file;
+    mylite_storage_statement *active_statement;
+    mylite_storage_statement *active_read_statement;
+} mylite_storage_update_file_scope;
+
 typedef struct mylite_storage_transaction_journal_snapshot {
     FILE *file;
     mylite_storage_header header;
@@ -581,6 +587,13 @@ static mylite_storage_result begin_write_journal(
     const mylite_storage_header *header,
     int include_catalog
 );
+static mylite_storage_result begin_write_journal_for_statement(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    int include_catalog,
+    mylite_storage_statement *statement
+);
 static mylite_storage_result begin_transaction_journal(
     FILE *file,
     const char *filename,
@@ -650,6 +663,10 @@ static mylite_storage_result read_transaction_journal_snapshot(
     mylite_storage_transaction_journal_snapshot *out_snapshot
 );
 static mylite_storage_result open_existing_file_for_update(const char *filename, FILE **out_file);
+static mylite_storage_result open_existing_file_for_update_scope(
+    const char *filename,
+    mylite_storage_update_file_scope *out_scope
+);
 static mylite_storage_result close_existing_file(FILE *file);
 static mylite_storage_statement *active_statement_for(const char *filename);
 static mylite_storage_statement *active_statement_for_any_owner(const char *filename);
@@ -807,6 +824,12 @@ static mylite_storage_result read_page_at(
     unsigned char *out_page
 );
 static mylite_storage_result publish_header(FILE *file, const mylite_storage_header *header);
+static mylite_storage_result publish_header_for_statement(
+    FILE *file,
+    const mylite_storage_header *header,
+    mylite_storage_statement *statement,
+    mylite_storage_statement *read_statement
+);
 static mylite_storage_result write_page_at(
     FILE *file,
     unsigned long long page_id,
@@ -4997,12 +5020,13 @@ static mylite_storage_result update_row_with_index_entries(
         return result;
     }
 
-    FILE *file = NULL;
-    result = open_existing_file_for_update(filename, &file);
+    mylite_storage_update_file_scope file_scope = {0};
+    result = open_existing_file_for_update_scope(filename, &file_scope);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
-    mylite_storage_statement *active_file_statement = active_statement_for_file(file);
+    FILE *file = file_scope.file;
+    mylite_storage_statement *active_file_statement = file_scope.active_statement;
     mylite_storage_statement *active_cache_statement = active_cache_statement_for(filename);
 
     mylite_storage_header header = {0};
@@ -5034,7 +5058,13 @@ static mylite_storage_result update_row_with_index_entries(
         );
     }
     if (result == MYLITE_STORAGE_OK) {
-        result = begin_write_journal(file, filename, &header, 0);
+        result = begin_write_journal_for_statement(
+            file,
+            filename,
+            &header,
+            0,
+            active_file_statement
+        );
     }
     unsigned long long next_page_id = 0ULL;
     int used_inline_update_pages = 0;
@@ -5114,7 +5144,12 @@ static mylite_storage_result update_row_with_index_entries(
     }
     if (result == MYLITE_STORAGE_OK) {
         header.page_count = next_page_id;
-        result = publish_header(file, &header);
+        result = publish_header_for_statement(
+            file,
+            &header,
+            active_file_statement,
+            file_scope.active_read_statement
+        );
         if (result == MYLITE_STORAGE_OK) {
             result = finish_write_journal(file, filename);
         }
@@ -7134,7 +7169,22 @@ static mylite_storage_result begin_write_journal(
     const mylite_storage_header *header,
     int include_catalog
 ) {
-    mylite_storage_statement *statement = active_statement_for(filename);
+    return begin_write_journal_for_statement(
+        file,
+        filename,
+        header,
+        include_catalog,
+        active_statement_for(filename)
+    );
+}
+
+static mylite_storage_result begin_write_journal_for_statement(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    int include_catalog,
+    mylite_storage_statement *statement
+) {
     if (statement == NULL) {
         return begin_recovery_journal(file, filename, header, include_catalog);
     }
@@ -7693,9 +7743,23 @@ static mylite_storage_result read_transaction_journal_snapshot(
 }
 
 static mylite_storage_result open_existing_file_for_update(const char *filename, FILE **out_file) {
+    mylite_storage_update_file_scope scope = {0};
+    const mylite_storage_result result = open_existing_file_for_update_scope(filename, &scope);
+    if (result == MYLITE_STORAGE_OK) {
+        *out_file = scope.file;
+    }
+    return result;
+}
+
+static mylite_storage_result open_existing_file_for_update_scope(
+    const char *filename,
+    mylite_storage_update_file_scope *out_scope
+) {
+    *out_scope = (mylite_storage_update_file_scope){0};
     mylite_storage_statement *statement = active_statement_for(filename);
     if (statement != NULL) {
-        *out_file = statement->file;
+        out_scope->file = statement->file;
+        out_scope->active_statement = statement;
         return MYLITE_STORAGE_OK;
     }
     statement = active_read_statement_for(filename);
@@ -7704,7 +7768,8 @@ static mylite_storage_result open_existing_file_for_update(const char *filename,
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
-        *out_file = statement->file;
+        out_scope->file = statement->file;
+        out_scope->active_read_statement = statement;
         return MYLITE_STORAGE_OK;
     }
     if (active_read_statement_for_any_owner(filename) != NULL &&
@@ -7730,7 +7795,7 @@ static mylite_storage_result open_existing_file_for_update(const char *filename,
         return result;
     }
 
-    *out_file = file;
+    out_scope->file = file;
     return MYLITE_STORAGE_OK;
 }
 
@@ -8640,7 +8705,20 @@ static mylite_storage_result read_page_at(
 }
 
 static mylite_storage_result publish_header(FILE *file, const mylite_storage_header *header) {
-    mylite_storage_statement *statement = active_statement_for_file(file);
+    return publish_header_for_statement(
+        file,
+        header,
+        active_statement_for_file(file),
+        active_read_statement_for_file(file)
+    );
+}
+
+static mylite_storage_result publish_header_for_statement(
+    FILE *file,
+    const mylite_storage_header *header,
+    mylite_storage_statement *statement,
+    mylite_storage_statement *read_statement
+) {
     if (statement != NULL) {
         if (!statement->has_current_header ||
             header->catalog_root_page != statement->current_header.catalog_root_page ||
@@ -8661,7 +8739,6 @@ static mylite_storage_result publish_header(FILE *file, const mylite_storage_hea
         header->page_size,
         header_page
     );
-    mylite_storage_statement *read_statement = active_read_statement_for_file(file);
     if (result == MYLITE_STORAGE_OK && read_statement != NULL) {
         if (!read_statement->has_current_header ||
             header->catalog_root_page != read_statement->current_header.catalog_root_page ||
