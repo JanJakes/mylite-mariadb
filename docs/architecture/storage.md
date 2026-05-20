@@ -130,6 +130,13 @@ checking MariaDB `db.opt`, `.frm`, `.MYD`, and `.MYI` files under `datadir/`.
 It does not claim broader engine, metadata-object, crash-recovery, or
 concurrency behavior.
 
+Native table operation coverage validates controlled MyISAM row DML, scans,
+primary and secondary indexes, duplicate-key diagnostics, nullable unique keys,
+autoincrement state across reopen, `TEXT` and `BLOB` values, and copy-style
+`ALTER TABLE` rebuilds through MariaDB's native handler path. This is still
+MyISAM-specific evidence; transaction, recovery, concurrency, InnoDB, and Aria
+table behavior require separate slices.
+
 The default embedded profile does not expose server account administration,
 dynamic plugin installation, replication metadata, or the event scheduler.
 `information_schema` remains virtual. Any required `mysql.*` system surface
