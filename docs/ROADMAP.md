@@ -109,7 +109,8 @@ reset/re-execute loops and avoid freeing already-drained results a second time,
 leaving parameter binding/reset semantics as the next prepared-path bottleneck.
 Prepared parameter bindings now follow SQLite-style reset semantics: reset keeps
 bindings for reuse, clear-bindings releases them explicitly, and repeated
-same-type scalar binds avoid redundant MariaDB `mysql_stmt_bind_param()` calls.
+same-type scalar binds avoid redundant MariaDB `mysql_stmt_bind_param()` calls
+and object-wide binding resets.
 Successful non-result prepared resets also avoid a redundant MariaDB statement
 reset before re-execution while result-producing statements keep the full reset
 path. Prepared non-result execution now also reuses the immutable SQL policy

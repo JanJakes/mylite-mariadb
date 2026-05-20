@@ -984,9 +984,9 @@ int mylite_bind_int64(mylite_stmt *statement, unsigned index, long long value) {
     BoundValue &bound = statement->parameters[static_cast<std::size_t>(parameter)];
     if (bound.kind != BoundValueKind::Int64) {
         statement->parameter_binds_dirty = true;
+        bound.reset_to_null();
+        bound.kind = BoundValueKind::Int64;
     }
-    bound.reset_to_null();
-    bound.kind = BoundValueKind::Int64;
     bound.int64_value = value;
     bound.mysql_is_null = false;
     set_ok(*statement->database);
@@ -1002,9 +1002,9 @@ int mylite_bind_uint64(mylite_stmt *statement, unsigned index, unsigned long lon
     BoundValue &bound = statement->parameters[static_cast<std::size_t>(parameter)];
     if (bound.kind != BoundValueKind::UInt64) {
         statement->parameter_binds_dirty = true;
+        bound.reset_to_null();
+        bound.kind = BoundValueKind::UInt64;
     }
-    bound.reset_to_null();
-    bound.kind = BoundValueKind::UInt64;
     bound.uint64_value = value;
     bound.mysql_is_null = false;
     set_ok(*statement->database);
@@ -1020,9 +1020,9 @@ int mylite_bind_double(mylite_stmt *statement, unsigned index, double value) {
     BoundValue &bound = statement->parameters[static_cast<std::size_t>(parameter)];
     if (bound.kind != BoundValueKind::Double) {
         statement->parameter_binds_dirty = true;
+        bound.reset_to_null();
+        bound.kind = BoundValueKind::Double;
     }
-    bound.reset_to_null();
-    bound.kind = BoundValueKind::Double;
     bound.double_value = value;
     bound.mysql_is_null = false;
     set_ok(*statement->database);
