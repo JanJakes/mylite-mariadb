@@ -739,6 +739,7 @@ static mylite_storage_statement *allocate_checkpoint_statement(
     const mylite_storage_statement *parent
 );
 static void initialize_nested_checkpoint_storage(mylite_storage_statement *statement);
+static void reset_reusable_nested_checkpoint_storage(mylite_storage_statement *statement);
 static mylite_storage_result initialize_checkpoint_statement(
     mylite_storage_statement *statement,
     const char *filename,
@@ -8658,11 +8659,31 @@ static void free_statement(mylite_storage_statement *statement) {
         free(statement->filename);
     }
     if (reuse_nested_storage && reusable_nested_checkpoint_statement == NULL) {
-        initialize_nested_checkpoint_storage(statement);
+        reset_reusable_nested_checkpoint_storage(statement);
         reusable_nested_checkpoint_statement = statement;
         return;
     }
     free(statement);
+}
+
+static void reset_reusable_nested_checkpoint_storage(mylite_storage_statement *statement) {
+    statement->file = NULL;
+    statement->filename = NULL;
+    statement->device = 0;
+    statement->inode = 0;
+    statement->parent = NULL;
+    statement->owner = NULL;
+    statement->owns_file = 0;
+    statement->owns_filename = 0;
+    statement->owns_recovery_journal = 0;
+    statement->owns_transaction_journal = 0;
+    statement->preserve_auto_increment_rollback = 0;
+    statement->cache_file_on_close = 0;
+    statement->has_identity = 0;
+    statement->has_deferred_durable_cache_retarget = 0;
+    statement->deferred_durable_cache_retarget_all_tables = 0;
+    statement->deferred_durable_cache_retarget_table_id = 0ULL;
+    statement->deferred_durable_cache_retarget_header = (mylite_storage_header){0};
 }
 
 static int find_active_table_entry_cache_in_statement(
