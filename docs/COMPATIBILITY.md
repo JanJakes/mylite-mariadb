@@ -98,6 +98,7 @@ behavior. It does not require a daemon in the default test path.
 | Dynamic plugin installation | ➖&nbsp;Out&nbsp;of&nbsp;scope | The embedded core uses a transient database-local plugin directory and rejects `INSTALL PLUGIN` / `UNINSTALL PLUGIN` through policy coverage |
 | SQL `HELP` | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server help-table lookup depends on `mysql.*` help tables and is rejected by policy coverage |
 | Statement profiling | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server diagnostic surface; `@@have_profiling=NO` is covered and profiling commands or variables are rejected by policy coverage |
+| Query cache | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server-side result-cache optimization; `@@have_query_cache=NO` is covered, management commands and variables are rejected, and `SQL_CACHE` / `SQL_NO_CACHE` remain accepted no-op hints |
 
 ## Rows, Indexes, And Constraints
 

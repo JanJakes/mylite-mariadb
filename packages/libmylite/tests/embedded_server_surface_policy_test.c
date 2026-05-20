@@ -147,11 +147,13 @@ static mylite_db *open_database(open_database_paths paths) {
 static void assert_runtime_policy_variables(mylite_db *db, const char *database_path) {
     static const char *const variable_columns[] = {
         "log_bin",
+        "have_query_cache",
         "have_profiling",
         "skip_grant_tables",
         "skip_networking",
     };
-    static const char *const variable_values[] = {"0", "NO", "1", "1"};
+    static const char *const variable_values[] = {"0", "NO", "NO", "1", "1"};
+    const int variable_column_count = (int)(sizeof(variable_columns) / sizeof(variable_columns[0]));
     char *plugin_directory = path_join(database_path, "run/plugins");
 
     query_expect(
@@ -159,10 +161,11 @@ static void assert_runtime_policy_variables(mylite_db *db, const char *database_
         (expected_query){
             .sql = "SELECT "
                    "@@log_bin AS log_bin, "
+                   "@@have_query_cache AS have_query_cache, "
                    "@@have_profiling AS have_profiling, "
                    "@@skip_grant_tables AS skip_grant_tables, "
                    "@@skip_networking AS skip_networking",
-            .column_count = 4,
+            .column_count = variable_column_count,
             .row_count = 1,
             .column_names = variable_columns,
             .values = variable_values,
@@ -218,6 +221,9 @@ static int performance_schema_variable_callback(
 
 static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "CREATE DATABASE app");
+    exec_ok(db, "SELECT SQL_CACHE 1");
+    exec_ok(db, "SELECT SQL_NO_CACHE 1");
+    exec_ok(db, "SET @query_cache_type = 'local'");
 
     expect_error(
         db,
@@ -310,6 +316,10 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_error(db, "SET profiling = 1", "server-owned SQL surface");
     expect_error(db, "SET @@session.profiling = 1", "server-owned SQL surface");
     expect_error(db, "SET profiling_history_size = 10", "server-owned SQL surface");
+    expect_error(db, "SET GLOBAL query_cache_size = 1048576", "server-owned SQL surface");
+    expect_error(db, "SET query_cache_type = ON", "server-owned SQL surface");
+    expect_error(db, "FLUSH QUERY CACHE", "server-owned SQL surface");
+    expect_error(db, "RESET QUERY CACHE", "server-owned SQL surface");
     expect_prepare_error(
         db,
         "CREATE USER 'prepared_user'@'localhost' IDENTIFIED BY 'secret'",
@@ -324,6 +334,8 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_prepare_error(db, "HELP SELECT", "server-owned SQL surface");
     expect_prepare_error(db, "SHOW PROFILES", "server-owned SQL surface");
     expect_prepare_error(db, "SET profiling = 1", "server-owned SQL surface");
+    expect_prepare_error(db, "SET query_cache_type = ON", "server-owned SQL surface");
+    expect_prepare_error(db, "RESET QUERY CACHE", "server-owned SQL surface");
 }
 
 static void assert_no_server_sidecar_files(const char *database_path) {

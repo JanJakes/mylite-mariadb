@@ -353,8 +353,265 @@ TODO list:
 const uchar *query_state_map;
 
 #ifdef EMBEDDED_LIBRARY
-#include "emb_qcache.h"
+
+const uchar *query_cache_table_get_key(const void *, size_t *length, my_bool)
+{
+  if (length)
+    *length= 0;
+  return nullptr;
+}
+
+const uchar *query_cache_query_get_key(const void *, size_t *length, my_bool)
+{
+  if (length)
+    *length= 0;
+  return nullptr;
+}
+
+extern "C" void query_cache_invalidate_by_MyISAM_filename(const char *)
+{
+}
+
+extern "C" void mysql_query_cache_invalidate4(THD *, const char *, unsigned, int)
+{
+}
+
+void query_cache_insert(void *, const char *, size_t, unsigned)
+{
+}
+
+Query_cache::Query_cache(size_t query_cache_limit_arg,
+                         size_t min_allocation_unit_arg,
+                         size_t min_result_data_size_arg,
+                         uint def_query_hash_size_arg,
+                         uint def_table_hash_size_arg)
+  : query_cache_size(0),
+    query_cache_limit(query_cache_limit_arg),
+    free_memory(0),
+    queries_in_cache(0),
+    hits(0),
+    inserts(0),
+    refused(0),
+    free_memory_blocks(0),
+    total_blocks(0),
+    lowmem_prunes(0),
+#ifndef DBUG_OFF
+    m_cache_lock_thread_id(0),
 #endif
+    COND_cache_status_changed(),
+    m_requests_in_progress(0),
+    m_cache_lock_status(UNLOCKED),
+    m_cache_status(DISABLED),
+    structure_guard_mutex(),
+    additional_data_size(0),
+    cache(nullptr),
+    first_block(nullptr),
+    queries_blocks(nullptr),
+    tables_blocks(nullptr),
+    bins(nullptr),
+    steps(nullptr),
+    queries(),
+    tables(),
+    min_allocation_unit(min_allocation_unit_arg),
+    min_result_data_size(min_result_data_size_arg),
+    def_query_hash_size(def_query_hash_size_arg),
+    def_table_hash_size(def_table_hash_size_arg),
+    mem_bin_num(0),
+    mem_bin_steps(0),
+    initialized(false)
+{
+}
+
+void Query_cache::init()
+{
+  make_disabled();
+  initialized= true;
+}
+
+size_t Query_cache::resize(size_t)
+{
+  make_disabled();
+  return 0;
+}
+
+size_t Query_cache::set_min_res_unit(size_t size)
+{
+  min_result_data_size= size;
+  return size;
+}
+
+void Query_cache::store_query(THD *thd, TABLE_LIST *)
+{
+  if (thd)
+    thd->query_cache_is_applicable= 0;
+}
+
+int Query_cache::send_result_to_client(THD *thd, char *, uint)
+{
+  if (thd)
+    thd->query_cache_is_applicable= 0;
+  return 0;
+}
+
+void Query_cache::invalidate(THD *, TABLE_LIST *, my_bool)
+{
+}
+
+void Query_cache::invalidate(THD *, CHANGED_TABLE_LIST *)
+{
+}
+
+void Query_cache::invalidate_locked_for_write(THD *, TABLE_LIST *)
+{
+}
+
+void Query_cache::invalidate(THD *, TABLE *, my_bool)
+{
+}
+
+void Query_cache::invalidate(THD *, const char *, size_t, my_bool)
+{
+}
+
+void Query_cache::invalidate(THD *, const LEX_CSTRING &)
+{
+}
+
+void Query_cache::invalidate_by_MyISAM_filename(const char *)
+{
+}
+
+void Query_cache::flush()
+{
+}
+
+void Query_cache::pack(THD *, size_t, uint)
+{
+}
+
+void Query_cache::destroy()
+{
+  make_disabled();
+}
+
+void Query_cache::insert(THD *, Query_cache_tls *, const char *, size_t, unsigned)
+{
+}
+
+my_bool Query_cache::insert_table(THD *, size_t, const char *,
+                                  Query_cache_block_table *, size_t, uint8,
+                                  uint8, qc_engine_callback, ulonglong,
+                                  my_bool)
+{
+  return TRUE;
+}
+
+void Query_cache::end_of_result(THD *)
+{
+}
+
+void Query_cache::abort(THD *, Query_cache_tls *query_cache_tls)
+{
+  if (query_cache_tls)
+    query_cache_tls->first_query_block= nullptr;
+}
+
+void Query_cache::wreck(uint, const char *)
+{
+  make_disabled();
+}
+
+void Query_cache::bins_dump()
+{
+}
+
+void Query_cache::cache_dump()
+{
+}
+
+void Query_cache::queries_dump()
+{
+}
+
+void Query_cache::tables_dump()
+{
+}
+
+my_bool Query_cache::check_integrity(bool)
+{
+  return FALSE;
+}
+
+my_bool Query_cache::in_list(Query_cache_block *, Query_cache_block *, const char *)
+{
+  return FALSE;
+}
+
+my_bool Query_cache::in_table_list(Query_cache_block_table *,
+                                   Query_cache_block_table *, const char *)
+{
+  return FALSE;
+}
+
+my_bool Query_cache::in_blocks(Query_cache_block *)
+{
+  return FALSE;
+}
+
+uint Query_cache::filename_2_table_key(char *, const char *, uint32 *db_length)
+{
+  if (db_length)
+    *db_length= 0;
+  return 0;
+}
+
+bool Query_cache::try_lock(THD *, Cache_try_lock_mode)
+{
+  return false;
+}
+
+void Query_cache::lock(THD *)
+{
+}
+
+void Query_cache::lock_and_suspend()
+{
+}
+
+void Query_cache::unlock()
+{
+}
+
+void Query_cache::disable_query_cache(THD *)
+{
+  make_disabled();
+}
+
+void Query_cache::make_disabled()
+{
+  query_cache_size= 0;
+  free_memory= 0;
+  queries_in_cache= 0;
+  hits= 0;
+  inserts= 0;
+  refused= 0;
+  free_memory_blocks= 0;
+  total_blocks= 0;
+  lowmem_prunes= 0;
+  cache= nullptr;
+  first_block= nullptr;
+  queries_blocks= nullptr;
+  tables_blocks= nullptr;
+  bins= nullptr;
+  steps= nullptr;
+  mem_bin_num= 0;
+  mem_bin_steps= 0;
+  m_requests_in_progress= 0;
+  m_cache_lock_status= UNLOCKED;
+  m_cache_status= DISABLED;
+}
+
+#else
 
 #if defined(EXTRA_DEBUG) && !defined(DBUG_OFF)
 #define RW_WLOCK(M) {DBUG_PRINT("lock", ("rwlock wlock %p",(M))); \
@@ -5321,3 +5578,5 @@ err2:
 }
 
 #endif /* DBUG_OFF */
+
+#endif /* EMBEDDED_LIBRARY */

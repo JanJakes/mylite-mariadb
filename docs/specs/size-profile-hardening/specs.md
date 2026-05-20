@@ -7,9 +7,9 @@ important MySQL/MariaDB behavior. The first safe steps are packaging hygiene,
 size-oriented compilation, and omission of already-disabled server surfaces:
 remove debug and local-symbol metadata from the embedded static archive, build
 the embedded archive with size-oriented release flags, and avoid building the
-unused Performance Schema and Feedback static plugins. Server help-table lookup
-and statement profiling are also compiled to disabled surfaces because neither
-belongs to the embedded application SQL profile.
+unused Performance Schema and Feedback static plugins. Server help-table
+lookup, statement profiling, and the query cache are also compiled to disabled
+surfaces because they do not belong to the embedded application SQL profile.
 
 ## Source Findings
 
@@ -46,6 +46,12 @@ belongs to the embedded application SQL profile.
   reduces the stripped archive to 30,228,928 bytes, 28.83 MiB, and 707
   members. The stripped `sql_profile.cc.o` member drops from 48,152 bytes to
   7,376 bytes while preserving MariaDB's `@@have_profiling=NO` contract.
+- Replacing the embedded query-cache implementation with no-op stubs reduces
+  the stripped archive to 30,188,592 bytes, 28.79 MiB, and 707 members. The
+  stripped `sql_cache.cc.o` member drops from 34,968 bytes to 5,368 bytes and
+  `emb_qcache.cc.o` drops from 7,168 bytes to 320 bytes while preserving
+  no-op `SQL_CACHE` / `SQL_NO_CACHE` parser hints and the
+  `@@have_query_cache=NO` contract.
 
 ## Proposed Design
 
@@ -76,6 +82,11 @@ MyLite rejects top-level `SHOW PROFILE`, `SHOW PROFILES`, and profiling
 variable assignment before dispatch so profiling remains unsupported even if a
 custom MariaDB build enables the upstream profiling code.
 
+The embedded query-cache implementation is compiled to no-op stubs. MyLite
+keeps `SQL_CACHE` and `SQL_NO_CACHE` as accepted parser hints, reports
+`@@have_query_cache=NO`, and rejects query-cache management commands and
+variables before dispatch.
+
 The wrapper keeps this behavior enabled by default because it is the
 distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
 need an unstripped archive for local inspection.
@@ -83,9 +94,9 @@ need an unstripped archive for local inspection.
 ## Affected MariaDB Subsystems
 
 The Performance Schema storage-engine plugin and Feedback reporting plugin are
-omitted by CMake configuration, embedded `HELP` and statement profiling are
-compiled to disabled surfaces, and the compiled objects use size-oriented
-release flags.
+omitted by CMake configuration, embedded `HELP`, statement profiling, and query
+cache are compiled to disabled surfaces, and the compiled objects use
+size-oriented release flags.
 
 ## Compatibility Impact
 
@@ -96,7 +107,9 @@ core embedded profile, and Feedback reporting is not part of the embedded
 runtime contract. SQL `HELP` is a server help-table surface and is explicitly
 unsupported in the embedded profile. Statement profiling is a diagnostic
 server surface, not application data behavior, and is explicitly unsupported in
-the embedded profile.
+the embedded profile. Query-cache management is a server-side result-cache
+optimization; MyLite keeps query-cache SELECT hints as no-op syntax and omits
+the cache implementation.
 
 ## Database-Directory And Lifecycle Impact
 
@@ -121,7 +134,10 @@ embedded `HELP` to stubs brings the archive to 30,296,952 bytes / 28.89 MiB.
 Disabling statement profiling brings the current archive to 30,228,928 bytes /
 28.83 MiB, 1,300,776 bytes smaller than the Release build with Performance
 Schema disabled and 2,900,712 bytes smaller than the symbol-stripped baseline
-with Performance Schema still built.
+with Performance Schema still built. Stubbing the embedded query cache brings
+the current archive to 30,188,592 bytes / 28.79 MiB, 1,341,112 bytes smaller
+than the Release build with Performance Schema disabled and 2,941,048 bytes
+smaller than the symbol-stripped baseline with Performance Schema still built.
 
 ## License Or Dependency Impact
 
@@ -152,6 +168,8 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - SQL `HELP` fails through the MyLite policy and the embedded MariaDB stub.
 - Statement profiling is disabled in the embedded archive and profiling SQL
   fails through the MyLite policy.
+- Query cache reports unavailable, query-cache management fails through the
+  MyLite policy, and query-cache SELECT hints remain no-op syntax.
 - The stripped archive still links `libmylite` and all embedded tests.
 - The measured archive size and member count are recorded in the build
   documentation.

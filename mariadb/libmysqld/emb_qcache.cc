@@ -22,6 +22,8 @@
 #include "embedded_priv.h"
 #include "sql_class.h"                          // THD
 
+#ifndef EMBEDDED_LIBRARY
+
 void Querycache_stream::store_uchar(uchar c)
 {
   if (data_end == cur_data)
@@ -496,3 +498,5 @@ return_ok:
 err:
   DBUG_RETURN(1);
 }
+
+#endif /* EMBEDDED_LIBRARY */

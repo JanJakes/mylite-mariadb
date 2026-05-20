@@ -58,8 +58,10 @@ Performance Schema and Feedback static plugins. Server help-table lookup is
 stubbed only after policy coverage proves `HELP` is outside the embedded
 application SQL profile. Statement profiling is disabled after policy coverage
 proves profiling SQL is a server diagnostic surface, not application data
-behavior. Compatibility-sensitive code removals require separate evidence
-before they are accepted.
+behavior. The query cache is stubbed after policy coverage proves query-cache
+management is a server tuning surface and `SQL_CACHE` / `SQL_NO_CACHE` can
+remain no-op parser hints. Compatibility-sensitive code removals require
+separate evidence before they are accepted.
 
 Historical branch-level size research is archived in
 [Bundle size reduction attempts](architecture/bundle-size-research.md). Treat

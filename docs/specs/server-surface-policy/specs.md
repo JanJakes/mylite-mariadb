@@ -5,7 +5,8 @@
 MyLite's core API is an embedded, directory-owned database runtime. Server-owned
 surfaces such as account management, dynamic plugin installation, replication,
 binlog inspection, event scheduling, server help-table lookup, and statement
-profiling do not fit that lifetime model and can
+profiling do not fit that lifetime model. Server tuning surfaces such as query
+cache management are also outside the core embedded contract and can
 also create durable sidecar files or system-table dependencies. This slice makes
 those boundaries explicit and covered by tests.
 
@@ -40,6 +41,12 @@ those boundaries explicit and covered by tests.
   `profiling`, and `profiling_history_size` behind MariaDB's
   `ENABLED_PROFILING` option. MyLite treats this as a server diagnostic
   surface and keeps `@@have_profiling=NO` in the default profile.
+- `mariadb/sql/sql_cache.cc` and `mariadb/sql/sys_vars.cc` implement the server
+  query cache, its `RESET QUERY CACHE` / `FLUSH QUERY CACHE` management
+  commands, and `query_cache_*` variables. MyLite treats the cache as a
+  server-side result-cache optimization, keeps `SQL_CACHE` and `SQL_NO_CACHE`
+  as no-op SELECT hints, and keeps `@@have_query_cache=NO` in the default
+  profile.
 
 ## Proposed Design
 
@@ -56,7 +63,8 @@ Use two layers:
    prepared-statement preparation for command families that are server-owned:
    users, roles, grants, password changes, dynamic plugins, events, replication,
    binlog administration and inspection, foreign-server metadata, SQL help-table
-   lookup, statement profiling, and selected server-surface variables.
+   lookup, statement profiling, query-cache management, and selected
+   server-surface variables.
 
 The gate is not a general SQL parser. It is a narrow first-token policy check
 for statement families whose top-level MariaDB commands are incompatible with
@@ -70,6 +78,7 @@ MariaDB.
 - Replication and binlog command paths.
 - Event scheduler and help-table command paths.
 - Statement profiling command paths and variables.
+- Query-cache command paths and variables.
 - Performance schema startup.
 - Embedded startup option handling.
 
@@ -129,14 +138,17 @@ No new dependencies or license changes.
 - Add `libmylite.embedded-server-surface-policy` under `embedded-dev`.
 - Label it `compat.server-surface`, `compat.directory-boundary`, and
   `compat.query`.
-- Cover startup variables for disabled binlog, performance schema, grant
-  tables, networking, statement profiling, and database-local plugin directory.
+- Cover startup variables for disabled binlog, performance schema, query cache,
+  grant tables, networking, statement profiling, and database-local plugin
+  directory.
 - Cover rejected direct SQL for account, grant, event, plugin, replication, and
   binlog command families, including executable-comment wrappers that MariaDB
   treats as SQL and common syntax variants such as `CREATE OR REPLACE`,
   `CREATE DEFINER ... EVENT`, `INSTALL SONAME`, `SET SQL_LOG_BIN`, and
   `@@GLOBAL` variable assignment, `HELP`, `SHOW PROFILE`, `SHOW PROFILES`, and
-  profiling variable assignment.
+  profiling variable assignment. Cover `RESET QUERY CACHE`, `FLUSH QUERY
+  CACHE`, and query-cache variable assignment while keeping `SQL_CACHE` and
+  `SQL_NO_CACHE` SELECT hints accepted.
 - Cover rejected prepared SQL for at least one server-owned statement family.
 - Assert server-sidecar files and system-table directories are absent.
 - Run:
@@ -154,12 +166,14 @@ No new dependencies or license changes.
 ## Acceptance Criteria
 
 - Startup variables prove disabled binlog, disabled performance schema,
-  disabled statement profiling, disabled grant tables, disabled networking, and
-  contained plugin directory.
+  disabled statement profiling, disabled query cache, disabled grant tables,
+  disabled networking, and contained plugin directory.
 - Account, grant, event, plugin, replication, and binlog command families fail
   through a stable MyLite policy diagnostic.
 - SQL help and statement-profiling command families fail through the same
   policy diagnostic.
+- Query-cache management fails through the same policy diagnostic while
+  query-cache SELECT hints remain no-op syntax.
 - MySQL/MariaDB executable comments cannot bypass the server-surface policy.
 - Direct execution and prepared statements share the same policy.
 - Rejected server commands do not create durable server sidecars or system-table

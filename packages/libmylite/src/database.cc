@@ -238,6 +238,7 @@ bool is_unsupported_replication_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_binlog_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_help_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_statement_profiling_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_query_cache_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_server_set_statement(const SqlPolicyTokens &tokens);
 SqlPolicyTokens collect_sql_policy_tokens(std::string_view sql);
 bool next_sql_token(std::string_view sql, std::size_t &offset, std::string_view &token);
@@ -1075,6 +1076,7 @@ bool is_unsupported_server_surface_sql(std::string_view sql) {
            is_unsupported_replication_statement(tokens) ||
            is_unsupported_binlog_statement(tokens) || is_unsupported_help_statement(tokens) ||
            is_unsupported_statement_profiling_statement(tokens) ||
+           is_unsupported_query_cache_statement(tokens) ||
            is_unsupported_server_set_statement(tokens);
 }
 
@@ -1176,6 +1178,15 @@ bool is_unsupported_statement_profiling_statement(const SqlPolicyTokens &tokens)
         }
     }
     return false;
+}
+
+bool is_unsupported_query_cache_statement(const SqlPolicyTokens &tokens) {
+    const std::string_view first = identifier_token_at(tokens, 0);
+    const std::string_view second = identifier_token_at(tokens, 1);
+    const std::string_view third = identifier_token_at(tokens, 2);
+
+    return (token_equals(first, "FLUSH") || token_equals(first, "RESET")) &&
+           token_equals(second, "QUERY") && token_equals(third, "CACHE");
 }
 
 bool is_unsupported_server_set_statement(const SqlPolicyTokens &tokens) {
@@ -1402,7 +1413,14 @@ bool token_in(
 }
 
 bool is_server_variable_token(std::string_view token) {
-    return token_in(token, "EVENT_SCHEDULER", "SQL_LOG_BIN", "LOG_BIN", "BINLOG_FORMAT");
+    return token_in(token, "EVENT_SCHEDULER", "SQL_LOG_BIN", "LOG_BIN", "BINLOG_FORMAT") ||
+           token_in(token, "QUERY_CACHE_SIZE", "QUERY_CACHE_TYPE", "QUERY_CACHE_LIMIT") ||
+           token_in(
+               token,
+               "QUERY_CACHE_MIN_RES_UNIT",
+               "QUERY_CACHE_WLOCK_INVALIDATE",
+               "QUERY_CACHE_STRIP_COMMENTS"
+           );
 }
 
 bool is_system_variable_qualified_token(const SqlPolicyTokens &tokens, std::size_t index) {

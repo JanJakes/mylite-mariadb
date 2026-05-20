@@ -8130,7 +8130,11 @@ static int mysql_init_variables(void)
 #else
   have_dlopen=SHOW_OPTION_NO;
 #endif
-  have_query_cache=SHOW_OPTION_YES;
+#ifdef EMBEDDED_LIBRARY
+  have_query_cache= SHOW_OPTION_NO;
+#else
+  have_query_cache= SHOW_OPTION_YES;
+#endif
   have_geometry=SHOW_OPTION_YES;
   have_rtree_keys=SHOW_OPTION_YES;
 #ifdef HAVE_CRYPT
