@@ -28,7 +28,7 @@ native storage files inside that directory.
 | 5 | Direct SQL execution | ✅&nbsp;Done | Add one-shot SQL execution, textual result callbacks, diagnostics, affected rows, and insert ids so embedded storage smoke tests can run SQL. |
 | 6 | Native storage baseline | ✅&nbsp;Done | Configure MariaDB native storage under the MyLite database directory and cover controlled MyISAM DDL/DML persistence across reopen. |
 | 7 | Metadata and DDL lifecycle | ✅&nbsp;Done | Keep controlled MyISAM `CREATE`, `ALTER`, `DROP`, and `RENAME` metadata and engine files inside the MyLite database directory. |
-| 8 | Directory lifecycle policy | ⚪&nbsp;Planned | Define database-directory layout, initialization markers, schema namespaces, cleanup rules, and version policy. |
+| 8 | Directory lifecycle policy | ✅&nbsp;Done | Define database-directory layout, initialization markers, existing-directory policy, cleanup rules, and version policy. |
 | 9 | Native table operations | ⚪&nbsp;Planned | Validate table scans, row DML, primary/secondary indexes, uniqueness, autoincrement, BLOB/TEXT overflow, and copy `ALTER` rebuilds through native engines. |
 | 10 | Transactions and recovery | ⚪&nbsp;Planned | Validate native engine atomicity, rollback, savepoints, crash recovery, checksums where available, and lifecycle tests for engine companions. |
 | 11 | Locking and concurrency | ⚪&nbsp;Planned | Validate safe directory locking, multiple-reader behavior, and MariaDB native storage-engine writer guarantees. |

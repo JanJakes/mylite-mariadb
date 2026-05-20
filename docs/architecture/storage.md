@@ -72,6 +72,21 @@ The native-storage baseline starts MariaDB with `--datadir=app.mylite/datadir`,
 clears temporary files under `tmp/`; durable native storage remains in
 `datadir/`.
 
+Format 1 uses `mylite.meta` as the directory identity marker:
+
+```text
+format=1
+mariadb_base=mariadb-11.8.6
+```
+
+Opening an existing directory without `mylite.meta` is allowed only when the
+directory is empty and the caller passes `MYLITE_OPEN_CREATE`. Non-empty
+directories without valid metadata, or directories missing required `datadir/`
+or `tmp/` entries, are treated as invalid MyLite database directories rather
+than being silently repaired. Stale inactive `run/` state is replaced on open;
+live `run/` state is preserved for additional handles to the same active
+directory.
+
 The layout must be validated by tests that open a database, execute DDL and DML,
 close it, and assert that durable state did not appear outside the MyLite
 database directory.

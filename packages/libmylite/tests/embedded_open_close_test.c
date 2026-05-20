@@ -12,6 +12,8 @@
 #include <unistd.h>
 
 #define MYLITE_TEST_REMOVE_TREE_MAX_FDS 32
+#define MYLITE_TEST_METADATA_LINE_SIZE 128
+#define MYLITE_TEST_METADATA "format=1\nmariadb_base=mariadb-11.8.6\n"
 
 typedef struct text_file {
     const char *path;
@@ -24,6 +26,12 @@ static void test_readonly_open_fails(void);
 static void test_two_handles_share_runtime(void);
 static void test_second_database_fails_while_runtime_open(void);
 static void test_directory_suffix_is_not_enforced(void);
+static void test_existing_empty_directory_with_create_initializes(void);
+static void test_existing_empty_directory_without_create_fails(void);
+static void test_nonempty_directory_without_metadata_fails(void);
+static void test_invalid_metadata_fails(void);
+static void test_incomplete_layout_fails(void);
+static void test_stale_run_directory_is_replaced_on_open(void);
 static void test_no_defaults_ignores_ambient_option_files(void);
 static void test_missing_file_without_create_fails(void);
 static void test_existing_file_path_fails(void);
@@ -33,6 +41,7 @@ static char *path_join(const char *directory, const char *name);
 static mylite_open_config open_config(const char *temp_directory);
 static void assert_open_database_layout(const char *database_path);
 static void assert_closed_database_layout(const char *database_path);
+static void assert_metadata_file(const char *metadata_path);
 static int is_directory_empty(const char *path);
 static int is_directory(const char *path);
 static int path_exists(const char *path);
@@ -52,6 +61,12 @@ int main(void) {
     test_two_handles_share_runtime();
     test_second_database_fails_while_runtime_open();
     test_directory_suffix_is_not_enforced();
+    test_existing_empty_directory_with_create_initializes();
+    test_existing_empty_directory_without_create_fails();
+    test_nonempty_directory_without_metadata_fails();
+    test_invalid_metadata_fails();
+    test_incomplete_layout_fails();
+    test_stale_run_directory_is_replaced_on_open();
     test_no_defaults_ignores_ambient_option_files();
     test_missing_file_without_create_fails();
     test_existing_file_path_fails();
@@ -230,6 +245,169 @@ static void test_directory_suffix_is_not_enforced(void) {
     free(root);
 }
 
+static void test_existing_empty_directory_with_create_initializes(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "empty-create.mylite");
+    mylite_open_config config = open_config(runtime_root);
+    mylite_db *db = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    assert(mkdir(database_path, 0700) == 0);
+
+    assert(
+        mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
+        MYLITE_OK
+    );
+    assert(db != NULL);
+    assert_open_database_layout(database_path);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_closed_database_layout(database_path);
+    assert(is_directory_empty(runtime_root));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_existing_empty_directory_without_create_fails(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "empty-no-create.mylite");
+    mylite_open_config config = open_config(runtime_root);
+    mylite_db *db = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    assert(mkdir(database_path, 0700) == 0);
+
+    assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_NOTFOUND);
+    assert(db == NULL);
+    assert(is_directory_empty(database_path));
+    assert(is_directory_empty(runtime_root));
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_nonempty_directory_without_metadata_fails(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "missing-metadata.mylite");
+    char *data_path = path_join(database_path, "datadir");
+    mylite_open_config config = open_config(runtime_root);
+    mylite_db *db = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    assert(mkdir(database_path, 0700) == 0);
+    assert(mkdir(data_path, 0700) == 0);
+
+    assert(
+        mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
+        MYLITE_CORRUPT
+    );
+    assert(db == NULL);
+    assert(is_directory_empty(runtime_root));
+
+    free(data_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_invalid_metadata_fails(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "invalid-metadata.mylite");
+    char *metadata_path = path_join(database_path, "mylite.meta");
+    mylite_open_config config = open_config(runtime_root);
+    mylite_db *db = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    assert(mkdir(database_path, 0700) == 0);
+    write_file((text_file){.path = metadata_path, .contents = "format=999\n"});
+
+    assert(
+        mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
+        MYLITE_CORRUPT
+    );
+    assert(db == NULL);
+    assert(is_directory_empty(runtime_root));
+
+    free(metadata_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_incomplete_layout_fails(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "incomplete-layout.mylite");
+    char *metadata_path = path_join(database_path, "mylite.meta");
+    mylite_open_config config = open_config(runtime_root);
+    mylite_db *db = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+    assert(mkdir(database_path, 0700) == 0);
+    write_file((text_file){.path = metadata_path, .contents = MYLITE_TEST_METADATA});
+
+    assert(
+        mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
+        MYLITE_CORRUPT
+    );
+    assert(db == NULL);
+    assert(is_directory_empty(runtime_root));
+
+    free(metadata_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_stale_run_directory_is_replaced_on_open(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "stale-run.mylite");
+    char *run_path = path_join(database_path, "run");
+    char *stale_path = path_join(run_path, "stale");
+    mylite_open_config config = open_config(runtime_root);
+    mylite_db *db = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+
+    assert(
+        mylite_open(database_path, &db, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE, &config) ==
+        MYLITE_OK
+    );
+    assert(db != NULL);
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_closed_database_layout(database_path);
+    assert(mkdir(run_path, 0700) == 0);
+    write_file((text_file){.path = stale_path, .contents = "stale runtime file\n"});
+
+    db = NULL;
+    assert(mylite_open(database_path, &db, MYLITE_OPEN_READWRITE, &config) == MYLITE_OK);
+    assert(db != NULL);
+    assert_open_database_layout(database_path);
+    assert(!path_exists(stale_path));
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_closed_database_layout(database_path);
+    assert(is_directory_empty(runtime_root));
+
+    free(stale_path);
+    free(run_path);
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_no_defaults_ignores_ambient_option_files(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
@@ -374,6 +552,7 @@ static void assert_open_database_layout(const char *database_path) {
     char *plugin_path = path_join(run_path, "plugins");
 
     assert(path_exists(metadata_path));
+    assert_metadata_file(metadata_path);
     assert(is_directory(data_path));
     assert(is_directory(tmp_path));
     assert(is_directory(run_path));
@@ -393,6 +572,7 @@ static void assert_closed_database_layout(const char *database_path) {
     char *run_path = path_join(database_path, "run");
 
     assert(path_exists(metadata_path));
+    assert_metadata_file(metadata_path);
     assert(is_directory(data_path));
     assert(is_directory(tmp_path));
     assert(!path_exists(run_path));
@@ -401,6 +581,18 @@ static void assert_closed_database_layout(const char *database_path) {
     free(tmp_path);
     free(data_path);
     free(metadata_path);
+}
+
+static void assert_metadata_file(const char *metadata_path) {
+    char format_line[MYLITE_TEST_METADATA_LINE_SIZE];
+    char base_line[MYLITE_TEST_METADATA_LINE_SIZE];
+    FILE *file = fopen(metadata_path, "r");
+    assert(file != NULL);
+    assert(fgets(format_line, sizeof(format_line), file) == format_line);
+    assert(strcmp(format_line, "format=1\n") == 0);
+    assert(fgets(base_line, sizeof(base_line), file) == base_line);
+    assert(strcmp(base_line, "mariadb_base=mariadb-11.8.6\n") == 0);
+    assert(fclose(file) == 0);
 }
 
 static int is_directory_empty(const char *path) {
@@ -420,7 +612,10 @@ static int is_directory_empty(const char *path) {
 
 static int is_directory(const char *path) {
     struct stat path_stat;
-    assert(lstat(path, &path_stat) == 0);
+    if (lstat(path, &path_stat) != 0) {
+        fprintf(stderr, "missing directory path: %s\n", path);
+        assert(0);
+    }
     return S_ISDIR(path_stat.st_mode);
 }
 

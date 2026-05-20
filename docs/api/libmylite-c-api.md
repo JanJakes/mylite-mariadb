@@ -110,12 +110,19 @@ options, ignores ambient option files with `--no-defaults`, establishes the
 requested MyLite database directory, and creates the baseline layout:
 `mylite.meta`, `datadir/`, `tmp/`, and `run/`.
 
+Existing directories must either already be valid MyLite directories or be empty
+and opened with `MYLITE_OPEN_CREATE`. A pre-existing empty directory without
+`MYLITE_OPEN_CREATE` returns `MYLITE_NOTFOUND`. A non-empty directory without
+valid `mylite.meta`, or with missing required layout directories, returns
+`MYLITE_CORRUPT`.
+
 For durable database paths, the embedded runtime starts with MariaDB native
 storage under the database directory: `--datadir=<db>/datadir`,
 `--tmpdir=<db>/tmp`, `--plugin-dir=<db>/run/plugins`, and
 `--aria-log-dir-path=<db>/datadir`. The final close removes `run/` and clears
 temporary files under `tmp/`; durable metadata and table files remain in
-`datadir/`. `mylite_open_config.temp_directory` is currently used only by the
+`datadir/`. A clean open replaces stale inactive `run/` state before runtime
+startup. `mylite_open_config.temp_directory` is currently used only by the
 `:memory:` bootstrap path.
 
 ## Direct Execution
