@@ -468,6 +468,13 @@ typedef struct mylite_storage_update_file_scope {
     mylite_storage_statement *active_read_statement;
 } mylite_storage_update_file_scope;
 
+typedef struct mylite_storage_file_scope {
+    FILE *file;
+    mylite_storage_statement *active_statement;
+    mylite_storage_statement *active_read_statement;
+    mylite_storage_statement *active_read_snapshot;
+} mylite_storage_file_scope;
+
 typedef struct mylite_storage_transaction_journal_snapshot {
     FILE *file;
     mylite_storage_header header;
@@ -656,6 +663,10 @@ static int is_storage_full_error(int error_number);
 static mylite_storage_result flush_parent_directory(const char *filename);
 static mylite_storage_result close_created_file(FILE *file, const char *filename);
 static mylite_storage_result open_existing_file(const char *filename, FILE **out_file);
+static mylite_storage_result open_existing_file_scope(
+    const char *filename,
+    mylite_storage_file_scope *out_scope
+);
 static mylite_storage_result open_transaction_journal_snapshot(
     const char *filename,
     FILE **out_file
@@ -676,6 +687,9 @@ static mylite_storage_statement *active_read_statement_for(const char *filename)
 static mylite_storage_statement *active_read_statement_for_any_owner(const char *filename);
 static mylite_storage_statement *active_read_snapshot_for(const char *filename);
 static mylite_storage_statement *active_cache_statement_for(const char *filename);
+static mylite_storage_statement *active_cache_statement_from_statement(
+    mylite_storage_statement *statement
+);
 static mylite_storage_statement *active_table_entry_cache_statement_for(const char *filename);
 static mylite_storage_statement *active_exact_index_cache_statement_for(const char *filename);
 static mylite_storage_statement *active_live_row_id_cache_statement_for(const char *filename);
@@ -776,15 +790,15 @@ static mylite_storage_result write_statement_current_header(mylite_storage_state
 static void clear_statement_chain_catalog_root_caches(mylite_storage_statement *statement);
 static void clear_catalog_root_cache(mylite_storage_statement *statement);
 static void free_statement(mylite_storage_statement *statement);
-static int find_active_table_entry_cache(
-    const char *filename,
+static int find_active_table_entry_cache_in_statement(
+    mylite_storage_statement *statement,
     const mylite_storage_header *header,
     const char *schema_name,
     const char *table_name,
     mylite_storage_catalog_entry *out_entry
 );
-static void store_active_table_entry_cache(
-    const char *filename,
+static void store_active_table_entry_cache_in_statement(
+    mylite_storage_statement *statement,
     const mylite_storage_header *header,
     const char *schema_name,
     const char *table_name,
@@ -1297,6 +1311,14 @@ static mylite_storage_result find_table_id(
     FILE *file,
     const char *filename,
     const mylite_storage_header *header,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long *out_table_id
+);
+static mylite_storage_result find_table_id_in_statement(
+    FILE *file,
+    const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
     const char *schema_name,
     const char *table_name,
     unsigned long long *out_table_id
@@ -5037,7 +5059,8 @@ static mylite_storage_result update_row_with_index_entries(
     }
     FILE *file = file_scope.file;
     mylite_storage_statement *active_file_statement = file_scope.active_statement;
-    mylite_storage_statement *active_cache_statement = active_cache_statement_for(filename);
+    mylite_storage_statement *active_cache_statement =
+        active_cache_statement_from_statement(active_file_statement);
 
     mylite_storage_header header = {0};
     unsigned long long table_id = 0ULL;
@@ -5046,7 +5069,14 @@ static mylite_storage_result update_row_with_index_entries(
     mylite_storage_row_write_position position = {0};
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
+        result = find_table_id_in_statement(
+            file,
+            &header,
+            active_cache_statement,
+            schema_name,
+            table_name,
+            &table_id
+        );
     }
     if (result == MYLITE_STORAGE_OK) {
         seed_active_live_row_id_cache_in_statement(
@@ -5403,31 +5433,35 @@ mylite_storage_result mylite_storage_find_index_entry(
 
     *out_row_id = 0ULL;
 
-    FILE *file = NULL;
-    mylite_storage_result result = open_existing_file(filename, &file);
+    mylite_storage_file_scope file_scope = {0};
+    mylite_storage_result result = open_existing_file_scope(filename, &file_scope);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
+    FILE *file = file_scope.file;
 
     mylite_storage_header header = {0};
     unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     mylite_storage_catalog_entry table_entry = {0};
-    mylite_storage_statement *active_cache_statement = NULL;
+    mylite_storage_statement *active_cache_statement =
+        active_cache_statement_from_statement(file_scope.active_statement);
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
-        active_cache_statement = active_cache_statement_for(filename);
-    }
-    if (result == MYLITE_STORAGE_OK) {
-        const int used_cached_table_entry =
-            find_active_table_entry_cache(filename, &header, schema_name, table_name, &table_entry);
+        const int used_cached_table_entry = find_active_table_entry_cache_in_statement(
+            active_cache_statement,
+            &header,
+            schema_name,
+            table_name,
+            &table_entry
+        );
         if (!used_cached_table_entry) {
             result = read_catalog_root(file, &header, catalog_page);
             if (result == MYLITE_STORAGE_OK) {
                 result = find_table_record(catalog_page, schema_name, table_name, &table_entry);
             }
             if (result == MYLITE_STORAGE_OK) {
-                store_active_table_entry_cache(
-                    filename,
+                store_active_table_entry_cache_in_statement(
+                    active_cache_statement,
                     &header,
                     schema_name,
                     table_name,
@@ -5548,31 +5582,35 @@ static mylite_storage_result find_indexed_row_payload(
     }
     *out_row_size = 0U;
 
-    FILE *file = NULL;
-    mylite_storage_result result = open_existing_file(filename, &file);
+    mylite_storage_file_scope file_scope = {0};
+    mylite_storage_result result = open_existing_file_scope(filename, &file_scope);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
+    FILE *file = file_scope.file;
 
     mylite_storage_header header = {0};
     unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     mylite_storage_catalog_entry table_entry = {0};
-    mylite_storage_statement *active_cache_statement = NULL;
+    mylite_storage_statement *active_cache_statement =
+        active_cache_statement_from_statement(file_scope.active_statement);
     result = read_header(file, &header);
     if (result == MYLITE_STORAGE_OK) {
-        active_cache_statement = active_cache_statement_for(filename);
-    }
-    if (result == MYLITE_STORAGE_OK) {
-        const int used_cached_table_entry =
-            find_active_table_entry_cache(filename, &header, schema_name, table_name, &table_entry);
+        const int used_cached_table_entry = find_active_table_entry_cache_in_statement(
+            active_cache_statement,
+            &header,
+            schema_name,
+            table_name,
+            &table_entry
+        );
         if (!used_cached_table_entry) {
             result = read_catalog_root(file, &header, catalog_page);
             if (result == MYLITE_STORAGE_OK) {
                 result = find_table_record(catalog_page, schema_name, table_name, &table_entry);
             }
             if (result == MYLITE_STORAGE_OK) {
-                store_active_table_entry_cache(
-                    filename,
+                store_active_table_entry_cache_in_statement(
+                    active_cache_statement,
                     &header,
                     schema_name,
                     table_name,
@@ -7709,20 +7747,36 @@ static mylite_storage_result close_created_file(FILE *file, const char *filename
 }
 
 static mylite_storage_result open_existing_file(const char *filename, FILE **out_file) {
+    mylite_storage_file_scope scope = {0};
+    const mylite_storage_result result = open_existing_file_scope(filename, &scope);
+    if (result == MYLITE_STORAGE_OK) {
+        *out_file = scope.file;
+    }
+    return result;
+}
+
+static mylite_storage_result open_existing_file_scope(
+    const char *filename,
+    mylite_storage_file_scope *out_scope
+) {
+    *out_scope = (mylite_storage_file_scope){0};
     mylite_storage_statement *statement = active_statement_for(filename);
     if (statement != NULL) {
-        *out_file = statement->file;
+        out_scope->file = statement->file;
+        out_scope->active_statement = statement;
         return MYLITE_STORAGE_OK;
     }
     statement = active_read_statement_for(filename);
     if (statement != NULL) {
-        *out_file = statement->file;
+        out_scope->file = statement->file;
+        out_scope->active_read_statement = statement;
         return MYLITE_STORAGE_OK;
     }
     statement = active_read_snapshot_for(filename);
     if (statement != NULL) {
         active_read_snapshot = statement;
-        *out_file = statement->file;
+        out_scope->file = statement->file;
+        out_scope->active_read_snapshot = statement;
         return MYLITE_STORAGE_OK;
     }
 
@@ -7730,7 +7784,7 @@ static mylite_storage_result open_existing_file(const char *filename, FILE **out
     if (result != MYLITE_STORAGE_OK) {
         if (result == MYLITE_STORAGE_BUSY) {
             const mylite_storage_result snapshot_result =
-                open_transaction_journal_snapshot(filename, out_file);
+                open_transaction_journal_snapshot(filename, &out_scope->file);
             if (snapshot_result == MYLITE_STORAGE_OK) {
                 return MYLITE_STORAGE_OK;
             }
@@ -7753,7 +7807,7 @@ static mylite_storage_result open_existing_file(const char *filename, FILE **out
         return result;
     }
 
-    *out_file = file;
+    out_scope->file = file;
     return MYLITE_STORAGE_OK;
 }
 
@@ -7997,6 +8051,18 @@ static mylite_storage_statement *active_cache_statement_for(const char *filename
          statement = statement->parent) {
         if (strcmp(statement->filename, filename) == 0 &&
             statement->owner == active_context_owner) {
+            cache_statement = statement;
+        }
+    }
+    return cache_statement;
+}
+
+static mylite_storage_statement *active_cache_statement_from_statement(
+    mylite_storage_statement *statement
+) {
+    mylite_storage_statement *cache_statement = NULL;
+    for (; statement != NULL; statement = statement->parent) {
+        if (statement->owner == active_context_owner) {
             cache_statement = statement;
         }
     }
@@ -8503,14 +8569,13 @@ static void free_statement(mylite_storage_statement *statement) {
     free(statement);
 }
 
-static int find_active_table_entry_cache(
-    const char *filename,
+static int find_active_table_entry_cache_in_statement(
+    mylite_storage_statement *statement,
     const mylite_storage_header *header,
     const char *schema_name,
     const char *table_name,
     mylite_storage_catalog_entry *out_entry
 ) {
-    mylite_storage_statement *statement = active_table_entry_cache_statement_for(filename);
     if (statement == NULL) {
         return 0;
     }
@@ -8529,14 +8594,13 @@ static int find_active_table_entry_cache(
     return 1;
 }
 
-static void store_active_table_entry_cache(
-    const char *filename,
+static void store_active_table_entry_cache_in_statement(
+    mylite_storage_statement *statement,
     const mylite_storage_header *header,
     const char *schema_name,
     const char *table_name,
     const mylite_storage_catalog_entry *entry
 ) {
-    mylite_storage_statement *statement = active_table_entry_cache_statement_for(filename);
     if (statement == NULL) {
         return;
     }
@@ -12138,9 +12202,33 @@ static mylite_storage_result find_table_id(
     const char *table_name,
     unsigned long long *out_table_id
 ) {
+    return find_table_id_in_statement(
+        file,
+        header,
+        active_table_entry_cache_statement_for(filename),
+        schema_name,
+        table_name,
+        out_table_id
+    );
+}
+
+static mylite_storage_result find_table_id_in_statement(
+    FILE *file,
+    const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long *out_table_id
+) {
     unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     mylite_storage_catalog_entry entry = {0};
-    if (find_active_table_entry_cache(filename, header, schema_name, table_name, &entry)) {
+    if (find_active_table_entry_cache_in_statement(
+            active_cache_statement,
+            header,
+            schema_name,
+            table_name,
+            &entry
+        )) {
         *out_table_id = entry.table_id;
         return MYLITE_STORAGE_OK;
     }
@@ -12150,7 +12238,13 @@ static mylite_storage_result find_table_id(
         result = find_table_record(catalog_page, schema_name, table_name, &entry);
     }
     if (result == MYLITE_STORAGE_OK) {
-        store_active_table_entry_cache(filename, header, schema_name, table_name, &entry);
+        store_active_table_entry_cache_in_statement(
+            active_cache_statement,
+            header,
+            schema_name,
+            table_name,
+            &entry
+        );
         *out_table_id = entry.table_id;
     }
     return result;
