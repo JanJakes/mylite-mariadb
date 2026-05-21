@@ -362,6 +362,9 @@ Active write-journal begin logic now resolves recovery and transaction journal
 owners in one statement-chain pass before protecting dirty pages.
 Row-update execution now resolves its active cache owner and same-file append
 buffer owner in one parent-chain pass after opening the scoped update file.
+Indexed-row payload reads now use the active row-payload cache already resolved
+by the caller, avoiding another filename/header/table cache lookup on prepared
+point-update reads.
 Durable handler write locks now defer MEMORY/HEAP statement snapshots until a
 volatile table participates, while transaction and savepoint snapshots remain
 eager at their SQL boundaries.

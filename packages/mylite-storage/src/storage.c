@@ -3008,7 +3008,7 @@ static mylite_storage_result read_indexed_row_payload_from_open_file(
     FILE *file,
     const char *filename,
     const mylite_storage_header *header,
-    mylite_storage_statement *active_cache_statement,
+    mylite_storage_row_payload_cache *active_row_payload_cache,
     unsigned long long table_id,
     unsigned long long row_id,
     unsigned char **out_row,
@@ -3231,13 +3231,6 @@ static int active_row_payload_cache_entry_is_usable(
     const mylite_storage_row_payload_cache_entry *entry
 );
 static int row_payload_cache_entry_is_valid(const mylite_storage_row_payload_cache_entry *entry);
-static const mylite_storage_row_payload_cache_entry *active_row_payload_cache_entry_for_statement(
-    mylite_storage_statement *statement,
-    const char *filename,
-    const mylite_storage_header *header,
-    unsigned long long table_id,
-    unsigned long long row_id
-);
 static int store_active_row_payload(
     const char *filename,
     const mylite_storage_header *header,
@@ -6155,7 +6148,7 @@ static mylite_storage_result read_indexed_row_payload_from_open_file(
     FILE *file,
     const char *filename,
     const mylite_storage_header *header,
-    mylite_storage_statement *active_cache_statement,
+    mylite_storage_row_payload_cache *active_row_payload_cache,
     unsigned long long table_id,
     unsigned long long row_id,
     unsigned char **out_row,
@@ -6170,13 +6163,9 @@ static mylite_storage_result read_indexed_row_payload_from_open_file(
     *out_active_payload_cached = 0;
 
     const mylite_storage_row_payload_cache_entry *active_entry =
-        active_row_payload_cache_entry_for_statement(
-            active_cache_statement,
-            filename,
-            header,
-            table_id,
-            row_id
-        );
+        active_row_payload_cache == NULL
+            ? NULL
+            : find_row_payload_cache_entry(active_row_payload_cache, row_id);
     if (active_row_payload_cache_entry_is_usable(active_entry)) {
         *out_active_payload_cached = 1;
         return copy_cached_row_payload(active_entry, out_row, inout_row_capacity, out_row_size);
@@ -7581,11 +7570,17 @@ static mylite_storage_result find_indexed_row_payload(
     }
     if (result == MYLITE_STORAGE_OK && *out_row_id != 0ULL) {
         int active_payload_cached = 0;
+        mylite_storage_row_payload_cache *active_row_payload_cache =
+            active_row_payload_cache_for_resolved_statement(
+                active_cache_statement,
+                &header,
+                table_entry.table_id
+            );
         result = read_indexed_row_payload_from_open_file(
             file,
             filename,
             &header,
-            active_cache_statement,
+            active_row_payload_cache,
             table_entry.table_id,
             *out_row_id,
             out_row,
@@ -23158,18 +23153,6 @@ static int active_row_payload_cache_entry_is_usable(
 static int row_payload_cache_entry_is_valid(const mylite_storage_row_payload_cache_entry *entry) {
     return entry != NULL && entry->row != NULL &&
            checksum_bytes(entry->row, entry->row_size) == entry->checksum;
-}
-
-static const mylite_storage_row_payload_cache_entry *active_row_payload_cache_entry_for_statement(
-    mylite_storage_statement *statement,
-    const char *filename,
-    const mylite_storage_header *header,
-    unsigned long long table_id,
-    unsigned long long row_id
-) {
-    mylite_storage_row_payload_cache *cache =
-        active_row_payload_cache_for_statement(statement, filename, header, table_id);
-    return cache == NULL ? NULL : find_row_payload_cache_entry(cache, row_id);
 }
 
 static int store_active_row_payload(
