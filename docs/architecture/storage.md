@@ -429,6 +429,8 @@ Durable autoincrement set and advance writes use scoped update setup before
 resolving table metadata and publishing scalar autoincrement pages.
 Table catalog writers use scoped update setup before publishing table
 definition BLOB pages, FK-aware drops, or table rename metadata.
+Index leaf rebuild publication also uses scoped update setup before writing
+rebuilt leaf pages and catalog root records.
 
 File-backed index cursor builds also keep the primary file open across exact
 lookup and row materialization. Primary-key point lookups and secondary exact

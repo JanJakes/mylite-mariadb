@@ -5018,17 +5018,18 @@ mylite_storage_result mylite_storage_rebuild_index_leaves(
     }
     initialize_index_leaf_rebuilds(rebuilds, index_numbers, index_number_count);
 
-    FILE *file = NULL;
-    mylite_storage_result result = open_existing_file_for_update(filename, &file);
+    mylite_storage_update_file_scope file_scope = {0};
+    mylite_storage_result result = open_existing_file_for_update_scope(filename, &file_scope);
     if (result != MYLITE_STORAGE_OK) {
         free_index_leaf_rebuilds(rebuilds, index_number_count);
         return result;
     }
+    FILE *file = file_scope.file;
 
     mylite_storage_header header = {0};
     mylite_storage_catalog_image catalog = {0};
     mylite_storage_catalog_entry table_entry = {0};
-    result = read_header(file, &header);
+    result = read_header_from_update_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
         result = read_catalog_image(file, &header, &catalog);
     }
@@ -5078,7 +5079,8 @@ mylite_storage_result mylite_storage_rebuild_index_leaves(
 
     free_catalog_image(&catalog);
     free_index_leaf_rebuilds(rebuilds, index_number_count);
-    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+    if (close_existing_update_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;

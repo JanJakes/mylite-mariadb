@@ -108,6 +108,8 @@ Durable autoincrement set and advance writes now use scoped update setup before
 resolving table metadata and publishing scalar autoincrement pages.
 Table catalog writers now use scoped update setup before publishing table
 definition BLOB pages, FK-aware drops, or table rename metadata.
+Index leaf rebuild publication now uses scoped update setup before writing
+rebuilt leaf pages and catalog root records.
 Normal read statements now reuse a thread-local unlocked read file handle after
 device/inode validation, reducing repeated `fopen()` overhead without holding
 shared locks between cursor builds. That read handle now stores its device and
