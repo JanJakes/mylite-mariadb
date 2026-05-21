@@ -1820,6 +1820,20 @@ static mylite_storage_result read_index_leaf_exact_row_ids(
     mylite_storage_row_id_list *out_row_ids,
     int *out_used_leaf
 );
+static mylite_storage_result find_index_leaf_exact_static_row_id(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    const mylite_storage_catalog_image *catalog,
+    unsigned long long table_id,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id,
+    int *out_used_leaf
+);
 static mylite_storage_result append_index_leaf_matches_to_row_id_list(
     const mylite_storage_index_leaf_page *leaf_page,
     const unsigned char *key,
@@ -1842,6 +1856,17 @@ static mylite_storage_result append_index_leaf_run_matches_to_row_id_list(
     const unsigned char *key,
     size_t key_size,
     mylite_storage_row_id_list *out_row_ids
+);
+static mylite_storage_result find_index_leaf_run_first_match_row_id(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    const mylite_storage_index_leaf_run *leaf_run,
+    unsigned long long table_id,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id
 );
 static mylite_storage_result append_index_leaf_run_matches_to_entryset(
     FILE *file,
@@ -1897,6 +1922,12 @@ static int index_leaf_page_last_key_matches(
     const mylite_storage_index_leaf_page *leaf_page,
     const unsigned char *key,
     size_t key_size
+);
+static void find_index_leaf_page_first_match_row_id(
+    const mylite_storage_index_leaf_page *leaf_page,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id
 );
 static mylite_storage_result scan_exact_index_row_ids(
     FILE *file,
@@ -15234,6 +15265,74 @@ static mylite_storage_result read_index_leaf_exact_row_ids(
     return result;
 }
 
+static mylite_storage_result find_index_leaf_exact_static_row_id(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    const mylite_storage_catalog_image *catalog,
+    unsigned long long table_id,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id,
+    int *out_used_leaf
+) {
+    *out_row_id = 0ULL;
+    *out_used_leaf = 0;
+
+    mylite_storage_catalog_entry root_entry = {0};
+    mylite_storage_result result = find_index_root_record(
+        catalog,
+        schema_name,
+        table_name,
+        table_id,
+        index_number,
+        &root_entry
+    );
+    if (result == MYLITE_STORAGE_NOTFOUND) {
+        return MYLITE_STORAGE_OK;
+    }
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    mylite_storage_index_leaf_page leaf_page = {0};
+    mylite_storage_index_leaf_run leaf_run = {0};
+    result = read_index_leaf_run_root(
+        file,
+        filename,
+        header,
+        &root_entry,
+        table_id,
+        index_number,
+        page,
+        &leaf_page,
+        &leaf_run
+    );
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    if (leaf_run.tail_page_id < header->page_count) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    *out_used_leaf = 1;
+    return find_index_leaf_run_first_match_row_id(
+        file,
+        filename,
+        header,
+        &leaf_run,
+        table_id,
+        index_number,
+        key,
+        key_size,
+        out_row_id
+    );
+}
+
 static mylite_storage_result read_index_leaf_run_root(
     FILE *file,
     const char *filename,
@@ -15436,6 +15535,97 @@ static mylite_storage_result append_index_leaf_run_matches_to_row_id_list(
         }
         if (!index_leaf_page_last_key_matches(&leaf_page, key, key_size)) {
             break;
+        }
+    }
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result find_index_leaf_run_first_match_row_id(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    const mylite_storage_index_leaf_run *leaf_run,
+    unsigned long long table_id,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id
+) {
+    *out_row_id = 0ULL;
+
+    unsigned long long match_page_offset = 0ULL;
+    int found = 0;
+    mylite_storage_result result = find_index_leaf_run_match_page(
+        file,
+        filename,
+        header,
+        leaf_run,
+        table_id,
+        index_number,
+        key,
+        key_size,
+        &match_page_offset,
+        &found
+    );
+    if (result != MYLITE_STORAGE_OK || !found) {
+        return result;
+    }
+
+    unsigned long long first_match_page_offset = match_page_offset;
+    while (first_match_page_offset > 0ULL) {
+        unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        mylite_storage_index_leaf_page leaf_page = {0};
+        result = read_index_leaf_run_page(
+            file,
+            filename,
+            header,
+            leaf_run,
+            table_id,
+            index_number,
+            first_match_page_offset - 1ULL,
+            page,
+            &leaf_page
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+        if (!index_leaf_page_last_key_matches(&leaf_page, key, key_size)) {
+            break;
+        }
+        --first_match_page_offset;
+    }
+
+    for (unsigned long long page_offset = first_match_page_offset;
+         page_offset < leaf_run->page_count;
+         ++page_offset) {
+        unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        mylite_storage_index_leaf_page leaf_page = {0};
+        result = read_index_leaf_run_page(
+            file,
+            filename,
+            header,
+            leaf_run,
+            table_id,
+            index_number,
+            page_offset,
+            page,
+            &leaf_page
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+
+        const int range_cmp = compare_index_leaf_page_key_range(&leaf_page, key, key_size);
+        if (range_cmp < 0) {
+            break;
+        }
+        if (range_cmp > 0 || (page_offset != first_match_page_offset &&
+                              !index_leaf_page_first_key_matches(&leaf_page, key, key_size))) {
+            return MYLITE_STORAGE_CORRUPT;
+        }
+        if (range_cmp == 0) {
+            find_index_leaf_page_first_match_row_id(&leaf_page, key, key_size, out_row_id);
+            return MYLITE_STORAGE_OK;
         }
     }
     return MYLITE_STORAGE_OK;
@@ -15737,6 +15927,32 @@ static int index_leaf_page_last_key_matches(
 ) {
     return leaf_page->entry_count != 0U && key_size == leaf_page->key_size &&
            compare_leaf_key(leaf_page, leaf_page->entry_count - 1U, key, key_size) == 0;
+}
+
+static void find_index_leaf_page_first_match_row_id(
+    const mylite_storage_index_leaf_page *leaf_page,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id
+) {
+    *out_row_id = 0ULL;
+    if (key_size != leaf_page->key_size) {
+        return;
+    }
+
+    size_t lower = 0U;
+    size_t upper = leaf_page->entry_count;
+    while (lower < upper) {
+        const size_t mid = lower + ((upper - lower) / 2U);
+        if (compare_leaf_key(leaf_page, mid, key, key_size) < 0) {
+            lower = mid + 1U;
+        } else {
+            upper = mid;
+        }
+    }
+    if (lower < leaf_page->entry_count && compare_leaf_key(leaf_page, lower, key, key_size) == 0) {
+        *out_row_id = index_leaf_entry_row_id(leaf_page, lower);
+    }
 }
 
 static mylite_storage_result append_index_leaf_matches_to_row_id_list(
@@ -18656,6 +18872,22 @@ static mylite_storage_result find_exact_index_row_id(
         &used_cache
     );
     if (result == MYLITE_STORAGE_OK && !used_cache && catalog != NULL) {
+        result = find_index_leaf_exact_static_row_id(
+            file,
+            filename,
+            header,
+            catalog,
+            table_entry->table_id,
+            schema_name,
+            table_name,
+            index_number,
+            key,
+            key_size,
+            out_row_id,
+            &used_leaf
+        );
+    }
+    if (result == MYLITE_STORAGE_OK && !used_cache && !used_leaf && catalog != NULL) {
         result = read_index_leaf_exact_row_ids(
             file,
             filename,

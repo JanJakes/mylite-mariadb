@@ -5221,6 +5221,14 @@ static void test_batched_index_leaf_pages(void) {
         initial_secondary_row_ids,
         sizeof(initial_secondary_row_ids) / sizeof(initial_secondary_row_ids[0])
     );
+    assert_index_entry_lookup(
+        filename,
+        1U,
+        secondary_key,
+        sizeof(secondary_key),
+        MYLITE_STORAGE_OK,
+        row_1_id
+    );
 
     assert(
         mylite_storage_append_row_with_index_entries(
@@ -5290,6 +5298,14 @@ static void test_batched_index_leaf_pages(void) {
         sizeof(secondary_key),
         rebuilt_secondary_row_ids,
         sizeof(rebuilt_secondary_row_ids) / sizeof(rebuilt_secondary_row_ids[0])
+    );
+    assert_index_entry_lookup(
+        filename,
+        1U,
+        secondary_key,
+        sizeof(secondary_key),
+        MYLITE_STORAGE_OK,
+        row_3_id
     );
     assert(
         mylite_storage_read_index_entries(filename, "app", "posts", 1U, &entries) ==

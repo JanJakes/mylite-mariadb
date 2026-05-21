@@ -530,10 +530,12 @@ bytes amortized, avoiding per-row cache discovery and metadata reallocations.
 Non-active durable index-leaf reads use the same file header fingerprint model
 for a bounded thread-local leaf page cache. Published leaf-root exact lookups
 can reuse validated leaf pages without repeating the file read, checksum, and
-decode work for every cursor build. Exact leaf-page matches bulk-grow their
-index entryset result arrays and row-id lists once per matching leaf page
-instead of reallocating per matched row id. The cache is disabled for active
-statements and read snapshots, and it is cleared by durable mutation
+decode work for every cursor build. When a published run has no append tail,
+single-row exact probes return the first matching row id directly from the leaf
+page instead of allocating a temporary row-id list. Exact leaf-page matches
+bulk-grow their index entryset result arrays and row-id lists once per matching
+leaf page instead of reallocating per matched row id. The cache is disabled for
+active statements and read snapshots, and it is cleared by durable mutation
 invalidation.
 
 MariaDB handler instances also cache proven child and parent foreign-key
