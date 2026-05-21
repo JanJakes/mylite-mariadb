@@ -346,6 +346,8 @@ Exact-index cache probes now compare 1/2/4/8-byte key images with fixed-size
 loads, keeping `memcmp()` only for larger or variable-width keys.
 Those same fixed-width exact-index cache probes now hash 1/2/4/8-byte keys with
 integer loads instead of the generic byte loop before bucket lookup.
+Active exact-index cache-set and row-id probe helpers are now hot-inlined on
+prepared point lookups.
 Exact unique index cursor construction now reuses the existing row-materialize
 eligibility flag instead of scanning table fields again for BLOB/TEXT columns
 on prepared point-update reads.

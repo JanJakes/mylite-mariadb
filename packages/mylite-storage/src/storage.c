@@ -3123,7 +3123,7 @@ static mylite_storage_result append_cached_durable_exact_index_entries(
     mylite_storage_index_entryset *out_entries,
     int *out_used_cache
 );
-static mylite_storage_result find_exact_index_cache_entry_row_id(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result find_exact_index_cache_entry_row_id(
     mylite_storage_exact_index_cache *cache,
     const unsigned char *key,
     unsigned long long *out_row_id
@@ -3467,7 +3467,7 @@ static mylite_storage_result append_durable_exact_index_cache(
     size_t key_size,
     mylite_storage_exact_index_cache **out_cache
 );
-static mylite_storage_exact_index_cache *find_exact_index_cache(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_exact_index_cache *find_exact_index_cache(
     mylite_storage_exact_index_cache_set *caches,
     unsigned long long table_id,
     unsigned index_number,
@@ -22794,7 +22794,7 @@ static mylite_storage_result append_cached_durable_exact_index_entries(
     return append_exact_index_cache_matches_to_entryset(cache, key, out_entries);
 }
 
-static mylite_storage_result find_exact_index_cache_entry_row_id(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result find_exact_index_cache_entry_row_id(
     mylite_storage_exact_index_cache *cache,
     const unsigned char *key,
     unsigned long long *out_row_id
@@ -24598,7 +24598,7 @@ static mylite_storage_result copy_exact_index_cache_entries(
     return MYLITE_STORAGE_OK;
 }
 
-static mylite_storage_exact_index_cache *find_exact_index_cache(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_exact_index_cache *find_exact_index_cache(
     mylite_storage_exact_index_cache_set *caches,
     unsigned long long table_id,
     unsigned index_number,
