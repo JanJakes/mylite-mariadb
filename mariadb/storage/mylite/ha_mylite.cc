@@ -1782,14 +1782,16 @@ int ha_mylite::read_index_cursor_row(uchar *buf, size_t row_index)
       DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
     }
     memcpy(buf, row_payload, row_payload_size);
-    mylite_storage_free(owned_row_payload);
+    if (owned_row_payload)
+      mylite_storage_free(owned_row_payload);
 
     size_t slot= 0;
     int error= record_blob_payload_slot(buf, &slot);
     if (error)
       DBUG_RETURN(error);
 
-    mylite_storage_free(record_blob_payloads[slot]);
+    if (record_blob_payloads[slot])
+      mylite_storage_free(record_blob_payloads[slot]);
     record_blob_payloads[slot]= NULL;
     record_blob_payloads_size[slot]= 0;
     index_row_index= row_index;
@@ -1872,7 +1874,8 @@ int ha_mylite::preserve_record_blob_payloads(uchar *buf)
   /* Joined result evaluation can outlive scan or index cursor buffers. */
   if (!table_has_blob_fields)
   {
-    mylite_storage_free(record_blob_payloads[slot]);
+    if (record_blob_payloads[slot])
+      mylite_storage_free(record_blob_payloads[slot]);
     record_blob_payloads[slot]= NULL;
     record_blob_payloads_size[slot]= 0;
     DBUG_RETURN(0);
