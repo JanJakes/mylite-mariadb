@@ -919,6 +919,7 @@ static mylite_storage_result close_existing_update_file_scope(
     mylite_storage_update_file_scope *scope
 );
 static mylite_storage_result close_existing_file(FILE *file);
+static void clear_existing_file_error_state(FILE *file);
 static mylite_storage_statement *active_statement_for(const char *filename);
 static mylite_storage_statement *active_statement_for_any_owner(const char *filename);
 static mylite_storage_statement *active_read_statement_for(const char *filename);
@@ -10706,12 +10707,12 @@ static mylite_storage_result close_existing_file_scope(mylite_storage_file_scope
     FILE *file = scope->file;
     scope->file = NULL;
     if (scope->active_statement != NULL || scope->active_read_statement != NULL) {
-        clearerr(file);
+        clear_existing_file_error_state(file);
         return MYLITE_STORAGE_OK;
     }
     if (scope->active_read_snapshot != NULL) {
         active_read_snapshot = NULL;
-        clearerr(file);
+        clear_existing_file_error_state(file);
         return MYLITE_STORAGE_OK;
     }
     return close_existing_file(file);
@@ -10727,7 +10728,7 @@ static mylite_storage_result close_existing_update_file_scope(
     FILE *file = scope->file;
     scope->file = NULL;
     if (scope->active_statement != NULL || scope->active_read_statement != NULL) {
-        clearerr(file);
+        clear_existing_file_error_state(file);
         return MYLITE_STORAGE_OK;
     }
     return close_existing_file(file);
@@ -10736,26 +10737,34 @@ static mylite_storage_result close_existing_update_file_scope(
 static mylite_storage_result close_existing_file(FILE *file) {
 #ifndef __clang_analyzer__
     if (active_read_statement_has_file(file)) {
-        clearerr(file);
+        clear_existing_file_error_state(file);
         return MYLITE_STORAGE_OK;
     }
     if (active_read_snapshot_has_file(file)) {
         active_read_snapshot = NULL;
-        clearerr(file);
+        clear_existing_file_error_state(file);
         return MYLITE_STORAGE_OK;
     }
     if (active_transaction_journal_snapshot_has_file(file)) {
         active_transaction_journal_snapshot = (mylite_storage_transaction_journal_snapshot){0};
-        clearerr(file);
+        clear_existing_file_error_state(file);
         return fclose(file) == 0 ? MYLITE_STORAGE_OK : MYLITE_STORAGE_IOERR;
     }
     /* Statement-owned handles stay open until checkpoint commit or rollback. */
     if (active_statement_has_file(file)) {
-        clearerr(file);
+        clear_existing_file_error_state(file);
         return MYLITE_STORAGE_OK;
     }
 #endif
     return fclose(file) == 0 ? MYLITE_STORAGE_OK : MYLITE_STORAGE_IOERR;
+}
+
+static void clear_existing_file_error_state(FILE *file) {
+#if defined(__APPLE__) || defined(__linux__)
+    clearerr_unlocked(file);
+#else
+    clearerr(file);
+#endif
 }
 
 static mylite_storage_statement *active_statement_for(const char *filename) {
@@ -11293,7 +11302,7 @@ static int take_cached_read_file(
     *out_device = active_read_file_cache.device;
     *out_inode = active_read_file_cache.inode;
     active_read_file_cache.file = NULL;
-    clearerr(*out_file);
+    clear_existing_file_error_state(*out_file);
     return 1;
 }
 
@@ -11311,7 +11320,7 @@ static mylite_storage_result cache_read_file(
         fclose(file);
         return MYLITE_STORAGE_IOERR;
     }
-    clearerr(file);
+    clear_existing_file_error_state(file);
 
     if (!has_identity) {
         struct stat file_stat;

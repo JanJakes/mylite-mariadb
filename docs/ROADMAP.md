@@ -348,6 +348,9 @@ on prepared point-update reads.
 Indexed-row payload lookup and row-update execution now also close borrowed
 active-statement file scopes through the captured scope metadata, avoiding
 repeated no-op active statement chain rediscovery on prepared point updates.
+Those borrowed and cached file handles now clear their stream state through an
+unlocked helper on Apple/Linux builds, avoiding stdio lock traffic in the same
+hot loop while preserving the existing fallback on other platforms.
 Row-update execution now also finishes active-checkpoint write journals through
 the captured statement scope, avoiding another filename-based active-statement
 lookup on prepared point updates.
