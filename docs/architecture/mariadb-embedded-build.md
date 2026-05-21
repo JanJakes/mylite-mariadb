@@ -54,6 +54,7 @@ MYLITE_WITH_FOREIGN_SERVER_METADATA=OFF
 MYLITE_WITH_BACKUP_RUNTIME=OFF
 MYLITE_WITH_VIO_TLS=OFF
 MYLITE_WITH_REPLICATION_EXEC_SYSVARS=OFF
+MYLITE_WITH_REPLICATION_FILTERS=OFF
 MYLITE_WITH_PROXY_PROTOCOL=OFF
 ```
 
@@ -107,7 +108,11 @@ DDL backup hooks remain inert. It omits VIO TLS transport behind
 network handshake. It omits replication execution, slave protocol, replication
 event, checksum, and semi-sync system variables behind
 `MYLITE_WITH_REPLICATION_EXEC_SYSVARS=0`; compatibility variables such as
-`@@log_bin=0` remain covered. It omits PROXY protocol listener support behind
+`@@log_bin=0` remain covered. It omits replication and binary-log filter
+runtime behind `MYLITE_WITH_REPLICATION_FILTERS=0`; retained no-filter checks
+remain permissive, and direct or prepared `@@replicate_do_db`,
+`@@replicate_wild_ignore_table`, and `@@binlog_do_db` lookups fail as unknown
+system variables. It omits PROXY protocol listener support behind
 `MYLITE_WITH_PROXY_PROTOCOL=0`; the core embedded profile has no socket
 listener, and direct or prepared `@@proxy_protocol_networks` lookups fail as an
 unknown system variable. It
@@ -144,7 +149,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,527,408 bytes / 25.30 MiB |
+| Archive size | 26,515,136 bytes / 25.29 MiB |
 | Archive members | 703 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -183,8 +188,10 @@ archive to 27,118,776 bytes / 25.86 MiB. Omitting VIO TLS transport reduces the
 pre-strip archive to 27,106,496 bytes / 25.85 MiB. Omitting replication
 execution system variables reduces the pre-strip archive to 27,104,488 bytes /
 25.85 MiB. Omitting PROXY protocol listener support reduces the pre-strip
-archive to 27,097,424 bytes / 25.84 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 570,016 bytes
+archive to 27,097,424 bytes / 25.84 MiB. Omitting replication and binary-log
+filter runtime reduces the pre-strip archive to 27,085,072 bytes /
+25.83 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 569,936 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -214,10 +221,11 @@ and removes the linked `libssl` dependency from first-party embedded test
 artifacts while keeping `libcrypto` for retained SQL crypto functions. Omitting
 replication execution system variables saves 1,976 bytes with no member-count
 change. Omitting PROXY protocol listener support saves 6,728 bytes with no
-member-count change.
-The final archive is 5,002,296 bytes smaller than the Release build with
-Performance Schema disabled, 6,602,232 bytes smaller than the symbol-stripped
-baseline that still built Performance Schema, and 7,314,912 bytes smaller than
+member-count change. Omitting replication and binary-log filter runtime saves
+12,272 bytes with no member-count change.
+The final archive is 5,014,568 bytes smaller than the Release build with
+Performance Schema disabled, 6,614,504 bytes smaller than the symbol-stripped
+baseline that still built Performance Schema, and 7,327,184 bytes smaller than
 the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
@@ -273,6 +281,9 @@ transaction coordination, or retained parser/runtime code still reference them.
 Replication execution, slave protocol, replication-event, checksum, and
 semi-sync system variables are omitted from the default embedded profile, while
 compatibility variables such as `@@log_bin=0` remain covered.
+Replication and binary-log filter runtime is omitted from the default embedded
+profile; retained runtime checks behave as if no filters are configured, and
+filter configuration variables are absent.
 PROXY protocol listener support is omitted from the default embedded profile;
 the core embedded runtime does not accept socket connections, and the
 `proxy_protocol_networks` system variable is absent.
@@ -346,6 +357,7 @@ The baseline explicitly disables:
 - External backup runtime
 - VIO TLS transport
 - Replication execution, slave protocol, and semi-sync system variables
+- Replication and binary-log filter runtime
 - PROXY protocol listener support
 - Oracle compatibility function aliases and `oracle_schema` routing
 - Full inherited server error-message catalog

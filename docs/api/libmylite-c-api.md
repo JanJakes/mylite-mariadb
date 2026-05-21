@@ -413,7 +413,10 @@ and compiles binlog transaction, row-event, and GTID-state entry points to
 embedded no-ops where they are unreachable through supported MyLite behavior.
 It also omits the unsupported injector root that is only needed by the server
 topology runtime, plus guarded replication execution system variables such as
-`slave_type_conversions` and `rpl_semi_sync_master_enabled`.
+`slave_type_conversions` and `rpl_semi_sync_master_enabled`. Replication and
+binlog filter variables such as `replicate_do_db`,
+`replicate_wild_ignore_table`, and `binlog_do_db` are also omitted because the
+core embedded profile has no replication or binary-log topology to filter.
 Dynamic UDF registration through `CREATE FUNCTION ... SONAME` is rejected
 through the same policy because it loads server-owned shared libraries and
 persists metadata in server system tables. Attempts to enable Oracle SQL mode,
@@ -463,7 +466,8 @@ query logging, statement profiling, grant tables, networking,
 `@@have_dynamic_loading=NO`, and the transient database-local plugin directory.
 Guarded replication execution variables are omitted from `SHOW VARIABLES` and
 `@@` lookup in the default embedded profile, while `@@log_bin=0` remains
-available as compatibility evidence.
+available as compatibility evidence. Replication and binlog filter variables
+are omitted from the same surfaces.
 PROXY protocol listener support is omitted for the same serverless-core reason:
 the default embedded profile has no socket listener, and
 `proxy_protocol_networks` is absent from `SHOW VARIABLES` and `@@` lookup.

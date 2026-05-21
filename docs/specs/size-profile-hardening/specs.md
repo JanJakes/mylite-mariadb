@@ -264,6 +264,16 @@ listener or network handshake.
   `MYLITE_WITH_PROXY_PROTOCOL=0` replaces the parser/network-list object with a
   small disabled stub, omits the `proxy_protocol_networks` system variable, and
   reduces the stripped archive to 26,527,408 bytes, 25.30 MiB, and 703 members.
+- `mariadb/sql/rpl_filter.cc` implements database, table, wildcard-table, and
+  rewrite filters used by replication and binary logging. `mariadb/sql/mysqld.cc`
+  registers corresponding `--replicate-*`, `--binlog-do-db`, and
+  `--binlog-ignore-db` option rows, and `mariadb/sql/sys_vars.cc` exposes the
+  matching filter system variables.
+- Disabling replication and binary-log filter runtime behind
+  `MYLITE_WITH_REPLICATION_FILTERS=0` replaces the filter parser with a
+  permissive no-filter stub, omits inherited filter system variables and
+  startup option rows, and reduces the stripped archive to 26,515,136 bytes,
+  25.29 MiB, and 703 members.
 - `mariadb/sql/item_create.cc` registers Oracle compatibility aliases such as
   `DECODE_ORACLE`, `LPAD_ORACLE`, `RTRIM_ORACLE`, `SUBSTR_ORACLE`, and
   `CONCAT_OPERATOR_ORACLE`, and builds a separate
@@ -504,6 +514,13 @@ replication execution, slave protocol, checksum, replication-event, and
 semi-sync variables while keeping compatibility variables such as `@@log_bin=0`
 available.
 
+The embedded archive omits replication and binary-log filter runtime by setting
+`MYLITE_WITH_REPLICATION_FILTERS=0` in the MyLite baseline. The option defaults
+to `ON` so normal MariaDB builds keep upstream filtering behavior. The disabled
+profile replaces `rpl_filter.cc` with a permissive no-filter stub and omits
+filter configuration variables such as `replicate_do_db`,
+`replicate_wild_ignore_table`, and `binlog_do_db`.
+
 The embedded archive omits PROXY protocol listener support by setting
 `MYLITE_WITH_PROXY_PROTOCOL=0` in the MyLite baseline. The option defaults to
 `ON` so normal MariaDB builds keep upstream listener behavior. The disabled
@@ -580,6 +597,10 @@ SQL because it is only used by the unsupported server topology runtime.
 Omitting the guarded replication execution system variables only removes
 configuration rows for unsupported topology behavior; common compatibility
 variables such as `@@log_bin=0` remain available.
+Omitting replication and binary-log filter runtime only removes inherited
+topology-filter configuration. Retained no-filter checks allow ordinary SQL to
+continue unchanged because the embedded profile has no configured replication
+or binlog filters.
 Omitting PROXY protocol listener support only removes inherited socket-listener
 configuration and header parsing. The core embedded profile already starts with
 `--skip-networking` and does not accept socket connections.
@@ -768,6 +789,11 @@ Omitting PROXY protocol listener support brings the current archive to
 with Performance Schema disabled, 6,602,232 bytes smaller than the
 symbol-stripped baseline with Performance Schema still built, and 7,314,912
 bytes smaller than the original broad archive.
+Omitting replication and binary-log filter runtime brings the current archive
+to 26,515,136 bytes / 25.29 MiB, 5,014,568 bytes smaller than the Release build
+with Performance Schema disabled, 6,614,504 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 7,327,184
+bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -820,6 +846,11 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   `proxy_protocol.cc.o` is absent, `mylite_proxy_protocol_disabled.cc.o` is
   present in `libmariadbd.a`, and direct and prepared
   `@@proxy_protocol_networks` lookups fail with unknown-system-variable errno.
+- Confirm `MYLITE_WITH_REPLICATION_FILTERS=OFF` appears in the embedded CMake
+  cache, `rpl_filter.cc.o` is absent, `mylite_rpl_filter_disabled.cc.o` is
+  present in `libmariadbd.a`, and direct and prepared
+  `@@replicate_do_db`, `@@replicate_wild_ignore_table`, and `@@binlog_do_db`
+  lookups fail with unknown-system-variable errno.
 - Run `cmake --build --preset dev`.
 - Run `ctest --preset dev --output-on-failure`.
 - Run `cmake --build --preset embedded-dev`.
@@ -857,9 +888,10 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   remains covered, no binlog/relay-log sidecars are created, and the embedded
   archive omits the active binlog transaction/event core plus the unsupported
   injector root. The guarded replication execution system variables are omitted
-  from `SHOW VARIABLES` and `@@` lookup in the default embedded profile. PROXY
-  protocol listener support is omitted, and `proxy_protocol_networks` is absent
   from `SHOW VARIABLES` and `@@` lookup in the default embedded profile.
+  Replication and binlog filter variables are also omitted. PROXY protocol
+  listener support is omitted, and `proxy_protocol_networks` is absent from
+  `SHOW VARIABLES` and `@@` lookup in the default embedded profile.
 - Process-list SHOW commands are rejected, the process-list Information Schema
   table returns zero rows, and the embedded archive omits process-list row
   producers.

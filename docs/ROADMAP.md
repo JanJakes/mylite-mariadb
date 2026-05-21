@@ -93,7 +93,10 @@ retained MariaDB code still references remain for narrower review.
 Replication execution, slave protocol, checksum, replication-event, and
 semi-sync system variables are also omitted after policy coverage proves those
 configuration rows belong to unsupported topology behavior; compatibility
-variables such as `@@log_bin=0` remain covered.
+variables such as `@@log_bin=0` remain covered. Replication and binlog filter
+runtime is omitted after policy coverage proves the inherited filter knobs are
+topology configuration, while retained runtime checks behave as if no filters
+are configured.
 Legacy `PROCEDURE ANALYSE()` support is omitted after policy coverage proves it
 is an obsolete diagnostic SELECT extension rather than application data
 functionality; normal SELECT execution remains supported.

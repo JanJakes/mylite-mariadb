@@ -78,6 +78,10 @@
 #define MYLITE_WITH_REPLICATION_EXEC_SYSVARS 1
 #endif
 
+#ifndef MYLITE_WITH_REPLICATION_FILTERS
+#define MYLITE_WITH_REPLICATION_FILTERS 1
+#endif
+
 #ifndef MYLITE_WITH_PROXY_PROTOCOL
 #define MYLITE_WITH_PROXY_PROTOCOL 1
 #endif
@@ -5732,6 +5736,7 @@ Sys_relay_log_recovery(
        GLOBAL_VAR(relay_log_recovery), CMD_LINE(OPT_ARG), DEFAULT(FALSE));
 
 
+#if MYLITE_WITH_REPLICATION_FILTERS
 bool Sys_var_rpl_filter::global_update(THD *thd, set_var *var)
 {
   bool result= true;                            // Assume error
@@ -5942,6 +5947,7 @@ static Sys_var_rpl_filter Sys_replicate_wild_ignore_table(
        "Tells the slave thread to not replicate to the tables that "
        "match the given wildcard pattern",
        PRIV_SET_SYSTEM_GLOBAL_VAR_REPLICATE_WILD_IGNORE_TABLE);
+#endif /* MYLITE_WITH_REPLICATION_FILTERS */
 
 static Sys_var_charptr_fscs Sys_slave_load_tmpdir(
        "slave_load_tmpdir", MYLITE_SYSVAR_HELP_TEXT("The location where the slave should put "

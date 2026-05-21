@@ -130,6 +130,15 @@ ELSE()
   ADD_DEFINITIONS(-DMYLITE_WITH_REPLICATION_EXEC_SYSVARS=0)
 ENDIF()
 
+OPTION(MYLITE_WITH_REPLICATION_FILTERS "Build replication and binary-log filter runtime" ON)
+IF(MYLITE_WITH_REPLICATION_FILTERS)
+  ADD_DEFINITIONS(-DMYLITE_WITH_REPLICATION_FILTERS=1)
+  SET(MYLITE_RPL_FILTER_SOURCE rpl_filter.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_REPLICATION_FILTERS=0)
+  SET(MYLITE_RPL_FILTER_SOURCE mylite_rpl_filter_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_PROXY_PROTOCOL "Build PROXY protocol listener support" ON)
 IF(MYLITE_WITH_PROXY_PROTOCOL)
   ADD_DEFINITIONS(-DMYLITE_WITH_PROXY_PROTOCOL=1)
@@ -168,7 +177,7 @@ SET (SQL_SOURCE
                opt_sum.cc
                opt_vcol_substitution.cc
                ../sql-common/pack.c parse_file.cc password.c procedure.cc
-               protocol.cc records.cc repl_failsafe.cc rpl_filter.cc
+               protocol.cc records.cc repl_failsafe.cc ${MYLITE_RPL_FILTER_SOURCE}
                session_tracker.cc
                set_var.cc
                slave.cc sp.cc sp_cache.cc sp_head.cc sp_pcontext.cc

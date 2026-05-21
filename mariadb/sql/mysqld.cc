@@ -6631,6 +6631,10 @@ int handle_early_options()
 #define MYLITE_WITH_OPTION_HELP_TEXT 1
 #endif
 
+#ifndef MYLITE_WITH_REPLICATION_FILTERS
+#define MYLITE_WITH_REPLICATION_FILTERS 1
+#endif
+
 #if MYLITE_WITH_OPTION_HELP_TEXT
 #define MYLITE_OPTION_HELP_TEXT(text) text
 #else
@@ -6652,11 +6656,13 @@ struct my_option my_long_options[]=
   {"autocommit", 0, MYLITE_OPTION_HELP_TEXT("Set default value for autocommit (0 or 1)"),
    &opt_autocommit, &opt_autocommit, 0,
    GET_BOOL, OPT_ARG, 1, 0, 0, 0, 0, NULL},
+#if MYLITE_WITH_REPLICATION_FILTERS
   {"binlog-do-db", OPT_BINLOG_DO_DB, MYLITE_OPTION_HELP_TEXT("Tells the master it should log updates for the specified database, "
    "and exclude all others not explicitly mentioned"),
    0, 0, 0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
   {"binlog-ignore-db", OPT_BINLOG_IGNORE_DB, MYLITE_OPTION_HELP_TEXT("Tells the master that updates to the given database should not be logged to the binary log"),
    0, 0, 0, GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+#endif /* MYLITE_WITH_REPLICATION_FILTERS */
 #ifndef DISABLE_GRANT_OPTIONS
   {"bootstrap", OPT_BOOTSTRAP, MYLITE_OPTION_HELP_TEXT("Used by MariaDB installation scripts"), 0, 0, 0,
    GET_NO_ARG, NO_ARG, 0, 0, 0, 0, 0, 0},
@@ -6857,6 +6863,7 @@ struct my_option my_long_options[]=
   {"port-open-timeout", 0, MYLITE_OPTION_HELP_TEXT("Maximum time in seconds to wait for the port to become free. "
    "(Default: No wait)"), &mysqld_port_timeout, &mysqld_port_timeout, 0,
    GET_UINT, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+#if MYLITE_WITH_REPLICATION_FILTERS
   {"replicate-do-db", OPT_REPLICATE_DO_DB, MYLITE_OPTION_HELP_TEXT("Tells the slave thread to restrict replication to the specified database. "
    "To specify more than one database, use the directive multiple times, "
    "once for each database. Note that this will only work if you do not use "
@@ -6882,6 +6889,7 @@ struct my_option my_long_options[]=
   {"replicate-rewrite-db", OPT_REPLICATE_REWRITE_DB, MYLITE_OPTION_HELP_TEXT("Updates to a database with a different name than the original. Example: "
    "replicate-rewrite-db=master_db_name->slave_db_name"),
    0, 0, 0, GET_STR | GET_ASK_ADDR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+#endif /* MYLITE_WITH_REPLICATION_FILTERS */
 #ifdef HAVE_REPLICATION
   {"replicate-same-server-id", 0, MYLITE_OPTION_HELP_TEXT("In replication, if set to 1, do not skip events having our server id. "
    "Default value is 0 (to break infinite loops in circular replication). "
@@ -6889,6 +6897,7 @@ struct my_option my_long_options[]=
    &replicate_same_server_id, &replicate_same_server_id,
    0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
 #endif
+#if MYLITE_WITH_REPLICATION_FILTERS
   {"replicate-wild-do-table", OPT_REPLICATE_WILD_DO_TABLE, MYLITE_OPTION_HELP_TEXT("Tells the slave thread to restrict replication to the tables that match "
    "the specified wildcard pattern. To specify more than one table, use the "
    "directive multiple times, once for each table. This will work for cross-"
@@ -6903,6 +6912,7 @@ struct my_option my_long_options[]=
    "will not do updates to tables in databases that start with foo and whose "
    "table names start with bar"),
    0, 0, 0, GET_STR | GET_ASK_ADDR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+#endif /* MYLITE_WITH_REPLICATION_FILTERS */
   {"safe-mode", OPT_SAFE, MYLITE_OPTION_HELP_TEXT("Skip some optimize stages (for testing)"),
    0, 0, 0, GET_NO_ARG, NO_ARG, 0, 0, 0, "", 0, 0},
   {"safe-user-create", 0, MYLITE_OPTION_HELP_TEXT("Don't allow new user creation by the user who has no write privileges to the mysql.user table"),
@@ -8368,6 +8378,7 @@ mysqld_get_one_option(const struct my_option *opt, const char *argument,
   }
 
 #ifdef HAVE_REPLICATION
+#if MYLITE_WITH_REPLICATION_FILTERS
   case (int)OPT_REPLICATE_IGNORE_DB:
   {
     cur_rpl_filter->add_ignore_db(argument);
@@ -8388,6 +8399,7 @@ mysqld_get_one_option(const struct my_option *opt, const char *argument,
     }
     break;
   }
+#endif /* MYLITE_WITH_REPLICATION_FILTERS */
   case (int)OPT_SLAVE_PARALLEL_MODE:
   {
     /* Store latest mode for Master::Info */
@@ -8395,6 +8407,7 @@ mysqld_get_one_option(const struct my_option *opt, const char *argument,
       ((enum_slave_parallel_mode)opt_slave_parallel_mode);
     break;
   }
+#if MYLITE_WITH_REPLICATION_FILTERS
   case (int)OPT_BINLOG_IGNORE_DB:
   {
     binlog_filter->add_ignore_db(argument);
@@ -8441,6 +8454,7 @@ mysqld_get_one_option(const struct my_option *opt, const char *argument,
     }
     break;
   }
+#endif /* MYLITE_WITH_REPLICATION_FILTERS */
 #endif /* HAVE_REPLICATION */
   case (int) OPT_SAFE:
     opt_specialflag|= SPECIAL_SAFE_MODE | SPECIAL_NO_NEW_FUNC;
@@ -8664,6 +8678,7 @@ mysql_getopt_value(const char *name, uint length,
   break;
 #ifdef HAVE_REPLICATION
   /* fall through */
+#if MYLITE_WITH_REPLICATION_FILTERS
   case OPT_REPLICATE_DO_DB:
   case OPT_REPLICATE_DO_TABLE:
   case OPT_REPLICATE_IGNORE_DB:
@@ -8671,6 +8686,7 @@ mysql_getopt_value(const char *name, uint length,
   case OPT_REPLICATE_WILD_DO_TABLE:
   case OPT_REPLICATE_WILD_IGNORE_TABLE:
   case OPT_REPLICATE_REWRITE_DB:
+#endif /* MYLITE_WITH_REPLICATION_FILTERS */
   case OPT_SLAVE_PARALLEL_MODE:
   {
     /* Store current filter for mysqld_get_one_option() */
