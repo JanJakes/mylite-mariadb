@@ -7571,6 +7571,8 @@ static void test_multi_page_index_leaf_pages(void) {
     unsigned char second_page_key[4] = {0};
     unsigned char last_key[4] = {0};
     unsigned char missing_key[4] = {0};
+    unsigned char first_byte_prefix[] = {0x01U};
+    unsigned char missing_two_byte_prefix[] = {0xffU, 0xffU};
     put_test_u32_le(first_key, 0U, 1U);
     put_test_u32_le(second_page_key, 0U, (unsigned)entry_capacity + 1U);
     put_test_u32_le(last_key, 0U, entry_count);
@@ -7611,6 +7613,22 @@ static void test_multi_page_index_leaf_pages(void) {
     assert_index_prefix_exists_for_index(
         filename,
         0U,
+        first_byte_prefix,
+        sizeof(first_byte_prefix),
+        0ULL,
+        1
+    );
+    assert_index_prefix_exists_for_index(
+        filename,
+        0U,
+        first_byte_prefix,
+        sizeof(first_byte_prefix),
+        row_ids[0],
+        1
+    );
+    assert_index_prefix_exists_for_index(
+        filename,
+        0U,
         second_page_key,
         sizeof(second_page_key),
         0ULL,
@@ -7618,6 +7636,14 @@ static void test_multi_page_index_leaf_pages(void) {
     );
     assert_index_prefix_exists_for_index(filename, 0U, last_key, sizeof(last_key), 0ULL, 1);
     assert_index_prefix_exists_for_index(filename, 0U, missing_key, sizeof(missing_key), 0ULL, 0);
+    assert_index_prefix_exists_for_index(
+        filename,
+        0U,
+        missing_two_byte_prefix,
+        sizeof(missing_two_byte_prefix),
+        0ULL,
+        0
+    );
     assert_index_prefix_exists_for_index(
         filename,
         0U,

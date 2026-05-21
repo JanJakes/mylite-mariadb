@@ -548,6 +548,8 @@ Durable foreign-key prefix checks use an index-specific storage helper that can
 answer directly from complete static published leaf roots and single-page
 maintained roots. Roots with append-tail history, missing roots, and unsupported
 shapes still fall back to the existing materialized index-entry overlay path.
+Static prefix probes lower-bound within each sorted leaf page, including probes
+whose serialized prefix is shorter than the full key image.
 
 MariaDB handler instances also cache proven child and parent foreign-key
 metadata absence for their opened table. Ordinary non-FK row-DML paths use that

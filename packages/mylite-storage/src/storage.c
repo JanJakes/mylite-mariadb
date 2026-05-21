@@ -2131,6 +2131,17 @@ static mylite_storage_result scan_static_index_leaf_prefix_exists(
     unsigned long long skip_row_id,
     int *out_exists
 );
+static size_t find_index_leaf_page_prefix_lower_bound(
+    const mylite_storage_index_leaf_page *leaf_page,
+    const unsigned char *key_prefix,
+    size_t key_prefix_size
+);
+static int compare_leaf_key_prefix(
+    const mylite_storage_index_leaf_page *leaf_page,
+    size_t entry_index,
+    const unsigned char *key_prefix,
+    size_t key_prefix_size
+);
 static int index_entryset_prefix_exists(
     const mylite_storage_index_entryset *entries,
     const unsigned char *key_prefix,
@@ -18411,9 +18422,10 @@ static mylite_storage_result scan_static_index_leaf_prefix_exists(
         if (leaf_page.key_size < key_prefix_size) {
             return MYLITE_STORAGE_OK;
         }
-        for (size_t i = 0U; i < leaf_page.entry_count; ++i) {
-            const unsigned char *entry_key = index_leaf_entry_key(&leaf_page, i);
-            const int key_cmp = memcmp(entry_key, key_prefix, key_prefix_size);
+        const size_t first_candidate =
+            find_index_leaf_page_prefix_lower_bound(&leaf_page, key_prefix, key_prefix_size);
+        for (size_t i = first_candidate; i < leaf_page.entry_count; ++i) {
+            const int key_cmp = compare_leaf_key_prefix(&leaf_page, i, key_prefix, key_prefix_size);
             if (key_cmp < 0) {
                 continue;
             }
@@ -18430,6 +18442,33 @@ static mylite_storage_result scan_static_index_leaf_prefix_exists(
         }
     }
     return MYLITE_STORAGE_OK;
+}
+
+static size_t find_index_leaf_page_prefix_lower_bound(
+    const mylite_storage_index_leaf_page *leaf_page,
+    const unsigned char *key_prefix,
+    size_t key_prefix_size
+) {
+    size_t lower = 0U;
+    size_t upper = leaf_page->entry_count;
+    while (lower < upper) {
+        const size_t mid = lower + ((upper - lower) / 2U);
+        if (compare_leaf_key_prefix(leaf_page, mid, key_prefix, key_prefix_size) < 0) {
+            lower = mid + 1U;
+        } else {
+            upper = mid;
+        }
+    }
+    return lower;
+}
+
+static int compare_leaf_key_prefix(
+    const mylite_storage_index_leaf_page *leaf_page,
+    size_t entry_index,
+    const unsigned char *key_prefix,
+    size_t key_prefix_size
+) {
+    return memcmp(index_leaf_entry_key(leaf_page, entry_index), key_prefix, key_prefix_size);
 }
 
 static int index_entryset_prefix_exists(
