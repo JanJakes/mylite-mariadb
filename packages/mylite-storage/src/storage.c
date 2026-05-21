@@ -3800,15 +3800,16 @@ mylite_storage_result mylite_storage_store_table_definition(
         return result;
     }
 
-    FILE *file = NULL;
-    result = open_existing_file_for_update(filename, &file);
+    mylite_storage_update_file_scope file_scope = {0};
+    result = open_existing_file_for_update_scope(filename, &file_scope);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
+    FILE *file = file_scope.file;
 
     mylite_storage_header header = {0};
     mylite_storage_catalog_image catalog = {0};
-    result = read_header(file, &header);
+    result = read_header_from_update_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
         result = read_catalog_image(file, &header, &catalog);
     }
@@ -3853,7 +3854,8 @@ mylite_storage_result mylite_storage_store_table_definition(
         result = publish_catalog_image(file, filename, &header, &catalog);
     }
     free_catalog_image(&catalog);
-    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+    if (close_existing_update_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;
@@ -5092,16 +5094,17 @@ mylite_storage_result mylite_storage_drop_table(
         return MYLITE_STORAGE_MISUSE;
     }
 
-    FILE *file = NULL;
-    mylite_storage_result result = open_existing_file_for_update(filename, &file);
+    mylite_storage_update_file_scope file_scope = {0};
+    mylite_storage_result result = open_existing_file_for_update_scope(filename, &file_scope);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
+    FILE *file = file_scope.file;
 
     mylite_storage_header header = {0};
     mylite_storage_catalog_image catalog = {0};
     mylite_storage_catalog_entry table_entry = {0};
-    result = read_header(file, &header);
+    result = read_header_from_update_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
         result = read_catalog_image(file, &header, &catalog);
     }
@@ -5144,7 +5147,8 @@ mylite_storage_result mylite_storage_drop_table(
     }
     free_catalog_image(&catalog);
 
-    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+    if (close_existing_update_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;
@@ -5199,15 +5203,16 @@ static mylite_storage_result rename_table(
         return MYLITE_STORAGE_MISUSE;
     }
 
-    FILE *file = NULL;
-    mylite_storage_result result = open_existing_file_for_update(filename, &file);
+    mylite_storage_update_file_scope file_scope = {0};
+    mylite_storage_result result = open_existing_file_for_update_scope(filename, &file_scope);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
+    FILE *file = file_scope.file;
 
     mylite_storage_header header = {0};
     mylite_storage_catalog_image catalog = {0};
-    result = read_header(file, &header);
+    result = read_header_from_update_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
         result = read_catalog_image(file, &header, &catalog);
     }
@@ -5233,7 +5238,8 @@ static mylite_storage_result rename_table(
     }
     free_catalog_image(&catalog);
 
-    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+    if (close_existing_update_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;

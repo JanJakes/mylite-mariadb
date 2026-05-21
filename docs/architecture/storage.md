@@ -427,6 +427,8 @@ Foreign-key metadata writes use scoped update setup before publishing,
 renaming, or dropping FK catalog records and metadata BLOB pages.
 Durable autoincrement set and advance writes use scoped update setup before
 resolving table metadata and publishing scalar autoincrement pages.
+Table catalog writers use scoped update setup before publishing table
+definition BLOB pages, FK-aware drops, or table rename metadata.
 
 File-backed index cursor builds also keep the primary file open across exact
 lookup and row materialization. Primary-key point lookups and secondary exact
