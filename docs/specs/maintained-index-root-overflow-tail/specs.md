@@ -138,14 +138,13 @@ git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c packages/m
 - Maintained-root leaf runs initially restored their append-tail overlay at
   `root_page + 1`, matching immutable leaf-run behavior. The follow-up
   [Maintained Index Root Overflow Tail Flag](../maintained-index-root-overflow-tail-flag/specs.md)
-  slice narrows that scan to roots that have overflow history, or roots still
-  at capacity for compatibility with pre-flag overflow roots.
-- The storage regression publishes a two-entry maintained root with `2000`-byte
-  fixed keys, inserts a third row after the root is full, and verifies exact
-  lookup, indexed-row lookup, and full index reads include the append-only
-  overflow entry while root metadata remains at the root capacity. It then
-  updates and deletes the overflow row to verify stale fallback keys are hidden
-  by the append-tail row-state overlay.
+  slice narrows that scan to roots that have overflow history.
+- The storage regression publishes a three-entry maintained root with
+  `1330`-byte fixed keys, inserts a fourth row after the root is full, and
+  verifies exact lookup, indexed-row lookup, and full index reads include the
+  append-only overflow entry while root metadata remains at the root capacity.
+  It then deletes a root-resident row, refills the root, updates and deletes the
+  former overflow row, and verifies stale fallback keys stay hidden.
 
 ## Verification Results
 

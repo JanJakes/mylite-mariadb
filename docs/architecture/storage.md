@@ -1016,11 +1016,16 @@ roots with the replacement row id and new key bytes, keep root entry counts
 stable, and skip duplicate append-only replacement index-entry pages for roots
 updated in place. Maintained roots mark overflow-tail history in the existing
 root flags field when a full root falls back to append-only index-entry pages.
+Maintained-root insert, update, and delete paths reject unsafe plans when dirty
+root pages cannot be protected by the statement or transaction journal, rather
+than publishing append-only fallback state that root-backed readers cannot see.
 Root-backed exact and full index readers use maintained roots as base entries
-and scan the append tail only when the overflow flag is set, or while a root is
-currently full for compatibility with roots written before the flag existed.
-Root-resident mutations suppress duplicate append-only index entries, so the
-tail overlay keeps fallback history visible without adding stale root entries.
+and scan the append tail only when the overflow flag is set. Root-resident
+mutations suppress duplicate append-only index entries, so the tail overlay
+keeps fallback history visible without adding stale root entries. Root-resident
+deletes also refill an overflow-marked root from the live root-plus-tail entryset
+when all remaining entries fit in the single-page root again, clearing the
+overflow flag and avoiding stale tail scans.
 Active exact-index and published-root cache reads bypass stale durable cache
 state while an active statement chain has deferred table-local durable cache
 retargeting. Statement rollback, savepoint rollback, transaction rollback,

@@ -54,22 +54,21 @@ known flag.
 
 Insert planning should record full maintained roots as overflow roots while
 leaving the matching `index_entry_changed` bit enabled. Those root pages are
-included in the preplanned dirty-page set when capacity allows, then rewritten
-through the pager to set the overflow flag before the append-only index-entry
-page is published. If a root is already full but lacks the new flag, readers
-still scan the tail as a compatibility fallback for roots created by the prior
-slice.
+included in the preplanned dirty-page set, then rewritten through the pager to
+set the overflow flag before the append-only index-entry page is published. If
+the bounded preplanned dirty-page set cannot protect that flag write, the insert
+must fail rather than publish a hidden append-tail entry.
 
-Deletes should preserve an existing overflow flag. If a root is full before a
-root-resident delete, set the flag before removing the entry; otherwise the root
-could become non-full and lose the compatibility fallback even though overflow
-history may exist.
+Deletes preserve an existing overflow flag. A full root without that explicit
+flag remains a complete single-page root; root fullness alone is not treated as
+overflow history.
 
-Reads use the append-tail overlay only when either:
+Maintained-root insert, update, and delete paths must keep their dirty root-page
+rewrites protected. If the active journal shape cannot protect those pages, the
+mutation fails instead of publishing append-only fallback state that would be
+invisible once reads rely only on the explicit overflow flag.
 
-- the overflow-tail flag is set; or
-- the root is currently at capacity, preserving compatibility with roots written
-  before this flag existed.
+Reads use the append-tail overlay only when the overflow-tail flag is set.
 
 ## Compatibility Impact
 
@@ -102,8 +101,10 @@ first-party storage change.
 
 - Extend maintained-root overflow-tail storage coverage to assert the new flag
   is set after a full root overflows.
-- Delete a root-resident row after overflow so the root entry count drops below
-  capacity, then verify the overflow-tail row remains visible.
+- Delete a root-resident row after overflow, then verify the overflow-tail row
+  remains visible before and after any refill.
+- Keep a refilled full root without an overflow flag from re-enabling tail scans
+  during later in-place updates.
 - Keep overflow-row update/delete coverage and maintained-root rollback/recovery
   tests passing.
 - Run:
@@ -117,10 +118,11 @@ git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c packages/m
 
 ## Acceptance Criteria
 
-- New maintained roots can report no append tail until they overflow or hit the
-  full-root compatibility path.
-- Maintained roots with overflow history keep append-tail visibility even after
-  root-resident deletes reduce root entry count below capacity.
+- New maintained roots can report no append tail until they overflow.
+- Maintained roots with overflow history keep append-tail visibility until a
+  later refill proves all live entries fit in the single-page root again.
+- Full maintained roots without overflow history do not scan stale append-tail
+  pages.
 - Unknown maintained-root flags remain corruption.
 - Existing maintained-root insert, update, delete, rollback, and recovery
   coverage remains green.
@@ -132,10 +134,10 @@ git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c packages/m
 - Insert planning records full maintained roots as overflow roots, journals
   them with the existing preplanned dirty-page set, and sets the overflow flag
   before publishing the append-only fallback index-entry page.
-- Maintained-root deletes preserve an existing overflow flag and set it when a
-  currently full root is reduced below capacity.
-- Root reads scan the append tail only when the overflow flag is set or when a
-  root is still at capacity for compatibility with pre-flag overflow roots.
+- Maintained-root deletes preserve an existing overflow flag.
+- Maintained-root insert, update, and delete paths reject unprotected dirty-root
+  fallback plans.
+- Root reads scan the append tail only when the overflow flag is set.
 - The overflow-tail storage regression now asserts the flag after overflow,
   deletes a root-resident row to reduce the root below capacity, and verifies
   the overflow row stays visible through exact and full index reads.
@@ -153,5 +155,5 @@ git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c packages/m
   SQLite-like index performance still needs navigable multi-page maintained
   indexes.
 - Very large single-row insert plans that exceed the bounded dirty-page
-  preplan can still rely on the current-full compatibility fallback until a
-  later split/merge design removes this append-tail overflow mode.
+  preplan now fail rather than publishing hidden fallback entries. A later
+  split/merge design should remove this append-tail overflow mode.
