@@ -95,6 +95,19 @@ typedef struct transaction_journal_test_context {
     const char *transaction_journal_filename;
 } transaction_journal_test_context;
 
+typedef struct maintained_index_root_rollback_fixture {
+    char *root;
+    char *filename;
+    char *journal_filename;
+    char *transaction_journal_filename;
+    unsigned long long row_1_id;
+    unsigned long long row_2_id;
+    unsigned long long primary_root_page;
+    unsigned long long secondary_root_page;
+    unsigned char primary_root[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    unsigned char secondary_root[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+} maintained_index_root_rollback_fixture;
+
 typedef struct lock_child {
     pid_t pid;
     int release_fd;
@@ -119,6 +132,101 @@ static const unsigned long long k_autoincrement_set_value = 5ULL;
 static const unsigned long long k_autoincrement_lower_value = 3ULL;
 static const unsigned long long k_autoincrement_ignored_advance = 4ULL;
 static const unsigned long long k_autoincrement_advanced_value = 9ULL;
+
+static const unsigned char k_maintained_root_definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+static const unsigned char k_maintained_root_row_1[] = {0x00U, 0x01U, 'a'};
+static const unsigned char k_maintained_root_row_2[] = {0x00U, 0x02U, 'b'};
+static const unsigned char k_maintained_root_row_3[] = {0x00U, 0x03U, 'c'};
+static const unsigned char k_maintained_root_updated_row_2[] = {0x00U, 0x20U, 'd'};
+static const unsigned char k_maintained_root_key_1[] = {0x01U, 0x00U, 0x00U, 0x00U};
+static const unsigned char k_maintained_root_key_2[] = {0x02U, 0x00U, 0x00U, 0x00U};
+static const unsigned char k_maintained_root_key_3[] = {0x03U, 0x00U, 0x00U, 0x00U};
+static const unsigned char k_maintained_root_updated_key_2[] = {
+    0x20U,
+    0x00U,
+    0x00U,
+    0x00U,
+};
+static const unsigned char k_maintained_root_secondary_key_1[] = {
+    0x11U,
+    0x00U,
+    0x00U,
+    0x00U,
+};
+static const unsigned char k_maintained_root_secondary_key_2[] = {
+    0x12U,
+    0x00U,
+    0x00U,
+    0x00U,
+};
+static const unsigned char k_maintained_root_secondary_key_3[] = {
+    0x13U,
+    0x00U,
+    0x00U,
+    0x00U,
+};
+static const unsigned char k_maintained_root_updated_secondary_key_2[] = {
+    0x22U,
+    0x00U,
+    0x00U,
+    0x00U,
+};
+static const mylite_storage_index_entry k_maintained_root_row_1_entries[] = {
+    {
+        .size = sizeof(mylite_storage_index_entry),
+        .index_number = 0U,
+        .key = k_maintained_root_key_1,
+        .key_size = sizeof(k_maintained_root_key_1),
+    },
+    {
+        .size = sizeof(mylite_storage_index_entry),
+        .index_number = 1U,
+        .key = k_maintained_root_secondary_key_1,
+        .key_size = sizeof(k_maintained_root_secondary_key_1),
+    },
+};
+static const mylite_storage_index_entry k_maintained_root_row_2_entries[] = {
+    {
+        .size = sizeof(mylite_storage_index_entry),
+        .index_number = 0U,
+        .key = k_maintained_root_key_2,
+        .key_size = sizeof(k_maintained_root_key_2),
+    },
+    {
+        .size = sizeof(mylite_storage_index_entry),
+        .index_number = 1U,
+        .key = k_maintained_root_secondary_key_2,
+        .key_size = sizeof(k_maintained_root_secondary_key_2),
+    },
+};
+static const mylite_storage_index_entry k_maintained_root_row_3_entries[] = {
+    {
+        .size = sizeof(mylite_storage_index_entry),
+        .index_number = 0U,
+        .key = k_maintained_root_key_3,
+        .key_size = sizeof(k_maintained_root_key_3),
+    },
+    {
+        .size = sizeof(mylite_storage_index_entry),
+        .index_number = 1U,
+        .key = k_maintained_root_secondary_key_3,
+        .key_size = sizeof(k_maintained_root_secondary_key_3),
+    },
+};
+static const mylite_storage_index_entry k_maintained_root_updated_row_2_entries[] = {
+    {
+        .size = sizeof(mylite_storage_index_entry),
+        .index_number = 0U,
+        .key = k_maintained_root_updated_key_2,
+        .key_size = sizeof(k_maintained_root_updated_key_2),
+    },
+    {
+        .size = sizeof(mylite_storage_index_entry),
+        .index_number = 1U,
+        .key = k_maintained_root_updated_secondary_key_2,
+        .key_size = sizeof(k_maintained_root_updated_secondary_key_2),
+    },
+};
 
 static void test_capabilities(void);
 static void test_create_empty_database(void);
@@ -171,6 +279,7 @@ static void test_indexed_row_batch_cache_reuses_duplicates(void);
 static void test_index_root_metadata(void);
 static void test_maintained_index_root_page_format(void);
 static void test_index_leaf_pages(void);
+static void test_maintained_index_root_transaction_rollback(void);
 static void test_batched_index_leaf_pages(void);
 static void test_multi_page_index_leaf_pages(void);
 static void test_multi_page_index_leaf_duplicate_boundaries(void);
@@ -233,6 +342,35 @@ static void assert_exact_index_entries_for_table(
     size_t key_size,
     const unsigned long long *expected_row_ids,
     size_t expected_count
+);
+static void prepare_maintained_index_root_rollback_fixture(
+    maintained_index_root_rollback_fixture *fixture,
+    const char *filename_base
+);
+static void assert_maintained_index_root_fixture_initial_state(
+    const maintained_index_root_rollback_fixture *fixture
+);
+static void assert_maintained_index_root_fixture_inserted_state(
+    const maintained_index_root_rollback_fixture *fixture,
+    unsigned long long row_3_id
+);
+static void snapshot_maintained_index_root_pages(
+    const maintained_index_root_rollback_fixture *fixture,
+    unsigned char *primary_root,
+    unsigned char *secondary_root
+);
+static void assert_maintained_index_root_pages_match(
+    const maintained_index_root_rollback_fixture *fixture,
+    const unsigned char *expected_primary_root,
+    const unsigned char *expected_secondary_root
+);
+static void assert_maintained_index_root_pages_changed(
+    const maintained_index_root_rollback_fixture *fixture,
+    const unsigned char *expected_primary_root,
+    const unsigned char *expected_secondary_root
+);
+static void destroy_maintained_index_root_rollback_fixture(
+    maintained_index_root_rollback_fixture *fixture
 );
 static void test_autoincrement_state(void);
 static void exercise_exact_autoincrement_set(const char *filename);
@@ -498,6 +636,7 @@ int main(void) {
     test_index_root_metadata();
     test_maintained_index_root_page_format();
     test_index_leaf_pages();
+    test_maintained_index_root_transaction_rollback();
     test_batched_index_leaf_pages();
     test_multi_page_index_leaf_pages();
     test_multi_page_index_leaf_duplicate_boundaries();
@@ -5801,6 +5940,732 @@ static void test_index_leaf_pages(void) {
     assert(rmdir(root) == 0);
     free(filename);
     free(root);
+}
+
+static void test_maintained_index_root_transaction_rollback(void) {
+    maintained_index_root_rollback_fixture fixture = {0};
+    mylite_storage_statement *statement = NULL;
+    mylite_storage_statement *transaction = NULL;
+    mylite_storage_statement *savepoint = NULL;
+    unsigned long long row_3_id = 0ULL;
+    unsigned long long updated_row_2_id = 0ULL;
+    int status = 0;
+    unsigned char post_insert_primary_root[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char post_insert_secondary_root[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+
+    prepare_maintained_index_root_rollback_fixture(
+        &fixture,
+        "maintained-index-root-transaction-rollback.mylite"
+    );
+
+    assert(mylite_storage_begin_statement(fixture.filename, &statement) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            fixture.filename,
+            "app",
+            "posts",
+            k_maintained_root_row_3,
+            sizeof(k_maintained_root_row_3),
+            k_maintained_root_row_3_entries,
+            sizeof(k_maintained_root_row_3_entries) / sizeof(k_maintained_root_row_3_entries[0]),
+            &row_3_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(access(fixture.journal_filename, F_OK) == 0);
+    assert_maintained_index_root_pages_changed(
+        &fixture,
+        fixture.primary_root,
+        fixture.secondary_root
+    );
+    assert_maintained_index_root_fixture_inserted_state(&fixture, row_3_id);
+    assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
+    assert_file_missing(fixture.journal_filename);
+    assert_maintained_index_root_pages_match(
+        &fixture,
+        fixture.primary_root,
+        fixture.secondary_root
+    );
+    assert_maintained_index_root_fixture_initial_state(&fixture);
+
+    assert(mylite_storage_begin_statement(fixture.filename, &statement) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_update_row_with_index_entries(
+            fixture.filename,
+            "app",
+            "posts",
+            fixture.row_2_id,
+            k_maintained_root_updated_row_2,
+            sizeof(k_maintained_root_updated_row_2),
+            k_maintained_root_updated_row_2_entries,
+            sizeof(k_maintained_root_updated_row_2_entries) /
+                sizeof(k_maintained_root_updated_row_2_entries[0]),
+            &updated_row_2_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(access(fixture.journal_filename, F_OK) == 0);
+    assert_maintained_index_root_pages_changed(
+        &fixture,
+        fixture.primary_root,
+        fixture.secondary_root
+    );
+    assert_index_root(fixture.filename, "app", "posts", 0U, fixture.primary_root_page, 2ULL);
+    assert_index_root(fixture.filename, "app", "posts", 1U, fixture.secondary_root_page, 2ULL);
+    assert_index_entry_lookup(
+        fixture.filename,
+        0U,
+        k_maintained_root_key_2,
+        sizeof(k_maintained_root_key_2),
+        MYLITE_STORAGE_NOTFOUND,
+        0ULL
+    );
+    assert_find_indexed_row_equals(
+        fixture.filename,
+        0U,
+        k_maintained_root_updated_key_2,
+        sizeof(k_maintained_root_updated_key_2),
+        updated_row_2_id,
+        k_maintained_root_updated_row_2,
+        sizeof(k_maintained_root_updated_row_2)
+    );
+    assert_exact_index_entries(
+        fixture.filename,
+        1U,
+        k_maintained_root_updated_secondary_key_2,
+        sizeof(k_maintained_root_updated_secondary_key_2),
+        &updated_row_2_id,
+        1U
+    );
+    assert_index_prefix_exists(
+        fixture.filename,
+        k_maintained_root_updated_key_2,
+        sizeof(k_maintained_root_updated_key_2),
+        1
+    );
+    assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
+    assert_file_missing(fixture.journal_filename);
+    assert_maintained_index_root_pages_match(
+        &fixture,
+        fixture.primary_root,
+        fixture.secondary_root
+    );
+    assert_maintained_index_root_fixture_initial_state(&fixture);
+
+    assert(mylite_storage_begin_statement(fixture.filename, &statement) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_delete_row(fixture.filename, "app", "posts", fixture.row_1_id) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(access(fixture.journal_filename, F_OK) == 0);
+    assert_maintained_index_root_pages_changed(
+        &fixture,
+        fixture.primary_root,
+        fixture.secondary_root
+    );
+    assert_index_root(fixture.filename, "app", "posts", 0U, fixture.primary_root_page, 1ULL);
+    assert_index_root(fixture.filename, "app", "posts", 1U, fixture.secondary_root_page, 1ULL);
+    assert_find_indexed_row_not_found(
+        fixture.filename,
+        0U,
+        k_maintained_root_key_1,
+        sizeof(k_maintained_root_key_1)
+    );
+    assert_exact_index_entries(
+        fixture.filename,
+        1U,
+        k_maintained_root_secondary_key_1,
+        sizeof(k_maintained_root_secondary_key_1),
+        NULL,
+        0U
+    );
+    assert_index_prefix_exists(
+        fixture.filename,
+        k_maintained_root_key_1,
+        sizeof(k_maintained_root_key_1),
+        0
+    );
+    assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
+    assert_file_missing(fixture.journal_filename);
+    assert_maintained_index_root_pages_match(
+        &fixture,
+        fixture.primary_root,
+        fixture.secondary_root
+    );
+    assert_maintained_index_root_fixture_initial_state(&fixture);
+
+    row_3_id = 0ULL;
+    updated_row_2_id = 0ULL;
+    assert(mylite_storage_begin_transaction(fixture.filename, &transaction) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            fixture.filename,
+            "app",
+            "posts",
+            k_maintained_root_row_3,
+            sizeof(k_maintained_root_row_3),
+            k_maintained_root_row_3_entries,
+            sizeof(k_maintained_root_row_3_entries) / sizeof(k_maintained_root_row_3_entries[0]),
+            &row_3_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_update_row_with_index_entries(
+            fixture.filename,
+            "app",
+            "posts",
+            fixture.row_2_id,
+            k_maintained_root_updated_row_2,
+            sizeof(k_maintained_root_updated_row_2),
+            k_maintained_root_updated_row_2_entries,
+            sizeof(k_maintained_root_updated_row_2_entries) /
+                sizeof(k_maintained_root_updated_row_2_entries[0]),
+            &updated_row_2_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_delete_row(fixture.filename, "app", "posts", fixture.row_1_id) ==
+        MYLITE_STORAGE_OK
+    );
+    assert_maintained_index_root_pages_changed(
+        &fixture,
+        fixture.primary_root,
+        fixture.secondary_root
+    );
+    assert_find_indexed_row_not_found(
+        fixture.filename,
+        0U,
+        k_maintained_root_key_1,
+        sizeof(k_maintained_root_key_1)
+    );
+    assert_find_indexed_row_equals(
+        fixture.filename,
+        0U,
+        k_maintained_root_key_3,
+        sizeof(k_maintained_root_key_3),
+        row_3_id,
+        k_maintained_root_row_3,
+        sizeof(k_maintained_root_row_3)
+    );
+    assert_find_indexed_row_equals(
+        fixture.filename,
+        0U,
+        k_maintained_root_updated_key_2,
+        sizeof(k_maintained_root_updated_key_2),
+        updated_row_2_id,
+        k_maintained_root_updated_row_2,
+        sizeof(k_maintained_root_updated_row_2)
+    );
+    assert(mylite_storage_rollback_statement(transaction) == MYLITE_STORAGE_OK);
+    assert_file_size_matches_header(fixture.filename);
+    assert_maintained_index_root_pages_match(
+        &fixture,
+        fixture.primary_root,
+        fixture.secondary_root
+    );
+    assert_maintained_index_root_fixture_initial_state(&fixture);
+
+    row_3_id = 0ULL;
+    updated_row_2_id = 0ULL;
+    assert(mylite_storage_begin_transaction(fixture.filename, &transaction) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            fixture.filename,
+            "app",
+            "posts",
+            k_maintained_root_row_3,
+            sizeof(k_maintained_root_row_3),
+            k_maintained_root_row_3_entries,
+            sizeof(k_maintained_root_row_3_entries) / sizeof(k_maintained_root_row_3_entries[0]),
+            &row_3_id
+        ) == MYLITE_STORAGE_OK
+    );
+    snapshot_maintained_index_root_pages(
+        &fixture,
+        post_insert_primary_root,
+        post_insert_secondary_root
+    );
+    assert_maintained_index_root_fixture_inserted_state(&fixture, row_3_id);
+
+    assert(mylite_storage_begin_statement(fixture.filename, &savepoint) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_update_row_with_index_entries(
+            fixture.filename,
+            "app",
+            "posts",
+            fixture.row_2_id,
+            k_maintained_root_updated_row_2,
+            sizeof(k_maintained_root_updated_row_2),
+            k_maintained_root_updated_row_2_entries,
+            sizeof(k_maintained_root_updated_row_2_entries) /
+                sizeof(k_maintained_root_updated_row_2_entries[0]),
+            &updated_row_2_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_delete_row(fixture.filename, "app", "posts", fixture.row_1_id) ==
+        MYLITE_STORAGE_OK
+    );
+    assert_maintained_index_root_pages_changed(
+        &fixture,
+        post_insert_primary_root,
+        post_insert_secondary_root
+    );
+    assert(mylite_storage_rollback_statement(savepoint) == MYLITE_STORAGE_OK);
+    assert_maintained_index_root_pages_match(
+        &fixture,
+        post_insert_primary_root,
+        post_insert_secondary_root
+    );
+    assert_maintained_index_root_fixture_inserted_state(&fixture, row_3_id);
+    assert(mylite_storage_commit_statement(transaction) == MYLITE_STORAGE_OK);
+    assert_file_size_matches_header(fixture.filename);
+    assert_maintained_index_root_fixture_inserted_state(&fixture, row_3_id);
+    destroy_maintained_index_root_rollback_fixture(&fixture);
+
+    prepare_maintained_index_root_rollback_fixture(
+        &fixture,
+        "maintained-index-root-transaction-recovery.mylite"
+    );
+    const pid_t transaction_pid = fork();
+    assert(transaction_pid >= 0);
+    if (transaction_pid == 0) {
+        mylite_storage_statement *child_transaction = NULL;
+        unsigned long long child_row_3_id = 0ULL;
+        unsigned long long child_updated_row_2_id = 0ULL;
+        if (mylite_storage_begin_transaction(fixture.filename, &child_transaction) !=
+            MYLITE_STORAGE_OK) {
+            _exit(2);
+        }
+        if (mylite_storage_append_row_with_index_entries(
+                fixture.filename,
+                "app",
+                "posts",
+                k_maintained_root_row_3,
+                sizeof(k_maintained_root_row_3),
+                k_maintained_root_row_3_entries,
+                sizeof(k_maintained_root_row_3_entries) /
+                    sizeof(k_maintained_root_row_3_entries[0]),
+                &child_row_3_id
+            ) != MYLITE_STORAGE_OK) {
+            _exit(3);
+        }
+        if (mylite_storage_update_row_with_index_entries(
+                fixture.filename,
+                "app",
+                "posts",
+                fixture.row_2_id,
+                k_maintained_root_updated_row_2,
+                sizeof(k_maintained_root_updated_row_2),
+                k_maintained_root_updated_row_2_entries,
+                sizeof(k_maintained_root_updated_row_2_entries) /
+                    sizeof(k_maintained_root_updated_row_2_entries[0]),
+                &child_updated_row_2_id
+            ) != MYLITE_STORAGE_OK) {
+            _exit(4);
+        }
+        if (mylite_storage_delete_row(fixture.filename, "app", "posts", fixture.row_1_id) !=
+            MYLITE_STORAGE_OK) {
+            _exit(5);
+        }
+        _exit(child_row_3_id == 0ULL || child_updated_row_2_id == 0ULL ? 6 : 0);
+    }
+    status = 0;
+    assert(waitpid(transaction_pid, &status, 0) == transaction_pid);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
+    assert_file_missing(fixture.journal_filename);
+    assert(access(fixture.transaction_journal_filename, F_OK) == 0);
+    assert_maintained_index_root_pages_changed(
+        &fixture,
+        fixture.primary_root,
+        fixture.secondary_root
+    );
+    assert_find_indexed_row_not_found(
+        fixture.filename,
+        0U,
+        k_maintained_root_key_3,
+        sizeof(k_maintained_root_key_3)
+    );
+    assert_file_missing(fixture.transaction_journal_filename);
+    assert_maintained_index_root_pages_match(
+        &fixture,
+        fixture.primary_root,
+        fixture.secondary_root
+    );
+    assert_maintained_index_root_fixture_initial_state(&fixture);
+    destroy_maintained_index_root_rollback_fixture(&fixture);
+
+    prepare_maintained_index_root_rollback_fixture(
+        &fixture,
+        "maintained-index-root-statement-recovery.mylite"
+    );
+    const pid_t pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+        mylite_storage_statement *child_statement = NULL;
+        unsigned long long child_row_id = 0ULL;
+        if (mylite_storage_begin_statement(fixture.filename, &child_statement) !=
+            MYLITE_STORAGE_OK) {
+            _exit(2);
+        }
+        if (mylite_storage_append_row_with_index_entries(
+                fixture.filename,
+                "app",
+                "posts",
+                k_maintained_root_row_3,
+                sizeof(k_maintained_root_row_3),
+                k_maintained_root_row_3_entries,
+                sizeof(k_maintained_root_row_3_entries) /
+                    sizeof(k_maintained_root_row_3_entries[0]),
+                &child_row_id
+            ) != MYLITE_STORAGE_OK) {
+            _exit(3);
+        }
+        _exit(child_row_id == 0ULL ? 4 : 0);
+    }
+    status = 0;
+    assert(waitpid(pid, &status, 0) == pid);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
+    assert(access(fixture.journal_filename, F_OK) == 0);
+    assert_maintained_index_root_pages_changed(
+        &fixture,
+        fixture.primary_root,
+        fixture.secondary_root
+    );
+    assert_find_indexed_row_not_found(
+        fixture.filename,
+        0U,
+        k_maintained_root_key_3,
+        sizeof(k_maintained_root_key_3)
+    );
+    assert_file_missing(fixture.journal_filename);
+    assert_maintained_index_root_pages_match(
+        &fixture,
+        fixture.primary_root,
+        fixture.secondary_root
+    );
+    assert_maintained_index_root_fixture_initial_state(&fixture);
+    destroy_maintained_index_root_rollback_fixture(&fixture);
+}
+
+static void prepare_maintained_index_root_rollback_fixture(
+    maintained_index_root_rollback_fixture *fixture,
+    const char *filename_base
+) {
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = k_maintained_root_definition,
+        .definition_size = sizeof(k_maintained_root_definition),
+    };
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+
+    *fixture = (maintained_index_root_rollback_fixture){0};
+    fixture->root = make_temp_root();
+    fixture->filename = path_join(fixture->root, filename_base);
+    fixture->journal_filename = journal_path(fixture->filename);
+    fixture->transaction_journal_filename = transaction_journal_path(fixture->filename);
+
+    assert(mylite_storage_create_empty(fixture->filename) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_store_table_definition(fixture->filename, &table_definition) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            fixture->filename,
+            "app",
+            "posts",
+            k_maintained_root_row_1,
+            sizeof(k_maintained_root_row_1),
+            k_maintained_root_row_1_entries,
+            sizeof(k_maintained_root_row_1_entries) / sizeof(k_maintained_root_row_1_entries[0]),
+            &fixture->row_1_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            fixture->filename,
+            "app",
+            "posts",
+            k_maintained_root_row_2,
+            sizeof(k_maintained_root_row_2),
+            k_maintained_root_row_2_entries,
+            sizeof(k_maintained_root_row_2_entries) / sizeof(k_maintained_root_row_2_entries[0]),
+            &fixture->row_2_id
+        ) == MYLITE_STORAGE_OK
+    );
+
+    assert(
+        mylite_storage_rebuild_index_leaf(fixture->filename, "app", "posts", 0U) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_open_header(fixture->filename, &header) == MYLITE_STORAGE_OK);
+    fixture->primary_root_page = header.page_count - 1ULL;
+    assert_index_root(fixture->filename, "app", "posts", 0U, fixture->primary_root_page, 2ULL);
+    assert_index_root_page_type(
+        fixture->filename,
+        fixture->primary_root_page,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_ROOT
+    );
+
+    assert(
+        mylite_storage_rebuild_index_leaf(fixture->filename, "app", "posts", 1U) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_open_header(fixture->filename, &header) == MYLITE_STORAGE_OK);
+    fixture->secondary_root_page = header.page_count - 1ULL;
+    assert_index_root(fixture->filename, "app", "posts", 1U, fixture->secondary_root_page, 2ULL);
+    assert_index_root_page_type(
+        fixture->filename,
+        fixture->secondary_root_page,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_ROOT
+    );
+
+    snapshot_maintained_index_root_pages(fixture, fixture->primary_root, fixture->secondary_root);
+    assert_maintained_index_root_fixture_initial_state(fixture);
+}
+
+static void assert_maintained_index_root_fixture_initial_state(
+    const maintained_index_root_rollback_fixture *fixture
+) {
+    mylite_storage_index_entryset entries = {
+        .size = sizeof(entries),
+    };
+    const unsigned long long row_1_ids[] = {fixture->row_1_id};
+    const unsigned long long row_2_ids[] = {fixture->row_2_id};
+
+    assert_index_root(fixture->filename, "app", "posts", 0U, fixture->primary_root_page, 2ULL);
+    assert_index_root(fixture->filename, "app", "posts", 1U, fixture->secondary_root_page, 2ULL);
+    assert_maintained_index_root_pages_match(
+        fixture,
+        fixture->primary_root,
+        fixture->secondary_root
+    );
+    assert_find_indexed_row_equals(
+        fixture->filename,
+        0U,
+        k_maintained_root_key_1,
+        sizeof(k_maintained_root_key_1),
+        fixture->row_1_id,
+        k_maintained_root_row_1,
+        sizeof(k_maintained_root_row_1)
+    );
+    assert_find_indexed_row_equals(
+        fixture->filename,
+        0U,
+        k_maintained_root_key_2,
+        sizeof(k_maintained_root_key_2),
+        fixture->row_2_id,
+        k_maintained_root_row_2,
+        sizeof(k_maintained_root_row_2)
+    );
+    assert_exact_index_entries(
+        fixture->filename,
+        1U,
+        k_maintained_root_secondary_key_1,
+        sizeof(k_maintained_root_secondary_key_1),
+        row_1_ids,
+        sizeof(row_1_ids) / sizeof(row_1_ids[0])
+    );
+    assert_exact_index_entries(
+        fixture->filename,
+        1U,
+        k_maintained_root_secondary_key_2,
+        sizeof(k_maintained_root_secondary_key_2),
+        row_2_ids,
+        sizeof(row_2_ids) / sizeof(row_2_ids[0])
+    );
+    assert_exact_index_entries(
+        fixture->filename,
+        1U,
+        k_maintained_root_secondary_key_3,
+        sizeof(k_maintained_root_secondary_key_3),
+        NULL,
+        0U
+    );
+    assert_index_prefix_exists(
+        fixture->filename,
+        k_maintained_root_key_1,
+        sizeof(k_maintained_root_key_1),
+        1
+    );
+    assert_index_prefix_exists(
+        fixture->filename,
+        k_maintained_root_key_3,
+        sizeof(k_maintained_root_key_3),
+        0
+    );
+    assert_index_prefix_exists(
+        fixture->filename,
+        k_maintained_root_updated_key_2,
+        sizeof(k_maintained_root_updated_key_2),
+        0
+    );
+
+    assert(
+        mylite_storage_read_index_entries(fixture->filename, "app", "posts", 0U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == 2U);
+    assert(entries.key_bytes == 2U * sizeof(k_maintained_root_key_1));
+    assert_index_entry(
+        &entries,
+        0U,
+        fixture->row_1_id,
+        k_maintained_root_key_1,
+        sizeof(k_maintained_root_key_1)
+    );
+    assert_index_entry(
+        &entries,
+        1U,
+        fixture->row_2_id,
+        k_maintained_root_key_2,
+        sizeof(k_maintained_root_key_2)
+    );
+    mylite_storage_free_index_entryset(&entries);
+
+    entries = (mylite_storage_index_entryset){
+        .size = sizeof(entries),
+    };
+    assert(
+        mylite_storage_read_index_entries(fixture->filename, "app", "posts", 1U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == 2U);
+    assert(entries.key_bytes == 2U * sizeof(k_maintained_root_secondary_key_1));
+    assert_index_entry(
+        &entries,
+        0U,
+        fixture->row_1_id,
+        k_maintained_root_secondary_key_1,
+        sizeof(k_maintained_root_secondary_key_1)
+    );
+    assert_index_entry(
+        &entries,
+        1U,
+        fixture->row_2_id,
+        k_maintained_root_secondary_key_2,
+        sizeof(k_maintained_root_secondary_key_2)
+    );
+    mylite_storage_free_index_entryset(&entries);
+}
+
+static void assert_maintained_index_root_fixture_inserted_state(
+    const maintained_index_root_rollback_fixture *fixture,
+    unsigned long long row_3_id
+) {
+    mylite_storage_index_entryset entries = {
+        .size = sizeof(entries),
+    };
+    const unsigned long long row_3_ids[] = {row_3_id};
+
+    assert_index_root(fixture->filename, "app", "posts", 0U, fixture->primary_root_page, 3ULL);
+    assert_index_root(fixture->filename, "app", "posts", 1U, fixture->secondary_root_page, 3ULL);
+    assert_find_indexed_row_equals(
+        fixture->filename,
+        0U,
+        k_maintained_root_key_3,
+        sizeof(k_maintained_root_key_3),
+        row_3_id,
+        k_maintained_root_row_3,
+        sizeof(k_maintained_root_row_3)
+    );
+    assert_exact_index_entries(
+        fixture->filename,
+        1U,
+        k_maintained_root_secondary_key_3,
+        sizeof(k_maintained_root_secondary_key_3),
+        row_3_ids,
+        sizeof(row_3_ids) / sizeof(row_3_ids[0])
+    );
+    assert_index_prefix_exists(
+        fixture->filename,
+        k_maintained_root_key_3,
+        sizeof(k_maintained_root_key_3),
+        1
+    );
+
+    assert(
+        mylite_storage_read_index_entries(fixture->filename, "app", "posts", 0U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == 3U);
+    assert(entries.key_bytes == 3U * sizeof(k_maintained_root_key_1));
+    assert_index_entry(
+        &entries,
+        0U,
+        fixture->row_1_id,
+        k_maintained_root_key_1,
+        sizeof(k_maintained_root_key_1)
+    );
+    assert_index_entry(
+        &entries,
+        1U,
+        fixture->row_2_id,
+        k_maintained_root_key_2,
+        sizeof(k_maintained_root_key_2)
+    );
+    assert_index_entry(
+        &entries,
+        2U,
+        row_3_id,
+        k_maintained_root_key_3,
+        sizeof(k_maintained_root_key_3)
+    );
+    mylite_storage_free_index_entryset(&entries);
+}
+
+static void snapshot_maintained_index_root_pages(
+    const maintained_index_root_rollback_fixture *fixture,
+    unsigned char *primary_root,
+    unsigned char *secondary_root
+) {
+    read_test_page(fixture->filename, fixture->primary_root_page, primary_root);
+    read_test_page(fixture->filename, fixture->secondary_root_page, secondary_root);
+}
+
+static void assert_maintained_index_root_pages_match(
+    const maintained_index_root_rollback_fixture *fixture,
+    const unsigned char *expected_primary_root,
+    const unsigned char *expected_secondary_root
+) {
+    unsigned char primary_root[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char secondary_root[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    snapshot_maintained_index_root_pages(fixture, primary_root, secondary_root);
+    assert(memcmp(primary_root, expected_primary_root, sizeof(primary_root)) == 0);
+    assert(memcmp(secondary_root, expected_secondary_root, sizeof(secondary_root)) == 0);
+}
+
+static void assert_maintained_index_root_pages_changed(
+    const maintained_index_root_rollback_fixture *fixture,
+    const unsigned char *expected_primary_root,
+    const unsigned char *expected_secondary_root
+) {
+    unsigned char primary_root[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char secondary_root[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    snapshot_maintained_index_root_pages(fixture, primary_root, secondary_root);
+    assert(memcmp(primary_root, expected_primary_root, sizeof(primary_root)) != 0);
+    assert(memcmp(secondary_root, expected_secondary_root, sizeof(secondary_root)) != 0);
+}
+
+static void destroy_maintained_index_root_rollback_fixture(
+    maintained_index_root_rollback_fixture *fixture
+) {
+    assert_file_missing(fixture->journal_filename);
+    assert_file_missing(fixture->transaction_journal_filename);
+    assert(unlink(fixture->filename) == 0);
+    assert(rmdir(fixture->root) == 0);
+    free(fixture->transaction_journal_filename);
+    free(fixture->journal_filename);
+    free(fixture->filename);
+    free(fixture->root);
+    *fixture = (maintained_index_root_rollback_fixture){0};
 }
 
 static void test_batched_index_leaf_pages(void) {

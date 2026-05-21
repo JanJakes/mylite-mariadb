@@ -185,8 +185,8 @@ LIKE` uses MariaDB's clone-definition path and publishes an empty MyLite catalog
 record with source requested-engine metadata preserved. FK child source tables
 clone their ordinary table and index shape, but MyLite does not copy source FK
 metadata to the LIKE target. Online `ALTER`, in-place `ALTER`,
-transaction-aware index maintenance, free-space reclamation, and unsupported
-index classes still reject
+multi-page transaction-aware index maintenance, free-space reclamation, and
+unsupported index classes still reject
 or remain planned until those slices define the paths. Standalone
 `CREATE INDEX` and `DROP INDEX` use MariaDB's ALTER-backed DDL path for
 supported copy-rebuild index additions and drops, including representative
@@ -357,10 +357,11 @@ keys with MariaDB's key helpers. Current mutating
 publication paths are protected by a
 rollback journal before the header or catalog root page is overwritten. Active
 file-backed row-DML transactions create a transient transaction journal
-with the transaction-start header and catalog root pages; recovery applies any
-ordinary rollback journal first, then the transaction journal. Richer
-transaction state, free-space metadata, and B-tree-style index navigation are
-still planned slices.
+with the transaction-start header, catalog root pages, and dynamically
+protected dirty existing pages needed by current pager-backed maintained roots;
+recovery applies any ordinary rollback journal first, then the transaction
+journal. Richer transaction state, free-space metadata, and B-tree-style index
+navigation are still planned slices.
 
 MariaDB handler row statistics are estimates for durable MyLite tables. MyLite
 does not advertise `HA_STATS_RECORDS_IS_EXACT`, and `ha_mylite::info()` answers
@@ -1013,12 +1014,20 @@ maintained roots while preserving the row-state delete overlay for immutable
 and fallback paths. Eligible updates now replace source-row cells in maintained
 roots with the replacement row id and new key bytes, keep root entry counts
 stable, and skip duplicate append-only replacement index-entry pages for roots
-updated in place. Root splits and transaction-aware maintained index mutation
-remain planned.
+updated in place. Root-backed exact and full index readers treat maintained
+roots as authoritative root entries rather than applying the append-tail
+row-state overlay to entries already maintained in place. Active exact-index
+and published-root cache reads bypass stale durable cache state while an active
+statement chain has deferred table-local durable cache retargeting. Statement
+rollback, savepoint rollback, transaction rollback, stale statement-journal
+recovery, and stale transaction-journal recovery now restore single-page
+maintained root bytes and logical visibility for covered insert, update, and
+delete paths. Root splits, multi-page navigable indexes, and broader
+transactional maintained index mutation remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
-definitions. B-tree pages, row/index free-space reclamation, multi-statement
-transaction rollback, and transaction-aware index maintenance remain planned.
+definitions. B-tree pages, row/index free-space reclamation, and broader
+multi-statement transaction-aware index maintenance remain planned.
 
 The storage engine must support:
 

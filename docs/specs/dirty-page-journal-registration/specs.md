@@ -8,10 +8,12 @@ now restores in-process statement and savepoint boundaries, but crash recovery
 still needs the rollback journal to contain the original bytes for any existing
 page written through the pager.
 
-The first implementation is intentionally narrow: allow one newly dirtied
+The first implementation was intentionally narrow: allow one newly dirtied
 existing page in an ordinary active statement to create the recovery journal
 with that page protected, and reject unsafe dirty writes once an existing
-statement or transaction journal can no longer be extended.
+statement journal can no longer be extended. Active durable transactions now
+extend their transaction journal through a rewritten replacement journal before
+pager-backed existing pages are dirtied.
 
 ## Non-Goals
 
@@ -70,11 +72,14 @@ Add a pager dirty-write guard before the first write to an existing page:
   recovery has a protected-page journal entry for that page;
 - if no active statement or transaction journal exists, create the recovery
   journal with header, catalog, current free-list root, and the dirty page id;
+- if an active transaction journal exists, rewrite it through a temporary
+  replacement journal and atomic rename so the transaction-start page preimage
+  is protected before the primary file write;
 - keep the recovery journal immutable after creation;
 - allow repeated writes to a page already captured in the active statement
   chain;
-- reject a different newly dirtied existing page when a statement or
-  transaction journal already exists and did not protect it; and
+- reject a different newly dirtied existing page when an immutable statement
+  journal already exists and did not protect it; and
 - skip new append-buffer pages and pages at or beyond the statement-start page
   count because header rollback and truncation already remove them.
 
@@ -96,12 +101,12 @@ writes the page. Repeated writes to the same page remain allowed because the
 active statement chain already has both the recovery-journal page protection
 and the in-memory undo preimage.
 
-If a statement or transaction journal already exists and the page has not
-already been captured in the active statement chain, the write returns
-`MYLITE_STORAGE_UNSUPPORTED`. Nested savepoints and active durable
-transactions therefore remain conservative until maintained-index work can
-pre-register a whole dirty-page set or the transaction journal can protect
-dirty pages explicitly.
+If a statement journal already exists and the page has not already been
+captured in the active statement chain, the write returns
+`MYLITE_STORAGE_UNSUPPORTED`. Active durable transactions now keep crash
+recovery by replacing the transaction journal with an extended journal that
+contains the transaction-start preimage for newly dirtied existing pages before
+those writes reach the primary file.
 
 ## File Lifecycle
 
@@ -174,10 +179,10 @@ ctest --test-dir build/storage-smoke-dev -R libmylite.embedded-storage-engine --
 - The recovery journal is still bounded by
   `MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES`; broad maintained-index
   mutations need a planned dirty-page set or a later WAL/checkpoint design.
-- Active durable transactions currently create a transaction journal at
-  transaction start. Arbitrary dirty-page writes inside those transactions
-  still need a transaction-aware protected-page contract before they can be
-  enabled.
+- Active durable transactions now have a transaction-aware protected-page
+  contract for current pager-backed dirty existing pages. Broader multi-page
+  navigable index work still needs bounded dirty-page planning so a large
+  mutation does not repeatedly rewrite the transaction journal.
 - Nested savepoints that introduce the first dirty page under a parent
   checkpoint need careful journal ownership before dirty pages can be broadly
   supported. The first implementation should stay conservative and reject

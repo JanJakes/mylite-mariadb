@@ -155,9 +155,9 @@ handling and a small storage API branch.
 
 ## Risks And Unresolved Questions
 
-- The transaction journal currently protects only the header and catalog root
-  pages. That is sufficient for append-only publication because restoring
-  `page_count` hides appended pages, but free-space reuse will require a richer
-  transaction log.
+- The transaction journal started by protecting only the header and catalog
+  root pages. Current pager-backed dirty existing pages can extend it with
+  transaction-start page preimages, but free-space reuse and broad multi-page
+  mutations will require a richer transaction log.
 - The commit point is transaction-journal removal, not a WAL frame. WAL remains
   the likely long-term path for concurrent writers and finer-grained recovery.
