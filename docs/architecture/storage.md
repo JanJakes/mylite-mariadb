@@ -549,7 +549,9 @@ answer directly from complete static published leaf roots and single-page
 maintained roots. Roots with append-tail history, missing roots, and unsupported
 shapes still fall back to the existing materialized index-entry overlay path.
 Static prefix probes lower-bound within each sorted leaf page, including probes
-whose serialized prefix is shorter than the full key image.
+whose serialized prefix is shorter than the full key image. Prefix probes also
+use scoped file/header reads, matching exact-index point lookups when an active
+statement, read statement, or snapshot already owns the current file view.
 
 MariaDB handler instances also cache proven child and parent foreign-key
 metadata absence for their opened table. Ordinary non-FK row-DML paths use that
