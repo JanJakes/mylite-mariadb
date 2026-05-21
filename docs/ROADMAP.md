@@ -148,8 +148,10 @@ per-candidate linear visibility lookup that dominated full scans after many
 updates, and full rowset reads now collect live row ids in one file pass before
 materializing only surviving row pages. SQLite-like
 row-write and point-read performance still requires the planned navigable index
-and pager work. Durable table-local row, payload, exact-index, and published
-leaf-page caches now retarget across unrelated table row mutations, so one
+and pager work; the next storage slice should establish the pager boundary
+before maintained B-tree pages rely on dirty-page ownership. Durable table-local
+row, payload, exact-index, and published leaf-page caches now retarget across
+unrelated table row mutations, so one
 table's insert/update/delete does not strand another table's hot durable cache
 solely because the file page count advanced. Durable handler
 index cursors also materialize their current row payloads in one ordered batch,
