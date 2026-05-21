@@ -993,8 +993,11 @@ rollback before truncation. The first dirty existing-page write in an ordinary
 active statement now creates a recovery journal that protects that page before
 the write reaches the primary file; dirty writes that cannot be protected under
 the current immutable journal model are rejected instead of becoming
-crash-unsafe. Maintained index roots still need a planned dirty-page set, page
-formats, and flush semantics before they can safely update in place.
+crash-unsafe. Active statements can also create the immutable recovery journal
+from a bounded preplanned dirty-page set, which lets future maintained-index
+writers declare root or leaf pages before row append creates the journal.
+Maintained index roots still need page formats and flush semantics before they
+can safely update in place.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, row/index free-space reclamation, multi-statement

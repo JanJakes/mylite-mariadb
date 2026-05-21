@@ -17,6 +17,11 @@
 #include <mylite/storage.h>
 
 #ifdef MYLITE_STORAGE_TEST_HOOKS
+mylite_storage_result mylite_storage_test_protect_active_dirty_pages(
+    const char *filename,
+    const unsigned long long *page_ids,
+    size_t page_count
+);
 mylite_storage_result mylite_storage_test_flip_active_page_byte(
     const char *filename,
     unsigned long long page_id,
@@ -126,6 +131,7 @@ static void test_update_and_delete_rows(void);
 static void test_active_dirty_page_rollback_restores_existing_page(void);
 static void test_recovers_active_dirty_page_journal(void);
 static void test_rejects_unprotected_active_dirty_page(void);
+static void test_preplanned_active_dirty_page_journal_set(void);
 static void test_many_row_state_pages_scan(void);
 static void test_active_live_row_validation_cache(void);
 static void test_reusable_live_row_cache_clears_row_ids(void);
@@ -445,6 +451,7 @@ int main(void) {
     test_active_dirty_page_rollback_restores_existing_page();
     test_recovers_active_dirty_page_journal();
     test_rejects_unprotected_active_dirty_page();
+    test_preplanned_active_dirty_page_journal_set();
     test_many_row_state_pages_scan();
     test_active_live_row_validation_cache();
     test_reusable_live_row_cache_clears_row_ids();
@@ -1879,6 +1886,116 @@ static void test_rejects_unprotected_active_dirty_page(void) {
     assert(rows.row_count == 1U);
     assert(rows.row_size == sizeof(row_1));
     assert(memcmp(rows.rows, row_1, sizeof(row_1)) == 0);
+    mylite_storage_free_rowset(&rows);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(journal_filename);
+    free(filename);
+    free(root);
+#endif
+}
+
+static void test_preplanned_active_dirty_page_journal_set(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row_1[] = {0x00U, 0x01U, 'o', 'n', 'e'};
+    static const unsigned char row_2[] = {0x00U, 0x02U, 't', 'w', 'o'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "preplanned-active-dirty-pages.mylite");
+    char *journal_filename = journal_path(filename);
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    unsigned char before_1[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char before_2[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char dirty_1[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char dirty_2[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char restored_1[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char restored_2[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+    mylite_storage_statement *statement = NULL;
+    unsigned long long row_1_id = 0ULL;
+    unsigned long long row_2_id = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_1,
+            sizeof(row_1),
+            NULL,
+            0U,
+            &row_1_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_2,
+            sizeof(row_2),
+            NULL,
+            0U,
+            &row_2_id
+        ) == MYLITE_STORAGE_OK
+    );
+    read_test_page(filename, row_1_id, before_1);
+    read_test_page(filename, row_2_id, before_2);
+
+    const unsigned long long page_ids[] = {row_1_id, row_2_id};
+    assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_test_protect_active_dirty_pages(
+            filename,
+            page_ids,
+            sizeof(page_ids) / sizeof(page_ids[0])
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(access(journal_filename, F_OK) == 0);
+    assert(
+        mylite_storage_test_flip_active_page_byte(
+            filename,
+            row_1_id,
+            MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_test_flip_active_page_byte(
+            filename,
+            row_2_id,
+            MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET
+        ) == MYLITE_STORAGE_OK
+    );
+    read_test_page(filename, row_1_id, dirty_1);
+    read_test_page(filename, row_2_id, dirty_2);
+    assert(memcmp(before_1, dirty_1, sizeof(before_1)) != 0);
+    assert(memcmp(before_2, dirty_2, sizeof(before_2)) != 0);
+
+    assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
+    assert_file_missing(journal_filename);
+    read_test_page(filename, row_1_id, restored_1);
+    read_test_page(filename, row_2_id, restored_2);
+    assert(memcmp(before_1, restored_1, sizeof(before_1)) == 0);
+    assert(memcmp(before_2, restored_2, sizeof(before_2)) == 0);
+
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
+    assert(rows.row_count == 2U);
+    assert(rows.row_size == sizeof(row_1));
+    assert(memcmp(rows.rows + rows.row_offsets[0], row_1, sizeof(row_1)) == 0);
+    assert(memcmp(rows.rows + rows.row_offsets[1], row_2, sizeof(row_2)) == 0);
     mylite_storage_free_rowset(&rows);
 
     assert(unlink(filename) == 0);
