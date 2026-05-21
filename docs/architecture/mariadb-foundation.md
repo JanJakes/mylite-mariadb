@@ -46,13 +46,16 @@ until the broader engine policy is designed.
 
 The core startup path also disables server topology and server-management
 surfaces that do not fit `mylite_open()`: grant tables, networking, binlog,
-replication slave auto-start, performance schema, statement profiling, and the
-query cache. `libmylite` rejects top-level SQL command families for users,
-roles, grants, events, dynamic plugins, replication, binlog administration,
-foreign-server metadata, SQL help-table lookup, statement profiling, and
-query-cache management before dispatching them to MariaDB. MyLite also rejects
-Oracle SQL mode because that optional MariaDB compatibility parser is outside
-the embedded application profile.
+replication slave auto-start, performance schema, statement profiling, query
+cache, and daemon query logs. `libmylite` rejects top-level SQL command
+families and optional server surfaces before dispatching them to MariaDB,
+including users, roles, grants, events, dynamic plugins and UDFs, replication,
+binlog administration, SQL `HANDLER`, foreign-server metadata, external backup
+coordination, host-file SQL import/export, SQL help-table lookup, statement
+profiling, query-cache management, optimizer trace, process-list and status
+diagnostics, user statistics, and user-variable diagnostics. MyLite also
+rejects Oracle SQL mode because that optional MariaDB compatibility parser is
+outside the embedded application profile.
 
 MariaDB 11.8.6 needed narrow embedded-restart fixes for repeated
 `mylite_open()` / `mylite_close()` tests in one process:
