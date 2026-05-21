@@ -464,10 +464,13 @@ typedef struct mylite_storage_table_identity {
 typedef struct mylite_storage_table_entry_cache {
     char *schema_name;
     char *table_name;
+    const char *schema_name_identity;
+    const char *table_name_identity;
     unsigned long long catalog_root_page;
     unsigned long long catalog_generation;
     mylite_storage_catalog_entry entry;
     int has_entry;
+    int has_name_identity;
 } mylite_storage_table_entry_cache;
 
 typedef struct mylite_storage_index_root_entry_cache {
@@ -698,6 +701,9 @@ typedef mylite_storage_result (*mylite_storage_row_page_callback)(
 
 static _Thread_local mylite_storage_statement *active_statement;
 static _Thread_local const void *active_context_owner;
+static _Thread_local const char *active_table_name_identity_schema;
+static _Thread_local const char *active_table_name_identity_table;
+static _Thread_local int active_table_name_identity_active;
 static _Thread_local mylite_storage_statement *active_read_statement;
 static _Thread_local mylite_storage_statement *active_read_snapshot;
 static _Thread_local mylite_storage_transaction_journal_snapshot active_transaction_journal_snapshot;
@@ -1080,6 +1086,16 @@ static void store_active_table_entry_cache_in_statement(
     const char *schema_name,
     const char *table_name,
     const mylite_storage_catalog_entry *entry
+);
+MYLITE_STORAGE_HOT_INLINE int table_entry_cache_names_match(
+    const mylite_storage_table_entry_cache *cache,
+    const char *schema_name,
+    const char *table_name
+);
+static void store_table_entry_cache_name_identity(
+    mylite_storage_table_entry_cache *cache,
+    const char *schema_name,
+    const char *table_name
 );
 static void clear_table_entry_cache(mylite_storage_table_entry_cache *cache);
 static int find_active_index_root_entry_cache_in_statement(
@@ -8546,6 +8562,35 @@ void mylite_storage_set_context_owner(const void *owner) {
     active_context_owner = owner;
 }
 
+void mylite_storage_begin_table_name_identity_scope(
+    const char *schema_name,
+    const char *table_name,
+    mylite_storage_table_name_identity_scope *scope
+) {
+    if (scope == NULL) {
+        return;
+    }
+
+    scope->previous_schema_name = active_table_name_identity_schema;
+    scope->previous_table_name = active_table_name_identity_table;
+    scope->previous_active = active_table_name_identity_active;
+    active_table_name_identity_schema = schema_name;
+    active_table_name_identity_table = table_name;
+    active_table_name_identity_active = schema_name != NULL && table_name != NULL;
+}
+
+void mylite_storage_end_table_name_identity_scope(
+    const mylite_storage_table_name_identity_scope *scope
+) {
+    if (scope == NULL) {
+        return;
+    }
+
+    active_table_name_identity_schema = scope->previous_schema_name;
+    active_table_name_identity_table = scope->previous_table_name;
+    active_table_name_identity_active = scope->previous_active;
+}
+
 void mylite_storage_set_busy_timeout(unsigned milliseconds) {
     active_busy_timeout_ms = milliseconds;
 }
@@ -11774,15 +11819,15 @@ MYLITE_STORAGE_HOT_INLINE int find_active_table_entry_cache_in_statement(
         return 0;
     }
 
-    const mylite_storage_table_entry_cache *cache = &statement->table_entry_cache;
+    mylite_storage_table_entry_cache *cache = &statement->table_entry_cache;
     if (!cache->has_entry || cache->schema_name == NULL || cache->table_name == NULL ||
         cache->catalog_root_page != header->catalog_root_page ||
         cache->catalog_generation != header->catalog_generation ||
-        (cache->schema_name != schema_name && strcmp(cache->schema_name, schema_name) != 0) ||
-        (cache->table_name != table_name && strcmp(cache->table_name, table_name) != 0)) {
+        !table_entry_cache_names_match(cache, schema_name, table_name)) {
         return 0;
     }
 
+    store_table_entry_cache_name_identity(cache, schema_name, table_name);
     *out_entry = cache->entry;
     out_entry->record = NULL;
     return 1;
@@ -11801,12 +11846,12 @@ static void store_active_table_entry_cache_in_statement(
 
     mylite_storage_table_entry_cache *cache = &statement->table_entry_cache;
     if (cache->has_entry && cache->schema_name != NULL && cache->table_name != NULL &&
-        strcmp(cache->schema_name, schema_name) == 0 &&
-        strcmp(cache->table_name, table_name) == 0) {
+        table_entry_cache_names_match(cache, schema_name, table_name)) {
         cache->catalog_root_page = header->catalog_root_page;
         cache->catalog_generation = header->catalog_generation;
         cache->entry = *entry;
         cache->entry.record = NULL;
+        store_table_entry_cache_name_identity(cache, schema_name, table_name);
         return;
     }
 
@@ -11828,6 +11873,41 @@ static void store_active_table_entry_cache_in_statement(
     cache->entry = *entry;
     cache->entry.record = NULL;
     cache->has_entry = 1;
+    store_table_entry_cache_name_identity(cache, schema_name, table_name);
+}
+
+MYLITE_STORAGE_HOT_INLINE int table_entry_cache_names_match(
+    const mylite_storage_table_entry_cache *cache,
+    const char *schema_name,
+    const char *table_name
+) {
+    if (cache->has_name_identity && active_table_name_identity_active &&
+        cache->schema_name_identity == schema_name && cache->table_name_identity == table_name &&
+        active_table_name_identity_schema == schema_name &&
+        active_table_name_identity_table == table_name) {
+        return 1;
+    }
+
+    return strcmp(cache->schema_name, schema_name) == 0 &&
+           strcmp(cache->table_name, table_name) == 0;
+}
+
+static void store_table_entry_cache_name_identity(
+    mylite_storage_table_entry_cache *cache,
+    const char *schema_name,
+    const char *table_name
+) {
+    cache->schema_name_identity = NULL;
+    cache->table_name_identity = NULL;
+    cache->has_name_identity = 0;
+    if (!active_table_name_identity_active || active_table_name_identity_schema != schema_name ||
+        active_table_name_identity_table != table_name) {
+        return;
+    }
+
+    cache->schema_name_identity = schema_name;
+    cache->table_name_identity = table_name;
+    cache->has_name_identity = 1;
 }
 
 static void clear_table_entry_cache(mylite_storage_table_entry_cache *cache) {

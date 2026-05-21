@@ -878,6 +878,25 @@ public:
   int error() const { return begin_error; }
 };
 
+class Mylite_table_name_identity_scope
+{
+  mylite_storage_table_name_identity_scope scope;
+
+public:
+  Mylite_table_name_identity_scope(const char *schema_name,
+                                   const char *table_name)
+      : scope{NULL, NULL, 0}
+  {
+    mylite_storage_begin_table_name_identity_scope(schema_name, table_name,
+                                                   &scope);
+  }
+
+  ~Mylite_table_name_identity_scope()
+  {
+    mylite_storage_end_table_name_identity_scope(&scope);
+  }
+};
+
 struct Mylite_discover_context
 {
   handlerton::discovered_list *result;
@@ -2164,6 +2183,9 @@ int ha_mylite::read_exact_unique_index_row_into(uint index_number,
   const char *primary_file= mylite_primary_file_path();
   if (!primary_file)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
+  const char *schema_name= storage_schema();
+  const char *table_name= storage_table();
+  Mylite_table_name_identity_scope table_name_scope(schema_name, table_name);
 
   Mylite_read_statement_scope read_scope(primary_file, true);
   if (read_scope.error())
@@ -2173,9 +2195,8 @@ int ha_mylite::read_exact_unique_index_row_into(uint index_number,
   ulonglong row_id= 0ULL;
   size_t row_payload_size= 0;
   mylite_storage_result storage_result= mylite_storage_find_indexed_row_into(
-      primary_file, storage_schema(), storage_table(), index_number,
-      key_filter, key_filter_length, &row_id, buf, table->s->reclength,
-      &row_payload_size);
+      primary_file, schema_name, table_name, index_number, key_filter,
+      key_filter_length, &row_id, buf, table->s->reclength, &row_payload_size);
   *out_applied= true;
   if (storage_result == MYLITE_STORAGE_NOTFOUND)
   {
@@ -2901,6 +2922,9 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
   const char *primary_file= mylite_primary_file_path();
   if (!primary_file)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
+  const char *schema_name= storage_schema();
+  const char *table_name= storage_table();
+  Mylite_table_name_identity_scope table_name_scope(schema_name, table_name);
 
   int error= 0;
   const bool check_foreign_keys=
@@ -2911,8 +2935,7 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
     error= has_parent_foreign_keys(&has_parent_constraints);
     if (!error && has_parent_constraints)
       error= mylite_apply_same_row_update_actions(
-          primary_file, storage_schema(), storage_table(), table, old_data,
-          new_data);
+          primary_file, schema_name, table_name, table, old_data, new_data);
     if (error)
       DBUG_RETURN(error);
   }
@@ -2960,11 +2983,11 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
     uint duplicate_key= (uint) -1;
     error= volatile_rows
                ? mylite_check_volatile_duplicate_keys(
-                     primary_file, storage_schema(), storage_table(), table,
+                     primary_file, schema_name, table_name, table,
                      index_entries, index_entry_count, index_entry_changed,
                      new_data, current_row_id, &duplicate_key)
                : mylite_check_duplicate_keys(
-                     primary_file, storage_schema(), storage_table(), table,
+                     primary_file, schema_name, table_name, table,
                      index_entries, index_entry_count, index_entry_changed,
                      new_data, current_row_id, &duplicate_key);
     if (error)
@@ -2984,18 +3007,17 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
     bool has_child_constraints= false;
     error= has_child_foreign_keys(&has_child_constraints);
     if (!error && has_child_constraints)
-      error= mylite_check_child_foreign_keys(primary_file, storage_schema(),
-                                             storage_table(), table, new_data);
+      error= mylite_check_child_foreign_keys(primary_file, schema_name,
+                                             table_name, table, new_data);
 
     if (!error && has_parent_constraints)
       error= mylite_apply_parent_foreign_key_actions(
-        primary_file, storage_schema(), storage_table(), table, old_data,
-        new_data, current_row_id, 0);
+          primary_file, schema_name, table_name, table, old_data, new_data,
+          current_row_id, 0);
     if (!error && has_parent_constraints)
-      error= mylite_check_parent_foreign_keys(primary_file, storage_schema(),
-                                              storage_table(), table,
-                                              old_data, new_data,
-                                              current_row_id);
+      error= mylite_check_parent_foreign_keys(primary_file, schema_name,
+                                              table_name, table, old_data,
+                                              new_data, current_row_id);
     if (error)
     {
       if (index_entry_changed != stack_index_entry_changed)
@@ -3014,14 +3036,14 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
                                                     &next_value))
     {
       error= mylite_storage_to_handler_error(
-        mylite_volatile_advance_auto_increment(primary_file, storage_schema(),
-                                               storage_table(), next_value));
+          mylite_volatile_advance_auto_increment(primary_file, schema_name,
+                                                 table_name, next_value));
     }
   }
   else
   {
     error= mylite_advance_auto_increment_from_field(
-        primary_file, storage_schema(), storage_table(), auto_increment_field);
+        primary_file, schema_name, table_name, auto_increment_field);
     if (!error && auto_increment_field)
     {
       const mylite_storage_result preserve_result=
@@ -3058,16 +3080,16 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
   unsigned long long new_row_id= 0ULL;
   const mylite_storage_result result=
       volatile_rows ? mylite_volatile_update_row_with_index_entries(
-                          primary_file, storage_schema(), storage_table(),
+                          primary_file, schema_name, table_name,
                           current_row_id, row_payload, row_payload_size,
                           index_entries, index_entry_count, &new_row_id)
       : preserve_index_entries
           ? mylite_storage_update_row_preserving_index_entries(
-                primary_file, storage_schema(), storage_table(),
-                current_row_id, row_payload, row_payload_size, &new_row_id)
+                primary_file, schema_name, table_name, current_row_id,
+                row_payload, row_payload_size, &new_row_id)
           : mylite_storage_update_row_with_index_entry_changes(
-                primary_file, storage_schema(), storage_table(),
-                current_row_id, row_payload, row_payload_size, index_entries,
+                primary_file, schema_name, table_name, current_row_id,
+                row_payload, row_payload_size, index_entries,
                 index_entry_count, index_entry_changed, &new_row_id);
   mylite_storage_free(owned_row_payload);
   if (index_entry_changed != stack_index_entry_changed)

@@ -264,6 +264,7 @@ static void test_active_row_payload_cache(void);
 static void test_active_row_payload_cache_large_window(void);
 static void test_active_row_payload_cache_validates_update(void);
 static void test_active_table_entry_cache_catalog_invalidation(void);
+static void test_active_table_entry_cache_mutable_name_buffers(void);
 static void test_active_row_payload_cache_many_replacements(void);
 static void test_durable_live_row_cache(void);
 static void test_deferred_durable_cache_retarget(void);
@@ -639,6 +640,7 @@ int main(void) {
     test_active_row_payload_cache_large_window();
     test_active_row_payload_cache_validates_update();
     test_active_table_entry_cache_catalog_invalidation();
+    test_active_table_entry_cache_mutable_name_buffers();
     test_active_row_payload_cache_many_replacements();
     test_durable_live_row_cache();
     test_deferred_durable_cache_retarget();
@@ -2928,6 +2930,118 @@ static void test_active_table_entry_cache_catalog_invalidation(void) {
     mylite_storage_free(stored_row);
     assert(mylite_storage_rollback_statement(transaction) == MYLITE_STORAGE_OK);
     assert_find_indexed_row_equals(filename, 0U, key, sizeof(key), row_id, row, sizeof(row));
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_active_table_entry_cache_mutable_name_buffers(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char posts_row[] = {0x00U, 0x11U, 'p'};
+    static const unsigned char articles_row[] = {0x00U, 0x11U, 'a'};
+    static const unsigned char key[] = {0x11U};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "active-table-entry-cache-mutable-name-buffers.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_index_entry row_entry = {
+        .size = sizeof(row_entry),
+        .index_number = 0U,
+        .key = key,
+        .key_size = sizeof(key),
+    };
+    mylite_storage_statement *transaction = NULL;
+    unsigned long long posts_row_id = 0ULL;
+    unsigned long long articles_row_id = 0ULL;
+    unsigned long long found_row_id = 0ULL;
+    unsigned char *stored_row = NULL;
+    size_t stored_row_size = 0U;
+    char schema_name[16];
+    char table_name[16];
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    table_definition.schema_name = "blog";
+    table_definition.table_name = "articles";
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            posts_row,
+            sizeof(posts_row),
+            &row_entry,
+            1U,
+            &posts_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "blog",
+            "articles",
+            articles_row,
+            sizeof(articles_row),
+            &row_entry,
+            1U,
+            &articles_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+
+    assert(mylite_storage_begin_transaction(filename, &transaction) == MYLITE_STORAGE_OK);
+    strcpy(schema_name, "app");
+    strcpy(table_name, "posts");
+    assert(
+        mylite_storage_find_indexed_row(
+            filename,
+            schema_name,
+            table_name,
+            0U,
+            key,
+            sizeof(key),
+            &found_row_id,
+            &stored_row,
+            &stored_row_size
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(found_row_id == posts_row_id);
+    assert(stored_row_size == sizeof(posts_row));
+    assert(memcmp(stored_row, posts_row, sizeof(posts_row)) == 0);
+    mylite_storage_free(stored_row);
+    stored_row = NULL;
+    stored_row_size = 0U;
+    found_row_id = 0ULL;
+
+    strcpy(schema_name, "blog");
+    strcpy(table_name, "articles");
+    assert(
+        mylite_storage_find_indexed_row(
+            filename,
+            schema_name,
+            table_name,
+            0U,
+            key,
+            sizeof(key),
+            &found_row_id,
+            &stored_row,
+            &stored_row_size
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(found_row_id == articles_row_id);
+    assert(stored_row_size == sizeof(articles_row));
+    assert(memcmp(stored_row, articles_row, sizeof(articles_row)) == 0);
+    mylite_storage_free(stored_row);
+    assert(mylite_storage_rollback_statement(transaction) == MYLITE_STORAGE_OK);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
