@@ -409,6 +409,8 @@ rescan the catalog image for the same root metadata.
 Full-row scans, exact row counts, direct row reads, and indexed-row batch
 materialization also use scoped file/header setup, so those row-oriented APIs
 reuse active statement views before consulting live-row and row-payload caches.
+Schema/table discovery reads, schema/table listing, and foreign-key listing
+also use scoped file/header setup before reading the catalog image.
 
 File-backed index cursor builds also keep the primary file open across exact
 lookup and row materialization. Primary-key point lookups and secondary exact
