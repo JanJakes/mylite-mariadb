@@ -482,6 +482,9 @@ on stable-key prepared updates.
 Nested statement checkpoints inside active transactions now begin from the
 known transaction or savepoint parent, avoiding filename-based active-statement
 rediscovery on prepared row-DML loops.
+The MyLite handler lock path now threads an already-observed active checkpoint
+into statement-checkpoint setup, avoiding a second active-chain lookup during
+routed prepared row-DML execution.
 Active live-row caches now keep hash-backed row-id membership for larger live
 and payload-validated row-id sets, while small nested statement caches stay on
 the cheaper linear path.

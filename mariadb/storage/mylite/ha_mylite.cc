@@ -148,10 +148,9 @@ static bool mylite_engine_name_equals(const char *engine_name,
                                       const char *expected_engine_name);
 static int mylite_begin_transaction_checkpoint(THD *thd,
                                                const char *primary_file);
-static int mylite_begin_statement_checkpoint(THD *thd,
-                                             const char *primary_file,
-                                             bool needs_storage_checkpoint,
-                                             bool needs_volatile_snapshot);
+static int mylite_begin_statement_checkpoint(
+    THD *thd, const char *primary_file, bool needs_storage_checkpoint,
+    bool needs_volatile_snapshot, bool storage_statement_known_active);
 static int mylite_finish_statement_checkpoint(THD *thd, bool commit);
 static int mylite_finish_savepoints(THD *thd, bool commit);
 static int mylite_finish_savepoint_frames(Mylite_trx_context *ctx,
@@ -2415,17 +2414,22 @@ int ha_mylite::external_lock(THD *thd, int lock_type)
   if (!primary_file)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
 
-  if (thd_test_options(thd, OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN) &&
-      !mylite_storage_statement_active(primary_file))
+  bool storage_statement_active= false;
+  if (thd_test_options(thd, OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN))
   {
-    int transaction_error= mylite_begin_transaction_checkpoint(thd,
-                                                              primary_file);
-    if (transaction_error)
-      DBUG_RETURN(transaction_error);
+    storage_statement_active= mylite_storage_statement_active(primary_file);
+    if (!storage_statement_active)
+    {
+      int transaction_error=
+          mylite_begin_transaction_checkpoint(thd, primary_file);
+      if (transaction_error)
+        DBUG_RETURN(transaction_error);
+    }
   }
 
   int error= mylite_begin_statement_checkpoint(thd, primary_file,
-                                               !volatile_rows, volatile_rows);
+                                               !volatile_rows, volatile_rows,
+                                               storage_statement_active);
   if (error)
     DBUG_RETURN(error);
 
@@ -3685,10 +3689,9 @@ static int mylite_begin_transaction_checkpoint(THD *thd,
   return 0;
 }
 
-static int mylite_begin_statement_checkpoint(THD *thd,
-                                             const char *primary_file,
-                                             bool needs_storage_checkpoint,
-                                             bool needs_volatile_snapshot)
+static int mylite_begin_statement_checkpoint(
+    THD *thd, const char *primary_file, bool needs_storage_checkpoint,
+    bool needs_volatile_snapshot, bool storage_statement_known_active)
 {
   Mylite_trx_context *ctx= mylite_trx_context(thd, true);
   if (!ctx)
@@ -3696,6 +3699,7 @@ static int mylite_begin_statement_checkpoint(THD *thd,
 
   bool began_statement= false;
   if (needs_storage_checkpoint && !ctx->statement &&
+      !storage_statement_known_active &&
       !mylite_storage_statement_active(primary_file))
   {
     mylite_storage_result result=
