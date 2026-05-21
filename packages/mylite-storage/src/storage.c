@@ -23171,11 +23171,12 @@ static void replace_active_row_payload_in_cache(
     if (cache == NULL) {
         return;
     }
-    const mylite_storage_row_payload_cache_entry *entry =
-        find_row_payload_cache_entry(cache, old_row_id);
-    if (entry == NULL) {
+    mylite_storage_row_payload_cache_bucket *bucket =
+        find_mutable_row_payload_cache_bucket(cache, old_row_id);
+    if (bucket == NULL || bucket->entry_index >= cache->count) {
         return;
     }
+    mylite_storage_row_payload_cache_entry *entry = cache->entries + bucket->entry_index;
     const size_t retained_bytes =
         cache->row_bytes >= entry->row_size ? cache->row_bytes - entry->row_size : 0U;
     if (new_row_size > MYLITE_STORAGE_ACTIVE_ROW_PAYLOAD_BYTES_LIMIT ||
@@ -23183,13 +23184,36 @@ static void replace_active_row_payload_in_cache(
         remove_row_payload_cache_entry(cache, old_row_id);
         return;
     }
-    if (new_row_id == 0ULL || replace_active_row_payload_cache_entry(
-                                  cache,
-                                  old_row_id,
-                                  new_row_id,
-                                  new_row,
-                                  new_row_size
-                              ) != MYLITE_STORAGE_OK) {
+    if (new_row_id == 0ULL) {
+        remove_row_payload_cache_entry(cache, old_row_id);
+        return;
+    }
+    if (old_row_id == new_row_id) {
+        unsigned char *row = entry->row;
+        if (entry->row_size != new_row_size) {
+            row = (unsigned char *)malloc(new_row_size);
+            if (row == NULL) {
+                remove_row_payload_cache_entry(cache, old_row_id);
+                return;
+            }
+        }
+        if (row != entry->row) {
+            free(entry->row);
+            entry->row = row;
+        }
+        memcpy(entry->row, new_row, new_row_size);
+        entry->row_size = new_row_size;
+        entry->checksum = 0ULL;
+        cache->row_bytes = retained_bytes + new_row_size;
+        return;
+    }
+    if (replace_active_row_payload_cache_entry(
+            cache,
+            old_row_id,
+            new_row_id,
+            new_row,
+            new_row_size
+        ) != MYLITE_STORAGE_OK) {
         remove_row_payload_cache_entry(cache, old_row_id);
     }
 }

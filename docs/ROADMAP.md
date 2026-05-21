@@ -331,6 +331,8 @@ append-only update loops.
 Active row-payload cache reads and replacements now trust active-checkpoint
 cache ownership without repeated row-byte checksums, while durable row-payload
 caches keep checksum validation before use.
+Same-row active row-payload replacements now update the cached payload entry
+after one bucket lookup, leaving bucket remapping to the row-id-changing path.
 Scoped exact-index and indexed-row lookup paths also mark statement live-row
 caches through the captured active statement instead of rediscovering the same
 ownership from `FILE *`.
