@@ -12774,7 +12774,8 @@ static mylite_storage_result capture_buffered_page_undo_from_page(
         return MYLITE_STORAGE_OK;
     }
 
-    if (find_buffered_page_undo(&statement->buffered_page_undos, page_id) != NULL) {
+    mylite_storage_buffered_page_undo_list *undos = &statement->buffered_page_undos;
+    if (undos->count != 0U && find_buffered_page_undo(undos, page_id) != NULL) {
         return MYLITE_STORAGE_OK;
     }
 
@@ -12782,42 +12783,40 @@ static mylite_storage_result capture_buffered_page_undo_from_page(
         return MYLITE_STORAGE_CORRUPT;
     }
 
-    if (statement->buffered_page_undos.count == statement->buffered_page_undos.capacity) {
-        if (statement->buffered_page_undos.capacity == 0U) {
-            adopt_reusable_buffered_page_undos(&statement->buffered_page_undos);
+    if (undos->count == undos->capacity) {
+        if (undos->capacity == 0U) {
+            adopt_reusable_buffered_page_undos(undos);
         }
     }
 
-    if (statement->buffered_page_undos.count == statement->buffered_page_undos.capacity) {
-        const size_t next_capacity = statement->buffered_page_undos.capacity == 0U
+    if (undos->count == undos->capacity) {
+        const size_t next_capacity = undos->capacity == 0U
                                          ? MYLITE_STORAGE_BUFFERED_PAGE_UNDO_INITIAL_CAPACITY
-                                         : statement->buffered_page_undos.capacity * 2U;
-        if (next_capacity <= statement->buffered_page_undos.capacity ||
-            next_capacity > SIZE_MAX / sizeof(*statement->buffered_page_undos.entries)) {
+                                         : undos->capacity * 2U;
+        if (next_capacity <= undos->capacity ||
+            next_capacity > SIZE_MAX / sizeof(*undos->entries)) {
             return MYLITE_STORAGE_FULL;
         }
-        mylite_storage_buffered_page_undo *entries = (mylite_storage_buffered_page_undo *)realloc(
-            statement->buffered_page_undos.entries,
-            next_capacity * sizeof(*statement->buffered_page_undos.entries)
-        );
+        mylite_storage_buffered_page_undo *entries = (mylite_storage_buffered_page_undo *)
+            realloc(undos->entries, next_capacity * sizeof(*undos->entries));
         if (entries == NULL) {
             return MYLITE_STORAGE_NOMEM;
         }
-        statement->buffered_page_undos.entries = entries;
-        statement->buffered_page_undos.capacity = next_capacity;
+        undos->entries = entries;
+        undos->capacity = next_capacity;
     }
 
-    mylite_storage_result result = ensure_buffered_page_undo_buckets(
-        &statement->buffered_page_undos,
-        statement->buffered_page_undos.count + 1U
-    );
-    if (result != MYLITE_STORAGE_OK) {
-        return result;
+    const size_t next_count = undos->count + 1U;
+    if (undos->bucket_capacity != 0U ||
+        next_count >= MYLITE_STORAGE_BUFFERED_PAGE_UNDO_BUCKET_MIN_COUNT) {
+        mylite_storage_result result = ensure_buffered_page_undo_buckets(undos, next_count);
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
     }
 
-    const size_t entry_index = statement->buffered_page_undos.count;
-    mylite_storage_buffered_page_undo *undo =
-        statement->buffered_page_undos.entries + entry_index;
+    const size_t entry_index = undos->count;
+    mylite_storage_buffered_page_undo *undo = undos->entries + entry_index;
     undo->page_id = page_id;
     if (used_size == 0U) {
         used_size = buffered_page_undo_used_size(page);
@@ -12827,17 +12826,17 @@ static mylite_storage_result capture_buffered_page_undo_from_page(
     undo->checksum_dirty = checksum_dirty != NULL && *checksum_dirty != 0U;
     undo->used_size = used_size;
     memcpy(undo->page, page, undo->used_size);
-    if (statement->buffered_page_undos.bucket_capacity > 0U) {
+    if (undos->bucket_capacity > 0U) {
         if (!place_buffered_page_undo_bucket(
-                statement->buffered_page_undos.buckets,
-                statement->buffered_page_undos.bucket_capacity,
+                undos->buckets,
+                undos->bucket_capacity,
                 page_id,
                 entry_index
             )) {
             return MYLITE_STORAGE_FULL;
         }
     }
-    ++statement->buffered_page_undos.count;
+    ++undos->count;
     return MYLITE_STORAGE_OK;
 }
 
