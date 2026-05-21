@@ -17343,23 +17343,19 @@ static mylite_storage_result rewrite_active_single_index_update_page(
         *row_page_ref.checksum_dirty = 1U;
     }
 
-    const unsigned char *existing_key =
-        index_page_ref.page + MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET;
-    if (memcmp(existing_key, index_entry->key, index_entry->key_size) != 0) {
-        result = capture_buffered_page_undo_from_page(
-            statement,
-            index_page_id,
-            index_page_ref.page,
-            index_page_ref.checksum_dirty,
-            buffered_index_entry_page_undo_used_size(index_page_ref.page)
-        );
-        if (result != MYLITE_STORAGE_OK) {
-            return result;
-        }
-        rewrite_buffered_index_entry_page(index_page_ref.page, index_entry);
-        if (index_page_ref.checksum_dirty != NULL) {
-            *index_page_ref.checksum_dirty = 1U;
-        }
+    result = capture_buffered_page_undo_from_page(
+        statement,
+        index_page_id,
+        index_page_ref.page,
+        index_page_ref.checksum_dirty,
+        buffered_index_entry_page_undo_used_size(index_page_ref.page)
+    );
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    rewrite_buffered_index_entry_page(index_page_ref.page, index_entry);
+    if (index_page_ref.checksum_dirty != NULL) {
+        *index_page_ref.checksum_dirty = 1U;
     }
 
     *out_rewritten = 1;

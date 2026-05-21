@@ -150,7 +150,9 @@ index-entry page decoders now validate their existing used-byte checksum shape
 without scanning unused fixed-page tails.
 Cached active update rewrites with one changed index entry now bypass the
 generic changed-index page-ref array and second changed-index loop after the
-existing buffered-shape cache has validated the row/index layout.
+existing buffered-shape cache has validated the row/index layout, and that
+fast path trusts the handler-provided changed-key proof instead of comparing the
+same serialized key bytes again.
 Fixed-width prepared result statements now reuse their result bindings across
 reset/re-execute loops and avoid freeing already-drained results a second time,
 leaving parameter binding/reset semantics as the next prepared-path bottleneck.
