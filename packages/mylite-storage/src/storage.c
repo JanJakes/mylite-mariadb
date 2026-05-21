@@ -1014,6 +1014,7 @@ static mylite_storage_result restore_buffered_page_undos(mylite_storage_statemen
 static mylite_storage_result restore_dirty_page_undos(mylite_storage_statement *statement);
 static void clear_append_page_buffer(mylite_storage_statement *statement);
 static void clear_buffered_page_undos(mylite_storage_statement *statement);
+static void reset_buffered_page_undos_for_reuse(mylite_storage_statement *statement);
 static void clear_dirty_page_undos(mylite_storage_statement *statement);
 static void clear_journal_dirty_pages(mylite_storage_statement *statement);
 static mylite_storage_result merge_dirty_page_undos(
@@ -11193,6 +11194,25 @@ static void clear_buffered_page_undos(mylite_storage_statement *statement) {
     release_buffered_page_undos(&statement->buffered_page_undos);
 }
 
+static void reset_buffered_page_undos_for_reuse(mylite_storage_statement *statement) {
+    if (statement == NULL) {
+        return;
+    }
+
+    mylite_storage_buffered_page_undo_list *undos = &statement->buffered_page_undos;
+    free(undos->buckets);
+    undos->buckets = NULL;
+    undos->bucket_capacity = 0U;
+    if (undos->entries != NULL &&
+        undos->capacity <= MYLITE_STORAGE_REUSABLE_BUFFERED_PAGE_UNDO_CAPACITY) {
+        undos->count = 0U;
+        return;
+    }
+
+    free(undos->entries);
+    *undos = (mylite_storage_buffered_page_undo_list){0};
+}
+
 static void clear_dirty_page_undos(mylite_storage_statement *statement) {
     if (statement == NULL) {
         return;
@@ -11429,6 +11449,8 @@ static void free_statement(mylite_storage_statement *statement) {
 
     const int reuse_nested_storage =
         statement->parent != NULL && !statement->owns_file && !statement->owns_filename;
+    const int keep_reusable_nested_storage =
+        reuse_nested_storage && reusable_nested_checkpoint_statement == NULL;
     if (statement->file != NULL && statement->owns_file) {
         fclose(statement->file);
     }
@@ -11441,14 +11463,18 @@ static void free_statement(mylite_storage_statement *statement) {
     statement->table_index_root_absence_cache = (mylite_storage_table_index_root_absence_cache){0};
     free_catalog_image(&statement->current_catalog_image);
     clear_append_page_buffer(statement);
-    clear_buffered_page_undos(statement);
+    if (keep_reusable_nested_storage) {
+        reset_buffered_page_undos_for_reuse(statement);
+    } else {
+        clear_buffered_page_undos(statement);
+    }
     clear_dirty_page_undos(statement);
     clear_journal_dirty_pages(statement);
     clear_buffered_update_rewrites(statement);
     if (statement->owns_filename) {
         free(statement->filename);
     }
-    if (reuse_nested_storage && reusable_nested_checkpoint_statement == NULL) {
+    if (keep_reusable_nested_storage) {
         reset_reusable_nested_checkpoint_storage(statement);
         reusable_nested_checkpoint_statement = statement;
         return;

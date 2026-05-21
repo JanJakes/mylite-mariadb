@@ -374,6 +374,9 @@ back out of the thread-local reusable slot.
 Reusable nested checkpoint cleanup now clears only lifecycle flags before
 caching the object, leaving full initialization to fresh allocations and parent
 snapshot cloning.
+Those reusable nested checkpoint objects now also keep bounded buffered-page
+undo entry storage attached between prepared row-DML executions, resetting
+rollback state without releasing and re-adopting the same small array.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation
