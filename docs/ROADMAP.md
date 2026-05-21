@@ -360,6 +360,8 @@ the captured statement scope, avoiding another filename-based active-statement
 lookup on prepared point updates.
 Active write-journal begin logic now resolves recovery and transaction journal
 owners in one statement-chain pass before protecting dirty pages.
+Row-update execution now resolves its active cache owner and same-file append
+buffer owner in one parent-chain pass after opening the scoped update file.
 Durable handler write locks now defer MEMORY/HEAP statement snapshots until a
 volatile table participates, while transaction and savepoint snapshots remain
 eager at their SQL boundaries.

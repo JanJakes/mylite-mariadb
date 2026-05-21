@@ -934,8 +934,10 @@ static mylite_storage_statement *active_cache_statement_for(const char *filename
 static mylite_storage_statement *active_cache_statement_from_statement(
     mylite_storage_statement *statement
 );
-static mylite_storage_statement *append_page_buffer_statement_from_statement(
-    mylite_storage_statement *statement
+static void active_cache_and_append_buffer_from_statement(
+    mylite_storage_statement *statement,
+    mylite_storage_statement **out_cache,
+    mylite_storage_statement **out_append_buffer
 );
 static mylite_storage_statement *active_exact_index_cache_statement_for(const char *filename);
 static mylite_storage_statement *active_live_row_id_cache_statement_for(const char *filename);
@@ -6347,10 +6349,13 @@ static mylite_storage_result update_row_with_index_entries(
     }
     FILE *file = file_scope.file;
     mylite_storage_statement *active_file_statement = file_scope.active_statement;
-    mylite_storage_statement *active_append_buffer_statement =
-        append_page_buffer_statement_from_statement(active_file_statement);
-    mylite_storage_statement *active_cache_statement =
-        active_cache_statement_from_statement(active_file_statement);
+    mylite_storage_statement *active_append_buffer_statement = NULL;
+    mylite_storage_statement *active_cache_statement = NULL;
+    active_cache_and_append_buffer_from_statement(
+        active_file_statement,
+        &active_cache_statement,
+        &active_append_buffer_statement
+    );
 
     mylite_storage_header header = {0};
     mylite_storage_catalog_image catalog = {0};
@@ -10904,21 +10909,27 @@ static mylite_storage_statement *active_cache_statement_from_statement(
     return cache_statement;
 }
 
-static mylite_storage_statement *append_page_buffer_statement_from_statement(
-    mylite_storage_statement *statement
+static void active_cache_and_append_buffer_from_statement(
+    mylite_storage_statement *statement,
+    mylite_storage_statement **out_cache,
+    mylite_storage_statement **out_append_buffer
 ) {
+    *out_cache = NULL;
+    *out_append_buffer = NULL;
     if (statement == NULL) {
-        return NULL;
+        return;
     }
 
     FILE *file = statement->file;
-    mylite_storage_statement *buffer_statement = NULL;
     for (; statement != NULL; statement = statement->parent) {
-        if (statement->file == file && statement->owner == active_context_owner) {
-            buffer_statement = statement;
+        if (statement->owner != active_context_owner) {
+            continue;
+        }
+        *out_cache = statement;
+        if (statement->file == file) {
+            *out_append_buffer = statement;
         }
     }
-    return buffer_statement;
 }
 
 static mylite_storage_statement *active_exact_index_cache_statement_for(const char *filename) {
