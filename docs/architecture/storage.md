@@ -539,8 +539,10 @@ bulk-grow their index entryset result arrays and row-id lists once per matching
 leaf page instead of reallocating per matched row id. Internal row-id result
 lists also retain amortized capacity, so append-history exact scans and
 append-tail overlays do not resize the row-id array for every incremental
-match. The cache is disabled for active statements and read snapshots, and it
-is cleared by durable mutation invalidation.
+match. Leaf-run exact and full-read helpers reuse the validated root page from
+run discovery for page offset `0`, avoiding redundant leaf-page cache lookups
+for single-page published roots. The cache is disabled for active statements and
+read snapshots, and it is cleared by durable mutation invalidation.
 
 MariaDB handler instances also cache proven child and parent foreign-key
 metadata absence for their opened table. Ordinary non-FK row-DML paths use that

@@ -1706,6 +1706,19 @@ static mylite_storage_result read_index_leaf_run_page(
     unsigned char *page,
     mylite_storage_index_leaf_page *out_index_leaf_page
 );
+static mylite_storage_result read_index_leaf_run_page_or_root(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    const mylite_storage_index_leaf_run *leaf_run,
+    const unsigned char *root_page,
+    const mylite_storage_index_leaf_page *root_leaf_page,
+    unsigned long long table_id,
+    unsigned index_number,
+    unsigned long long page_offset,
+    unsigned char *page,
+    mylite_storage_index_leaf_page *out_index_leaf_page
+);
 static size_t index_leaf_run_expected_entry_count(
     const mylite_storage_index_leaf_run *leaf_run,
     unsigned long long page_offset
@@ -1853,6 +1866,8 @@ static mylite_storage_result append_index_leaf_run_matches_to_row_id_list(
     const char *filename,
     const mylite_storage_header *header,
     const mylite_storage_index_leaf_run *leaf_run,
+    const unsigned char *root_page,
+    const mylite_storage_index_leaf_page *root_leaf_page,
     unsigned long long table_id,
     unsigned index_number,
     const unsigned char *key,
@@ -1864,6 +1879,8 @@ static mylite_storage_result find_index_leaf_run_first_match_row_id(
     const char *filename,
     const mylite_storage_header *header,
     const mylite_storage_index_leaf_run *leaf_run,
+    const unsigned char *root_page,
+    const mylite_storage_index_leaf_page *root_leaf_page,
     unsigned long long table_id,
     unsigned index_number,
     const unsigned char *key,
@@ -1875,6 +1892,8 @@ static mylite_storage_result append_index_leaf_run_matches_to_entryset(
     const char *filename,
     const mylite_storage_header *header,
     const mylite_storage_index_leaf_run *leaf_run,
+    const unsigned char *root_page,
+    const mylite_storage_index_leaf_page *root_leaf_page,
     unsigned long long table_id,
     unsigned index_number,
     const unsigned char *key,
@@ -1886,6 +1905,8 @@ static mylite_storage_result append_index_leaf_run_entries_to_entryset(
     const char *filename,
     const mylite_storage_header *header,
     const mylite_storage_index_leaf_run *leaf_run,
+    const unsigned char *root_page,
+    const mylite_storage_index_leaf_page *root_leaf_page,
     unsigned long long table_id,
     unsigned index_number,
     mylite_storage_index_entryset *out_entries
@@ -1903,6 +1924,8 @@ static mylite_storage_result find_index_leaf_run_match_page(
     const char *filename,
     const mylite_storage_header *header,
     const mylite_storage_index_leaf_run *leaf_run,
+    const unsigned char *root_page,
+    const mylite_storage_index_leaf_page *root_leaf_page,
     unsigned long long table_id,
     unsigned index_number,
     const unsigned char *key,
@@ -15096,6 +15119,8 @@ static mylite_storage_result read_index_leaf_entries(
         filename,
         header,
         &leaf_run,
+        page,
+        &leaf_page,
         table_id,
         index_number,
         out_entries
@@ -15169,6 +15194,8 @@ static mylite_storage_result read_index_leaf_exact_entries(
         filename,
         header,
         &leaf_run,
+        page,
+        &leaf_page,
         table_id,
         index_number,
         key,
@@ -15246,6 +15273,8 @@ static mylite_storage_result read_index_leaf_exact_row_ids(
         filename,
         header,
         &leaf_run,
+        page,
+        &leaf_page,
         table_id,
         index_number,
         key,
@@ -15327,6 +15356,8 @@ static mylite_storage_result find_index_leaf_exact_static_row_id(
         filename,
         header,
         &leaf_run,
+        page,
+        &leaf_page,
         table_id,
         index_number,
         key,
@@ -15433,6 +15464,42 @@ static mylite_storage_result read_index_leaf_run_page(
     return MYLITE_STORAGE_OK;
 }
 
+static mylite_storage_result read_index_leaf_run_page_or_root(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    const mylite_storage_index_leaf_run *leaf_run,
+    const unsigned char *root_page,
+    const mylite_storage_index_leaf_page *root_leaf_page,
+    unsigned long long table_id,
+    unsigned index_number,
+    unsigned long long page_offset,
+    unsigned char *page,
+    mylite_storage_index_leaf_page *out_index_leaf_page
+) {
+    if (page_offset >= leaf_run->page_count) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+    if (page_offset == 0ULL && root_page != NULL && root_leaf_page != NULL) {
+        memcpy(page, root_page, MYLITE_STORAGE_FORMAT_PAGE_SIZE);
+        *out_index_leaf_page = *root_leaf_page;
+        out_index_leaf_page->payload = page + MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET;
+        return MYLITE_STORAGE_OK;
+    }
+
+    return read_index_leaf_run_page(
+        file,
+        filename,
+        header,
+        leaf_run,
+        table_id,
+        index_number,
+        page_offset,
+        page,
+        out_index_leaf_page
+    );
+}
+
 static size_t index_leaf_run_expected_entry_count(
     const mylite_storage_index_leaf_run *leaf_run,
     unsigned long long page_offset
@@ -15452,6 +15519,8 @@ static mylite_storage_result append_index_leaf_run_matches_to_row_id_list(
     const char *filename,
     const mylite_storage_header *header,
     const mylite_storage_index_leaf_run *leaf_run,
+    const unsigned char *root_page,
+    const mylite_storage_index_leaf_page *root_leaf_page,
     unsigned long long table_id,
     unsigned index_number,
     const unsigned char *key,
@@ -15465,6 +15534,8 @@ static mylite_storage_result append_index_leaf_run_matches_to_row_id_list(
         filename,
         header,
         leaf_run,
+        root_page,
+        root_leaf_page,
         table_id,
         index_number,
         key,
@@ -15480,11 +15551,13 @@ static mylite_storage_result append_index_leaf_run_matches_to_row_id_list(
     while (first_match_page_offset > 0ULL) {
         unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
         mylite_storage_index_leaf_page leaf_page = {0};
-        result = read_index_leaf_run_page(
+        result = read_index_leaf_run_page_or_root(
             file,
             filename,
             header,
             leaf_run,
+            root_page,
+            root_leaf_page,
             table_id,
             index_number,
             first_match_page_offset - 1ULL,
@@ -15505,11 +15578,13 @@ static mylite_storage_result append_index_leaf_run_matches_to_row_id_list(
          ++page_offset) {
         unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
         mylite_storage_index_leaf_page leaf_page = {0};
-        result = read_index_leaf_run_page(
+        result = read_index_leaf_run_page_or_root(
             file,
             filename,
             header,
             leaf_run,
+            root_page,
+            root_leaf_page,
             table_id,
             index_number,
             page_offset,
@@ -15547,6 +15622,8 @@ static mylite_storage_result find_index_leaf_run_first_match_row_id(
     const char *filename,
     const mylite_storage_header *header,
     const mylite_storage_index_leaf_run *leaf_run,
+    const unsigned char *root_page,
+    const mylite_storage_index_leaf_page *root_leaf_page,
     unsigned long long table_id,
     unsigned index_number,
     const unsigned char *key,
@@ -15562,6 +15639,8 @@ static mylite_storage_result find_index_leaf_run_first_match_row_id(
         filename,
         header,
         leaf_run,
+        root_page,
+        root_leaf_page,
         table_id,
         index_number,
         key,
@@ -15577,11 +15656,13 @@ static mylite_storage_result find_index_leaf_run_first_match_row_id(
     while (first_match_page_offset > 0ULL) {
         unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
         mylite_storage_index_leaf_page leaf_page = {0};
-        result = read_index_leaf_run_page(
+        result = read_index_leaf_run_page_or_root(
             file,
             filename,
             header,
             leaf_run,
+            root_page,
+            root_leaf_page,
             table_id,
             index_number,
             first_match_page_offset - 1ULL,
@@ -15602,11 +15683,13 @@ static mylite_storage_result find_index_leaf_run_first_match_row_id(
          ++page_offset) {
         unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
         mylite_storage_index_leaf_page leaf_page = {0};
-        result = read_index_leaf_run_page(
+        result = read_index_leaf_run_page_or_root(
             file,
             filename,
             header,
             leaf_run,
+            root_page,
+            root_leaf_page,
             table_id,
             index_number,
             page_offset,
@@ -15638,6 +15721,8 @@ static mylite_storage_result append_index_leaf_run_matches_to_entryset(
     const char *filename,
     const mylite_storage_header *header,
     const mylite_storage_index_leaf_run *leaf_run,
+    const unsigned char *root_page,
+    const mylite_storage_index_leaf_page *root_leaf_page,
     unsigned long long table_id,
     unsigned index_number,
     const unsigned char *key,
@@ -15651,6 +15736,8 @@ static mylite_storage_result append_index_leaf_run_matches_to_entryset(
         filename,
         header,
         leaf_run,
+        root_page,
+        root_leaf_page,
         table_id,
         index_number,
         key,
@@ -15666,11 +15753,13 @@ static mylite_storage_result append_index_leaf_run_matches_to_entryset(
     while (first_match_page_offset > 0ULL) {
         unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
         mylite_storage_index_leaf_page leaf_page = {0};
-        result = read_index_leaf_run_page(
+        result = read_index_leaf_run_page_or_root(
             file,
             filename,
             header,
             leaf_run,
+            root_page,
+            root_leaf_page,
             table_id,
             index_number,
             first_match_page_offset - 1ULL,
@@ -15691,11 +15780,13 @@ static mylite_storage_result append_index_leaf_run_matches_to_entryset(
          ++page_offset) {
         unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
         mylite_storage_index_leaf_page leaf_page = {0};
-        result = read_index_leaf_run_page(
+        result = read_index_leaf_run_page_or_root(
             file,
             filename,
             header,
             leaf_run,
+            root_page,
+            root_leaf_page,
             table_id,
             index_number,
             page_offset,
@@ -15732,6 +15823,8 @@ static mylite_storage_result append_index_leaf_run_entries_to_entryset(
     const char *filename,
     const mylite_storage_header *header,
     const mylite_storage_index_leaf_run *leaf_run,
+    const unsigned char *root_page,
+    const mylite_storage_index_leaf_page *root_leaf_page,
     unsigned long long table_id,
     unsigned index_number,
     mylite_storage_index_entryset *out_entries
@@ -15743,11 +15836,13 @@ static mylite_storage_result append_index_leaf_run_entries_to_entryset(
     for (unsigned long long page_offset = 0ULL; page_offset < leaf_run->page_count; ++page_offset) {
         unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
         mylite_storage_index_leaf_page leaf_page = {0};
-        mylite_storage_result result = read_index_leaf_run_page(
+        mylite_storage_result result = read_index_leaf_run_page_or_root(
             file,
             filename,
             header,
             leaf_run,
+            root_page,
+            root_leaf_page,
             table_id,
             index_number,
             page_offset,
@@ -15848,6 +15943,8 @@ static mylite_storage_result find_index_leaf_run_match_page(
     const char *filename,
     const mylite_storage_header *header,
     const mylite_storage_index_leaf_run *leaf_run,
+    const unsigned char *root_page,
+    const mylite_storage_index_leaf_page *root_leaf_page,
     unsigned long long table_id,
     unsigned index_number,
     const unsigned char *key,
@@ -15867,11 +15964,13 @@ static mylite_storage_result find_index_leaf_run_match_page(
         const unsigned long long mid = lower + ((upper - lower) / 2ULL);
         unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
         mylite_storage_index_leaf_page leaf_page = {0};
-        mylite_storage_result result = read_index_leaf_run_page(
+        mylite_storage_result result = read_index_leaf_run_page_or_root(
             file,
             filename,
             header,
             leaf_run,
+            root_page,
+            root_leaf_page,
             table_id,
             index_number,
             mid,

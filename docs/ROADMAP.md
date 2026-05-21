@@ -324,6 +324,9 @@ temporary row-id list allocation from static point probes and per-row-id array
 reallocations from many-match secondary lookups. Internal row-id result lists
 now keep amortized capacity, so append-history exact scans and append-tail
 overlays no longer resize the list on every discovered row id.
+Leaf-run exact and full-read helpers now reuse the validated root leaf page
+decoded during run discovery for offset `0`, avoiding redundant leaf-page cache
+lookups on single-page published roots.
 Handler row-DML now prepares small index-entry/key buffers on the stack for
 common fixed-width tables, avoiding hot per-row heap churn while larger key
 sets still use the existing heap path.
