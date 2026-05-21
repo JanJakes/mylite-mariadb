@@ -3761,13 +3761,14 @@ mylite_storage_result mylite_storage_open_header(
 
     *out_header = (mylite_storage_header){0};
 
-    FILE *file = NULL;
-    mylite_storage_result result = open_existing_file(filename, &file);
+    mylite_storage_file_scope file_scope = {0};
+    mylite_storage_result result = open_existing_file_scope(filename, &file_scope);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
 
-    result = read_header(file, out_header);
+    FILE *file = file_scope.file;
+    result = read_header_from_file_scope(&file_scope, out_header);
     if (result == MYLITE_STORAGE_OK) {
         result = validate_catalog_root_page(file, out_header);
     }
@@ -3775,7 +3776,8 @@ mylite_storage_result mylite_storage_open_header(
         result = validate_free_list_root_page(file, out_header);
     }
 
-    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
 
@@ -4807,17 +4809,20 @@ mylite_storage_result mylite_storage_read_index_root(
         .size = sizeof(*out_metadata),
     };
 
-    FILE *file = NULL;
-    mylite_storage_result result = open_existing_file(filename, &file);
+    mylite_storage_file_scope file_scope = {0};
+    mylite_storage_result result = open_existing_file_scope(filename, &file_scope);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
 
+    FILE *file = file_scope.file;
+    mylite_storage_statement *active_cache_statement =
+        active_cache_statement_from_statement(file_scope.active_statement);
     mylite_storage_header header = {0};
     mylite_storage_catalog_image catalog = {0};
     mylite_storage_catalog_entry table_entry = {0};
     mylite_storage_catalog_entry entry = {0};
-    result = read_header(file, &header);
+    result = read_header_from_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
         result = read_catalog_image(file, &header, &catalog);
     }
@@ -4825,7 +4830,9 @@ mylite_storage_result mylite_storage_read_index_root(
         result = find_table_record(&catalog, schema_name, table_name, &table_entry);
     }
     if (result == MYLITE_STORAGE_OK) {
-        result = find_index_root_record(
+        result = find_index_root_record_in_statement(
+            active_cache_statement,
+            &header,
             &catalog,
             schema_name,
             table_name,
@@ -4854,7 +4861,8 @@ mylite_storage_result mylite_storage_read_index_root(
     }
 
     free_catalog_image(&catalog);
-    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     if (result != MYLITE_STORAGE_OK) {
@@ -7917,23 +7925,34 @@ mylite_storage_result mylite_storage_read_auto_increment(
 
     *out_next_value = 0ULL;
 
-    FILE *file = NULL;
-    mylite_storage_result result = open_existing_file(filename, &file);
+    mylite_storage_file_scope file_scope = {0};
+    mylite_storage_result result = open_existing_file_scope(filename, &file_scope);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
 
+    FILE *file = file_scope.file;
+    mylite_storage_statement *active_cache_statement =
+        active_cache_statement_from_statement(file_scope.active_statement);
     mylite_storage_header header = {0};
     unsigned long long table_id = 0ULL;
-    result = read_header(file, &header);
+    result = read_header_from_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
+        result = find_table_id_in_statement(
+            file,
+            &header,
+            active_cache_statement,
+            schema_name,
+            table_name,
+            &table_id
+        );
     }
     if (result == MYLITE_STORAGE_OK) {
         result = latest_auto_increment_value(file, &header, table_id, out_next_value);
     }
 
-    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     if (result != MYLITE_STORAGE_OK) {
