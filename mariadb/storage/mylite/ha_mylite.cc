@@ -2429,7 +2429,10 @@ int ha_mylite::external_lock(THD *thd, int lock_type)
   bool storage_statement_active= false;
   if (thd_test_options(thd, OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN))
   {
-    storage_statement_active= mylite_storage_statement_active(primary_file);
+    Mylite_trx_context *ctx= mylite_trx_context(thd, false);
+    storage_statement_active= ctx && ctx->transaction;
+    if (!storage_statement_active)
+      storage_statement_active= mylite_storage_statement_active(primary_file);
     if (!storage_statement_active)
     {
       int transaction_error=

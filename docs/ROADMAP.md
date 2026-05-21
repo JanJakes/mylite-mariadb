@@ -402,6 +402,9 @@ instead of a heavier two-multiply finalizer.
 Native little-endian builds now load fixed-width storage fields and store
 32-bit fields with unaligned-safe `memcpy()` fast paths while preserving
 byte-loop fallbacks for other targets and 64-bit stores.
+Handler write locks now trust an existing THD transaction checkpoint as the
+active storage statement proof, avoiding a filename-based storage active-chain
+lookup on every row-DML execution inside the same transaction.
 Reused nested checkpoint objects now skip a second reset when they are taken
 back out of the thread-local reusable slot.
 Reusable nested checkpoint cleanup now clears only lifecycle flags before
