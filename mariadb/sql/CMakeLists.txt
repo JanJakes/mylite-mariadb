@@ -107,6 +107,15 @@ ELSE()
   SET(MYLITE_FOREIGN_SERVER_METADATA_SOURCE mylite_sql_servers_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_BACKUP_RUNTIME "Build external backup runtime" ON)
+IF(MYLITE_WITH_BACKUP_RUNTIME)
+  ADD_DEFINITIONS(-DMYLITE_WITH_BACKUP_RUNTIME=1)
+  SET(MYLITE_BACKUP_RUNTIME_SOURCE backup.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_BACKUP_RUNTIME=0)
+  SET(MYLITE_BACKUP_RUNTIME_SOURCE mylite_backup_disabled.cc)
+ENDIF()
+
 SET (SQL_SOURCE
                ${CMAKE_CURRENT_BINARY_DIR}/yy_mariadb.cc
                ${CMAKE_CURRENT_BINARY_DIR}/yy_oracle.cc
@@ -203,7 +212,7 @@ SET (SQL_SOURCE
                opt_trace.cc
                table_cache.cc encryption.cc temporary_tables.cc
                json_table.cc
-               proxy_protocol.cc backup.cc xa.cc
+               proxy_protocol.cc ${MYLITE_BACKUP_RUNTIME_SOURCE} xa.cc
                socketpair.c socketpair.h
                opt_vcol_substitution.h
                opt_vcol_substitution.cc

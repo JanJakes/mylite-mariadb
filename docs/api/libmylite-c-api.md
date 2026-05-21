@@ -441,6 +441,9 @@ Foreign-server metadata is omitted as server-global remote connection
 configuration: `CREATE SERVER`, `ALTER SERVER`, `DROP SERVER`, and
 `SHOW CREATE SERVER` are rejected, and the default embedded archive omits the
 `mysql.servers` metadata cache.
+External backup runtime SQL is omitted as a server backup-tool surface:
+`BACKUP STAGE`, `BACKUP LOCK`, and `BACKUP UNLOCK` are rejected, while
+ordinary DDL hooks stay inert.
 The default embedded profile also omits `SFORMAT()`, which fails as an
 unknown SQL function; ordinary `FORMAT()` remains available. The legacy
 `PROCEDURE ANALYSE()` SELECT extension is rejected as an unsupported diagnostic

@@ -51,6 +51,7 @@ MYLITE_WITH_OPTION_HELP_TEXT=OFF
 MYLITE_WITH_OPTIMIZER_TRACE=OFF
 MYLITE_WITH_PROCESSLIST_METADATA=OFF
 MYLITE_WITH_FOREIGN_SERVER_METADATA=OFF
+MYLITE_WITH_BACKUP_RUNTIME=OFF
 ```
 
 `CMAKE_BUILD_TYPE=MinSizeRel` makes the embedded MariaDB archive optimize for
@@ -96,6 +97,9 @@ metadata remain available. It omits process-list metadata behind
 omits foreign-server metadata behind `MYLITE_WITH_FOREIGN_SERVER_METADATA=0`;
 `CREATE SERVER`, `ALTER SERVER`, `DROP SERVER`, and `SHOW CREATE SERVER` are
 rejected because they persist remote-server definitions in `mysql.servers`. It
+omits the external backup runtime behind `MYLITE_WITH_BACKUP_RUNTIME=0`;
+`BACKUP STAGE`, `BACKUP LOCK`, and `BACKUP UNLOCK` are rejected while ordinary
+DDL backup hooks remain inert. It
 omits Oracle compatibility function aliases and
 `oracle_schema` routing behind `MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS=0`, while
 ordinary MySQL/MariaDB string functions remain available. It uses a compact
@@ -129,7 +133,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,553,928 bytes / 25.32 MiB |
+| Archive size | 26,548,408 bytes / 25.32 MiB |
 | Archive members | 704 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -163,8 +167,9 @@ update paths, and omitting the unsupported injector root, reduces the pre-strip
 archive to 27,180,312 bytes / 25.92 MiB. Omitting process-list metadata
 producers reduces the pre-strip archive to 27,140,408 bytes / 25.88 MiB.
 Omitting foreign-server metadata reduces the pre-strip archive to 27,124,416
-bytes / 25.87 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 570,488 bytes
+bytes / 25.87 MiB. Omitting the external backup runtime reduces the pre-strip
+archive to 27,118,776 bytes / 25.86 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 570,368 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -188,9 +193,11 @@ member-count change. Guarding the retained no-binlog paths and omitting the
 injector root saves 14,896 bytes and one archive member. Omitting process-list
 metadata producers saves 39,752 bytes with no member-count change. Omitting
 foreign-server metadata saves 15,344 bytes with no member-count change.
-The final archive is 4,975,776 bytes smaller than the Release build with
-Performance Schema disabled, 6,575,712 bytes smaller than the symbol-stripped
-baseline that still built Performance Schema, and 7,288,392 bytes smaller than
+Omitting the external backup runtime saves 5,520 bytes with no member-count
+change.
+The final archive is 4,981,296 bytes smaller than the Release build with
+Performance Schema disabled, 6,581,232 bytes smaller than the symbol-stripped
+baseline that still built Performance Schema, and 7,293,912 bytes smaller than
 the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
@@ -272,7 +279,10 @@ Foreign-server metadata is omitted from the default embedded archive;
 `CREATE SERVER`, `ALTER SERVER`, `DROP SERVER`, and `SHOW CREATE SERVER` are
 rejected by policy because remote server definitions are server-global
 `mysql.servers` metadata, not application tables inside the MyLite database
-directory. The
+directory. External backup runtime SQL is omitted from the default embedded
+archive; `BACKUP STAGE`, `BACKUP LOCK`, and `BACKUP UNLOCK` are rejected by
+policy while ordinary DDL, transaction, and native storage behavior remain
+available. The
 full English server error-message catalog is compacted in the default embedded
 archive; common syntax, duplicate-key, table lookup,
 storage-engine, unsupported-feature, and unknown-function diagnostics remain
@@ -307,6 +317,7 @@ The baseline explicitly disables:
 - Server status variables
 - Process-list metadata
 - Foreign-server metadata
+- External backup runtime
 - Oracle compatibility function aliases and `oracle_schema` routing
 - Full inherited server error-message catalog
 - MariaDB upstream unit-test targets

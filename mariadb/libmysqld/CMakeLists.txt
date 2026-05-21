@@ -120,6 +120,15 @@ ELSE()
   SET(MYLITE_FOREIGN_SERVER_METADATA_SOURCE ../sql/mylite_sql_servers_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_BACKUP_RUNTIME "Build external backup runtime" ON)
+IF(MYLITE_WITH_BACKUP_RUNTIME)
+  ADD_DEFINITIONS(-DMYLITE_WITH_BACKUP_RUNTIME=1)
+  SET(MYLITE_BACKUP_RUNTIME_SOURCE ../sql/backup.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_BACKUP_RUNTIME=0)
+  SET(MYLITE_BACKUP_RUNTIME_SOURCE ../sql/mylite_backup_disabled.cc)
+ENDIF()
+
 INCLUDE_DIRECTORIES(
 ${CMAKE_SOURCE_DIR}/include 
 ${CMAKE_SOURCE_DIR}/libmysqld
@@ -245,7 +254,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/sql_sequence.cc ../sql/sql_sequence.h
            ../sql/ha_sequence.cc ../sql/ha_sequence.h
            ../sql/temporary_tables.cc
-           ../sql/proxy_protocol.cc ../sql/backup.cc
+           ../sql/proxy_protocol.cc ${MYLITE_BACKUP_RUNTIME_SOURCE}
            ../sql/sql_tvc.cc ../sql/sql_tvc.h
            ../sql/opt_split.cc
            ../sql/rowid_filter.cc ../sql/rowid_filter.h

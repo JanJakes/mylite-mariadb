@@ -124,6 +124,9 @@ Foreign-server metadata is omitted after coverage proves `CREATE SERVER`,
 `ALTER SERVER`, `DROP SERVER`, and `SHOW CREATE SERVER` manage server-global
 remote connection definitions in `mysql.servers`, not application tables or
 native storage inside the MyLite database directory.
+External backup runtime is omitted after coverage proves `BACKUP STAGE`,
+`BACKUP LOCK`, and `BACKUP UNLOCK` are backup-tool coordination surfaces;
+ordinary DDL backup hooks stay inert so application DDL remains unaffected.
 Oracle compatibility function aliases and `oracle_schema` routing are omitted
 after coverage proves the normal MySQL/MariaDB string functions remain
 available, Oracle-only aliases fail predictably, and `oracle_schema` no

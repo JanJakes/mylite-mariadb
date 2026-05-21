@@ -458,6 +458,10 @@ static void assert_server_sql_rejected(mylite_db *db) {
     );
     expect_error(db, "DROP SERVER remote_app", "server-owned SQL surface");
     expect_error(db, "SHOW CREATE SERVER remote_app", "server-owned SQL surface");
+    expect_error(db, "BACKUP STAGE START", "server-owned SQL surface");
+    expect_error(db, "BACKUP STAGE BLOCK_COMMIT", "server-owned SQL surface");
+    expect_error(db, "BACKUP LOCK app.t", "server-owned SQL surface");
+    expect_error(db, "BACKUP UNLOCK", "server-owned SQL surface");
     expect_error(
         db,
         "GRANT SELECT ON *.* TO 'mylite_user'@'localhost'",
@@ -622,6 +626,9 @@ static void assert_server_sql_rejected(mylite_db *db) {
     );
     expect_prepare_error(db, "DROP SERVER prepared_remote_app", "server-owned SQL surface");
     expect_prepare_error(db, "SHOW CREATE SERVER prepared_remote_app", "server-owned SQL surface");
+    expect_prepare_error(db, "BACKUP STAGE START", "server-owned SQL surface");
+    expect_prepare_error(db, "BACKUP LOCK app.t", "server-owned SQL surface");
+    expect_prepare_error(db, "BACKUP UNLOCK", "server-owned SQL surface");
     expect_prepare_error(
         db,
         "CREATE FUNCTION prepared_udf RETURNS INTEGER SONAME 'prepared_udf.so'",

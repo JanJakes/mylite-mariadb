@@ -5068,12 +5068,23 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
     }
     break;
   case SQLCOM_BACKUP:
+#if defined(MYLITE_WITH_BACKUP_RUNTIME) && !MYLITE_WITH_BACKUP_RUNTIME
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+             "external backup runtime in the MyLite embedded profile");
+    res= true;
+#else
     if (check_global_access(thd, RELOAD_ACL))
       goto error;
     if (!(res= run_backup_stage(thd, lex->backup_stage)))
       my_ok(thd);
+#endif
     break;
   case SQLCOM_BACKUP_LOCK:
+#if defined(MYLITE_WITH_BACKUP_RUNTIME) && !MYLITE_WITH_BACKUP_RUNTIME
+    my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+             "external backup runtime in the MyLite embedded profile");
+    res= true;
+#else
     if (check_global_access(thd, RELOAD_ACL, true))
     {
 #ifndef NO_EMBEDDED_ACCESS_CHECKS
@@ -5129,6 +5140,7 @@ mysql_execute_command(THD *thd, bool is_called_from_prepared_stmt)
       backup_unlock(thd);
     if (!res)
       my_ok(thd);
+#endif
     break;
   case SQLCOM_CREATE_DB:
   {

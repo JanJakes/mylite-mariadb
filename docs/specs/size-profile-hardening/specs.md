@@ -222,6 +222,12 @@ behavior when MariaDB errno and SQLSTATE remain available.
   unsupported embedded stub, rejects the SQL surface through policy, and
   reduces the stripped archive to 26,553,928 bytes, 25.32 MiB, and 704
   members.
+- `mariadb/sql/backup.cc` implements `BACKUP STAGE`, `BACKUP LOCK`, backup
+  metadata locks, and the `ddl.log` writer used by external backup tooling.
+- Disabling the external backup runtime behind
+  `MYLITE_WITH_BACKUP_RUNTIME=0` replaces the active runtime with inert DDL
+  hooks and unsupported SQL entry points, and reduces the stripped archive to
+  26,548,408 bytes, 25.32 MiB, and 704 members.
 - `mariadb/sql/item_create.cc` registers Oracle compatibility aliases such as
   `DECODE_ORACLE`, `LPAD_ORACLE`, `RTRIM_ORACLE`, `SUBSTR_ORACLE`, and
   `CONCAT_OPERATOR_ORACLE`, and builds a separate
@@ -438,6 +444,13 @@ that starts without loading `mysql.servers`, rejects `CREATE SERVER`,
 `ALTER SERVER`, and `DROP SERVER` if policy is bypassed, and makes
 `SHOW CREATE SERVER` report the inherited not-found path. The public MyLite
 SQL policy rejects direct and prepared foreign-server metadata statements.
+
+The embedded archive omits the external backup runtime by setting
+`MYLITE_WITH_BACKUP_RUNTIME=0` in the MyLite baseline. The option defaults to
+`ON` so normal MariaDB server builds keep upstream backup behavior. The
+disabled profile replaces `backup.cc` with inert DDL helper hooks and
+unsupported `BACKUP STAGE` / `BACKUP LOCK` entry points. The public MyLite SQL
+policy rejects direct and prepared backup statements before MariaDB dispatch.
 
 The wrapper keeps this behavior enabled by default because it is the
 distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
@@ -666,10 +679,10 @@ current archive to 26,609,024 bytes / 25.38 MiB, 4,920,680 bytes smaller than
 the Release build with Performance Schema disabled, 6,520,616 bytes smaller
 than the symbol-stripped baseline with Performance Schema still built, and
 7,233,296 bytes smaller than the original broad archive.
-Omitting foreign-server metadata brings the current archive to 26,553,928
-bytes / 25.32 MiB, 4,975,776 bytes smaller than the Release build with
-Performance Schema disabled, 6,575,712 bytes smaller than the symbol-stripped
-baseline with Performance Schema still built, and 7,288,392 bytes smaller than
+Omitting the external backup runtime brings the current archive to 26,548,408
+bytes / 25.32 MiB, 4,981,296 bytes smaller than the Release build with
+Performance Schema disabled, 6,581,232 bytes smaller than the symbol-stripped
+baseline with Performance Schema still built, and 7,293,912 bytes smaller than
 the original broad archive.
 
 ## License Or Dependency Impact
@@ -706,6 +719,9 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
   CMake cache, `sql_servers.cc.o` is absent,
   `mylite_sql_servers_disabled.cc.o` is present in `libmariadbd.a`, and direct
   and prepared foreign-server metadata statements are rejected.
+- Confirm `MYLITE_WITH_BACKUP_RUNTIME=OFF` appears in the embedded CMake cache,
+  `backup.cc.o` is absent, `mylite_backup_disabled.cc.o` is present in
+  `libmariadbd.a`, and direct and prepared backup SQL statements are rejected.
 - Run `cmake --build --preset dev`.
 - Run `ctest --preset dev --output-on-failure`.
 - Run `cmake --build --preset embedded-dev`.
