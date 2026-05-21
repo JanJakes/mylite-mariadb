@@ -5645,6 +5645,17 @@ static void test_index_leaf_pages(void) {
         header.page_count - 1ULL,
         MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_ROOT
     );
+    const unsigned long long primary_root_page = header.page_count - 1ULL;
+    mylite_storage_index_root_definition stale_primary_root = {
+        .size = sizeof(stale_primary_root),
+        .schema_name = "app",
+        .table_name = "posts",
+        .index_number = 0U,
+        .root_page = primary_root_page,
+        .entry_count = 99ULL,
+    };
+    assert(mylite_storage_store_index_root(filename, &stale_primary_root) == MYLITE_STORAGE_OK);
+    assert_index_root(filename, "app", "posts", 0U, primary_root_page, 2ULL);
     assert_index_entry_lookup(filename, 0U, key_1, sizeof(key_1), MYLITE_STORAGE_OK, row_1_id);
     assert_index_entry_lookup(filename, 0U, key_3, sizeof(key_3), MYLITE_STORAGE_NOTFOUND, 0ULL);
 
@@ -6187,6 +6198,24 @@ static void test_multi_page_index_leaf_pages(void) {
         sizeof(tail_key),
         tail_expected_row_ids,
         sizeof(tail_expected_row_ids) / sizeof(tail_expected_row_ids[0])
+    );
+
+    mylite_storage_index_root_definition stale_leaf_root = {
+        .size = sizeof(stale_leaf_root),
+        .schema_name = "app",
+        .table_name = "posts",
+        .index_number = 0U,
+        .root_page = header.page_count - (unsigned long long)expected_leaf_pages,
+        .entry_count = entry_count - 1ULL,
+    };
+    assert(mylite_storage_store_index_root(filename, &stale_leaf_root) == MYLITE_STORAGE_OK);
+    assert_index_root(
+        filename,
+        "app",
+        "posts",
+        0U,
+        header.page_count - (unsigned long long)expected_leaf_pages,
+        entry_count - 1ULL
     );
 
     assert(unlink(filename) == 0);

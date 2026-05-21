@@ -1501,6 +1501,14 @@ static mylite_storage_result find_index_root_record(
     unsigned index_number,
     mylite_storage_catalog_entry *out_entry
 );
+static mylite_storage_result read_index_root_entry_count(
+    FILE *file,
+    const mylite_storage_header *header,
+    const mylite_storage_catalog_entry *entry,
+    unsigned long long table_id,
+    unsigned index_number,
+    unsigned long long *out_entry_count
+);
 static int catalog_has_schema(const mylite_storage_catalog_image *catalog, const char *schema_name);
 static mylite_storage_result read_table_metadata_from_record(
     const unsigned char *record,
@@ -4489,11 +4497,22 @@ mylite_storage_result mylite_storage_read_index_root(
             &entry
         );
     }
+    unsigned long long entry_count = 0ULL;
+    if (result == MYLITE_STORAGE_OK) {
+        result = read_index_root_entry_count(
+            file,
+            &header,
+            &entry,
+            table_entry.table_id,
+            index_number,
+            &entry_count
+        );
+    }
     if (result == MYLITE_STORAGE_OK) {
         *out_metadata = (mylite_storage_index_root_metadata){
             .size = sizeof(*out_metadata),
             .root_page = entry.definition_root_page,
-            .entry_count = entry.definition_size,
+            .entry_count = entry_count,
         };
     }
 
@@ -4507,6 +4526,43 @@ mylite_storage_result mylite_storage_read_index_root(
         };
     }
     return result;
+}
+
+static mylite_storage_result read_index_root_entry_count(
+    FILE *file,
+    const mylite_storage_header *header,
+    const mylite_storage_catalog_entry *entry,
+    unsigned long long table_id,
+    unsigned index_number,
+    unsigned long long *out_entry_count
+) {
+    *out_entry_count = entry->definition_size;
+    if (!is_addressable_page_id(header, entry->definition_root_page)) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    mylite_storage_result result =
+        read_page_at(file, entry->definition_root_page, header->page_size, page);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    if (!is_maintained_index_root_page(page)) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    mylite_storage_maintained_index_root_page root_page = {0};
+    result =
+        decode_maintained_index_root_page(header, entry->definition_root_page, page, &root_page);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    if (root_page.table_id != table_id || root_page.index_number != index_number) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    *out_entry_count = (unsigned long long)root_page.entry_count;
+    return MYLITE_STORAGE_OK;
 }
 
 mylite_storage_result mylite_storage_drop_index_root(

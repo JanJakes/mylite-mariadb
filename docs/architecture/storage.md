@@ -1001,9 +1001,11 @@ root-owned entry counts, fixed key width, flags, used bytes, and sorted
 `(row id, key bytes)` cells. Small non-empty fixed-width rebuilds publish that
 root page type, and full/exact index readers dispatch by root page type so
 maintained roots use their own entry count while oversized rebuilds continue to
-use immutable leaf runs. Production row-DML maintenance still needs in-place
-root update and flush semantics before it can safely update maintained roots
-instead of relying on append-tail overlays.
+use immutable leaf runs. Index-root metadata reads also decode maintained root
+pages for current entry counts, so later in-place updates do not need catalog
+publication solely to keep metadata counts fresh. Production row-DML
+maintenance still needs in-place root update and flush semantics before it can
+safely update maintained roots instead of relying on append-tail overlays.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, row/index free-space reclamation, multi-statement
