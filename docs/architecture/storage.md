@@ -534,9 +534,11 @@ decode work for every cursor build. When a published run has no append tail,
 single-row exact probes return the first matching row id directly from the leaf
 page instead of allocating a temporary row-id list. Exact leaf-page matches
 bulk-grow their index entryset result arrays and row-id lists once per matching
-leaf page instead of reallocating per matched row id. The cache is disabled for
-active statements and read snapshots, and it is cleared by durable mutation
-invalidation.
+leaf page instead of reallocating per matched row id. Internal row-id result
+lists also retain amortized capacity, so append-history exact scans and
+append-tail overlays do not resize the row-id array for every incremental
+match. The cache is disabled for active statements and read snapshots, and it
+is cleared by durable mutation invalidation.
 
 MariaDB handler instances also cache proven child and parent foreign-key
 metadata absence for their opened table. Ordinary non-FK row-DML paths use that

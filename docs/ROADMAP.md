@@ -319,7 +319,9 @@ already-open handler caches through a process-wide FK metadata epoch. Published
 leaf-root exact reads now return the first row id directly for static published
 runs, and bulk-grow matching entrysets and row-id lists per leaf page, removing
 temporary row-id list allocation from static point probes and per-row-id array
-reallocations from many-match secondary lookups.
+reallocations from many-match secondary lookups. Internal row-id result lists
+now keep amortized capacity, so append-history exact scans and append-tail
+overlays no longer resize the list on every discovered row id.
 Handler row-DML now prepares small index-entry/key buffers on the stack for
 common fixed-width tables, avoiding hot per-row heap churn while larger key
 sets still use the existing heap path.

@@ -120,6 +120,7 @@ typedef struct mylite_storage_live_row_cache_set {
 typedef struct mylite_storage_row_id_list {
     unsigned long long *row_ids;
     size_t count;
+    size_t capacity;
 } mylite_storage_row_id_list;
 
 typedef struct mylite_storage_index_prefix_match {
@@ -16975,6 +16976,7 @@ static mylite_storage_result copy_live_row_ids(
     memcpy(copy, row_ids, row_id_count * sizeof(*copy));
     out_row_ids->row_ids = copy;
     out_row_ids->count = row_id_count;
+    out_row_ids->capacity = row_id_count;
     return MYLITE_STORAGE_OK;
 }
 
@@ -18732,16 +18734,33 @@ static mylite_storage_result grow_row_id_list_for_append(
     }
 
     const size_t new_count = list->count + additional_count;
+    if (new_count <= list->capacity) {
+        *out_first_index = list->count;
+        return MYLITE_STORAGE_OK;
+    }
     if (new_count > SIZE_MAX / sizeof(*list->row_ids)) {
         return MYLITE_STORAGE_FULL;
     }
 
+    size_t new_capacity = list->capacity == 0U ? 8U : list->capacity;
+    while (new_capacity < new_count) {
+        if (new_capacity > SIZE_MAX / 2U) {
+            new_capacity = new_count;
+            break;
+        }
+        new_capacity *= 2U;
+    }
+    if (new_capacity > SIZE_MAX / sizeof(*list->row_ids)) {
+        return MYLITE_STORAGE_FULL;
+    }
+
     unsigned long long *row_ids =
-        (unsigned long long *)realloc(list->row_ids, new_count * sizeof(*row_ids));
+        (unsigned long long *)realloc(list->row_ids, new_capacity * sizeof(*row_ids));
     if (row_ids == NULL) {
         return MYLITE_STORAGE_NOMEM;
     }
     list->row_ids = row_ids;
+    list->capacity = new_capacity;
     *out_first_index = list->count;
     return MYLITE_STORAGE_OK;
 }
