@@ -299,6 +299,15 @@ storage, or public API behavior.
   static `user_variables` plugin, while retaining ordinary `@variable`
   assignment and reads. The stripped archive is reduced to 26,484,960 bytes,
   25.26 MiB, and 701 members.
+- `mariadb/sql/sql_yacc.yy` still references `Event_parse_data::new_instance`
+  while parsing event syntax, but `mariadb/sql/sql_parse.cc` returns an
+  embedded-server unsupported error for event DDL when `HAVE_EVENT_SCHEDULER`
+  is absent. The full `event_parse_data.cc` object validates scheduler dates
+  and definitions for event execution that is not linked into `libmysqld`.
+- Disabling full event parse-data validation behind
+  `MYLITE_WITH_EVENT_PARSE_DATA=0` replaces `event_parse_data.cc` with a small
+  parser-link stub. The stripped archive is reduced to 26,480,216 bytes,
+  25.25 MiB, and 701 members.
 - `mariadb/sql/item_create.cc` registers Oracle compatibility aliases such as
   `DECODE_ORACLE`, `LPAD_ORACLE`, `RTRIM_ORACLE`, `SUBSTR_ORACLE`, and
   `CONCAT_OPERATOR_ORACLE`, and builds a separate
@@ -570,6 +579,13 @@ the optional `user_variables` Information Schema plugin. MyLite policy rejects
 direct and prepared reads from `INFORMATION_SCHEMA.USER_VARIABLES`, `SHOW
 USER_VARIABLES`, and `FLUSH USER_VARIABLES`, while ordinary `@variable` SQL
 and application tables named `user_variables` remain valid.
+
+The embedded archive omits full event parse-data validation by setting
+`MYLITE_WITH_EVENT_PARSE_DATA=0` in the MyLite baseline. The option defaults to
+`ON` so normal MariaDB builds keep upstream event validation. The disabled
+profile retains only enough `Event_parse_data` implementation for parser-owned
+event syntax to link, while MyLite policy rejects direct and prepared event
+DDL and event metadata statements before parser execution.
 
 Archive stripping stays enabled by default because it is the distributed archive
 profile. Developers can set `STRIP_ARCHIVE=0` when they
@@ -919,6 +935,11 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   `user_variables.cc.o` is absent from `libmariadbd.a`, ordinary `@variable`
   SQL still works, and user-variable diagnostic SQL is rejected by
   server-surface policy coverage.
+- Confirm `MYLITE_WITH_EVENT_PARSE_DATA=OFF` appears in the embedded CMake
+  cache, `event_parse_data.cc.o` is absent,
+  `mylite_event_parse_data_disabled.cc.o` is present in `libmariadbd.a`, and
+  direct and prepared event DDL plus event metadata SQL are rejected by
+  server-surface policy coverage.
 - Run `cmake --build --preset dev`.
 - Run `ctest --preset dev --output-on-failure`.
 - Run `cmake --build --preset embedded-dev`.
@@ -965,7 +986,9 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   VARIABLES` and `@@` lookup, and userstat Information Schema reads plus reset
   statements are rejected. User-variable diagnostics are also omitted, ordinary
   `@variable` SQL remains covered, and user-variable diagnostic reads plus
-  resets are rejected.
+  resets are rejected. Full event parse-data validation is omitted, event DDL
+  and metadata statements remain rejected, and the embedded archive keeps only
+  a parser-link event parse-data stub.
 - Process-list SHOW commands are rejected, the process-list Information Schema
   table returns zero rows, and the embedded archive omits process-list row
   producers.

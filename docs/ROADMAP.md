@@ -148,6 +148,9 @@ server counters rather than application data behavior.
 User-variable diagnostics are omitted after coverage proves the
 `user_variables` plugin only exposes optional `@variable` introspection and
 reset helpers; ordinary `@variable` SQL remains available.
+Event parse-data validation is reduced to a parser-link stub after coverage
+proves event DDL, event metadata commands, and scheduler changes are outside
+the embedded core.
 Oracle compatibility function aliases and `oracle_schema` routing are omitted
 after coverage proves the normal MySQL/MariaDB string functions remain
 available, Oracle-only aliases fail predictably, and `oracle_schema` no

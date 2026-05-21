@@ -96,7 +96,10 @@ statement digest normalization behind `MYLITE_WITH_SQL_DIGEST=0`; Performance
 Schema digest text and hashes are unavailable, and startup sets
 `@@max_digest_length=0` so per-session digest token buffers are not allocated.
 SQL parsing, execution, prepared statements, diagnostics, and `EXPLAIN` remain
-available. It omits server status-variable publication behind
+available. It omits full event parse-data validation behind
+`MYLITE_WITH_EVENT_PARSE_DATA=0`; event DDL and metadata commands are rejected,
+and retained parser references use a small link stub. It omits server
+status-variable publication behind
 `MYLITE_WITH_STATUS_VARIABLES=0`; `SHOW STATUS` and status Information Schema
 tables return empty result sets, while ordinary SQL diagnostics and result
 metadata remain available. It omits process-list metadata behind

@@ -168,6 +168,15 @@ ELSE()
   ADD_DEFINITIONS(-DMYLITE_WITH_USERSTAT_DIAGNOSTICS=0)
 ENDIF()
 
+OPTION(MYLITE_WITH_EVENT_PARSE_DATA "Build event scheduler parse-data validation" ON)
+IF(MYLITE_WITH_EVENT_PARSE_DATA)
+  ADD_DEFINITIONS(-DMYLITE_WITH_EVENT_PARSE_DATA=1)
+  SET(MYLITE_EVENT_PARSE_DATA_SOURCE ../sql/event_parse_data.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_EVENT_PARSE_DATA=0)
+  SET(MYLITE_EVENT_PARSE_DATA_SOURCE ../sql/mylite_event_parse_data_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_PROXY_PROTOCOL "Build PROXY protocol listener support" ON)
 IF(MYLITE_WITH_PROXY_PROTOCOL)
   ADD_DEFINITIONS(-DMYLITE_WITH_PROXY_PROTOCOL=1)
@@ -268,7 +277,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/partition_info.cc ../sql/sql_connect.cc 
            ../sql/scheduler.cc ../sql/sql_audit.cc
            ../sql/sql_alter.cc ../sql/sql_partition_admin.cc
-           ../sql/event_parse_data.cc
+           ${MYLITE_EVENT_PARSE_DATA_SOURCE}
            ../sql/sql_signal.cc
            ../sql/sys_vars.cc ../sql/vector_mhnsw.cc
            ${CMAKE_BINARY_DIR}/sql/sql_builtin.cc

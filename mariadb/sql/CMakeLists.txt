@@ -155,6 +155,15 @@ ELSE()
   ADD_DEFINITIONS(-DMYLITE_WITH_USERSTAT_DIAGNOSTICS=0)
 ENDIF()
 
+OPTION(MYLITE_WITH_EVENT_PARSE_DATA "Build event scheduler parse-data validation" ON)
+IF(MYLITE_WITH_EVENT_PARSE_DATA)
+  ADD_DEFINITIONS(-DMYLITE_WITH_EVENT_PARSE_DATA=1)
+  SET(MYLITE_EVENT_PARSE_DATA_SOURCE event_parse_data.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_EVENT_PARSE_DATA=0)
+  SET(MYLITE_EVENT_PARSE_DATA_SOURCE mylite_event_parse_data_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_PROXY_PROTOCOL "Build PROXY protocol listener support" ON)
 IF(MYLITE_WITH_PROXY_PROTOCOL)
   ADD_DEFINITIONS(-DMYLITE_WITH_PROXY_PROTOCOL=1)
@@ -223,7 +232,7 @@ SET (SQL_SOURCE
                rpl_injector.cc sql_locale.cc
                rpl_rli.cc rpl_mi.cc ${MYLITE_FOREIGN_SERVER_METADATA_SOURCE} sql_audit.cc
                sql_connect.cc scheduler.cc sql_partition_admin.cc
-               ${MYLITE_SQL_PROFILE_SOURCE} event_parse_data.cc sql_alter.cc
+               ${MYLITE_SQL_PROFILE_SOURCE} ${MYLITE_EVENT_PARSE_DATA_SOURCE} sql_alter.cc
                sql_signal.cc mdl.cc sql_admin.cc
                transaction.cc sys_vars.cc sql_truncate.cc datadict.cc
                sql_reload.cc

@@ -1216,6 +1216,10 @@ bool is_unsupported_account_or_event_statement(const SqlPolicyTokens &tokens) {
     if (token_equals(first, "DROP")) {
         return token_in(second, "USER", "ROLE", "EVENT", "SERVER");
     }
+    if (token_equals(first, "SHOW")) {
+        return token_equals(second, "EVENTS") ||
+               (token_equals(second, "CREATE") && token_equals(third, "EVENT"));
+    }
     return token_equals(first, "RENAME") && token_equals(second, "USER");
 }
 

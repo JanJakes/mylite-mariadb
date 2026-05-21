@@ -652,6 +652,10 @@ static void assert_server_sql_rejected(mylite_db *db) {
         "ON SCHEDULE EVERY 1 DAY DO SELECT 1",
         "server-owned SQL surface"
     );
+    expect_error(db, "ALTER EVENT app.mylite_event DISABLE", "server-owned SQL surface");
+    expect_error(db, "DROP EVENT app.mylite_event", "server-owned SQL surface");
+    expect_error(db, "SHOW EVENTS", "server-owned SQL surface");
+    expect_error(db, "SHOW CREATE EVENT app.mylite_event", "server-owned SQL surface");
     expect_error(db, "SET GLOBAL event_scheduler = ON", "server-owned SQL surface");
     expect_error(db, "SET PASSWORD = PASSWORD('secret')", "server-owned SQL surface");
     expect_error(db, "SET SQL_LOG_BIN = 1", "server-owned SQL surface");
@@ -805,6 +809,15 @@ static void assert_server_sql_rejected(mylite_db *db) {
         "CREATE USER 'prepared_user'@'localhost' IDENTIFIED BY 'secret'",
         "server-owned SQL surface"
     );
+    expect_prepare_error(
+        db,
+        "CREATE EVENT app.prepared_event ON SCHEDULE EVERY 1 DAY DO SELECT 1",
+        "server-owned SQL surface"
+    );
+    expect_prepare_error(db, "ALTER EVENT app.prepared_event DISABLE", "server-owned SQL surface");
+    expect_prepare_error(db, "DROP EVENT app.prepared_event", "server-owned SQL surface");
+    expect_prepare_error(db, "SHOW EVENTS", "server-owned SQL surface");
+    expect_prepare_error(db, "SHOW CREATE EVENT app.prepared_event", "server-owned SQL surface");
     expect_prepare_error(
         db,
         "/*! CREATE USER 'prepared_comment_user'@'localhost' IDENTIFIED BY 'secret' */",

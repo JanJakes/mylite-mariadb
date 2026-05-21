@@ -388,7 +388,7 @@ compatibility features that do not fit the embedded library model:
 - server audit plugins,
 - network-protocol `LOAD DATA LOCAL`,
 - PROXY protocol listener support,
-- event scheduler,
+- event scheduler and event metadata commands,
 - performance schema,
 - Oracle SQL mode,
 - Oracle compatibility function aliases,
@@ -412,6 +412,8 @@ metadata are rejected before direct execution or prepared-statement
 preparation. The default embedded profile starts with binary logging disabled
 and compiles binlog transaction, row-event, and GTID-state entry points to
 embedded no-ops where they are unreachable through supported MyLite behavior.
+It keeps only a parser-link event parse-data stub because event scheduler
+execution and event metadata are outside the embedded core.
 It also omits the unsupported injector root that is only needed by the server
 topology runtime, plus guarded replication execution system variables such as
 `slave_type_conversions` and `rpl_semi_sync_master_enabled`. Replication and
