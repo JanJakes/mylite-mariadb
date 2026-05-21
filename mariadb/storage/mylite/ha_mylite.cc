@@ -1276,15 +1276,15 @@ void ha_mylite::clear_scan_rows()
 
 void ha_mylite::clear_index_cursor()
 {
-  if (index_keys != index_inline_key)
+  if (index_keys && index_keys != index_inline_key)
     mylite_storage_free(index_keys);
-  if (index_entries != &index_inline_entry)
+  if (index_entries && index_entries != &index_inline_entry)
     mylite_storage_free(index_entries);
-  if (index_rows != index_row_scratch)
+  if (index_rows && index_rows != index_row_scratch)
     mylite_storage_free(index_rows);
-  if (index_row_offsets != &index_inline_row_offset)
+  if (index_row_offsets && index_row_offsets != &index_inline_row_offset)
     mylite_storage_free(index_row_offsets);
-  if (index_row_sizes != &index_inline_row_size)
+  if (index_row_sizes && index_row_sizes != &index_inline_row_size)
     mylite_storage_free(index_row_sizes);
   index_keys= NULL;
   index_entries= NULL;

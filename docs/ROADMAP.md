@@ -367,6 +367,8 @@ by the caller, avoiding another filename/header/table cache lookup on prepared
 point-update reads.
 Fixed-width exact-index cache key hash and compare helpers are now hot-inlined
 at their cache-probe call sites.
+Handler index cursor cleanup now skips storage free-wrapper calls for already
+empty cursor buffers while preserving inline-buffer ownership checks.
 Durable handler write locks now defer MEMORY/HEAP statement snapshots until a
 volatile table participates, while transaction and savepoint snapshots remain
 eager at their SQL boundaries.
