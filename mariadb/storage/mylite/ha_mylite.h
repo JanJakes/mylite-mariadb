@@ -97,6 +97,10 @@ class ha_mylite: public handler
                          uint key_filter_length);
   int materialize_index_cursor_rows(const char *primary_file);
   int read_index_cursor_row(uchar *buf, size_t row_index);
+  int read_exact_unique_index_row_into(uint index_number,
+                                       const uchar *key_filter,
+                                       uint key_filter_length, uchar *buf,
+                                       bool *out_applied, bool *out_found);
   int record_blob_payload_slot(const uchar *buf, size_t *out_slot) const;
   int preserve_record_blob_payloads(uchar *buf);
   void clear_foreign_key_presence_cache() const;

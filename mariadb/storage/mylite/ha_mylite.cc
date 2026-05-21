@@ -2063,6 +2063,17 @@ int ha_mylite::index_read_map(uchar *buf, const uchar *key,
   const bool filter_cursor=
       key_length > 0 &&
       (find_flag == HA_READ_KEY_EXACT || find_flag == HA_READ_PREFIX);
+  if (filter_cursor && find_flag == HA_READ_KEY_EXACT)
+  {
+    bool direct_applied= false;
+    bool direct_found= false;
+    const int error= read_exact_unique_index_row_into(
+        active_index, key, key_length, buf, &direct_applied, &direct_found);
+    if (error)
+      DBUG_RETURN(error);
+    if (direct_applied)
+      DBUG_RETURN(direct_found ? 0 : HA_ERR_KEY_NOT_FOUND);
+  }
   if (filter_cursor || index_cursor_number != active_index ||
       index_cursor_filtered)
   {
@@ -2087,6 +2098,108 @@ int ha_mylite::index_read_map(uchar *buf, const uchar *key,
     DBUG_RETURN(error);
 
   DBUG_RETURN(read_index_cursor_row(buf, entry_index));
+}
+
+int ha_mylite::read_exact_unique_index_row_into(uint index_number,
+                                                const uchar *key_filter,
+                                                uint key_filter_length,
+                                                uchar *buf, bool *out_applied,
+                                                bool *out_found)
+{
+  DBUG_ENTER("ha_mylite::read_exact_unique_index_row_into");
+  *out_applied= false;
+  *out_found= false;
+
+  if (discard_rows || volatile_rows || table_has_blob_fields ||
+      index_number >= table->s->keys ||
+      !mylite_key_is_supported(table->key_info + index_number))
+    DBUG_RETURN(0);
+
+  KEY *key_info= table->key_info + index_number;
+  const bool full_key_filter= key_filter != NULL && key_filter_length > 0 &&
+                              key_filter_length == key_info->key_length;
+  const bool non_nullable_full_key_filter=
+      full_key_filter && !(key_info->flags & HA_NULL_PART_KEY);
+  const bool raw_exact_unique_filter=
+      non_nullable_full_key_filter && (key_info->flags & HA_NOSAME) &&
+      mylite_key_uses_raw_exact_filter(key_info);
+  if (!raw_exact_unique_filter)
+    DBUG_RETURN(0);
+
+  const char *primary_file= mylite_primary_file_path();
+  if (!primary_file)
+    DBUG_RETURN(HA_ERR_NO_CONNECTION);
+
+  Mylite_read_statement_scope read_scope(primary_file, true);
+  if (read_scope.error())
+    DBUG_RETURN(read_scope.error());
+
+  clear_index_cursor();
+  ulonglong row_id= 0ULL;
+  size_t row_payload_size= 0;
+  mylite_storage_result storage_result= mylite_storage_find_indexed_row_into(
+      primary_file, storage_schema(), storage_table(), index_number,
+      key_filter, key_filter_length, &row_id, buf, table->s->reclength,
+      &row_payload_size);
+  *out_applied= true;
+  if (storage_result == MYLITE_STORAGE_NOTFOUND)
+  {
+    index_cursor_number= index_number;
+    index_cursor_filtered= true;
+    DBUG_RETURN(0);
+  }
+  if (storage_result == MYLITE_STORAGE_FULL &&
+      row_payload_size != table->s->reclength)
+    DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
+  if (storage_result != MYLITE_STORAGE_OK)
+    DBUG_RETURN(mylite_storage_to_handler_error(storage_result));
+  if (row_payload_size != table->s->reclength)
+    DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
+
+  size_t slot= 0;
+  const int slot_error= record_blob_payload_slot(buf, &slot);
+  if (slot_error)
+    DBUG_RETURN(slot_error);
+
+  const bool use_inline_cursor_storage=
+      key_filter_length <= sizeof(index_inline_key);
+  uchar *keys= use_inline_cursor_storage
+                   ? index_inline_key
+                   : static_cast<uchar *>(malloc(key_filter_length));
+  Mylite_index_cursor_entry *entries=
+      use_inline_cursor_storage
+          ? &index_inline_entry
+          : static_cast<Mylite_index_cursor_entry *>(
+                malloc(sizeof(Mylite_index_cursor_entry)));
+  if (!keys || !entries)
+  {
+    if (!use_inline_cursor_storage)
+    {
+      free(keys);
+      free(entries);
+    }
+    DBUG_RETURN(HA_ERR_OUT_OF_MEM);
+  }
+
+  memcpy(keys, key_filter, key_filter_length);
+  entries[0].key_offset= 0;
+  entries[0].key_size= key_filter_length;
+  entries[0].row_id= row_id;
+  index_keys= keys;
+  index_entries= entries;
+  index_row_count= 1;
+  index_row_index= 0;
+  index_cursor_number= index_number;
+  index_cursor_filtered= true;
+  current_row_id= row_id;
+
+  if (record_blob_payloads[slot])
+    mylite_storage_free(record_blob_payloads[slot]);
+  record_blob_payloads[slot]= NULL;
+  record_blob_payloads_size[slot]= 0;
+
+  *out_found= true;
+  DBUG_RETURN(0);
 }
 
 int ha_mylite::index_read_idx_map(uchar *buf, uint index, const uchar *key,

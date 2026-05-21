@@ -459,6 +459,18 @@ mylite_storage_result mylite_storage_find_indexed_row_reuse(
     size_t *inout_row_capacity,
     size_t *out_row_size
 );
+mylite_storage_result mylite_storage_find_indexed_row_into(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id,
+    unsigned char *out_row,
+    size_t out_row_capacity,
+    size_t *out_row_size
+);
 mylite_storage_result mylite_storage_read_exact_index_entries(
     const char *filename,
     const char *schema_name,

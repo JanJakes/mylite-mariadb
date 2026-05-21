@@ -502,6 +502,15 @@ static void assert_find_indexed_row_equals(
     const unsigned char *expected_row,
     size_t expected_row_size
 );
+static void assert_find_indexed_row_into_equals(
+    const char *filename,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long expected_row_id,
+    const unsigned char *expected_row,
+    size_t expected_row_size
+);
 static void assert_find_indexed_row_not_found(
     const char *filename,
     unsigned index_number,
@@ -3572,6 +3581,48 @@ static void test_index_entries(void) {
         row_1,
         sizeof(row_1)
     );
+    assert_find_indexed_row_into_equals(
+        filename,
+        0U,
+        key_1,
+        sizeof(key_1),
+        ctx.row_1_id,
+        row_1,
+        sizeof(row_1)
+    );
+    unsigned long long fixed_row_id = 0ULL;
+    unsigned char fixed_row[sizeof(row_1)];
+    size_t fixed_row_size = 0U;
+    assert(
+        mylite_storage_find_indexed_row_into(
+            filename,
+            "app",
+            "posts",
+            0U,
+            key_1,
+            sizeof(key_1),
+            &fixed_row_id,
+            fixed_row,
+            sizeof(fixed_row) - 1U,
+            &fixed_row_size
+        ) == MYLITE_STORAGE_FULL
+    );
+    assert(fixed_row_id == 0ULL);
+    assert(fixed_row_size == sizeof(row_1));
+    assert(
+        mylite_storage_find_indexed_row_into(
+            filename,
+            "app",
+            "posts",
+            0U,
+            key_1,
+            sizeof(key_1),
+            &fixed_row_id,
+            NULL,
+            sizeof(fixed_row),
+            &fixed_row_size
+        ) == MYLITE_STORAGE_MISUSE
+    );
     unsigned long long reusable_row_id = 0ULL;
     unsigned char *reusable_row = NULL;
     size_t reusable_row_capacity = 0U;
@@ -3636,6 +3687,24 @@ static void test_index_entries(void) {
     assert_index_entry_lookup(filename, 0U, key_2, sizeof(key_2), MYLITE_STORAGE_OK, ctx.row_2_id);
     assert_index_entry_lookup(filename, 0U, key_9, sizeof(key_9), MYLITE_STORAGE_NOTFOUND, 0ULL);
     assert_find_indexed_row_not_found(filename, 0U, key_9, sizeof(key_9));
+    fixed_row_id = 123ULL;
+    fixed_row_size = 123U;
+    assert(
+        mylite_storage_find_indexed_row_into(
+            filename,
+            "app",
+            "posts",
+            0U,
+            key_9,
+            sizeof(key_9),
+            &fixed_row_id,
+            fixed_row,
+            sizeof(fixed_row),
+            &fixed_row_size
+        ) == MYLITE_STORAGE_NOTFOUND
+    );
+    assert(fixed_row_id == 0ULL);
+    assert(fixed_row_size == 0U);
     assert_exact_index_entries(
         filename,
         1U,
@@ -10800,6 +10869,43 @@ static void assert_find_indexed_row_equals(
     assert(stored_row_size == expected_row_size);
     assert(memcmp(stored_row, expected_row, expected_row_size) == 0);
     mylite_storage_free(stored_row);
+}
+
+static void assert_find_indexed_row_into_equals(
+    const char *filename,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long expected_row_id,
+    const unsigned char *expected_row,
+    size_t expected_row_size
+) {
+    unsigned long long row_id = 0ULL;
+    unsigned char stored_row[32];
+    size_t stored_row_size = 0U;
+
+    assert(expected_row_size <= sizeof(stored_row));
+    memset(stored_row, 0xA5, sizeof(stored_row));
+    assert(
+        mylite_storage_find_indexed_row_into(
+            filename,
+            "app",
+            "posts",
+            index_number,
+            key,
+            key_size,
+            &row_id,
+            stored_row,
+            sizeof(stored_row),
+            &stored_row_size
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(row_id == expected_row_id);
+    assert(stored_row_size == expected_row_size);
+    assert(memcmp(stored_row, expected_row, expected_row_size) == 0);
+    if (expected_row_size < sizeof(stored_row)) {
+        assert(stored_row[expected_row_size] == 0xA5U);
+    }
 }
 
 static void assert_find_indexed_row_not_found(

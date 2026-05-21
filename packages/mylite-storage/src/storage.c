@@ -3019,6 +3019,8 @@ static mylite_storage_result read_indexed_row_payload_from_open_file(
     unsigned long long row_id,
     unsigned char **out_row,
     size_t *inout_row_capacity,
+    unsigned char *out_row_buffer,
+    size_t out_row_capacity,
     size_t *out_row_size,
     int *out_active_payload_cached
 );
@@ -3032,6 +3034,8 @@ static mylite_storage_result find_indexed_row_payload(
     unsigned long long *out_row_id,
     unsigned char **out_row,
     size_t *inout_row_capacity,
+    unsigned char *out_row_buffer,
+    size_t out_row_capacity,
     size_t *out_row_size
 );
 static mylite_storage_result append_row_id_to_list(
@@ -3272,6 +3276,17 @@ static mylite_storage_result copy_cached_row_payload(
     const mylite_storage_row_payload_cache_entry *entry,
     unsigned char **out_row,
     size_t *inout_row_capacity,
+    unsigned char *out_row_buffer,
+    size_t out_row_capacity,
+    size_t *out_row_size
+);
+static mylite_storage_result copy_row_payload_to_output_target(
+    const unsigned char *row,
+    size_t row_size,
+    unsigned char **out_row,
+    size_t *inout_row_capacity,
+    unsigned char *out_row_buffer,
+    size_t out_row_capacity,
     size_t *out_row_size
 );
 static mylite_storage_result copy_row_payload_to_output(
@@ -6173,10 +6188,12 @@ static mylite_storage_result read_indexed_row_payload_from_open_file(
     unsigned long long row_id,
     unsigned char **out_row,
     size_t *inout_row_capacity,
+    unsigned char *out_row_buffer,
+    size_t out_row_capacity,
     size_t *out_row_size,
     int *out_active_payload_cached
 ) {
-    if (inout_row_capacity == NULL) {
+    if (out_row_buffer == NULL && inout_row_capacity == NULL) {
         *out_row = NULL;
     }
     *out_row_size = 0U;
@@ -6188,7 +6205,14 @@ static mylite_storage_result read_indexed_row_payload_from_open_file(
             : find_row_payload_cache_entry(active_row_payload_cache, row_id);
     if (active_row_payload_cache_entry_is_usable(active_entry)) {
         *out_active_payload_cached = 1;
-        return copy_cached_row_payload(active_entry, out_row, inout_row_capacity, out_row_size);
+        return copy_cached_row_payload(
+            active_entry,
+            out_row,
+            inout_row_capacity,
+            out_row_buffer,
+            out_row_capacity,
+            out_row_size
+        );
     }
 
     mylite_storage_row_payload_cache *row_payload_cache =
@@ -6198,7 +6222,14 @@ static mylite_storage_result read_indexed_row_payload_from_open_file(
         const mylite_storage_row_payload_cache_entry *entry =
             find_row_payload_cache_entry(row_payload_cache, row_id);
         if (row_payload_cache_entry_is_valid(entry)) {
-            return copy_cached_row_payload(entry, out_row, inout_row_capacity, out_row_size);
+            return copy_cached_row_payload(
+                entry,
+                out_row,
+                inout_row_capacity,
+                out_row_buffer,
+                out_row_capacity,
+                out_row_size
+            );
         }
         if (entry != NULL) {
             remove_row_payload_cache_entry(row_payload_cache, row_id);
@@ -6218,11 +6249,13 @@ static mylite_storage_result read_indexed_row_payload_from_open_file(
         result = MYLITE_STORAGE_NOTFOUND;
     }
     if (result == MYLITE_STORAGE_OK) {
-        result = copy_row_payload_to_output(
+        result = copy_row_payload_to_output_target(
             row_page.payload,
             row_page.row_size,
             out_row,
             inout_row_capacity,
+            out_row_buffer,
+            out_row_capacity,
             out_row_size
         );
         if (result == MYLITE_STORAGE_OK) {
@@ -7479,6 +7512,8 @@ mylite_storage_result mylite_storage_find_indexed_row(
         out_row_id,
         out_row,
         NULL,
+        NULL,
+        0U,
         out_row_size
     );
 }
@@ -7512,6 +7547,42 @@ mylite_storage_result mylite_storage_find_indexed_row_reuse(
         out_row_id,
         inout_row,
         inout_row_capacity,
+        NULL,
+        0U,
+        out_row_size
+    );
+}
+
+mylite_storage_result mylite_storage_find_indexed_row_into(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id,
+    unsigned char *out_row,
+    size_t out_row_capacity,
+    size_t *out_row_size
+) {
+    if (filename == NULL || filename[0] == '\0' || schema_name == NULL || schema_name[0] == '\0' ||
+        table_name == NULL || table_name[0] == '\0' || key == NULL || key_size == 0U ||
+        out_row_id == NULL || out_row == NULL || out_row_size == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    return find_indexed_row_payload(
+        filename,
+        schema_name,
+        table_name,
+        index_number,
+        key,
+        key_size,
+        out_row_id,
+        NULL,
+        NULL,
+        out_row,
+        out_row_capacity,
         out_row_size
     );
 }
@@ -7526,10 +7597,12 @@ static mylite_storage_result find_indexed_row_payload(
     unsigned long long *out_row_id,
     unsigned char **out_row,
     size_t *inout_row_capacity,
+    unsigned char *out_row_buffer,
+    size_t out_row_capacity,
     size_t *out_row_size
 ) {
     *out_row_id = 0ULL;
-    if (inout_row_capacity == NULL) {
+    if (out_row_buffer == NULL && inout_row_capacity == NULL) {
         *out_row = NULL;
     }
     *out_row_size = 0U;
@@ -7608,6 +7681,8 @@ static mylite_storage_result find_indexed_row_payload(
             *out_row_id,
             out_row,
             inout_row_capacity,
+            out_row_buffer,
+            out_row_capacity,
             out_row_size,
             &active_payload_cached
         );
@@ -7629,12 +7704,14 @@ static mylite_storage_result find_indexed_row_payload(
     }
     free_catalog_image(&catalog);
     if (result != MYLITE_STORAGE_OK) {
-        if (inout_row_capacity == NULL) {
+        const size_t found_row_size = *out_row_size;
+        if (out_row_buffer == NULL && inout_row_capacity == NULL) {
             free(*out_row);
             *out_row = NULL;
         }
         *out_row_id = 0ULL;
-        *out_row_size = 0U;
+        *out_row_size =
+            out_row_buffer != NULL && result == MYLITE_STORAGE_FULL ? found_row_size : 0U;
         return result;
     }
     return *out_row_id != 0ULL ? MYLITE_STORAGE_OK : MYLITE_STORAGE_NOTFOUND;
@@ -23357,15 +23434,43 @@ static mylite_storage_result copy_cached_row_payload(
     const mylite_storage_row_payload_cache_entry *entry,
     unsigned char **out_row,
     size_t *inout_row_capacity,
+    unsigned char *out_row_buffer,
+    size_t out_row_capacity,
     size_t *out_row_size
 ) {
-    return copy_row_payload_to_output(
+    return copy_row_payload_to_output_target(
         entry->row,
         entry->row_size,
         out_row,
         inout_row_capacity,
+        out_row_buffer,
+        out_row_capacity,
         out_row_size
     );
+}
+
+static mylite_storage_result copy_row_payload_to_output_target(
+    const unsigned char *row,
+    size_t row_size,
+    unsigned char **out_row,
+    size_t *inout_row_capacity,
+    unsigned char *out_row_buffer,
+    size_t out_row_capacity,
+    size_t *out_row_size
+) {
+    if (out_row_buffer != NULL) {
+        *out_row_size = row_size;
+        if (row_size == 0U) {
+            return MYLITE_STORAGE_OK;
+        }
+        if (out_row_capacity < row_size) {
+            return MYLITE_STORAGE_FULL;
+        }
+        memcpy(out_row_buffer, row, row_size);
+        return MYLITE_STORAGE_OK;
+    }
+
+    return copy_row_payload_to_output(row, row_size, out_row, inout_row_capacity, out_row_size);
 }
 
 static mylite_storage_result copy_row_payload_to_output(
