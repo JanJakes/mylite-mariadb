@@ -192,8 +192,9 @@ new root page type as a known non-target page.
 
 - A single-page root is only a stepping stone. Larger indexes still need page
   splits or a multi-page root/leaf structure.
-- Catalog records need an explicit way for readers to distinguish immutable
-  leaf-run roots from maintained root pages by reading the page type.
+- Production readers now distinguish immutable leaf-run roots from maintained
+  root pages by reading the page type; broader B-tree shapes still need the
+  same explicit dispatch.
 - Omitting append-only index-entry pages for maintained inserts requires careful
   fallback rules so corruption or unsupported shapes do not lose index
   visibility.

@@ -219,6 +219,11 @@ static void assert_index_root(
     unsigned long long expected_root_page,
     unsigned long long expected_entry_count
 );
+static void assert_index_root_page_type(
+    const char *filename,
+    unsigned long long root_page,
+    unsigned expected_page_type
+);
 static void assert_exact_index_entries_for_table(
     const char *filename,
     const char *schema_name,
@@ -5635,10 +5640,22 @@ static void test_index_leaf_pages(void) {
     assert(mylite_storage_rebuild_index_leaf(filename, "app", "posts", 0U) == MYLITE_STORAGE_OK);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert_index_root(filename, "app", "posts", 0U, header.page_count - 1ULL, 2ULL);
+    assert_index_root_page_type(
+        filename,
+        header.page_count - 1ULL,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_ROOT
+    );
     assert_index_entry_lookup(filename, 0U, key_1, sizeof(key_1), MYLITE_STORAGE_OK, row_1_id);
     assert_index_entry_lookup(filename, 0U, key_3, sizeof(key_3), MYLITE_STORAGE_NOTFOUND, 0ULL);
 
     assert(mylite_storage_rebuild_index_leaf(filename, "app", "posts", 1U) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert_index_root(filename, "app", "posts", 1U, header.page_count - 1ULL, 2ULL);
+    assert_index_root_page_type(
+        filename,
+        header.page_count - 1ULL,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_ROOT
+    );
     const unsigned long long first_secondary_row_ids[] = {row_1_id, row_2_id};
     assert_exact_index_entries(
         filename,
@@ -5899,6 +5916,16 @@ static void test_batched_index_leaf_pages(void) {
     );
     assert_index_root(filename, "app", "posts", 0U, first_rebuild_root, 2ULL);
     assert_index_root(filename, "app", "posts", 1U, first_rebuild_root + 1ULL, 2ULL);
+    assert_index_root_page_type(
+        filename,
+        first_rebuild_root,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_ROOT
+    );
+    assert_index_root_page_type(
+        filename,
+        first_rebuild_root + 1ULL,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_ROOT
+    );
     assert_index_entry_lookup(filename, 0U, key_1, sizeof(key_1), MYLITE_STORAGE_OK, row_1_id);
     assert_index_entry_lookup(filename, 0U, key_2, sizeof(key_2), MYLITE_STORAGE_OK, row_2_id);
     const unsigned long long initial_secondary_row_ids[] = {row_1_id, row_2_id};
@@ -5979,6 +6006,16 @@ static void test_batched_index_leaf_pages(void) {
     );
     assert_index_root(filename, "app", "posts", 0U, second_rebuild_root, 2ULL);
     assert_index_root(filename, "app", "posts", 1U, second_rebuild_root + 1ULL, 2ULL);
+    assert_index_root_page_type(
+        filename,
+        second_rebuild_root,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_ROOT
+    );
+    assert_index_root_page_type(
+        filename,
+        second_rebuild_root + 1ULL,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_ROOT
+    );
     const unsigned long long rebuilt_secondary_row_ids[] = {row_3_id, updated_row_2_id};
     assert_exact_index_entries(
         filename,
@@ -6071,6 +6108,11 @@ static void test_multi_page_index_leaf_pages(void) {
         0U,
         header.page_count - (unsigned long long)expected_leaf_pages,
         entry_count
+    );
+    assert_index_root_page_type(
+        filename,
+        header.page_count - (unsigned long long)expected_leaf_pages,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_LEAF
     );
 
     unsigned char first_key[4] = {0};
@@ -6445,6 +6487,18 @@ static void assert_index_root(
     );
     assert(metadata.root_page == expected_root_page);
     assert(metadata.entry_count == expected_entry_count);
+}
+
+static void assert_index_root_page_type(
+    const char *filename,
+    unsigned long long root_page,
+    unsigned expected_page_type
+) {
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    read_test_page(filename, root_page, page);
+    assert(
+        get_test_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_OFFSET) == expected_page_type
+    );
 }
 
 static void assert_exact_index_entries_for_table(

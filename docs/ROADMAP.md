@@ -160,10 +160,11 @@ writing it, while unsafe journal shapes reject rather than silently bypassing
 crash recovery. Active statements can now create that immutable recovery journal
 from a bounded preplanned dirty-page set, preparing row/index mutations to
 declare candidate maintained pages before row append creates the journal.
-Maintained index root pages now have an initial single-page typed format with
-root-owned entry counts, fixed key width, and sorted cells. Production
-maintained B-tree pages still need lookup integration, root publication,
-flushing, and root update semantics.
+Maintained index root pages now have a single-page typed format with
+root-owned entry counts, fixed key width, and sorted cells, and small
+non-empty fixed-width rebuilds publish that root type while readers dispatch by
+root page type. Production maintained B-tree pages still need in-place row-DML
+root update and flush semantics.
 Durable table-local row,
 payload, exact-index, and published leaf-page caches now retarget across
 unrelated table row mutations, so one
