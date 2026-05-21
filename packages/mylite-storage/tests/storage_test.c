@@ -138,6 +138,7 @@ static void test_index_root_metadata(void);
 static void test_index_leaf_pages(void);
 static void test_multi_page_index_leaf_pages(void);
 static void test_multi_page_index_leaf_duplicate_boundaries(void);
+static void test_full_index_reads_use_leaf_runs(void);
 static void assert_index_prefix_exists(
     const char *filename,
     const unsigned char *key_prefix,
@@ -361,6 +362,7 @@ static transaction_child hold_transaction_with_uncommitted_row(
 );
 static void release_transaction_child(transaction_child child);
 static void put_test_u32_le(unsigned char *page, size_t offset, unsigned value);
+static void put_test_u32_be(unsigned char *page, size_t offset, unsigned value);
 static void put_test_u64_le(unsigned char *page, size_t offset, unsigned long long value);
 static unsigned get_test_u32_le(const unsigned char *page, size_t offset);
 static unsigned long long get_test_u64_le(const unsigned char *page, size_t offset);
@@ -435,6 +437,7 @@ int main(void) {
     test_index_leaf_pages();
     test_multi_page_index_leaf_pages();
     test_multi_page_index_leaf_duplicate_boundaries();
+    test_full_index_reads_use_leaf_runs();
     test_autoincrement_state();
     test_truncate_table_lifecycle();
     test_statement_checkpoints();
@@ -5295,6 +5298,187 @@ static void test_multi_page_index_leaf_duplicate_boundaries(void) {
     free(root);
 }
 
+static void test_full_index_reads_use_leaf_runs(void) {
+    enum { entry_count = 400U };
+
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "full-index-leaf-run-reads.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    unsigned long long row_ids[entry_count];
+    mylite_storage_index_entryset entries = {
+        .size = sizeof(entries),
+    };
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    for (unsigned i = 0U; i < entry_count; ++i) {
+        unsigned char row[8] = {0};
+        unsigned char key[4] = {0};
+        const unsigned key_value = entry_count - i;
+        put_test_u32_le(row, 0U, key_value);
+        put_test_u32_be(key, 0U, key_value);
+        mylite_storage_index_entry index_entry = {
+            .size = sizeof(index_entry),
+            .index_number = 0U,
+            .key = key,
+            .key_size = sizeof(key),
+        };
+        unsigned long long row_id = 0ULL;
+        assert(
+            mylite_storage_append_row_with_index_entries(
+                filename,
+                "app",
+                "posts",
+                row,
+                sizeof(row),
+                &index_entry,
+                1U,
+                &row_id
+            ) == MYLITE_STORAGE_OK
+        );
+        row_ids[key_value - 1U] = row_id;
+    }
+
+    assert(mylite_storage_rebuild_index_leaf(filename, "app", "posts", 0U) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_read_index_entries(filename, "app", "posts", 0U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == entry_count);
+    for (unsigned i = 0U; i < entry_count; ++i) {
+        unsigned char key[4] = {0};
+        put_test_u32_be(key, 0U, i + 1U);
+        assert_index_entry(&entries, i, row_ids[i], key, sizeof(key));
+    }
+    mylite_storage_free_index_entryset(&entries);
+
+    unsigned char tail_row[8] = {0};
+    unsigned char tail_key[4] = {0};
+    unsigned long long tail_row_id = 0ULL;
+    put_test_u32_le(tail_row, 0U, entry_count + 1U);
+    put_test_u32_be(tail_key, 0U, entry_count + 1U);
+    mylite_storage_index_entry tail_entry = {
+        .size = sizeof(tail_entry),
+        .index_number = 0U,
+        .key = tail_key,
+        .key_size = sizeof(tail_key),
+    };
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            tail_row,
+            sizeof(tail_row),
+            &tail_entry,
+            1U,
+            &tail_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+
+    unsigned char unchanged_update_row[8] = {0};
+    unsigned char unchanged_update_key[4] = {0};
+    unsigned char unchanged_index_changed[] = {0U};
+    unsigned long long unchanged_update_row_id = 0ULL;
+    put_test_u32_le(unchanged_update_row, 0U, 1000U);
+    put_test_u32_be(unchanged_update_key, 0U, 10U);
+    mylite_storage_index_entry unchanged_update_entry = {
+        .size = sizeof(unchanged_update_entry),
+        .index_number = 0U,
+        .key = unchanged_update_key,
+        .key_size = sizeof(unchanged_update_key),
+    };
+    assert(
+        mylite_storage_update_row_with_index_entry_changes(
+            filename,
+            "app",
+            "posts",
+            row_ids[9],
+            unchanged_update_row,
+            sizeof(unchanged_update_row),
+            &unchanged_update_entry,
+            1U,
+            unchanged_index_changed,
+            &unchanged_update_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    row_ids[9] = unchanged_update_row_id;
+
+    unsigned char changed_update_row[8] = {0};
+    unsigned char changed_update_key[4] = {0};
+    unsigned char changed_index_changed[] = {1U};
+    unsigned long long changed_update_row_id = 0ULL;
+    put_test_u32_le(changed_update_row, 0U, 2000U);
+    put_test_u32_be(changed_update_key, 0U, entry_count + 2U);
+    mylite_storage_index_entry changed_update_entry = {
+        .size = sizeof(changed_update_entry),
+        .index_number = 0U,
+        .key = changed_update_key,
+        .key_size = sizeof(changed_update_key),
+    };
+    assert(
+        mylite_storage_update_row_with_index_entry_changes(
+            filename,
+            "app",
+            "posts",
+            row_ids[19],
+            changed_update_row,
+            sizeof(changed_update_row),
+            &changed_update_entry,
+            1U,
+            changed_index_changed,
+            &changed_update_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_delete_row(filename, "app", "posts", row_ids[29]) == MYLITE_STORAGE_OK);
+
+    entries = (mylite_storage_index_entryset){
+        .size = sizeof(entries),
+    };
+    assert(
+        mylite_storage_read_index_entries(filename, "app", "posts", 0U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == entry_count);
+
+    size_t entry_index = 0U;
+    for (unsigned key_value = 1U; key_value <= entry_count; ++key_value) {
+        if (key_value == 20U || key_value == 30U) {
+            continue;
+        }
+        unsigned char key[4] = {0};
+        put_test_u32_be(key, 0U, key_value);
+        assert_index_entry(&entries, entry_index, row_ids[key_value - 1U], key, sizeof(key));
+        ++entry_index;
+    }
+    assert_index_entry(&entries, entry_index, tail_row_id, tail_key, sizeof(tail_key));
+    ++entry_index;
+    assert_index_entry(
+        &entries,
+        entry_index,
+        changed_update_row_id,
+        changed_update_key,
+        sizeof(changed_update_key)
+    );
+    ++entry_index;
+    assert(entry_index == entries.entry_count);
+    mylite_storage_free_index_entryset(&entries);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
 static void assert_index_root(
     const char *filename,
     const char *schema_name,
@@ -8319,6 +8503,13 @@ static void release_transaction_child(transaction_child child) {
 static void put_test_u32_le(unsigned char *page, size_t offset, unsigned value) {
     for (size_t i = 0U; i < sizeof(uint32_t); ++i) {
         page[offset + i] = (unsigned char)((value >> (unsigned)(i * CHAR_BIT)) & UINT8_MAX);
+    }
+}
+
+static void put_test_u32_be(unsigned char *page, size_t offset, unsigned value) {
+    for (size_t i = 0U; i < sizeof(uint32_t); ++i) {
+        const unsigned shift = (unsigned)((sizeof(uint32_t) - 1U - i) * CHAR_BIT);
+        page[offset + i] = (unsigned char)((value >> shift) & UINT8_MAX);
     }
 }
 

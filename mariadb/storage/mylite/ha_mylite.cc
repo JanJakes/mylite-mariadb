@@ -177,6 +177,10 @@ static int mylite_rebuild_index_leaf_root_for_ddl_key(const char *primary_file,
                                                       const char *table_name,
                                                       TABLE_SHARE *share,
                                                       const Key *ddl_key);
+static int mylite_drop_index_leaf_root(const char *primary_file,
+                                       const char *schema_name,
+                                       const char *table_name,
+                                       uint index_number);
 static int mylite_rebuild_index_leaf_root(const char *primary_file,
                                           const char *schema_name,
                                           const char *table_name,
@@ -3405,10 +3409,25 @@ static int mylite_rebuild_index_leaf_root_for_ddl_key(const char *primary_file,
   {
     if (!mylite_share_key_matches_ddl_key(share, index_number, ddl_key))
       continue;
+    if (!mylite_key_uses_raw_exact_filter(share->key_info + index_number))
+      return mylite_drop_index_leaf_root(primary_file, schema_name, table_name,
+                                         index_number);
     return mylite_rebuild_index_leaf_root(primary_file, schema_name,
                                           table_name, index_number);
   }
   return 0;
+}
+
+static int mylite_drop_index_leaf_root(const char *primary_file,
+                                       const char *schema_name,
+                                       const char *table_name,
+                                       uint index_number)
+{
+  const mylite_storage_result result= mylite_storage_drop_index_root(
+      primary_file, schema_name, table_name, index_number);
+  if (result == MYLITE_STORAGE_OK || result == MYLITE_STORAGE_NOTFOUND)
+    return 0;
+  return mylite_storage_to_handler_error(result);
 }
 
 static int mylite_rebuild_index_leaf_root(const char *primary_file,
@@ -4175,6 +4194,8 @@ static bool mylite_key_fields_may_change(TABLE *table, const KEY *key)
   {
     const KEY_PART_INFO *key_part= key->key_part + part;
     if (!key_part->field || key_part->field->field_index >= table->s->fields)
+      return true;
+    if (key_part->field->vcol_info)
       return true;
     if (bitmap_is_set(table->write_set, key_part->field->field_index))
       return true;

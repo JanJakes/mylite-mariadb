@@ -162,7 +162,11 @@ primary, unique, and secondary indexes append durable index-entry pages and
 serve ordered handler cursors from MariaDB key tuples, including bounded
 BLOB/TEXT prefix key images produced by MariaDB. Those cursors keep sorted key
 metadata and row ids, then materialize the selected row payload lazily when the
-SQL layer asks for a row. `TRUNCATE TABLE` logically
+SQL layer asks for a row. When a catalog-backed published leaf run exists for
+a raw fixed-width key, full durable index cursor construction uses that
+immutable run as the base snapshot and overlays later append-tail mutations,
+rather than rebuilding the same index from the whole append history.
+`TRUNCATE TABLE` logically
 deletes live rows and resets autoincrement state without changing catalog
 metadata. Ordinary `CREATE TABLE IF NOT EXISTS` creates missing routed tables
 and skips existing routed tables without changing their catalog metadata.
