@@ -3218,6 +3218,9 @@ static mylite_storage_result append_cached_row_payload_to_builder(
     mylite_storage_rowset_builder *builder,
     int *out_used_cache
 );
+static int active_row_payload_cache_entry_is_usable(
+    const mylite_storage_row_payload_cache_entry *entry
+);
 static int row_payload_cache_entry_is_valid(const mylite_storage_row_payload_cache_entry *entry);
 static const mylite_storage_row_payload_cache_entry *active_row_payload_cache_entry_for_statement(
     mylite_storage_statement *statement,
@@ -3362,7 +3365,7 @@ static mylite_storage_result put_row_payload_cache_entry(
     const unsigned char *row,
     size_t row_size
 );
-static mylite_storage_result replace_row_payload_cache_entry(
+static mylite_storage_result replace_active_row_payload_cache_entry(
     mylite_storage_row_payload_cache *cache,
     unsigned long long old_row_id,
     unsigned long long new_row_id,
@@ -6164,7 +6167,7 @@ static mylite_storage_result read_indexed_row_payload_from_open_file(
             table_id,
             row_id
         );
-    if (row_payload_cache_entry_is_valid(active_entry)) {
+    if (active_row_payload_cache_entry_is_usable(active_entry)) {
         *out_active_payload_cached = 1;
         return copy_cached_row_payload(active_entry, out_row, inout_row_capacity, out_row_size);
     }
@@ -23069,6 +23072,12 @@ static mylite_storage_result append_cached_row_payload_to_builder(
     return append_row_to_rowset_builder(builder, row_id, entry->row, entry->row_size);
 }
 
+static int active_row_payload_cache_entry_is_usable(
+    const mylite_storage_row_payload_cache_entry *entry
+) {
+    return entry != NULL && entry->row != NULL;
+}
+
 static int row_payload_cache_entry_is_valid(const mylite_storage_row_payload_cache_entry *entry) {
     return entry != NULL && entry->row != NULL &&
            checksum_bytes(entry->row, entry->row_size) == entry->checksum;
@@ -23138,14 +23147,13 @@ static void replace_active_row_payload_in_cache(
         remove_row_payload_cache_entry(cache, old_row_id);
         return;
     }
-    if (new_row_id == 0ULL ||
-        replace_row_payload_cache_entry(
-            cache,
-            old_row_id,
-            new_row_id,
-            new_row,
-            new_row_size
-        ) != MYLITE_STORAGE_OK) {
+    if (new_row_id == 0ULL || replace_active_row_payload_cache_entry(
+                                  cache,
+                                  old_row_id,
+                                  new_row_id,
+                                  new_row,
+                                  new_row_size
+                              ) != MYLITE_STORAGE_OK) {
         remove_row_payload_cache_entry(cache, old_row_id);
     }
 }
@@ -23683,7 +23691,7 @@ static mylite_storage_result put_row_payload_cache_entry(
     return append_row_payload_cache_entry(cache, row_id, row, row_size);
 }
 
-static mylite_storage_result replace_row_payload_cache_entry(
+static mylite_storage_result replace_active_row_payload_cache_entry(
     mylite_storage_row_payload_cache *cache,
     unsigned long long old_row_id,
     unsigned long long new_row_id,
@@ -23732,7 +23740,7 @@ static mylite_storage_result replace_row_payload_cache_entry(
     memcpy(entry->row, new_row, new_row_size);
     entry->row_size = new_row_size;
     entry->row_id = new_row_id;
-    entry->checksum = checksum_bytes(entry->row, entry->row_size);
+    entry->checksum = 0ULL;
     cache->row_bytes = retained_bytes + new_row_size;
     if (old_row_id != new_row_id) {
         maybe_rebuild_row_payload_cache_buckets_after_tombstone(cache);

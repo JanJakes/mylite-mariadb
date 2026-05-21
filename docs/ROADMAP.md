@@ -328,6 +328,9 @@ prepared point updates.
 Row-update maintained-root planning now caches table-level index-root absence
 for the active catalog generation, avoiding repeated catalog copies on hot
 append-only update loops.
+Active row-payload cache reads and replacements now trust active-checkpoint
+cache ownership without repeated row-byte checksums, while durable row-payload
+caches keep checksum validation before use.
 Scoped exact-index and indexed-row lookup paths also mark statement live-row
 caches through the captured active statement instead of rediscovering the same
 ownership from `FILE *`.
