@@ -166,6 +166,9 @@ Stable-key durable handler updates now use MariaDB's write set to skip
 new index-entry serialization, duplicate-key checks, and maintained-root
 planning when no supported index key part can change, while retargeting active
 exact-index caches by row id.
+Handler row-DML now caches immutable table row-lifecycle support and the
+resolved auto-increment field at open time, avoiding repeated table/index
+metadata walks on hot routed insert, update, and delete paths.
 Durable exact-index cache reads now bulk-grow matching entrysets in one pass,
 removing per-match array reallocations from many-match secondary cursors that do
 not use published leaf roots. Exact-index caches now add transient hash buckets

@@ -81,10 +81,13 @@ class ha_mylite: public handler
   mutable bool child_foreign_key_presence;
   mutable bool parent_foreign_key_presence_known;
   mutable bool parent_foreign_key_presence;
+  Field *auto_increment_field;
   bool index_cursor_filtered;
   bool discard_rows;
   bool volatile_rows;
   bool table_has_blob_fields;
+  bool table_supports_row_write;
+  bool table_supports_row_lifecycle;
 
   Mylite_share *get_share();
   void clear_scan_rows();

@@ -187,10 +187,19 @@ static int mylite_drop_foreign_key_for_alter(const char *primary_file,
                                              const char *table_name,
                                              const Lex_ident_column &name);
 static bool mylite_table_supports_row_write(TABLE *table);
+static bool
+mylite_table_supports_row_write_with_auto_increment(TABLE *table,
+                                                    Field *auto_field);
 static bool mylite_table_supports_row_lifecycle(TABLE *table);
 static bool mylite_table_supports_auto_increment(TABLE *table);
+static bool mylite_table_supports_auto_increment_field(TABLE *table,
+                                                       Field *auto_field);
 static bool mylite_table_has_first_key_auto_increment(TABLE *table);
+static bool mylite_table_has_first_key_auto_increment_field(TABLE *table,
+                                                            Field *auto_field);
 static bool mylite_table_has_grouped_auto_increment(TABLE *table);
+static bool mylite_table_has_grouped_auto_increment_field(TABLE *table,
+                                                          Field *auto_field);
 static bool mylite_table_supports_indexes(TABLE *table);
 static bool mylite_key_is_supported(const KEY *key);
 static Field *mylite_auto_increment_field(TABLE *table);
@@ -492,6 +501,10 @@ static int mylite_advance_auto_increment_from_row(const char *primary_file,
                                                   const char *schema_name,
                                                   const char *table_name,
                                                   TABLE *table);
+static int mylite_advance_auto_increment_from_field(const char *primary_file,
+                                                    const char *schema_name,
+                                                    const char *table_name,
+                                                    Field *auto_field);
 static int mylite_find_index_entry(TABLE *table,
                                    const Mylite_index_cursor_entry *entries,
                                    size_t entry_count, const uchar *keys,
@@ -1245,8 +1258,10 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
       child_foreign_key_presence_known(false),
       child_foreign_key_presence(false),
       parent_foreign_key_presence_known(false),
-      parent_foreign_key_presence(false), index_cursor_filtered(false),
-      discard_rows(false), volatile_rows(false), table_has_blob_fields(false)
+      parent_foreign_key_presence(false), auto_increment_field(NULL),
+      index_cursor_filtered(false), discard_rows(false), volatile_rows(false),
+      table_has_blob_fields(false), table_supports_row_write(false),
+      table_supports_row_lifecycle(false)
 {
   storage_schema_name[0]= '\0';
   storage_table_name[0]= '\0';
@@ -1964,6 +1979,11 @@ int ha_mylite::open(const char *name, int, uint)
 
   clear_foreign_key_presence_cache();
   table_has_blob_fields= table && mylite_table_has_blob_fields(table);
+  auto_increment_field= mylite_auto_increment_field(table);
+  table_supports_row_write=
+      mylite_table_supports_row_write_with_auto_increment(
+          table, auto_increment_field);
+  table_supports_row_lifecycle= table_supports_row_write;
 
   int path_error= mylite_table_name_from_path(name, storage_schema_name,
                                               sizeof(storage_schema_name),
@@ -2026,9 +2046,12 @@ int ha_mylite::close(void)
   clear_index_row_scratch();
   clear_record_blob_payloads();
   clear_foreign_key_presence_cache();
+  auto_increment_field= NULL;
   discard_rows= false;
   volatile_rows= false;
   table_has_blob_fields= false;
+  table_supports_row_write= false;
+  table_supports_row_lifecycle= false;
   DBUG_RETURN(0);
 }
 
@@ -2533,7 +2556,7 @@ int ha_mylite::info(uint flag)
     stats.mean_rec_length= table && table->s ? table->s->reclength : 0;
   }
 
-  if ((flag & HA_STATUS_AUTO) && mylite_auto_increment_field(table))
+  if ((flag & HA_STATUS_AUTO) && auto_increment_field)
   {
     unsigned long long next_value= 0ULL;
     const mylite_storage_result auto_result= volatile_rows ?
@@ -2701,7 +2724,7 @@ int ha_mylite::write_row(const uchar *buf)
 
   duplicate_key_index= (uint) -1;
 
-  if (!mylite_table_supports_row_write(table))
+  if (!table_supports_row_write)
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
   if (discard_rows)
     DBUG_RETURN(table->next_number_field ? update_auto_increment() : 0);
@@ -2736,9 +2759,8 @@ int ha_mylite::write_row(const uchar *buf)
 
   if (!volatile_rows && generated_auto_increment)
   {
-    error= mylite_advance_auto_increment_from_row(primary_file,
-                                                  storage_schema(),
-                                                  storage_table(), table);
+    error= mylite_advance_auto_increment_from_field(
+        primary_file, storage_schema(), storage_table(), auto_increment_field);
     if (error)
     {
       mylite_free_index_entries_with_scratch(index_entries, index_key_storage,
@@ -2798,9 +2820,9 @@ int ha_mylite::write_row(const uchar *buf)
 
   if (volatile_rows)
   {
-    Field *auto_field= mylite_auto_increment_field(table);
     ulonglong next_value= 0ULL;
-    if (mylite_next_auto_increment_value_from_field(auto_field, &next_value))
+    if (mylite_next_auto_increment_value_from_field(auto_increment_field,
+                                                    &next_value))
     {
       error= mylite_storage_to_handler_error(
         mylite_volatile_advance_auto_increment(primary_file, storage_schema(),
@@ -2809,9 +2831,8 @@ int ha_mylite::write_row(const uchar *buf)
   }
   else if (auto_increment_row && !generated_auto_increment)
   {
-    error= mylite_advance_auto_increment_from_row(primary_file,
-                                                  storage_schema(),
-                                                  storage_table(), table);
+    error= mylite_advance_auto_increment_from_field(
+        primary_file, storage_schema(), storage_table(), auto_increment_field);
     if (!error)
     {
       const mylite_storage_result preserve_result=
@@ -2866,7 +2887,7 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
 
   if (discard_rows)
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
-  if (!mylite_table_supports_row_lifecycle(table))
+  if (!table_supports_row_lifecycle)
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
   if (current_row_id == 0)
     DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
@@ -2982,9 +3003,9 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
 
   if (volatile_rows)
   {
-    Field *auto_field= mylite_auto_increment_field(table);
     ulonglong next_value= 0ULL;
-    if (mylite_next_auto_increment_value_from_field(auto_field, &next_value))
+    if (mylite_next_auto_increment_value_from_field(auto_increment_field,
+                                                    &next_value))
     {
       error= mylite_storage_to_handler_error(
         mylite_volatile_advance_auto_increment(primary_file, storage_schema(),
@@ -2993,10 +3014,9 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
   }
   else
   {
-    error= mylite_advance_auto_increment_from_row(primary_file,
-                                                  storage_schema(),
-                                                  storage_table(), table);
-    if (!error && mylite_auto_increment_field(table))
+    error= mylite_advance_auto_increment_from_field(
+        primary_file, storage_schema(), storage_table(), auto_increment_field);
+    if (!error && auto_increment_field)
     {
       const mylite_storage_result preserve_result=
         mylite_storage_preserve_auto_increment_on_rollback(primary_file);
@@ -3062,7 +3082,7 @@ int ha_mylite::delete_row(const uchar *buf)
 
   if (discard_rows)
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
-  if (!mylite_table_supports_row_lifecycle(table))
+  if (!table_supports_row_lifecycle)
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
   if (current_row_id == 0)
     DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
@@ -3112,7 +3132,7 @@ int ha_mylite::truncate()
     duplicate_key_index= (uint) -1;
     DBUG_RETURN(0);
   }
-  if (!mylite_table_supports_row_lifecycle(table))
+  if (!table_supports_row_lifecycle)
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
 
   const char *primary_file= mylite_primary_file_path();
@@ -4093,7 +4113,15 @@ static bool mylite_is_alter_backup_table_name(const char *table_name)
 
 static bool mylite_table_supports_row_write(TABLE *table)
 {
-  return mylite_table_supports_auto_increment(table) &&
+  return mylite_table_supports_row_write_with_auto_increment(
+      table, mylite_auto_increment_field(table));
+}
+
+static bool
+mylite_table_supports_row_write_with_auto_increment(TABLE *table,
+                                                    Field *auto_field)
+{
+  return mylite_table_supports_auto_increment_field(table, auto_field) &&
          (table->s->keys == 0 || mylite_table_supports_indexes(table));
 }
 
@@ -4104,16 +4132,29 @@ static bool mylite_table_supports_row_lifecycle(TABLE *table)
 
 static bool mylite_table_supports_auto_increment(TABLE *table)
 {
-  if (!mylite_auto_increment_field(table))
+  return mylite_table_supports_auto_increment_field(
+      table, mylite_auto_increment_field(table));
+}
+
+static bool mylite_table_supports_auto_increment_field(TABLE *table,
+                                                       Field *auto_field)
+{
+  if (!auto_field)
     return true;
 
-  return mylite_table_has_first_key_auto_increment(table) ||
-         mylite_table_has_grouped_auto_increment(table);
+  return mylite_table_has_first_key_auto_increment_field(table, auto_field) ||
+         mylite_table_has_grouped_auto_increment_field(table, auto_field);
 }
 
 static bool mylite_table_has_first_key_auto_increment(TABLE *table)
 {
-  Field *auto_field= mylite_auto_increment_field(table);
+  return mylite_table_has_first_key_auto_increment_field(
+      table, mylite_auto_increment_field(table));
+}
+
+static bool mylite_table_has_first_key_auto_increment_field(TABLE *table,
+                                                            Field *auto_field)
+{
   if (!auto_field)
     return false;
 
@@ -4130,7 +4171,13 @@ static bool mylite_table_has_first_key_auto_increment(TABLE *table)
 
 static bool mylite_table_has_grouped_auto_increment(TABLE *table)
 {
-  Field *auto_field= mylite_auto_increment_field(table);
+  return mylite_table_has_grouped_auto_increment_field(
+      table, mylite_auto_increment_field(table));
+}
+
+static bool mylite_table_has_grouped_auto_increment_field(TABLE *table,
+                                                          Field *auto_field)
+{
   if (!auto_field)
     return false;
 
@@ -7502,7 +7549,16 @@ static int mylite_advance_auto_increment_from_row(const char *primary_file,
                                                   const char *table_name,
                                                   TABLE *table)
 {
-  Field *auto_field= mylite_auto_increment_field(table);
+  return mylite_advance_auto_increment_from_field(
+      primary_file, schema_name, table_name,
+      mylite_auto_increment_field(table));
+}
+
+static int mylite_advance_auto_increment_from_field(const char *primary_file,
+                                                    const char *schema_name,
+                                                    const char *table_name,
+                                                    Field *auto_field)
+{
   ulonglong next_value= 0ULL;
   if (!mylite_next_auto_increment_value_from_field(auto_field, &next_value))
     return 0;
