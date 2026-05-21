@@ -99,10 +99,9 @@ DDL/DML behavior. Host-file SQL imports are omitted because `LOAD DATA` and
 - Historical bundle-size research shows archive symbol stripping as a
   packaging-only reduction that passed relinked smokes. The old `strip -g`
   command is GNU-specific; Apple `strip` accepts `-S -x` for debug/local-symbol
-  stripping.
-- On the current macOS baseline, `strip -S -x` plus `ranlib` on a copy of
-  `libmariadbd.a` reduces the archive by 712,680 bytes without changing archive
-  membership.
+  stripping and `-u -r` for a relink-safe undefined/dynamic-symbol strip.
+- On the current macOS baseline, `strip -u -r` plus `ranlib` on
+  `libmariadbd.a` saves 567,616 bytes without changing archive membership.
 - Setting `PLUGIN_PERFSCHEMA=NO` and keeping archive stripping enabled reduces
   the current archive to 31,529,704 bytes, 30.07 MiB, and 712 members.
 - Building the same profile with `CMAKE_BUILD_TYPE=MinSizeRel` reduces the
@@ -445,14 +444,21 @@ DDL/DML behavior. Host-file SQL imports are omitted because `LOAD DATA` and
   retained XA command symbols fail-closed, preserves `XA RECOVER` prepare-time
   metadata, leaves ordinary native-engine transactions on implicit XIDs, and
   reduces the stripped archive to 26,028,560 bytes, 24.82 MiB, and 693 members.
+- Applying the Darwin relink-safe archive strip mode keeps the archive
+  relinkable with the current embedded tests, records the strip signature in
+  the marker file, and reduces the stripped archive to 26,020,528 bytes,
+  24.82 MiB, and 693 members.
 
 ## Proposed Design
 
 After building the embedded archive, `tools/mariadb-embedded-build` strips
-debug and local symbols from `libmariadbd.a` and refreshes the archive index
-with `ranlib`. The wrapper records a build-local marker after stripping so a
-no-op rebuild does not mutate an already-stripped archive or drift the measured
-size.
+symbols from `libmariadbd.a` and refreshes the archive index with `ranlib`. On
+Darwin, it uses `strip -u -r`, which was verified by relinking and running the
+embedded tests against a copied archive. Other platforms keep the existing
+debug/local-symbol strip mode. The wrapper records a build-local marker after
+stripping so a no-op rebuild does not mutate an already-stripped archive or
+drift the measured size; the marker includes a strip signature so policy
+changes trigger a fresh strip pass.
 
 The embedded baseline uses `CMAKE_BUILD_TYPE=MinSizeRel` so MariaDB compiles
 the same runtime surface with size-oriented release flags.
@@ -1023,8 +1029,9 @@ run against the same native engine members.
 
 ## Binary-Size Impact
 
-The first step is archive-only: 712,680 bytes from debug/local-symbol
-stripping. Disabling Performance Schema removes unused static plugin members.
+The first step was archive-only symbol stripping; the current Darwin strip
+mode saves 567,616 bytes on the current archive. Disabling Performance Schema
+removes unused static plugin members.
 Switching the same profile to `MinSizeRel`, omitting Feedback, and compiling
 embedded `HELP` to stubs brings the archive to 30,296,952 bytes / 28.89 MiB.
 Disabling statement profiling brings the current archive to 30,228,928 bytes /
@@ -1255,6 +1262,11 @@ Omitting the full external-XA runtime brings the current archive to
 26,028,560 bytes / 24.82 MiB, 5,501,144 bytes smaller than the Release build
 with Performance Schema disabled, 7,101,080 bytes smaller than the
 symbol-stripped baseline with Performance Schema still built, and 7,813,760
+bytes smaller than the original broad archive.
+Using the Darwin relink-safe archive strip mode brings the current archive to
+26,020,528 bytes / 24.82 MiB, 5,509,176 bytes smaller than the Release build
+with Performance Schema disabled, 7,109,112 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 7,821,792
 bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact

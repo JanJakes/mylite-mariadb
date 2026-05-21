@@ -238,7 +238,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,028,560 bytes / 24.82 MiB |
+| Archive size | 26,020,528 bytes / 24.82 MiB |
 | Archive members | 693 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -316,8 +316,10 @@ Omitting the mmap-backed `tc.log` transaction coordinator reduces the current
 pre-strip archive to 26,599,376 bytes / 25.37 MiB.
 Omitting the full external-XA runtime reduces the current pre-strip archive to
 26,588,144 bytes / 25.36 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 559,584 bytes
-without changing archive membership or runtime behavior. The `SFORMAT()` and
+Post-build platform-specific archive stripping plus `ranlib` saves another
+567,616 bytes without changing archive membership or runtime behavior. On
+Darwin, the wrapper uses `strip -u -r` after relink verification; other
+platforms keep the debug/local-symbol strip mode. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
 runtime omission saves 87,416 bytes and one archive member. The embedded
@@ -375,10 +377,11 @@ client authentication plugin handshake support saves 6,704 pre-strip bytes and
 `tc.log` transaction coordinator saves 8,120 pre-strip bytes and 8,064
 stripped bytes with no member-count change. Omitting the full external-XA
 runtime saves 11,232 pre-strip bytes and 10,688 stripped bytes with no
-member-count change. The final archive is
-5,501,144 bytes smaller than the Release build with Performance Schema
-disabled, 7,101,080 bytes smaller than the symbol-stripped baseline that still
-built Performance Schema, and 7,813,760 bytes smaller than the original broad
+member-count change. Using the Darwin relink-safe archive strip mode saves
+another 8,032 stripped bytes with no member-count change. The final archive is
+5,509,176 bytes smaller than the Release build with Performance Schema
+disabled, 7,109,112 bytes smaller than the symbol-stripped baseline that still
+built Performance Schema, and 7,821,792 bytes smaller than the original broad
 archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
