@@ -890,7 +890,6 @@ static mylite_storage_result io_error_result_from_errno(int error_number);
 static int is_storage_full_error(int error_number);
 static mylite_storage_result flush_parent_directory(const char *filename);
 static mylite_storage_result close_created_file(FILE *file, const char *filename);
-static mylite_storage_result open_existing_file(const char *filename, FILE **out_file);
 static mylite_storage_result open_existing_file_scope(
     const char *filename,
     mylite_storage_file_scope *out_scope
@@ -7348,7 +7347,8 @@ mylite_storage_result mylite_storage_find_index_entry(
     }
 
     free_catalog_image(&catalog);
-    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     if (result != MYLITE_STORAGE_OK) {
@@ -7810,19 +7810,29 @@ mylite_storage_result mylite_storage_index_prefix_exists(
 
     *out_exists = 0;
 
-    FILE *file = NULL;
-    mylite_storage_result result = open_existing_file(filename, &file);
+    mylite_storage_file_scope file_scope = {0};
+    mylite_storage_result result = open_existing_file_scope(filename, &file_scope);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
 
+    FILE *file = file_scope.file;
+    mylite_storage_statement *active_cache_statement =
+        active_cache_statement_from_statement(file_scope.active_statement);
     mylite_storage_header header = {0};
     unsigned long long table_id = 0ULL;
     mylite_storage_row_state_map row_state_map = {0};
     mylite_storage_index_prefix_match_list matches = {0};
-    result = read_header(file, &header);
+    result = read_header_from_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
+        result = find_table_id_in_statement(
+            file,
+            &header,
+            active_cache_statement,
+            schema_name,
+            table_name,
+            &table_id
+        );
     }
     for (unsigned long long page_id = MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT;
          result == MYLITE_STORAGE_OK && page_id < header.page_count;
@@ -7905,7 +7915,8 @@ mylite_storage_result mylite_storage_index_prefix_exists(
 
     free(matches.matches);
     free_row_state_map(&row_state_map);
-    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     if (result != MYLITE_STORAGE_OK) {
@@ -10423,15 +10434,6 @@ static mylite_storage_result close_created_file(FILE *file, const char *filename
     }
 
     remove(filename);
-    return result;
-}
-
-static mylite_storage_result open_existing_file(const char *filename, FILE **out_file) {
-    mylite_storage_file_scope scope = {0};
-    const mylite_storage_result result = open_existing_file_scope(filename, &scope);
-    if (result == MYLITE_STORAGE_OK) {
-        *out_file = scope.file;
-    }
     return result;
 }
 
