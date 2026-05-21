@@ -1276,6 +1276,12 @@ void ha_mylite::clear_scan_rows()
 
 void ha_mylite::clear_index_cursor()
 {
+  if (!index_keys && !index_entries && !index_rows && !index_row_offsets &&
+      !index_row_sizes && index_row_bytes == 0 && index_row_count == 0 &&
+      index_row_index == 0 && index_cursor_number == MAX_KEY &&
+      !index_cursor_filtered)
+    return;
+
   if (index_keys && index_keys != index_inline_key)
     mylite_storage_free(index_keys);
   if (index_entries && index_entries != &index_inline_entry)

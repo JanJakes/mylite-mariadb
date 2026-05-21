@@ -369,6 +369,8 @@ Fixed-width exact-index cache key hash and compare helpers are now hot-inlined
 at their cache-probe call sites.
 Handler index cursor cleanup now skips storage free-wrapper calls for already
 empty cursor buffers while preserving inline-buffer ownership checks.
+Already-empty handler index cursor cleanup also returns before rewriting cursor
+state while preserving logical no-row cursor resets.
 Small buffered-page undo captures now skip duplicate lookup and bucket ensure
 work when the active statement has no prior undo entries and no buckets yet.
 Durable handler write locks now defer MEMORY/HEAP statement snapshots until a
