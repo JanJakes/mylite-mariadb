@@ -74,6 +74,7 @@ surface that does not fit a local directory-owned library:
 - network client authentication plugin handshake support,
 - server utility SQL functions,
 - vector SQL functions and MHNSW vector indexes,
+- legacy XML SQL helper functions,
 - rarely used optional engines or plugins unless a slice justifies them.
 
 The minimal embedded build establishes the first baseline. Later slices record
@@ -138,6 +139,10 @@ proves direct and prepared `VEC_*` calls fail predictably and vector-index DDL
 does not create application tables; ordinary scalar functions, JSON,
 GEOMETRY/GIS, DDL/DML, transactions, native storage, and retained `VECTOR(N)`
 type parsing remain separate supported or planned surfaces.
+Legacy XML SQL helpers are omitted after coverage proves direct and prepared
+`EXTRACTVALUE()` and `UPDATEXML()` calls fail predictably; ordinary SQL, JSON,
+GEOMETRY/GIS, DDL/DML, transactions, native storage, and the separately
+unsupported `LOAD XML` host-file import boundary remain unchanged.
 Startup option rows for disabled server topology and dynamic-plugin-loading
 surfaces are omitted after source review proves the retained `libmylite`
 startup vector still uses only serverless, directory-owned options.

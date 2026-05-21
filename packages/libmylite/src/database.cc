@@ -237,6 +237,7 @@ bool is_unsupported_server_surface_sql(std::string_view sql, const std::string &
 bool is_unsupported_oracle_sql_mode_statement(std::string_view sql);
 bool is_unsupported_procedure_analyse_statement(std::string_view sql);
 bool is_unsupported_vector_runtime_statement(std::string_view sql);
+bool is_unsupported_xml_sql_function_statement(std::string_view sql);
 bool is_unsupported_account_or_event_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_plugin_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_udf_statement(const SqlPolicyTokens &tokens);
@@ -246,6 +247,7 @@ bool is_unsupported_xa_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_replication_function_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_vector_sql_function_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_vector_index_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_xml_sql_function_call(const SqlPolicyTokens &tokens);
 bool is_unsupported_server_utility_function_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_sql_handler_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_select_file_statement(const SqlPolicyTokens &tokens);
@@ -1140,6 +1142,11 @@ int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql) {
         return MYLITE_ERROR;
     }
 
+    if (is_unsupported_xml_sql_function_statement(sql)) {
+        set_error(db, MYLITE_ERROR, "XML SQL functions are not supported by MyLite");
+        return MYLITE_ERROR;
+    }
+
     if (is_unsupported_server_surface_sql(sql, db.current_schema)) {
         set_error(db, MYLITE_ERROR, "server-owned SQL surface is not supported by MyLite");
         return MYLITE_ERROR;
@@ -1184,6 +1191,11 @@ bool is_unsupported_vector_runtime_statement(std::string_view sql) {
     const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
     return is_unsupported_vector_sql_function_statement(tokens) ||
            is_unsupported_vector_index_statement(tokens);
+}
+
+bool is_unsupported_xml_sql_function_statement(std::string_view sql) {
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    return is_unsupported_xml_sql_function_call(tokens);
 }
 
 bool is_unsupported_server_surface_sql(std::string_view sql, const std::string &current_schema) {
@@ -1360,6 +1372,17 @@ bool is_unsupported_vector_index_statement(const SqlPolicyTokens &tokens) {
         }
         if (token_equals(tokens.values[index + 1U], "(") && index > 0U &&
             token_in(tokens.values[index - 1U], "(", ",")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool is_unsupported_xml_sql_function_call(const SqlPolicyTokens &tokens) {
+    for (std::size_t index = 0; index + 1U < tokens.count; ++index) {
+        if ((identifier_token_equals(tokens.values[index], "EXTRACTVALUE") ||
+             identifier_token_equals(tokens.values[index], "UPDATEXML")) &&
+            token_equals(tokens.values[index + 1U], "(")) {
             return true;
         }
     }

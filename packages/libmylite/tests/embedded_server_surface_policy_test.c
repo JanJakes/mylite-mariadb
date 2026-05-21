@@ -697,6 +697,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SELECT 'LOAD DATA INFILE' AS literal");
     exec_ok(db, "SELECT 'SLEEP()' AS literal");
     exec_ok(db, "SELECT 'VEC_FROMTEXT()' AS literal");
+    exec_ok(db, "SELECT 'EXTRACTVALUE()' AS literal");
     exec_ok(db, "SELECT 'HANDLER app.t OPEN' AS literal");
     exec_ok(db, "SELECT 'INTO OUTFILE /tmp/mylite-out.txt' AS literal");
     exec_ok(db, "SHOW VARIABLES LIKE 'version'");
@@ -846,6 +847,8 @@ static void assert_server_sql_rejected(mylite_db *db) {
         "vector SQL runtime"
     );
     expect_error(db, "SELECT VEC_DISTANCE_COSINE(X'0000803F', X'00000040')", "vector SQL runtime");
+    expect_error(db, "SELECT EXTRACTVALUE('<a>v</a>', '/a')", "XML SQL functions");
+    expect_error(db, "SELECT UPDATEXML('<a>v</a>', '/a', '<a>w</a>')", "XML SQL functions");
     expect_error(db, "SET GLOBAL gtid_binlog_state = '0-1-1'", "server-owned SQL surface");
     expect_error(db, "SET @@GLOBAL.gtid_slave_pos = '0-1-1'", "server-owned SQL surface");
     expect_error(db, "SET gtid_strict_mode = ON", "server-owned SQL surface");
@@ -1094,6 +1097,8 @@ static void assert_server_sql_rejected(mylite_db *db) {
         "SELECT VEC_DISTANCE_COSINE(X'0000803F', X'00000040')",
         "vector SQL runtime"
     );
+    expect_prepare_error(db, "SELECT EXTRACTVALUE('<a>v</a>', '/a')", "XML SQL functions");
+    expect_prepare_error(db, "SELECT UPDATEXML('<a>v</a>', '/a', '<a>w</a>')", "XML SQL functions");
     expect_prepare_error(db, "SET GLOBAL gtid_binlog_state = '0-1-1'", "server-owned SQL surface");
     expect_prepare_error(db, "SET gtid_strict_mode = ON", "server-owned SQL surface");
     expect_prepare_error(db, "HANDLER app.t OPEN", "server-owned SQL surface");

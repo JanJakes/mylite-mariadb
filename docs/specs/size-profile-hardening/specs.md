@@ -84,6 +84,11 @@ MariaDB vector search is a newer optional search surface outside the current
 embedded compatibility target; ordinary scalar functions, JSON, GEOMETRY/GIS,
 DDL/DML, transactions, native storage, and retained `VECTOR(N)` type parsing
 remain separate surfaces.
+Legacy XML SQL helper functions are omitted because `EXTRACTVALUE()` and
+`UPDATEXML()` are legacy XPath helpers outside the current embedded
+compatibility target; ordinary SQL, JSON, GEOMETRY/GIS, native storage, and
+the separately unsupported `LOAD XML` host-file import boundary remain
+unchanged.
 
 ## Source Findings
 
@@ -106,7 +111,7 @@ remain separate surfaces.
   command is GNU-specific; Apple `strip` accepts `-S -x` for debug/local-symbol
   stripping and `-u -r` for a relink-safe undefined/dynamic-symbol strip.
 - On the current macOS baseline, `strip -S -x -u -r` plus `ranlib` on
-  `libmariadbd.a` saves 558,576 bytes without changing archive membership.
+  `libmariadbd.a` saves 555,624 bytes without changing archive membership.
 - Setting `PLUGIN_PERFSCHEMA=NO` and keeping archive stripping enabled reduces
   the current archive to 31,529,704 bytes, 30.07 MiB, and 712 members.
 - Building the same profile with `CMAKE_BUILD_TYPE=MinSizeRel` reduces the
@@ -456,12 +461,19 @@ remain separate surfaces.
   archive relinkable with the current embedded tests, records the strip
   signature in the marker file, and reduces the stripped archive to 25,937,816
   bytes, 24.74 MiB, and 692 members.
+- Omitting legacy XML SQL helper functions behind
+  `MYLITE_WITH_XML_SQL_FUNCTIONS=0` reduces the stripped archive to 25,723,176
+  bytes, 24.53 MiB, and 691 members.
 - `mariadb/sql/item_vectorfunc.cc` implements MariaDB `VEC_*` conversion and
   distance functions, while `mariadb/sql/vector_mhnsw.cc` implements the
   mandatory `mhnsw` vector-index plugin, cache, transaction participant, and
   index maintenance entry points. Retained SQL/table/handler sources reference
   `mhnsw_*` declarations, so the embedded profile needs fail-closed stubs when
   the runtime is omitted.
+- `mariadb/sql/item_xmlfunc.cc` implements MariaDB `EXTRACTVALUE()` and
+  `UPDATEXML()` runtime. `mariadb/sql/item_create.cc` registers those native
+  function builders. Retained `LOAD XML` parser and import code is separate
+  and already rejected by MyLite host-file import policy.
 
 ## Proposed Design
 
@@ -814,6 +826,13 @@ mandatory `mhnsw` plugin registration. MyLite policy rejects direct and
 prepared `VEC_*` calls before dispatch, and vector-index DDL fails without
 creating application tables.
 
+The embedded archive omits legacy XML SQL helper functions by setting
+`MYLITE_WITH_XML_SQL_FUNCTIONS=0` in the MyLite baseline. The option defaults
+to `ON` so inherited MariaDB builds keep upstream XML helper behavior. The
+disabled profile omits `item_xmlfunc.cc` and removes the `EXTRACTVALUE()` and
+`UPDATEXML()` function builders from the native function registry. MyLite
+policy rejects direct and prepared XML helper calls before dispatch.
+
 The embedded archive omits PROXY protocol listener support by setting
 `MYLITE_WITH_PROXY_PROTOCOL=0` in the MyLite baseline. The option defaults to
 `ON` so normal MariaDB builds keep upstream listener behavior. The disabled
@@ -901,6 +920,9 @@ omitted after retained no-binlog paths no longer reference them. Server utility
 SQL function builders and item implementations are omitted from the embedded
 function registry. `LOAD DATA` and `LOAD XML` import runtime is replaced with
 a fail-closed embedded source while small retained parser/item helpers remain.
+Vector SQL function and MHNSW vector-index runtime are omitted, and legacy XML
+SQL helper builders and runtime are omitted from the embedded function
+registry.
 Inherited network client authentication plugin descriptors and plugin VIO
 handshake helpers are compiled out while retained embedded connection
 attributes and server VIO info helpers stay linked.
@@ -934,6 +956,14 @@ functions are not removed by this slice.
 surfaces. Rejecting them and omitting their runtime does not affect ordinary
 `INSERT`, prepared statement bindings, `INSERT ... SELECT`, native storage
 engines, JSON, GEOMETRY/GIS, DDL, DML, transactions, or the public C API.
+Vector SQL and MHNSW vector-index runtime is a newer optional search surface.
+Omitting it does not affect ordinary scalar functions, JSON, GEOMETRY/GIS,
+DDL, DML, transactions, native storage, prepared statements, or retained
+`VECTOR(N)` type parsing.
+Legacy XML SQL helpers are XPath helper functions. Omitting `EXTRACTVALUE()`
+and `UPDATEXML()` does not affect ordinary SQL, JSON, GEOMETRY/GIS, native
+storage, prepared statements, or the already unsupported `LOAD XML` host-file
+import boundary.
 Network client authentication plugin negotiation is a raw inherited
 client/server handshake surface. Omitting the descriptors and plugin VIO
 dialog helpers does not affect `libmylite` directory opens, ordinary SQL,
@@ -1040,7 +1070,9 @@ trimming only removes in-memory diagnostic publication. Dynamic plugin loading
 trimming does not remove the transient database-local plugin directory because
 retained MariaDB startup code still expects the directory setting. Host-file
 import trimming removes caller-named file reads and client-file streams rather
-than changing MyLite database-directory storage.
+than changing MyLite database-directory storage. Vector and XML SQL helper
+trimming removes code paths only; it does not add, remove, or relocate database
+directory state.
 
 ## Public API Impact
 
@@ -1054,7 +1086,7 @@ run against the same native engine members.
 ## Binary-Size Impact
 
 The first step was archive-only symbol stripping; the current Darwin strip
-mode saves 558,576 bytes on the current archive. Disabling Performance Schema
+mode saves 555,624 bytes on the current archive. Disabling Performance Schema
 removes unused static plugin members.
 Switching the same profile to `MinSizeRel`, omitting Feedback, and compiling
 embedded `HELP` to stubs brings the archive to 30,296,952 bytes / 28.89 MiB.
@@ -1293,6 +1325,11 @@ combined Darwin relink-safe archive strip mode, brings the current archive to
 with Performance Schema disabled, 7,191,824 bytes smaller than the
 symbol-stripped baseline with Performance Schema still built, and 7,904,504
 bytes smaller than the original broad archive.
+Omitting legacy XML SQL helper functions brings the current archive to
+25,723,176 bytes / 24.53 MiB, 5,806,528 bytes smaller than the Release build
+with Performance Schema disabled, 7,406,464 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 8,119,144
+bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -1507,6 +1544,10 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   DDL fails without creating application tables, `item_vectorfunc.cc.o` and
   `vector_mhnsw.cc.o` are absent, and `mylite_vector_sql_runtime_disabled.cc.o`
   is present.
+  XML SQL helper functions are omitted from the embedded archive; direct and
+  prepared `EXTRACTVALUE()` and `UPDATEXML()` calls are rejected,
+  `item_xmlfunc.cc.o` is absent, and ordinary JSON, GEOMETRY/GIS, scalar SQL,
+  DDL/DML, transactions, and native storage remain covered.
   Persistent
   optimizer-statistics storage is omitted, `use_stat_tables` starts as `NEVER`,
   histogram collection starts at size `0`, persistent statistics SQL and

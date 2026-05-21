@@ -21,7 +21,8 @@ storage-engine, JSON, GEOMETRY/GIS, charset, collation, or API functionality.
   executable that still runs with its libraries. Applied together to the
   static archive, the combined mode preserves enough external symbol
   information for the current `libmylite` embedded build to relink.
-- A clean rebuilt current archive measured:
+- The vector-trim profile used to correct the clean-build strip policy
+  measured:
 
   | Mode | Bytes |
   | --- | ---: |
@@ -54,8 +55,8 @@ copy of the more aggressively stripped archive.
 
 ## Binary-Size Impact
 
-The current macOS embedded archive changes from 26,496,392 bytes to 25,937,816
-bytes, saving 558,576 bytes with no archive-member count change.
+That macOS embedded archive changed from 26,496,392 bytes to 25,937,816 bytes,
+saving 558,576 bytes with no archive-member count change.
 
 ## Test And Verification Plan
 

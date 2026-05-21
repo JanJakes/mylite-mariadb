@@ -476,6 +476,10 @@ default embedded profile. `VEC_FROMTEXT()`, `VEC_TOTEXT()`, `VEC_DISTANCE()`,
 `VEC_DISTANCE_EUCLIDEAN()`, and `VEC_DISTANCE_COSINE()` fail through MyLite
 policy, while the retained `VECTOR(N)` type parser is a separate compatibility
 surface.
+Legacy XML SQL helpers are omitted from the default embedded profile.
+`EXTRACTVALUE()` and `UPDATEXML()` fail through MyLite policy; this does not
+change JSON, GEOMETRY/GIS, ordinary SQL, or the separately unsupported
+`LOAD XML` host-file import boundary.
 Optimizer trace variables and
 `INFORMATION_SCHEMA.OPTIMIZER_TRACE`, including unqualified reads while
 `information_schema` is the current schema, are rejected as server diagnostics.
