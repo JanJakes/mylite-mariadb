@@ -112,7 +112,9 @@ Active checkpoints can seed a complete live-row-id list from that durable
 cache, maintain insert/update/delete changes in process memory, and promote the
 updated list on top-level commit. Rollback, catalog changes, truncate, cache
 overflow, or any inconsistent mutation state discards the active list and keeps
-the existing append-history scan fallback.
+the existing append-history scan fallback. Complete live-row caches retain
+amortized row-id capacity under their bounded entry limit, so maintained
+inserts do not resize the row-id array for every appended row id.
 Active exact-index caches follow the same transient handoff shape: a new active
 cache can seed from a durable exact-index cache only when the filename, catalog
 root, catalog generation, page count, table id, index number, and key width all

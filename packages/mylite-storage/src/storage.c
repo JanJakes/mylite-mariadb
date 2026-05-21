@@ -141,6 +141,7 @@ typedef struct mylite_storage_live_row_id_cache {
     unsigned long long table_id;
     unsigned long long *row_ids;
     size_t count;
+    size_t capacity;
 } mylite_storage_live_row_id_cache;
 
 typedef struct mylite_storage_live_row_id_cache_set {
@@ -16811,12 +16812,30 @@ static int append_row_id_to_cache(
     }
 
     const size_t new_count = cache->count + 1U;
-    unsigned long long *row_ids =
-        (unsigned long long *)realloc(cache->row_ids, new_count * sizeof(*cache->row_ids));
-    if (row_ids == NULL) {
-        return 0;
+    if (new_count > cache->capacity) {
+        size_t new_capacity = cache->capacity == 0U ? 8U : cache->capacity;
+        while (new_capacity < new_count) {
+            if (new_capacity > SIZE_MAX / 2U) {
+                new_capacity = new_count;
+                break;
+            }
+            new_capacity *= 2U;
+        }
+        if (new_capacity > MYLITE_STORAGE_DURABLE_LIVE_ROW_ID_ENTRY_LIMIT) {
+            new_capacity = MYLITE_STORAGE_DURABLE_LIVE_ROW_ID_ENTRY_LIMIT;
+        }
+        if (new_capacity > SIZE_MAX / sizeof(*cache->row_ids)) {
+            return 0;
+        }
+
+        unsigned long long *row_ids =
+            (unsigned long long *)realloc(cache->row_ids, new_capacity * sizeof(*cache->row_ids));
+        if (row_ids == NULL) {
+            return 0;
+        }
+        cache->row_ids = row_ids;
+        cache->capacity = new_capacity;
     }
-    cache->row_ids = row_ids;
     cache->row_ids[cache->count] = row_id;
     cache->count = new_count;
     return 1;
@@ -16952,6 +16971,7 @@ static mylite_storage_result assign_live_row_id_cache(
     free(cache->row_ids);
     cache->row_ids = copy.row_ids;
     cache->count = copy.count;
+    cache->capacity = copy.capacity;
     return MYLITE_STORAGE_OK;
 }
 

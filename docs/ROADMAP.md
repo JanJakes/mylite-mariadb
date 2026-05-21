@@ -171,7 +171,9 @@ header fingerprint, avoiding repeated append-history scans for unchanged
 checkpoints after an initial count or scan. Active transactions can now maintain
 those seeded live row-id lists through insert/update/delete mutations and
 publish the maintained list on commit, avoiding the first post-commit live-row
-scan when the pre-transaction checkpoint was already cached. The
+scan when the pre-transaction checkpoint was already cached; those complete
+live-row caches keep amortized row-id capacity under their existing entry bound
+instead of resizing on every maintained append. The
 common inline update path now writes replacement row, row-state, and
 replacement index-entry pages as one contiguous append run, reducing per-update
 write syscall overhead without changing the durable page format. Active
