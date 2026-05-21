@@ -5550,6 +5550,88 @@ static void test_maintained_index_root_page_format(void) {
     );
 
     memcpy(corrupt_page, page, sizeof(corrupt_page));
+    put_test_u32_le(
+        corrupt_page,
+        MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAGS_OFFSET,
+        MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAG_SINGLE_PAGE |
+            MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAG_HAS_OVERFLOW_TAIL
+    );
+    put_test_u64_le(corrupt_page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_OVERFLOW_TAIL_PAGE_OFFSET, 8ULL);
+    rechecksum_test_index_root_page(corrupt_page);
+    assert(
+        mylite_storage_test_decode_maintained_index_root_page(
+            &header,
+            4ULL,
+            corrupt_page,
+            &table_id,
+            &index_number,
+            &key_size,
+            &entry_count
+        ) == MYLITE_STORAGE_OK
+    );
+
+    memcpy(corrupt_page, page, sizeof(corrupt_page));
+    put_test_u64_le(corrupt_page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_OVERFLOW_TAIL_PAGE_OFFSET, 8ULL);
+    rechecksum_test_index_root_page(corrupt_page);
+    assert(
+        mylite_storage_test_decode_maintained_index_root_page(
+            &header,
+            4ULL,
+            corrupt_page,
+            &table_id,
+            &index_number,
+            &key_size,
+            &entry_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    memcpy(corrupt_page, page, sizeof(corrupt_page));
+    put_test_u32_le(
+        corrupt_page,
+        MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAGS_OFFSET,
+        MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAG_SINGLE_PAGE |
+            MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAG_HAS_OVERFLOW_TAIL
+    );
+    put_test_u64_le(corrupt_page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_OVERFLOW_TAIL_PAGE_OFFSET, 4ULL);
+    rechecksum_test_index_root_page(corrupt_page);
+    assert(
+        mylite_storage_test_decode_maintained_index_root_page(
+            &header,
+            4ULL,
+            corrupt_page,
+            &table_id,
+            &index_number,
+            &key_size,
+            &entry_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    memcpy(corrupt_page, page, sizeof(corrupt_page));
+    put_test_u32_le(
+        corrupt_page,
+        MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAGS_OFFSET,
+        MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAG_SINGLE_PAGE |
+            MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAG_HAS_OVERFLOW_TAIL
+    );
+    put_test_u64_le(
+        corrupt_page,
+        MYLITE_STORAGE_FORMAT_INDEX_ROOT_OVERFLOW_TAIL_PAGE_OFFSET,
+        header.page_count
+    );
+    rechecksum_test_index_root_page(corrupt_page);
+    assert(
+        mylite_storage_test_decode_maintained_index_root_page(
+            &header,
+            4ULL,
+            corrupt_page,
+            &table_id,
+            &index_number,
+            &key_size,
+            &entry_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    memcpy(corrupt_page, page, sizeof(corrupt_page));
     corrupt_page[MYLITE_STORAGE_FORMAT_INDEX_ROOT_PAYLOAD_OFFSET] ^= 0x01U;
     assert(
         mylite_storage_test_decode_maintained_index_root_page(
@@ -5949,11 +6031,11 @@ static void test_maintained_index_root_overflow_tail(void) {
     static const unsigned char row_1[] = {0x00U, 0x01U, 'a'};
     static const unsigned char row_2[] = {0x00U, 0x02U, 'b'};
     static const unsigned char row_3[] = {0x00U, 0x03U, 'c'};
-    static const unsigned char row_4[] = {0x00U, 0x04U, 'd'};
     static const unsigned char updated_row_4[] = {0x00U, 0x40U, 'e'};
     static const size_t key_size = 1330U;
     char *root = make_temp_root();
     char *filename = path_join(root, "maintained-index-root-overflow-tail.mylite");
+    unsigned char row_4[9000U] = {0};
     unsigned char key_1[1330U] = {0};
     unsigned char key_2[1330U] = {0};
     unsigned char key_3[1330U] = {0};
@@ -6030,6 +6112,9 @@ static void test_maintained_index_root_overflow_tail(void) {
     key_3[0] = 0x03U;
     key_4[0] = 0x04U;
     key_5[0] = 0x05U;
+    row_4[0] = 0x00U;
+    row_4[1] = 0x04U;
+    row_4[2] = 'd';
 
     assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
     assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
@@ -6093,14 +6178,34 @@ static void test_maintained_index_root_overflow_tail(void) {
             &row_4_id
         ) == MYLITE_STORAGE_OK
     );
+    const unsigned long long overflow_blob_pages =
+        ((sizeof(row_4) - 1U) /
+         (MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_BLOB_PAYLOAD_OFFSET)) +
+        1ULL;
+    const unsigned long long overflow_tail_page =
+        before_overflow_pages + overflow_blob_pages + 1ULL;
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
-    assert(header.page_count == before_overflow_pages + 2ULL);
+    assert(header.page_count == overflow_tail_page + 1ULL);
+    assert(overflow_tail_page > root_page + 1ULL);
     assert_index_root(filename, "app", "posts", 0U, root_page, 3ULL);
     read_test_page(filename, root_page, root_page_bytes);
     assert(
         (get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAGS_OFFSET) &
          MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAG_HAS_OVERFLOW_TAIL) != 0U
     );
+    assert(
+        get_test_u64_le(
+            root_page_bytes,
+            MYLITE_STORAGE_FORMAT_INDEX_ROOT_OVERFLOW_TAIL_PAGE_OFFSET
+        ) == overflow_tail_page
+    );
+    put_test_u64_le(
+        root_page_bytes,
+        MYLITE_STORAGE_FORMAT_INDEX_ROOT_OVERFLOW_TAIL_PAGE_OFFSET,
+        0ULL
+    );
+    rechecksum_test_index_root_page(root_page_bytes);
+    write_test_page(filename, root_page, root_page_bytes);
 
     assert_index_entry_lookup(filename, 0U, key_1, key_size, MYLITE_STORAGE_OK, row_1_id);
     assert_index_entry_lookup(filename, 0U, key_2, key_size, MYLITE_STORAGE_OK, row_2_id);
@@ -6137,6 +6242,12 @@ static void test_maintained_index_root_overflow_tail(void) {
         (get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAGS_OFFSET) &
          MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAG_HAS_OVERFLOW_TAIL) == 0U
     );
+    assert(
+        get_test_u64_le(
+            root_page_bytes,
+            MYLITE_STORAGE_FORMAT_INDEX_ROOT_OVERFLOW_TAIL_PAGE_OFFSET
+        ) == 0ULL
+    );
     assert_index_entry_lookup(filename, 0U, key_1, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
     assert_index_entry_lookup(filename, 0U, key_4, key_size, MYLITE_STORAGE_OK, row_4_id);
     assert_find_indexed_row_not_found(filename, 0U, key_1, key_size);
@@ -6168,6 +6279,13 @@ static void test_maintained_index_root_overflow_tail(void) {
     assert(updated_row_4_id != row_4_id);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert_index_root(filename, "app", "posts", 0U, root_page, 3ULL);
+    read_test_page(filename, root_page, root_page_bytes);
+    assert(
+        get_test_u64_le(
+            root_page_bytes,
+            MYLITE_STORAGE_FORMAT_INDEX_ROOT_OVERFLOW_TAIL_PAGE_OFFSET
+        ) == 0ULL
+    );
     assert_index_entry_lookup(filename, 0U, key_4, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
     assert_index_entry_lookup(filename, 0U, key_5, key_size, MYLITE_STORAGE_OK, updated_row_4_id);
     assert_find_indexed_row_not_found(filename, 0U, key_4, key_size);
@@ -6209,6 +6327,12 @@ static void test_maintained_index_root_overflow_tail(void) {
     assert(
         (get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAGS_OFFSET) &
          MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAG_HAS_OVERFLOW_TAIL) == 0U
+    );
+    assert(
+        get_test_u64_le(
+            root_page_bytes,
+            MYLITE_STORAGE_FORMAT_INDEX_ROOT_OVERFLOW_TAIL_PAGE_OFFSET
+        ) == 0ULL
     );
     assert_index_entry_lookup(filename, 0U, key_5, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
     assert_find_indexed_row_not_found(filename, 0U, key_5, key_size);

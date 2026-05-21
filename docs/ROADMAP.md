@@ -178,9 +178,10 @@ maintained root insert, update, and delete paths now preserve root bytes and
 logical index visibility across statement rollback, transaction rollback,
 savepoint rollback, and stale transaction or statement journal recovery. Root
 overflow inserts now mark explicit append-tail history on the maintained root,
-readers scan that tail only while the flag is set, and root-resident deletes
-refill the root from live root-plus-tail entries when they fit again; maintained
-root mutations now reject unprotected dirty-root fallback plans. Root
+record the first fallback index-entry page when known, readers scan that tail
+only while the flag is set, and root-resident deletes refill the root from live
+root-plus-tail entries when they fit again; maintained root mutations now reject
+unprotected dirty-root fallback plans. Root
 splits, multi-page navigable indexes, and broader transactional maintained
 index mutation remain planned.
 Durable table-local row,

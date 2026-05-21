@@ -1016,6 +1016,9 @@ roots with the replacement row id and new key bytes, keep root entry counts
 stable, and skip duplicate append-only replacement index-entry pages for roots
 updated in place. Maintained roots mark overflow-tail history in the existing
 root flags field when a full root falls back to append-only index-entry pages.
+New overflow roots also store the first fallback index-entry page id when it is
+known, letting readers skip first-overflow row payload pages; older overflow
+roots with no stored tail start still fall back to `root_page + 1`.
 Maintained-root insert, update, and delete paths reject unsafe plans when dirty
 root pages cannot be protected by the statement or transaction journal, rather
 than publishing append-only fallback state that root-backed readers cannot see.

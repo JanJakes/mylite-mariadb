@@ -277,6 +277,7 @@ typedef struct mylite_storage_index_leaf_page {
 
 typedef struct mylite_storage_maintained_index_root_page {
     unsigned long long table_id;
+    unsigned long long overflow_tail_page_id;
     unsigned index_number;
     size_t key_size;
     size_t entry_count;
@@ -1800,12 +1801,14 @@ static mylite_storage_result write_maintained_index_root_inserts(
     const mylite_storage_header *header,
     unsigned long long table_id,
     unsigned long long row_id,
+    unsigned long long first_fallback_index_page_id,
     const mylite_storage_index_entry *index_entries,
     const mylite_storage_maintained_index_insert_plan *plan
 );
 static mylite_storage_result write_maintained_index_root_overflow_flags(
     FILE *file,
     const mylite_storage_header *header,
+    unsigned long long first_fallback_index_page_id,
     const mylite_storage_maintained_index_insert_plan *plan
 );
 static mylite_storage_result insert_maintained_index_root_entry(
@@ -1852,7 +1855,8 @@ static mylite_storage_result refill_maintained_index_root_from_overflow_tail(
 static mylite_storage_result mark_maintained_index_root_overflow_tail(
     unsigned char *page,
     const mylite_storage_header *header,
-    unsigned long long page_id
+    unsigned long long page_id,
+    unsigned long long first_fallback_index_page_id
 );
 static int maintained_index_root_page_has_row_id(
     const mylite_storage_maintained_index_root_page *root_page,
@@ -2035,6 +2039,10 @@ static int is_maintained_index_root_page(const unsigned char *page);
 static size_t maintained_index_root_entry_capacity(size_t key_size);
 static int maintained_index_root_needs_tail_scan(
     const mylite_storage_maintained_index_root_page *root_page
+);
+static unsigned long long maintained_index_root_tail_page_id(
+    const mylite_storage_maintained_index_root_page *root_page,
+    unsigned long long page_id
 );
 static void maintained_index_root_page_as_leaf_page(
     const mylite_storage_maintained_index_root_page *root_page,
@@ -5182,6 +5190,7 @@ mylite_storage_result mylite_storage_append_row_with_index_entries(
             &header,
             table_id,
             position.row_page_id,
+            next_page_id,
             index_entries,
             &maintained_index_plan
         );
@@ -5398,6 +5407,7 @@ static mylite_storage_result write_maintained_index_root_inserts(
     const mylite_storage_header *header,
     unsigned long long table_id,
     unsigned long long row_id,
+    unsigned long long first_fallback_index_page_id,
     const mylite_storage_index_entry *index_entries,
     const mylite_storage_maintained_index_insert_plan *plan
 ) {
@@ -5425,12 +5435,18 @@ static mylite_storage_result write_maintained_index_root_inserts(
             return result;
         }
     }
-    return write_maintained_index_root_overflow_flags(file, header, plan);
+    return write_maintained_index_root_overflow_flags(
+        file,
+        header,
+        first_fallback_index_page_id,
+        plan
+    );
 }
 
 static mylite_storage_result write_maintained_index_root_overflow_flags(
     FILE *file,
     const mylite_storage_header *header,
+    unsigned long long first_fallback_index_page_id,
     const mylite_storage_maintained_index_insert_plan *plan
 ) {
     const mylite_storage_pager pager = open_storage_pager(file, NULL, header);
@@ -5441,8 +5457,12 @@ static mylite_storage_result write_maintained_index_root_overflow_flags(
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
-        result =
-            mark_maintained_index_root_overflow_tail(page, header, plan->overflow_root_page_ids[i]);
+        result = mark_maintained_index_root_overflow_tail(
+            page,
+            header,
+            plan->overflow_root_page_ids[i],
+            first_fallback_index_page_id
+        );
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
@@ -6832,7 +6852,7 @@ static mylite_storage_result refill_maintained_index_root_from_overflow_tail(
             header,
             root_page.table_id,
             root_page.index_number,
-            page_id + 1ULL,
+            maintained_index_root_tail_page_id(&root_page, page_id),
             &entries
         );
     }
@@ -6854,7 +6874,8 @@ static mylite_storage_result refill_maintained_index_root_from_overflow_tail(
 static mylite_storage_result mark_maintained_index_root_overflow_tail(
     unsigned char *page,
     const mylite_storage_header *header,
-    unsigned long long page_id
+    unsigned long long page_id,
+    unsigned long long first_fallback_index_page_id
 ) {
     mylite_storage_maintained_index_root_page root_page = {0};
     mylite_storage_result result =
@@ -6865,11 +6886,19 @@ static mylite_storage_result mark_maintained_index_root_overflow_tail(
     if ((root_page.flags & MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAG_HAS_OVERFLOW_TAIL) != 0U) {
         return MYLITE_STORAGE_OK;
     }
+    if (first_fallback_index_page_id <= page_id) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
 
     put_u32_le(
         page,
         MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAGS_OFFSET,
         root_page.flags | MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAG_HAS_OVERFLOW_TAIL
+    );
+    put_u64_le(
+        page,
+        MYLITE_STORAGE_FORMAT_INDEX_ROOT_OVERFLOW_TAIL_PAGE_OFFSET,
+        first_fallback_index_page_id
     );
     put_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET, 0ULL);
     put_u64_le(
@@ -16728,6 +16757,8 @@ static mylite_storage_result decode_maintained_index_root_page(
         get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_ENTRY_COUNT_OFFSET);
     const size_t used_bytes = get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_USED_BYTES_OFFSET);
     const unsigned flags = get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAGS_OFFSET);
+    const unsigned long long overflow_tail_page_id =
+        get_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_OVERFLOW_TAIL_PAGE_OFFSET);
     const unsigned long long expected_checksum =
         get_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET);
     const unsigned long long actual_checksum =
@@ -16749,9 +16780,17 @@ static mylite_storage_result decode_maintained_index_root_page(
         MYLITE_STORAGE_FORMAT_INDEX_ROOT_PAYLOAD_OFFSET + (entry_count * cell_size) != used_bytes) {
         return MYLITE_STORAGE_CORRUPT;
     }
+    if (overflow_tail_page_id != 0ULL) {
+        if ((flags & MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAG_HAS_OVERFLOW_TAIL) == 0U ||
+            overflow_tail_page_id <= page_id ||
+            !is_addressable_page_id(header, overflow_tail_page_id)) {
+            return MYLITE_STORAGE_CORRUPT;
+        }
+    }
 
     mylite_storage_maintained_index_root_page root_page = {
         .table_id = table_id,
+        .overflow_tail_page_id = overflow_tail_page_id,
         .index_number = index_number,
         .key_size = key_size,
         .entry_count = entry_count,
@@ -16809,6 +16848,19 @@ static int maintained_index_root_needs_tail_scan(
     const mylite_storage_maintained_index_root_page *root_page
 ) {
     return (root_page->flags & MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAG_HAS_OVERFLOW_TAIL) != 0U;
+}
+
+static unsigned long long maintained_index_root_tail_page_id(
+    const mylite_storage_maintained_index_root_page *root_page,
+    unsigned long long page_id
+) {
+    if (!maintained_index_root_needs_tail_scan(root_page)) {
+        return ULLONG_MAX;
+    }
+    if (root_page->overflow_tail_page_id != 0ULL) {
+        return root_page->overflow_tail_page_id;
+    }
+    return page_id + 1ULL;
 }
 
 static void maintained_index_root_page_as_leaf_page(
@@ -17873,10 +17925,13 @@ static mylite_storage_result read_index_leaf_run_root(
             }
 
             maintained_index_root_page_as_leaf_page(&root_page, out_index_leaf_page);
-            const unsigned long long tail_page_id =
-                maintained_index_root_needs_tail_scan(&root_page)
-                    ? root_entry->definition_root_page + 1ULL
-                    : header->page_count;
+            unsigned long long tail_page_id = header->page_count;
+            if (maintained_index_root_needs_tail_scan(&root_page)) {
+                tail_page_id = maintained_index_root_tail_page_id(
+                    &root_page,
+                    root_entry->definition_root_page
+                );
+            }
             *out_leaf_run = (mylite_storage_index_leaf_run){
                 .first_page_id = root_entry->definition_root_page,
                 .page_count = 1ULL,
