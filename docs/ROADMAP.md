@@ -102,6 +102,10 @@ Replication GTID-state runtime is replaced with empty embedded state after link
 evidence proves retained `log.cc` and `gtid_index.cc` paths only need the state
 contract, not server topology behavior. GTID helper SQL functions are rejected
 by policy.
+SQL `HANDLER` command runtime is replaced with a disabled embedded source after
+source review proves top-level `HANDLER ...` commands are a server table-cursor
+surface, not the storage-engine handler abstraction needed by normal table
+execution.
 Replication execution, slave protocol, checksum, replication-event, and
 semi-sync system variables are also omitted after policy coverage proves those
 configuration rows belong to unsupported topology behavior; compatibility

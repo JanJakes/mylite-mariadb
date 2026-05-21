@@ -51,6 +51,15 @@ ELSE()
   SET(MYLITE_GTID_STATE_SOURCE ../sql/mylite_rpl_gtid_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_SQL_HANDLER "Build SQL HANDLER command runtime" ON)
+IF(MYLITE_WITH_SQL_HANDLER)
+  ADD_DEFINITIONS(-DMYLITE_WITH_SQL_HANDLER=1)
+  SET(MYLITE_SQL_HANDLER_SOURCE ../sql/sql_handler.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_SQL_HANDLER=0)
+  SET(MYLITE_SQL_HANDLER_SOURCE ../sql/mylite_sql_handler_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_QUERY_LOGS "Build general and slow query log runtime" ON)
 IF(MYLITE_WITH_QUERY_LOGS)
   ADD_DEFINITIONS(-DMYLITE_WITH_QUERY_LOGS=1)
@@ -289,7 +298,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/sql_analyse.cc ../sql/sql_base.cc ../sql/sql_cache.cc 
            ../sql/sql_class.cc ../sql/sql_crypt.cc ../sql/sql_cursor.cc 
            ../sql/sql_db.cc ../sql/sql_delete.cc ../sql/sql_derived.cc 
-           ../sql/sql_do.cc ../sql/sql_error.cc ../sql/sql_handler.cc
+           ../sql/sql_do.cc ../sql/sql_error.cc ${MYLITE_SQL_HANDLER_SOURCE}
             ../sql/sql_get_diagnostics.cc
            ../sql/sql_help.cc ../sql/sql_insert.cc ../sql/datadict.cc
            ../sql/sql_admin.cc ../sql/sql_truncate.cc ../sql/sql_reload.cc

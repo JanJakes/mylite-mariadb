@@ -644,6 +644,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SELECT 'INFORMATION_SCHEMA.USER_VARIABLES' AS literal");
     exec_ok(db, "SELECT 'SHOW PROCESSLIST' AS literal");
     exec_ok(db, "SELECT 'MASTER_GTID_WAIT()' AS literal");
+    exec_ok(db, "SELECT 'HANDLER app.t OPEN' AS literal");
     exec_ok(db, "SHOW VARIABLES LIKE 'version'");
     exec_ok(db, "SET @GTID_BINLOG_STATE = 'local'");
 
@@ -771,6 +772,9 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_error(db, "SET @@GLOBAL.gtid_slave_pos = '0-1-1'", "server-owned SQL surface");
     expect_error(db, "SET gtid_strict_mode = ON", "server-owned SQL surface");
     expect_error(db, "SET @@session.gtid_seq_no = 1", "server-owned SQL surface");
+    expect_error(db, "HANDLER app.t OPEN", "server-owned SQL surface");
+    expect_error(db, "HANDLER t READ FIRST", "server-owned SQL surface");
+    expect_error(db, "HANDLER t CLOSE", "server-owned SQL surface");
     expect_error(db, "HELP SELECT", "server-owned SQL surface");
     expect_error(db, "SHOW AUTHORS", "server-owned SQL surface");
     expect_error(db, "SHOW CONTRIBUTORS", "server-owned SQL surface");
@@ -948,6 +952,9 @@ static void assert_server_sql_rejected(mylite_db *db) {
     );
     expect_prepare_error(db, "SET GLOBAL gtid_binlog_state = '0-1-1'", "server-owned SQL surface");
     expect_prepare_error(db, "SET gtid_strict_mode = ON", "server-owned SQL surface");
+    expect_prepare_error(db, "HANDLER app.t OPEN", "server-owned SQL surface");
+    expect_prepare_error(db, "HANDLER t READ FIRST", "server-owned SQL surface");
+    expect_prepare_error(db, "HANDLER t CLOSE", "server-owned SQL surface");
     expect_prepare_error(db, "BACKUP STAGE START", "server-owned SQL surface");
     expect_prepare_error(db, "BACKUP LOCK app.t", "server-owned SQL surface");
     expect_prepare_error(db, "BACKUP UNLOCK", "server-owned SQL surface");

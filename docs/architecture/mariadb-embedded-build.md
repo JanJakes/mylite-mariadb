@@ -43,6 +43,7 @@ MYLITE_WITH_BINLOG_CORE=OFF
 MYLITE_WITH_BINLOG_REPLAY=OFF
 MYLITE_WITH_LOG_EVENT_SERVER=OFF
 MYLITE_WITH_GTID_STATE=OFF
+MYLITE_WITH_SQL_HANDLER=OFF
 MYLITE_WITH_QUERY_LOGS=OFF
 MYLITE_WITH_SQL_DIGEST=OFF
 MYLITE_WITH_STATUS_VARIABLES=OFF
@@ -105,7 +106,10 @@ the retained `append_query_string()` escaping helper, while unsupported event
 write paths fail closed. It omits replication GTID-state runtime behind
 `MYLITE_WITH_GTID_STATE=0`; retained GTID-index link paths see empty state,
 while GTID helper functions and GTID state variable assignments are rejected by
-MyLite policy. It omits the general and slow query-log runtime
+MyLite policy. It omits SQL `HANDLER` command runtime behind
+`MYLITE_WITH_SQL_HANDLER=0`; the storage-engine handler abstraction remains,
+while top-level `HANDLER ...` commands are rejected by policy. It omits the
+general and slow query-log runtime
 behind `MYLITE_WITH_QUERY_LOGS=0`; error logging,
 SQL diagnostics, warnings, and result metadata remain available. It omits
 statement digest normalization behind `MYLITE_WITH_SQL_DIGEST=0`; Performance
@@ -185,7 +189,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,287,896 bytes / 25.07 MiB |
+| Archive size | 26,275,784 bytes / 25.06 MiB |
 | Archive members | 698 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -239,7 +243,9 @@ and retaining only the SQL string-quoting helper plus fail-closed event stubs
 reduces the current pre-strip archive to 26,907,160 bytes / 25.66 MiB.
 Replacing replication GTID-state runtime with empty embedded state reduces the
 current pre-strip archive to 26,852,496 bytes / 25.61 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 564,600 bytes
+Omitting SQL `HANDLER` command runtime reduces the current pre-strip archive to
+26,839,776 bytes / 25.60 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 563,992 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -281,10 +287,12 @@ bytes and one archive member. Omitting SQL `BINLOG` statement replay saves
 storage and JSON histogram storage saves 73,368 bytes and one archive member.
 Omitting server-side binary-log event writers saves 60,648 bytes with no
 member-count change. Omitting replication GTID-state runtime saves 53,688
-bytes with no member-count change. The final archive is 5,241,808 bytes
-smaller than the Release build with Performance Schema disabled, 6,841,744
-bytes smaller than the symbol-stripped baseline that still built Performance
-Schema, and 7,554,424 bytes smaller than the original broad archive.
+bytes with no member-count change. Omitting SQL `HANDLER` command runtime
+saves 12,112 bytes with no member-count change. The final archive is
+5,253,920 bytes smaller than the Release build with Performance Schema
+disabled, 6,853,856 bytes smaller than the symbol-stripped baseline that still
+built Performance Schema, and 7,566,536 bytes smaller than the original broad
+archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
 GSSAPI, BZip2, LZ4, LibLZMA, LZO, PCRE2, and Zstandard support on this
@@ -347,6 +355,10 @@ but `rpl_gtid.cc` is absent from the default embedded archive.
 SQL `BINLOG` statement replay is omitted from the embedded archive, and direct
 and prepared `BINLOG` statements, GTID SQL functions, and GTID state variable
 assignments are rejected by policy coverage.
+SQL `HANDLER` command runtime is replaced by a small disabled embedded source,
+and direct and prepared top-level `HANDLER ...` statements are rejected by
+policy coverage. The generic storage-engine `handler` abstraction remains
+linked for normal table execution.
 Replication execution, slave protocol, replication-event, checksum, and
 semi-sync system variables are omitted from the default embedded profile, while
 compatibility variables such as `@@log_bin=0` remain covered.
@@ -431,6 +443,7 @@ The baseline explicitly disables:
 - SQL `BINLOG` statement replay
 - Server binary-log event writers
 - Replication GTID-state runtime
+- SQL `HANDLER` command runtime
 - Unsupported binlog injector root
 - `PROCEDURE ANALYSE()`
 - System-variable help text

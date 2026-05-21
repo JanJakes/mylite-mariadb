@@ -479,6 +479,13 @@ rejects `MASTER_GTID_WAIT()`, `BINLOG_GTID_POS()`,
 `WSREP_SYNC_WAIT_UPTO_GTID()`, and GTID state variable assignments before
 dispatch.
 
+The embedded archive omits top-level SQL `HANDLER` command runtime by setting
+`MYLITE_WITH_SQL_HANDLER=0` in the MyLite baseline. The option defaults to
+`ON` so normal MariaDB server builds keep upstream `HANDLER ...` behavior. The
+disabled embedded source keeps generic cleanup hooks as no-ops and leaves the
+storage-engine `handler` abstraction untouched. MyLite policy rejects direct
+and prepared top-level `HANDLER ...` statements before dispatch.
+
 The embedded archive disables `PROCEDURE ANALYSE()` by setting
 `MYLITE_WITH_PROCEDURE_ANALYSE=0` in the MyLite baseline, replacing
 `sql_analyse.cc` with a small `proc_analyse_init()` unsupported stub. The
@@ -966,6 +973,11 @@ Omitting replication GTID-state runtime brings the current archive to
 with Performance Schema disabled, 6,841,744 bytes smaller than the
 symbol-stripped baseline with Performance Schema still built, and 7,554,424
 bytes smaller than the original broad archive.
+Omitting SQL `HANDLER` command runtime brings the current archive to
+26,275,784 bytes / 25.06 MiB, 5,253,920 bytes smaller than the Release build
+with Performance Schema disabled, 6,853,856 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 7,566,536
+bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -996,6 +1008,7 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
 - Confirm `MYLITE_WITH_LOG_EVENT_SERVER=OFF` appears in the embedded CMake
   cache.
 - Confirm `MYLITE_WITH_GTID_STATE=OFF` appears in the embedded CMake cache.
+- Confirm `MYLITE_WITH_SQL_HANDLER=OFF` appears in the embedded CMake cache.
 - Confirm `rpl_injector.cc.o`, `rpl_record.cc.o`, and `log_event_server.cc.o`
   are absent from `libmariadbd.a`, while `gtid_index.cc.o`, `log_event.cc.o`,
   `mylite_log_event_server_disabled.cc.o`, and
@@ -1004,6 +1017,10 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   prepared `MASTER_GTID_WAIT()` / `BINLOG_GTID_POS()` /
   `WSREP_SYNC_WAIT_UPTO_GTID()` calls plus GTID state variable assignments fail
   through server-surface policy coverage.
+- Confirm `sql_handler.cc.o` is absent from `libmariadbd.a`,
+  `mylite_sql_handler_disabled.cc.o` remains, and direct and prepared
+  top-level `HANDLER ...` statements fail through server-surface policy
+  coverage.
 - Confirm `MYLITE_WITH_BINLOG_REPLAY=OFF` appears in the embedded CMake cache,
   `sql_binlog.cc.o` is absent from `libmariadbd.a`, and direct and prepared
   SQL `BINLOG` replay statements fail through server-surface policy coverage.
@@ -1113,7 +1130,9 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   the embedded archive. Replication GTID-state runtime is replaced with a
   disabled embedded source, GTID helper SQL functions and GTID state variable
   assignments are rejected, and `rpl_gtid.cc.o` is absent from the embedded
-  archive. Persistent
+  archive. SQL `HANDLER` command runtime is replaced with a disabled embedded
+  source, top-level `HANDLER ...` statements are rejected, and
+  `sql_handler.cc.o` is absent from the embedded archive. Persistent
   optimizer-statistics storage is omitted, `use_stat_tables` starts as `NEVER`,
   histogram collection starts at size `0`, persistent statistics SQL and
   variable changes are rejected, and ordinary engine estimates,
@@ -1172,6 +1191,8 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
 - `log.cc`, `gtid_index.cc`, `log_event.cc`, `sql_repl.cc`, and replication
   utility files still have shared references. Removing more binlog code needs
   separate source and link evidence rather than file-name pruning.
+- The SQL `HANDLER` command runtime is omitted, but storage-engine `handler`
+  classes and generic handler APIs remain required for normal table execution.
 - The generic SELECT procedure dispatch remains linked after omitting
   `PROCEDURE ANALYSE()`. Removing it should be a separate slice.
 - Clients that build help UIs from
