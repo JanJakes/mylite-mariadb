@@ -67,16 +67,16 @@ reads now reuse the decoded in-memory header instead of re-encoding and
 re-checksumming page `0`; nested write checkpoints now clone the parent
 header/catalog snapshot instead of revalidating the same active pages for every
 prepared row-DML savepoint. Active statements now reuse validated catalog root
-pages until catalog writes or catalog-generation header changes invalidate the
+images until catalog writes or catalog-generation header changes invalidate the
 statement chain. Active row mutation publication now updates decoded checkpoint
 headers directly instead of encode/decode round-tripping page `0`.
 Durable handler index cursor builds now keep one scoped read session open
 across exact-index lookup and row materialization, reusing the validated
-primary-file header and catalog root for point lookups and exact-index cursor
+primary-file header and catalog image for point lookups and exact-index cursor
 builds. Repeated read statements over unchanged durable header bytes and the
 same file identity also reuse a thread-local decoded checkpoint snapshot after
 raw header-page comparison, avoiding repeated header/catalog checksum
-validation and redundant catalog-page reads on hot point-select loops.
+validation and redundant catalog-chain reads on hot point-select loops.
 Normal read statements now reuse a thread-local unlocked read file handle after
 device/inode validation, reducing repeated `fopen()` overhead without holding
 shared locks between cursor builds. That read handle now stores its device and

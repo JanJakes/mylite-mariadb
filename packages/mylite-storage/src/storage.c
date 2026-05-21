@@ -473,6 +473,7 @@ struct mylite_storage_statement {
     unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     unsigned char current_catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    mylite_storage_catalog_image current_catalog_image;
     unsigned long long current_catalog_root_page;
     unsigned long long current_catalog_generation;
     int has_header_page;
@@ -482,6 +483,7 @@ struct mylite_storage_statement {
     int has_current_header;
     int current_header_dirty;
     int has_current_catalog_page;
+    int has_current_catalog_image;
     int owns_recovery_journal;
     int owns_transaction_journal;
     int preserve_auto_increment_rollback;
@@ -529,10 +531,12 @@ typedef struct mylite_storage_read_checkpoint_cache {
     unsigned char header_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     unsigned char current_catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    mylite_storage_catalog_image current_catalog_image;
     unsigned long long current_catalog_root_page;
     unsigned long long current_catalog_generation;
     int has_snapshot;
     int has_current_catalog_page;
+    int has_current_catalog_image;
     int has_identity;
 } mylite_storage_read_checkpoint_cache;
 
@@ -796,7 +800,7 @@ static mylite_storage_result read_checkpoint_snapshot_from_header_page(
     mylite_storage_statement *statement,
     const unsigned char *header_page
 );
-static void copy_read_checkpoint_cache_to_statement(
+static mylite_storage_result copy_read_checkpoint_cache_to_statement(
     const mylite_storage_read_checkpoint_cache *cache,
     mylite_storage_statement *statement
 );
@@ -1183,11 +1187,56 @@ static mylite_storage_result read_catalog_image(
     const mylite_storage_header *header,
     mylite_storage_catalog_image *out_catalog
 );
+static mylite_storage_result copy_cached_catalog_image_for_file(
+    FILE *file,
+    const mylite_storage_header *header,
+    mylite_storage_catalog_image *out_catalog,
+    int *out_copied
+);
+static mylite_storage_result copy_cached_catalog_image_from_statement(
+    const mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    mylite_storage_catalog_image *out_catalog,
+    int *out_copied
+);
+static int statement_has_current_catalog_image(
+    const mylite_storage_statement *statement,
+    const mylite_storage_header *header
+);
+static mylite_storage_result read_catalog_image_from_root_page(
+    FILE *file,
+    const mylite_storage_header *header,
+    const unsigned char *root_page,
+    mylite_storage_catalog_image *out_catalog
+);
 static mylite_storage_result initialize_catalog_image(
     mylite_storage_catalog_image *catalog,
     size_t capacity
 );
 static void free_catalog_image(mylite_storage_catalog_image *catalog);
+static mylite_storage_result copy_catalog_image(
+    const mylite_storage_catalog_image *catalog,
+    mylite_storage_catalog_image *out_catalog
+);
+static void maybe_cache_catalog_image_for_file(
+    FILE *file,
+    const mylite_storage_header *header,
+    const mylite_storage_catalog_image *catalog
+);
+static void maybe_cache_catalog_image_in_statement(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    const mylite_storage_catalog_image *catalog
+);
+static void adopt_current_catalog_image(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    mylite_storage_catalog_image *catalog
+);
+static void maybe_cache_catalog_image_in_read_checkpoint_cache(
+    const mylite_storage_statement *statement,
+    const mylite_storage_catalog_image *catalog
+);
 static mylite_storage_result ensure_catalog_image_capacity(
     mylite_storage_catalog_image *catalog,
     size_t needed_capacity
@@ -6577,6 +6626,7 @@ static void initialize_nested_checkpoint_storage(mylite_storage_statement *state
     statement->header = (mylite_storage_header){0};
     statement->current_header = (mylite_storage_header){0};
     statement->deferred_durable_cache_retarget_header = (mylite_storage_header){0};
+    statement->current_catalog_image = (mylite_storage_catalog_image){0};
     statement->current_catalog_root_page = 0ULL;
     statement->current_catalog_generation = 0ULL;
     statement->has_header_page = 0;
@@ -6586,6 +6636,7 @@ static void initialize_nested_checkpoint_storage(mylite_storage_statement *state
     statement->has_current_header = 0;
     statement->current_header_dirty = 0;
     statement->has_current_catalog_page = 0;
+    statement->has_current_catalog_image = 0;
     statement->owns_recovery_journal = 0;
     statement->owns_transaction_journal = 0;
     statement->preserve_auto_increment_rollback = 0;
@@ -6772,6 +6823,16 @@ static mylite_storage_result initialize_read_statement(
         statement->current_catalog_generation = same_file_parent->current_catalog_generation;
         statement->has_current_header = same_file_parent->has_current_header;
         statement->has_current_catalog_page = same_file_parent->has_current_catalog_page;
+        if (same_file_parent->has_current_catalog_image) {
+            const mylite_storage_result result = copy_catalog_image(
+                &same_file_parent->current_catalog_image,
+                &statement->current_catalog_image
+            );
+            if (result != MYLITE_STORAGE_OK) {
+                return result;
+            }
+            statement->has_current_catalog_image = 1;
+        }
         statement->has_identity = same_file_parent->has_identity;
         return MYLITE_STORAGE_OK;
     }
@@ -6813,6 +6874,17 @@ static mylite_storage_result initialize_read_statement(
         statement->current_catalog_generation = snapshot.header.catalog_generation;
         statement->has_current_header = 1;
         statement->has_current_catalog_page = 1;
+        mylite_storage_catalog_image catalog_image = {0};
+        result = read_catalog_image_from_root_page(
+            statement->file,
+            &statement->header,
+            statement->catalog_page,
+            &catalog_image
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+        adopt_current_catalog_image(statement, &statement->header, &catalog_image);
         return MYLITE_STORAGE_OK;
     }
     if (result != MYLITE_STORAGE_OK) {
@@ -6884,8 +6956,7 @@ static mylite_storage_result read_cached_checkpoint_snapshot(mylite_storage_stat
         if (cache->header.page_size > sizeof(statement->catalog_page)) {
             return MYLITE_STORAGE_CORRUPT;
         }
-        copy_read_checkpoint_cache_to_statement(cache, statement);
-        return MYLITE_STORAGE_OK;
+        return copy_read_checkpoint_cache_to_statement(cache, statement);
     }
 
     result = read_checkpoint_snapshot_from_header_page(statement, header_page);
@@ -6913,6 +6984,15 @@ static mylite_storage_result read_checkpoint_snapshot_from_header_page(
     if (result == MYLITE_STORAGE_OK) {
         result = validate_catalog_root_bytes(statement->catalog_page, &statement->header);
     }
+    mylite_storage_catalog_image catalog_image = {0};
+    if (result == MYLITE_STORAGE_OK) {
+        result = read_catalog_image_from_root_page(
+            statement->file,
+            &statement->header,
+            statement->catalog_page,
+            &catalog_image
+        );
+    }
     if (result == MYLITE_STORAGE_OK) {
         statement->has_rollback_catalog_page = 1;
         statement->current_header = statement->header;
@@ -6926,14 +7006,24 @@ static mylite_storage_result read_checkpoint_snapshot_from_header_page(
         statement->current_catalog_root_page = statement->header.catalog_root_page;
         statement->current_catalog_generation = statement->header.catalog_generation;
         statement->has_current_catalog_page = 1;
+        adopt_current_catalog_image(statement, &statement->header, &catalog_image);
     }
     return result;
 }
 
-static void copy_read_checkpoint_cache_to_statement(
+static mylite_storage_result copy_read_checkpoint_cache_to_statement(
     const mylite_storage_read_checkpoint_cache *cache,
     mylite_storage_statement *statement
 ) {
+    mylite_storage_catalog_image catalog_image = {0};
+    if (cache->has_current_catalog_image) {
+        const mylite_storage_result result =
+            copy_catalog_image(&cache->current_catalog_image, &catalog_image);
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+    }
+
     statement->header = cache->header;
     statement->current_header = cache->header;
     memcpy(statement->header_page, cache->header_page, sizeof(statement->header_page));
@@ -6950,6 +7040,10 @@ static void copy_read_checkpoint_cache_to_statement(
     statement->has_current_header = 1;
     statement->current_header_dirty = 0;
     statement->has_current_catalog_page = cache->has_current_catalog_page;
+    free_catalog_image(&statement->current_catalog_image);
+    statement->current_catalog_image = catalog_image;
+    statement->has_current_catalog_image = cache->has_current_catalog_image;
+    return MYLITE_STORAGE_OK;
 }
 
 static mylite_storage_read_checkpoint_cache *read_checkpoint_cache_for(
@@ -6997,6 +7091,15 @@ static void store_read_checkpoint_cache(const mylite_storage_statement *statemen
         statement->current_catalog_page,
         sizeof(active_read_checkpoint_cache.current_catalog_page)
     );
+    free_catalog_image(&active_read_checkpoint_cache.current_catalog_image);
+    active_read_checkpoint_cache.has_current_catalog_image = 0;
+    if (statement->has_current_catalog_image &&
+        copy_catalog_image(
+            &statement->current_catalog_image,
+            &active_read_checkpoint_cache.current_catalog_image
+        ) == MYLITE_STORAGE_OK) {
+        active_read_checkpoint_cache.has_current_catalog_image = 1;
+    }
     active_read_checkpoint_cache.current_catalog_root_page = statement->current_catalog_root_page;
     active_read_checkpoint_cache.current_catalog_generation = statement->current_catalog_generation;
     active_read_checkpoint_cache.has_current_catalog_page = statement->has_current_catalog_page;
@@ -7006,6 +7109,7 @@ static void store_read_checkpoint_cache(const mylite_storage_statement *statemen
 
 static void clear_read_checkpoint_cache(void) {
     free(active_read_checkpoint_cache.filename);
+    free_catalog_image(&active_read_checkpoint_cache.current_catalog_image);
     active_read_checkpoint_cache = (mylite_storage_read_checkpoint_cache){0};
 }
 
@@ -8728,8 +8832,10 @@ static void clear_statement_chain_catalog_root_caches(mylite_storage_statement *
 
 static void clear_catalog_root_cache(mylite_storage_statement *statement) {
     statement->has_current_catalog_page = 0;
+    statement->has_current_catalog_image = 0;
     statement->current_catalog_root_page = 0ULL;
     statement->current_catalog_generation = 0ULL;
+    free_catalog_image(&statement->current_catalog_image);
     clear_table_entry_cache(&statement->table_entry_cache);
 }
 
@@ -8748,6 +8854,7 @@ static void free_statement(mylite_storage_statement *statement) {
     clear_live_row_id_caches(statement);
     clear_row_payload_caches(statement);
     clear_table_entry_cache(&statement->table_entry_cache);
+    free_catalog_image(&statement->current_catalog_image);
     clear_append_page_buffer(statement);
     clear_buffered_page_undos(statement);
     clear_buffered_update_rewrites(statement);
@@ -8770,6 +8877,10 @@ static void reset_reusable_nested_checkpoint_storage(mylite_storage_statement *s
     statement->parent = NULL;
     statement->owner = NULL;
     statement->has_rollback_catalog_page = 0;
+    statement->current_catalog_root_page = 0ULL;
+    statement->current_catalog_generation = 0ULL;
+    statement->has_current_catalog_page = 0;
+    statement->has_current_catalog_image = 0;
     statement->owns_file = 0;
     statement->owns_filename = 0;
     statement->owns_recovery_journal = 0;
@@ -10925,13 +11036,98 @@ static mylite_storage_result read_catalog_image(
     mylite_storage_catalog_image *out_catalog
 ) {
     *out_catalog = (mylite_storage_catalog_image){0};
+    int copied_cached_catalog = 0;
+    mylite_storage_result result =
+        copy_cached_catalog_image_for_file(file, header, out_catalog, &copied_cached_catalog);
+    if (result != MYLITE_STORAGE_OK || copied_cached_catalog) {
+        return result;
+    }
+
     unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    mylite_storage_result result = read_catalog_root(file, header, catalog_page);
+    result = read_catalog_root(file, header, catalog_page);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
 
-    result = initialize_catalog_image(out_catalog, MYLITE_STORAGE_FORMAT_PAGE_SIZE);
+    result = read_catalog_image_from_root_page(file, header, catalog_page, out_catalog);
+    if (result == MYLITE_STORAGE_OK) {
+        maybe_cache_catalog_image_for_file(file, header, out_catalog);
+    }
+    return result;
+}
+
+static mylite_storage_result copy_cached_catalog_image_for_file(
+    FILE *file,
+    const mylite_storage_header *header,
+    mylite_storage_catalog_image *out_catalog,
+    int *out_copied
+) {
+    *out_copied = 0;
+
+    mylite_storage_statement *statement = active_statement_for_file(file);
+    mylite_storage_result result =
+        copy_cached_catalog_image_from_statement(statement, header, out_catalog, out_copied);
+    if (result != MYLITE_STORAGE_OK || *out_copied) {
+        return result;
+    }
+
+    statement = active_read_statement_for_file(file);
+    result = copy_cached_catalog_image_from_statement(statement, header, out_catalog, out_copied);
+    if (result != MYLITE_STORAGE_OK || *out_copied) {
+        return result;
+    }
+
+    if (active_read_snapshot_has_file(file)) {
+        result = copy_cached_catalog_image_from_statement(
+            active_read_snapshot,
+            header,
+            out_catalog,
+            out_copied
+        );
+    }
+    return result;
+}
+
+static mylite_storage_result copy_cached_catalog_image_from_statement(
+    const mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    mylite_storage_catalog_image *out_catalog,
+    int *out_copied
+) {
+    if (!statement_has_current_catalog_image(statement, header)) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    const mylite_storage_result result =
+        copy_catalog_image(&statement->current_catalog_image, out_catalog);
+    if (result == MYLITE_STORAGE_OK) {
+        *out_copied = 1;
+    }
+    return result;
+}
+
+static int statement_has_current_catalog_image(
+    const mylite_storage_statement *statement,
+    const mylite_storage_header *header
+) {
+    return statement != NULL && statement->has_current_catalog_image &&
+           statement->current_catalog_image.bytes != NULL &&
+           statement->current_catalog_root_page == header->catalog_root_page &&
+           statement->current_catalog_generation == header->catalog_generation;
+}
+
+static mylite_storage_result read_catalog_image_from_root_page(
+    FILE *file,
+    const mylite_storage_header *header,
+    const unsigned char *root_page,
+    mylite_storage_catalog_image *out_catalog
+) {
+    *out_catalog = (mylite_storage_catalog_image){0};
+    unsigned char catalog_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    memcpy(catalog_page, root_page, sizeof(catalog_page));
+
+    mylite_storage_result result =
+        initialize_catalog_image(out_catalog, MYLITE_STORAGE_FORMAT_PAGE_SIZE);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
@@ -10994,6 +11190,97 @@ static mylite_storage_result initialize_catalog_image(
 static void free_catalog_image(mylite_storage_catalog_image *catalog) {
     free(catalog->bytes);
     *catalog = (mylite_storage_catalog_image){0};
+}
+
+static mylite_storage_result copy_catalog_image(
+    const mylite_storage_catalog_image *catalog,
+    mylite_storage_catalog_image *out_catalog
+) {
+    *out_catalog = (mylite_storage_catalog_image){0};
+    if (catalog->bytes == NULL || catalog->used_bytes == 0U ||
+        catalog->used_bytes > catalog->capacity) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    size_t capacity = catalog->used_bytes;
+    if (capacity < MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+        capacity = MYLITE_STORAGE_FORMAT_PAGE_SIZE;
+    }
+    unsigned char *bytes = (unsigned char *)calloc(1U, capacity);
+    if (bytes == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    memcpy(bytes, catalog->bytes, catalog->used_bytes);
+    *out_catalog = (mylite_storage_catalog_image){
+        .bytes = bytes,
+        .used_bytes = catalog->used_bytes,
+        .capacity = capacity,
+        .record_count = catalog->record_count,
+    };
+    return MYLITE_STORAGE_OK;
+}
+
+static void maybe_cache_catalog_image_for_file(
+    FILE *file,
+    const mylite_storage_header *header,
+    const mylite_storage_catalog_image *catalog
+) {
+    maybe_cache_catalog_image_in_statement(active_statement_for_file(file), header, catalog);
+    maybe_cache_catalog_image_in_statement(active_read_statement_for_file(file), header, catalog);
+    if (active_read_snapshot_has_file(file)) {
+        maybe_cache_catalog_image_in_statement(active_read_snapshot, header, catalog);
+    }
+}
+
+static void maybe_cache_catalog_image_in_statement(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    const mylite_storage_catalog_image *catalog
+) {
+    if (statement == NULL || header->page_size != MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+        return;
+    }
+
+    mylite_storage_catalog_image copy = {0};
+    if (copy_catalog_image(catalog, &copy) != MYLITE_STORAGE_OK) {
+        return;
+    }
+    adopt_current_catalog_image(statement, header, &copy);
+    maybe_cache_catalog_image_in_read_checkpoint_cache(statement, catalog);
+}
+
+static void adopt_current_catalog_image(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    mylite_storage_catalog_image *catalog
+) {
+    free_catalog_image(&statement->current_catalog_image);
+    statement->current_catalog_image = *catalog;
+    *catalog = (mylite_storage_catalog_image){0};
+    statement->current_catalog_root_page = header->catalog_root_page;
+    statement->current_catalog_generation = header->catalog_generation;
+    statement->has_current_catalog_image = 1;
+}
+
+static void maybe_cache_catalog_image_in_read_checkpoint_cache(
+    const mylite_storage_statement *statement,
+    const mylite_storage_catalog_image *catalog
+) {
+    mylite_storage_read_checkpoint_cache *cache = read_checkpoint_cache_for(statement);
+    if (cache == NULL || !cache->has_snapshot ||
+        cache->header.catalog_root_page != statement->current_catalog_root_page ||
+        cache->header.catalog_generation != statement->current_catalog_generation) {
+        return;
+    }
+
+    mylite_storage_catalog_image copy = {0};
+    if (copy_catalog_image(catalog, &copy) != MYLITE_STORAGE_OK) {
+        return;
+    }
+    free_catalog_image(&cache->current_catalog_image);
+    cache->current_catalog_image = copy;
+    cache->has_current_catalog_image = 1;
 }
 
 static mylite_storage_result ensure_catalog_image_capacity(
@@ -11152,6 +11439,9 @@ static mylite_storage_result publish_catalog_image(
     result = write_catalog_chain_pages(file, header, catalog, chain_page_count);
     if (result == MYLITE_STORAGE_OK) {
         result = publish_header(file, header);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        maybe_cache_catalog_image_for_file(file, header, catalog);
     }
     if (result == MYLITE_STORAGE_OK) {
         result = finish_write_journal(file, filename);

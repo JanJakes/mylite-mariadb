@@ -234,6 +234,7 @@ static void assert_statement_checkpoint_preserves_marked_auto_increment_rollback
 );
 static void test_read_statement_storage_session(void);
 static void test_read_checkpoint_snapshot_cache(void);
+static void test_read_statement_multi_page_catalog_image_cache(void);
 static void test_read_statement_file_cache_path_replacement(void);
 static void test_transaction_journals(void);
 static void test_transaction_owner_isolation(void);
@@ -424,6 +425,7 @@ int main(void) {
     test_statement_checkpoints();
     test_read_statement_storage_session();
     test_read_checkpoint_snapshot_cache();
+    test_read_statement_multi_page_catalog_image_cache();
     test_read_statement_file_cache_path_replacement();
     test_transaction_journals();
     test_transaction_owner_isolation();
@@ -5968,6 +5970,68 @@ static void test_read_checkpoint_snapshot_cache(void) {
     assert(memcmp(stored_definition, comments_definition, sizeof(comments_definition)) == 0);
     mylite_storage_free(stored_definition);
     assert(mylite_storage_end_read_statement(read_statement) == MYLITE_STORAGE_OK);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_read_statement_multi_page_catalog_image_cache(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+
+    enum { table_count = 96 };
+
+    char *root = make_temp_root();
+    char *filename = path_join(root, "read-statement-catalog-image-cache.mylite");
+    char table_names[table_count][16] = {{0}};
+    unsigned char catalog_root_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+    mylite_storage_statement *read_statement = NULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    for (unsigned i = 0U; i < table_count; ++i) {
+        assert(snprintf(table_names[i], sizeof(table_names[i]), "t%03u", i) > 0);
+        const mylite_storage_table_definition table_definition = {
+            .size = sizeof(table_definition),
+            .schema_name = "app",
+            .table_name = table_names[i],
+            .requested_engine_name = "MYLITE",
+            .effective_engine_name = "MYLITE",
+            .definition = definition,
+            .definition_size = sizeof(definition),
+        };
+        assert(
+            mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK
+        );
+    }
+
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    read_test_page(filename, header.catalog_root_page, catalog_root_page);
+    const unsigned long long next_page =
+        get_test_u64_le(catalog_root_page, MYLITE_STORAGE_FORMAT_CATALOG_NEXT_PAGE_OFFSET);
+    assert(next_page == header.catalog_root_page + 1ULL);
+    assert(mylite_storage_begin_read_statement(filename, &read_statement) == MYLITE_STORAGE_OK);
+    assert(read_statement != NULL);
+
+    flip_file_byte(
+        filename,
+        (long)(next_page * MYLITE_STORAGE_FORMAT_PAGE_SIZE) +
+            (long)MYLITE_STORAGE_FORMAT_CATALOG_MAGIC_OFFSET
+    );
+    assert(mylite_storage_table_exists(filename, "app", table_names[0]) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_table_exists(filename, "app", table_names[table_count - 1U]) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_end_read_statement(read_statement) == MYLITE_STORAGE_OK);
+
+    assert(
+        mylite_storage_table_exists(filename, "app", table_names[table_count - 1U]) ==
+        MYLITE_STORAGE_CORRUPT
+    );
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);

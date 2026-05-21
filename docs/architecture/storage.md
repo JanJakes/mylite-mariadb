@@ -63,10 +63,10 @@ instead of re-encoding and re-validating page `0`. Nested checkpoints clone the
 parent checkpoint's current header/catalog snapshot under the same owner and
 exclusive lock, so prepared row-DML savepoints do not re-read or re-checksum a
 snapshot the parent already validated. Active statements also cache validated
-catalog root pages by root page id and catalog generation so row-DML and
-duplicate-key probes do not repeatedly checksum unchanged catalog metadata;
-catalog root writes and catalog-generation header changes invalidate the active
-statement chain before later metadata reads. Row append, update, delete,
+catalog images by root page id and catalog generation so row-DML and
+duplicate-key probes do not repeatedly walk or checksum unchanged catalog
+metadata; catalog root writes and catalog-generation header changes invalidate
+the active statement chain before later metadata reads. Row append, update, delete,
 truncate, and autoincrement publication paths publish decoded headers directly
 into the active checkpoint instead of encoding and immediately decoding page
 `0`. Active checkpoints also keep a transaction-local row-payload cache for
@@ -381,7 +381,7 @@ file and the same live row ids returned by index-entry reads.
 
 File-backed index cursor builds also keep the primary file open across exact
 lookup and row materialization. Primary-key point lookups and secondary exact
-cursor builds reuse that scoped file view and cached header/catalog pages.
+cursor builds reuse that scoped file view and cached header/catalog images.
 Single-entry exact unique cursors keep their copied key, cursor entry, and
 one-row materialization offsets inline in the handler when the key fits
 MariaDB's normal key buffer, avoiding per-lookup heap allocation on primary-key
