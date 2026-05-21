@@ -154,8 +154,11 @@ index-entry, and index leaf access while preserving existing storage bytes;
 versioned rollback journals can now protect a bounded typed page set for future
 pager dirty-page preimages, and active dirty-page rollback now captures,
 merges, and restores pager-owned existing page preimages across
-statement/savepoint rollback. Maintained B-tree pages still need production
-dirty-page journal wiring, page formats, flushing, and root update semantics.
+statement/savepoint rollback. The first dirty existing-page write in an
+ordinary active statement now registers that page in the recovery journal before
+writing it, while unsafe journal shapes reject rather than silently bypassing
+crash recovery. Maintained B-tree pages still need planned dirty-page sets,
+page formats, flushing, and root update semantics.
 Durable table-local row,
 payload, exact-index, and published leaf-page caches now retarget across
 unrelated table row mutations, so one

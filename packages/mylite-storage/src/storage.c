@@ -1004,6 +1004,15 @@ static mylite_storage_result capture_dirty_page_undo_for_pager_write(
     const mylite_storage_pager *pager,
     unsigned long long page_id
 );
+static mylite_storage_result ensure_dirty_page_recovery_journal(
+    const mylite_storage_pager *pager,
+    mylite_storage_statement *statement,
+    unsigned long long page_id
+);
+static int dirty_page_undo_exists_in_statement_chain(
+    const mylite_storage_statement *statement,
+    unsigned long long page_id
+);
 static mylite_storage_result append_dirty_page_undo(
     mylite_storage_dirty_page_undo_list *undos,
     unsigned long long page_id,
@@ -9877,13 +9886,60 @@ static mylite_storage_result capture_dirty_page_undo_for_pager_write(
         return MYLITE_STORAGE_OK;
     }
 
+    mylite_storage_result result = ensure_dirty_page_recovery_journal(pager, statement, page_id);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
     unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    mylite_storage_result result =
-        read_page_at(pager->file, page_id, pager->header->page_size, page);
+    result = read_page_at(pager->file, page_id, pager->header->page_size, page);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
     return append_dirty_page_undo(&statement->dirty_page_undos, page_id, page);
+}
+
+static mylite_storage_result ensure_dirty_page_recovery_journal(
+    const mylite_storage_pager *pager,
+    mylite_storage_statement *statement,
+    unsigned long long page_id
+) {
+    if (dirty_page_undo_exists_in_statement_chain(statement, page_id)) {
+        return MYLITE_STORAGE_OK;
+    }
+    if (statement_chain_has_write_journal(statement)) {
+        return MYLITE_STORAGE_UNSUPPORTED;
+    }
+    if (statement->parent != NULL || pager->filename == NULL || pager->filename[0] == '\0') {
+        return MYLITE_STORAGE_UNSUPPORTED;
+    }
+
+    mylite_storage_result result = begin_recovery_journal_for_pages(
+        pager->file,
+        pager->filename,
+        pager->header,
+        1,
+        pager->header->free_list_root_page != 0ULL,
+        &page_id,
+        1U
+    );
+    if (result == MYLITE_STORAGE_OK) {
+        statement->owns_recovery_journal = 1;
+    }
+    return result;
+}
+
+static int dirty_page_undo_exists_in_statement_chain(
+    const mylite_storage_statement *statement,
+    unsigned long long page_id
+) {
+    for (const mylite_storage_statement *current = statement; current != NULL;
+         current = current->parent) {
+        if (dirty_page_undo_exists(&current->dirty_page_undos, page_id)) {
+            return 1;
+        }
+    }
+    return 0;
 }
 
 static mylite_storage_result append_dirty_page_undo(
