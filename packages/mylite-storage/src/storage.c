@@ -458,6 +458,17 @@ typedef struct mylite_storage_table_entry_cache {
     int has_entry;
 } mylite_storage_table_entry_cache;
 
+typedef struct mylite_storage_index_root_entry_cache {
+    char *schema_name;
+    char *table_name;
+    unsigned long long catalog_root_page;
+    unsigned long long catalog_generation;
+    unsigned long long table_id;
+    unsigned index_number;
+    mylite_storage_catalog_entry entry;
+    int has_entry;
+} mylite_storage_index_root_entry_cache;
+
 typedef struct mylite_storage_rowset_builder {
     mylite_storage_rowset *rowset;
     size_t row_capacity;
@@ -600,6 +611,7 @@ struct mylite_storage_statement {
     mylite_storage_live_row_id_cache_set live_row_id_caches;
     mylite_storage_row_payload_cache_set row_payload_caches;
     mylite_storage_table_entry_cache table_entry_cache;
+    mylite_storage_index_root_entry_cache index_root_entry_cache;
     mylite_storage_append_page_buffer append_pages;
     mylite_storage_buffered_page_undo_list buffered_page_undos;
     mylite_storage_dirty_page_undo_list dirty_page_undos;
@@ -1040,6 +1052,25 @@ static void store_active_table_entry_cache_in_statement(
     const mylite_storage_catalog_entry *entry
 );
 static void clear_table_entry_cache(mylite_storage_table_entry_cache *cache);
+static int find_active_index_root_entry_cache_in_statement(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long table_id,
+    unsigned index_number,
+    mylite_storage_catalog_entry *out_entry
+);
+static void store_active_index_root_entry_cache_in_statement(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long table_id,
+    unsigned index_number,
+    const mylite_storage_catalog_entry *entry
+);
+static void clear_index_root_entry_cache(mylite_storage_index_root_entry_cache *cache);
 static void clear_statement_chain_exact_index_caches(mylite_storage_statement *statement);
 static void clear_exact_index_caches(mylite_storage_statement *statement);
 static void free_exact_index_cache(mylite_storage_exact_index_cache *cache);
@@ -1567,6 +1598,16 @@ static mylite_storage_result find_parent_foreign_key_record(
     const char *referenced_table_name
 );
 static mylite_storage_result find_index_root_record(
+    const mylite_storage_catalog_image *catalog,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long table_id,
+    unsigned index_number,
+    mylite_storage_catalog_entry *out_entry
+);
+static mylite_storage_result find_index_root_record_in_statement(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
     const mylite_storage_catalog_image *catalog,
     const char *schema_name,
     const char *table_name,
@@ -2106,6 +2147,7 @@ static mylite_storage_result find_static_index_leaf_prefix_exists(
     FILE *file,
     const char *filename,
     const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
     const mylite_storage_catalog_image *catalog,
     unsigned long long table_id,
     const char *schema_name,
@@ -2245,6 +2287,7 @@ static mylite_storage_result read_index_leaf_entries(
     FILE *file,
     const char *filename,
     const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
     const mylite_storage_catalog_image *catalog,
     unsigned long long table_id,
     const char *schema_name,
@@ -2257,6 +2300,7 @@ static mylite_storage_result read_index_leaf_exact_entries(
     FILE *file,
     const char *filename,
     const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
     const mylite_storage_catalog_image *catalog,
     unsigned long long table_id,
     const char *schema_name,
@@ -2271,6 +2315,7 @@ static mylite_storage_result read_index_leaf_exact_row_ids(
     FILE *file,
     const char *filename,
     const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
     const mylite_storage_catalog_image *catalog,
     unsigned long long table_id,
     const char *schema_name,
@@ -2285,6 +2330,7 @@ static mylite_storage_result find_index_leaf_exact_static_row_id(
     FILE *file,
     const char *filename,
     const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
     const mylite_storage_catalog_image *catalog,
     unsigned long long table_id,
     const char *schema_name,
@@ -7115,6 +7161,7 @@ mylite_storage_result mylite_storage_read_index_entries(
             file,
             filename,
             &header,
+            active_cache_statement,
             &catalog,
             table_entry.table_id,
             schema_name,
@@ -7499,6 +7546,7 @@ mylite_storage_result mylite_storage_read_exact_index_entries(
             file,
             filename,
             &header,
+            active_cache_statement,
             &catalog,
             table_entry.table_id,
             schema_name,
@@ -7619,6 +7667,7 @@ mylite_storage_result mylite_storage_index_prefix_exists_for_index(
             file,
             filename,
             &header,
+            active_cache_statement,
             &catalog,
             table_entry.table_id,
             schema_name,
@@ -7640,6 +7689,7 @@ mylite_storage_result mylite_storage_index_prefix_exists_for_index(
             file,
             filename,
             &header,
+            active_cache_statement,
             &catalog,
             table_entry.table_id,
             schema_name,
@@ -8533,6 +8583,7 @@ static void initialize_nested_checkpoint_storage(mylite_storage_statement *state
     statement->live_row_id_caches = (mylite_storage_live_row_id_cache_set){0};
     statement->row_payload_caches = (mylite_storage_row_payload_cache_set){0};
     statement->table_entry_cache = (mylite_storage_table_entry_cache){0};
+    statement->index_root_entry_cache = (mylite_storage_index_root_entry_cache){0};
     statement->append_pages = (mylite_storage_append_page_buffer){0};
     statement->buffered_page_undos = (mylite_storage_buffered_page_undo_list){0};
     statement->dirty_page_undos = (mylite_storage_dirty_page_undo_list){0};
@@ -11198,6 +11249,7 @@ static void clear_catalog_root_cache(mylite_storage_statement *statement) {
     statement->current_catalog_generation = 0ULL;
     free_catalog_image(&statement->current_catalog_image);
     clear_table_entry_cache(&statement->table_entry_cache);
+    clear_index_root_entry_cache(&statement->index_root_entry_cache);
 }
 
 static void free_statement(mylite_storage_statement *statement) {
@@ -11215,6 +11267,7 @@ static void free_statement(mylite_storage_statement *statement) {
     clear_live_row_id_caches(statement);
     clear_row_payload_caches(statement);
     clear_table_entry_cache(&statement->table_entry_cache);
+    clear_index_root_entry_cache(&statement->index_root_entry_cache);
     free_catalog_image(&statement->current_catalog_image);
     clear_append_page_buffer(statement);
     clear_buffered_page_undos(statement);
@@ -11255,6 +11308,7 @@ static void reset_reusable_nested_checkpoint_storage(mylite_storage_statement *s
     statement->deferred_durable_cache_retarget_all_tables = 0;
     statement->deferred_durable_cache_retarget_table_id = 0ULL;
     statement->deferred_durable_cache_retarget_header = (mylite_storage_header){0};
+    statement->index_root_entry_cache = (mylite_storage_index_root_entry_cache){0};
 }
 
 static int find_active_table_entry_cache_in_statement(
@@ -11328,6 +11382,86 @@ static void clear_table_entry_cache(mylite_storage_table_entry_cache *cache) {
     free(cache->schema_name);
     free(cache->table_name);
     *cache = (mylite_storage_table_entry_cache){0};
+}
+
+static int find_active_index_root_entry_cache_in_statement(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long table_id,
+    unsigned index_number,
+    mylite_storage_catalog_entry *out_entry
+) {
+    if (statement == NULL) {
+        return 0;
+    }
+
+    const mylite_storage_index_root_entry_cache *cache = &statement->index_root_entry_cache;
+    if (!cache->has_entry || cache->schema_name == NULL || cache->table_name == NULL ||
+        cache->catalog_root_page != header->catalog_root_page ||
+        cache->catalog_generation != header->catalog_generation || cache->table_id != table_id ||
+        cache->index_number != index_number || strcmp(cache->schema_name, schema_name) != 0 ||
+        strcmp(cache->table_name, table_name) != 0) {
+        return 0;
+    }
+
+    *out_entry = cache->entry;
+    out_entry->record = NULL;
+    return 1;
+}
+
+static void store_active_index_root_entry_cache_in_statement(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long table_id,
+    unsigned index_number,
+    const mylite_storage_catalog_entry *entry
+) {
+    if (statement == NULL) {
+        return;
+    }
+
+    mylite_storage_index_root_entry_cache *cache = &statement->index_root_entry_cache;
+    if (cache->has_entry && cache->schema_name != NULL && cache->table_name != NULL &&
+        cache->table_id == table_id && cache->index_number == index_number &&
+        strcmp(cache->schema_name, schema_name) == 0 &&
+        strcmp(cache->table_name, table_name) == 0) {
+        cache->catalog_root_page = header->catalog_root_page;
+        cache->catalog_generation = header->catalog_generation;
+        cache->entry = *entry;
+        cache->entry.record = NULL;
+        return;
+    }
+
+    char *schema_name_copy = copy_string(schema_name);
+    if (schema_name_copy == NULL) {
+        return;
+    }
+    char *table_name_copy = copy_string(table_name);
+    if (table_name_copy == NULL) {
+        free(schema_name_copy);
+        return;
+    }
+
+    clear_index_root_entry_cache(cache);
+    cache->schema_name = schema_name_copy;
+    cache->table_name = table_name_copy;
+    cache->catalog_root_page = header->catalog_root_page;
+    cache->catalog_generation = header->catalog_generation;
+    cache->table_id = table_id;
+    cache->index_number = index_number;
+    cache->entry = *entry;
+    cache->entry.record = NULL;
+    cache->has_entry = 1;
+}
+
+static void clear_index_root_entry_cache(mylite_storage_index_root_entry_cache *cache) {
+    free(cache->schema_name);
+    free(cache->table_name);
+    *cache = (mylite_storage_index_root_entry_cache){0};
 }
 
 static void clear_statement_chain_exact_index_caches(mylite_storage_statement *statement) {
@@ -14719,6 +14853,44 @@ static mylite_storage_result find_index_root_record(
     return MYLITE_STORAGE_NOTFOUND;
 }
 
+static mylite_storage_result find_index_root_record_in_statement(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    const mylite_storage_catalog_image *catalog,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long table_id,
+    unsigned index_number,
+    mylite_storage_catalog_entry *out_entry
+) {
+    if (find_active_index_root_entry_cache_in_statement(
+            statement,
+            header,
+            schema_name,
+            table_name,
+            table_id,
+            index_number,
+            out_entry
+        )) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    mylite_storage_result result =
+        find_index_root_record(catalog, schema_name, table_name, table_id, index_number, out_entry);
+    if (result == MYLITE_STORAGE_OK) {
+        store_active_index_root_entry_cache_in_statement(
+            statement,
+            header,
+            schema_name,
+            table_name,
+            table_id,
+            index_number,
+            out_entry
+        );
+    }
+    return result;
+}
+
 static int catalog_has_schema(
     const mylite_storage_catalog_image *catalog,
     const char *schema_name
@@ -17903,6 +18075,7 @@ static mylite_storage_result read_index_leaf_entries(
     FILE *file,
     const char *filename,
     const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
     const mylite_storage_catalog_image *catalog,
     unsigned long long table_id,
     const char *schema_name,
@@ -17914,7 +18087,9 @@ static mylite_storage_result read_index_leaf_entries(
     *out_used_leaf = 0;
 
     mylite_storage_catalog_entry root_entry = {0};
-    mylite_storage_result result = find_index_root_record(
+    mylite_storage_result result = find_index_root_record_in_statement(
+        active_cache_statement,
+        header,
         catalog,
         schema_name,
         table_name,
@@ -17976,6 +18151,7 @@ static mylite_storage_result read_index_leaf_exact_entries(
     FILE *file,
     const char *filename,
     const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
     const mylite_storage_catalog_image *catalog,
     unsigned long long table_id,
     const char *schema_name,
@@ -17989,7 +18165,9 @@ static mylite_storage_result read_index_leaf_exact_entries(
     *out_used_leaf = 0;
 
     mylite_storage_catalog_entry root_entry = {0};
-    mylite_storage_result result = find_index_root_record(
+    mylite_storage_result result = find_index_root_record_in_statement(
+        active_cache_statement,
+        header,
         catalog,
         schema_name,
         table_name,
@@ -18055,6 +18233,7 @@ static mylite_storage_result read_index_leaf_exact_row_ids(
     FILE *file,
     const char *filename,
     const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
     const mylite_storage_catalog_image *catalog,
     unsigned long long table_id,
     const char *schema_name,
@@ -18068,7 +18247,9 @@ static mylite_storage_result read_index_leaf_exact_row_ids(
     *out_used_leaf = 0;
 
     mylite_storage_catalog_entry root_entry = {0};
-    mylite_storage_result result = find_index_root_record(
+    mylite_storage_result result = find_index_root_record_in_statement(
+        active_cache_statement,
+        header,
         catalog,
         schema_name,
         table_name,
@@ -18134,6 +18315,7 @@ static mylite_storage_result find_index_leaf_exact_static_row_id(
     FILE *file,
     const char *filename,
     const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
     const mylite_storage_catalog_image *catalog,
     unsigned long long table_id,
     const char *schema_name,
@@ -18148,7 +18330,9 @@ static mylite_storage_result find_index_leaf_exact_static_row_id(
     *out_used_leaf = 0;
 
     mylite_storage_catalog_entry root_entry = {0};
-    mylite_storage_result result = find_index_root_record(
+    mylite_storage_result result = find_index_root_record_in_statement(
+        active_cache_statement,
+        header,
         catalog,
         schema_name,
         table_name,
@@ -18406,6 +18590,7 @@ static mylite_storage_result find_static_index_leaf_prefix_exists(
     FILE *file,
     const char *filename,
     const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
     const mylite_storage_catalog_image *catalog,
     unsigned long long table_id,
     const char *schema_name,
@@ -18421,7 +18606,9 @@ static mylite_storage_result find_static_index_leaf_prefix_exists(
     *out_used_leaf = 0;
 
     mylite_storage_catalog_entry root_entry = {0};
-    mylite_storage_result result = find_index_root_record(
+    mylite_storage_result result = find_index_root_record_in_statement(
+        active_cache_statement,
+        header,
         catalog,
         schema_name,
         table_name,
@@ -22122,6 +22309,7 @@ static mylite_storage_result find_exact_index_row_id(
             file,
             filename,
             header,
+            active_cache_statement,
             catalog,
             table_entry->table_id,
             schema_name,
@@ -22138,6 +22326,7 @@ static mylite_storage_result find_exact_index_row_id(
             file,
             filename,
             header,
+            active_cache_statement,
             catalog,
             table_entry->table_id,
             schema_name,

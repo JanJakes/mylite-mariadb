@@ -80,11 +80,13 @@ across exact-index lookup and row materialization, reusing the validated
 primary-file header and catalog image for point lookups and exact-index cursor
 builds. Durable exact and full entryset reads now use the same scoped
 file/header setup as point lookups and FK prefix probes before ordered cursor
-construction falls through to published roots or append-history scans. Repeated
-read statements over unchanged durable header bytes and the
-same file identity also reuse a thread-local decoded checkpoint snapshot after
-raw header-page comparison, avoiding repeated header/catalog checksum
-validation and redundant catalog-chain reads on hot point-select loops.
+construction falls through to published roots or append-history scans.
+Published leaf-root readers now cache resolved index-root catalog entries on
+the active statement, avoiding repeated catalog-record scans for the same table
+and index root. Repeated read statements over unchanged durable header bytes
+and the same file identity also reuse a thread-local decoded checkpoint
+snapshot after raw header-page comparison, avoiding repeated header/catalog
+checksum validation and redundant catalog-chain reads on hot point-select loops.
 Normal read statements now reuse a thread-local unlocked read file handle after
 device/inode validation, reducing repeated `fopen()` overhead without holding
 shared locks between cursor builds. That read handle now stores its device and

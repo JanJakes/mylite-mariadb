@@ -402,6 +402,10 @@ matching primary-key point lookups and FK prefix probes when an active
 statement, read statement, or snapshot already owns the current file view.
 Full entryset reads then fall through to published roots or append-history
 scans for ordered cursor construction.
+Published leaf-root readers cache the last resolved index-root catalog entry
+on the active statement, keyed by table identity, index number, catalog root,
+and catalog generation, so repeated exact, full, and prefix probes do not
+rescan the catalog image for the same root metadata.
 
 File-backed index cursor builds also keep the primary file open across exact
 lookup and row materialization. Primary-key point lookups and secondary exact
