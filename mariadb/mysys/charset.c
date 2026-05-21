@@ -659,7 +659,12 @@ void add_compiled_extra_collation(struct charset_info_st *cs)
 
 static void remember_compiled_collation(struct charset_info_st *cs)
 {
+  /*
+    Only static compiled definitions reach here before MY_CS_AVAILABLE is set.
+    Generated UCA aliases are once_alloc'd and rebuilt during each startup.
+  */
   if (!cs || !(cs->state & MY_CS_COMPILED) ||
+      (cs->state & (MY_CS_AVAILABLE | MY_CS_LOADED)) ||
       cs->number >= array_elements(compiled_charset_snapshots))
     return;
 
