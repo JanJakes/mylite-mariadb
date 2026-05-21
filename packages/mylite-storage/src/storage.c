@@ -18264,7 +18264,8 @@ static mylite_storage_result read_row_state_page(
         return MYLITE_STORAGE_CORRUPT;
     }
 
-    mylite_storage_result result = read_page_at(file, page_id, header->page_size, page);
+    const mylite_storage_pager pager = open_storage_pager(file, NULL, header);
+    mylite_storage_result result = pager_read_page(&pager, page_id, page);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
@@ -21759,7 +21760,8 @@ static mylite_storage_result read_autoincrement_page(
         return MYLITE_STORAGE_CORRUPT;
     }
 
-    mylite_storage_result result = read_page_at(file, page_id, header->page_size, page);
+    const mylite_storage_pager pager = open_storage_pager(file, NULL, header);
+    mylite_storage_result result = pager_read_page(&pager, page_id, page);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
@@ -22021,7 +22023,8 @@ static mylite_storage_result read_blob_page(
     }
 
     unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    mylite_storage_result result = read_page_at(file, page_id, header->page_size, page);
+    const mylite_storage_pager pager = open_storage_pager(file, NULL, header);
+    mylite_storage_result result = pager_read_page(&pager, page_id, page);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
