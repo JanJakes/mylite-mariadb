@@ -423,6 +423,8 @@ Schema namespace catalog writes use scoped update file/header setup before
 publishing catalog mutations, including the no-op existing-schema path.
 Index-root catalog writes use the same scoped update setup before publishing or
 removing root metadata records.
+Foreign-key metadata writes use scoped update setup before publishing,
+renaming, or dropping FK catalog records and metadata BLOB pages.
 
 File-backed index cursor builds also keep the primary file open across exact
 lookup and row materialization. Primary-key point lookups and secondary exact
