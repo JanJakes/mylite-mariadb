@@ -3516,9 +3516,13 @@ static size_t exact_index_cache_bucket_for_key(
     const unsigned char *key
 );
 static size_t exact_index_cache_bucket_count(size_t entry_count);
-static int key_bytes_equal(const unsigned char *left, const unsigned char *right, size_t key_size);
-static size_t hash_key_bytes(const unsigned char *key, size_t key_size);
-static size_t hash_fixed_key_value(uint64_t value, size_t key_size);
+MYLITE_STORAGE_HOT_INLINE int key_bytes_equal(
+    const unsigned char *left,
+    const unsigned char *right,
+    size_t key_size
+);
+MYLITE_STORAGE_HOT_INLINE size_t hash_key_bytes(const unsigned char *key, size_t key_size);
+MYLITE_STORAGE_HOT_INLINE size_t hash_fixed_key_value(uint64_t value, size_t key_size);
 static uint64_t checksum_bytes(const unsigned char *bytes, size_t size);
 static void clear_exact_index_cache_buckets(mylite_storage_exact_index_cache *cache);
 static void unlink_exact_index_cache_row_id_bucket_entry(
@@ -24997,7 +25001,11 @@ static size_t exact_index_cache_bucket_count(size_t entry_count) {
     return bucket_count;
 }
 
-static int key_bytes_equal(const unsigned char *left, const unsigned char *right, size_t key_size) {
+MYLITE_STORAGE_HOT_INLINE int key_bytes_equal(
+    const unsigned char *left,
+    const unsigned char *right,
+    size_t key_size
+) {
     switch (key_size) {
     case 1U:
         return left[0] == right[0];
@@ -25027,7 +25035,7 @@ static int key_bytes_equal(const unsigned char *left, const unsigned char *right
     }
 }
 
-static size_t hash_key_bytes(const unsigned char *key, size_t key_size) {
+MYLITE_STORAGE_HOT_INLINE size_t hash_key_bytes(const unsigned char *key, size_t key_size) {
     switch (key_size) {
     case 1U:
         return hash_fixed_key_value(key[0], key_size);
@@ -25058,7 +25066,7 @@ static size_t hash_key_bytes(const unsigned char *key, size_t key_size) {
     return (size_t)hash;
 }
 
-static size_t hash_fixed_key_value(uint64_t value, size_t key_size) {
+MYLITE_STORAGE_HOT_INLINE size_t hash_fixed_key_value(uint64_t value, size_t key_size) {
     value ^= (uint64_t)key_size * 0x9e3779b97f4a7c15ULL;
     value *= 0x9e3779b97f4a7c15ULL;
     value ^= value >> 32U;

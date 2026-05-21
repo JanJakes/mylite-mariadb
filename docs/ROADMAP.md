@@ -365,6 +365,8 @@ buffer owner in one parent-chain pass after opening the scoped update file.
 Indexed-row payload reads now use the active row-payload cache already resolved
 by the caller, avoiding another filename/header/table cache lookup on prepared
 point-update reads.
+Fixed-width exact-index cache key hash and compare helpers are now hot-inlined
+at their cache-probe call sites.
 Durable handler write locks now defer MEMORY/HEAP statement snapshots until a
 volatile table participates, while transaction and savepoint snapshots remain
 eager at their SQL boundaries.
