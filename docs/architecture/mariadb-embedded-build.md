@@ -14,7 +14,9 @@ tools/mariadb-embedded-build all
 The wrapper configures MariaDB with
 `cmake/mariadb-embedded-baseline.cmake`, builds only the `libmariadbd.a` target,
 strips debug and local-symbol metadata from the archive, and reports archive
-size evidence. It does not update MariaDB submodules.
+size evidence. A build-local marker prevents no-op builds from repeatedly
+stripping an already-stripped archive, keeping measurements stable. The wrapper
+does not update MariaDB submodules.
 
 Set `STRIP_ARCHIVE=0` when an unstripped archive is needed for local
 inspection.

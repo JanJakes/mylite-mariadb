@@ -122,6 +122,7 @@ embedded_archive() {
 
 strip_archive() {
   local archive
+  local strip_marker
   local size_after
   local size_before
 
@@ -142,10 +143,18 @@ strip_archive() {
   require_command strip
   require_command ranlib
 
+  strip_marker="${archive}.mylite-stripped"
+  if [ -f "${strip_marker}" ] && [ ! "${archive}" -nt "${strip_marker}" ]; then
+    echo "stripped_archive=${archive}"
+    echo "stripped_saved_bytes=0"
+    return
+  fi
+
   size_before="$(file_size "${archive}")"
   strip -S -x "${archive}"
   ranlib "${archive}"
   size_after="$(file_size "${archive}")"
+  touch "${strip_marker}"
 
   echo "stripped_archive=${archive}"
   echo "stripped_saved_bytes=$((size_before - size_after))"

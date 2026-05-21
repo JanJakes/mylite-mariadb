@@ -184,7 +184,9 @@ diagnostics, which are already outside the default embedded profile.
 
 After building the embedded archive, `tools/mariadb-embedded-build` strips
 debug and local symbols from `libmariadbd.a` and refreshes the archive index
-with `ranlib`.
+with `ranlib`. The wrapper records a build-local marker after stripping so a
+no-op rebuild does not mutate an already-stripped archive or drift the measured
+size.
 
 The embedded baseline uses `CMAKE_BUILD_TYPE=MinSizeRel` so MariaDB compiles
 the same runtime surface with size-oriented release flags.
@@ -507,6 +509,8 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 ## Acceptance Criteria
 
 - The embedded build wrapper produces a stripped `libmariadbd.a` by default.
+- Re-running the embedded build without relinking does not repeatedly strip or
+  resize an already-stripped archive.
 - `STRIP_ARCHIVE=0` preserves an unstripped archive for diagnostics.
 - The embedded archive builds with size-oriented release flags.
 - Performance Schema is omitted from the embedded archive and remains omitted
