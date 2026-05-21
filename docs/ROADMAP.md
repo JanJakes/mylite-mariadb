@@ -95,8 +95,7 @@ policy coverage proves replication and binlog command families are outside the
 core library contract. Embedded no-binlog startup, open, cleanup, and
 GTID-index update paths are guarded, and the unsupported injector root is
 omitted after link evidence proves it is only needed by the server topology
-runtime. Shared replication utility helpers still referenced by retained
-MariaDB code remain for narrower review.
+runtime.
 SQL `BINLOG` statement replay is omitted after coverage proves it is an
 unsupported replication replay surface and the embedded dispatcher already
 fail-closes it.
