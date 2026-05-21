@@ -17302,15 +17302,21 @@ static mylite_storage_result decode_index_entry_page(
     const size_t key_size = get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_KEY_SIZE_OFFSET);
     const unsigned long long expected_checksum =
         get_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET);
-    const unsigned long long actual_checksum =
-        checksum_page(page, MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET);
     const size_t key_capacity =
         MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET;
     if (page_type != MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX || page_version != 1U ||
         format_version != MYLITE_STORAGE_FORMAT_VERSION ||
         checksum_algorithm != MYLITE_STORAGE_FORMAT_CHECKSUM_FNV1A64 || stored_page_id != page_id ||
         table_id == 0ULL || !is_addressable_page_id(header, row_id) || key_size == 0U ||
-        key_size > key_capacity || expected_checksum != actual_checksum) {
+        key_size > key_capacity) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+    const unsigned long long actual_checksum = checksum_page_zero_tail(
+        page,
+        MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET,
+        MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET + key_size
+    );
+    if (expected_checksum != actual_checksum) {
         return MYLITE_STORAGE_CORRUPT;
     }
 
@@ -20877,15 +20883,12 @@ static mylite_storage_result decode_row_page_metadata(
         get_u64_le(page, MYLITE_STORAGE_FORMAT_ROW_OVERFLOW_ROOT_PAGE_OFFSET);
     const unsigned long long expected_checksum =
         get_u64_le(page, MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET);
-    const unsigned long long actual_checksum =
-        checksum_page(page, MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET);
     const size_t payload_capacity =
         MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET;
     if (page_type != MYLITE_STORAGE_FORMAT_ROW_PAGE_TYPE_TABLE_ROWS || page_version != 1U ||
         format_version != MYLITE_STORAGE_FORMAT_VERSION ||
         checksum_algorithm != MYLITE_STORAGE_FORMAT_CHECKSUM_FNV1A64 || stored_page_id != page_id ||
-        table_id == 0ULL || expected_checksum != actual_checksum || row_size == 0U ||
-        row_count != 1U) {
+        table_id == 0ULL || row_size == 0U || row_count != 1U) {
         return MYLITE_STORAGE_CORRUPT;
     }
     if (overflow_root_page == 0ULL && row_count > payload_capacity / row_size) {
@@ -20893,6 +20896,14 @@ static mylite_storage_result decode_row_page_metadata(
     }
     if (overflow_root_page != 0ULL &&
         (row_count != 1U || !is_addressable_page_id(header, overflow_root_page))) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+    const size_t used_size = overflow_root_page == 0ULL
+                                 ? MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET + row_size
+                                 : MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET;
+    const unsigned long long actual_checksum =
+        checksum_page_zero_tail(page, MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET, used_size);
+    if (expected_checksum != actual_checksum) {
         return MYLITE_STORAGE_CORRUPT;
     }
 
@@ -21838,8 +21849,11 @@ static mylite_storage_result decode_row_state_page(
     const unsigned state_kind = get_u32_le(page, MYLITE_STORAGE_FORMAT_ROW_STATE_KIND_OFFSET);
     const unsigned long long expected_checksum =
         get_u64_le(page, MYLITE_STORAGE_FORMAT_ROW_STATE_CHECKSUM_OFFSET);
-    const unsigned long long actual_checksum =
-        checksum_page(page, MYLITE_STORAGE_FORMAT_ROW_STATE_CHECKSUM_OFFSET);
+    const unsigned long long actual_checksum = checksum_page_zero_tail(
+        page,
+        MYLITE_STORAGE_FORMAT_ROW_STATE_CHECKSUM_OFFSET,
+        MYLITE_STORAGE_FORMAT_ROW_STATE_KIND_OFFSET + sizeof(uint32_t)
+    );
 
     if (page_type != MYLITE_STORAGE_FORMAT_ROW_STATE_PAGE_TYPE_TABLE_ROWS || page_version != 1U ||
         format_version != MYLITE_STORAGE_FORMAT_VERSION ||
