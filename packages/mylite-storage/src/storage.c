@@ -2464,6 +2464,11 @@ static mylite_storage_result append_row_id_to_list(
     mylite_storage_row_id_list *list,
     unsigned long long row_id
 );
+static mylite_storage_result grow_row_id_list_for_append(
+    mylite_storage_row_id_list *list,
+    size_t additional_count,
+    size_t *out_first_index
+);
 static void remove_row_id_from_list(mylite_storage_row_id_list *list, unsigned long long row_id);
 static void replace_row_id_in_list(
     mylite_storage_row_id_list *list,
@@ -15755,16 +15760,27 @@ static mylite_storage_result append_index_leaf_matches_to_row_id_list(
         }
     }
 
+    size_t match_count = 0U;
     for (size_t i = lower; i < leaf_page->entry_count; ++i) {
         if (compare_leaf_key(leaf_page, i, key, key_size) != 0) {
             break;
         }
-        const mylite_storage_result result =
-            append_row_id_to_list(out_row_ids, index_leaf_entry_row_id(leaf_page, i));
-        if (result != MYLITE_STORAGE_OK) {
-            return result;
-        }
+        ++match_count;
     }
+    if (match_count == 0U) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    size_t first_index = 0U;
+    mylite_storage_result result =
+        grow_row_id_list_for_append(out_row_ids, match_count, &first_index);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    for (size_t i = 0U; i < match_count; ++i) {
+        out_row_ids->row_ids[first_index + i] = index_leaf_entry_row_id(leaf_page, lower + i);
+    }
+    out_row_ids->count = first_index + match_count;
     return MYLITE_STORAGE_OK;
 }
 
@@ -18476,23 +18492,41 @@ static mylite_storage_result append_row_id_to_list(
     mylite_storage_row_id_list *list,
     unsigned long long row_id
 ) {
-    if (list->count == SIZE_MAX) {
+    size_t first_index = 0U;
+    mylite_storage_result result = grow_row_id_list_for_append(list, 1U, &first_index);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    list->row_ids[first_index] = row_id;
+    list->count = first_index + 1U;
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result grow_row_id_list_for_append(
+    mylite_storage_row_id_list *list,
+    size_t additional_count,
+    size_t *out_first_index
+) {
+    if (additional_count == 0U) {
+        *out_first_index = list->count;
+        return MYLITE_STORAGE_OK;
+    }
+    if (list->count > SIZE_MAX - additional_count) {
         return MYLITE_STORAGE_FULL;
     }
 
-    const size_t new_count = list->count + 1U;
-    if (new_count > SIZE_MAX / sizeof(unsigned long long)) {
+    const size_t new_count = list->count + additional_count;
+    if (new_count > SIZE_MAX / sizeof(*list->row_ids)) {
         return MYLITE_STORAGE_FULL;
     }
 
     unsigned long long *row_ids =
-        (unsigned long long *)realloc(list->row_ids, new_count * sizeof(unsigned long long));
+        (unsigned long long *)realloc(list->row_ids, new_count * sizeof(*row_ids));
     if (row_ids == NULL) {
         return MYLITE_STORAGE_NOMEM;
     }
     list->row_ids = row_ids;
-    list->row_ids[list->count] = row_id;
-    list->count = new_count;
+    *out_first_index = list->count;
     return MYLITE_STORAGE_OK;
 }
 
