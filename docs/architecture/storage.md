@@ -957,8 +957,9 @@ neighbor pages, with only pages appended after the published run scanned as a
 visibility overlay; missing roots fall back to the append-only scan path.
 Copy-rebuild DDL publishes supported fixed-width leaf roots for every current
 key that fits the raw format in the rebuilt table, including retained primary
-keys after forced rebuilds, while pure table renames keep existing root metadata
-without rebuilding. Cursors check
+keys after forced rebuilds, by scanning the append history once for the table's
+raw key set and publishing one catalog update. Pure table renames keep existing
+root metadata without rebuilding. Cursors check
 `index_next_same()` boundaries before row materialization and reconstruct only
 the selected row buffer from row pages. Active checkpoints reuse statement
 journals, defer header publication to checkpoint boundaries, and cache guarded

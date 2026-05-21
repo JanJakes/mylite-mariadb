@@ -173,19 +173,13 @@ static bool mylite_is_alter_backup_table_name(const char *table_name);
 static int mylite_rebuild_index_leaf_roots(const char *primary_file,
                                            const char *schema_name,
                                            const char *table_name);
-static int mylite_rebuild_index_leaf_root_for_key(const char *primary_file,
-                                                  const char *schema_name,
-                                                  const char *table_name,
-                                                  const TABLE_SHARE *share,
-                                                  uint index_number);
+static int mylite_rebuild_index_leaf_roots_for_keys(
+    const char *primary_file, const char *schema_name, const char *table_name,
+    const unsigned *index_numbers, size_t index_number_count);
 static int mylite_drop_index_leaf_root(const char *primary_file,
                                        const char *schema_name,
                                        const char *table_name,
                                        uint index_number);
-static int mylite_rebuild_index_leaf_root(const char *primary_file,
-                                          const char *schema_name,
-                                          const char *table_name,
-                                          uint index_number);
 static int mylite_drop_foreign_keys_for_alter(const char *primary_file,
                                               const char *schema_name,
                                               const char *table_name);
@@ -3370,34 +3364,52 @@ static int mylite_rebuild_index_leaf_roots(const char *primary_file,
     return error;
 
   TABLE_SHARE *share= &catalog_share.share;
+  unsigned raw_index_numbers[MAX_KEY];
+  size_t raw_index_count= 0;
   for (uint index_number= 0; !error && index_number < share->keys;
        ++index_number)
   {
-    error= mylite_rebuild_index_leaf_root_for_key(
-        primary_file, schema_name, table_name, share, index_number);
+    const KEY *key= share->key_info + index_number;
+    if (!mylite_key_is_supported(key))
+      continue;
+    if (!mylite_key_uses_raw_exact_filter(key))
+    {
+      error= mylite_drop_index_leaf_root(primary_file, schema_name, table_name,
+                                         index_number);
+      continue;
+    }
+    DBUG_ASSERT(raw_index_count < MAX_KEY);
+    if (raw_index_count >= MAX_KEY)
+    {
+      error= HA_ERR_UNSUPPORTED;
+      continue;
+    }
+    raw_index_numbers[raw_index_count++]= index_number;
   }
+  if (!error)
+    error= mylite_rebuild_index_leaf_roots_for_keys(
+        primary_file, schema_name, table_name, raw_index_numbers,
+        raw_index_count);
 
   mylite_free_catalog_table_share(&catalog_share);
   return error;
 }
 
-static int mylite_rebuild_index_leaf_root_for_key(const char *primary_file,
-                                                  const char *schema_name,
-                                                  const char *table_name,
-                                                  const TABLE_SHARE *share,
-                                                  uint index_number)
+static int mylite_rebuild_index_leaf_roots_for_keys(
+    const char *primary_file, const char *schema_name, const char *table_name,
+    const unsigned *index_numbers, size_t index_number_count)
 {
-  if (!share || index_number >= share->keys)
+  if (index_number_count == 0)
     return 0;
 
-  const KEY *key= share->key_info + index_number;
-  if (!mylite_key_is_supported(key))
+  const mylite_storage_result result= mylite_storage_rebuild_index_leaves(
+      primary_file, schema_name, table_name, index_numbers,
+      index_number_count);
+  if (result == MYLITE_STORAGE_OK || result == MYLITE_STORAGE_FULL ||
+      result == MYLITE_STORAGE_UNSUPPORTED ||
+      result == MYLITE_STORAGE_NOTFOUND)
     return 0;
-  if (!mylite_key_uses_raw_exact_filter(key))
-    return mylite_drop_index_leaf_root(primary_file, schema_name, table_name,
-                                       index_number);
-  return mylite_rebuild_index_leaf_root(primary_file, schema_name, table_name,
-                                        index_number);
+  return mylite_storage_to_handler_error(result);
 }
 
 static int mylite_drop_index_leaf_root(const char *primary_file,
@@ -3408,20 +3420,6 @@ static int mylite_drop_index_leaf_root(const char *primary_file,
   const mylite_storage_result result= mylite_storage_drop_index_root(
       primary_file, schema_name, table_name, index_number);
   if (result == MYLITE_STORAGE_OK || result == MYLITE_STORAGE_NOTFOUND)
-    return 0;
-  return mylite_storage_to_handler_error(result);
-}
-
-static int mylite_rebuild_index_leaf_root(const char *primary_file,
-                                          const char *schema_name,
-                                          const char *table_name,
-                                          uint index_number)
-{
-  const mylite_storage_result result= mylite_storage_rebuild_index_leaf(
-      primary_file, schema_name, table_name, index_number);
-  if (result == MYLITE_STORAGE_OK || result == MYLITE_STORAGE_FULL ||
-      result == MYLITE_STORAGE_UNSUPPORTED ||
-      result == MYLITE_STORAGE_NOTFOUND)
     return 0;
   return mylite_storage_to_handler_error(result);
 }

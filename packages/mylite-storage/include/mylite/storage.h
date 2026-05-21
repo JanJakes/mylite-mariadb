@@ -298,6 +298,13 @@ mylite_storage_result mylite_storage_rebuild_index_leaf(
     const char *table_name,
     unsigned index_number
 );
+mylite_storage_result mylite_storage_rebuild_index_leaves(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    const unsigned *index_numbers,
+    size_t index_number_count
+);
 mylite_storage_result mylite_storage_drop_table(
     const char *filename,
     const char *schema_name,
