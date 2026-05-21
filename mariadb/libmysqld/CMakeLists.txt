@@ -47,6 +47,15 @@ ELSE()
   ADD_DEFINITIONS(-DMYLITE_WITH_STATUS_VARIABLES=0)
 ENDIF()
 
+OPTION(MYLITE_WITH_STATEMENT_PROFILING_METADATA "Build statement profiling metadata" ON)
+IF(MYLITE_WITH_STATEMENT_PROFILING_METADATA OR ENABLED_PROFILING)
+  ADD_DEFINITIONS(-DMYLITE_WITH_STATEMENT_PROFILING_METADATA=1)
+  SET(MYLITE_SQL_PROFILE_SOURCE ../sql/sql_profile.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_STATEMENT_PROFILING_METADATA=0)
+  SET(MYLITE_SQL_PROFILE_SOURCE ../sql/mylite_sql_profile_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
   "Build Oracle compatibility SQL function aliases and schema routing" ON)
 IF(MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS)
@@ -245,7 +254,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/sql_table.cc ../sql/sql_test.cc
            ../sql/ddl_log.cc ../sql/item_vectorfunc.cc
            ../sql/sql_trigger.cc ../sql/sql_union.cc
-           ../sql/sql_update.cc ../sql/sql_view.cc ../sql/sql_profile.cc
+           ../sql/sql_update.cc ../sql/sql_view.cc ${MYLITE_SQL_PROFILE_SOURCE}
            ../sql/gcalc_tools.cc ../sql/gcalc_slicescan.cc
            ../sql/strfunc.cc ../sql/table.cc ../sql/thr_malloc.cc
            ../sql/sql_time.cc ../sql/tztime.cc ../sql/uniques.cc ../sql/unireg.cc

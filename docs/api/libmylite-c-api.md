@@ -426,7 +426,9 @@ stable MyLite diagnostic. Oracle compatibility function aliases such as
 `DECODE_ORACLE` and `oracle_schema` routing are omitted from the default
 embedded profile; ordinary MySQL/MariaDB string functions remain available.
 Omitted function aliases fail as unsupported SQL function paths. Query-cache
-SELECT hints remain accepted no-op syntax. Optimizer trace variables and
+SELECT hints remain accepted no-op syntax. `INFORMATION_SCHEMA.PROFILING` is
+rejected as part of the statement-profiling server diagnostic surface.
+Optimizer trace variables and
 `INFORMATION_SCHEMA.OPTIMIZER_TRACE`, including unqualified reads while
 `information_schema` is the current schema, are rejected as server diagnostics.
 Ordinary planning, execution, and `EXPLAIN` remain supported. The default

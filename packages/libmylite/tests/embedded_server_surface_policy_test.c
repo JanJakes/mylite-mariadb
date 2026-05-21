@@ -500,6 +500,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SET @password = 'local'");
     exec_ok(db, "SET sql_mode = @@sql_mode");
     exec_ok(db, "SELECT 'PROCEDURE ANALYSE()' AS literal");
+    exec_ok(db, "SELECT 'INFORMATION_SCHEMA.PROFILING' AS literal");
     exec_ok(db, "SELECT 'INFORMATION_SCHEMA.OPTIMIZER_TRACE' AS literal");
     exec_ok(db, "SELECT 'SHOW PROCESSLIST' AS literal");
     exec_ok(db, "SHOW VARIABLES LIKE 'version'");
@@ -625,6 +626,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_error(db, "/*! SHOW PROCESSLIST */", "server-owned SQL surface");
     expect_error(db, "SHOW PROFILES", "server-owned SQL surface");
     expect_error(db, "SHOW PROFILE CPU FOR QUERY 1", "server-owned SQL surface");
+    expect_error(db, "SELECT * FROM INFORMATION_SCHEMA.PROFILING", "server-owned SQL surface");
     expect_error(db, "SET profiling = 1", "server-owned SQL surface");
     expect_error(db, "SET @@session.profiling = 1", "server-owned SQL surface");
     expect_error(db, "SET profiling_history_size = 10", "server-owned SQL surface");
@@ -735,6 +737,11 @@ static void assert_server_sql_rejected(mylite_db *db) {
         "server-owned SQL surface"
     );
     expect_prepare_error(db, "SHOW PROFILES", "server-owned SQL surface");
+    expect_prepare_error(
+        db,
+        "SELECT * FROM INFORMATION_SCHEMA.PROFILING",
+        "server-owned SQL surface"
+    );
     expect_prepare_error(db, "SET profiling = 1", "server-owned SQL surface");
     expect_prepare_error(db, "SET query_cache_type = ON", "server-owned SQL surface");
     expect_prepare_error(db, "RESET QUERY CACHE", "server-owned SQL surface");
@@ -753,12 +760,17 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_prepare_error(db, "SELECT 1 PROCEDURE ANALYSE()", "PROCEDURE ANALYSE");
 
     exec_ok(db, "USE app");
+    exec_ok(db, "CREATE TABLE profiling (id INT)");
+    exec_ok(db, "SELECT * FROM profiling");
     exec_ok(db, "CREATE TABLE optimizer_trace (id INT)");
     exec_ok(db, "SELECT * FROM optimizer_trace");
     exec_ok(db, "USE information_schema");
+    expect_error(db, "SELECT * FROM PROFILING", "server-owned SQL surface");
+    expect_prepare_error(db, "SELECT * FROM PROFILING", "server-owned SQL surface");
     expect_error(db, "SELECT * FROM OPTIMIZER_TRACE", "server-owned SQL surface");
     expect_prepare_error(db, "SELECT * FROM OPTIMIZER_TRACE", "server-owned SQL surface");
     exec_ok(db, "USE app");
+    exec_ok(db, "SELECT * FROM profiling");
     exec_ok(db, "SELECT * FROM optimizer_trace");
     exec_ok(db, "EXPLAIN SELECT 1");
     exec_ok(db, "EXPLAIN FORMAT=JSON SELECT 1");

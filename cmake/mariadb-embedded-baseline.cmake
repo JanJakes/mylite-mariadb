@@ -23,6 +23,7 @@ set(MYLITE_WITH_BINLOG_CORE OFF CACHE BOOL "Disable binary log runtime core in t
 set(MYLITE_WITH_QUERY_LOGS OFF CACHE BOOL "Disable general and slow query log runtime in the embedded baseline" FORCE)
 set(MYLITE_WITH_SQL_DIGEST OFF CACHE BOOL "Disable statement digest normalization in the embedded baseline" FORCE)
 set(MYLITE_WITH_STATUS_VARIABLES OFF CACHE BOOL "Disable server status variable publication in the embedded baseline" FORCE)
+set(MYLITE_WITH_STATEMENT_PROFILING_METADATA OFF CACHE BOOL "Disable statement profiling metadata in the embedded baseline" FORCE)
 set(MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS OFF CACHE BOOL "Disable Oracle compatibility function aliases in the embedded baseline" FORCE)
 set(MYLITE_WITH_FULL_ERROR_MESSAGES OFF CACHE BOOL "Use compact server error messages in the embedded baseline" FORCE)
 set(MYLITE_WITH_DYNAMIC_PLUGIN_LOADING OFF CACHE BOOL "Disable dynamic plugin shared-library loading in the embedded baseline" FORCE)

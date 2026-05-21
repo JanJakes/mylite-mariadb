@@ -10,6 +10,8 @@ the embedded archive with size-oriented release flags, and avoid building the
 unused Performance Schema and Feedback static plugins. Server help-table
 lookup, statement profiling, and the query cache are also compiled to disabled
 surfaces because they do not belong to the embedded application SQL profile.
+The remaining statement-profiling metadata table is omitted for the same
+reason.
 The optional Oracle SQL-mode parser is treated the same way after policy
 coverage proves attempts to enable `sql_mode=ORACLE` fail explicitly. The
 fmtlib-backed `SFORMAT()` helper is also omitted from the embedded profile so
@@ -85,6 +87,10 @@ listener or network handshake.
   reduces the stripped archive to 30,228,928 bytes, 28.83 MiB, and 707
   members. The stripped `sql_profile.cc.o` member drops from 48,152 bytes to
   7,376 bytes while preserving MariaDB's `@@have_profiling=NO` contract.
+- Replacing the remaining disabled profiling metadata source with a
+  fail-closed MyLite stub reduces the stripped archive to 26,511,064 bytes,
+  25.28 MiB, and 703 members. The stripped `sql_profile.cc.o` member is
+  replaced by a 2,656-byte `mylite_sql_profile_disabled.cc.o` member.
 - Replacing the embedded query-cache implementation with no-op stubs reduces
   the stripped archive to 30,188,592 bytes, 28.79 MiB, and 707 members. The
   stripped `sql_cache.cc.o` member drops from 34,968 bytes to 5,368 bytes and
@@ -339,7 +345,10 @@ preserve fail-closed behavior if the policy is bypassed.
 The embedded baseline disables statement profiling with `ENABLED_PROFILING=OFF`.
 MyLite rejects top-level `SHOW PROFILE`, `SHOW PROFILES`, and profiling
 variable assignment before dispatch so profiling remains unsupported even if a
-custom MariaDB build enables the upstream profiling code.
+custom MariaDB build enables the upstream profiling code. The default embedded
+profile also replaces the remaining profiling Information Schema metadata with
+a fail-closed stub, and MyLite rejects direct
+`INFORMATION_SCHEMA.PROFILING` reads before dispatch.
 
 The embedded query-cache implementation is compiled to no-op stubs. MyLite
 keeps `SQL_CACHE` and `SQL_NO_CACHE` as accepted parser hints, reports
@@ -574,7 +583,8 @@ outside the core embedded profile, and Feedback reporting is not part of the
 embedded runtime contract. SQL `HELP` is a server help-table surface and is
 explicitly unsupported in the embedded profile. Statement profiling is a diagnostic
 server surface, not application data behavior, and is explicitly unsupported in
-the embedded profile. Query-cache management is a server-side result-cache
+the embedded profile, including its `INFORMATION_SCHEMA.PROFILING` metadata
+table. Query-cache management is a server-side result-cache
 optimization; MyLite keeps query-cache SELECT hints as no-op syntax and omits
 the cache implementation. Oracle SQL mode is an optional MariaDB compatibility
 mode, not core MySQL/MariaDB application behavior; MyLite rejects it explicitly
@@ -872,8 +882,9 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   or disabled at runtime.
 - Feedback reporting is omitted from the embedded archive.
 - SQL `HELP` fails through the MyLite policy and the embedded MariaDB stub.
-- Statement profiling is disabled in the embedded archive and profiling SQL
-  fails through the MyLite policy.
+- Statement profiling is disabled in the embedded archive, profiling metadata
+  is replaced by a fail-closed stub, and profiling SQL fails through the
+  MyLite policy.
 - Query cache reports unavailable, query-cache management fails through the
   MyLite policy, and query-cache SELECT hints remain no-op syntax.
 - Oracle SQL mode fails through the MyLite policy and the embedded parser stub.

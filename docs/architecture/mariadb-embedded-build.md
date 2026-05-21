@@ -41,6 +41,7 @@ MYLITE_WITH_BINLOG_CORE=OFF
 MYLITE_WITH_QUERY_LOGS=OFF
 MYLITE_WITH_SQL_DIGEST=OFF
 MYLITE_WITH_STATUS_VARIABLES=OFF
+MYLITE_WITH_STATEMENT_PROFILING_METADATA=OFF
 MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS=OFF
 MYLITE_WITH_FULL_ERROR_MESSAGES=OFF
 MYLITE_WITH_DYNAMIC_PLUGIN_LOADING=OFF
@@ -72,8 +73,10 @@ Schema, MyLite still passes `--performance-schema=OFF`; otherwise the omitted
 plugin is the disabled contract. `PLUGIN_FEEDBACK=NO` omits MariaDB's telemetry
 and usage-reporting plugin from the embedded profile. `ENABLED_PROFILING=OFF`
 omits statement-profiling implementation code while preserving MariaDB's
-disabled `@@have_profiling=NO` contract. The embedded query cache is compiled
-to no-op stubs and reports `@@have_query_cache=NO`. The embedded archive links
+disabled `@@have_profiling=NO` contract.
+`MYLITE_WITH_STATEMENT_PROFILING_METADATA=OFF` replaces the remaining profiling
+Information Schema metadata with a fail-closed stub. The embedded query cache
+is compiled to no-op stubs and reports `@@have_query_cache=NO`. The embedded archive links
 a small Oracle SQL-mode parser stub instead of the generated Oracle parser. It
 also omits the fmtlib-backed `SFORMAT()` SQL function and builds the embedded
 SQL target without C++ exceptions or unwind tables. Dynamic UDF shared-library
@@ -256,7 +259,9 @@ Performance Schema is not part of the default embedded archive; the
 server-surface policy treats it as either omitted by the build profile or
 disabled when a custom build includes it. `HELP` is present only as a small
 unsupported-command shim in the embedded archive. Statement profiling reports
-`@@have_profiling=NO` and top-level profiling commands are rejected by policy.
+`@@have_profiling=NO`; top-level profiling commands and
+`INFORMATION_SCHEMA.PROFILING` reads are rejected by policy, and the remaining
+metadata source is a small unsupported-command shim in the embedded archive.
 Query-cache implementation code is stubbed for the embedded archive; `SQL_CACHE`
 and `SQL_NO_CACHE` remain accepted parser hints, while query-cache management
 commands and variables are rejected by policy. Oracle SQL mode is rejected by
@@ -336,6 +341,7 @@ The baseline explicitly disables:
 - Feedback reporting
 - SQL `HELP` table lookup
 - Statement profiling
+- Statement profiling metadata
 - Query cache
 - Oracle SQL mode
 - `SFORMAT()`

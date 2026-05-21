@@ -246,7 +246,10 @@ bool is_unsupported_static_show_info_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_processlist_metadata_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_foreign_server_metadata_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_backup_statement(const SqlPolicyTokens &tokens);
-bool is_unsupported_statement_profiling_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_statement_profiling_statement(
+    const SqlPolicyTokens &tokens,
+    std::string_view current_schema
+);
 bool is_unsupported_query_cache_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_query_log_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_optimizer_trace_statement(
@@ -1161,7 +1164,7 @@ bool is_unsupported_server_surface_sql(std::string_view sql, const std::string &
            is_unsupported_processlist_metadata_statement(tokens) ||
            is_unsupported_foreign_server_metadata_statement(tokens) ||
            is_unsupported_backup_statement(tokens) ||
-           is_unsupported_statement_profiling_statement(tokens) ||
+           is_unsupported_statement_profiling_statement(tokens, current_schema) ||
            is_unsupported_query_cache_statement(tokens) ||
            is_unsupported_query_log_statement(tokens) ||
            is_unsupported_optimizer_trace_statement(tokens, current_schema) ||
@@ -1295,10 +1298,17 @@ bool is_unsupported_backup_statement(const SqlPolicyTokens &tokens) {
     return token_equals(identifier_token_at(tokens, 0), "BACKUP");
 }
 
-bool is_unsupported_statement_profiling_statement(const SqlPolicyTokens &tokens) {
+bool is_unsupported_statement_profiling_statement(
+    const SqlPolicyTokens &tokens,
+    std::string_view current_schema
+) {
     const std::string_view first = identifier_token_at(tokens, 0);
     const std::string_view second = identifier_token_at(tokens, 1);
 
+    if (has_information_schema_table(tokens, "PROFILING") ||
+        has_current_schema_table_reference(tokens, "PROFILING", current_schema)) {
+        return true;
+    }
     if (token_equals(first, "SHOW") && token_in(second, "PROFILE", "PROFILES")) {
         return true;
     }

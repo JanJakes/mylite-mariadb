@@ -70,9 +70,10 @@ The first safe hardening steps use size-oriented release flags, strip debug and
 local-symbol metadata from the embedded static archive, and omit unused
 Performance Schema and Feedback static plugins. Server help-table lookup is
 stubbed only after policy coverage proves `HELP` is outside the embedded
-application SQL profile. Statement profiling is disabled after policy coverage
-proves profiling SQL is a server diagnostic surface, not application data
-behavior. The query cache is stubbed after policy coverage proves query-cache
+application SQL profile. Statement profiling and its Information Schema
+metadata are disabled after policy coverage proves profiling SQL is a server
+diagnostic surface, not application data behavior. The query cache is stubbed
+after policy coverage proves query-cache
 management is a server tuning surface and `SQL_CACHE` / `SQL_NO_CACHE` can
 remain no-op parser hints. The optional Oracle SQL-mode parser is replaced with
 an unsupported embedded stub after policy coverage proves normal SQL modes and

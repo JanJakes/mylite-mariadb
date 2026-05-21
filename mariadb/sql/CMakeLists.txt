@@ -107,6 +107,15 @@ ELSE()
   SET(MYLITE_FOREIGN_SERVER_METADATA_SOURCE mylite_sql_servers_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_STATEMENT_PROFILING_METADATA "Build statement profiling metadata" ON)
+IF(MYLITE_WITH_STATEMENT_PROFILING_METADATA OR ENABLED_PROFILING)
+  ADD_DEFINITIONS(-DMYLITE_WITH_STATEMENT_PROFILING_METADATA=1)
+  SET(MYLITE_SQL_PROFILE_SOURCE sql_profile.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_STATEMENT_PROFILING_METADATA=0)
+  SET(MYLITE_SQL_PROFILE_SOURCE mylite_sql_profile_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_BACKUP_RUNTIME "Build external backup runtime" ON)
 IF(MYLITE_WITH_BACKUP_RUNTIME)
   ADD_DEFINITIONS(-DMYLITE_WITH_BACKUP_RUNTIME=1)
@@ -207,7 +216,7 @@ SET (SQL_SOURCE
                rpl_injector.cc sql_locale.cc
                rpl_rli.cc rpl_mi.cc ${MYLITE_FOREIGN_SERVER_METADATA_SOURCE} sql_audit.cc
                sql_connect.cc scheduler.cc sql_partition_admin.cc
-               sql_profile.cc event_parse_data.cc sql_alter.cc
+               ${MYLITE_SQL_PROFILE_SOURCE} event_parse_data.cc sql_alter.cc
                sql_signal.cc mdl.cc sql_admin.cc
                transaction.cc sys_vars.cc sql_truncate.cc datadict.cc
                sql_reload.cc
