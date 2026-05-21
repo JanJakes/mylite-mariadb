@@ -1377,14 +1377,15 @@ static int place_buffered_page_undo_bucket(
     unsigned long long page_id,
     size_t entry_index
 );
-static size_t buffered_row_page_undo_used_size(const unsigned char *page);
-static size_t buffered_index_entry_page_undo_used_size(const unsigned char *page);
+MYLITE_STORAGE_HOT_INLINE size_t buffered_row_page_undo_used_size(const unsigned char *page);
+MYLITE_STORAGE_HOT_INLINE size_t
+buffered_index_entry_page_undo_used_size(const unsigned char *page);
 static size_t buffered_page_undo_used_size(const unsigned char *page);
-static int buffered_update_rewrite_row_state_known(
+MYLITE_STORAGE_HOT_INLINE int buffered_update_rewrite_row_state_known(
     mylite_storage_statement *statement,
     unsigned long long row_id
 );
-static int buffered_update_rewrite_shape_known(
+MYLITE_STORAGE_HOT_INLINE int buffered_update_rewrite_shape_known(
     mylite_storage_statement *statement,
     unsigned long long row_id,
     unsigned long long table_id,
@@ -1392,7 +1393,7 @@ static int buffered_update_rewrite_shape_known(
     size_t index_entry_count,
     const unsigned char *index_entry_changed
 );
-static int buffered_update_rewrite_row_only_shape_known(
+MYLITE_STORAGE_HOT_INLINE int buffered_update_rewrite_row_only_shape_known(
     mylite_storage_statement *statement,
     unsigned long long row_id,
     unsigned long long table_id
@@ -1418,7 +1419,7 @@ static mylite_storage_result rebuild_buffered_update_rewrite_buckets(
     mylite_storage_buffered_update_rewrite_cache *cache,
     size_t bucket_capacity
 );
-static mylite_storage_buffered_update_rewrite_bucket *find_buffered_update_rewrite_bucket(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_buffered_update_rewrite_bucket *find_buffered_update_rewrite_bucket(
     mylite_storage_buffered_update_rewrite_cache *cache,
     unsigned long long row_id
 );
@@ -3518,7 +3519,7 @@ static void remove_row_payload_cache_bucket(
 static void maybe_rebuild_row_payload_cache_buckets_after_tombstone(
     mylite_storage_row_payload_cache *cache
 );
-static size_t hash_row_id(unsigned long long row_id);
+MYLITE_STORAGE_HOT_INLINE size_t hash_row_id(unsigned long long row_id);
 static void free_row_payload_cache(mylite_storage_row_payload_cache *cache);
 static mylite_storage_result read_cached_durable_index_leaf_page(
     const char *filename,
@@ -13430,7 +13431,7 @@ static int place_buffered_page_undo_bucket(
     return 0;
 }
 
-static size_t buffered_row_page_undo_used_size(const unsigned char *page) {
+MYLITE_STORAGE_HOT_INLINE size_t buffered_row_page_undo_used_size(const unsigned char *page) {
     const size_t row_size = get_u32_le(page, MYLITE_STORAGE_FORMAT_ROW_RECORD_SIZE_OFFSET);
     if (row_size <= MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET) {
         return MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET + row_size;
@@ -13438,7 +13439,8 @@ static size_t buffered_row_page_undo_used_size(const unsigned char *page) {
     return MYLITE_STORAGE_FORMAT_PAGE_SIZE;
 }
 
-static size_t buffered_index_entry_page_undo_used_size(const unsigned char *page) {
+MYLITE_STORAGE_HOT_INLINE size_t
+buffered_index_entry_page_undo_used_size(const unsigned char *page) {
     const size_t key_size = get_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_KEY_SIZE_OFFSET);
     if (key_size <= MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET) {
         return MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET + key_size;
@@ -13604,7 +13606,7 @@ static mylite_storage_result refresh_dirty_buffered_page_checksum(unsigned char 
     return MYLITE_STORAGE_CORRUPT;
 }
 
-static int buffered_update_rewrite_row_state_known(
+MYLITE_STORAGE_HOT_INLINE int buffered_update_rewrite_row_state_known(
     mylite_storage_statement *statement,
     unsigned long long row_id
 ) {
@@ -13616,7 +13618,7 @@ static int buffered_update_rewrite_row_state_known(
            NULL;
 }
 
-static int buffered_update_rewrite_shape_known(
+MYLITE_STORAGE_HOT_INLINE int buffered_update_rewrite_shape_known(
     mylite_storage_statement *statement,
     unsigned long long row_id,
     unsigned long long table_id,
@@ -13652,7 +13654,7 @@ static int buffered_update_rewrite_shape_known(
     return changed_index == bucket->changed_index_count ? 1 : 0;
 }
 
-static int buffered_update_rewrite_row_only_shape_known(
+MYLITE_STORAGE_HOT_INLINE int buffered_update_rewrite_row_only_shape_known(
     mylite_storage_statement *statement,
     unsigned long long row_id,
     unsigned long long table_id
@@ -13822,7 +13824,7 @@ static mylite_storage_result rebuild_buffered_update_rewrite_buckets(
     return MYLITE_STORAGE_OK;
 }
 
-static mylite_storage_buffered_update_rewrite_bucket *find_buffered_update_rewrite_bucket(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_buffered_update_rewrite_bucket *find_buffered_update_rewrite_bucket(
     mylite_storage_buffered_update_rewrite_cache *cache,
     unsigned long long row_id
 ) {
@@ -24909,7 +24911,7 @@ static void maybe_rebuild_row_payload_cache_buckets_after_tombstone(
     }
 }
 
-static size_t hash_row_id(unsigned long long row_id) {
+MYLITE_STORAGE_HOT_INLINE size_t hash_row_id(unsigned long long row_id) {
     row_id *= 0x9e3779b97f4a7c15ULL;
     row_id ^= row_id >> 32U;
     return (size_t)row_id;
