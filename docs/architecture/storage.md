@@ -984,7 +984,9 @@ performance structure because maintained B-tree navigation and pager-style write
 paths are not implemented. A first pager foundation now wraps fixed-page access
 for row-page, row-state, autoincrement, BLOB payload, free-list, append-only
 index-entry, and index leaf access, but dirty-page ownership and rollback for
-maintained B-tree updates remain planned.
+maintained B-tree updates remain planned. Versioned rollback journals can now
+protect a bounded set of typed storage pages, giving the pager a recovery
+boundary for future dirty in-place page writes.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, row/index free-space reclamation, multi-statement
@@ -1030,10 +1032,12 @@ Minimum guarantees:
 
 Current implementation status: MyLite writes a deterministic
 `<database>.mylite-journal` rollback companion before publishing current
-append-only mutations. The journal stores the committed header page and, for
-catalog mutations, the committed catalog root page. When catalog publication
-will reuse the catalog free-list, the journal also protects the current
-free-list root page before that node is mutated. Catalog overflow pages do not
+append-only mutations. Version `2` journals store the committed header page and
+a bounded set of protected typed storage pages; version `1` journals with the
+older three-page header layout remain readable for pending-journal recovery.
+Current catalog mutations protect the committed catalog root page. When catalog
+publication will reuse the catalog free-list, the journal also protects the
+current free-list root page before that node is mutated. Catalog overflow pages do not
 need separate journal slots because catalog publication writes a fresh chain
 before repointing the header and reclaims the previous chain only after the
 catalog publish journal is removed. It is fsynced before primary-file writes,

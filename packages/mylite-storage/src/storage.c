@@ -657,6 +657,15 @@ static mylite_storage_result begin_recovery_journal(
     int include_catalog,
     int include_free_list
 );
+static mylite_storage_result begin_recovery_journal_for_pages(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    int include_catalog,
+    int include_free_list,
+    const unsigned long long *protected_page_ids,
+    size_t protected_page_count
+);
 static mylite_storage_result begin_write_journal(
     FILE *file,
     const char *filename,
@@ -680,7 +689,9 @@ static mylite_storage_result begin_journal_at_path(
     char *journal_filename,
     const mylite_storage_header *header,
     int include_catalog,
-    int include_free_list
+    int include_free_list,
+    const unsigned long long *protected_page_ids,
+    size_t protected_page_count
 );
 static mylite_storage_result finish_recovery_journal(FILE *file, const char *filename);
 static mylite_storage_result finish_write_journal(FILE *file, const char *filename);
@@ -711,6 +722,11 @@ static mylite_storage_result validate_recovery_journal_saved_page(
     const mylite_storage_header *header,
     size_t page_index,
     const unsigned char *page
+);
+static mylite_storage_result append_recovery_journal_page_id(
+    mylite_storage_recovery_journal *journal,
+    const mylite_storage_header *header,
+    unsigned long long page_id
 );
 static mylite_storage_result write_page(FILE *file, const unsigned char *page, size_t size);
 static mylite_storage_result read_file_at(
@@ -3066,6 +3082,12 @@ static mylite_storage_result read_autoincrement_page(
     unsigned char *page,
     mylite_storage_autoincrement_page *out_autoincrement_page
 );
+static mylite_storage_result decode_autoincrement_page(
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    const unsigned char *page,
+    mylite_storage_autoincrement_page *out_autoincrement_page
+);
 static int is_autoincrement_page(const unsigned char *page);
 static mylite_storage_result latest_auto_increment_value(
     FILE *file,
@@ -3109,6 +3131,11 @@ static mylite_storage_result read_blob_page(
     size_t *inout_written,
     unsigned long long *out_next_page_id,
     unsigned expected_page_type
+);
+static mylite_storage_result validate_blob_page_bytes(
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    const unsigned char *page
 );
 static char *copy_record_field(const unsigned char *record, unsigned field_index);
 static mylite_storage_result decode_foreign_key_metadata(
@@ -7862,6 +7889,26 @@ static mylite_storage_result begin_recovery_journal(
     int include_catalog,
     int include_free_list
 ) {
+    return begin_recovery_journal_for_pages(
+        file,
+        filename,
+        header,
+        include_catalog,
+        include_free_list,
+        NULL,
+        0U
+    );
+}
+
+static mylite_storage_result begin_recovery_journal_for_pages(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    int include_catalog,
+    int include_free_list,
+    const unsigned long long *protected_page_ids,
+    size_t protected_page_count
+) {
     char *journal_filename = recovery_journal_path(filename);
     if (journal_filename == NULL) {
         return MYLITE_STORAGE_NOMEM;
@@ -7871,7 +7918,9 @@ static mylite_storage_result begin_recovery_journal(
         journal_filename,
         header,
         include_catalog,
-        include_free_list
+        include_free_list,
+        protected_page_ids,
+        protected_page_count
     );
 }
 
@@ -7884,7 +7933,7 @@ static mylite_storage_result begin_transaction_journal(
     if (journal_filename == NULL) {
         return MYLITE_STORAGE_NOMEM;
     }
-    return begin_journal_at_path(file, journal_filename, header, 1, 0);
+    return begin_journal_at_path(file, journal_filename, header, 1, 0, NULL, 0U);
 }
 
 static mylite_storage_result begin_journal_at_path(
@@ -7892,7 +7941,9 @@ static mylite_storage_result begin_journal_at_path(
     char *journal_filename,
     const mylite_storage_header *header,
     int include_catalog,
-    int include_free_list
+    int include_free_list,
+    const unsigned long long *protected_page_ids,
+    size_t protected_page_count
 ) {
     if (header->page_size != MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
         free(journal_filename);
@@ -7900,20 +7951,24 @@ static mylite_storage_result begin_journal_at_path(
     }
 
     mylite_storage_result result = MYLITE_STORAGE_OK;
-    mylite_storage_recovery_journal journal = {
-        .page_ids = {MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID},
-        .page_count = 1U,
-    };
-    if (include_catalog) {
-        journal.page_ids[journal.page_count++] = header->catalog_root_page;
+    mylite_storage_recovery_journal journal = {0};
+    result =
+        append_recovery_journal_page_id(&journal, header, MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID);
+    if (result == MYLITE_STORAGE_OK && include_catalog) {
+        result = append_recovery_journal_page_id(&journal, header, header->catalog_root_page);
     }
     if (include_free_list && header->free_list_root_page != 0ULL &&
         header->free_list_root_page != header->catalog_root_page) {
-        if (journal.page_count >= MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES) {
-            free(journal_filename);
-            return MYLITE_STORAGE_FULL;
+        if (result == MYLITE_STORAGE_OK) {
+            result = append_recovery_journal_page_id(&journal, header, header->free_list_root_page);
         }
-        journal.page_ids[journal.page_count++] = header->free_list_root_page;
+    }
+    for (size_t i = 0U; result == MYLITE_STORAGE_OK && i < protected_page_count; ++i) {
+        if (protected_page_ids == NULL) {
+            result = MYLITE_STORAGE_MISUSE;
+        } else {
+            result = append_recovery_journal_page_id(&journal, header, protected_page_ids[i]);
+        }
     }
     unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
                        [MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {{0}};
@@ -8099,24 +8154,32 @@ static mylite_storage_result decode_recovery_journal_header(
     if (page_type != MYLITE_STORAGE_FORMAT_JOURNAL_PAGE_TYPE_ROLLBACK) {
         return MYLITE_STORAGE_CORRUPT;
     }
-    if (page_version != MYLITE_STORAGE_FORMAT_JOURNAL_VERSION ||
-        format_version != MYLITE_STORAGE_FORMAT_VERSION ||
+    unsigned checksum_offset = 0U;
+    unsigned max_protected_pages = 0U;
+    if (page_version == MYLITE_STORAGE_FORMAT_JOURNAL_VERSION) {
+        checksum_offset = MYLITE_STORAGE_FORMAT_JOURNAL_CHECKSUM_OFFSET;
+        max_protected_pages = MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES;
+    } else if (page_version == MYLITE_STORAGE_FORMAT_JOURNAL_LEGACY_VERSION) {
+        checksum_offset = MYLITE_STORAGE_FORMAT_JOURNAL_LEGACY_CHECKSUM_OFFSET;
+        max_protected_pages = MYLITE_STORAGE_FORMAT_JOURNAL_LEGACY_MAX_PROTECTED_PAGES;
+    } else {
+        return MYLITE_STORAGE_UNSUPPORTED;
+    }
+    if (format_version != MYLITE_STORAGE_FORMAT_VERSION ||
         checksum_algorithm != MYLITE_STORAGE_FORMAT_CHECKSUM_FNV1A64 ||
         primary_page_size != MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
         return MYLITE_STORAGE_UNSUPPORTED;
     }
 
-    const unsigned long long expected_checksum =
-        get_u64_le(page, MYLITE_STORAGE_FORMAT_JOURNAL_CHECKSUM_OFFSET);
-    const unsigned long long actual_checksum =
-        checksum_page(page, MYLITE_STORAGE_FORMAT_JOURNAL_CHECKSUM_OFFSET);
+    const unsigned long long expected_checksum = get_u64_le(page, checksum_offset);
+    const unsigned long long actual_checksum = checksum_page(page, checksum_offset);
     if (expected_checksum != actual_checksum) {
         return MYLITE_STORAGE_CORRUPT;
     }
 
     const unsigned page_count =
         get_u32_le(page, MYLITE_STORAGE_FORMAT_JOURNAL_PROTECTED_PAGE_COUNT_OFFSET);
-    if (page_count == 0U || page_count > MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES) {
+    if (page_count == 0U || page_count > max_protected_pages) {
         return MYLITE_STORAGE_CORRUPT;
     }
 
@@ -8181,7 +8244,66 @@ static mylite_storage_result validate_recovery_journal_saved_page(
         mylite_storage_free_list_page free_list_page = {0};
         return validate_free_list_page_bytes(page, header, page_id, &free_list_page);
     }
+    if (is_catalog_page(page)) {
+        return validate_catalog_page_bytes(
+            page,
+            header,
+            page_id,
+            page_id == header->catalog_root_page
+        );
+    }
+    if (is_free_list_page(page)) {
+        mylite_storage_free_list_page free_list_page = {0};
+        return validate_free_list_page_bytes(page, header, page_id, &free_list_page);
+    }
+    if (is_row_page(page)) {
+        mylite_storage_row_page_metadata metadata = {0};
+        return decode_row_page_metadata(header, page_id, page, &metadata);
+    }
+    if (is_row_state_page(page)) {
+        mylite_storage_row_state_page row_state_page = {0};
+        return decode_row_state_page(header, page_id, page, &row_state_page);
+    }
+    if (is_index_entry_page(page)) {
+        mylite_storage_index_entry_page index_entry_page = {0};
+        return decode_index_entry_page(header, page_id, page, &index_entry_page);
+    }
+    if (is_index_leaf_page(page)) {
+        mylite_storage_index_leaf_page index_leaf_page = {0};
+        return decode_index_leaf_page(header, page_id, page, &index_leaf_page);
+    }
+    if (is_autoincrement_page(page)) {
+        mylite_storage_autoincrement_page autoincrement_page = {0};
+        return decode_autoincrement_page(header, page_id, page, &autoincrement_page);
+    }
+    if (memcmp(
+            page + MYLITE_STORAGE_FORMAT_BLOB_MAGIC_OFFSET,
+            k_blob_magic,
+            sizeof(k_blob_magic)
+        ) == 0) {
+        return validate_blob_page_bytes(header, page_id, page);
+    }
     return MYLITE_STORAGE_CORRUPT;
+}
+
+static mylite_storage_result append_recovery_journal_page_id(
+    mylite_storage_recovery_journal *journal,
+    const mylite_storage_header *header,
+    unsigned long long page_id
+) {
+    if (page_id >= header->page_count) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+    for (size_t i = 0U; i < journal->page_count; ++i) {
+        if (journal->page_ids[i] == page_id) {
+            return MYLITE_STORAGE_OK;
+        }
+    }
+    if (journal->page_count >= MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES) {
+        return MYLITE_STORAGE_FULL;
+    }
+    journal->page_ids[journal->page_count++] = page_id;
+    return MYLITE_STORAGE_OK;
 }
 
 static mylite_storage_result write_page(FILE *file, const unsigned char *page, size_t size) {
@@ -21782,6 +21904,18 @@ static mylite_storage_result read_autoincrement_page(
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
+    return decode_autoincrement_page(header, page_id, page, out_autoincrement_page);
+}
+
+static mylite_storage_result decode_autoincrement_page(
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    const unsigned char *page,
+    mylite_storage_autoincrement_page *out_autoincrement_page
+) {
+    if (!is_addressable_page_id(header, page_id)) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
     if (!is_autoincrement_page(page)) {
         if (memcmp(
                 page + MYLITE_STORAGE_FORMAT_BLOB_MAGIC_OFFSET,
@@ -22085,6 +22219,52 @@ static mylite_storage_result read_blob_page(
     *inout_written += payload_size;
     *out_next_page_id = get_u64_le(page, MYLITE_STORAGE_FORMAT_BLOB_NEXT_PAGE_OFFSET);
     if (*out_next_page_id != 0ULL && *out_next_page_id >= header->page_count) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result validate_blob_page_bytes(
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    const unsigned char *page
+) {
+    if (!is_addressable_page_id(header, page_id)) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+    if (memcmp(
+            page + MYLITE_STORAGE_FORMAT_BLOB_MAGIC_OFFSET,
+            k_blob_magic,
+            sizeof(k_blob_magic)
+        ) != 0) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    const unsigned page_type = get_u32_le(page, MYLITE_STORAGE_FORMAT_BLOB_PAGE_TYPE_OFFSET);
+    const unsigned page_version = get_u32_le(page, MYLITE_STORAGE_FORMAT_BLOB_PAGE_VERSION_OFFSET);
+    const unsigned format_version =
+        get_u32_le(page, MYLITE_STORAGE_FORMAT_BLOB_FORMAT_VERSION_OFFSET);
+    const unsigned checksum_algorithm =
+        get_u32_le(page, MYLITE_STORAGE_FORMAT_BLOB_CHECKSUM_ALGORITHM_OFFSET);
+    const unsigned long long stored_page_id =
+        get_u64_le(page, MYLITE_STORAGE_FORMAT_BLOB_PAGE_ID_OFFSET);
+    const unsigned long long next_page_id =
+        get_u64_le(page, MYLITE_STORAGE_FORMAT_BLOB_NEXT_PAGE_OFFSET);
+    const unsigned payload_size = get_u32_le(page, MYLITE_STORAGE_FORMAT_BLOB_PAYLOAD_SIZE_OFFSET);
+    const unsigned long long expected_checksum =
+        get_u64_le(page, MYLITE_STORAGE_FORMAT_BLOB_CHECKSUM_OFFSET);
+    const unsigned long long actual_checksum =
+        checksum_page(page, MYLITE_STORAGE_FORMAT_BLOB_CHECKSUM_OFFSET);
+    if ((page_type != MYLITE_STORAGE_FORMAT_BLOB_PAGE_TYPE_TABLE_DEFINITION &&
+         page_type != MYLITE_STORAGE_FORMAT_BLOB_PAGE_TYPE_ROW_PAYLOAD &&
+         page_type != MYLITE_STORAGE_FORMAT_BLOB_PAGE_TYPE_FOREIGN_KEY) ||
+        page_version != 1U || format_version != MYLITE_STORAGE_FORMAT_VERSION ||
+        checksum_algorithm != MYLITE_STORAGE_FORMAT_CHECKSUM_FNV1A64 || stored_page_id != page_id ||
+        expected_checksum != actual_checksum ||
+        payload_size >
+            MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_BLOB_PAYLOAD_OFFSET ||
+        payload_size == 0U ||
+        (next_page_id != 0ULL && !is_addressable_page_id(header, next_page_id))) {
         return MYLITE_STORAGE_CORRUPT;
     }
     return MYLITE_STORAGE_OK;

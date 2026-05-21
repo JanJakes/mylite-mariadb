@@ -151,9 +151,11 @@ row-write and point-read performance still requires the planned navigable index
 and pager work. The first pager foundation now wraps fixed-page access for
 row-page, row-state, autoincrement, BLOB payload, free-list, append-only
 index-entry, and index leaf access while preserving existing storage bytes;
-maintained B-tree pages still need pager-owned dirty-page and rollback
-semantics. Durable table-local row, payload, exact-index, and published
-leaf-page caches now retarget across unrelated table row mutations, so one
+versioned rollback journals can now protect a bounded typed page set for future
+pager dirty-page preimages. Maintained B-tree pages still need pager-owned
+dirty-page flushing and root update semantics. Durable table-local row,
+payload, exact-index, and published leaf-page caches now retarget across
+unrelated table row mutations, so one
 table's insert/update/delete does not strand another table's hot durable cache
 solely because the file page count advanced. Durable handler
 index cursors also materialize their current row payloads in one ordered batch,
