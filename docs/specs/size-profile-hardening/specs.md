@@ -299,6 +299,13 @@ storage, or public API behavior.
   static `user_variables` plugin, while retaining ordinary `@variable`
   assignment and reads. The stripped archive is reduced to 26,484,960 bytes,
   25.26 MiB, and 701 members.
+- `mariadb/plugin/auth_socket/auth_socket.c` declares the `unix_socket`
+  server authentication plugin for socket-client login. `libmylite` opens a
+  database directory in-process and already rejects server account and password
+  management statements.
+- Disabling Unix socket server authentication with `PLUGIN_AUTH_SOCKET=NO`
+  omits the static `auth_socket.c.o` object. The stripped archive is reduced
+  to 26,478,056 bytes, 25.25 MiB, and 700 members.
 - `mariadb/sql/sql_yacc.yy` still references `Event_parse_data::new_instance`
   while parsing event syntax, but `mariadb/sql/sql_parse.cc` returns an
   embedded-server unsupported error for event DDL when `HAVE_EVENT_SCHEDULER`
@@ -579,6 +586,12 @@ the optional `user_variables` Information Schema plugin. MyLite policy rejects
 direct and prepared reads from `INFORMATION_SCHEMA.USER_VARIABLES`, `SHOW
 USER_VARIABLES`, and `FLUSH USER_VARIABLES`, while ordinary `@variable` SQL
 and application tables named `user_variables` remain valid.
+
+The embedded archive omits Unix socket server authentication by setting
+`PLUGIN_AUTH_SOCKET=NO` in the MyLite baseline. The disabled profile omits the
+static `unix_socket` authentication plugin. This does not change `libmylite`
+opens because the core API does not perform socket-client authentication, and
+server account management is already rejected by policy.
 
 The embedded archive omits full event parse-data validation by setting
 `MYLITE_WITH_EVENT_PARSE_DATA=0` in the MyLite baseline. The option defaults to
@@ -935,6 +948,9 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   `user_variables.cc.o` is absent from `libmariadbd.a`, ordinary `@variable`
   SQL still works, and user-variable diagnostic SQL is rejected by
   server-surface policy coverage.
+- Confirm `PLUGIN_AUTH_SOCKET=NO` appears in the embedded CMake cache,
+  `auth_socket.c.o` is absent from `libmariadbd.a`, and the `unix_socket`
+  plugin is absent from Information Schema plugin metadata.
 - Confirm `MYLITE_WITH_EVENT_PARSE_DATA=OFF` appears in the embedded CMake
   cache, `event_parse_data.cc.o` is absent,
   `mylite_event_parse_data_disabled.cc.o` is present in `libmariadbd.a`, and
@@ -986,9 +1002,10 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   VARIABLES` and `@@` lookup, and userstat Information Schema reads plus reset
   statements are rejected. User-variable diagnostics are also omitted, ordinary
   `@variable` SQL remains covered, and user-variable diagnostic reads plus
-  resets are rejected. Full event parse-data validation is omitted, event DDL
-  and metadata statements remain rejected, and the embedded archive keeps only
-  a parser-link event parse-data stub.
+  resets are rejected. Unix socket server authentication is omitted and the
+  `unix_socket` plugin is absent. Full event parse-data validation is omitted,
+  event DDL and metadata statements remain rejected, and the embedded archive
+  keeps only a parser-link event parse-data stub.
 - Process-list SHOW commands are rejected, the process-list Information Schema
   table returns zero rows, and the embedded archive omits process-list row
   producers.

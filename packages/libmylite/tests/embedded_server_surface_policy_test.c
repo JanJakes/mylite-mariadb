@@ -55,6 +55,7 @@ static void assert_status_variables_omitted(mylite_db *db);
 static void assert_processlist_metadata_omitted(mylite_db *db);
 static void assert_userstat_diagnostics_omitted(mylite_db *db);
 static void assert_user_variable_diagnostics_omitted(mylite_db *db);
+static void assert_server_auth_plugins_omitted(mylite_db *db);
 static void assert_oracle_compat_functions_omitted(mylite_db *db);
 static void assert_compact_error_catalog(mylite_db *db);
 static void assert_performance_schema_omitted_or_disabled(mylite_db *db);
@@ -125,6 +126,7 @@ static void test_server_surfaces_are_disabled_or_contained(void) {
     assert_processlist_metadata_omitted(db);
     assert_userstat_diagnostics_omitted(db);
     assert_user_variable_diagnostics_omitted(db);
+    assert_server_auth_plugins_omitted(db);
     assert_oracle_compat_functions_omitted(db);
     assert_compact_error_catalog(db);
     assert_server_sql_rejected(db);
@@ -456,6 +458,21 @@ static void assert_user_variable_diagnostics_omitted(mylite_db *db) {
         db,
         "SELECT * FROM INFORMATION_SCHEMA.USER_VARIABLES",
         "server-owned SQL surface"
+    );
+}
+
+static void assert_server_auth_plugins_omitted(mylite_db *db) {
+    query_expect(
+        db,
+        (expected_query){
+            .sql = "SELECT PLUGIN_NAME "
+                   "FROM INFORMATION_SCHEMA.PLUGINS "
+                   "WHERE PLUGIN_NAME = 'unix_socket'",
+            .column_count = 1,
+            .row_count = 0,
+            .column_names = NULL,
+            .values = NULL,
+        }
     );
 }
 

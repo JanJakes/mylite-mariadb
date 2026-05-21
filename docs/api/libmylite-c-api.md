@@ -420,6 +420,9 @@ topology runtime, plus guarded replication execution system variables such as
 binlog filter variables such as `replicate_do_db`,
 `replicate_wild_ignore_table`, and `binlog_do_db` are also omitted because the
 core embedded profile has no replication or binary-log topology to filter.
+The default profile omits the `unix_socket` server authentication plugin for
+the same reason; `libmylite` opens a local database directory directly instead
+of authenticating network or socket clients.
 Dynamic UDF registration through `CREATE FUNCTION ... SONAME` is rejected
 through the same policy because it loads server-owned shared libraries and
 persists metadata in server system tables. Attempts to enable Oracle SQL mode,

@@ -263,8 +263,7 @@ library and static embedded engines/plugins such as:
 - InnoDB
 - MyISAM and MRG_MyISAM
 - Sequence and partition support
-- selected static server plugins such as auth socket, type handlers, and user
-  variables
+- selected static server plugins such as native type handlers
 
 Configure also enables many module targets, including Archive, Blackhole,
 CONNECT, Example, Federated, FederatedX, Mroonga, Sphinx, Spider, and many
@@ -315,6 +314,9 @@ usable outside `information_schema`.
 User-variable diagnostics are omitted from the default embedded profile; the
 `user_variables` plugin is absent, diagnostic reads and resets are rejected by
 policy, and ordinary `@variable` SQL remains available.
+Unix socket server authentication is omitted from the default embedded profile;
+the `unix_socket` plugin is absent, and network users and authentication remain
+outside the core embedded API.
 `PROCEDURE ANALYSE()` is omitted from the default embedded archive and linked
 to an unsupported stub; ordinary SELECT execution and the generic retained
 SELECT procedure dispatch continue to link. System-variable names, values,

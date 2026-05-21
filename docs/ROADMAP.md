@@ -148,6 +148,9 @@ server counters rather than application data behavior.
 User-variable diagnostics are omitted after coverage proves the
 `user_variables` plugin only exposes optional `@variable` introspection and
 reset helpers; ordinary `@variable` SQL remains available.
+Unix socket server authentication is omitted after coverage proves local
+directory opens do not use server auth plugins and account management remains
+outside the embedded core.
 Event parse-data validation is reduced to a parser-link stub after coverage
 proves event DDL, event metadata commands, and scheduler changes are outside
 the embedded core.
