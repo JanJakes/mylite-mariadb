@@ -32,3 +32,4 @@ set(MYLITE_WITH_STATIC_SHOW_INFO OFF CACHE BOOL "Disable static SHOW information
 set(MYLITE_WITH_OPTION_HELP_TEXT OFF CACHE BOOL "Disable command-line option help text in the embedded baseline" FORCE)
 set(MYLITE_WITH_OPTIMIZER_TRACE OFF CACHE BOOL "Disable optimizer trace diagnostics in the embedded baseline" FORCE)
 set(MYLITE_WITH_PROCESSLIST_METADATA OFF CACHE BOOL "Disable process-list metadata in the embedded baseline" FORCE)
+set(MYLITE_WITH_FOREIGN_SERVER_METADATA OFF CACHE BOOL "Disable mysql.servers metadata in the embedded baseline" FORCE)

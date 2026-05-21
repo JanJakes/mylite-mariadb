@@ -213,6 +213,15 @@ behavior when MariaDB errno and SQLSTATE remain available.
   producers, keeps `INFORMATION_SCHEMA.PROCESSLIST` visible with zero rows,
   and reduces the stripped archive to 26,569,272 bytes, 25.34 MiB, and 704
   members.
+- `mariadb/sql/sql_servers.cc` initializes a process-global `servers_cache`,
+  loads remote server definitions from `mysql.servers`, implements
+  `CREATE SERVER`, `ALTER SERVER`, and `DROP SERVER`, and serves
+  `SHOW CREATE SERVER` through `get_server_by_name()`.
+- Disabling foreign-server metadata behind
+  `MYLITE_WITH_FOREIGN_SERVER_METADATA=0` replaces that cache with a small
+  unsupported embedded stub, rejects the SQL surface through policy, and
+  reduces the stripped archive to 26,553,928 bytes, 25.32 MiB, and 704
+  members.
 - `mariadb/sql/item_create.cc` registers Oracle compatibility aliases such as
   `DECODE_ORACLE`, `LPAD_ORACLE`, `RTRIM_ORACLE`, `SUBSTR_ORACLE`, and
   `CONCAT_OPERATOR_ORACLE`, and builds a separate
@@ -420,6 +429,15 @@ behavior. The disabled profile compiles out `SHOW PROCESSLIST` and
 `INFORMATION_SCHEMA.PROCESSLIST` thread-walk producers, rejects
 `SHOW PROCESSLIST` and `SHOW FULL PROCESSLIST` through policy, and keeps
 `INFORMATION_SCHEMA.PROCESSLIST` queryable with zero rows.
+
+The embedded archive omits foreign-server metadata by setting
+`MYLITE_WITH_FOREIGN_SERVER_METADATA=0` in the MyLite baseline. The option
+defaults to `ON` so normal MariaDB server builds keep upstream `mysql.servers`
+behavior. The disabled profile replaces `sql_servers.cc` with a small stub
+that starts without loading `mysql.servers`, rejects `CREATE SERVER`,
+`ALTER SERVER`, and `DROP SERVER` if policy is bypassed, and makes
+`SHOW CREATE SERVER` report the inherited not-found path. The public MyLite
+SQL policy rejects direct and prepared foreign-server metadata statements.
 
 The wrapper keeps this behavior enabled by default because it is the
 distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
@@ -648,11 +666,11 @@ current archive to 26,609,024 bytes / 25.38 MiB, 4,920,680 bytes smaller than
 the Release build with Performance Schema disabled, 6,520,616 bytes smaller
 than the symbol-stripped baseline with Performance Schema still built, and
 7,233,296 bytes smaller than the original broad archive.
-Omitting process-list metadata brings the current archive to 26,569,272 bytes /
-25.34 MiB, 4,960,432 bytes smaller than the Release build with Performance
-Schema disabled, 6,560,368 bytes smaller than the symbol-stripped baseline with
-Performance Schema still built, and 7,273,048 bytes smaller than the original
-broad archive.
+Omitting foreign-server metadata brings the current archive to 26,553,928
+bytes / 25.32 MiB, 4,975,776 bytes smaller than the Release build with
+Performance Schema disabled, 6,575,712 bytes smaller than the symbol-stripped
+baseline with Performance Schema still built, and 7,288,392 bytes smaller than
+the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -684,6 +702,10 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Confirm `MYLITE_WITH_PROCESSLIST_METADATA=OFF` appears in the embedded CMake
   cache, direct and prepared process-list SHOW commands are rejected, and
   `INFORMATION_SCHEMA.PROCESSLIST` returns zero rows.
+- Confirm `MYLITE_WITH_FOREIGN_SERVER_METADATA=OFF` appears in the embedded
+  CMake cache, `sql_servers.cc.o` is absent,
+  `mylite_sql_servers_disabled.cc.o` is present in `libmariadbd.a`, and direct
+  and prepared foreign-server metadata statements are rejected.
 - Run `cmake --build --preset dev`.
 - Run `ctest --preset dev --output-on-failure`.
 - Run `cmake --build --preset embedded-dev`.

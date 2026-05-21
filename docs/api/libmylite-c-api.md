@@ -437,6 +437,10 @@ diagnostics, warnings, result metadata, and the public C API remain available.
 Process-list metadata is also omitted: `SHOW PROCESSLIST` and
 `SHOW FULL PROCESSLIST` are rejected as daemon/session inventory, while
 `INFORMATION_SCHEMA.PROCESSLIST` stays visible and returns zero rows.
+Foreign-server metadata is omitted as server-global remote connection
+configuration: `CREATE SERVER`, `ALTER SERVER`, `DROP SERVER`, and
+`SHOW CREATE SERVER` are rejected, and the default embedded archive omits the
+`mysql.servers` metadata cache.
 The default embedded profile also omits `SFORMAT()`, which fails as an
 unknown SQL function; ordinary `FORMAT()` remains available. The legacy
 `PROCEDURE ANALYSE()` SELECT extension is rejected as an unsupported diagnostic

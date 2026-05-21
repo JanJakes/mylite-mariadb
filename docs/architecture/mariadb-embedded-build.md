@@ -50,6 +50,7 @@ MYLITE_WITH_STATIC_SHOW_INFO=OFF
 MYLITE_WITH_OPTION_HELP_TEXT=OFF
 MYLITE_WITH_OPTIMIZER_TRACE=OFF
 MYLITE_WITH_PROCESSLIST_METADATA=OFF
+MYLITE_WITH_FOREIGN_SERVER_METADATA=OFF
 ```
 
 `CMAKE_BUILD_TYPE=MinSizeRel` makes the embedded MariaDB archive optimize for
@@ -92,6 +93,9 @@ tables return empty result sets, while ordinary SQL diagnostics and result
 metadata remain available. It omits process-list metadata behind
 `MYLITE_WITH_PROCESSLIST_METADATA=0`; `SHOW PROCESSLIST` is rejected, while
 `INFORMATION_SCHEMA.PROCESSLIST` remains visible and returns zero rows. It
+omits foreign-server metadata behind `MYLITE_WITH_FOREIGN_SERVER_METADATA=0`;
+`CREATE SERVER`, `ALTER SERVER`, `DROP SERVER`, and `SHOW CREATE SERVER` are
+rejected because they persist remote-server definitions in `mysql.servers`. It
 omits Oracle compatibility function aliases and
 `oracle_schema` routing behind `MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS=0`, while
 ordinary MySQL/MariaDB string functions remain available. It uses a compact
@@ -125,7 +129,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,569,272 bytes / 25.34 MiB |
+| Archive size | 26,553,928 bytes / 25.32 MiB |
 | Archive members | 704 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -158,7 +162,9 @@ and service injection reduces the pre-strip archive to 27,195,584 bytes /
 update paths, and omitting the unsupported injector root, reduces the pre-strip
 archive to 27,180,312 bytes / 25.92 MiB. Omitting process-list metadata
 producers reduces the pre-strip archive to 27,140,408 bytes / 25.88 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 571,136 bytes
+Omitting foreign-server metadata reduces the pre-strip archive to 27,124,416
+bytes / 25.87 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 570,488 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -180,10 +186,11 @@ catalog saves 226,176 bytes with no member-count change. Omitting dynamic
 plugin shared-object loading and service injection saves 24,760 bytes with no
 member-count change. Guarding the retained no-binlog paths and omitting the
 injector root saves 14,896 bytes and one archive member. Omitting process-list
-metadata producers saves 39,752 bytes with no member-count change.
-The final archive is 4,960,432 bytes smaller than the Release build with
-Performance Schema disabled, 6,560,368 bytes smaller than the symbol-stripped
-baseline that still built Performance Schema, and 7,273,048 bytes smaller than
+metadata producers saves 39,752 bytes with no member-count change. Omitting
+foreign-server metadata saves 15,344 bytes with no member-count change.
+The final archive is 4,975,776 bytes smaller than the Release build with
+Performance Schema disabled, 6,575,712 bytes smaller than the symbol-stripped
+baseline that still built Performance Schema, and 7,288,392 bytes smaller than
 the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
@@ -260,7 +267,12 @@ Server status-variable publication is omitted from the default embedded archive;
 while SQL diagnostics, warnings, result metadata, and the public C API remain
 available. Process-list metadata is omitted from the default embedded archive;
 `SHOW PROCESSLIST` and `SHOW FULL PROCESSLIST` are rejected by policy, while
-`INFORMATION_SCHEMA.PROCESSLIST` remains visible and returns zero rows. The
+`INFORMATION_SCHEMA.PROCESSLIST` remains visible and returns zero rows.
+Foreign-server metadata is omitted from the default embedded archive;
+`CREATE SERVER`, `ALTER SERVER`, `DROP SERVER`, and `SHOW CREATE SERVER` are
+rejected by policy because remote server definitions are server-global
+`mysql.servers` metadata, not application tables inside the MyLite database
+directory. The
 full English server error-message catalog is compacted in the default embedded
 archive; common syntax, duplicate-key, table lookup,
 storage-engine, unsupported-feature, and unknown-function diagnostics remain
@@ -294,6 +306,7 @@ The baseline explicitly disables:
 - Statement digest diagnostics
 - Server status variables
 - Process-list metadata
+- Foreign-server metadata
 - Oracle compatibility function aliases and `oracle_schema` routing
 - Full inherited server error-message catalog
 - MariaDB upstream unit-test targets

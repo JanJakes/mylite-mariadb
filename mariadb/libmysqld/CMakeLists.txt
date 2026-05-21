@@ -111,6 +111,15 @@ ELSE()
   ADD_DEFINITIONS(-DMYLITE_WITH_PROCESSLIST_METADATA=0)
 ENDIF()
 
+OPTION(MYLITE_WITH_FOREIGN_SERVER_METADATA "Build mysql.servers foreign-server metadata cache" ON)
+IF(MYLITE_WITH_FOREIGN_SERVER_METADATA)
+  ADD_DEFINITIONS(-DMYLITE_WITH_FOREIGN_SERVER_METADATA=1)
+  SET(MYLITE_FOREIGN_SERVER_METADATA_SOURCE ../sql/sql_servers.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_FOREIGN_SERVER_METADATA=0)
+  SET(MYLITE_FOREIGN_SERVER_METADATA_SOURCE ../sql/mylite_sql_servers_disabled.cc)
+ENDIF()
+
 INCLUDE_DIRECTORIES(
 ${CMAKE_SOURCE_DIR}/include 
 ${CMAKE_SOURCE_DIR}/libmysqld
@@ -187,7 +196,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/debug_sync.cc ../sql/debug.cc
            ../sql/opt_table_elimination.cc
            ../sql/sql_prepare.cc ../sql/sql_rename.cc ../sql/sql_repl.cc 
-           ../sql/sql_select.cc ../sql/sql_servers.cc
+           ../sql/sql_select.cc ${MYLITE_FOREIGN_SERVER_METADATA_SOURCE}
            ../sql/group_by_handler.cc ../sql/derived_handler.cc
            ../sql/select_handler.cc
            ../sql/sql_show.cc ../sql/sql_state.c 

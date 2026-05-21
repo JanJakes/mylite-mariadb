@@ -98,6 +98,15 @@ ELSE()
   ADD_DEFINITIONS(-DMYLITE_WITH_PROCESSLIST_METADATA=0)
 ENDIF()
 
+OPTION(MYLITE_WITH_FOREIGN_SERVER_METADATA "Build mysql.servers foreign-server metadata cache" ON)
+IF(MYLITE_WITH_FOREIGN_SERVER_METADATA)
+  ADD_DEFINITIONS(-DMYLITE_WITH_FOREIGN_SERVER_METADATA=1)
+  SET(MYLITE_FOREIGN_SERVER_METADATA_SOURCE sql_servers.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_FOREIGN_SERVER_METADATA=0)
+  SET(MYLITE_FOREIGN_SERVER_METADATA_SOURCE mylite_sql_servers_disabled.cc)
+ENDIF()
+
 SET (SQL_SOURCE
                ${CMAKE_CURRENT_BINARY_DIR}/yy_mariadb.cc
                ${CMAKE_CURRENT_BINARY_DIR}/yy_oracle.cc
@@ -155,7 +164,7 @@ SET (SQL_SOURCE
                events.cc ../sql-common/my_user.c
                partition_info.cc rpl_utility.cc rpl_utility_server.cc
                rpl_injector.cc sql_locale.cc
-               rpl_rli.cc rpl_mi.cc sql_servers.cc sql_audit.cc
+               rpl_rli.cc rpl_mi.cc ${MYLITE_FOREIGN_SERVER_METADATA_SOURCE} sql_audit.cc
                sql_connect.cc scheduler.cc sql_partition_admin.cc
                sql_profile.cc event_parse_data.cc sql_alter.cc
                sql_signal.cc mdl.cc sql_admin.cc

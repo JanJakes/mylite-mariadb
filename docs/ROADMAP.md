@@ -120,6 +120,10 @@ stable empty result behavior while ordinary diagnostics remain available.
 Process-list metadata is omitted after coverage proves `SHOW PROCESSLIST` and
 `SHOW FULL PROCESSLIST` are daemon thread/session inventory surfaces;
 `INFORMATION_SCHEMA.PROCESSLIST` remains queryable and returns zero rows.
+Foreign-server metadata is omitted after coverage proves `CREATE SERVER`,
+`ALTER SERVER`, `DROP SERVER`, and `SHOW CREATE SERVER` manage server-global
+remote connection definitions in `mysql.servers`, not application tables or
+native storage inside the MyLite database directory.
 Oracle compatibility function aliases and `oracle_schema` routing are omitted
 after coverage proves the normal MySQL/MariaDB string functions remain
 available, Oracle-only aliases fail predictably, and `oracle_schema` no

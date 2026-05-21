@@ -244,6 +244,7 @@ bool is_unsupported_binlog_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_help_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_static_show_info_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_processlist_metadata_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_foreign_server_metadata_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_statement_profiling_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_query_cache_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_query_log_statement(const SqlPolicyTokens &tokens);
@@ -1157,6 +1158,7 @@ bool is_unsupported_server_surface_sql(std::string_view sql, const std::string &
            is_unsupported_binlog_statement(tokens) || is_unsupported_help_statement(tokens) ||
            is_unsupported_static_show_info_statement(tokens) ||
            is_unsupported_processlist_metadata_statement(tokens) ||
+           is_unsupported_foreign_server_metadata_statement(tokens) ||
            is_unsupported_statement_profiling_statement(tokens) ||
            is_unsupported_query_cache_statement(tokens) ||
            is_unsupported_query_log_statement(tokens) ||
@@ -1276,6 +1278,15 @@ bool is_unsupported_processlist_metadata_statement(const SqlPolicyTokens &tokens
     return token_equals(first, "SHOW") &&
            (token_equals(second, "PROCESSLIST") ||
             (token_equals(second, "FULL") && token_equals(third, "PROCESSLIST")));
+}
+
+bool is_unsupported_foreign_server_metadata_statement(const SqlPolicyTokens &tokens) {
+    const std::string_view first = identifier_token_at(tokens, 0);
+    const std::string_view second = identifier_token_at(tokens, 1);
+    const std::string_view third = identifier_token_at(tokens, 2);
+
+    return token_equals(first, "SHOW") && token_equals(second, "CREATE") &&
+           token_equals(third, "SERVER");
 }
 
 bool is_unsupported_statement_profiling_statement(const SqlPolicyTokens &tokens) {

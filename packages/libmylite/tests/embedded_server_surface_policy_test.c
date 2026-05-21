@@ -445,7 +445,19 @@ static void assert_server_sql_rejected(mylite_db *db) {
         "CREATE SERVER remote_app FOREIGN DATA WRAPPER mysql OPTIONS (HOST '127.0.0.1')",
         "server-owned SQL surface"
     );
+    expect_error(
+        db,
+        "CREATE OR REPLACE SERVER remote_app FOREIGN DATA WRAPPER mysql "
+        "OPTIONS (HOST '127.0.0.1')",
+        "server-owned SQL surface"
+    );
+    expect_error(
+        db,
+        "ALTER SERVER remote_app OPTIONS (HOST '127.0.0.1')",
+        "server-owned SQL surface"
+    );
     expect_error(db, "DROP SERVER remote_app", "server-owned SQL surface");
+    expect_error(db, "SHOW CREATE SERVER remote_app", "server-owned SQL surface");
     expect_error(
         db,
         "GRANT SELECT ON *.* TO 'mylite_user'@'localhost'",
@@ -597,6 +609,19 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_prepare_error(db, "SHOW PRIVILEGES", "server-owned SQL surface");
     expect_prepare_error(db, "SHOW PROCESSLIST", "server-owned SQL surface");
     expect_prepare_error(db, "SHOW FULL PROCESSLIST", "server-owned SQL surface");
+    expect_prepare_error(
+        db,
+        "CREATE SERVER prepared_remote_app FOREIGN DATA WRAPPER mysql "
+        "OPTIONS (HOST '127.0.0.1')",
+        "server-owned SQL surface"
+    );
+    expect_prepare_error(
+        db,
+        "ALTER SERVER prepared_remote_app OPTIONS (HOST '127.0.0.1')",
+        "server-owned SQL surface"
+    );
+    expect_prepare_error(db, "DROP SERVER prepared_remote_app", "server-owned SQL surface");
+    expect_prepare_error(db, "SHOW CREATE SERVER prepared_remote_app", "server-owned SQL surface");
     expect_prepare_error(
         db,
         "CREATE FUNCTION prepared_udf RETURNS INTEGER SONAME 'prepared_udf.so'",
