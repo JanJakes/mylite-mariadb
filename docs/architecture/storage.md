@@ -397,9 +397,11 @@ ordered batch after cursor construction. This keeps repeated secondary cursor
 reads from reopening the primary file and revalidating header/catalog state for
 each row while the storage layer still works from the same single `.mylite`
 file and the same live row ids returned by index-entry reads.
-Durable exact entryset reads also use scoped file/header setup, matching
-primary-key point lookups and FK prefix probes when an active statement, read
-statement, or snapshot already owns the current file view.
+Durable exact and full entryset reads also use scoped file/header setup,
+matching primary-key point lookups and FK prefix probes when an active
+statement, read statement, or snapshot already owns the current file view.
+Full entryset reads then fall through to published roots or append-history
+scans for ordered cursor construction.
 
 File-backed index cursor builds also keep the primary file open across exact
 lookup and row materialization. Primary-key point lookups and secondary exact

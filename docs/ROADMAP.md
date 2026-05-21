@@ -78,9 +78,10 @@ headers directly instead of encode/decode round-tripping page `0`.
 Durable handler index cursor builds now keep one scoped read session open
 across exact-index lookup and row materialization, reusing the validated
 primary-file header and catalog image for point lookups and exact-index cursor
-builds. Durable exact entryset reads now use the same scoped file/header setup
-as point lookups and FK prefix probes. Repeated read statements over unchanged
-durable header bytes and the
+builds. Durable exact and full entryset reads now use the same scoped
+file/header setup as point lookups and FK prefix probes before ordered cursor
+construction falls through to published roots or append-history scans. Repeated
+read statements over unchanged durable header bytes and the
 same file identity also reuse a thread-local decoded checkpoint snapshot after
 raw header-page comparison, avoiding repeated header/catalog checksum
 validation and redundant catalog-chain reads on hot point-select loops.

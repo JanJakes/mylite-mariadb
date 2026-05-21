@@ -7064,22 +7064,51 @@ mylite_storage_result mylite_storage_read_index_entries(
         .size = sizeof(*out_entries),
     };
 
-    FILE *file = NULL;
-    mylite_storage_result result = open_existing_file(filename, &file);
+    mylite_storage_file_scope file_scope = {0};
+    mylite_storage_result result = open_existing_file_scope(filename, &file_scope);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
+    FILE *file = file_scope.file;
 
     mylite_storage_header header = {0};
     mylite_storage_catalog_image catalog = {0};
+    int has_catalog = 0;
     mylite_storage_catalog_entry table_entry = {0};
     int used_leaf = 0;
-    result = read_header(file, &header);
+    mylite_storage_statement *active_cache_statement =
+        active_cache_statement_from_statement(file_scope.active_statement);
+    result = read_header_from_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = read_catalog_image(file, &header, &catalog);
+        const int used_cached_table_entry = find_active_table_entry_cache_in_statement(
+            active_cache_statement,
+            &header,
+            schema_name,
+            table_name,
+            &table_entry
+        );
+        if (!used_cached_table_entry) {
+            result = read_catalog_image(file, &header, &catalog);
+            if (result == MYLITE_STORAGE_OK) {
+                has_catalog = 1;
+                result = find_table_record(&catalog, schema_name, table_name, &table_entry);
+            }
+            if (result == MYLITE_STORAGE_OK) {
+                store_active_table_entry_cache_in_statement(
+                    active_cache_statement,
+                    &header,
+                    schema_name,
+                    table_name,
+                    &table_entry
+                );
+            }
+        }
     }
-    if (result == MYLITE_STORAGE_OK) {
-        result = find_table_record(&catalog, schema_name, table_name, &table_entry);
+    if (result == MYLITE_STORAGE_OK && !has_catalog) {
+        result = read_catalog_image(file, &header, &catalog);
+        if (result == MYLITE_STORAGE_OK) {
+            has_catalog = 1;
+        }
     }
     if (result == MYLITE_STORAGE_OK) {
         result = read_index_leaf_entries(
@@ -7103,7 +7132,8 @@ mylite_storage_result mylite_storage_read_index_entries(
         (void)mark_active_live_row(file, &header, table_entry.table_id, out_entries->row_ids[i]);
     }
 
-    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     free_catalog_image(&catalog);
