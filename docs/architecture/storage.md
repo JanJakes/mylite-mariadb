@@ -406,6 +406,9 @@ Published leaf-root readers cache the last resolved index-root catalog entry
 on the active statement, keyed by table identity, index number, catalog root,
 and catalog generation, so repeated exact, full, and prefix probes do not
 rescan the catalog image for the same root metadata.
+Full-row scans, exact row counts, direct row reads, and indexed-row batch
+materialization also use scoped file/header setup, so those row-oriented APIs
+reuse active statement views before consulting live-row and row-payload caches.
 
 File-backed index cursor builds also keep the primary file open across exact
 lookup and row materialization. Primary-key point lookups and secondary exact

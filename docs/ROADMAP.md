@@ -87,6 +87,9 @@ and index root. Repeated read statements over unchanged durable header bytes
 and the same file identity also reuse a thread-local decoded checkpoint
 snapshot after raw header-page comparison, avoiding repeated header/catalog
 checksum validation and redundant catalog-chain reads on hot point-select loops.
+Full-row scans, exact row counts, direct row reads, and indexed-row batch
+materialization now use the same scoped file/header setup before live-row and
+row-payload cache checks.
 Normal read statements now reuse a thread-local unlocked read file handle after
 device/inode validation, reducing repeated `fopen()` overhead without holding
 shared locks between cursor builds. That read handle now stores its device and

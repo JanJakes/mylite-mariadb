@@ -5680,17 +5680,27 @@ mylite_storage_result mylite_storage_read_rows(
         .size = sizeof(*out_rows),
     };
 
-    FILE *file = NULL;
-    mylite_storage_result result = open_existing_file(filename, &file);
+    mylite_storage_file_scope file_scope = {0};
+    mylite_storage_result result = open_existing_file_scope(filename, &file_scope);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
+    FILE *file = file_scope.file;
 
     mylite_storage_header header = {0};
     unsigned long long table_id = 0ULL;
-    result = read_header(file, &header);
+    mylite_storage_statement *active_cache_statement =
+        active_cache_statement_from_statement(file_scope.active_statement);
+    result = read_header_from_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
+        result = find_table_id_in_statement(
+            file,
+            &header,
+            active_cache_statement,
+            schema_name,
+            table_name,
+            &table_id
+        );
     }
     mylite_storage_row_id_list live_rows = {0};
     int used_live_row_cache = 0;
@@ -5717,7 +5727,8 @@ mylite_storage_result mylite_storage_read_rows(
     }
     free(live_rows.row_ids);
 
-    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     if (result != MYLITE_STORAGE_OK) {
@@ -5739,17 +5750,27 @@ mylite_storage_result mylite_storage_count_rows(
 
     *out_row_count = 0ULL;
 
-    FILE *file = NULL;
-    mylite_storage_result result = open_existing_file(filename, &file);
+    mylite_storage_file_scope file_scope = {0};
+    mylite_storage_result result = open_existing_file_scope(filename, &file_scope);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
+    FILE *file = file_scope.file;
 
     mylite_storage_header header = {0};
     unsigned long long table_id = 0ULL;
-    result = read_header(file, &header);
+    mylite_storage_statement *active_cache_statement =
+        active_cache_statement_from_statement(file_scope.active_statement);
+    result = read_header_from_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
+        result = find_table_id_in_statement(
+            file,
+            &header,
+            active_cache_statement,
+            schema_name,
+            table_name,
+            &table_id
+        );
     }
     mylite_storage_row_id_list live_rows = {0};
     int used_live_row_cache = 0;
@@ -5776,7 +5797,8 @@ mylite_storage_result mylite_storage_count_rows(
     }
     free(live_rows.row_ids);
 
-    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     if (result != MYLITE_STORAGE_OK) {
@@ -5834,17 +5856,28 @@ mylite_storage_result mylite_storage_read_indexed_rows(
         return result;
     }
 
-    FILE *file = NULL;
-    result = open_existing_file(filename, &file);
+    mylite_storage_file_scope file_scope = {0};
+    result = open_existing_file_scope(filename, &file_scope);
     if (result != MYLITE_STORAGE_OK) {
+        mylite_storage_free_rowset(out_rows);
         return result;
     }
+    FILE *file = file_scope.file;
 
     mylite_storage_header header = {0};
     unsigned long long table_id = 0ULL;
-    result = read_header(file, &header);
+    mylite_storage_statement *active_cache_statement =
+        active_cache_statement_from_statement(file_scope.active_statement);
+    result = read_header_from_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
+        result = find_table_id_in_statement(
+            file,
+            &header,
+            active_cache_statement,
+            schema_name,
+            table_name,
+            &table_id
+        );
     }
     mylite_storage_row_payload_cache *row_payload_cache = NULL;
     unsigned long long row_payload_cache_generation = 0ULL;
@@ -5938,7 +5971,8 @@ mylite_storage_result mylite_storage_read_indexed_rows(
         free(row_page.owned_payload);
     }
 
-    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     if (result != MYLITE_STORAGE_OK) {
@@ -5965,20 +5999,30 @@ static mylite_storage_result read_row_payload(
     *out_row = NULL;
     *out_row_size = 0U;
 
-    FILE *file = NULL;
-    mylite_storage_result result = open_existing_file(filename, &file);
+    mylite_storage_file_scope file_scope = {0};
+    mylite_storage_result result = open_existing_file_scope(filename, &file_scope);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
+    FILE *file = file_scope.file;
 
     mylite_storage_header header = {0};
     unsigned long long table_id = 0ULL;
     mylite_storage_row_page row_page = {0};
     unsigned char row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     int row_hidden = 0;
-    result = read_header(file, &header);
+    mylite_storage_statement *active_cache_statement =
+        active_cache_statement_from_statement(file_scope.active_statement);
+    result = read_header_from_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
+        result = find_table_id_in_statement(
+            file,
+            &header,
+            active_cache_statement,
+            schema_name,
+            table_name,
+            &table_id
+        );
     }
     if (result == MYLITE_STORAGE_OK && !is_addressable_page_id(&header, row_id)) {
         result = MYLITE_STORAGE_NOTFOUND;
@@ -6013,7 +6057,8 @@ static mylite_storage_result read_row_payload(
     }
 
     free(row_page.owned_payload);
-    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     if (result != MYLITE_STORAGE_OK) {
