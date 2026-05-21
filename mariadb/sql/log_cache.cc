@@ -5,7 +5,13 @@
 #include "mysql/psi/mysql_file.h"
 #include "mysql/service_wsrep.h"
 
+#ifndef MYLITE_WITH_BINLOG_CORE
+#define MYLITE_WITH_BINLOG_CORE 1
+#endif
+
+#if MYLITE_WITH_BINLOG_CORE
 const char *BINLOG_CACHE_DIR= "#binlog_cache_files";
+#endif
 char binlog_cache_dir[FN_REFLEN];
 extern uint32 binlog_cache_reserved_size();
 
@@ -55,6 +61,10 @@ extern void ignore_db_dirs_append(const char *dirname_arg);
 
 bool init_binlog_cache_dir()
 {
+#if !MYLITE_WITH_BINLOG_CORE
+  memset(binlog_cache_dir, 0, sizeof(binlog_cache_dir));
+  return false;
+#else
   size_t length;
   uint max_tmp_file_name_len=
       2 /* prefix */ + 10 /* max len of thread_id */ + 1 /* underline */;
@@ -138,4 +148,5 @@ bool init_binlog_cache_dir()
 
   my_dirend(dir_info);
   return false;
+#endif
 }

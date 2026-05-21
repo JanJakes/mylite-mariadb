@@ -97,7 +97,8 @@ loading and service injection are omitted behind
 storage engines still initialize, and the embedded profile reports
 `@@have_dynamic_loading=NO`. The embedded baseline disables the active
 binary-log transaction/event core behind `MYLITE_WITH_BINLOG_CORE=0` while
-preserving the normal MariaDB server build path. It also guards embedded
+preserving the normal MariaDB server build path. The disabled binary-log core
+also skips inherited `#binlog_cache_files` directory setup. It guards embedded
 no-binlog startup, open, cleanup, and GTID-index update paths, and omits the
 unsupported injector root. It omits SQL `BINLOG` statement replay behind
 `MYLITE_WITH_BINLOG_REPLAY=0`; direct and prepared `BINLOG` statements are
@@ -198,7 +199,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,267,304 bytes / 25.05 MiB |
+| Archive size | 26,265,424 bytes / 25.05 MiB |
 | Archive members | 698 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -257,8 +258,10 @@ Omitting SQL `HANDLER` command runtime reduces the current pre-strip archive to
 `SELECT ... INTO DUMPFILE` host-file writers reduces the current pre-strip
 archive to 26,833,536 bytes / 25.59 MiB. Omitting startup option rows for
 disabled server topology and dynamic plugin-loading surfaces reduces the
-current pre-strip archive to 26,831,128 bytes / 25.59 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 563,824 bytes
+current pre-strip archive to 26,831,128 bytes / 25.59 MiB. Skipping inherited
+`#binlog_cache_files` setup in the no-binlog embedded profile reduces the
+current pre-strip archive to 26,829,192 bytes / 25.59 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 563,768 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -380,6 +383,8 @@ Startup option rows for disabled server topology and dynamic plugin-loading
 surfaces are omitted from the default embedded archive; retained options needed
 by MyLite startup, including `--skip-log-bin`, `--skip-slave-start`, and
 `--plugin-dir`, stay accepted.
+Inherited `#binlog_cache_files` setup is skipped in the no-binlog embedded
+profile, and the server-surface test suite covers its absence under `datadir/`.
 Replication execution, slave protocol, replication-event, checksum, and
 semi-sync system variables are omitted from the default embedded profile, while
 compatibility variables such as `@@log_bin=0` remain covered.

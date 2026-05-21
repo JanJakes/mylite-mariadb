@@ -1078,6 +1078,7 @@ static void assert_no_server_sidecar_files(const char *database_path) {
     char *relay_info_path = path_join(data_path, "relay-log.info");
     char *multi_master_info_path = path_join(data_path, "multi-master.info");
     char *binlog_index_path = path_join(data_path, "mysql-bin.index");
+    char *binlog_cache_path = path_join(data_path, "#binlog_cache_files");
     char *performance_schema_path = path_join(data_path, "performance_schema");
     char *mysql_system_path = path_join(data_path, "mysql");
 
@@ -1085,11 +1086,13 @@ static void assert_no_server_sidecar_files(const char *database_path) {
     assert(!path_exists(relay_info_path));
     assert(!path_exists(multi_master_info_path));
     assert(!path_exists(binlog_index_path));
+    assert(!path_exists(binlog_cache_path));
     assert(!path_exists(performance_schema_path));
     assert(!path_exists(mysql_system_path));
 
     free(mysql_system_path);
     free(performance_schema_path);
+    free(binlog_cache_path);
     free(binlog_index_path);
     free(multi_master_info_path);
     free(relay_info_path);

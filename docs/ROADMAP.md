@@ -64,6 +64,7 @@ surface that does not fit a local directory-owned library:
 - static server-information `SHOW` commands,
 - command-line option help prose,
 - startup options for disabled server topology and dynamic plugin loading,
+- inherited binary-log cache directory setup,
 - host-file SELECT exports,
 - rarely used optional engines or plugins unless a slice justifies them.
 
@@ -114,6 +115,9 @@ ordinary result delivery and `SELECT ... INTO @variable` remain covered.
 Startup option rows for disabled server topology and dynamic-plugin-loading
 surfaces are omitted after source review proves the retained `libmylite`
 startup vector still uses only serverless, directory-owned options.
+Inherited binary-log cache directory setup is skipped when
+`MYLITE_WITH_BINLOG_CORE=OFF`; the no-binlog embedded profile does not create
+or clean up `#binlog_cache_files`.
 Replication execution, slave protocol, checksum, replication-event, and
 semi-sync system variables are also omitted after policy coverage proves those
 configuration rows belong to unsupported topology behavior; compatibility

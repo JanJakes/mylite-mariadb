@@ -59,7 +59,9 @@ SELECT exports are omitted because they write arbitrary user-named filesystem
 paths rather than returning rows through the embedded API. Startup option rows
 for disabled binary-log, replication, and dynamic-plugin-loading surfaces are
 omitted because the default `libmylite` startup contract is fixed,
-serverless, and directory-owned.
+serverless, and directory-owned. Inherited `#binlog_cache_files` setup is
+skipped because the default profile has no binary-log core and does not create
+binlog cache files.
 
 ## Source Findings
 
@@ -372,6 +374,10 @@ serverless, and directory-owned.
   `--skip-log-bin`, `--skip-slave-start`, `--plugin-dir`, and storage
   directory options, but does not use positive binlog, relay-log, replication,
   or plugin-load configuration rows.
+- `mariadb/sql/log_cache.cc` implements inherited `#binlog_cache_files`
+  directory setup and cleanup. The default embedded baseline already starts
+  with `--skip-log-bin` and builds with `MYLITE_WITH_BINLOG_CORE=0`, so no
+  retained runtime path needs binlog cache files.
 
 ## Proposed Design
 
@@ -449,6 +455,11 @@ defaults to `ON` so normal MariaDB server builds keep upstream option rows.
 The disabled profile keeps startup options needed by the fixed `libmylite`
 runtime, including `--skip-log-bin`, `--skip-slave-start`, `--plugin-dir`,
 temporary-directory, and storage-directory options.
+
+When `MYLITE_WITH_BINLOG_CORE=0`, the embedded archive keeps the
+`init_binlog_cache_dir()` link contract but skips inherited
+`#binlog_cache_files` setup and cleanup. Custom profiles that re-enable
+binary logging keep upstream directory behavior.
 
 The embedded SQL function registry omits `SFORMAT()` and the embedded
 `item_strfunc.cc` build excludes the fmtlib-backed implementation. With the
@@ -1017,6 +1028,12 @@ plugin-loading surfaces brings the current archive to 26,267,304 bytes /
 Schema disabled, 6,862,336 bytes smaller than the symbol-stripped baseline
 with Performance Schema still built, and 7,575,016 bytes smaller than the
 original broad archive.
+Skipping inherited `#binlog_cache_files` setup in the no-binlog embedded
+profile brings the current archive to 26,265,424 bytes / 25.05 MiB, 5,264,280
+bytes smaller than the Release build with Performance Schema disabled,
+6,864,216 bytes smaller than the symbol-stripped baseline with Performance
+Schema still built, and 7,576,896 bytes smaller than the original broad
+archive.
 
 ## License Or Dependency Impact
 
