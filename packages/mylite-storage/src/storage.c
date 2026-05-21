@@ -1462,11 +1462,12 @@ static mylite_storage_result update_row_with_index_entries(
     const unsigned char *index_entry_changed,
     unsigned long long *out_new_row_id
 );
-static size_t changed_index_entry_count(
+MYLITE_STORAGE_HOT_INLINE size_t
+changed_index_entry_count(const unsigned char *index_entry_changed, size_t index_entry_count);
+MYLITE_STORAGE_HOT_INLINE int is_index_entry_changed(
     const unsigned char *index_entry_changed,
-    size_t index_entry_count
+    size_t entry_index
 );
-static int is_index_entry_changed(const unsigned char *index_entry_changed, size_t entry_index);
 static mylite_storage_result rename_table(
     const char *filename,
     const char *old_schema_name,
@@ -3517,7 +3518,7 @@ static void link_exact_index_cache_bucket_entry(
 static mylite_storage_result ensure_exact_index_cache_buckets(
     mylite_storage_exact_index_cache *cache
 );
-static size_t exact_index_cache_bucket_for_key(
+MYLITE_STORAGE_HOT_INLINE size_t exact_index_cache_bucket_for_key(
     const mylite_storage_exact_index_cache *cache,
     const unsigned char *key
 );
@@ -14174,10 +14175,8 @@ static mylite_storage_result validate_index_entries(
     return MYLITE_STORAGE_OK;
 }
 
-static size_t changed_index_entry_count(
-    const unsigned char *index_entry_changed,
-    size_t index_entry_count
-) {
+MYLITE_STORAGE_HOT_INLINE size_t
+changed_index_entry_count(const unsigned char *index_entry_changed, size_t index_entry_count) {
     if (index_entry_changed == NULL) {
         return index_entry_count;
     }
@@ -14191,7 +14190,10 @@ static size_t changed_index_entry_count(
     return changed_count;
 }
 
-static int is_index_entry_changed(const unsigned char *index_entry_changed, size_t entry_index) {
+MYLITE_STORAGE_HOT_INLINE int is_index_entry_changed(
+    const unsigned char *index_entry_changed,
+    size_t entry_index
+) {
     return index_entry_changed == NULL || index_entry_changed[entry_index] != 0U;
 }
 
@@ -25013,7 +25015,7 @@ static mylite_storage_result ensure_exact_index_cache_buckets(
     return MYLITE_STORAGE_OK;
 }
 
-static size_t exact_index_cache_bucket_for_key(
+MYLITE_STORAGE_HOT_INLINE size_t exact_index_cache_bucket_for_key(
     const mylite_storage_exact_index_cache *cache,
     const unsigned char *key
 ) {

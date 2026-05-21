@@ -142,7 +142,8 @@ for exact cursor builds and row-write table-id resolution while the catalog
 root and generation are unchanged. Active statement, table-entry, and
 row-payload cache lookups now inline their hottest resolution helpers and
 short-circuit identical string identities before falling back to value
-comparison.
+comparison. Per-index change predicates and exact-cache bucket resolution now
+inline on the row-DML hot path.
 Fixed-width prepared result statements now reuse their result bindings across
 reset/re-execute loops and avoid freeing already-drained results a second time,
 leaving parameter binding/reset semantics as the next prepared-path bottleneck.
