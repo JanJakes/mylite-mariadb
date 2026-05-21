@@ -217,6 +217,12 @@ static int mylite_prepare_index_entries_with_scratch(
   size_t *out_entry_count, uchar **out_key_storage,
   mylite_storage_index_entry *entry_scratch, size_t entry_scratch_count,
   uchar *key_storage_scratch, size_t key_storage_scratch_size);
+static int mylite_prepare_checked_index_entries_with_scratch(
+    TABLE *table, const uchar *buf, mylite_storage_index_entry **out_entries,
+    size_t *out_entry_count, uchar **out_key_storage,
+    mylite_storage_index_entry *entry_scratch, size_t entry_scratch_count,
+    uchar *key_storage_scratch, size_t key_storage_scratch_size,
+    bool indexes_known_supported);
 static int mylite_prepare_index_entry_changes(
     TABLE *table, const uchar *old_buf,
     const mylite_storage_index_entry *new_entries, size_t new_entry_count,
@@ -2749,11 +2755,11 @@ int ha_mylite::write_row(const uchar *buf)
   mylite_storage_index_entry *index_entries= NULL;
   uchar *index_key_storage= NULL;
   size_t index_entry_count= 0;
-  int error= mylite_prepare_index_entries_with_scratch(
+  int error= mylite_prepare_checked_index_entries_with_scratch(
       table, buf, &index_entries, &index_entry_count, &index_key_storage,
       stack_index_entries,
       sizeof(stack_index_entries) / sizeof(stack_index_entries[0]),
-      stack_index_key_storage, sizeof(stack_index_key_storage));
+      stack_index_key_storage, sizeof(stack_index_key_storage), true);
   if (error)
     DBUG_RETURN(error);
 
@@ -2923,11 +2929,11 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
       mylite_update_preserves_all_index_entries(table, old_data, new_data);
   if (!preserve_index_entries)
   {
-    error= mylite_prepare_index_entries_with_scratch(
+    error= mylite_prepare_checked_index_entries_with_scratch(
         table, new_data, &index_entries, &index_entry_count,
         &index_key_storage, stack_index_entries,
         sizeof(stack_index_entries) / sizeof(stack_index_entries[0]),
-        stack_index_key_storage, sizeof(stack_index_key_storage));
+        stack_index_key_storage, sizeof(stack_index_key_storage), true);
     if (error)
       DBUG_RETURN(error);
 
@@ -4284,13 +4290,26 @@ static int mylite_prepare_index_entries_with_scratch(
   mylite_storage_index_entry *entry_scratch, size_t entry_scratch_count,
   uchar *key_storage_scratch, size_t key_storage_scratch_size)
 {
+  return mylite_prepare_checked_index_entries_with_scratch(
+      table, buf, out_entries, out_entry_count, out_key_storage, entry_scratch,
+      entry_scratch_count, key_storage_scratch, key_storage_scratch_size,
+      false);
+}
+
+static int mylite_prepare_checked_index_entries_with_scratch(
+    TABLE *table, const uchar *buf, mylite_storage_index_entry **out_entries,
+    size_t *out_entry_count, uchar **out_key_storage,
+    mylite_storage_index_entry *entry_scratch, size_t entry_scratch_count,
+    uchar *key_storage_scratch, size_t key_storage_scratch_size,
+    bool indexes_known_supported)
+{
   *out_entries= NULL;
   *out_entry_count= 0;
   *out_key_storage= NULL;
 
   if (table->s->keys == 0)
     return 0;
-  if (!mylite_table_supports_indexes(table))
+  if (!indexes_known_supported && !mylite_table_supports_indexes(table))
     return HA_ERR_UNSUPPORTED;
 
   size_t key_storage_size= 0;
