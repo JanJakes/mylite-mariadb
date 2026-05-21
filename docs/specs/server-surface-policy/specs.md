@@ -84,6 +84,11 @@ Use two layers:
 5. Keep direct and prepared regression coverage for omitted legacy diagnostic
    SELECT extensions. The first such case is `PROCEDURE ANALYSE()`, which fails
    predictably while ordinary SELECT queries remain available.
+6. Keep direct and prepared regression coverage for omitted server utility SQL
+   functions such as `BENCHMARK()`, named-lock helpers, `LOAD_FILE()`,
+   replication wait/position helpers, `SLEEP()`, and `UUID_SHORT()`, while
+   retained scalar functions such as `VERSION()` and `FORMAT()` remain
+   available.
 
 The gate is not a general SQL parser. It is a narrow first-token policy check
 for statement families and explicit mode switches whose MariaDB behavior is
@@ -178,6 +183,9 @@ No new dependencies or license changes.
   profile omits it.
 - Cover rejected direct and prepared `PROCEDURE ANALYSE()` after the embedded
   size profile omits it.
+- Cover rejected direct and prepared server utility SQL functions after the
+  embedded size profile omits them, while keeping retained scalar functions
+  executable.
 - Cover rejected prepared SQL for at least one server-owned statement family.
 - Assert server-sidecar files and system-table directories are absent.
 - Run:
@@ -212,6 +220,9 @@ No new dependencies or license changes.
   statements after the embedded size profile omits it.
 - `PROCEDURE ANALYSE()` fails predictably in direct execution and prepared
   statements after the embedded size profile omits it.
+- Server utility SQL functions fail predictably in direct execution and
+  prepared statements after the embedded size profile omits them, while
+  retained scalar functions remain available.
 - MySQL/MariaDB executable comments cannot bypass the server-surface policy.
 - Direct execution and prepared statements share the same policy.
 - Rejected server commands do not create durable server sidecars or system-table
