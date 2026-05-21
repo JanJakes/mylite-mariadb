@@ -986,7 +986,10 @@ for row-page, row-state, autoincrement, BLOB payload, free-list, append-only
 index-entry, and index leaf access, but dirty-page ownership and rollback for
 maintained B-tree updates remain planned. Versioned rollback journals can now
 protect a bounded set of typed storage pages, giving the pager a recovery
-boundary for future dirty in-place page writes.
+boundary for future dirty in-place page writes. Active dirty-page rollback is
+the next pager step: existing typed pages rewritten through the pager need
+statement/savepoint preimages before maintained index roots can safely update
+in place.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, row/index free-space reclamation, multi-statement
