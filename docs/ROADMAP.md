@@ -432,6 +432,9 @@ work when the active statement has no prior undo entries and no buckets yet.
 Small non-bucketed buffered-page undo lists now also scan duplicate page ids
 directly in the capture helper, leaving the bucketed lookup path for larger
 statements.
+Cached single-index active update rewrites now batch the row and changed-index
+undo preimage capture when the nested statement has an empty undo list, keeping
+the same rollback order while avoiding duplicated small-list setup.
 Durable handler write locks now defer MEMORY/HEAP statement snapshots until a
 volatile table participates, while transaction and savepoint snapshots remain
 eager at their SQL boundaries.
