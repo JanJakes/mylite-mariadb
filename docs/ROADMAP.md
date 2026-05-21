@@ -49,6 +49,7 @@ surface that does not fit a local directory-owned library:
 - dynamic plugin loading and external durable storage engines,
 - dynamic UDF shared-library loading,
 - performance schema, statement profiling, query cache, and server audit plugins,
+- optimizer trace diagnostics,
 - optional Oracle SQL compatibility mode,
 - optional fmtlib-backed SQL helpers such as `SFORMAT()`,
 - legacy diagnostic SELECT procedures such as `PROCEDURE ANALYSE()`,
@@ -92,6 +93,10 @@ VARIABLES` remain available.
 Command-line option help prose is omitted after measurement proves startup
 option parsing remains intact and only inherited `--help` descriptions become
 empty in the embedded archive.
+Optimizer trace diagnostics are omitted after coverage proves trace variables
+and `INFORMATION_SCHEMA.OPTIMIZER_TRACE`, qualified or current-schema, are
+explicit unsupported surfaces while ordinary planning, execution, and
+`EXPLAIN` remain available.
 Compatibility-sensitive code removals require separate evidence before they
 are accepted.
 

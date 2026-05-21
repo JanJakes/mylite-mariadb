@@ -388,6 +388,7 @@ compatibility features that do not fit the embedded library model:
 - SQL help-table lookup,
 - statement profiling,
 - query-cache management,
+- optimizer trace diagnostics,
 - the optional `SFORMAT()` SQL helper,
 - legacy `PROCEDURE ANALYSE()` SELECT diagnostics,
 - static `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES`
@@ -405,7 +406,11 @@ persists metadata in server system tables. Attempts to enable Oracle SQL mode,
 SQL `HELP`, statement-profiling commands, and query-cache management commands
 are also rejected through the same policy. They fail with `MYLITE_ERROR` and a
 stable MyLite diagnostic. Query-cache SELECT hints remain accepted no-op
-syntax. The default embedded profile also omits `SFORMAT()`, which fails as an
+syntax. Optimizer trace variables and
+`INFORMATION_SCHEMA.OPTIMIZER_TRACE`, including unqualified reads while
+`information_schema` is the current schema, are rejected as server diagnostics.
+Ordinary planning, execution, and `EXPLAIN` remain supported. The default
+embedded profile also omits `SFORMAT()`, which fails as an
 unknown SQL function; ordinary `FORMAT()` remains available. The legacy
 `PROCEDURE ANALYSE()` SELECT extension is rejected as an unsupported diagnostic
 surface while ordinary SELECT queries remain supported. Long system-variable

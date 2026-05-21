@@ -40,6 +40,7 @@ MYLITE_WITH_PROCEDURE_ANALYSE=OFF
 MYLITE_WITH_SYSVAR_HELP_TEXT=OFF
 MYLITE_WITH_STATIC_SHOW_INFO=OFF
 MYLITE_WITH_OPTION_HELP_TEXT=OFF
+MYLITE_WITH_OPTIMIZER_TRACE=OFF
 ```
 
 `CMAKE_BUILD_TYPE=MinSizeRel` makes the embedded MariaDB archive optimize for
@@ -72,7 +73,9 @@ AUTHORS`, `SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES` result producers are
 omitted behind `MYLITE_WITH_STATIC_SHOW_INFO=0`. Command-line option help
 prose in `my_long_options` is omitted behind
 `MYLITE_WITH_OPTION_HELP_TEXT=0`; option names, parsing metadata, defaults,
-and startup behavior remain intact.
+and startup behavior remain intact. Optimizer trace diagnostics are omitted
+behind `MYLITE_WITH_OPTIMIZER_TRACE=0`; ordinary planning, execution, and
+`EXPLAIN` remain available.
 
 ## Measurement
 
@@ -88,7 +91,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 27,128,952 bytes / 25.87 MiB |
+| Archive size | 27,116,808 bytes / 25.86 MiB |
 | Archive members | 705 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -106,9 +109,11 @@ pre-strip archive to 27,825,136 bytes / 26.54 MiB. Omitting system-variable
 help text reduces the pre-strip archive to 27,767,568 bytes / 26.48 MiB.
 Omitting static `SHOW` information reduces the pre-strip archive to 27,732,624
 bytes / 26.45 MiB. Omitting command-line option help text reduces the
-pre-strip archive to 27,723,608 bytes / 26.44 MiB. Post-build `strip -S -x`
-plus `ranlib` saves another 594,656 bytes without changing archive membership
-or runtime behavior. The `SFORMAT()` and exception cut accounts for 1,808,240
+pre-strip archive to 27,723,608 bytes / 26.44 MiB. Omitting optimizer trace
+diagnostics reduces the pre-strip archive to 27,710,800 bytes / 26.43 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 593,992 bytes without
+changing archive membership or runtime behavior. The `SFORMAT()` and exception
+cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
 runtime omission saves 87,416 bytes and one archive member. The embedded
 binary-log core trim saves 72,232 bytes and one archive member. Omitting
@@ -117,10 +122,11 @@ the implementation object is replaced by a small stub. Omitting
 system-variable help text saves 56,040 bytes with no member-count change.
 Omitting static `SHOW` information saves 32,936 bytes with no member-count
 change. Omitting command-line option help text saves 8,680 bytes with no
-member-count change. The final archive is 4,400,752 bytes smaller than the
-Release build with Performance Schema disabled, 6,000,688 bytes smaller than
+member-count change. Omitting optimizer trace diagnostics saves 12,144 bytes
+with no member-count change. The final archive is 4,412,896 bytes smaller than
+the Release build with Performance Schema disabled, 6,012,832 bytes smaller than
 the symbol-stripped baseline that still built Performance Schema, and
-6,713,368 bytes smaller than the original broad archive.
+6,725,512 bytes smaller than the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
 GSSAPI, BZip2, LZ4, LibLZMA, LZO, PCRE2, and Zstandard support on this
@@ -173,7 +179,9 @@ embedded profile. Static `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and
 policy; ordinary supported `SHOW` surfaces such as `SHOW VARIABLES` remain
 available. Command-line option help prose is omitted from the default embedded
 archive, while option names, aliases, argument types, defaults, limits, and
-parsing behavior remain available.
+parsing behavior remain available. Optimizer trace diagnostics are omitted
+from the default embedded archive and rejected by policy; ordinary query
+planning, execution, and `EXPLAIN` remain available.
 
 ## Disabled Or Missing Surface
 
@@ -195,6 +203,7 @@ The baseline explicitly disables:
 - Static `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES`
   information producers
 - Command-line option help text
+- Optimizer trace diagnostics
 - MariaDB upstream unit-test targets
 
 Configure also reports unavailable optional features on this host, including

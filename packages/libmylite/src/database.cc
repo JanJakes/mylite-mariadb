@@ -124,6 +124,7 @@ struct mylite_db {
     MYSQL mysql = {};
 #endif
     std::string database_path;
+    std::string current_schema;
     int errcode = MYLITE_OK;
     int extended_errcode = MYLITE_OK;
     unsigned mariadb_errno = 0;
@@ -231,7 +232,8 @@ mylite_value_type column_type(const ResultColumn &column);
 const ResultColumn *column_at(const mylite_stmt *stmt, unsigned column);
 void set_mariadb_statement_error(mylite_stmt &stmt);
 int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql);
-bool is_unsupported_server_surface_sql(std::string_view sql);
+void update_current_schema_after_successful_sql(mylite_db &db, std::string_view sql);
+bool is_unsupported_server_surface_sql(std::string_view sql, const std::string &current_schema);
 bool is_unsupported_oracle_sql_mode_statement(std::string_view sql);
 bool is_unsupported_procedure_analyse_statement(std::string_view sql);
 bool is_unsupported_account_or_event_statement(const SqlPolicyTokens &tokens);
@@ -243,6 +245,10 @@ bool is_unsupported_help_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_static_show_info_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_statement_profiling_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_query_cache_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_optimizer_trace_statement(
+    const SqlPolicyTokens &tokens,
+    std::string_view current_schema
+);
 bool is_unsupported_server_set_statement(const SqlPolicyTokens &tokens);
 SqlPolicyTokens collect_sql_policy_tokens(std::string_view sql);
 bool next_sql_token(std::string_view sql, std::size_t &offset, std::string_view &token);
@@ -256,15 +262,25 @@ bool is_sql_space(char value);
 bool is_sql_identifier_char(char value);
 bool is_sql_identifier_token(std::string_view token);
 std::string_view identifier_token_at(const SqlPolicyTokens &tokens, std::size_t index);
+std::string_view unquoted_identifier_token(std::string_view token);
 bool has_identifier_token(
     const SqlPolicyTokens &tokens,
     const char *keyword,
     std::size_t start_index
 );
+bool has_information_schema_table(const SqlPolicyTokens &tokens, const char *table_name);
+bool has_current_schema_table_reference(
+    const SqlPolicyTokens &tokens,
+    const char *table_name,
+    std::string_view current_schema
+);
+bool has_unqualified_table_reference(const SqlPolicyTokens &tokens, const char *table_name);
 bool is_sql_mode_assignment_target(const SqlPolicyTokens &tokens, std::size_t index);
 bool sql_mode_assignment_mentions_oracle(const SqlPolicyTokens &tokens, std::size_t index);
 bool token_contains_sql_mode_name(std::string_view token, const char *mode_name);
 bool token_equals(std::string_view token, const char *keyword);
+bool identifier_token_equals(std::string_view token, const char *keyword);
+bool table_reference_keyword(std::string_view token);
 bool token_in(std::string_view token, const char *first, const char *second);
 bool token_in(std::string_view token, const char *first, const char *second, const char *third);
 bool token_in(
@@ -978,6 +994,7 @@ int exec_impl(
     if (result != MYLITE_OK) {
         return copy_error_message(*db, errmsg);
     }
+    update_current_schema_after_successful_sql(*db, sql);
 
     const my_ulonglong affected_rows = mysql_affected_rows(&db->mysql);
     db->changes =
@@ -990,6 +1007,16 @@ int exec_impl(
     return MYLITE_OK;
 #endif
 }
+
+#if MYLITE_WITH_MARIADB_EMBEDDED
+void update_current_schema_after_successful_sql(mylite_db &db, std::string_view sql) {
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    if (!token_equals(identifier_token_at(tokens, 0), "USE") || tokens.count < 2U) {
+        return;
+    }
+    db.current_schema = std::string(unquoted_identifier_token(tokens.values[1]));
+}
+#endif
 
 int prepare_impl(
     mylite_db *db,
@@ -1075,7 +1102,7 @@ int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql) {
         return MYLITE_ERROR;
     }
 
-    if (is_unsupported_server_surface_sql(sql)) {
+    if (is_unsupported_server_surface_sql(sql, db.current_schema)) {
         set_error(db, MYLITE_ERROR, "server-owned SQL surface is not supported by MyLite");
         return MYLITE_ERROR;
     }
@@ -1115,7 +1142,7 @@ bool is_unsupported_procedure_analyse_statement(std::string_view sql) {
     return false;
 }
 
-bool is_unsupported_server_surface_sql(std::string_view sql) {
+bool is_unsupported_server_surface_sql(std::string_view sql, const std::string &current_schema) {
     const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
     if (identifier_token_at(tokens, 0).empty()) {
         return false;
@@ -1128,6 +1155,7 @@ bool is_unsupported_server_surface_sql(std::string_view sql) {
            is_unsupported_static_show_info_statement(tokens) ||
            is_unsupported_statement_profiling_statement(tokens) ||
            is_unsupported_query_cache_statement(tokens) ||
+           is_unsupported_optimizer_trace_statement(tokens, current_schema) ||
            is_unsupported_server_set_statement(tokens);
 }
 
@@ -1262,6 +1290,27 @@ bool is_unsupported_query_cache_statement(const SqlPolicyTokens &tokens) {
 
     return (token_equals(first, "FLUSH") || token_equals(first, "RESET")) &&
            token_equals(second, "QUERY") && token_equals(third, "CACHE");
+}
+
+bool is_unsupported_optimizer_trace_statement(
+    const SqlPolicyTokens &tokens,
+    std::string_view current_schema
+) {
+    if (has_information_schema_table(tokens, "OPTIMIZER_TRACE") ||
+        has_current_schema_table_reference(tokens, "OPTIMIZER_TRACE", current_schema)) {
+        return true;
+    }
+    if (!token_equals(identifier_token_at(tokens, 0), "SET")) {
+        return false;
+    }
+
+    for (std::size_t index = 1; index < tokens.count; ++index) {
+        if (token_in(tokens.values[index], "OPTIMIZER_TRACE", "OPTIMIZER_TRACE_MAX_MEM_SIZE") &&
+            is_system_variable_qualified_token(tokens, index)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool is_unsupported_server_set_statement(const SqlPolicyTokens &tokens) {
@@ -1435,6 +1484,14 @@ std::string_view identifier_token_at(const SqlPolicyTokens &tokens, std::size_t 
     return {};
 }
 
+std::string_view unquoted_identifier_token(std::string_view token) {
+    if (token.size() >= 2U && token.front() == '`' && token.back() == '`') {
+        token.remove_prefix(1U);
+        token.remove_suffix(1U);
+    }
+    return token;
+}
+
 bool has_identifier_token(
     const SqlPolicyTokens &tokens,
     const char *keyword,
@@ -1442,6 +1499,36 @@ bool has_identifier_token(
 ) {
     for (std::size_t index = start_index; !identifier_token_at(tokens, index).empty(); ++index) {
         if (token_equals(identifier_token_at(tokens, index), keyword)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool has_information_schema_table(const SqlPolicyTokens &tokens, const char *table_name) {
+    for (std::size_t index = 0; index + 2U < tokens.count; ++index) {
+        if (identifier_token_equals(tokens.values[index], "INFORMATION_SCHEMA") &&
+            token_equals(tokens.values[index + 1U], ".") &&
+            identifier_token_equals(tokens.values[index + 2U], table_name)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool has_current_schema_table_reference(
+    const SqlPolicyTokens &tokens,
+    const char *table_name,
+    std::string_view current_schema
+) {
+    return identifier_token_equals(current_schema, "INFORMATION_SCHEMA") &&
+           has_unqualified_table_reference(tokens, table_name);
+}
+
+bool has_unqualified_table_reference(const SqlPolicyTokens &tokens, const char *table_name) {
+    for (std::size_t index = 1; index < tokens.count; ++index) {
+        if (identifier_token_equals(tokens.values[index], table_name) &&
+            table_reference_keyword(tokens.values[index - 1U])) {
             return true;
         }
     }
@@ -1531,6 +1618,15 @@ bool token_equals(std::string_view token, const char *keyword) {
         }
     }
     return true;
+}
+
+bool identifier_token_equals(std::string_view token, const char *keyword) {
+    return token_equals(unquoted_identifier_token(token), keyword);
+}
+
+bool table_reference_keyword(std::string_view token) {
+    return token_in(token, "FROM", "JOIN", "UPDATE") ||
+           token_in(token, "INTO", "TABLE", "DESC", "DESCRIBE");
 }
 
 bool token_in(std::string_view token, const char *first, const char *second) {

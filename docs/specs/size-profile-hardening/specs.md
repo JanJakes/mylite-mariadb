@@ -27,6 +27,8 @@ than variable behavior. Static `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and
 attribution and privilege help metadata rather than application data.
 Command-line option help text is omitted because it is inherited server
 documentation prose, while option names and parser metadata remain available.
+Optimizer trace diagnostics are omitted because they expose server optimizer
+debugging data rather than application behavior.
 
 ## Source Findings
 
@@ -147,6 +149,14 @@ documentation prose, while option names and parser metadata remain available.
   `MYLITE_WITH_OPTION_HELP_TEXT=0` maps only those hardcoded option comments to
   empty strings and reduces the stripped archive to 27,128,952 bytes,
   25.87 MiB, and 705 members.
+- `mariadb/sql/opt_trace.cc` implements optimizer trace collection,
+  `INFORMATION_SCHEMA.OPTIMIZER_TRACE` rows, trace security checks, and trace
+  JSON helper symbols referenced by retained optimizer paths. The safe embedded
+  cut is an inert replacement object, not deleting the header-level trace API.
+- Disabling optimizer trace diagnostics behind
+  `MYLITE_WITH_OPTIMIZER_TRACE=0` replaces `opt_trace.cc.o` with
+  `mylite_opt_trace_disabled.cc.o` and reduces the stripped archive to
+  27,116,808 bytes, 25.86 MiB, and 705 members.
 
 ## Proposed Design
 
@@ -244,6 +254,16 @@ profile wraps only `my_long_options[]` comment strings in
 types, defaults, bounds, deprecation aliases, and parsing behavior remain
 compiled normally.
 
+The embedded archive omits optimizer trace diagnostics by setting
+`MYLITE_WITH_OPTIMIZER_TRACE=0` in the MyLite baseline. The option defaults to
+`ON` so normal MariaDB server builds keep upstream optimizer trace behavior.
+The disabled profile links `mylite_opt_trace_disabled.cc` in place of
+`opt_trace.cc`, preserving helper symbols required by retained optimizer code
+while never collecting or exposing optimizer trace rows. MyLite rejects
+optimizer-trace variable assignment and
+`INFORMATION_SCHEMA.OPTIMIZER_TRACE`, qualified or current-schema, before
+dispatch; ordinary planning, execution, and `EXPLAIN` remain available.
+
 The wrapper keeps this behavior enabled by default because it is the
 distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
 need an unstripped archive for local inspection.
@@ -260,7 +280,8 @@ embedded baseline also disables binlog transaction/event runtime behind a
 MyLite-owned profile flag and omits long system-variable help comments from
 `sys_vars.cc`. Static server-information `SHOW` producers are compiled out of
 `sql_show.cc`. Hardcoded command-line option help strings are compiled out of
-the embedded `mysqld.cc` option table.
+the embedded `mysqld.cc` option table. Optimizer trace diagnostics are replaced
+with inert trace helper symbols in the embedded SQL archive.
 
 ## Compatibility Impact
 
@@ -307,6 +328,10 @@ and warnings available.
 Command-line option help text is documentation metadata. Omitting it leaves
 embedded startup option parsing, names, aliases, types, defaults, and limits
 available; inherited `--help` descriptions are empty in the embedded archive.
+Optimizer trace is a server diagnostic surface. Omitting it removes optimizer
+trace output and `INFORMATION_SCHEMA.OPTIMIZER_TRACE`, not ordinary query
+planning, execution, `EXPLAIN`, JSON functions, native storage engines, DDL,
+DML, or the public C API.
 
 ## Database-Directory And Lifecycle Impact
 
@@ -379,6 +404,11 @@ bytes / 25.87 MiB, 4,400,752 bytes smaller than the Release build with
 Performance Schema disabled, 6,000,688 bytes smaller than the symbol-stripped
 baseline with Performance Schema still built, and 6,713,368 bytes smaller than
 the original broad archive.
+Omitting optimizer trace diagnostics brings the current archive to 27,116,808
+bytes / 25.86 MiB, 4,412,896 bytes smaller than the Release build with
+Performance Schema disabled, 6,012,832 bytes smaller than the symbol-stripped
+baseline with Performance Schema still built, and 6,725,512 bytes smaller than
+the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -390,6 +420,8 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Run `tools/mariadb-embedded-build all`.
 - Confirm `sql_analyse.cc.o` is absent and
   `mylite_procedure_analyse_stub.cc.o` is present in `libmariadbd.a`.
+- Confirm `opt_trace.cc.o` is absent and `mylite_opt_trace_disabled.cc.o` is
+  present in `libmariadbd.a`.
 - Run `cmake --build --preset dev`.
 - Run `ctest --preset dev --output-on-failure`.
 - Run `cmake --build --preset embedded-dev`.
@@ -435,6 +467,9 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
   VARIABLES` remains available.
 - Embedded startup option parsing remains covered by the embedded test suite,
   and inherited option help strings are absent from the measured archive.
+- Direct and prepared optimizer-trace SQL fails through MyLite policy,
+  ordinary `EXPLAIN` remains available, and the embedded archive replaces
+  `opt_trace.cc.o` with `mylite_opt_trace_disabled.cc.o`.
 - The stripped archive still links `libmylite` and all embedded tests.
 - The measured archive size and member count are recorded in the build
   documentation.
@@ -467,3 +502,6 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Users inspecting MariaDB-style command-line help from the embedded archive
   lose inherited prose descriptions. The option parser still accepts the
   retained embedded startup options.
+- Users inspecting MariaDB optimizer trace diagnostics lose
+  `INFORMATION_SCHEMA.OPTIMIZER_TRACE` output in the default embedded profile.
+  Normal query execution and `EXPLAIN` remain available.

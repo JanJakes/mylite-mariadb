@@ -24,3 +24,4 @@ set(MYLITE_WITH_PROCEDURE_ANALYSE OFF CACHE BOOL "Disable PROCEDURE ANALYSE in t
 set(MYLITE_WITH_SYSVAR_HELP_TEXT OFF CACHE BOOL "Disable system variable help text in the embedded baseline" FORCE)
 set(MYLITE_WITH_STATIC_SHOW_INFO OFF CACHE BOOL "Disable static SHOW information in the embedded baseline" FORCE)
 set(MYLITE_WITH_OPTION_HELP_TEXT OFF CACHE BOOL "Disable command-line option help text in the embedded baseline" FORCE)
+set(MYLITE_WITH_OPTIMIZER_TRACE OFF CACHE BOOL "Disable optimizer trace diagnostics in the embedded baseline" FORCE)

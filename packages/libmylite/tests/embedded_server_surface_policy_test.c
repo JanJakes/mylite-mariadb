@@ -249,10 +249,13 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SET @query_cache_size = 1048576");
     exec_ok(db, "SET @query_cache_type = 'local'");
     exec_ok(db, "SET @first_local = 1, @query_cache_limit = 1024");
+    exec_ok(db, "SET @optimizer_trace = 'enabled=on'");
+    exec_ok(db, "SET @first_trace = 1, @optimizer_trace_max_mem_size = 8192");
     exec_ok(db, "SET @sql_mode = 'ORACLE'");
     exec_ok(db, "SET @password = 'local'");
     exec_ok(db, "SET sql_mode = @@sql_mode");
     exec_ok(db, "SELECT 'PROCEDURE ANALYSE()' AS literal");
+    exec_ok(db, "SELECT 'INFORMATION_SCHEMA.OPTIMIZER_TRACE' AS literal");
     exec_ok(db, "SHOW VARIABLES LIKE 'version'");
 
     expect_error(
@@ -371,6 +374,29 @@ static void assert_server_sql_rejected(mylite_db *db) {
     );
     expect_error(db, "FLUSH QUERY CACHE", "server-owned SQL surface");
     expect_error(db, "RESET QUERY CACHE", "server-owned SQL surface");
+    expect_error(db, "SET optimizer_trace = 'enabled=on'", "server-owned SQL surface");
+    expect_error(db, "SET @@session.optimizer_trace = 'enabled=on'", "server-owned SQL surface");
+    expect_error(db, "SET optimizer_trace_max_mem_size = 8192", "server-owned SQL surface");
+    expect_error(
+        db,
+        "SET autocommit = 1, optimizer_trace = 'enabled=on'",
+        "server-owned SQL surface"
+    );
+    expect_error(
+        db,
+        "SET STATEMENT optimizer_trace = 'enabled=on' FOR SELECT 1",
+        "server-owned SQL surface"
+    );
+    expect_error(
+        db,
+        "SELECT * FROM INFORMATION_SCHEMA.OPTIMIZER_TRACE",
+        "server-owned SQL surface"
+    );
+    expect_error(
+        db,
+        "SELECT * FROM `information_schema`.`OPTIMIZER_TRACE`",
+        "server-owned SQL surface"
+    );
     expect_error(db, "SET sql_mode = 'ORACLE'", "Oracle SQL mode");
     expect_error(db, "SET @@session.sql_mode = 'ORACLE'", "Oracle SQL mode");
     expect_error(db, "SET STATEMENT sql_mode = 'ORACLE' FOR SELECT 1", "Oracle SQL mode");
@@ -410,9 +436,26 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_prepare_error(db, "SET profiling = 1", "server-owned SQL surface");
     expect_prepare_error(db, "SET query_cache_type = ON", "server-owned SQL surface");
     expect_prepare_error(db, "RESET QUERY CACHE", "server-owned SQL surface");
+    expect_prepare_error(db, "SET optimizer_trace = 'enabled=on'", "server-owned SQL surface");
+    expect_prepare_error(
+        db,
+        "SELECT * FROM INFORMATION_SCHEMA.OPTIMIZER_TRACE",
+        "server-owned SQL surface"
+    );
     expect_prepare_error(db, "SET sql_mode = 'ORACLE'", "Oracle SQL mode");
     expect_prepare_error(db, "SELECT SFORMAT('{}', 1)", "SFORMAT");
     expect_prepare_error(db, "SELECT 1 PROCEDURE ANALYSE()", "PROCEDURE ANALYSE");
+
+    exec_ok(db, "USE app");
+    exec_ok(db, "CREATE TABLE optimizer_trace (id INT)");
+    exec_ok(db, "SELECT * FROM optimizer_trace");
+    exec_ok(db, "USE information_schema");
+    expect_error(db, "SELECT * FROM OPTIMIZER_TRACE", "server-owned SQL surface");
+    expect_prepare_error(db, "SELECT * FROM OPTIMIZER_TRACE", "server-owned SQL surface");
+    exec_ok(db, "USE app");
+    exec_ok(db, "SELECT * FROM optimizer_trace");
+    exec_ok(db, "EXPLAIN SELECT 1");
+    exec_ok(db, "EXPLAIN FORMAT=JSON SELECT 1");
 }
 
 static void assert_no_server_sidecar_files(const char *database_path) {
