@@ -86,6 +86,10 @@
 #define MYLITE_WITH_PROXY_PROTOCOL 1
 #endif
 
+#ifndef MYLITE_WITH_USERSTAT_DIAGNOSTICS
+#define MYLITE_WITH_USERSTAT_DIAGNOSTICS 1
+#endif
+
 /*
   The rule for this file: everything should be 'static'. When a sys_var
   variable or a function from this file is - in very rare cases - needed
@@ -6970,12 +6974,14 @@ static Sys_var_ulong Sys_rowid_merge_buff_size(
        VALID_RANGE(0, LONG_MAX), DEFAULT(8*1024*1024),
        BLOCK_SIZE(1));
 
+#if MYLITE_WITH_USERSTAT_DIAGNOSTICS
 static Sys_var_mybool Sys_userstat(
        "userstat",
        MYLITE_SYSVAR_HELP_TEXT("Enables statistics gathering for USER_STATISTICS, CLIENT_STATISTICS, "
        "INDEX_STATISTICS and TABLE_STATISTICS tables in the INFORMATION_SCHEMA"),
        GLOBAL_VAR(opt_userstat_running),
        CMD_LINE(OPT_ARG), DEFAULT(FALSE));
+#endif
 
 static Sys_var_on_access<Sys_var_mybool,
                          PRIV_SET_SYSTEM_VAR_BINLOG_ANNOTATE_ROW_EVENTS,

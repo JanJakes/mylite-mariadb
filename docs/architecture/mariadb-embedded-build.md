@@ -56,6 +56,7 @@ MYLITE_WITH_BACKUP_RUNTIME=OFF
 MYLITE_WITH_VIO_TLS=OFF
 MYLITE_WITH_REPLICATION_EXEC_SYSVARS=OFF
 MYLITE_WITH_REPLICATION_FILTERS=OFF
+MYLITE_WITH_USERSTAT_DIAGNOSTICS=OFF
 MYLITE_WITH_PROXY_PROTOCOL=OFF
 ```
 
@@ -118,8 +119,11 @@ remain permissive, and direct or prepared `@@replicate_do_db`,
 system variables. It omits PROXY protocol listener support behind
 `MYLITE_WITH_PROXY_PROTOCOL=0`; the core embedded profile has no socket
 listener, and direct or prepared `@@proxy_protocol_networks` lookups fail as an
-unknown system variable. It
-omits Oracle compatibility function aliases and
+unknown system variable. It omits user statistics diagnostics behind
+`MYLITE_WITH_USERSTAT_DIAGNOSTICS=0`; `userstat` and
+`INFORMATION_SCHEMA.CLIENT_STATISTICS`, `INDEX_STATISTICS`,
+`TABLE_STATISTICS`, and `USER_STATISTICS` are server diagnostic counters, not
+application storage behavior. It omits Oracle compatibility function aliases and
 `oracle_schema` routing behind `MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS=0`, while
 ordinary MySQL/MariaDB string functions remain available. It uses a compact
 server error-message catalog behind `MYLITE_WITH_FULL_ERROR_MESSAGES=0`;
@@ -152,8 +156,8 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,515,136 bytes / 25.29 MiB |
-| Archive members | 703 |
+| Archive size | 26,491,536 bytes / 25.26 MiB |
+| Archive members | 702 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
 32.27 MiB. With `MinSizeRel`, the unused Performance Schema static plugin
@@ -193,8 +197,11 @@ execution system variables reduces the pre-strip archive to 27,104,488 bytes /
 25.85 MiB. Omitting PROXY protocol listener support reduces the pre-strip
 archive to 27,097,424 bytes / 25.84 MiB. Omitting replication and binary-log
 filter runtime reduces the pre-strip archive to 27,085,072 bytes /
-25.83 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 569,936 bytes
+25.83 MiB. Replacing statement profiling metadata with a fail-closed stub
+reduces the pre-strip archive to 27,080,800 bytes / 25.83 MiB. Omitting user
+statistics diagnostics reduces the pre-strip archive to 27,059,928 bytes /
+25.81 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 568,392 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -225,10 +232,12 @@ artifacts while keeping `libcrypto` for retained SQL crypto functions. Omitting
 replication execution system variables saves 1,976 bytes with no member-count
 change. Omitting PROXY protocol listener support saves 6,728 bytes with no
 member-count change. Omitting replication and binary-log filter runtime saves
-12,272 bytes with no member-count change.
-The final archive is 5,014,568 bytes smaller than the Release build with
-Performance Schema disabled, 6,614,504 bytes smaller than the symbol-stripped
-baseline that still built Performance Schema, and 7,327,184 bytes smaller than
+12,272 bytes with no member-count change. Replacing the remaining profiling
+metadata saves 4,272 bytes with no member-count change. Omitting user
+statistics diagnostics saves 20,872 bytes and one archive member.
+The final archive is 5,038,168 bytes smaller than the Release build with
+Performance Schema disabled, 6,638,104 bytes smaller than the symbol-stripped
+baseline that still built Performance Schema, and 7,350,784 bytes smaller than
 the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
@@ -247,8 +256,8 @@ library and static embedded engines/plugins such as:
 - InnoDB
 - MyISAM and MRG_MyISAM
 - Sequence and partition support
-- selected static server plugins such as auth socket, type handlers, user
-  variables, userstat, and thread-pool info
+- selected static server plugins such as auth socket, type handlers, and user
+  variables
 
 Configure also enables many module targets, including Archive, Blackhole,
 CONNECT, Example, Federated, FederatedX, Mroonga, Sphinx, Spider, and many
@@ -292,6 +301,10 @@ filter configuration variables are absent.
 PROXY protocol listener support is omitted from the default embedded profile;
 the core embedded runtime does not accept socket connections, and the
 `proxy_protocol_networks` system variable is absent.
+User statistics diagnostics are omitted from the default embedded profile; the
+`userstat` system variable is absent, userstat Information Schema tables are
+rejected by policy, and ordinary application tables with the same names remain
+usable outside `information_schema`.
 `PROCEDURE ANALYSE()` is omitted from the default embedded archive and linked
 to an unsupported stub; ordinary SELECT execution and the generic retained
 SELECT procedure dispatch continue to link. System-variable names, values,
@@ -365,6 +378,7 @@ The baseline explicitly disables:
 - Replication execution, slave protocol, and semi-sync system variables
 - Replication and binary-log filter runtime
 - PROXY protocol listener support
+- User statistics diagnostics
 - Oracle compatibility function aliases and `oracle_schema` routing
 - Full inherited server error-message catalog
 - MariaDB upstream unit-test targets

@@ -49,7 +49,9 @@ database-directory runtime without socket startup or network handshakes.
 Replication execution system variables are omitted because they configure
 server topology behavior that the embedded profile already rejects. PROXY
 protocol listener support is omitted because the core profile has no socket
-listener or network handshake.
+listener or network handshake. User statistics diagnostics are omitted because
+they expose optional server counters rather than application SQL, native
+storage, or public API behavior.
 
 ## Source Findings
 
@@ -280,6 +282,14 @@ listener or network handshake.
   permissive no-filter stub, omits inherited filter system variables and
   startup option rows, and reduces the stripped archive to 26,515,136 bytes,
   25.29 MiB, and 703 members.
+- `mariadb/plugin/userstat/userstat.cc` declares four Information Schema
+  plugins for `CLIENT_STATISTICS`, `INDEX_STATISTICS`, `TABLE_STATISTICS`, and
+  `USER_STATISTICS`. `mariadb/sql/sys_vars.cc` exposes the `userstat` system
+  variable that enables collection for those tables.
+- Disabling user statistics diagnostics behind
+  `MYLITE_WITH_USERSTAT_DIAGNOSTICS=0` omits the static `USERSTAT` plugin and
+  the `userstat` system variable, and reduces the stripped archive to
+  26,491,536 bytes, 25.26 MiB, and 702 members.
 - `mariadb/sql/item_create.cc` registers Oracle compatibility aliases such as
   `DECODE_ORACLE`, `LPAD_ORACLE`, `RTRIM_ORACLE`, `SUBSTR_ORACLE`, and
   `CONCAT_OPERATOR_ORACLE`, and builds a separate
@@ -536,6 +546,15 @@ The embedded archive omits PROXY protocol listener support by setting
 profile replaces `proxy_protocol.cc` with fail-closed lifecycle stubs and omits
 the `proxy_protocol_networks` system-variable registration.
 
+The embedded archive omits user statistics diagnostics by setting
+`MYLITE_WITH_USERSTAT_DIAGNOSTICS=0` in the MyLite baseline. The option
+defaults to `ON` so normal MariaDB builds keep upstream userstat diagnostics.
+The disabled profile omits the static `USERSTAT` plugin and the `userstat`
+system-variable registration. MyLite policy rejects direct and prepared reads
+from the userstat Information Schema tables, `FLUSH *_STATISTICS`, and
+`userstat` system-variable assignment, while ordinary application tables with
+the same names remain valid outside `information_schema`.
+
 Archive stripping stays enabled by default because it is the distributed archive
 profile. Developers can set `STRIP_ARCHIVE=0` when they
 need an unstripped archive for local inspection.
@@ -572,7 +591,8 @@ with a disabled embedded stub. Replication execution, slave protocol,
 replication-event, checksum, and semi-sync system-variable registrations are
 compiled out while retained shared replication helpers remain available. PROXY
 protocol listener parsing and its system-variable registration are replaced
-with fail-closed embedded stubs.
+with fail-closed embedded stubs. User statistics Information Schema plugin
+registration and the `userstat` system variable are omitted.
 
 ## Compatibility Impact
 
@@ -614,6 +634,10 @@ or binlog filters.
 Omitting PROXY protocol listener support only removes inherited socket-listener
 configuration and header parsing. The core embedded profile already starts with
 `--skip-networking` and does not accept socket connections.
+Omitting user statistics diagnostics only removes optional server counter
+tables and the `userstat` collection knob. It does not affect ordinary SQL,
+native storage, JSON, GEOMETRY/GIS, diagnostics, result metadata, prepared
+statements, or the public C API.
 `PROCEDURE ANALYSE()` is a legacy diagnostic SELECT extension. Omitting it does
 not affect ordinary SELECT execution, DDL, DML, native storage engines, JSON,
 GEOMETRY/GIS, or the public C API.
@@ -804,6 +828,16 @@ to 26,515,136 bytes / 25.29 MiB, 5,014,568 bytes smaller than the Release build
 with Performance Schema disabled, 6,614,504 bytes smaller than the
 symbol-stripped baseline with Performance Schema still built, and 7,327,184
 bytes smaller than the original broad archive.
+Replacing the remaining profiling metadata with a fail-closed stub brings the
+current archive to 26,511,064 bytes / 25.28 MiB, 5,018,640 bytes smaller than
+the Release build with Performance Schema disabled, 6,618,576 bytes smaller
+than the symbol-stripped baseline with Performance Schema still built, and
+7,331,256 bytes smaller than the original broad archive.
+Omitting user statistics diagnostics brings the current archive to
+26,491,536 bytes / 25.26 MiB, 5,038,168 bytes smaller than the Release build
+with Performance Schema disabled, 6,638,104 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 7,350,784
+bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -861,6 +895,10 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   present in `libmariadbd.a`, and direct and prepared
   `@@replicate_do_db`, `@@replicate_wild_ignore_table`, and `@@binlog_do_db`
   lookups fail with unknown-system-variable errno.
+- Confirm `MYLITE_WITH_USERSTAT_DIAGNOSTICS=OFF` appears in the embedded CMake
+  cache, `userstat.cc.o` is absent from `libmariadbd.a`, `@@userstat` lookups
+  fail with unknown-system-variable errno, and userstat diagnostic SQL is
+  rejected by server-surface policy coverage.
 - Run `cmake --build --preset dev`.
 - Run `ctest --preset dev --output-on-failure`.
 - Run `cmake --build --preset embedded-dev`.
@@ -902,7 +940,10 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   from `SHOW VARIABLES` and `@@` lookup in the default embedded profile.
   Replication and binlog filter variables are also omitted. PROXY protocol
   listener support is omitted, and `proxy_protocol_networks` is absent from
-  `SHOW VARIABLES` and `@@` lookup in the default embedded profile.
+  `SHOW VARIABLES` and `@@` lookup in the default embedded profile. User
+  statistics diagnostics are omitted, `userstat` is absent from `SHOW
+  VARIABLES` and `@@` lookup, and userstat Information Schema reads plus reset
+  statements are rejected.
 - Process-list SHOW commands are rejected, the process-list Information Schema
   table returns zero rows, and the embedded archive omits process-list row
   producers.

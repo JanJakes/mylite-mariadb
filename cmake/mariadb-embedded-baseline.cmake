@@ -38,4 +38,5 @@ set(MYLITE_WITH_BACKUP_RUNTIME OFF CACHE BOOL "Disable external backup runtime i
 set(MYLITE_WITH_VIO_TLS OFF CACHE BOOL "Disable VIO TLS transport in the embedded baseline" FORCE)
 set(MYLITE_WITH_REPLICATION_EXEC_SYSVARS OFF CACHE BOOL "Disable replication execution system variables in the embedded baseline" FORCE)
 set(MYLITE_WITH_REPLICATION_FILTERS OFF CACHE BOOL "Disable replication and binary-log filter runtime in the embedded baseline" FORCE)
+set(MYLITE_WITH_USERSTAT_DIAGNOSTICS OFF CACHE BOOL "Disable user statistics diagnostics in the embedded baseline" FORCE)
 set(MYLITE_WITH_PROXY_PROTOCOL OFF CACHE BOOL "Disable PROXY protocol listener support in the embedded baseline" FORCE)

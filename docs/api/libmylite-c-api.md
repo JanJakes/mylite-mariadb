@@ -400,6 +400,7 @@ compatibility features that do not fit the embedded library model:
 - statement digest diagnostics,
 - server status variables,
 - process-list metadata,
+- user statistics diagnostics,
 - the optional `SFORMAT()` SQL helper,
 - legacy `PROCEDURE ANALYSE()` SELECT diagnostics,
 - static `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES`
@@ -444,6 +445,10 @@ diagnostics, warnings, result metadata, and the public C API remain available.
 Process-list metadata is also omitted: `SHOW PROCESSLIST` and
 `SHOW FULL PROCESSLIST` are rejected as daemon/session inventory, while
 `INFORMATION_SCHEMA.PROCESSLIST` stays visible and returns zero rows.
+User statistics diagnostics are omitted as optional server counters:
+`userstat`, the userstat Information Schema tables, and `FLUSH *_STATISTICS`
+are rejected or absent, while ordinary application tables with the same names
+remain usable outside `information_schema`.
 Foreign-server metadata is omitted as server-global remote connection
 configuration: `CREATE SERVER`, `ALTER SERVER`, `DROP SERVER`, and
 `SHOW CREATE SERVER` are rejected, and the default embedded archive omits the

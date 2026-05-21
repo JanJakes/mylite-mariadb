@@ -246,6 +246,10 @@ bool is_unsupported_static_show_info_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_processlist_metadata_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_foreign_server_metadata_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_backup_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_userstat_diagnostics_statement(
+    const SqlPolicyTokens &tokens,
+    std::string_view current_schema
+);
 bool is_unsupported_statement_profiling_statement(
     const SqlPolicyTokens &tokens,
     std::string_view current_schema
@@ -275,6 +279,11 @@ bool has_identifier_token(
     const char *keyword,
     std::size_t start_index
 );
+bool has_information_schema_userstat_statistics_table(const SqlPolicyTokens &tokens);
+bool has_current_schema_userstat_statistics_table_reference(
+    const SqlPolicyTokens &tokens,
+    std::string_view current_schema
+);
 bool has_information_schema_table(const SqlPolicyTokens &tokens, const char *table_name);
 bool has_current_schema_table_reference(
     const SqlPolicyTokens &tokens,
@@ -297,6 +306,7 @@ bool token_in(
     const char *third,
     const char *fourth
 );
+bool is_userstat_statistics_table_token(std::string_view token);
 bool is_server_variable_token(std::string_view token);
 bool is_query_log_variable_token(std::string_view token);
 bool is_system_variable_qualified_token(const SqlPolicyTokens &tokens, std::size_t index);
@@ -1164,6 +1174,7 @@ bool is_unsupported_server_surface_sql(std::string_view sql, const std::string &
            is_unsupported_processlist_metadata_statement(tokens) ||
            is_unsupported_foreign_server_metadata_statement(tokens) ||
            is_unsupported_backup_statement(tokens) ||
+           is_unsupported_userstat_diagnostics_statement(tokens, current_schema) ||
            is_unsupported_statement_profiling_statement(tokens, current_schema) ||
            is_unsupported_query_cache_statement(tokens) ||
            is_unsupported_query_log_statement(tokens) ||
@@ -1296,6 +1307,35 @@ bool is_unsupported_foreign_server_metadata_statement(const SqlPolicyTokens &tok
 
 bool is_unsupported_backup_statement(const SqlPolicyTokens &tokens) {
     return token_equals(identifier_token_at(tokens, 0), "BACKUP");
+}
+
+bool is_unsupported_userstat_diagnostics_statement(
+    const SqlPolicyTokens &tokens,
+    std::string_view current_schema
+) {
+    const std::string_view first = identifier_token_at(tokens, 0);
+    const std::string_view second = identifier_token_at(tokens, 1);
+
+    if (has_information_schema_userstat_statistics_table(tokens) ||
+        has_current_schema_userstat_statistics_table_reference(tokens, current_schema)) {
+        return true;
+    }
+    if (token_equals(first, "FLUSH")) {
+        const std::size_t flush_target_index =
+            token_in(second, "LOCAL", "NO_WRITE_TO_BINLOG") ? 2U : 1U;
+        return is_userstat_statistics_table_token(identifier_token_at(tokens, flush_target_index));
+    }
+    if (!token_equals(first, "SET")) {
+        return false;
+    }
+
+    for (std::size_t index = 1; index < tokens.count; ++index) {
+        if (identifier_token_equals(tokens.values[index], "USERSTAT") &&
+            is_system_variable_qualified_token(tokens, index)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool is_unsupported_statement_profiling_statement(
@@ -1574,6 +1614,23 @@ bool has_identifier_token(
     return false;
 }
 
+bool has_information_schema_userstat_statistics_table(const SqlPolicyTokens &tokens) {
+    return has_information_schema_table(tokens, "CLIENT_STATISTICS") ||
+           has_information_schema_table(tokens, "INDEX_STATISTICS") ||
+           has_information_schema_table(tokens, "TABLE_STATISTICS") ||
+           has_information_schema_table(tokens, "USER_STATISTICS");
+}
+
+bool has_current_schema_userstat_statistics_table_reference(
+    const SqlPolicyTokens &tokens,
+    std::string_view current_schema
+) {
+    return has_current_schema_table_reference(tokens, "CLIENT_STATISTICS", current_schema) ||
+           has_current_schema_table_reference(tokens, "INDEX_STATISTICS", current_schema) ||
+           has_current_schema_table_reference(tokens, "TABLE_STATISTICS", current_schema) ||
+           has_current_schema_table_reference(tokens, "USER_STATISTICS", current_schema);
+}
+
 bool has_information_schema_table(const SqlPolicyTokens &tokens, const char *table_name) {
     for (std::size_t index = 0; index + 2U < tokens.count; ++index) {
         if (identifier_token_equals(tokens.values[index], "INFORMATION_SCHEMA") &&
@@ -1715,6 +1772,13 @@ bool token_in(
 ) {
     return token_equals(token, first) || token_equals(token, second) ||
            token_equals(token, third) || token_equals(token, fourth);
+}
+
+bool is_userstat_statistics_table_token(std::string_view token) {
+    return identifier_token_equals(token, "CLIENT_STATISTICS") ||
+           identifier_token_equals(token, "INDEX_STATISTICS") ||
+           identifier_token_equals(token, "TABLE_STATISTICS") ||
+           identifier_token_equals(token, "USER_STATISTICS");
 }
 
 bool is_server_variable_token(std::string_view token) {

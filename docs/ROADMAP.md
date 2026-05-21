@@ -54,6 +54,7 @@ surface that does not fit a local directory-owned library:
 - statement digest diagnostics,
 - server status variables,
 - process-list metadata,
+- user statistics diagnostics,
 - optional Oracle SQL compatibility mode,
 - optional Oracle compatibility function aliases,
 - full inherited server diagnostic text,
@@ -141,6 +142,9 @@ startup contract; retained SQL crypto functions continue to use OpenSSL Crypto.
 PROXY protocol listener support is omitted for the same serverless-core reason;
 the core runtime has no socket listener, and `proxy_protocol_networks` is
 absent from `SHOW VARIABLES` and `@@` lookup.
+User statistics diagnostics are omitted after coverage proves `userstat`,
+userstat Information Schema tables, and `FLUSH *_STATISTICS` are optional
+server counters rather than application data behavior.
 Oracle compatibility function aliases and `oracle_schema` routing are omitted
 after coverage proves the normal MySQL/MariaDB string functions remain
 available, Oracle-only aliases fail predictably, and `oracle_schema` no
