@@ -705,6 +705,7 @@ static void initialize_empty_catalog_page(unsigned char *page);
 static void update_catalog_checksum(unsigned char *page);
 static char *recovery_journal_path(const char *filename);
 static char *transaction_journal_path(const char *filename);
+static char *recovery_journal_rewrite_path(const char *filename);
 static char *transaction_journal_rewrite_path(const char *filename);
 static char *journal_path_with_suffix(const char *filename, const char *suffix, size_t suffix_size);
 static mylite_storage_result cached_journal_paths(
@@ -713,6 +714,7 @@ static mylite_storage_result cached_journal_paths(
     const char **out_transaction_journal_filename
 );
 static void clear_journal_path_cache(const char *filename);
+static mylite_storage_result remove_stale_recovery_journal_rewrite(const char *filename);
 static mylite_storage_result remove_stale_transaction_journal_rewrite(const char *filename);
 static mylite_storage_result recover_pending_journals(const char *filename);
 static mylite_storage_result recover_pending_journals_locked(FILE *file, const char *filename);
@@ -785,6 +787,12 @@ static mylite_storage_result write_recovery_journal_file(
     const unsigned char pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
                              [MYLITE_STORAGE_FORMAT_PAGE_SIZE]
 );
+static mylite_storage_result ensure_recovery_journal_protects_pages(
+    const mylite_storage_pager *pager,
+    mylite_storage_statement *statement,
+    const unsigned long long *page_ids,
+    size_t page_count
+);
 static mylite_storage_result ensure_transaction_journal_protects_pages(
     const mylite_storage_pager *pager,
     mylite_storage_statement *statement,
@@ -801,10 +809,21 @@ static mylite_storage_result finish_write_journal_for_statement(
 static mylite_storage_result finish_transaction_journal(FILE *file, const char *filename);
 static mylite_storage_result finish_journal_at_path(FILE *file, char *journal_filename);
 static int statement_chain_has_write_journal(const mylite_storage_statement *statement);
+static mylite_storage_statement *recovery_journal_owner_in_statement_chain(
+    mylite_storage_statement *statement
+);
 static mylite_storage_statement *transaction_journal_owner_in_statement_chain(
     mylite_storage_statement *statement
 );
 static int statement_chain_has_transaction_journal(const mylite_storage_statement *statement);
+static mylite_storage_result ensure_existing_journal_protects_pages(
+    const mylite_storage_pager *pager,
+    mylite_storage_statement *journal_owner,
+    char *(*journal_path)(const char *filename),
+    char *(*journal_rewrite_path)(const char *filename),
+    const unsigned long long *page_ids,
+    size_t page_count
+);
 static void encode_recovery_journal_header(
     unsigned char *page,
     const mylite_storage_recovery_journal *journal
@@ -8954,6 +8973,11 @@ static char *transaction_journal_path(const char *filename) {
     return journal_path_with_suffix(filename, suffix, sizeof(suffix));
 }
 
+static char *recovery_journal_rewrite_path(const char *filename) {
+    static const char suffix[] = "-journal.rewrite";
+    return journal_path_with_suffix(filename, suffix, sizeof(suffix));
+}
+
 static char *transaction_journal_rewrite_path(const char *filename) {
     static const char suffix[] = "-transaction-journal.rewrite";
     return journal_path_with_suffix(filename, suffix, sizeof(suffix));
@@ -9054,6 +9078,9 @@ static mylite_storage_result recover_pending_journals(const char *filename) {
 
     result = lock_file(file, LOCK_EX);
     if (result == MYLITE_STORAGE_OK) {
+        result = remove_stale_recovery_journal_rewrite(filename);
+    }
+    if (result == MYLITE_STORAGE_OK) {
         result = remove_stale_transaction_journal_rewrite(filename);
     }
     if (result == MYLITE_STORAGE_OK) {
@@ -9063,6 +9090,22 @@ static mylite_storage_result recover_pending_journals(const char *filename) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;
+}
+
+static mylite_storage_result remove_stale_recovery_journal_rewrite(const char *filename) {
+    char *journal_filename = recovery_journal_rewrite_path(filename);
+    if (journal_filename == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+
+    errno = 0;
+    const int remove_result = remove(journal_filename);
+    const int remove_errno = errno;
+    free(journal_filename);
+    if (remove_result == 0 || remove_errno == ENOENT) {
+        return MYLITE_STORAGE_OK;
+    }
+    return MYLITE_STORAGE_IOERR;
 }
 
 static mylite_storage_result remove_stale_transaction_journal_rewrite(const char *filename) {
@@ -9252,13 +9295,13 @@ static mylite_storage_result begin_write_journal_for_statement_pages(
                 protected_page_count
             );
         }
-        for (size_t i = 0U; i < protected_page_count; ++i) {
-            if (protected_page_ids == NULL ||
-                !journal_dirty_page_exists_in_statement_chain(statement, protected_page_ids[i])) {
-                return MYLITE_STORAGE_UNSUPPORTED;
-            }
-        }
-        return MYLITE_STORAGE_OK;
+        const mylite_storage_pager pager = open_storage_pager(file, filename, header);
+        return ensure_recovery_journal_protects_pages(
+            &pager,
+            statement,
+            protected_page_ids,
+            protected_page_count
+        );
     }
     if (statement->parent != NULL && protected_page_count != 0U) {
         return MYLITE_STORAGE_UNSUPPORTED;
@@ -9428,22 +9471,62 @@ static mylite_storage_result ensure_transaction_journal_protects_pages(
     const unsigned long long *page_ids,
     size_t page_count
 ) {
-    if (page_count == 0U) {
-        return MYLITE_STORAGE_OK;
-    }
-    if (pager == NULL || pager->file == NULL || pager->filename == NULL || pager->header == NULL ||
-        page_ids == NULL) {
-        return MYLITE_STORAGE_MISUSE;
-    }
-
     mylite_storage_statement *transaction = transaction_journal_owner_in_statement_chain(statement);
     if (transaction == NULL) {
         return MYLITE_STORAGE_OK;
     }
 
+    return ensure_existing_journal_protects_pages(
+        pager,
+        transaction,
+        transaction_journal_path,
+        transaction_journal_rewrite_path,
+        page_ids,
+        page_count
+    );
+}
+
+static mylite_storage_result ensure_recovery_journal_protects_pages(
+    const mylite_storage_pager *pager,
+    mylite_storage_statement *statement,
+    const unsigned long long *page_ids,
+    size_t page_count
+) {
+    mylite_storage_statement *recovery = recovery_journal_owner_in_statement_chain(statement);
+    if (recovery == NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    return ensure_existing_journal_protects_pages(
+        pager,
+        recovery,
+        recovery_journal_path,
+        recovery_journal_rewrite_path,
+        page_ids,
+        page_count
+    );
+}
+
+static mylite_storage_result ensure_existing_journal_protects_pages(
+    const mylite_storage_pager *pager,
+    mylite_storage_statement *journal_owner,
+    char *(*journal_path)(const char *filename),
+    char *(*journal_rewrite_path)(const char *filename),
+    const unsigned long long *page_ids,
+    size_t page_count
+) {
+    if (page_count == 0U) {
+        return MYLITE_STORAGE_OK;
+    }
+    if (pager == NULL || pager->file == NULL || pager->header == NULL || journal_owner == NULL ||
+        journal_owner->filename == NULL || page_ids == NULL || journal_path == NULL ||
+        journal_rewrite_path == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
     int needs_rewrite = 0;
     for (size_t i = 0U; i < page_count; ++i) {
-        if (!journal_dirty_page_exists(&transaction->journal_dirty_pages, page_ids[i])) {
+        if (!journal_dirty_page_exists(&journal_owner->journal_dirty_pages, page_ids[i])) {
             needs_rewrite = 1;
             break;
         }
@@ -9452,8 +9535,8 @@ static mylite_storage_result ensure_transaction_journal_protects_pages(
         return MYLITE_STORAGE_OK;
     }
 
-    char *journal_filename = transaction_journal_path(transaction->filename);
-    char *rewrite_filename = transaction_journal_rewrite_path(transaction->filename);
+    char *journal_filename = journal_path(journal_owner->filename);
+    char *rewrite_filename = journal_rewrite_path(journal_owner->filename);
     if (journal_filename == NULL || rewrite_filename == NULL) {
         free(journal_filename);
         free(rewrite_filename);
@@ -9517,7 +9600,7 @@ static mylite_storage_result ensure_transaction_journal_protects_pages(
     }
     if (result == MYLITE_STORAGE_OK) {
         for (size_t i = 0U; result == MYLITE_STORAGE_OK && i < page_count; ++i) {
-            result = append_journal_dirty_page_id(&transaction->journal_dirty_pages, page_ids[i]);
+            result = append_journal_dirty_page_id(&journal_owner->journal_dirty_pages, page_ids[i]);
         }
     }
 
@@ -9578,6 +9661,18 @@ static int statement_chain_has_write_journal(const mylite_storage_statement *sta
         }
     }
     return 0;
+}
+
+static mylite_storage_statement *recovery_journal_owner_in_statement_chain(
+    mylite_storage_statement *statement
+) {
+    for (mylite_storage_statement *current = statement; current != NULL;
+         current = current->parent) {
+        if (current->owns_recovery_journal) {
+            return current;
+        }
+    }
+    return NULL;
 }
 
 static mylite_storage_statement *transaction_journal_owner_in_statement_chain(
@@ -11402,7 +11497,7 @@ static mylite_storage_result ensure_dirty_page_recovery_journal(
         return ensure_transaction_journal_protects_pages(pager, statement, &page_id, 1U);
     }
     if (statement_chain_has_write_journal(statement)) {
-        return MYLITE_STORAGE_UNSUPPORTED;
+        return ensure_recovery_journal_protects_pages(pager, statement, &page_id, 1U);
     }
     if (statement->parent != NULL || pager->filename == NULL || pager->filename[0] == '\0') {
         return MYLITE_STORAGE_UNSUPPORTED;

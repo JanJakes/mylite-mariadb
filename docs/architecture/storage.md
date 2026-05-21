@@ -1029,6 +1029,10 @@ keeps fallback history visible without adding stale root entries. Root-resident
 deletes also refill an overflow-marked root from the live root-plus-tail entryset
 when all remaining entries fit in the single-page root again, clearing the
 overflow flag and avoiding stale tail scans.
+Statement-owned recovery journals can now be rewritten to protect late dirty
+pages introduced after the journal was first created. This keeps maintained-root
+updates recoverable when another page owner, such as autoincrement metadata,
+opens the recovery journal before row append reaches the index root.
 Active exact-index and published-root cache reads bypass stale durable cache
 state while an active statement chain has deferred table-local durable cache
 retargeting. Statement rollback, savepoint rollback, transaction rollback,

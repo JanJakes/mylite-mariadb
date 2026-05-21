@@ -255,7 +255,7 @@ static void test_append_and_read_large_row_payload(void);
 static void test_update_and_delete_rows(void);
 static void test_active_dirty_page_rollback_restores_existing_page(void);
 static void test_recovers_active_dirty_page_journal(void);
-static void test_rejects_unprotected_active_dirty_page(void);
+static void test_extends_recovery_journal_for_active_dirty_page(void);
 static void test_preplanned_active_dirty_page_journal_set(void);
 static void test_many_row_state_pages_scan(void);
 static void test_active_live_row_validation_cache(void);
@@ -613,7 +613,7 @@ int main(void) {
     test_update_and_delete_rows();
     test_active_dirty_page_rollback_restores_existing_page();
     test_recovers_active_dirty_page_journal();
-    test_rejects_unprotected_active_dirty_page();
+    test_extends_recovery_journal_for_active_dirty_page();
     test_preplanned_active_dirty_page_journal_set();
     test_many_row_state_pages_scan();
     test_active_live_row_validation_cache();
@@ -1994,13 +1994,13 @@ static void test_recovers_active_dirty_page_journal(void) {
 #endif
 }
 
-static void test_rejects_unprotected_active_dirty_page(void) {
+static void test_extends_recovery_journal_for_active_dirty_page(void) {
 #ifdef MYLITE_STORAGE_TEST_HOOKS
     static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
     static const unsigned char row_1[] = {0x00U, 0x01U, 'o', 'n', 'e'};
     static const unsigned char row_2[] = {0x00U, 0x02U, 't', 'w', 'o'};
     char *root = make_temp_root();
-    char *filename = path_join(root, "unprotected-active-dirty-page.mylite");
+    char *filename = path_join(root, "extended-active-dirty-page-journal.mylite");
     char *journal_filename = journal_path(filename);
     mylite_storage_table_definition table_definition = {
         .size = sizeof(table_definition),
@@ -2015,6 +2015,9 @@ static void test_rejects_unprotected_active_dirty_page(void) {
         .size = sizeof(rows),
     };
     mylite_storage_statement *statement = NULL;
+    unsigned char before_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char dirty_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char restored_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
     unsigned long long row_1_id = 0ULL;
 
     assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
@@ -2031,6 +2034,7 @@ static void test_rejects_unprotected_active_dirty_page(void) {
             &row_1_id
         ) == MYLITE_STORAGE_OK
     );
+    read_test_page(filename, row_1_id, before_page);
 
     assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
     assert(
@@ -2043,10 +2047,14 @@ static void test_rejects_unprotected_active_dirty_page(void) {
             filename,
             row_1_id,
             MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET
-        ) == MYLITE_STORAGE_UNSUPPORTED
+        ) == MYLITE_STORAGE_OK
     );
+    read_test_page(filename, row_1_id, dirty_page);
+    assert(memcmp(before_page, dirty_page, sizeof(before_page)) != 0);
     assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
     assert_file_missing(journal_filename);
+    read_test_page(filename, row_1_id, restored_page);
+    assert(memcmp(before_page, restored_page, sizeof(before_page)) == 0);
 
     assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
     assert(rows.row_count == 1U);
@@ -6630,6 +6638,68 @@ static void test_maintained_index_root_transaction_rollback(void) {
     assert(mylite_storage_commit_statement(transaction) == MYLITE_STORAGE_OK);
     assert_file_size_matches_header(fixture.filename);
     assert_maintained_index_root_fixture_inserted_state(&fixture, row_3_id);
+    destroy_maintained_index_root_rollback_fixture(&fixture);
+
+    prepare_maintained_index_root_rollback_fixture(
+        &fixture,
+        "maintained-index-root-statement-journal-extension.mylite"
+    );
+    const pid_t statement_extension_pid = fork();
+    assert(statement_extension_pid >= 0);
+    if (statement_extension_pid == 0) {
+        mylite_storage_statement *child_statement = NULL;
+        unsigned long long child_row_id = 0ULL;
+        if (mylite_storage_begin_statement(fixture.filename, &child_statement) !=
+            MYLITE_STORAGE_OK) {
+            _exit(2);
+        }
+        if (mylite_storage_advance_auto_increment(fixture.filename, "app", "posts", 7ULL) !=
+            MYLITE_STORAGE_OK) {
+            _exit(3);
+        }
+        if (mylite_storage_preserve_auto_increment_on_rollback(fixture.filename) !=
+            MYLITE_STORAGE_OK) {
+            _exit(4);
+        }
+        if (mylite_storage_append_row_with_index_entries(
+                fixture.filename,
+                "app",
+                "posts",
+                k_maintained_root_row_3,
+                sizeof(k_maintained_root_row_3),
+                k_maintained_root_row_3_entries,
+                sizeof(k_maintained_root_row_3_entries) /
+                    sizeof(k_maintained_root_row_3_entries[0]),
+                &child_row_id
+            ) != MYLITE_STORAGE_OK) {
+            _exit(5);
+        }
+        _exit(child_row_id == 0ULL ? 6 : 0);
+    }
+    status = 0;
+    assert(waitpid(statement_extension_pid, &status, 0) == statement_extension_pid);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
+    assert(access(fixture.journal_filename, F_OK) == 0);
+    assert_maintained_index_root_pages_changed(
+        &fixture,
+        fixture.primary_root,
+        fixture.secondary_root
+    );
+    assert_find_indexed_row_not_found(
+        fixture.filename,
+        0U,
+        k_maintained_root_key_3,
+        sizeof(k_maintained_root_key_3)
+    );
+    assert_file_missing(fixture.journal_filename);
+    assert_maintained_index_root_pages_match(
+        &fixture,
+        fixture.primary_root,
+        fixture.secondary_root
+    );
+    assert_maintained_index_root_fixture_initial_state(&fixture);
+    assert_auto_increment_value(fixture.filename, 1ULL);
     destroy_maintained_index_root_rollback_fixture(&fixture);
 
     prepare_maintained_index_root_rollback_fixture(
