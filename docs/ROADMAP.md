@@ -51,6 +51,7 @@ surface that does not fit a local directory-owned library:
 - performance schema, statement profiling, query cache, and server audit plugins,
 - optimizer trace diagnostics,
 - general and slow query logs,
+- statement digest diagnostics,
 - optional Oracle SQL compatibility mode,
 - optional fmtlib-backed SQL helpers such as `SFORMAT()`,
 - legacy diagnostic SELECT procedures such as `PROCEDURE ANALYSE()`,
@@ -101,6 +102,10 @@ explicitly unsupported surfaces while ordinary planning, execution, and
 General and slow query logs are omitted after coverage proves query-log
 configuration is explicitly unsupported while error logging, SQL diagnostics,
 warnings, and result metadata remain available.
+Statement digest normalization is omitted after measurement proves Performance
+Schema digest text and hash diagnostics are outside the default embedded
+profile while ordinary parsing, execution, prepared statements, and `EXPLAIN`
+remain available.
 Compatibility-sensitive code removals require separate evidence before they
 are accepted.
 

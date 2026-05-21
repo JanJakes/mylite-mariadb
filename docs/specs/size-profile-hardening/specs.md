@@ -30,7 +30,9 @@ documentation prose, while option names and parser metadata remain available.
 Optimizer trace diagnostics are omitted because they expose server optimizer
 debugging data rather than application behavior. General and slow query logs
 are omitted because they are daemon query-audit diagnostics rather than
-application storage, SQL execution, or public API behavior.
+application storage, SQL execution, or public API behavior. Statement digest
+normalization is omitted because it feeds Performance Schema statement
+diagnostics, which are already outside the default embedded profile.
 
 ## Source Findings
 
@@ -167,6 +169,16 @@ application storage, SQL execution, or public API behavior.
   `MYLITE_WITH_QUERY_LOGS=0` keeps error logging and diagnostics available,
   rejects query-log configuration through the MyLite SQL policy, and reduces
   the stripped archive to 27,095,640 bytes, 25.84 MiB, and 705 members.
+- `mariadb/sql/sql_digest.cc` implements parser-token collection,
+  statement normalization, digest text rendering, and digest MD5 calculation
+  for Performance Schema statement diagnostics. Parser calls in
+  `mariadb/sql/sql_lex.cc` only collect digest tokens when
+  `mariadb/sql/sql_parse.cc` installs a Performance Schema digest listener.
+  Disabling statement digest normalization behind
+  `MYLITE_WITH_SQL_DIGEST=0`, replacing `sql_digest.cc.o` with
+  `mylite_sql_digest_disabled.cc.o`, and starting with
+  `--max-digest-length=0` reduces the stripped archive to 27,039,160 bytes,
+  25.79 MiB, and 705 members.
 
 ## Proposed Design
 
@@ -283,6 +295,16 @@ with `--log-output=NONE` and rejects query-log variable assignment plus
 `FLUSH LOGS`, `FLUSH GENERAL LOGS`, and `FLUSH SLOW LOGS`, including `LOCAL`
 and `NO_WRITE_TO_BINLOG` variants, before dispatch.
 
+The embedded archive omits statement digest normalization by setting
+`MYLITE_WITH_SQL_DIGEST=0` in the MyLite baseline. The option defaults to `ON`
+so normal MariaDB server builds keep upstream statement digest behavior. The
+disabled profile links `mylite_sql_digest_disabled.cc` in place of
+`sql_digest.cc`, preserving parser-visible helper symbols as no-ops while
+returning empty digest text and a zero hash if a custom path asks for digest
+output. MyLite starts with `--max-digest-length=0` so THD startup does not
+allocate per-session digest token buffers. Performance Schema remains omitted
+from the default profile.
+
 The wrapper keeps this behavior enabled by default because it is the
 distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
 need an unstripped archive for local inspection.
@@ -302,16 +324,18 @@ MyLite-owned profile flag and omits long system-variable help comments from
 the embedded `mysqld.cc` option table. Optimizer trace diagnostics are replaced
 with inert trace helper symbols in the embedded SQL archive. General and slow
 query-log handlers are compiled to inert embedded paths while shared error-log
-behavior remains available.
+behavior remains available. Statement digest normalization is replaced with
+inert digest helper symbols, and per-session digest token buffers are disabled
+at startup.
 
 ## Compatibility Impact
 
 No application compatibility impact is expected. This slice does not remove SQL
 syntax, functions, data types, collations, supported storage engines,
-diagnostics, or public C API behavior. Performance Schema remains outside the
-core embedded profile, and Feedback reporting is not part of the embedded
-runtime contract. SQL `HELP` is a server help-table surface and is explicitly
-unsupported in the embedded profile. Statement profiling is a diagnostic
+ordinary diagnostics, or public C API behavior. Performance Schema remains
+outside the core embedded profile, and Feedback reporting is not part of the
+embedded runtime contract. SQL `HELP` is a server help-table surface and is
+explicitly unsupported in the embedded profile. Statement profiling is a diagnostic
 server surface, not application data behavior, and is explicitly unsupported in
 the embedded profile. Query-cache management is a server-side result-cache
 optimization; MyLite keeps query-cache SELECT hints as no-op syntax and omits
@@ -357,12 +381,18 @@ General and slow query logs are daemon diagnostics that write statement text to
 server log files or log tables. Omitting them removes query-log output and
 configuration, not ordinary statement execution, SQL diagnostics, errors,
 warnings, native storage engines, DDL, DML, or the public C API.
+Statement digest normalization is a Performance Schema diagnostic path.
+Omitting it removes normalized statement digest text and digest hashes, not
+ordinary parsing, statement execution, prepared statements, `EXPLAIN`, SQL
+diagnostics, JSON, GEOMETRY/GIS, native storage engines, DDL, DML, or the
+public C API.
 
 ## Database-Directory And Lifecycle Impact
 
 Runtime directory layout, storage files, temporary files, and lock behavior are
 unchanged. Query-log omission removes inherited daemon log-file output rather
-than adding any database-directory companions.
+than adding any database-directory companions. Statement digest trimming only
+removes in-memory diagnostic collection and token buffers.
 
 ## Public API Impact
 
@@ -440,6 +470,11 @@ Omitting general and slow query-log runtime brings the current archive to
 with Performance Schema disabled, 6,034,000 bytes smaller than the
 symbol-stripped baseline with Performance Schema still built, and 6,746,680
 bytes smaller than the original broad archive.
+Omitting statement digest normalization brings the current archive to
+27,039,160 bytes / 25.79 MiB, 4,490,544 bytes smaller than the Release build
+with Performance Schema disabled, 6,090,480 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 6,803,160
+bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -455,6 +490,10 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
   present in `libmariadbd.a`.
 - Confirm `MYLITE_WITH_QUERY_LOGS=OFF` appears in the embedded CMake cache and
   query-log configuration SQL is rejected by server-surface policy coverage.
+- Confirm `MYLITE_WITH_SQL_DIGEST=OFF` appears in the embedded CMake cache,
+  `sql_digest.cc.o` is absent, `mylite_sql_digest_disabled.cc.o` is present in
+  `libmariadbd.a`, and `@@max_digest_length=0` is covered by server-surface
+  policy coverage.
 - Run `cmake --build --preset dev`.
 - Run `ctest --preset dev --output-on-failure`.
 - Run `cmake --build --preset embedded-dev`.
@@ -506,6 +545,9 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Direct and prepared query-log configuration SQL fails through MyLite policy,
   `@@general_log`, `@@slow_query_log`, and `@@log_output` show the disabled
   embedded state, and error logging remains available.
+- Statement digest normalization is omitted from the default embedded archive,
+  `@@max_digest_length=0` is covered at startup, and ordinary SQL execution,
+  prepared statements, diagnostics, and `EXPLAIN` remain available.
 - The stripped archive still links `libmylite` and all embedded tests.
 - The measured archive size and member count are recorded in the build
   documentation.
@@ -544,3 +586,7 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Users relying on MariaDB general or slow query logs lose those daemon
   diagnostics in the default embedded profile. MyLite still exposes SQL errors,
   warnings, result metadata, and normal statement diagnostics through the C API.
+- Users relying on Performance Schema statement digest text or digest hashes
+  lose those diagnostics in the default embedded profile. Performance Schema is
+  already omitted from that profile, and ordinary statement execution remains
+  available.

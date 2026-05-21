@@ -2562,6 +2562,7 @@ std::vector<std::string> runtime_arguments(const RuntimeLayout &layout) {
         "--innodb-flush-log-at-trx-commit=1",
         "--innodb-fast-shutdown=1",
         "--log-output=NONE",
+        "--max-digest-length=0",
         "--skip-log-bin",
         "--skip-slave-start",
         "--skip-grant-tables",

@@ -31,6 +31,15 @@ ELSE()
   ADD_DEFINITIONS(-DMYLITE_WITH_QUERY_LOGS=0)
 ENDIF()
 
+OPTION(MYLITE_WITH_SQL_DIGEST "Build statement digest normalization runtime" ON)
+IF(MYLITE_WITH_SQL_DIGEST)
+  ADD_DEFINITIONS(-DMYLITE_WITH_SQL_DIGEST=1)
+  SET(MYLITE_SQL_DIGEST_SOURCE ../sql/sql_digest.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_SQL_DIGEST=0)
+  SET(MYLITE_SQL_DIGEST_SOURCE ../sql/mylite_sql_digest_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_PROCEDURE_ANALYSE "Build PROCEDURE ANALYSE implementation" ON)
 IF(MYLITE_WITH_PROCEDURE_ANALYSE)
   ADD_DEFINITIONS(-DMYLITE_WITH_PROCEDURE_ANALYSE=1)
@@ -100,7 +109,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql-common/client_plugin.c
            ../sql/password.c ../sql/discover.cc ../sql/derror.cc 
            ../sql/field.cc ../sql/field_conv.cc ../sql/field_comp.cc
-           ../sql/filesort_utils.cc ../sql/sql_digest.cc
+           ../sql/filesort_utils.cc ${MYLITE_SQL_DIGEST_SOURCE}
            ../sql/filesort.cc ../sql/grant.cc
            ../sql/gstream.cc ../sql/slave.cc
            ../sql/signal_handler.cc
