@@ -7130,6 +7130,8 @@ Sys_binlog_row_metadata(
        ON_UPDATE(NULL));
 
 
+#if !defined(EMBEDDED_LIBRARY) || !defined(MYLITE_WITH_GTID_INDEX) || \
+    MYLITE_WITH_GTID_INDEX
 static Sys_var_on_access_global<Sys_var_mybool,
                            PRIV_SET_SYSTEM_GLOBAL_VAR_BINLOG_GTID_INDEX>
 Sys_binlog_gtid_index(
@@ -7158,6 +7160,7 @@ Sys_binlog_gtid_index_span_min(
        "to reduce the size of the index. Normally does not need tuning"),
        GLOBAL_VAR(opt_binlog_gtid_index_span_min), CMD_LINE(REQUIRED_ARG),
        VALID_RANGE(1, 1024*1024L*1024L), DEFAULT(65536), BLOCK_SIZE(1));
+#endif
 
 
 static bool check_pseudo_slave_mode(sys_var *self, THD *thd, set_var *var)

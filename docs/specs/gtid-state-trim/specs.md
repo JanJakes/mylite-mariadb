@@ -6,9 +6,9 @@ MyLite's embedded profile rejects replication, binary-log administration, and
 SQL `BINLOG` replay, but the default archive still carries MariaDB's
 replication GTID state runtime in `sql/rpl_gtid.cc`.
 
-GTID state is server topology state. The current embedded profile still links
-retained `log.cc` and `gtid_index.cc` paths, so removing the object requires a
-small disabled source that preserves the link contract.
+GTID state is server topology state. At this slice boundary, the embedded
+profile still linked retained `log.cc` and `gtid_index.cc` paths, so removing
+the object required a small disabled source that preserved the link contract.
 
 ## Source Findings
 
@@ -23,6 +23,8 @@ small disabled source that preserves the link contract.
 - `gtid_index.cc` only needs an empty state contract in the default no-binlog
   embedded profile; MyLite policy already keeps public replication and binlog
   commands unreachable.
+- A later binary-log GTID-index trim replaces `gtid_index.cc` with a
+  fail-closed embedded link contract.
 
 ## Design
 
@@ -30,7 +32,7 @@ Add `MYLITE_WITH_GTID_STATE`. The default MariaDB build keeps the upstream
 source. The MyLite embedded baseline sets the option to `OFF`, replaces
 `rpl_gtid.cc` with `mylite_rpl_gtid_disabled.cc`, and keeps:
 
-- empty GTID state for retained GTID-index link paths;
+- empty GTID state for retained no-binlog link paths;
 - fail-closed state mutation helpers for unsupported binary-log paths;
 - parser/helper stubs needed by retained declarations.
 

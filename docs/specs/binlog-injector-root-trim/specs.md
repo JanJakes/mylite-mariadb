@@ -30,14 +30,16 @@ Relevant source paths:
 - `packages/libmylite/tests/embedded_server_surface_policy_test.c` already
   covers `@@log_bin=0` and absence of binlog or relay-log sidecars.
 
-An attempted broader event-object trim showed that `gtid_index.cc`,
-`log_event.cc`, and `log_event_server.cc` are still linked through retained
-MariaDB code. This slice keeps them instead of replacing shared event and
-GTID-index implementations with a wide stub.
+An attempted broader event-object trim showed that, at this slice boundary,
+`gtid_index.cc`, `log_event.cc`, and `log_event_server.cc` were still linked
+through retained MariaDB code. This slice kept them instead of replacing shared
+event and GTID-index implementations with a wide stub.
 
 This spec records the injector-root trim boundary. Later dedicated
 log-event-server and log-event-parsing trims replace the event writer and event
-parser objects with narrower disabled link contracts.
+parser objects with narrower disabled link contracts. A later binary-log
+GTID-index trim replaces `gtid_index.cc` with a fail-closed embedded link
+contract.
 
 ## Design
 
@@ -102,7 +104,8 @@ git diff --check
 - `rpl_injector.cc.o` and `rpl_record.cc.o` are absent from the measured
   archive.
 - `gtid_index.cc.o`, `log_event.cc.o`, and `log_event_server.cc.o` remain in
-  the measured archive because retained MariaDB code still references them.
+  the measured archive at this slice boundary because retained MariaDB code
+  still references them.
 - Replication and binlog SQL remain rejected, `@@log_bin=0` remains covered,
   and no binlog or relay-log sidecars are created.
 - Native storage, DDL/DML, transactions, prepared statements, JSON,
@@ -114,8 +117,8 @@ git diff --check
 
 - Some retained MariaDB code still includes `log_event.h` types. The trim must
   not remove declarations needed by generic SQL, transaction, or handler code.
-- The no-binlog profile still retains `log.cc`, `gtid_index.cc`,
-  `log_event.cc`, `log_event_server.cc`, `sql_binlog.cc`, `sql_repl.cc`,
-  `rpl_gtid.cc`, and replication utility files where other retained MariaDB
-  paths still reference them at this slice boundary. Later size slices narrow
-  that retained set with separate source and link evidence.
+- The no-binlog profile still retains `log.cc`, `log_event.cc`,
+  `log_event_server.cc`, `sql_binlog.cc`, `sql_repl.cc`, `rpl_gtid.cc`, and
+  replication utility files where other retained MariaDB paths still reference
+  them at this slice boundary. Later size slices narrow that retained set with
+  separate source and link evidence.

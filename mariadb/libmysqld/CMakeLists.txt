@@ -63,6 +63,19 @@ ELSE()
   SET(MYLITE_GTID_STATE_SOURCE ../sql/mylite_rpl_gtid_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_GTID_INDEX "Build binary-log GTID index runtime" ON)
+IF(MYLITE_WITH_GTID_INDEX)
+  ADD_DEFINITIONS(-DMYLITE_WITH_GTID_INDEX=1)
+  SET(MYLITE_GTID_INDEX_SOURCE ../sql/gtid_index.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_GTID_INDEX=0)
+  IF(MYLITE_WITH_BINLOG_CORE)
+    MESSAGE(FATAL_ERROR
+      "MYLITE_WITH_GTID_INDEX=OFF requires MYLITE_WITH_BINLOG_CORE=OFF")
+  ENDIF()
+  SET(MYLITE_GTID_INDEX_SOURCE ../sql/mylite_gtid_index_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_SQL_HANDLER "Build SQL HANDLER command runtime" ON)
 IF(MYLITE_WITH_SQL_HANDLER)
   ADD_DEFINITIONS(-DMYLITE_WITH_SQL_HANDLER=1)
@@ -376,7 +389,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/sql_expression_cache.cc
            ../sql/my_apc.cc ../sql/my_apc.h
            ../sql/my_json_writer.cc ../sql/my_json_writer.h
-           ${MYLITE_GTID_STATE_SOURCE} ../sql/gtid_index.cc
+           ${MYLITE_GTID_STATE_SOURCE} ${MYLITE_GTID_INDEX_SOURCE}
            ../sql/sql_explain.cc ../sql/sql_explain.h
            ../sql/sql_analyze_stmt.cc ../sql/sql_analyze_stmt.h
            ../sql/compat56.cc

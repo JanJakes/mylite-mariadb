@@ -95,8 +95,8 @@ policy coverage proves replication and binlog command families are outside the
 core library contract. Embedded no-binlog startup, open, cleanup, and
 GTID-index update paths are guarded, and the unsupported injector root is
 omitted after link evidence proves it is only needed by the server topology
-runtime. Shared GTID-index and replication utility helpers still referenced by
-retained MariaDB code remain for narrower review.
+runtime. Shared replication utility helpers still referenced by retained
+MariaDB code remain for narrower review.
 SQL `BINLOG` statement replay is omitted after coverage proves it is an
 unsupported replication replay surface and the embedded dispatcher already
 fail-closes it.
@@ -107,9 +107,11 @@ Binary-log event parser and reader runtime is omitted after link evidence
 proves retained embedded paths need only minimal fail-closed event symbols, not
 binary-log replay/decode support.
 Replication GTID-state runtime is replaced with empty embedded state after link
-evidence proves retained `log.cc` and `gtid_index.cc` paths only need the state
-contract, not server topology behavior. GTID helper SQL functions are rejected
-by policy.
+evidence proves retained no-binlog paths only need the state contract, not
+server topology behavior. GTID helper SQL functions are rejected by policy.
+Binary-log GTID-index runtime and tuning variables are omitted after source and
+link evidence proves they only serve unsupported binlog lookup and replication
+positioning paths.
 SQL `HANDLER` command runtime is replaced with a disabled embedded source after
 source review proves top-level `HANDLER ...` commands are a server table-cursor
 surface, not the storage-engine handler abstraction needed by normal table

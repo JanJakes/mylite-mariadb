@@ -48,6 +48,7 @@ static void test_server_surfaces_are_disabled_or_contained(void);
 static mylite_db *open_database(open_database_paths paths);
 static void assert_runtime_policy_variables(mylite_db *db, const char *database_path);
 static void assert_replication_execution_variables_omitted(mylite_db *db);
+static void assert_binlog_gtid_index_variables_omitted(mylite_db *db);
 static void assert_replication_filter_variables_omitted(mylite_db *db);
 static void assert_proxy_protocol_variables_omitted(mylite_db *db);
 static void assert_system_variable_help_text_omitted(mylite_db *db);
@@ -120,6 +121,7 @@ static void test_server_surfaces_are_disabled_or_contained(void) {
     db = open_database(paths);
     assert_runtime_policy_variables(db, database_path);
     assert_replication_execution_variables_omitted(db);
+    assert_binlog_gtid_index_variables_omitted(db);
     assert_replication_filter_variables_omitted(db);
     assert_proxy_protocol_variables_omitted(db);
     assert_system_variable_help_text_omitted(db);
@@ -256,6 +258,48 @@ static void assert_replication_execution_variables_omitted(mylite_db *db) {
     expect_error(db, "SELECT @@rpl_semi_sync_master_enabled", NULL);
     assert(mylite_mariadb_errno(db) == 1193U);
     expect_prepare_error(db, "SELECT @@slave_type_conversions", NULL);
+    assert(mylite_mariadb_errno(db) == 1193U);
+}
+
+static void assert_binlog_gtid_index_variables_omitted(mylite_db *db) {
+    query_expect(
+        db,
+        (expected_query){
+            .sql = "SHOW VARIABLES LIKE 'binlog_gtid_index'",
+            .column_count = 2,
+            .row_count = 0,
+            .column_names = NULL,
+            .values = NULL,
+        }
+    );
+    query_expect(
+        db,
+        (expected_query){
+            .sql = "SHOW VARIABLES LIKE 'binlog_gtid_index_page_size'",
+            .column_count = 2,
+            .row_count = 0,
+            .column_names = NULL,
+            .values = NULL,
+        }
+    );
+    query_expect(
+        db,
+        (expected_query){
+            .sql = "SHOW VARIABLES LIKE 'binlog_gtid_index_span_min'",
+            .column_count = 2,
+            .row_count = 0,
+            .column_names = NULL,
+            .values = NULL,
+        }
+    );
+
+    expect_error(db, "SELECT @@binlog_gtid_index", NULL);
+    assert(mylite_mariadb_errno(db) == 1193U);
+    expect_error(db, "SELECT @@binlog_gtid_index_page_size", NULL);
+    assert(mylite_mariadb_errno(db) == 1193U);
+    expect_error(db, "SELECT @@binlog_gtid_index_span_min", NULL);
+    assert(mylite_mariadb_errno(db) == 1193U);
+    expect_prepare_error(db, "SELECT @@binlog_gtid_index", NULL);
     assert(mylite_mariadb_errno(db) == 1193U);
 }
 
@@ -733,6 +777,9 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_error(db, "SET PASSWORD = PASSWORD('secret')", "server-owned SQL surface");
     expect_error(db, "SET SQL_LOG_BIN = 1", "server-owned SQL surface");
     expect_error(db, "SET @@GLOBAL.SQL_LOG_BIN = 1", "server-owned SQL surface");
+    expect_error(db, "SET binlog_gtid_index = OFF", "server-owned SQL surface");
+    expect_error(db, "SET binlog_gtid_index_page_size = 4096", "server-owned SQL surface");
+    expect_error(db, "SET binlog_gtid_index_span_min = 65536", "server-owned SQL surface");
     exec_ok(db, "SET @SQL_LOG_BIN = 1");
     expect_error(
         db,
@@ -933,6 +980,8 @@ static void assert_server_sql_rejected(mylite_db *db) {
         "server-owned SQL surface"
     );
     expect_prepare_error(db, "SET @@GLOBAL.SQL_LOG_BIN = 1", "server-owned SQL surface");
+    expect_prepare_error(db, "SET binlog_gtid_index = OFF", "server-owned SQL surface");
+    expect_prepare_error(db, "SET binlog_gtid_index_span_min = 65536", "server-owned SQL surface");
     expect_prepare_error(
         db,
         "SET PASSWORD = PASSWORD('prepared-secret')",

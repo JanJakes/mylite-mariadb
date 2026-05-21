@@ -518,9 +518,9 @@ binary-log event write paths fail closed.
 The embedded archive omits replication GTID-state runtime by setting
 `MYLITE_WITH_GTID_STATE=0` in the MyLite baseline. The option defaults to `ON`
 so normal MariaDB server builds keep upstream GTID state behavior. The disabled
-embedded source keeps empty state for retained `log.cc` and `gtid_index.cc`
-link paths and fails closed on unsupported state mutation. MyLite policy
-rejects `MASTER_GTID_WAIT()`, `BINLOG_GTID_POS()`,
+embedded source keeps empty state for retained no-binlog link paths and fails
+closed on unsupported state mutation. MyLite policy rejects
+`MASTER_GTID_WAIT()`, `BINLOG_GTID_POS()`,
 `WSREP_SYNC_WAIT_UPTO_GTID()`, and GTID state variable assignments before
 dispatch.
 
@@ -675,6 +675,13 @@ event writers remain enabled, because the disabled event source owns the
 combined retained link contract.
 `append_query_string()` and `str_to_hex()` remain available for ordinary SQL
 literal rendering.
+
+The embedded archive omits binary-log GTID-index runtime by setting
+`MYLITE_WITH_GTID_INDEX=0` in the MyLite baseline. The option defaults to `ON`
+so upstream-style embedded builds keep upstream binlog GTID-index behavior.
+The disabled profile replaces `gtid_index.cc` with a fail-closed embedded
+source, and binary-log GTID-index tuning system variables are omitted from the
+default profile.
 
 The embedded archive omits PROXY protocol listener support by setting
 `MYLITE_WITH_PROXY_PROTOCOL=0` in the MyLite baseline. The option defaults to
@@ -1091,6 +1098,11 @@ to 26,195,576 bytes / 24.98 MiB, 5,334,128 bytes smaller than the Release build
 with Performance Schema disabled, 6,934,064 bytes smaller than the
 symbol-stripped baseline with Performance Schema still built, and 7,646,744
 bytes smaller than the original broad archive.
+Omitting binary-log GTID-index runtime and tuning variables brings the current
+archive to 26,180,192 bytes / 24.97 MiB, 5,349,512 bytes smaller than the
+Release build with Performance Schema disabled, 6,949,448 bytes smaller than
+the symbol-stripped baseline with Performance Schema still built, and
+7,662,128 bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -1123,12 +1135,14 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
 - Confirm `MYLITE_WITH_LOG_EVENT_PARSING=OFF` appears in the embedded CMake
   cache.
 - Confirm `MYLITE_WITH_GTID_STATE=OFF` appears in the embedded CMake cache.
+- Confirm `MYLITE_WITH_GTID_INDEX=OFF` appears in the embedded CMake cache.
 - Confirm `MYLITE_WITH_SQL_HANDLER=OFF` appears in the embedded CMake cache.
 - Confirm `MYLITE_WITH_SELECT_INTO_FILE=OFF` appears in the embedded CMake
   cache.
-- Confirm `rpl_injector.cc.o`, `rpl_record.cc.o`, `log_event.cc.o`, and
-  `log_event_server.cc.o` are absent from `libmariadbd.a`, while
-  `gtid_index.cc.o`, `mylite_log_event_server_disabled.cc.o`, and
+- Confirm `rpl_injector.cc.o`, `rpl_record.cc.o`, `log_event.cc.o`,
+  `log_event_server.cc.o`, and `gtid_index.cc.o` are absent from
+  `libmariadbd.a`, while `mylite_gtid_index_disabled.cc.o`,
+  `mylite_log_event_server_disabled.cc.o`, and
   `mylite_rpl_gtid_disabled.cc.o` remain.
 - Confirm `rpl_gtid.cc.o` is absent from `libmariadbd.a`, and direct and
   prepared `MASTER_GTID_WAIT()` / `BINLOG_GTID_POS()` /
@@ -1252,9 +1266,12 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   read/decode paths fail closed. Replication GTID-state runtime is replaced
   with a disabled embedded source, GTID helper SQL functions and GTID state
   variable assignments are rejected, and `rpl_gtid.cc.o` is absent from the
-  embedded archive. SQL `HANDLER` command runtime is replaced with a disabled
-  embedded source, top-level `HANDLER ...` statements are rejected, and
-  `sql_handler.cc.o` is absent from the embedded archive. Host-file SELECT
+  embedded archive. Binary-log GTID-index runtime is replaced with a disabled
+  embedded source, GTID-index tuning variables are omitted, and
+  `gtid_index.cc.o` is absent from the embedded archive. SQL `HANDLER` command
+  runtime is replaced with a disabled embedded source, top-level
+  `HANDLER ...` statements are rejected, and `sql_handler.cc.o` is absent from
+  the embedded archive. Host-file SELECT
   exports are rejected, and `SELECT ... INTO @variable` remains supported.
   Row-replication type-conversion helpers are replaced with fail-closed embedded
   stubs, `rpl_utility_server.cc.o` is absent from the embedded archive, and
@@ -1315,9 +1332,9 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
 - Unwind-table omission should stay scoped to targets where it is non-semantic.
 - Stored functions remain planned application SQL. Dynamic UDF policy and size
   trimming must stay scoped to shared-library UDF registration and execution.
-- `log.cc`, `gtid_index.cc`, `sql_repl.cc`, and replication utility files
-  still have shared references. Removing more binlog code needs separate source
-  and link evidence rather than file-name pruning.
+- `log.cc`, `sql_repl.cc`, and replication utility files still have shared
+  references. Removing more binlog code needs separate source and link evidence
+  rather than file-name pruning.
 - The disabled log-event source keeps a small virtual-method and destructor
   contract for retained unsupported paths. Further shrinking that contract
   needs link evidence plus coverage for ordinary SQL string rendering.
