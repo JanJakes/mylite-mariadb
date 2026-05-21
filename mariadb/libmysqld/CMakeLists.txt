@@ -42,6 +42,15 @@ ELSE()
   SET(MYLITE_LOG_EVENT_SERVER_SOURCE ../sql/mylite_log_event_server_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_GTID_STATE "Build replication GTID state runtime" ON)
+IF(MYLITE_WITH_GTID_STATE)
+  ADD_DEFINITIONS(-DMYLITE_WITH_GTID_STATE=1)
+  SET(MYLITE_GTID_STATE_SOURCE ../sql/rpl_gtid.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_GTID_STATE=0)
+  SET(MYLITE_GTID_STATE_SOURCE ../sql/mylite_rpl_gtid_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_QUERY_LOGS "Build general and slow query log runtime" ON)
 IF(MYLITE_WITH_QUERY_LOGS)
   ADD_DEFINITIONS(-DMYLITE_WITH_QUERY_LOGS=1)
@@ -323,7 +332,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/sql_expression_cache.cc
            ../sql/my_apc.cc ../sql/my_apc.h
            ../sql/my_json_writer.cc ../sql/my_json_writer.h
-	   ../sql/rpl_gtid.cc ../sql/gtid_index.cc
+           ${MYLITE_GTID_STATE_SOURCE} ../sql/gtid_index.cc
            ../sql/sql_explain.cc ../sql/sql_explain.h
            ../sql/sql_analyze_stmt.cc ../sql/sql_analyze_stmt.h
            ../sql/compat56.cc

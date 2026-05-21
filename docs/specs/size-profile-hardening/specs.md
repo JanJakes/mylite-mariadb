@@ -450,7 +450,7 @@ library or `mysql.func` metadata path is exposed through the core API.
 The embedded archive disables binary-log core runtime by setting
 `MYLITE_WITH_BINLOG_CORE=0` in the MyLite baseline, omitting `rpl_record.cc`,
 skipping mandatory binlog plugin registration, and compiling binlog
-transaction, row-event, GTID-state, event-write, and table-map entry points to
+transaction, row-event, event-write, and table-map entry points to
 no-op or fail-closed behavior. The option defaults to `ON` so normal MariaDB
 server builds keep upstream binlog behavior.
 The disabled embedded profile also guards no-binlog startup, open, cleanup,
@@ -469,6 +469,15 @@ The embedded archive omits server-side binary-log event writers by setting
 disabled embedded source keeps the real `append_query_string()` SQL
 string-quoting helper for ordinary `Item` and type rendering, while unsupported
 binary-log event write paths fail closed.
+
+The embedded archive omits replication GTID-state runtime by setting
+`MYLITE_WITH_GTID_STATE=0` in the MyLite baseline. The option defaults to `ON`
+so normal MariaDB server builds keep upstream GTID state behavior. The disabled
+embedded source keeps empty state for retained `log.cc` and `gtid_index.cc`
+link paths and fails closed on unsupported state mutation. MyLite policy
+rejects `MASTER_GTID_WAIT()`, `BINLOG_GTID_POS()`,
+`WSREP_SYNC_WAIT_UPTO_GTID()`, and GTID state variable assignments before
+dispatch.
 
 The embedded archive disables `PROCEDURE ANALYSE()` by setting
 `MYLITE_WITH_PROCEDURE_ANALYSE=0` in the MyLite baseline, replacing
@@ -952,6 +961,11 @@ Omitting server-side binary-log event writers brings the current archive to
 with Performance Schema disabled, 6,788,056 bytes smaller than the
 symbol-stripped baseline with Performance Schema still built, and 7,500,736
 bytes smaller than the original broad archive.
+Omitting replication GTID-state runtime brings the current archive to
+26,287,896 bytes / 25.07 MiB, 5,241,808 bytes smaller than the Release build
+with Performance Schema disabled, 6,841,744 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 7,554,424
+bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -981,9 +995,15 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   coverage, and plugin SQL remains rejected.
 - Confirm `MYLITE_WITH_LOG_EVENT_SERVER=OFF` appears in the embedded CMake
   cache.
+- Confirm `MYLITE_WITH_GTID_STATE=OFF` appears in the embedded CMake cache.
 - Confirm `rpl_injector.cc.o`, `rpl_record.cc.o`, and `log_event_server.cc.o`
   are absent from `libmariadbd.a`, while `gtid_index.cc.o`, `log_event.cc.o`,
-  and `mylite_log_event_server_disabled.cc.o` remain.
+  `mylite_log_event_server_disabled.cc.o`, and
+  `mylite_rpl_gtid_disabled.cc.o` remain.
+- Confirm `rpl_gtid.cc.o` is absent from `libmariadbd.a`, and direct and
+  prepared `MASTER_GTID_WAIT()` / `BINLOG_GTID_POS()` /
+  `WSREP_SYNC_WAIT_UPTO_GTID()` calls plus GTID state variable assignments fail
+  through server-surface policy coverage.
 - Confirm `MYLITE_WITH_BINLOG_REPLAY=OFF` appears in the embedded CMake cache,
   `sql_binlog.cc.o` is absent from `libmariadbd.a`, and direct and prepared
   SQL `BINLOG` replay statements fail through server-surface policy coverage.
@@ -1090,10 +1110,14 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   from the embedded archive. Server-side binary-log event writers are replaced
   with a disabled embedded source, `append_query_string()` still supports
   ordinary SQL literal rendering, and `log_event_server.cc.o` is absent from
-  the embedded archive. Persistent optimizer-statistics storage is omitted,
-  `use_stat_tables` starts as `NEVER`, histogram collection starts at size `0`,
-  persistent statistics SQL and variable changes are rejected, and ordinary
-  engine estimates, `ANALYZE TABLE`, and `EXPLAIN` remain covered.
+  the embedded archive. Replication GTID-state runtime is replaced with a
+  disabled embedded source, GTID helper SQL functions and GTID state variable
+  assignments are rejected, and `rpl_gtid.cc.o` is absent from the embedded
+  archive. Persistent
+  optimizer-statistics storage is omitted, `use_stat_tables` starts as `NEVER`,
+  histogram collection starts at size `0`, persistent statistics SQL and
+  variable changes are rejected, and ordinary engine estimates,
+  `ANALYZE TABLE`, and `EXPLAIN` remain covered.
 - Process-list SHOW commands are rejected, the process-list Information Schema
   table returns zero rows, and the embedded archive omits process-list row
   producers.
@@ -1145,10 +1169,9 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
 - Unwind-table omission should stay scoped to targets where it is non-semantic.
 - Stored functions remain planned application SQL. Dynamic UDF policy and size
   trimming must stay scoped to shared-library UDF registration and execution.
-- `log.cc`, `gtid_index.cc`, `log_event.cc`, `rpl_gtid.cc`, `sql_repl.cc`,
-  and replication utility files still have shared references. Removing more
-  binlog code needs separate source and link evidence rather than file-name
-  pruning.
+- `log.cc`, `gtid_index.cc`, `log_event.cc`, `sql_repl.cc`, and replication
+  utility files still have shared references. Removing more binlog code needs
+  separate source and link evidence rather than file-name pruning.
 - The generic SELECT procedure dispatch remains linked after omitting
   `PROCEDURE ANALYSE()`. Removing it should be a separate slice.
 - Clients that build help UIs from

@@ -410,9 +410,12 @@ compatibility features that do not fit the embedded library model:
 Top-level SQL command families for users, roles, grants, password changes,
 dynamic plugins, events, replication, binlog administration, and foreign-server
 metadata are rejected before direct execution or prepared-statement
-preparation. The default embedded profile starts with binary logging disabled
-and compiles binlog transaction, row-event, and GTID-state entry points to
-embedded no-ops where they are unreachable through supported MyLite behavior.
+preparation. Replication GTID helper functions such as `MASTER_GTID_WAIT()`,
+`BINLOG_GTID_POS()`, and `WSREP_SYNC_WAIT_UPTO_GTID()` plus GTID state variable
+assignments are rejected by the same policy. The default embedded profile
+starts with binary logging disabled and compiles binlog transaction, row-event,
+and GTID-state entry points to embedded no-ops where they are unreachable
+through supported MyLite behavior.
 It keeps only a parser-link event parse-data stub because event scheduler
 execution and event metadata are outside the embedded core.
 It also omits the unsupported injector root that is only needed by the server
@@ -424,7 +427,8 @@ core embedded profile has no replication or binary-log topology to filter.
 SQL `BINLOG` statement replay is rejected before dispatch and omitted from the
 embedded archive. Server-side binary-log event writers are also replaced by a
 disabled embedded source; ordinary SQL value rendering keeps MariaDB's
-`append_query_string()` escaping behavior.
+`append_query_string()` escaping behavior. Replication GTID-state runtime is
+replaced by empty embedded state for retained GTID-index link paths.
 The default profile omits the `unix_socket` server authentication plugin for
 the same reason; `libmylite` opens a local database directory directly instead
 of authenticating network or socket clients.

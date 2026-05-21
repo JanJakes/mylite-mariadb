@@ -42,6 +42,7 @@ ENABLED_PROFILING=OFF
 MYLITE_WITH_BINLOG_CORE=OFF
 MYLITE_WITH_BINLOG_REPLAY=OFF
 MYLITE_WITH_LOG_EVENT_SERVER=OFF
+MYLITE_WITH_GTID_STATE=OFF
 MYLITE_WITH_QUERY_LOGS=OFF
 MYLITE_WITH_SQL_DIGEST=OFF
 MYLITE_WITH_STATUS_VARIABLES=OFF
@@ -101,7 +102,10 @@ rejected by MyLite policy, and the embedded MariaDB dispatcher remains a
 fail-closed backstop. It omits server-side binary-log event writers behind
 `MYLITE_WITH_LOG_EVENT_SERVER=0`; ordinary SQL string literal rendering keeps
 the retained `append_query_string()` escaping helper, while unsupported event
-write paths fail closed. It omits the general and slow query-log runtime
+write paths fail closed. It omits replication GTID-state runtime behind
+`MYLITE_WITH_GTID_STATE=0`; retained GTID-index link paths see empty state,
+while GTID helper functions and GTID state variable assignments are rejected by
+MyLite policy. It omits the general and slow query-log runtime
 behind `MYLITE_WITH_QUERY_LOGS=0`; error logging,
 SQL diagnostics, warnings, and result metadata remain available. It omits
 statement digest normalization behind `MYLITE_WITH_SQL_DIGEST=0`; Performance
@@ -181,7 +185,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,341,584 bytes / 25.12 MiB |
+| Archive size | 26,287,896 bytes / 25.07 MiB |
 | Archive members | 698 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -233,7 +237,9 @@ and JSON histogram storage reduces the current pre-strip archive to
 26,968,288 bytes / 25.72 MiB. Omitting server-side binary-log event writers
 and retaining only the SQL string-quoting helper plus fail-closed event stubs
 reduces the current pre-strip archive to 26,907,160 bytes / 25.66 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 565,576 bytes
+Replacing replication GTID-state runtime with empty embedded state reduces the
+current pre-strip archive to 26,852,496 bytes / 25.61 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 564,600 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -274,10 +280,11 @@ bytes and one archive member. Omitting SQL `BINLOG` statement replay saves
 3,640 bytes and one archive member. Omitting persistent optimizer-statistics
 storage and JSON histogram storage saves 73,368 bytes and one archive member.
 Omitting server-side binary-log event writers saves 60,648 bytes with no
-member-count change. The final archive is 5,188,120 bytes smaller than the
-Release build with Performance Schema disabled, 6,788,056 bytes smaller than
-the symbol-stripped baseline that still built Performance Schema, and
-7,500,736 bytes smaller than the original broad archive.
+member-count change. Omitting replication GTID-state runtime saves 53,688
+bytes with no member-count change. The final archive is 5,241,808 bytes
+smaller than the Release build with Performance Schema disabled, 6,841,744
+bytes smaller than the symbol-stripped baseline that still built Performance
+Schema, and 7,554,424 bytes smaller than the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
 GSSAPI, BZip2, LZ4, LibLZMA, LZO, PCRE2, and Zstandard support on this
@@ -327,14 +334,19 @@ and the embedded profile reports `@@have_dynamic_loading=NO`.
 The active binary-log transaction/event core is disabled in the default
 embedded archive. The unsupported injector root is omitted, and retained
 embedded no-binlog paths in `log.cc`, `mysqld.cc`, and transaction-coordinator
-selection are guarded. `log_event.cc`, `gtid_index.cc`, `rpl_gtid.cc`, and
-shared helper symbols remain where generic MariaDB logging, transaction
-coordination, or retained parser/runtime code still reference them.
+selection are guarded. `log_event.cc`, `gtid_index.cc`, and shared helper
+symbols remain where generic MariaDB logging, transaction coordination, or
+retained parser/runtime code still reference them.
 Server-side binary-log event writers are replaced by a small disabled embedded
 source that keeps `append_query_string()` for ordinary SQL literal rendering
 and fails closed for unsupported event writes.
+Replication GTID-state runtime is replaced by a small disabled embedded source
+that keeps empty state for retained GTID-index link paths and fails closed for
+unsupported state mutation. `gtid_index.cc` still links as a retained helper,
+but `rpl_gtid.cc` is absent from the default embedded archive.
 SQL `BINLOG` statement replay is omitted from the embedded archive, and direct
-and prepared `BINLOG` statements are rejected by policy coverage.
+and prepared `BINLOG` statements, GTID SQL functions, and GTID state variable
+assignments are rejected by policy coverage.
 Replication execution, slave protocol, replication-event, checksum, and
 semi-sync system variables are omitted from the default embedded profile, while
 compatibility variables such as `@@log_bin=0` remain covered.
@@ -418,6 +430,7 @@ The baseline explicitly disables:
 - Active binary-log transaction/event core
 - SQL `BINLOG` statement replay
 - Server binary-log event writers
+- Replication GTID-state runtime
 - Unsupported binlog injector root
 - `PROCEDURE ANALYSE()`
 - System-variable help text

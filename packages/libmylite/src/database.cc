@@ -241,6 +241,7 @@ bool is_unsupported_plugin_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_udf_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_replication_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_binlog_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_replication_function_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_help_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_static_show_info_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_processlist_metadata_statement(const SqlPolicyTokens &tokens);
@@ -1175,7 +1176,9 @@ bool is_unsupported_server_surface_sql(std::string_view sql, const std::string &
     return is_unsupported_account_or_event_statement(tokens) ||
            is_unsupported_plugin_statement(tokens) || is_unsupported_udf_statement(tokens) ||
            is_unsupported_replication_statement(tokens) ||
-           is_unsupported_binlog_statement(tokens) || is_unsupported_help_statement(tokens) ||
+           is_unsupported_binlog_statement(tokens) ||
+           is_unsupported_replication_function_statement(tokens) ||
+           is_unsupported_help_statement(tokens) ||
            is_unsupported_static_show_info_statement(tokens) ||
            is_unsupported_processlist_metadata_statement(tokens) ||
            is_unsupported_foreign_server_metadata_statement(tokens) ||
@@ -1290,6 +1293,18 @@ bool is_unsupported_binlog_statement(const SqlPolicyTokens &tokens) {
         return true;
     }
     return token_equals(first, "PURGE") && token_in(second, "BINARY", "MASTER");
+}
+
+bool is_unsupported_replication_function_statement(const SqlPolicyTokens &tokens) {
+    for (std::size_t index = 0; index + 1U < tokens.count; ++index) {
+        if ((identifier_token_equals(tokens.values[index], "MASTER_GTID_WAIT") ||
+             identifier_token_equals(tokens.values[index], "BINLOG_GTID_POS") ||
+             identifier_token_equals(tokens.values[index], "WSREP_SYNC_WAIT_UPTO_GTID")) &&
+            token_equals(tokens.values[index + 1U], "(")) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool is_unsupported_help_statement(const SqlPolicyTokens &tokens) {
@@ -1847,7 +1862,22 @@ bool is_server_variable_token(std::string_view token) {
                "QUERY_CACHE_MIN_RES_UNIT",
                "QUERY_CACHE_WLOCK_INVALIDATE",
                "QUERY_CACHE_STRIP_COMMENTS"
-           );
+           ) ||
+           token_in(token, "GTID_BINLOG_STATE", "GTID_SLAVE_POS", "GTID_STRICT_MODE") ||
+           token_in(token, "GTID_DOMAIN_ID", "GTID_SEQ_NO", "GTID_CLEANUP_BATCH_SIZE") ||
+           token_in(
+               token,
+               "GTID_IGNORE_DUPLICATES",
+               "GTID_POS_AUTO_ENGINES",
+               "BINLOG_GTID_INDEX"
+           ) ||
+           token_in(
+               token,
+               "BINLOG_GTID_INDEX_PAGE_SIZE",
+               "BINLOG_GTID_INDEX_SPAN_MIN",
+               "WSREP_GTID_DOMAIN_ID"
+           ) ||
+           token_in(token, "WSREP_GTID_SEQ_NO", "WSREP_GTID_MODE");
 }
 
 bool is_query_log_variable_token(std::string_view token) {
