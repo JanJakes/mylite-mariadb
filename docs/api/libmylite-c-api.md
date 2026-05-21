@@ -411,7 +411,8 @@ preparation. The default embedded profile starts with binary logging disabled
 and compiles binlog transaction, row-event, and GTID-state entry points to
 embedded no-ops where they are unreachable through supported MyLite behavior.
 It also omits the unsupported injector root that is only needed by the server
-topology runtime.
+topology runtime, plus guarded replication execution system variables such as
+`slave_type_conversions` and `rpl_semi_sync_master_enabled`.
 Dynamic UDF registration through `CREATE FUNCTION ... SONAME` is rejected
 through the same policy because it loads server-owned shared libraries and
 persists metadata in server system tables. Attempts to enable Oracle SQL mode,
@@ -459,6 +460,9 @@ and system-variable values remain available, but
 variables also cover disabled binlog, performance schema, query cache,
 query logging, statement profiling, grant tables, networking,
 `@@have_dynamic_loading=NO`, and the transient database-local plugin directory.
+Guarded replication execution variables are omitted from `SHOW VARIABLES` and
+`@@` lookup in the default embedded profile, while `@@log_bin=0` remains
+available as compatibility evidence.
 The default embedded archive omits runtime shared-object plugin loading while
 keeping static built-in plugins and native storage engines available. Static
 `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES` are rejected as

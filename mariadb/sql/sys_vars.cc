@@ -74,6 +74,10 @@
 #define PCRE2_STATIC 1             /* Important on Windows */
 #include "pcre2.h"                 /* pcre2 header file */
 
+#ifndef MYLITE_WITH_REPLICATION_EXEC_SYSVARS
+#define MYLITE_WITH_REPLICATION_EXEC_SYSVARS 1
+#endif
+
 /*
   The rule for this file: everything should be 'static'. When a sys_var
   variable or a function from this file is - in very rare cases - needed
@@ -3615,6 +3619,7 @@ static Sys_var_charptr Sys_server_uid(
        CMD_LINE_HELP_ONLY,
        DEFAULT(server_uid));
 
+#if MYLITE_WITH_REPLICATION_EXEC_SYSVARS
 static Sys_var_on_access_global<Sys_var_mybool,
                           PRIV_SET_SYSTEM_GLOBAL_VAR_SLAVE_COMPRESSED_PROTOCOL>
 Sys_slave_compressed_protocol(
@@ -3916,6 +3921,7 @@ Sys_semisync_slave_kill_conn_timeout(
        NO_MUTEX_GUARD, NOT_IN_BINLOG, ON_CHECK(0),
        ON_UPDATE(fix_rpl_semi_sync_slave_kill_conn_timeout));
 #endif /* HAVE_REPLICATION */
+#endif /* MYLITE_WITH_REPLICATION_EXEC_SYSVARS */
 
 static Sys_var_on_access_global<Sys_var_ulong,
                                 PRIV_SET_SYSTEM_GLOBAL_VAR_SLOW_LAUNCH_TIME>

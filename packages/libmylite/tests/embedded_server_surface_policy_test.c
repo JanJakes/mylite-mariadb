@@ -47,6 +47,7 @@ typedef struct root_entries {
 static void test_server_surfaces_are_disabled_or_contained(void);
 static mylite_db *open_database(open_database_paths paths);
 static void assert_runtime_policy_variables(mylite_db *db, const char *database_path);
+static void assert_replication_execution_variables_omitted(mylite_db *db);
 static void assert_system_variable_help_text_omitted(mylite_db *db);
 static void assert_status_variables_omitted(mylite_db *db);
 static void assert_processlist_metadata_omitted(mylite_db *db);
@@ -112,6 +113,7 @@ static void test_server_surfaces_are_disabled_or_contained(void) {
 
     db = open_database(paths);
     assert_runtime_policy_variables(db, database_path);
+    assert_replication_execution_variables_omitted(db);
     assert_system_variable_help_text_omitted(db);
     assert_status_variables_omitted(db);
     assert_processlist_metadata_omitted(db);
@@ -211,6 +213,38 @@ static void assert_runtime_policy_variables(mylite_db *db, const char *database_
     );
 
     free(plugin_directory);
+}
+
+static void assert_replication_execution_variables_omitted(mylite_db *db) {
+    query_expect(
+        db,
+        (expected_query){
+            .sql = "SHOW VARIABLES LIKE 'slave_type_conversions'",
+            .column_count = 2,
+            .row_count = 0,
+            .column_names = NULL,
+            .values = NULL,
+        }
+    );
+    query_expect(
+        db,
+        (expected_query){
+            .sql = "SHOW VARIABLES LIKE 'rpl_semi_sync_master_enabled'",
+            .column_count = 2,
+            .row_count = 0,
+            .column_names = NULL,
+            .values = NULL,
+        }
+    );
+
+    expect_error(db, "SELECT @@slave_compressed_protocol", NULL);
+    assert(mylite_mariadb_errno(db) == 1193U);
+    expect_error(db, "SELECT @@slave_type_conversions", NULL);
+    assert(mylite_mariadb_errno(db) == 1193U);
+    expect_error(db, "SELECT @@rpl_semi_sync_master_enabled", NULL);
+    assert(mylite_mariadb_errno(db) == 1193U);
+    expect_prepare_error(db, "SELECT @@slave_type_conversions", NULL);
+    assert(mylite_mariadb_errno(db) == 1193U);
 }
 
 static void assert_system_variable_help_text_omitted(mylite_db *db) {

@@ -44,6 +44,8 @@ compacted because uncommon diagnostic prose is not core SQL, storage, or API
 behavior when MariaDB errno and SQLSTATE remain available.
 VIO TLS transport is omitted because the core profile is an in-process
 database-directory runtime without socket startup or network handshakes.
+Replication execution system variables are omitted because they configure
+server topology behavior that the embedded profile already rejects.
 
 ## Source Findings
 
@@ -240,6 +242,15 @@ database-directory runtime without socket startup or network handshakes.
   embedded target, and reduces the stripped archive to 26,536,112 bytes,
   25.31 MiB, and 703 members. `libcrypto` remains linked for retained SQL
   crypto and password functions.
+- `mariadb/sql/sys_vars.cc` registers a contiguous block of replication
+  execution, slave protocol, replication-event, checksum, and semi-sync system
+  variables such as `slave_compressed_protocol`, `slave_type_conversions`, and
+  `rpl_semi_sync_master_enabled`. Compatibility variables such as `log_bin`,
+  `server_id`, and GTID positions are separate declarations.
+- Disabling those registrations behind `MYLITE_WITH_REPLICATION_EXEC_SYSVARS=0`
+  keeps retained shared replication helpers available for generic MariaDB code
+  and reduces the stripped archive to 26,534,136 bytes, 25.30 MiB, and 703
+  members.
 - `mariadb/sql/item_create.cc` registers Oracle compatibility aliases such as
   `DECODE_ORACLE`, `LPAD_ORACLE`, `RTRIM_ORACLE`, `SUBSTR_ORACLE`, and
   `CONCAT_OPERATOR_ORACLE`, and builds a separate
@@ -472,6 +483,14 @@ stub, guards TLS branches in shared VIO/client helpers, makes inherited
 `mysql_ssl_set()` calls fail closed, and lets first-party linked MyLite
 artifacts omit `OpenSSL::SSL`.
 
+The embedded archive omits replication execution system-variable registration
+by setting `MYLITE_WITH_REPLICATION_EXEC_SYSVARS=0` in the MyLite baseline. The
+option defaults to `ON` so normal MariaDB builds keep upstream variable
+registration. The disabled profile removes variable rows for the guarded
+replication execution, slave protocol, checksum, replication-event, and
+semi-sync variables while keeping compatibility variables such as `@@log_bin=0`
+available.
+
 The wrapper keeps this behavior enabled by default because it is the
 distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
 need an unstripped archive for local inspection.
@@ -503,7 +522,10 @@ keeping MariaDB error numbers,
 SQLSTATEs, and common diagnostics available. Dynamic plugin shared-object
 loading and the corresponding dynamic service injection table are compiled out
 of the default embedded archive, while static built-in plugins, native engines,
-and provider fallback services remain available.
+and provider fallback services remain available. VIO TLS transport is replaced
+with a disabled embedded stub. Replication execution, slave protocol,
+replication-event, checksum, and semi-sync system-variable registrations are
+compiled out while retained shared replication helpers remain available.
 
 ## Compatibility Impact
 
@@ -534,6 +556,9 @@ and verifies that no binlog or relay-log sidecars are created. The no-binlog
 core keeps supported DDL, DML, transactions, crash/reopen behavior, and native
 engine coverage intact. Omitting the injector root does not affect supported
 SQL because it is only used by the unsupported server topology runtime.
+Omitting the guarded replication execution system variables only removes
+configuration rows for unsupported topology behavior; common compatibility
+variables such as `@@log_bin=0` remain available.
 `PROCEDURE ANALYSE()` is a legacy diagnostic SELECT extension. Omitting it does
 not affect ordinary SELECT execution, DDL, DML, native storage engines, JSON,
 GEOMETRY/GIS, or the public C API.
@@ -709,6 +734,11 @@ Omitting VIO TLS transport brings the current archive to 26,536,112 bytes /
 Schema disabled, 6,593,528 bytes smaller than the symbol-stripped baseline
 with Performance Schema still built, and 7,306,208 bytes smaller than the
 original broad archive.
+Omitting replication execution system variables brings the current archive to
+26,534,136 bytes / 25.30 MiB, 4,995,568 bytes smaller than the Release build
+with Performance Schema disabled, 6,595,504 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 7,308,184
+bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -753,6 +783,10 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   `viossl.c.o` and `viosslfactories.c.o` are absent,
   `mylite_viossl_disabled.c.o` is present in `libmariadbd.a`, and
   first-party linked embedded artifacts do not depend on `libssl`.
+- Confirm `MYLITE_WITH_REPLICATION_EXEC_SYSVARS=OFF` appears in the embedded
+  CMake cache, direct and prepared `@@slave_type_conversions` lookups fail with
+  unknown-system-variable errno, and `SHOW VARIABLES` does not expose
+  `slave_type_conversions` or `rpl_semi_sync_master_enabled`.
 - Run `cmake --build --preset dev`.
 - Run `ctest --preset dev --output-on-failure`.
 - Run `cmake --build --preset embedded-dev`.
@@ -789,7 +823,8 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
 - Replication and binlog command families remain rejected, `@@log_bin=0`
   remains covered, no binlog/relay-log sidecars are created, and the embedded
   archive omits the active binlog transaction/event core plus the unsupported
-  injector root.
+  injector root. The guarded replication execution system variables are omitted
+  from `SHOW VARIABLES` and `@@` lookup in the default embedded profile.
 - Process-list SHOW commands are rejected, the process-list Information Schema
   table returns zero rows, and the embedded archive omits process-list row
   producers.

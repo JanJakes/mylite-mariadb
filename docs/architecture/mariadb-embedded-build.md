@@ -52,6 +52,8 @@ MYLITE_WITH_OPTIMIZER_TRACE=OFF
 MYLITE_WITH_PROCESSLIST_METADATA=OFF
 MYLITE_WITH_FOREIGN_SERVER_METADATA=OFF
 MYLITE_WITH_BACKUP_RUNTIME=OFF
+MYLITE_WITH_VIO_TLS=OFF
+MYLITE_WITH_REPLICATION_EXEC_SYSVARS=OFF
 ```
 
 `CMAKE_BUILD_TYPE=MinSizeRel` makes the embedded MariaDB archive optimize for
@@ -99,7 +101,12 @@ omits foreign-server metadata behind `MYLITE_WITH_FOREIGN_SERVER_METADATA=0`;
 rejected because they persist remote-server definitions in `mysql.servers`. It
 omits the external backup runtime behind `MYLITE_WITH_BACKUP_RUNTIME=0`;
 `BACKUP STAGE`, `BACKUP LOCK`, and `BACKUP UNLOCK` are rejected while ordinary
-DDL backup hooks remain inert. It
+DDL backup hooks remain inert. It omits VIO TLS transport behind
+`MYLITE_WITH_VIO_TLS=0` because the core embedded profile has no socket or
+network handshake. It omits replication execution, slave protocol, replication
+event, checksum, and semi-sync system variables behind
+`MYLITE_WITH_REPLICATION_EXEC_SYSVARS=0`; compatibility variables such as
+`@@log_bin=0` remain covered. It
 omits Oracle compatibility function aliases and
 `oracle_schema` routing behind `MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS=0`, while
 ordinary MySQL/MariaDB string functions remain available. It uses a compact
@@ -133,8 +140,8 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,548,408 bytes / 25.32 MiB |
-| Archive members | 704 |
+| Archive size | 26,534,136 bytes / 25.30 MiB |
+| Archive members | 703 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
 32.27 MiB. With `MinSizeRel`, the unused Performance Schema static plugin
@@ -168,8 +175,11 @@ archive to 27,180,312 bytes / 25.92 MiB. Omitting process-list metadata
 producers reduces the pre-strip archive to 27,140,408 bytes / 25.88 MiB.
 Omitting foreign-server metadata reduces the pre-strip archive to 27,124,416
 bytes / 25.87 MiB. Omitting the external backup runtime reduces the pre-strip
-archive to 27,118,776 bytes / 25.86 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 570,368 bytes
+archive to 27,118,776 bytes / 25.86 MiB. Omitting VIO TLS transport reduces the
+pre-strip archive to 27,106,496 bytes / 25.85 MiB. Omitting replication
+execution system variables reduces the pre-strip archive to 27,104,488 bytes /
+25.85 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 570,352 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -196,10 +206,12 @@ foreign-server metadata saves 15,344 bytes with no member-count change.
 Omitting the external backup runtime saves 5,520 bytes with no member-count
 change. Omitting VIO TLS transport saves 12,296 bytes and one archive member,
 and removes the linked `libssl` dependency from first-party embedded test
-artifacts while keeping `libcrypto` for retained SQL crypto functions.
-The final archive is 4,993,592 bytes smaller than the Release build with
-Performance Schema disabled, 6,593,528 bytes smaller than the symbol-stripped
-baseline that still built Performance Schema, and 7,306,208 bytes smaller than
+artifacts while keeping `libcrypto` for retained SQL crypto functions. Omitting
+replication execution system variables saves 1,976 bytes with no member-count
+change.
+The final archive is 4,995,568 bytes smaller than the Release build with
+Performance Schema disabled, 6,595,504 bytes smaller than the symbol-stripped
+baseline that still built Performance Schema, and 7,308,184 bytes smaller than
 the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
@@ -252,6 +264,9 @@ embedded no-binlog paths in `log.cc`, `mysqld.cc`, and transaction-coordinator
 selection are guarded. `log_event.cc`, `log_event_server.cc`, `gtid_index.cc`,
 `rpl_gtid.cc`, and shared helper symbols remain where generic MariaDB logging,
 transaction coordination, or retained parser/runtime code still reference them.
+Replication execution, slave protocol, replication-event, checksum, and
+semi-sync system variables are omitted from the default embedded profile, while
+compatibility variables such as `@@log_bin=0` remain covered.
 `PROCEDURE ANALYSE()` is omitted from the default embedded archive and linked
 to an unsupported stub; ordinary SELECT execution and the generic retained
 SELECT procedure dispatch continue to link. System-variable names, values,
@@ -321,6 +336,7 @@ The baseline explicitly disables:
 - Foreign-server metadata
 - External backup runtime
 - VIO TLS transport
+- Replication execution, slave protocol, and semi-sync system variables
 - Oracle compatibility function aliases and `oracle_schema` routing
 - Full inherited server error-message catalog
 - MariaDB upstream unit-test targets

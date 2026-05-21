@@ -90,6 +90,10 @@ GTID-index update paths are guarded, and the unsupported injector root is
 omitted after link evidence proves it is only needed by the server topology
 runtime. Shared event, GTID-state, and replication utility helpers that
 retained MariaDB code still references remain for narrower review.
+Replication execution, slave protocol, checksum, replication-event, and
+semi-sync system variables are also omitted after policy coverage proves those
+configuration rows belong to unsupported topology behavior; compatibility
+variables such as `@@log_bin=0` remain covered.
 Legacy `PROCEDURE ANALYSE()` support is omitted after policy coverage proves it
 is an obsolete diagnostic SELECT extension rather than application data
 functionality; normal SELECT execution remains supported.
