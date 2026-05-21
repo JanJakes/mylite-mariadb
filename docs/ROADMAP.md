@@ -145,6 +145,9 @@ absent from `SHOW VARIABLES` and `@@` lookup.
 User statistics diagnostics are omitted after coverage proves `userstat`,
 userstat Information Schema tables, and `FLUSH *_STATISTICS` are optional
 server counters rather than application data behavior.
+User-variable diagnostics are omitted after coverage proves the
+`user_variables` plugin only exposes optional `@variable` introspection and
+reset helpers; ordinary `@variable` SQL remains available.
 Oracle compatibility function aliases and `oracle_schema` routing are omitted
 after coverage proves the normal MySQL/MariaDB string functions remain
 available, Oracle-only aliases fail predictably, and `oracle_schema` no

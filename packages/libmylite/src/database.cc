@@ -250,6 +250,10 @@ bool is_unsupported_userstat_diagnostics_statement(
     const SqlPolicyTokens &tokens,
     std::string_view current_schema
 );
+bool is_unsupported_user_variable_diagnostics_statement(
+    const SqlPolicyTokens &tokens,
+    std::string_view current_schema
+);
 bool is_unsupported_statement_profiling_statement(
     const SqlPolicyTokens &tokens,
     std::string_view current_schema
@@ -1175,6 +1179,7 @@ bool is_unsupported_server_surface_sql(std::string_view sql, const std::string &
            is_unsupported_foreign_server_metadata_statement(tokens) ||
            is_unsupported_backup_statement(tokens) ||
            is_unsupported_userstat_diagnostics_statement(tokens, current_schema) ||
+           is_unsupported_user_variable_diagnostics_statement(tokens, current_schema) ||
            is_unsupported_statement_profiling_statement(tokens, current_schema) ||
            is_unsupported_query_cache_statement(tokens) ||
            is_unsupported_query_log_statement(tokens) ||
@@ -1334,6 +1339,31 @@ bool is_unsupported_userstat_diagnostics_statement(
             is_system_variable_qualified_token(tokens, index)) {
             return true;
         }
+    }
+    return false;
+}
+
+bool is_unsupported_user_variable_diagnostics_statement(
+    const SqlPolicyTokens &tokens,
+    std::string_view current_schema
+) {
+    const std::string_view first = identifier_token_at(tokens, 0);
+    const std::string_view second = identifier_token_at(tokens, 1);
+
+    if (has_information_schema_table(tokens, "USER_VARIABLES") ||
+        has_current_schema_table_reference(tokens, "USER_VARIABLES", current_schema)) {
+        return true;
+    }
+    if (token_equals(first, "SHOW")) {
+        return token_equals(second, "USER_VARIABLES");
+    }
+    if (token_equals(first, "FLUSH")) {
+        const std::size_t flush_target_index =
+            token_in(second, "LOCAL", "NO_WRITE_TO_BINLOG") ? 2U : 1U;
+        return identifier_token_equals(
+            identifier_token_at(tokens, flush_target_index),
+            "USER_VARIABLES"
+        );
     }
     return false;
 }

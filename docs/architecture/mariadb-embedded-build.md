@@ -123,8 +123,12 @@ unknown system variable. It omits user statistics diagnostics behind
 `MYLITE_WITH_USERSTAT_DIAGNOSTICS=0`; `userstat` and
 `INFORMATION_SCHEMA.CLIENT_STATISTICS`, `INDEX_STATISTICS`,
 `TABLE_STATISTICS`, and `USER_STATISTICS` are server diagnostic counters, not
-application storage behavior. It omits Oracle compatibility function aliases and
-`oracle_schema` routing behind `MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS=0`, while
+application storage behavior. It omits the `user_variables` Information Schema
+plugin with `PLUGIN_USER_VARIABLES=NO`; local `@variable` SQL remains
+available, but `INFORMATION_SCHEMA.USER_VARIABLES`, `SHOW USER_VARIABLES`, and
+`FLUSH USER_VARIABLES` are omitted as diagnostics. It omits Oracle
+compatibility function aliases and `oracle_schema` routing behind
+`MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS=0`, while
 ordinary MySQL/MariaDB string functions remain available. It uses a compact
 server error-message catalog behind `MYLITE_WITH_FULL_ERROR_MESSAGES=0`;
 MariaDB error numbers and SQLSTATEs remain available, common syntax and
@@ -305,6 +309,9 @@ User statistics diagnostics are omitted from the default embedded profile; the
 `userstat` system variable is absent, userstat Information Schema tables are
 rejected by policy, and ordinary application tables with the same names remain
 usable outside `information_schema`.
+User-variable diagnostics are omitted from the default embedded profile; the
+`user_variables` plugin is absent, diagnostic reads and resets are rejected by
+policy, and ordinary `@variable` SQL remains available.
 `PROCEDURE ANALYSE()` is omitted from the default embedded archive and linked
 to an unsupported stub; ordinary SELECT execution and the generic retained
 SELECT procedure dispatch continue to link. System-variable names, values,

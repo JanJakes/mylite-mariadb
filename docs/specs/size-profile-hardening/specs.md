@@ -290,6 +290,15 @@ storage, or public API behavior.
   `MYLITE_WITH_USERSTAT_DIAGNOSTICS=0` omits the static `USERSTAT` plugin and
   the `userstat` system variable, and reduces the stripped archive to
   26,491,536 bytes, 25.26 MiB, and 702 members.
+- `mariadb/plugin/user_variables/user_variables.cc` declares the optional
+  `INFORMATION_SCHEMA.USER_VARIABLES` plugin plus the reset hook used by
+  `FLUSH USER_VARIABLES`. Core `@variable` SQL behavior stays in retained
+  SQL/session sources such as `item_func.cc`, `session_tracker.cc`, and
+  `sql_class.cc`.
+- Disabling user-variable diagnostics with `PLUGIN_USER_VARIABLES=NO` omits the
+  static `user_variables` plugin, while retaining ordinary `@variable`
+  assignment and reads. The stripped archive is reduced to 26,484,960 bytes,
+  25.26 MiB, and 701 members.
 - `mariadb/sql/item_create.cc` registers Oracle compatibility aliases such as
   `DECODE_ORACLE`, `LPAD_ORACLE`, `RTRIM_ORACLE`, `SUBSTR_ORACLE`, and
   `CONCAT_OPERATOR_ORACLE`, and builds a separate
@@ -554,6 +563,13 @@ system-variable registration. MyLite policy rejects direct and prepared reads
 from the userstat Information Schema tables, `FLUSH *_STATISTICS`, and
 `userstat` system-variable assignment, while ordinary application tables with
 the same names remain valid outside `information_schema`.
+
+The embedded archive omits user-variable diagnostics by setting
+`PLUGIN_USER_VARIABLES=NO` in the MyLite baseline. The disabled profile omits
+the optional `user_variables` Information Schema plugin. MyLite policy rejects
+direct and prepared reads from `INFORMATION_SCHEMA.USER_VARIABLES`, `SHOW
+USER_VARIABLES`, and `FLUSH USER_VARIABLES`, while ordinary `@variable` SQL
+and application tables named `user_variables` remain valid.
 
 Archive stripping stays enabled by default because it is the distributed archive
 profile. Developers can set `STRIP_ARCHIVE=0` when they
@@ -899,6 +915,10 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   cache, `userstat.cc.o` is absent from `libmariadbd.a`, `@@userstat` lookups
   fail with unknown-system-variable errno, and userstat diagnostic SQL is
   rejected by server-surface policy coverage.
+- Confirm `PLUGIN_USER_VARIABLES=NO` appears in the embedded CMake cache,
+  `user_variables.cc.o` is absent from `libmariadbd.a`, ordinary `@variable`
+  SQL still works, and user-variable diagnostic SQL is rejected by
+  server-surface policy coverage.
 - Run `cmake --build --preset dev`.
 - Run `ctest --preset dev --output-on-failure`.
 - Run `cmake --build --preset embedded-dev`.
@@ -943,7 +963,9 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   `SHOW VARIABLES` and `@@` lookup in the default embedded profile. User
   statistics diagnostics are omitted, `userstat` is absent from `SHOW
   VARIABLES` and `@@` lookup, and userstat Information Schema reads plus reset
-  statements are rejected.
+  statements are rejected. User-variable diagnostics are also omitted, ordinary
+  `@variable` SQL remains covered, and user-variable diagnostic reads plus
+  resets are rejected.
 - Process-list SHOW commands are rejected, the process-list Information Schema
   table returns zero rows, and the embedded archive omits process-list row
   producers.

@@ -449,6 +449,10 @@ User statistics diagnostics are omitted as optional server counters:
 `userstat`, the userstat Information Schema tables, and `FLUSH *_STATISTICS`
 are rejected or absent, while ordinary application tables with the same names
 remain usable outside `information_schema`.
+User-variable diagnostics are omitted as optional session introspection:
+`INFORMATION_SCHEMA.USER_VARIABLES`, `SHOW USER_VARIABLES`, and
+`FLUSH USER_VARIABLES` are rejected, while ordinary `@variable` SQL remains
+available.
 Foreign-server metadata is omitted as server-global remote connection
 configuration: `CREATE SERVER`, `ALTER SERVER`, `DROP SERVER`, and
 `SHOW CREATE SERVER` are rejected, and the default embedded archive omits the

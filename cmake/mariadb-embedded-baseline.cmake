@@ -18,6 +18,7 @@ set(WITH_WSREP OFF CACHE BOOL "Disable Galera/wsrep support for the embedded bas
 set(PLUGIN_S3 "NO" CACHE STRING "Disable Aria S3 support for the embedded baseline" FORCE)
 set(PLUGIN_PERFSCHEMA "NO" CACHE STRING "Disable Performance Schema in the embedded baseline" FORCE)
 set(PLUGIN_FEEDBACK "NO" CACHE STRING "Disable MariaDB feedback reporting in the embedded baseline" FORCE)
+set(PLUGIN_USER_VARIABLES "NO" CACHE STRING "Disable user-variable diagnostics in the embedded baseline" FORCE)
 set(ENABLED_PROFILING OFF CACHE BOOL "Disable statement profiling in the embedded baseline" FORCE)
 set(MYLITE_WITH_BINLOG_CORE OFF CACHE BOOL "Disable binary log runtime core in the embedded baseline" FORCE)
 set(MYLITE_WITH_QUERY_LOGS OFF CACHE BOOL "Disable general and slow query log runtime in the embedded baseline" FORCE)

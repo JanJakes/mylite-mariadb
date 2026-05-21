@@ -54,6 +54,7 @@ static void assert_system_variable_help_text_omitted(mylite_db *db);
 static void assert_status_variables_omitted(mylite_db *db);
 static void assert_processlist_metadata_omitted(mylite_db *db);
 static void assert_userstat_diagnostics_omitted(mylite_db *db);
+static void assert_user_variable_diagnostics_omitted(mylite_db *db);
 static void assert_oracle_compat_functions_omitted(mylite_db *db);
 static void assert_compact_error_catalog(mylite_db *db);
 static void assert_performance_schema_omitted_or_disabled(mylite_db *db);
@@ -123,6 +124,7 @@ static void test_server_surfaces_are_disabled_or_contained(void) {
     assert_status_variables_omitted(db);
     assert_processlist_metadata_omitted(db);
     assert_userstat_diagnostics_omitted(db);
+    assert_user_variable_diagnostics_omitted(db);
     assert_oracle_compat_functions_omitted(db);
     assert_compact_error_catalog(db);
     assert_server_sql_rejected(db);
@@ -410,6 +412,53 @@ static void assert_userstat_diagnostics_omitted(mylite_db *db) {
     assert(mylite_mariadb_errno(db) == 1193U);
 }
 
+static void assert_user_variable_diagnostics_omitted(mylite_db *db) {
+    static const char *const user_variable_columns[] = {"user_variable"};
+    static const char *const user_variable_values[] = {"ok"};
+
+    query_expect(
+        db,
+        (expected_query){
+            .sql = "SELECT PLUGIN_NAME "
+                   "FROM INFORMATION_SCHEMA.PLUGINS "
+                   "WHERE PLUGIN_NAME = 'user_variables'",
+            .column_count = 1,
+            .row_count = 0,
+            .column_names = NULL,
+            .values = NULL,
+        }
+    );
+
+    exec_ok(db, "SET @mylite_user_variable = 'ok'");
+    query_expect(
+        db,
+        (expected_query){
+            .sql = "SELECT @mylite_user_variable AS user_variable",
+            .column_count = 1,
+            .row_count = 1,
+            .column_names = user_variable_columns,
+            .values = user_variable_values,
+        }
+    );
+
+    expect_error(db, "SHOW USER_VARIABLES", "server-owned SQL surface");
+    expect_error(db, "FLUSH USER_VARIABLES", "server-owned SQL surface");
+    expect_error(db, "FLUSH LOCAL USER_VARIABLES", "server-owned SQL surface");
+    expect_error(
+        db,
+        "SHOW CREATE TABLE INFORMATION_SCHEMA.USER_VARIABLES",
+        "server-owned SQL surface"
+    );
+    expect_error(db, "SELECT * FROM INFORMATION_SCHEMA.USER_VARIABLES", "server-owned SQL surface");
+    expect_prepare_error(db, "SHOW USER_VARIABLES", "server-owned SQL surface");
+    expect_prepare_error(db, "FLUSH USER_VARIABLES", "server-owned SQL surface");
+    expect_prepare_error(
+        db,
+        "SELECT * FROM INFORMATION_SCHEMA.USER_VARIABLES",
+        "server-owned SQL surface"
+    );
+}
+
 static void assert_oracle_compat_functions_omitted(mylite_db *db) {
     static const char *const column_names[] = {
         "concat_value",
@@ -513,6 +562,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SET @query_cache_type = 'local'");
     exec_ok(db, "SET @first_local = 1, @query_cache_limit = 1024");
     exec_ok(db, "SET @userstat = 1");
+    exec_ok(db, "SET @user_variables = 'local'");
     exec_ok(db, "SET @general_log = 1");
     exec_ok(db, "SET @first_log = 1, @slow_query_log = 1");
     exec_ok(db, "SET @optimizer_trace = 'enabled=on'");
@@ -524,6 +574,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SELECT 'INFORMATION_SCHEMA.PROFILING' AS literal");
     exec_ok(db, "SELECT 'INFORMATION_SCHEMA.OPTIMIZER_TRACE' AS literal");
     exec_ok(db, "SELECT 'INFORMATION_SCHEMA.USER_STATISTICS' AS literal");
+    exec_ok(db, "SELECT 'INFORMATION_SCHEMA.USER_VARIABLES' AS literal");
     exec_ok(db, "SELECT 'SHOW PROCESSLIST' AS literal");
     exec_ok(db, "SHOW VARIABLES LIKE 'version'");
 
@@ -735,6 +786,10 @@ static void assert_server_sql_rejected(mylite_db *db) {
         "SELECT * FROM INFORMATION_SCHEMA.TABLE_STATISTICS",
         "server-owned SQL surface"
     );
+    expect_error(db, "SHOW USER_VARIABLES", "server-owned SQL surface");
+    expect_error(db, "FLUSH USER_VARIABLES", "server-owned SQL surface");
+    expect_error(db, "FLUSH NO_WRITE_TO_BINLOG USER_VARIABLES", "server-owned SQL surface");
+    expect_error(db, "SELECT * FROM INFORMATION_SCHEMA.USER_VARIABLES", "server-owned SQL surface");
     expect_error(db, "SET sql_mode = 'ORACLE'", "Oracle SQL mode");
     expect_error(db, "SET @@session.sql_mode = 'ORACLE'", "Oracle SQL mode");
     expect_error(db, "SET STATEMENT sql_mode = 'ORACLE' FOR SELECT 1", "Oracle SQL mode");
@@ -814,6 +869,13 @@ static void assert_server_sql_rejected(mylite_db *db) {
         "SELECT * FROM INFORMATION_SCHEMA.USER_STATISTICS",
         "server-owned SQL surface"
     );
+    expect_prepare_error(db, "SHOW USER_VARIABLES", "server-owned SQL surface");
+    expect_prepare_error(db, "FLUSH USER_VARIABLES", "server-owned SQL surface");
+    expect_prepare_error(
+        db,
+        "SELECT * FROM INFORMATION_SCHEMA.USER_VARIABLES",
+        "server-owned SQL surface"
+    );
     expect_prepare_error(db, "SET sql_mode = 'ORACLE'", "Oracle SQL mode");
     expect_prepare_error(db, "SELECT SFORMAT('{}', 1)", "SFORMAT");
     expect_prepare_error(db, "SELECT 1 PROCEDURE ANALYSE()", "PROCEDURE ANALYSE");
@@ -831,6 +893,8 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SELECT * FROM index_statistics");
     exec_ok(db, "CREATE TABLE table_statistics (id INT)");
     exec_ok(db, "SELECT * FROM table_statistics");
+    exec_ok(db, "CREATE TABLE user_variables (id INT)");
+    exec_ok(db, "SELECT * FROM user_variables");
     exec_ok(db, "USE information_schema");
     expect_error(db, "SELECT * FROM PROFILING", "server-owned SQL surface");
     expect_prepare_error(db, "SELECT * FROM PROFILING", "server-owned SQL surface");
@@ -838,6 +902,8 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_prepare_error(db, "SELECT * FROM OPTIMIZER_TRACE", "server-owned SQL surface");
     expect_error(db, "SELECT * FROM USER_STATISTICS", "server-owned SQL surface");
     expect_prepare_error(db, "SELECT * FROM USER_STATISTICS", "server-owned SQL surface");
+    expect_error(db, "SELECT * FROM USER_VARIABLES", "server-owned SQL surface");
+    expect_prepare_error(db, "SELECT * FROM USER_VARIABLES", "server-owned SQL surface");
     exec_ok(db, "USE app");
     exec_ok(db, "SELECT * FROM profiling");
     exec_ok(db, "SELECT * FROM optimizer_trace");
@@ -845,6 +911,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SELECT * FROM client_statistics");
     exec_ok(db, "SELECT * FROM index_statistics");
     exec_ok(db, "SELECT * FROM table_statistics");
+    exec_ok(db, "SELECT * FROM user_variables");
     exec_ok(db, "EXPLAIN SELECT 1");
     exec_ok(db, "EXPLAIN FORMAT=JSON SELECT 1");
 }
