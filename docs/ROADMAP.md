@@ -104,6 +104,8 @@ Index-root catalog writes now use the same scoped update setup before publishing
 or removing root metadata records.
 Foreign-key metadata writes now use scoped update setup before publishing,
 renaming, or dropping FK catalog records and metadata BLOB pages.
+Durable autoincrement set and advance writes now use scoped update setup before
+resolving table metadata and publishing scalar autoincrement pages.
 Normal read statements now reuse a thread-local unlocked read file handle after
 device/inode validation, reducing repeated `fopen()` overhead without holding
 shared locks between cursor builds. That read handle now stores its device and

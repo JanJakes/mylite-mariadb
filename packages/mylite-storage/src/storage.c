@@ -8001,18 +8001,28 @@ mylite_storage_result mylite_storage_set_auto_increment(
         return MYLITE_STORAGE_MISUSE;
     }
 
-    FILE *file = NULL;
-    mylite_storage_result result = open_existing_file_for_update(filename, &file);
+    mylite_storage_update_file_scope file_scope = {0};
+    mylite_storage_result result = open_existing_file_for_update_scope(filename, &file_scope);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
+    FILE *file = file_scope.file;
+    mylite_storage_statement *active_cache_statement =
+        active_cache_statement_from_statement(file_scope.active_statement);
 
     mylite_storage_header header = {0};
     unsigned long long table_id = 0ULL;
     unsigned long long current_next_value = 0ULL;
-    result = read_header(file, &header);
+    result = read_header_from_update_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
+        result = find_table_id_in_statement(
+            file,
+            &header,
+            active_cache_statement,
+            schema_name,
+            table_name,
+            &table_id
+        );
     }
     if (result == MYLITE_STORAGE_OK) {
         result = latest_auto_increment_value(file, &header, table_id, &current_next_value);
@@ -8021,7 +8031,8 @@ mylite_storage_result mylite_storage_set_auto_increment(
         result = publish_auto_increment_value(file, filename, &header, table_id, next_value);
     }
 
-    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+    if (close_existing_update_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;
@@ -8038,24 +8049,34 @@ mylite_storage_result mylite_storage_advance_auto_increment(
         return MYLITE_STORAGE_MISUSE;
     }
 
-    FILE *file = NULL;
-    mylite_storage_result result = open_existing_file_for_update(filename, &file);
+    mylite_storage_update_file_scope file_scope = {0};
+    mylite_storage_result result = open_existing_file_for_update_scope(filename, &file_scope);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
+    FILE *file = file_scope.file;
+    mylite_storage_statement *active_cache_statement =
+        active_cache_statement_from_statement(file_scope.active_statement);
 
     mylite_storage_header header = {0};
     unsigned long long table_id = 0ULL;
     unsigned long long current_next_value = 0ULL;
-    result = read_header(file, &header);
+    result = read_header_from_update_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
-        result = find_table_id(file, filename, &header, schema_name, table_name, &table_id);
+        result = find_table_id_in_statement(
+            file,
+            &header,
+            active_cache_statement,
+            schema_name,
+            table_name,
+            &table_id
+        );
     }
     if (result == MYLITE_STORAGE_OK) {
         result = latest_auto_increment_value(file, &header, table_id, &current_next_value);
     }
     if (result == MYLITE_STORAGE_OK && next_value <= current_next_value) {
-        if (close_existing_file(file) != MYLITE_STORAGE_OK) {
+        if (close_existing_update_file_scope(&file_scope) != MYLITE_STORAGE_OK) {
             return MYLITE_STORAGE_IOERR;
         }
         return MYLITE_STORAGE_OK;
@@ -8064,7 +8085,8 @@ mylite_storage_result mylite_storage_advance_auto_increment(
         result = publish_auto_increment_value(file, filename, &header, table_id, next_value);
     }
 
-    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+    if (close_existing_update_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     return result;
