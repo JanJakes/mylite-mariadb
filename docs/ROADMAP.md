@@ -408,6 +408,10 @@ lookup on every row-DML execution inside the same transaction.
 Existing active exact-index cache hits now go through a small hot-inline probe
 before falling back to cache creation and seeding, keeping the repeated
 prepared point-lookup path out of the miss-handling wrapper.
+Non-BLOB handler index cursor rows now validate the fixed record length and
+copy directly into the target record buffer, using the opened-handler
+BLOB/TEXT metadata cache and leaving descriptor validation on the existing
+generic row materialization path.
 Reused nested checkpoint objects now skip a second reset when they are taken
 back out of the thread-local reusable slot.
 Reusable nested checkpoint cleanup now clears only lifecycle flags before

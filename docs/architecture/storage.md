@@ -138,6 +138,10 @@ skip live-row cache retargeting because the row remains live under that id.
 Existing active exact-index cache hits use a hot inline probe before the
 storage layer enters the colder cache creation, durable seeding, and
 append-history loading path.
+Handler index cursor reads for non-BLOB rows validate the fixed payload length
+and copy the stored record image directly, using the opened-handler BLOB/TEXT
+metadata cache while BLOB/TEXT rows keep the full descriptor validation and
+retained-payload ownership path.
 Durable row-id, row-payload, exact-index, and published leaf-page caches are
 retargeted after successful row insert, update, and delete when the mutation is
 limited to a known table. Caches for that table are cleared or maintained by the

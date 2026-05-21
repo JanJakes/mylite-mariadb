@@ -1240,7 +1240,7 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
       child_foreign_key_presence(false),
       parent_foreign_key_presence_known(false),
       parent_foreign_key_presence(false), index_cursor_filtered(false),
-      discard_rows(false), volatile_rows(false)
+      discard_rows(false), volatile_rows(false), table_has_blob_fields(false)
 {
   storage_schema_name[0]= '\0';
   storage_table_name[0]= '\0';
@@ -1443,7 +1443,7 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
                                mylite_key_uses_raw_exact_filter(key_info);
   const bool raw_exact_unique_filter=
       raw_exact_filter && (key_info->flags & HA_NOSAME);
-  const bool materialize_index_rows= !mylite_table_has_blob_fields(table);
+  const bool materialize_index_rows= !table_has_blob_fields;
   if (discard_rows)
   {
     index_cursor_number= index_number;
@@ -1774,6 +1774,29 @@ int ha_mylite::read_index_cursor_row(uchar *buf, size_t row_index)
     row_payload= owned_row_payload;
   }
 
+  if (!table_has_blob_fields)
+  {
+    if (row_payload_size != table->s->reclength)
+    {
+      mylite_storage_free(owned_row_payload);
+      DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
+    }
+    memcpy(buf, row_payload, row_payload_size);
+    mylite_storage_free(owned_row_payload);
+
+    size_t slot= 0;
+    int error= record_blob_payload_slot(buf, &slot);
+    if (error)
+      DBUG_RETURN(error);
+
+    mylite_storage_free(record_blob_payloads[slot]);
+    record_blob_payloads[slot]= NULL;
+    record_blob_payloads_size[slot]= 0;
+    index_row_index= row_index;
+    current_row_id= entry->row_id;
+    DBUG_RETURN(0);
+  }
+
   size_t blob_payloads_size= 0;
   int error= mylite_scan_stored_row(table, row_payload, row_payload_size,
                                     &blob_payloads_size);
@@ -1847,7 +1870,7 @@ int ha_mylite::preserve_record_blob_payloads(uchar *buf)
     DBUG_RETURN(error);
 
   /* Joined result evaluation can outlive scan or index cursor buffers. */
-  if (!mylite_table_has_blob_fields(table))
+  if (!table_has_blob_fields)
   {
     mylite_storage_free(record_blob_payloads[slot]);
     record_blob_payloads[slot]= NULL;
@@ -1931,6 +1954,7 @@ int ha_mylite::open(const char *name, int, uint)
   DBUG_ENTER("ha_mylite::open");
 
   clear_foreign_key_presence_cache();
+  table_has_blob_fields= table && mylite_table_has_blob_fields(table);
 
   int path_error= mylite_table_name_from_path(name, storage_schema_name,
                                               sizeof(storage_schema_name),
@@ -1995,6 +2019,7 @@ int ha_mylite::close(void)
   clear_foreign_key_presence_cache();
   discard_rows= false;
   volatile_rows= false;
+  table_has_blob_fields= false;
   DBUG_RETURN(0);
 }
 

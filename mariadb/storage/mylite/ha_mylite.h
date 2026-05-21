@@ -84,6 +84,7 @@ class ha_mylite: public handler
   bool index_cursor_filtered;
   bool discard_rows;
   bool volatile_rows;
+  bool table_has_blob_fields;
 
   Mylite_share *get_share();
   void clear_scan_rows();
