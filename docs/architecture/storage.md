@@ -419,6 +419,8 @@ resolving scalar metadata.
 Residual exact point lookups and broad index-prefix existence scans also close
 or execute through scoped file lifecycles, matching index-specific prefix and
 entryset reads.
+Schema namespace catalog writes use scoped update file/header setup before
+publishing catalog mutations, including the no-op existing-schema path.
 
 File-backed index cursor builds also keep the primary file open across exact
 lookup and row materialization. Primary-key point lookups and secondary exact
