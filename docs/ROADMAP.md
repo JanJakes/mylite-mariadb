@@ -399,6 +399,8 @@ Active exact-index cache-set and row-id probe helpers are now hot-inlined on
 prepared point lookups.
 Exact-index cache sets now keep a validated last-hit descriptor for repeated
 active and durable table/index/key-size probes.
+Prepared point materialization now hot-inlines cached row-payload output helpers
+and avoids refreshing an already-current table-name pointer identity.
 Exact unique index cursor construction now reuses the existing row-materialize
 eligibility flag instead of scanning table fields again for BLOB/TEXT columns
 on prepared point-update reads.

@@ -1094,7 +1094,7 @@ MYLITE_STORAGE_HOT_INLINE int table_entry_cache_names_match(
     const char *schema_name,
     const char *table_name
 );
-static void store_table_entry_cache_name_identity(
+MYLITE_STORAGE_HOT_INLINE void store_table_entry_cache_name_identity(
     mylite_storage_table_entry_cache *cache,
     const char *schema_name,
     const char *table_name
@@ -3353,7 +3353,7 @@ static void remove_active_row_payload(
     unsigned long long table_id,
     unsigned long long row_id
 );
-static mylite_storage_result copy_cached_row_payload(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result copy_cached_row_payload(
     const mylite_storage_row_payload_cache_entry *entry,
     unsigned char **out_row,
     size_t *inout_row_capacity,
@@ -3361,7 +3361,7 @@ static mylite_storage_result copy_cached_row_payload(
     size_t out_row_capacity,
     size_t *out_row_size
 );
-static mylite_storage_result copy_row_payload_to_output_target(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result copy_row_payload_to_output_target(
     const unsigned char *row,
     size_t row_size,
     unsigned char **out_row,
@@ -3370,7 +3370,7 @@ static mylite_storage_result copy_row_payload_to_output_target(
     size_t out_row_capacity,
     size_t *out_row_size
 );
-static mylite_storage_result copy_row_payload_to_output(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result copy_row_payload_to_output(
     const unsigned char *row,
     size_t row_size,
     unsigned char **out_row,
@@ -11926,11 +11926,18 @@ MYLITE_STORAGE_HOT_INLINE int table_entry_cache_names_match(
            strcmp(cache->table_name, table_name) == 0;
 }
 
-static void store_table_entry_cache_name_identity(
+MYLITE_STORAGE_HOT_INLINE void store_table_entry_cache_name_identity(
     mylite_storage_table_entry_cache *cache,
     const char *schema_name,
     const char *table_name
 ) {
+    if (cache->has_name_identity && active_table_name_identity_active &&
+        cache->schema_name_identity == schema_name && cache->table_name_identity == table_name &&
+        active_table_name_identity_schema == schema_name &&
+        active_table_name_identity_table == table_name) {
+        return;
+    }
+
     cache->schema_name_identity = NULL;
     cache->table_name_identity = NULL;
     cache->has_name_identity = 0;
@@ -24033,7 +24040,7 @@ static void remove_active_row_payload(
     }
 }
 
-static mylite_storage_result copy_cached_row_payload(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result copy_cached_row_payload(
     const mylite_storage_row_payload_cache_entry *entry,
     unsigned char **out_row,
     size_t *inout_row_capacity,
@@ -24052,7 +24059,7 @@ static mylite_storage_result copy_cached_row_payload(
     );
 }
 
-static mylite_storage_result copy_row_payload_to_output_target(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result copy_row_payload_to_output_target(
     const unsigned char *row,
     size_t row_size,
     unsigned char **out_row,
@@ -24076,7 +24083,7 @@ static mylite_storage_result copy_row_payload_to_output_target(
     return copy_row_payload_to_output(row, row_size, out_row, inout_row_capacity, out_row_size);
 }
 
-static mylite_storage_result copy_row_payload_to_output(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result copy_row_payload_to_output(
     const unsigned char *row,
     size_t row_size,
     unsigned char **out_row,
