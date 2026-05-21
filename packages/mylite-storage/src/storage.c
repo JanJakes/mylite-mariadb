@@ -3241,6 +3241,11 @@ static mylite_storage_result retarget_exact_index_cache_entries_by_row_id(
     unsigned long long old_row_id,
     unsigned long long new_row_id
 );
+static mylite_storage_result replace_exact_index_cache_key_by_row_id(
+    mylite_storage_exact_index_cache *cache,
+    unsigned long long row_id,
+    const unsigned char *key
+);
 static void invalidate_exact_index_caches(const char *filename);
 static void clear_durable_exact_index_caches(const char *filename);
 static void retarget_durable_caches_after_table_mutation_in_statement(
@@ -23513,6 +23518,8 @@ static void replace_active_exact_index_cache_entries_in_statement(
         }
         int cache_entry_matched = 0;
         int cache_entry_changed = 0;
+        size_t cache_entry_match_count = 0U;
+        const mylite_storage_index_entry *matched_index_entry = NULL;
         for (size_t entry_index = 0U; entry_index < index_entry_count; ++entry_index) {
             const mylite_storage_index_entry *index_entry = index_entries + entry_index;
             if (index_entry->index_number != cache->index_number ||
@@ -23520,12 +23527,24 @@ static void replace_active_exact_index_cache_entries_in_statement(
                 continue;
             }
             cache_entry_matched = 1;
+            ++cache_entry_match_count;
+            matched_index_entry = index_entry;
             if (is_index_entry_changed(index_entry_changed, entry_index)) {
                 cache_entry_changed = 1;
-                break;
             }
         }
         if (old_row_id == new_row_id && cache_entry_matched && !cache_entry_changed) {
+            continue;
+        }
+        if (old_row_id == new_row_id && cache_entry_match_count == 1U && cache_entry_changed) {
+            if (replace_exact_index_cache_key_by_row_id(
+                    cache,
+                    old_row_id,
+                    matched_index_entry->key
+                ) != MYLITE_STORAGE_OK) {
+                clear_exact_index_caches(statement);
+                return;
+            }
             continue;
         }
         remove_exact_index_cache_entries_by_row_id(cache, old_row_id);
@@ -23545,6 +23564,83 @@ static void replace_active_exact_index_cache_entries_in_statement(
             }
         }
     }
+}
+
+static mylite_storage_result replace_exact_index_cache_key_by_row_id(
+    mylite_storage_exact_index_cache *cache,
+    unsigned long long row_id,
+    const unsigned char *key
+) {
+    if (cache == NULL || key == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+    if (cache->live_count == 0U) {
+        return append_exact_index_cache_entry(cache, key, row_id);
+    }
+    if (cache->entry_live == NULL ||
+        (!cache->row_id_buckets_valid &&
+         ensure_exact_index_cache_row_id_buckets(cache) != MYLITE_STORAGE_OK)) {
+        remove_exact_index_cache_entries_by_row_id(cache, row_id);
+        return append_exact_index_cache_entry(cache, key, row_id);
+    }
+
+    const size_t bucket_index = exact_index_cache_bucket_for_row_id(cache, row_id);
+    size_t *current = cache->row_id_bucket_heads + bucket_index;
+    size_t matched_entry_index = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+    int removed_duplicate = 0;
+    while (*current != MYLITE_STORAGE_CACHE_BUCKET_EMPTY) {
+        const size_t entry_index = *current;
+        if (entry_index >= cache->count) {
+            clear_exact_index_cache_row_id_buckets(cache);
+            remove_exact_index_cache_entries_by_row_id(cache, row_id);
+            return append_exact_index_cache_entry(cache, key, row_id);
+        }
+
+        size_t *next = cache->row_id_bucket_next + entry_index;
+        if (!cache->entry_live[entry_index]) {
+            *current = *next;
+            *next = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+            continue;
+        }
+        if (cache->row_ids[entry_index] != row_id) {
+            current = next;
+            continue;
+        }
+        if (matched_entry_index == MYLITE_STORAGE_CACHE_BUCKET_EMPTY) {
+            matched_entry_index = entry_index;
+            current = next;
+            continue;
+        }
+
+        *current = *next;
+        *next = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+        if (cache->buckets_valid) {
+            unlink_exact_index_cache_bucket_entry(cache, entry_index);
+        }
+        cache->entry_live[entry_index] = 0U;
+        --cache->live_count;
+        ++cache->dead_count;
+        removed_duplicate = 1;
+    }
+
+    if (matched_entry_index == MYLITE_STORAGE_CACHE_BUCKET_EMPTY) {
+        return append_exact_index_cache_entry(cache, key, row_id);
+    }
+
+    unsigned char *entry_key = cache->keys + (matched_entry_index * cache->key_size);
+    if (!key_bytes_equal(entry_key, key, cache->key_size)) {
+        if (cache->buckets_valid) {
+            unlink_exact_index_cache_bucket_entry(cache, matched_entry_index);
+        }
+        memcpy(entry_key, key, cache->key_size);
+        if (cache->buckets_valid) {
+            link_exact_index_cache_bucket_entry(cache, matched_entry_index);
+        }
+    }
+    if (removed_duplicate) {
+        maybe_compact_exact_index_cache_entries(cache);
+    }
+    return MYLITE_STORAGE_OK;
 }
 
 static void retarget_active_exact_index_cache_entries_in_statement(

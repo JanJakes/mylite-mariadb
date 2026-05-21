@@ -4247,6 +4247,7 @@ static void test_active_exact_index_cache_many_replacements(void) {
                 &final_row_ids[i]
             ) == MYLITE_STORAGE_OK
         );
+        assert(final_row_ids[i] == replacement_row_ids[i]);
     }
     assert_index_entry_lookup(
         filename,
