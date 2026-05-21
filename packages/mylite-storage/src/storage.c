@@ -335,7 +335,10 @@ typedef struct mylite_storage_maintained_index_insert {
 
 typedef struct mylite_storage_maintained_index_insert_plan {
     unsigned char *index_entry_changed;
+    unsigned char inline_index_entry_changed[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES];
     mylite_storage_maintained_index_insert *entries;
+    mylite_storage_maintained_index_insert
+        inline_entries[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES];
     size_t count;
     size_t capacity;
     unsigned long long protected_page_ids[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES];
@@ -356,7 +359,10 @@ typedef struct mylite_storage_maintained_index_update {
 
 typedef struct mylite_storage_maintained_index_update_plan {
     unsigned char *index_entry_changed;
+    unsigned char inline_index_entry_changed[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES];
     mylite_storage_maintained_index_update *entries;
+    mylite_storage_maintained_index_update
+        inline_entries[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES];
     size_t count;
     size_t capacity;
     unsigned long long protected_page_ids[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES];
@@ -1880,6 +1886,7 @@ static int maintained_index_insert_plan_has_root(
     const mylite_storage_maintained_index_insert_plan *plan,
     unsigned long long root_page_id
 );
+static void init_maintained_index_insert_plan(mylite_storage_maintained_index_insert_plan *plan);
 static mylite_storage_result write_maintained_index_root_inserts(
     FILE *file,
     const mylite_storage_header *header,
@@ -1968,6 +1975,7 @@ static int maintained_index_update_plan_has_root(
     const mylite_storage_maintained_index_update_plan *plan,
     unsigned long long root_page_id
 );
+static void init_maintained_index_update_plan(mylite_storage_maintained_index_update_plan *plan);
 static mylite_storage_result write_maintained_index_root_updates(
     FILE *file,
     const mylite_storage_header *header,
@@ -5372,8 +5380,9 @@ mylite_storage_result mylite_storage_append_row_with_index_entries(
     mylite_storage_header header = {0};
     mylite_storage_catalog_image catalog = {0};
     mylite_storage_catalog_entry table_entry = {0};
-    mylite_storage_maintained_index_insert_plan maintained_index_plan = {0};
+    mylite_storage_maintained_index_insert_plan maintained_index_plan;
     unsigned long long table_id = 0ULL;
+    init_maintained_index_insert_plan(&maintained_index_plan);
     result = read_header_from_update_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
         result = read_catalog_image(file, &header, &catalog);
@@ -5490,7 +5499,7 @@ static mylite_storage_result plan_maintained_index_root_inserts(
     size_t index_entry_count,
     mylite_storage_maintained_index_insert_plan *out_plan
 ) {
-    *out_plan = (mylite_storage_maintained_index_insert_plan){0};
+    init_maintained_index_insert_plan(out_plan);
     if (index_entry_count == 0U) {
         return MYLITE_STORAGE_OK;
     }
@@ -5498,10 +5507,14 @@ static mylite_storage_result plan_maintained_index_root_inserts(
         return MYLITE_STORAGE_FULL;
     }
 
-    out_plan->index_entry_changed =
-        (unsigned char *)malloc(index_entry_count * sizeof(*out_plan->index_entry_changed));
-    if (out_plan->index_entry_changed == NULL) {
-        return MYLITE_STORAGE_NOMEM;
+    if (index_entry_count <= MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES) {
+        out_plan->index_entry_changed = out_plan->inline_index_entry_changed;
+    } else {
+        out_plan->index_entry_changed =
+            (unsigned char *)malloc(index_entry_count * sizeof(*out_plan->index_entry_changed));
+        if (out_plan->index_entry_changed == NULL) {
+            return MYLITE_STORAGE_NOMEM;
+        }
     }
     memset(out_plan->index_entry_changed, 1, index_entry_count);
 
@@ -5573,7 +5586,9 @@ static mylite_storage_result plan_maintained_index_root_inserts(
         }
     }
     if (out_plan->count == 0U) {
-        free(out_plan->index_entry_changed);
+        if (out_plan->index_entry_changed != out_plan->inline_index_entry_changed) {
+            free(out_plan->index_entry_changed);
+        }
         out_plan->index_entry_changed = NULL;
     }
     return MYLITE_STORAGE_OK;
@@ -5584,18 +5599,12 @@ static mylite_storage_result append_maintained_index_insert_plan_entry(
     size_t entry_index,
     unsigned long long root_page_id
 ) {
+    if (plan->entries == NULL) {
+        plan->entries = plan->inline_entries;
+        plan->capacity = MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES;
+    }
     if (plan->count == plan->capacity) {
-        const size_t next_capacity = plan->capacity == 0U ? 4U : plan->capacity * 2U;
-        if (next_capacity <= plan->capacity || next_capacity > SIZE_MAX / sizeof(*plan->entries)) {
-            return MYLITE_STORAGE_FULL;
-        }
-        mylite_storage_maintained_index_insert *entries = (mylite_storage_maintained_index_insert *)
-            realloc(plan->entries, next_capacity * sizeof(*plan->entries));
-        if (entries == NULL) {
-            return MYLITE_STORAGE_NOMEM;
-        }
-        plan->entries = entries;
-        plan->capacity = next_capacity;
+        return MYLITE_STORAGE_UNSUPPORTED;
     }
 
     plan->entries[plan->count++] = (mylite_storage_maintained_index_insert){
@@ -5631,6 +5640,15 @@ static int maintained_index_insert_plan_has_root(
         }
     }
     return 0;
+}
+
+static void init_maintained_index_insert_plan(mylite_storage_maintained_index_insert_plan *plan) {
+    plan->index_entry_changed = NULL;
+    plan->entries = NULL;
+    plan->count = 0U;
+    plan->capacity = 0U;
+    plan->protected_page_count = 0U;
+    plan->overflow_root_page_count = 0U;
 }
 
 static mylite_storage_result write_maintained_index_root_inserts(
@@ -5779,9 +5797,14 @@ static mylite_storage_result insert_maintained_index_root_entry(
 }
 
 static void clear_maintained_index_insert_plan(mylite_storage_maintained_index_insert_plan *plan) {
-    free(plan->index_entry_changed);
-    free(plan->entries);
-    *plan = (mylite_storage_maintained_index_insert_plan){0};
+    if (plan->index_entry_changed != NULL &&
+        plan->index_entry_changed != plan->inline_index_entry_changed) {
+        free(plan->index_entry_changed);
+    }
+    if (plan->entries != NULL && plan->entries != plan->inline_entries) {
+        free(plan->entries);
+    }
+    init_maintained_index_insert_plan(plan);
 }
 
 mylite_storage_result mylite_storage_read_rows(
@@ -6444,7 +6467,7 @@ static mylite_storage_result update_row_with_index_entries(
 
     mylite_storage_header header = {0};
     mylite_storage_catalog_image catalog = {0};
-    mylite_storage_maintained_index_update_plan maintained_index_plan = {0};
+    mylite_storage_maintained_index_update_plan maintained_index_plan;
     int has_catalog = 0;
     unsigned long long table_id = 0ULL;
     mylite_storage_row_page old_row_page = {0};
@@ -6453,6 +6476,7 @@ static mylite_storage_result update_row_with_index_entries(
     mylite_storage_row_payload_cache_entry *active_row_payload_entry = NULL;
     unsigned char old_row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     mylite_storage_row_write_position position = {0};
+    init_maintained_index_update_plan(&maintained_index_plan);
     result = read_header_from_update_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
         result = find_table_id_in_statement(
@@ -6723,7 +6747,7 @@ static mylite_storage_result plan_maintained_index_root_updates(
     const unsigned char *index_entry_changed,
     mylite_storage_maintained_index_update_plan *out_plan
 ) {
-    *out_plan = (mylite_storage_maintained_index_update_plan){0};
+    init_maintained_index_update_plan(out_plan);
     if (index_entry_count == 0U) {
         return MYLITE_STORAGE_OK;
     }
@@ -6731,10 +6755,14 @@ static mylite_storage_result plan_maintained_index_root_updates(
         return MYLITE_STORAGE_FULL;
     }
 
-    out_plan->index_entry_changed =
-        (unsigned char *)malloc(index_entry_count * sizeof(*out_plan->index_entry_changed));
-    if (out_plan->index_entry_changed == NULL) {
-        return MYLITE_STORAGE_NOMEM;
+    if (index_entry_count <= MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES) {
+        out_plan->index_entry_changed = out_plan->inline_index_entry_changed;
+    } else {
+        out_plan->index_entry_changed =
+            (unsigned char *)malloc(index_entry_count * sizeof(*out_plan->index_entry_changed));
+        if (out_plan->index_entry_changed == NULL) {
+            return MYLITE_STORAGE_NOMEM;
+        }
     }
     for (size_t i = 0U; i < index_entry_count; ++i) {
         out_plan->index_entry_changed[i] = is_index_entry_changed(index_entry_changed, i) ? 1U : 0U;
@@ -6807,18 +6835,12 @@ static mylite_storage_result append_maintained_index_update_plan_entry(
     size_t entry_index,
     unsigned long long root_page_id
 ) {
+    if (plan->entries == NULL) {
+        plan->entries = plan->inline_entries;
+        plan->capacity = MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES;
+    }
     if (plan->count == plan->capacity) {
-        const size_t next_capacity = plan->capacity == 0U ? 4U : plan->capacity * 2U;
-        if (next_capacity <= plan->capacity || next_capacity > SIZE_MAX / sizeof(*plan->entries)) {
-            return MYLITE_STORAGE_FULL;
-        }
-        mylite_storage_maintained_index_update *entries = (mylite_storage_maintained_index_update *)
-            realloc(plan->entries, next_capacity * sizeof(*plan->entries));
-        if (entries == NULL) {
-            return MYLITE_STORAGE_NOMEM;
-        }
-        plan->entries = entries;
-        plan->capacity = next_capacity;
+        return MYLITE_STORAGE_UNSUPPORTED;
     }
 
     plan->entries[plan->count++] = (mylite_storage_maintained_index_update){
@@ -6840,6 +6862,14 @@ static int maintained_index_update_plan_has_root(
         }
     }
     return 0;
+}
+
+static void init_maintained_index_update_plan(mylite_storage_maintained_index_update_plan *plan) {
+    plan->index_entry_changed = NULL;
+    plan->entries = NULL;
+    plan->count = 0U;
+    plan->capacity = 0U;
+    plan->protected_page_count = 0U;
 }
 
 static mylite_storage_result write_maintained_index_root_updates(
@@ -6904,9 +6934,14 @@ static mylite_storage_result update_maintained_index_root_entry(
 }
 
 static void clear_maintained_index_update_plan(mylite_storage_maintained_index_update_plan *plan) {
-    free(plan->index_entry_changed);
-    free(plan->entries);
-    *plan = (mylite_storage_maintained_index_update_plan){0};
+    if (plan->index_entry_changed != NULL &&
+        plan->index_entry_changed != plan->inline_index_entry_changed) {
+        free(plan->index_entry_changed);
+    }
+    if (plan->entries != NULL && plan->entries != plan->inline_entries) {
+        free(plan->entries);
+    }
+    init_maintained_index_update_plan(plan);
 }
 
 mylite_storage_result mylite_storage_delete_row(

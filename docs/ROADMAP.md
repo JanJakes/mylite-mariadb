@@ -234,7 +234,10 @@ overflow inserts now mark explicit append-tail history on the maintained root,
 record the first fallback index-entry page when known, readers scan that tail
 only while the flag is set, and root-resident deletes refill the root from live
 root-plus-tail entries when they fit again; maintained root mutations now reject
-unprotected dirty-root fallback plans. Root
+unprotected dirty-root fallback plans. Maintained root insert and update
+planning now keeps journal-bounded plan entries and common changed-entry maps
+inline, avoiding tiny per-row heap allocations on hot rooted index mutations.
+Root
 splits, multi-page navigable indexes, and broader transactional maintained
 index mutation remain planned.
 Durable table-local row,
