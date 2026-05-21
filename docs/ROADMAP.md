@@ -139,7 +139,10 @@ metadata inline in the handler, avoiding per-lookup heap allocation on the
 primary-key point-read path, reuse a handler-owned serialized-row scratch
 buffer for fixed-record point lookups, and reuse active table-entry metadata
 for exact cursor builds and row-write table-id resolution while the catalog
-root and generation are unchanged.
+root and generation are unchanged. Active statement, table-entry, and
+row-payload cache lookups now inline their hottest resolution helpers and
+short-circuit identical string identities before falling back to value
+comparison.
 Fixed-width prepared result statements now reuse their result bindings across
 reset/re-execute loops and avoid freeing already-drained results a second time,
 leaving parameter binding/reset semantics as the next prepared-path bottleneck.

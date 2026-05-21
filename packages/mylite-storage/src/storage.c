@@ -925,16 +925,18 @@ static mylite_storage_result close_existing_update_file_scope(
 );
 static mylite_storage_result close_existing_file(FILE *file);
 static void clear_existing_file_error_state(FILE *file);
-static mylite_storage_statement *active_statement_for(const char *filename);
+MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_statement_for(const char *filename);
 static mylite_storage_statement *active_statement_for_any_owner(const char *filename);
 static mylite_storage_statement *active_read_statement_for(const char *filename);
 static mylite_storage_statement *active_read_statement_for_any_owner(const char *filename);
 static mylite_storage_statement *active_read_snapshot_for(const char *filename);
-static mylite_storage_statement *active_cache_statement_for(const char *filename);
-static mylite_storage_statement *active_cache_statement_from_statement(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_cache_statement_for(
+    const char *filename
+);
+MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_cache_statement_from_statement(
     mylite_storage_statement *statement
 );
-static void active_cache_and_append_buffer_from_statement(
+MYLITE_STORAGE_HOT_INLINE void active_cache_and_append_buffer_from_statement(
     mylite_storage_statement *statement,
     mylite_storage_statement **out_cache,
     mylite_storage_statement **out_append_buffer
@@ -942,9 +944,11 @@ static void active_cache_and_append_buffer_from_statement(
 static mylite_storage_statement *active_exact_index_cache_statement_for(const char *filename);
 static mylite_storage_statement *active_live_row_id_cache_statement_for(const char *filename);
 static mylite_storage_statement *active_row_payload_cache_statement_for(const char *filename);
-static mylite_storage_statement *active_statement_for_file(FILE *file);
+MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_statement_for_file(FILE *file);
 static mylite_storage_statement *active_read_statement_for_file(FILE *file);
-static mylite_storage_statement *append_page_buffer_statement_for_file(FILE *file);
+MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *append_page_buffer_statement_for_file(
+    FILE *file
+);
 static void active_statement_and_append_buffer_for_file(
     FILE *file,
     mylite_storage_statement **out_active,
@@ -952,7 +956,7 @@ static void active_statement_and_append_buffer_for_file(
 );
 static int active_statement_has_file(FILE *file);
 static int active_read_statement_has_file(FILE *file);
-static int active_read_snapshot_has_file(FILE *file);
+MYLITE_STORAGE_HOT_INLINE int active_read_snapshot_has_file(FILE *file);
 static int active_transaction_journal_snapshot_has_file(FILE *file);
 static mylite_storage_result begin_checkpoint(
     const char *filename,
@@ -1051,7 +1055,7 @@ static mylite_storage_result write_statement_current_header(mylite_storage_state
 static void clear_statement_chain_catalog_root_caches(mylite_storage_statement *statement);
 static void clear_catalog_root_cache(mylite_storage_statement *statement);
 static void free_statement(mylite_storage_statement *statement);
-static int find_active_table_entry_cache_in_statement(
+MYLITE_STORAGE_HOT_INLINE int find_active_table_entry_cache_in_statement(
     mylite_storage_statement *statement,
     const mylite_storage_header *header,
     const char *schema_name,
@@ -3278,7 +3282,7 @@ static mylite_storage_row_payload_cache *active_row_payload_cache_for_statement(
     const mylite_storage_header *header,
     unsigned long long table_id
 );
-static mylite_storage_row_payload_cache *active_row_payload_cache_for_resolved_statement(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_row_payload_cache *active_row_payload_cache_for_resolved_statement(
     mylite_storage_statement *statement,
     const mylite_storage_header *header,
     unsigned long long table_id
@@ -10808,15 +10812,15 @@ static void clear_existing_file_error_state(FILE *file) {
 #endif
 }
 
-static mylite_storage_statement *active_statement_for(const char *filename) {
+MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_statement_for(const char *filename) {
     if (filename == NULL) {
         return NULL;
     }
 
     for (mylite_storage_statement *statement = active_statement; statement != NULL;
          statement = statement->parent) {
-        if (strcmp(statement->filename, filename) == 0 &&
-            statement->owner == active_context_owner) {
+        if (statement->owner == active_context_owner &&
+            (statement->filename == filename || strcmp(statement->filename, filename) == 0)) {
             return statement;
         }
     }
@@ -10830,7 +10834,7 @@ static mylite_storage_statement *active_statement_for_any_owner(const char *file
 
     for (mylite_storage_statement *statement = active_statement; statement != NULL;
          statement = statement->parent) {
-        if (strcmp(statement->filename, filename) == 0) {
+        if (statement->filename == filename || strcmp(statement->filename, filename) == 0) {
             return statement;
         }
     }
@@ -10844,8 +10848,8 @@ static mylite_storage_statement *active_read_statement_for(const char *filename)
 
     for (mylite_storage_statement *statement = active_read_statement; statement != NULL;
          statement = statement->parent) {
-        if (strcmp(statement->filename, filename) == 0 &&
-            statement->owner == active_context_owner) {
+        if (statement->owner == active_context_owner &&
+            (statement->filename == filename || strcmp(statement->filename, filename) == 0)) {
             return statement;
         }
     }
@@ -10859,7 +10863,7 @@ static mylite_storage_statement *active_read_statement_for_any_owner(const char 
 
     for (mylite_storage_statement *statement = active_read_statement; statement != NULL;
          statement = statement->parent) {
-        if (strcmp(statement->filename, filename) == 0) {
+        if (statement->filename == filename || strcmp(statement->filename, filename) == 0) {
             return statement;
         }
     }
@@ -10874,7 +10878,7 @@ static mylite_storage_statement *active_read_snapshot_for(const char *filename) 
     mylite_storage_statement *snapshot = NULL;
     for (mylite_storage_statement *statement = active_statement; statement != NULL;
          statement = statement->parent) {
-        if (strcmp(statement->filename, filename) != 0) {
+        if (statement->filename != filename && strcmp(statement->filename, filename) != 0) {
             continue;
         }
         if (statement->owner == active_context_owner) {
@@ -10885,7 +10889,9 @@ static mylite_storage_statement *active_read_snapshot_for(const char *filename) 
     return snapshot;
 }
 
-static mylite_storage_statement *active_cache_statement_for(const char *filename) {
+MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_cache_statement_for(
+    const char *filename
+) {
     if (filename == NULL) {
         return NULL;
     }
@@ -10893,15 +10899,15 @@ static mylite_storage_statement *active_cache_statement_for(const char *filename
     mylite_storage_statement *cache_statement = NULL;
     for (mylite_storage_statement *statement = active_statement; statement != NULL;
          statement = statement->parent) {
-        if (strcmp(statement->filename, filename) == 0 &&
-            statement->owner == active_context_owner) {
+        if (statement->owner == active_context_owner &&
+            (statement->filename == filename || strcmp(statement->filename, filename) == 0)) {
             cache_statement = statement;
         }
     }
     return cache_statement;
 }
 
-static mylite_storage_statement *active_cache_statement_from_statement(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_cache_statement_from_statement(
     mylite_storage_statement *statement
 ) {
     mylite_storage_statement *cache_statement = NULL;
@@ -10913,7 +10919,7 @@ static mylite_storage_statement *active_cache_statement_from_statement(
     return cache_statement;
 }
 
-static void active_cache_and_append_buffer_from_statement(
+MYLITE_STORAGE_HOT_INLINE void active_cache_and_append_buffer_from_statement(
     mylite_storage_statement *statement,
     mylite_storage_statement **out_cache,
     mylite_storage_statement **out_append_buffer
@@ -10948,7 +10954,7 @@ static mylite_storage_statement *active_row_payload_cache_statement_for(const ch
     return active_cache_statement_for(filename);
 }
 
-static mylite_storage_statement *active_statement_for_file(FILE *file) {
+MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_statement_for_file(FILE *file) {
     if (file == NULL || active_read_snapshot_has_file(file)) {
         return NULL;
     }
@@ -10976,7 +10982,9 @@ static mylite_storage_statement *active_read_statement_for_file(FILE *file) {
     return NULL;
 }
 
-static mylite_storage_statement *append_page_buffer_statement_for_file(FILE *file) {
+MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *append_page_buffer_statement_for_file(
+    FILE *file
+) {
     if (file == NULL || active_read_snapshot_has_file(file)) {
         return NULL;
     }
@@ -11040,7 +11048,7 @@ static int active_read_statement_has_file(FILE *file) {
     return 0;
 }
 
-static int active_read_snapshot_has_file(FILE *file) {
+MYLITE_STORAGE_HOT_INLINE int active_read_snapshot_has_file(FILE *file) {
     return active_read_snapshot != NULL && active_read_snapshot->file == file;
 }
 
@@ -11554,7 +11562,7 @@ static void reset_reusable_nested_checkpoint_storage(mylite_storage_statement *s
     statement->table_index_root_absence_cache = (mylite_storage_table_index_root_absence_cache){0};
 }
 
-static int find_active_table_entry_cache_in_statement(
+MYLITE_STORAGE_HOT_INLINE int find_active_table_entry_cache_in_statement(
     mylite_storage_statement *statement,
     const mylite_storage_header *header,
     const char *schema_name,
@@ -11569,8 +11577,8 @@ static int find_active_table_entry_cache_in_statement(
     if (!cache->has_entry || cache->schema_name == NULL || cache->table_name == NULL ||
         cache->catalog_root_page != header->catalog_root_page ||
         cache->catalog_generation != header->catalog_generation ||
-        strcmp(cache->schema_name, schema_name) != 0 ||
-        strcmp(cache->table_name, table_name) != 0) {
+        (cache->schema_name != schema_name && strcmp(cache->schema_name, schema_name) != 0) ||
+        (cache->table_name != table_name && strcmp(cache->table_name, table_name) != 0)) {
         return 0;
     }
 
@@ -23370,7 +23378,7 @@ static mylite_storage_row_payload_cache *active_row_payload_cache_for_statement(
     );
 }
 
-static mylite_storage_row_payload_cache *active_row_payload_cache_for_resolved_statement(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_row_payload_cache *active_row_payload_cache_for_resolved_statement(
     mylite_storage_statement *statement,
     const mylite_storage_header *header,
     unsigned long long table_id
@@ -23434,7 +23442,8 @@ static mylite_storage_row_payload_cache *find_active_row_payload_cache(
 ) {
     for (size_t i = 0U; i < caches->count; ++i) {
         mylite_storage_row_payload_cache *cache = caches->entries + i;
-        if (cache->filename != NULL && strcmp(cache->filename, filename) == 0 &&
+        if (cache->filename != NULL &&
+            (cache->filename == filename || strcmp(cache->filename, filename) == 0) &&
             cache->catalog_root_page == header->catalog_root_page &&
             cache->catalog_generation == header->catalog_generation &&
             cache->table_id == table_id) {
