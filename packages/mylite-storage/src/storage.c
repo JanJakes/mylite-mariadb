@@ -4231,18 +4231,19 @@ mylite_storage_result mylite_storage_read_foreign_key_definition(
         .size = sizeof(*out_metadata),
     };
 
-    FILE *file = NULL;
-    mylite_storage_result result = open_existing_file(filename, &file);
+    mylite_storage_file_scope file_scope = {0};
+    mylite_storage_result result = open_existing_file_scope(filename, &file_scope);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
+    FILE *file = file_scope.file;
 
     mylite_storage_header header = {0};
     mylite_storage_catalog_image catalog = {0};
     mylite_storage_catalog_entry entry = {0};
     unsigned char *metadata = NULL;
     size_t metadata_size = 0U;
-    result = read_header(file, &header);
+    result = read_header_from_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
         result = read_catalog_image(file, &header, &catalog);
     }
@@ -4259,7 +4260,8 @@ mylite_storage_result mylite_storage_read_foreign_key_definition(
 
     free(metadata);
     free_catalog_image(&catalog);
-    if (close_existing_file(file) != MYLITE_STORAGE_OK && result == MYLITE_STORAGE_OK) {
+    if (close_existing_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
         result = MYLITE_STORAGE_IOERR;
     }
     if (result != MYLITE_STORAGE_OK) {

@@ -411,6 +411,8 @@ materialization also use scoped file/header setup, so those row-oriented APIs
 reuse active statement views before consulting live-row and row-payload caches.
 Schema/table discovery reads, schema/table listing, and foreign-key listing
 also use scoped file/header setup before reading the catalog image.
+Foreign-key definition reads use the same scoped setup before reading catalog
+records and FK metadata BLOB pages.
 Header validation, index-root metadata, and durable autoincrement metadata
 reads use the same scoped setup before validating catalog/free-list roots or
 resolving scalar metadata.

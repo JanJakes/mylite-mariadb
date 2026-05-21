@@ -92,6 +92,8 @@ materialization now use the same scoped file/header setup before live-row and
 row-payload cache checks.
 Schema/table discovery reads, schema/table listing, and foreign-key listing now
 use the same scoped setup before catalog-image reads.
+Foreign-key definition reads now use the same scoped setup before reading FK
+metadata BLOB pages.
 Header validation, index-root metadata, and durable autoincrement metadata reads
 now use the same scoped setup before scalar metadata resolution.
 Normal read statements now reuse a thread-local unlocked read file handle after
