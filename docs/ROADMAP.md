@@ -148,6 +148,9 @@ lookups. Per-index change predicates and exact-cache bucket resolution now
 inline on the row-DML hot path. Durable row, row-state, and append-only
 index-entry page decoders now validate their existing used-byte checksum shape
 without scanning unused fixed-page tails.
+Cached active update rewrites with one changed index entry now bypass the
+generic changed-index page-ref array and second changed-index loop after the
+existing buffered-shape cache has validated the row/index layout.
 Fixed-width prepared result statements now reuse their result bindings across
 reset/re-execute loops and avoid freeing already-drained results a second time,
 leaving parameter binding/reset semantics as the next prepared-path bottleneck.
