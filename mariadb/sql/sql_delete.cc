@@ -43,6 +43,7 @@
 #include "sql_derived.h"                        // mysql_handle_derived
 #include "key.h"
                                                 // end_read_record
+#include "mylite_schema_hook.h"
 #include "sql_insert.h"          // fix_rownum_pointers
 #include "sql_partition.h"       // make_used_partitions_str
 #ifdef WITH_WSREP
@@ -107,6 +108,11 @@ bool Update_plan::save_explain_data_intern(THD *thd,
                                            Explain_update *explain,
                                            bool is_analyze)
 {
+  const bool collect_explain_details=
+      !mylite_schema_hooks_active() || thd->lex->describe || is_analyze ||
+      (thd->variables.log_slow_verbosity &
+       (LOG_SLOW_VERBOSITY_ENGINE | LOG_SLOW_VERBOSITY_EXPLAIN));
+
   explain->select_type= "SIMPLE";
   explain->table_name.append(table->alias);
   
@@ -181,19 +187,20 @@ bool Update_plan::save_explain_data_intern(THD *thd,
       return 1;
   explain->using_io_buffer= using_io_buffer;
 
-  append_possible_keys(mem_root, explain->possible_keys, table, 
-                       possible_keys);
+  if (collect_explain_details)
+    append_possible_keys(mem_root, explain->possible_keys, table,
+                         possible_keys);
 
   explain->quick_info= NULL;
 
   /* Calculate key_len */
-  if (select && select->quick)
+  if (collect_explain_details && select && select->quick)
   {
     explain->quick_info= select->quick->get_explain(mem_root);
   }
   else
   {
-    if (index != MAX_KEY)
+    if (collect_explain_details && index != MAX_KEY)
     {
       explain->key.set(mem_root, &table->key_info[index],
                        table->key_info[index].key_length);
@@ -201,7 +208,7 @@ bool Update_plan::save_explain_data_intern(THD *thd,
   }
   explain->rows= scanned_rows;
 
-  if (select && select->quick && 
+  if (collect_explain_details && select && select->quick &&
       select->quick->get_type() == QUICK_SELECT_I::QS_TYPE_RANGE)
   {
     explain_append_mrr_info((QUICK_RANGE_SELECT*)select->quick, 

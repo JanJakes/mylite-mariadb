@@ -769,6 +769,11 @@ static void test_stat_free_estimates_keep_secondary_plan(void) {
         "EXPLAIN SELECT id FROM stats_plan_posts WHERE category_id = 5",
         "stats_plan_posts_category"
     );
+    assert_explain_uses_key(
+        db,
+        "EXPLAIN UPDATE stats_plan_posts SET title = 'updated' WHERE category_id = 5",
+        "stats_plan_posts_category"
+    );
     assert_query_single_value(
         db,
         "SELECT COUNT(*) FROM stats_plan_posts WHERE category_id = 5",
