@@ -20,6 +20,7 @@
 #include <mysql/service_thd_mdl.h>
 #include <mysql/service_print_check_msg.h>
 
+#if MYLITE_HAVE_DYNAMIC_PLUGIN_LOADING
 struct st_service_ref {
   const char *name;
   uint version;
@@ -264,6 +265,7 @@ static struct thd_mdl_service_st thd_mdl_handler=
 {
   thd_mdl_context
 };
+#endif /* MYLITE_HAVE_DYNAMIC_PLUGIN_LOADING */
 
 #define DEFINE_warning_function(name, ret) {                                \
   static query_id_t last_query_id= -1;                                      \
@@ -335,6 +337,7 @@ static struct provider_service_lz4_st provider_handler_lz4=
 };
 struct provider_service_lz4_st *provider_service_lz4= &provider_handler_lz4;
 
+#if MYLITE_HAVE_DYNAMIC_PLUGIN_LOADING
 static struct st_service_ref list_of_services[]=
 {
   { "base64_service",              VERSION_base64,              &base64_handler },
@@ -368,3 +371,4 @@ static struct st_service_ref list_of_services[]=
   { "provider_service_lzo",        VERSION_provider_lzo,        &provider_handler_lzo },
   { "provider_service_snappy",     VERSION_provider_snappy,     &provider_handler_snappy }
 };
+#endif /* MYLITE_HAVE_DYNAMIC_PLUGIN_LOADING */

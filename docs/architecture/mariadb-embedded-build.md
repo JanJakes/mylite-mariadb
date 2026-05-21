@@ -43,6 +43,7 @@ MYLITE_WITH_SQL_DIGEST=OFF
 MYLITE_WITH_STATUS_VARIABLES=OFF
 MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS=OFF
 MYLITE_WITH_FULL_ERROR_MESSAGES=OFF
+MYLITE_WITH_DYNAMIC_PLUGIN_LOADING=OFF
 MYLITE_WITH_PROCEDURE_ANALYSE=OFF
 MYLITE_WITH_SYSVAR_HELP_TEXT=OFF
 MYLITE_WITH_STATIC_SHOW_INFO=OFF
@@ -69,9 +70,13 @@ to no-op stubs and reports `@@have_query_cache=NO`. The embedded archive links
 a small Oracle SQL-mode parser stub instead of the generated Oracle parser. It
 also omits the fmtlib-backed `SFORMAT()` SQL function and builds the embedded
 SQL target without C++ exceptions or unwind tables. Dynamic UDF shared-library
-loading is omitted from the embedded archive. The embedded baseline disables
-the active binary-log transaction/event core behind `MYLITE_WITH_BINLOG_CORE=0`
-while preserving the normal MariaDB server build path. It omits the general
+loading is omitted from the embedded archive. Dynamic plugin shared-object
+loading and service injection are omitted behind
+`MYLITE_WITH_DYNAMIC_PLUGIN_LOADING=0`; static built-in plugins and native
+storage engines still initialize, and the embedded profile reports
+`@@have_dynamic_loading=NO`. The embedded baseline disables the active
+binary-log transaction/event core behind `MYLITE_WITH_BINLOG_CORE=0` while
+preserving the normal MariaDB server build path. It omits the general
 and slow query-log runtime behind `MYLITE_WITH_QUERY_LOGS=0`; error logging,
 SQL diagnostics, warnings, and result metadata remain available. It omits
 statement digest normalization behind `MYLITE_WITH_SQL_DIGEST=0`; Performance
@@ -114,7 +119,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,647,312 bytes / 25.41 MiB |
+| Archive size | 26,623,920 bytes / 25.39 MiB |
 | Archive members | 705 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -141,8 +146,10 @@ status-variable publication reduces the pre-strip archive to 27,591,584 bytes /
 26.31 MiB. Omitting Oracle compatibility function aliases and `oracle_schema`
 routing reduces the pre-strip archive to 27,446,520 bytes / 26.18 MiB.
 Using the compact server error-message catalog reduces the pre-strip archive to
-27,220,344 bytes / 25.96 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 573,032 bytes
+27,220,344 bytes / 25.96 MiB. Omitting dynamic plugin shared-object loading
+and service injection reduces the pre-strip archive to 27,195,584 bytes /
+25.94 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 571,664 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -160,10 +167,12 @@ normalization saves 56,480 bytes with no member-count change. Omitting server
 status-variable publication saves 33,200 bytes with no member-count change.
 Omitting Oracle compatibility function aliases and schema routing saves 145,064
 bytes with no member-count change. Using the compact server error-message
-catalog saves 226,176 bytes with no member-count change.
-The final archive is 4,882,392 bytes smaller than the Release build with
-Performance Schema disabled, 6,482,328 bytes smaller than the symbol-stripped
-baseline that still built Performance Schema, and 7,195,008 bytes smaller than
+catalog saves 226,176 bytes with no member-count change. Omitting dynamic
+plugin shared-object loading and service injection saves 24,760 bytes with no
+member-count change.
+The final archive is 4,905,784 bytes smaller than the Release build with
+Performance Schema disabled, 6,505,720 bytes smaller than the symbol-stripped
+baseline that still built Performance Schema, and 7,218,400 bytes smaller than
 the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
@@ -207,6 +216,9 @@ omitted from the embedded archive; normal `CONCAT`, `LPAD`, `RPAD`, `LTRIM`,
 embedded function registry, while ordinary `FORMAT()` remains available.
 Dynamic UDF lookup, execution, and registration are omitted; stored functions
 remain a separate SQL routine surface.
+Dynamic plugin shared-object loading is omitted from the default embedded
+archive; static built-in plugins and native storage engines remain available,
+and the embedded profile reports `@@have_dynamic_loading=NO`.
 The active binary-log transaction/event core is disabled in the default
 embedded archive. `log.cc` and shared binlog/event symbols remain where generic
 MariaDB logging, transaction coordination, or retained parser/runtime code
@@ -253,6 +265,7 @@ The baseline explicitly disables:
 - Oracle SQL mode
 - `SFORMAT()`
 - Dynamic UDF shared-library loading
+- Dynamic plugin shared-object loading
 - Active binary-log transaction/event core
 - `PROCEDURE ANALYSE()`
 - System-variable help text

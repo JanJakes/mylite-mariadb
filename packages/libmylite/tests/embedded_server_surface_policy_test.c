@@ -163,8 +163,20 @@ static void assert_runtime_policy_variables(mylite_db *db, const char *database_
         "slow_query_log",
         "log_output",
         "max_digest_length",
+        "have_dynamic_loading",
     };
-    static const char *const variable_values[] = {"0", "NO", "NO", "1", "1", "0", "0", "NONE", "0"};
+    static const char *const variable_values[] = {
+        "0",
+        "NO",
+        "NO",
+        "1",
+        "1",
+        "0",
+        "0",
+        "NONE",
+        "0",
+        "NO",
+    };
     const int variable_column_count = (int)(sizeof(variable_columns) / sizeof(variable_columns[0]));
     char *plugin_directory = path_join(database_path, "run/plugins");
 
@@ -180,7 +192,8 @@ static void assert_runtime_policy_variables(mylite_db *db, const char *database_
                    "@@general_log AS general_log, "
                    "@@slow_query_log AS slow_query_log, "
                    "@@log_output AS log_output, "
-                   "@@max_digest_length AS max_digest_length",
+                   "@@max_digest_length AS max_digest_length, "
+                   "@@have_dynamic_loading AS have_dynamic_loading",
             .column_count = variable_column_count,
             .row_count = 1,
             .column_names = variable_columns,

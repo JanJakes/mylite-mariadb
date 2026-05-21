@@ -92,6 +92,10 @@
 #define MYLITE_WITH_STATUS_VARIABLES 1
 #endif
 
+#ifndef MYLITE_WITH_DYNAMIC_PLUGIN_LOADING
+#define MYLITE_WITH_DYNAMIC_PLUGIN_LOADING 1
+#endif
+
 #ifdef HAVE_OPENSSL
 #include <ssl_compat.h>
 #endif
@@ -8097,7 +8101,7 @@ static int mysql_init_variables(void)
 #else
   have_openssl= have_ssl= SHOW_OPTION_NO;
 #endif
-#ifdef HAVE_DLOPEN
+#if defined(HAVE_DLOPEN) && MYLITE_WITH_DYNAMIC_PLUGIN_LOADING
   have_dlopen=SHOW_OPTION_YES;
 #else
   have_dlopen=SHOW_OPTION_NO;

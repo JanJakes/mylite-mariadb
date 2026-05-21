@@ -220,6 +220,16 @@ behavior when MariaDB errno and SQLSTATE remain available.
   use a generic placeholder-free message while MariaDB errno and SQLSTATE
   remain available. The stripped archive is reduced to 26,647,312 bytes, 25.41
   MiB, and 705 members.
+- `mariadb/sql/sql_plugin.cc` owns dynamic plugin shared-object loading,
+  `--plugin-load`, `mysql.plugin` loading, `dlopen()` declaration discovery,
+  and service pointer injection. `mariadb/sql/mysqld.cc` reports
+  `@@have_dynamic_loading` from `HAVE_DLOPEN`.
+- Disabling dynamic plugin loading behind
+  `MYLITE_WITH_DYNAMIC_PLUGIN_LOADING=0` omits the runtime shared-object
+  loader and dynamic service table while keeping static built-in plugins,
+  native storage engines, and compression-provider fallback services available.
+  The embedded profile reports `@@have_dynamic_loading=NO`. The stripped
+  archive is reduced to 26,623,920 bytes, 25.39 MiB, and 705 members.
 
 ## Proposed Design
 
@@ -277,6 +287,15 @@ The compact profile registers the same error ranges and keeps common
 MyLite-facing format strings, but maps less common inherited server errors to
 a generic placeholder-free message. MariaDB errno and SQLSTATE remain the
 stable compatibility surfaces.
+
+The embedded archive omits dynamic plugin shared-object loading by setting
+`MYLITE_WITH_DYNAMIC_PLUGIN_LOADING=0` in the MyLite baseline. The option
+defaults to `ON` so normal MariaDB server builds keep upstream dynamic plugin
+loading. The disabled profile keeps static built-in plugin registration and
+initialization, keeps native storage engines available, and keeps provider
+fallback services used by retained engine code. `INSTALL PLUGIN` and
+`UNINSTALL PLUGIN` remain rejected by policy coverage, and
+`@@have_dynamic_loading=NO` records the runtime contract.
 
 The embedded SQL function registry omits `SFORMAT()` and the embedded
 `item_strfunc.cc` build excludes the fmtlib-backed implementation. With the
@@ -397,7 +416,10 @@ inert digest helper symbols, and per-session digest token buffers are disabled
 at startup. Server status-variable publication arrays and dynamic registry
 updates are compiled to empty embedded paths. The embedded English server
 error-message catalog is compacted while keeping MariaDB error numbers,
-SQLSTATEs, and common diagnostics available.
+SQLSTATEs, and common diagnostics available. Dynamic plugin shared-object
+loading and the corresponding dynamic service injection table are compiled out
+of the default embedded archive, while static built-in plugins, native engines,
+and provider fallback services remain available.
 
 ## Compatibility Impact
 
@@ -466,6 +488,10 @@ does not change MariaDB errno, SQLSTATE, SQL execution, prepared statements,
 warnings, result metadata, JSON, GEOMETRY/GIS, native storage engines, DDL,
 DML, or the public C API. Common syntax-error and duplicate-key text remains
 covered; less common inherited server errors may return generic text.
+Dynamic plugin loading is already outside the embedded core API. Omitting the
+shared-object loader does not affect static built-in plugins, native storage
+engines, SQL parsing, DDL, DML, prepared statements, diagnostics, result
+metadata, JSON, or GEOMETRY/GIS.
 
 ## Database-Directory And Lifecycle Impact
 
@@ -473,7 +499,9 @@ Runtime directory layout, storage files, temporary files, and lock behavior are
 unchanged. Query-log omission removes inherited daemon log-file output rather
 than adding any database-directory companions. Statement digest trimming only
 removes in-memory diagnostic collection and token buffers. Status-variable
-trimming only removes in-memory diagnostic publication.
+trimming only removes in-memory diagnostic publication. Dynamic plugin loading
+trimming does not remove the transient database-local plugin directory because
+retained MariaDB startup code still expects the directory setting.
 
 ## Public API Impact
 
@@ -561,6 +589,21 @@ Omitting server status-variable publication brings the current archive to
 with Performance Schema disabled, 6,123,680 bytes smaller than the
 symbol-stripped baseline with Performance Schema still built, and 6,836,360
 bytes smaller than the original broad archive.
+Omitting Oracle compatibility function aliases and `oracle_schema` routing
+brings the current archive to 26,861,088 bytes / 25.62 MiB, 4,668,616 bytes
+smaller than the Release build with Performance Schema disabled, 6,268,552
+bytes smaller than the symbol-stripped baseline with Performance Schema still
+built, and 6,981,232 bytes smaller than the original broad archive.
+Using the compact server error-message catalog brings the current archive to
+26,647,312 bytes / 25.41 MiB, 4,882,392 bytes smaller than the Release build
+with Performance Schema disabled, 6,482,328 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 7,195,008
+bytes smaller than the original broad archive.
+Omitting dynamic plugin shared-object loading and service injection brings the
+current archive to 26,623,920 bytes / 25.39 MiB, 4,905,784 bytes smaller than
+the Release build with Performance Schema disabled, 6,505,720 bytes smaller
+than the symbol-stripped baseline with Performance Schema still built, and
+7,218,400 bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -583,6 +626,9 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Confirm `MYLITE_WITH_STATUS_VARIABLES=OFF` appears in the embedded CMake
   cache, and direct and prepared `SHOW STATUS` plus status Information Schema
   reads return empty rows through server-surface policy coverage.
+- Confirm `MYLITE_WITH_DYNAMIC_PLUGIN_LOADING=OFF` appears in the embedded
+  CMake cache, `@@have_dynamic_loading=NO` is covered by server-surface policy
+  coverage, and plugin SQL remains rejected.
 - Run `cmake --build --preset dev`.
 - Run `ctest --preset dev --output-on-failure`.
 - Run `cmake --build --preset embedded-dev`.
@@ -646,6 +692,9 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
   embedded archive, MariaDB errno and SQLSTATE remain available, syntax-error
   and duplicate-key diagnostics remain readable, and uncommon inherited server
   errors have a tested generic fallback.
+- Dynamic plugin shared-object loading is omitted from the default embedded
+  archive, `@@have_dynamic_loading=NO` is covered, static built-in plugins and
+  native storage engines still initialize, and plugin SQL remains rejected.
 - The stripped archive still links `libmylite` and all embedded tests.
 - The measured archive size and member count are recorded in the build
   documentation.
@@ -695,3 +744,7 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
   inherited errors may see generic message text in the default embedded
   profile. MariaDB errno and SQLSTATE remain the stable compatibility
   surfaces, and common MyLite-facing messages remain covered.
+- Users relying on external MariaDB shared-object plugins cannot load them
+  through the default embedded archive. Static built-in plugins and native
+  storage engines remain available; external plugin loading requires a custom
+  build profile or future adapter.

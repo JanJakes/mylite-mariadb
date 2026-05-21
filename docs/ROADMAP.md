@@ -120,6 +120,10 @@ longer acts as a built-in compatibility schema.
 The full server error-message catalog is compacted after coverage proves
 MariaDB error numbers, SQLSTATEs, syntax-error messages, duplicate-key
 messages, and generic fallback diagnostics remain available.
+Dynamic plugin shared-object loading is omitted after policy coverage proves
+plugin SQL is outside the core API; static built-in plugins and native storage
+engines remain available, and `@@have_dynamic_loading=NO` records the embedded
+runtime contract.
 Compatibility-sensitive code removals require separate evidence before they
 are accepted.
 

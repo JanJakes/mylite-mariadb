@@ -42,6 +42,16 @@
 #include "sql_plugin_compat.h"
 #include "wsrep_mysqld.h"
 
+#ifndef MYLITE_WITH_DYNAMIC_PLUGIN_LOADING
+#define MYLITE_WITH_DYNAMIC_PLUGIN_LOADING 1
+#endif
+
+#if defined(HAVE_DLOPEN) && MYLITE_WITH_DYNAMIC_PLUGIN_LOADING
+#define MYLITE_HAVE_DYNAMIC_PLUGIN_LOADING 1
+#else
+#define MYLITE_HAVE_DYNAMIC_PLUGIN_LOADING 0
+#endif
+
 static PSI_memory_key key_memory_plugin_mem_root;
 static PSI_memory_key key_memory_plugin_int_mem_root;
 static PSI_memory_key key_memory_mysql_plugin;
@@ -155,7 +165,7 @@ static int plugin_type_initialization_order[MYSQL_MAX_PLUGIN_TYPE_NUM]=
   MYSQL_UDF_PLUGIN
 };
 
-#ifdef HAVE_DLOPEN
+#if MYLITE_HAVE_DYNAMIC_PLUGIN_LOADING
 static const char *plugin_interface_version_sym=
                    "_mysql_plugin_interface_version_";
 static const char *sizeof_st_plugin_sym=
@@ -335,8 +345,10 @@ public:
 
 
 /* prototypes */
+#if MYLITE_HAVE_DYNAMIC_PLUGIN_LOADING
 static void plugin_load(MEM_ROOT *tmp_root);
 static bool plugin_load_list(MEM_ROOT *, const char *);
+#endif
 static int test_plugin_options(MEM_ROOT *, struct st_plugin_int *,
                                int *, char **);
 static bool register_builtin(struct st_maria_plugin *, struct st_plugin_int *,
@@ -457,7 +469,7 @@ static int item_val_real(struct st_mysql_value *value, double *buf)
   Plugin support code
 ****************************************************************************/
 
-#ifdef HAVE_DLOPEN
+#if MYLITE_HAVE_DYNAMIC_PLUGIN_LOADING
 
 static struct st_plugin_dl *plugin_dl_find(const LEX_CSTRING *dl)
 {
@@ -499,16 +511,16 @@ static st_plugin_dl *plugin_dl_insert_or_reuse(struct st_plugin_dl *plugin_dl)
   DBUG_RETURN(tmp);
 }
 #else
-static struct st_plugin_dl *plugin_dl_find(const LEX_STRING *)
+static struct st_plugin_dl *plugin_dl_find(const LEX_CSTRING *)
 {
   return 0;
 }
-#endif /* HAVE_DLOPEN */
+#endif /* MYLITE_HAVE_DYNAMIC_PLUGIN_LOADING */
 
 
 static void free_plugin_mem(struct st_plugin_dl *p)
 {
-#ifdef HAVE_DLOPEN
+#if MYLITE_HAVE_DYNAMIC_PLUGIN_LOADING
   if (p->ptr_backup)
   {
     DBUG_ASSERT(p->nbackups);
@@ -537,7 +549,7 @@ static void free_plugin_mem(struct st_plugin_dl *p)
   @retval TRUE  ERROR
 */
 
-#ifdef HAVE_DLOPEN
+#if MYLITE_HAVE_DYNAMIC_PLUGIN_LOADING
 static my_bool read_mysql_plugin_info(struct st_plugin_dl *plugin_dl,
                                       void *sym, char *dlpath, myf MyFlags)
 {
@@ -736,11 +748,11 @@ static my_bool read_maria_plugin_info(struct st_plugin_dl *plugin_dl,
 
   DBUG_RETURN(FALSE);
 }
-#endif /* HAVE_DLOPEN */
+#endif /* MYLITE_HAVE_DYNAMIC_PLUGIN_LOADING */
 
 static st_plugin_dl *plugin_dl_add(const LEX_CSTRING *dl, myf MyFlags)
 {
-#ifdef HAVE_DLOPEN
+#if MYLITE_HAVE_DYNAMIC_PLUGIN_LOADING
   char dlpath[FN_REFLEN];
   size_t plugin_dir_len,i;
   uint dummy_errors;
@@ -875,7 +887,8 @@ ret:
 
 #else
   DBUG_ENTER("plugin_dl_add");
-  my_error(ER_FEATURE_DISABLED, MyFlags, "plugin", "HAVE_DLOPEN");
+  my_error(ER_FEATURE_DISABLED, MyFlags, "plugin",
+           "MYLITE_WITH_DYNAMIC_PLUGIN_LOADING");
   DBUG_RETURN(0);
 #endif
 }
@@ -1590,7 +1603,9 @@ int plugin_init(int *argc, char **argv, int flags)
   MEM_ROOT tmp_root;
   bool reaped_mandatory_plugin= false;
   bool mandatory= true;
+#if MYLITE_HAVE_DYNAMIC_PLUGIN_LOADING
   I_List_iterator<i_string> opt_plugin_load_list_iter(opt_plugin_load_list);
+#endif
   char plugin_table_engine_name_buf[NAME_CHAR_LEN + 1];
   LEX_CSTRING plugin_table_engine_name= { plugin_table_engine_name_buf, 0 };
   LEX_CSTRING MyISAM= { STRING_WITH_LEN("MyISAM") };
@@ -1631,8 +1646,10 @@ int plugin_init(int *argc, char **argv, int flags)
   }
 
   /* prepare debug_sync service */
+#if MYLITE_HAVE_DYNAMIC_PLUGIN_LOADING
   DBUG_ASSERT(strcmp(list_of_services[1].name, "debug_sync_service") == 0);
   list_of_services[1].service= *(void**)&debug_sync_C_callback_ptr;
+#endif
 
   /* prepare encryption_keys service */
   finalize_encryption_plugin(0);
@@ -1710,10 +1727,12 @@ int plugin_init(int *argc, char **argv, int flags)
   mysql_mutex_unlock(&LOCK_plugin);
 
   /* Register (not initialize!) all dynamic plugins */
+#if MYLITE_HAVE_DYNAMIC_PLUGIN_LOADING
   if (global_system_variables.log_warnings >= 9)
     sql_print_information("Initializing plugins specified on the command line");
   while (i_string *item= opt_plugin_load_list_iter++)
     plugin_load_list(&tmp_root, item->ptr);
+#endif
 
   if (!(flags & PLUGIN_INIT_SKIP_PLUGIN_TABLE))
   {
@@ -1803,10 +1822,14 @@ int plugin_init(int *argc, char **argv, int flags)
     if (flags & PLUGIN_INIT_SKIP_PLUGIN_TABLE)
       break;
 
+#if MYLITE_HAVE_DYNAMIC_PLUGIN_LOADING
     mysql_mutex_unlock(&LOCK_plugin);
     plugin_load(&tmp_root);
     flags|= PLUGIN_INIT_SKIP_PLUGIN_TABLE;
     mysql_mutex_lock(&LOCK_plugin);
+#else
+    flags|= PLUGIN_INIT_SKIP_PLUGIN_TABLE;
+#endif
   }
 
   /*
@@ -1876,10 +1899,10 @@ static bool plugin_table_is_valid(TABLE *table)
 }
 
 
+#if MYLITE_HAVE_DYNAMIC_PLUGIN_LOADING
 /*
   called only by plugin_init()
 */
-
 static void plugin_load(MEM_ROOT *tmp_root)
 {
   TABLE_LIST tables;
@@ -2076,6 +2099,7 @@ error:
     sql_print_error("Couldn't load plugins from '%s'.", dl.str);
   DBUG_RETURN(TRUE);
 }
+#endif /* MYLITE_HAVE_DYNAMIC_PLUGIN_LOADING */
 
 
 void plugin_shutdown(void)

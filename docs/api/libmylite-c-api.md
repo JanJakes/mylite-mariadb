@@ -382,7 +382,7 @@ compatibility features that do not fit the embedded library model:
 - network users and authentication,
 - replication, relay log, and binary-log runtime,
 - Galera/wsrep,
-- dynamic plugin installation,
+- dynamic plugin installation and shared-object loading,
 - dynamic UDF shared-library registration,
 - durable storage outside the MyLite database directory,
 - server audit plugins,
@@ -439,10 +439,13 @@ help comments are omitted from the default embedded profile; `SHOW VARIABLES`
 and system-variable values remain available, but
 `INFORMATION_SCHEMA.SYSTEM_VARIABLES.VARIABLE_COMMENT` is empty. Startup
 variables also cover disabled binlog, performance schema, query cache,
-query logging, statement profiling, grant tables, networking, and the transient
-database-local plugin directory. Static `SHOW AUTHORS`, `SHOW CONTRIBUTORS`,
-and `SHOW PRIVILEGES` are rejected as server-information surfaces; ordinary
-supported `SHOW` commands remain available.
+query logging, statement profiling, grant tables, networking,
+`@@have_dynamic_loading=NO`, and the transient database-local plugin directory.
+The default embedded archive omits runtime shared-object plugin loading while
+keeping static built-in plugins and native storage engines available. Static
+`SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES` are rejected as
+server-information surfaces; ordinary supported `SHOW` commands remain
+available.
 
 ## Compatibility Adapter
 
