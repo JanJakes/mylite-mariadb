@@ -92,6 +92,15 @@ ELSE()
   ADD_DEFINITIONS(-DMYLITE_WITH_SELECT_INTO_FILE=0)
 ENDIF()
 
+OPTION(MYLITE_WITH_LOAD_FILE_IMPORTS "Build LOAD DATA/XML host-file imports" ON)
+IF(MYLITE_WITH_LOAD_FILE_IMPORTS)
+  ADD_DEFINITIONS(-DMYLITE_WITH_LOAD_FILE_IMPORTS=1)
+  SET(MYLITE_SQL_LOAD_SOURCE ../sql/sql_load.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_LOAD_FILE_IMPORTS=0)
+  SET(MYLITE_SQL_LOAD_SOURCE ../sql/mylite_sql_load_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_DISABLED_STARTUP_OPTIONS "Build startup options for disabled server subsystems" ON)
 IF(MYLITE_WITH_DISABLED_STARTUP_OPTIONS)
   ADD_DEFINITIONS(-DMYLITE_WITH_DISABLED_STARTUP_OPTIONS=1)
@@ -377,7 +386,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/sql_help.cc ../sql/sql_insert.cc ../sql/datadict.cc
            ../sql/sql_admin.cc ../sql/sql_truncate.cc ../sql/sql_reload.cc
            ../sql/sql_lex.cc ../sql/keycaches.cc
-           ../sql/sql_list.cc ../sql/sql_load.cc ../sql/sql_locale.cc 
+           ../sql/sql_list.cc ${MYLITE_SQL_LOAD_SOURCE} ../sql/sql_locale.cc
            ${MYLITE_SQL_BINLOG_SOURCE} ../sql/sql_manager.cc
            ../sql/sql_parse.cc ../sql/sql_bootstrap.cc
            ../sql/sql_partition.cc ../sql/sql_plugin.cc 

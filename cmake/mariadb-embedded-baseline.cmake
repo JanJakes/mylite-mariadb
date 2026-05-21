@@ -29,6 +29,7 @@ set(MYLITE_WITH_GTID_STATE OFF CACHE BOOL "Disable replication GTID state runtim
 set(MYLITE_WITH_GTID_INDEX OFF CACHE BOOL "Disable binary-log GTID index runtime in the embedded baseline" FORCE)
 set(MYLITE_WITH_SQL_HANDLER OFF CACHE BOOL "Disable SQL HANDLER command runtime in the embedded baseline" FORCE)
 set(MYLITE_WITH_SELECT_INTO_FILE OFF CACHE BOOL "Disable SELECT INTO OUTFILE/DUMPFILE host-file writers in the embedded baseline" FORCE)
+set(MYLITE_WITH_LOAD_FILE_IMPORTS OFF CACHE BOOL "Disable LOAD DATA/XML host-file imports in the embedded baseline" FORCE)
 set(MYLITE_WITH_DISABLED_STARTUP_OPTIONS OFF CACHE BOOL "Disable startup options for disabled server subsystems in the embedded baseline" FORCE)
 set(MYLITE_WITH_QUERY_LOGS OFF CACHE BOOL "Disable general and slow query log runtime in the embedded baseline" FORCE)
 set(MYLITE_WITH_SQL_DIGEST OFF CACHE BOOL "Disable statement digest normalization in the embedded baseline" FORCE)

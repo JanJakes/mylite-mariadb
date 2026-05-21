@@ -68,6 +68,7 @@ surface that does not fit a local directory-owned library:
 - row-replication type conversion,
 - binary-log event parser and reader runtime,
 - host-file SELECT exports,
+- host-file SQL imports,
 - server utility SQL functions,
 - rarely used optional engines or plugins unless a slice justifies them.
 
@@ -119,6 +120,10 @@ execution.
 `SELECT ... INTO OUTFILE` and `SELECT ... INTO DUMPFILE` host-file writers are
 omitted after coverage proves they are server filesystem export surfaces;
 ordinary result delivery and `SELECT ... INTO @variable` remain covered.
+`LOAD DATA` and `LOAD XML` host-file import runtime is omitted after coverage
+proves those statements are server filesystem or client-protocol import
+surfaces; ordinary `INSERT`, prepared bindings, and `INSERT ... SELECT` remain
+covered.
 Server utility SQL functions are omitted after coverage proves benchmarking,
 named locks, host-file reads, replication waits, sleeping, and server-id based
 ID generation are outside the embedded application SQL profile; ordinary scalar

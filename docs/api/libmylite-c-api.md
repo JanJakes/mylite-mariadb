@@ -386,7 +386,8 @@ compatibility features that do not fit the embedded library model:
 - dynamic UDF shared-library registration,
 - durable storage outside the MyLite database directory,
 - server audit plugins,
-- network-protocol `LOAD DATA LOCAL`,
+- host-file SQL imports such as `LOAD DATA`, `LOAD DATA LOCAL`, and
+  `LOAD XML`,
 - PROXY protocol listener support,
 - event scheduler and event metadata commands,
 - performance schema,
@@ -409,8 +410,9 @@ compatibility features that do not fit the embedded library model:
 
 Top-level SQL command families for users, roles, grants, password changes,
 dynamic plugins, events, replication, binlog administration, SQL `HANDLER`,
-host-file SELECT exports, and foreign-server metadata are rejected before
-direct execution or prepared-statement preparation. Replication GTID helper
+host-file SELECT exports, host-file SQL imports, and foreign-server metadata
+are rejected before direct execution or prepared-statement preparation.
+Replication GTID helper
 functions such as `MASTER_GTID_WAIT()`,
 `BINLOG_GTID_POS()`, and `WSREP_SYNC_WAIT_UPTO_GTID()` plus GTID state variable
 assignments are rejected by the same policy. The default embedded profile
@@ -439,6 +441,9 @@ execution.
 `SELECT ... INTO OUTFILE` and `SELECT ... INTO DUMPFILE` host-file writers are
 replaced by disabled embedded methods; ordinary result delivery and
 `SELECT ... INTO @variable` remain available.
+`LOAD DATA` and `LOAD XML` import runtime is replaced by a disabled embedded
+source; applications should load files through application-owned parsing,
+ordinary `INSERT`, prepared bindings, or `INSERT ... SELECT`.
 The default profile omits the `unix_socket` server authentication plugin for
 the same reason; `libmylite` opens a local database directory directly instead
 of authenticating network or socket clients.

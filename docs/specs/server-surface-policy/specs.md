@@ -10,7 +10,9 @@ cache management are also outside the core embedded contract. Some of these
 surfaces can create durable sidecar files or system-table dependencies.
 Dynamic UDF registration is the same kind of server-owned extension surface
 because it loads shared libraries and persists metadata in `mysql.func`. This
-slice makes those boundaries explicit and covered by tests.
+slice makes those boundaries explicit and covered by tests. Later size-profile
+slices also use the same policy for server file imports such as `LOAD DATA` and
+`LOAD XML`.
 
 ## Source Findings
 
@@ -55,6 +57,11 @@ slice makes those boundaries explicit and covered by tests.
   server-side result-cache optimization, keeps `SQL_CACHE` and `SQL_NO_CACHE`
   as no-op SELECT hints, and keeps `@@have_query_cache=NO` in the default
   profile.
+- `mariadb/sql/sql_yacc.yy`, `mariadb/sql/sql_parse.cc`,
+  `mariadb/sql/sql_prepare.cc`, and `mariadb/sql/sql_load.cc` implement
+  `LOAD DATA` and `LOAD XML` file-import statements. MyLite treats them as
+  server filesystem or client-protocol import surfaces outside the core
+  parameter-binding API.
 
 ## Proposed Design
 
@@ -89,6 +96,9 @@ Use two layers:
    replication wait/position helpers, `SLEEP()`, and `UUID_SHORT()`, while
    retained scalar functions such as `VERSION()` and `FORMAT()` remain
    available.
+7. Keep direct and prepared regression coverage for omitted host-file SQL
+   imports such as `LOAD DATA` and `LOAD XML`, while ordinary `INSERT`,
+   prepared bindings, and `INSERT ... SELECT` remain available.
 
 The gate is not a general SQL parser. It is a narrow first-token policy check
 for statement families and explicit mode switches whose MariaDB behavior is
@@ -186,6 +196,9 @@ No new dependencies or license changes.
 - Cover rejected direct and prepared server utility SQL functions after the
   embedded size profile omits them, while keeping retained scalar functions
   executable.
+- Cover rejected direct and prepared `LOAD DATA` and `LOAD XML` after the
+  embedded size profile omits file-import runtime, while keeping ordinary
+  insert paths covered.
 - Cover rejected prepared SQL for at least one server-owned statement family.
 - Assert server-sidecar files and system-table directories are absent.
 - Run:
@@ -223,6 +236,9 @@ No new dependencies or license changes.
 - Server utility SQL functions fail predictably in direct execution and
   prepared statements after the embedded size profile omits them, while
   retained scalar functions remain available.
+- Host-file SQL imports fail predictably in direct execution and prepared
+  statements after the embedded size profile omits them, while ordinary
+  inserts and prepared bindings remain available.
 - MySQL/MariaDB executable comments cannot bypass the server-surface policy.
 - Direct execution and prepared statements share the same policy.
 - Rejected server commands do not create durable server sidecars or system-table

@@ -694,6 +694,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SELECT 'MASTER_POS_WAIT()' AS literal");
     exec_ok(db, "SELECT 'GET_LOCK()' AS literal");
     exec_ok(db, "SELECT 'LOAD_FILE()' AS literal");
+    exec_ok(db, "SELECT 'LOAD DATA INFILE' AS literal");
     exec_ok(db, "SELECT 'SLEEP()' AS literal");
     exec_ok(db, "SELECT 'HANDLER app.t OPEN' AS literal");
     exec_ok(db, "SELECT 'INTO OUTFILE /tmp/mylite-out.txt' AS literal");
@@ -854,6 +855,21 @@ static void assert_server_sql_rejected(mylite_db *db) {
         db,
         "WITH c AS (SELECT 1 AS id) SELECT id FROM c INTO OUTFILE "
         "'/tmp/mylite-cte-outfile-policy.txt'",
+        "server-owned SQL surface"
+    );
+    expect_error(
+        db,
+        "LOAD DATA INFILE '/tmp/mylite-load-policy.csv' INTO TABLE app.t",
+        "server-owned SQL surface"
+    );
+    expect_error(
+        db,
+        "LOAD DATA LOCAL INFILE '/tmp/mylite-local-load-policy.csv' INTO TABLE app.t",
+        "server-owned SQL surface"
+    );
+    expect_error(
+        db,
+        "LOAD XML INFILE '/tmp/mylite-load-policy.xml' INTO TABLE app.t",
         "server-owned SQL surface"
     );
     expect_error(db, "HELP SELECT", "server-owned SQL surface");
@@ -1064,6 +1080,21 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_prepare_error(
         db,
         "SELECT 1 INTO DUMPFILE '/tmp/mylite-prepared-dumpfile-policy.txt'",
+        "server-owned SQL surface"
+    );
+    expect_prepare_error(
+        db,
+        "LOAD DATA INFILE '/tmp/mylite-prepared-load-policy.csv' INTO TABLE app.t",
+        "server-owned SQL surface"
+    );
+    expect_prepare_error(
+        db,
+        "LOAD DATA LOCAL INFILE '/tmp/mylite-prepared-local-load-policy.csv' INTO TABLE app.t",
+        "server-owned SQL surface"
+    );
+    expect_prepare_error(
+        db,
+        "LOAD XML INFILE '/tmp/mylite-prepared-load-policy.xml' INTO TABLE app.t",
         "server-owned SQL surface"
     );
     expect_prepare_error(db, "BACKUP STAGE START", "server-owned SQL surface");

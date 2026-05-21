@@ -20,8 +20,8 @@ behavior and must stay supported.
   write result rows through `IO_CACHE`.
 - `mariadb/sql/sql_class.h` documents `sql_exchange` as the shared descriptor
   for non-database files used by `SELECT ... INTO OUTFILE` and `LOAD DATA`.
-  The safe cut must not remove `sql_exchange`, because `LOAD DATA` still uses
-  it.
+  This slice kept `sql_exchange`; the later file-import trim disables
+  `LOAD DATA` / `LOAD XML` execution separately.
 - Historical size research ranked this as a small but safe cleanup after larger
   daemon-only trims. The old measurement saved about 19 KiB from the archive
   and kept `SELECT ... INTO` variables working.

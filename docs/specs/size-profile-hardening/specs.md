@@ -67,7 +67,9 @@ reader runtime is omitted because event decode and replay are already outside
 the no-binlog embedded profile. Server utility SQL functions are omitted
 because they expose server benchmarking, sleeps, named locks, host-file reads,
 replication waits, and server-id based ID generation rather than application
-DDL/DML behavior.
+DDL/DML behavior. Host-file SQL imports are omitted because `LOAD DATA` and
+`LOAD XML` read caller-named files or protocol file streams outside the
+`libmylite` parameter-binding and result API.
 
 ## Source Findings
 
@@ -396,6 +398,13 @@ DDL/DML behavior.
   methods used by replay and replication paths. Retained code still references
   a small event-class link contract and `str_to_hex()` for ordinary SQL string
   literal rendering through `append_query_string()`.
+- `mariadb/sql/sql_yacc.yy` parses `LOAD DATA` and `LOAD XML` into
+  `SQLCOM_LOAD`, `mariadb/sql/sql_parse.cc` dispatches that command to
+  `mysql_load()`, and `mariadb/sql/sql_prepare.cc` prepares it through the
+  common insert preparation path.
+- `mariadb/sql/sql_load.cc` implements `mysql_load()`, host-file reads,
+  `LOAD DATA LOCAL` client-file handling, XML row parsing, and small
+  `Load_data_param` helper methods needed by retained parser and item code.
 
 ## Proposed Design
 
@@ -541,6 +550,16 @@ The embedded archive omits `SELECT ... INTO OUTFILE` and
 The disabled embedded methods fail closed, and MyLite policy rejects direct
 and prepared host-file SELECT exports before dispatch while retaining
 `SELECT ... INTO @variable`.
+
+The embedded archive omits `LOAD DATA` and `LOAD XML` host-file import runtime
+by setting `MYLITE_WITH_LOAD_FILE_IMPORTS=0` in the MyLite baseline. The option
+defaults to `ON` so normal MariaDB server builds keep upstream file-import
+behavior. The disabled profile replaces `sql_load.cc` with
+`mylite_sql_load_disabled.cc`, keeps the small `Load_data_param` helpers needed
+by retained parser and item code, and compiles `mysql_load()` to fail closed.
+MyLite policy rejects direct and prepared `LOAD DATA` and `LOAD XML` before
+dispatch while retaining ordinary `INSERT`, prepared bindings, and
+`INSERT ... SELECT`.
 
 The embedded archive disables `PROCEDURE ANALYSE()` by setting
 `MYLITE_WITH_PROCEDURE_ANALYSE=0` in the MyLite baseline, replacing
@@ -787,19 +806,21 @@ disabled embedded sources. Row-replication type-conversion helpers are replaced
 with fail-closed embedded stubs, and residual replication helper objects are
 omitted after retained no-binlog paths no longer reference them. Server utility
 SQL function builders and item implementations are omitted from the embedded
-function registry.
+function registry. `LOAD DATA` and `LOAD XML` import runtime is replaced with
+a fail-closed embedded source while small retained parser/item helpers remain.
 
 ## Compatibility Impact
 
-No application compatibility impact is expected. This slice does not remove SQL
-syntax, functions, data types, collations, supported storage engines,
-ordinary diagnostics, or public C API behavior. Performance Schema remains
-outside the core embedded profile, and Feedback reporting is not part of the
-embedded runtime contract. SQL `HELP` is a server help-table surface and is
-explicitly unsupported in the embedded profile. Statement profiling is a diagnostic
-server surface, not application data behavior, and is explicitly unsupported in
-the embedded profile, including its `INFORMATION_SCHEMA.PROFILING` metadata
-table. Query-cache management is a server-side result-cache
+No supported core-API compatibility impact is expected. This slice preserves
+ordinary SQL syntax, retained functions, data types, collations, supported
+storage engines, ordinary diagnostics, and public C API behavior. Performance
+Schema remains outside the core embedded profile, and Feedback reporting is
+not part of the embedded runtime contract. SQL `HELP` is a server help-table
+surface and is explicitly unsupported in the embedded profile. Statement
+profiling is a diagnostic server surface, not application data behavior, and is
+explicitly unsupported in the embedded profile, including its
+`INFORMATION_SCHEMA.PROFILING` metadata table. Query-cache management is a
+server-side result-cache
 optimization; MyLite keeps query-cache SELECT hints as no-op syntax and omits
 the cache implementation. Oracle SQL mode is an optional MariaDB compatibility
 mode, not core MySQL/MariaDB application behavior; MyLite rejects it explicitly
@@ -813,6 +834,10 @@ Dynamic UDF registration is a server extension surface based on shared-library
 loading and `mysql.func` metadata. MyLite rejects `CREATE FUNCTION ... SONAME`
 directly and in prepared statements; stored functions and built-in SQL
 functions are not removed by this slice.
+`LOAD DATA` and `LOAD XML` are server file-import and client-protocol import
+surfaces. Rejecting them and omitting their runtime does not affect ordinary
+`INSERT`, prepared statement bindings, `INSERT ... SELECT`, native storage
+engines, JSON, GEOMETRY/GIS, DDL, DML, transactions, or the public C API.
 Replication and binary logging are server-topology surfaces. MyLite already
 rejects replication and binlog command families, starts with `@@log_bin=0`,
 and verifies that no binlog or relay-log sidecars are created. The no-binlog
@@ -911,7 +936,9 @@ than adding any database-directory companions. Statement digest trimming only
 removes in-memory diagnostic collection and token buffers. Status-variable
 trimming only removes in-memory diagnostic publication. Dynamic plugin loading
 trimming does not remove the transient database-local plugin directory because
-retained MariaDB startup code still expects the directory setting.
+retained MariaDB startup code still expects the directory setting. Host-file
+import trimming removes caller-named file reads and client-file streams rather
+than changing MyLite database-directory storage.
 
 ## Public API Impact
 
@@ -1137,6 +1164,11 @@ Omitting server utility SQL functions brings the current archive to
 with Performance Schema disabled, 7,051,912 bytes smaller than the
 symbol-stripped baseline with Performance Schema still built, and 7,764,592
 bytes smaller than the original broad archive.
+Omitting `LOAD DATA` and `LOAD XML` host-file import runtime brings the current
+archive to 26,053,336 bytes / 24.85 MiB, 5,476,368 bytes smaller than the
+Release build with Performance Schema disabled, 7,076,304 bytes smaller than
+the symbol-stripped baseline with Performance Schema still built, and
+7,788,984 bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -1198,6 +1230,11 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
 - Confirm direct and prepared `SELECT ... INTO OUTFILE` and
   `SELECT ... INTO DUMPFILE` statements fail through server-surface policy
   coverage while `SELECT ... INTO @variable` succeeds.
+- Confirm `MYLITE_WITH_LOAD_FILE_IMPORTS=OFF` appears in the embedded CMake
+  cache, `sql_load.cc.o` is absent, `mylite_sql_load_disabled.cc.o` is present
+  in `libmariadbd.a`, and direct and prepared `LOAD DATA` / `LOAD XML`
+  statements fail through server-surface policy coverage while ordinary
+  inserts and prepared bindings remain covered.
 - Confirm `MYLITE_WITH_BINLOG_REPLAY=OFF` appears in the embedded CMake cache,
   `sql_binlog.cc.o` is absent from `libmariadbd.a`, and direct and prepared
   SQL `BINLOG` replay statements fail through server-surface policy coverage.
@@ -1316,6 +1353,9 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   `HANDLER ...` statements are rejected, and `sql_handler.cc.o` is absent from
   the embedded archive. Host-file SELECT
   exports are rejected, and `SELECT ... INTO @variable` remains supported.
+  Host-file SQL imports are rejected, `sql_load.cc.o` is absent from the
+  embedded archive, `mylite_sql_load_disabled.cc.o` is present, and ordinary
+  `INSERT`, prepared bindings, and `INSERT ... SELECT` remain supported.
   Row-replication type-conversion helpers are replaced with fail-closed embedded
   stubs, `rpl_utility_server.cc.o` is absent from the embedded archive, and
   ordinary SQL type conversion remains covered through retained tests.
@@ -1425,3 +1465,7 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   through the default embedded archive. Static built-in plugins and native
   storage engines remain available; external plugin loading requires a custom
   build profile or future adapter.
+- Users relying on MariaDB `LOAD DATA` or `LOAD XML` cannot use those SQL
+  import commands through the default embedded core. They should parse files in
+  the application layer and use prepared bindings, multi-row `INSERT`, or
+  `INSERT ... SELECT`.

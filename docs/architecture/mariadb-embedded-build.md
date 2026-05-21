@@ -47,6 +47,7 @@ MYLITE_WITH_GTID_STATE=OFF
 MYLITE_WITH_GTID_INDEX=OFF
 MYLITE_WITH_SQL_HANDLER=OFF
 MYLITE_WITH_SELECT_INTO_FILE=OFF
+MYLITE_WITH_LOAD_FILE_IMPORTS=OFF
 MYLITE_WITH_DISABLED_STARTUP_OPTIONS=OFF
 MYLITE_WITH_QUERY_LOGS=OFF
 MYLITE_WITH_SQL_DIGEST=OFF
@@ -125,7 +126,11 @@ storage-engine handler abstraction remains,
 while top-level `HANDLER ...` commands are rejected by policy. It omits
 `SELECT ... INTO OUTFILE` and `SELECT ... INTO DUMPFILE` host-file writer
 runtime behind `MYLITE_WITH_SELECT_INTO_FILE=0`; ordinary result delivery and
-`SELECT ... INTO @variable` remain available. Startup option rows for disabled
+`SELECT ... INTO @variable` remain available. It omits `LOAD DATA` and
+`LOAD XML` host-file import runtime behind
+`MYLITE_WITH_LOAD_FILE_IMPORTS=0`; direct and prepared import statements are
+rejected by policy, while ordinary `INSERT`, prepared bindings, and
+`INSERT ... SELECT` remain available. Startup option rows for disabled
 server topology and dynamic plugin-loading surfaces are omitted behind
 `MYLITE_WITH_DISABLED_STARTUP_OPTIONS=0`; the retained serverless startup
 options used by `libmylite`, including `--skip-log-bin`, `--skip-slave-start`,
@@ -222,7 +227,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,077,728 bytes / 24.87 MiB |
+| Archive size | 26,053,336 bytes / 24.85 MiB |
 | Archive members | 693 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -292,8 +297,9 @@ tuning variables reduces the current pre-strip archive to 26,742,160 bytes /
 25.50 MiB. Omitting residual replication helper objects reduces the current
 pre-strip archive to 26,731,984 bytes / 25.49 MiB. Omitting server utility SQL
 functions reduces the current pre-strip archive to 26,639,104 bytes /
-25.41 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 561,376 bytes
+25.41 MiB. Omitting `LOAD DATA` and `LOAD XML` host-file import runtime
+reduces the current pre-strip archive to 26,614,200 bytes / 25.38 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 560,864 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -344,11 +350,13 @@ GTID-index runtime and tuning variables saves 15,944 pre-strip bytes and
 15,384 stripped bytes with no member-count change. Omitting residual
 replication helper objects saves 10,176 pre-strip bytes, 9,832 stripped bytes,
 and four archive members. Omitting server utility SQL functions saves 92,880
-pre-strip bytes and 92,632 stripped bytes with no member-count change. The
-final archive is 5,451,976 bytes smaller than the Release build with
-Performance Schema disabled, 7,051,912 bytes smaller
-than the symbol-stripped baseline that still built Performance Schema, and
-7,764,592 bytes smaller than the original broad archive.
+pre-strip bytes and 92,632 stripped bytes with no member-count change. Omitting
+`LOAD DATA` and `LOAD XML` host-file import runtime saves 24,904 pre-strip
+bytes and 24,392 stripped bytes with no member-count change. The final archive
+is 5,476,368 bytes smaller than the Release build with Performance Schema
+disabled, 7,076,304 bytes smaller than the symbol-stripped baseline that still
+built Performance Schema, and 7,788,984 bytes smaller than the original broad
+archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
 GSSAPI, BZip2, LZ4, LibLZMA, LZO, PCRE2, and Zstandard support on this
@@ -426,6 +434,9 @@ linked for normal table execution.
 `SELECT ... INTO OUTFILE` and `SELECT ... INTO DUMPFILE` host-file writer
 bodies are omitted from the embedded profile, while ordinary result delivery
 and `SELECT ... INTO @variable` remain available.
+`LOAD DATA` and `LOAD XML` host-file import runtime is omitted from the
+embedded profile, while ordinary `INSERT`, prepared bindings, and
+`INSERT ... SELECT` remain available.
 Startup option rows for disabled server topology and dynamic plugin-loading
 surfaces are omitted from the default embedded archive; retained options needed
 by MyLite startup, including `--skip-log-bin`, `--skip-slave-start`, and
@@ -529,6 +540,7 @@ The baseline explicitly disables:
 - Residual replication helper objects
 - SQL `HANDLER` command runtime
 - `SELECT ... INTO OUTFILE` and `SELECT ... INTO DUMPFILE`
+- `LOAD DATA` and `LOAD XML` host-file import runtime
 - Unsupported binlog injector root
 - `PROCEDURE ANALYSE()`
 - System-variable help text
