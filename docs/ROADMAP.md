@@ -54,6 +54,7 @@ surface that does not fit a local directory-owned library:
 - statement digest diagnostics,
 - server status variables,
 - optional Oracle SQL compatibility mode,
+- optional Oracle compatibility function aliases,
 - optional fmtlib-backed SQL helpers such as `SFORMAT()`,
 - legacy diagnostic SELECT procedures such as `PROCEDURE ANALYSE()`,
 - server help text such as system-variable comments,
@@ -111,6 +112,10 @@ Server status-variable publication is omitted after measurement proves
 `SHOW STATUS` and status Information Schema rows are daemon diagnostics, not
 application SQL or storage behavior; direct and prepared status queries keep
 stable empty result behavior while ordinary diagnostics remain available.
+Oracle compatibility function aliases and `oracle_schema` routing are omitted
+after coverage proves the normal MySQL/MariaDB string functions remain
+available, Oracle-only aliases fail predictably, and `oracle_schema` no
+longer acts as a built-in compatibility schema.
 Compatibility-sensitive code removals require separate evidence before they
 are accepted.
 

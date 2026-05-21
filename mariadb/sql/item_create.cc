@@ -39,6 +39,10 @@
 #include "item_vectorfunc.h"
 #include <mysql/plugin_function.h>
 
+#ifndef MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
+#define MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS 1
+#endif
+
 
 extern "C" const uchar *get_native_fct_hash_key(const void *buff,
                                                 size_t *length, my_bool)
@@ -427,6 +431,7 @@ protected:
 };
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 class Create_func_concat_operator_oracle : public Create_native_func
 {
 public:
@@ -439,6 +444,7 @@ protected:
   Create_func_concat_operator_oracle() = default;
   ~Create_func_concat_operator_oracle() override = default;
 };
+#endif
 
 
 class Create_func_decode_histogram : public Create_func_arg2
@@ -454,6 +460,7 @@ protected:
 };
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 class Create_func_decode_oracle : public Create_native_func
 {
 public:
@@ -474,6 +481,7 @@ protected:
   Create_func_decode_oracle() = default;
   ~Create_func_decode_oracle() override = default;
 };
+#endif
 
 
 class Create_func_decode : public Create_native_func
@@ -1754,11 +1762,14 @@ protected:
   ~Create_func_lpad() override = default;
   Item *create_native_std(THD *thd, const LEX_CSTRING *name,
                           List<Item> *items);
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
   Item *create_native_oracle(THD *thd, const LEX_CSTRING *name,
                              List<Item> *items);
+#endif
 };
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 class Create_func_lpad_oracle : public Create_func_lpad
 {
 public:
@@ -1769,6 +1780,7 @@ public:
   }
   static Create_func_lpad_oracle s_singleton;
 };
+#endif
 
 
 class Create_func_ltrim : public Create_func_arg1
@@ -1784,6 +1796,7 @@ protected:
 };
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 class Create_func_ltrim_oracle : public Create_func_arg1
 {
 public:
@@ -1795,6 +1808,7 @@ protected:
   Create_func_ltrim_oracle() = default;
   ~Create_func_ltrim_oracle() override = default;
 };
+#endif
 
 
 class Create_func_makedate : public Create_func_arg2
@@ -2087,6 +2101,7 @@ protected:
 Create_func_regexp_replace Create_func_regexp_replace::s_singleton;
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 class Create_func_regexp_replace_oracle : public Create_func_arg3
 {
 public:
@@ -2105,6 +2120,7 @@ protected:
 
 Create_func_regexp_replace_oracle
   Create_func_regexp_replace_oracle::s_singleton;
+#endif
 
 
 class Create_func_regexp_substr : public Create_func_arg2
@@ -2182,6 +2198,7 @@ protected:
 };
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 class Create_func_replace_oracle : public Create_func_arg3
 {
 public:
@@ -2193,6 +2210,7 @@ protected:
   Create_func_replace_oracle() = default;
   ~Create_func_replace_oracle() override = default;
 };
+#endif
 
 
 class Create_func_reverse : public Create_func_arg1
@@ -2250,11 +2268,14 @@ protected:
   ~Create_func_rpad() override = default;
   Item *create_native_std(THD *thd, const LEX_CSTRING *name,
                           List<Item> *items);
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
   Item *create_native_oracle(THD *thd, const LEX_CSTRING *name,
                              List<Item> *items);
+#endif
 };
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 class Create_func_rpad_oracle : public Create_func_rpad
 {
 public:
@@ -2265,6 +2286,7 @@ public:
   }
   static Create_func_rpad_oracle s_singleton;
 };
+#endif
 
 
 class Create_func_rtrim : public Create_func_arg1
@@ -2280,6 +2302,7 @@ protected:
 };
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 class Create_func_rtrim_oracle : public Create_func_arg1
 {
 public:
@@ -2291,6 +2314,7 @@ protected:
   Create_func_rtrim_oracle() = default;
   ~Create_func_rtrim_oracle() override = default;
 };
+#endif
 
 
 class Create_func_sec_to_time : public Create_func_arg1
@@ -2461,6 +2485,7 @@ protected:
 };
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 class Create_func_substr_oracle : public Create_native_func
 {
 public:
@@ -2473,6 +2498,7 @@ protected:
   Create_func_substr_oracle() = default;
   ~Create_func_substr_oracle() override = default;
 };
+#endif
 
 
 class Create_func_subtime : public Create_func_arg2
@@ -3493,6 +3519,7 @@ Create_func_concat::create_native(THD *thd, const LEX_CSTRING *name,
   return new (thd->mem_root) Item_func_concat(thd, *item_list);
 }
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 Create_func_concat_operator_oracle
   Create_func_concat_operator_oracle::s_singleton;
 
@@ -3513,6 +3540,7 @@ Create_func_concat_operator_oracle::create_native(THD *thd, const LEX_CSTRING *n
 
   return new (thd->mem_root) Item_func_concat_operator_oracle(thd, *item_list);
 }
+#endif
 
 Create_func_decode_histogram Create_func_decode_histogram::s_singleton;
 
@@ -3524,7 +3552,9 @@ Create_func_decode_histogram::create_2_arg(THD *thd, Item *arg1, Item *arg2)
 
 Create_func_decode Create_func_decode::s_singleton;
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 Create_func_decode_oracle Create_func_decode_oracle::s_singleton;
+#endif
 
 Create_func_concat_ws Create_func_concat_ws::s_singleton;
 
@@ -5090,7 +5120,9 @@ Create_func_log2::create_1_arg(THD *thd, Item *arg1)
 
 Create_func_lpad Create_func_lpad::s_singleton;
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 Create_func_lpad_oracle Create_func_lpad_oracle::s_singleton;
+#endif
 
 Item*
 Create_func_lpad::create_native_std(THD *thd, const LEX_CSTRING *name,
@@ -5124,6 +5156,7 @@ Create_func_lpad::create_native_std(THD *thd, const LEX_CSTRING *name,
 }
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 Item*
 Create_func_lpad::create_native_oracle(THD *thd, const LEX_CSTRING *name,
                                        List<Item> *item_list)
@@ -5150,6 +5183,7 @@ Create_func_lpad::create_native_oracle(THD *thd, const LEX_CSTRING *name,
   }
   return NULL;
 }
+#endif
 
 
 Create_func_ltrim Create_func_ltrim::s_singleton;
@@ -5161,6 +5195,7 @@ Create_func_ltrim::create_1_arg(THD *thd, Item *arg1)
 }
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 Create_func_ltrim_oracle Create_func_ltrim_oracle::s_singleton;
 
 Item*
@@ -5168,6 +5203,7 @@ Create_func_ltrim_oracle::create_1_arg(THD *thd, Item *arg1)
 {
   return new (thd->mem_root) Item_func_ltrim_oracle(thd, arg1);
 }
+#endif
 
 
 Create_func_makedate Create_func_makedate::s_singleton;
@@ -5565,6 +5601,7 @@ Create_func_release_lock::create_1_arg(THD *thd, Item *arg1)
 }
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 Create_func_replace_oracle Create_func_replace_oracle::s_singleton;
 
 Item*
@@ -5573,6 +5610,7 @@ Create_func_replace_oracle::create_3_arg(THD *thd, Item *arg1, Item *arg2,
 {
   return new (thd->mem_root) Item_func_replace_oracle(thd, arg1, arg2, arg3);
 }
+#endif
 
 
 Create_func_reverse Create_func_reverse::s_singleton;
@@ -5635,7 +5673,9 @@ Create_func_row_count::create_builder(THD *thd)
 
 Create_func_rpad Create_func_rpad::s_singleton;
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 Create_func_rpad_oracle Create_func_rpad_oracle::s_singleton;
+#endif
 
 Item*
 Create_func_rpad::create_native_std(THD *thd, const LEX_CSTRING *name,
@@ -5669,6 +5709,7 @@ Create_func_rpad::create_native_std(THD *thd, const LEX_CSTRING *name,
 }
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 Item*
 Create_func_rpad::create_native_oracle(THD *thd, const LEX_CSTRING *name,
                                        List<Item> *item_list)
@@ -5695,6 +5736,7 @@ Create_func_rpad::create_native_oracle(THD *thd, const LEX_CSTRING *name,
   }
   return NULL;
 }
+#endif
 
 
 Create_func_rtrim Create_func_rtrim::s_singleton;
@@ -5706,6 +5748,7 @@ Create_func_rtrim::create_1_arg(THD *thd, Item *arg1)
 }
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 Create_func_rtrim_oracle Create_func_rtrim_oracle::s_singleton;
 
 Item*
@@ -5713,6 +5756,7 @@ Create_func_rtrim_oracle::create_1_arg(THD *thd, Item *arg1)
 {
   return new (thd->mem_root) Item_func_rtrim_oracle(thd, arg1);
 }
+#endif
 
 
 Create_func_sec_to_time Create_func_sec_to_time::s_singleton;
@@ -5847,6 +5891,7 @@ Create_func_substr_index::create_3_arg(THD *thd, Item *arg1, Item *arg2, Item *a
 }
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 Create_func_substr_oracle Create_func_substr_oracle::s_singleton;
 
 Item*
@@ -5879,6 +5924,7 @@ Create_func_substr_oracle::create_native(THD *thd, const LEX_CSTRING *name,
 
   return func;
 }
+#endif
 
 
 Create_func_subtime Create_func_subtime::s_singleton;
@@ -6384,7 +6430,9 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("COLUMN_JSON") }, BUILDER(Create_func_dyncol_json)},
   { { STRING_WITH_LEN("COMPRESS") }, BUILDER(Create_func_compress)},
   { { STRING_WITH_LEN("CONCAT") }, BUILDER(Create_func_concat)},
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
   { { STRING_WITH_LEN("CONCAT_OPERATOR_ORACLE") }, BUILDER(Create_func_concat_operator_oracle)},
+#endif
   { { STRING_WITH_LEN("CONCAT_WS") }, BUILDER(Create_func_concat_ws)},
   { { STRING_WITH_LEN("CONNECTION_ID") }, BUILDER(Create_func_connection_id)},
   { { STRING_WITH_LEN("CONV") }, BUILDER(Create_func_conv)},
@@ -6403,7 +6451,9 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("DECODE") }, BUILDER(Create_func_decode)},
   { { STRING_WITH_LEN("DEGREES") }, BUILDER(Create_func_degrees)},
   { { STRING_WITH_LEN("DECODE_HISTOGRAM") }, BUILDER(Create_func_decode_histogram)},
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
   { { STRING_WITH_LEN("DECODE_ORACLE") }, BUILDER(Create_func_decode_oracle)},
+#endif
   { { STRING_WITH_LEN("DES_DECRYPT") }, BUILDER(Create_func_des_decrypt)},
   { { STRING_WITH_LEN("DES_ENCRYPT") }, BUILDER(Create_func_des_encrypt)},
   { { STRING_WITH_LEN("ELT") }, BUILDER(Create_func_elt)},
@@ -6486,9 +6536,13 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("LOG2") }, BUILDER(Create_func_log2)},
   { { STRING_WITH_LEN("LOWER") }, BUILDER(Create_func_lcase)},
   { { STRING_WITH_LEN("LPAD") }, BUILDER(Create_func_lpad)},
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
   { { STRING_WITH_LEN("LPAD_ORACLE") }, BUILDER(Create_func_lpad_oracle)},
+#endif
   { { STRING_WITH_LEN("LTRIM") }, BUILDER(Create_func_ltrim)},
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
   { { STRING_WITH_LEN("LTRIM_ORACLE") }, BUILDER(Create_func_ltrim_oracle)},
+#endif
   { { STRING_WITH_LEN("MAKEDATE") }, BUILDER(Create_func_makedate)},
   { { STRING_WITH_LEN("MAKETIME") }, BUILDER(Create_func_maketime)},
   { { STRING_WITH_LEN("MAKE_SET") }, BUILDER(Create_func_make_set)},
@@ -6524,15 +6578,21 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("RELEASE_ALL_LOCKS") },
       BUILDER(Create_func_release_all_locks)},
   { { STRING_WITH_LEN("RELEASE_LOCK") }, BUILDER(Create_func_release_lock)},
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
   { { STRING_WITH_LEN("REPLACE_ORACLE") },
       BUILDER(Create_func_replace_oracle)},
+#endif
   { { STRING_WITH_LEN("REVERSE") }, BUILDER(Create_func_reverse)},
   { { STRING_WITH_LEN("ROUND") }, BUILDER(Create_func_round)},
   { { STRING_WITH_LEN("ROW_COUNT") }, BUILDER(Create_func_row_count)},
   { { STRING_WITH_LEN("RPAD") }, BUILDER(Create_func_rpad)},
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
   { { STRING_WITH_LEN("RPAD_ORACLE") }, BUILDER(Create_func_rpad_oracle)},
+#endif
   { { STRING_WITH_LEN("RTRIM") }, BUILDER(Create_func_rtrim)},
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
   { { STRING_WITH_LEN("RTRIM_ORACLE") }, BUILDER(Create_func_rtrim_oracle)},
+#endif
   { { STRING_WITH_LEN("SEC_TO_TIME") }, BUILDER(Create_func_sec_to_time)},
 #ifndef EMBEDDED_LIBRARY
   { { STRING_WITH_LEN("SFORMAT") }, BUILDER(Create_func_sformat)},
@@ -6550,8 +6610,10 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("SQRT") }, BUILDER(Create_func_sqrt)},
   { { STRING_WITH_LEN("STRCMP") }, BUILDER(Create_func_strcmp)},
   { { STRING_WITH_LEN("STR_TO_DATE") }, BUILDER(Create_func_str_to_date)},
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
   { { STRING_WITH_LEN("SUBSTR_ORACLE") },
       BUILDER(Create_func_substr_oracle)},
+#endif
   { { STRING_WITH_LEN("SUBSTRING_INDEX") }, BUILDER(Create_func_substr_index)},
   { { STRING_WITH_LEN("SUBTIME") }, BUILDER(Create_func_subtime)},
   { { STRING_WITH_LEN("TAN") }, BUILDER(Create_func_tan)},
@@ -6590,6 +6652,7 @@ const Native_func_registry func_array[] =
 Native_func_registry_array
   native_func_registry_array(func_array, array_elements(func_array));
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 const Native_func_registry func_array_oracle_overrides[] =
 {
   { { STRING_WITH_LEN("CONCAT") },  BUILDER(Create_func_concat_operator_oracle)},
@@ -6606,9 +6669,12 @@ const Native_func_registry func_array_oracle_overrides[] =
 Native_func_registry_array
   oracle_func_registry_array(func_array_oracle_overrides,
                              array_elements(func_array_oracle_overrides));
+#endif
 
 Native_functions_hash native_functions_hash;
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 Native_functions_hash native_functions_hash_oracle;
+#endif
 
 
 /*
@@ -6735,6 +6801,7 @@ int item_create_init()
                                    native_func_registry_array_geom.count()))
     return true;
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
   count+= oracle_func_registry_array.count();
 
   if (native_functions_hash_oracle.init(count) ||
@@ -6749,13 +6816,18 @@ int item_create_init()
   return 
     native_functions_hash_oracle.replace(oracle_func_registry_array.elements(),
                                          oracle_func_registry_array.count());
+#else
+  return false;
+#endif
 }
 
 
 void item_create_cleanup()
 {
   native_functions_hash.cleanup();
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
   native_functions_hash_oracle.cleanup();
+#endif
 }
 
 

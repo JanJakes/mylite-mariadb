@@ -1,6 +1,10 @@
 #ifndef STRUCTS_INCLUDED
 #define STRUCTS_INCLUDED
 
+#ifndef MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
+#define MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS 1
+#endif
+
 /* Copyright (c) 2000, 2010, Oracle and/or its affiliates.
    Copyright (c) 2009, 2019, MariaDB Corporation.
 
@@ -959,7 +963,9 @@ public:
     set(spec, NULL, source);
   }
   Item *make_item_func_trim_std(THD *thd) const;
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
   Item *make_item_func_trim_oracle(THD *thd) const;
+#endif
 };
 
 

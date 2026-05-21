@@ -1,5 +1,10 @@
 #ifndef ITEM_FUNC_INCLUDED
 #define ITEM_FUNC_INCLUDED
+
+#ifndef MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
+#define MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS 1
+#endif
+
 /* Copyright (c) 2000, 2016, Oracle and/or its affiliates.
    Copyright (c) 2009, 2021, MariaDB
 
@@ -4365,6 +4370,7 @@ protected:
 };
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 class Item_func_oracle_sql_rowcount :public Item_longlong_func
 {
 public:
@@ -4387,6 +4393,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_oracle_sql_rowcount>(thd, this); }
 };
+#endif
 
 
 class Item_func_sqlcode: public Item_long_func

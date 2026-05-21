@@ -385,6 +385,7 @@ compatibility features that do not fit the embedded library model:
 - event scheduler,
 - performance schema,
 - Oracle SQL mode,
+- Oracle compatibility function aliases,
 - SQL help-table lookup,
 - statement profiling,
 - query-cache management,
@@ -407,9 +408,12 @@ Dynamic UDF registration through `CREATE FUNCTION ... SONAME` is rejected
 through the same policy because it loads server-owned shared libraries and
 persists metadata in server system tables. Attempts to enable Oracle SQL mode,
 SQL `HELP`, statement-profiling commands, and query-cache management commands
-are also rejected through the same policy. They fail with `MYLITE_ERROR` and a
-stable MyLite diagnostic. Query-cache SELECT hints remain accepted no-op
-syntax. Optimizer trace variables and
+are also rejected through the same policy and fail with `MYLITE_ERROR` and a
+stable MyLite diagnostic. Oracle compatibility function aliases such as
+`DECODE_ORACLE` and `oracle_schema` routing are omitted from the default
+embedded profile; ordinary MySQL/MariaDB string functions remain available.
+Omitted function aliases fail as unsupported SQL function paths. Query-cache
+SELECT hints remain accepted no-op syntax. Optimizer trace variables and
 `INFORMATION_SCHEMA.OPTIMIZER_TRACE`, including unqualified reads while
 `information_schema` is the current schema, are rejected as server diagnostics.
 Ordinary planning, execution, and `EXPLAIN` remain supported. The default

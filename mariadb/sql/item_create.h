@@ -19,6 +19,10 @@
 #ifndef ITEM_CREATE_H
 #define ITEM_CREATE_H
 
+#ifndef MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
+#define MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS 1
+#endif
+
 #include "item_func.h" // Cast_target
 
 typedef struct st_udf_func udf_func;
@@ -342,7 +346,10 @@ public:
 };
 
 extern MYSQL_PLUGIN_IMPORT Native_functions_hash native_functions_hash;
+#if !defined(MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS) || \
+    MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 extern MYSQL_PLUGIN_IMPORT Native_functions_hash native_functions_hash_oracle;
+#endif
 
 extern const Native_func_registry func_array[];
 extern const size_t func_array_length;

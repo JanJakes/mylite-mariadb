@@ -29,6 +29,10 @@
 
 #include "mariadb.h"                          // HAVE_*
 
+#ifndef MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
+#define MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS 1
+#endif
+
 #include "sql_priv.h"
 /*
   It is necessary to include set_var.h instead of item.h because there
@@ -824,6 +828,7 @@ null:
 }
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 String *Item_func_concat_operator_oracle::val_str(String *str)
 {
   DBUG_ASSERT(fixed());
@@ -859,6 +864,7 @@ null:
   null_value= true;
   return 0;
 }
+#endif
 
 
 bool Item_func_concat::append_value(THD *thd, String *res, const String *app)
@@ -2589,7 +2595,8 @@ void Item_func_trim::print(String *str, enum_query_type query_type)
     {
       // 10.3 downgrade compatibility for FRM
       str->append(func_name_cstring());
-      if (schema() == &oracle_schema_ref)
+      if (MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS &&
+          schema() == &oracle_schema_ref)
         str->append(suffix);
     }
     else
@@ -2602,7 +2609,8 @@ void Item_func_trim::print(String *str, enum_query_type query_type)
   {
     // 10.3 downgrade compatibility for FRM
     str->append(Item_func_trim::func_name_cstring());
-    if (schema() == &oracle_schema_ref)
+    if (MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS &&
+        schema() == &oracle_schema_ref)
       str->append(suffix);
   }
   else

@@ -41,6 +41,7 @@ MYLITE_WITH_BINLOG_CORE=OFF
 MYLITE_WITH_QUERY_LOGS=OFF
 MYLITE_WITH_SQL_DIGEST=OFF
 MYLITE_WITH_STATUS_VARIABLES=OFF
+MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS=OFF
 MYLITE_WITH_PROCEDURE_ANALYSE=OFF
 MYLITE_WITH_SYSVAR_HELP_TEXT=OFF
 MYLITE_WITH_STATIC_SHOW_INFO=OFF
@@ -79,7 +80,9 @@ SQL parsing, execution, prepared statements, diagnostics, and `EXPLAIN` remain
 available. It omits server status-variable publication behind
 `MYLITE_WITH_STATUS_VARIABLES=0`; `SHOW STATUS` and status Information Schema
 tables return empty result sets, while ordinary SQL diagnostics and result
-metadata remain available. It also
+metadata remain available. It omits Oracle compatibility function aliases and
+`oracle_schema` routing behind `MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS=0`, while
+ordinary MySQL/MariaDB string functions remain available. It also
 omits the legacy `PROCEDURE ANALYSE()` implementation behind
 `MYLITE_WITH_PROCEDURE_ANALYSE=0`. Long system-variable help comments are
 omitted behind `MYLITE_WITH_SYSVAR_HELP_TEXT=0`; variable names, values,
@@ -106,7 +109,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 27,005,960 bytes / 25.75 MiB |
+| Archive size | 26,861,088 bytes / 25.62 MiB |
 | Archive members | 705 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -130,7 +133,9 @@ Omitting general and slow query-log runtime reduces the pre-strip archive to
 27,689,312 bytes / 26.41 MiB. Omitting statement digest normalization reduces
 the pre-strip archive to 27,627,712 bytes / 26.35 MiB. Omitting server
 status-variable publication reduces the pre-strip archive to 27,591,584 bytes /
-26.31 MiB. Post-build `strip -S -x` plus `ranlib` saves another 585,624 bytes
+26.31 MiB. Omitting Oracle compatibility function aliases and `oracle_schema`
+routing reduces the pre-strip archive to 27,446,520 bytes / 26.18 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 585,432 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -146,9 +151,11 @@ with no member-count change. Omitting general and slow query-log runtime saves
 21,168 bytes with no member-count change. Omitting statement digest
 normalization saves 56,480 bytes with no member-count change. Omitting server
 status-variable publication saves 33,200 bytes with no member-count change.
-The final archive is 4,523,744 bytes smaller than the Release build with
-Performance Schema disabled, 6,123,680 bytes smaller than the symbol-stripped
-baseline that still built Performance Schema, and 6,836,360 bytes smaller than
+Omitting Oracle compatibility function aliases and schema routing saves 145,064
+bytes with no member-count change.
+The final archive is 4,668,616 bytes smaller than the Release build with
+Performance Schema disabled, 6,268,552 bytes smaller than the symbol-stripped
+baseline that still built Performance Schema, and 6,981,232 bytes smaller than
 the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
@@ -184,7 +191,11 @@ Query-cache implementation code is stubbed for the embedded archive; `SQL_CACHE`
 and `SQL_NO_CACHE` remain accepted parser hints, while query-cache management
 commands and variables are rejected by policy. Oracle SQL mode is rejected by
 policy and linked to an unsupported parser stub; normal MariaDB/MySQL parsing
-continues to use the generated MariaDB parser. `SFORMAT()` is omitted from the
+continues to use the generated MariaDB parser. Oracle compatibility aliases
+such as `DECODE_ORACLE` and `LPAD_ORACLE`, plus `oracle_schema` routing, are
+omitted from the embedded archive; normal `CONCAT`, `LPAD`, `RPAD`, `LTRIM`,
+`RTRIM`, `SUBSTR`, `REPLACE`, `TRIM`, and `LENGTH` remain available.
+`SFORMAT()` is omitted from the
 embedded function registry, while ordinary `FORMAT()` remains available.
 Dynamic UDF lookup, execution, and registration are omitted; stored functions
 remain a separate SQL routine surface.
@@ -240,6 +251,7 @@ The baseline explicitly disables:
 - General and slow query logs
 - Statement digest diagnostics
 - Server status variables
+- Oracle compatibility function aliases and `oracle_schema` routing
 - MariaDB upstream unit-test targets
 
 Configure also reports unavailable optional features on this host, including

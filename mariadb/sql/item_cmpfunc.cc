@@ -24,6 +24,11 @@
 
 #include "mariadb.h"
 #include "sql_priv.h"
+
+#ifndef MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
+#define MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS 1
+#endif
+
 #include <m_ctype.h>
 #include "sql_select.h"
 #include "sql_parse.h"                          // check_stack_overrun
@@ -3174,6 +3179,7 @@ Item *Item_func_case_simple::find_item()
 }
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 Item *Item_func_decode_oracle::find_item()
 {
   uint idx;
@@ -3182,6 +3188,7 @@ Item *Item_func_decode_oracle::find_item()
   Item **pos= Item_func_decode_oracle::else_expr_addr();
   return pos ? pos[0] : 0;
 }
+#endif
 
 
 String *Item_func_case::str_op(String *str)
@@ -3348,11 +3355,13 @@ bool Item_func_case_simple::fix_length_and_dec(THD *thd)
 }
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 bool Item_func_decode_oracle::fix_length_and_dec(THD *thd)
 {
   return (aggregate_then_and_else_arguments(thd, when_count() + 1) ||
           aggregate_switch_and_when_arguments(thd, true));
 }
+#endif
 
 
 /*
@@ -3547,6 +3556,7 @@ void Item_func_case_simple::print(String *str, enum_query_type query_type)
 }
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 void Item_func_decode_oracle::print(String *str, enum_query_type query_type)
 {
   if (query_type & QT_FOR_FRM)
@@ -3573,6 +3583,7 @@ void Item_func_decode_oracle::print(String *str, enum_query_type query_type)
   }
   str->append(')');
 }
+#endif
 
 
 /**
@@ -8039,4 +8050,3 @@ Item *Item_equal::multiple_equality_transformer(THD *thd, uchar *arg)
     break;
   }
 }
-

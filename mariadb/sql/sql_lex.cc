@@ -19,6 +19,11 @@
 
 #define MYSQL_LEX 1
 #include "mariadb.h"
+
+#ifndef MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
+#define MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS 1
+#endif
+
 #include "sql_priv.h"
 #include "sql_class.h"                          // sql_lex.h: SQLCOM_END
 #include "sql_lex.h"
@@ -10097,6 +10102,7 @@ Item *Lex_trim_st::make_item_func_trim_std(THD *thd) const
 }
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 Item *Lex_trim_st::make_item_func_trim_oracle(THD *thd) const
 {
   if (m_remove)
@@ -10122,6 +10128,7 @@ Item *Lex_trim_st::make_item_func_trim_oracle(THD *thd) const
   DBUG_ASSERT(0);
   return NULL;
 }
+#endif
 
 
 Item *LEX::make_item_func_call_generic(THD *thd,

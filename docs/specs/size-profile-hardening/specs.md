@@ -34,7 +34,10 @@ application storage, SQL execution, or public API behavior. Statement digest
 normalization is omitted because it feeds Performance Schema statement
 diagnostics, which are already outside the default embedded profile. Server
 status-variable publication is omitted because it exposes daemon diagnostic
-counters rather than application SQL, storage, or public API behavior.
+counters rather than application SQL, storage, or public API behavior. Oracle
+compatibility function aliases and `oracle_schema` routing are omitted because
+Oracle compatibility mode is already unsupported and these aliases are not core
+MySQL/MariaDB application SQL.
 
 ## Source Findings
 
@@ -190,6 +193,20 @@ counters rather than application SQL, storage, or public API behavior.
   `MYLITE_WITH_STATUS_VARIABLES=0` compiles the publication arrays to
   terminator-only arrays, makes the dynamic registry inert, and reduces the
   stripped archive to 27,005,960 bytes, 25.75 MiB, and 705 members.
+- `mariadb/sql/item_create.cc` registers Oracle compatibility aliases such as
+  `DECODE_ORACLE`, `LPAD_ORACLE`, `RTRIM_ORACLE`, `SUBSTR_ORACLE`, and
+  `CONCAT_OPERATOR_ORACLE`, and builds a separate
+  `native_functions_hash_oracle` with Oracle-mode function overrides.
+  `mariadb/sql/sql_schema.cc` routes `oracle_schema` and implied `MODE_ORACLE`
+  lookup to that hash, while `mariadb/sql/sql_yacc.yy`, `item_func.*`,
+  `item_cmpfunc.*`, `item_strfunc.*`, and `sql_lex.cc` still instantiate
+  Oracle-only item classes.
+- Disabling Oracle compatibility function aliases behind
+  `MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS=0` omits the aliases, the Oracle native
+  function hash, `oracle_schema` routing, and Oracle-only item classes, while
+  keeping normal `CONCAT`, `LPAD`, `RPAD`, `LTRIM`, `RTRIM`, `SUBSTR`,
+  `REPLACE`, `TRIM`, and `LENGTH` behavior covered. The stripped archive is
+  reduced to 26,861,088 bytes, 25.62 MiB, and 705 members.
 
 ## Proposed Design
 
@@ -231,6 +248,14 @@ The embedded archive links a MyLite-owned Oracle parser stub instead of the
 generated `yy_oracle.cc` parser. MyLite rejects attempts to enable
 `sql_mode=ORACLE` before dispatch, while normal SQL modes and user variables
 named `sql_mode` continue through the generated MariaDB parser.
+
+The embedded archive omits Oracle compatibility function aliases and
+`oracle_schema` routing by setting `MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS=0` in
+the MyLite baseline. The option defaults to `ON` so normal MariaDB server
+builds keep upstream Oracle migration aliases. MyLite already rejects
+`sql_mode=ORACLE`; this cut removes the remaining Oracle-only aliases and
+parser item paths while keeping ordinary MySQL/MariaDB string functions
+available.
 
 The embedded SQL function registry omits `SFORMAT()` and the embedded
 `item_strfunc.cc` build excludes the fmtlib-backed implementation. With the

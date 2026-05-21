@@ -1,5 +1,10 @@
 #ifndef ITEM_CMPFUNC_INCLUDED
 #define ITEM_CMPFUNC_INCLUDED
+
+#ifndef MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
+#define MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS 1
+#endif
+
 /* Copyright (c) 2000, 2015, Oracle and/or its affiliates.
    Copyright (c) 2009, 2022, MariaDB
 
@@ -2564,6 +2569,7 @@ protected:
 };
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 class Item_func_decode_oracle: public Item_func_case_simple
 {
 public:
@@ -2584,6 +2590,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_decode_oracle>(thd, this); }
 };
+#endif
 
 
 /*

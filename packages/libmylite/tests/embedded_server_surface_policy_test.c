@@ -49,6 +49,7 @@ static mylite_db *open_database(open_database_paths paths);
 static void assert_runtime_policy_variables(mylite_db *db, const char *database_path);
 static void assert_system_variable_help_text_omitted(mylite_db *db);
 static void assert_status_variables_omitted(mylite_db *db);
+static void assert_oracle_compat_functions_omitted(mylite_db *db);
 static void assert_performance_schema_omitted_or_disabled(mylite_db *db);
 static int performance_schema_variable_callback(
     void *ctx,
@@ -111,6 +112,7 @@ static void test_server_surfaces_are_disabled_or_contained(void) {
     assert_runtime_policy_variables(db, database_path);
     assert_system_variable_help_text_omitted(db);
     assert_status_variables_omitted(db);
+    assert_oracle_compat_functions_omitted(db);
     assert_server_sql_rejected(db);
     assert_no_server_sidecar_files(database_path);
     assert(mylite_close(db) == MYLITE_OK);
@@ -256,6 +258,48 @@ static void assert_status_variables_omitted(mylite_db *db) {
     assert(mylite_column_count(stmt) == 2U);
     assert(mylite_step(stmt) == MYLITE_DONE);
     assert(mylite_finalize(stmt) == MYLITE_OK);
+}
+
+static void assert_oracle_compat_functions_omitted(mylite_db *db) {
+    static const char *const column_names[] = {
+        "concat_value",
+        "lpad_value",
+        "rpad_value",
+        "ltrim_value",
+        "rtrim_value",
+        "substr_value",
+        "replace_value",
+        "trim_value",
+        "length_value",
+    };
+    static const char *const values[] = {"ab", "0x", "x0", "x", "x", "b", "axc", "x", "3"};
+
+    query_expect(
+        db,
+        (expected_query){
+            .sql = "SELECT "
+                   "CONCAT('a','b') AS concat_value, "
+                   "LPAD('x',2,'0') AS lpad_value, "
+                   "RPAD('x',2,'0') AS rpad_value, "
+                   "LTRIM(' x') AS ltrim_value, "
+                   "RTRIM('x ') AS rtrim_value, "
+                   "SUBSTR('abc',2,1) AS substr_value, "
+                   "REPLACE('abc','b','x') AS replace_value, "
+                   "TRIM(' x ') AS trim_value, "
+                   "LENGTH('abc') AS length_value",
+            .column_count = (int)(sizeof(column_names) / sizeof(column_names[0])),
+            .row_count = 1,
+            .column_names = column_names,
+            .values = values,
+        }
+    );
+
+    expect_error(db, "SELECT DECODE_ORACLE(1,1,10)", "DECODE_ORACLE");
+    expect_error(db, "SELECT oracle_schema.LENGTH('abc')", NULL);
+    expect_error(db, "SELECT TRIM_ORACLE(' x ')", "Oracle compatibility SQL functions");
+    expect_error(db, "SELECT SQL%ROWCOUNT", NULL);
+    expect_prepare_error(db, "SELECT DECODE_ORACLE(1,1,10)", "DECODE_ORACLE");
+    expect_prepare_error(db, "SELECT TRIM_ORACLE(' x ')", "Oracle compatibility SQL functions");
 }
 
 static void assert_performance_schema_omitted_or_disabled(mylite_db *db) {

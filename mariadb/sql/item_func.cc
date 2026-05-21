@@ -23,6 +23,11 @@
 
 #include "sql_plugin.h"
 #include "sql_priv.h"
+
+#ifndef MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
+#define MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS 1
+#endif
+
 /*
   It is necessary to include set_var.h instead of item.h because there
   are dependencies on include order for set_var.h and item.h. This
@@ -6766,6 +6771,7 @@ longlong Item_func_found_rows::val_int()
 }
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 longlong Item_func_oracle_sql_rowcount::val_int()
 {
   DBUG_ASSERT(fixed());
@@ -6779,6 +6785,7 @@ longlong Item_func_oracle_sql_rowcount::val_int()
   return rows != -1 ? rows :                   // ROW_COUNT()
                       thd->found_rows();       // FOUND_ROWS()
 }
+#endif
 
 
 longlong Item_func_sqlcode::val_int()

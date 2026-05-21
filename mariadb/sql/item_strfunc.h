@@ -1,6 +1,10 @@
 #ifndef ITEM_STRFUNC_INCLUDED
 #define ITEM_STRFUNC_INCLUDED
 
+#ifndef MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
+#define MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS 1
+#endif
+
 /*
    Copyright (c) 2000, 2011, Oracle and/or its affiliates.
    Copyright (c) 2009, 2022, MariaDB
@@ -400,6 +404,7 @@ protected:
   This class handles the || operator in sql_mode=ORACLE.
   Unlike the traditional MariaDB concat(), it treats NULL arguments as ''.
 */
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 class Item_func_concat_operator_oracle :public Item_func_concat
 {
 public:
@@ -427,6 +432,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_concat_operator_oracle>(thd, this); }
 };
+#endif
 
 
 class Item_func_decode_histogram :public Item_str_func
@@ -544,6 +550,7 @@ protected:
 };
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 class Item_func_replace_oracle :public Item_func_replace
 {
   String tmp_emtpystr;
@@ -569,6 +576,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_replace_oracle>(thd, this); }
 };
+#endif
 
 
 class Item_func_regexp_replace :public Item_str_func
@@ -611,6 +619,7 @@ protected:
 };
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 class Item_func_regexp_replace_oracle: public Item_func_regexp_replace
 {
 public:
@@ -631,6 +640,7 @@ public:
 protected:
   Item *shallow_copy(THD *thd) const override { return nullptr; }
 };
+#endif
 
 
 class Item_func_regexp_substr :public Item_str_func
@@ -815,6 +825,7 @@ public:
 };
 #endif
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 class Item_func_substr_oracle :public Item_func_substr
 {
 protected:
@@ -852,6 +863,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_substr_oracle>(thd, this); }
 };
+#endif
 
 class Item_func_substr_index :public Item_str_func
 {
@@ -917,6 +929,7 @@ protected:
 };
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 class Item_func_trim_oracle :public Item_func_trim
 {
 protected:
@@ -938,6 +951,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_trim_oracle>(thd, this); }
 };
+#endif
 
 
 class Item_func_ltrim :public Item_func_trim
@@ -965,6 +979,7 @@ protected:
 };
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 class Item_func_ltrim_oracle :public Item_func_ltrim
 {
 protected:
@@ -986,6 +1001,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_ltrim_oracle>(thd, this); }
 };
+#endif
 
 
 class Item_func_rtrim :public Item_func_trim
@@ -1009,6 +1025,7 @@ protected:
 };
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 class Item_func_rtrim_oracle :public Item_func_rtrim
 {
 protected:
@@ -1029,6 +1046,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_rtrim_oracle>(thd, this); }
 };
+#endif
 
 /*
   Item_func_password -- new (4.1.1) PASSWORD() function implementation.
@@ -1661,6 +1679,7 @@ protected:
 };
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 class Item_func_rpad_oracle :public Item_func_rpad
 {
   String *make_empty_result(String *str) override
@@ -1695,6 +1714,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_rpad_oracle>(thd, this); }
 };
+#endif
 
 
 class Item_func_lpad :public Item_func_pad
@@ -1725,6 +1745,7 @@ protected:
 };
 
 
+#if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 class Item_func_lpad_oracle :public Item_func_lpad
 {
   String *make_empty_result(String *str) override
@@ -1759,6 +1780,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_lpad_oracle>(thd, this); }
 };
+#endif
 
 
 class Item_func_conv :public Item_str_func
