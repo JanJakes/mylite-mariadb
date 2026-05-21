@@ -24,6 +24,15 @@ ELSE()
   ADD_DEFINITIONS(-DMYLITE_WITH_BINLOG_CORE=0)
 ENDIF()
 
+OPTION(MYLITE_WITH_BINLOG_REPLAY "Build SQL BINLOG statement replay" ON)
+IF(MYLITE_WITH_BINLOG_REPLAY)
+  ADD_DEFINITIONS(-DMYLITE_WITH_BINLOG_REPLAY=1)
+  SET(MYLITE_SQL_BINLOG_SOURCE ../sql/sql_binlog.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_BINLOG_REPLAY=0)
+  SET(MYLITE_SQL_BINLOG_SOURCE)
+ENDIF()
+
 OPTION(MYLITE_WITH_QUERY_LOGS "Build general and slow query log runtime" ON)
 IF(MYLITE_WITH_QUERY_LOGS)
   ADD_DEFINITIONS(-DMYLITE_WITH_QUERY_LOGS=1)
@@ -256,7 +265,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/sql_admin.cc ../sql/sql_truncate.cc ../sql/sql_reload.cc
            ../sql/sql_lex.cc ../sql/keycaches.cc
            ../sql/sql_list.cc ../sql/sql_load.cc ../sql/sql_locale.cc 
-           ../sql/sql_binlog.cc ../sql/sql_manager.cc
+           ${MYLITE_SQL_BINLOG_SOURCE} ../sql/sql_manager.cc
            ../sql/sql_parse.cc ../sql/sql_bootstrap.cc
            ../sql/sql_partition.cc ../sql/sql_plugin.cc 
            ../sql/debug_sync.cc ../sql/debug.cc

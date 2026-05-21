@@ -36,8 +36,11 @@ WITH_WSREP=OFF
 PLUGIN_S3=NO
 PLUGIN_PERFSCHEMA=NO
 PLUGIN_FEEDBACK=NO
+PLUGIN_USER_VARIABLES=NO
+PLUGIN_AUTH_SOCKET=NO
 ENABLED_PROFILING=OFF
 MYLITE_WITH_BINLOG_CORE=OFF
+MYLITE_WITH_BINLOG_REPLAY=OFF
 MYLITE_WITH_QUERY_LOGS=OFF
 MYLITE_WITH_SQL_DIGEST=OFF
 MYLITE_WITH_STATUS_VARIABLES=OFF
@@ -57,6 +60,7 @@ MYLITE_WITH_VIO_TLS=OFF
 MYLITE_WITH_REPLICATION_EXEC_SYSVARS=OFF
 MYLITE_WITH_REPLICATION_FILTERS=OFF
 MYLITE_WITH_USERSTAT_DIAGNOSTICS=OFF
+MYLITE_WITH_EVENT_PARSE_DATA=OFF
 MYLITE_WITH_PROXY_PROTOCOL=OFF
 ```
 
@@ -89,7 +93,10 @@ storage engines still initialize, and the embedded profile reports
 binary-log transaction/event core behind `MYLITE_WITH_BINLOG_CORE=0` while
 preserving the normal MariaDB server build path. It also guards embedded
 no-binlog startup, open, cleanup, and GTID-index update paths, and omits the
-unsupported injector root. It omits the general and slow query-log runtime
+unsupported injector root. It omits SQL `BINLOG` statement replay behind
+`MYLITE_WITH_BINLOG_REPLAY=0`; direct and prepared `BINLOG` statements are
+rejected by MyLite policy, and the embedded MariaDB dispatcher remains a
+fail-closed backstop. It omits the general and slow query-log runtime
 behind `MYLITE_WITH_QUERY_LOGS=0`; error logging,
 SQL diagnostics, warnings, and result metadata remain available. It omits
 statement digest normalization behind `MYLITE_WITH_SQL_DIGEST=0`; Performance
@@ -298,6 +305,8 @@ embedded no-binlog paths in `log.cc`, `mysqld.cc`, and transaction-coordinator
 selection are guarded. `log_event.cc`, `log_event_server.cc`, `gtid_index.cc`,
 `rpl_gtid.cc`, and shared helper symbols remain where generic MariaDB logging,
 transaction coordination, or retained parser/runtime code still reference them.
+SQL `BINLOG` statement replay is omitted from the embedded archive, and direct
+and prepared `BINLOG` statements are rejected by policy coverage.
 Replication execution, slave protocol, replication-event, checksum, and
 semi-sync system variables are omitted from the default embedded profile, while
 compatibility variables such as `@@log_bin=0` remain covered.
@@ -373,6 +382,7 @@ The baseline explicitly disables:
 - Dynamic UDF shared-library loading
 - Dynamic plugin shared-object loading
 - Active binary-log transaction/event core
+- SQL `BINLOG` statement replay
 - Unsupported binlog injector root
 - `PROCEDURE ANALYSE()`
 - System-variable help text
@@ -391,6 +401,9 @@ The baseline explicitly disables:
 - Replication and binary-log filter runtime
 - PROXY protocol listener support
 - User statistics diagnostics
+- User-variable diagnostics
+- Unix socket server authentication
+- Full event parse-data validation
 - Oracle compatibility function aliases and `oracle_schema` routing
 - Full inherited server error-message catalog
 - MariaDB upstream unit-test targets

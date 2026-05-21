@@ -711,6 +711,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_error(db, "FLUSH BINARY LOGS", "server-owned SQL surface");
     expect_error(db, "SHOW BINARY LOGS", "server-owned SQL surface");
     expect_error(db, "SHOW BINLOG EVENTS", "server-owned SQL surface");
+    expect_error(db, "BINLOG 'ZmFrZQ=='", "server-owned SQL surface");
     expect_error(db, "HELP SELECT", "server-owned SQL surface");
     expect_error(db, "SHOW AUTHORS", "server-owned SQL surface");
     expect_error(db, "SHOW CONTRIBUTORS", "server-owned SQL surface");
@@ -865,6 +866,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     );
     expect_prepare_error(db, "DROP SERVER prepared_remote_app", "server-owned SQL surface");
     expect_prepare_error(db, "SHOW CREATE SERVER prepared_remote_app", "server-owned SQL surface");
+    expect_prepare_error(db, "BINLOG 'ZmFrZQ=='", "server-owned SQL surface");
     expect_prepare_error(db, "BACKUP STAGE START", "server-owned SQL surface");
     expect_prepare_error(db, "BACKUP LOCK app.t", "server-owned SQL surface");
     expect_prepare_error(db, "BACKUP UNLOCK", "server-owned SQL surface");

@@ -51,7 +51,10 @@ server topology behavior that the embedded profile already rejects. PROXY
 protocol listener support is omitted because the core profile has no socket
 listener or network handshake. User statistics diagnostics are omitted because
 they expose optional server counters rather than application SQL, native
-storage, or public API behavior.
+storage, or public API behavior. User-variable diagnostics, Unix socket server
+authentication, full event parse-data validation, and SQL `BINLOG` replay are
+omitted because they belong to diagnostic, authentication, scheduler, and
+replication replay surfaces outside the core embedded profile.
 
 ## Source Findings
 
@@ -299,13 +302,6 @@ storage, or public API behavior.
   static `user_variables` plugin, while retaining ordinary `@variable`
   assignment and reads. The stripped archive is reduced to 26,484,960 bytes,
   25.26 MiB, and 701 members.
-- `mariadb/plugin/auth_socket/auth_socket.c` declares the `unix_socket`
-  server authentication plugin for socket-client login. `libmylite` opens a
-  database directory in-process and already rejects server account and password
-  management statements.
-- Disabling Unix socket server authentication with `PLUGIN_AUTH_SOCKET=NO`
-  omits the static `auth_socket.c.o` object. The stripped archive is reduced
-  to 26,478,056 bytes, 25.25 MiB, and 700 members.
 - `mariadb/sql/sql_yacc.yy` still references `Event_parse_data::new_instance`
   while parsing event syntax, but `mariadb/sql/sql_parse.cc` returns an
   embedded-server unsupported error for event DDL when `HAVE_EVENT_SCHEDULER`
@@ -315,6 +311,21 @@ storage, or public API behavior.
   `MYLITE_WITH_EVENT_PARSE_DATA=0` replaces `event_parse_data.cc` with a small
   parser-link stub. The stripped archive is reduced to 26,480,216 bytes,
   25.25 MiB, and 701 members.
+- `mariadb/plugin/auth_socket/auth_socket.c` declares the `unix_socket`
+  server authentication plugin for socket-client login. `libmylite` opens a
+  database directory in-process and already rejects server account and password
+  management statements.
+- Disabling Unix socket server authentication with `PLUGIN_AUTH_SOCKET=NO`
+  omits the static `auth_socket.c.o` object. The stripped archive is reduced
+  to 26,478,056 bytes, 25.25 MiB, and 700 members.
+- `mariadb/sql/sql_yacc.yy` parses SQL `BINLOG` replay statements as
+  `SQLCOM_BINLOG_BASE64_EVENT`, while `mariadb/sql/sql_parse.cc` already
+  returns a fail-closed embedded-server error for that command under
+  `EMBEDDED_LIBRARY`.
+- Disabling SQL `BINLOG` replay with `MYLITE_WITH_BINLOG_REPLAY=0` omits the
+  embedded `sql_binlog.cc.o` object and rejects direct and prepared `BINLOG`
+  statements through MyLite policy. The stripped archive is reduced to
+  26,474,416 bytes, 25.25 MiB, and 699 members.
 - `mariadb/sql/item_create.cc` registers Oracle compatibility aliases such as
   `DECODE_ORACLE`, `LPAD_ORACLE`, `RTRIM_ORACLE`, `SUBSTR_ORACLE`, and
   `CONCAT_OPERATOR_ORACLE`, and builds a separate
@@ -445,6 +456,12 @@ server builds keep upstream binlog behavior.
 The disabled embedded profile also guards no-binlog startup, open, cleanup,
 annotated-row, and GTID-index update paths, and omits the unsupported injector
 root that is only needed by the server topology runtime.
+
+The embedded archive omits SQL `BINLOG` statement replay by setting
+`MYLITE_WITH_BINLOG_REPLAY=0` in the MyLite baseline. The option defaults to
+`ON` so normal MariaDB server builds keep upstream replay behavior. MyLite
+policy rejects direct and prepared `BINLOG` statements before dispatch, while
+the embedded MariaDB dispatcher remains a fail-closed backstop.
 
 The embedded archive disables `PROCEDURE ANALYSE()` by setting
 `MYLITE_WITH_PROCEDURE_ANALYSE=0` in the MyLite baseline, replacing
@@ -637,7 +654,10 @@ replication-event, checksum, and semi-sync system-variable registrations are
 compiled out while retained shared replication helpers remain available. PROXY
 protocol listener parsing and its system-variable registration are replaced
 with fail-closed embedded stubs. User statistics Information Schema plugin
-registration and the `userstat` system variable are omitted.
+registration and the `userstat` system variable are omitted. User-variable
+diagnostics, Unix socket server authentication, full event parse-data
+validation, and SQL `BINLOG` replay are also omitted from the default embedded
+profile.
 
 ## Compatibility Impact
 
@@ -669,6 +689,10 @@ and verifies that no binlog or relay-log sidecars are created. The no-binlog
 core keeps supported DDL, DML, transactions, crash/reopen behavior, and native
 engine coverage intact. Omitting the injector root does not affect supported
 SQL because it is only used by the unsupported server topology runtime.
+SQL `BINLOG` replay is also a replication replay surface. Omitting
+`sql_binlog.cc` and rejecting direct and prepared `BINLOG` statements does not
+affect ordinary SQL execution, prepared statements, native storage engines,
+JSON, GEOMETRY/GIS, DDL, DML, transactions, or the public C API.
 Omitting the guarded replication execution system variables only removes
 configuration rows for unsupported topology behavior; common compatibility
 variables such as `@@log_bin=0` remain available.
@@ -683,6 +707,13 @@ Omitting user statistics diagnostics only removes optional server counter
 tables and the `userstat` collection knob. It does not affect ordinary SQL,
 native storage, JSON, GEOMETRY/GIS, diagnostics, result metadata, prepared
 statements, or the public C API.
+Omitting user-variable diagnostics only removes the optional
+`INFORMATION_SCHEMA.USER_VARIABLES` plugin and reset command. Ordinary
+`@variable` SQL behavior remains covered. Omitting Unix socket server
+authentication only removes a socket-client login plugin; `libmylite` opens a
+local database directory directly. Omitting full event parse-data validation
+only removes scheduler validation code for event execution that the embedded
+profile already rejects.
 `PROCEDURE ANALYSE()` is a legacy diagnostic SELECT extension. Omitting it does
 not affect ordinary SELECT execution, DDL, DML, native storage engines, JSON,
 GEOMETRY/GIS, or the public C API.
@@ -883,6 +914,26 @@ Omitting user statistics diagnostics brings the current archive to
 with Performance Schema disabled, 6,638,104 bytes smaller than the
 symbol-stripped baseline with Performance Schema still built, and 7,350,784
 bytes smaller than the original broad archive.
+Omitting user-variable diagnostics brings the current archive to
+26,484,960 bytes / 25.26 MiB, 5,044,744 bytes smaller than the Release build
+with Performance Schema disabled, 6,644,680 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 7,357,360
+bytes smaller than the original broad archive.
+Reducing event parse-data validation to a parser-link stub brings the current
+archive to 26,480,216 bytes / 25.25 MiB, 5,049,488 bytes smaller than the
+Release build with Performance Schema disabled, 6,649,424 bytes smaller than
+the symbol-stripped baseline with Performance Schema still built, and
+7,362,104 bytes smaller than the original broad archive.
+Omitting Unix socket server authentication brings the current archive to
+26,478,056 bytes / 25.25 MiB, 5,051,648 bytes smaller than the Release build
+with Performance Schema disabled, 6,651,584 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 7,364,264
+bytes smaller than the original broad archive.
+Omitting SQL `BINLOG` statement replay brings the current archive to
+26,474,416 bytes / 25.25 MiB, 5,055,288 bytes smaller than the Release build
+with Performance Schema disabled, 6,655,224 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 7,367,904
+bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -913,6 +964,9 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
 - Confirm `rpl_injector.cc.o` and `rpl_record.cc.o` are absent from
   `libmariadbd.a`, while `gtid_index.cc.o`, `log_event.cc.o`, and
   `log_event_server.cc.o` remain.
+- Confirm `MYLITE_WITH_BINLOG_REPLAY=OFF` appears in the embedded CMake cache,
+  `sql_binlog.cc.o` is absent from `libmariadbd.a`, and direct and prepared
+  SQL `BINLOG` replay statements fail through server-surface policy coverage.
 - Confirm `MYLITE_WITH_PROCESSLIST_METADATA=OFF` appears in the embedded CMake
   cache, direct and prepared process-list SHOW commands are rejected, and
   `INFORMATION_SCHEMA.PROCESSLIST` returns zero rows.
@@ -1005,7 +1059,9 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   resets are rejected. Unix socket server authentication is omitted and the
   `unix_socket` plugin is absent. Full event parse-data validation is omitted,
   event DDL and metadata statements remain rejected, and the embedded archive
-  keeps only a parser-link event parse-data stub.
+  keeps only a parser-link event parse-data stub. SQL `BINLOG` replay is
+  rejected directly and in prepared statements, and `sql_binlog.cc.o` is absent
+  from the embedded archive.
 - Process-list SHOW commands are rejected, the process-list Information Schema
   table returns zero rows, and the embedded archive omits process-list row
   producers.
@@ -1058,9 +1114,9 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
 - Stored functions remain planned application SQL. Dynamic UDF policy and size
   trimming must stay scoped to shared-library UDF registration and execution.
 - `log.cc`, `gtid_index.cc`, `log_event.cc`, `log_event_server.cc`,
-  `rpl_gtid.cc`, `sql_binlog.cc`, `sql_repl.cc`, and replication utility files
-  still have shared references. Removing more binlog code needs separate source
-  and link evidence rather than file-name pruning.
+  `rpl_gtid.cc`, `sql_repl.cc`, and replication utility files still have
+  shared references. Removing more binlog code needs separate source and link
+  evidence rather than file-name pruning.
 - The generic SELECT procedure dispatch remains linked after omitting
   `PROCEDURE ANALYSE()`. Removing it should be a separate slice.
 - Clients that build help UIs from

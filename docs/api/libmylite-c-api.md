@@ -380,7 +380,7 @@ The core directory-owned API rejects or omits server-owned and optional
 compatibility features that do not fit the embedded library model:
 
 - network users and authentication,
-- replication, relay log, and binary-log runtime,
+- replication, relay log, binary-log runtime, and SQL `BINLOG` replay,
 - Galera/wsrep,
 - dynamic plugin installation and shared-object loading,
 - dynamic UDF shared-library registration,
@@ -420,6 +420,8 @@ topology runtime, plus guarded replication execution system variables such as
 binlog filter variables such as `replicate_do_db`,
 `replicate_wild_ignore_table`, and `binlog_do_db` are also omitted because the
 core embedded profile has no replication or binary-log topology to filter.
+SQL `BINLOG` statement replay is rejected before dispatch and omitted from the
+embedded archive.
 The default profile omits the `unix_socket` server authentication plugin for
 the same reason; `libmylite` opens a local database directory directly instead
 of authenticating network or socket clients.

@@ -1268,6 +1268,9 @@ bool is_unsupported_binlog_statement(const SqlPolicyTokens &tokens) {
     const std::string_view second = identifier_token_at(tokens, 1);
     const std::string_view third = identifier_token_at(tokens, 2);
 
+    if (token_equals(first, "BINLOG")) {
+        return true;
+    }
     if (token_equals(first, "SHOW") && token_equals(second, "BINARY")) {
         return token_in(third, "LOGS", "STATUS");
     }

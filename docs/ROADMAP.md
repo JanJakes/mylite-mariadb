@@ -92,6 +92,9 @@ GTID-index update paths are guarded, and the unsupported injector root is
 omitted after link evidence proves it is only needed by the server topology
 runtime. Shared event, GTID-state, and replication utility helpers that
 retained MariaDB code still references remain for narrower review.
+SQL `BINLOG` statement replay is omitted after coverage proves it is an
+unsupported replication replay surface and the embedded dispatcher already
+fail-closes it.
 Replication execution, slave protocol, checksum, replication-event, and
 semi-sync system variables are also omitted after policy coverage proves those
 configuration rows belong to unsupported topology behavior; compatibility
