@@ -325,6 +325,9 @@ checkpoint header.
 Exact-index row-id lookup now defers catalog-image materialization until after
 the active exact-index cache misses, avoiding repeated catalog copies on hot
 prepared point updates.
+Row-update maintained-root planning now caches table-level index-root absence
+for the active catalog generation, avoiding repeated catalog copies on hot
+append-only update loops.
 Scoped exact-index and indexed-row lookup paths also mark statement live-row
 caches through the captured active statement instead of rediscovering the same
 ownership from `FILE *`.

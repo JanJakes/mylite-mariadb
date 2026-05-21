@@ -469,6 +469,13 @@ typedef struct mylite_storage_index_root_entry_cache {
     int has_entry;
 } mylite_storage_index_root_entry_cache;
 
+typedef struct mylite_storage_table_index_root_absence_cache {
+    unsigned long long catalog_root_page;
+    unsigned long long catalog_generation;
+    unsigned long long table_id;
+    int has_absence;
+} mylite_storage_table_index_root_absence_cache;
+
 typedef struct mylite_storage_rowset_builder {
     mylite_storage_rowset *rowset;
     size_t row_capacity;
@@ -612,6 +619,7 @@ struct mylite_storage_statement {
     mylite_storage_row_payload_cache_set row_payload_caches;
     mylite_storage_table_entry_cache table_entry_cache;
     mylite_storage_index_root_entry_cache index_root_entry_cache;
+    mylite_storage_table_index_root_absence_cache table_index_root_absence_cache;
     mylite_storage_append_page_buffer append_pages;
     mylite_storage_buffered_page_undo_list buffered_page_undos;
     mylite_storage_dirty_page_undo_list dirty_page_undos;
@@ -1068,6 +1076,16 @@ static void store_active_index_root_entry_cache_in_statement(
     const mylite_storage_catalog_entry *entry
 );
 static void clear_index_root_entry_cache(mylite_storage_index_root_entry_cache *cache);
+static int table_index_roots_absent_in_statement(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    unsigned long long table_id
+);
+static void store_table_index_roots_absent_in_statement(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    unsigned long long table_id
+);
 static void clear_statement_chain_exact_index_caches(mylite_storage_statement *statement);
 static void clear_exact_index_caches(mylite_storage_statement *statement);
 static void free_exact_index_cache(mylite_storage_exact_index_cache *cache);
@@ -1601,6 +1619,10 @@ static mylite_storage_result find_index_root_record(
     unsigned long long table_id,
     unsigned index_number,
     mylite_storage_catalog_entry *out_entry
+);
+static int catalog_has_index_root_for_table(
+    const mylite_storage_catalog_image *catalog,
+    unsigned long long table_id
 );
 static mylite_storage_result find_index_root_record_in_statement(
     mylite_storage_statement *statement,
@@ -6322,6 +6344,7 @@ static mylite_storage_result update_row_with_index_entries(
     mylite_storage_header header = {0};
     mylite_storage_catalog_image catalog = {0};
     mylite_storage_maintained_index_update_plan maintained_index_plan = {0};
+    int has_catalog = 0;
     unsigned long long table_id = 0ULL;
     mylite_storage_row_page old_row_page = {0};
     mylite_storage_live_row_cache *active_live_row_cache = NULL;
@@ -6339,10 +6362,16 @@ static mylite_storage_result update_row_with_index_entries(
             &table_id
         );
     }
-    if (result == MYLITE_STORAGE_OK) {
+    const int needs_maintained_root_planning =
+        index_entry_count != 0U &&
+        !table_index_roots_absent_in_statement(active_cache_statement, &header, table_id);
+    if (result == MYLITE_STORAGE_OK && needs_maintained_root_planning) {
         result = read_catalog_image(file, &header, &catalog);
+        if (result == MYLITE_STORAGE_OK) {
+            has_catalog = 1;
+        }
     }
-    if (result == MYLITE_STORAGE_OK) {
+    if (result == MYLITE_STORAGE_OK && has_catalog) {
         result = plan_maintained_index_root_updates(
             file,
             &header,
@@ -6356,6 +6385,10 @@ static mylite_storage_result update_row_with_index_entries(
             index_entry_changed,
             &maintained_index_plan
         );
+    }
+    if (result == MYLITE_STORAGE_OK && has_catalog &&
+        !catalog_has_index_root_for_table(&catalog, table_id)) {
+        store_table_index_roots_absent_in_statement(active_cache_statement, &header, table_id);
     }
     if (result == MYLITE_STORAGE_OK) {
         active_live_row_cache =
@@ -11373,6 +11406,7 @@ static void clear_catalog_root_cache(mylite_storage_statement *statement) {
     free_catalog_image(&statement->current_catalog_image);
     clear_table_entry_cache(&statement->table_entry_cache);
     clear_index_root_entry_cache(&statement->index_root_entry_cache);
+    statement->table_index_root_absence_cache = (mylite_storage_table_index_root_absence_cache){0};
 }
 
 static void free_statement(mylite_storage_statement *statement) {
@@ -11391,6 +11425,7 @@ static void free_statement(mylite_storage_statement *statement) {
     clear_row_payload_caches(statement);
     clear_table_entry_cache(&statement->table_entry_cache);
     clear_index_root_entry_cache(&statement->index_root_entry_cache);
+    statement->table_index_root_absence_cache = (mylite_storage_table_index_root_absence_cache){0};
     free_catalog_image(&statement->current_catalog_image);
     clear_append_page_buffer(statement);
     clear_buffered_page_undos(statement);
@@ -11432,6 +11467,7 @@ static void reset_reusable_nested_checkpoint_storage(mylite_storage_statement *s
     statement->deferred_durable_cache_retarget_table_id = 0ULL;
     statement->deferred_durable_cache_retarget_header = (mylite_storage_header){0};
     statement->index_root_entry_cache = (mylite_storage_index_root_entry_cache){0};
+    statement->table_index_root_absence_cache = (mylite_storage_table_index_root_absence_cache){0};
 }
 
 static int find_active_table_entry_cache_in_statement(
@@ -11585,6 +11621,41 @@ static void clear_index_root_entry_cache(mylite_storage_index_root_entry_cache *
     free(cache->schema_name);
     free(cache->table_name);
     *cache = (mylite_storage_index_root_entry_cache){0};
+}
+
+static int table_index_roots_absent_in_statement(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    unsigned long long table_id
+) {
+    if (statement == NULL || table_id == 0ULL) {
+        return 0;
+    }
+
+    const mylite_storage_table_index_root_absence_cache *cache =
+        &statement->table_index_root_absence_cache;
+    return cache->has_absence && cache->catalog_root_page == header->catalog_root_page &&
+                   cache->catalog_generation == header->catalog_generation &&
+                   cache->table_id == table_id
+               ? 1
+               : 0;
+}
+
+static void store_table_index_roots_absent_in_statement(
+    mylite_storage_statement *statement,
+    const mylite_storage_header *header,
+    unsigned long long table_id
+) {
+    if (statement == NULL || table_id == 0ULL) {
+        return;
+    }
+
+    statement->table_index_root_absence_cache = (mylite_storage_table_index_root_absence_cache){
+        .catalog_root_page = header->catalog_root_page,
+        .catalog_generation = header->catalog_generation,
+        .table_id = table_id,
+        .has_absence = 1,
+    };
 }
 
 static void clear_statement_chain_exact_index_caches(mylite_storage_statement *statement) {
@@ -14974,6 +15045,23 @@ static mylite_storage_result find_index_root_record(
         offset += get_u32_le(record, MYLITE_STORAGE_FORMAT_RECORD_SIZE_OFFSET);
     }
     return MYLITE_STORAGE_NOTFOUND;
+}
+
+static int catalog_has_index_root_for_table(
+    const mylite_storage_catalog_image *catalog,
+    unsigned long long table_id
+) {
+    size_t offset = MYLITE_STORAGE_FORMAT_CATALOG_HEADER_SIZE;
+    const unsigned long long record_count = catalog_record_count(catalog);
+    for (unsigned long long i = 0ULL; i < record_count; ++i) {
+        const unsigned char *record = catalog->bytes + offset;
+        if (record_is_index_root(record) &&
+            get_u64_le(record, MYLITE_STORAGE_FORMAT_RECORD_TABLE_ID_OFFSET) == table_id) {
+            return 1;
+        }
+        offset += get_u32_le(record, MYLITE_STORAGE_FORMAT_RECORD_SIZE_OFFSET);
+    }
+    return 0;
 }
 
 static mylite_storage_result find_index_root_record_in_statement(
