@@ -100,6 +100,8 @@ Residual exact point lookups and broad index-prefix existence scans now close or
 execute through the same scoped file lifecycle as the newer index read paths.
 Schema namespace catalog writes now use scoped update file/header setup before
 publishing catalog mutations, including the no-op existing-schema path.
+Index-root catalog writes now use the same scoped update setup before publishing
+or removing root metadata records.
 Normal read statements now reuse a thread-local unlocked read file handle after
 device/inode validation, reducing repeated `fopen()` overhead without holding
 shared locks between cursor builds. That read handle now stores its device and
