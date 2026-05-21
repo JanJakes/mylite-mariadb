@@ -2714,9 +2714,11 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
 
   int error= 0;
-  if (!volatile_rows && !mylite_foreign_key_checks_disabled(ha_thd()))
+  const bool check_foreign_keys=
+      !volatile_rows && !mylite_foreign_key_checks_disabled(ha_thd());
+  bool has_parent_constraints= false;
+  if (check_foreign_keys)
   {
-    bool has_parent_constraints= false;
     error= has_parent_foreign_keys(&has_parent_constraints);
     if (!error && has_parent_constraints)
       error= mylite_apply_same_row_update_actions(
@@ -2782,7 +2784,7 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
     DBUG_RETURN(error);
   }
 
-  if (!volatile_rows && !mylite_foreign_key_checks_disabled(ha_thd()))
+  if (check_foreign_keys)
   {
     bool has_child_constraints= false;
     error= has_child_foreign_keys(&has_child_constraints);
@@ -2790,9 +2792,6 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
       error= mylite_check_child_foreign_keys(primary_file, storage_schema(),
                                              storage_table(), table, new_data);
 
-    bool has_parent_constraints= false;
-    if (!error)
-      error= has_parent_foreign_keys(&has_parent_constraints);
     if (!error && has_parent_constraints)
       error= mylite_apply_parent_foreign_key_actions(
         primary_file, storage_schema(), storage_table(), table, old_data,

@@ -485,6 +485,9 @@ rediscovery on prepared row-DML loops.
 The MyLite handler lock path now threads an already-observed active checkpoint
 into statement-checkpoint setup, avoiding a second active-chain lookup during
 routed prepared row-DML execution.
+Handler row updates now reuse the per-call parent foreign-key presence result,
+avoiding a second handler FK-presence guard on each checked update while keeping
+child checks and FK action order unchanged.
 Active live-row caches now keep hash-backed row-id membership for larger live
 and payload-validated row-id sets, while small nested statement caches stay on
 the cheaper linear path.
