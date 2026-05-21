@@ -33,6 +33,9 @@ points.
   behavior.
 - Keep the normal MariaDB server build path unchanged.
 - Keep shared log/event objects that retained MariaDB code still references.
+  A later binlog injector-root trim omits the separable injector root once
+  link evidence proves it is no longer needed in the embedded no-binlog
+  profile.
 
 ## Compatibility Impact
 
@@ -70,6 +73,7 @@ The pre-strip archive moved from 27,938,032 bytes to 27,864,688 bytes.
 
 ## Risks
 
-`log.cc`, `log_event.cc`, GTID helpers, and binlog plugin symbols remain in the
-archive because other retained MariaDB code still references them. Further
-binlog/event pruning needs a separate source review and link evidence.
+`log.cc`, log-event helpers, GTID-state helpers, replication utility files, and
+binlog plugin symbols remain in the archive because other retained MariaDB code
+still references them. Further binlog/event pruning needs a separate source
+review and link evidence.

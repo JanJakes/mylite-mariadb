@@ -76,8 +76,10 @@ loading and service injection are omitted behind
 storage engines still initialize, and the embedded profile reports
 `@@have_dynamic_loading=NO`. The embedded baseline disables the active
 binary-log transaction/event core behind `MYLITE_WITH_BINLOG_CORE=0` while
-preserving the normal MariaDB server build path. It omits the general
-and slow query-log runtime behind `MYLITE_WITH_QUERY_LOGS=0`; error logging,
+preserving the normal MariaDB server build path. It also guards embedded
+no-binlog startup, open, cleanup, and GTID-index update paths, and omits the
+unsupported injector root. It omits the general and slow query-log runtime
+behind `MYLITE_WITH_QUERY_LOGS=0`; error logging,
 SQL diagnostics, warnings, and result metadata remain available. It omits
 statement digest normalization behind `MYLITE_WITH_SQL_DIGEST=0`; Performance
 Schema digest text and hashes are unavailable, and startup sets
@@ -119,8 +121,8 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,623,920 bytes / 25.39 MiB |
-| Archive members | 705 |
+| Archive size | 26,609,024 bytes / 25.38 MiB |
+| Archive members | 704 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
 32.27 MiB. With `MinSizeRel`, the unused Performance Schema static plugin
@@ -148,8 +150,10 @@ routing reduces the pre-strip archive to 27,446,520 bytes / 26.18 MiB.
 Using the compact server error-message catalog reduces the pre-strip archive to
 27,220,344 bytes / 25.96 MiB. Omitting dynamic plugin shared-object loading
 and service injection reduces the pre-strip archive to 27,195,584 bytes /
-25.94 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 571,664 bytes
+25.94 MiB. Guarding embedded no-binlog startup, open, cleanup, and GTID-index
+update paths, and omitting the unsupported injector root, reduces the pre-strip
+archive to 27,180,312 bytes / 25.92 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 571,288 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -169,10 +173,11 @@ Omitting Oracle compatibility function aliases and schema routing saves 145,064
 bytes with no member-count change. Using the compact server error-message
 catalog saves 226,176 bytes with no member-count change. Omitting dynamic
 plugin shared-object loading and service injection saves 24,760 bytes with no
-member-count change.
-The final archive is 4,905,784 bytes smaller than the Release build with
-Performance Schema disabled, 6,505,720 bytes smaller than the symbol-stripped
-baseline that still built Performance Schema, and 7,218,400 bytes smaller than
+member-count change. Guarding the retained no-binlog paths and omitting the
+injector root saves 14,896 bytes and one archive member.
+The final archive is 4,920,680 bytes smaller than the Release build with
+Performance Schema disabled, 6,520,616 bytes smaller than the symbol-stripped
+baseline that still built Performance Schema, and 7,233,296 bytes smaller than
 the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
@@ -220,9 +225,11 @@ Dynamic plugin shared-object loading is omitted from the default embedded
 archive; static built-in plugins and native storage engines remain available,
 and the embedded profile reports `@@have_dynamic_loading=NO`.
 The active binary-log transaction/event core is disabled in the default
-embedded archive. `log.cc` and shared binlog/event symbols remain where generic
-MariaDB logging, transaction coordination, or retained parser/runtime code
-still reference them; this slice does not claim full event-object removal.
+embedded archive. The unsupported injector root is omitted, and retained
+embedded no-binlog paths in `log.cc`, `mysqld.cc`, and transaction-coordinator
+selection are guarded. `log_event.cc`, `log_event_server.cc`, `gtid_index.cc`,
+`rpl_gtid.cc`, and shared helper symbols remain where generic MariaDB logging,
+transaction coordination, or retained parser/runtime code still reference them.
 `PROCEDURE ANALYSE()` is omitted from the default embedded archive and linked
 to an unsupported stub; ordinary SELECT execution and the generic retained
 SELECT procedure dispatch continue to link. System-variable names, values,
@@ -267,6 +274,7 @@ The baseline explicitly disables:
 - Dynamic UDF shared-library loading
 - Dynamic plugin shared-object loading
 - Active binary-log transaction/event core
+- Unsupported binlog injector root
 - `PROCEDURE ANALYSE()`
 - System-variable help text
 - Static `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES`

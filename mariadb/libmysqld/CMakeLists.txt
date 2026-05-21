@@ -246,7 +246,9 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
 
 
 IF(NOT MYLITE_WITH_BINLOG_CORE)
-  LIST(REMOVE_ITEM SQL_EMBEDDED_SOURCES ../sql/rpl_record.cc)
+  LIST(REMOVE_ITEM SQL_EMBEDDED_SOURCES
+    ../sql/rpl_injector.cc
+    ../sql/rpl_record.cc)
 ENDIF()
 
 IF(NOT MYLITE_WITH_PROCEDURE_ANALYSE)

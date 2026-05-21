@@ -84,8 +84,11 @@ Dynamic UDF shared-library loading is omitted after policy coverage proves
 separate application SQL surface.
 The binary-log transaction/event core is compiled to embedded no-op paths after
 policy coverage proves replication and binlog command families are outside the
-core library contract; shared log/event objects that other MariaDB code still
-references remain for later, narrower review.
+core library contract. Embedded no-binlog startup, open, cleanup, and
+GTID-index update paths are guarded, and the unsupported injector root is
+omitted after link evidence proves it is only needed by the server topology
+runtime. Shared event, GTID-state, and replication utility helpers that
+retained MariaDB code still references remain for narrower review.
 Legacy `PROCEDURE ANALYSE()` support is omitted after policy coverage proves it
 is an obsolete diagnostic SELECT extension rather than application data
 functionality; normal SELECT execution remains supported.

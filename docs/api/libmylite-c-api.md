@@ -409,6 +409,8 @@ metadata are rejected before direct execution or prepared-statement
 preparation. The default embedded profile starts with binary logging disabled
 and compiles binlog transaction, row-event, and GTID-state entry points to
 embedded no-ops where they are unreachable through supported MyLite behavior.
+It also omits the unsupported injector root that is only needed by the server
+topology runtime.
 Dynamic UDF registration through `CREATE FUNCTION ... SONAME` is rejected
 through the same policy because it loads server-owned shared libraries and
 persists metadata in server system tables. Attempts to enable Oracle SQL mode,

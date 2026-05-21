@@ -121,6 +121,12 @@ behavior when MariaDB errno and SQLSTATE remain available.
   and reduces the stripped archive to 27,265,728 bytes, 26.00 MiB, and 705
   members. Shared log/event symbols remain where retained MariaDB code still
   references them.
+- Further guarding no-binlog startup, cleanup, open, annotated-row, and
+  GTID-index update paths allows the unsupported `rpl_injector.cc.o` root to
+  be omitted. The stripped archive is reduced to 26,609,024 bytes, 25.38 MiB,
+  and 704 members. `gtid_index.cc.o`, `log_event.cc.o`, and
+  `log_event_server.cc.o` remain because retained MariaDB code still references
+  them.
 - `mariadb/sql/procedure.cc` registers the built-in `analyse` SELECT procedure
   and dispatches it to `proc_analyse_init()`. `mariadb/sql/sql_analyse.cc`
   implements that analyzer and is included in the embedded SQL archive by
@@ -319,6 +325,9 @@ skipping mandatory binlog plugin registration, and compiling binlog
 transaction, row-event, GTID-state, event-write, and table-map entry points to
 no-op or fail-closed behavior. The option defaults to `ON` so normal MariaDB
 server builds keep upstream binlog behavior.
+The disabled embedded profile also guards no-binlog startup, open, cleanup,
+annotated-row, and GTID-index update paths, and omits the unsupported injector
+root that is only needed by the server topology runtime.
 
 The embedded archive disables `PROCEDURE ANALYSE()` by setting
 `MYLITE_WITH_PROCEDURE_ANALYSE=0` in the MyLite baseline, replacing
@@ -405,8 +414,10 @@ disabled or omitted surfaces, and the compiled objects use size-oriented
 release flags. The embedded SQL target also uses `-fno-exceptions`, omits
 unwind tables, and omits dynamic UDF lookup, execution, and DDL runtime. The
 embedded baseline also disables binlog transaction/event runtime behind a
-MyLite-owned profile flag and omits long system-variable help comments from
-`sys_vars.cc`. Static server-information `SHOW` producers are compiled out of
+MyLite-owned profile flag, guards retained no-binlog paths, and omits the
+unsupported injector root from the no-binlog embedded profile. It also omits
+long system-variable help comments from `sys_vars.cc`. Static server-information
+`SHOW` producers are compiled out of
 `sql_show.cc`. Hardcoded command-line option help strings are compiled out of
 the embedded `mysqld.cc` option table. Optimizer trace diagnostics are replaced
 with inert trace helper symbols in the embedded SQL archive. General and slow
@@ -448,7 +459,8 @@ Replication and binary logging are server-topology surfaces. MyLite already
 rejects replication and binlog command families, starts with `@@log_bin=0`,
 and verifies that no binlog or relay-log sidecars are created. The no-binlog
 core keeps supported DDL, DML, transactions, crash/reopen behavior, and native
-engine coverage intact.
+engine coverage intact. Omitting the injector root does not affect supported
+SQL because it is only used by the unsupported server topology runtime.
 `PROCEDURE ANALYSE()` is a legacy diagnostic SELECT extension. Omitting it does
 not affect ordinary SELECT execution, DDL, DML, native storage engines, JSON,
 GEOMETRY/GIS, or the public C API.
@@ -604,6 +616,11 @@ current archive to 26,623,920 bytes / 25.39 MiB, 4,905,784 bytes smaller than
 the Release build with Performance Schema disabled, 6,505,720 bytes smaller
 than the symbol-stripped baseline with Performance Schema still built, and
 7,218,400 bytes smaller than the original broad archive.
+Guarding retained no-binlog paths and omitting the injector root brings the
+current archive to 26,609,024 bytes / 25.38 MiB, 4,920,680 bytes smaller than
+the Release build with Performance Schema disabled, 6,520,616 bytes smaller
+than the symbol-stripped baseline with Performance Schema still built, and
+7,233,296 bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -629,6 +646,9 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Confirm `MYLITE_WITH_DYNAMIC_PLUGIN_LOADING=OFF` appears in the embedded
   CMake cache, `@@have_dynamic_loading=NO` is covered by server-surface policy
   coverage, and plugin SQL remains rejected.
+- Confirm `rpl_injector.cc.o` and `rpl_record.cc.o` are absent from
+  `libmariadbd.a`, while `gtid_index.cc.o`, `log_event.cc.o`, and
+  `log_event_server.cc.o` remain.
 - Run `cmake --build --preset dev`.
 - Run `ctest --preset dev --output-on-failure`.
 - Run `cmake --build --preset embedded-dev`.
@@ -664,7 +684,8 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
   runtime.
 - Replication and binlog command families remain rejected, `@@log_bin=0`
   remains covered, no binlog/relay-log sidecars are created, and the embedded
-  archive omits the active binlog transaction/event core.
+  archive omits the active binlog transaction/event core plus the unsupported
+  injector root.
 - Direct and prepared `SELECT ... PROCEDURE ANALYSE()` fail predictably, quoted
   literal mentions remain normal SQL, and the embedded archive omits
   `sql_analyse.cc.o`.
@@ -713,9 +734,10 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Unwind-table omission should stay scoped to targets where it is non-semantic.
 - Stored functions remain planned application SQL. Dynamic UDF policy and size
   trimming must stay scoped to shared-library UDF registration and execution.
-- `log.cc`, `log_event.cc`, GTID helpers, and binlog plugin symbols still have
-  shared references. Removing more binlog/event code needs separate source and
-  link evidence rather than file-name pruning.
+- `log.cc`, `gtid_index.cc`, `log_event.cc`, `log_event_server.cc`,
+  `rpl_gtid.cc`, `sql_binlog.cc`, `sql_repl.cc`, and replication utility files
+  still have shared references. Removing more binlog code needs separate source
+  and link evidence rather than file-name pruning.
 - The generic SELECT procedure dispatch remains linked after omitting
   `PROCEDURE ANALYSE()`. Removing it should be a separate slice.
 - Clients that build help UIs from
