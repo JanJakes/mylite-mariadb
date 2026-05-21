@@ -358,6 +358,8 @@ hot loop while preserving the existing fallback on other platforms.
 Row-update execution now also finishes active-checkpoint write journals through
 the captured statement scope, avoiding another filename-based active-statement
 lookup on prepared point updates.
+Active write-journal begin logic now resolves recovery and transaction journal
+owners in one statement-chain pass before protecting dirty pages.
 Durable handler write locks now defer MEMORY/HEAP statement snapshots until a
 volatile table participates, while transaction and savepoint snapshots remain
 eager at their SQL boundaries.

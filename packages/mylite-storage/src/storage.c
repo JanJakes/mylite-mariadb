@@ -835,6 +835,11 @@ static mylite_storage_statement *recovery_journal_owner_in_statement_chain(
 static mylite_storage_statement *transaction_journal_owner_in_statement_chain(
     mylite_storage_statement *statement
 );
+static void statement_chain_journal_owners(
+    mylite_storage_statement *statement,
+    mylite_storage_statement **out_recovery,
+    mylite_storage_statement **out_transaction
+);
 static int statement_chain_has_transaction_journal(const mylite_storage_statement *statement);
 static mylite_storage_result ensure_existing_journal_protects_pages(
     const mylite_storage_pager *pager,
@@ -9751,20 +9756,27 @@ static mylite_storage_result begin_write_journal_for_statement_pages(
         clear_statement_chain_row_payload_caches(statement);
         clear_durable_exact_index_caches(filename);
     }
-    if (statement_chain_has_write_journal(statement)) {
-        if (statement_chain_has_transaction_journal(statement)) {
-            const mylite_storage_pager pager = open_storage_pager(file, filename, header);
-            return ensure_transaction_journal_protects_pages(
-                &pager,
-                statement,
-                protected_page_ids,
-                protected_page_count
-            );
-        }
+    mylite_storage_statement *recovery_journal_owner = NULL;
+    mylite_storage_statement *transaction_journal_owner = NULL;
+    statement_chain_journal_owners(statement, &recovery_journal_owner, &transaction_journal_owner);
+    if (transaction_journal_owner != NULL) {
         const mylite_storage_pager pager = open_storage_pager(file, filename, header);
-        return ensure_recovery_journal_protects_pages(
+        return ensure_existing_journal_protects_pages(
             &pager,
-            statement,
+            transaction_journal_owner,
+            transaction_journal_path,
+            transaction_journal_rewrite_path,
+            protected_page_ids,
+            protected_page_count
+        );
+    }
+    if (recovery_journal_owner != NULL) {
+        const mylite_storage_pager pager = open_storage_pager(file, filename, header);
+        return ensure_existing_journal_protects_pages(
+            &pager,
+            recovery_journal_owner,
+            recovery_journal_path,
+            recovery_journal_rewrite_path,
             protected_page_ids,
             protected_page_count
         );
@@ -10151,6 +10163,24 @@ static mylite_storage_statement *transaction_journal_owner_in_statement_chain(
         }
     }
     return NULL;
+}
+
+static void statement_chain_journal_owners(
+    mylite_storage_statement *statement,
+    mylite_storage_statement **out_recovery,
+    mylite_storage_statement **out_transaction
+) {
+    *out_recovery = NULL;
+    *out_transaction = NULL;
+    for (mylite_storage_statement *current = statement; current != NULL;
+         current = current->parent) {
+        if (current->owns_recovery_journal && *out_recovery == NULL) {
+            *out_recovery = current;
+        }
+        if (current->owns_transaction_journal && *out_transaction == NULL) {
+            *out_transaction = current;
+        }
+    }
 }
 
 static int statement_chain_has_transaction_journal(const mylite_storage_statement *statement) {
