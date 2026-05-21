@@ -264,6 +264,7 @@ bool is_unsupported_optimizer_trace_statement(
     const SqlPolicyTokens &tokens,
     std::string_view current_schema
 );
+bool is_unsupported_persistent_statistics_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_server_set_statement(const SqlPolicyTokens &tokens);
 SqlPolicyTokens collect_sql_policy_tokens(std::string_view sql);
 bool next_sql_token(std::string_view sql, std::size_t &offset, std::string_view &token);
@@ -313,6 +314,7 @@ bool token_in(
 bool is_userstat_statistics_table_token(std::string_view token);
 bool is_server_variable_token(std::string_view token);
 bool is_query_log_variable_token(std::string_view token);
+bool is_persistent_statistics_variable_token(std::string_view token);
 bool is_system_variable_qualified_token(const SqlPolicyTokens &tokens, std::size_t index);
 bool is_system_variable_assignment_start(const SqlPolicyTokens &tokens, std::size_t index);
 std::size_t first_set_assignment_token_index(const SqlPolicyTokens &tokens);
@@ -1184,6 +1186,7 @@ bool is_unsupported_server_surface_sql(std::string_view sql, const std::string &
            is_unsupported_query_cache_statement(tokens) ||
            is_unsupported_query_log_statement(tokens) ||
            is_unsupported_optimizer_trace_statement(tokens, current_schema) ||
+           is_unsupported_persistent_statistics_statement(tokens) ||
            is_unsupported_server_set_statement(tokens);
 }
 
@@ -1452,6 +1455,24 @@ bool is_unsupported_optimizer_trace_statement(
 
     for (std::size_t index = 1; index < tokens.count; ++index) {
         if (token_in(tokens.values[index], "OPTIMIZER_TRACE", "OPTIMIZER_TRACE_MAX_MEM_SIZE") &&
+            is_system_variable_qualified_token(tokens, index)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool is_unsupported_persistent_statistics_statement(const SqlPolicyTokens &tokens) {
+    if (token_equals(identifier_token_at(tokens, 0), "ANALYZE") &&
+        has_identifier_token(tokens, "PERSISTENT", 1)) {
+        return true;
+    }
+    if (!token_equals(identifier_token_at(tokens, 0), "SET")) {
+        return false;
+    }
+
+    for (std::size_t index = 1; index < tokens.count; ++index) {
+        if (is_persistent_statistics_variable_token(tokens.values[index]) &&
             is_system_variable_qualified_token(tokens, index)) {
             return true;
         }
@@ -1851,6 +1872,10 @@ bool is_query_log_variable_token(std::string_view token) {
                "LOG_SLOW_SLAVE_STATEMENTS",
                "LOG_SLOW_MAX_WARNINGS"
            );
+}
+
+bool is_persistent_statistics_variable_token(std::string_view token) {
+    return token_in(token, "USE_STAT_TABLES", "HISTOGRAM_SIZE", "HISTOGRAM_TYPE");
 }
 
 bool is_system_variable_qualified_token(const SqlPolicyTokens &tokens, std::size_t index) {
@@ -2703,6 +2728,8 @@ std::vector<std::string> runtime_arguments(const RuntimeLayout &layout) {
         "--innodb-fast-shutdown=1",
         "--log-output=NONE",
         "--max-digest-length=0",
+        "--use-stat-tables=never",
+        "--histogram-size=0",
         "--skip-log-bin",
         "--skip-slave-start",
         "--skip-grant-tables",

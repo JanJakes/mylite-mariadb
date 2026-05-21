@@ -122,6 +122,18 @@ ELSE()
   ADD_DEFINITIONS(-DMYLITE_WITH_OPTIMIZER_TRACE=0)
 ENDIF()
 
+OPTION(MYLITE_WITH_PERSISTENT_STATISTICS
+  "Build persistent optimizer statistics and JSON histogram storage" ON)
+IF(MYLITE_WITH_PERSISTENT_STATISTICS)
+  ADD_DEFINITIONS(-DMYLITE_WITH_PERSISTENT_STATISTICS=1)
+  SET(MYLITE_SQL_STATISTICS_SOURCE ../sql/sql_statistics.cc)
+  SET(MYLITE_OPT_HISTOGRAM_JSON_SOURCE ../sql/opt_histogram_json.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_PERSISTENT_STATISTICS=0)
+  SET(MYLITE_SQL_STATISTICS_SOURCE ../sql/mylite_sql_statistics_disabled.cc)
+  SET(MYLITE_OPT_HISTOGRAM_JSON_SOURCE)
+ENDIF()
+
 OPTION(MYLITE_WITH_PROCESSLIST_METADATA "Build process-list metadata producers" ON)
 IF(MYLITE_WITH_PROCESSLIST_METADATA)
   ADD_DEFINITIONS(-DMYLITE_WITH_PROCESSLIST_METADATA=1)
@@ -275,7 +287,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/group_by_handler.cc ../sql/derived_handler.cc
            ../sql/select_handler.cc
            ../sql/sql_show.cc ../sql/sql_state.c 
-           ../sql/sql_statistics.cc ../sql/sql_string.cc
+           ${MYLITE_SQL_STATISTICS_SOURCE} ../sql/sql_string.cc
            ../sql/sql_table.cc ../sql/sql_test.cc
            ../sql/ddl_log.cc ../sql/item_vectorfunc.cc
            ../sql/sql_trigger.cc ../sql/sql_union.cc
@@ -328,7 +340,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/opt_trace.cc
            ../sql/xa.cc
            ../sql/json_table.cc
-           ../sql/opt_histogram_json.cc
+           ${MYLITE_OPT_HISTOGRAM_JSON_SOURCE}
            ../sql/sp_instr.cc
            ../sql/mylite_oracle_parser_stub.cc
            ${GEN_SOURCES}

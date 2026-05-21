@@ -53,6 +53,7 @@ MYLITE_WITH_SYSVAR_HELP_TEXT=OFF
 MYLITE_WITH_STATIC_SHOW_INFO=OFF
 MYLITE_WITH_OPTION_HELP_TEXT=OFF
 MYLITE_WITH_OPTIMIZER_TRACE=OFF
+MYLITE_WITH_PERSISTENT_STATISTICS=OFF
 MYLITE_WITH_PROCESSLIST_METADATA=OFF
 MYLITE_WITH_FOREIGN_SERVER_METADATA=OFF
 MYLITE_WITH_BACKUP_RUNTIME=OFF
@@ -105,7 +106,13 @@ Schema digest text and hashes are unavailable, and startup sets
 SQL parsing, execution, prepared statements, diagnostics, and `EXPLAIN` remain
 available. It omits full event parse-data validation behind
 `MYLITE_WITH_EVENT_PARSE_DATA=0`; event DDL and metadata commands are rejected,
-and retained parser references use a small link stub. It omits server
+and retained parser references use a small link stub. It omits persistent
+engine-independent optimizer-statistics storage behind
+`MYLITE_WITH_PERSISTENT_STATISTICS=0`; persistent `mysql.table_stats`,
+`mysql.column_stats`, `mysql.index_stats`, and JSON histogram storage are
+omitted, startup sets `@@use_stat_tables=NEVER` and `@@histogram_size=0`,
+and ordinary engine statistics, planning, execution, `ANALYZE TABLE`, and
+`EXPLAIN` remain available. It omits server
 status-variable publication behind
 `MYLITE_WITH_STATUS_VARIABLES=0`; `SHOW STATUS` and status Information Schema
 tables return empty result sets, while ordinary SQL diagnostics and result
@@ -170,8 +177,8 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,474,416 bytes / 25.25 MiB |
-| Archive members | 699 |
+| Archive size | 26,402,232 bytes / 25.18 MiB |
+| Archive members | 698 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
 32.27 MiB. With `MinSizeRel`, the unused Performance Schema static plugin
@@ -217,8 +224,10 @@ statistics diagnostics reduces the pre-strip archive to 27,059,928 bytes /
 25.81 MiB. Omitting user-variable diagnostics, reducing event parse-data
 validation to a parser-link stub, omitting Unix socket server authentication,
 and omitting SQL `BINLOG` replay bring the current pre-strip archive to
-27,041,656 bytes / 25.79 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 567,240 bytes
+27,041,656 bytes / 25.79 MiB. Omitting persistent optimizer-statistics storage
+and JSON histogram storage reduces the current pre-strip archive to
+26,968,288 bytes / 25.72 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 566,056 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -256,10 +265,11 @@ user-variable diagnostics saves 6,576 bytes and one archive member. Reducing
 event parse-data validation to a parser-link stub saves 4,744 bytes with no
 member-count change. Omitting Unix socket server authentication saves 2,160
 bytes and one archive member. Omitting SQL `BINLOG` statement replay saves
-3,640 bytes and one archive member.
-The final archive is 5,055,288 bytes smaller than the Release build with
-Performance Schema disabled, 6,655,224 bytes smaller than the symbol-stripped
-baseline that still built Performance Schema, and 7,367,904 bytes smaller than
+3,640 bytes and one archive member. Omitting persistent optimizer-statistics
+storage and JSON histogram storage saves 73,368 bytes and one archive member.
+The final archive is 5,127,472 bytes smaller than the Release build with
+Performance Schema disabled, 6,727,408 bytes smaller than the symbol-stripped
+baseline that still built Performance Schema, and 7,440,088 bytes smaller than
 the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
@@ -331,6 +341,12 @@ usable outside `information_schema`.
 User-variable diagnostics are omitted from the default embedded profile; the
 `user_variables` plugin is absent, diagnostic reads and resets are rejected by
 policy, and ordinary `@variable` SQL remains available.
+Persistent optimizer-statistics storage is omitted from the default embedded
+profile; `use_stat_tables` starts as `NEVER`, histogram collection starts at
+size `0`, persistent `ANALYZE TABLE ... PERSISTENT FOR ...` and statistic
+system-variable changes are rejected by policy, and ordinary engine
+statistics, planning, execution, `ANALYZE TABLE`, and `EXPLAIN` remain
+available.
 Unix socket server authentication is omitted from the default embedded profile;
 the `unix_socket` plugin is absent, and network users and authentication remain
 outside the core embedded API.
@@ -410,6 +426,7 @@ The baseline explicitly disables:
 - PROXY protocol listener support
 - User statistics diagnostics
 - User-variable diagnostics
+- Persistent optimizer statistics and JSON histogram storage
 - Unix socket server authentication
 - Full event parse-data validation
 - Oracle compatibility function aliases and `oracle_schema` routing

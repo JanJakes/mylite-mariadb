@@ -55,6 +55,7 @@ static void assert_status_variables_omitted(mylite_db *db);
 static void assert_processlist_metadata_omitted(mylite_db *db);
 static void assert_userstat_diagnostics_omitted(mylite_db *db);
 static void assert_user_variable_diagnostics_omitted(mylite_db *db);
+static void assert_persistent_statistics_omitted(mylite_db *db);
 static void assert_server_auth_plugins_omitted(mylite_db *db);
 static void assert_oracle_compat_functions_omitted(mylite_db *db);
 static void assert_compact_error_catalog(mylite_db *db);
@@ -126,6 +127,7 @@ static void test_server_surfaces_are_disabled_or_contained(void) {
     assert_processlist_metadata_omitted(db);
     assert_userstat_diagnostics_omitted(db);
     assert_user_variable_diagnostics_omitted(db);
+    assert_persistent_statistics_omitted(db);
     assert_server_auth_plugins_omitted(db);
     assert_oracle_compat_functions_omitted(db);
     assert_compact_error_catalog(db);
@@ -461,6 +463,51 @@ static void assert_user_variable_diagnostics_omitted(mylite_db *db) {
     );
 }
 
+static void assert_persistent_statistics_omitted(mylite_db *db) {
+    static const char *const stats_variable_columns[] = {"use_stat_tables", "histogram_size"};
+    static const char *const stats_variable_values[] = {"NEVER", "0"};
+
+    query_expect(
+        db,
+        (expected_query){
+            .sql = "SELECT @@use_stat_tables AS use_stat_tables, "
+                   "@@histogram_size AS histogram_size",
+            .column_count = 2,
+            .row_count = 1,
+            .column_names = stats_variable_columns,
+            .values = stats_variable_values,
+        }
+    );
+
+    exec_ok(db, "SET @use_stat_tables = 'local'");
+    exec_ok(db, "SET @histogram_size = 16");
+    exec_ok(db, "SET @histogram_type = 'local'");
+    exec_ok(db, "CREATE DATABASE stats_app");
+    exec_ok(db, "CREATE TABLE stats_app.t (id INT PRIMARY KEY, value INT)");
+    exec_ok(db, "INSERT INTO stats_app.t VALUES (1, 10), (2, 20)");
+    exec_ok(db, "ANALYZE TABLE stats_app.t");
+    exec_ok(db, "EXPLAIN SELECT * FROM stats_app.t WHERE id = 1");
+
+    expect_error(db, "ANALYZE TABLE stats_app.t PERSISTENT FOR ALL", "server-owned SQL surface");
+    expect_error(db, "SET use_stat_tables = PREFERABLY", "server-owned SQL surface");
+    expect_error(db, "SET @@session.use_stat_tables = PREFERABLY", "server-owned SQL surface");
+    expect_error(db, "SET histogram_size = 10", "server-owned SQL surface");
+    expect_error(db, "SET histogram_type = SINGLE_PREC_HB", "server-owned SQL surface");
+    expect_error(db, "SET autocommit = 1, histogram_size = 10", "server-owned SQL surface");
+    expect_error(
+        db,
+        "SET STATEMENT use_stat_tables = PREFERABLY FOR SELECT 1",
+        "server-owned SQL surface"
+    );
+    expect_prepare_error(
+        db,
+        "ANALYZE TABLE stats_app.t PERSISTENT FOR ALL",
+        "server-owned SQL surface"
+    );
+    expect_prepare_error(db, "SET use_stat_tables = PREFERABLY", "server-owned SQL surface");
+    expect_prepare_error(db, "SET histogram_size = 10", "server-owned SQL surface");
+}
+
 static void assert_server_auth_plugins_omitted(mylite_db *db) {
     query_expect(
         db,
@@ -584,6 +631,9 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SET @first_log = 1, @slow_query_log = 1");
     exec_ok(db, "SET @optimizer_trace = 'enabled=on'");
     exec_ok(db, "SET @first_trace = 1, @optimizer_trace_max_mem_size = 8192");
+    exec_ok(db, "SET @use_stat_tables = 'local'");
+    exec_ok(db, "SET @histogram_size = 16");
+    exec_ok(db, "SET @histogram_type = 'local'");
     exec_ok(db, "SET @sql_mode = 'ORACLE'");
     exec_ok(db, "SET @password = 'local'");
     exec_ok(db, "SET sql_mode = @@sql_mode");
@@ -778,6 +828,15 @@ static void assert_server_sql_rejected(mylite_db *db) {
         "SELECT * FROM `information_schema`.`OPTIMIZER_TRACE`",
         "server-owned SQL surface"
     );
+    expect_error(
+        db,
+        "ANALYZE TABLE app.table_statistics PERSISTENT FOR ALL",
+        "server-owned SQL surface"
+    );
+    expect_error(db, "SET use_stat_tables = PREFERABLY", "server-owned SQL surface");
+    expect_error(db, "SET @@session.use_stat_tables = PREFERABLY", "server-owned SQL surface");
+    expect_error(db, "SET histogram_size = 10", "server-owned SQL surface");
+    expect_error(db, "SET histogram_type = SINGLE_PREC_HB", "server-owned SQL surface");
     expect_error(db, "SET userstat = ON", "server-owned SQL surface");
     expect_error(db, "SET GLOBAL userstat = ON", "server-owned SQL surface");
     expect_error(db, "SET @@global.userstat = ON", "server-owned SQL surface");
@@ -895,6 +954,13 @@ static void assert_server_sql_rejected(mylite_db *db) {
         "server-owned SQL surface"
     );
     expect_prepare_error(db, "SET userstat = ON", "server-owned SQL surface");
+    expect_prepare_error(
+        db,
+        "ANALYZE TABLE app.table_statistics PERSISTENT FOR ALL",
+        "server-owned SQL surface"
+    );
+    expect_prepare_error(db, "SET use_stat_tables = PREFERABLY", "server-owned SQL surface");
+    expect_prepare_error(db, "SET histogram_size = 10", "server-owned SQL surface");
     expect_prepare_error(db, "FLUSH USER_STATISTICS", "server-owned SQL surface");
     expect_prepare_error(
         db,

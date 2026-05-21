@@ -934,6 +934,11 @@ Omitting SQL `BINLOG` statement replay brings the current archive to
 with Performance Schema disabled, 6,655,224 bytes smaller than the
 symbol-stripped baseline with Performance Schema still built, and 7,367,904
 bytes smaller than the original broad archive.
+Omitting persistent optimizer-statistics storage and JSON histogram storage
+brings the current archive to 26,402,232 bytes / 25.18 MiB, 5,127,472 bytes
+smaller than the Release build with Performance Schema disabled, 6,727,408
+bytes smaller than the symbol-stripped baseline with Performance Schema still
+built, and 7,440,088 bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -1010,6 +1015,12 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   `mylite_event_parse_data_disabled.cc.o` is present in `libmariadbd.a`, and
   direct and prepared event DDL plus event metadata SQL are rejected by
   server-surface policy coverage.
+- Confirm `MYLITE_WITH_PERSISTENT_STATISTICS=OFF` appears in the embedded
+  CMake cache, `sql_statistics.cc.o` and `opt_histogram_json.cc.o` are absent,
+  `mylite_sql_statistics_disabled.cc.o` is present in `libmariadbd.a`,
+  ordinary `ANALYZE TABLE` and `EXPLAIN` still execute, and persistent
+  statistics SQL plus variables are rejected by server-surface policy
+  coverage.
 - Run `cmake --build --preset dev`.
 - Run `ctest --preset dev --output-on-failure`.
 - Run `cmake --build --preset embedded-dev`.
@@ -1061,7 +1072,10 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   event DDL and metadata statements remain rejected, and the embedded archive
   keeps only a parser-link event parse-data stub. SQL `BINLOG` replay is
   rejected directly and in prepared statements, and `sql_binlog.cc.o` is absent
-  from the embedded archive.
+  from the embedded archive. Persistent optimizer-statistics storage is
+  omitted, `use_stat_tables` starts as `NEVER`, histogram collection starts at
+  size `0`, persistent statistics SQL and variable changes are rejected, and
+  ordinary engine estimates, `ANALYZE TABLE`, and `EXPLAIN` remain covered.
 - Process-list SHOW commands are rejected, the process-list Information Schema
   table returns zero rows, and the embedded archive omits process-list row
   producers.
@@ -1141,6 +1155,10 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
 - Users relying on MariaDB `SHOW STATUS` counters or status Information Schema
   rows lose those server diagnostics in the default embedded profile. Ordinary
   SQL diagnostics and result metadata remain available.
+- Users relying on persistent MariaDB optimizer statistics or JSON histograms
+  in `mysql.table_stats`, `mysql.column_stats`, or `mysql.index_stats` lose
+  that tuning metadata in the default embedded profile. Ordinary engine
+  statistics, planning, `ANALYZE TABLE`, and `EXPLAIN` remain available.
 - Users relying on exact full-text MariaDB server diagnostics for uncommon
   inherited errors may see generic message text in the default embedded
   profile. MariaDB errno and SQLSTATE remain the stable compatibility

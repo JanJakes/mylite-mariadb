@@ -118,6 +118,11 @@ Optimizer trace diagnostics are omitted after coverage proves trace variables
 and `INFORMATION_SCHEMA.OPTIMIZER_TRACE`, qualified or current-schema, are
 explicitly unsupported surfaces while ordinary planning, execution, and
 `EXPLAIN` remain available.
+Persistent optimizer-statistics storage and JSON histogram storage are omitted
+after coverage proves `ANALYZE TABLE ... PERSISTENT FOR ...` and statistic
+system-variable changes are server-owned tuning surfaces, while ordinary
+engine statistics, planning, execution, `ANALYZE TABLE`, and `EXPLAIN` remain
+available.
 General and slow query logs are omitted after coverage proves query-log
 configuration is explicitly unsupported while error logging, SQL diagnostics,
 warnings, and result metadata remain available.

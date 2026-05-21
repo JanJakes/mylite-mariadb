@@ -396,6 +396,7 @@ compatibility features that do not fit the embedded library model:
 - statement profiling,
 - query-cache management,
 - optimizer trace diagnostics,
+- persistent optimizer statistics,
 - general and slow query logs,
 - statement digest diagnostics,
 - server status variables,
@@ -439,7 +440,12 @@ rejected as part of the statement-profiling server diagnostic surface.
 Optimizer trace variables and
 `INFORMATION_SCHEMA.OPTIMIZER_TRACE`, including unqualified reads while
 `information_schema` is the current schema, are rejected as server diagnostics.
-Ordinary planning, execution, and `EXPLAIN` remain supported. The default
+Ordinary planning, execution, and `EXPLAIN` remain supported. Persistent
+optimizer-statistics storage is omitted because it is server-owned `mysql.*`
+tuning metadata: startup sets `@@use_stat_tables=NEVER` and
+`@@histogram_size=0`, persistent `ANALYZE TABLE ... PERSISTENT FOR ...` and
+statistic variable changes are rejected, and ordinary `ANALYZE TABLE`, engine
+row estimates, planning, execution, and `EXPLAIN` remain available. The default
 embedded profile omits general and slow query logs as daemon diagnostics;
 query-log variables and log flush commands are rejected while SQL errors,
 warnings, and result metadata remain available. Statement digest normalization
