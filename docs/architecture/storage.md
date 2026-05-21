@@ -1014,16 +1014,17 @@ maintained roots while preserving the row-state delete overlay for immutable
 and fallback paths. Eligible updates now replace source-row cells in maintained
 roots with the replacement row id and new key bytes, keep root entry counts
 stable, and skip duplicate append-only replacement index-entry pages for roots
-updated in place. Root-backed exact and full index readers treat maintained
-roots as authoritative root entries rather than applying the append-tail
-row-state overlay to entries already maintained in place. Active exact-index
-and published-root cache reads bypass stale durable cache state while an active
-statement chain has deferred table-local durable cache retargeting. Statement
-rollback, savepoint rollback, transaction rollback, stale statement-journal
-recovery, and stale transaction-journal recovery now restore single-page
-maintained root bytes and logical visibility for covered insert, update, and
-delete paths. Root splits, multi-page navigable indexes, and broader
-transactional maintained index mutation remain planned.
+updated in place. Root-backed exact and full index readers use maintained roots
+as base entries and scan the append tail for fallback entries after the root is
+full; root-resident mutations suppress duplicate append-only index entries, so
+the tail overlay keeps fallback history visible without adding stale root
+entries. Active exact-index and published-root cache reads bypass stale durable
+cache state while an active statement chain has deferred table-local durable
+cache retargeting. Statement rollback, savepoint rollback, transaction
+rollback, stale statement-journal recovery, and stale transaction-journal
+recovery now restore single-page maintained root bytes and logical visibility
+for covered insert, update, and delete paths. Root splits, multi-page navigable
+indexes, and broader transactional maintained index mutation remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, row/index free-space reclamation, and broader

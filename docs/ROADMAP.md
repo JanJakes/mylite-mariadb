@@ -53,10 +53,12 @@ published append-only page history once and prune candidates as later row-state
 pages hide source row ids. These reduce current scan-based point lookup overhead
 without changing the planned B-tree navigation work. Catalog-backed index-root
 metadata is now available as the publication point for future navigable index
-pages, and contiguous raw fixed-width leaf runs now serve exact byte-key base
-snapshots with page-range lookup and append-tail visibility overlay, including
-full durable index reads that can start from the published run instead of
-scanning the whole append history. SQL copy-rebuild DDL now
+pages. Single-page maintained roots now cover in-place insert, update, delete,
+rollback, recovery, and overflow append-tail visibility for rows inserted after
+the root reaches capacity. Contiguous raw fixed-width leaf runs now serve exact
+byte-key base snapshots with page-range lookup and append-tail visibility
+overlay, including full durable index reads that can start from the published
+run instead of scanning the whole append history. SQL copy-rebuild DDL now
 opportunistically publishes those roots for all current supported fixed-width
 keys in rebuilt tables, including retained primary keys after forced copy
 rebuilds, with one shared append-history scan and one catalog publication for

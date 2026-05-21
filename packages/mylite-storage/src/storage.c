@@ -17739,7 +17739,7 @@ static mylite_storage_result read_index_leaf_run_root(
             *out_leaf_run = (mylite_storage_index_leaf_run){
                 .first_page_id = root_entry->definition_root_page,
                 .page_count = 1ULL,
-                .tail_page_id = header->page_count,
+                .tail_page_id = root_entry->definition_root_page + 1ULL,
                 .entry_count = root_page.entry_count,
                 .key_size = root_page.key_size,
                 .entry_capacity = maintained_index_root_entry_capacity(root_page.key_size),
