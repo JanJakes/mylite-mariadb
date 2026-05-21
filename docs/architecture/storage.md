@@ -292,7 +292,12 @@ The header stores:
 - durability and feature flags.
 
 The current implementation writes page 0 as a fixed-size, little-endian,
-checksummed header and page 1 as a catalog root. Explicit MyLite table
+checksummed header and page 1 as the initial empty catalog root. Catalog
+mutations publish a fresh append-only catalog chain at the file tail, repoint
+the header's catalog root to the new chain, and leave the previous chain
+immutable until free-space reclamation exists. Catalog records remain
+page-local; a record larger than one catalog page payload is still unsupported,
+while large table and FK payloads live in blob pages. Explicit MyLite table
 definitions are stored as catalog records plus checksummed definition blob
 pages. Schema namespace names use lightweight catalog records; table-definition
 schema names are also treated as namespaces for compatibility with files that
@@ -934,8 +939,8 @@ snapshots by searching run page key ranges and walking only duplicate-spanning
 neighbor pages, with only pages appended after the published run scanned as a
 visibility overlay; missing roots fall back to the append-only scan path. Explicit
 standalone `CREATE INDEX` and `ALTER TABLE ... ADD KEY` copy rebuilds can
-opportunistically publish supported fixed-width leaf roots when catalog headroom
-allows, while generated FK helper keys plus rename/drop rebuilds keep using the
+publish supported fixed-width leaf roots through the growable catalog chain,
+while generated FK helper keys plus rename/drop rebuilds keep using the
 scan fallback. Cursors check
 `index_next_same()` boundaries before row materialization and reconstruct only
 the selected row buffer from row pages. Active checkpoints reuse statement
@@ -951,8 +956,7 @@ copy `ALTER` behavior for the supported shapes, but it is still an interim
 performance structure because maintained B-tree navigation and pager-style write
 paths are not implemented. Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
-definitions. B-tree pages, multi-page catalog storage, free-space reclamation,
-multi-statement transaction
+definitions. B-tree pages, free-space reclamation, multi-statement transaction
 rollback, and transaction-aware index maintenance remain planned.
 
 The storage engine must support:
@@ -996,15 +1000,18 @@ Minimum guarantees:
 Current implementation status: MyLite writes a deterministic
 `<database>.mylite-journal` rollback companion before publishing current
 append-only mutations. The journal stores the committed header page and, for
-catalog mutations, the committed catalog root page. It is fsynced before
+catalog mutations, the committed catalog root page. Catalog overflow pages do
+not need separate journal slots because catalog publication appends a fresh
+chain and never mutates the previous chain in place. It is fsynced before
 primary-file writes, the primary file is fsynced before the journal is removed,
 the parent directory is synced after journal create/remove, and every storage
 open first recovers and removes a valid pending journal. Recovery restores the
 previously committed header/catalog state and truncates the primary file to the
-restored header page count. Committed orphan pages from update/delete/truncate
-history still wait for free-space reclamation. Physical write, flush, sync, and
-truncate paths classify no-space, quota, and file-size-limit failures as
-`MYLITE_STORAGE_FULL`, leaving generic I/O errors for non-capacity failures.
+restored header page count. Committed orphan pages from catalog, update/delete,
+and truncate history still wait for free-space reclamation. Physical write,
+flush, sync, and truncate paths classify no-space, quota, and file-size-limit
+failures as `MYLITE_STORAGE_FULL`, leaving generic I/O errors for non-capacity
+failures.
 The MariaDB handler maps that storage result to a file-full condition rather
 than reporting a crashed table or index.
 

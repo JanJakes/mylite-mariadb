@@ -100,6 +100,7 @@ static void test_rejects_newer_format_version(void);
 static void test_rejects_bad_catalog_root(void);
 static void test_store_and_read_table_definition(void);
 static void test_store_large_table_definition(void);
+static void test_multi_page_catalog_chain(void);
 static void test_foreign_key_metadata_records(void);
 static void assert_foreign_key_metadata(
     const mylite_storage_foreign_key_metadata *metadata,
@@ -350,9 +351,11 @@ static transaction_child hold_transaction_with_uncommitted_row(
 static void release_transaction_child(transaction_child child);
 static void put_test_u32_le(unsigned char *page, size_t offset, unsigned value);
 static void put_test_u64_le(unsigned char *page, size_t offset, unsigned long long value);
+static unsigned long long get_test_u64_le(const unsigned char *page, size_t offset);
 static unsigned long long checksum_test_page(const unsigned char *page, size_t checksum_offset);
 static void flip_file_byte(const char *path, long offset);
 static void write_header_format_version(const char *path, unsigned value);
+static int count_app_table(void *ctx, const char *schema_name, const char *table_name);
 static int collect_table(void *ctx, const char *schema_name, const char *table_name);
 static int collect_schema(void *ctx, const char *schema_name);
 static int collect_foreign_key(void *ctx, const mylite_storage_foreign_key_metadata *metadata);
@@ -388,6 +391,7 @@ int main(void) {
     test_rejects_bad_catalog_root();
     test_store_and_read_table_definition();
     test_store_large_table_definition();
+    test_multi_page_catalog_chain();
     test_foreign_key_metadata_records();
     test_append_and_read_rows();
     test_append_and_read_large_row_payload();
@@ -672,7 +676,7 @@ static void test_store_and_read_table_definition(void) {
     );
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.catalog_generation == MYLITE_STORAGE_FORMAT_EMPTY_CATALOG_GENERATION + 1ULL);
-    assert(header.page_count == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 1ULL);
+    assert(header.page_count == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 2ULL);
     assert(mylite_storage_table_exists(filename, "app", "posts") == MYLITE_STORAGE_OK);
     assert(mylite_storage_table_exists(filename, "app", "missing") == MYLITE_STORAGE_NOTFOUND);
     assert(
@@ -734,7 +738,7 @@ static void test_store_large_table_definition(void) {
     assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
     assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
-    assert(header.page_count == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 3ULL);
+    assert(header.page_count == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 4ULL);
     assert(
         mylite_storage_read_table_definition(
             filename,
@@ -751,6 +755,142 @@ static void test_store_large_table_definition(void) {
     free(definition);
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_multi_page_catalog_chain(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+
+    enum { table_count = 96 };
+
+    char *root = make_temp_root();
+    char *filename = path_join(root, "multi-page-catalog.mylite");
+    char *journal_filename = journal_path(filename);
+    char table_names[table_count][16] = {{0}};
+    unsigned char catalog_root_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char catalog_next_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char saved_pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
+                             [MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {{0}};
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+    mylite_storage_statement *statement = NULL;
+    unsigned char *stored_definition = NULL;
+    size_t stored_definition_size = 0U;
+    unsigned listed_table_count = 0U;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    for (unsigned i = 0U; i < table_count; ++i) {
+        assert(snprintf(table_names[i], sizeof(table_names[i]), "t%03u", i) > 0);
+        mylite_storage_table_definition table_definition = {
+            .size = sizeof(table_definition),
+            .schema_name = "app",
+            .table_name = table_names[i],
+            .requested_engine_name = "MYLITE",
+            .effective_engine_name = "MYLITE",
+            .definition = definition,
+            .definition_size = sizeof(definition),
+        };
+        assert(
+            mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK
+        );
+    }
+
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    read_test_page(filename, header.catalog_root_page, catalog_root_page);
+    const unsigned long long next_page =
+        get_test_u64_le(catalog_root_page, MYLITE_STORAGE_FORMAT_CATALOG_NEXT_PAGE_OFFSET);
+    assert(next_page == header.catalog_root_page + 1ULL);
+    assert(next_page < header.page_count);
+    read_test_page(filename, next_page, catalog_next_page);
+    assert(
+        get_test_u64_le(catalog_next_page, MYLITE_STORAGE_FORMAT_CATALOG_PAGE_ID_OFFSET) ==
+        next_page
+    );
+    assert(mylite_storage_table_exists(filename, "app", table_names[0]) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_table_exists(filename, "app", table_names[table_count - 1U]) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_read_table_definition(
+            filename,
+            "app",
+            table_names[table_count - 1U],
+            &stored_definition,
+            &stored_definition_size
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(stored_definition_size == sizeof(definition));
+    assert(memcmp(stored_definition, definition, sizeof(definition)) == 0);
+    mylite_storage_free(stored_definition);
+
+    assert(
+        mylite_storage_list_tables(filename, "app", count_app_table, &listed_table_count) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(listed_table_count == table_count);
+
+    const mylite_storage_index_root_definition index_root = {
+        .size = sizeof(index_root),
+        .schema_name = "app",
+        .table_name = table_names[table_count - 1U],
+        .index_number = 7U,
+        .root_page = MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT,
+        .entry_count = 123ULL,
+    };
+    assert(mylite_storage_store_index_root(filename, &index_root) == MYLITE_STORAGE_OK);
+    assert_index_root(
+        filename,
+        "app",
+        table_names[table_count - 1U],
+        7U,
+        MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT,
+        123ULL
+    );
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+
+    assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_drop_table(filename, "app", table_names[table_count - 1U]) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", table_names[table_count - 1U]) ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_table_exists(filename, "app", table_names[table_count - 1U]) ==
+        MYLITE_STORAGE_OK
+    );
+
+    const unsigned long long page_ids[] = {
+        MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
+        header.catalog_root_page,
+    };
+    read_test_page(filename, MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID, saved_pages[0]);
+    read_test_page(filename, header.catalog_root_page, saved_pages[1]);
+    assert(
+        mylite_storage_drop_table(filename, "app", table_names[table_count - 1U]) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", table_names[table_count - 1U]) ==
+        MYLITE_STORAGE_NOTFOUND
+    );
+    write_test_recovery_journal(filename, page_ids, 2U, saved_pages);
+    assert(
+        mylite_storage_table_exists(filename, "app", table_names[table_count - 1U]) ==
+        MYLITE_STORAGE_OK
+    );
+    assert_file_missing(journal_filename);
+    assert_file_size_matches_header(filename);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(journal_filename);
     free(filename);
     free(root);
 }
@@ -1107,7 +1247,7 @@ static void test_append_and_read_rows(void) {
         MYLITE_STORAGE_OK
     );
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
-    assert(header.page_count == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 5ULL);
+    assert(header.page_count == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 7ULL);
 
     assert(mylite_storage_count_rows(filename, "app", "posts", &row_count) == MYLITE_STORAGE_OK);
     assert(row_count == 2ULL);
@@ -1164,17 +1304,17 @@ static void test_append_and_read_large_row_payload(void) {
         MYLITE_STORAGE_OK
     );
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
-    assert(header.page_count == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 6ULL);
+    assert(header.page_count == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 7ULL);
     assert(mylite_storage_read_rows(filename, "app", "payloads", &rows) == MYLITE_STORAGE_OK);
     assert(rows.row_size == 0U);
     assert(rows.row_count == 2U);
     assert(rows.row_bytes == sizeof(small_row) + large_row_size);
     assert(rows.row_offsets[0] == 0U);
     assert(rows.row_sizes[0] == sizeof(small_row));
-    assert(rows.row_ids[0] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 1ULL);
+    assert(rows.row_ids[0] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 2ULL);
     assert(rows.row_offsets[1] == sizeof(small_row));
     assert(rows.row_sizes[1] == large_row_size);
-    assert(rows.row_ids[1] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 5ULL);
+    assert(rows.row_ids[1] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 6ULL);
     assert(memcmp(rows.rows + rows.row_offsets[0], small_row, sizeof(small_row)) == 0);
     assert(memcmp(rows.rows + rows.row_offsets[1], large_row, large_row_size) == 0);
 
@@ -1237,7 +1377,7 @@ static void test_update_and_delete_rows(void) {
             &new_row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(new_row_id == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 4ULL);
+    assert(new_row_id == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 5ULL);
     assert(
         mylite_storage_delete_row(filename, "app", "posts", rows.row_ids[1]) == MYLITE_STORAGE_OK
     );
@@ -4249,7 +4389,7 @@ static void append_index_entry_test_rows(index_entries_test_context *ctx) {
             &ctx->row_1_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(ctx->row_1_id == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 1ULL);
+    assert(ctx->row_1_id == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 2ULL);
     assert(
         mylite_storage_append_row_with_index_entries(
             ctx->filename,
@@ -4262,7 +4402,7 @@ static void append_index_entry_test_rows(index_entries_test_context *ctx) {
             &ctx->row_2_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(ctx->row_2_id == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 4ULL);
+    assert(ctx->row_2_id == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 5ULL);
 }
 
 static void assert_primary_index_entries_after_insert(const index_entries_test_context *ctx) {
@@ -4295,7 +4435,7 @@ static void update_index_entry_test_row(index_entries_test_context *ctx) {
             &ctx->updated_row_1_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(ctx->updated_row_1_id == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 7ULL);
+    assert(ctx->updated_row_1_id == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 8ULL);
 }
 
 static void assert_primary_index_entries_after_update(const index_entries_test_context *ctx) {
@@ -4582,7 +4722,7 @@ static void test_index_leaf_pages(void) {
 
     assert(mylite_storage_rebuild_index_leaf(filename, "app", "posts", 0U) == MYLITE_STORAGE_OK);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
-    assert_index_root(filename, "app", "posts", 0U, header.page_count - 1ULL, 2ULL);
+    assert_index_root(filename, "app", "posts", 0U, header.page_count - 2ULL, 2ULL);
     assert_index_entry_lookup(filename, 0U, key_1, sizeof(key_1), MYLITE_STORAGE_OK, row_1_id);
     assert_index_entry_lookup(filename, 0U, key_3, sizeof(key_3), MYLITE_STORAGE_NOTFOUND, 0ULL);
 
@@ -4764,7 +4904,7 @@ static void test_multi_page_index_leaf_pages(void) {
         "app",
         "posts",
         0U,
-        header.page_count - (unsigned long long)expected_leaf_pages,
+        header.page_count - (unsigned long long)expected_leaf_pages - 1ULL,
         entry_count
     );
 
@@ -5017,7 +5157,7 @@ static void test_autoincrement_state(void) {
     assert_auto_increment_value(filename, 1ULL);
     exercise_exact_autoincrement_set(filename);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
-    assert(header.page_count == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 4ULL);
+    assert(header.page_count == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 5ULL);
 
     assert(
         mylite_storage_append_row(filename, "app", "posts", row, sizeof(row)) == MYLITE_STORAGE_OK
@@ -6439,19 +6579,25 @@ static void assert_transaction_and_statement_journals_recover_in_order(
                                          [MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {{0}};
     unsigned char statement_saved_pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
                                        [MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {{0}};
-    const unsigned long long transaction_page_ids[] = {
-        MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
-        MYLITE_STORAGE_FORMAT_CATALOG_ROOT_PAGE_ID,
+    mylite_storage_header transaction_saved_header = {
+        .size = sizeof(transaction_saved_header),
     };
     const unsigned long long statement_page_ids[] = {MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID};
     mylite_storage_rowset rows = {
         .size = sizeof(rows),
     };
 
+    assert(
+        mylite_storage_open_header(ctx->filename, &transaction_saved_header) == MYLITE_STORAGE_OK
+    );
+    const unsigned long long transaction_page_ids[] = {
+        MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
+        transaction_saved_header.catalog_root_page,
+    };
     read_test_page(ctx->filename, MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID, transaction_saved_pages[0]);
     read_test_page(
         ctx->filename,
-        MYLITE_STORAGE_FORMAT_CATALOG_ROOT_PAGE_ID,
+        transaction_saved_header.catalog_root_page,
         transaction_saved_pages[1]
     );
     assert(
@@ -6670,15 +6816,19 @@ static void test_recovers_catalog_publication_journal(void) {
     };
     unsigned char saved_pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
                              [MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {{0}};
-    const unsigned long long page_ids[] = {
-        MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
-        MYLITE_STORAGE_FORMAT_CATALOG_ROOT_PAGE_ID,
+    mylite_storage_header saved_header = {
+        .size = sizeof(saved_header),
     };
 
     assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
     assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_open_header(filename, &saved_header) == MYLITE_STORAGE_OK);
+    const unsigned long long page_ids[] = {
+        MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
+        saved_header.catalog_root_page,
+    };
     read_test_page(filename, MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID, saved_pages[0]);
-    read_test_page(filename, MYLITE_STORAGE_FORMAT_CATALOG_ROOT_PAGE_ID, saved_pages[1]);
+    read_test_page(filename, saved_header.catalog_root_page, saved_pages[1]);
     assert(mylite_storage_drop_table(filename, "app", "posts") == MYLITE_STORAGE_OK);
     assert(mylite_storage_table_exists(filename, "app", "posts") == MYLITE_STORAGE_NOTFOUND);
     write_test_recovery_journal(filename, page_ids, 2U, saved_pages);
@@ -6847,9 +6997,8 @@ static void test_transaction_recovery_requires_exclusive_file_lock(void) {
     };
     unsigned char saved_pages[MYLITE_STORAGE_FORMAT_JOURNAL_MAX_PROTECTED_PAGES]
                              [MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {{0}};
-    const unsigned long long page_ids[] = {
-        MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
-        MYLITE_STORAGE_FORMAT_CATALOG_ROOT_PAGE_ID,
+    mylite_storage_header saved_header = {
+        .size = sizeof(saved_header),
     };
     mylite_storage_rowset rows = {
         .size = sizeof(rows),
@@ -6857,8 +7006,13 @@ static void test_transaction_recovery_requires_exclusive_file_lock(void) {
 
     assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
     assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_open_header(filename, &saved_header) == MYLITE_STORAGE_OK);
+    const unsigned long long page_ids[] = {
+        MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID,
+        saved_header.catalog_root_page,
+    };
     read_test_page(filename, MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID, saved_pages[0]);
-    read_test_page(filename, MYLITE_STORAGE_FORMAT_CATALOG_ROOT_PAGE_ID, saved_pages[1]);
+    read_test_page(filename, saved_header.catalog_root_page, saved_pages[1]);
     assert(
         mylite_storage_append_row(filename, "app", "posts", row, sizeof(row)) == MYLITE_STORAGE_OK
     );
@@ -6952,7 +7106,7 @@ static void test_rejects_corrupt_row_page(void) {
     );
     flip_file_byte(
         filename,
-        (long)((MYLITE_STORAGE_FORMAT_PAGE_SIZE * 3U) + MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET)
+        (long)((MYLITE_STORAGE_FORMAT_PAGE_SIZE * 4U) + MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET)
     );
     assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_CORRUPT);
     assert(
@@ -6999,7 +7153,7 @@ static void test_rejects_corrupt_row_payload_page(void) {
     );
     flip_file_byte(
         filename,
-        (long)((MYLITE_STORAGE_FORMAT_PAGE_SIZE * 3U) + MYLITE_STORAGE_FORMAT_BLOB_PAYLOAD_OFFSET)
+        (long)((MYLITE_STORAGE_FORMAT_PAGE_SIZE * 4U) + MYLITE_STORAGE_FORMAT_BLOB_PAYLOAD_OFFSET)
     );
     assert(mylite_storage_read_rows(filename, "app", "payloads", &rows) == MYLITE_STORAGE_CORRUPT);
     assert(
@@ -7046,7 +7200,7 @@ static void test_rejects_corrupt_row_state_page(void) {
 
     flip_file_byte(
         filename,
-        (long)((MYLITE_STORAGE_FORMAT_PAGE_SIZE * 4U) + MYLITE_STORAGE_FORMAT_ROW_STATE_KIND_OFFSET)
+        (long)((MYLITE_STORAGE_FORMAT_PAGE_SIZE * 5U) + MYLITE_STORAGE_FORMAT_ROW_STATE_KIND_OFFSET)
     );
     assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_CORRUPT);
     assert(
@@ -7102,11 +7256,11 @@ static void test_rejects_corrupt_index_entry_page(void) {
             &row_id
         ) == MYLITE_STORAGE_OK
     );
-    assert(row_id == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 1ULL);
+    assert(row_id == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 2ULL);
 
     flip_file_byte(
         filename,
-        (long)((MYLITE_STORAGE_FORMAT_PAGE_SIZE * 4U) + MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET)
+        (long)((MYLITE_STORAGE_FORMAT_PAGE_SIZE * 5U) + MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET)
     );
     assert(
         mylite_storage_read_index_entries(filename, "app", "posts", 0U, &entries) ==
@@ -7144,7 +7298,7 @@ static void test_rejects_corrupt_autoincrement_page(void) {
     );
     flip_file_byte(
         filename,
-        (long)((MYLITE_STORAGE_FORMAT_PAGE_SIZE * 3U) +
+        (long)((MYLITE_STORAGE_FORMAT_PAGE_SIZE * 4U) +
                MYLITE_STORAGE_FORMAT_AUTOINCREMENT_NEXT_VALUE_OFFSET)
     );
     assert(
@@ -7374,17 +7528,17 @@ static void assert_post_rowset_layout(const mylite_storage_rowset *rows, size_t 
     assert(rows->row_bytes == row_size * 2U);
     assert(rows->row_offsets[0] == 0U);
     assert(rows->row_sizes[0] == row_size);
-    assert(rows->row_ids[0] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 2ULL);
+    assert(rows->row_ids[0] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 4ULL);
     assert(rows->row_offsets[1] == row_size);
     assert(rows->row_sizes[1] == row_size);
-    assert(rows->row_ids[1] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 4ULL);
+    assert(rows->row_ids[1] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 6ULL);
 }
 
 static void assert_lifecycle_initial_rows(const mylite_storage_rowset *rows) {
     assert(rows->row_count == 3U);
-    assert(rows->row_ids[0] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 1ULL);
-    assert(rows->row_ids[1] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 2ULL);
-    assert(rows->row_ids[2] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 3ULL);
+    assert(rows->row_ids[0] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 2ULL);
+    assert(rows->row_ids[1] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 3ULL);
+    assert(rows->row_ids[2] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 4ULL);
 }
 
 static void assert_lifecycle_live_rows(
@@ -7396,7 +7550,7 @@ static void assert_lifecycle_live_rows(
 
     assert(rows->row_size == 0U);
     assert(rows->row_count == 2U);
-    assert(rows->row_ids[0] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 3ULL);
+    assert(rows->row_ids[0] == MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT + 4ULL);
     assert(rows->row_ids[1] == new_row_id);
     assert(memcmp(rows->rows + rows->row_offsets[0], row_3, sizeof(row_3)) == 0);
     assert(memcmp(rows->rows + rows->row_offsets[1], updated_row_1, sizeof(updated_row_1)) == 0);
@@ -7822,6 +7976,14 @@ static void put_test_u64_le(unsigned char *page, size_t offset, unsigned long lo
     }
 }
 
+static unsigned long long get_test_u64_le(const unsigned char *page, size_t offset) {
+    unsigned long long value = 0ULL;
+    for (size_t i = 0U; i < sizeof(uint64_t); ++i) {
+        value |= (unsigned long long)page[offset + i] << (unsigned)(i * CHAR_BIT);
+    }
+    return value;
+}
+
 static unsigned long long checksum_test_page(const unsigned char *page, size_t checksum_offset) {
     unsigned long long checksum = UINT64_C(1469598103934665603);
     for (size_t i = 0U; i < MYLITE_STORAGE_FORMAT_PAGE_SIZE; ++i) {
@@ -7861,6 +8023,14 @@ static int collect_table(void *ctx, const char *schema_name, const char *table_n
     assert(strcmp(schema_name, expected_schema_name) == 0);
     assert(strcmp(table_name, expected_table_name) == 0);
     ++capture->count;
+    return 0;
+}
+
+static int count_app_table(void *ctx, const char *schema_name, const char *table_name) {
+    unsigned *count = (unsigned *)ctx;
+    assert(strcmp(schema_name, "app") == 0);
+    assert(table_name != NULL && table_name[0] != '\0');
+    ++*count;
     return 0;
 }
 
