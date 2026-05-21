@@ -17568,6 +17568,8 @@ static void test_copy_alter_leaf_root_publication(void) {
     );
 
     assert_exec_succeeds(db, "INSERT INTO copy_alter_leaf_posts VALUES (4, 5, 'delta')");
+    assert_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 0U, 4ULL);
+    assert_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 1U, 4ULL);
     assert_exec_succeeds(db, "UPDATE copy_alter_leaf_posts SET views = 9 WHERE id = 1");
     assert_exec_succeeds(db, "DELETE FROM copy_alter_leaf_posts WHERE id = 3");
     assert_query_single_value(
@@ -17617,8 +17619,8 @@ static void test_copy_alter_leaf_root_publication(void) {
 
     db = open_database_with_filename(root, filename);
     assert_exec_succeeds(db, "USE app");
-    assert_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 0U, 3ULL);
-    assert_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 1U, 3ULL);
+    assert_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 0U, 4ULL);
+    assert_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 1U, 4ULL);
     assert_no_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 2U);
     assert_no_index_root_metadata(filename, "app", "renamed_leaf_posts", 0U);
     assert_query_single_value(

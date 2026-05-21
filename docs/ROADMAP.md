@@ -164,8 +164,11 @@ Maintained index root pages now have a single-page typed format with
 root-owned entry counts, fixed key width, and sorted cells, and small
 non-empty fixed-width rebuilds publish that root type while readers dispatch by
 root page type. Index-root metadata reads now report maintained root page
-counts instead of stale catalog counts. Production maintained B-tree pages still
-need in-place row-DML root update and flush semantics.
+counts instead of stale catalog counts. Eligible inserts now update maintained
+root pages in place under the preplanned dirty-page journal path and skip the
+duplicate append-only index-entry page; rebuild scans preserve entries that
+live only in maintained roots. Update/delete physical root maintenance, root
+splits, and transaction-aware maintained index mutation remain planned.
 Durable table-local row,
 payload, exact-index, and published leaf-page caches now retarget across
 unrelated table row mutations, so one

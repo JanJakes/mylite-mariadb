@@ -1003,9 +1003,13 @@ root page type, and full/exact index readers dispatch by root page type so
 maintained roots use their own entry count while oversized rebuilds continue to
 use immutable leaf runs. Index-root metadata reads also decode maintained root
 pages for current entry counts, so later in-place updates do not need catalog
-publication solely to keep metadata counts fresh. Production row-DML
-maintenance still needs in-place root update and flush semantics before it can
-safely update maintained roots instead of relying on append-tail overlays.
+publication solely to keep metadata counts fresh. Eligible inserts now plan and
+journal single-page maintained root rewrites before writing the row page, insert
+the new key in sorted order, and skip the duplicate append-only index-entry
+page. Rebuild scans also treat maintained roots as live index sources so a
+later rebuild or rename does not lose entries that were inserted directly into
+the root. Update/delete physical root maintenance, root splits, and
+transaction-aware maintained index mutation remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, row/index free-space reclamation, multi-statement

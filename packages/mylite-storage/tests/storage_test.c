@@ -5677,6 +5677,7 @@ static void test_index_leaf_pages(void) {
         sizeof(first_secondary_row_ids) / sizeof(first_secondary_row_ids[0])
     );
 
+    const unsigned long long before_maintained_insert_pages = header.page_count;
     assert(
         mylite_storage_append_row_with_index_entries(
             filename,
@@ -5689,6 +5690,9 @@ static void test_index_leaf_pages(void) {
             &row_3_id
         ) == MYLITE_STORAGE_OK
     );
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_maintained_insert_pages + 1ULL);
+    assert_index_entry_lookup(filename, 0U, key_3, sizeof(key_3), MYLITE_STORAGE_OK, row_3_id);
     const unsigned long long append_tail_row_ids[] = {row_1_id, row_2_id, row_3_id};
     assert_exact_index_entries(
         filename,
@@ -6125,6 +6129,8 @@ static void test_multi_page_index_leaf_pages(void) {
         header.page_count - (unsigned long long)expected_leaf_pages,
         MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_LEAF
     );
+    const unsigned long long immutable_leaf_root_page =
+        header.page_count - (unsigned long long)expected_leaf_pages;
 
     unsigned char first_key[4] = {0};
     unsigned char second_page_key[4] = {0};
@@ -6178,6 +6184,7 @@ static void test_multi_page_index_leaf_pages(void) {
         .key = tail_key,
         .key_size = sizeof(tail_key),
     };
+    const unsigned long long before_tail_insert_pages = header.page_count;
     assert(
         mylite_storage_append_row_with_index_entries(
             filename,
@@ -6190,6 +6197,8 @@ static void test_multi_page_index_leaf_pages(void) {
             &tail_row_id
         ) == MYLITE_STORAGE_OK
     );
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_tail_insert_pages + 2ULL);
     const unsigned long long tail_expected_row_ids[] = {row_ids[199], tail_row_id};
     assert_exact_index_entries(
         filename,
@@ -6205,18 +6214,11 @@ static void test_multi_page_index_leaf_pages(void) {
         .schema_name = "app",
         .table_name = "posts",
         .index_number = 0U,
-        .root_page = header.page_count - (unsigned long long)expected_leaf_pages,
+        .root_page = immutable_leaf_root_page,
         .entry_count = entry_count - 1ULL,
     };
     assert(mylite_storage_store_index_root(filename, &stale_leaf_root) == MYLITE_STORAGE_OK);
-    assert_index_root(
-        filename,
-        "app",
-        "posts",
-        0U,
-        header.page_count - (unsigned long long)expected_leaf_pages,
-        entry_count - 1ULL
-    );
+    assert_index_root(filename, "app", "posts", 0U, immutable_leaf_root_page, entry_count - 1ULL);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
