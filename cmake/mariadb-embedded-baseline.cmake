@@ -22,6 +22,7 @@ set(PLUGIN_USER_VARIABLES "NO" CACHE STRING "Disable user-variable diagnostics i
 set(PLUGIN_AUTH_SOCKET "NO" CACHE STRING "Disable Unix socket server authentication in the embedded baseline" FORCE)
 set(ENABLED_PROFILING OFF CACHE BOOL "Disable statement profiling in the embedded baseline" FORCE)
 set(MYLITE_WITH_BINLOG_CORE OFF CACHE BOOL "Disable binary log runtime core in the embedded baseline" FORCE)
+set(MYLITE_WITH_TC_LOG_MMAP OFF CACHE BOOL "Disable mmap transaction coordinator log in the embedded baseline" FORCE)
 set(MYLITE_WITH_BINLOG_REPLAY OFF CACHE BOOL "Disable SQL BINLOG statement replay in the embedded baseline" FORCE)
 set(MYLITE_WITH_LOG_EVENT_SERVER OFF CACHE BOOL "Disable server binary-log event writers in the embedded baseline" FORCE)
 set(MYLITE_WITH_LOG_EVENT_PARSING OFF CACHE BOOL "Disable binary-log event parsing in the embedded baseline" FORCE)

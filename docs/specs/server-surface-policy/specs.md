@@ -43,6 +43,10 @@ slices also use the same policy for server file imports such as `LOAD DATA` and
 - `mariadb/sql/sql_repl.cc` implements replication commands such as
   `CHANGE MASTER` and `START SLAVE`, which can depend on replication metadata
   files and server topology state.
+- `mariadb/sql/xa.cc`, `mariadb/sql/handler.cc`, and `mariadb/sql/log.cc`
+  implement external XA commands and transaction-coordinator logging. MyLite
+  treats external XA as a distributed transaction-manager surface outside the
+  current local embedded API.
 - `mariadb/sql/events.cc` implements the event scheduler and event metadata
   paths around `mysql.event`; scheduler behavior is outside the core embedded
   profile.
@@ -139,7 +143,7 @@ rejected before they can create or depend on `mysql.*` metadata tables.
 
 The embedded runtime continues to keep durable state inside the MyLite database
 directory. The server-surface policy test verifies that unsupported server
-commands do not create replication metadata, binlog index files,
+commands do not create replication metadata, binlog index files, `tc.log`,
 `performance_schema/`, or `mysql/` system-table directories under `datadir/`,
 and that no file appears beside the MyLite database directory.
 

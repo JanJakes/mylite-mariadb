@@ -65,6 +65,7 @@ surface that does not fit a local directory-owned library:
 - command-line option help prose,
 - startup options for disabled server topology and dynamic plugin loading,
 - inherited binary-log cache directory setup,
+- mmap-backed `tc.log` transaction coordinator for external XA recovery,
 - row-replication type conversion,
 - binary-log event parser and reader runtime,
 - host-file SELECT exports,
@@ -147,6 +148,10 @@ Row-replication type-conversion helpers are replaced with fail-closed embedded
 stubs after source review proves row-event apply is already outside the core
 profile; ordinary SQL type conversion, native storage, JSON, GEOMETRY/GIS, and
 sequence support remain linked through their normal non-replication paths.
+The mmap-backed `tc.log` transaction coordinator is omitted after policy
+coverage proves external XA SQL is outside the core embedded API and native
+transaction coverage still proves ordinary commit, rollback, savepoints, and
+crash reopen behavior.
 Residual replication helper objects are omitted after link evidence proves the
 no-binlog embedded profile no longer references `slave.cc`, `sql_repl.cc`,
 `rpl_utility.cc`, or `rpl_reporting.cc`.

@@ -65,10 +65,13 @@ for disabled binary-log, replication, and dynamic-plugin-loading surfaces are
 omitted because the default `libmylite` startup contract is fixed,
 serverless, and directory-owned. Inherited `#binlog_cache_files` setup is
 skipped because the default profile has no binary-log core and does not create
-binlog cache files. Row-replication type conversion is omitted because row-event
-apply is already outside the core embedded profile. Binary-log event parser and
-reader runtime is omitted because event decode and replay are already outside
-the no-binlog embedded profile. Server utility SQL functions are omitted
+binlog cache files. The mmap-backed `tc.log` transaction coordinator is omitted
+because external XA and durable multi-resource two-phase recovery are outside
+the current core embedded profile. Row-replication type conversion is omitted
+because row-event apply is already outside the core embedded profile.
+Binary-log event parser and reader runtime is omitted because event decode and
+replay are already outside the no-binlog embedded profile. Server utility SQL
+functions are omitted
 because they expose server benchmarking, sleeps, named locks, host-file reads,
 replication waits, and server-id based ID generation rather than application
 DDL/DML behavior. Host-file SQL imports are omitted because `LOAD DATA` and
@@ -396,6 +399,12 @@ DDL/DML behavior. Host-file SQL imports are omitted because `LOAD DATA` and
   owned shared table-map metadata helpers used by retained event code, so the
   server-side conversion source needed a separate replacement rather than
   deleting all replication utility code.
+- `mariadb/sql/log.h` defines the mmap-backed `TC_LOG_MMAP` transaction
+  coordinator when `HAVE_MMAP` is set. `mariadb/sql/log.cc` implements its
+  file-backed `tc.log` open, recovery, logging, unlogging, and checkpoint
+  cleanup paths. `mariadb/sql/handler.cc` uses the selected `tc_log` during
+  commit and XA prepare paths. This is durable external-XA and multi-resource
+  two-phase recovery machinery, not ordinary local transaction execution.
 - `mariadb/sql/log_event.cc` implements common binary-log event parser and
   reader runtime, including `Log_event::read_log_event()`,
   format-description setup, compressed-event helpers, and event-class virtual
@@ -421,6 +430,10 @@ DDL/DML behavior. Host-file SQL imports are omitted because `LOAD DATA` and
   compiles the built-in client plugin list to empty, turns `run_plugin_auth()`
   into a fail-closed stub for raw remote client paths, and reduces the
   stripped archive to 26,047,312 bytes, 24.84 MiB, and 693 members.
+- Disabling the mmap-backed `tc.log` transaction coordinator behind
+  `MYLITE_WITH_TC_LOG_MMAP=0` keeps ordinary local transactions on native
+  engines, rejects external XA at the MyLite policy layer, and reduces the
+  stripped archive to 26,039,248 bytes, 24.83 MiB, and 693 members.
 
 ## Proposed Design
 
@@ -529,6 +542,13 @@ server builds keep upstream binlog behavior.
 The disabled embedded profile also guards no-binlog startup, open, cleanup,
 annotated-row, and GTID-index update paths, and omits the unsupported injector
 root that is only needed by the server topology runtime.
+
+The embedded archive omits the mmap-backed `tc.log` transaction coordinator by
+setting `MYLITE_WITH_TC_LOG_MMAP=0` in the MyLite baseline. The option defaults
+to `ON` so normal MariaDB server builds keep upstream two-phase recovery
+behavior. The disabled no-binlog profile maps `TC_LOG_MMAP` to `TC_LOG_DUMMY`,
+keeps inert status globals for inherited references, and rejects direct and
+prepared external `XA` SQL before dispatch.
 
 The embedded archive omits SQL `BINLOG` statement replay by setting
 `MYLITE_WITH_BINLOG_REPLAY=0` in the MyLite baseline. The option defaults to
@@ -1208,6 +1228,11 @@ current archive to 26,047,312 bytes / 24.84 MiB, 5,482,392 bytes smaller than
 the Release build with Performance Schema disabled, 7,082,328 bytes smaller
 than the symbol-stripped baseline with Performance Schema still built, and
 7,795,008 bytes smaller than the original broad archive.
+Omitting the mmap-backed `tc.log` transaction coordinator brings the current
+archive to 26,039,248 bytes / 24.83 MiB, 5,490,456 bytes smaller than the
+Release build with Performance Schema disabled, 7,090,392 bytes smaller than
+the symbol-stripped baseline with Performance Schema still built, and
+7,803,072 bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -1369,6 +1394,9 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   archive omits the active binlog transaction/event core plus the unsupported
   injector root. The guarded replication execution system variables are omitted
   from `SHOW VARIABLES` and `@@` lookup in the default embedded profile.
+  The mmap-backed `tc.log` transaction coordinator is omitted, direct and
+  prepared external `XA` SQL is rejected, and ordinary native-engine
+  transaction tests still cover commit, rollback, savepoints, and crash reopen.
   Replication and binlog filter variables are also omitted. PROXY protocol
   listener support is omitted, and `proxy_protocol_networks` is absent from
   `SHOW VARIABLES` and `@@` lookup in the default embedded profile. User

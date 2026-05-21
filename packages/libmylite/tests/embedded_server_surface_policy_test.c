@@ -821,6 +821,8 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_error(db, "SHOW BINARY LOGS", "server-owned SQL surface");
     expect_error(db, "SHOW BINLOG EVENTS", "server-owned SQL surface");
     expect_error(db, "BINLOG 'ZmFrZQ=='", "server-owned SQL surface");
+    expect_error(db, "XA START 'mylite-xa'", "server-owned SQL surface");
+    expect_error(db, "XA RECOVER", "server-owned SQL surface");
     expect_error(db, "SELECT MASTER_GTID_WAIT('0-1-1', 0)", "server-owned SQL surface");
     expect_error(db, "SELECT MASTER_POS_WAIT('mylite-bin.000001', 4)", "server-owned SQL surface");
     expect_error(db, "SELECT BINLOG_GTID_POS('mylite-bin.000001', 4)", "server-owned SQL surface");
@@ -1038,6 +1040,8 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_prepare_error(db, "DROP SERVER prepared_remote_app", "server-owned SQL surface");
     expect_prepare_error(db, "SHOW CREATE SERVER prepared_remote_app", "server-owned SQL surface");
     expect_prepare_error(db, "BINLOG 'ZmFrZQ=='", "server-owned SQL surface");
+    expect_prepare_error(db, "XA START 'prepared-mylite-xa'", "server-owned SQL surface");
+    expect_prepare_error(db, "XA RECOVER", "server-owned SQL surface");
     expect_prepare_error(db, "SELECT MASTER_GTID_WAIT('0-1-1', 0)", "server-owned SQL surface");
     expect_prepare_error(
         db,
@@ -1192,6 +1196,7 @@ static void assert_no_server_sidecar_files(const char *database_path) {
     char *multi_master_info_path = path_join(data_path, "multi-master.info");
     char *binlog_index_path = path_join(data_path, "mysql-bin.index");
     char *binlog_cache_path = path_join(data_path, "#binlog_cache_files");
+    char *tc_log_path = path_join(data_path, "tc.log");
     char *performance_schema_path = path_join(data_path, "performance_schema");
     char *mysql_system_path = path_join(data_path, "mysql");
 
@@ -1200,11 +1205,13 @@ static void assert_no_server_sidecar_files(const char *database_path) {
     assert(!path_exists(multi_master_info_path));
     assert(!path_exists(binlog_index_path));
     assert(!path_exists(binlog_cache_path));
+    assert(!path_exists(tc_log_path));
     assert(!path_exists(performance_schema_path));
     assert(!path_exists(mysql_system_path));
 
     free(mysql_system_path);
     free(performance_schema_path);
+    free(tc_log_path);
     free(binlog_cache_path);
     free(binlog_index_path);
     free(multi_master_info_path);

@@ -40,6 +40,7 @@ PLUGIN_USER_VARIABLES=NO
 PLUGIN_AUTH_SOCKET=NO
 ENABLED_PROFILING=OFF
 MYLITE_WITH_BINLOG_CORE=OFF
+MYLITE_WITH_TC_LOG_MMAP=OFF
 MYLITE_WITH_BINLOG_REPLAY=OFF
 MYLITE_WITH_LOG_EVENT_SERVER=OFF
 MYLITE_WITH_LOG_EVENT_PARSING=OFF
@@ -108,7 +109,10 @@ binary-log transaction/event core behind `MYLITE_WITH_BINLOG_CORE=0` while
 preserving the normal MariaDB server build path. The disabled binary-log core
 also skips inherited `#binlog_cache_files` directory setup. It guards embedded
 no-binlog startup, open, cleanup, and GTID-index update paths, and omits the
-unsupported injector root. It omits SQL `BINLOG` statement replay behind
+unsupported injector root. It also omits the mmap-backed `tc.log` transaction
+coordinator behind `MYLITE_WITH_TC_LOG_MMAP=0`; ordinary transactions remain
+covered, while external XA SQL is rejected by policy. It omits SQL `BINLOG`
+statement replay behind
 `MYLITE_WITH_BINLOG_REPLAY=0`; direct and prepared `BINLOG` statements are
 rejected by MyLite policy, and the embedded MariaDB dispatcher remains a
 fail-closed backstop. It omits server-side binary-log event writers behind
@@ -232,7 +236,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,047,312 bytes / 24.84 MiB |
+| Archive size | 26,039,248 bytes / 24.83 MiB |
 | Archive members | 693 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -306,7 +310,9 @@ functions reduces the current pre-strip archive to 26,639,104 bytes /
 reduces the current pre-strip archive to 26,614,200 bytes / 25.38 MiB.
 Omitting network client authentication plugin handshake support reduces the
 current pre-strip archive to 26,607,496 bytes / 25.37 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 560,184 bytes
+Omitting the mmap-backed `tc.log` transaction coordinator reduces the current
+pre-strip archive to 26,599,376 bytes / 25.37 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 560,128 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -361,10 +367,12 @@ pre-strip bytes and 92,632 stripped bytes with no member-count change. Omitting
 `LOAD DATA` and `LOAD XML` host-file import runtime saves 24,904 pre-strip
 bytes and 24,392 stripped bytes with no member-count change. Omitting network
 client authentication plugin handshake support saves 6,704 pre-strip bytes and
-6,024 stripped bytes with no member-count change. The final archive is
-5,482,392 bytes smaller than the Release build with Performance Schema
-disabled, 7,082,328 bytes smaller than the symbol-stripped baseline that still
-built Performance Schema, and 7,795,008 bytes smaller than the original broad
+6,024 stripped bytes with no member-count change. Omitting the mmap-backed
+`tc.log` transaction coordinator saves 8,120 pre-strip bytes and 8,064
+stripped bytes with no member-count change. The final archive is
+5,490,456 bytes smaller than the Release build with Performance Schema
+disabled, 7,090,392 bytes smaller than the symbol-stripped baseline that still
+built Performance Schema, and 7,803,072 bytes smaller than the original broad
 archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
@@ -420,7 +428,10 @@ and the embedded profile reports `@@have_dynamic_loading=NO`.
 The active binary-log transaction/event core is disabled in the default
 embedded archive. The unsupported injector root is omitted, and retained
 embedded no-binlog paths in `log.cc`, `mysqld.cc`, and transaction-coordinator
-selection are guarded. Binary-log GTID-index runtime is replaced by a
+selection are guarded. The mmap-backed `tc.log` transaction coordinator is
+omitted in the no-binlog embedded profile; external XA SQL is rejected by
+policy, and ordinary transaction coverage remains in the native engine tests.
+Binary-log GTID-index runtime is replaced by a
 fail-closed embedded source for retained unsupported paths.
 Server-side binary-log event writers are replaced by a small disabled embedded
 source that keeps `append_query_string()` for ordinary SQL literal rendering

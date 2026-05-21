@@ -423,8 +423,11 @@ through supported MyLite behavior.
 It keeps only a parser-link event parse-data stub because event scheduler
 execution and event metadata are outside the embedded core.
 It also omits the unsupported injector root that is only needed by the server
-topology runtime, plus guarded replication execution system variables such as
-`slave_type_conversions` and `rpl_semi_sync_master_enabled`. Replication and
+topology runtime. The default embedded profile omits the mmap-backed `tc.log`
+transaction coordinator used for external XA recovery, and MyLite rejects
+top-level `XA` SQL through policy. It also omits guarded replication execution
+system variables such as `slave_type_conversions` and
+`rpl_semi_sync_master_enabled`. Replication and
 binlog filter variables such as `replicate_do_db`,
 `replicate_wild_ignore_table`, and `binlog_do_db` are also omitted because the
 core embedded profile has no replication or binary-log topology to filter.
