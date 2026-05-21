@@ -293,21 +293,28 @@ The header stores:
 
 The current implementation writes page 0 as a fixed-size, little-endian,
 checksummed header and page 1 as the initial empty catalog root. Catalog
-mutations publish a fresh append-only catalog chain at the file tail, repoint
-the header's catalog root to the new chain, and leave the previous chain
-immutable until free-space reclamation exists. Catalog records remain
-page-local; a record larger than one catalog page payload is still unsupported,
-while large table and FK payloads live in blob pages. Explicit MyLite table
-definitions are stored as catalog records plus checksummed definition blob
-pages. Schema namespace names use lightweight catalog records; table-definition
-schema names are also treated as namespaces for compatibility with files that
-pre-date explicit schema records. Internal FK definitions use catalog records
-keyed by child schema/table and constraint name plus typed FK blob pages for
-referenced key, column-list, action, match-option, and nullable-column
-metadata. Catalog-backed index-root records key future navigable index roots by
-schema, table, table id, and MariaDB key number; table rename and drop preserve
-or remove those records with the owning table. FK referenced-key rewrites append
-replacement FK blob pages and republish the FK catalog record. Row inserts
+mutations publish a fresh catalog chain, repoint the header's catalog root to
+the new chain, and then reclaim the previous non-active catalog-chain run into
+a durable free-list page inside the primary file. Later non-active catalog
+publication can reuse a suitable contiguous free run; active statement and
+transaction checkpoints remain append-only until their rollback ownership is
+extended. Catalog-keyed runtime caches are cleared after durable catalog
+publication so reused catalog-chain pages cannot make stale page-count
+identities look current. Row-payload cache entries carry an in-memory checksum
+and are discarded before use when their copied bytes no longer match. Catalog
+records remain page-local; a record larger than one catalog page payload is
+still unsupported, while large table and FK payloads live in blob pages.
+Explicit MyLite table definitions are stored as catalog records plus
+checksummed definition blob pages. Schema namespace names use lightweight
+catalog records; table-definition schema names are also treated as namespaces
+for compatibility with files that pre-date explicit schema records. Internal FK
+definitions use catalog records keyed by child schema/table and constraint name
+plus typed FK blob pages for referenced key, column-list, action, match-option,
+and nullable-column metadata. Catalog-backed index-root records key future
+navigable index roots by schema, table, table id, and MariaDB key number; table
+rename and drop preserve or remove those records with the owning table. FK
+referenced-key rewrites append replacement FK blob pages and republish the FK
+catalog record. Row inserts
 append checksummed row pages tagged by catalog table id;
 non-BLOB rows store raw MariaDB record images, while BLOB/TEXT rows store a
 durable handler-owned row payload that replaces process pointers with value
@@ -587,9 +594,10 @@ Referenced-parent drops fail while supported FK metadata still points at the
 table. Child-table drops remove child FK metadata and the table record in one
 catalog publication, after which the parent can be dropped normally. Dropped
 table-definition blobs, row pages, index-entry pages, and FK metadata blob pages
-remain orphaned inside the primary file until free-space management exists; new
-table ids are allocated above both live catalog records and existing row pages
-so drop/recreate does not expose old rows. Simple
+remain orphaned inside the primary file until broader free-space management
+exists; superseded catalog-chain pages are reclaimed into the catalog free-list.
+New table ids are allocated above both live catalog records and existing row
+pages so drop/recreate does not expose old rows. Simple
 `RENAME TABLE` rewrites the catalog record identity while preserving table id,
 requested/effective engine metadata, and the stored table-definition blob
 reference, so existing row and index-entry pages move with the renamed table.
@@ -956,8 +964,8 @@ copy `ALTER` behavior for the supported shapes, but it is still an interim
 performance structure because maintained B-tree navigation and pager-style write
 paths are not implemented. Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
-definitions. B-tree pages, free-space reclamation, multi-statement transaction
-rollback, and transaction-aware index maintenance remain planned.
+definitions. B-tree pages, row/index free-space reclamation, multi-statement
+transaction rollback, and transaction-aware index maintenance remain planned.
 
 The storage engine must support:
 
@@ -1000,15 +1008,19 @@ Minimum guarantees:
 Current implementation status: MyLite writes a deterministic
 `<database>.mylite-journal` rollback companion before publishing current
 append-only mutations. The journal stores the committed header page and, for
-catalog mutations, the committed catalog root page. Catalog overflow pages do
-not need separate journal slots because catalog publication appends a fresh
-chain and never mutates the previous chain in place. It is fsynced before
-primary-file writes, the primary file is fsynced before the journal is removed,
-the parent directory is synced after journal create/remove, and every storage
-open first recovers and removes a valid pending journal. Recovery restores the
-previously committed header/catalog state and truncates the primary file to the
-restored header page count. Committed orphan pages from catalog, update/delete,
-and truncate history still wait for free-space reclamation. Physical write,
+catalog mutations, the committed catalog root page. When catalog publication
+will reuse the catalog free-list, the journal also protects the current
+free-list root page before that node is mutated. Catalog overflow pages do not
+need separate journal slots because catalog publication writes a fresh chain
+before repointing the header and reclaims the previous chain only after the
+catalog publish journal is removed. It is fsynced before primary-file writes,
+the primary file is fsynced before the journal is removed, the parent directory
+is synced after journal create/remove, and every storage open first recovers and
+removes a valid pending journal. Recovery restores the previously committed
+header/catalog/free-list-root state and truncates the primary file to the
+restored header page count. Committed orphan pages from row, index,
+update/delete, and truncate history still wait for broader free-space
+reclamation. Physical write,
 flush, sync, and truncate paths classify no-space, quota, and file-size-limit
 failures as `MYLITE_STORAGE_FULL`, leaving generic I/O errors for non-capacity
 failures.
