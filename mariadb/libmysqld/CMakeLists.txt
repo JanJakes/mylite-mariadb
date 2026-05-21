@@ -43,6 +43,19 @@ ELSE()
   ENDIF()
 ENDIF()
 
+OPTION(MYLITE_WITH_XA_RUNTIME "Build external XA transaction runtime" ON)
+IF(MYLITE_WITH_XA_RUNTIME)
+  ADD_DEFINITIONS(-DMYLITE_WITH_XA_RUNTIME=1)
+  SET(MYLITE_XA_RUNTIME_SOURCE ../sql/xa.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_XA_RUNTIME=0)
+  IF(MYLITE_WITH_BINLOG_CORE OR MYLITE_WITH_TC_LOG_MMAP)
+    MESSAGE(FATAL_ERROR
+      "MYLITE_WITH_XA_RUNTIME=OFF requires MYLITE_WITH_BINLOG_CORE=OFF and MYLITE_WITH_TC_LOG_MMAP=OFF")
+  ENDIF()
+  SET(MYLITE_XA_RUNTIME_SOURCE ../sql/mylite_xa_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_BINLOG_REPLAY "Build SQL BINLOG statement replay" ON)
 IF(MYLITE_WITH_BINLOG_REPLAY)
   ADD_DEFINITIONS(-DMYLITE_WITH_BINLOG_REPLAY=1)
@@ -475,7 +488,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/rowid_filter.cc ../sql/rowid_filter.h
            ../sql/item_vers.cc
            ../sql/opt_trace.cc
-           ../sql/xa.cc
+           ${MYLITE_XA_RUNTIME_SOURCE}
            ../sql/json_table.cc
            ${MYLITE_OPT_HISTOGRAM_JSON_SOURCE}
            ../sql/sp_instr.cc

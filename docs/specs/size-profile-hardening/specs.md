@@ -67,8 +67,10 @@ serverless, and directory-owned. Inherited `#binlog_cache_files` setup is
 skipped because the default profile has no binary-log core and does not create
 binlog cache files. The mmap-backed `tc.log` transaction coordinator is omitted
 because external XA and durable multi-resource two-phase recovery are outside
-the current core embedded profile. Row-replication type conversion is omitted
-because row-event apply is already outside the core embedded profile.
+the current core embedded profile. The full external-XA command runtime is
+omitted behind the same unsupported policy boundary. Row-replication type
+conversion is omitted because row-event apply is already outside the core
+embedded profile.
 Binary-log event parser and reader runtime is omitted because event decode and
 replay are already outside the no-binlog embedded profile. Server utility SQL
 functions are omitted
@@ -405,6 +407,11 @@ DDL/DML behavior. Host-file SQL imports are omitted because `LOAD DATA` and
   cleanup paths. `mariadb/sql/handler.cc` uses the selected `tc_log` during
   commit and XA prepare paths. This is durable external-XA and multi-resource
   two-phase recovery machinery, not ordinary local transaction execution.
+- `mariadb/sql/xa.cc` implements explicit external XA state transitions,
+  lock-free XID-cache storage, prepared-XA completion, and `XA RECOVER` result
+  production. `mariadb/sql/sql_parse.cc` dispatches `SQLCOM_XA_*` commands to
+  this runtime, while `mariadb/sql/sql_prepare.cc` still needs
+  `xa_recover_get_fields()` for retained prepare-time metadata.
 - `mariadb/sql/log_event.cc` implements common binary-log event parser and
   reader runtime, including `Log_event::read_log_event()`,
   format-description setup, compressed-event helpers, and event-class virtual
@@ -434,6 +441,10 @@ DDL/DML behavior. Host-file SQL imports are omitted because `LOAD DATA` and
   `MYLITE_WITH_TC_LOG_MMAP=0` keeps ordinary local transactions on native
   engines, rejects external XA at the MyLite policy layer, and reduces the
   stripped archive to 26,039,248 bytes, 24.83 MiB, and 693 members.
+- Disabling the external-XA runtime behind `MYLITE_WITH_XA_RUNTIME=0` keeps the
+  retained XA command symbols fail-closed, preserves `XA RECOVER` prepare-time
+  metadata, leaves ordinary native-engine transactions on implicit XIDs, and
+  reduces the stripped archive to 26,028,560 bytes, 24.82 MiB, and 693 members.
 
 ## Proposed Design
 
@@ -549,6 +560,13 @@ to `ON` so normal MariaDB server builds keep upstream two-phase recovery
 behavior. The disabled no-binlog profile maps `TC_LOG_MMAP` to `TC_LOG_DUMMY`,
 keeps inert status globals for inherited references, and rejects direct and
 prepared external `XA` SQL before dispatch.
+
+The embedded archive omits the full external-XA command runtime by setting
+`MYLITE_WITH_XA_RUNTIME=0` in the MyLite baseline. The option defaults to `ON`
+so normal MariaDB server builds keep upstream external-XA behavior. The
+disabled no-binlog profile replaces `xa.cc` with fail-closed stubs for
+`trans_xa_*()`, inert XID-cache lifecycle hooks, and retained `XA RECOVER`
+metadata construction for prepare-time links.
 
 The embedded archive omits SQL `BINLOG` statement replay by setting
 `MYLITE_WITH_BINLOG_REPLAY=0` in the MyLite baseline. The option defaults to
@@ -1233,6 +1251,11 @@ archive to 26,039,248 bytes / 24.83 MiB, 5,490,456 bytes smaller than the
 Release build with Performance Schema disabled, 7,090,392 bytes smaller than
 the symbol-stripped baseline with Performance Schema still built, and
 7,803,072 bytes smaller than the original broad archive.
+Omitting the full external-XA runtime brings the current archive to
+26,028,560 bytes / 24.82 MiB, 5,501,144 bytes smaller than the Release build
+with Performance Schema disabled, 7,101,080 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 7,813,760
+bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -1395,8 +1418,9 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   injector root. The guarded replication execution system variables are omitted
   from `SHOW VARIABLES` and `@@` lookup in the default embedded profile.
   The mmap-backed `tc.log` transaction coordinator is omitted, direct and
-  prepared external `XA` SQL is rejected, and ordinary native-engine
-  transaction tests still cover commit, rollback, savepoints, and crash reopen.
+  prepared external `XA` SQL is rejected, the full external-XA runtime is
+  replaced with fail-closed stubs, and ordinary native-engine transaction tests
+  still cover commit, rollback, savepoints, and crash reopen.
   Replication and binlog filter variables are also omitted. PROXY protocol
   listener support is omitted, and `proxy_protocol_networks` is absent from
   `SHOW VARIABLES` and `@@` lookup in the default embedded profile. User

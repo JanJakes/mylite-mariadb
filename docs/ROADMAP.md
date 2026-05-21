@@ -65,6 +65,7 @@ surface that does not fit a local directory-owned library:
 - command-line option help prose,
 - startup options for disabled server topology and dynamic plugin loading,
 - inherited binary-log cache directory setup,
+- external XA transaction runtime,
 - mmap-backed `tc.log` transaction coordinator for external XA recovery,
 - row-replication type conversion,
 - binary-log event parser and reader runtime,
@@ -152,6 +153,9 @@ The mmap-backed `tc.log` transaction coordinator is omitted after policy
 coverage proves external XA SQL is outside the core embedded API and native
 transaction coverage still proves ordinary commit, rollback, savepoints, and
 crash reopen behavior.
+The full external-XA runtime is omitted after the same policy boundary and
+transaction tests prove MyLite needs ordinary native-engine transactions, not
+distributed transaction-manager commands.
 Residual replication helper objects are omitted after link evidence proves the
 no-binlog embedded profile no longer references `slave.cc`, `sql_repl.cc`,
 `rpl_utility.cc`, or `rpl_reporting.cc`.

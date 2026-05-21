@@ -46,7 +46,8 @@ slices also use the same policy for server file imports such as `LOAD DATA` and
 - `mariadb/sql/xa.cc`, `mariadb/sql/handler.cc`, and `mariadb/sql/log.cc`
   implement external XA commands and transaction-coordinator logging. MyLite
   treats external XA as a distributed transaction-manager surface outside the
-  current local embedded API.
+  current local embedded API, and the default embedded archive replaces the
+  external-XA command runtime with fail-closed stubs.
 - `mariadb/sql/events.cc` implements the event scheduler and event metadata
   paths around `mysql.event`; scheduler behavior is outside the core embedded
   profile.

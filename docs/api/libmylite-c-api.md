@@ -425,8 +425,9 @@ execution and event metadata are outside the embedded core.
 It also omits the unsupported injector root that is only needed by the server
 topology runtime. The default embedded profile omits the mmap-backed `tc.log`
 transaction coordinator used for external XA recovery, and MyLite rejects
-top-level `XA` SQL through policy. It also omits guarded replication execution
-system variables such as `slave_type_conversions` and
+top-level `XA` SQL through policy. The full external-XA runtime is also
+replaced with fail-closed embedded stubs. It also omits guarded replication
+execution system variables such as `slave_type_conversions` and
 `rpl_semi_sync_master_enabled`. Replication and
 binlog filter variables such as `replicate_do_db`,
 `replicate_wild_ignore_table`, and `binlog_do_db` are also omitted because the
