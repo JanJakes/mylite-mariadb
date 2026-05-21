@@ -996,8 +996,12 @@ the current immutable journal model are rejected instead of becoming
 crash-unsafe. Active statements can also create the immutable recovery journal
 from a bounded preplanned dirty-page set, which lets future maintained-index
 writers declare root or leaf pages before row append creates the journal.
-Maintained index roots still need page formats and flush semantics before they
-can safely update in place.
+Maintained index root pages now have an initial single-page typed format with
+root-owned entry counts, fixed key width, flags, used bytes, and sorted
+`(row id, key bytes)` cells, so future row-DML maintenance can avoid catalog
+publication solely to update an entry count. Production maintained-index
+inserts still need lookup integration, root publication, and flush semantics
+before they can safely update in place.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, row/index free-space reclamation, multi-statement

@@ -17,6 +17,23 @@
 #include <mylite/storage.h>
 
 #ifdef MYLITE_STORAGE_TEST_HOOKS
+mylite_storage_result mylite_storage_test_encode_maintained_index_root_page(
+    unsigned char *page,
+    unsigned long long page_id,
+    unsigned long long table_id,
+    unsigned index_number,
+    size_t key_size,
+    const mylite_storage_index_entryset *entryset
+);
+mylite_storage_result mylite_storage_test_decode_maintained_index_root_page(
+    const mylite_storage_header *header,
+    unsigned long long page_id,
+    const unsigned char *page,
+    unsigned long long *out_table_id,
+    unsigned *out_index_number,
+    size_t *out_key_size,
+    size_t *out_entry_count
+);
 mylite_storage_result mylite_storage_test_protect_active_dirty_pages(
     const char *filename,
     const unsigned long long *page_ids,
@@ -152,6 +169,7 @@ static void test_active_update_rewrite(void);
 static void test_unchanged_index_update_elision(void);
 static void test_indexed_row_batch_cache_reuses_duplicates(void);
 static void test_index_root_metadata(void);
+static void test_maintained_index_root_page_format(void);
 static void test_index_leaf_pages(void);
 static void test_batched_index_leaf_pages(void);
 static void test_multi_page_index_leaf_pages(void);
@@ -401,6 +419,7 @@ static void put_test_u64_le(unsigned char *page, size_t offset, unsigned long lo
 static unsigned get_test_u32_le(const unsigned char *page, size_t offset);
 static unsigned long long get_test_u64_le(const unsigned char *page, size_t offset);
 static unsigned long long checksum_test_page(const unsigned char *page, size_t checksum_offset);
+static void rechecksum_test_index_root_page(unsigned char *page);
 static void flip_file_byte(const char *path, long offset);
 static void write_header_format_version(const char *path, unsigned value);
 static int count_app_table(void *ctx, const char *schema_name, const char *table_name);
@@ -472,6 +491,7 @@ int main(void) {
     test_unchanged_index_update_elision();
     test_indexed_row_batch_cache_reuses_duplicates();
     test_index_root_metadata();
+    test_maintained_index_root_page_format();
     test_index_leaf_pages();
     test_batched_index_leaf_pages();
     test_multi_page_index_leaf_pages();
@@ -5199,6 +5219,304 @@ static void test_index_root_metadata(void) {
     free(root);
 }
 
+static void test_maintained_index_root_page_format(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    static const unsigned char key_1[] = {0x01U, 0x00U, 0x00U, 0x00U};
+    static const unsigned char key_2[] = {0x02U, 0x00U, 0x00U, 0x00U};
+    unsigned char keys[sizeof(key_1) + sizeof(key_2)] = {0};
+    memcpy(keys, key_2, sizeof(key_2));
+    memcpy(keys + sizeof(key_2), key_1, sizeof(key_1));
+    unsigned char one_key[sizeof(key_1)] = {0};
+    memcpy(one_key, key_1, sizeof(one_key));
+    size_t key_offsets[] = {0U, sizeof(key_2)};
+    size_t key_sizes[] = {sizeof(key_2), sizeof(key_1)};
+    unsigned long long row_ids[] = {11ULL, 10ULL};
+    size_t one_key_offsets[] = {0U};
+    size_t one_key_sizes[] = {sizeof(one_key)};
+    unsigned long long one_row_ids[] = {6ULL};
+    mylite_storage_index_entryset entryset = {
+        .size = sizeof(entryset),
+        .keys = keys,
+        .key_bytes = sizeof(keys),
+        .entry_count = 2U,
+        .key_offsets = key_offsets,
+        .key_sizes = key_sizes,
+        .row_ids = row_ids,
+    };
+    mylite_storage_index_entryset one_entryset = {
+        .size = sizeof(one_entryset),
+        .keys = one_key,
+        .key_bytes = sizeof(one_key),
+        .entry_count = 1U,
+        .key_offsets = one_key_offsets,
+        .key_sizes = one_key_sizes,
+        .row_ids = one_row_ids,
+    };
+    mylite_storage_index_entryset empty_entryset = {
+        .size = sizeof(empty_entryset),
+    };
+    mylite_storage_header header = {
+        .size = sizeof(header),
+        .format_version = MYLITE_STORAGE_FORMAT_VERSION,
+        .header_version = MYLITE_STORAGE_FORMAT_HEADER_VERSION,
+        .page_size = MYLITE_STORAGE_FORMAT_PAGE_SIZE,
+        .page_count = 12ULL,
+    };
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char corrupt_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned long long table_id = 0ULL;
+    unsigned index_number = 0U;
+    size_t key_size = 0U;
+    size_t entry_count = 0U;
+
+    assert(
+        mylite_storage_test_encode_maintained_index_root_page(
+            page,
+            4ULL,
+            3ULL,
+            1U,
+            sizeof(key_1),
+            &entryset
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_test_decode_maintained_index_root_page(
+            &header,
+            4ULL,
+            page,
+            &table_id,
+            &index_number,
+            &key_size,
+            &entry_count
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(table_id == 3ULL);
+    assert(index_number == 1U);
+    assert(key_size == sizeof(key_1));
+    assert(entry_count == 2U);
+    assert(
+        get_test_u64_le(
+            page + MYLITE_STORAGE_FORMAT_INDEX_ROOT_PAYLOAD_OFFSET,
+            MYLITE_STORAGE_FORMAT_INDEX_ROOT_ENTRY_ROW_ID_OFFSET
+        ) == 10ULL
+    );
+    assert(
+        memcmp(
+            page + MYLITE_STORAGE_FORMAT_INDEX_ROOT_PAYLOAD_OFFSET +
+                MYLITE_STORAGE_FORMAT_INDEX_ROOT_ENTRY_KEY_OFFSET,
+            key_1,
+            sizeof(key_1)
+        ) == 0
+    );
+    assert(
+        mylite_storage_test_decode_maintained_index_root_page(
+            &header,
+            6ULL,
+            page,
+            &table_id,
+            &index_number,
+            &key_size,
+            &entry_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    memcpy(corrupt_page, page, sizeof(corrupt_page));
+    put_test_u64_le(corrupt_page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_TABLE_ID_OFFSET, 0ULL);
+    rechecksum_test_index_root_page(corrupt_page);
+    assert(
+        mylite_storage_test_decode_maintained_index_root_page(
+            &header,
+            4ULL,
+            corrupt_page,
+            &table_id,
+            &index_number,
+            &key_size,
+            &entry_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    memcpy(corrupt_page, page, sizeof(corrupt_page));
+    put_test_u32_le(corrupt_page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_KEY_SIZE_OFFSET, 0U);
+    rechecksum_test_index_root_page(corrupt_page);
+    assert(
+        mylite_storage_test_decode_maintained_index_root_page(
+            &header,
+            4ULL,
+            corrupt_page,
+            &table_id,
+            &index_number,
+            &key_size,
+            &entry_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    memcpy(corrupt_page, page, sizeof(corrupt_page));
+    put_test_u32_le(
+        corrupt_page,
+        MYLITE_STORAGE_FORMAT_INDEX_ROOT_USED_BYTES_OFFSET,
+        MYLITE_STORAGE_FORMAT_INDEX_ROOT_PAYLOAD_OFFSET
+    );
+    rechecksum_test_index_root_page(corrupt_page);
+    assert(
+        mylite_storage_test_decode_maintained_index_root_page(
+            &header,
+            4ULL,
+            corrupt_page,
+            &table_id,
+            &index_number,
+            &key_size,
+            &entry_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    memcpy(corrupt_page, page, sizeof(corrupt_page));
+    put_test_u64_le(
+        corrupt_page + MYLITE_STORAGE_FORMAT_INDEX_ROOT_PAYLOAD_OFFSET,
+        MYLITE_STORAGE_FORMAT_INDEX_ROOT_ENTRY_ROW_ID_OFFSET,
+        header.page_count
+    );
+    rechecksum_test_index_root_page(corrupt_page);
+    assert(
+        mylite_storage_test_decode_maintained_index_root_page(
+            &header,
+            4ULL,
+            corrupt_page,
+            &table_id,
+            &index_number,
+            &key_size,
+            &entry_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    memcpy(corrupt_page, page, sizeof(corrupt_page));
+    put_test_u32_le(corrupt_page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_FLAGS_OFFSET, 0U);
+    rechecksum_test_index_root_page(corrupt_page);
+    assert(
+        mylite_storage_test_decode_maintained_index_root_page(
+            &header,
+            4ULL,
+            corrupt_page,
+            &table_id,
+            &index_number,
+            &key_size,
+            &entry_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    memcpy(corrupt_page, page, sizeof(corrupt_page));
+    corrupt_page[MYLITE_STORAGE_FORMAT_INDEX_ROOT_PAYLOAD_OFFSET] ^= 0x01U;
+    assert(
+        mylite_storage_test_decode_maintained_index_root_page(
+            &header,
+            4ULL,
+            corrupt_page,
+            &table_id,
+            &index_number,
+            &key_size,
+            &entry_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    memcpy(corrupt_page, page, sizeof(corrupt_page));
+    memcpy(
+        corrupt_page + MYLITE_STORAGE_FORMAT_INDEX_ROOT_PAYLOAD_OFFSET +
+            MYLITE_STORAGE_FORMAT_INDEX_ROOT_ENTRY_KEY_OFFSET,
+        key_2,
+        sizeof(key_2)
+    );
+    memcpy(
+        corrupt_page + MYLITE_STORAGE_FORMAT_INDEX_ROOT_PAYLOAD_OFFSET +
+            MYLITE_STORAGE_FORMAT_INDEX_ROOT_ENTRY_HEADER_SIZE + sizeof(key_1) +
+            MYLITE_STORAGE_FORMAT_INDEX_ROOT_ENTRY_KEY_OFFSET,
+        key_1,
+        sizeof(key_1)
+    );
+    rechecksum_test_index_root_page(corrupt_page);
+    assert(
+        mylite_storage_test_decode_maintained_index_root_page(
+            &header,
+            4ULL,
+            corrupt_page,
+            &table_id,
+            &index_number,
+            &key_size,
+            &entry_count
+        ) == MYLITE_STORAGE_CORRUPT
+    );
+
+    assert(
+        mylite_storage_test_encode_maintained_index_root_page(
+            page,
+            6ULL,
+            3ULL,
+            2U,
+            sizeof(key_1),
+            &one_entryset
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_test_decode_maintained_index_root_page(
+            &header,
+            6ULL,
+            page,
+            &table_id,
+            &index_number,
+            &key_size,
+            &entry_count
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(table_id == 3ULL);
+    assert(index_number == 2U);
+    assert(key_size == sizeof(key_1));
+    assert(entry_count == 1U);
+
+    assert(
+        mylite_storage_test_encode_maintained_index_root_page(
+            page,
+            4ULL,
+            0ULL,
+            1U,
+            sizeof(key_1),
+            &entryset
+        ) == MYLITE_STORAGE_MISUSE
+    );
+    assert(
+        mylite_storage_test_encode_maintained_index_root_page(
+            page,
+            4ULL,
+            3ULL,
+            1U,
+            sizeof(key_1) + 1U,
+            &entryset
+        ) == MYLITE_STORAGE_MISUSE
+    );
+
+    assert(
+        mylite_storage_test_encode_maintained_index_root_page(
+            page,
+            5ULL,
+            3ULL,
+            1U,
+            sizeof(key_1),
+            &empty_entryset
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_test_decode_maintained_index_root_page(
+            &header,
+            5ULL,
+            page,
+            &table_id,
+            &index_number,
+            &key_size,
+            &entry_count
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(entry_count == 0U);
+    assert(key_size == sizeof(key_1));
+#endif
+}
+
 static void test_index_leaf_pages(void) {
     static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
     static const unsigned char row_1[] = {0x00U, 0x01U, 'a'};
@@ -9338,6 +9656,15 @@ static unsigned long long checksum_test_page(const unsigned char *page, size_t c
         checksum *= UINT64_C(1099511628211);
     }
     return checksum;
+}
+
+static void rechecksum_test_index_root_page(unsigned char *page) {
+    put_test_u64_le(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET, 0ULL);
+    put_test_u64_le(
+        page,
+        MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET,
+        checksum_test_page(page, MYLITE_STORAGE_FORMAT_INDEX_ROOT_CHECKSUM_OFFSET)
+    );
 }
 
 static void flip_file_byte(const char *path, long offset) {
