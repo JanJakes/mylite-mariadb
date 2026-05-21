@@ -20,6 +20,13 @@
 #include "handler.h"                            /* my_xid */
 #include "rpl_constants.h"
 
+#if defined(EMBEDDED_LIBRARY) && defined(MYLITE_WITH_QUERY_LOGS) && \
+    !MYLITE_WITH_QUERY_LOGS
+#define MYLITE_QUERY_LOGS_DISABLED 1
+#else
+#define MYLITE_QUERY_LOGS_DISABLED 0
+#endif
+
 class Relay_log_info;
 class Gtid_index_writer;
 
@@ -545,6 +552,10 @@ public:
              const char *sql_text, size_t sql_text_len);
   bool open_slow_log(const char *log_name)
   {
+#if MYLITE_QUERY_LOGS_DISABLED
+    (void) log_name;
+    return false;
+#else
     char buf[FN_REFLEN];
     return open(
 #ifdef HAVE_PSI_INTERFACE
@@ -552,9 +563,14 @@ public:
 #endif
                 generate_name(log_name, "-slow.log", 0, buf),
                 LOG_NORMAL, 0, 0, WRITE_CACHE);
+#endif
   }
   bool open_query_log(const char *log_name)
   {
+#if MYLITE_QUERY_LOGS_DISABLED
+    (void) log_name;
+    return false;
+#else
     char buf[FN_REFLEN];
     return open(
 #ifdef HAVE_PSI_INTERFACE
@@ -562,6 +578,7 @@ public:
 #endif
                 generate_name(log_name, ".log", 0, buf),
                 LOG_NORMAL, 0, 0, WRITE_CACHE);
+#endif
   }
 
 private:

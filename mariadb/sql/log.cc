@@ -687,6 +687,10 @@ bool write_bin_log_start_alter(THD *thd, bool& partial_alter,
 
 bool LOGGER::is_log_table_enabled(uint log_table_type)
 {
+#if MYLITE_QUERY_LOGS_DISABLED
+  (void) log_table_type;
+  return false;
+#else
   switch (log_table_type) {
   case QUERY_LOG_SLOW:
     return (table_log_handler != NULL) && global_system_variables.sql_log_slow
@@ -698,6 +702,7 @@ bool LOGGER::is_log_table_enabled(uint log_table_type)
     DBUG_ASSERT(0);
     return FALSE;                             /* make compiler happy */
   }
+#endif
 }
 
 
@@ -803,6 +808,19 @@ bool Log_to_csv_event_handler::
               const char *sql_text, size_t sql_text_len,
               CHARSET_INFO *client_cs)
 {
+#if MYLITE_QUERY_LOGS_DISABLED
+  (void) thd;
+  (void) event_time;
+  (void) user_host;
+  (void) user_host_len;
+  (void) thread_id_arg;
+  (void) command_type;
+  (void) command_type_len;
+  (void) sql_text;
+  (void) sql_text_len;
+  (void) client_cs;
+  return false;
+#else
   TABLE_LIST table_list;
   TABLE *table;
   const char *cause= 0;
@@ -950,6 +968,7 @@ err:
 
   thd->used= (thd->used & ~THD::TIME_ZONE_USED) | save_time_zone_used;
   DBUG_RETURN(result);
+#endif
 }
 
 
@@ -987,6 +1006,18 @@ bool Log_to_csv_event_handler::
            ulonglong query_utime, ulonglong lock_utime, bool is_command,
            const char *sql_text, size_t sql_text_len)
 {
+#if MYLITE_QUERY_LOGS_DISABLED
+  (void) thd;
+  (void) current_time;
+  (void) user_host;
+  (void) user_host_len;
+  (void) query_utime;
+  (void) lock_utime;
+  (void) is_command;
+  (void) sql_text;
+  (void) sql_text_len;
+  return false;
+#else
   TABLE_LIST table_list;
   TABLE *table;
   const char *cause= 0;
@@ -1156,11 +1187,17 @@ err:
     close_log_table(thd, &open_tables_backup);
   thd->used= (thd->used & ~THD::TIME_ZONE_USED) | save_time_zone_used;
   DBUG_RETURN(result);
+#endif
 }
 
 int Log_to_csv_event_handler::
   activate_log(THD *thd, uint log_table_type)
 {
+#if MYLITE_QUERY_LOGS_DISABLED
+  (void) thd;
+  (void) log_table_type;
+  return 1;
+#else
   TABLE_LIST table_list;
   TABLE *table;
   LEX_CSTRING *UNINIT_VAR(log_name);
@@ -1191,6 +1228,7 @@ int Log_to_csv_event_handler::
     result= 1;
 
   DBUG_RETURN(result);
+#endif
 }
 
 bool Log_to_csv_event_handler::
@@ -1210,8 +1248,10 @@ bool Log_to_file_event_handler::
 
 void Log_to_file_event_handler::init_pthread_objects()
 {
+#if !MYLITE_QUERY_LOGS_DISABLED
   mysql_log.init_pthread_objects();
   mysql_slow_log.init_pthread_objects();
+#endif
 }
 
 
@@ -1223,6 +1263,18 @@ bool Log_to_file_event_handler::
            ulonglong query_utime, ulonglong lock_utime, bool is_command,
            const char *sql_text, size_t sql_text_len)
 {
+#if MYLITE_QUERY_LOGS_DISABLED
+  (void) thd;
+  (void) current_time;
+  (void) user_host;
+  (void) user_host_len;
+  (void) query_utime;
+  (void) lock_utime;
+  (void) is_command;
+  (void) sql_text;
+  (void) sql_text_len;
+  return false;
+#else
   Silence_log_table_errors error_handler;
   thd->push_internal_handler(&error_handler);
   bool retval= mysql_slow_log.write(thd, hrtime_to_my_time(current_time),
@@ -1231,6 +1283,7 @@ bool Log_to_file_event_handler::
                                     sql_text, sql_text_len);
   thd->pop_internal_handler();
   return retval;
+#endif
 }
 
 
@@ -1245,6 +1298,19 @@ bool Log_to_file_event_handler::
               const char *sql_text, size_t sql_text_len,
               CHARSET_INFO *client_cs)
 {
+#if MYLITE_QUERY_LOGS_DISABLED
+  (void) thd;
+  (void) event_time;
+  (void) user_host;
+  (void) user_host_len;
+  (void) thread_id_arg;
+  (void) command_type;
+  (void) command_type_len;
+  (void) sql_text;
+  (void) sql_text_len;
+  (void) client_cs;
+  return false;
+#else
   Silence_log_table_errors error_handler;
   thd->push_internal_handler(&error_handler);
   bool retval= mysql_log.write(hrtime_to_time(event_time), user_host,
@@ -1253,11 +1319,16 @@ bool Log_to_file_event_handler::
                                sql_text, sql_text_len);
   thd->pop_internal_handler();
   return retval;
+#endif
 }
 
 
 bool Log_to_file_event_handler::init()
 {
+#if MYLITE_QUERY_LOGS_DISABLED
+  is_initialized= TRUE;
+  return FALSE;
+#else
   if (!is_initialized)
   {
     if (global_system_variables.sql_log_slow)
@@ -1270,22 +1341,27 @@ bool Log_to_file_event_handler::init()
   }
 
   return FALSE;
+#endif
 }
 
 
 void Log_to_file_event_handler::cleanup()
 {
+#if !MYLITE_QUERY_LOGS_DISABLED
   mysql_log.cleanup();
   mysql_slow_log.cleanup();
+#endif
 }
 
 void Log_to_file_event_handler::flush()
 {
+#if !MYLITE_QUERY_LOGS_DISABLED
   /* reopen log files */
   if (opt_log)
     mysql_log.reopen_file();
   if (global_system_variables.sql_log_slow)
     mysql_slow_log.reopen_file();
+#endif
 }
 
 /*
@@ -1376,12 +1452,16 @@ void LOGGER::init_base()
 
 void LOGGER::init_log_tables()
 {
+#if MYLITE_QUERY_LOGS_DISABLED
+  is_log_tables_initialized= TRUE;
+#else
   if (!table_log_handler)
     table_log_handler= new Log_to_csv_event_handler;
 
   if (!is_log_tables_initialized &&
       !table_log_handler->init() && !file_log_handler->init())
     is_log_tables_initialized= TRUE;
+#endif
 }
 
 
@@ -1392,6 +1472,9 @@ void LOGGER::init_log_tables()
 */
 bool LOGGER::flush_slow_log()
 {
+#if MYLITE_QUERY_LOGS_DISABLED
+  return 0;
+#else
   /*
     Now we lock logger, as nobody should be able to use logging routines while
     log tables are closed
@@ -1406,6 +1489,7 @@ bool LOGGER::flush_slow_log()
   logger.unlock();
 
   return 0;
+#endif
 }
 
 
@@ -1416,6 +1500,9 @@ bool LOGGER::flush_slow_log()
 */
 bool LOGGER::flush_general_log()
 {
+#if MYLITE_QUERY_LOGS_DISABLED
+  return 0;
+#else
   /*
     Now we lock logger, as nobody should be able to use logging routines while
     log tables are closed
@@ -1430,6 +1517,7 @@ bool LOGGER::flush_general_log()
   logger.unlock();
 
   return 0;
+#endif
 }
 
 
@@ -1453,6 +1541,13 @@ bool LOGGER::slow_log_print(THD *thd, const char *query, size_t query_length,
                             ulonglong current_utime)
 
 {
+#if MYLITE_QUERY_LOGS_DISABLED
+  (void) thd;
+  (void) query;
+  (void) query_length;
+  (void) current_utime;
+  return false;
+#else
   bool error= FALSE;
   Log_event_handler **current_handler;
   bool is_command= FALSE;
@@ -1510,11 +1605,19 @@ bool LOGGER::slow_log_print(THD *thd, const char *query, size_t query_length,
     unlock();
   }
   return error;
+#endif
 }
 
 bool LOGGER::general_log_write(THD *thd, enum enum_server_command command,
                                const char *query, size_t query_length)
 {
+#if MYLITE_QUERY_LOGS_DISABLED
+  (void) thd;
+  (void) command;
+  (void) query;
+  (void) query_length;
+  return false;
+#else
   bool error= FALSE;
   Log_event_handler **current_handler= general_log_handler_list;
   char user_host_buff[MAX_USER_HOST_SIZE + 1];
@@ -1546,11 +1649,19 @@ bool LOGGER::general_log_write(THD *thd, enum enum_server_command command,
   }
 
   return error;
+#endif
 }
 
 bool LOGGER::general_log_print(THD *thd, enum enum_server_command command,
                                const char *format, va_list args)
 {
+#if MYLITE_QUERY_LOGS_DISABLED
+  (void) thd;
+  (void) command;
+  (void) format;
+  (void) args;
+  return false;
+#else
   size_t message_buff_len= 0;
   char message_buff[MAX_LOG_BUFFER_SIZE];
 
@@ -1562,6 +1673,7 @@ bool LOGGER::general_log_print(THD *thd, enum enum_server_command command,
     message_buff[0]= '\0';
 
   return general_log_write(thd, command, message_buff, message_buff_len);
+#endif
 }
 
 void LOGGER::init_error_log(ulonglong error_log_printer)
@@ -1589,6 +1701,10 @@ void LOGGER::init_error_log(ulonglong error_log_printer)
 
 void LOGGER::init_slow_log(ulonglong slow_log_printer)
 {
+#if MYLITE_QUERY_LOGS_DISABLED
+  (void) slow_log_printer;
+  slow_log_handler_list[0]= 0;
+#else
   if (slow_log_printer & LOG_NONE)
   {
     slow_log_handler_list[0]= 0;
@@ -1610,10 +1726,15 @@ void LOGGER::init_slow_log(ulonglong slow_log_printer)
     slow_log_handler_list[2]= 0;
     break;
   }
+#endif
 }
 
 void LOGGER::init_general_log(ulonglong general_log_printer)
 {
+#if MYLITE_QUERY_LOGS_DISABLED
+  (void) general_log_printer;
+  general_log_handler_list[0]= 0;
+#else
   if (general_log_printer & LOG_NONE)
   {
     general_log_handler_list[0]= 0;
@@ -1635,11 +1756,17 @@ void LOGGER::init_general_log(ulonglong general_log_printer)
     general_log_handler_list[2]= 0;
     break;
   }
+#endif
 }
 
 
 bool LOGGER::activate_log_handler(THD* thd, uint log_type)
 {
+#if MYLITE_QUERY_LOGS_DISABLED
+  (void) thd;
+  (void) log_type;
+  return true;
+#else
   MYSQL_QUERY_LOG *file_log;
   bool res= FALSE;
   lock_exclusive();
@@ -1687,11 +1814,16 @@ bool LOGGER::activate_log_handler(THD* thd, uint log_type)
   }
   unlock();
   return res;
+#endif
 }
 
 
 void LOGGER::deactivate_log_handler(THD *thd, uint log_type)
 {
+#if MYLITE_QUERY_LOGS_DISABLED
+  (void) thd;
+  (void) log_type;
+#else
   my_bool *tmp_opt= 0;
   MYSQL_LOG *UNINIT_VAR(file_log);
 
@@ -1715,6 +1847,7 @@ void LOGGER::deactivate_log_handler(THD *thd, uint log_type)
   file_log->close(0);
   *tmp_opt= FALSE;
   unlock();
+#endif
 }
 
 
@@ -1727,6 +1860,13 @@ bool Log_to_csv_event_handler::init()
 int LOGGER::set_handlers(ulonglong slow_log_printer,
                          ulonglong general_log_printer)
 {
+#if MYLITE_QUERY_LOGS_DISABLED
+  (void) slow_log_printer;
+  (void) general_log_printer;
+  init_slow_log(LOG_NONE);
+  init_general_log(LOG_NONE);
+  return 0;
+#else
   lock_exclusive();
 
   if ((slow_log_printer & LOG_TABLE || general_log_printer & LOG_TABLE) &&
@@ -1745,6 +1885,7 @@ int LOGGER::set_handlers(ulonglong slow_log_printer,
   unlock();
 
   return 0;
+#endif
 }
 
  /*
@@ -3315,6 +3456,9 @@ int MYSQL_BIN_LOG::generate_new_name(char *new_name, const char *log_name,
 
 void MYSQL_QUERY_LOG::reopen_file()
 {
+#if MYLITE_QUERY_LOGS_DISABLED
+  return;
+#else
   char *save_name;
   DBUG_ENTER("MYSQL_LOG::reopen_file");
 
@@ -3344,6 +3488,7 @@ void MYSQL_QUERY_LOG::reopen_file()
   mysql_mutex_unlock(&LOCK_log);
 
   DBUG_VOID_RETURN;
+#endif
 }
 
 
@@ -3377,6 +3522,17 @@ bool MYSQL_QUERY_LOG::write(time_t event_time, const char *user_host,
                             const char *command_type, size_t command_type_len,
                             const char *sql_text, size_t sql_text_len)
 {
+#if MYLITE_QUERY_LOGS_DISABLED
+  (void) event_time;
+  (void) user_host;
+  (void) user_host_len;
+  (void) thread_id_arg;
+  (void) command_type;
+  (void) command_type_len;
+  (void) sql_text;
+  (void) sql_text_len;
+  return false;
+#else
   char buff[32];
   char local_time_buff[MAX_TIME_SIZE];
   struct tm start;
@@ -3442,6 +3598,7 @@ err:
   }
   mysql_mutex_unlock(&LOCK_log);
   return TRUE;
+#endif
 }
 
 
@@ -3479,6 +3636,18 @@ bool MYSQL_QUERY_LOG::write(THD *thd, time_t current_time,
                             ulonglong lock_utime, bool is_command,
                             const char *sql_text, size_t sql_text_len)
 {
+#if MYLITE_QUERY_LOGS_DISABLED
+  (void) thd;
+  (void) current_time;
+  (void) user_host;
+  (void) user_host_len;
+  (void) query_utime;
+  (void) lock_utime;
+  (void) is_command;
+  (void) sql_text;
+  (void) sql_text_len;
+  return false;
+#else
   bool error= 0;
   char llbuff[22];
   DBUG_ENTER("MYSQL_QUERY_LOG::write");
@@ -3699,6 +3868,7 @@ err:
     sql_print_error(ER_DEFAULT(ER_ERROR_ON_WRITE), name, errno);
   }
   goto end;
+#endif
 }
 
 

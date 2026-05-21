@@ -245,6 +245,7 @@ bool is_unsupported_help_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_static_show_info_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_statement_profiling_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_query_cache_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_query_log_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_optimizer_trace_statement(
     const SqlPolicyTokens &tokens,
     std::string_view current_schema
@@ -291,6 +292,7 @@ bool token_in(
     const char *fourth
 );
 bool is_server_variable_token(std::string_view token);
+bool is_query_log_variable_token(std::string_view token);
 bool is_system_variable_qualified_token(const SqlPolicyTokens &tokens, std::size_t index);
 bool is_system_variable_assignment_start(const SqlPolicyTokens &tokens, std::size_t index);
 std::size_t first_set_assignment_token_index(const SqlPolicyTokens &tokens);
@@ -1155,6 +1157,7 @@ bool is_unsupported_server_surface_sql(std::string_view sql, const std::string &
            is_unsupported_static_show_info_statement(tokens) ||
            is_unsupported_statement_profiling_statement(tokens) ||
            is_unsupported_query_cache_statement(tokens) ||
+           is_unsupported_query_log_statement(tokens) ||
            is_unsupported_optimizer_trace_statement(tokens, current_schema) ||
            is_unsupported_server_set_statement(tokens);
 }
@@ -1290,6 +1293,33 @@ bool is_unsupported_query_cache_statement(const SqlPolicyTokens &tokens) {
 
     return (token_equals(first, "FLUSH") || token_equals(first, "RESET")) &&
            token_equals(second, "QUERY") && token_equals(third, "CACHE");
+}
+
+bool is_unsupported_query_log_statement(const SqlPolicyTokens &tokens) {
+    const std::string_view first = identifier_token_at(tokens, 0);
+    const std::string_view second = identifier_token_at(tokens, 1);
+
+    if (token_equals(first, "FLUSH")) {
+        const std::size_t flush_target_index =
+            token_in(second, "LOCAL", "NO_WRITE_TO_BINLOG") ? 2U : 1U;
+        const std::string_view flush_target = identifier_token_at(tokens, flush_target_index);
+        const std::string_view flush_target_tail =
+            identifier_token_at(tokens, flush_target_index + 1U);
+
+        return token_equals(flush_target, "LOGS") || (token_in(flush_target, "GENERAL", "SLOW") &&
+                                                      token_equals(flush_target_tail, "LOGS"));
+    }
+    if (!token_equals(first, "SET")) {
+        return false;
+    }
+
+    for (std::size_t index = 1; index < tokens.count; ++index) {
+        if (is_query_log_variable_token(tokens.values[index]) &&
+            is_system_variable_qualified_token(tokens, index)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool is_unsupported_optimizer_trace_statement(
@@ -1656,6 +1686,30 @@ bool is_server_variable_token(std::string_view token) {
                "QUERY_CACHE_MIN_RES_UNIT",
                "QUERY_CACHE_WLOCK_INVALIDATE",
                "QUERY_CACHE_STRIP_COMMENTS"
+           );
+}
+
+bool is_query_log_variable_token(std::string_view token) {
+    return token_in(token, "GENERAL_LOG", "GENERAL_LOG_FILE", "LOG_OUTPUT") ||
+           token_in(token, "SLOW_QUERY_LOG", "SLOW_QUERY_LOG_FILE", "LOG_SLOW_QUERY") ||
+           token_in(token, "LOG_SLOW_QUERY_FILE", "SQL_LOG_OFF", "LONG_QUERY_TIME") ||
+           token_in(
+               token,
+               "MIN_EXAMINED_ROW_LIMIT",
+               "LOG_SLOW_MIN_EXAMINED_ROW_LIMIT",
+               "LOG_SLOW_RATE_LIMIT"
+           ) ||
+           token_in(
+               token,
+               "LOG_SLOW_FILTER",
+               "LOG_SLOW_VERBOSITY",
+               "LOG_SLOW_DISABLED_STATEMENTS"
+           ) ||
+           token_in(
+               token,
+               "LOG_SLOW_ADMIN_STATEMENTS",
+               "LOG_SLOW_SLAVE_STATEMENTS",
+               "LOG_SLOW_MAX_WARNINGS"
            );
 }
 
@@ -2507,6 +2561,7 @@ std::vector<std::string> runtime_arguments(const RuntimeLayout &layout) {
         std::string("--innodb-temp-data-file-path=") + k_innodb_temp_data_file_path,
         "--innodb-flush-log-at-trx-commit=1",
         "--innodb-fast-shutdown=1",
+        "--log-output=NONE",
         "--skip-log-bin",
         "--skip-slave-start",
         "--skip-grant-tables",

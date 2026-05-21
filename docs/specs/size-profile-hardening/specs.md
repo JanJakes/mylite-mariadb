@@ -28,7 +28,9 @@ attribution and privilege help metadata rather than application data.
 Command-line option help text is omitted because it is inherited server
 documentation prose, while option names and parser metadata remain available.
 Optimizer trace diagnostics are omitted because they expose server optimizer
-debugging data rather than application behavior.
+debugging data rather than application behavior. General and slow query logs
+are omitted because they are daemon query-audit diagnostics rather than
+application storage, SQL execution, or public API behavior.
 
 ## Source Findings
 
@@ -157,6 +159,14 @@ debugging data rather than application behavior.
   `MYLITE_WITH_OPTIMIZER_TRACE=0` replaces `opt_trace.cc.o` with
   `mylite_opt_trace_disabled.cc.o` and reduces the stripped archive to
   27,116,808 bytes, 25.86 MiB, and 705 members.
+- `mariadb/sql/log.cc` owns general and slow query-log dispatch, table
+  handlers, file handlers, and `MYSQL_QUERY_LOG` formatting. It also owns
+  shared error-log entry points, so the safe cut is inert query-log handlers,
+  not removing the shared logging object.
+- Disabling general and slow query-log runtime behind
+  `MYLITE_WITH_QUERY_LOGS=0` keeps error logging and diagnostics available,
+  rejects query-log configuration through the MyLite SQL policy, and reduces
+  the stripped archive to 27,095,640 bytes, 25.84 MiB, and 705 members.
 
 ## Proposed Design
 
@@ -264,6 +274,15 @@ optimizer-trace variable assignment and
 `INFORMATION_SCHEMA.OPTIMIZER_TRACE`, qualified or current-schema, before
 dispatch; ordinary planning, execution, and `EXPLAIN` remain available.
 
+The embedded archive omits general and slow query-log runtime by setting
+`MYLITE_WITH_QUERY_LOGS=0` in the MyLite baseline. The option defaults to `ON`
+so normal MariaDB server builds keep upstream query-log behavior. The disabled
+profile keeps the shared logger and error-log paths but makes query-log table
+handlers, file handlers, writes, flushes, and activation inert. MyLite starts
+with `--log-output=NONE` and rejects query-log variable assignment plus
+`FLUSH LOGS`, `FLUSH GENERAL LOGS`, and `FLUSH SLOW LOGS`, including `LOCAL`
+and `NO_WRITE_TO_BINLOG` variants, before dispatch.
+
 The wrapper keeps this behavior enabled by default because it is the
 distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
 need an unstripped archive for local inspection.
@@ -281,7 +300,9 @@ MyLite-owned profile flag and omits long system-variable help comments from
 `sys_vars.cc`. Static server-information `SHOW` producers are compiled out of
 `sql_show.cc`. Hardcoded command-line option help strings are compiled out of
 the embedded `mysqld.cc` option table. Optimizer trace diagnostics are replaced
-with inert trace helper symbols in the embedded SQL archive.
+with inert trace helper symbols in the embedded SQL archive. General and slow
+query-log handlers are compiled to inert embedded paths while shared error-log
+behavior remains available.
 
 ## Compatibility Impact
 
@@ -332,11 +353,16 @@ Optimizer trace is a server diagnostic surface. Omitting it removes optimizer
 trace output and `INFORMATION_SCHEMA.OPTIMIZER_TRACE`, not ordinary query
 planning, execution, `EXPLAIN`, JSON functions, native storage engines, DDL,
 DML, or the public C API.
+General and slow query logs are daemon diagnostics that write statement text to
+server log files or log tables. Omitting them removes query-log output and
+configuration, not ordinary statement execution, SQL diagnostics, errors,
+warnings, native storage engines, DDL, DML, or the public C API.
 
 ## Database-Directory And Lifecycle Impact
 
-None. Runtime directory layout, storage files, temporary files, and lock
-behavior are unchanged.
+Runtime directory layout, storage files, temporary files, and lock behavior are
+unchanged. Query-log omission removes inherited daemon log-file output rather
+than adding any database-directory companions.
 
 ## Public API Impact
 
@@ -409,6 +435,11 @@ bytes / 25.86 MiB, 4,412,896 bytes smaller than the Release build with
 Performance Schema disabled, 6,012,832 bytes smaller than the symbol-stripped
 baseline with Performance Schema still built, and 6,725,512 bytes smaller than
 the original broad archive.
+Omitting general and slow query-log runtime brings the current archive to
+27,095,640 bytes / 25.84 MiB, 4,434,064 bytes smaller than the Release build
+with Performance Schema disabled, 6,034,000 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 6,746,680
+bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -422,6 +453,8 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
   `mylite_procedure_analyse_stub.cc.o` is present in `libmariadbd.a`.
 - Confirm `opt_trace.cc.o` is absent and `mylite_opt_trace_disabled.cc.o` is
   present in `libmariadbd.a`.
+- Confirm `MYLITE_WITH_QUERY_LOGS=OFF` appears in the embedded CMake cache and
+  query-log configuration SQL is rejected by server-surface policy coverage.
 - Run `cmake --build --preset dev`.
 - Run `ctest --preset dev --output-on-failure`.
 - Run `cmake --build --preset embedded-dev`.
@@ -470,6 +503,9 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Direct and prepared optimizer-trace SQL fails through MyLite policy,
   ordinary `EXPLAIN` remains available, and the embedded archive replaces
   `opt_trace.cc.o` with `mylite_opt_trace_disabled.cc.o`.
+- Direct and prepared query-log configuration SQL fails through MyLite policy,
+  `@@general_log`, `@@slow_query_log`, and `@@log_output` show the disabled
+  embedded state, and error logging remains available.
 - The stripped archive still links `libmylite` and all embedded tests.
 - The measured archive size and member count are recorded in the build
   documentation.
@@ -505,3 +541,6 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Users inspecting MariaDB optimizer trace diagnostics lose
   `INFORMATION_SCHEMA.OPTIMIZER_TRACE` output in the default embedded profile.
   Normal query execution and `EXPLAIN` remain available.
+- Users relying on MariaDB general or slow query logs lose those daemon
+  diagnostics in the default embedded profile. MyLite still exposes SQL errors,
+  warnings, result metadata, and normal statement diagnostics through the C API.

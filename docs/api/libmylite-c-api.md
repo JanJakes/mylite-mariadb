@@ -389,6 +389,7 @@ compatibility features that do not fit the embedded library model:
 - statement profiling,
 - query-cache management,
 - optimizer trace diagnostics,
+- general and slow query logs,
 - the optional `SFORMAT()` SQL helper,
 - legacy `PROCEDURE ANALYSE()` SELECT diagnostics,
 - static `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES`
@@ -410,6 +411,9 @@ syntax. Optimizer trace variables and
 `INFORMATION_SCHEMA.OPTIMIZER_TRACE`, including unqualified reads while
 `information_schema` is the current schema, are rejected as server diagnostics.
 Ordinary planning, execution, and `EXPLAIN` remain supported. The default
+embedded profile omits general and slow query logs as daemon diagnostics;
+query-log variables and log flush commands are rejected while SQL errors,
+warnings, and result metadata remain available. The default
 embedded profile also omits `SFORMAT()`, which fails as an
 unknown SQL function; ordinary `FORMAT()` remains available. The legacy
 `PROCEDURE ANALYSE()` SELECT extension is rejected as an unsupported diagnostic
@@ -418,7 +422,7 @@ help comments are omitted from the default embedded profile; `SHOW VARIABLES`
 and system-variable values remain available, but
 `INFORMATION_SCHEMA.SYSTEM_VARIABLES.VARIABLE_COMMENT` is empty. Startup
 variables also cover disabled binlog, performance schema, query cache,
-statement profiling, grant tables, networking, and the transient
+query logging, statement profiling, grant tables, networking, and the transient
 database-local plugin directory. Static `SHOW AUTHORS`, `SHOW CONTRIBUTORS`,
 and `SHOW PRIVILEGES` are rejected as server-information surfaces; ordinary
 supported `SHOW` commands remain available.

@@ -36,6 +36,7 @@ PLUGIN_PERFSCHEMA=NO
 PLUGIN_FEEDBACK=NO
 ENABLED_PROFILING=OFF
 MYLITE_WITH_BINLOG_CORE=OFF
+MYLITE_WITH_QUERY_LOGS=OFF
 MYLITE_WITH_PROCEDURE_ANALYSE=OFF
 MYLITE_WITH_SYSVAR_HELP_TEXT=OFF
 MYLITE_WITH_STATIC_SHOW_INFO=OFF
@@ -64,8 +65,10 @@ also omits the fmtlib-backed `SFORMAT()` SQL function and builds the embedded
 SQL target without C++ exceptions or unwind tables. Dynamic UDF shared-library
 loading is omitted from the embedded archive. The embedded baseline disables
 the active binary-log transaction/event core behind `MYLITE_WITH_BINLOG_CORE=0`
-while preserving the normal MariaDB server build path. It also omits the
-legacy `PROCEDURE ANALYSE()` implementation behind
+while preserving the normal MariaDB server build path. It omits the general
+and slow query-log runtime behind `MYLITE_WITH_QUERY_LOGS=0`; error logging,
+SQL diagnostics, warnings, and result metadata remain available. It also
+omits the legacy `PROCEDURE ANALYSE()` implementation behind
 `MYLITE_WITH_PROCEDURE_ANALYSE=0`. Long system-variable help comments are
 omitted behind `MYLITE_WITH_SYSVAR_HELP_TEXT=0`; variable names, values,
 defaults, validation, and `SHOW VARIABLES` remain intact. Static `SHOW
@@ -91,7 +94,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 27,116,808 bytes / 25.86 MiB |
+| Archive size | 27,095,640 bytes / 25.84 MiB |
 | Archive members | 705 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -111,7 +114,9 @@ Omitting static `SHOW` information reduces the pre-strip archive to 27,732,624
 bytes / 26.45 MiB. Omitting command-line option help text reduces the
 pre-strip archive to 27,723,608 bytes / 26.44 MiB. Omitting optimizer trace
 diagnostics reduces the pre-strip archive to 27,710,800 bytes / 26.43 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 593,992 bytes without
+Omitting general and slow query-log runtime reduces the pre-strip archive to
+27,689,312 bytes / 26.41 MiB. Post-build `strip -S -x` plus `ranlib` saves
+another 593,672 bytes without
 changing archive membership or runtime behavior. The `SFORMAT()` and exception
 cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -123,10 +128,12 @@ system-variable help text saves 56,040 bytes with no member-count change.
 Omitting static `SHOW` information saves 32,936 bytes with no member-count
 change. Omitting command-line option help text saves 8,680 bytes with no
 member-count change. Omitting optimizer trace diagnostics saves 12,144 bytes
-with no member-count change. The final archive is 4,412,896 bytes smaller than
-the Release build with Performance Schema disabled, 6,012,832 bytes smaller than
-the symbol-stripped baseline that still built Performance Schema, and
-6,725,512 bytes smaller than the original broad archive.
+with no member-count change. Omitting general and slow query-log runtime saves
+21,168 bytes with no member-count change. The final archive is 4,434,064
+bytes smaller than the Release build with Performance Schema disabled,
+6,034,000 bytes smaller than the symbol-stripped baseline that still built
+Performance Schema, and 6,746,680 bytes smaller than the original broad
+archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
 GSSAPI, BZip2, LZ4, LibLZMA, LZO, PCRE2, and Zstandard support on this
@@ -181,7 +188,9 @@ available. Command-line option help prose is omitted from the default embedded
 archive, while option names, aliases, argument types, defaults, limits, and
 parsing behavior remain available. Optimizer trace diagnostics are omitted
 from the default embedded archive and rejected by policy; ordinary query
-planning, execution, and `EXPLAIN` remain available.
+planning, execution, and `EXPLAIN` remain available. General and slow query
+logs are omitted from the default embedded archive and rejected by policy;
+error logging, SQL diagnostics, warnings, and result metadata remain available.
 
 ## Disabled Or Missing Surface
 
@@ -204,6 +213,7 @@ The baseline explicitly disables:
   information producers
 - Command-line option help text
 - Optimizer trace diagnostics
+- General and slow query logs
 - MariaDB upstream unit-test targets
 
 Configure also reports unavailable optional features on this host, including

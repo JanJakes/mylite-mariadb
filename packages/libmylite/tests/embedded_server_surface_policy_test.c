@@ -153,8 +153,11 @@ static void assert_runtime_policy_variables(mylite_db *db, const char *database_
         "have_profiling",
         "skip_grant_tables",
         "skip_networking",
+        "general_log",
+        "slow_query_log",
+        "log_output",
     };
-    static const char *const variable_values[] = {"0", "NO", "NO", "1", "1"};
+    static const char *const variable_values[] = {"0", "NO", "NO", "1", "1", "0", "0", "NONE"};
     const int variable_column_count = (int)(sizeof(variable_columns) / sizeof(variable_columns[0]));
     char *plugin_directory = path_join(database_path, "run/plugins");
 
@@ -166,7 +169,10 @@ static void assert_runtime_policy_variables(mylite_db *db, const char *database_
                    "@@have_query_cache AS have_query_cache, "
                    "@@have_profiling AS have_profiling, "
                    "@@skip_grant_tables AS skip_grant_tables, "
-                   "@@skip_networking AS skip_networking",
+                   "@@skip_networking AS skip_networking, "
+                   "@@general_log AS general_log, "
+                   "@@slow_query_log AS slow_query_log, "
+                   "@@log_output AS log_output",
             .column_count = variable_column_count,
             .row_count = 1,
             .column_names = variable_columns,
@@ -249,6 +255,8 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SET @query_cache_size = 1048576");
     exec_ok(db, "SET @query_cache_type = 'local'");
     exec_ok(db, "SET @first_local = 1, @query_cache_limit = 1024");
+    exec_ok(db, "SET @general_log = 1");
+    exec_ok(db, "SET @first_log = 1, @slow_query_log = 1");
     exec_ok(db, "SET @optimizer_trace = 'enabled=on'");
     exec_ok(db, "SET @first_trace = 1, @optimizer_trace_max_mem_size = 8192");
     exec_ok(db, "SET @sql_mode = 'ORACLE'");
@@ -374,6 +382,25 @@ static void assert_server_sql_rejected(mylite_db *db) {
     );
     expect_error(db, "FLUSH QUERY CACHE", "server-owned SQL surface");
     expect_error(db, "RESET QUERY CACHE", "server-owned SQL surface");
+    expect_error(db, "SET general_log = ON", "server-owned SQL surface");
+    expect_error(db, "SET GLOBAL general_log = ON", "server-owned SQL surface");
+    expect_error(db, "SET @@GLOBAL.general_log = ON", "server-owned SQL surface");
+    expect_error(db, "SET slow_query_log = ON", "server-owned SQL surface");
+    expect_error(db, "SET SESSION slow_query_log = ON", "server-owned SQL surface");
+    expect_error(db, "SET log_slow_query = ON", "server-owned SQL surface");
+    expect_error(db, "SET log_output = 'FILE'", "server-owned SQL surface");
+    expect_error(db, "SET long_query_time = 0", "server-owned SQL surface");
+    expect_error(db, "SET sql_log_off = 1", "server-owned SQL surface");
+    expect_error(db, "SET @@session.sql_log_off = 1", "server-owned SQL surface");
+    expect_error(db, "SET autocommit = 1, slow_query_log = ON", "server-owned SQL surface");
+    expect_error(db, "SET STATEMENT slow_query_log = ON FOR SELECT 1", "server-owned SQL surface");
+    expect_error(db, "SET STATEMENT sql_log_off = 1 FOR SELECT 1", "server-owned SQL surface");
+    expect_error(db, "FLUSH LOGS", "server-owned SQL surface");
+    expect_error(db, "FLUSH LOCAL LOGS", "server-owned SQL surface");
+    expect_error(db, "FLUSH NO_WRITE_TO_BINLOG LOGS", "server-owned SQL surface");
+    expect_error(db, "FLUSH GENERAL LOGS", "server-owned SQL surface");
+    expect_error(db, "FLUSH LOCAL SLOW LOGS", "server-owned SQL surface");
+    expect_error(db, "FLUSH SLOW LOGS", "server-owned SQL surface");
     expect_error(db, "SET optimizer_trace = 'enabled=on'", "server-owned SQL surface");
     expect_error(db, "SET @@session.optimizer_trace = 'enabled=on'", "server-owned SQL surface");
     expect_error(db, "SET optimizer_trace_max_mem_size = 8192", "server-owned SQL surface");
@@ -436,6 +463,10 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_prepare_error(db, "SET profiling = 1", "server-owned SQL surface");
     expect_prepare_error(db, "SET query_cache_type = ON", "server-owned SQL surface");
     expect_prepare_error(db, "RESET QUERY CACHE", "server-owned SQL surface");
+    expect_prepare_error(db, "SET general_log = ON", "server-owned SQL surface");
+    expect_prepare_error(db, "SET slow_query_log = ON", "server-owned SQL surface");
+    expect_prepare_error(db, "SET log_output = 'TABLE'", "server-owned SQL surface");
+    expect_prepare_error(db, "FLUSH LOGS", "server-owned SQL surface");
     expect_prepare_error(db, "SET optimizer_trace = 'enabled=on'", "server-owned SQL surface");
     expect_prepare_error(
         db,
