@@ -387,6 +387,7 @@ compatibility features that do not fit the embedded library model:
 - durable storage outside the MyLite database directory,
 - server audit plugins,
 - network-protocol `LOAD DATA LOCAL`,
+- PROXY protocol listener support,
 - event scheduler,
 - performance schema,
 - Oracle SQL mode,
@@ -463,6 +464,9 @@ query logging, statement profiling, grant tables, networking,
 Guarded replication execution variables are omitted from `SHOW VARIABLES` and
 `@@` lookup in the default embedded profile, while `@@log_bin=0` remains
 available as compatibility evidence.
+PROXY protocol listener support is omitted for the same serverless-core reason:
+the default embedded profile has no socket listener, and
+`proxy_protocol_networks` is absent from `SHOW VARIABLES` and `@@` lookup.
 The default embedded archive omits runtime shared-object plugin loading while
 keeping static built-in plugins and native storage engines available. Static
 `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES` are rejected as

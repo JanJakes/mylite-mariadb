@@ -130,6 +130,15 @@ ELSE()
   ADD_DEFINITIONS(-DMYLITE_WITH_REPLICATION_EXEC_SYSVARS=0)
 ENDIF()
 
+OPTION(MYLITE_WITH_PROXY_PROTOCOL "Build PROXY protocol listener support" ON)
+IF(MYLITE_WITH_PROXY_PROTOCOL)
+  ADD_DEFINITIONS(-DMYLITE_WITH_PROXY_PROTOCOL=1)
+  SET(MYLITE_PROXY_PROTOCOL_SOURCE proxy_protocol.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_PROXY_PROTOCOL=0)
+  SET(MYLITE_PROXY_PROTOCOL_SOURCE mylite_proxy_protocol_disabled.cc)
+ENDIF()
+
 SET (SQL_SOURCE
                ${CMAKE_CURRENT_BINARY_DIR}/yy_mariadb.cc
                ${CMAKE_CURRENT_BINARY_DIR}/yy_oracle.cc
@@ -226,7 +235,7 @@ SET (SQL_SOURCE
                opt_trace.cc
                table_cache.cc encryption.cc temporary_tables.cc
                json_table.cc
-               proxy_protocol.cc ${MYLITE_BACKUP_RUNTIME_SOURCE} xa.cc
+               ${MYLITE_PROXY_PROTOCOL_SOURCE} ${MYLITE_BACKUP_RUNTIME_SOURCE} xa.cc
                socketpair.c socketpair.h
                opt_vcol_substitution.h
                opt_vcol_substitution.cc

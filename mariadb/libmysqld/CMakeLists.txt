@@ -143,6 +143,15 @@ ELSE()
   ADD_DEFINITIONS(-DMYLITE_WITH_REPLICATION_EXEC_SYSVARS=0)
 ENDIF()
 
+OPTION(MYLITE_WITH_PROXY_PROTOCOL "Build PROXY protocol listener support" ON)
+IF(MYLITE_WITH_PROXY_PROTOCOL)
+  ADD_DEFINITIONS(-DMYLITE_WITH_PROXY_PROTOCOL=1)
+  SET(MYLITE_PROXY_PROTOCOL_SOURCE ../sql/proxy_protocol.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_PROXY_PROTOCOL=0)
+  SET(MYLITE_PROXY_PROTOCOL_SOURCE ../sql/mylite_proxy_protocol_disabled.cc)
+ENDIF()
+
 INCLUDE_DIRECTORIES(
 ${CMAKE_SOURCE_DIR}/include 
 ${CMAKE_SOURCE_DIR}/libmysqld
@@ -268,7 +277,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/sql_sequence.cc ../sql/sql_sequence.h
            ../sql/ha_sequence.cc ../sql/ha_sequence.h
            ../sql/temporary_tables.cc
-           ../sql/proxy_protocol.cc ${MYLITE_BACKUP_RUNTIME_SOURCE}
+           ${MYLITE_PROXY_PROTOCOL_SOURCE} ${MYLITE_BACKUP_RUNTIME_SOURCE}
            ../sql/sql_tvc.cc ../sql/sql_tvc.h
            ../sql/opt_split.cc
            ../sql/rowid_filter.cc ../sql/rowid_filter.h

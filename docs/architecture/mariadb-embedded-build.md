@@ -54,6 +54,7 @@ MYLITE_WITH_FOREIGN_SERVER_METADATA=OFF
 MYLITE_WITH_BACKUP_RUNTIME=OFF
 MYLITE_WITH_VIO_TLS=OFF
 MYLITE_WITH_REPLICATION_EXEC_SYSVARS=OFF
+MYLITE_WITH_PROXY_PROTOCOL=OFF
 ```
 
 `CMAKE_BUILD_TYPE=MinSizeRel` makes the embedded MariaDB archive optimize for
@@ -106,7 +107,10 @@ DDL backup hooks remain inert. It omits VIO TLS transport behind
 network handshake. It omits replication execution, slave protocol, replication
 event, checksum, and semi-sync system variables behind
 `MYLITE_WITH_REPLICATION_EXEC_SYSVARS=0`; compatibility variables such as
-`@@log_bin=0` remain covered. It
+`@@log_bin=0` remain covered. It omits PROXY protocol listener support behind
+`MYLITE_WITH_PROXY_PROTOCOL=0`; the core embedded profile has no socket
+listener, and direct or prepared `@@proxy_protocol_networks` lookups fail as an
+unknown system variable. It
 omits Oracle compatibility function aliases and
 `oracle_schema` routing behind `MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS=0`, while
 ordinary MySQL/MariaDB string functions remain available. It uses a compact
@@ -140,7 +144,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,534,136 bytes / 25.30 MiB |
+| Archive size | 26,527,408 bytes / 25.30 MiB |
 | Archive members | 703 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -178,8 +182,9 @@ bytes / 25.87 MiB. Omitting the external backup runtime reduces the pre-strip
 archive to 27,118,776 bytes / 25.86 MiB. Omitting VIO TLS transport reduces the
 pre-strip archive to 27,106,496 bytes / 25.85 MiB. Omitting replication
 execution system variables reduces the pre-strip archive to 27,104,488 bytes /
-25.85 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 570,352 bytes
+25.85 MiB. Omitting PROXY protocol listener support reduces the pre-strip
+archive to 27,097,424 bytes / 25.84 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 570,016 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -208,10 +213,11 @@ change. Omitting VIO TLS transport saves 12,296 bytes and one archive member,
 and removes the linked `libssl` dependency from first-party embedded test
 artifacts while keeping `libcrypto` for retained SQL crypto functions. Omitting
 replication execution system variables saves 1,976 bytes with no member-count
-change.
-The final archive is 4,995,568 bytes smaller than the Release build with
-Performance Schema disabled, 6,595,504 bytes smaller than the symbol-stripped
-baseline that still built Performance Schema, and 7,308,184 bytes smaller than
+change. Omitting PROXY protocol listener support saves 6,728 bytes with no
+member-count change.
+The final archive is 5,002,296 bytes smaller than the Release build with
+Performance Schema disabled, 6,602,232 bytes smaller than the symbol-stripped
+baseline that still built Performance Schema, and 7,314,912 bytes smaller than
 the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
@@ -267,6 +273,9 @@ transaction coordination, or retained parser/runtime code still reference them.
 Replication execution, slave protocol, replication-event, checksum, and
 semi-sync system variables are omitted from the default embedded profile, while
 compatibility variables such as `@@log_bin=0` remain covered.
+PROXY protocol listener support is omitted from the default embedded profile;
+the core embedded runtime does not accept socket connections, and the
+`proxy_protocol_networks` system variable is absent.
 `PROCEDURE ANALYSE()` is omitted from the default embedded archive and linked
 to an unsupported stub; ordinary SELECT execution and the generic retained
 SELECT procedure dispatch continue to link. System-variable names, values,
@@ -337,6 +346,7 @@ The baseline explicitly disables:
 - External backup runtime
 - VIO TLS transport
 - Replication execution, slave protocol, and semi-sync system variables
+- PROXY protocol listener support
 - Oracle compatibility function aliases and `oracle_schema` routing
 - Full inherited server error-message catalog
 - MariaDB upstream unit-test targets

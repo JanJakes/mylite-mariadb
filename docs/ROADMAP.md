@@ -134,6 +134,9 @@ ordinary DDL backup hooks stay inert so application DDL remains unaffected.
 VIO TLS transport is omitted from the core embedded archive because TLS belongs
 to socket and wire-protocol adapters, not to the in-process database-directory
 startup contract; retained SQL crypto functions continue to use OpenSSL Crypto.
+PROXY protocol listener support is omitted for the same serverless-core reason;
+the core runtime has no socket listener, and `proxy_protocol_networks` is
+absent from `SHOW VARIABLES` and `@@` lookup.
 Oracle compatibility function aliases and `oracle_schema` routing are omitted
 after coverage proves the normal MySQL/MariaDB string functions remain
 available, Oracle-only aliases fail predictably, and `oracle_schema` no

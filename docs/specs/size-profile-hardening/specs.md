@@ -45,7 +45,9 @@ behavior when MariaDB errno and SQLSTATE remain available.
 VIO TLS transport is omitted because the core profile is an in-process
 database-directory runtime without socket startup or network handshakes.
 Replication execution system variables are omitted because they configure
-server topology behavior that the embedded profile already rejects.
+server topology behavior that the embedded profile already rejects. PROXY
+protocol listener support is omitted because the core profile has no socket
+listener or network handshake.
 
 ## Source Findings
 
@@ -251,6 +253,17 @@ server topology behavior that the embedded profile already rejects.
   keeps retained shared replication helpers available for generic MariaDB code
   and reduces the stripped archive to 26,534,136 bytes, 25.30 MiB, and 703
   members.
+- `mariadb/sql/proxy_protocol.cc` parses HAProxy PROXY protocol v1/v2 headers,
+  parses `proxy_protocol_networks`, and checks whether a remote socket address
+  may send a proxy header. `mariadb/sql/net_serv.cc` compiles
+  `handle_proxy_header()` to `IGNORE` when `EMBEDDED_LIBRARY` is defined, and
+  `mariadb/sql/sql_connect.cc` only calls `is_proxy_protocol_allowed()` in the
+  non-embedded path. Shared `mysqld.cc` startup and cleanup still call the
+  lifecycle helpers.
+- Disabling PROXY protocol listener support behind
+  `MYLITE_WITH_PROXY_PROTOCOL=0` replaces the parser/network-list object with a
+  small disabled stub, omits the `proxy_protocol_networks` system variable, and
+  reduces the stripped archive to 26,527,408 bytes, 25.30 MiB, and 703 members.
 - `mariadb/sql/item_create.cc` registers Oracle compatibility aliases such as
   `DECODE_ORACLE`, `LPAD_ORACLE`, `RTRIM_ORACLE`, `SUBSTR_ORACLE`, and
   `CONCAT_OPERATOR_ORACLE`, and builds a separate
@@ -491,8 +504,14 @@ replication execution, slave protocol, checksum, replication-event, and
 semi-sync variables while keeping compatibility variables such as `@@log_bin=0`
 available.
 
-The wrapper keeps this behavior enabled by default because it is the
-distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
+The embedded archive omits PROXY protocol listener support by setting
+`MYLITE_WITH_PROXY_PROTOCOL=0` in the MyLite baseline. The option defaults to
+`ON` so normal MariaDB builds keep upstream listener behavior. The disabled
+profile replaces `proxy_protocol.cc` with fail-closed lifecycle stubs and omits
+the `proxy_protocol_networks` system-variable registration.
+
+Archive stripping stays enabled by default because it is the distributed archive
+profile. Developers can set `STRIP_ARCHIVE=0` when they
 need an unstripped archive for local inspection.
 
 ## Affected MariaDB Subsystems
@@ -525,7 +544,9 @@ of the default embedded archive, while static built-in plugins, native engines,
 and provider fallback services remain available. VIO TLS transport is replaced
 with a disabled embedded stub. Replication execution, slave protocol,
 replication-event, checksum, and semi-sync system-variable registrations are
-compiled out while retained shared replication helpers remain available.
+compiled out while retained shared replication helpers remain available. PROXY
+protocol listener parsing and its system-variable registration are replaced
+with fail-closed embedded stubs.
 
 ## Compatibility Impact
 
@@ -559,6 +580,9 @@ SQL because it is only used by the unsupported server topology runtime.
 Omitting the guarded replication execution system variables only removes
 configuration rows for unsupported topology behavior; common compatibility
 variables such as `@@log_bin=0` remain available.
+Omitting PROXY protocol listener support only removes inherited socket-listener
+configuration and header parsing. The core embedded profile already starts with
+`--skip-networking` and does not accept socket connections.
 `PROCEDURE ANALYSE()` is a legacy diagnostic SELECT extension. Omitting it does
 not affect ordinary SELECT execution, DDL, DML, native storage engines, JSON,
 GEOMETRY/GIS, or the public C API.
@@ -739,6 +763,11 @@ Omitting replication execution system variables brings the current archive to
 with Performance Schema disabled, 6,595,504 bytes smaller than the
 symbol-stripped baseline with Performance Schema still built, and 7,308,184
 bytes smaller than the original broad archive.
+Omitting PROXY protocol listener support brings the current archive to
+26,527,408 bytes / 25.30 MiB, 5,002,296 bytes smaller than the Release build
+with Performance Schema disabled, 6,602,232 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 7,314,912
+bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -787,6 +816,10 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   CMake cache, direct and prepared `@@slave_type_conversions` lookups fail with
   unknown-system-variable errno, and `SHOW VARIABLES` does not expose
   `slave_type_conversions` or `rpl_semi_sync_master_enabled`.
+- Confirm `MYLITE_WITH_PROXY_PROTOCOL=OFF` appears in the embedded CMake cache,
+  `proxy_protocol.cc.o` is absent, `mylite_proxy_protocol_disabled.cc.o` is
+  present in `libmariadbd.a`, and direct and prepared
+  `@@proxy_protocol_networks` lookups fail with unknown-system-variable errno.
 - Run `cmake --build --preset dev`.
 - Run `ctest --preset dev --output-on-failure`.
 - Run `cmake --build --preset embedded-dev`.
@@ -824,6 +857,8 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   remains covered, no binlog/relay-log sidecars are created, and the embedded
   archive omits the active binlog transaction/event core plus the unsupported
   injector root. The guarded replication execution system variables are omitted
+  from `SHOW VARIABLES` and `@@` lookup in the default embedded profile. PROXY
+  protocol listener support is omitted, and `proxy_protocol_networks` is absent
   from `SHOW VARIABLES` and `@@` lookup in the default embedded profile.
 - Process-list SHOW commands are rejected, the process-list Information Schema
   table returns zero rows, and the embedded archive omits process-list row

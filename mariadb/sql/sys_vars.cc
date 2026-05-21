@@ -78,6 +78,10 @@
 #define MYLITE_WITH_REPLICATION_EXEC_SYSVARS 1
 #endif
 
+#ifndef MYLITE_WITH_PROXY_PROTOCOL
+#define MYLITE_WITH_PROXY_PROTOCOL 1
+#endif
+
 /*
   The rule for this file: everything should be 'static'. When a sys_var
   variable or a function from this file is - in very rare cases - needed
@@ -5322,6 +5326,7 @@ static Sys_var_charptr Sys_license(
        READ_ONLY GLOBAL_VAR(license), NO_CMD_LINE,
        DEFAULT(STRINGIFY_ARG(LICENSE)));
 
+#if MYLITE_WITH_PROXY_PROTOCOL
 #include <proxy_protocol.h>
 char *my_proxy_protocol_networks;
 static bool check_proxy_protocol_networks(sys_var *, THD *, set_var *var)
@@ -5351,6 +5356,9 @@ Sys_proxy_protocol_networks(
     DEFAULT(""), NO_MUTEX_GUARD, NOT_IN_BINLOG,
     ON_CHECK(check_proxy_protocol_networks), ON_UPDATE(fix_proxy_protocol_networks));
 
+#else
+char *my_proxy_protocol_networks= 0;
+#endif
 
 static bool check_log_path(sys_var *self, THD *thd, set_var *var)
 {
