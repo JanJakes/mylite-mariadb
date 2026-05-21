@@ -37,6 +37,10 @@
 #define MYLITE_WITH_SERVER_UTILITY_FUNCTIONS 1
 #endif
 
+#ifndef MYLITE_WITH_DYNAMIC_COLUMNS
+#define MYLITE_WITH_DYNAMIC_COLUMNS 1
+#endif
+
 #include "sql_priv.h"
 /*
   It is necessary to include set_var.h instead of item.h because there
@@ -4933,6 +4937,7 @@ err:
 #endif
 
 
+#if MYLITE_WITH_DYNAMIC_COLUMNS
 Item_func_dyncol_create::Item_func_dyncol_create(THD *thd, List<Item> &args,
                                                  DYNCALL_CREATE_DEF *dfs):
   Item_str_func(thd, args), defs(dfs), vals(0), keys_num(NULL), keys_str(NULL),
@@ -5821,6 +5826,7 @@ null:
     my_free(names);
   return NULL;
 }
+#endif
 
 Item_temptable_rowid::Item_temptable_rowid(TABLE *table_arg)
   : Item_str_func(table_arg->in_use), table(table_arg)

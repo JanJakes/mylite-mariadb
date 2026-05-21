@@ -238,6 +238,7 @@ bool is_unsupported_oracle_sql_mode_statement(std::string_view sql);
 bool is_unsupported_procedure_analyse_statement(std::string_view sql);
 bool is_unsupported_vector_runtime_statement(std::string_view sql);
 bool is_unsupported_xml_sql_function_statement(std::string_view sql);
+bool is_unsupported_dynamic_column_statement(std::string_view sql);
 bool is_unsupported_account_or_event_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_plugin_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_udf_statement(const SqlPolicyTokens &tokens);
@@ -248,6 +249,7 @@ bool is_unsupported_replication_function_statement(const SqlPolicyTokens &tokens
 bool is_unsupported_vector_sql_function_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_vector_index_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_xml_sql_function_call(const SqlPolicyTokens &tokens);
+bool is_unsupported_dynamic_column_function_call(const SqlPolicyTokens &tokens);
 bool is_unsupported_server_utility_function_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_sql_handler_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_select_file_statement(const SqlPolicyTokens &tokens);
@@ -1147,6 +1149,11 @@ int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql) {
         return MYLITE_ERROR;
     }
 
+    if (is_unsupported_dynamic_column_statement(sql)) {
+        set_error(db, MYLITE_ERROR, "dynamic columns are not supported by MyLite");
+        return MYLITE_ERROR;
+    }
+
     if (is_unsupported_server_surface_sql(sql, db.current_schema)) {
         set_error(db, MYLITE_ERROR, "server-owned SQL surface is not supported by MyLite");
         return MYLITE_ERROR;
@@ -1196,6 +1203,11 @@ bool is_unsupported_vector_runtime_statement(std::string_view sql) {
 bool is_unsupported_xml_sql_function_statement(std::string_view sql) {
     const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
     return is_unsupported_xml_sql_function_call(tokens);
+}
+
+bool is_unsupported_dynamic_column_statement(std::string_view sql) {
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    return is_unsupported_dynamic_column_function_call(tokens);
 }
 
 bool is_unsupported_server_surface_sql(std::string_view sql, const std::string &current_schema) {
@@ -1382,6 +1394,23 @@ bool is_unsupported_xml_sql_function_call(const SqlPolicyTokens &tokens) {
     for (std::size_t index = 0; index + 1U < tokens.count; ++index) {
         if ((identifier_token_equals(tokens.values[index], "EXTRACTVALUE") ||
              identifier_token_equals(tokens.values[index], "UPDATEXML")) &&
+            token_equals(tokens.values[index + 1U], "(")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool is_unsupported_dynamic_column_function_call(const SqlPolicyTokens &tokens) {
+    for (std::size_t index = 0; index + 1U < tokens.count; ++index) {
+        if ((identifier_token_equals(tokens.values[index], "COLUMN_ADD") ||
+             identifier_token_equals(tokens.values[index], "COLUMN_CHECK") ||
+             identifier_token_equals(tokens.values[index], "COLUMN_CREATE") ||
+             identifier_token_equals(tokens.values[index], "COLUMN_DELETE") ||
+             identifier_token_equals(tokens.values[index], "COLUMN_EXISTS") ||
+             identifier_token_equals(tokens.values[index], "COLUMN_GET") ||
+             identifier_token_equals(tokens.values[index], "COLUMN_JSON") ||
+             identifier_token_equals(tokens.values[index], "COLUMN_LIST")) &&
             token_equals(tokens.values[index + 1U], "(")) {
             return true;
         }

@@ -41,6 +41,7 @@ set(MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS OFF CACHE BOOL "Disable Oracle compatibi
 set(MYLITE_WITH_SERVER_UTILITY_FUNCTIONS OFF CACHE BOOL "Disable server utility SQL functions in the embedded baseline" FORCE)
 set(MYLITE_WITH_VECTOR_SQL_RUNTIME OFF CACHE BOOL "Disable vector SQL function and MHNSW runtime in the embedded baseline" FORCE)
 set(MYLITE_WITH_XML_SQL_FUNCTIONS OFF CACHE BOOL "Disable XML SQL helper functions in the embedded baseline" FORCE)
+set(MYLITE_WITH_DYNAMIC_COLUMNS OFF CACHE BOOL "Disable dynamic column SQL and helper runtime in the embedded baseline" FORCE)
 set(MYLITE_WITH_FULL_ERROR_MESSAGES OFF CACHE BOOL "Use compact server error messages in the embedded baseline" FORCE)
 set(MYLITE_WITH_DYNAMIC_PLUGIN_LOADING OFF CACHE BOOL "Disable dynamic plugin shared-library loading in the embedded baseline" FORCE)
 set(MYLITE_WITH_UDF_RUNTIME OFF CACHE BOOL "Disable dynamic UDF shared-library runtime in the embedded baseline" FORCE)

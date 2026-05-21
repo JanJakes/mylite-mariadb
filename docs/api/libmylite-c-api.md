@@ -480,6 +480,11 @@ Legacy XML SQL helpers are omitted from the default embedded profile.
 `EXTRACTVALUE()` and `UPDATEXML()` fail through MyLite policy; this does not
 change JSON, GEOMETRY/GIS, ordinary SQL, or the separately unsupported
 `LOAD XML` host-file import boundary.
+MariaDB-specific dynamic-column SQL helpers are omitted from the default
+embedded profile. `COLUMN_CREATE()`, `COLUMN_ADD()`, `COLUMN_DELETE()`,
+`COLUMN_GET()`, `COLUMN_CHECK()`, `COLUMN_EXISTS()`, `COLUMN_LIST()`, and
+`COLUMN_JSON()` fail through MyLite policy; this does not change JSON,
+GEOMETRY/GIS, ordinary SQL, native storage, or result metadata.
 Optimizer trace variables and
 `INFORMATION_SCHEMA.OPTIMIZER_TRACE`, including unqualified reads while
 `information_schema` is the current schema, are rejected as server diagnostics.

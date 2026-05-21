@@ -59,6 +59,7 @@ MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS=OFF
 MYLITE_WITH_SERVER_UTILITY_FUNCTIONS=OFF
 MYLITE_WITH_VECTOR_SQL_RUNTIME=OFF
 MYLITE_WITH_XML_SQL_FUNCTIONS=OFF
+MYLITE_WITH_DYNAMIC_COLUMNS=OFF
 MYLITE_WITH_FULL_ERROR_MESSAGES=OFF
 MYLITE_WITH_DYNAMIC_PLUGIN_LOADING=OFF
 MYLITE_WITH_UDF_RUNTIME=OFF
@@ -217,8 +218,12 @@ parsing remains a separate compatibility surface. It omits legacy XML SQL
 helper functions behind `MYLITE_WITH_XML_SQL_FUNCTIONS=0`; direct and prepared
 `EXTRACTVALUE()` and `UPDATEXML()` calls are rejected by MyLite policy, while
 ordinary SQL, JSON, GEOMETRY/GIS, native storage, and the separately
-unsupported `LOAD XML` host-file import boundary remain unchanged. It uses a
-compact
+unsupported `LOAD XML` host-file import boundary remain unchanged. It omits
+dynamic-column SQL and helper runtime behind `MYLITE_WITH_DYNAMIC_COLUMNS=0`;
+direct and prepared `COLUMN_*` helper calls are rejected by MyLite policy, and
+the inherited dynamic-column C helper API remains as fail-closed stubs, while
+ordinary SQL, JSON, GEOMETRY/GIS, native storage, and result metadata remain
+unchanged. It uses a compact
 server error-message catalog behind `MYLITE_WITH_FULL_ERROR_MESSAGES=0`;
 MariaDB error numbers and SQLSTATEs remain available, common syntax and
 duplicate-key diagnostics stay readable, and uncommon inherited server errors
@@ -249,7 +254,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 25,723,176 bytes / 24.53 MiB |
+| Archive size | 25,635,600 bytes / 24.45 MiB |
 | Archive members | 691 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -331,8 +336,10 @@ Omitting vector SQL function and MHNSW vector-index runtime reduces the current
 pre-strip archive to 26,496,392 bytes / 25.27 MiB.
 Omitting legacy XML SQL helper functions reduces the current pre-strip archive
 to 26,278,800 bytes / 25.06 MiB.
+Omitting dynamic-column SQL and helper runtime reduces the current pre-strip
+archive to 26,189,992 bytes / 24.98 MiB.
 Post-build platform-specific archive stripping plus `ranlib` saves another
-555,624 bytes without changing archive membership or runtime behavior. On
+554,392 bytes without changing archive membership or runtime behavior. On
 Darwin, the wrapper uses `strip -S -x -u -r` after relink verification; other
 platforms keep the debug/local-symbol strip mode. The `SFORMAT()` and
 exception cut accounts for 1,808,240
@@ -395,11 +402,12 @@ runtime saves 11,232 pre-strip bytes and 10,688 stripped bytes with no
 member-count change. Omitting vector SQL function and MHNSW vector-index
 runtime saves 91,752 pre-strip bytes, 82,712 stripped bytes, and one archive
 member. Omitting legacy XML SQL helper functions saves 217,592 pre-strip
-bytes, 214,640 stripped bytes, and one archive member. The final archive is
-5,806,528 bytes smaller than the Release build with Performance Schema
-disabled, 7,406,464 bytes smaller than the symbol-stripped baseline that still
-built Performance Schema, and 8,119,144
-bytes smaller than the original broad archive.
+bytes, 214,640 stripped bytes, and one archive member. Omitting dynamic-column
+SQL and helper runtime saves 88,808 pre-strip bytes and 87,576 stripped bytes
+with no member-count change. The final archive is 5,894,104 bytes smaller than
+the Release build with Performance Schema disabled, 7,494,040 bytes smaller
+than the symbol-stripped baseline that still built Performance Schema, and
+8,206,720 bytes smaller than the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
 GSSAPI, BZip2, LZ4, LibLZMA, LZO, PCRE2, and Zstandard support on this
@@ -449,6 +457,9 @@ MariaDB vector SQL functions such as `VEC_FROMTEXT()`, `VEC_TOTEXT()`, and
 from the default embedded archive; `VECTOR(N)` type parsing remains linked.
 Legacy XML SQL helpers such as `EXTRACTVALUE()` and `UPDATEXML()` are omitted
 from the default embedded archive.
+MariaDB dynamic-column SQL helpers such as `COLUMN_CREATE()`, `COLUMN_GET()`,
+and `COLUMN_JSON()` are omitted from the default embedded archive; inherited
+dynamic-column C helper symbols remain as fail-closed embedded stubs.
 `SFORMAT()` is omitted from the
 embedded function registry, while ordinary `FORMAT()` remains available.
 Dynamic UDF lookup, execution, and registration are omitted; stored functions
@@ -618,6 +629,7 @@ The baseline explicitly disables:
 - User-variable diagnostics
 - Vector SQL functions and MHNSW vector-index runtime
 - XML SQL helper functions
+- Dynamic-column SQL and helper runtime
 - Persistent optimizer statistics and JSON histogram storage
 - Unix socket server authentication
 - Full event parse-data validation

@@ -29,6 +29,10 @@
 #define MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS 1
 #endif
 
+#ifndef MYLITE_WITH_DYNAMIC_COLUMNS
+#define MYLITE_WITH_DYNAMIC_COLUMNS 1
+#endif
+
 #include <m_ctype.h>
 #include "sql_select.h"
 #include "sql_parse.h"                          // check_stack_overrun
@@ -7692,6 +7696,7 @@ Item* Item_equal::get_first(JOIN_TAB *context, Item *field_item)
 }
 
 
+#if MYLITE_WITH_DYNAMIC_COLUMNS
 bool Item_func_dyncol_check::val_bool()
 {
   char buff[STRING_BUFFER_USUAL_SIZE];
@@ -7784,6 +7789,7 @@ null:
   null_value= TRUE;
   return 0;
 }
+#endif
 
 
 Item_bool_rowready_func2 *Eq_creator::create(THD *thd, Item *a, Item *b) const

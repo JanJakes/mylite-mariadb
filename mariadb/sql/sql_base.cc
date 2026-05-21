@@ -18,6 +18,11 @@
 /* Basic functions needed by many modules */
 
 #include "mariadb.h"
+
+#ifndef MYLITE_WITH_DYNAMIC_COLUMNS
+#define MYLITE_WITH_DYNAMIC_COLUMNS 1
+#endif
+
 #include "sql_base.h"                           // setup_table_map
 #include "sql_list.h"
 #include "sql_priv.h"
@@ -9920,6 +9925,7 @@ void unfix_fields(List<Item> &fields)
   @return the result code which was get as an argument\
 */
 
+#if MYLITE_WITH_DYNAMIC_COLUMNS
 int dynamic_column_error_message(enum_dyncol_func_result rc)
 {
   switch (rc) {
@@ -9945,6 +9951,7 @@ int dynamic_column_error_message(enum_dyncol_func_result rc)
   }
   return rc;
 }
+#endif
 
 /**
   @} (end of group Data_Dictionary)

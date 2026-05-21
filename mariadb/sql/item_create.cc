@@ -48,6 +48,10 @@
 #define MYLITE_WITH_XML_SQL_FUNCTIONS 1
 #endif
 
+#ifndef MYLITE_WITH_DYNAMIC_COLUMNS
+#define MYLITE_WITH_DYNAMIC_COLUMNS 1
+#endif
+
 #ifndef MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
 #define MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS 1
 #endif
@@ -354,6 +358,7 @@ protected:
   ~Create_func_coercibility() override = default;
 };
 
+#if MYLITE_WITH_DYNAMIC_COLUMNS
 class Create_func_dyncol_check : public Create_func_arg1
 {
 public:
@@ -401,6 +406,7 @@ protected:
   Create_func_dyncol_json() = default;
   ~Create_func_dyncol_json() override = default;
 };
+#endif
 
 
 class Create_func_coalesce : public Create_native_func
@@ -3466,6 +3472,7 @@ Create_func_coercibility::create_1_arg(THD *thd, Item *arg1)
 }
 
 
+#if MYLITE_WITH_DYNAMIC_COLUMNS
 Create_func_dyncol_check Create_func_dyncol_check::s_singleton;
 
 Item*
@@ -3497,6 +3504,7 @@ Create_func_dyncol_json::create_1_arg(THD *thd, Item *arg1)
 {
   return new (thd->mem_root) Item_func_dyncol_json(thd, arg1);
 }
+#endif
 
 Create_func_coalesce Create_func_coalesce::s_singleton;
 
@@ -6465,10 +6473,12 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("COALESCE") }, BUILDER(Create_func_coalesce)},
   { { STRING_WITH_LEN("COERCIBILITY") }, BUILDER(Create_func_coercibility)},
   { { STRING_WITH_LEN("COLLATION") }, BUILDER(Create_func_collation)},
+#if MYLITE_WITH_DYNAMIC_COLUMNS
   { { STRING_WITH_LEN("COLUMN_CHECK") }, BUILDER(Create_func_dyncol_check)},
   { { STRING_WITH_LEN("COLUMN_EXISTS") }, BUILDER(Create_func_dyncol_exists)},
   { { STRING_WITH_LEN("COLUMN_LIST") }, BUILDER(Create_func_dyncol_list)},
   { { STRING_WITH_LEN("COLUMN_JSON") }, BUILDER(Create_func_dyncol_json)},
+#endif
   { { STRING_WITH_LEN("COMPRESS") }, BUILDER(Create_func_compress)},
   { { STRING_WITH_LEN("CONCAT") }, BUILDER(Create_func_concat)},
 #if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
@@ -6899,6 +6909,7 @@ find_qualified_function_builder(THD *thd)
 }
 
 
+#if MYLITE_WITH_DYNAMIC_COLUMNS
 static List<Item> *create_func_dyncol_prepare(THD *thd,
                                               DYNCALL_CREATE_DEF **dfs,
                                               List<DYNCALL_CREATE_DEF> &list)
@@ -6989,3 +7000,32 @@ Item *create_func_dyncol_get(THD *thd,  Item *str, Item *num,
   return handler->create_typecast_item(thd, res,
                                        Type_cast_attributes(length_dec, cs));
 }
+#else
+static Item *mylite_create_disabled_dynamic_column_item()
+{
+  my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+           "dynamic columns in the MyLite embedded profile");
+  return NULL;
+}
+
+Item *create_func_dyncol_create(THD *, List<DYNCALL_CREATE_DEF> &)
+{
+  return mylite_create_disabled_dynamic_column_item();
+}
+
+Item *create_func_dyncol_add(THD *, Item *, List<DYNCALL_CREATE_DEF> &)
+{
+  return mylite_create_disabled_dynamic_column_item();
+}
+
+Item *create_func_dyncol_delete(THD *, Item *, List<Item> &)
+{
+  return mylite_create_disabled_dynamic_column_item();
+}
+
+Item *create_func_dyncol_get(THD *, Item *, Item *, const Type_handler *,
+                             const Lex_length_and_dec_st &, CHARSET_INFO *)
+{
+  return mylite_create_disabled_dynamic_column_item();
+}
+#endif

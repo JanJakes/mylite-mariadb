@@ -89,6 +89,11 @@ Legacy XML SQL helper functions are omitted because `EXTRACTVALUE()` and
 compatibility target; ordinary SQL, JSON, GEOMETRY/GIS, native storage, and
 the separately unsupported `LOAD XML` host-file import boundary remain
 unchanged.
+MariaDB dynamic-column helpers are omitted because `COLUMN_*` dynamic-column
+SQL and the standalone dynamic-column C helper API are MariaDB-specific helper
+surfaces outside the current MySQL/MariaDB drop-in target; ordinary SQL, JSON,
+GEOMETRY/GIS, native storage, result metadata, and prepared statements remain
+unchanged.
 
 ## Source Findings
 
@@ -111,7 +116,7 @@ unchanged.
   command is GNU-specific; Apple `strip` accepts `-S -x` for debug/local-symbol
   stripping and `-u -r` for a relink-safe undefined/dynamic-symbol strip.
 - On the current macOS baseline, `strip -S -x -u -r` plus `ranlib` on
-  `libmariadbd.a` saves 555,624 bytes without changing archive membership.
+  `libmariadbd.a` saves 554,392 bytes without changing archive membership.
 - Setting `PLUGIN_PERFSCHEMA=NO` and keeping archive stripping enabled reduces
   the current archive to 31,529,704 bytes, 30.07 MiB, and 712 members.
 - Building the same profile with `CMAKE_BUILD_TYPE=MinSizeRel` reduces the
@@ -464,6 +469,9 @@ unchanged.
 - Omitting legacy XML SQL helper functions behind
   `MYLITE_WITH_XML_SQL_FUNCTIONS=0` reduces the stripped archive to 25,723,176
   bytes, 24.53 MiB, and 691 members.
+- Omitting dynamic-column SQL and helper runtime behind
+  `MYLITE_WITH_DYNAMIC_COLUMNS=0` reduces the stripped archive to 25,635,600
+  bytes, 24.45 MiB, and 691 members.
 - `mariadb/sql/item_vectorfunc.cc` implements MariaDB `VEC_*` conversion and
   distance functions, while `mariadb/sql/vector_mhnsw.cc` implements the
   mandatory `mhnsw` vector-index plugin, cache, transaction participant, and
@@ -474,6 +482,12 @@ unchanged.
   `UPDATEXML()` runtime. `mariadb/sql/item_create.cc` registers those native
   function builders. Retained `LOAD XML` parser and import code is separate
   and already rejected by MyLite host-file import policy.
+- `mariadb/sql/sql_yacc.yy` parses `COLUMN_ADD()`, `COLUMN_DELETE()`,
+  `COLUMN_CREATE()`, and `COLUMN_GET()` through dedicated grammar rules that
+  call `create_func_dyncol_*` helpers in `mariadb/sql/item_create.cc`.
+  `mariadb/sql/item_strfunc.cc` and `mariadb/sql/item_cmpfunc.cc` implement the
+  dynamic-column item runtime, and `mariadb/mysys/ma_dyncol.c` implements the
+  standalone dynamic-column C helper API.
 
 ## Proposed Design
 
@@ -833,6 +847,15 @@ disabled profile omits `item_xmlfunc.cc` and removes the `EXTRACTVALUE()` and
 `UPDATEXML()` function builders from the native function registry. MyLite
 policy rejects direct and prepared XML helper calls before dispatch.
 
+The embedded archive omits dynamic-column SQL and helper runtime by setting
+`MYLITE_WITH_DYNAMIC_COLUMNS=0` in the MyLite baseline. The option defaults to
+`ON` so inherited MariaDB builds keep upstream dynamic-column behavior. The
+disabled profile compiles out dynamic-column item bodies, removes native
+function builders for registry-routed `COLUMN_*` helpers, keeps parser-called
+`create_func_dyncol_*` symbols as fail-closed stubs, and replaces
+`ma_dyncol.c` with fail-closed dynamic-column C helper stubs. MyLite policy
+rejects direct and prepared dynamic-column SQL calls before dispatch.
+
 The embedded archive omits PROXY protocol listener support by setting
 `MYLITE_WITH_PROXY_PROTOCOL=0` in the MyLite baseline. The option defaults to
 `ON` so normal MariaDB builds keep upstream listener behavior. The disabled
@@ -964,6 +987,10 @@ Legacy XML SQL helpers are XPath helper functions. Omitting `EXTRACTVALUE()`
 and `UPDATEXML()` does not affect ordinary SQL, JSON, GEOMETRY/GIS, native
 storage, prepared statements, or the already unsupported `LOAD XML` host-file
 import boundary.
+Dynamic columns are MariaDB-specific helper functions and a standalone helper
+API. Omitting dynamic-column SQL/runtime does not affect ordinary SQL, JSON,
+GEOMETRY/GIS, DDL, DML, transactions, native storage, prepared statements,
+result metadata, or the public MyLite C API.
 Network client authentication plugin negotiation is a raw inherited
 client/server handshake surface. Omitting the descriptors and plugin VIO
 dialog helpers does not affect `libmylite` directory opens, ordinary SQL,
@@ -1070,9 +1097,9 @@ trimming only removes in-memory diagnostic publication. Dynamic plugin loading
 trimming does not remove the transient database-local plugin directory because
 retained MariaDB startup code still expects the directory setting. Host-file
 import trimming removes caller-named file reads and client-file streams rather
-than changing MyLite database-directory storage. Vector and XML SQL helper
-trimming removes code paths only; it does not add, remove, or relocate database
-directory state.
+than changing MyLite database-directory storage. Vector, XML SQL helper, and
+dynamic-column trimming remove code paths only; they do not add, remove, or
+relocate database directory state.
 
 ## Public API Impact
 
@@ -1086,7 +1113,7 @@ run against the same native engine members.
 ## Binary-Size Impact
 
 The first step was archive-only symbol stripping; the current Darwin strip
-mode saves 555,624 bytes on the current archive. Disabling Performance Schema
+mode saves 554,392 bytes on the current archive. Disabling Performance Schema
 removes unused static plugin members.
 Switching the same profile to `MinSizeRel`, omitting Feedback, and compiling
 embedded `HELP` to stubs brings the archive to 30,296,952 bytes / 28.89 MiB.
@@ -1330,6 +1357,11 @@ Omitting legacy XML SQL helper functions brings the current archive to
 with Performance Schema disabled, 7,406,464 bytes smaller than the
 symbol-stripped baseline with Performance Schema still built, and 8,119,144
 bytes smaller than the original broad archive.
+Omitting dynamic-column SQL and helper runtime brings the current archive to
+25,635,600 bytes / 24.45 MiB, 5,894,104 bytes smaller than the Release build
+with Performance Schema disabled, 7,494,040 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 8,206,720
+bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -1548,6 +1580,11 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   prepared `EXTRACTVALUE()` and `UPDATEXML()` calls are rejected,
   `item_xmlfunc.cc.o` is absent, and ordinary JSON, GEOMETRY/GIS, scalar SQL,
   DDL/DML, transactions, and native storage remain covered.
+  Dynamic-column SQL and helper runtime is omitted from the embedded archive;
+  direct and prepared `COLUMN_*` calls are rejected, `ma_dyncol.c.o` is absent,
+  `mylite_dynamic_columns_disabled.c.o` is present, and ordinary JSON,
+  GEOMETRY/GIS, scalar SQL, DDL/DML, transactions, prepared statements, and
+  native storage remain covered.
   Persistent
   optimizer-statistics storage is omitted, `use_stat_tables` starts as `NEVER`,
   histogram collection starts at size `0`, persistent statistics SQL and

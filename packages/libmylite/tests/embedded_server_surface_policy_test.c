@@ -698,6 +698,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SELECT 'SLEEP()' AS literal");
     exec_ok(db, "SELECT 'VEC_FROMTEXT()' AS literal");
     exec_ok(db, "SELECT 'EXTRACTVALUE()' AS literal");
+    exec_ok(db, "SELECT 'COLUMN_CREATE()' AS literal");
     exec_ok(db, "SELECT 'HANDLER app.t OPEN' AS literal");
     exec_ok(db, "SELECT 'INTO OUTFILE /tmp/mylite-out.txt' AS literal");
     exec_ok(db, "SHOW VARIABLES LIKE 'version'");
@@ -849,6 +850,14 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_error(db, "SELECT VEC_DISTANCE_COSINE(X'0000803F', X'00000040')", "vector SQL runtime");
     expect_error(db, "SELECT EXTRACTVALUE('<a>v</a>', '/a')", "XML SQL functions");
     expect_error(db, "SELECT UPDATEXML('<a>v</a>', '/a', '<a>w</a>')", "XML SQL functions");
+    expect_error(db, "SELECT COLUMN_CREATE(1, 'a')", "dynamic columns");
+    expect_error(db, "SELECT COLUMN_ADD(COLUMN_CREATE(1, 'a'), 2, 'b')", "dynamic columns");
+    expect_error(db, "SELECT COLUMN_DELETE(COLUMN_CREATE(1, 'a'), 1)", "dynamic columns");
+    expect_error(db, "SELECT COLUMN_GET(COLUMN_CREATE(1, 'a'), 1 AS CHAR)", "dynamic columns");
+    expect_error(db, "SELECT COLUMN_CHECK('')", "dynamic columns");
+    expect_error(db, "SELECT COLUMN_EXISTS('', 1)", "dynamic columns");
+    expect_error(db, "SELECT COLUMN_LIST('')", "dynamic columns");
+    expect_error(db, "SELECT COLUMN_JSON('')", "dynamic columns");
     expect_error(db, "SET GLOBAL gtid_binlog_state = '0-1-1'", "server-owned SQL surface");
     expect_error(db, "SET @@GLOBAL.gtid_slave_pos = '0-1-1'", "server-owned SQL surface");
     expect_error(db, "SET gtid_strict_mode = ON", "server-owned SQL surface");
@@ -1099,6 +1108,18 @@ static void assert_server_sql_rejected(mylite_db *db) {
     );
     expect_prepare_error(db, "SELECT EXTRACTVALUE('<a>v</a>', '/a')", "XML SQL functions");
     expect_prepare_error(db, "SELECT UPDATEXML('<a>v</a>', '/a', '<a>w</a>')", "XML SQL functions");
+    expect_prepare_error(db, "SELECT COLUMN_CREATE(1, 'a')", "dynamic columns");
+    expect_prepare_error(db, "SELECT COLUMN_ADD(COLUMN_CREATE(1, 'a'), 2, 'b')", "dynamic columns");
+    expect_prepare_error(db, "SELECT COLUMN_DELETE(COLUMN_CREATE(1, 'a'), 1)", "dynamic columns");
+    expect_prepare_error(
+        db,
+        "SELECT COLUMN_GET(COLUMN_CREATE(1, 'a'), 1 AS CHAR)",
+        "dynamic columns"
+    );
+    expect_prepare_error(db, "SELECT COLUMN_CHECK('')", "dynamic columns");
+    expect_prepare_error(db, "SELECT COLUMN_EXISTS('', 1)", "dynamic columns");
+    expect_prepare_error(db, "SELECT COLUMN_LIST('')", "dynamic columns");
+    expect_prepare_error(db, "SELECT COLUMN_JSON('')", "dynamic columns");
     expect_prepare_error(db, "SET GLOBAL gtid_binlog_state = '0-1-1'", "server-owned SQL surface");
     expect_prepare_error(db, "SET gtid_strict_mode = ON", "server-owned SQL surface");
     expect_prepare_error(db, "HANDLER app.t OPEN", "server-owned SQL surface");
