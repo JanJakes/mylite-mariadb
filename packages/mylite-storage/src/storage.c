@@ -3072,7 +3072,16 @@ static void replace_index_prefix_match_row_id(
     unsigned long long old_row_id,
     unsigned long long new_row_id
 );
-static mylite_storage_result find_cached_exact_index_entry_in_statement(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result find_existing_cached_exact_index_entry_in_statement(
+    mylite_storage_statement *statement,
+    unsigned long long table_id,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id,
+    int *out_used_cache
+);
+static mylite_storage_result load_cached_exact_index_entry_in_statement(
     mylite_storage_statement *statement,
     const mylite_storage_statement *mutation_statement,
     FILE *file,
@@ -22610,12 +22619,8 @@ static mylite_storage_result find_exact_index_row_id(
     mylite_storage_row_id_list row_ids = {0};
     int used_cache = 0;
     int used_leaf = 0;
-    mylite_storage_result result = find_cached_exact_index_entry_in_statement(
+    mylite_storage_result result = find_existing_cached_exact_index_entry_in_statement(
         active_cache_statement,
-        active_mutation_statement,
-        file,
-        header,
-        filename,
         table_entry->table_id,
         index_number,
         key,
@@ -22623,6 +22628,21 @@ static mylite_storage_result find_exact_index_row_id(
         out_row_id,
         &used_cache
     );
+    if (result == MYLITE_STORAGE_OK && !used_cache) {
+        result = load_cached_exact_index_entry_in_statement(
+            active_cache_statement,
+            active_mutation_statement,
+            file,
+            header,
+            filename,
+            table_entry->table_id,
+            index_number,
+            key,
+            key_size,
+            out_row_id,
+            &used_cache
+        );
+    }
     if (result == MYLITE_STORAGE_OK && !used_cache) {
         result = ensure_catalog_image_loaded(file, header, catalog, has_catalog);
     }
@@ -22709,7 +22729,31 @@ static mylite_storage_result ensure_catalog_image_loaded(
     return result;
 }
 
-static mylite_storage_result find_cached_exact_index_entry_in_statement(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result find_existing_cached_exact_index_entry_in_statement(
+    mylite_storage_statement *statement,
+    unsigned long long table_id,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id,
+    int *out_used_cache
+) {
+    *out_used_cache = 0;
+    if (statement == NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    mylite_storage_exact_index_cache *cache =
+        find_exact_index_cache(&statement->exact_index_caches, table_id, index_number, key_size);
+    if (cache == NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    *out_used_cache = 1;
+    return find_exact_index_cache_entry_row_id(cache, key, out_row_id);
+}
+
+static mylite_storage_result load_cached_exact_index_entry_in_statement(
     mylite_storage_statement *statement,
     const mylite_storage_statement *mutation_statement,
     FILE *file,

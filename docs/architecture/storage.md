@@ -135,6 +135,9 @@ maintenance when possible, with order-preserving compaction only after dead
 entries outnumber live entries. In-place active rewrites that keep the same row
 id skip exact-index cache maintenance for unchanged matching key images and
 skip live-row cache retargeting because the row remains live under that id.
+Existing active exact-index cache hits use a hot inline probe before the
+storage layer enters the colder cache creation, durable seeding, and
+append-history loading path.
 Durable row-id, row-payload, exact-index, and published leaf-page caches are
 retargeted after successful row insert, update, and delete when the mutation is
 limited to a known table. Caches for that table are cleared or maintained by the
