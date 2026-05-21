@@ -2044,6 +2044,12 @@ int ha_mylite::index_read_map(uchar *buf, const uchar *key,
     if (error)
       DBUG_RETURN(error);
   }
+  if (filter_cursor)
+  {
+    if (index_row_count == 0)
+      DBUG_RETURN(HA_ERR_KEY_NOT_FOUND);
+    DBUG_RETURN(read_index_cursor_row(buf, 0));
+  }
 
   size_t entry_index= 0;
   const int error= mylite_find_index_entry(
@@ -2077,6 +2083,12 @@ int ha_mylite::index_read_idx_map(uchar *buf, uint index, const uchar *key,
                                 filter_cursor ? key_length : 0);
   if (error)
     DBUG_RETURN(error);
+  if (filter_cursor)
+  {
+    if (index_row_count == 0)
+      DBUG_RETURN(HA_ERR_KEY_NOT_FOUND);
+    DBUG_RETURN(read_index_cursor_row(buf, 0));
+  }
 
   size_t entry_index= 0;
   error= mylite_find_index_entry(table, index_entries, index_row_count,

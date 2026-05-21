@@ -381,6 +381,9 @@ Handler index cursor cleanup now skips storage free-wrapper calls for already
 empty cursor buffers while preserving inline-buffer ownership checks.
 Already-empty handler index cursor cleanup also returns before rewriting cursor
 state while preserving logical no-row cursor resets.
+Filtered exact and prefix handler index reads now read the first already-filtered
+cursor entry directly, avoiding a second key search over the cursor that the
+builder just restricted to matching rows.
 Small buffered-page undo captures now skip duplicate lookup and bucket ensure
 work when the active statement has no prior undo entries and no buckets yet.
 Small non-bucketed buffered-page undo lists now also scan duplicate page ids

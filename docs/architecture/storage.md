@@ -93,6 +93,9 @@ advisory lock for the cursor build, and reuses the validated header and catalog
 root pages for repeated storage calls in that phase. This avoids reopening the
 `.mylite` file and revalidating unchanged root pages for every point lookup
 helper while preserving the same single-file visibility rules.
+Exact and prefix handler reads that build a filtered cursor read the first
+matching entry from that cursor directly; only range and boundary-oriented
+read modes perform an additional ordered cursor search.
 
 Read-statement startup also keeps a process-local checkpoint snapshot cache for
 the current thread and storage owner. A new read statement reads the durable
