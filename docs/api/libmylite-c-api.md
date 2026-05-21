@@ -245,12 +245,16 @@ built-ins remain available. Zlib-backed compression is disabled in the default
 embedded profile: `have_compress` reports `NO`, `COMPRESS()` and
 `UNCOMPRESS()` return `NULL`, and compressed column DDL is rejected with
 ordinary MyLite/MariaDB diagnostics.
-Native InnoDB is not registered in the default embedded profile, but
-file-backed storage-engine builds still route application `ENGINE=InnoDB` DDL
-to MyLite storage. Native CSV and partition are not registered either; CSV
-table files remain unsupported, and partition DDL plus representative
-partition-management statements continue to fail before MariaDB execution until
-MyLite has partition metadata and routing.
+Native InnoDB is not registered in the default embedded profile, but active
+file-backed storage-engine sessions resolve application `ENGINE=InnoDB` DDL
+directly to MyLite storage, including under `NO_ENGINE_SUBSTITUTION`.
+Supported legacy engine names such as `MyISAM`, `Aria`, `BLACKHOLE`,
+`MEMORY`, and `HEAP` follow the same MyLite resolver path while preserving the
+requested engine name in catalog and `SHOW CREATE TABLE` metadata. Native CSV
+and partition are not registered either; CSV table files remain unsupported,
+and partition DDL plus representative partition-management statements continue
+to fail before MariaDB execution until MyLite has partition metadata and
+routing.
 
 ## Prepared Statements
 

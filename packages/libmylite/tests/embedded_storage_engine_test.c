@@ -169,6 +169,7 @@ static void test_show_engines_reports_mylite(void);
 static void test_embedded_session_defaults(void);
 static void test_stat_free_estimates_keep_secondary_plan(void);
 static void test_unsupported_engine_request_policy(void);
+static void test_no_substitution_engine_aliases(void);
 static void test_transactional_engine_flags(void);
 static void test_blackhole_engine_routes_to_mylite(void);
 static void test_memory_engine_routes_to_mylite(void);
@@ -564,6 +565,7 @@ int main(int argc, char **argv) {
     test_embedded_session_defaults();
     test_stat_free_estimates_keep_secondary_plan();
     test_unsupported_engine_request_policy();
+    test_no_substitution_engine_aliases();
     test_transactional_engine_flags();
     test_blackhole_engine_routes_to_mylite();
     test_memory_engine_routes_to_mylite();
@@ -869,6 +871,101 @@ static void test_unsupported_engine_request_policy(void) {
     assert_unsupported_engine_exec_fails(db, "ALTER TABLE csv_comment ENGINE SEQUENCE");
     assert_catalog_table_count(filename, "app", 1U);
     assert_catalog_table_metadata(filename, "app", "csv_comment", "InnoDB", "MYLITE");
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_no_substitution_engine_aliases(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    char *show_create = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(db, "SET SESSION sql_mode='NO_ENGINE_SUBSTITUTION'");
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE innodb_alias (id INT NOT NULL PRIMARY KEY, title VARCHAR(16)) "
+        "ENGINE=InnoDB"
+    );
+    assert_no_warnings(db);
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE myisam_alias (id INT NOT NULL PRIMARY KEY, title VARCHAR(16)) "
+        "ENGINE=MyISAM"
+    );
+    assert_no_warnings(db);
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE aria_alias (id INT NOT NULL PRIMARY KEY, title VARCHAR(16)) ENGINE=Aria"
+    );
+    assert_no_warnings(db);
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE blackhole_alias (id INT NOT NULL PRIMARY KEY) ENGINE=BLACKHOLE"
+    );
+    assert_no_warnings(db);
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE memory_alias ("
+        "id INT NOT NULL PRIMARY KEY, title VARCHAR(16), KEY title_key (title)"
+        ") ENGINE=MEMORY"
+    );
+    assert_no_warnings(db);
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE heap_alias (id INT NOT NULL PRIMARY KEY, title VARCHAR(16)) ENGINE=HEAP"
+    );
+    assert_no_warnings(db);
+    assert_prepared_succeeds(
+        db,
+        "CREATE TABLE prepared_myisam_alias (id INT NOT NULL PRIMARY KEY) ENGINE=MyISAM"
+    );
+    assert_no_warnings(db);
+
+    assert_catalog_table_count(filename, "app", 7U);
+    assert_catalog_table_metadata(filename, "app", "innodb_alias", "InnoDB", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "myisam_alias", "MyISAM", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "aria_alias", "Aria", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "blackhole_alias", "BLACKHOLE", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "memory_alias", "MEMORY", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "heap_alias", "HEAP", "MYLITE");
+    assert_catalog_table_metadata(filename, "app", "prepared_myisam_alias", "MyISAM", "MYLITE");
+
+    show_create = capture_show_create_table(db, "myisam_alias");
+    assert(strstr(show_create, "ENGINE=MyISAM") != NULL);
+    free(show_create);
+    show_create = capture_show_create_table(db, "memory_alias");
+    assert(strstr(show_create, "ENGINE=MEMORY") != NULL);
+    free(show_create);
+
+    assert_exec_succeeds(db, "INSERT INTO innodb_alias VALUES (1, 'innodb')");
+    assert_exec_succeeds(db, "INSERT INTO myisam_alias VALUES (1, 'myisam')");
+    assert_exec_succeeds(db, "INSERT INTO aria_alias VALUES (1, 'aria')");
+    assert_exec_succeeds(db, "INSERT INTO blackhole_alias VALUES (1)");
+    assert_exec_succeeds(db, "INSERT INTO memory_alias VALUES (1, 'memory')");
+    assert_exec_succeeds(db, "INSERT INTO heap_alias VALUES (1, 'heap')");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM innodb_alias", "1");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM myisam_alias", "1");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM aria_alias", "1");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM blackhole_alias", "0");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM memory_alias", "1");
+    assert_query_single_value(db, "SELECT COUNT(*) FROM heap_alias", "1");
+
+    assert_unsupported_engine_exec_fails(
+        db,
+        "CREATE TABLE archive_alias (id INT NOT NULL PRIMARY KEY) ENGINE=ARCHIVE"
+    );
+    assert(
+        mylite_storage_table_exists(filename, "app", "archive_alias") == MYLITE_STORAGE_NOTFOUND
+    );
+    assert_catalog_table_count(filename, "app", 7U);
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");

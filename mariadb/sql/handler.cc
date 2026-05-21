@@ -49,6 +49,7 @@
 #include "mysys_err.h"
 #include "optimizer_defaults.h"
 #include "vector_mhnsw.h"
+#include "mylite_schema_hook.h" // MyLite active primary-file signal
 
 #ifdef WITH_PARTITION_STORAGE_ENGINE
 #include "ha_partition.h"
@@ -146,6 +147,10 @@ static const Lex_ident_engine sys_table_aliases[]=
   "Maria"_Lex_ident_engine,     "Aria"_Lex_ident_engine,
   Lex_ident_engine()
 };
+
+static plugin_ref ha_resolve_mylite_engine_alias(THD *thd,
+                                                 const LEX_CSTRING *name);
+static bool ha_is_mylite_engine_alias(const LEX_CSTRING *name);
 
 const LEX_CSTRING ha_row_type[]=
 {
@@ -275,6 +280,9 @@ redo:
   if (thd && "DEFAULT"_Lex_ident_engine.streq(*name))
     return tmp_table ?  ha_default_tmp_plugin(thd) : ha_default_plugin(thd);
 
+  if ((plugin= ha_resolve_mylite_engine_alias(thd, name)))
+    return plugin;
+
   if ((plugin= my_plugin_lock_by_name(thd, name, MYSQL_STORAGE_ENGINE_PLUGIN)))
   {
     handlerton *hton= plugin_hton(plugin);
@@ -304,6 +312,46 @@ redo:
   return NULL;
 }
 
+static plugin_ref ha_resolve_mylite_engine_alias(THD *thd,
+                                                 const LEX_CSTRING *name)
+{
+  if (!ha_is_mylite_engine_alias(name))
+    return NULL;
+
+  static const Lex_ident_engine mylite_engine= "MYLITE"_Lex_ident_engine;
+  plugin_ref plugin=
+      my_plugin_lock_by_name(thd, &mylite_engine, MYSQL_STORAGE_ENGINE_PLUGIN);
+  if (!plugin)
+    return NULL;
+
+  handlerton *hton= plugin_hton(plugin);
+  if (hton && !(hton->flags & HTON_NOT_USER_SELECTABLE))
+    return plugin;
+
+  plugin_unlock(thd, plugin);
+  return NULL;
+}
+
+static bool ha_is_mylite_engine_alias(const LEX_CSTRING *name)
+{
+  if (!mylite_schema_hooks_active())
+    return false;
+
+  static const Lex_ident_engine mylite_engine_aliases[]= {
+      "INNOBASE"_Lex_ident_engine, "INNODB"_Lex_ident_engine,
+      "MYISAM"_Lex_ident_engine,   "Maria"_Lex_ident_engine,
+      "Aria"_Lex_ident_engine,     "BLACKHOLE"_Lex_ident_engine,
+      "HEAP"_Lex_ident_engine,     "MEMORY"_Lex_ident_engine,
+      Lex_ident_engine()};
+
+  for (const Lex_ident_engine *alias= mylite_engine_aliases; alias->str;
+       ++alias)
+  {
+    if (alias->streq(*name))
+      return true;
+  }
+  return false;
+}
 
 /*
   Resolve the storage engine by name.

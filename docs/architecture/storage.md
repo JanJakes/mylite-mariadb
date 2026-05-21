@@ -151,8 +151,13 @@ The initial handler is opt-in. It is disabled in the default embedded baseline
 and covered by a separate storage smoke build. That build verifies the
 `MYLITE` row from `SHOW ENGINES`, explicit `CREATE TABLE ... ENGINE=MYLITE`
 stores metadata in the primary `.mylite` catalog, and catalog discovery works
-after close/reopen. Routed tables support row inserts, full scans, updates, and
-deletes from the primary file, including BLOB/TEXT payloads. Supported
+after close/reopen. When a MyLite primary file is active, MariaDB engine-name
+resolution maps supported application engine requests such as `InnoDB`,
+`MyISAM`, `Aria`, `BLACKHOLE`, `MEMORY`, and `HEAP` directly to the MyLite
+handler before native-engine fallback, including under `NO_ENGINE_SUBSTITUTION`;
+the handler still records the requested engine name in catalog metadata. Routed
+tables support row inserts, full scans, updates, and deletes from the primary
+file, including BLOB/TEXT payloads. Supported
 primary, unique, and secondary indexes append durable index-entry pages and
 serve ordered handler cursors from MariaDB key tuples, including bounded
 BLOB/TEXT prefix key images produced by MariaDB. Those cursors keep sorted key
