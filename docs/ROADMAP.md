@@ -371,6 +371,9 @@ Handler exact unique reads and row updates now enter a stable table-name
 identity scope, letting active table-entry cache hits bypass repeated name
 string comparisons while raw storage callers keep owned-string fallback
 matching.
+Exact unique reads now also skip creating a handler read-statement scope when
+the current THD or storage owner already has an active write checkpoint,
+leaving standalone reads on the existing read-scope path.
 Row-update maintained-root planning now caches table-level index-root absence
 for the active catalog generation, avoiding repeated catalog copies on hot
 append-only update loops.

@@ -164,6 +164,8 @@ static int mylite_finish_volatile_snapshot(
   Mylite_volatile_snapshot *snapshot, bool commit);
 static int mylite_finish_transaction_checkpoint(THD *thd, bool commit);
 static Mylite_trx_context *mylite_trx_context(THD *thd, bool create);
+static bool mylite_thd_has_active_storage_checkpoint(THD *thd,
+                                                     const char *primary_file);
 static int mylite_table_name_from_path(const char *path, char *out_schema_name,
                                        size_t out_schema_name_size,
                                        char *out_table_name,
@@ -2187,7 +2189,9 @@ int ha_mylite::read_exact_unique_index_row_into(uint index_number,
   const char *table_name= storage_table();
   Mylite_table_name_identity_scope table_name_scope(schema_name, table_name);
 
-  Mylite_read_statement_scope read_scope(primary_file, true);
+  Mylite_read_statement_scope read_scope(
+      primary_file,
+      !mylite_thd_has_active_storage_checkpoint(ha_thd(), primary_file));
   if (read_scope.error())
     DBUG_RETURN(read_scope.error());
 
@@ -4094,6 +4098,14 @@ static Mylite_trx_context *mylite_trx_context(THD *thd, bool create)
 
   thd->ha_data[mylite_hton->slot].ha_ptr= ctx;
   return ctx;
+}
+
+static bool mylite_thd_has_active_storage_checkpoint(THD *thd,
+                                                     const char *primary_file)
+{
+  Mylite_trx_context *ctx= mylite_trx_context(thd, false);
+  return (ctx && (ctx->statement || ctx->transaction)) ||
+         mylite_storage_statement_active(primary_file);
 }
 
 static int mylite_table_name_from_path(const char *path, char *out_schema_name,

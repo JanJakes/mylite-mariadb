@@ -135,6 +135,11 @@ No new dependencies.
   packages/mylite-storage/tests/storage_test.c`: no changes.
 - `cmake --build --preset storage-smoke-dev --target mylite_storage_test
   mylite_embedded_storage_engine_test mylite_perf_baseline`: passed.
+- `BUILD_DIR=build/mariadb-mylite-storage-smoke
+  tools/mariadb-embedded-build all -DPLUGIN_MYLITE_SE=STATIC`: passed during
+  the follow-up active-write exact-read scope work, rebuilding
+  `mariadb/storage/mylite/ha_mylite.cc` and the MyLite storage archive objects
+  with this slice included.
 - `build/storage-smoke-dev/packages/mylite-storage/mylite_storage_test`:
   passed.
 - `ctest --test-dir build/storage-smoke-dev -R
