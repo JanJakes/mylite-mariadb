@@ -152,10 +152,11 @@ and pager work. The first pager foundation now wraps fixed-page access for
 row-page, row-state, autoincrement, BLOB payload, free-list, append-only
 index-entry, and index leaf access while preserving existing storage bytes;
 versioned rollback journals can now protect a bounded typed page set for future
-pager dirty-page preimages, and active dirty-page rollback is specified as the
-next pager slice before maintained B-tree roots. Maintained B-tree pages still
-need pager-owned dirty-page flushing and root update semantics. Durable
-table-local row,
+pager dirty-page preimages, and active dirty-page rollback now captures,
+merges, and restores pager-owned existing page preimages across
+statement/savepoint rollback. Maintained B-tree pages still need production
+dirty-page journal wiring, page formats, flushing, and root update semantics.
+Durable table-local row,
 payload, exact-index, and published leaf-page caches now retarget across
 unrelated table row mutations, so one
 table's insert/update/delete does not strand another table's hot durable cache

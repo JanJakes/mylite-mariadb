@@ -447,6 +447,17 @@ typedef struct mylite_storage_buffered_page_undo_list {
     size_t bucket_capacity;
 } mylite_storage_buffered_page_undo_list;
 
+typedef struct mylite_storage_dirty_page_undo {
+    unsigned long long page_id;
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+} mylite_storage_dirty_page_undo;
+
+typedef struct mylite_storage_dirty_page_undo_list {
+    mylite_storage_dirty_page_undo *entries;
+    size_t count;
+    size_t capacity;
+} mylite_storage_dirty_page_undo_list;
+
 enum {
     MYLITE_STORAGE_LIVE_ROW_CACHE_INITIAL_CAPACITY = 4U,
     MYLITE_STORAGE_LIVE_ROW_ID_INITIAL_CAPACITY = 16U,
@@ -458,6 +469,7 @@ enum {
     MYLITE_STORAGE_BUFFERED_PAGE_UNDO_BUCKET_MIN_COUNT = 8U,
     MYLITE_STORAGE_REUSABLE_BUFFERED_PAGE_UNDO_CAPACITY =
         MYLITE_STORAGE_BUFFERED_PAGE_UNDO_INITIAL_CAPACITY,
+    MYLITE_STORAGE_DIRTY_PAGE_UNDO_INITIAL_CAPACITY = 4U,
 };
 
 enum { MYLITE_STORAGE_BUFFERED_UPDATE_REWRITE_INLINE_INDEXES = 4U };
@@ -522,6 +534,7 @@ struct mylite_storage_statement {
     mylite_storage_table_entry_cache table_entry_cache;
     mylite_storage_append_page_buffer append_pages;
     mylite_storage_buffered_page_undo_list buffered_page_undos;
+    mylite_storage_dirty_page_undo_list dirty_page_undos;
     mylite_storage_buffered_update_rewrite_cache buffered_update_rewrites;
 };
 
@@ -872,8 +885,14 @@ static void trim_statement_append_page_buffer(
     unsigned long long page_count
 );
 static mylite_storage_result restore_buffered_page_undos(mylite_storage_statement *statement);
+static mylite_storage_result restore_dirty_page_undos(mylite_storage_statement *statement);
 static void clear_append_page_buffer(mylite_storage_statement *statement);
 static void clear_buffered_page_undos(mylite_storage_statement *statement);
+static void clear_dirty_page_undos(mylite_storage_statement *statement);
+static mylite_storage_result merge_dirty_page_undos(
+    mylite_storage_statement *parent,
+    const mylite_storage_statement *child
+);
 static void adopt_reusable_buffered_page_undos(mylite_storage_buffered_page_undo_list *undos);
 static void release_buffered_page_undos(mylite_storage_buffered_page_undo_list *undos);
 static void clear_buffered_update_rewrites(mylite_storage_statement *statement);
@@ -980,6 +999,19 @@ static mylite_storage_result pager_write_page(
     const mylite_storage_pager *pager,
     unsigned long long page_id,
     const unsigned char *page
+);
+static mylite_storage_result capture_dirty_page_undo_for_pager_write(
+    const mylite_storage_pager *pager,
+    unsigned long long page_id
+);
+static mylite_storage_result append_dirty_page_undo(
+    mylite_storage_dirty_page_undo_list *undos,
+    unsigned long long page_id,
+    const unsigned char *page
+);
+static int dirty_page_undo_exists(
+    const mylite_storage_dirty_page_undo_list *undos,
+    unsigned long long page_id
 );
 static mylite_storage_result publish_header(FILE *file, const mylite_storage_header *header);
 static mylite_storage_result publish_header_for_statement(
@@ -6575,6 +6607,13 @@ mylite_storage_result mylite_storage_commit_statement(mylite_storage_statement *
             return journal_result;
         }
     }
+    if (statement->parent != NULL) {
+        const mylite_storage_result dirty_page_result =
+            merge_dirty_page_undos(statement->parent, statement);
+        if (dirty_page_result != MYLITE_STORAGE_OK) {
+            return dirty_page_result;
+        }
+    }
 
     const int promote_active_caches = statement->parent == NULL;
     active_statement = statement->parent;
@@ -6627,6 +6666,9 @@ mylite_storage_result mylite_storage_rollback_statement(mylite_storage_statement
             statement->has_current_header = 1;
             statement->current_header_dirty = 0;
         }
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = restore_dirty_page_undos(statement);
     }
     if (result == MYLITE_STORAGE_OK) {
         result = restore_buffered_page_undos(statement);
@@ -6961,6 +7003,7 @@ static void initialize_nested_checkpoint_storage(mylite_storage_statement *state
     statement->table_entry_cache = (mylite_storage_table_entry_cache){0};
     statement->append_pages = (mylite_storage_append_page_buffer){0};
     statement->buffered_page_undos = (mylite_storage_buffered_page_undo_list){0};
+    statement->dirty_page_undos = (mylite_storage_dirty_page_undo_list){0};
     statement->buffered_update_rewrites = (mylite_storage_buffered_update_rewrite_cache){0};
 }
 
@@ -9078,6 +9121,27 @@ static mylite_storage_result restore_buffered_page_undos(mylite_storage_statemen
     return MYLITE_STORAGE_OK;
 }
 
+static mylite_storage_result restore_dirty_page_undos(mylite_storage_statement *statement) {
+    if (statement == NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    for (size_t i = 0U; i < statement->dirty_page_undos.count; ++i) {
+        const mylite_storage_dirty_page_undo *undo = statement->dirty_page_undos.entries + i;
+        mylite_storage_result result = write_page_at_raw(
+            statement->file,
+            undo->page_id,
+            statement->header.page_size,
+            undo->page
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+    }
+    clear_dirty_page_undos(statement);
+    return MYLITE_STORAGE_OK;
+}
+
 static void clear_append_page_buffer(mylite_storage_statement *statement) {
     if (statement == NULL) {
         return;
@@ -9094,6 +9158,37 @@ static void clear_buffered_page_undos(mylite_storage_statement *statement) {
     }
 
     release_buffered_page_undos(&statement->buffered_page_undos);
+}
+
+static void clear_dirty_page_undos(mylite_storage_statement *statement) {
+    if (statement == NULL) {
+        return;
+    }
+
+    free(statement->dirty_page_undos.entries);
+    statement->dirty_page_undos = (mylite_storage_dirty_page_undo_list){0};
+}
+
+static mylite_storage_result merge_dirty_page_undos(
+    mylite_storage_statement *parent,
+    const mylite_storage_statement *child
+) {
+    if (parent == NULL || child == NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    for (size_t i = 0U; i < child->dirty_page_undos.count; ++i) {
+        const mylite_storage_dirty_page_undo *undo = child->dirty_page_undos.entries + i;
+        if (dirty_page_undo_exists(&parent->dirty_page_undos, undo->page_id)) {
+            continue;
+        }
+        mylite_storage_result result =
+            append_dirty_page_undo(&parent->dirty_page_undos, undo->page_id, undo->page);
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+    }
+    return MYLITE_STORAGE_OK;
 }
 
 static void adopt_reusable_buffered_page_undos(mylite_storage_buffered_page_undo_list *undos) {
@@ -9301,6 +9396,7 @@ static void free_statement(mylite_storage_statement *statement) {
     free_catalog_image(&statement->current_catalog_image);
     clear_append_page_buffer(statement);
     clear_buffered_page_undos(statement);
+    clear_dirty_page_undos(statement);
     clear_buffered_update_rewrites(statement);
     if (statement->owns_filename) {
         free(statement->filename);
@@ -9755,8 +9851,128 @@ static mylite_storage_result pager_write_page(
     unsigned long long page_id,
     const unsigned char *page
 ) {
+    mylite_storage_result result = capture_dirty_page_undo_for_pager_write(pager, page_id);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
     return write_page_at(pager->file, page_id, pager->header->page_size, page);
 }
+
+static mylite_storage_result capture_dirty_page_undo_for_pager_write(
+    const mylite_storage_pager *pager,
+    unsigned long long page_id
+) {
+    if (pager == NULL || pager->file == NULL || pager->header == NULL ||
+        pager->header->page_size != MYLITE_STORAGE_FORMAT_PAGE_SIZE ||
+        page_id == MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    mylite_storage_statement *statement = active_statement_for_file(pager->file);
+    if (statement == NULL || page_id >= statement->header.page_count ||
+        dirty_page_undo_exists(&statement->dirty_page_undos, page_id)) {
+        return MYLITE_STORAGE_OK;
+    }
+    if (buffered_append_page(pager->file, page_id, pager->header->page_size) != NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    mylite_storage_result result =
+        read_page_at(pager->file, page_id, pager->header->page_size, page);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    return append_dirty_page_undo(&statement->dirty_page_undos, page_id, page);
+}
+
+static mylite_storage_result append_dirty_page_undo(
+    mylite_storage_dirty_page_undo_list *undos,
+    unsigned long long page_id,
+    const unsigned char *page
+) {
+    if (undos->count == undos->capacity) {
+        const size_t next_capacity = undos->capacity == 0U
+                                         ? MYLITE_STORAGE_DIRTY_PAGE_UNDO_INITIAL_CAPACITY
+                                         : undos->capacity * 2U;
+        if (next_capacity <= undos->capacity ||
+            next_capacity > SIZE_MAX / sizeof(*undos->entries)) {
+            return MYLITE_STORAGE_FULL;
+        }
+        mylite_storage_dirty_page_undo *entries = (mylite_storage_dirty_page_undo *)
+            realloc(undos->entries, next_capacity * sizeof(*undos->entries));
+        if (entries == NULL) {
+            return MYLITE_STORAGE_NOMEM;
+        }
+        undos->entries = entries;
+        undos->capacity = next_capacity;
+    }
+
+    mylite_storage_dirty_page_undo *undo = undos->entries + undos->count;
+    undo->page_id = page_id;
+    memcpy(undo->page, page, MYLITE_STORAGE_FORMAT_PAGE_SIZE);
+    ++undos->count;
+    return MYLITE_STORAGE_OK;
+}
+
+static int dirty_page_undo_exists(
+    const mylite_storage_dirty_page_undo_list *undos,
+    unsigned long long page_id
+) {
+    if (undos == NULL) {
+        return 0;
+    }
+
+    for (size_t i = 0U; i < undos->count; ++i) {
+        if (undos->entries[i].page_id == page_id) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+mylite_storage_result mylite_storage_test_flip_active_page_byte(
+    const char *filename,
+    unsigned long long page_id,
+    size_t offset
+) {
+    if (filename == NULL || filename[0] == '\0' ||
+        page_id == MYLITE_STORAGE_FORMAT_HEADER_PAGE_ID ||
+        offset >= MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+    if (active_statement_for(filename) == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    mylite_storage_update_file_scope scope = {0};
+    mylite_storage_result result = open_existing_file_for_update_scope(filename, &scope);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_header header = {0};
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    result = read_header_from_update_file_scope(&scope, &header);
+    if (result == MYLITE_STORAGE_OK && page_id >= header.page_count) {
+        result = MYLITE_STORAGE_MISUSE;
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        const mylite_storage_pager pager = open_storage_pager(scope.file, filename, &header);
+        result = pager_read_page(&pager, page_id, page);
+        if (result == MYLITE_STORAGE_OK) {
+            page[offset] ^= 0x5aU;
+            result = pager_write_page(&pager, page_id, page);
+        }
+    }
+    if (close_existing_update_file_scope(&scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    return result;
+}
+#endif
 
 static mylite_storage_result publish_header(FILE *file, const mylite_storage_header *header) {
     return publish_header_for_statement(

@@ -16,6 +16,14 @@
 
 #include <mylite/storage.h>
 
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+mylite_storage_result mylite_storage_test_flip_active_page_byte(
+    const char *filename,
+    unsigned long long page_id,
+    size_t offset
+);
+#endif
+
 typedef struct index_entries_test_context {
     const char *filename;
     const unsigned char *row_1;
@@ -115,6 +123,7 @@ static void assert_foreign_key_metadata(
 static void test_append_and_read_rows(void);
 static void test_append_and_read_large_row_payload(void);
 static void test_update_and_delete_rows(void);
+static void test_active_dirty_page_rollback_restores_existing_page(void);
 static void test_many_row_state_pages_scan(void);
 static void test_active_live_row_validation_cache(void);
 static void test_reusable_live_row_cache_clears_row_ids(void);
@@ -431,6 +440,7 @@ int main(void) {
     test_append_and_read_rows();
     test_append_and_read_large_row_payload();
     test_update_and_delete_rows();
+    test_active_dirty_page_rollback_restores_existing_page();
     test_many_row_state_pages_scan();
     test_active_live_row_validation_cache();
     test_reusable_live_row_cache_clears_row_ids();
@@ -1651,6 +1661,73 @@ static void test_update_and_delete_rows(void) {
     assert(rmdir(root) == 0);
     free(filename);
     free(root);
+}
+
+static void test_active_dirty_page_rollback_restores_existing_page(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row[] = {0x00U, 0x01U, 'r', 'o', 'w'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "active-dirty-page-rollback.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    unsigned char before_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char dirty_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char restored_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+    mylite_storage_statement *statement = NULL;
+    unsigned long long row_id = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row,
+            sizeof(row),
+            NULL,
+            0U,
+            &row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    read_test_page(filename, row_id, before_page);
+
+    assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_test_flip_active_page_byte(
+            filename,
+            row_id,
+            MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET
+        ) == MYLITE_STORAGE_OK
+    );
+    read_test_page(filename, row_id, dirty_page);
+    assert(memcmp(before_page, dirty_page, sizeof(before_page)) != 0);
+    assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
+
+    read_test_page(filename, row_id, restored_page);
+    assert(memcmp(before_page, restored_page, sizeof(before_page)) == 0);
+    assert(mylite_storage_read_rows(filename, "app", "posts", &rows) == MYLITE_STORAGE_OK);
+    assert(rows.row_count == 1U);
+    assert(rows.row_size == sizeof(row));
+    assert(memcmp(rows.rows, row, sizeof(row)) == 0);
+    mylite_storage_free_rowset(&rows);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+#endif
 }
 
 static void test_many_row_state_pages_scan(void) {

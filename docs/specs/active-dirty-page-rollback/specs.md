@@ -48,9 +48,10 @@ pager while a statement or savepoint is active.
   payload pages, free-list pages, append-only index-entry pages, and index leaf
   pages.
 - `packages/mylite-storage/src/storage.c::allocate_catalog_page_run()` already
-  rewrites an existing free-list page when catalog publication reuses part of a
-  reclaimed catalog-chain run. That gives this slice a concrete, typed
-  in-place write to test before B-tree pages exist.
+  rewrites an existing free-list page when non-active catalog publication
+  reuses part of a reclaimed catalog-chain run, but active catalog free-list
+  reuse remains deliberately disabled because broader active catalog rollback
+  still needs its own safety review.
 
 Official MariaDB documentation for SAVEPOINT and handler transactions supports
 the same engine-level rollback model; the local source refs above are the
@@ -84,11 +85,23 @@ pages:
 - keep page-family validation in existing typed decoders, not in the undo list.
 
 Crash recovery for durable in-place rewrites remains tied to the existing
-recovery journal. The first implementation may rely on the active statement's
-current journal for catalog/free-list rewrite coverage because that journal now
-protects bounded typed pages. Later maintained index work should pass dirty
-page ids into the protected-page journal before flushing pages that are not
-already included by catalog/free-list publication.
+recovery journal. Maintained index work should pass dirty page ids into the
+protected-page journal before flushing pages that are not already included by
+catalog/free-list publication.
+
+## Initial Implementation
+
+The first implementation adds an active-statement dirty-page undo list behind
+`pager_write_page()`. It captures a full-page preimage once for each existing
+page id dirtied through the pager during the active statement, merges nested
+savepoint preimages upward on savepoint release, restores them on rollback
+before truncation, and leaves append-buffer undo unchanged.
+
+Because no production maintained-page writer exists yet, storage unit coverage
+uses a test-only hook compiled only under `BUILD_TESTING`. The hook flips a
+byte in an existing row page through the pager inside an active statement, then
+rollback proves the raw page bytes and row read path are restored. Production
+catalog free-list reuse remains disabled while an active writer is present.
 
 ## File Lifecycle
 
@@ -112,10 +125,9 @@ active storage checkpoint state.
 
 ## Test Plan
 
-- Add a storage unit test that creates a reclaimable catalog free-list run,
-  opens an active statement, forces partial free-list reuse through catalog
-  publication, rolls the statement back, and asserts the free-list root page
-  bytes are restored.
+- Add a storage unit test that opens an active statement, dirties an existing
+  row page through the pager test hook, rolls the statement back, and asserts
+  the raw page bytes plus normal row reads are restored.
 - Keep the existing active append-buffer savepoint rollback tests passing.
 - Keep protected-page journal recovery tests passing.
 - Run:
@@ -145,6 +157,15 @@ ctest --test-dir build/storage-smoke-dev -R libmylite.embedded-storage-engine --
 - No public API or durable file-format change is introduced.
 - Storage and storage-smoke verification pass.
 
+## Verification Results
+
+- `cmake --build --preset dev --target mylite_storage_test`
+- `ctest --test-dir build/dev -R mylite-storage --output-on-failure`
+- `git diff --check`
+- `git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c packages/mylite-storage/tests/storage_test.c packages/mylite-storage/CMakeLists.txt`
+- `cmake --build --preset storage-smoke-dev --target mylite_embedded_storage_engine_test`
+- `ctest --test-dir build/storage-smoke-dev -R libmylite.embedded-storage-engine --output-on-failure`
+
 ## Risks And Open Questions
 
 - The first dirty-page undo list is in-memory and bounded only by allocation
@@ -153,5 +174,8 @@ ctest --test-dir build/storage-smoke-dev -R libmylite.embedded-storage-engine --
 - Crash recovery for arbitrary dirty pages is not fully wired until production
   callers pass protected page ids into the journal before flush. This slice
   should not claim B-tree-safe recovery until that connection exists.
+- Active catalog free-list reuse is still disabled because it also depends on
+  broader active catalog rollback guarantees. It belongs in a separate
+  catalog/free-space slice rather than this pager rollback foundation.
 - Future WAL/checkpoint work may replace this rollback-journal model for
   high-concurrency writers.
