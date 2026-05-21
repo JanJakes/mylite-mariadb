@@ -118,8 +118,11 @@ runtime behind `MYLITE_WITH_SELECT_INTO_FILE=0`; ordinary result delivery and
 server topology and dynamic plugin-loading surfaces are omitted behind
 `MYLITE_WITH_DISABLED_STARTUP_OPTIONS=0`; the retained serverless startup
 options used by `libmylite`, including `--skip-log-bin`, `--skip-slave-start`,
-and `--plugin-dir`, remain available. It omits the general and slow
-query-log runtime
+and `--plugin-dir`, remain available. Row-replication type conversion is
+replaced with fail-closed embedded stubs behind
+`MYLITE_WITH_RPL_TYPE_CONVERSION=0`; ordinary SQL type conversion and retained
+storage-engine behavior use their normal non-replication paths. It omits the
+general and slow query-log runtime
 behind `MYLITE_WITH_QUERY_LOGS=0`; error logging,
 SQL diagnostics, warnings, and result metadata remain available. It omits
 statement digest normalization behind `MYLITE_WITH_SQL_DIGEST=0`; Performance
@@ -199,7 +202,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,265,424 bytes / 25.05 MiB |
+| Archive size | 26,258,720 bytes / 25.04 MiB |
 | Archive members | 698 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -260,8 +263,10 @@ archive to 26,833,536 bytes / 25.59 MiB. Omitting startup option rows for
 disabled server topology and dynamic plugin-loading surfaces reduces the
 current pre-strip archive to 26,831,128 bytes / 25.59 MiB. Skipping inherited
 `#binlog_cache_files` setup in the no-binlog embedded profile reduces the
-current pre-strip archive to 26,829,192 bytes / 25.59 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 563,768 bytes
+current pre-strip archive to 26,829,192 bytes / 25.59 MiB. Replacing
+row-replication type conversion with fail-closed embedded stubs reduces the
+current pre-strip archive to 26,822,408 bytes / 25.58 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 563,688 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -391,6 +396,10 @@ compatibility variables such as `@@log_bin=0` remain covered.
 Replication and binary-log filter runtime is omitted from the default embedded
 profile; retained runtime checks behave as if no filters are configured, and
 filter configuration variables are absent.
+Row-replication type-conversion helpers are replaced with fail-closed embedded
+stubs; row-event apply is unsupported, and ordinary SQL conversion, JSON,
+GEOMETRY/GIS, sequence handling, and native storage remain on retained
+non-replication paths.
 PROXY protocol listener support is omitted from the default embedded profile;
 the core embedded runtime does not accept socket connections, and the
 `proxy_protocol_networks` system variable is absent.

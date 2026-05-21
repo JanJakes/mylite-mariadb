@@ -46,6 +46,8 @@ static void create_engine_schema(mylite_db *db);
 static void assert_unsupported_engine_rejected(mylite_db *db);
 static void insert_engine_rows(mylite_db *db);
 static void assert_engine_rows_before_reopen(mylite_db *db);
+static void create_sequence(mylite_db *db);
+static void assert_next_sequence_value(mylite_db *db, const char *expected_value);
 static void create_wordpress_schema(mylite_db *db);
 static void insert_wordpress_rows(mylite_db *db);
 static void assert_wordpress_queries(mylite_db *db);
@@ -96,6 +98,8 @@ static void test_engine_clauses_and_wordpress_schema_survive_reopen(void) {
     assert_unsupported_engine_rejected(db);
     insert_engine_rows(db);
     assert_engine_rows_before_reopen(db);
+    create_sequence(db);
+    assert_next_sequence_value(db, "7");
     create_wordpress_schema(db);
     insert_wordpress_rows(db);
     assert_wordpress_queries(db);
@@ -109,6 +113,7 @@ static void test_engine_clauses_and_wordpress_schema_survive_reopen(void) {
 
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert_database_open_layout(database_path);
+    assert_next_sequence_value(db, "10");
     assert_after_reopen(db);
     assert_wordpress_queries(db);
     assert(mylite_close(db) == MYLITE_OK);
@@ -257,6 +262,26 @@ static void assert_engine_rows_before_reopen(mylite_db *db) {
             .row_count = 1,
             .column_names = totals_columns,
             .values = totals_values,
+        }
+    );
+}
+
+static void create_sequence(mylite_db *db) {
+    exec_ok(db, "CREATE SEQUENCE app.item_sequence START WITH 7 INCREMENT BY 3 NOCACHE");
+}
+
+static void assert_next_sequence_value(mylite_db *db, const char *expected_value) {
+    static const char *const sequence_columns[] = {"next_value"};
+    const char *const sequence_values[] = {expected_value};
+
+    query_expect(
+        db,
+        (expected_query){
+            .sql = "SELECT NEXT VALUE FOR app.item_sequence AS next_value",
+            .column_count = 1,
+            .row_count = 1,
+            .column_names = sequence_columns,
+            .values = sequence_values,
         }
     );
 }
@@ -465,6 +490,15 @@ static int expected_result_callback(
             assert(values[column] == NULL);
         } else {
             assert(values[column] != NULL);
+            if (strcmp(values[column], expected_value) != 0) {
+                fprintf(
+                    stderr,
+                    "Unexpected value for %s: expected '%s', got '%s'\n",
+                    column_names[column],
+                    expected_value,
+                    values[column]
+                );
+            }
             assert(strcmp(values[column], expected_value) == 0);
         }
     }

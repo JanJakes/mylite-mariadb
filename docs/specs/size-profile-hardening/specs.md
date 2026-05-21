@@ -61,7 +61,8 @@ for disabled binary-log, replication, and dynamic-plugin-loading surfaces are
 omitted because the default `libmylite` startup contract is fixed,
 serverless, and directory-owned. Inherited `#binlog_cache_files` setup is
 skipped because the default profile has no binary-log core and does not create
-binlog cache files.
+binlog cache files. Row-replication type conversion is omitted because row-event
+apply is already outside the core embedded profile.
 
 ## Source Findings
 
@@ -378,6 +379,12 @@ binlog cache files.
   directory setup and cleanup. The default embedded baseline already starts
   with `--skip-log-bin` and builds with `MYLITE_WITH_BINLOG_CORE=0`, so no
   retained runtime path needs binlog cache files.
+- `mariadb/sql/rpl_utility_server.cc` implements row-replication type
+  comparison, conversion-table construction, and binary-log type rendering for
+  row-event apply. `mariadb/sql/rpl_utility.cc` still owns shared table-map
+  metadata helpers used by retained event code, so the server-side conversion
+  source needs a separate replacement rather than deleting all replication
+  utility code.
 
 ## Proposed Design
 
@@ -643,6 +650,12 @@ profile replaces `rpl_filter.cc` with a permissive no-filter stub and omits
 filter configuration variables such as `replicate_do_db`,
 `replicate_wild_ignore_table`, and `binlog_do_db`.
 
+The embedded archive omits row-replication type conversion by setting
+`MYLITE_WITH_RPL_TYPE_CONVERSION=0` in the MyLite baseline. The option defaults
+to `ON` so upstream-style embedded builds keep row-event conversion behavior.
+The disabled profile replaces `rpl_utility_server.cc` with fail-closed
+conversion stubs while retaining `rpl_utility.cc` table-map metadata helpers.
+
 The embedded archive omits PROXY protocol listener support by setting
 `MYLITE_WITH_PROXY_PROTOCOL=0` in the MyLite baseline. The option defaults to
 `ON` so normal MariaDB builds keep upstream listener behavior. The disabled
@@ -720,6 +733,9 @@ diagnostics, Unix socket server authentication, full event parse-data
 validation, and SQL `BINLOG` replay are also omitted from the default embedded
 profile. Server-side binary-log event writers are replaced with a disabled
 embedded source while the ordinary SQL string-quoting helper remains available.
+Row-replication type-conversion helpers are replaced with fail-closed embedded
+stubs while shared table-map metadata helpers remain available for retained
+event code.
 
 ## Compatibility Impact
 
@@ -762,6 +778,10 @@ Omitting replication and binary-log filter runtime only removes inherited
 topology-filter configuration. Retained no-filter checks allow ordinary SQL to
 continue unchanged because the embedded profile has no configured replication
 or binlog filters.
+Omitting row-replication type conversion only removes conversion decisions for
+unsupported row-event apply. Ordinary SQL type conversion, native storage,
+JSON, GEOMETRY/GIS, sequence handling, prepared statements, and the public C API
+continue through retained non-replication paths.
 Omitting PROXY protocol listener support only removes inherited socket-listener
 configuration and header parsing. The core embedded profile already starts with
 `--skip-networking` and does not accept socket connections.
@@ -1034,6 +1054,11 @@ bytes smaller than the Release build with Performance Schema disabled,
 6,864,216 bytes smaller than the symbol-stripped baseline with Performance
 Schema still built, and 7,576,896 bytes smaller than the original broad
 archive.
+Replacing row-replication type conversion with fail-closed embedded stubs
+brings the current archive to 26,258,720 bytes / 25.04 MiB, 5,270,984 bytes
+smaller than the Release build with Performance Schema disabled, 6,870,920
+bytes smaller than the symbol-stripped baseline with Performance Schema still
+built, and 7,583,600 bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -1195,6 +1220,9 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   source, top-level `HANDLER ...` statements are rejected, and
   `sql_handler.cc.o` is absent from the embedded archive. Host-file SELECT
   exports are rejected, and `SELECT ... INTO @variable` remains supported.
+  Row-replication type-conversion helpers are replaced with fail-closed embedded
+  stubs, `rpl_utility_server.cc.o` is absent from the embedded archive, and
+  ordinary SQL type conversion remains covered through retained tests.
   Persistent
   optimizer-statistics storage is omitted, `use_stat_tables` starts as `NEVER`,
   histogram collection starts at size `0`, persistent statistics SQL and

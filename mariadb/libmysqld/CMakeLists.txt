@@ -223,6 +223,15 @@ ELSE()
   SET(MYLITE_RPL_FILTER_SOURCE ../sql/mylite_rpl_filter_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_RPL_TYPE_CONVERSION "Build row-replication type-conversion helpers" ON)
+IF(MYLITE_WITH_RPL_TYPE_CONVERSION)
+  ADD_DEFINITIONS(-DMYLITE_WITH_RPL_TYPE_CONVERSION=1)
+  SET(MYLITE_RPL_UTILITY_SERVER_SOURCE ../sql/rpl_utility_server.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_RPL_TYPE_CONVERSION=0)
+  SET(MYLITE_RPL_UTILITY_SERVER_SOURCE ../sql/mylite_rpl_utility_server_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_USERSTAT_DIAGNOSTICS "Build user statistics diagnostics" ON)
 IF(MYLITE_WITH_USERSTAT_DIAGNOSTICS)
   ADD_DEFINITIONS(-DMYLITE_WITH_USERSTAT_DIAGNOSTICS=1)
@@ -350,7 +359,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/opt_subselect.cc
            ../sql/create_options.cc
            ../sql/rpl_utility.cc
-           ../sql/rpl_utility_server.cc
+           ${MYLITE_RPL_UTILITY_SERVER_SOURCE}
            ../sql/rpl_reporting.cc
            ../sql/sql_expression_cache.cc
            ../sql/my_apc.cc ../sql/my_apc.h

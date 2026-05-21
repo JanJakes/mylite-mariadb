@@ -90,6 +90,7 @@ behavior. It does not require a daemon in the default test path.
 | `CREATE TABLE ... LIKE` | ⚪&nbsp;Planned | Preserve MariaDB table definition behavior |
 | `CREATE TABLE ... SELECT` | ⚪&nbsp;Planned | Preserve MariaDB statement semantics over MyLite tables |
 | Schemas/databases | 🟡&nbsp;Partial | Controlled `CREATE DATABASE`, qualified table access, and `DROP DATABASE` lifecycle are covered inside `datadir/`; broader schema behavior remains planned |
+| Sequences | 🟡&nbsp;Partial | Simple MariaDB `CREATE SEQUENCE ... NOCACHE` and `NEXT VALUE FOR` behavior is covered across close and reopen; broader sequence DDL and edge cases remain planned |
 | Representative application schemas | 🟡&nbsp;Partial | WordPress-shaped InnoDB `wp_options`, `wp_posts`, and `wp_postmeta` DDL and queries are covered as representative application-schema evidence |
 | Views, triggers, and routines | ⚪&nbsp;Planned | Persist through MariaDB native metadata inside the MyLite directory where supported |
 | Events and scheduler | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server scheduler is not part of the core embedded profile; event DDL, event metadata commands, and scheduler variables are rejected by policy coverage, and the default embedded archive uses only a parser-link event parse-data stub |

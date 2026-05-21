@@ -65,6 +65,7 @@ surface that does not fit a local directory-owned library:
 - command-line option help prose,
 - startup options for disabled server topology and dynamic plugin loading,
 - inherited binary-log cache directory setup,
+- row-replication type conversion,
 - host-file SELECT exports,
 - rarely used optional engines or plugins unless a slice justifies them.
 
@@ -125,6 +126,10 @@ variables such as `@@log_bin=0` remain covered. Replication and binlog filter
 runtime is omitted after policy coverage proves the inherited filter knobs are
 topology configuration, while retained runtime checks behave as if no filters
 are configured.
+Row-replication type-conversion helpers are replaced with fail-closed embedded
+stubs after source review proves row-event apply is already outside the core
+profile; ordinary SQL type conversion, native storage, JSON, GEOMETRY/GIS, and
+sequence support remain linked through their normal non-replication paths.
 Legacy `PROCEDURE ANALYSE()` support is omitted after policy coverage proves it
 is an obsolete diagnostic SELECT extension rather than application data
 functionality; normal SELECT execution remains supported.
