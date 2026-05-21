@@ -24,6 +24,7 @@ set(ENABLED_PROFILING OFF CACHE BOOL "Disable statement profiling in the embedde
 set(MYLITE_WITH_BINLOG_CORE OFF CACHE BOOL "Disable binary log runtime core in the embedded baseline" FORCE)
 set(MYLITE_WITH_BINLOG_REPLAY OFF CACHE BOOL "Disable SQL BINLOG statement replay in the embedded baseline" FORCE)
 set(MYLITE_WITH_LOG_EVENT_SERVER OFF CACHE BOOL "Disable server binary-log event writers in the embedded baseline" FORCE)
+set(MYLITE_WITH_LOG_EVENT_PARSING OFF CACHE BOOL "Disable binary-log event parsing in the embedded baseline" FORCE)
 set(MYLITE_WITH_GTID_STATE OFF CACHE BOOL "Disable replication GTID state runtime in the embedded baseline" FORCE)
 set(MYLITE_WITH_SQL_HANDLER OFF CACHE BOOL "Disable SQL HANDLER command runtime in the embedded baseline" FORCE)
 set(MYLITE_WITH_SELECT_INTO_FILE OFF CACHE BOOL "Disable SELECT INTO OUTFILE/DUMPFILE host-file writers in the embedded baseline" FORCE)

@@ -62,7 +62,9 @@ omitted because the default `libmylite` startup contract is fixed,
 serverless, and directory-owned. Inherited `#binlog_cache_files` setup is
 skipped because the default profile has no binary-log core and does not create
 binlog cache files. Row-replication type conversion is omitted because row-event
-apply is already outside the core embedded profile.
+apply is already outside the core embedded profile. Binary-log event parser and
+reader runtime is omitted because event decode and replay are already outside
+the no-binlog embedded profile.
 
 ## Source Findings
 
@@ -385,6 +387,12 @@ apply is already outside the core embedded profile.
   metadata helpers used by retained event code, so the server-side conversion
   source needs a separate replacement rather than deleting all replication
   utility code.
+- `mariadb/sql/log_event.cc` implements common binary-log event parser and
+  reader runtime, including `Log_event::read_log_event()`,
+  format-description setup, compressed-event helpers, and event-class virtual
+  methods used by replay and replication paths. Retained code still references
+  a small event-class link contract and `str_to_hex()` for ordinary SQL string
+  literal rendering through `append_query_string()`.
 
 ## Proposed Design
 
@@ -656,6 +664,18 @@ to `ON` so upstream-style embedded builds keep row-event conversion behavior.
 The disabled profile replaces `rpl_utility_server.cc` with fail-closed
 conversion stubs while retaining `rpl_utility.cc` table-map metadata helpers.
 
+The embedded archive omits common binary-log event parser and reader runtime by
+setting `MYLITE_WITH_LOG_EVENT_PARSING=0` in the MyLite baseline. The option
+defaults to `ON` so upstream-style embedded builds keep upstream event parsing
+behavior. The disabled profile omits `log_event.cc` and keeps minimal
+fail-closed event reader, checksum metadata, virtual method, destructor, and
+format-description symbols in `mylite_log_event_server_disabled.cc`.
+Configuration rejects `MYLITE_WITH_LOG_EVENT_PARSING=0` while upstream server
+event writers remain enabled, because the disabled event source owns the
+combined retained link contract.
+`append_query_string()` and `str_to_hex()` remain available for ordinary SQL
+literal rendering.
+
 The embedded archive omits PROXY protocol listener support by setting
 `MYLITE_WITH_PROXY_PROTOCOL=0` in the MyLite baseline. The option defaults to
 `ON` so normal MariaDB builds keep upstream listener behavior. The disabled
@@ -735,7 +755,8 @@ profile. Server-side binary-log event writers are replaced with a disabled
 embedded source while the ordinary SQL string-quoting helper remains available.
 Row-replication type-conversion helpers are replaced with fail-closed embedded
 stubs while shared table-map metadata helpers remain available for retained
-event code.
+event code. Common binary-log event parser and reader runtime is omitted while
+minimal fail-closed event-class symbols remain for retained unsupported paths.
 
 ## Compatibility Impact
 
@@ -771,6 +792,12 @@ SQL `BINLOG` replay is also a replication replay surface. Omitting
 `sql_binlog.cc` and rejecting direct and prepared `BINLOG` statements does not
 affect ordinary SQL execution, prepared statements, native storage engines,
 JSON, GEOMETRY/GIS, DDL, DML, transactions, or the public C API.
+Common binary-log event parser and reader runtime is also part of the
+unsupported replication/binlog replay surface. Omitting `log_event.cc` does not
+affect ordinary SQL parsing, statement execution, prepared statements,
+diagnostics, native storage engines, JSON, GEOMETRY/GIS, DDL, DML,
+transactions, or the public C API; retained event symbols fail closed if an
+unsupported path reaches them.
 Omitting the guarded replication execution system variables only removes
 configuration rows for unsupported topology behavior; common compatibility
 variables such as `@@log_bin=0` remain available.
@@ -1059,6 +1086,11 @@ brings the current archive to 26,258,720 bytes / 25.04 MiB, 5,270,984 bytes
 smaller than the Release build with Performance Schema disabled, 6,870,920
 bytes smaller than the symbol-stripped baseline with Performance Schema still
 built, and 7,583,600 bytes smaller than the original broad archive.
+Omitting binary-log event parser and reader runtime brings the current archive
+to 26,195,576 bytes / 24.98 MiB, 5,334,128 bytes smaller than the Release build
+with Performance Schema disabled, 6,934,064 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 7,646,744
+bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -1088,13 +1120,15 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   coverage, and plugin SQL remains rejected.
 - Confirm `MYLITE_WITH_LOG_EVENT_SERVER=OFF` appears in the embedded CMake
   cache.
+- Confirm `MYLITE_WITH_LOG_EVENT_PARSING=OFF` appears in the embedded CMake
+  cache.
 - Confirm `MYLITE_WITH_GTID_STATE=OFF` appears in the embedded CMake cache.
 - Confirm `MYLITE_WITH_SQL_HANDLER=OFF` appears in the embedded CMake cache.
 - Confirm `MYLITE_WITH_SELECT_INTO_FILE=OFF` appears in the embedded CMake
   cache.
-- Confirm `rpl_injector.cc.o`, `rpl_record.cc.o`, and `log_event_server.cc.o`
-  are absent from `libmariadbd.a`, while `gtid_index.cc.o`, `log_event.cc.o`,
-  `mylite_log_event_server_disabled.cc.o`, and
+- Confirm `rpl_injector.cc.o`, `rpl_record.cc.o`, `log_event.cc.o`, and
+  `log_event_server.cc.o` are absent from `libmariadbd.a`, while
+  `gtid_index.cc.o`, `mylite_log_event_server_disabled.cc.o`, and
   `mylite_rpl_gtid_disabled.cc.o` remain.
 - Confirm `rpl_gtid.cc.o` is absent from `libmariadbd.a`, and direct and
   prepared `MASTER_GTID_WAIT()` / `BINLOG_GTID_POS()` /
@@ -1213,11 +1247,13 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   from the embedded archive. Server-side binary-log event writers are replaced
   with a disabled embedded source, `append_query_string()` still supports
   ordinary SQL literal rendering, and `log_event_server.cc.o` is absent from
-  the embedded archive. Replication GTID-state runtime is replaced with a
-  disabled embedded source, GTID helper SQL functions and GTID state variable
-  assignments are rejected, and `rpl_gtid.cc.o` is absent from the embedded
-  archive. SQL `HANDLER` command runtime is replaced with a disabled embedded
-  source, top-level `HANDLER ...` statements are rejected, and
+  the embedded archive. Binary-log event parser and reader runtime is omitted,
+  `log_event.cc.o` is absent from the embedded archive, and retained event
+  read/decode paths fail closed. Replication GTID-state runtime is replaced
+  with a disabled embedded source, GTID helper SQL functions and GTID state
+  variable assignments are rejected, and `rpl_gtid.cc.o` is absent from the
+  embedded archive. SQL `HANDLER` command runtime is replaced with a disabled
+  embedded source, top-level `HANDLER ...` statements are rejected, and
   `sql_handler.cc.o` is absent from the embedded archive. Host-file SELECT
   exports are rejected, and `SELECT ... INTO @variable` remains supported.
   Row-replication type-conversion helpers are replaced with fail-closed embedded
@@ -1279,9 +1315,12 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
 - Unwind-table omission should stay scoped to targets where it is non-semantic.
 - Stored functions remain planned application SQL. Dynamic UDF policy and size
   trimming must stay scoped to shared-library UDF registration and execution.
-- `log.cc`, `gtid_index.cc`, `log_event.cc`, `sql_repl.cc`, and replication
-  utility files still have shared references. Removing more binlog code needs
-  separate source and link evidence rather than file-name pruning.
+- `log.cc`, `gtid_index.cc`, `sql_repl.cc`, and replication utility files
+  still have shared references. Removing more binlog code needs separate source
+  and link evidence rather than file-name pruning.
+- The disabled log-event source keeps a small virtual-method and destructor
+  contract for retained unsupported paths. Further shrinking that contract
+  needs link evidence plus coverage for ordinary SQL string rendering.
 - The SQL `HANDLER` command runtime is omitted, but storage-engine `handler`
   classes and generic handler APIs remain required for normal table execution.
 - The generic SELECT procedure dispatch remains linked after omitting

@@ -24,6 +24,10 @@ retained helper rather than a blind source deletion.
   `append_query_string()` plus binary-log event writer/vtable symbols retained
   through `log.cc`, `temporary_tables.cc`, and `log_event.cc`.
 
+This spec records the server-event-writer trim boundary. A later dedicated
+log-event-parsing trim omits `log_event.cc` too, after moving the remaining
+event-reader link contract into the disabled MyLite event source.
+
 ## Design
 
 Add `MYLITE_WITH_LOG_EVENT_SERVER`. The default MariaDB build keeps the upstream

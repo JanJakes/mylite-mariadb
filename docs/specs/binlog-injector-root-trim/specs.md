@@ -35,6 +35,10 @@ An attempted broader event-object trim showed that `gtid_index.cc`,
 MariaDB code. This slice keeps them instead of replacing shared event and
 GTID-index implementations with a wide stub.
 
+This spec records the injector-root trim boundary. Later dedicated
+log-event-server and log-event-parsing trims replace the event writer and event
+parser objects with narrower disabled link contracts.
+
 ## Design
 
 When `MYLITE_WITH_BINLOG_CORE=OFF`:
@@ -113,4 +117,5 @@ git diff --check
 - The no-binlog profile still retains `log.cc`, `gtid_index.cc`,
   `log_event.cc`, `log_event_server.cc`, `sql_binlog.cc`, `sql_repl.cc`,
   `rpl_gtid.cc`, and replication utility files where other retained MariaDB
-  paths still reference them. Further cuts need separate link evidence.
+  paths still reference them at this slice boundary. Later size slices narrow
+  that retained set with separate source and link evidence.

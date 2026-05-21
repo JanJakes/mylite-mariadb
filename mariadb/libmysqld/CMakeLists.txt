@@ -42,6 +42,18 @@ ELSE()
   SET(MYLITE_LOG_EVENT_SERVER_SOURCE ../sql/mylite_log_event_server_disabled.cc)
 ENDIF()
 
+OPTION(MYLITE_WITH_LOG_EVENT_PARSING "Build binary-log event parser and reader runtime" ON)
+IF(MYLITE_WITH_LOG_EVENT_PARSING)
+  ADD_DEFINITIONS(-DMYLITE_WITH_LOG_EVENT_PARSING=1)
+  SET(MYLITE_LOG_EVENT_SOURCE ../sql/log_event.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_LOG_EVENT_PARSING=0)
+  IF(MYLITE_WITH_LOG_EVENT_SERVER)
+    MESSAGE(FATAL_ERROR
+      "MYLITE_WITH_LOG_EVENT_PARSING=OFF requires MYLITE_WITH_LOG_EVENT_SERVER=OFF")
+  ENDIF()
+ENDIF()
+
 OPTION(MYLITE_WITH_GTID_STATE "Build replication GTID state runtime" ON)
 IF(MYLITE_WITH_GTID_STATE)
   ADD_DEFINITIONS(-DMYLITE_WITH_GTID_STATE=1)
@@ -303,7 +315,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/item_xmlfunc.cc ../sql/item_jsonfunc.cc
            ../sql/json_schema.cc ../sql/json_schema_helper.cc
            ../sql/key.cc ../sql/lock.cc ../sql/log.cc ../sql/log_cache.cc
-           ../sql/log_event.cc ${MYLITE_LOG_EVENT_SERVER_SOURCE}
+           ${MYLITE_LOG_EVENT_SOURCE} ${MYLITE_LOG_EVENT_SERVER_SOURCE}
            ../sql/mf_iocache.cc ../sql/my_decimal.cc 
            ../sql/net_serv.cc ../sql/opt_range.cc
            ../sql/opt_group_by_cardinality.cc

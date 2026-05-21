@@ -15,6 +15,21 @@
 #define MYLITE_LOG_EVENT_WRITE_DISABLED true
 #define MYLITE_LOG_EVENT_IO_DISABLED 1
 
+#ifndef _AIX
+PSI_memory_key key_memory_log_event;
+#endif
+PSI_memory_key key_memory_Incident_log_event_message;
+
+const char *binlog_checksum_type_names[]= { "NONE", "CRC32", NullS };
+
+unsigned int binlog_checksum_type_length[]= {
+  sizeof("NONE") - 1,
+  sizeof("CRC32") - 1,
+  0
+};
+
+TYPELIB binlog_checksum_typelib= CREATE_TYPELIB_FOR(binlog_checksum_type_names);
+
 int append_query_string(CHARSET_INFO *csinfo, String *to,
                         const char *str, size_t len, bool no_backslash)
 {
@@ -50,6 +65,21 @@ int append_query_string(CHARSET_INFO *csinfo, String *to,
   return 0;
 }
 
+char *str_to_hex(char *to, const uchar *from, size_t len)
+{
+  if (len)
+  {
+    *to++= 'X';
+    *to++= '\'';
+    to= octet2hex(to, from, len);
+    *to++= '\'';
+    *to= '\0';
+  }
+  else
+    to= strmov(to, "\"\"");
+  return to;
+}
+
 Log_event::Log_event(THD *thd_arg, uint16 flags_arg, bool using_trans)
   : log_pos(0), temp_buf(0), exec_time(0),
     slave_exec_mode(SLAVE_EXEC_MODE_STRICT), thd(thd_arg)
@@ -74,6 +104,22 @@ Log_event::Log_event()
 
 void Log_event::init_show_field_list(THD *, List<Item> *)
 {
+}
+
+Log_event *Log_event::read_log_event(IO_CACHE *, int *out_error,
+                                     const Format_description_log_event *,
+                                     my_bool, my_bool, size_t)
+{
+  if (out_error)
+    *out_error= LOG_READ_BOGUS;
+  return NULL;
+}
+
+int Log_event::read_log_event(IO_CACHE *, String *,
+                              const Format_description_log_event *,
+                              enum_binlog_checksum_alg, size_t)
+{
+  return LOG_READ_BOGUS;
 }
 
 bool Log_event::write_header(Log_event_writer *, size_t)
@@ -202,6 +248,24 @@ bool Rotate_log_event::write(Log_event_writer *)
   return MYLITE_LOG_EVENT_WRITE_DISABLED;
 }
 
+bool Format_description_log_event::start_decryption(Start_encryption_log_event *)
+{
+  return true;
+}
+
+Format_description_log_event::Format_description_log_event(
+    uint8 binlog_ver, const char *server_ver,
+    enum_binlog_checksum_alg checksum_alg)
+  : Log_event(), created(0), binlog_version(binlog_ver),
+    dont_set_created(false), common_header_len(LOG_EVENT_MINIMAL_HEADER_LEN),
+    number_of_event_types(0), post_header_len(0), server_version_split(),
+    event_type_permutation(0), options_written_to_bin_log(0),
+    used_checksum_alg(checksum_alg)
+{
+  strmake(server_version, server_ver ? server_ver : MYSQL_SERVER_VERSION,
+          sizeof(server_version) - 1);
+}
+
 Binlog_checkpoint_log_event::Binlog_checkpoint_log_event(
     const char *binlog_file_name_arg, uint binlog_file_len_arg)
   : Log_event(), binlog_file_name(0), binlog_file_len(binlog_file_len_arg)
@@ -308,13 +372,39 @@ bool Execute_load_query_log_event::write_post_header_for_derived(
   return MYLITE_LOG_EVENT_WRITE_DISABLED;
 }
 
+ulong Execute_load_query_log_event::get_post_header_size_for_derived()
+{
+  return EXECUTE_LOAD_QUERY_EXTRA_HEADER_LEN;
+}
+
 Annotate_rows_log_event::Annotate_rows_log_event(THD *thd_arg,
                                                  bool using_trans,
                                                  bool direct)
-  : Log_event(thd_arg, 0, using_trans), m_query_txt(0)
+  : Log_event(thd_arg, 0, using_trans), m_query_txt(0), m_query_len(0),
+    m_save_thd_query_txt(0), m_save_thd_query_len(0),
+    m_saved_thd_query(false), m_used_query_txt(false)
 {
   if (direct)
     cache_type= EVENT_NO_CACHE;
+}
+
+Annotate_rows_log_event::~Annotate_rows_log_event()
+{
+}
+
+int Annotate_rows_log_event::get_data_size()
+{
+  return 0;
+}
+
+Log_event_type Annotate_rows_log_event::get_type_code()
+{
+  return ANNOTATE_ROWS_EVENT;
+}
+
+bool Annotate_rows_log_event::is_valid() const
+{
+  return false;
 }
 
 bool Annotate_rows_log_event::write_data_header(Log_event_writer *)
@@ -341,6 +431,14 @@ Table_map_log_event::Table_map_log_event(THD *thd, TABLE *tbl, ulonglong tid,
     m_null_bits(0), m_meta_memory(0), m_optional_metadata_len(0),
     m_optional_metadata(0)
 {
+}
+
+Table_map_log_event::~Table_map_log_event()
+{
+  my_free(m_meta_memory);
+  my_free(m_memory);
+  my_free(m_optional_metadata);
+  m_optional_metadata= NULL;
 }
 
 int Table_map_log_event::save_field_metadata()
@@ -415,6 +513,18 @@ Rows_log_event::Rows_log_event(THD *thd_arg, TABLE *tbl_arg,
   memset(&m_cols_ai, 0, sizeof(m_cols_ai));
 }
 
+Rows_log_event::~Rows_log_event()
+{
+  my_bitmap_free(&m_cols);
+  my_free(m_rows_buf);
+  my_free(m_extra_row_data);
+}
+
+int Rows_log_event::get_data_size()
+{
+  return 0;
+}
+
 int Rows_log_event::do_add_row_data(uchar *, size_t)
 {
   return HA_ERR_UNSUPPORTED;
@@ -483,6 +593,11 @@ Update_rows_compressed_log_event::Update_rows_compressed_log_event(
   m_type= UPDATE_ROWS_COMPRESSED_EVENT_V1;
 }
 
+Update_rows_log_event::~Update_rows_log_event()
+{
+  my_bitmap_free(&m_cols_ai);
+}
+
 bool Update_rows_compressed_log_event::write(Log_event_writer *)
 {
   return MYLITE_LOG_EVENT_WRITE_DISABLED;
@@ -517,4 +632,15 @@ bool Incident_log_event::write_data_header(Log_event_writer *)
 bool Incident_log_event::write_data_body(Log_event_writer *)
 {
   return MYLITE_LOG_EVENT_WRITE_DISABLED;
+}
+
+Incident_log_event::~Incident_log_event()
+{
+  if (m_message.str)
+    my_free(m_message.str);
+}
+
+const char *Incident_log_event::description() const
+{
+  return "DISABLED";
 }

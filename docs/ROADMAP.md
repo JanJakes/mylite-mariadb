@@ -66,6 +66,7 @@ surface that does not fit a local directory-owned library:
 - startup options for disabled server topology and dynamic plugin loading,
 - inherited binary-log cache directory setup,
 - row-replication type conversion,
+- binary-log event parser and reader runtime,
 - host-file SELECT exports,
 - rarely used optional engines or plugins unless a slice justifies them.
 
@@ -94,14 +95,17 @@ policy coverage proves replication and binlog command families are outside the
 core library contract. Embedded no-binlog startup, open, cleanup, and
 GTID-index update paths are guarded, and the unsupported injector root is
 omitted after link evidence proves it is only needed by the server topology
-runtime. Shared event and replication utility helpers that retained MariaDB code
-still references remain for narrower review.
+runtime. Shared GTID-index and replication utility helpers still referenced by
+retained MariaDB code remain for narrower review.
 SQL `BINLOG` statement replay is omitted after coverage proves it is an
 unsupported replication replay surface and the embedded dispatcher already
 fail-closes it.
 Server-side binary-log event writers are replaced with a disabled embedded
 source after link evidence proves the only ordinary SQL helper that must remain
 is `append_query_string()`.
+Binary-log event parser and reader runtime is omitted after link evidence
+proves retained embedded paths need only minimal fail-closed event symbols, not
+binary-log replay/decode support.
 Replication GTID-state runtime is replaced with empty embedded state after link
 evidence proves retained `log.cc` and `gtid_index.cc` paths only need the state
 contract, not server topology behavior. GTID helper SQL functions are rejected
