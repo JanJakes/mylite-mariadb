@@ -127,6 +127,9 @@ native storage inside the MyLite database directory.
 External backup runtime is omitted after coverage proves `BACKUP STAGE`,
 `BACKUP LOCK`, and `BACKUP UNLOCK` are backup-tool coordination surfaces;
 ordinary DDL backup hooks stay inert so application DDL remains unaffected.
+VIO TLS transport is omitted from the core embedded archive because TLS belongs
+to socket and wire-protocol adapters, not to the in-process database-directory
+startup contract; retained SQL crypto functions continue to use OpenSSL Crypto.
 Oracle compatibility function aliases and `oracle_schema` routing are omitted
 after coverage proves the normal MySQL/MariaDB string functions remain
 available, Oracle-only aliases fail predictably, and `oracle_schema` no

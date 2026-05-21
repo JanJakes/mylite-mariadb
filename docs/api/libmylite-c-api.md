@@ -444,6 +444,11 @@ configuration: `CREATE SERVER`, `ALTER SERVER`, `DROP SERVER`, and
 External backup runtime SQL is omitted as a server backup-tool surface:
 `BACKUP STAGE`, `BACKUP LOCK`, and `BACKUP UNLOCK` are rejected, while
 ordinary DDL hooks stay inert.
+VIO TLS transport is omitted from the default embedded archive because
+`libmylite` does not open a socket or perform a network handshake. Wire-protocol
+adapters that need TLS should own that transport explicitly. Inherited
+`mysql_ssl_set()` calls fail closed in this profile, while retained SQL crypto
+functions continue to use OpenSSL Crypto.
 The default embedded profile also omits `SFORMAT()`, which fails as an
 unknown SQL function; ordinary `FORMAT()` remains available. The legacy
 `PROCEDURE ANALYSE()` SELECT extension is rejected as an unsupported diagnostic

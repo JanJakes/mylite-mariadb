@@ -25,6 +25,10 @@
 */
 
 #include "vio_priv.h"
+#ifndef MYLITE_WITH_VIO_TLS
+#define MYLITE_WITH_VIO_TLS 1
+#endif
+
 #ifdef _WIN32
   #include <winsock2.h>
   #include <MSWSock.h>
@@ -1191,7 +1195,7 @@ my_bool vio_is_connected(Vio *vio)
       DBUG_RETURN(FALSE);
   }
 
-#ifdef HAVE_OPENSSL
+#if defined(HAVE_OPENSSL) && MYLITE_WITH_VIO_TLS
   /* There might be buffered data at the SSL layer. */
   if (!bytes && vio->type == VIO_TYPE_SSL)
     bytes= SSL_pending((SSL*) vio->ssl_arg);
@@ -1229,9 +1233,11 @@ ssize_t vio_pending(Vio *vio)
     return bytes;
 
   case VIO_TYPE_SSL:
+#if defined(HAVE_OPENSSL) && MYLITE_WITH_VIO_TLS
     bytes= (uint) SSL_pending(vio->ssl_arg);
     if (bytes)
       return bytes;
+#endif
     if (socket_peek_read(vio, &bytes))
       return -1;
     return bytes;

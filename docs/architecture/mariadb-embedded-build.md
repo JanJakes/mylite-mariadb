@@ -194,10 +194,12 @@ injector root saves 14,896 bytes and one archive member. Omitting process-list
 metadata producers saves 39,752 bytes with no member-count change. Omitting
 foreign-server metadata saves 15,344 bytes with no member-count change.
 Omitting the external backup runtime saves 5,520 bytes with no member-count
-change.
-The final archive is 4,981,296 bytes smaller than the Release build with
-Performance Schema disabled, 6,581,232 bytes smaller than the symbol-stripped
-baseline that still built Performance Schema, and 7,293,912 bytes smaller than
+change. Omitting VIO TLS transport saves 12,296 bytes and one archive member,
+and removes the linked `libssl` dependency from first-party embedded test
+artifacts while keeping `libcrypto` for retained SQL crypto functions.
+The final archive is 4,993,592 bytes smaller than the Release build with
+Performance Schema disabled, 6,593,528 bytes smaller than the symbol-stripped
+baseline that still built Performance Schema, and 7,306,208 bytes smaller than
 the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
@@ -318,6 +320,7 @@ The baseline explicitly disables:
 - Process-list metadata
 - Foreign-server metadata
 - External backup runtime
+- VIO TLS transport
 - Oracle compatibility function aliases and `oracle_schema` routing
 - Full inherited server error-message catalog
 - MariaDB upstream unit-test targets

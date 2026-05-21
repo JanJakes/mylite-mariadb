@@ -22,7 +22,13 @@
 */
 
 #include "vio_priv.h"
+#ifndef MYLITE_WITH_VIO_TLS
+#define MYLITE_WITH_VIO_TLS 1
+#endif
+
+#if defined(HAVE_OPENSSL) && MYLITE_WITH_VIO_TLS
 #include "ssl_compat.h"
+#endif
 
 PSI_memory_key key_memory_vio_ssl_fd;
 PSI_memory_key key_memory_vio;
@@ -131,7 +137,7 @@ static void vio_init(Vio *vio, enum enum_vio_type type,
   }
 #endif
 
-#ifdef HAVE_OPENSSL
+#if defined(HAVE_OPENSSL) && MYLITE_WITH_VIO_TLS
   if (type == VIO_TYPE_SSL)
   {
     vio->viodelete	=vio_ssl_delete;
@@ -153,7 +159,7 @@ static void vio_init(Vio *vio, enum enum_vio_type type,
     vio->timeout        =vio_socket_timeout;
     DBUG_VOID_RETURN;
   }
-#endif /* HAVE_OPENSSL */
+#endif /* HAVE_OPENSSL && MYLITE_WITH_VIO_TLS */
   vio->viodelete        =vio_delete;
   vio->vioerrno         =vio_errno;
   vio->read=            (flags & VIO_BUFFERED_READ) ? vio_read_buff : vio_read;
@@ -213,7 +219,7 @@ my_bool vio_reset(Vio* vio, enum enum_vio_type type,
   /* Preserve perfschema info for this connection */
   vio->mysql_socket.m_psi= old_vio.mysql_socket.m_psi;
 
-#ifdef HAVE_OPENSSL
+#if defined(HAVE_OPENSSL) && MYLITE_WITH_VIO_TLS
   vio->ssl_arg= ssl;
 #endif
 

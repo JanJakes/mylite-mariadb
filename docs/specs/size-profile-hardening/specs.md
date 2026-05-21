@@ -42,6 +42,8 @@ Oracle compatibility mode is already unsupported and these aliases are not core
 MySQL/MariaDB application SQL. The full English server error-message catalog is
 compacted because uncommon diagnostic prose is not core SQL, storage, or API
 behavior when MariaDB errno and SQLSTATE remain available.
+VIO TLS transport is omitted because the core profile is an in-process
+database-directory runtime without socket startup or network handshakes.
 
 ## Source Findings
 
@@ -228,6 +230,16 @@ behavior when MariaDB errno and SQLSTATE remain available.
   `MYLITE_WITH_BACKUP_RUNTIME=0` replaces the active runtime with inert DDL
   hooks and unsupported SQL entry points, and reduces the stripped archive to
   26,548,408 bytes, 25.32 MiB, and 704 members.
+- `mariadb/vio/viossl.c` and `mariadb/vio/viosslfactories.c` implement TLS
+  socket transport and connector/acceptor context setup. Shared VIO and
+  client helpers in `mariadb/vio/vio.c`, `mariadb/vio/viosocket.c`, and
+  `mariadb/sql-common/client.c` also reference those TLS helpers.
+- Disabling VIO TLS transport behind `MYLITE_WITH_VIO_TLS=0` replaces the
+  full transport with a small disabled stub, compiles shared VIO/client paths
+  without TLS branches, removes `OpenSSL::SSL` from the first-party imported
+  embedded target, and reduces the stripped archive to 26,536,112 bytes,
+  25.31 MiB, and 703 members. `libcrypto` remains linked for retained SQL
+  crypto and password functions.
 - `mariadb/sql/item_create.cc` registers Oracle compatibility aliases such as
   `DECODE_ORACLE`, `LPAD_ORACLE`, `RTRIM_ORACLE`, `SUBSTR_ORACLE`, and
   `CONCAT_OPERATOR_ORACLE`, and builds a separate
@@ -451,6 +463,14 @@ The embedded archive omits the external backup runtime by setting
 disabled profile replaces `backup.cc` with inert DDL helper hooks and
 unsupported `BACKUP STAGE` / `BACKUP LOCK` entry points. The public MyLite SQL
 policy rejects direct and prepared backup statements before MariaDB dispatch.
+
+The embedded archive omits VIO TLS transport by setting
+`MYLITE_WITH_VIO_TLS=0` in the MyLite baseline. The option defaults to `ON` so
+normal MariaDB builds keep upstream TLS socket behavior. The disabled profile
+replaces `viossl.c` and `viosslfactories.c` with a small unsupported transport
+stub, guards TLS branches in shared VIO/client helpers, makes inherited
+`mysql_ssl_set()` calls fail closed, and lets first-party linked MyLite
+artifacts omit `OpenSSL::SSL`.
 
 The wrapper keeps this behavior enabled by default because it is the
 distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
@@ -684,11 +704,18 @@ bytes / 25.32 MiB, 4,981,296 bytes smaller than the Release build with
 Performance Schema disabled, 6,581,232 bytes smaller than the symbol-stripped
 baseline with Performance Schema still built, and 7,293,912 bytes smaller than
 the original broad archive.
+Omitting VIO TLS transport brings the current archive to 26,536,112 bytes /
+25.31 MiB, 4,993,592 bytes smaller than the Release build with Performance
+Schema disabled, 6,593,528 bytes smaller than the symbol-stripped baseline
+with Performance Schema still built, and 7,306,208 bytes smaller than the
+original broad archive.
 
 ## License Or Dependency Impact
 
 No new dependencies or license changes. The wrapper uses standard `strip` and
-`ranlib` tools already expected in the native build toolchain.
+`ranlib` tools already expected in the native build toolchain. VIO TLS trimming
+removes the linked `libssl` dependency from first-party embedded MyLite
+artifacts while retaining `libcrypto` for SQL crypto and password functions.
 
 ## Test And Verification Plan
 
@@ -722,6 +749,10 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Confirm `MYLITE_WITH_BACKUP_RUNTIME=OFF` appears in the embedded CMake cache,
   `backup.cc.o` is absent, `mylite_backup_disabled.cc.o` is present in
   `libmariadbd.a`, and direct and prepared backup SQL statements are rejected.
+- Confirm `MYLITE_WITH_VIO_TLS=OFF` appears in the embedded CMake cache,
+  `viossl.c.o` and `viosslfactories.c.o` are absent,
+  `mylite_viossl_disabled.c.o` is present in `libmariadbd.a`, and
+  first-party linked embedded artifacts do not depend on `libssl`.
 - Run `cmake --build --preset dev`.
 - Run `ctest --preset dev --output-on-failure`.
 - Run `cmake --build --preset embedded-dev`.

@@ -34,3 +34,4 @@ set(MYLITE_WITH_OPTIMIZER_TRACE OFF CACHE BOOL "Disable optimizer trace diagnost
 set(MYLITE_WITH_PROCESSLIST_METADATA OFF CACHE BOOL "Disable process-list metadata in the embedded baseline" FORCE)
 set(MYLITE_WITH_FOREIGN_SERVER_METADATA OFF CACHE BOOL "Disable mysql.servers metadata in the embedded baseline" FORCE)
 set(MYLITE_WITH_BACKUP_RUNTIME OFF CACHE BOOL "Disable external backup runtime in the embedded baseline" FORCE)
+set(MYLITE_WITH_VIO_TLS OFF CACHE BOOL "Disable VIO TLS transport in the embedded baseline" FORCE)
