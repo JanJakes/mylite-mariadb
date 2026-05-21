@@ -96,6 +96,10 @@
 #define MYLITE_WITH_DYNAMIC_PLUGIN_LOADING 1
 #endif
 
+#ifndef MYLITE_WITH_DISABLED_STARTUP_OPTIONS
+#define MYLITE_WITH_DISABLED_STARTUP_OPTIONS 1
+#endif
+
 #ifdef HAVE_OPENSSL
 #include <ssl_compat.h>
 #endif
@@ -6776,14 +6780,17 @@ struct my_option my_long_options[]=
    "(not repair) tables while the MariaDB server is running. Disable with "
    "--skip-external-locking"), &opt_external_locking, &opt_external_locking,
    0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
+#if MYLITE_WITH_DISABLED_STARTUP_OPTIONS
   /* We must always support the next option to make scripts like mysqltest
      easier to do */
   {"flashback", 0, MYLITE_OPTION_HELP_TEXT("Setup the server to use flashback. This enables binary log in row mode and will enable extra logging for DDL's needed by flashback feature"),
    &opt_support_flashback, &opt_support_flashback,
    0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
+#endif /* MYLITE_WITH_DISABLED_STARTUP_OPTIONS */
   {"gdb", 0, MYLITE_OPTION_HELP_TEXT("Set up signals usable for debugging"),
    &opt_debugging, &opt_debugging,
    0, GET_BOOL, NO_ARG, 0, 0, 0, "debug_gdb", 0, 0},
+#if MYLITE_WITH_DISABLED_STARTUP_OPTIONS
   {"gtid-pos-auto-engines", 0, MYLITE_OPTION_HELP_TEXT("List of engines for which to automatically create a "
    "mysql.gtid_slave_pos_ENGINE table, if a transaction using that engine "
    "is replicated. This can be used to avoid introducing cross-engine "
@@ -6791,6 +6798,7 @@ struct my_option my_long_options[]=
    "mysql.gtid_slave_pos"),
    &gtid_pos_auto_engines, 0, 0, GET_STR, REQUIRED_ARG,
    0, 0, 0, 0, 0, 0 },
+#endif /* MYLITE_WITH_DISABLED_STARTUP_OPTIONS */
 #ifdef HAVE_SOLARIS_LARGE_PAGES
   {"super-large-pages", 0, MYLITE_OPTION_HELP_TEXT("Enable support for super large pages"),
    &opt_super_large_pages, &opt_super_large_pages, 0,
@@ -6821,6 +6829,7 @@ struct my_option my_long_options[]=
    "stop if the real hostname of the computer changes"),
    &opt_bin_logname, &opt_bin_logname, 0, GET_STR,
    OPT_ARG, 0, 0, 0, 0, 0, 0},
+#if MYLITE_WITH_DISABLED_STARTUP_OPTIONS
   {"log-bin-index", 0, MYLITE_OPTION_HELP_TEXT("File that holds the names for last binary log files"),
    &opt_binlog_index_name, &opt_binlog_index_name, 0, GET_STR,
    REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
@@ -6828,6 +6837,7 @@ struct my_option my_long_options[]=
    "relay logs"),
    &opt_relaylog_index_name, &opt_relaylog_index_name, 0, GET_STR,
    REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+#endif /* MYLITE_WITH_DISABLED_STARTUP_OPTIONS */
   {"log-ddl-recovery", 0, MYLITE_OPTION_HELP_TEXT("Path to file used for recovery of DDL statements after a crash"),
    &opt_ddl_recovery_file, &opt_ddl_recovery_file, 0, GET_STR,
    REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
@@ -6841,6 +6851,7 @@ struct my_option my_long_options[]=
    "more than one storage engine, when binary log is disabled)"),
    &opt_tc_log_file, &opt_tc_log_file, 0, GET_STR,
    REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+#if MYLITE_WITH_DISABLED_STARTUP_OPTIONS
   {"master-info-file", 0, MYLITE_OPTION_HELP_TEXT("The location and name of the file that remembers the master and where "
    "the I/O replication thread is in the master's binlogs. Defaults to "
    "master.info"),
@@ -6849,6 +6860,7 @@ struct my_option my_long_options[]=
   {"master-retry-count", 0, MYLITE_OPTION_HELP_TEXT("The number of tries the slave will make to connect to the master before giving up"),
    &master_retry_count, &master_retry_count, 0, GET_ULONG,
    REQUIRED_ARG, 100000, 0, 0, 0, 0, 0},
+#endif /* MYLITE_WITH_DISABLED_STARTUP_OPTIONS */
 #ifdef HAVE_REPLICATION
   {"init-rpl-role", 0, MYLITE_OPTION_HELP_TEXT("Set the replication role"),
    &rpl_status, &rpl_status, &rpl_role_typelib,
@@ -6918,9 +6930,11 @@ struct my_option my_long_options[]=
   {"safe-user-create", 0, MYLITE_OPTION_HELP_TEXT("Don't allow new user creation by the user who has no write privileges to the mysql.user table"),
    &opt_safe_user_create, &opt_safe_user_create, 0, GET_BOOL,
    NO_ARG, 0, 0, 0, 0, 0, 0},
+#if MYLITE_WITH_DISABLED_STARTUP_OPTIONS
   {"show-slave-auth-info", 0, MYLITE_OPTION_HELP_TEXT("Show user and password in SHOW SLAVE HOSTS on this master"),
    &opt_show_slave_auth_info, &opt_show_slave_auth_info, 0,
    GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
+#endif /* MYLITE_WITH_DISABLED_STARTUP_OPTIONS */
   {"silent-startup", OPT_SILENT, MYLITE_OPTION_HELP_TEXT("Don't print [Note] to the error log during startup"),
    &opt_silent_startup, &opt_silent_startup, 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
   {"skip-host-cache", OPT_SKIP_HOST_CACHE, MYLITE_OPTION_HELP_TEXT("Don't cache host names"), 0, 0, 0,
@@ -6997,6 +7011,7 @@ struct my_option my_long_options[]=
    &opt_verbose, &opt_verbose, 0, GET_BOOL, NO_ARG, 0, 0, 0, 0, 0, 0},
   {"version", 'V', MYLITE_OPTION_HELP_TEXT("Output version information and exit"), 0, 0, 0, GET_STR,
    OPT_ARG, 0, 0, 0, 0, 0, 0},
+#if MYLITE_WITH_DISABLED_STARTUP_OPTIONS
   {"plugin-load", OPT_PLUGIN_LOAD, MYLITE_OPTION_HELP_TEXT("Semicolon-separated list of plugins to load, where each plugin is "
    "specified as ether a plugin_name=library_file pair or only a library_file. "
    "If the latter case, all plugins from a given library_file will be loaded"),
@@ -7007,6 +7022,7 @@ struct my_option my_long_options[]=
    "It can be specified many times, adding more plugins every time"),
    0, 0, 0,
     GET_STR, REQUIRED_ARG, 0, 0, 0, 0, 0, 0},
+#endif /* MYLITE_WITH_DISABLED_STARTUP_OPTIONS */
   {"table_cache", 0, MYLITE_OPTION_HELP_TEXT("Sets table_open_cache"),
    &tc_size, &tc_size, 0, GET_ULONG,
    REQUIRED_ARG, TABLE_OPEN_CACHE_DEFAULT, 1, 512*1024L, "table_open_cache", 1, 0},
@@ -8551,6 +8567,7 @@ mysqld_get_one_option(const struct my_option *opt, const char *argument,
       }
     }
     break;
+#if MYLITE_WITH_DISABLED_STARTUP_OPTIONS
   case OPT_PLUGIN_LOAD:
     free_list(opt_plugin_load_list_ptr);
     if (argument == disabled_my_option)
@@ -8559,6 +8576,7 @@ mysqld_get_one_option(const struct my_option *opt, const char *argument,
   case OPT_PLUGIN_LOAD_ADD:
     opt_plugin_load_list_ptr->push_back(new i_string(argument));
     break;
+#endif /* MYLITE_WITH_DISABLED_STARTUP_OPTIONS */
   case OPT_PFS_INSTRUMENT:
   {
 #ifdef WITH_PERFSCHEMA_STORAGE_ENGINE

@@ -63,6 +63,7 @@ surface that does not fit a local directory-owned library:
 - server help text such as system-variable comments,
 - static server-information `SHOW` commands,
 - command-line option help prose,
+- startup options for disabled server topology and dynamic plugin loading,
 - host-file SELECT exports,
 - rarely used optional engines or plugins unless a slice justifies them.
 
@@ -110,6 +111,9 @@ execution.
 `SELECT ... INTO OUTFILE` and `SELECT ... INTO DUMPFILE` host-file writers are
 omitted after coverage proves they are server filesystem export surfaces;
 ordinary result delivery and `SELECT ... INTO @variable` remain covered.
+Startup option rows for disabled server topology and dynamic-plugin-loading
+surfaces are omitted after source review proves the retained `libmylite`
+startup vector still uses only serverless, directory-owned options.
 Replication execution, slave protocol, checksum, replication-event, and
 semi-sync system variables are also omitted after policy coverage proves those
 configuration rows belong to unsupported topology behavior; compatibility

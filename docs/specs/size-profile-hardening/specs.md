@@ -56,7 +56,10 @@ authentication, full event parse-data validation, and SQL `BINLOG` replay are
 omitted because they belong to diagnostic, authentication, scheduler, and
 replication replay surfaces outside the core embedded profile. Host-file
 SELECT exports are omitted because they write arbitrary user-named filesystem
-paths rather than returning rows through the embedded API.
+paths rather than returning rows through the embedded API. Startup option rows
+for disabled binary-log, replication, and dynamic-plugin-loading surfaces are
+omitted because the default `libmylite` startup contract is fixed,
+serverless, and directory-owned.
 
 ## Source Findings
 
@@ -363,6 +366,12 @@ paths rather than returning rows through the embedded API.
   native storage engines, and compression-provider fallback services available.
   The embedded profile reports `@@have_dynamic_loading=NO`. The stripped
   archive is reduced to 26,623,920 bytes, 25.39 MiB, and 705 members.
+- `mariadb/sql/mysqld.cc` still owns `my_long_options[]` rows for disabled
+  server topology and dynamic-plugin-loading startup options. The default
+  `libmylite` startup vector uses retained serverless options such as
+  `--skip-log-bin`, `--skip-slave-start`, `--plugin-dir`, and storage
+  directory options, but does not use positive binlog, relay-log, replication,
+  or plugin-load configuration rows.
 
 ## Proposed Design
 
@@ -432,6 +441,14 @@ initialization, keeps native storage engines available, and keeps provider
 fallback services used by retained engine code. `INSTALL PLUGIN` and
 `UNINSTALL PLUGIN` remain rejected by policy coverage, and
 `@@have_dynamic_loading=NO` records the runtime contract.
+
+The embedded archive omits startup option rows for disabled server topology and
+dynamic-plugin-loading surfaces by setting
+`MYLITE_WITH_DISABLED_STARTUP_OPTIONS=0` in the MyLite baseline. The option
+defaults to `ON` so normal MariaDB server builds keep upstream option rows.
+The disabled profile keeps startup options needed by the fixed `libmylite`
+runtime, including `--skip-log-bin`, `--skip-slave-start`, `--plugin-dir`,
+temporary-directory, and storage-directory options.
 
 The embedded SQL function registry omits `SFORMAT()` and the embedded
 `item_strfunc.cc` build excludes the fmtlib-backed implementation. With the
@@ -994,6 +1011,12 @@ bytes smaller than the Release build with Performance Schema disabled,
 6,859,976 bytes smaller than the symbol-stripped baseline with Performance
 Schema still built, and 7,572,656 bytes smaller than the original broad
 archive.
+Omitting startup option rows for disabled server topology and dynamic
+plugin-loading surfaces brings the current archive to 26,267,304 bytes /
+25.05 MiB, 5,262,400 bytes smaller than the Release build with Performance
+Schema disabled, 6,862,336 bytes smaller than the symbol-stripped baseline
+with Performance Schema still built, and 7,575,016 bytes smaller than the
+original broad archive.
 
 ## License Or Dependency Impact
 

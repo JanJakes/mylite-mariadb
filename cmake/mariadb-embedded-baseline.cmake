@@ -27,6 +27,7 @@ set(MYLITE_WITH_LOG_EVENT_SERVER OFF CACHE BOOL "Disable server binary-log event
 set(MYLITE_WITH_GTID_STATE OFF CACHE BOOL "Disable replication GTID state runtime in the embedded baseline" FORCE)
 set(MYLITE_WITH_SQL_HANDLER OFF CACHE BOOL "Disable SQL HANDLER command runtime in the embedded baseline" FORCE)
 set(MYLITE_WITH_SELECT_INTO_FILE OFF CACHE BOOL "Disable SELECT INTO OUTFILE/DUMPFILE host-file writers in the embedded baseline" FORCE)
+set(MYLITE_WITH_DISABLED_STARTUP_OPTIONS OFF CACHE BOOL "Disable startup options for disabled server subsystems in the embedded baseline" FORCE)
 set(MYLITE_WITH_QUERY_LOGS OFF CACHE BOOL "Disable general and slow query log runtime in the embedded baseline" FORCE)
 set(MYLITE_WITH_SQL_DIGEST OFF CACHE BOOL "Disable statement digest normalization in the embedded baseline" FORCE)
 set(MYLITE_WITH_STATUS_VARIABLES OFF CACHE BOOL "Disable server status variable publication in the embedded baseline" FORCE)

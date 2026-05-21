@@ -45,6 +45,7 @@ MYLITE_WITH_LOG_EVENT_SERVER=OFF
 MYLITE_WITH_GTID_STATE=OFF
 MYLITE_WITH_SQL_HANDLER=OFF
 MYLITE_WITH_SELECT_INTO_FILE=OFF
+MYLITE_WITH_DISABLED_STARTUP_OPTIONS=OFF
 MYLITE_WITH_QUERY_LOGS=OFF
 MYLITE_WITH_SQL_DIGEST=OFF
 MYLITE_WITH_STATUS_VARIABLES=OFF
@@ -112,7 +113,11 @@ MyLite policy. It omits SQL `HANDLER` command runtime behind
 while top-level `HANDLER ...` commands are rejected by policy. It omits
 `SELECT ... INTO OUTFILE` and `SELECT ... INTO DUMPFILE` host-file writer
 runtime behind `MYLITE_WITH_SELECT_INTO_FILE=0`; ordinary result delivery and
-`SELECT ... INTO @variable` remain available. It omits the general and slow
+`SELECT ... INTO @variable` remain available. Startup option rows for disabled
+server topology and dynamic plugin-loading surfaces are omitted behind
+`MYLITE_WITH_DISABLED_STARTUP_OPTIONS=0`; the retained serverless startup
+options used by `libmylite`, including `--skip-log-bin`, `--skip-slave-start`,
+and `--plugin-dir`, remain available. It omits the general and slow
 query-log runtime
 behind `MYLITE_WITH_QUERY_LOGS=0`; error logging,
 SQL diagnostics, warnings, and result metadata remain available. It omits
@@ -193,7 +198,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,269,664 bytes / 25.05 MiB |
+| Archive size | 26,267,304 bytes / 25.05 MiB |
 | Archive members | 698 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -250,8 +255,10 @@ current pre-strip archive to 26,852,496 bytes / 25.61 MiB.
 Omitting SQL `HANDLER` command runtime reduces the current pre-strip archive to
 26,839,776 bytes / 25.60 MiB. Omitting `SELECT ... INTO OUTFILE` and
 `SELECT ... INTO DUMPFILE` host-file writers reduces the current pre-strip
-archive to 26,833,536 bytes / 25.59 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 563,872 bytes
+archive to 26,833,536 bytes / 25.59 MiB. Omitting startup option rows for
+disabled server topology and dynamic plugin-loading surfaces reduces the
+current pre-strip archive to 26,831,128 bytes / 25.59 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 563,824 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -369,6 +376,10 @@ linked for normal table execution.
 `SELECT ... INTO OUTFILE` and `SELECT ... INTO DUMPFILE` host-file writer
 bodies are omitted from the embedded profile, while ordinary result delivery
 and `SELECT ... INTO @variable` remain available.
+Startup option rows for disabled server topology and dynamic plugin-loading
+surfaces are omitted from the default embedded archive; retained options needed
+by MyLite startup, including `--skip-log-bin`, `--skip-slave-start`, and
+`--plugin-dir`, stay accepted.
 Replication execution, slave protocol, replication-event, checksum, and
 semi-sync system variables are omitted from the default embedded profile, while
 compatibility variables such as `@@log_bin=0` remain covered.
