@@ -35,6 +35,7 @@ set(MYLITE_WITH_SQL_DIGEST OFF CACHE BOOL "Disable statement digest normalizatio
 set(MYLITE_WITH_STATUS_VARIABLES OFF CACHE BOOL "Disable server status variable publication in the embedded baseline" FORCE)
 set(MYLITE_WITH_STATEMENT_PROFILING_METADATA OFF CACHE BOOL "Disable statement profiling metadata in the embedded baseline" FORCE)
 set(MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS OFF CACHE BOOL "Disable Oracle compatibility function aliases in the embedded baseline" FORCE)
+set(MYLITE_WITH_SERVER_UTILITY_FUNCTIONS OFF CACHE BOOL "Disable server utility SQL functions in the embedded baseline" FORCE)
 set(MYLITE_WITH_FULL_ERROR_MESSAGES OFF CACHE BOOL "Use compact server error messages in the embedded baseline" FORCE)
 set(MYLITE_WITH_DYNAMIC_PLUGIN_LOADING OFF CACHE BOOL "Disable dynamic plugin shared-library loading in the embedded baseline" FORCE)
 set(MYLITE_WITH_PROCEDURE_ANALYSE OFF CACHE BOOL "Disable PROCEDURE ANALYSE in the embedded baseline" FORCE)

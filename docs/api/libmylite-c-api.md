@@ -450,7 +450,11 @@ are also rejected through the same policy and fail with `MYLITE_ERROR` and a
 stable MyLite diagnostic. Oracle compatibility function aliases such as
 `DECODE_ORACLE` and `oracle_schema` routing are omitted from the default
 embedded profile; ordinary MySQL/MariaDB string functions remain available.
-Omitted function aliases fail as unsupported SQL function paths. Query-cache
+Omitted function aliases fail as unsupported SQL function paths. Server utility
+functions such as `BENCHMARK()`, named-lock helpers,
+`LOAD_FILE()`, replication wait/position helpers, `SLEEP()`, and
+`UUID_SHORT()` are also rejected and omitted, while retained scalar functions
+such as `VERSION()` and `FORMAT()` remain available. Query-cache
 SELECT hints remain accepted no-op syntax. `INFORMATION_SCHEMA.PROFILING` is
 rejected as part of the statement-profiling server diagnostic surface.
 Optimizer trace variables and

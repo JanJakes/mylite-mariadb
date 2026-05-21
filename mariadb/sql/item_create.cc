@@ -43,6 +43,10 @@
 #define MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS 1
 #endif
 
+#ifndef MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
+#define MYLITE_WITH_SERVER_UTILITY_FUNCTIONS 1
+#endif
+
 
 extern "C" const uchar *get_native_fct_hash_key(const void *buff,
                                                 size_t *length, my_bool)
@@ -3345,6 +3349,7 @@ Create_func_atan::create_native(THD *thd, const LEX_CSTRING *name,
 }
 
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 Create_func_benchmark Create_func_benchmark::s_singleton;
 
 Item*
@@ -3353,6 +3358,7 @@ Create_func_benchmark::create_2_arg(THD *thd, Item *arg1, Item *arg2)
   thd->lex->uncacheable(UNCACHEABLE_SIDEEFFECT);
   return new (thd->mem_root) Item_func_benchmark(thd, arg1, arg2);
 }
+#endif
 
 
 Create_func_bin Create_func_bin::s_singleton;
@@ -3366,6 +3372,7 @@ Create_func_bin::create_1_arg(THD *thd, Item *arg1)
 }
 
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 Create_func_binlog_gtid_pos Create_func_binlog_gtid_pos::s_singleton;
 
 Item*
@@ -3381,6 +3388,7 @@ Create_func_binlog_gtid_pos::create_2_arg(THD *thd, Item *arg1, Item *arg2)
   thd->lex->set_stmt_unsafe(LEX::BINLOG_STMT_UNSAFE_SYSTEM_FUNCTION);
   return new (thd->mem_root) Item_func_binlog_gtid_pos(thd, arg1, arg2);
 }
+#endif
 
 
 Create_func_bit_count Create_func_bit_count::s_singleton;
@@ -4158,6 +4166,7 @@ Create_func_from_unixtime::create_native(THD *thd, const LEX_CSTRING *name,
 
 
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 Create_func_get_lock Create_func_get_lock::s_singleton;
 
 Item*
@@ -4167,6 +4176,7 @@ Create_func_get_lock::create_2_arg(THD *thd, Item *arg1, Item *arg2)
   thd->lex->uncacheable(UNCACHEABLE_SIDEEFFECT);
   return new (thd->mem_root) Item_func_get_lock(thd, arg1, arg2);
 }
+#endif
 
 
 Create_func_greatest Create_func_greatest::s_singleton;
@@ -4217,6 +4227,7 @@ Create_func_instr::create_2_arg(THD *thd, Item *arg1, Item *arg2)
 }
 
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 Create_func_is_free_lock Create_func_is_free_lock::s_singleton;
 
 Item*
@@ -4237,6 +4248,7 @@ Create_func_is_used_lock::create_1_arg(THD *thd, Item *arg1)
   thd->lex->uncacheable(UNCACHEABLE_SIDEEFFECT);
   return new (thd->mem_root) Item_func_is_used_lock(thd, arg1);
 }
+#endif
 
 
 Create_func_isnull Create_func_isnull::s_singleton;
@@ -5010,6 +5022,7 @@ Create_func_ln::create_1_arg(THD *thd, Item *arg1)
 }
 
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 Create_func_load_file Create_func_load_file::s_singleton;
 
 Item*
@@ -5020,6 +5033,7 @@ Create_func_load_file::create_1_arg(THD *thd, Item *arg1)
   thd->lex->uncacheable(UNCACHEABLE_SIDEEFFECT);
   DBUG_RETURN(new (thd->mem_root) Item_load_file(thd, arg1));
 }
+#endif
 
 
 Create_func_locate Create_func_locate::s_singleton;
@@ -5245,6 +5259,7 @@ Create_func_make_set::create_native(THD *thd, const LEX_CSTRING *name,
 }
 
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 Create_func_master_pos_wait Create_func_master_pos_wait::s_singleton;
 
 Item*
@@ -5335,6 +5350,7 @@ Create_func_master_gtid_wait::create_native(THD *thd, const LEX_CSTRING *name,
 
   return func;
 }
+#endif
 
 
 Create_func_md5 Create_func_md5::s_singleton;
@@ -5579,6 +5595,7 @@ Item *Create_func_random_bytes::create_1_arg(THD *thd, Item *arg1)
 }
 
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 Create_func_release_all_locks Create_func_release_all_locks::s_singleton;
 
 Item*
@@ -5599,6 +5616,7 @@ Create_func_release_lock::create_1_arg(THD *thd, Item *arg1)
   thd->lex->uncacheable(UNCACHEABLE_SIDEEFFECT);
   return new (thd->mem_root) Item_func_release_lock(thd, arg1);
 }
+#endif
 
 
 #if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
@@ -5826,6 +5844,7 @@ Create_func_sin::create_1_arg(THD *thd, Item *arg1)
 }
 
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 Create_func_sleep Create_func_sleep::s_singleton;
 
 Item*
@@ -5835,6 +5854,7 @@ Create_func_sleep::create_1_arg(THD *thd, Item *arg1)
   thd->lex->uncacheable(UNCACHEABLE_SIDEEFFECT);
   return new (thd->mem_root) Item_func_sleep(thd, arg1);
 }
+#endif
 
 
 Create_func_soundex Create_func_soundex::s_singleton;
@@ -6109,6 +6129,7 @@ Create_func_unix_timestamp::create_native(THD *thd, const LEX_CSTRING *name,
 }
 
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 Create_func_uuid_short Create_func_uuid_short::s_singleton;
 
 Item*
@@ -6119,6 +6140,7 @@ Create_func_uuid_short::create_builder(THD *thd)
   thd->lex->uncacheable(UNCACHEABLE_RAND);  // disallow cache and query merges
   DBUG_RETURN(new (thd->mem_root) Item_func_uuid_short(thd));
 }
+#endif
 
 
 Create_func_version Create_func_version::s_singleton;
@@ -6411,9 +6433,13 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("ASIN") }, BUILDER(Create_func_asin)},
   { { STRING_WITH_LEN("ATAN") }, BUILDER(Create_func_atan)},
   { { STRING_WITH_LEN("ATAN2") }, BUILDER(Create_func_atan)},
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
   { { STRING_WITH_LEN("BENCHMARK") }, BUILDER(Create_func_benchmark)},
+#endif
   { { STRING_WITH_LEN("BIN") }, BUILDER(Create_func_bin)},
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
   { { STRING_WITH_LEN("BINLOG_GTID_POS") }, BUILDER(Create_func_binlog_gtid_pos)},
+#endif
   { { STRING_WITH_LEN("BIT_COUNT") }, BUILDER(Create_func_bit_count)},
   { { STRING_WITH_LEN("BIT_LENGTH") }, BUILDER(Create_func_bit_length)},
   { { STRING_WITH_LEN("CEIL") }, BUILDER(Create_func_ceiling)},
@@ -6472,14 +6498,18 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("FROM_BASE64") }, BUILDER(Create_func_from_base64)},
   { { STRING_WITH_LEN("FROM_DAYS") }, BUILDER(Create_func_from_days)},
   { { STRING_WITH_LEN("FROM_UNIXTIME") }, BUILDER(Create_func_from_unixtime)},
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
   { { STRING_WITH_LEN("GET_LOCK") }, BUILDER(Create_func_get_lock)},
+#endif
   { { STRING_WITH_LEN("GREATEST") }, BUILDER(Create_func_greatest)},
   { { STRING_WITH_LEN("HEX") }, BUILDER(Create_func_hex)},
   { { STRING_WITH_LEN("IFNULL") }, BUILDER(Create_func_ifnull)},
   { { STRING_WITH_LEN("INSTR") }, BUILDER(Create_func_instr)},
   { { STRING_WITH_LEN("ISNULL") }, BUILDER(Create_func_isnull)},
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
   { { STRING_WITH_LEN("IS_FREE_LOCK") }, BUILDER(Create_func_is_free_lock)},
   { { STRING_WITH_LEN("IS_USED_LOCK") }, BUILDER(Create_func_is_used_lock)},
+#endif
   { { STRING_WITH_LEN("JSON_ARRAY") }, BUILDER(Create_func_json_array)},
   { { STRING_WITH_LEN("JSON_ARRAY_APPEND") }, BUILDER(Create_func_json_array_append)},
   { { STRING_WITH_LEN("JSON_ARRAY_INSERT") }, BUILDER(Create_func_json_array_insert)},
@@ -6529,7 +6559,9 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("LIKE_RANGE_MAX") }, BUILDER(Create_func_like_range_max)},
 #endif
   { { STRING_WITH_LEN("LN") }, BUILDER(Create_func_ln)},
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
   { { STRING_WITH_LEN("LOAD_FILE") }, BUILDER(Create_func_load_file)},
+#endif
   { { STRING_WITH_LEN("LOCATE") }, BUILDER(Create_func_locate)},
   { { STRING_WITH_LEN("LOG") }, BUILDER(Create_func_log)},
   { { STRING_WITH_LEN("LOG10") }, BUILDER(Create_func_log10)},
@@ -6546,8 +6578,10 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("MAKEDATE") }, BUILDER(Create_func_makedate)},
   { { STRING_WITH_LEN("MAKETIME") }, BUILDER(Create_func_maketime)},
   { { STRING_WITH_LEN("MAKE_SET") }, BUILDER(Create_func_make_set)},
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
   { { STRING_WITH_LEN("MASTER_GTID_WAIT") }, BUILDER(Create_func_master_gtid_wait)},
   { { STRING_WITH_LEN("MASTER_POS_WAIT") }, BUILDER(Create_func_master_pos_wait)},
+#endif
   { { STRING_WITH_LEN("MD5") }, BUILDER(Create_func_md5)},
   { { STRING_WITH_LEN("MICROSECOND") }, BUILDER(Create_func_microsecond)},
   { { STRING_WITH_LEN("MOD") }, BUILDER(Create_func_mod)},
@@ -6575,9 +6609,11 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("REGEXP_SUBSTR") }, BUILDER(Create_func_regexp_substr)},
   { { STRING_WITH_LEN("RADIANS") }, BUILDER(Create_func_radians)},
   { { STRING_WITH_LEN("RAND") }, BUILDER(Create_func_rand)},
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
   { { STRING_WITH_LEN("RELEASE_ALL_LOCKS") },
       BUILDER(Create_func_release_all_locks)},
   { { STRING_WITH_LEN("RELEASE_LOCK") }, BUILDER(Create_func_release_lock)},
+#endif
 #if MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
   { { STRING_WITH_LEN("REPLACE_ORACLE") },
       BUILDER(Create_func_replace_oracle)},
@@ -6604,7 +6640,9 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("SHA2") }, BUILDER(Create_func_sha2)},
   { { STRING_WITH_LEN("SIGN") }, BUILDER(Create_func_sign)},
   { { STRING_WITH_LEN("SIN") }, BUILDER(Create_func_sin)},
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
   { { STRING_WITH_LEN("SLEEP") }, BUILDER(Create_func_sleep)},
+#endif
   { { STRING_WITH_LEN("SOUNDEX") }, BUILDER(Create_func_soundex)},
   { { STRING_WITH_LEN("SPACE") }, BUILDER(Create_func_space)},
   { { STRING_WITH_LEN("SQRT") }, BUILDER(Create_func_sqrt)},
@@ -6631,7 +6669,9 @@ const Native_func_registry func_array[] =
   { { STRING_WITH_LEN("UNIX_TIMESTAMP") }, BUILDER(Create_func_unix_timestamp)},
   { { STRING_WITH_LEN("UPDATEXML") }, BUILDER(Create_func_xml_update)},
   { { STRING_WITH_LEN("UPPER") }, BUILDER(Create_func_ucase)},
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
   { { STRING_WITH_LEN("UUID_SHORT") }, BUILDER(Create_func_uuid_short)},
+#endif
   { { STRING_WITH_LEN("VEC_DISTANCE_EUCLIDEAN") }, BUILDER(Create_func_vec_distance_euclidean)},
   { { STRING_WITH_LEN("VEC_DISTANCE_COSINE") }, BUILDER(Create_func_vec_distance_cosine)},
   { { STRING_WITH_LEN("VEC_DISTANCE") }, BUILDER(Create_func_vec_distance)},

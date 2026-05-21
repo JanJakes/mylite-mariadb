@@ -53,6 +53,7 @@ MYLITE_WITH_SQL_DIGEST=OFF
 MYLITE_WITH_STATUS_VARIABLES=OFF
 MYLITE_WITH_STATEMENT_PROFILING_METADATA=OFF
 MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS=OFF
+MYLITE_WITH_SERVER_UTILITY_FUNCTIONS=OFF
 MYLITE_WITH_FULL_ERROR_MESSAGES=OFF
 MYLITE_WITH_DYNAMIC_PLUGIN_LOADING=OFF
 MYLITE_WITH_PROCEDURE_ANALYSE=OFF
@@ -185,7 +186,12 @@ available, but `INFORMATION_SCHEMA.USER_VARIABLES`, `SHOW USER_VARIABLES`, and
 `FLUSH USER_VARIABLES` are omitted as diagnostics. It omits Oracle
 compatibility function aliases and `oracle_schema` routing behind
 `MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS=0`, while
-ordinary MySQL/MariaDB string functions remain available. It uses a compact
+ordinary MySQL/MariaDB string functions remain available. It omits server
+utility SQL functions behind `MYLITE_WITH_SERVER_UTILITY_FUNCTIONS=0`;
+`BENCHMARK()`, named-lock helpers, `LOAD_FILE()`, replication wait/position
+helpers, `SLEEP()`, and `UUID_SHORT()` are rejected by MyLite policy, while
+ordinary scalar functions, JSON, GEOMETRY/GIS, DDL/DML, transactions, and
+native storage remain available. It uses a compact
 server error-message catalog behind `MYLITE_WITH_FULL_ERROR_MESSAGES=0`;
 MariaDB error numbers and SQLSTATEs remain available, common syntax and
 duplicate-key diagnostics stay readable, and uncommon inherited server errors
@@ -216,7 +222,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,170,360 bytes / 24.96 MiB |
+| Archive size | 26,077,728 bytes / 24.87 MiB |
 | Archive members | 693 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -284,8 +290,10 @@ event parser and reader runtime reduces the current pre-strip archive to
 26,758,104 bytes / 25.52 MiB. Omitting binary-log GTID-index runtime and
 tuning variables reduces the current pre-strip archive to 26,742,160 bytes /
 25.50 MiB. Omitting residual replication helper objects reduces the current
-pre-strip archive to 26,731,984 bytes / 25.49 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 561,624 bytes
+pre-strip archive to 26,731,984 bytes / 25.49 MiB. Omitting server utility SQL
+functions reduces the current pre-strip archive to 26,639,104 bytes /
+25.41 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 561,376 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -335,11 +343,12 @@ runtime saves 64,304 bytes and one archive member. Omitting binary-log
 GTID-index runtime and tuning variables saves 15,944 pre-strip bytes and
 15,384 stripped bytes with no member-count change. Omitting residual
 replication helper objects saves 10,176 pre-strip bytes, 9,832 stripped bytes,
-and four archive members. The final archive is
-5,359,344 bytes smaller than the Release build with Performance Schema
-disabled, 6,959,280 bytes smaller
+and four archive members. Omitting server utility SQL functions saves 92,880
+pre-strip bytes and 92,632 stripped bytes with no member-count change. The
+final archive is 5,451,976 bytes smaller than the Release build with
+Performance Schema disabled, 7,051,912 bytes smaller
 than the symbol-stripped baseline that still built Performance Schema, and
-7,671,960 bytes smaller than the original broad archive.
+7,764,592 bytes smaller than the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
 GSSAPI, BZip2, LZ4, LibLZMA, LZO, PCRE2, and Zstandard support on this
@@ -379,6 +388,11 @@ continues to use the generated MariaDB parser. Oracle compatibility aliases
 such as `DECODE_ORACLE` and `LPAD_ORACLE`, plus `oracle_schema` routing, are
 omitted from the embedded archive; normal `CONCAT`, `LPAD`, `RPAD`, `LTRIM`,
 `RTRIM`, `SUBSTR`, `REPLACE`, `TRIM`, and `LENGTH` remain available.
+Server utility SQL functions such as `BENCHMARK()`, named-lock helpers,
+`LOAD_FILE()`, `MASTER_GTID_WAIT()`, `MASTER_POS_WAIT()`, `BINLOG_GTID_POS()`,
+`SLEEP()`, and `UUID_SHORT()` are omitted from the embedded function registry
+and rejected by policy, while ordinary scalar functions such as `VERSION()`,
+`FORMAT()`, JSON functions, and GEOMETRY/GIS functions remain available.
 `SFORMAT()` is omitted from the
 embedded function registry, while ordinary `FORMAT()` remains available.
 Dynamic UDF lookup, execution, and registration are omitted; stored functions

@@ -64,7 +64,10 @@ skipped because the default profile has no binary-log core and does not create
 binlog cache files. Row-replication type conversion is omitted because row-event
 apply is already outside the core embedded profile. Binary-log event parser and
 reader runtime is omitted because event decode and replay are already outside
-the no-binlog embedded profile.
+the no-binlog embedded profile. Server utility SQL functions are omitted
+because they expose server benchmarking, sleeps, named locks, host-file reads,
+replication waits, and server-id based ID generation rather than application
+DDL/DML behavior.
 
 ## Source Findings
 
@@ -690,6 +693,15 @@ The disabled profile replaces `gtid_index.cc` with a fail-closed embedded
 source, and binary-log GTID-index tuning system variables are omitted from the
 default profile.
 
+The embedded archive omits server utility SQL functions by setting
+`MYLITE_WITH_SERVER_UTILITY_FUNCTIONS=0` in the MyLite baseline. The option
+defaults to `ON` so upstream-style embedded builds keep upstream function
+coverage. The disabled profile removes builders and item implementations for
+`BENCHMARK()`, named-lock helpers, `LOAD_FILE()`, replication wait/position
+helpers, `SLEEP()`, and `UUID_SHORT()` while keeping ordinary scalar
+functions, JSON, GEOMETRY/GIS, DDL/DML, transactions, and native storage
+available.
+
 The embedded archive omits PROXY protocol listener support by setting
 `MYLITE_WITH_PROXY_PROTOCOL=0` in the MyLite baseline. The option defaults to
 `ON` so normal MariaDB builds keep upstream listener behavior. The disabled
@@ -773,7 +785,9 @@ fail-closed event-class symbols remain for retained unsupported paths.
 Replication GTID-state and binary-log GTID-index runtime are replaced with
 disabled embedded sources. Row-replication type-conversion helpers are replaced
 with fail-closed embedded stubs, and residual replication helper objects are
-omitted after retained no-binlog paths no longer reference them.
+omitted after retained no-binlog paths no longer reference them. Server utility
+SQL function builders and item implementations are omitted from the embedded
+function registry.
 
 ## Compatibility Impact
 
@@ -1118,6 +1132,11 @@ Omitting residual replication helper objects brings the current archive to
 with Performance Schema disabled, 6,959,280 bytes smaller than the
 symbol-stripped baseline with Performance Schema still built, and 7,671,960
 bytes smaller than the original broad archive.
+Omitting server utility SQL functions brings the current archive to
+26,077,728 bytes / 24.87 MiB, 5,451,976 bytes smaller than the Release build
+with Performance Schema disabled, 7,051,912 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 7,764,592
+bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -1167,6 +1186,11 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   through server-surface policy coverage.
 - Confirm `slave.cc.o`, `sql_repl.cc.o`, `rpl_utility.cc.o`, and
   `rpl_reporting.cc.o` are absent from `libmariadbd.a`.
+- Confirm `MYLITE_WITH_SERVER_UTILITY_FUNCTIONS=OFF` appears in the embedded
+  CMake cache, and direct and prepared `BENCHMARK()`, named-lock helpers,
+  `LOAD_FILE()`, `MASTER_POS_WAIT()`, `SLEEP()`, and `UUID_SHORT()` calls fail
+  through server-surface policy coverage while retained functions such as
+  `VERSION()` and `FORMAT()` still execute.
 - Confirm `sql_handler.cc.o` is absent from `libmariadbd.a`,
   `mylite_sql_handler_disabled.cc.o` remains, and direct and prepared
   top-level `HANDLER ...` statements fail through server-surface policy
@@ -1297,6 +1321,11 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   ordinary SQL type conversion remains covered through retained tests.
   Residual replication helper objects are omitted after link evidence proves
   no retained no-binlog path references them.
+  Server utility SQL functions are omitted from the embedded function registry;
+  direct and prepared calls to `BENCHMARK()`, named-lock helpers, `LOAD_FILE()`,
+  replication wait/position helpers, `SLEEP()`, and `UUID_SHORT()` are
+  rejected, while retained scalar functions, JSON, GEOMETRY/GIS, DDL/DML,
+  transactions, and native storage remain covered.
   Persistent
   optimizer-statistics storage is omitted, `use_stat_tables` starts as `NEVER`,
   histogram collection starts at size `0`, persistent statistics SQL and

@@ -242,6 +242,7 @@ bool is_unsupported_udf_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_replication_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_binlog_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_replication_function_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_server_utility_function_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_sql_handler_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_select_file_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_help_statement(const SqlPolicyTokens &tokens);
@@ -1180,6 +1181,7 @@ bool is_unsupported_server_surface_sql(std::string_view sql, const std::string &
            is_unsupported_replication_statement(tokens) ||
            is_unsupported_binlog_statement(tokens) ||
            is_unsupported_replication_function_statement(tokens) ||
+           is_unsupported_server_utility_function_statement(tokens) ||
            is_unsupported_sql_handler_statement(tokens) ||
            is_unsupported_select_file_statement(tokens) || is_unsupported_help_statement(tokens) ||
            is_unsupported_static_show_info_statement(tokens) ||
@@ -1301,8 +1303,27 @@ bool is_unsupported_binlog_statement(const SqlPolicyTokens &tokens) {
 bool is_unsupported_replication_function_statement(const SqlPolicyTokens &tokens) {
     for (std::size_t index = 0; index + 1U < tokens.count; ++index) {
         if ((identifier_token_equals(tokens.values[index], "MASTER_GTID_WAIT") ||
+             identifier_token_equals(tokens.values[index], "MASTER_POS_WAIT") ||
              identifier_token_equals(tokens.values[index], "BINLOG_GTID_POS") ||
              identifier_token_equals(tokens.values[index], "WSREP_SYNC_WAIT_UPTO_GTID")) &&
+            token_equals(tokens.values[index + 1U], "(")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool is_unsupported_server_utility_function_statement(const SqlPolicyTokens &tokens) {
+    for (std::size_t index = 0; index + 1U < tokens.count; ++index) {
+        if ((identifier_token_equals(tokens.values[index], "BENCHMARK") ||
+             identifier_token_equals(tokens.values[index], "GET_LOCK") ||
+             identifier_token_equals(tokens.values[index], "IS_FREE_LOCK") ||
+             identifier_token_equals(tokens.values[index], "IS_USED_LOCK") ||
+             identifier_token_equals(tokens.values[index], "LOAD_FILE") ||
+             identifier_token_equals(tokens.values[index], "RELEASE_ALL_LOCKS") ||
+             identifier_token_equals(tokens.values[index], "RELEASE_LOCK") ||
+             identifier_token_equals(tokens.values[index], "SLEEP") ||
+             identifier_token_equals(tokens.values[index], "UUID_SHORT")) &&
             token_equals(tokens.values[index + 1U], "(")) {
             return true;
         }

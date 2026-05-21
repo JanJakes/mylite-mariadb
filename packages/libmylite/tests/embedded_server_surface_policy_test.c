@@ -664,6 +664,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SELECT SQL_CACHE 1");
     exec_ok(db, "SELECT SQL_NO_CACHE 1");
     exec_ok(db, "SELECT FORMAT(1234.5, 2)");
+    exec_ok(db, "SELECT VERSION()");
     exec_ok(db, "SET @profiling = 1");
     exec_ok(db, "SET @profiling_history_size = 10");
     exec_ok(db, "SET @query_cache_size = 1048576");
@@ -690,6 +691,10 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SELECT 'INFORMATION_SCHEMA.USER_VARIABLES' AS literal");
     exec_ok(db, "SELECT 'SHOW PROCESSLIST' AS literal");
     exec_ok(db, "SELECT 'MASTER_GTID_WAIT()' AS literal");
+    exec_ok(db, "SELECT 'MASTER_POS_WAIT()' AS literal");
+    exec_ok(db, "SELECT 'GET_LOCK()' AS literal");
+    exec_ok(db, "SELECT 'LOAD_FILE()' AS literal");
+    exec_ok(db, "SELECT 'SLEEP()' AS literal");
     exec_ok(db, "SELECT 'HANDLER app.t OPEN' AS literal");
     exec_ok(db, "SELECT 'INTO OUTFILE /tmp/mylite-out.txt' AS literal");
     exec_ok(db, "SHOW VARIABLES LIKE 'version'");
@@ -816,8 +821,18 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_error(db, "SHOW BINLOG EVENTS", "server-owned SQL surface");
     expect_error(db, "BINLOG 'ZmFrZQ=='", "server-owned SQL surface");
     expect_error(db, "SELECT MASTER_GTID_WAIT('0-1-1', 0)", "server-owned SQL surface");
+    expect_error(db, "SELECT MASTER_POS_WAIT('mylite-bin.000001', 4)", "server-owned SQL surface");
     expect_error(db, "SELECT BINLOG_GTID_POS('mylite-bin.000001', 4)", "server-owned SQL surface");
     expect_error(db, "SELECT WSREP_SYNC_WAIT_UPTO_GTID('0-1-1', 0)", "server-owned SQL surface");
+    expect_error(db, "SELECT BENCHMARK(1, 1 + 1)", "server-owned SQL surface");
+    expect_error(db, "SELECT GET_LOCK('mylite', 0)", "server-owned SQL surface");
+    expect_error(db, "SELECT IS_FREE_LOCK('mylite')", "server-owned SQL surface");
+    expect_error(db, "SELECT IS_USED_LOCK('mylite')", "server-owned SQL surface");
+    expect_error(db, "SELECT RELEASE_LOCK('mylite')", "server-owned SQL surface");
+    expect_error(db, "SELECT RELEASE_ALL_LOCKS()", "server-owned SQL surface");
+    expect_error(db, "SELECT LOAD_FILE('/tmp/mylite-policy.txt')", "server-owned SQL surface");
+    expect_error(db, "SELECT SLEEP(0)", "server-owned SQL surface");
+    expect_error(db, "SELECT UUID_SHORT()", "server-owned SQL surface");
     expect_error(db, "SET GLOBAL gtid_binlog_state = '0-1-1'", "server-owned SQL surface");
     expect_error(db, "SET @@GLOBAL.gtid_slave_pos = '0-1-1'", "server-owned SQL surface");
     expect_error(db, "SET gtid_strict_mode = ON", "server-owned SQL surface");
@@ -1010,6 +1025,11 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_prepare_error(db, "SELECT MASTER_GTID_WAIT('0-1-1', 0)", "server-owned SQL surface");
     expect_prepare_error(
         db,
+        "SELECT MASTER_POS_WAIT('mylite-bin.000001', 4)",
+        "server-owned SQL surface"
+    );
+    expect_prepare_error(
+        db,
         "SELECT BINLOG_GTID_POS('mylite-bin.000001', 4)",
         "server-owned SQL surface"
     );
@@ -1018,6 +1038,19 @@ static void assert_server_sql_rejected(mylite_db *db) {
         "SELECT WSREP_SYNC_WAIT_UPTO_GTID('0-1-1', 0)",
         "server-owned SQL surface"
     );
+    expect_prepare_error(db, "SELECT BENCHMARK(1, 1 + 1)", "server-owned SQL surface");
+    expect_prepare_error(db, "SELECT GET_LOCK('mylite', 0)", "server-owned SQL surface");
+    expect_prepare_error(db, "SELECT IS_FREE_LOCK('mylite')", "server-owned SQL surface");
+    expect_prepare_error(db, "SELECT IS_USED_LOCK('mylite')", "server-owned SQL surface");
+    expect_prepare_error(db, "SELECT RELEASE_LOCK('mylite')", "server-owned SQL surface");
+    expect_prepare_error(db, "SELECT RELEASE_ALL_LOCKS()", "server-owned SQL surface");
+    expect_prepare_error(
+        db,
+        "SELECT LOAD_FILE('/tmp/mylite-prepared-policy.txt')",
+        "server-owned SQL surface"
+    );
+    expect_prepare_error(db, "SELECT SLEEP(0)", "server-owned SQL surface");
+    expect_prepare_error(db, "SELECT UUID_SHORT()", "server-owned SQL surface");
     expect_prepare_error(db, "SET GLOBAL gtid_binlog_state = '0-1-1'", "server-owned SQL surface");
     expect_prepare_error(db, "SET gtid_strict_mode = ON", "server-owned SQL surface");
     expect_prepare_error(db, "HANDLER app.t OPEN", "server-owned SQL surface");

@@ -5,6 +5,10 @@
 #define MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS 1
 #endif
 
+#ifndef MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
+#define MYLITE_WITH_SERVER_UTILITY_FUNCTIONS 1
+#endif
+
 /*
    Copyright (c) 2000, 2011, Oracle and/or its affiliates.
    Copyright (c) 2009, 2022, MariaDB
@@ -1612,6 +1616,7 @@ protected:
 };
 
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 class Item_func_binlog_gtid_pos :public Item_str_func
 {
 public:
@@ -1633,6 +1638,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_func_binlog_gtid_pos>(thd, this); }
 };
+#endif
 
 
 class Item_func_pad: public Item_str_func
@@ -1980,6 +1986,7 @@ protected:
 };
 
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 class Item_load_file :public Item_str_func
 {
   String tmp_value;
@@ -2007,6 +2014,7 @@ protected:
   Item *shallow_copy(THD *thd) const override
   { return get_item_copy<Item_load_file>(thd, this); }
 };
+#endif
 
 
 class Item_func_export_set: public Item_str_func

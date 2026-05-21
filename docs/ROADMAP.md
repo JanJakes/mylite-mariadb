@@ -68,6 +68,7 @@ surface that does not fit a local directory-owned library:
 - row-replication type conversion,
 - binary-log event parser and reader runtime,
 - host-file SELECT exports,
+- server utility SQL functions,
 - rarely used optional engines or plugins unless a slice justifies them.
 
 The minimal embedded build establishes the first baseline. Later slices record
@@ -118,6 +119,11 @@ execution.
 `SELECT ... INTO OUTFILE` and `SELECT ... INTO DUMPFILE` host-file writers are
 omitted after coverage proves they are server filesystem export surfaces;
 ordinary result delivery and `SELECT ... INTO @variable` remain covered.
+Server utility SQL functions are omitted after coverage proves benchmarking,
+named locks, host-file reads, replication waits, sleeping, and server-id based
+ID generation are outside the embedded application SQL profile; ordinary scalar
+functions, JSON, GEOMETRY/GIS, DDL/DML, transactions, and native storage remain
+covered.
 Startup option rows for disabled server topology and dynamic-plugin-loading
 surfaces are omitted after source review proves the retained `libmylite`
 startup vector still uses only serverless, directory-owned options.

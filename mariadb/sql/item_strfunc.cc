@@ -33,6 +33,10 @@
 #define MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS 1
 #endif
 
+#ifndef MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
+#define MYLITE_WITH_SERVER_UTILITY_FUNCTIONS 1
+#endif
+
 #include "sql_priv.h"
 /*
   It is necessary to include set_var.h instead of item.h because there
@@ -3646,6 +3650,7 @@ err:
 }
 
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 bool Item_func_binlog_gtid_pos::fix_length_and_dec(THD *thd)
 {
   collation.set(system_charset_info_for_i_s);
@@ -3685,6 +3690,7 @@ err:
   return NULL;
 #endif  /* !HAVE_REPLICATION */
 }
+#endif
 
 
 static String *default_pad_str(String *pad_str, CHARSET_INFO *collation)
@@ -4398,6 +4404,7 @@ void Item_func_binary::print(String *str, enum_query_type query_type)
 
 #include <my_dir.h>				// For my_stat
 
+#if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
 String *Item_load_file::val_str(String *str)
 {
   DBUG_ASSERT(fixed());
@@ -4463,6 +4470,7 @@ err:
   null_value = 1;
   DBUG_RETURN(0);
 }
+#endif
 
 
 String* Item_func_export_set::val_str(String* str)
