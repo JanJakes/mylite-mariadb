@@ -67,6 +67,8 @@ MYLITE_WITH_BACKUP_RUNTIME=OFF
 MYLITE_WITH_VIO_TLS=OFF
 MYLITE_WITH_REPLICATION_EXEC_SYSVARS=OFF
 MYLITE_WITH_REPLICATION_FILTERS=OFF
+MYLITE_WITH_RPL_TYPE_CONVERSION=OFF
+MYLITE_WITH_REPLICATION_HELPERS=OFF
 MYLITE_WITH_USERSTAT_DIAGNOSTICS=OFF
 MYLITE_WITH_EVENT_PARSE_DATA=OFF
 MYLITE_WITH_PROXY_PROTOCOL=OFF
@@ -129,7 +131,11 @@ options used by `libmylite`, including `--skip-log-bin`, `--skip-slave-start`,
 and `--plugin-dir`, remain available. Row-replication type conversion is
 replaced with fail-closed embedded stubs behind
 `MYLITE_WITH_RPL_TYPE_CONVERSION=0`; ordinary SQL type conversion and retained
-storage-engine behavior use their normal non-replication paths. It omits the
+storage-engine behavior use their normal non-replication paths. It omits
+residual replication helper objects behind
+`MYLITE_WITH_REPLICATION_HELPERS=0` after the no-binlog profile removes the
+remaining link references to `slave.cc`, `sql_repl.cc`, `rpl_utility.cc`, and
+`rpl_reporting.cc`. It omits the
 general and slow query-log runtime
 behind `MYLITE_WITH_QUERY_LOGS=0`; error logging,
 SQL diagnostics, warnings, and result metadata remain available. It omits
@@ -210,8 +216,8 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,180,192 bytes / 24.97 MiB |
-| Archive members | 697 |
+| Archive size | 26,170,360 bytes / 24.96 MiB |
+| Archive members | 693 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
 32.27 MiB. With `MinSizeRel`, the unused Performance Schema static plugin
@@ -277,8 +283,9 @@ current pre-strip archive to 26,822,408 bytes / 25.58 MiB. Omitting binary-log
 event parser and reader runtime reduces the current pre-strip archive to
 26,758,104 bytes / 25.52 MiB. Omitting binary-log GTID-index runtime and
 tuning variables reduces the current pre-strip archive to 26,742,160 bytes /
-25.50 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 561,968 bytes
+25.50 MiB. Omitting residual replication helper objects reduces the current
+pre-strip archive to 26,731,984 bytes / 25.49 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 561,624 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -326,11 +333,13 @@ OUTFILE` and `SELECT ... INTO DUMPFILE` host-file writers saves 6,120 bytes
 with no member-count change. Omitting binary-log event parser and reader
 runtime saves 64,304 bytes and one archive member. Omitting binary-log
 GTID-index runtime and tuning variables saves 15,944 pre-strip bytes and
-15,384 stripped bytes with no member-count change. The final archive is
-5,349,512 bytes smaller than the Release build with Performance Schema
-disabled, 6,949,448 bytes smaller
+15,384 stripped bytes with no member-count change. Omitting residual
+replication helper objects saves 10,176 pre-strip bytes, 9,832 stripped bytes,
+and four archive members. The final archive is
+5,359,344 bytes smaller than the Release build with Performance Schema
+disabled, 6,959,280 bytes smaller
 than the symbol-stripped baseline that still built Performance Schema, and
-7,662,128 bytes smaller than the original broad archive.
+7,671,960 bytes smaller than the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
 GSSAPI, BZip2, LZ4, LibLZMA, LZO, PCRE2, and Zstandard support on this
@@ -418,7 +427,10 @@ filter configuration variables are absent.
 Row-replication type-conversion helpers are replaced with fail-closed embedded
 stubs; row-event apply is unsupported, and ordinary SQL conversion, JSON,
 GEOMETRY/GIS, sequence handling, and native storage remain on retained
-non-replication paths.
+non-replication paths. Residual replication helper objects are omitted from the
+default embedded archive after link evidence proves retained no-binlog paths no
+longer reference `slave.cc`, `sql_repl.cc`, `rpl_utility.cc`, or
+`rpl_reporting.cc`.
 PROXY protocol listener support is omitted from the default embedded profile;
 the core embedded runtime does not accept socket connections, and the
 `proxy_protocol_networks` system variable is absent.

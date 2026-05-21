@@ -430,7 +430,9 @@ embedded archive. Server-side binary-log event writers are also replaced by a
 disabled embedded source; ordinary SQL value rendering keeps MariaDB's
 `append_query_string()` escaping behavior. Replication GTID-state runtime is
 replaced by empty embedded state for retained no-binlog link paths, and
-binary-log GTID-index runtime plus tuning variables are omitted.
+binary-log GTID-index runtime plus tuning variables are omitted. Residual
+replication helper objects are omitted after link evidence proves the
+serverless no-binlog profile does not reference them.
 SQL `HANDLER` command runtime is replaced by a disabled embedded source; the
 storage-engine `handler` abstraction remains available for normal table
 execution.

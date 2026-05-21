@@ -21,9 +21,9 @@ C API behavior.
   such as `Field::*::rpl_conv_type_from()`, `Type_handler::*::show_binlog_type()`,
   and `Type_handler::*::max_display_length_for_field()` implementations used by
   row-event apply.
-- `mariadb/sql/rpl_utility.cc` still provides shared table-map metadata helpers
-  referenced by retained binary-log event code, so this slice cannot delete all
-  replication utility code.
+- At this slice boundary, `mariadb/sql/rpl_utility.cc` still provided shared
+  table-map metadata helpers referenced by retained binary-log event code, so
+  this slice could not delete all replication utility code.
 - `packages/libmylite/tests/embedded_server_surface_policy_test.c` already
   rejects replication, binlog, GTID helper functions, and replication execution
   variables directly and in prepared statements.
@@ -44,7 +44,7 @@ When disabled:
 - return `CONV_TYPE_IMPOSSIBLE` from row-replication conversion checks;
 - leave binary-log type-rendering strings empty for fail-closed row-event error
   paths;
-- retain `rpl_utility.cc` table-map metadata helpers.
+- retain `rpl_utility.cc` table-map metadata helpers at this slice boundary.
 
 ## Compatibility Impact
 

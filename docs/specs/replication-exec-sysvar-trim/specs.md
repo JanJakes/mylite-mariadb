@@ -39,8 +39,9 @@ Relevant source paths:
   contiguous `sys_vars.cc` block.
 - Keep common compatibility and status variables such as `@@log_bin=0` available
   where they are already part of the embedded policy contract.
-- Keep retained shared replication helper objects until a separate source and
-  link review proves narrower removals are safe.
+- Keep retained shared replication helper objects at this slice boundary. A
+  later residual-helper trim removes them after source and link review proves
+  narrower removals are safe.
 
 ## Compatibility Impact
 

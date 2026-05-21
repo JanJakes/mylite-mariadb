@@ -271,7 +271,7 @@ the no-binlog embedded profile.
   `rpl_semi_sync_master_enabled`. Compatibility variables such as `log_bin`,
   `server_id`, and GTID positions are separate declarations.
 - Disabling those registrations behind `MYLITE_WITH_REPLICATION_EXEC_SYSVARS=0`
-  keeps retained shared replication helpers available for generic MariaDB code
+  keeps retained replication helper objects available at that slice boundary
   and reduces the stripped archive to 26,534,136 bytes, 25.30 MiB, and 703
   members.
 - `mariadb/sql/proxy_protocol.cc` parses HAProxy PROXY protocol v1/v2 headers,
@@ -383,10 +383,10 @@ the no-binlog embedded profile.
   retained runtime path needs binlog cache files.
 - `mariadb/sql/rpl_utility_server.cc` implements row-replication type
   comparison, conversion-table construction, and binary-log type rendering for
-  row-event apply. `mariadb/sql/rpl_utility.cc` still owns shared table-map
-  metadata helpers used by retained event code, so the server-side conversion
-  source needs a separate replacement rather than deleting all replication
-  utility code.
+  row-event apply. At that slice boundary, `mariadb/sql/rpl_utility.cc` still
+  owned shared table-map metadata helpers used by retained event code, so the
+  server-side conversion source needed a separate replacement rather than
+  deleting all replication utility code.
 - `mariadb/sql/log_event.cc` implements common binary-log event parser and
   reader runtime, including `Log_event::read_log_event()`,
   format-description setup, compressed-event helpers, and event-class virtual
@@ -662,7 +662,14 @@ The embedded archive omits row-replication type conversion by setting
 `MYLITE_WITH_RPL_TYPE_CONVERSION=0` in the MyLite baseline. The option defaults
 to `ON` so upstream-style embedded builds keep row-event conversion behavior.
 The disabled profile replaces `rpl_utility_server.cc` with fail-closed
-conversion stubs while retaining `rpl_utility.cc` table-map metadata helpers.
+conversion stubs.
+
+The embedded archive omits residual replication helper objects by setting
+`MYLITE_WITH_REPLICATION_HELPERS=0` in the MyLite baseline. The option defaults
+to `ON` so upstream-style embedded builds keep the helper objects. The disabled
+profile removes `slave.cc`, `sql_repl.cc`, `rpl_utility.cc`, and
+`rpl_reporting.cc` after link evidence proves retained no-binlog paths no
+longer reference their symbols.
 
 The embedded archive omits common binary-log event parser and reader runtime by
 setting `MYLITE_WITH_LOG_EVENT_PARSING=0` in the MyLite baseline. The option
@@ -752,9 +759,10 @@ of the default embedded archive, while static built-in plugins, native engines,
 and provider fallback services remain available. VIO TLS transport is replaced
 with a disabled embedded stub. Replication execution, slave protocol,
 replication-event, checksum, and semi-sync system-variable registrations are
-compiled out while retained shared replication helpers remain available. PROXY
-protocol listener parsing and its system-variable registration are replaced
-with fail-closed embedded stubs. User statistics Information Schema plugin
+compiled out, and residual replication helper objects are omitted once no
+retained no-binlog paths reference them. PROXY protocol listener parsing and
+its system-variable registration are replaced with fail-closed embedded stubs.
+User statistics Information Schema plugin
 registration and the `userstat` system variable are omitted. User-variable
 diagnostics, Unix socket server authentication, full event parse-data
 validation, and SQL `BINLOG` replay are also omitted from the default embedded
@@ -1103,6 +1111,11 @@ archive to 26,180,192 bytes / 24.97 MiB, 5,349,512 bytes smaller than the
 Release build with Performance Schema disabled, 6,949,448 bytes smaller than
 the symbol-stripped baseline with Performance Schema still built, and
 7,662,128 bytes smaller than the original broad archive.
+Omitting residual replication helper objects brings the current archive to
+26,170,360 bytes / 24.96 MiB, 5,359,344 bytes smaller than the Release build
+with Performance Schema disabled, 6,959,280 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 7,671,960
+bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -1136,6 +1149,8 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   cache.
 - Confirm `MYLITE_WITH_GTID_STATE=OFF` appears in the embedded CMake cache.
 - Confirm `MYLITE_WITH_GTID_INDEX=OFF` appears in the embedded CMake cache.
+- Confirm `MYLITE_WITH_REPLICATION_HELPERS=OFF` appears in the embedded CMake
+  cache.
 - Confirm `MYLITE_WITH_SQL_HANDLER=OFF` appears in the embedded CMake cache.
 - Confirm `MYLITE_WITH_SELECT_INTO_FILE=OFF` appears in the embedded CMake
   cache.
@@ -1148,6 +1163,8 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   prepared `MASTER_GTID_WAIT()` / `BINLOG_GTID_POS()` /
   `WSREP_SYNC_WAIT_UPTO_GTID()` calls plus GTID state variable assignments fail
   through server-surface policy coverage.
+- Confirm `slave.cc.o`, `sql_repl.cc.o`, `rpl_utility.cc.o`, and
+  `rpl_reporting.cc.o` are absent from `libmariadbd.a`.
 - Confirm `sql_handler.cc.o` is absent from `libmariadbd.a`,
   `mylite_sql_handler_disabled.cc.o` remains, and direct and prepared
   top-level `HANDLER ...` statements fail through server-surface policy
@@ -1276,6 +1293,8 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   Row-replication type-conversion helpers are replaced with fail-closed embedded
   stubs, `rpl_utility_server.cc.o` is absent from the embedded archive, and
   ordinary SQL type conversion remains covered through retained tests.
+  Residual replication helper objects are omitted after link evidence proves
+  no retained no-binlog path references them.
   Persistent
   optimizer-statistics storage is omitted, `use_stat_tables` starts as `NEVER`,
   histogram collection starts at size `0`, persistent statistics SQL and
@@ -1332,9 +1351,8 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
 - Unwind-table omission should stay scoped to targets where it is non-semantic.
 - Stored functions remain planned application SQL. Dynamic UDF policy and size
   trimming must stay scoped to shared-library UDF registration and execution.
-- `log.cc`, `sql_repl.cc`, and replication utility files still have shared
-  references. Removing more binlog code needs separate source and link evidence
-  rather than file-name pruning.
+- `log.cc` still has shared no-binlog references. Removing more binlog code
+  needs separate source and link evidence rather than file-name pruning.
 - The disabled log-event source keeps a small virtual-method and destructor
   contract for retained unsupported paths. Further shrinking that contract
   needs link evidence plus coverage for ordinary SQL string rendering.

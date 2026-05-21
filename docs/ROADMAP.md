@@ -136,6 +136,9 @@ Row-replication type-conversion helpers are replaced with fail-closed embedded
 stubs after source review proves row-event apply is already outside the core
 profile; ordinary SQL type conversion, native storage, JSON, GEOMETRY/GIS, and
 sequence support remain linked through their normal non-replication paths.
+Residual replication helper objects are omitted after link evidence proves the
+no-binlog embedded profile no longer references `slave.cc`, `sql_repl.cc`,
+`rpl_utility.cc`, or `rpl_reporting.cc`.
 Legacy `PROCEDURE ANALYSE()` support is omitted after policy coverage proves it
 is an obsolete diagnostic SELECT extension rather than application data
 functionality; normal SELECT execution remains supported.
