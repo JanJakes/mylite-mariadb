@@ -37,7 +37,9 @@ status-variable publication is omitted because it exposes daemon diagnostic
 counters rather than application SQL, storage, or public API behavior. Oracle
 compatibility function aliases and `oracle_schema` routing are omitted because
 Oracle compatibility mode is already unsupported and these aliases are not core
-MySQL/MariaDB application SQL.
+MySQL/MariaDB application SQL. The full English server error-message catalog is
+compacted because uncommon diagnostic prose is not core SQL, storage, or API
+behavior when MariaDB errno and SQLSTATE remain available.
 
 ## Source Findings
 
@@ -207,6 +209,17 @@ MySQL/MariaDB application SQL.
   keeping normal `CONCAT`, `LPAD`, `RPAD`, `LTRIM`, `RTRIM`, `SUBSTR`,
   `REPLACE`, `TRIM`, and `LENGTH` behavior covered. The stripped archive is
   reduced to 26,861,088 bytes, 25.62 MiB, and 705 members.
+- `mariadb/sql/derror.cc` initializes the English server error-message catalog
+  by including generated `mysqld_ername.h`, then registers the populated error
+  ranges for `my_error()` and `ER_DEFAULT()` lookups.
+- Disabling the full English error-message catalog behind
+  `MYLITE_WITH_FULL_ERROR_MESSAGES=0` keeps the same active error-id ranges
+  and preserves common MyLite-facing messages such as syntax errors, duplicate
+  keys, table lookup, storage-engine file errors, unsupported-feature
+  diagnostics, and unknown function paths. Less common inherited server errors
+  use a generic placeholder-free message while MariaDB errno and SQLSTATE
+  remain available. The stripped archive is reduced to 26,647,312 bytes, 25.41
+  MiB, and 705 members.
 
 ## Proposed Design
 
@@ -256,6 +269,14 @@ builds keep upstream Oracle migration aliases. MyLite already rejects
 `sql_mode=ORACLE`; this cut removes the remaining Oracle-only aliases and
 parser item paths while keeping ordinary MySQL/MariaDB string functions
 available.
+
+The embedded archive uses a compact English server error-message catalog by
+setting `MYLITE_WITH_FULL_ERROR_MESSAGES=0` in the MyLite baseline. The option
+defaults to `ON` so normal MariaDB server builds keep upstream diagnostics.
+The compact profile registers the same error ranges and keeps common
+MyLite-facing format strings, but maps less common inherited server errors to
+a generic placeholder-free message. MariaDB errno and SQLSTATE remain the
+stable compatibility surfaces.
 
 The embedded SQL function registry omits `SFORMAT()` and the embedded
 `item_strfunc.cc` build excludes the fmtlib-backed implementation. With the
@@ -374,7 +395,9 @@ query-log handlers are compiled to inert embedded paths while shared error-log
 behavior remains available. Statement digest normalization is replaced with
 inert digest helper symbols, and per-session digest token buffers are disabled
 at startup. Server status-variable publication arrays and dynamic registry
-updates are compiled to empty embedded paths.
+updates are compiled to empty embedded paths. The embedded English server
+error-message catalog is compacted while keeping MariaDB error numbers,
+SQLSTATEs, and common diagnostics available.
 
 ## Compatibility Impact
 
@@ -438,6 +461,11 @@ Server status-variable publication is a server diagnostic path. Omitting it
 removes `SHOW STATUS` rows and status Information Schema rows, not ordinary
 SQL diagnostics, warnings, result metadata, prepared statements, JSON,
 GEOMETRY/GIS, native storage engines, DDL, DML, or the public C API.
+The full English server error-message catalog is diagnostic text. Compacting it
+does not change MariaDB errno, SQLSTATE, SQL execution, prepared statements,
+warnings, result metadata, JSON, GEOMETRY/GIS, native storage engines, DDL,
+DML, or the public C API. Common syntax-error and duplicate-key text remains
+covered; less common inherited server errors may return generic text.
 
 ## Database-Directory And Lifecycle Impact
 
@@ -614,6 +642,10 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Server status-variable publication is omitted from the default embedded
   archive, status queries return empty rows, and ordinary diagnostics,
   warnings, result metadata, and prepared statements remain available.
+- The full English server error-message catalog is compacted in the default
+  embedded archive, MariaDB errno and SQLSTATE remain available, syntax-error
+  and duplicate-key diagnostics remain readable, and uncommon inherited server
+  errors have a tested generic fallback.
 - The stripped archive still links `libmylite` and all embedded tests.
 - The measured archive size and member count are recorded in the build
   documentation.
@@ -659,3 +691,7 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Users relying on MariaDB `SHOW STATUS` counters or status Information Schema
   rows lose those server diagnostics in the default embedded profile. Ordinary
   SQL diagnostics and result metadata remain available.
+- Users relying on exact full-text MariaDB server diagnostics for uncommon
+  inherited errors may see generic message text in the default embedded
+  profile. MariaDB errno and SQLSTATE remain the stable compatibility
+  surfaces, and common MyLite-facing messages remain covered.

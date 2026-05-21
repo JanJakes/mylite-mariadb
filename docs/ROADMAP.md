@@ -55,6 +55,7 @@ surface that does not fit a local directory-owned library:
 - server status variables,
 - optional Oracle SQL compatibility mode,
 - optional Oracle compatibility function aliases,
+- full inherited server diagnostic text,
 - optional fmtlib-backed SQL helpers such as `SFORMAT()`,
 - legacy diagnostic SELECT procedures such as `PROCEDURE ANALYSE()`,
 - server help text such as system-variable comments,
@@ -116,6 +117,9 @@ Oracle compatibility function aliases and `oracle_schema` routing are omitted
 after coverage proves the normal MySQL/MariaDB string functions remain
 available, Oracle-only aliases fail predictably, and `oracle_schema` no
 longer acts as a built-in compatibility schema.
+The full server error-message catalog is compacted after coverage proves
+MariaDB error numbers, SQLSTATEs, syntax-error messages, duplicate-key
+messages, and generic fallback diagnostics remain available.
 Compatibility-sensitive code removals require separate evidence before they
 are accepted.
 

@@ -30,9 +30,18 @@
 #include "derror.h"                             // read_texts
 #include "sql_class.h"                          // THD
 
+#ifndef MYLITE_WITH_FULL_ERROR_MESSAGES
+#define MYLITE_WITH_FULL_ERROR_MESSAGES 1
+#endif
+
 uint errors_per_range[MAX_ERROR_RANGES+1];
 
 static bool check_error_mesg(const char *file_name, const char **errmsg);
+#if !MYLITE_WITH_FULL_ERROR_MESSAGES
+static bool init_compact_english_error_messages(void);
+static void init_compact_error_ranges(void);
+static const char *compact_error_message(uint id);
+#endif
 static void init_myfunc_errs(void);
 
 
@@ -67,7 +76,6 @@ static const char ***original_error_messages;
 
 bool init_errmessage(void)
 {
-  const char **errmsgs;
   bool error= FALSE;
   const char *lang= my_default_lc_messages->errmsgs->language;
   my_bool use_english;
@@ -92,6 +100,7 @@ bool init_errmessage(void)
 
   if (use_english)
   {
+#if MYLITE_WITH_FULL_ERROR_MESSAGES
     static const struct
     {
       const char* name;
@@ -119,6 +128,7 @@ bool init_errmessage(void)
     for (size_t i= 0; i < MAX_ERROR_RANGES; i++)
       all_errors+= errors_per_range[i];
 
+    const char **errmsgs;
     if (!(original_error_messages= (const char***)
           my_malloc(PSI_NOT_INSTRUMENTED,
                     (all_errors + MAX_ERROR_RANGES)*sizeof(void*),
@@ -140,6 +150,10 @@ bool init_errmessage(void)
       original_error_messages[id/ERRORS_PER_RANGE-1][id%ERRORS_PER_RANGE]=
          english_msgs[i].fmt;
     }
+#else
+    if (init_compact_english_error_messages())
+      DBUG_RETURN(TRUE);
+#endif
   }
 
   /* Register messages for use with my_error(). */
@@ -161,6 +175,200 @@ bool init_errmessage(void)
   init_myfunc_errs();			/* Init myfunc messages */
   DBUG_RETURN(error);
 }
+
+#if !MYLITE_WITH_FULL_ERROR_MESSAGES
+static bool init_compact_english_error_messages(void)
+{
+  const char **errmsgs;
+
+  init_compact_error_ranges();
+
+  size_t all_errors= 0;
+  for (size_t i= 0; i < MAX_ERROR_RANGES; i++)
+    all_errors+= errors_per_range[i];
+
+  if (!(original_error_messages= (const char***)
+        my_malloc(PSI_NOT_INSTRUMENTED,
+                  (all_errors + MAX_ERROR_RANGES)*sizeof(void*),
+                  MYF(MY_ZEROFILL))))
+    return true;
+
+  errmsgs= (const char**)(original_error_messages + MAX_ERROR_RANGES);
+
+  original_error_messages[0]= errmsgs;
+  for (uint i= 1; i < MAX_ERROR_RANGES; i++)
+  {
+    original_error_messages[i]=
+      original_error_messages[i-1] + errors_per_range[i-1];
+  }
+
+  for (uint range= 0; range < MAX_ERROR_RANGES; range++)
+  {
+    for (uint offset= 0; offset < errors_per_range[range]; offset++)
+    {
+      uint id= (range + 1) * ERRORS_PER_RANGE + offset;
+      original_error_messages[range][offset]= compact_error_message(id);
+    }
+  }
+
+  return false;
+}
+
+
+static void init_compact_error_ranges(void)
+{
+  memset(errors_per_range, 0, sizeof(errors_per_range));
+  errors_per_range[0]= ER_ERROR_LAST_SECTION_2 - ER_ERROR_FIRST + 1;
+  errors_per_range[2]= ER_ERROR_LAST_SECTION_4 -
+                       ER_ERROR_FIRST_SECTION_4 + 1;
+  errors_per_range[3]= ER_ERROR_LAST - ER_ERROR_FIRST_SECTION_5 + 1;
+}
+
+
+static const char *compact_error_message(uint id)
+{
+  switch (id)
+  {
+  case ER_CANT_CREATE_FILE:
+    return "Can't create file '%-.200s' (errno: %iE)";
+  case ER_CANT_CREATE_TABLE:
+    return "Can't create table %sQ.%sQ (errno: %iE)";
+  case ER_CANT_CREATE_DB:
+    return "Can't create database '%-.192s' (errno: %iE)";
+  case ER_DB_CREATE_EXISTS:
+    return "Can't create database '%-.192s'; database exists";
+  case ER_DB_DROP_EXISTS:
+    return "Can't drop database '%-.192s'; database doesn't exist";
+  case ER_CANT_DELETE_FILE:
+    return "Error on delete of '%-.192s' (errno: %iE)";
+  case ER_CANT_GET_STAT:
+    return "Can't get status of '%-.200s' (errno: %iE)";
+  case ER_CANT_LOCK:
+    return "Can't lock file (errno: %iE)";
+  case ER_CANT_OPEN_FILE:
+    return "Can't open file: '%-.200s' (errno: %iE)";
+  case ER_FILE_NOT_FOUND:
+    return "Can't find file: '%-.200s' (errno: %iE)";
+  case ER_CANT_READ_DIR:
+    return "Can't read dir of '%-.192s' (errno: %iE)";
+  case ER_DISK_FULL:
+    return "Disk full (%s); waiting for someone to free some space... "
+           "(errno: %iE)";
+  case ER_DUP_KEY:
+    return "Can't write; duplicate key in table '%-.192s'";
+  case ER_ERROR_ON_CLOSE:
+    return "Error on close of '%-.192s' (errno: %iE)";
+  case ER_ERROR_ON_READ:
+    return "Error reading file '%-.200s' (errno: %iE)";
+  case ER_ERROR_ON_RENAME:
+    return "Error on rename of '%-.210s' to '%-.210s' (errno: %iE)";
+  case ER_ERROR_ON_WRITE:
+    return "Error writing file '%-.200s' (errno: %iE)";
+  case ER_GET_ERRNO:
+    return "Got error %iE from storage engine %s";
+  case ER_ILLEGAL_HA:
+    return "Storage engine %s of the table %sQ.%sQ doesn't have this option";
+  case ER_KEY_NOT_FOUND:
+    return "Can't find record in '%-.192s'";
+  case ER_NOT_KEYFILE:
+    return "Index for table '%-.200s' is corrupt; try to repair it";
+  case ER_OPEN_AS_READONLY:
+    return "Table '%-.192s' is read only";
+  case ER_OUTOFMEMORY:
+    return "Out of memory; restart server and try again (needed %d bytes)";
+  case ER_OUT_OF_SORTMEMORY:
+    return "Out of sort memory, consider increasing server sort buffer size";
+  case ER_UNEXPECTED_EOF:
+    return "Unexpected EOF found when reading file '%-.192s' (errno: %iE)";
+  case ER_NO_DB_ERROR:
+    return "No database selected";
+  case ER_BAD_NULL_ERROR:
+    return "Column '%-.192s' cannot be null";
+  case ER_BAD_DB_ERROR:
+    return "Unknown database '%-.192s'";
+  case ER_TABLE_EXISTS_ERROR:
+    return "Table '%-.192s' already exists";
+  case ER_BAD_TABLE_ERROR:
+    return "Unknown table '%-.100sT'";
+  case ER_BAD_FIELD_ERROR:
+    return "Unknown column '%-.192s' in '%-.192s'";
+  case ER_WRONG_VALUE_COUNT:
+    return "Column count doesn't match value count";
+  case ER_DUP_FIELDNAME:
+    return "Duplicate column name '%-.192s'";
+  case ER_DUP_KEYNAME:
+    return "Duplicate key name '%-.192s'";
+  case ER_DUP_ENTRY:
+    return "Duplicate entry '%-.192sT' for key %d";
+  case ER_PARSE_ERROR:
+    return "%s near '%-.80sT' at line %d";
+  case ER_INVALID_DEFAULT:
+    return "Invalid default value for '%-.192s'";
+  case ER_UNKNOWN_TABLE:
+    return "Unknown table '%-.192s' in %-.32s";
+  case ER_SYNTAX_ERROR:
+    return "You have an error in your SQL syntax; check the manual that "
+           "corresponds to your MariaDB server version for the right syntax "
+           "to use";
+  case ER_RECORD_FILE_FULL:
+    return "The table '%-.192s' is full";
+  case ER_WRONG_VALUE_COUNT_ON_ROW:
+    return "Column count doesn't match value count at row %lu";
+  case ER_NO_SUCH_TABLE:
+    return "Table '%-.192s.%-.192s' doesn't exist";
+  case ER_LOCK_WAIT_TIMEOUT:
+    return "Lock wait timeout exceeded; try restarting transaction";
+  case ER_LOCK_DEADLOCK:
+    return "Deadlock found when trying to get lock; try restarting "
+           "transaction";
+  case ER_CANNOT_ADD_FOREIGN:
+    return "Cannot add foreign key constraint for `%s`";
+  case ER_NO_REFERENCED_ROW:
+    return "Cannot add or update a child row: a foreign key constraint fails";
+  case ER_ROW_IS_REFERENCED:
+    return "Cannot delete or update a parent row: a foreign key constraint "
+           "fails";
+  case ER_NOT_SUPPORTED_YET:
+    return "This version of MariaDB doesn't yet support '%s'";
+  case WARN_DATA_TRUNCATED:
+    return "Data truncated for column '%s' at row %lu";
+  case ER_UNKNOWN_STORAGE_ENGINE:
+    return "Unknown storage engine '%s'";
+  case ER_TRUNCATED_WRONG_VALUE:
+    return "Truncated incorrect %-.32sT value: '%-.128sT'";
+  case ER_SP_DOES_NOT_EXIST:
+    return "%s %s does not exist";
+  case ER_TRUNCATED_WRONG_VALUE_FOR_FIELD:
+    return "Incorrect %-.32s value: '%-.128sT' for column "
+           "`%.192s`.`%.192s`.`%.192s` at row %lu";
+  case ER_DATA_TOO_LONG:
+    return "Data too long for column '%s' at row %lu";
+  case ER_ROW_IS_REFERENCED_2:
+    return "Cannot delete or update a parent row: a foreign key constraint "
+           "fails (%s)";
+  case ER_NO_REFERENCED_ROW_2:
+    return "Cannot add or update a child row: a foreign key constraint "
+           "fails (%s)";
+  case ER_DUP_ENTRY_WITH_KEY_NAME:
+    return "Duplicate entry '%-.64sT' for key '%-.192s'";
+  case ER_FUNC_INEXISTENT_NAME_COLLISION:
+    return "FUNCTION %s does not exist. Check the 'Function Name Parsing and "
+           "Resolution' section in the Reference Manual";
+  case ER_INDEX_COLUMN_TOO_LONG:
+    return "Index column size too large. The maximum column size is %lu bytes";
+  case ER_INDEX_CORRUPT:
+    return "Index %s is corrupted";
+  case ER_TABLESPACE_MISSING:
+    return "Tablespace is missing for table '%-.192s'";
+  case ER_DATA_TRUNCATED:
+    return "Truncated value '%-.128s' when converting to %-.32s";
+  case ER_NO_SUCH_TABLE_IN_ENGINE:
+    return "Table '%-.192s.%-.192s' doesn't exist in engine";
+  default:
+    return "MariaDB error";
+  }
+}
+#endif
 
 
 void free_error_messages()

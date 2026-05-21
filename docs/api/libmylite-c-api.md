@@ -305,6 +305,11 @@ int mylite_warning(
 
 `mylite_errcode()` is the stable MyLite classification. MariaDB errno and
 SQLSTATE remain available for callers that need server-compatible diagnostics.
+The default embedded profile uses a compact MariaDB server error-message
+catalog: common diagnostics such as syntax errors and duplicate-key errors stay
+readable, while less common inherited server errors may return generic message
+text. Callers that need exact server compatibility should rely on MariaDB errno
+and SQLSTATE rather than matching the full upstream message catalog.
 
 `mylite_warning()` uses a zero-based index. It returns `MYLITE_NOTFOUND` when
 the requested warning is not stored.

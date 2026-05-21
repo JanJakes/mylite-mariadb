@@ -50,6 +50,7 @@ static void assert_runtime_policy_variables(mylite_db *db, const char *database_
 static void assert_system_variable_help_text_omitted(mylite_db *db);
 static void assert_status_variables_omitted(mylite_db *db);
 static void assert_oracle_compat_functions_omitted(mylite_db *db);
+static void assert_compact_error_catalog(mylite_db *db);
 static void assert_performance_schema_omitted_or_disabled(mylite_db *db);
 static int performance_schema_variable_callback(
     void *ctx,
@@ -113,6 +114,7 @@ static void test_server_surfaces_are_disabled_or_contained(void) {
     assert_system_variable_help_text_omitted(db);
     assert_status_variables_omitted(db);
     assert_oracle_compat_functions_omitted(db);
+    assert_compact_error_catalog(db);
     assert_server_sql_rejected(db);
     assert_no_server_sidecar_files(database_path);
     assert(mylite_close(db) == MYLITE_OK);
@@ -300,6 +302,19 @@ static void assert_oracle_compat_functions_omitted(mylite_db *db) {
     expect_error(db, "SELECT SQL%ROWCOUNT", NULL);
     expect_prepare_error(db, "SELECT DECODE_ORACLE(1,1,10)", "DECODE_ORACLE");
     expect_prepare_error(db, "SELECT TRIM_ORACLE(' x ')", "Oracle compatibility SQL functions");
+}
+
+static void assert_compact_error_catalog(mylite_db *db) {
+    char *errmsg = NULL;
+    const char *sql = "SELECT 1 UNION SELECT 1, 2";
+
+    assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_ERROR);
+    assert(mylite_mariadb_errno(db) == 1222U);
+    assert(strcmp(mylite_sqlstate(db), "21000") == 0);
+    assert(strcmp(mylite_errmsg(db), "MariaDB error") == 0);
+    assert(errmsg != NULL);
+    assert(strcmp(errmsg, "MariaDB error") == 0);
+    mylite_free(errmsg);
 }
 
 static void assert_performance_schema_omitted_or_disabled(mylite_db *db) {

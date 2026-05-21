@@ -50,7 +50,7 @@ behavior. It does not require a daemon in the default test path.
 | Direct SQL execution | 🟡&nbsp;Partial | `mylite_exec()` executes controlled one-shot SQL with textual result callbacks in embedded builds; native-storage coverage verifies MyISAM DDL/DML, row/index operations, and explicit InnoDB transaction/recovery behavior across reopen |
 | Prepared statements | 🟡&nbsp;Partial | Reusable MariaDB prepared statements are exposed through `mylite_prepare()`, `mylite_step()`, `mylite_reset()`, and `mylite_finalize()` with 1-based parameter binding |
 | Binary-safe values | 🟡&nbsp;Partial | Prepared text/blob bindings and column accessors use explicit byte counts; embedded NUL blob values are covered |
-| Diagnostics | 🟡&nbsp;Partial | Open handles expose stable MyLite result codes, MariaDB errno, SQLSTATE, and message text |
+| Diagnostics | 🟡&nbsp;Partial | Open handles expose stable MyLite result codes, MariaDB errno, SQLSTATE, and message text; the default embedded profile keeps common MariaDB messages but may use compact generic text for uncommon inherited server errors |
 | Warnings | 🟡&nbsp;Partial | MariaDB warning counts and indexed warning lookup expose level, code, and message text after statement execution |
 | Affected rows and insert ids | 🟡&nbsp;Partial | Successful direct execution exposes affected rows for non-result statements and the last insert id |
 | Raw `MYSQL *` as primary API | ➖&nbsp;Out&nbsp;of&nbsp;scope | Available only through a deliberate compatibility adapter |
