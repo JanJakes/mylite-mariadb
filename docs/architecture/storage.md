@@ -431,6 +431,9 @@ Table catalog writers use scoped update setup before publishing table
 definition BLOB pages, FK-aware drops, or table rename metadata.
 Index leaf rebuild publication also uses scoped update setup before writing
 rebuilt leaf pages and catalog root records.
+Row append, delete, and truncate mutation paths use scoped update setup before
+writing row pages, row-state pages, maintained index roots, and truncate
+autoincrement reset pages; the generic update-open wrapper has been removed.
 
 File-backed index cursor builds also keep the primary file open across exact
 lookup and row materialization. Primary-key point lookups and secondary exact
