@@ -17571,6 +17571,8 @@ static void test_copy_alter_leaf_root_publication(void) {
     assert_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 0U, 4ULL);
     assert_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 1U, 4ULL);
     assert_exec_succeeds(db, "UPDATE copy_alter_leaf_posts SET views = 9 WHERE id = 1");
+    assert_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 0U, 4ULL);
+    assert_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 1U, 4ULL);
     assert_exec_succeeds(db, "DELETE FROM copy_alter_leaf_posts WHERE id = 3");
     assert_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 0U, 3ULL);
     assert_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 1U, 3ULL);

@@ -4757,7 +4757,7 @@ static void test_unchanged_index_update_elision(void) {
     );
     assert(secondary_update_row_id != payload_update_row_id);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
-    assert(header.page_count == before_secondary_update_pages + 3ULL);
+    assert(header.page_count == before_secondary_update_pages + 2ULL);
 
     const unsigned long long secondary_update_row_ids[] = {secondary_update_row_id};
     assert_exact_index_entries(
@@ -5704,6 +5704,8 @@ static void test_index_leaf_pages(void) {
         sizeof(append_tail_row_ids) / sizeof(append_tail_row_ids[0])
     );
 
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    const unsigned long long before_maintained_update_pages = header.page_count;
     assert(
         mylite_storage_update_row_with_index_entries(
             filename,
@@ -5717,6 +5719,10 @@ static void test_index_leaf_pages(void) {
             &updated_row_2_id
         ) == MYLITE_STORAGE_OK
     );
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_maintained_update_pages + 2ULL);
+    assert_index_root(filename, "app", "posts", 0U, primary_root_page, 3ULL);
+    assert_index_root(filename, "app", "posts", 1U, secondary_root_page, 3ULL);
     assert_index_entry_lookup(filename, 0U, key_2, sizeof(key_2), MYLITE_STORAGE_NOTFOUND, 0ULL);
     assert_index_entry_lookup(
         filename,
@@ -6005,7 +6011,7 @@ static void test_batched_index_leaf_pages(void) {
         MYLITE_STORAGE_OK,
         updated_row_2_id
     );
-    const unsigned long long tail_secondary_row_ids[] = {updated_row_2_id, row_3_id};
+    const unsigned long long tail_secondary_row_ids[] = {row_3_id, updated_row_2_id};
     assert_exact_index_entries(
         filename,
         1U,

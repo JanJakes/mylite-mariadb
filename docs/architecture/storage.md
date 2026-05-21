@@ -1010,8 +1010,11 @@ page. Rebuild scans also treat maintained roots as live index sources so a
 later rebuild or rename does not lose entries that were inserted directly into
 the root. Eligible deletes now physically remove the source row id from
 maintained roots while preserving the row-state delete overlay for immutable
-and fallback paths. Update physical root maintenance, root splits, and
-transaction-aware maintained index mutation remain planned.
+and fallback paths. Eligible updates now replace source-row cells in maintained
+roots with the replacement row id and new key bytes, keep root entry counts
+stable, and skip duplicate append-only replacement index-entry pages for roots
+updated in place. Root splits and transaction-aware maintained index mutation
+remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, row/index free-space reclamation, multi-statement

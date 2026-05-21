@@ -169,8 +169,10 @@ root pages in place under the preplanned dirty-page journal path and skip the
 duplicate append-only index-entry page; rebuild scans preserve entries that
 live only in maintained roots. Eligible deletes now physically remove source
 row ids from maintained roots while retaining row-state overlays for fallback
-visibility. Update physical root maintenance, root splits, and
-transaction-aware maintained index mutation remain planned.
+visibility. Eligible updates now physically replace maintained root cells for
+source-row replacements, preserve root counts, and skip duplicate append-only
+replacement index-entry pages when the root was updated in place. Root splits
+and transaction-aware maintained index mutation remain planned.
 Durable table-local row,
 payload, exact-index, and published leaf-page caches now retarget across
 unrelated table row mutations, so one
