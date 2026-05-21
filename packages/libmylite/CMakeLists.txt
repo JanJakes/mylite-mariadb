@@ -9,6 +9,9 @@ add_library(mylite STATIC
   src/version.c
 )
 add_library(MyLite::mylite ALIAS mylite)
+set_target_properties(mylite PROPERTIES
+  POSITION_INDEPENDENT_CODE ON
+)
 
 target_include_directories(mylite
   PUBLIC
@@ -20,6 +23,46 @@ target_include_directories(mylite
 mylite_configure_c_target(mylite)
 mylite_configure_cxx_target(mylite)
 mylite_link_mariadb_embedded(mylite)
+
+if(MYLITE_BUILD_BUNDLE_AUDIT_PROBE)
+  if(NOT MYLITE_WITH_MARIADB_EMBEDDED)
+    message(FATAL_ERROR "MYLITE_BUILD_BUNDLE_AUDIT_PROBE requires MYLITE_WITH_MARIADB_EMBEDDED=ON")
+  endif()
+
+  add_library(mylite_php_probe MODULE
+    audit/mylite_php_probe.c
+  )
+  target_link_libraries(mylite_php_probe PRIVATE MyLite::mylite)
+  mylite_configure_c_target(mylite_php_probe)
+  if(NOT MSVC)
+    target_compile_options(mylite PRIVATE -ffunction-sections -fdata-sections)
+    target_compile_options(mylite_php_probe PRIVATE -ffunction-sections -fdata-sections)
+  endif()
+  set_target_properties(mylite_php_probe PROPERTIES
+    C_VISIBILITY_PRESET hidden
+    PREFIX ""
+    OUTPUT_NAME mylite_php_probe
+  )
+
+  set(mylite_php_probe_map "${CMAKE_CURRENT_BINARY_DIR}/mylite_php_probe.map")
+  if(APPLE)
+    set_target_properties(mylite_php_probe PROPERTIES SUFFIX ".so")
+    target_link_options(mylite_php_probe PRIVATE
+      "LINKER:-dead_strip"
+      "LINKER:-exported_symbol,_get_module"
+      "LINKER:-map,${mylite_php_probe_map}"
+    )
+  elseif(UNIX)
+    set(mylite_php_probe_exports "${CMAKE_CURRENT_BINARY_DIR}/mylite_php_probe.exports")
+    file(WRITE "${mylite_php_probe_exports}" "{\n  global: get_module;\n  local: *;\n};\n")
+    target_link_options(mylite_php_probe PRIVATE
+      "LINKER:--exclude-libs,ALL"
+      "LINKER:--gc-sections"
+      "LINKER:--version-script=${mylite_php_probe_exports}"
+      "LINKER:-Map,${mylite_php_probe_map}"
+    )
+  endif()
+endif()
 
 if(BUILD_TESTING)
   add_executable(mylite_api_test

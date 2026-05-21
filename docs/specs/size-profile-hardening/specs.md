@@ -94,6 +94,9 @@ SQL and the standalone dynamic-column C helper API are MariaDB-specific helper
 surfaces outside the current MySQL/MariaDB drop-in target; ordinary SQL, JSON,
 GEOMETRY/GIS, native storage, result metadata, and prepared statements remain
 unchanged.
+Linked package-shape measurements use a committed PHP-shaped audit probe so
+export control, dead stripping, dependency roots, and linker-map contributors
+are measured separately from static archive size.
 
 ## Source Findings
 
@@ -472,6 +475,12 @@ unchanged.
 - Omitting dynamic-column SQL and helper runtime behind
   `MYLITE_WITH_DYNAMIC_COLUMNS=0` reduces the stripped archive to 25,635,600
   bytes, 24.45 MiB, and 691 members.
+- `tools/mylite-bundle-audit` builds a one-export macOS module against the
+  current default embedded archive. On 2026-05-21 it measured
+  `mylite_php_probe.so` at 14,301,968 bytes / 13.64 MiB unstripped and
+  12,409,568 bytes / 11.83 MiB after release stripping, exporting only
+  `_get_module` and linking directly to `libcrypto`, `libpcre2-8`, `libc++`,
+  and `libSystem`.
 - `mariadb/sql/item_vectorfunc.cc` implements MariaDB `VEC_*` conversion and
   distance functions, while `mariadb/sql/vector_mhnsw.cc` implements the
   mandatory `mhnsw` vector-index plugin, cache, transaction participant, and
@@ -855,6 +864,13 @@ function builders for registry-routed `COLUMN_*` helpers, keeps parser-called
 `create_func_dyncol_*` symbols as fail-closed stubs, and replaces
 `ma_dyncol.c` with fail-closed dynamic-column C helper stubs. MyLite policy
 rejects direct and prepared dynamic-column SQL calls before dispatch.
+
+The linked bundle audit uses `tools/mylite-bundle-audit` to configure a
+separate `build/bundle-audit` tree, build `mylite_php_probe` as a PHP-shaped
+module, export only `get_module`, apply package-target dead stripping, and
+report unstripped and stripped sizes, dynamic dependencies, exported symbols,
+and linker-map contributors. This keeps package-only reductions separate from
+the default `libmariadbd.a` archive measurement.
 
 The embedded archive omits PROXY protocol listener support by setting
 `MYLITE_WITH_PROXY_PROTOCOL=0` in the MyLite baseline. The option defaults to
@@ -1484,6 +1500,8 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   ordinary `ANALYZE TABLE` and `EXPLAIN` still execute, and persistent
   statistics SQL plus variables are rejected by server-surface policy
   coverage.
+- Run `tools/mylite-bundle-audit` and confirm it reports one exported symbol,
+  dynamic dependencies, linker-map contributors, and stripped probe size.
 - Run `cmake --build --preset dev`.
 - Run `ctest --preset dev --output-on-failure`.
 - Run `cmake --build --preset embedded-dev`.
@@ -1585,11 +1603,13 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   `mylite_dynamic_columns_disabled.c.o` is present, and ordinary JSON,
   GEOMETRY/GIS, scalar SQL, DDL/DML, transactions, prepared statements, and
   native storage remain covered.
-  Persistent
-  optimizer-statistics storage is omitted, `use_stat_tables` starts as `NEVER`,
-  histogram collection starts at size `0`, persistent statistics SQL and
-  variable changes are rejected, and ordinary engine estimates,
+  Persistent optimizer-statistics storage is omitted, `use_stat_tables` starts
+  as `NEVER`, histogram collection starts at size `0`, persistent statistics
+  SQL and variable changes are rejected, and ordinary engine estimates,
   `ANALYZE TABLE`, and `EXPLAIN` remain covered.
+- The committed bundle audit probe builds as a one-export module and reports
+  linked package-shape size, dependencies, exports, and linker-map
+  contributors without changing the default embedded archive profile.
 - Process-list SHOW commands are rejected, the process-list Information Schema
   table returns zero rows, and the embedded archive omits process-list row
   producers.

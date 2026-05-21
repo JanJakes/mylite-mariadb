@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+build_dir="${BUILD_DIR:-"${root_dir}/build/bundle-audit"}"
+generator="${GENERATOR:-Ninja}"
+mariadb_build_dir="${MYLITE_MARIADB_BUILD_DIR:-"${root_dir}/build/mariadb-embedded"}"
+target="${TARGET:-mylite_php_probe}"
+
+usage() {
+  cat <<EOF
+Usage: tools/mylite-bundle-audit [cmake args...]
+
+Environment:
+  BUILD_DIR                 Build directory. Defaults to build/bundle-audit.
+  GENERATOR                 CMake generator. Defaults to Ninja.
+  MYLITE_MARIADB_BUILD_DIR  MariaDB embedded build directory. Defaults to build/mariadb-embedded.
+  TARGET                    Audit target. Defaults to mylite_php_probe.
+EOF
+}
+
+require_command() {
+  local command_name="$1"
+
+  if ! command -v "${command_name}" >/dev/null 2>&1; then
+    echo "Missing required command: ${command_name}" >&2
+    exit 1
+  fi
+}
+
+file_size() {
+  local path="$1"
+
+  if size="$(stat -f %z "${path}" 2>/dev/null)"; then
+    echo "${size}"
+    return
+  fi
+
+  stat -c %s "${path}"
+}
+
+print_size() {
+  local label="$1"
+  local path="$2"
+  local size_bytes
+  local size_mib
+
+  size_bytes="$(file_size "${path}")"
+  size_mib="$(awk -v bytes="${size_bytes}" 'BEGIN { printf "%.2f", bytes / 1048576 }')"
+  echo "${label}=${path}"
+  echo "${label}_size_bytes=${size_bytes}"
+  echo "${label}_size_mib=${size_mib}"
+}
+
+find_probe() {
+  local probe
+
+  for probe in \
+    "${build_dir}/packages/libmylite/${target}.so" \
+    "${build_dir}/packages/libmylite/lib${target}.so" \
+    "${build_dir}/packages/libmylite/${target}.dylib" \
+    "${build_dir}/packages/libmylite/${target}.bundle" \
+    "${build_dir}/packages/libmylite/${target}.dll"; do
+    if [ -f "${probe}" ]; then
+      echo "${probe}"
+      return
+    fi
+  done
+
+  find "${build_dir}/packages/libmylite" -maxdepth 1 -type f -name "*${target}*" -print -quit
+}
+
+print_exports() {
+  local probe="$1"
+
+  echo
+  echo "exports:"
+  if ! command -v nm >/dev/null 2>&1; then
+    echo "  n/a: nm not found"
+    return
+  fi
+
+  case "$(uname -s)" in
+    Darwin)
+      nm -gU "${probe}" | awk 'NF { print "  " $NF }'
+      ;;
+    *)
+      nm -D --defined-only "${probe}" | awk 'NF { print "  " $NF }'
+      ;;
+  esac
+}
+
+print_dependencies() {
+  local probe="$1"
+
+  echo
+  echo "dependencies:"
+  case "$(uname -s)" in
+    Darwin)
+      if command -v otool >/dev/null 2>&1; then
+        otool -L "${probe}" | sed '1d;s/^/  /'
+      else
+        echo "  n/a: otool not found"
+      fi
+      ;;
+    *)
+      if command -v readelf >/dev/null 2>&1; then
+        readelf -d "${probe}" | awk '/NEEDED/ { print "  " $0 }'
+      elif command -v ldd >/dev/null 2>&1; then
+        ldd "${probe}" | sed 's/^/  /'
+      else
+        echo "  n/a: readelf and ldd not found"
+      fi
+      ;;
+  esac
+}
+
+print_largest_symbols() {
+  local probe="$1"
+
+  echo
+  echo "largest_symbols:"
+  if ! command -v nm >/dev/null 2>&1; then
+    echo "  n/a: nm not found"
+    return
+  fi
+
+  case "$(uname -s)" in
+    Darwin)
+      echo "  n/a: Darwin nm reports zero Mach-O symbol sizes"
+      ;;
+    *)
+      nm -S --size-sort "${probe}" 2>/dev/null |
+        awk 'NF { print "  0x" $2 " " $NF }' |
+        tail -20
+      ;;
+  esac
+}
+
+print_map() {
+  local map_file="$1"
+
+  echo
+  if [ -f "${map_file}" ]; then
+    print_size "map" "${map_file}"
+    echo "map_contributors:"
+    LC_ALL=C awk '
+      /^# Object files:/ { in_objects = 1; next }
+      /^# Sections:/ { in_objects = 0 }
+      in_objects && shown < 20 { print "  " $0; shown++ }
+    ' "${map_file}"
+  else
+    echo "map=${map_file}"
+    echo "map_contributors=n/a"
+  fi
+}
+
+strip_copy() {
+  local source="$1"
+  local target_path="$2"
+
+  cp "${source}" "${target_path}"
+  case "$(uname -s)" in
+    Darwin)
+      strip -S -x "${target_path}"
+      ;;
+    *)
+      strip --strip-unneeded "${target_path}"
+      ;;
+  esac
+}
+
+write_sectionless_copy() {
+  local source="$1"
+  local target_path="$2"
+
+  if strip --help 2>&1 | grep -q -- "--strip-section-headers"; then
+    cp "${source}" "${target_path}"
+    strip --strip-unneeded --strip-section-headers "${target_path}"
+    return 0
+  fi
+
+  return 1
+}
+
+case "${1:-}" in
+  -h | --help | help)
+    usage
+    exit 0
+    ;;
+esac
+
+require_command cmake
+require_command awk
+require_command strip
+
+cmake \
+  -S "${root_dir}" \
+  -B "${build_dir}" \
+  -G "${generator}" \
+  -DBUILD_TESTING=OFF \
+  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+  -DMYLITE_BUILD_TOOLS=OFF \
+  -DMYLITE_WITH_MARIADB_EMBEDDED=ON \
+  -DMYLITE_BUILD_BUNDLE_AUDIT_PROBE=ON \
+  -DMYLITE_MARIADB_BUILD_DIR="${mariadb_build_dir}" \
+  "$@"
+cmake --build "${build_dir}" --target "${target}"
+
+probe="$(find_probe)"
+if [ -z "${probe}" ] || [ ! -f "${probe}" ]; then
+  echo "Could not find ${target} under ${build_dir}/packages/libmylite" >&2
+  exit 1
+fi
+
+map_file="${build_dir}/packages/libmylite/${target}.map"
+stripped_probe="${probe}.stripped"
+sectionless_probe="${probe}.sectionless"
+
+print_size "probe" "${probe}"
+strip_copy "${probe}" "${stripped_probe}"
+print_size "stripped_probe" "${stripped_probe}"
+if write_sectionless_copy "${probe}" "${sectionless_probe}"; then
+  print_size "sectionless_probe" "${sectionless_probe}"
+else
+  echo "sectionless_probe=n/a"
+fi
+
+print_exports "${probe}"
+print_dependencies "${probe}"
+print_map "${map_file}"
+print_largest_symbols "${probe}"

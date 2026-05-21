@@ -655,3 +655,9 @@ Use this baseline as the comparison point for later profile changes. Each
 future trimming slice should record the same archive path, size, member count,
 cache options, and compatibility rationale. Runtime-functionality cuts remain
 separate decisions from packaging-only archive stripping.
+
+Use `tools/mylite-bundle-audit` for linked package-shape measurements. The
+audit target builds a one-export PHP-shaped module in a separate
+`build/bundle-audit` tree, reports stripped size, exports, dependencies, and
+linker-map contributors, and keeps package-only choices separate from the
+default embedded archive measurement.

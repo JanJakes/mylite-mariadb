@@ -60,17 +60,18 @@ default size cuts.
 
 The current default archive is measured in
 [mariadb-embedded-build.md](mariadb-embedded-build.md) at 25,635,600 bytes /
-24.45 MiB after post-build archive stripping. A current one-export macOS
-shared-object probe measured outside the committed build scripts was
-14,188,976 bytes / 13.53 MiB stripped. That probe is useful directional
-evidence, but it is not directly comparable to the 3.86 MiB historical
-research-stack probe because the current default intentionally retains more SQL
-and compatibility surface.
+24.45 MiB after post-build archive stripping. The committed
+`tools/mylite-bundle-audit` probe builds a one-export, PHP-shaped macOS module
+at 14,301,968 bytes / 13.64 MiB unstripped and 12,409,568 bytes / 11.83 MiB
+after release stripping. That probe is useful directional evidence, but it is
+not directly comparable to the 3.86 MiB historical research-stack probe because
+the current default intentionally retains more SQL and compatibility surface.
 
 Status labels:
 
-- **Applied** means the current default profile already contains the same
-  reduction, a narrower safer version, or a superseding implementation.
+- **Applied** means the current default profile or committed audit/package
+  tooling already contains the same reduction, a narrower safer version, or a
+  superseding implementation.
 - **Still safe to evaluate** means the row appears compatible with the current
   product direction, but should be remeasured and tested on the current
   baseline before it becomes default.
@@ -86,19 +87,22 @@ The ranked table repeats the same status as a single-icon column:
 
 | Icon | Status |
 | --- | --- |
-| ✅ | Applied in the current default profile |
+| ✅ | Applied in the current default profile or audit/package tooling |
 | 🟢 | Still safe to evaluate |
 | 🟡 | Needs product or packaging decision |
 | 🔴 | Not planned for the default profile |
 | ⚪ | Historical only |
 
-### Applied in the current default profile
+### Applied in the current default profile or audit tooling
 
-These rows are represented in the current default embedded profile:
+These rows are represented in the current default embedded profile or the
+committed bundle-audit probe:
 
 | Rows | Current status |
 | --- | --- |
 | 7, 9, 115 | Covered by the current platform-specific archive stripping and `ranlib` step after relink verification. The current Darwin path uses a narrower release-archive strip policy than the riskiest one-off research command. |
+| 5, 47, 122 | No current first-party target sets `ENABLE_EXPORTS`, first-party targets use hidden visibility defaults, and the committed PHP-shaped audit probe exports only `get_module`, writes a linker map, and reports size, dependencies, and exports. The final product shared library still needs deliberate ABI policy. |
+| 14 | Partly applied to the committed PHP-shaped audit probe through first-party function/data sections and link-time dead stripping. The broader MariaDB embedded-target section-GC profile remains packaging-only because it grows the static archive. |
 | 10, 12, 27, 28, 31 | Applied through the Oracle parser stub, embedded-target exception cut, `SFORMAT()` removal, unwind-table omission, and SQL `HELP` unsupported-command stub. |
 | 15, 38, 39, 40, 41, 44, 53, 55, 58, 60, 61, 67, 69, 72, 77, 78, 79, 90, 91, 92, 94, 97, 100, 108, 112, 114, 116, 117, 126 | Applied to server-oriented, host-file, diagnostic, option-help, unsupported-command, and policy surfaces that are outside the core embedded library contract. |
 | 20 | Applied with compact server error messages while preserving useful MyLite-facing diagnostics. |
@@ -117,16 +121,9 @@ for follow-up measurement, with the caveats shown:
 | Rows | Why still plausible |
 | --- | --- |
 | 1 | `DT_RELR` can be a large Linux linked-artifact win if the package can require a modern glibc loader. Treat it as a Linux packaging candidate, not a cross-platform default. |
-| 5 | Removing accidental executable exports is safe where any current probe or package target still exports the full linked SQL symbol set. The current tree should first get a committed PHP/shared-object audit target. |
-| 14 | Function/data sections plus linked-artifact section GC are safe for final linked packages, but grow the static archive. This should be a package-target option, not an archive-size metric. |
 | 22, 89 | Clang/lld and lld `-O2` are packaging candidates. They need a current rerun on the supported platform matrix because previous measurements predated direct sessions and later cuts. |
 | 23 | `--no-eh-frame-hdr` kept exception metadata but reduces unwind lookup metadata. Safe to benchmark for release packages, with debugger/unwinder expectations documented. |
-| 47 | Hidden visibility defaults or an export map are still appropriate for a final shared library if the public `MYLITE_API` surface is audited first. |
-| 88 | Bypassing inherited option-file loading after MyLite's required `--no-defaults` startup is probably safe, but should be proven against the current embedded bootstrap and config-file policy. |
 | 98 | Section-header stripping is safe only for final release artifacts where post-link debugging and inspection are not required. Keep debug/release artifacts separate. |
-| 109 | The `tpool_wait_begin()` / `tpool_wait_end()` no-op cleanup is semantically safe but tiny. It should be done only if it keeps inherited thread-pool hooks clearer. |
-| 111 | `-Oz` is safe to benchmark, but the historical win was negligible. |
-| 122 | A committed PHP-extension-shaped shared-object audit is still useful. This is measurement tooling, not a reduction. |
 
 ### Needs product or packaging decision
 
@@ -144,6 +141,7 @@ becoming default:
 | 73, 101 | Direct embedded result adapters are architecture work, not simple size cuts. They are likely useful for the final PHP-like shape, but must preserve the public prepared/query API behavior. |
 | 76 | Removing the retained `VECTOR(N)` type is a product decision. The current default trims vector functions and indexes but keeps the type parser boundary. |
 | 86 | Replacing named time-zone tables with `SYSTEM` and numeric offsets only changes SQL date/time semantics. |
+| 88 | Bypassing inherited option-file loading after MyLite's required `--no-defaults` startup is probably safe, but it touches embedded startup argument ownership for a small linked win and no archive win. Decide after the package audit target shows it is still material. |
 | 96 | System-versioned table support is an application-visible MariaDB feature. Decide whether it belongs in the default compatibility target. |
 | 125 | Shrinking the charset registry was a memory-footprint experiment, not a stripped-size win. Revisit only as memory work. |
 
@@ -177,6 +175,7 @@ written:
 | 16 | Superseded by the later temp-spill experiment and incompatible with the current native-storage caution. |
 | 25, 30 | Small or superseded plugin/charset experiments whose tradeoffs were not worth accepting. |
 | 110, 127 | Hardening reductions were rejected and should stay rejected. |
+| 109, 111 | Semantically safe but too small to justify a source delta now: thread-pool wait hooks saved only 304 linked bytes and grew the archive, while `-Oz` saved only 128 linked bytes. |
 | 113, 118, 119, 121 | No useful size effect or superseded by better measurements. |
 | 128, 129, 130 | Broad SSL, RTTI, and exception removals failed or were replaced by narrower staged cuts. |
 
@@ -188,7 +187,7 @@ written:
 | 2 | 🔴 | Set `WITH_EXTRA_CHARSETS=none` and skip generated UCA 1400 registration for charsets absent from the small profile. | 2,495,240 | 2,584,666 | Passed current smokes. This retained MariaDB's default UCA collation at that point; non-default charset coverage remains a high compatibility tradeoff. |
 | 3 | ⚪ | Set `WITH_EXTRA_CHARSETS=none` without the later UCA registration fix. | 2,495,240 | 2,584,650 | Rejected. The build linked, but the open-close smoke segfaulted. Superseded by the later fixed charset-small build profile. |
 | 4 | ⚪ | Set `WITH_EXTRA_CHARSETS=none` and switch the default collation to `utf8mb4_general_ci` without fixing UCA registration. | 2,495,240 | 2,584,658 | Rejected. Changing the default collation did not fix the startup segfault. Superseded by the later fixed charset-small build profile. |
-| 5 | 🟢 | Remove `ENABLE_EXPORTS TRUE` from MyLite-owned smoke executables so they stop exporting the full linked SQL symbol set. | 2,162,688 | 0 | Passed current smokes. Linked-artifact win only; static archive size is unchanged. |
+| 5 | ✅ | Remove `ENABLE_EXPORTS TRUE` from MyLite-owned smoke executables so they stop exporting the full linked SQL symbol set. | 2,162,688 | 0 | Passed current smokes. Linked-artifact win only; static archive size is unchanged. |
 | 6 | 🔴 | Make UCA collations optional, omit UCA 0900 and UCA 1400 generated data, and use `utf8mb4_general_ci` as the aggressive-profile default. | 1,552,864 | 1,777,908 | Passed smokes and harness. Major compatibility tradeoff for Unicode collation coverage. |
 | 7 | ✅ | Run `strip --strip-unneeded` and `ranlib` on a copied release static archive. | n/a | 1,532,384 | One-off archive-only measurement before the build-script strip landed. Higher risk than `strip -g`, later accepted after smokes relinked and passed. |
 | 8 | ⚪ | Enable CMake/GCC LTO for the minsize build. | 1,315,712 | -299,075,078 | Rejected. The stripped linked smoke shrank, but the static archive grew to 342,480,510 bytes and GCC emitted ODR/type warnings. |
@@ -197,7 +196,7 @@ written:
 | 11 | 🔴 | Omit GIS SQL function sources and link a small empty GIS registry/type-constructor shim. | 463,440 | 864,782 | Passed current smokes. GEOMETRY/SPATIAL rejection paths remained covered. |
 | 12 | ✅ | Compile only the retained `sql_embedded` target with `-fno-exceptions` after removing retained SQL exception users such as `SFORMAT()`. | 458,256 | 2,554,764 | Passed smokes and harness. First-party MyLite API and storage code remain exception-capable. |
 | 13 | 🔴 | Make `type_geom`, `type_inet`, and `type_uuid` plugins non-mandatory and disable them in the minsize profile. | 396,104 | 3,463,834 | Passed current smokes. Large archive win with SQL type compatibility cost. |
-| 14 | 🟢 | Compile embedded targets with per-function/per-data sections and link runtime artifacts with `--gc-sections`. | 328,176 | -4,413,456 | Passed smokes and harness. Linked runtime shrank, but the static archive grew from section metadata. |
+| 14 | ✅ | Compile embedded targets with per-function/per-data sections and link runtime artifacts with `--gc-sections`. | 328,176 | -4,413,456 | Passed smokes and harness. Linked runtime shrank, but the static archive grew from section metadata. |
 | 15 | ✅ | Omit `item_xmlfunc.cc` and remove native builders for `EXTRACTVALUE()` and `UPDATEXML()`. | 264,240 | 517,000 | Passed current smokes. XML functions fail through the unknown-function path. |
 | 16 | ⚪ | Omit MyISAM temporary-table spill support before fixing schema-table MEMORY compatibility. | 246,680 | 695,536 | Superseded. Open-close passed, but storage/catalog harness failed. |
 | 17 | 🔴 | Stop registering compiled `general1400` collations and omit unused extended Unicode casefold tables. | 215,408 | 238,392 | Passed smokes and harness. Another collation compatibility tradeoff. |
@@ -230,7 +229,7 @@ written:
 | 44 | ✅ | Remove Oracle compatibility function aliases, Oracle native function hash, and Oracle schema routing. | 34,376 | 318,034 | Passed smokes and harness. Oracle compatibility surface shrinks further. |
 | 45 | 🟡 | Remove CSV and MRG_MyISAM from the minsize plugin list and hide MyISAM from user DDL while retaining it internally. | 33,440 | 252,074 | Passed smokes and harness. MyISAM remained for disk temp tables at this point. |
 | 46 | ✅ | Replace persistent `mysql.*` statistics and JSON histogram storage with no-statistics embedded stubs. | 33,072 | 156,716 | Passed smokes and harness. Handler row estimates remain for planning. |
-| 47 | 🟢 | Set CMake C/C++ visibility presets to hidden and keep explicit `MYLITE_API` exports. | 32,360 | 29,858 | Passed smokes and harness. Final shared-library packaging still needs deliberate export policy. |
+| 47 | ✅ | Set CMake C/C++ visibility presets to hidden and keep explicit `MYLITE_API` exports. | 32,360 | 29,858 | Passed smokes and harness. Final shared-library packaging still needs deliberate export policy. |
 | 48 | 🔴 | Omit MyISAM full-text sources, startup, sysvars, and full-text key update paths. | 29,936 | 86,788 | Passed smokes and harness. Non-full-text MyISAM temp-table use remained. |
 | 49 | 🔴 | Reject the `JSON` type alias and parser-backed JSON aggregates, and omit JSON type handlers. | 29,592 | 413,494 | Passed smokes and harness. `LONGTEXT` remains available. |
 | 50 | ✅ | Compile out runtime `dlopen()` plugin loading and replace the dynamic plugin service bridge with a minimal placeholder. | 26,192 | 49,278 | Passed smokes and harness. `have_dynamic_loading=NO`; `libcrypto.so.3` still remained. |
@@ -271,7 +270,7 @@ written:
 | 85 | ✅ | Replace row-replication type-conversion utilities with fail-closed embedded stubs. | 5,824 | 17,996 | Passed smokes and harness. Replication conversion is unsupported. |
 | 86 | 🟡 | Replace table-backed named time-zone loading with a stub that keeps `SYSTEM` and numeric offsets. | 5,800 | 21,910 | Passed smokes and harness. Named zones such as `Europe/Prague` reject. |
 | 87 | 🟡 | Omit the OpenSSL-backed `KDF()` SQL function. | 5,136 | 28,816 | Passed smokes and harness. `libcrypto.so.3` still remained. |
-| 88 | 🟢 | Bypass embedded option-file loading after the required `--no-defaults` startup argument. | 5,128 | -64 | Passed smokes and harness. Linked artifacts shrink while the merged archive grows by 64 bytes. |
+| 88 | 🟡 | Bypass embedded option-file loading after the required `--no-defaults` startup argument. | 5,128 | -64 | Passed smokes and harness. Linked artifacts shrink while the merged archive grows by 64 bytes. |
 | 89 | 🟢 | Add lld `-O2` to executable, module, and shared linker flags. | 5,120 | 0 | Passed smokes and harness. Keeps build-id and RELRO. |
 | 90 | ✅ | Reject `SELECT ... INTO OUTFILE` and `DUMPFILE`, and compile out host-file writer bodies. | 3,920 | 19,526 | Passed smokes and harness. `SELECT ... INTO` variables remain. |
 | 91 | ✅ | Replace the `mysql.servers` foreign-server metadata cache with no-op embedded stubs. | 3,632 | 30,750 | Passed smokes and harness. `CREATE SERVER` surfaces remain rejected. |
@@ -292,9 +291,9 @@ written:
 | 106 | ✅ | Skip `mysql_bin_log` instrumentation setup, pthread-object init, and cleanup in the embedded no-binlog profile. | 448 | 288 | Passed smokes and harness. Embedded startup cleanup, not a material size lever. |
 | 107 | ✅ | Move retained SQL string-rendering helper into a minsize stub and omit `log_event_server.cc.o`. | 424 | 299,846 | Passed smokes and harness. Large archive win, tiny linked win. |
 | 108 | ✅ | Replace generic `SELECT ... PROCEDURE` runtime with an unsupported embedded stub. | 336 | 120,998 | Passed smokes and harness. `PROCEDURE ANALYSE()` was already unsupported. |
-| 109 | 🟢 | Replace inherited `tpool_wait_begin()` and `tpool_wait_end()` runtime with no-op embedded hooks. | 304 | -1,554 | Passed smokes and harness. Valid embedded cleanup with negligible size effect. |
+| 109 | ⚪ | Replace inherited `tpool_wait_begin()` and `tpool_wait_end()` runtime with no-op embedded hooks. | 304 | -1,554 | Passed smokes and harness. Valid embedded cleanup with negligible size effect. |
 | 110 | ⚪ | Relink runtime artifacts with RELRO disabled. | 208 | n/a | Rejected. A 208-byte saving was not worth dropping RELRO hardening. |
-| 111 | 🟢 | Switch aggressive minsize compile flags from `-Os` to `-Oz`. | 128 | 0 | Passed smokes and harness. Marginal linked-runtime win, not meaningful pruning. |
+| 111 | ⚪ | Switch aggressive minsize compile flags from `-Os` to `-Oz`. | 128 | 0 | Passed smokes and harness. Marginal linked-runtime win, not meaningful pruning. |
 | 112 | ✅ | Replace full event parser data validation with a minimal parser-allocation stub. | 88 | 11,856 | Passed smokes and harness. Event DDL remains rejected. |
 | 113 | ⚪ | Enable function/data sections and section GC before removing executable exports. | 88 | -4,899,920 | Rejected and superseded. Linked size barely moved and archive size grew. |
 | 114 | ✅ | Replace proxy protocol network-listener support with disabled embedded stubs. | 80 | 8,012 | Passed smokes and harness. Network listener support is absent. |
@@ -305,7 +304,7 @@ written:
 | 119 | ⚪ | Add only `-fno-asynchronous-unwind-tables` to C and C++ flags. | 0 | 0 | Rejected. Smokes passed, but artifact sizes and unwind sections were unchanged. |
 | 120 | ⚪ | Build with GCC non-fat LTO objects and use GNU bfd because lld cannot consume them. | 0 | -917,856 | Rejected. Saved no stripped bytes and grew archive and unstripped runtime artifacts. |
 | 121 | ⚪ | Relink runtime artifacts with smaller max page size and no separate code segment. | 0 | n/a | Rejected. Segment-alignment relink did not reduce stripped file size. |
-| 122 | 🟢 | Add an audit script that relinks a PHP-extension-shaped shared-object probe and reports exports, dependencies, map contributors, and stripped sizes. | 0 | n/a | Measurement tool, not a reduction attempt. Audit-only. Current corrected probe is 3,861,728 bytes stripped and 3,859,368 bytes sectionless. |
+| 122 | ✅ | Add an audit script that relinks a PHP-extension-shaped shared-object probe and reports exports, dependencies, map contributors, and stripped sizes. | 0 | n/a | Measurement tool, not a reduction attempt. Audit-only. Current macOS probe is 12,409,568 bytes stripped; section-header stripping is not available with Darwin `strip`. |
 | 123 | ✅ | Omit command-level binlog replay and replication SQL sources while keeping transaction participant roots. | -512 | 23,172 | Passed smokes and harness. Linked-runtime growth is smoke-test noise; mainly archive cleanup. |
 | 124 | 🟡 | Replace retained OpenSSL-backed MD5/SHA-1 wrappers and omit unused OpenSSL wrapper objects and cleanup paths. | -680 | 39,888 | Passed smokes and harness. Linked smoke grew, but `libcrypto.so.3` was removed; vendored dependency saving is 4,597,928 bytes before compression. |
 | 125 | 🟡 | Shrink the process-global `all_charsets` pointer registry from 4096 entries to 1152 entries. | -960 | -24 | Opt-in memory-footprint attempt. `llvm-size` dropped by 47,180 bytes through `.bss`, but stripped bundle size grew. |
