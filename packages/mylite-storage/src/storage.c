@@ -1446,10 +1446,8 @@ static mylite_storage_result validate_foreign_key_columns(
     size_t column_count,
     size_t *out_column_names_size
 );
-static mylite_storage_result validate_index_entries(
-    const mylite_storage_index_entry *index_entries,
-    size_t index_entry_count
-);
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result
+validate_index_entries(const mylite_storage_index_entry *index_entries, size_t index_entry_count);
 static mylite_storage_result update_row_with_index_entries(
     const char *filename,
     const char *schema_name,
@@ -14290,10 +14288,8 @@ static mylite_storage_result validate_foreign_key_columns(
     return MYLITE_STORAGE_OK;
 }
 
-static mylite_storage_result validate_index_entries(
-    const mylite_storage_index_entry *index_entries,
-    size_t index_entry_count
-) {
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result
+validate_index_entries(const mylite_storage_index_entry *index_entries, size_t index_entry_count) {
     const size_t key_capacity = MYLITE_STORAGE_MAX_INDEX_KEY_SIZE;
     if (index_entry_count == 0U) {
         return MYLITE_STORAGE_OK;

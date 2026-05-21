@@ -172,6 +172,9 @@ metadata walks on hot routed insert, update, and delete paths.
 Handler index-entry serialization now also reuses that cached support proof for
 checked insert and update paths, so hot row-DML does not rescan immutable key
 metadata after the handler has accepted the table shape.
+Storage index-entry shape validation now uses the same hot-inline treatment as
+the other small row-DML guards, preserving API validation without an extra
+out-of-line call on indexed insert and update paths.
 Durable exact-index cache reads now bulk-grow matching entrysets in one pass,
 removing per-match array reallocations from many-match secondary cursors that do
 not use published leaf roots. Exact-index caches now add transient hash buckets
