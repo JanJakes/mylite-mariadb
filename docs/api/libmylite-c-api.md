@@ -380,6 +380,7 @@ The core directory-owned API rejects or omits server-owned and optional
 compatibility features that do not fit the embedded library model:
 
 - network users and authentication,
+- network client authentication plugin negotiation,
 - replication, relay log, binary-log runtime, and SQL `BINLOG` replay,
 - Galera/wsrep,
 - dynamic plugin installation and shared-object loading,
@@ -447,6 +448,10 @@ ordinary `INSERT`, prepared bindings, or `INSERT ... SELECT`.
 The default profile omits the `unix_socket` server authentication plugin for
 the same reason; `libmylite` opens a local database directory directly instead
 of authenticating network or socket clients.
+It also omits inherited network client authentication plugin descriptors and
+plugin VIO handshake helpers; the local embedded open path is retained, while
+raw remote client auth and `mysql_change_user()` fail closed in the default
+embedded profile.
 Dynamic UDF registration through `CREATE FUNCTION ... SONAME` is rejected
 through the same policy because it loads server-owned shared libraries and
 persists metadata in server system tables. Attempts to enable Oracle SQL mode,

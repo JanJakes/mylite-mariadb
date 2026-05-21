@@ -71,6 +71,9 @@ my_bool	net_flush(NET *net);
 #ifndef MYLITE_WITH_VIO_TLS
 #define MYLITE_WITH_VIO_TLS 1
 #endif
+#ifndef MYLITE_WITH_NETWORK_AUTH_CLIENT
+#define MYLITE_WITH_NETWORK_AUTH_CLIENT 1
+#endif
 
 #if !defined(_WIN32)
 #include <my_pthread.h>				/* because of signal()	*/
@@ -1781,6 +1784,8 @@ C_MODE_END
 
 /*********** client side authentication support **************************/
 
+#if MYLITE_WITH_NETWORK_AUTH_CLIENT
+
 typedef struct st_mysql_client_plugin_AUTHENTICATION auth_plugin_t;
 static int client_mpvio_write_packet(struct st_plugin_vio*, const uchar*, int);
 static int native_password_auth_client(MYSQL_PLUGIN_VIO *vio, MYSQL *mysql);
@@ -1828,6 +1833,12 @@ struct st_mysql_client_plugin *mysql_client_builtins[]=
   (struct st_mysql_client_plugin *)&old_password_client_plugin,
   0
 };
+
+#else
+
+struct st_mysql_client_plugin *mysql_client_builtins[]= {0};
+
+#endif /* MYLITE_WITH_NETWORK_AUTH_CLIENT */
 
 
 static uchar *
@@ -1889,6 +1900,11 @@ static size_t get_length_store_length(size_t length)
   return ptr - &length_buffer[0];
 }
 
+
+#define MAX_CONNECTION_ATTR_STORAGE_LENGTH 65536
+
+
+#if MYLITE_WITH_NETWORK_AUTH_CLIENT
 
 /* this is a "superset" of MYSQL_PLUGIN_VIO, in C++ I use inheritance */
 typedef struct {
@@ -2031,8 +2047,6 @@ static my_bool is_local_connection(const char *hostname, enum enum_vio_type viot
   }
   return FALSE;
 }
-
-#define MAX_CONNECTION_ATTR_STORAGE_LENGTH 65536
 
 /**
   sends a client authentication packet (second packet in the 3-way handshake)
@@ -2410,6 +2424,8 @@ static int client_mpvio_write_packet(struct st_plugin_vio *mpv,
 }
 
 
+#endif /* MYLITE_WITH_NETWORK_AUTH_CLIENT */
+
 /**
   fills MYSQL_PLUGIN_VIO_INFO structure with the information about the
   connection
@@ -2448,6 +2464,8 @@ void mpvio_info(Vio *vio, MYSQL_PLUGIN_VIO_INFO *info)
   }
 }
 
+
+#if MYLITE_WITH_NETWORK_AUTH_CLIENT
 
 static void client_mpvio_info(MYSQL_PLUGIN_VIO *vio,
                               MYSQL_PLUGIN_VIO_INFO *info)
@@ -2679,6 +2697,20 @@ int run_plugin_auth(MYSQL *mysql, char *data, uint data_len,
   DBUG_RETURN(1);
 #endif
 }
+
+
+#else
+
+int run_plugin_auth(MYSQL *mysql, char *data __attribute__((unused)),
+                    uint data_len __attribute__((unused)),
+                    const char *data_plugin __attribute__((unused)),
+                    const char *db __attribute__((unused)))
+{
+  set_mysql_error(mysql, CR_NOT_IMPLEMENTED, unknown_sqlstate);
+  return 1;
+}
+
+#endif /* MYLITE_WITH_NETWORK_AUTH_CLIENT */
 
 
 static int
@@ -4195,6 +4227,9 @@ int STDCALL mysql_set_character_set(MYSQL *mysql, const char *cs_name)
   return mysql->net.last_errno;
 }
 
+
+#if MYLITE_WITH_NETWORK_AUTH_CLIENT
+
 /**
   client authentication plugin that does native MySQL authentication
   using a 20-byte (4.1+) scramble
@@ -4312,6 +4347,9 @@ static int old_password_auth_client(MYSQL_PLUGIN_VIO *vio, MYSQL *mysql)
 
   DBUG_RETURN(CR_OK);
 }
+
+
+#endif /* MYLITE_WITH_NETWORK_AUTH_CLIENT */
 
 
 my_socket STDCALL

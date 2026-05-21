@@ -69,6 +69,7 @@ surface that does not fit a local directory-owned library:
 - binary-log event parser and reader runtime,
 - host-file SELECT exports,
 - host-file SQL imports,
+- network client authentication plugin handshake support,
 - server utility SQL functions,
 - rarely used optional engines or plugins unless a slice justifies them.
 
@@ -194,6 +195,9 @@ ordinary DDL backup hooks stay inert so application DDL remains unaffected.
 VIO TLS transport is omitted from the core embedded archive because TLS belongs
 to socket and wire-protocol adapters, not to the in-process database-directory
 startup contract; retained SQL crypto functions continue to use OpenSSL Crypto.
+Network client authentication plugin handshake support is omitted for the same
+serverless-core reason; local embedded opens keep embedded connection setup,
+while raw inherited remote client auth and `mysql_change_user()` fail closed.
 PROXY protocol listener support is omitted for the same serverless-core reason;
 the core runtime has no socket listener, and `proxy_protocol_networks` is
 absent from `SHOW VARIABLES` and `@@` lookup.

@@ -46,6 +46,10 @@ compacted because uncommon diagnostic prose is not core SQL, storage, or API
 behavior when MariaDB errno and SQLSTATE remain available.
 VIO TLS transport is omitted because the core profile is an in-process
 database-directory runtime without socket startup or network handshakes.
+Network client authentication plugin handshake support is omitted for the same
+reason: the retained `libmylite` open path does not negotiate remote client
+auth plugins, while raw inherited client paths can fail closed in the default
+archive.
 Replication execution system variables are omitted because they configure
 server topology behavior that the embedded profile already rejects. PROXY
 protocol listener support is omitted because the core profile has no socket
@@ -405,6 +409,18 @@ DDL/DML behavior. Host-file SQL imports are omitted because `LOAD DATA` and
 - `mariadb/sql/sql_load.cc` implements `mysql_load()`, host-file reads,
   `LOAD DATA LOCAL` client-file handling, XML row parsing, and small
   `Load_data_param` helper methods needed by retained parser and item code.
+- `mariadb/sql-common/client.c` declares inherited client authentication
+  plugin descriptors and plugin VIO helpers for remote `mysql_real_connect()`
+  and `mysql_change_user()` authentication. The local embedded
+  `mysql_real_connect()` path in `mariadb/libmysqld/libmysqld.c` uses
+  `check_embedded_connection()` instead, while `mariadb/libmysqld/lib_sql.cc`
+  and server auth code still need `send_client_connect_attrs()` and
+  `mpvio_info()`.
+- Disabling network client authentication plugin handshake support behind
+  `MYLITE_WITH_NETWORK_AUTH_CLIENT=0` keeps the retained embedded helpers,
+  compiles the built-in client plugin list to empty, turns `run_plugin_auth()`
+  into a fail-closed stub for raw remote client paths, and reduces the
+  stripped archive to 26,047,312 bytes, 24.84 MiB, and 693 members.
 
 ## Proposed Design
 
@@ -560,6 +576,15 @@ by retained parser and item code, and compiles `mysql_load()` to fail closed.
 MyLite policy rejects direct and prepared `LOAD DATA` and `LOAD XML` before
 dispatch while retaining ordinary `INSERT`, prepared bindings, and
 `INSERT ... SELECT`.
+
+The embedded archive omits inherited network client authentication plugin
+handshake support by setting `MYLITE_WITH_NETWORK_AUTH_CLIENT=0` in the MyLite
+baseline. The option defaults to `ON` so normal MariaDB builds keep upstream
+client authentication behavior. The disabled profile keeps
+`send_client_connect_attrs()` and `mpvio_info()` for retained embedded/server
+helpers, compiles `mysql_client_builtins` to an empty built-in client plugin
+list, and makes `run_plugin_auth()` fail closed for inherited raw remote
+client and `mysql_change_user()` paths.
 
 The embedded archive disables `PROCEDURE ANALYSE()` by setting
 `MYLITE_WITH_PROCEDURE_ANALYSE=0` in the MyLite baseline, replacing
@@ -808,6 +833,9 @@ omitted after retained no-binlog paths no longer reference them. Server utility
 SQL function builders and item implementations are omitted from the embedded
 function registry. `LOAD DATA` and `LOAD XML` import runtime is replaced with
 a fail-closed embedded source while small retained parser/item helpers remain.
+Inherited network client authentication plugin descriptors and plugin VIO
+handshake helpers are compiled out while retained embedded connection
+attributes and server VIO info helpers stay linked.
 
 ## Compatibility Impact
 
@@ -838,6 +866,12 @@ functions are not removed by this slice.
 surfaces. Rejecting them and omitting their runtime does not affect ordinary
 `INSERT`, prepared statement bindings, `INSERT ... SELECT`, native storage
 engines, JSON, GEOMETRY/GIS, DDL, DML, transactions, or the public C API.
+Network client authentication plugin negotiation is a raw inherited
+client/server handshake surface. Omitting the descriptors and plugin VIO
+dialog helpers does not affect `libmylite` directory opens, ordinary SQL,
+prepared statements, native storage, JSON, GEOMETRY/GIS, DDL, DML, or
+transactions. Raw inherited remote client auth and `mysql_change_user()` fail
+closed in the default embedded archive.
 Replication and binary logging are server-topology surfaces. MyLite already
 rejects replication and binlog command families, starts with `@@log_bin=0`,
 and verifies that no binlog or relay-log sidecars are created. The no-binlog
@@ -1169,6 +1203,11 @@ archive to 26,053,336 bytes / 24.85 MiB, 5,476,368 bytes smaller than the
 Release build with Performance Schema disabled, 7,076,304 bytes smaller than
 the symbol-stripped baseline with Performance Schema still built, and
 7,788,984 bytes smaller than the original broad archive.
+Omitting network client authentication plugin handshake support brings the
+current archive to 26,047,312 bytes / 24.84 MiB, 5,482,392 bytes smaller than
+the Release build with Performance Schema disabled, 7,082,328 bytes smaller
+than the symbol-stripped baseline with Performance Schema still built, and
+7,795,008 bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -1235,6 +1274,10 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   in `libmariadbd.a`, and direct and prepared `LOAD DATA` / `LOAD XML`
   statements fail through server-surface policy coverage while ordinary
   inserts and prepared bindings remain covered.
+- Confirm `MYLITE_WITH_NETWORK_AUTH_CLIENT=OFF` appears in the embedded CMake
+  cache, `client.c.o` no longer contains inherited client auth descriptor
+  strings or plugin VIO helper symbols, and `run_plugin_auth()` remains linked
+  as the fail-closed backstop for raw inherited client paths.
 - Confirm `MYLITE_WITH_BINLOG_REPLAY=OFF` appears in the embedded CMake cache,
   `sql_binlog.cc.o` is absent from `libmariadbd.a`, and direct and prepared
   SQL `BINLOG` replay statements fail through server-surface policy coverage.
@@ -1356,6 +1399,10 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   Host-file SQL imports are rejected, `sql_load.cc.o` is absent from the
   embedded archive, `mylite_sql_load_disabled.cc.o` is present, and ordinary
   `INSERT`, prepared bindings, and `INSERT ... SELECT` remain supported.
+  Network client authentication plugin handshake support is omitted, client
+  auth plugin descriptors and plugin VIO helper symbols are absent from
+  `client.c.o`, retained embedded connection helpers stay linked, and raw
+  inherited remote client auth paths fail closed.
   Row-replication type-conversion helpers are replaced with fail-closed embedded
   stubs, `rpl_utility_server.cc.o` is absent from the embedded archive, and
   ordinary SQL type conversion remains covered through retained tests.
@@ -1469,3 +1516,7 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   import commands through the default embedded core. They should parse files in
   the application layer and use prepared bindings, multi-row `INSERT`, or
   `INSERT ... SELECT`.
+- Users relying on raw inherited MariaDB C API remote authentication or
+  `mysql_change_user()` cannot use those paths in the default embedded core.
+  They need a custom profile or a future wire-protocol/client adapter that owns
+  authentication explicitly.

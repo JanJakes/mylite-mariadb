@@ -67,6 +67,7 @@ MYLITE_WITH_PROCESSLIST_METADATA=OFF
 MYLITE_WITH_FOREIGN_SERVER_METADATA=OFF
 MYLITE_WITH_BACKUP_RUNTIME=OFF
 MYLITE_WITH_VIO_TLS=OFF
+MYLITE_WITH_NETWORK_AUTH_CLIENT=OFF
 MYLITE_WITH_REPLICATION_EXEC_SYSVARS=OFF
 MYLITE_WITH_REPLICATION_FILTERS=OFF
 MYLITE_WITH_RPL_TYPE_CONVERSION=OFF
@@ -171,10 +172,13 @@ omits the external backup runtime behind `MYLITE_WITH_BACKUP_RUNTIME=0`;
 `BACKUP STAGE`, `BACKUP LOCK`, and `BACKUP UNLOCK` are rejected while ordinary
 DDL backup hooks remain inert. It omits VIO TLS transport behind
 `MYLITE_WITH_VIO_TLS=0` because the core embedded profile has no socket or
-network handshake. It omits replication execution, slave protocol, replication
-event, checksum, and semi-sync system variables behind
-`MYLITE_WITH_REPLICATION_EXEC_SYSVARS=0`; compatibility variables such as
-`@@log_bin=0` remain covered. It omits replication and binary-log filter
+network handshake. It omits network client authentication plugin handshake
+support behind `MYLITE_WITH_NETWORK_AUTH_CLIENT=0`; the local embedded open
+path keeps embedded connection setup, while inherited raw remote client auth
+and `mysql_change_user()` paths fail closed. It omits replication execution,
+slave protocol, replication event, checksum, and semi-sync system variables
+behind `MYLITE_WITH_REPLICATION_EXEC_SYSVARS=0`; compatibility variables such
+as `@@log_bin=0` remain covered. It omits replication and binary-log filter
 runtime behind `MYLITE_WITH_REPLICATION_FILTERS=0`; retained no-filter checks
 remain permissive, and direct or prepared `@@replicate_do_db`,
 `@@replicate_wild_ignore_table`, and `@@binlog_do_db` lookups fail as unknown
@@ -227,7 +231,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,053,336 bytes / 24.85 MiB |
+| Archive size | 26,047,312 bytes / 24.84 MiB |
 | Archive members | 693 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -299,7 +303,9 @@ pre-strip archive to 26,731,984 bytes / 25.49 MiB. Omitting server utility SQL
 functions reduces the current pre-strip archive to 26,639,104 bytes /
 25.41 MiB. Omitting `LOAD DATA` and `LOAD XML` host-file import runtime
 reduces the current pre-strip archive to 26,614,200 bytes / 25.38 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 560,864 bytes
+Omitting network client authentication plugin handshake support reduces the
+current pre-strip archive to 26,607,496 bytes / 25.37 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 560,184 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -352,10 +358,12 @@ replication helper objects saves 10,176 pre-strip bytes, 9,832 stripped bytes,
 and four archive members. Omitting server utility SQL functions saves 92,880
 pre-strip bytes and 92,632 stripped bytes with no member-count change. Omitting
 `LOAD DATA` and `LOAD XML` host-file import runtime saves 24,904 pre-strip
-bytes and 24,392 stripped bytes with no member-count change. The final archive
-is 5,476,368 bytes smaller than the Release build with Performance Schema
-disabled, 7,076,304 bytes smaller than the symbol-stripped baseline that still
-built Performance Schema, and 7,788,984 bytes smaller than the original broad
+bytes and 24,392 stripped bytes with no member-count change. Omitting network
+client authentication plugin handshake support saves 6,704 pre-strip bytes and
+6,024 stripped bytes with no member-count change. The final archive is
+5,482,392 bytes smaller than the Release build with Performance Schema
+disabled, 7,082,328 bytes smaller than the symbol-stripped baseline that still
+built Performance Schema, and 7,795,008 bytes smaller than the original broad
 archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
@@ -475,6 +483,9 @@ available.
 Unix socket server authentication is omitted from the default embedded profile;
 the `unix_socket` plugin is absent, and network users and authentication remain
 outside the core embedded API.
+Network client authentication plugin handshake support is omitted from the
+default embedded profile; local embedded opens keep embedded connection setup,
+and inherited raw remote client auth plus `mysql_change_user()` fail closed.
 `PROCEDURE ANALYSE()` is omitted from the default embedded archive and linked
 to an unsupported stub; ordinary SELECT execution and the generic retained
 SELECT procedure dispatch continue to link. System-variable names, values,
@@ -555,6 +566,7 @@ The baseline explicitly disables:
 - Foreign-server metadata
 - External backup runtime
 - VIO TLS transport
+- Network client authentication plugin handshake support
 - Replication execution, slave protocol, and semi-sync system variables
 - Replication and binary-log filter runtime
 - PROXY protocol listener support

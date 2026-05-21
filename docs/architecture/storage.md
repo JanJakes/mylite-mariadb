@@ -165,7 +165,8 @@ dynamic plugin or UDF loading, replication metadata, binlog administration, SQL
 import/export, or the event scheduler. Server help-table lookup, statement
 profiling, query-cache management, query logs, optimizer trace, process-list
 metadata, status counters, user statistics, and user-variable diagnostics are
-also outside the core embedded storage profile. Direct execution and
+also outside the core embedded storage profile; inherited network client
+auth-plugin negotiation is outside the core embedded API. Direct execution and
 prepared-statement preparation reject those top-level SQL command families
 before they can create server sidecars, depend on `mysql.*` system tables,
 read or write caller-named files, or expose server-owned tuning state.
