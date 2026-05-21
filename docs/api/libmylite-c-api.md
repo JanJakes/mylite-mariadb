@@ -391,6 +391,7 @@ compatibility features that do not fit the embedded library model:
 - optimizer trace diagnostics,
 - general and slow query logs,
 - statement digest diagnostics,
+- server status variables,
 - the optional `SFORMAT()` SQL helper,
 - legacy `PROCEDURE ANALYSE()` SELECT diagnostics,
 - static `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES`
@@ -418,7 +419,10 @@ warnings, and result metadata remain available. Statement digest normalization
 is omitted because it feeds Performance Schema diagnostics; startup sets
 `@@max_digest_length=0`, and ordinary statement execution, prepared
 statements, diagnostics, and `EXPLAIN` remain available. The default embedded
-profile also omits `SFORMAT()`, which fails as an
+profile also omits server status-variable publication, so `SHOW STATUS` and
+status Information Schema tables return empty result sets while ordinary SQL
+diagnostics, warnings, result metadata, and the public C API remain available.
+The default embedded profile also omits `SFORMAT()`, which fails as an
 unknown SQL function; ordinary `FORMAT()` remains available. The legacy
 `PROCEDURE ANALYSE()` SELECT extension is rejected as an unsupported diagnostic
 surface while ordinary SELECT queries remain supported. Long system-variable

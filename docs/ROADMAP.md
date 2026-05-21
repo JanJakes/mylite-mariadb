@@ -52,6 +52,7 @@ surface that does not fit a local directory-owned library:
 - optimizer trace diagnostics,
 - general and slow query logs,
 - statement digest diagnostics,
+- server status variables,
 - optional Oracle SQL compatibility mode,
 - optional fmtlib-backed SQL helpers such as `SFORMAT()`,
 - legacy diagnostic SELECT procedures such as `PROCEDURE ANALYSE()`,
@@ -106,6 +107,10 @@ Statement digest normalization is omitted after measurement proves Performance
 Schema digest text and hash diagnostics are outside the default embedded
 profile while ordinary parsing, execution, prepared statements, and `EXPLAIN`
 remain available.
+Server status-variable publication is omitted after measurement proves
+`SHOW STATUS` and status Information Schema rows are daemon diagnostics, not
+application SQL or storage behavior; direct and prepared status queries keep
+stable empty result behavior while ordinary diagnostics remain available.
 Compatibility-sensitive code removals require separate evidence before they
 are accepted.
 

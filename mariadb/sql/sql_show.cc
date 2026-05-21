@@ -50,6 +50,9 @@
 #include "sql_servers.h"
 #include "sql_repl.h"                       // rpl_load_gtid_state
 #include "rpl_mi.h"                         // master_info_index
+#ifndef MYLITE_WITH_STATUS_VARIABLES
+#define MYLITE_WITH_STATUS_VARIABLES 1
+#endif
 #ifndef MYLITE_WITH_STATIC_SHOW_INFO
 #define MYLITE_WITH_STATIC_SHOW_INFO 1
 #endif
@@ -3578,8 +3581,10 @@ int fill_schema_processlist(THD* thd, TABLE_LIST* tables, COND* cond)
 *****************************************************************************/
 
 DYNAMIC_ARRAY all_status_vars;
-static bool status_vars_inited= 0;
 ulonglong status_var_array_version= 0;
+
+#if MYLITE_WITH_STATUS_VARIABLES
+static bool status_vars_inited= 0;
 
 C_MODE_START
 static int show_var_cmp(const void *var1, const void *var2)
@@ -3762,6 +3767,35 @@ ulonglong get_status_vars_version(void)
 {
   return status_var_array_version;
 }
+#else
+int add_status_vars(SHOW_VAR *list)
+{
+  (void) list;
+  return 0;
+}
+
+void init_status_vars()
+{
+}
+
+void reset_status_vars()
+{
+}
+
+void free_status_vars()
+{
+}
+
+void remove_status_vars(SHOW_VAR *list)
+{
+  (void) list;
+}
+
+ulonglong get_status_vars_version(void)
+{
+  return status_var_array_version;
+}
+#endif
 
 /**
   A union holding a pointer to a type that can be referred by a status variable.
@@ -8684,6 +8718,7 @@ int fill_i_s_sql_functions(THD *thd, TABLE_LIST *tables, COND *cond)
 }
 
 
+#if MYLITE_WITH_STATUS_VARIABLES
 int fill_status(THD *thd, TABLE_LIST *tables, COND *cond)
 {
   DBUG_ENTER("fill_status");
@@ -8730,6 +8765,16 @@ int fill_status(THD *thd, TABLE_LIST *tables, COND *cond)
   mysql_rwlock_unlock(&LOCK_all_status_vars);
   DBUG_RETURN(res);
 }
+#else
+int fill_status(THD *thd, TABLE_LIST *tables, COND *cond)
+{
+  (void) thd;
+  (void) tables;
+  (void) cond;
+  DBUG_ENTER("fill_status");
+  DBUG_RETURN(0);
+}
+#endif
 
 
 /*

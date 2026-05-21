@@ -48,6 +48,7 @@ static void test_server_surfaces_are_disabled_or_contained(void);
 static mylite_db *open_database(open_database_paths paths);
 static void assert_runtime_policy_variables(mylite_db *db, const char *database_path);
 static void assert_system_variable_help_text_omitted(mylite_db *db);
+static void assert_status_variables_omitted(mylite_db *db);
 static void assert_performance_schema_omitted_or_disabled(mylite_db *db);
 static int performance_schema_variable_callback(
     void *ctx,
@@ -109,6 +110,7 @@ static void test_server_surfaces_are_disabled_or_contained(void) {
     db = open_database(paths);
     assert_runtime_policy_variables(db, database_path);
     assert_system_variable_help_text_omitted(db);
+    assert_status_variables_omitted(db);
     assert_server_sql_rejected(db);
     assert_no_server_sidecar_files(database_path);
     assert(mylite_close(db) == MYLITE_OK);
@@ -208,6 +210,52 @@ static void assert_system_variable_help_text_omitted(mylite_db *db) {
             .values = comment_values,
         }
     );
+}
+
+static void assert_status_variables_omitted(mylite_db *db) {
+    const char *sql = "SHOW STATUS LIKE 'Questions'";
+    mylite_stmt *stmt = NULL;
+    const char *tail = NULL;
+
+    query_expect(
+        db,
+        (expected_query){
+            .sql = sql,
+            .column_count = 2,
+            .row_count = 0,
+            .column_names = NULL,
+            .values = NULL,
+        }
+    );
+    query_expect(
+        db,
+        (expected_query){
+            .sql = "SELECT VARIABLE_NAME, VARIABLE_VALUE "
+                   "FROM information_schema.GLOBAL_STATUS LIMIT 1",
+            .column_count = 2,
+            .row_count = 0,
+            .column_names = NULL,
+            .values = NULL,
+        }
+    );
+    query_expect(
+        db,
+        (expected_query){
+            .sql = "SELECT VARIABLE_NAME, VARIABLE_VALUE "
+                   "FROM information_schema.SESSION_STATUS LIMIT 1",
+            .column_count = 2,
+            .row_count = 0,
+            .column_names = NULL,
+            .values = NULL,
+        }
+    );
+
+    assert(mylite_prepare(db, sql, MYLITE_NUL_TERMINATED, &stmt, &tail) == MYLITE_OK);
+    assert(stmt != NULL);
+    assert(tail == sql + strlen(sql));
+    assert(mylite_column_count(stmt) == 2U);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
 }
 
 static void assert_performance_schema_omitted_or_disabled(mylite_db *db) {

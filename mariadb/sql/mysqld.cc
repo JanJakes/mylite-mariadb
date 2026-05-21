@@ -88,6 +88,10 @@
 #include "sql_callback.h"
 #include "threadpool.h"
 
+#ifndef MYLITE_WITH_STATUS_VARIABLES
+#define MYLITE_WITH_STATUS_VARIABLES 1
+#endif
+
 #ifdef HAVE_OPENSSL
 #include <ssl_compat.h>
 #endif
@@ -3462,6 +3466,7 @@ static void init_libstrings()
 #define COM_STATUS(X)  (void*) offsetof(STATUS_VAR, X), SHOW_LONG_STATUS
 #define STMT_STATUS(X) COM_STATUS(com_stat[(uint) X])
 
+#if MYLITE_WITH_STATUS_VARIABLES || defined(HAVE_PSI_STATEMENT_INTERFACE)
 SHOW_VAR com_status_vars[]= {
   {"admin_commands",       COM_STATUS(com_other)},
   {"alter_db",             STMT_STATUS(SQLCOM_ALTER_DB)},
@@ -3643,6 +3648,11 @@ SHOW_VAR com_status_vars[]= {
   {"xa_start",             STMT_STATUS(SQLCOM_XA_START)},
   {NullS, NullS, SHOW_LONG}
 };
+#else
+SHOW_VAR com_status_vars[]= {
+  {NullS, NullS, SHOW_LONG}
+};
+#endif
 
 
 #ifdef HAVE_PSI_STATEMENT_INTERFACE
@@ -4086,7 +4096,8 @@ static int init_common_variables()
   if (add_status_vars(status_vars))
     exit(1); // an error was already reported
 
-#ifndef DBUG_OFF
+#if !defined(DBUG_OFF) && \
+    (MYLITE_WITH_STATUS_VARIABLES || defined(HAVE_PSI_STATEMENT_INTERFACE))
   /*
     We have few debug-only commands in com_status_vars, only visible in debug
     builds. for simplicity we enable the assert only in debug builds
@@ -7540,6 +7551,7 @@ static int show_cached_thread_count(THD *thd, SHOW_VAR *var, void *buff,
   Variables shown by SHOW STATUS in alphabetical order
 */
 
+#if MYLITE_WITH_STATUS_VARIABLES
 SHOW_VAR status_vars[]= {
   {"Aborted_clients",          (char*) &aborted_threads,        SHOW_LONG},
   {"Aborted_connects",         (char*) &aborted_connects,       SHOW_LONG},
@@ -7801,6 +7813,11 @@ SHOW_VAR status_vars[]= {
 #endif
   {NullS, NullS, SHOW_LONG}
 };
+#else
+SHOW_VAR status_vars[]= {
+  {NullS, NullS, SHOW_LONG}
+};
+#endif
 
 static bool add_terminator(DYNAMIC_ARRAY *options)
 {

@@ -32,7 +32,9 @@ debugging data rather than application behavior. General and slow query logs
 are omitted because they are daemon query-audit diagnostics rather than
 application storage, SQL execution, or public API behavior. Statement digest
 normalization is omitted because it feeds Performance Schema statement
-diagnostics, which are already outside the default embedded profile.
+diagnostics, which are already outside the default embedded profile. Server
+status-variable publication is omitted because it exposes daemon diagnostic
+counters rather than application SQL, storage, or public API behavior.
 
 ## Source Findings
 
@@ -179,6 +181,15 @@ diagnostics, which are already outside the default embedded profile.
   `mylite_sql_digest_disabled.cc.o`, and starting with
   `--max-digest-length=0` reduces the stripped archive to 27,039,160 bytes,
   25.79 MiB, and 705 members.
+- `mariadb/sql/mysqld.cc` defines `com_status_vars[]` and `status_vars[]`,
+  then registers the status array during startup with `add_status_vars()`.
+  `mariadb/sql/sql_show.cc` owns the dynamic `all_status_vars` registry and
+  fills `SHOW STATUS`, `INFORMATION_SCHEMA.GLOBAL_STATUS`, and
+  `INFORMATION_SCHEMA.SESSION_STATUS` from that registry.
+- Disabling server status-variable publication behind
+  `MYLITE_WITH_STATUS_VARIABLES=0` compiles the publication arrays to
+  terminator-only arrays, makes the dynamic registry inert, and reduces the
+  stripped archive to 27,005,960 bytes, 25.75 MiB, and 705 members.
 
 ## Proposed Design
 
@@ -307,6 +318,15 @@ output. MyLite starts with `--max-digest-length=0` so THD startup does not
 allocate per-session digest token buffers. Performance Schema remains omitted
 from the default profile.
 
+The embedded archive omits server status-variable publication by setting
+`MYLITE_WITH_STATUS_VARIABLES=0` in the MyLite baseline. The option defaults
+to `ON` so normal MariaDB server builds keep upstream status counters. The
+disabled profile compiles the status publication arrays to terminator-only
+arrays, makes the dynamic registry helpers no-ops, and has `SHOW STATUS` plus
+status Information Schema tables return empty result sets. Ordinary SQL
+diagnostics, warnings, result metadata, and public C API diagnostics remain
+available.
+
 The wrapper keeps this behavior enabled by default because it is the
 distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
 need an unstripped archive for local inspection.
@@ -328,7 +348,8 @@ with inert trace helper symbols in the embedded SQL archive. General and slow
 query-log handlers are compiled to inert embedded paths while shared error-log
 behavior remains available. Statement digest normalization is replaced with
 inert digest helper symbols, and per-session digest token buffers are disabled
-at startup.
+at startup. Server status-variable publication arrays and dynamic registry
+updates are compiled to empty embedded paths.
 
 ## Compatibility Impact
 
@@ -388,13 +409,18 @@ Omitting it removes normalized statement digest text and digest hashes, not
 ordinary parsing, statement execution, prepared statements, `EXPLAIN`, SQL
 diagnostics, JSON, GEOMETRY/GIS, native storage engines, DDL, DML, or the
 public C API.
+Server status-variable publication is a server diagnostic path. Omitting it
+removes `SHOW STATUS` rows and status Information Schema rows, not ordinary
+SQL diagnostics, warnings, result metadata, prepared statements, JSON,
+GEOMETRY/GIS, native storage engines, DDL, DML, or the public C API.
 
 ## Database-Directory And Lifecycle Impact
 
 Runtime directory layout, storage files, temporary files, and lock behavior are
 unchanged. Query-log omission removes inherited daemon log-file output rather
 than adding any database-directory companions. Statement digest trimming only
-removes in-memory diagnostic collection and token buffers.
+removes in-memory diagnostic collection and token buffers. Status-variable
+trimming only removes in-memory diagnostic publication.
 
 ## Public API Impact
 
@@ -477,6 +503,11 @@ Omitting statement digest normalization brings the current archive to
 with Performance Schema disabled, 6,090,480 bytes smaller than the
 symbol-stripped baseline with Performance Schema still built, and 6,803,160
 bytes smaller than the original broad archive.
+Omitting server status-variable publication brings the current archive to
+27,005,960 bytes / 25.75 MiB, 4,523,744 bytes smaller than the Release build
+with Performance Schema disabled, 6,123,680 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 6,836,360
+bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -496,6 +527,9 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
   `sql_digest.cc.o` is absent, `mylite_sql_digest_disabled.cc.o` is present in
   `libmariadbd.a`, and `@@max_digest_length=0` is covered by server-surface
   policy coverage.
+- Confirm `MYLITE_WITH_STATUS_VARIABLES=OFF` appears in the embedded CMake
+  cache, and direct and prepared `SHOW STATUS` plus status Information Schema
+  reads return empty rows through server-surface policy coverage.
 - Run `cmake --build --preset dev`.
 - Run `ctest --preset dev --output-on-failure`.
 - Run `cmake --build --preset embedded-dev`.
@@ -552,6 +586,9 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Statement digest normalization is omitted from the default embedded archive,
   `@@max_digest_length=0` is covered at startup, and ordinary SQL execution,
   prepared statements, diagnostics, and `EXPLAIN` remain available.
+- Server status-variable publication is omitted from the default embedded
+  archive, status queries return empty rows, and ordinary diagnostics,
+  warnings, result metadata, and prepared statements remain available.
 - The stripped archive still links `libmylite` and all embedded tests.
 - The measured archive size and member count are recorded in the build
   documentation.
@@ -594,3 +631,6 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
   lose those diagnostics in the default embedded profile. Performance Schema is
   already omitted from that profile, and ordinary statement execution remains
   available.
+- Users relying on MariaDB `SHOW STATUS` counters or status Information Schema
+  rows lose those server diagnostics in the default embedded profile. Ordinary
+  SQL diagnostics and result metadata remain available.
