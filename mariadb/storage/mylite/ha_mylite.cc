@@ -150,6 +150,7 @@ static int mylite_begin_transaction_checkpoint(THD *thd,
                                                const char *primary_file);
 static int mylite_begin_statement_checkpoint(THD *thd,
                                              const char *primary_file,
+                                             bool needs_storage_checkpoint,
                                              bool needs_volatile_snapshot);
 static int mylite_finish_statement_checkpoint(THD *thd, bool commit);
 static int mylite_finish_savepoints(THD *thd, bool commit);
@@ -2425,8 +2426,8 @@ int ha_mylite::external_lock(THD *thd, int lock_type)
       DBUG_RETURN(transaction_error);
   }
 
-  int error=
-      mylite_begin_statement_checkpoint(thd, primary_file, volatile_rows);
+  int error= mylite_begin_statement_checkpoint(thd, primary_file,
+                                               !volatile_rows, volatile_rows);
   if (error)
     DBUG_RETURN(error);
 
@@ -3716,6 +3717,7 @@ static int mylite_begin_transaction_checkpoint(THD *thd,
 
 static int mylite_begin_statement_checkpoint(THD *thd,
                                              const char *primary_file,
+                                             bool needs_storage_checkpoint,
                                              bool needs_volatile_snapshot)
 {
   Mylite_trx_context *ctx= mylite_trx_context(thd, true);
@@ -3723,7 +3725,8 @@ static int mylite_begin_statement_checkpoint(THD *thd,
     return HA_ERR_OUT_OF_MEM;
 
   bool began_statement= false;
-  if (!ctx->statement && !mylite_storage_statement_active(primary_file))
+  if (needs_storage_checkpoint && !ctx->statement &&
+      !mylite_storage_statement_active(primary_file))
   {
     mylite_storage_result result=
       mylite_storage_begin_statement(primary_file, &ctx->statement);

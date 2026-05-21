@@ -338,6 +338,7 @@ struct mylite_stmt {
     std::vector<std::string> temporary_tables_to_forget;
     unsigned long long storage_metadata_epoch = 0;
     bool transaction_statement_checkpoint_plan_valid = false;
+    bool transaction_statement_needs_storage_checkpoint = true;
     bool transaction_statement_needs_volatile_snapshot = true;
 #endif
     bool sync_schema_catalog_after_execute = false;
@@ -484,6 +485,7 @@ void apply_prepared_temporary_table_lifecycle(mylite_db &database, const mylite_
 void refresh_prepared_statement_checkpoint_plan(mylite_stmt &statement);
 bool prepared_statement_changes_temporary_table_lifecycle(const mylite_stmt &statement);
 bool row_dml_needs_volatile_snapshot(const mylite_db &database, std::string_view sql);
+bool row_dml_needs_storage_checkpoint(const mylite_db &database, std::string_view sql);
 bool storage_engine_name_is_volatile(std::string_view engine_name);
 void apply_successful_storage_metadata_lifecycle(mylite_db &database, std::string_view sql);
 bool remember_created_table_engine(mylite_db &database, std::string_view sql);
@@ -1669,6 +1671,9 @@ int exec_impl(
     const bool temporary_table_ddl = is_temporary_table_ddl_sql(sql_view);
     const bool storage_outer_checkpoint_sql =
         is_storage_outer_checkpoint_sql(sql_view) && !temporary_table_ddl;
+    const bool row_dml_storage_checkpoint_sql =
+        row_dml_checkpoint_sql &&
+        (database->transaction_active || row_dml_needs_storage_checkpoint(*database, sql_view));
     if (database->transaction_active && transaction_control == TransactionControlKind::None &&
         storage_outer_checkpoint_sql) {
         set_error(*database, MYLITE_ERROR, "unsupported transactional DDL SQL surface");
@@ -1684,7 +1689,7 @@ int exec_impl(
     StorageStatementCheckpoint checkpoint;
     const bool checkpoint_enabled =
         database->filename != ":memory:" &&
-        (storage_outer_checkpoint_sql || (database->transaction_active && row_dml_checkpoint_sql));
+        (storage_outer_checkpoint_sql || row_dml_storage_checkpoint_sql);
     bool checkpoint_needs_volatile_snapshot = checkpoint_enabled;
     if (checkpoint_enabled && !storage_outer_checkpoint_sql) {
         checkpoint_needs_volatile_snapshot = row_dml_needs_volatile_snapshot(*database, sql_view);
@@ -2089,14 +2094,15 @@ int execute_statement(mylite_stmt &statement) {
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
     refresh_prepared_statement_checkpoint_plan(statement);
     StorageStatementCheckpoint checkpoint;
+    const bool row_dml_checkpoint_enabled =
+        statement.uses_transaction_statement_checkpoint &&
+        (statement.database->transaction_active ||
+         statement.transaction_statement_needs_storage_checkpoint);
     const bool checkpoint_enabled =
-        statement.uses_statement_checkpoint ||
-        (statement.database->transaction_active && statement.uses_transaction_statement_checkpoint);
+        statement.uses_statement_checkpoint || row_dml_checkpoint_enabled;
     const bool checkpoint_needs_volatile_snapshot =
         statement.uses_statement_checkpoint ||
-        (statement.database->transaction_active &&
-         statement.uses_transaction_statement_checkpoint &&
-         statement.transaction_statement_needs_volatile_snapshot);
+        (row_dml_checkpoint_enabled && statement.transaction_statement_needs_volatile_snapshot);
     int checkpoint_result = checkpoint.begin(
         *statement.database,
         checkpoint_enabled,
@@ -2532,6 +2538,8 @@ void refresh_prepared_statement_checkpoint_plan(mylite_stmt &statement) {
         return;
     }
 
+    statement.transaction_statement_needs_storage_checkpoint =
+        row_dml_needs_storage_checkpoint(database, statement.sql);
     statement.transaction_statement_needs_volatile_snapshot =
         row_dml_needs_volatile_snapshot(database, statement.sql);
     statement.storage_metadata_epoch = database.storage_metadata_epoch;
@@ -2591,6 +2599,59 @@ bool row_dml_needs_volatile_snapshot(const mylite_db &database, std::string_view
         mylite_storage_free(metadata.requested_engine_name);
         mylite_storage_free(metadata.effective_engine_name);
         return needs_volatile_snapshot;
+    } catch (const std::bad_alloc &) {
+        return true;
+    }
+}
+
+bool row_dml_needs_storage_checkpoint(const mylite_db &database, std::string_view sql) {
+    if (database.filename == ":memory:") {
+        return false;
+    }
+
+    try {
+        std::string table_name;
+        if (!row_dml_target_table_name(sql, &table_name)) {
+            return true;
+        }
+        if (has_tracked_temporary_table(database, table_name)) {
+            return false;
+        }
+
+        const char *schema_name =
+            !database.current_schema.empty() ? database.current_schema.c_str() : database.mysql.db;
+        if (schema_name == nullptr || schema_name[0] == '\0') {
+            return true;
+        }
+
+        bool tracked_needs_snapshot = true;
+        if (tracked_table_engine_needs_volatile_snapshot(
+                database,
+                schema_name,
+                table_name,
+                &tracked_needs_snapshot
+            )) {
+            return !tracked_needs_snapshot;
+        }
+
+        mylite_storage_table_metadata metadata = {};
+        metadata.size = sizeof(metadata);
+        const mylite_storage_result result = mylite_storage_read_table_metadata(
+            database.filename.c_str(),
+            schema_name,
+            table_name.c_str(),
+            &metadata
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            return true;
+        }
+
+        const bool needs_storage_checkpoint =
+            metadata.requested_engine_name == nullptr ||
+            !storage_engine_name_is_volatile(metadata.requested_engine_name);
+        mylite_storage_free(metadata.requested_engine_name);
+        mylite_storage_free(metadata.effective_engine_name);
+        return needs_storage_checkpoint;
     } catch (const std::bad_alloc &) {
         return true;
     }

@@ -121,6 +121,7 @@ typedef struct id_sequence_context {
 typedef struct single_value_context {
     int rows;
     const char *expected_value;
+    const char *sql;
 } single_value_context;
 
 typedef struct explain_key_context {
@@ -539,6 +540,8 @@ static void wait_test_lock_child(pid_t pid);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
 static char *transaction_journal_path(const char *filename);
+static void wait_for_child(pid_t pid, int *status);
+static void assert_no_active_storage_statement(mylite_db *db, const char *filename);
 static void assert_no_durable_sidecars(const char *root, const char *primary_name);
 static void assert_no_runtime_schema_directory(const char *root, const char *schema_name);
 static void assert_no_forbidden_sidecars(const char *path);
@@ -1153,8 +1156,11 @@ static void test_memory_engine_routes_to_mylite(void) {
     assert_catalog_table_count(filename, "app", 3U);
 
     assert_exec_succeeds(db, "INSERT INTO memory_posts (title) VALUES ('first'), ('second')");
+    assert_no_active_storage_statement(db, filename);
     assert_exec_succeeds(db, "INSERT INTO heap_posts VALUES (1, 'heap-row')");
+    assert_no_active_storage_statement(db, filename);
     assert_exec_succeeds(db, "INSERT INTO memory_score_posts VALUES (1, 7), (2, 7), (3, 9)");
+    assert_no_active_storage_statement(db, filename);
     assert(
         mylite_storage_count_rows(filename, "app", "memory_posts", &durable_row_count) ==
         MYLITE_STORAGE_OK
@@ -2473,7 +2479,7 @@ static void test_transaction_and_foreign_key_policies(void) {
         ) != NULL
     );
     free(create_sql);
-    single_value_context fk_metadata_count = {0, "1"};
+    single_value_context fk_metadata_count = {.expected_value = "1"};
     assert(
         mylite_exec(
             db,
@@ -2496,7 +2502,7 @@ static void test_transaction_and_foreign_key_policies(void) {
     create_sql = capture_show_create_table(db, "fk_child");
     assert(strstr(create_sql, "CONSTRAINT `fk_child_parent` FOREIGN KEY") == NULL);
     free(create_sql);
-    single_value_context dropped_fk_metadata_count = {0, "0"};
+    single_value_context dropped_fk_metadata_count = {.expected_value = "0"};
     assert(
         mylite_exec(
             db,
@@ -2603,7 +2609,7 @@ static void test_transaction_and_foreign_key_policies(void) {
     create_sql = capture_show_create_table(db, "fk_child");
     assert(strstr(create_sql, "CONSTRAINT `fk_child_parent` FOREIGN KEY") == NULL);
     free(create_sql);
-    single_value_context reopened_dropped_fk_metadata_count = {0, "0"};
+    single_value_context reopened_dropped_fk_metadata_count = {.expected_value = "0"};
     assert(
         mylite_exec(
             db,
@@ -21842,6 +21848,7 @@ static void assert_index_ignored(
 static void assert_query_single_value(mylite_db *db, const char *sql, const char *expected_value) {
     single_value_context value = {
         .expected_value = expected_value,
+        .sql = sql,
     };
     char *errmsg = NULL;
 
@@ -24205,7 +24212,7 @@ static void assert_transaction_crash_recovery(const char *root, const char *file
     }
 
     int status = 0;
-    assert(waitpid(pid, &status, 0) == pid);
+    wait_for_child(pid, &status);
     assert(WIFEXITED(status));
     assert(WEXITSTATUS(status) == 0);
     assert(access(transaction_journal_filename, F_OK) == 0);
@@ -24794,7 +24801,16 @@ static char *capture_show_create_table(mylite_db *db, const char *table_name) {
         .expected_table_name = table_name,
     };
     char *errmsg = NULL;
-    assert(mylite_exec(db, sql, show_create_table_callback, &ctx, &errmsg) == MYLITE_OK);
+    const int result = mylite_exec(db, sql, show_create_table_callback, &ctx, &errmsg);
+    if (result != MYLITE_OK) {
+        fprintf(
+            stderr,
+            "SHOW CREATE TABLE failed: %s\n%s\n",
+            sql,
+            errmsg != NULL ? errmsg : "(no error)"
+        );
+    }
+    assert(result == MYLITE_OK);
     assert(errmsg == NULL);
     assert(ctx.rows == 1);
     assert(ctx.create_sql != NULL);
@@ -25246,7 +25262,9 @@ static int single_value_callback(void *ctx, int column_count, char **values, cha
     if (strcmp(values[0], value_ctx->expected_value) != 0) {
         fprintf(
             stderr,
-            "unexpected single value: got '%s', expected '%s'\n",
+            "unexpected single value%s%s: got '%s', expected '%s'\n",
+            value_ctx->sql != NULL ? " for query: " : "",
+            value_ctx->sql != NULL ? value_ctx->sql : "",
             values[0],
             value_ctx->expected_value
         );
@@ -25475,7 +25493,7 @@ static void release_transaction_read_snapshot_child(sql_transaction_child child)
     assert(close(child.release_fd) == 0);
 
     int status = 0;
-    assert(waitpid(child.pid, &status, 0) == child.pid);
+    wait_for_child(child.pid, &status);
     assert(WIFEXITED(status));
     assert(WEXITSTATUS(status) == 0);
 }
@@ -25512,7 +25530,7 @@ static pid_t hold_test_lock_for(const char *filename, timed_lock_request request
 
 static void wait_test_lock_child(pid_t pid) {
     int status = 0;
-    assert(waitpid(pid, &status, 0) == pid);
+    wait_for_child(pid, &status);
     assert(WIFEXITED(status));
     assert(WEXITSTATUS(status) == 0);
 }
@@ -25546,6 +25564,21 @@ static char *transaction_journal_path(const char *filename) {
     memcpy(path, filename, filename_len);
     memcpy(path + filename_len, suffix, sizeof(suffix));
     return path;
+}
+
+static void wait_for_child(pid_t pid, int *status) {
+    pid_t waited = 0;
+    do {
+        waited = waitpid(pid, status, 0);
+    } while (waited < 0 && errno == EINTR);
+    assert(waited == pid);
+}
+
+static void assert_no_active_storage_statement(mylite_db *db, const char *filename) {
+    const void *previous_owner = mylite_storage_context_owner();
+    mylite_storage_set_context_owner(db);
+    assert(mylite_storage_statement_active(filename) == 0);
+    mylite_storage_set_context_owner(previous_owner);
 }
 
 static void assert_no_durable_sidecars(const char *root, const char *primary_name) {
