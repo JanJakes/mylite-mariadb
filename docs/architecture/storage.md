@@ -1008,7 +1008,9 @@ journal single-page maintained root rewrites before writing the row page, insert
 the new key in sorted order, and skip the duplicate append-only index-entry
 page. Rebuild scans also treat maintained roots as live index sources so a
 later rebuild or rename does not lose entries that were inserted directly into
-the root. Update/delete physical root maintenance, root splits, and
+the root. Eligible deletes now physically remove the source row id from
+maintained roots while preserving the row-state delete overlay for immutable
+and fallback paths. Update physical root maintenance, root splits, and
 transaction-aware maintained index mutation remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index

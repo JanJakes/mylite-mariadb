@@ -5667,6 +5667,7 @@ static void test_index_leaf_pages(void) {
         header.page_count - 1ULL,
         MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_ROOT
     );
+    const unsigned long long secondary_root_page = header.page_count - 1ULL;
     const unsigned long long first_secondary_row_ids[] = {row_1_id, row_2_id};
     assert_exact_index_entries(
         filename,
@@ -5744,7 +5745,13 @@ static void test_index_leaf_pages(void) {
         sizeof(updated_secondary_row_ids) / sizeof(updated_secondary_row_ids[0])
     );
 
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    const unsigned long long before_maintained_delete_pages = header.page_count;
     assert(mylite_storage_delete_row(filename, "app", "posts", row_1_id) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_maintained_delete_pages + 1ULL);
+    assert_index_root(filename, "app", "posts", 0U, primary_root_page, 2ULL);
+    assert_index_root(filename, "app", "posts", 1U, secondary_root_page, 2ULL);
     assert_index_entry_lookup(filename, 0U, key_1, sizeof(key_1), MYLITE_STORAGE_NOTFOUND, 0ULL);
     const unsigned long long delete_tail_row_ids[] = {row_3_id};
     assert_exact_index_entries(

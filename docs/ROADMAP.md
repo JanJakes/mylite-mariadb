@@ -167,8 +167,10 @@ root page type. Index-root metadata reads now report maintained root page
 counts instead of stale catalog counts. Eligible inserts now update maintained
 root pages in place under the preplanned dirty-page journal path and skip the
 duplicate append-only index-entry page; rebuild scans preserve entries that
-live only in maintained roots. Update/delete physical root maintenance, root
-splits, and transaction-aware maintained index mutation remain planned.
+live only in maintained roots. Eligible deletes now physically remove source
+row ids from maintained roots while retaining row-state overlays for fallback
+visibility. Update physical root maintenance, root splits, and
+transaction-aware maintained index mutation remain planned.
 Durable table-local row,
 payload, exact-index, and published leaf-page caches now retarget across
 unrelated table row mutations, so one
