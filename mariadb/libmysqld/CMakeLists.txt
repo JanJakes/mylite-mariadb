@@ -14,8 +14,16 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1335 USA
 
-ADD_DEFINITIONS(-DMYSQL_SERVER -DEMBEDDED_LIBRARY -DMYLITE_WITH_UDF_RUNTIME=0
- ${SSL_DEFINES})
+ADD_DEFINITIONS(-DMYSQL_SERVER -DEMBEDDED_LIBRARY ${SSL_DEFINES})
+
+OPTION(MYLITE_WITH_UDF_RUNTIME "Build dynamic UDF shared-library runtime" ON)
+IF(MYLITE_WITH_UDF_RUNTIME)
+  ADD_DEFINITIONS(-DMYLITE_WITH_UDF_RUNTIME=1)
+  SET(MYLITE_SQL_UDF_SOURCE ../sql/sql_udf.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_UDF_RUNTIME=0)
+  SET(MYLITE_SQL_UDF_SOURCE)
+ENDIF()
 
 OPTION(MYLITE_WITH_BINLOG_CORE "Build binary log transaction and event core" ON)
 IF(MYLITE_WITH_BINLOG_CORE)
@@ -409,6 +417,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/ddl_log.cc ../sql/item_vectorfunc.cc
            ../sql/sql_trigger.cc ../sql/sql_union.cc
            ../sql/sql_update.cc ../sql/sql_view.cc ${MYLITE_SQL_PROFILE_SOURCE}
+           ${MYLITE_SQL_UDF_SOURCE}
            ../sql/gcalc_tools.cc ../sql/gcalc_slicescan.cc
            ../sql/strfunc.cc ../sql/table.cc ../sql/thr_malloc.cc
            ../sql/sql_time.cc ../sql/tztime.cc ../sql/uniques.cc ../sql/unireg.cc
