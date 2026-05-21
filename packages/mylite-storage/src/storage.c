@@ -3054,7 +3054,8 @@ static mylite_storage_result find_exact_index_row_id(
     const mylite_storage_header *header,
     mylite_storage_statement *active_cache_statement,
     const mylite_storage_statement *active_mutation_statement,
-    const mylite_storage_catalog_image *catalog,
+    mylite_storage_catalog_image *catalog,
+    int *has_catalog,
     const mylite_storage_catalog_entry *table_entry,
     const char *schema_name,
     const char *table_name,
@@ -3062,6 +3063,12 @@ static mylite_storage_result find_exact_index_row_id(
     const unsigned char *key,
     size_t key_size,
     unsigned long long *out_row_id
+);
+static mylite_storage_result ensure_catalog_image_loaded(
+    FILE *file,
+    const mylite_storage_header *header,
+    mylite_storage_catalog_image *catalog,
+    int *has_catalog
 );
 static mylite_storage_result find_cached_durable_exact_index_entry(
     FILE *file,
@@ -7345,12 +7352,6 @@ mylite_storage_result mylite_storage_find_index_entry(
             }
         }
     }
-    if (result == MYLITE_STORAGE_OK && !has_catalog) {
-        result = read_catalog_image(file, &header, &catalog);
-        if (result == MYLITE_STORAGE_OK) {
-            has_catalog = 1;
-        }
-    }
     if (result == MYLITE_STORAGE_OK) {
         result = find_exact_index_row_id(
             file,
@@ -7358,7 +7359,8 @@ mylite_storage_result mylite_storage_find_index_entry(
             &header,
             active_cache_statement,
             file_scope.active_statement,
-            has_catalog ? &catalog : NULL,
+            &catalog,
+            &has_catalog,
             &table_entry,
             schema_name,
             table_name,
@@ -7510,12 +7512,6 @@ static mylite_storage_result find_indexed_row_payload(
             }
         }
     }
-    if (result == MYLITE_STORAGE_OK && !has_catalog) {
-        result = read_catalog_image(file, &header, &catalog);
-        if (result == MYLITE_STORAGE_OK) {
-            has_catalog = 1;
-        }
-    }
     if (result == MYLITE_STORAGE_OK) {
         result = find_exact_index_row_id(
             file,
@@ -7523,7 +7519,8 @@ static mylite_storage_result find_indexed_row_payload(
             &header,
             active_cache_statement,
             file_scope.active_statement,
-            has_catalog ? &catalog : NULL,
+            &catalog,
+            &has_catalog,
             &table_entry,
             schema_name,
             table_name,
@@ -22387,7 +22384,8 @@ static mylite_storage_result find_exact_index_row_id(
     const mylite_storage_header *header,
     mylite_storage_statement *active_cache_statement,
     const mylite_storage_statement *active_mutation_statement,
-    const mylite_storage_catalog_image *catalog,
+    mylite_storage_catalog_image *catalog,
+    int *has_catalog,
     const mylite_storage_catalog_entry *table_entry,
     const char *schema_name,
     const char *table_name,
@@ -22412,7 +22410,10 @@ static mylite_storage_result find_exact_index_row_id(
         out_row_id,
         &used_cache
     );
-    if (result == MYLITE_STORAGE_OK && !used_cache && catalog != NULL) {
+    if (result == MYLITE_STORAGE_OK && !used_cache) {
+        result = ensure_catalog_image_loaded(file, header, catalog, has_catalog);
+    }
+    if (result == MYLITE_STORAGE_OK && !used_cache) {
         result = find_index_leaf_exact_static_row_id(
             file,
             filename,
@@ -22429,7 +22430,7 @@ static mylite_storage_result find_exact_index_row_id(
             &used_leaf
         );
     }
-    if (result == MYLITE_STORAGE_OK && !used_cache && !used_leaf && catalog != NULL) {
+    if (result == MYLITE_STORAGE_OK && !used_cache && !used_leaf) {
         result = read_index_leaf_exact_row_ids(
             file,
             filename,
@@ -22475,6 +22476,23 @@ static mylite_storage_result find_exact_index_row_id(
     }
 
     free(row_ids.row_ids);
+    return result;
+}
+
+static mylite_storage_result ensure_catalog_image_loaded(
+    FILE *file,
+    const mylite_storage_header *header,
+    mylite_storage_catalog_image *catalog,
+    int *has_catalog
+) {
+    if (*has_catalog) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    const mylite_storage_result result = read_catalog_image(file, header, catalog);
+    if (result == MYLITE_STORAGE_OK) {
+        *has_catalog = 1;
+    }
     return result;
 }
 
