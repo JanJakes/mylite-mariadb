@@ -250,6 +250,7 @@ static void test_autoincrement_insert_select_failed_dml(void);
 static void test_indexed_rows(void);
 static void test_prepared_routed_select_reads(void);
 static void test_standalone_index_ddl(void);
+static void test_copy_alter_leaf_root_publication(void);
 static void test_index_ddl_if_exists(void);
 static void test_index_ignorability(void);
 static void test_blob_text_prefix_indexes(void);
@@ -391,6 +392,12 @@ static void assert_index_root_metadata(
     const char *table_name,
     unsigned index_number,
     unsigned long long expected_entry_count
+);
+static void assert_no_index_root_metadata(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number
 );
 static void assert_collation_matrix_catalog_metadata(
     const char *filename,
@@ -648,6 +655,7 @@ int main(int argc, char **argv) {
     test_indexed_rows();
     test_prepared_routed_select_reads();
     test_standalone_index_ddl();
+    test_copy_alter_leaf_root_publication();
     test_index_ddl_if_exists();
     test_index_ignorability();
     test_blob_text_prefix_indexes();
@@ -17517,6 +17525,127 @@ static void test_standalone_index_ddl(void) {
     free(root);
 }
 
+static void test_copy_alter_leaf_root_publication(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+
+    assert_exec_succeeds(db, "CREATE DATABASE app");
+    assert_exec_succeeds(db, "USE app");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE copy_alter_leaf_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "views INT NOT NULL, "
+        "slug VARCHAR(32) NOT NULL, "
+        "KEY views_key (views), "
+        "KEY slug_key (slug)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO copy_alter_leaf_posts VALUES "
+        "(1, 5, 'alpha'), (2, 5, 'beta'), (3, 7, 'gamma')"
+    );
+    assert_no_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 0U);
+    assert_no_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 1U);
+    assert_no_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 2U);
+
+    assert_exec_succeeds(db, "ALTER TABLE copy_alter_leaf_posts FORCE, ALGORITHM=COPY");
+    assert_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 0U, 3ULL);
+    assert_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 1U, 3ULL);
+    assert_no_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 2U);
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM copy_alter_leaf_posts FORCE INDEX (PRIMARY) WHERE id = 2",
+        "beta"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM copy_alter_leaf_posts FORCE INDEX (views_key) "
+        "WHERE views = 5",
+        "2"
+    );
+
+    assert_exec_succeeds(db, "INSERT INTO copy_alter_leaf_posts VALUES (4, 5, 'delta')");
+    assert_exec_succeeds(db, "UPDATE copy_alter_leaf_posts SET views = 9 WHERE id = 1");
+    assert_exec_succeeds(db, "DELETE FROM copy_alter_leaf_posts WHERE id = 3");
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM copy_alter_leaf_posts FORCE INDEX (PRIMARY) WHERE id = 4",
+        "delta"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM copy_alter_leaf_posts FORCE INDEX (PRIMARY) WHERE id = 3",
+        "0"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM copy_alter_leaf_posts FORCE INDEX (views_key) "
+        "WHERE views = 5",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM copy_alter_leaf_posts FORCE INDEX (views_key) "
+        "WHERE views = 9",
+        "1"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM copy_alter_leaf_posts FORCE INDEX (views_key) "
+        "WHERE views = 7",
+        "0"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE rename_leaf_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "views INT NOT NULL, "
+        "KEY views_key (views)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO rename_leaf_posts VALUES (1, 10)");
+    assert_exec_succeeds(db, "RENAME TABLE rename_leaf_posts TO renamed_leaf_posts");
+    assert_no_index_root_metadata(filename, "app", "renamed_leaf_posts", 0U);
+    assert_no_index_root_metadata(filename, "app", "renamed_leaf_posts", 1U);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    db = open_database_with_filename(root, filename);
+    assert_exec_succeeds(db, "USE app");
+    assert_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 0U, 3ULL);
+    assert_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 1U, 3ULL);
+    assert_no_index_root_metadata(filename, "app", "copy_alter_leaf_posts", 2U);
+    assert_no_index_root_metadata(filename, "app", "renamed_leaf_posts", 0U);
+    assert_query_single_value(
+        db,
+        "SELECT slug FROM copy_alter_leaf_posts FORCE INDEX (PRIMARY) WHERE id = 4",
+        "delta"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM copy_alter_leaf_posts FORCE INDEX (views_key) "
+        "WHERE views = 5",
+        "2"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM renamed_leaf_posts FORCE INDEX (views_key) WHERE views = 10",
+        "1"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
 static void test_index_ddl_if_exists(void) {
     char *root = make_temp_root();
     char *filename = NULL;
@@ -24874,17 +25003,46 @@ static void assert_index_root_metadata(
         .size = sizeof(metadata),
     };
 
-    assert(
-        mylite_storage_read_index_root(
-            filename,
+    const mylite_storage_result result =
+        mylite_storage_read_index_root(filename, schema_name, table_name, index_number, &metadata);
+    if (result != MYLITE_STORAGE_OK) {
+        fprintf(
+            stderr,
+            "Expected index root for %s.%s index %u, got storage result %d\n",
             schema_name,
             table_name,
             index_number,
-            &metadata
-        ) == MYLITE_STORAGE_OK
-    );
+            result
+        );
+    }
+    assert(result == MYLITE_STORAGE_OK);
     assert(metadata.root_page != 0ULL);
     assert(metadata.entry_count == expected_entry_count);
+}
+
+static void assert_no_index_root_metadata(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number
+) {
+    mylite_storage_index_root_metadata metadata = {
+        .size = sizeof(metadata),
+    };
+
+    const mylite_storage_result result =
+        mylite_storage_read_index_root(filename, schema_name, table_name, index_number, &metadata);
+    if (result != MYLITE_STORAGE_NOTFOUND) {
+        fprintf(
+            stderr,
+            "Expected no index root for %s.%s index %u, got storage result %d\n",
+            schema_name,
+            table_name,
+            index_number,
+            result
+        );
+    }
+    assert(result == MYLITE_STORAGE_NOTFOUND);
 }
 
 static int engine_callback(void *ctx, int column_count, char **values, char **column_names) {

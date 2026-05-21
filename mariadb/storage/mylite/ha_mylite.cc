@@ -173,11 +173,11 @@ static bool mylite_is_alter_backup_table_name(const char *table_name);
 static int mylite_rebuild_index_leaf_roots(const char *primary_file,
                                            const char *schema_name,
                                            const char *table_name);
-static int mylite_rebuild_index_leaf_root_for_ddl_key(const char *primary_file,
-                                                      const char *schema_name,
-                                                      const char *table_name,
-                                                      TABLE_SHARE *share,
-                                                      const Key *ddl_key);
+static int mylite_rebuild_index_leaf_root_for_key(const char *primary_file,
+                                                  const char *schema_name,
+                                                  const char *table_name,
+                                                  const TABLE_SHARE *share,
+                                                  uint index_number);
 static int mylite_drop_index_leaf_root(const char *primary_file,
                                        const char *schema_name,
                                        const char *table_name,
@@ -186,9 +186,6 @@ static int mylite_rebuild_index_leaf_root(const char *primary_file,
                                           const char *schema_name,
                                           const char *table_name,
                                           uint index_number);
-static bool mylite_share_key_matches_ddl_key(TABLE_SHARE *share,
-                                             uint index_number,
-                                             const Key *ddl_key);
 static int mylite_drop_foreign_keys_for_alter(const char *primary_file,
                                               const char *schema_name,
                                               const char *table_name);
@@ -308,7 +305,8 @@ static const char *mylite_foreign_key_referenced_key_name_for_alter(
 static const char *mylite_foreign_key_referenced_key_name_in_alter_info(
   Alter_info *alter_info, const char *referenced_key_name);
 static bool mylite_alter_renames_keys(HA_CREATE_INFO *create_info);
-static bool mylite_current_command_publishes_index_leaf_roots();
+static bool mylite_current_command_rebuilds_index_leaf_roots();
+static bool mylite_alter_table_renames_only(const Alter_info *alter_info);
 static Alter_info *mylite_current_alter_info_for_key_rename();
 static bool mylite_alter_drops_foreign_key(
   HA_CREATE_INFO *create_info,
@@ -3327,7 +3325,7 @@ int ha_mylite::rename_table(const char *from, const char *to)
     DBUG_RETURN(error);
 
   if (!rebuild_backup_rename &&
-      mylite_current_command_publishes_index_leaf_roots())
+      mylite_current_command_rebuilds_index_leaf_roots())
   {
     error= mylite_rebuild_index_leaf_roots(primary_file, new_schema_name,
                                            new_table_name);
@@ -3372,51 +3370,34 @@ static int mylite_rebuild_index_leaf_roots(const char *primary_file,
     return error;
 
   TABLE_SHARE *share= &catalog_share.share;
-  switch (thd->lex->sql_command)
+  for (uint index_number= 0; !error && index_number < share->keys;
+       ++index_number)
   {
-  case SQLCOM_CREATE_INDEX:
-  case SQLCOM_ALTER_TABLE: {
-    List_iterator_fast<Key> key_it(thd->lex->alter_info.key_list);
-    while (!error)
-    {
-      Key *key= key_it++;
-      if (!key)
-        break;
-      if (key->type == Key::FOREIGN_KEY || key->generated)
-        continue;
-      error= mylite_rebuild_index_leaf_root_for_ddl_key(
-          primary_file, schema_name, table_name, share, key);
-    }
-    break;
-  }
-  default:
-    break;
+    error= mylite_rebuild_index_leaf_root_for_key(
+        primary_file, schema_name, table_name, share, index_number);
   }
 
   mylite_free_catalog_table_share(&catalog_share);
   return error;
 }
 
-static int mylite_rebuild_index_leaf_root_for_ddl_key(const char *primary_file,
-                                                      const char *schema_name,
-                                                      const char *table_name,
-                                                      TABLE_SHARE *share,
-                                                      const Key *ddl_key)
+static int mylite_rebuild_index_leaf_root_for_key(const char *primary_file,
+                                                  const char *schema_name,
+                                                  const char *table_name,
+                                                  const TABLE_SHARE *share,
+                                                  uint index_number)
 {
-  if (!share || !ddl_key)
+  if (!share || index_number >= share->keys)
     return 0;
 
-  for (uint index_number= 0; index_number < share->keys; ++index_number)
-  {
-    if (!mylite_share_key_matches_ddl_key(share, index_number, ddl_key))
-      continue;
-    if (!mylite_key_uses_raw_exact_filter(share->key_info + index_number))
-      return mylite_drop_index_leaf_root(primary_file, schema_name, table_name,
-                                         index_number);
-    return mylite_rebuild_index_leaf_root(primary_file, schema_name,
-                                          table_name, index_number);
-  }
-  return 0;
+  const KEY *key= share->key_info + index_number;
+  if (!mylite_key_is_supported(key))
+    return 0;
+  if (!mylite_key_uses_raw_exact_filter(key))
+    return mylite_drop_index_leaf_root(primary_file, schema_name, table_name,
+                                       index_number);
+  return mylite_rebuild_index_leaf_root(primary_file, schema_name, table_name,
+                                        index_number);
 }
 
 static int mylite_drop_index_leaf_root(const char *primary_file,
@@ -3443,21 +3424,6 @@ static int mylite_rebuild_index_leaf_root(const char *primary_file,
       result == MYLITE_STORAGE_NOTFOUND)
     return 0;
   return mylite_storage_to_handler_error(result);
-}
-
-static bool mylite_share_key_matches_ddl_key(TABLE_SHARE *share,
-                                             uint index_number,
-                                             const Key *ddl_key)
-{
-  if (!share || !ddl_key || index_number >= share->keys)
-    return false;
-
-  KEY *key= share->key_info + index_number;
-  if (!mylite_key_is_supported(key))
-    return false;
-  if (ddl_key->type == Key::PRIMARY)
-    return index_number == share->primary_key;
-  return ddl_key->name.str && key->name.streq(ddl_key->name);
 }
 
 static int mylite_drop_foreign_keys_for_alter(const char *primary_file,
@@ -6044,7 +6010,7 @@ static bool mylite_alter_renames_keys(HA_CREATE_INFO *create_info)
   return alter_info && alter_info->alter_rename_key_list.elements;
 }
 
-static bool mylite_current_command_publishes_index_leaf_roots()
+static bool mylite_current_command_rebuilds_index_leaf_roots()
 {
   THD *thd= current_thd;
   if (!thd || !thd->lex)
@@ -6053,27 +6019,19 @@ static bool mylite_current_command_publishes_index_leaf_roots()
   switch (thd->lex->sql_command)
   {
   case SQLCOM_CREATE_INDEX:
-    return true;
   case SQLCOM_DROP_INDEX:
-    return false;
+    return true;
   case SQLCOM_ALTER_TABLE:
-    break;
+    return !mylite_alter_table_renames_only(&thd->lex->alter_info);
   default:
     return false;
   }
+}
 
-  Alter_info *alter_info= &thd->lex->alter_info;
-  if (alter_info->flags & ALTER_ADD_INDEX)
-  {
-    List_iterator_fast<Key> key_it(alter_info->key_list);
-    while (Key *key= key_it++)
-    {
-      if (key->type != Key::FOREIGN_KEY && !key->generated)
-        return true;
-    }
-  }
-
-  return false;
+static bool mylite_alter_table_renames_only(const Alter_info *alter_info)
+{
+  return alter_info && (alter_info->flags & ALTER_RENAME) &&
+         (alter_info->flags & ~ALTER_RENAME) == 0;
 }
 
 static Alter_info *mylite_current_alter_info_for_key_rename()

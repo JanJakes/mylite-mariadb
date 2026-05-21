@@ -954,11 +954,11 @@ published append-only page once and prune candidates as later row-state pages
 hide older row ids. Contiguous index leaf runs can serve as exact lookup base
 snapshots by searching run page key ranges and walking only duplicate-spanning
 neighbor pages, with only pages appended after the published run scanned as a
-visibility overlay; missing roots fall back to the append-only scan path. Explicit
-standalone `CREATE INDEX` and `ALTER TABLE ... ADD KEY` copy rebuilds can
-publish supported fixed-width leaf roots through the growable catalog chain,
-while generated FK helper keys plus rename/drop rebuilds keep using the
-scan fallback. Cursors check
+visibility overlay; missing roots fall back to the append-only scan path.
+Copy-rebuild DDL publishes supported fixed-width leaf roots for every current
+key that fits the raw format in the rebuilt table, including retained primary
+keys after forced rebuilds, while pure table renames keep existing root metadata
+without rebuilding. Cursors check
 `index_next_same()` boundaries before row materialization and reconstruct only
 the selected row buffer from row pages. Active checkpoints reuse statement
 journals, defer header publication to checkpoint boundaries, and cache guarded
