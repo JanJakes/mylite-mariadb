@@ -768,10 +768,12 @@ diagnostics, Unix socket server authentication, full event parse-data
 validation, and SQL `BINLOG` replay are also omitted from the default embedded
 profile. Server-side binary-log event writers are replaced with a disabled
 embedded source while the ordinary SQL string-quoting helper remains available.
-Row-replication type-conversion helpers are replaced with fail-closed embedded
-stubs while shared table-map metadata helpers remain available for retained
-event code. Common binary-log event parser and reader runtime is omitted while
-minimal fail-closed event-class symbols remain for retained unsupported paths.
+Common binary-log event parser and reader runtime is omitted while minimal
+fail-closed event-class symbols remain for retained unsupported paths.
+Replication GTID-state and binary-log GTID-index runtime are replaced with
+disabled embedded sources. Row-replication type-conversion helpers are replaced
+with fail-closed embedded stubs, and residual replication helper objects are
+omitted after retained no-binlog paths no longer reference them.
 
 ## Compatibility Impact
 

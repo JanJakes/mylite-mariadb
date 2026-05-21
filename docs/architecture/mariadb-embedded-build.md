@@ -510,6 +510,9 @@ The baseline explicitly disables:
 - Server binary-log event writers
 - Binary-log event parser and reader runtime
 - Replication GTID-state runtime
+- Binary-log GTID-index runtime and tuning variables
+- Row-replication type-conversion helpers
+- Residual replication helper objects
 - SQL `HANDLER` command runtime
 - `SELECT ... INTO OUTFILE` and `SELECT ... INTO DUMPFILE`
 - Unsupported binlog injector root
