@@ -48,6 +48,128 @@ The most reduced research-stack measurement captured on the source branch was:
 | corrected PHP-shaped shared probe | 3,861,728 | 3.68 |
 | sectionless corrected PHP-shaped shared probe | 3,859,368 | 3.68 |
 
+## Current default-profile review
+
+This section compares the historical `bundle-size` research against the current
+default embedded profile on `main` as of 2026-05-21. The current profile is
+more conservative than the most reduced research stack: it keeps native storage
+direction, prepared statements, JSON, GEOMETRY/GIS, and broad
+charset/collation coverage. It also avoids treating planned SQL surfaces such
+as views, triggers, routines, FULLTEXT, SPATIAL, and sequence behavior as safe
+default size cuts.
+
+The current default archive is measured in
+[mariadb-embedded-build.md](mariadb-embedded-build.md) at 25,635,600 bytes /
+24.45 MiB after post-build archive stripping. A current one-export macOS
+shared-object probe measured outside the committed build scripts was
+14,188,976 bytes / 13.53 MiB stripped. That probe is useful directional
+evidence, but it is not directly comparable to the 3.86 MiB historical
+research-stack probe because the current default intentionally retains more SQL
+and compatibility surface.
+
+Status labels:
+
+- **Applied** means the current default profile already contains the same
+  reduction, a narrower safer version, or a superseding implementation.
+- **Still safe to evaluate** means the row appears compatible with the current
+  product direction, but should be remeasured and tested on the current
+  baseline before it becomes default.
+- **Needs decision** means the row may fit a specialized profile or packaging
+  target, but it changes compatibility, portability, hardening, observability,
+  or architecture enough that it should not be treated as a default safe cut.
+- **Not planned for default** means the row removes functionality that is
+  important to the current MyLite direction.
+- **Historical only** means the row failed, was superseded, had no useful size
+  effect, or exists only as measurement evidence.
+
+### Applied in the current default profile
+
+These rows are represented in the current default embedded profile:
+
+| Rows | Current status |
+| --- | --- |
+| 7, 9, 115 | Covered by the current platform-specific archive stripping and `ranlib` step after relink verification. The current Darwin path uses a narrower release-archive strip policy than the riskiest one-off research command. |
+| 10, 12, 27, 28, 31 | Applied through the Oracle parser stub, embedded-target exception cut, `SFORMAT()` removal, unwind-table omission, and SQL `HELP` unsupported-command stub. |
+| 15, 38, 39, 40, 41, 44, 53, 55, 58, 60, 61, 67, 69, 72, 77, 78, 79, 90, 91, 92, 94, 97, 100, 108, 112, 114, 116, 117, 126 | Applied to server-oriented, host-file, diagnostic, option-help, unsupported-command, and policy surfaces that are outside the core embedded library contract. |
+| 20 | Applied with compact server error messages while preserving useful MyLite-facing diagnostics. |
+| 29, 34, 71, 75, 83, 85, 104, 105, 106, 107, 123 | Applied through the no-binlog, no-replication, and no-external-XA default profile. |
+| 46 | Applied for persistent optimizer statistics and JSON histogram storage while preserving ordinary planning, `ANALYZE TABLE`, and `EXPLAIN`. |
+| 50 | Applied for dynamic plugin shared-object loading. Static built-in plugins and native storage remain available. |
+| 52 | Partly applied by trimming network-auth client handshake support and inherited daemon/client startup roots. Broader embedded-client C API root removal remains a separate architecture decision. |
+| 102 | Applied for vector SQL functions, MHNSW runtime, and mandatory `mhnsw` plugin registration. The `VECTOR(N)` type is intentionally retained. |
+| 103 | Partly applied for `user_variables` and user-stat diagnostics. The sequence surface is retained because simple sequence behavior is now covered, and remaining plugin choices should be deliberate. |
+
+### Still safe to evaluate
+
+These rows look compatible with the current direction and are good candidates
+for follow-up measurement, with the caveats shown:
+
+| Rows | Why still plausible |
+| --- | --- |
+| 1 | `DT_RELR` can be a large Linux linked-artifact win if the package can require a modern glibc loader. Treat it as a Linux packaging candidate, not a cross-platform default. |
+| 5 | Removing accidental executable exports is safe where any current probe or package target still exports the full linked SQL symbol set. The current tree should first get a committed PHP/shared-object audit target. |
+| 14 | Function/data sections plus linked-artifact section GC are safe for final linked packages, but grow the static archive. This should be a package-target option, not an archive-size metric. |
+| 22, 89 | Clang/lld and lld `-O2` are packaging candidates. They need a current rerun on the supported platform matrix because previous measurements predated direct sessions and later cuts. |
+| 23 | `--no-eh-frame-hdr` kept exception metadata but reduces unwind lookup metadata. Safe to benchmark for release packages, with debugger/unwinder expectations documented. |
+| 47 | Hidden visibility defaults or an export map are still appropriate for a final shared library if the public `MYLITE_API` surface is audited first. |
+| 88 | Bypassing inherited option-file loading after MyLite's required `--no-defaults` startup is probably safe, but should be proven against the current embedded bootstrap and config-file policy. |
+| 98 | Section-header stripping is safe only for final release artifacts where post-link debugging and inspection are not required. Keep debug/release artifacts separate. |
+| 109 | The `tpool_wait_begin()` / `tpool_wait_end()` no-op cleanup is semantically safe but tiny. It should be done only if it keeps inherited thread-pool hooks clearer. |
+| 111 | `-Oz` is safe to benchmark, but the historical win was negligible. |
+| 122 | A committed PHP-extension-shaped shared-object audit is still useful. This is measurement tooling, not a reduction. |
+
+### Needs product or packaging decision
+
+These rows are not obviously wrong, but they require an explicit decision before
+becoming default:
+
+| Rows | Decision needed |
+| --- | --- |
+| 18 | Identical code folding is a linked-artifact win, but `--icf=all` can merge functions with distinct addresses. Decide whether that is acceptable for the final ABI and diagnostics. |
+| 21, 32, 45, 56 | MyISAM temp-spill, repair/check/optimize, CSV/MRG_MyISAM, key-cache, and maintenance cuts interact with native-storage behavior and admin compatibility. They need a storage-surface policy before being default cuts. |
+| 24, 57, 64, 65, 68, 82 | Stored routines, triggers, events, views, PL/SQL cursor attributes, and routine metadata are planned or adjacent to planned SQL surfaces. They may be deferred, but should not be permanently trimmed without a roadmap decision. |
+| 35 | An `en_US`-only locale table is a compatibility decision for date/time formatting and `lc_time_names`. |
+| 43 | Removing `EXPLAIN`, `ANALYZE`, and `SHOW EXPLAIN` hurts developer and application introspection. The current profile intentionally keeps `EXPLAIN`. |
+| 51, 66, 74, 80, 87, 95, 124 | Crypto, compression, encryption hooks, and OpenSSL wrapper cuts need a security and compatibility policy. They may become profile-specific, especially if dependency bundling dominates package size. |
+| 73, 101 | Direct embedded result adapters are architecture work, not simple size cuts. They are likely useful for the final PHP-like shape, but must preserve the public prepared/query API behavior. |
+| 76 | Removing the retained `VECTOR(N)` type is a product decision. The current default trims vector functions and indexes but keeps the type parser boundary. |
+| 86 | Replacing named time-zone tables with `SYSTEM` and numeric offsets only changes SQL date/time semantics. |
+| 96 | System-versioned table support is an application-visible MariaDB feature. Decide whether it belongs in the default compatibility target. |
+| 125 | Shrinking the charset registry was a memory-footprint experiment, not a stripped-size win. Revisit only as memory work. |
+
+### Not planned for the default profile
+
+These rows remove functionality that is important to the current default
+direction and should not be pursued as safe size reductions:
+
+| Rows | Reason |
+| --- | --- |
+| 2, 6, 17, 93 | Broad charset and collation coverage is important for MySQL/MariaDB compatibility. Smaller charset profiles can be specialized builds, not the default. |
+| 11, 13, 37, 42, 54 | GEOMETRY/GIS, spatial typing, and SPATIAL index behavior remain important compatibility targets. |
+| 19, 36, 49, 70 | JSON is explicitly retained. JSON histogram storage is already trimmed separately, but user-facing JSON SQL behavior should remain. |
+| 26 | Window functions are ordinary SQL compatibility, not server-only surface. |
+| 33, 99 | Public and SQL-language prepared statements are important for application compatibility and the `libmylite` API direction. |
+| 48, 84 | FULLTEXT behavior is planned where the retained native engines support it. |
+| 59 | `REGEXP`/PCRE is ordinary SQL compatibility and should stay in the default profile. |
+| 62 | Sequence behavior is now partially supported and covered by tests. |
+| 63 | `SHOW CREATE` output is core introspection for schema-management tools. |
+| 81 | SQL diagnostics are normal SQL behavior; trimming them would be a compatibility cut, not a server-only cut. |
+
+### Historical only
+
+These rows should remain as research evidence but should not drive new work as
+written:
+
+| Rows | Reason |
+| --- | --- |
+| 3, 4 | Failed charset-small attempts, superseded by later research. |
+| 8, 120 | LTO variants grew or failed the static-archive/package goals. |
+| 16 | Superseded by the later temp-spill experiment and incompatible with the current native-storage caution. |
+| 25, 30 | Small or superseded plugin/charset experiments whose tradeoffs were not worth accepting. |
+| 110, 127 | Hardening reductions were rejected and should stay rejected. |
+| 113, 118, 119, 121 | No useful size effect or superseded by better measurements. |
+| 128, 129, 130 | Broad SSL, RTTI, and exception removals failed or were replaced by narrower staged cuts. |
+
 ## Ranked attempts
 
 | Rank | Required change | Bundle saving | Archive saving | Outcome |
