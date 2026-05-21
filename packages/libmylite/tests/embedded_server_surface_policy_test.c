@@ -248,6 +248,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SET @profiling_history_size = 10");
     exec_ok(db, "SET @query_cache_size = 1048576");
     exec_ok(db, "SET @query_cache_type = 'local'");
+    exec_ok(db, "SET @first_local = 1, @query_cache_limit = 1024");
     exec_ok(db, "SET @sql_mode = 'ORACLE'");
     exec_ok(db, "SET @password = 'local'");
     exec_ok(db, "SET sql_mode = @@sql_mode");
@@ -359,12 +360,20 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_error(db, "SET profiling = 1", "server-owned SQL surface");
     expect_error(db, "SET @@session.profiling = 1", "server-owned SQL surface");
     expect_error(db, "SET profiling_history_size = 10", "server-owned SQL surface");
+    expect_error(db, "SET autocommit = 1, profiling = 1", "server-owned SQL surface");
     expect_error(db, "SET GLOBAL query_cache_size = 1048576", "server-owned SQL surface");
     expect_error(db, "SET query_cache_type = ON", "server-owned SQL surface");
+    expect_error(db, "SET autocommit = 1, query_cache_type = ON", "server-owned SQL surface");
+    expect_error(
+        db,
+        "SET STATEMENT query_cache_type = ON FOR SELECT 1",
+        "server-owned SQL surface"
+    );
     expect_error(db, "FLUSH QUERY CACHE", "server-owned SQL surface");
     expect_error(db, "RESET QUERY CACHE", "server-owned SQL surface");
     expect_error(db, "SET sql_mode = 'ORACLE'", "Oracle SQL mode");
     expect_error(db, "SET @@session.sql_mode = 'ORACLE'", "Oracle SQL mode");
+    expect_error(db, "SET STATEMENT sql_mode = 'ORACLE' FOR SELECT 1", "Oracle SQL mode");
     expect_error(
         db,
         "SET autocommit = 1, sql_mode = CONCAT(@@sql_mode, ',ORACLE')",

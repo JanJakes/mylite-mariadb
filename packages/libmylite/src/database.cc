@@ -276,6 +276,8 @@ bool token_in(
 );
 bool is_server_variable_token(std::string_view token);
 bool is_system_variable_qualified_token(const SqlPolicyTokens &tokens, std::size_t index);
+bool is_system_variable_assignment_start(const SqlPolicyTokens &tokens, std::size_t index);
+std::size_t first_set_assignment_token_index(const SqlPolicyTokens &tokens);
 std::filesystem::path normalize_database_path(const char *path);
 bool is_memory_database_path(const std::filesystem::path &database_path);
 void initialize_database_layout(const std::filesystem::path &database_path);
@@ -1447,23 +1449,7 @@ bool has_identifier_token(
 }
 
 bool is_sql_mode_assignment_target(const SqlPolicyTokens &tokens, std::size_t index) {
-    if (index + 1U >= tokens.count || !token_equals(tokens.values[index + 1U], "=")) {
-        return false;
-    }
-    if (index == 1U || token_equals(tokens.values[index - 1U], ",")) {
-        return true;
-    }
-    if (token_in(tokens.values[index - 1U], "GLOBAL", "SESSION", "LOCAL")) {
-        return index == 2U || token_equals(tokens.values[index - 2U], ",");
-    }
-    if (index >= 2U && token_equals(tokens.values[index - 1U], "@") &&
-        token_equals(tokens.values[index - 2U], "@")) {
-        return true;
-    }
-    return index >= 4U && token_equals(tokens.values[index - 1U], ".") &&
-           token_in(tokens.values[index - 2U], "GLOBAL", "SESSION", "LOCAL") &&
-           token_equals(tokens.values[index - 3U], "@") &&
-           token_equals(tokens.values[index - 4U], "@");
+    return is_system_variable_qualified_token(tokens, index);
 }
 
 bool sql_mode_assignment_mentions_oracle(const SqlPolicyTokens &tokens, std::size_t index) {
@@ -1578,11 +1564,14 @@ bool is_server_variable_token(std::string_view token) {
 }
 
 bool is_system_variable_qualified_token(const SqlPolicyTokens &tokens, std::size_t index) {
-    if (index == 1U) {
+    if (index + 1U >= tokens.count || !token_equals(tokens.values[index + 1U], "=")) {
+        return false;
+    }
+    if (is_system_variable_assignment_start(tokens, index)) {
         return true;
     }
     if (token_in(tokens.values[index - 1U], "GLOBAL", "SESSION", "LOCAL")) {
-        return true;
+        return is_system_variable_assignment_start(tokens, index - 1U);
     }
     if (index >= 2U && token_equals(tokens.values[index - 1U], "@") &&
         token_equals(tokens.values[index - 2U], "@")) {
@@ -1592,6 +1581,40 @@ bool is_system_variable_qualified_token(const SqlPolicyTokens &tokens, std::size
            token_in(tokens.values[index - 2U], "GLOBAL", "SESSION", "LOCAL") &&
            token_equals(tokens.values[index - 3U], "@") &&
            token_equals(tokens.values[index - 4U], "@");
+}
+
+bool is_system_variable_assignment_start(const SqlPolicyTokens &tokens, std::size_t index) {
+    const std::size_t first_assignment = first_set_assignment_token_index(tokens);
+    int paren_depth = 0;
+
+    if (index == first_assignment) {
+        return true;
+    }
+    for (std::size_t token_index = first_assignment; token_index < index; ++token_index) {
+        if (token_equals(tokens.values[token_index], "(")) {
+            ++paren_depth;
+            continue;
+        }
+        if (token_equals(tokens.values[token_index], ")")) {
+            if (paren_depth > 0) {
+                --paren_depth;
+            }
+            continue;
+        }
+        if (paren_depth == 0 && first_assignment == 2U &&
+            token_equals(tokens.values[token_index], "FOR")) {
+            return false;
+        }
+    }
+    return index > 0U && paren_depth == 0 && token_equals(tokens.values[index - 1U], ",");
+}
+
+std::size_t first_set_assignment_token_index(const SqlPolicyTokens &tokens) {
+    if (tokens.count > 2U && token_equals(tokens.values[1], "STATEMENT") &&
+        !token_equals(tokens.values[2], "=")) {
+        return 2U;
+    }
+    return 1U;
 }
 
 int validate_runtime_database_path(mylite_db &db) {
