@@ -169,6 +169,10 @@ successful step. Single-part non-null unique-key `UPDATE` predicates now build
 their exact range quick path directly during execution, avoiding the full
 range-optimizer rebuild for hot prepared primary-key update loops while leaving
 the original `WHERE` condition in place for MariaDB expression semantics.
+That exact update quick path now executes through a single exact key-read quick
+object instead of generic one-range MRR quick machinery, avoiding dynamic range
+allocation and `multi_range_read_next()` overhead for the accepted prepared
+point-update shape.
 Ordinary MyLite `UPDATE` / `DELETE` execution now skips eager quick-plan
 explain detail allocation unless explicit `EXPLAIN`, `ANALYZE`, or slow-log
 explain/engine detail needs it, while routed `EXPLAIN UPDATE` keeps the full

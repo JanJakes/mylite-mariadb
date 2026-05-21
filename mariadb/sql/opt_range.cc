@@ -130,11 +130,11 @@ static bool find_simple_unique_key_equal_item(Item *cond, TABLE *table,
 static bool find_key_field_equal_item(Item *item, TABLE *table, Field *field,
                                       Item **out_value_item);
 static bool is_simple_unique_key_candidate(TABLE *table, KEY *key_info);
-QUICK_RANGE_SELECT *get_quick_select_for_exact_key(THD *thd, TABLE *table,
-                                                   uint keynr,
-                                                   const uchar *key_buff,
-                                                   uint key_length,
-                                                   ha_rows records);
+QUICK_SELECT_I *get_quick_select_for_exact_key(THD *thd, TABLE *table,
+                                               uint keynr,
+                                               const uchar *key_buff,
+                                               uint key_length,
+                                               ha_rows records);
 
 #ifndef EXTRA_DEBUG
 #define test_rb_tree(A,B) {}
@@ -3320,7 +3320,7 @@ make_simple_update_unique_key_quick_select(THD *thd, SQL_SELECT *select,
     return SQL_SELECT::IMPOSSIBLE_RANGE;
   }
 
-  QUICK_RANGE_SELECT *quick= get_quick_select_for_exact_key(
+  QUICK_SELECT_I *quick= get_quick_select_for_exact_key(
       thd, table, keynr, key_buff, key_info->key_length, 1);
   if (!quick)
     return SQL_SELECT::ERROR;
@@ -13090,79 +13090,144 @@ FT_SELECT *get_ft_select(THD *thd, TABLE *table, uint key)
     return fts;
 }
 
+class QUICK_EXACT_KEY_SELECT : public QUICK_SELECT_I
+{
+public:
+  QUICK_EXACT_KEY_SELECT(TABLE *table, uint keynr, const uchar *key,
+                         uint key_length_arg, ha_rows records_arg)
+      : file(table->file), keypart_map(make_prev_keypart_map(1)),
+        exhausted(false)
+  {
+    DBUG_ASSERT(key_length_arg <= MAX_KEY_LENGTH);
+    head= table;
+    index= keynr;
+    record= head->record[0];
+    records= records_arg;
+    read_time= 1.0;
+    max_used_key_length= head->key_info[index].key_part[0].store_length;
+    used_key_parts= 1;
+    memcpy(key_buff, key, key_length_arg);
+  }
+
+  ~QUICK_EXACT_KEY_SELECT() override
+  {
+    if (file)
+    {
+      range_end();
+      file->ha_end_keyread();
+    }
+  }
+
+  int init() override
+  {
+    if (file->inited != handler::NONE)
+      file->ha_index_or_rnd_end();
+    return 0;
+  }
+
+  int reset() override
+  {
+    int error;
+    DBUG_ENTER("QUICK_EXACT_KEY_SELECT::reset");
+    exhausted= false;
+
+    if (file->inited == handler::RND)
+    {
+      if (unlikely((error= file->ha_rnd_end())))
+        DBUG_RETURN(error);
+    }
+
+    if (file->inited == handler::NONE)
+    {
+      if (unlikely((error= file->ha_index_init(index, 1))))
+      {
+        file->print_error(error, MYF(0));
+        DBUG_RETURN(error);
+      }
+    }
+
+    DBUG_RETURN(0);
+  }
+
+  int get_next() override
+  {
+    int error;
+    DBUG_ENTER("QUICK_EXACT_KEY_SELECT::get_next");
+    if (exhausted)
+      DBUG_RETURN(HA_ERR_END_OF_FILE);
+
+    exhausted= true;
+    error= file->ha_index_read_map(record, key_buff, keypart_map,
+                                   HA_READ_KEY_EXACT);
+    if (error == HA_ERR_KEY_NOT_FOUND)
+      DBUG_RETURN(HA_ERR_END_OF_FILE);
+    DBUG_RETURN(error);
+  }
+
+  void range_end() override
+  {
+    if (file->inited != handler::NONE)
+      file->ha_index_or_rnd_end();
+  }
+
+  bool reverse_sorted() override { return false; }
+  bool unique_key_range() override { return true; }
+  void need_sorted_output() override {}
+  int get_type() override { return QS_TYPE_RANGE; }
+
+  void add_keys_and_lengths(String *key_names, String *used_lengths) override
+  {
+    bool first= true;
+    add_key_and_length(key_names, used_lengths, &first);
+  }
+
+  Explain_quick_select *get_explain(MEM_ROOT *local_alloc) override
+  {
+    Explain_quick_select *res;
+    if ((res= new (local_alloc) Explain_quick_select(QS_TYPE_RANGE)))
+      res->range.set(local_alloc, &head->key_info[index], max_used_key_length);
+    return res;
+  }
+
+  void add_used_key_part_to_set() override
+  {
+    Field *field=
+        head->field[head->key_info[index].key_part[0].field->field_index];
+    field->register_field_in_read_map();
+  }
+
+#ifndef DBUG_OFF
+  void dbug_dump(int indent, bool) override
+  {
+    fprintf(DBUG_FILE, "%*sexact key select, key %s, length: %d\n", indent, "",
+            head->key_info[index].name.str, max_used_key_length);
+  }
+#endif
+
+private:
+  handler *file;
+  uchar key_buff[MAX_KEY_LENGTH];
+  key_part_map keypart_map;
+  bool exhausted;
+};
+
 /*
   Create quick select from a fully built exact key image.
 */
 
-QUICK_RANGE_SELECT *get_quick_select_for_exact_key(THD *thd, TABLE *table,
-                                                   uint keynr,
-                                                   const uchar *key_buff,
-                                                   uint key_length,
-                                                   ha_rows records)
+QUICK_SELECT_I *
+get_quick_select_for_exact_key(THD *thd __attribute__((unused)), TABLE *table,
+                               uint keynr, const uchar *key_buff,
+                               uint key_length, ha_rows records)
 {
-  MEM_ROOT *old_root, *alloc;
-  QUICK_RANGE_SELECT *quick;
-  KEY *key_info= &table->key_info[keynr];
-  KEY_PART *key_part;
-  QUICK_RANGE *range;
-  uchar *range_key;
-  bool create_err= FALSE;
-  Cost_estimate cost;
-  uint max_used_key_len;
-  uint key_parts= 1;
-
-  old_root= thd->mem_root;
-  quick= new QUICK_RANGE_SELECT(thd, table, keynr, 0, 0, &create_err);
-  alloc= thd->mem_root;
-  thd->mem_root= old_root;
-
-  if (!quick || create_err || quick->init())
-    goto err;
-  quick->records= records;
-
-  range_key= (uchar *) alloc_root(alloc, key_length);
-  if (!range_key || unlikely(!(range= new (alloc) QUICK_RANGE())))
-    goto err;
-  memcpy(range_key, key_buff, key_length);
-
-  range->min_key= range->max_key= range_key;
-  range->min_length= range->max_length= key_length;
-  range->min_keypart_map= range->max_keypart_map=
-      make_prev_keypart_map(key_parts);
-  range->flag= EQ_RANGE;
-
-  if (unlikely(!(quick->key_parts= key_part= (KEY_PART *) alloc_root(
-                     &quick->alloc, sizeof(KEY_PART) * key_parts))))
-    goto err;
-
-  key_part->part= 0;
-  key_part->field= key_info->key_part[0].field;
-  key_part->length= key_info->key_part[0].length;
-  key_part->store_length= key_info->key_part[0].store_length;
-  key_part->null_bit= key_info->key_part[0].null_bit;
-  key_part->flag= (uint8) key_info->key_part[0].key_part_flag;
-
-  max_used_key_len= key_info->key_part[0].store_length;
-  quick->max_used_key_length= max_used_key_len;
-
-  if (insert_dynamic(&quick->ranges, (uchar *) &range))
-    goto err;
-
-  quick->mrr_flags= HA_MRR_NO_ASSOCIATION |
-                    (table->file->keyread_enabled() ? HA_MRR_INDEX_ONLY : 0);
-  if (thd->lex->sql_command != SQLCOM_SELECT)
-    quick->mrr_flags|= HA_MRR_USE_DEFAULT_IMPL;
-
-  quick->mrr_buf_size= thd->variables.mrr_buff_size;
-  if (table->file->multi_range_read_info(quick->index, 1, (uint) records, ~0,
-                                         &quick->mrr_buf_size,
-                                         &quick->mrr_flags, &cost))
-    goto err;
-
+  QUICK_SELECT_I *quick=
+      new QUICK_EXACT_KEY_SELECT(table, keynr, key_buff, key_length, records);
+  if (!quick || quick->init())
+  {
+    delete quick;
+    return 0;
+  }
   return quick;
-err:
-  delete quick;
-  return 0;
 }
 
 /*
