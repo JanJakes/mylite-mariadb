@@ -16986,6 +16986,58 @@ static void test_prepared_primary_key_update_rebinds(void) {
         "71"
     );
 
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE stable_update_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "slug VARCHAR(32) NOT NULL, "
+        "value INT NOT NULL, "
+        "UNIQUE KEY slug_key (slug)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO stable_update_posts VALUES "
+        "(1, 'first', 10), (2, 'second', 20)"
+    );
+    assert_exec_succeeds(db, "BEGIN");
+    assert_query_single_value(
+        db,
+        "SELECT CAST(value AS CHAR) FROM stable_update_posts "
+        "FORCE INDEX (slug_key) WHERE slug = 'first'",
+        "10"
+    );
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE stable_update_posts SET value = value + 3 WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+    assert_query_single_value(
+        db,
+        "SELECT CAST(value AS CHAR) FROM stable_update_posts WHERE id = 1",
+        "16"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT CAST(value AS CHAR) FROM stable_update_posts "
+        "FORCE INDEX (slug_key) WHERE slug = 'first'",
+        "16"
+    );
+    assert_exec_succeeds(db, "COMMIT");
+
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
 

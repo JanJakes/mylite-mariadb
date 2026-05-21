@@ -1460,6 +1460,7 @@ static mylite_storage_result update_row_with_index_entries(
     const mylite_storage_index_entry *index_entries,
     size_t index_entry_count,
     const unsigned char *index_entry_changed,
+    int preserve_index_entries,
     unsigned long long *out_new_row_id
 );
 MYLITE_STORAGE_HOT_INLINE size_t
@@ -3200,6 +3201,17 @@ static void replace_active_exact_index_cache_entries_in_statement(
     const mylite_storage_index_entry *index_entries,
     size_t index_entry_count,
     const unsigned char *index_entry_changed
+);
+static void retarget_active_exact_index_cache_entries_in_statement(
+    mylite_storage_statement *statement,
+    unsigned long long table_id,
+    unsigned long long old_row_id,
+    unsigned long long new_row_id
+);
+static mylite_storage_result retarget_exact_index_cache_entries_by_row_id(
+    mylite_storage_exact_index_cache *cache,
+    unsigned long long old_row_id,
+    unsigned long long new_row_id
 );
 static void invalidate_exact_index_caches(const char *filename);
 static void clear_durable_exact_index_caches(const char *filename);
@@ -6293,7 +6305,7 @@ mylite_storage_result mylite_storage_update_row(
     size_t row_size,
     unsigned long long *out_new_row_id
 ) {
-    return mylite_storage_update_row_with_index_entries(
+    return update_row_with_index_entries(
         filename,
         schema_name,
         table_name,
@@ -6302,6 +6314,32 @@ mylite_storage_result mylite_storage_update_row(
         row_size,
         NULL,
         0U,
+        NULL,
+        0,
+        out_new_row_id
+    );
+}
+
+mylite_storage_result mylite_storage_update_row_preserving_index_entries(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long row_id,
+    const unsigned char *row,
+    size_t row_size,
+    unsigned long long *out_new_row_id
+) {
+    return update_row_with_index_entries(
+        filename,
+        schema_name,
+        table_name,
+        row_id,
+        row,
+        row_size,
+        NULL,
+        0U,
+        NULL,
+        1,
         out_new_row_id
     );
 }
@@ -6327,6 +6365,7 @@ mylite_storage_result mylite_storage_update_row_with_index_entries(
         index_entries,
         index_entry_count,
         NULL,
+        0,
         out_new_row_id
     );
 }
@@ -6353,6 +6392,7 @@ mylite_storage_result mylite_storage_update_row_with_index_entry_changes(
         index_entries,
         index_entry_count,
         index_entry_changed,
+        0,
         out_new_row_id
     );
 }
@@ -6367,11 +6407,16 @@ static mylite_storage_result update_row_with_index_entries(
     const mylite_storage_index_entry *index_entries,
     size_t index_entry_count,
     const unsigned char *index_entry_changed,
+    int preserve_index_entries,
     unsigned long long *out_new_row_id
 ) {
     if (filename == NULL || filename[0] == '\0' || schema_name == NULL || schema_name[0] == '\0' ||
         table_name == NULL || table_name[0] == '\0' || row_id == 0ULL || row == NULL ||
         row_size == 0U || out_new_row_id == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+    if (preserve_index_entries &&
+        (index_entries != NULL || index_entry_count != 0U || index_entry_changed != NULL)) {
         return MYLITE_STORAGE_MISUSE;
     }
     if (row_size > UINT32_MAX) {
@@ -6601,15 +6646,24 @@ static mylite_storage_result update_row_with_index_entries(
     }
     if (result == MYLITE_STORAGE_OK) {
         *out_new_row_id = position.row_page_id;
-        replace_active_exact_index_cache_entries_in_statement(
-            active_cache_statement,
-            table_id,
-            row_id,
-            position.row_page_id,
-            index_entries,
-            index_entry_count,
-            index_entry_changed
-        );
+        if (preserve_index_entries) {
+            retarget_active_exact_index_cache_entries_in_statement(
+                active_cache_statement,
+                table_id,
+                row_id,
+                position.row_page_id
+            );
+        } else {
+            replace_active_exact_index_cache_entries_in_statement(
+                active_cache_statement,
+                table_id,
+                row_id,
+                position.row_page_id,
+                index_entries,
+                index_entry_count,
+                index_entry_changed
+            );
+        }
         const int active_row_id_unchanged = position.row_page_id == row_id;
         if (!active_row_id_unchanged) {
             replace_active_live_row_in_cache(
@@ -23282,6 +23336,30 @@ static void replace_active_exact_index_cache_entries_in_statement(
     }
 }
 
+static void retarget_active_exact_index_cache_entries_in_statement(
+    mylite_storage_statement *statement,
+    unsigned long long table_id,
+    unsigned long long old_row_id,
+    unsigned long long new_row_id
+) {
+    if (statement == NULL || statement->exact_index_caches.count == 0U ||
+        old_row_id == new_row_id) {
+        return;
+    }
+
+    for (size_t i = 0U; i < statement->exact_index_caches.count; ++i) {
+        mylite_storage_exact_index_cache *cache = statement->exact_index_caches.entries + i;
+        if (cache->table_id != table_id) {
+            continue;
+        }
+        if (retarget_exact_index_cache_entries_by_row_id(cache, old_row_id, new_row_id) !=
+            MYLITE_STORAGE_OK) {
+            clear_exact_index_caches(statement);
+            return;
+        }
+    }
+}
+
 static void invalidate_exact_index_caches(const char *filename) {
     clear_exact_index_caches(active_exact_index_cache_statement_for(filename));
     clear_statement_chain_live_row_caches(active_statement_for(filename));
@@ -24970,6 +25048,55 @@ static void remove_exact_index_cache_entries_by_row_id(
         ++cache->dead_count;
     }
     maybe_compact_exact_index_cache_entries(cache);
+}
+
+static mylite_storage_result retarget_exact_index_cache_entries_by_row_id(
+    mylite_storage_exact_index_cache *cache,
+    unsigned long long old_row_id,
+    unsigned long long new_row_id
+) {
+    if (cache->live_count == 0U || old_row_id == new_row_id) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    if (cache->row_id_buckets_valid ||
+        ensure_exact_index_cache_row_id_buckets(cache) == MYLITE_STORAGE_OK) {
+        const size_t bucket_index = exact_index_cache_bucket_for_row_id(cache, old_row_id);
+        size_t *current = cache->row_id_bucket_heads + bucket_index;
+        while (*current != MYLITE_STORAGE_CACHE_BUCKET_EMPTY) {
+            const size_t entry_index = *current;
+            if (entry_index >= cache->count) {
+                clear_exact_index_cache_row_id_buckets(cache);
+                break;
+            }
+
+            const int entry_live = cache->entry_live == NULL || cache->entry_live[entry_index];
+            size_t *next = cache->row_id_bucket_next + entry_index;
+            if (!entry_live || cache->row_ids[entry_index] == old_row_id) {
+                *current = *next;
+                *next = MYLITE_STORAGE_CACHE_BUCKET_EMPTY;
+                if (entry_live && cache->row_ids[entry_index] == old_row_id) {
+                    cache->row_ids[entry_index] = new_row_id;
+                    link_exact_index_cache_row_id_bucket_entry(cache, entry_index);
+                }
+                continue;
+            }
+            current = next;
+        }
+        if (cache->row_id_buckets_valid) {
+            return MYLITE_STORAGE_OK;
+        }
+    }
+
+    for (size_t entry_index = 0U; entry_index < cache->count; ++entry_index) {
+        if (cache->entry_live != NULL && !cache->entry_live[entry_index]) {
+            continue;
+        }
+        if (cache->row_ids[entry_index] == old_row_id) {
+            cache->row_ids[entry_index] = new_row_id;
+        }
+    }
+    return MYLITE_STORAGE_OK;
 }
 
 static mylite_storage_result grow_exact_index_cache_entry_capacity(

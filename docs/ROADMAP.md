@@ -162,6 +162,10 @@ successful step. Single-part non-null unique-key `UPDATE` predicates now build
 their exact range quick path directly during execution, avoiding the full
 range-optimizer rebuild for hot prepared primary-key update loops while leaving
 the original `WHERE` condition in place for MariaDB expression semantics.
+Stable-key durable handler updates now use MariaDB's write set to skip
+new index-entry serialization, duplicate-key checks, and maintained-root
+planning when no supported index key part can change, while retargeting active
+exact-index caches by row id.
 Durable exact-index cache reads now bulk-grow matching entrysets in one pass,
 removing per-match array reallocations from many-match secondary cursors that do
 not use published leaf roots. Exact-index caches now add transient hash buckets

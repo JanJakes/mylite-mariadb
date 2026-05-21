@@ -386,6 +386,15 @@ mylite_storage_result mylite_storage_update_row(
     size_t row_size,
     unsigned long long *out_new_row_id
 );
+mylite_storage_result mylite_storage_update_row_preserving_index_entries(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long row_id,
+    const unsigned char *row,
+    size_t row_size,
+    unsigned long long *out_new_row_id
+);
 mylite_storage_result mylite_storage_update_row_with_index_entries(
     const char *filename,
     const char *schema_name,

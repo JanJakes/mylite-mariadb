@@ -213,6 +213,12 @@ static int mylite_prepare_index_entry_changes(
     const mylite_storage_index_entry *new_entries, size_t new_entry_count,
     uchar *entry_changed, size_t entry_changed_count);
 static bool mylite_key_fields_may_change(TABLE *table, const KEY *key);
+static bool mylite_update_preserves_all_index_entries(TABLE *table,
+                                                      const uchar *old_data,
+                                                      const uchar *new_data);
+static bool mylite_key_part_records_equal(TABLE *table, const KEY *key,
+                                          const uchar *old_data,
+                                          const uchar *new_data);
 static void mylite_free_index_entries(mylite_storage_index_entry *entries,
                                       uchar *key_storage);
 static void mylite_free_index_entries_with_scratch(
@@ -2891,53 +2897,59 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
   uchar stack_index_entry_changed[64];
   uchar *index_entry_changed= NULL;
   size_t index_entry_count= 0;
-  error= mylite_prepare_index_entries_with_scratch(
-      table, new_data, &index_entries, &index_entry_count, &index_key_storage,
-      stack_index_entries,
-      sizeof(stack_index_entries) / sizeof(stack_index_entries[0]),
-      stack_index_key_storage, sizeof(stack_index_key_storage));
-  if (error)
-    DBUG_RETURN(error);
-
-  if (index_entry_count <= sizeof(stack_index_entry_changed))
-    index_entry_changed= stack_index_entry_changed;
-  else
-    index_entry_changed= static_cast<uchar *>(malloc(index_entry_count));
-  if (index_entry_count != 0 && !index_entry_changed)
-    error= HA_ERR_OUT_OF_MEM;
-  if (!error)
-    error= mylite_prepare_index_entry_changes(
-        table, old_data, index_entries, index_entry_count, index_entry_changed,
-        index_entry_count);
-  if (error)
+  const bool preserve_index_entries=
+      !volatile_rows &&
+      mylite_update_preserves_all_index_entries(table, old_data, new_data);
+  if (!preserve_index_entries)
   {
-    if (index_entry_changed != stack_index_entry_changed)
-      free(index_entry_changed);
-    mylite_free_index_entries_with_scratch(index_entries, index_key_storage,
-                                           stack_index_entries,
-                                           stack_index_key_storage);
-    DBUG_RETURN(error);
-  }
+    error= mylite_prepare_index_entries_with_scratch(
+        table, new_data, &index_entries, &index_entry_count,
+        &index_key_storage, stack_index_entries,
+        sizeof(stack_index_entries) / sizeof(stack_index_entries[0]),
+        stack_index_key_storage, sizeof(stack_index_key_storage));
+    if (error)
+      DBUG_RETURN(error);
 
-  uint duplicate_key= (uint) -1;
-  error= volatile_rows
-             ? mylite_check_volatile_duplicate_keys(
-                   primary_file, storage_schema(), storage_table(), table,
-                   index_entries, index_entry_count, index_entry_changed,
-                   new_data, current_row_id, &duplicate_key)
-             : mylite_check_duplicate_keys(
-                   primary_file, storage_schema(), storage_table(), table,
-                   index_entries, index_entry_count, index_entry_changed,
-                   new_data, current_row_id, &duplicate_key);
-  if (error)
-  {
-    if (index_entry_changed != stack_index_entry_changed)
-      free(index_entry_changed);
-    mylite_free_index_entries_with_scratch(index_entries, index_key_storage,
-                                           stack_index_entries,
-                                           stack_index_key_storage);
-    duplicate_key_index= duplicate_key;
-    DBUG_RETURN(error);
+    if (index_entry_count <= sizeof(stack_index_entry_changed))
+      index_entry_changed= stack_index_entry_changed;
+    else
+      index_entry_changed= static_cast<uchar *>(malloc(index_entry_count));
+    if (index_entry_count != 0 && !index_entry_changed)
+      error= HA_ERR_OUT_OF_MEM;
+    if (!error)
+      error= mylite_prepare_index_entry_changes(
+          table, old_data, index_entries, index_entry_count,
+          index_entry_changed, index_entry_count);
+    if (error)
+    {
+      if (index_entry_changed != stack_index_entry_changed)
+        free(index_entry_changed);
+      mylite_free_index_entries_with_scratch(index_entries, index_key_storage,
+                                             stack_index_entries,
+                                             stack_index_key_storage);
+      DBUG_RETURN(error);
+    }
+
+    uint duplicate_key= (uint) -1;
+    error= volatile_rows
+               ? mylite_check_volatile_duplicate_keys(
+                     primary_file, storage_schema(), storage_table(), table,
+                     index_entries, index_entry_count, index_entry_changed,
+                     new_data, current_row_id, &duplicate_key)
+               : mylite_check_duplicate_keys(
+                     primary_file, storage_schema(), storage_table(), table,
+                     index_entries, index_entry_count, index_entry_changed,
+                     new_data, current_row_id, &duplicate_key);
+    if (error)
+    {
+      if (index_entry_changed != stack_index_entry_changed)
+        free(index_entry_changed);
+      mylite_free_index_entries_with_scratch(index_entries, index_key_storage,
+                                             stack_index_entries,
+                                             stack_index_key_storage);
+      duplicate_key_index= duplicate_key;
+      DBUG_RETURN(error);
+    }
   }
 
   if (check_foreign_keys)
@@ -3019,11 +3031,14 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
 
   unsigned long long new_row_id= 0ULL;
   const mylite_storage_result result=
-      volatile_rows
-          ? mylite_volatile_update_row_with_index_entries(
+      volatile_rows ? mylite_volatile_update_row_with_index_entries(
+                          primary_file, storage_schema(), storage_table(),
+                          current_row_id, row_payload, row_payload_size,
+                          index_entries, index_entry_count, &new_row_id)
+      : preserve_index_entries
+          ? mylite_storage_update_row_preserving_index_entries(
                 primary_file, storage_schema(), storage_table(),
-                current_row_id, row_payload, row_payload_size, index_entries,
-                index_entry_count, &new_row_id)
+                current_row_id, row_payload, row_payload_size, &new_row_id)
           : mylite_storage_update_row_with_index_entry_changes(
                 primary_file, storage_schema(), storage_table(),
                 current_row_id, row_payload, row_payload_size, index_entries,
@@ -4334,6 +4349,54 @@ static bool mylite_key_fields_may_change(TABLE *table, const KEY *key)
   }
 
   return false;
+}
+
+static bool mylite_update_preserves_all_index_entries(TABLE *table,
+                                                      const uchar *old_data,
+                                                      const uchar *new_data)
+{
+  if (!table || !old_data || !new_data)
+    return false;
+  if (table->s->keys == 0)
+    return true;
+  if (!mylite_table_supports_indexes(table))
+    return false;
+
+  for (uint i= 0; i < table->s->keys; ++i)
+  {
+    if (!mylite_key_part_records_equal(table, table->key_info + i, old_data,
+                                       new_data))
+      return false;
+  }
+
+  return true;
+}
+
+static bool mylite_key_part_records_equal(TABLE *table, const KEY *key,
+                                          const uchar *old_data,
+                                          const uchar *new_data)
+{
+  if (!table || !table->record[0] || !key || !key->key_part)
+    return false;
+
+  for (uint part= 0; part < key->user_defined_key_parts; ++part)
+  {
+    const KEY_PART_INFO *key_part= key->key_part + part;
+    Field *field= key_part->field;
+    if (!field || field->vcol_info || field->real_maybe_null())
+      return false;
+    if (field->ptr < table->record[0])
+      return false;
+    const size_t offset= static_cast<size_t>(field->ptr - table->record[0]);
+    const size_t pack_length= field->pack_length_in_rec();
+    if (offset > table->s->reclength ||
+        pack_length > table->s->reclength - offset)
+      return false;
+    if (memcmp(old_data + offset, new_data + offset, pack_length) != 0)
+      return false;
+  }
+
+  return true;
 }
 
 static void mylite_free_index_entries(mylite_storage_index_entry *entries,
