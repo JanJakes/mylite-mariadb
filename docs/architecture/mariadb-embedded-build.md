@@ -49,6 +49,7 @@ MYLITE_WITH_SYSVAR_HELP_TEXT=OFF
 MYLITE_WITH_STATIC_SHOW_INFO=OFF
 MYLITE_WITH_OPTION_HELP_TEXT=OFF
 MYLITE_WITH_OPTIMIZER_TRACE=OFF
+MYLITE_WITH_PROCESSLIST_METADATA=OFF
 ```
 
 `CMAKE_BUILD_TYPE=MinSizeRel` makes the embedded MariaDB archive optimize for
@@ -88,7 +89,10 @@ SQL parsing, execution, prepared statements, diagnostics, and `EXPLAIN` remain
 available. It omits server status-variable publication behind
 `MYLITE_WITH_STATUS_VARIABLES=0`; `SHOW STATUS` and status Information Schema
 tables return empty result sets, while ordinary SQL diagnostics and result
-metadata remain available. It omits Oracle compatibility function aliases and
+metadata remain available. It omits process-list metadata behind
+`MYLITE_WITH_PROCESSLIST_METADATA=0`; `SHOW PROCESSLIST` is rejected, while
+`INFORMATION_SCHEMA.PROCESSLIST` remains visible and returns zero rows. It
+omits Oracle compatibility function aliases and
 `oracle_schema` routing behind `MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS=0`, while
 ordinary MySQL/MariaDB string functions remain available. It uses a compact
 server error-message catalog behind `MYLITE_WITH_FULL_ERROR_MESSAGES=0`;
@@ -121,7 +125,7 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,609,024 bytes / 25.38 MiB |
+| Archive size | 26,569,272 bytes / 25.34 MiB |
 | Archive members | 704 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
@@ -152,8 +156,9 @@ Using the compact server error-message catalog reduces the pre-strip archive to
 and service injection reduces the pre-strip archive to 27,195,584 bytes /
 25.94 MiB. Guarding embedded no-binlog startup, open, cleanup, and GTID-index
 update paths, and omitting the unsupported injector root, reduces the pre-strip
-archive to 27,180,312 bytes / 25.92 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 571,288 bytes
+archive to 27,180,312 bytes / 25.92 MiB. Omitting process-list metadata
+producers reduces the pre-strip archive to 27,140,408 bytes / 25.88 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 571,136 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -174,10 +179,11 @@ bytes with no member-count change. Using the compact server error-message
 catalog saves 226,176 bytes with no member-count change. Omitting dynamic
 plugin shared-object loading and service injection saves 24,760 bytes with no
 member-count change. Guarding the retained no-binlog paths and omitting the
-injector root saves 14,896 bytes and one archive member.
-The final archive is 4,920,680 bytes smaller than the Release build with
-Performance Schema disabled, 6,520,616 bytes smaller than the symbol-stripped
-baseline that still built Performance Schema, and 7,233,296 bytes smaller than
+injector root saves 14,896 bytes and one archive member. Omitting process-list
+metadata producers saves 39,752 bytes with no member-count change.
+The final archive is 4,960,432 bytes smaller than the Release build with
+Performance Schema disabled, 6,560,368 bytes smaller than the symbol-stripped
+baseline that still built Performance Schema, and 7,273,048 bytes smaller than
 the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
@@ -252,8 +258,11 @@ prepared statements, ordinary diagnostics, and `EXPLAIN` remain available.
 Server status-variable publication is omitted from the default embedded archive;
 `SHOW STATUS` and status Information Schema tables return empty result sets,
 while SQL diagnostics, warnings, result metadata, and the public C API remain
-available. The full English server error-message catalog is compacted in the
-default embedded archive; common syntax, duplicate-key, table lookup,
+available. Process-list metadata is omitted from the default embedded archive;
+`SHOW PROCESSLIST` and `SHOW FULL PROCESSLIST` are rejected by policy, while
+`INFORMATION_SCHEMA.PROCESSLIST` remains visible and returns zero rows. The
+full English server error-message catalog is compacted in the default embedded
+archive; common syntax, duplicate-key, table lookup,
 storage-engine, unsupported-feature, and unknown-function diagnostics remain
 readable, and uncommon inherited server errors may report generic text while
 the MariaDB errno and SQLSTATE remain available.
@@ -284,6 +293,7 @@ The baseline explicitly disables:
 - General and slow query logs
 - Statement digest diagnostics
 - Server status variables
+- Process-list metadata
 - Oracle compatibility function aliases and `oracle_schema` routing
 - Full inherited server error-message catalog
 - MariaDB upstream unit-test targets

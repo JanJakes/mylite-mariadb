@@ -56,6 +56,9 @@
 #ifndef MYLITE_WITH_STATIC_SHOW_INFO
 #define MYLITE_WITH_STATIC_SHOW_INFO 1
 #endif
+#ifndef MYLITE_WITH_PROCESSLIST_METADATA
+#define MYLITE_WITH_PROCESSLIST_METADATA 1
+#endif
 #if MYLITE_WITH_STATIC_SHOW_INFO
 #include "authors.h"
 #include "contributors.h"
@@ -2870,6 +2873,7 @@ static int show_create_sequence(THD *thd, TABLE_LIST *table_list,
   returns for each thread: thread id, user, host, db, command, info
 ****************************************************************************/
 
+#if MYLITE_WITH_PROCESSLIST_METADATA
 class thread_info :public ilink {
 public:
   static void *operator new(size_t size, MEM_ROOT *mem_root) throw ()
@@ -2887,6 +2891,7 @@ public:
   CSET_STRING query_string;
   double progress;
 };
+#endif
 
 static const char *thread_state_info(THD *tmp)
 {
@@ -2920,6 +2925,7 @@ static const char *thread_state_info(THD *tmp)
 }
 
 
+#if MYLITE_WITH_PROCESSLIST_METADATA
 struct list_callback_arg
 {
   list_callback_arg(const char *u, THD *t, ulong m):
@@ -3113,6 +3119,7 @@ void mysqld_list_processes(THD *thd,const char *user, bool verbose)
   my_eof(thd);
   DBUG_VOID_RETURN;
 }
+#endif
 
 
 /*
@@ -3424,6 +3431,7 @@ int fill_show_analyze_json(THD * thd, TABLE_LIST * table, COND * cond)
 }
 
 
+#if MYLITE_WITH_PROCESSLIST_METADATA
 struct processlist_callback_arg
 {
   processlist_callback_arg(THD *thd_arg, TABLE *table_arg):
@@ -3575,6 +3583,12 @@ int fill_schema_processlist(THD* thd, TABLE_LIST* tables, COND* cond)
     DBUG_RETURN(1);
   DBUG_RETURN(0);
 }
+#else
+static int mylite_fill_empty_schema_table(THD *, TABLE_LIST *, COND *)
+{
+  return 0;
+}
+#endif
 
 /*****************************************************************************
   Status functions
@@ -10890,7 +10904,11 @@ ST_SCHEMA_TABLE schema_tables[]=
   {"PLUGINS"_Lex_ident_i_s_table, Show::plugin_fields_info, 0,
    fill_plugins, make_old_format, 0, -1, -1, 0, 0},
   {"PROCESSLIST"_Lex_ident_i_s_table, Show::processlist_fields_info, 0,
+#if MYLITE_WITH_PROCESSLIST_METADATA
    fill_schema_processlist, make_old_format, 0, -1, -1, 0, 0},
+#else
+   mylite_fill_empty_schema_table, make_old_format, 0, -1, -1, 0, 0},
+#endif
   {"PROFILING"_Lex_ident_i_s_table, Show::query_profile_statistics_info, 0,
     fill_query_profile_statistics_info, make_profile_table_for_show,
     NULL, -1, -1, false, 0},

@@ -398,6 +398,7 @@ compatibility features that do not fit the embedded library model:
 - general and slow query logs,
 - statement digest diagnostics,
 - server status variables,
+- process-list metadata,
 - the optional `SFORMAT()` SQL helper,
 - legacy `PROCEDURE ANALYSE()` SELECT diagnostics,
 - static `SHOW AUTHORS`, `SHOW CONTRIBUTORS`, and `SHOW PRIVILEGES`
@@ -433,6 +434,9 @@ statements, diagnostics, and `EXPLAIN` remain available. The default embedded
 profile also omits server status-variable publication, so `SHOW STATUS` and
 status Information Schema tables return empty result sets while ordinary SQL
 diagnostics, warnings, result metadata, and the public C API remain available.
+Process-list metadata is also omitted: `SHOW PROCESSLIST` and
+`SHOW FULL PROCESSLIST` are rejected as daemon/session inventory, while
+`INFORMATION_SCHEMA.PROCESSLIST` stays visible and returns zero rows.
 The default embedded profile also omits `SFORMAT()`, which fails as an
 unknown SQL function; ordinary `FORMAT()` remains available. The legacy
 `PROCEDURE ANALYSE()` SELECT extension is rejected as an unsupported diagnostic

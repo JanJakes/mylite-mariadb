@@ -34,7 +34,9 @@ application storage, SQL execution, or public API behavior. Statement digest
 normalization is omitted because it feeds Performance Schema statement
 diagnostics, which are already outside the default embedded profile. Server
 status-variable publication is omitted because it exposes daemon diagnostic
-counters rather than application SQL, storage, or public API behavior. Oracle
+counters rather than application SQL, storage, or public API behavior.
+Process-list metadata is omitted because it exposes daemon thread and session
+inventory rather than application SQL, storage, or public API behavior. Oracle
 compatibility function aliases and `oracle_schema` routing are omitted because
 Oracle compatibility mode is already unsupported and these aliases are not core
 MySQL/MariaDB application SQL. The full English server error-message catalog is
@@ -201,6 +203,16 @@ behavior when MariaDB errno and SQLSTATE remain available.
   `MYLITE_WITH_STATUS_VARIABLES=0` compiles the publication arrays to
   terminator-only arrays, makes the dynamic registry inert, and reduces the
   stripped archive to 27,005,960 bytes, 25.75 MiB, and 705 members.
+- `mariadb/sql/sql_parse.cc` dispatches `COM_PROCESS_INFO` and
+  `SQLCOM_SHOW_PROCESSLIST` to `mysqld_list_processes()`.
+  `mariadb/sql/sql_show.cc` implements process-list row production by walking
+  `server_threads` for `SHOW PROCESSLIST` and
+  `INFORMATION_SCHEMA.PROCESSLIST`.
+- Disabling process-list metadata behind
+  `MYLITE_WITH_PROCESSLIST_METADATA=0` compiles out the daemon thread-walk
+  producers, keeps `INFORMATION_SCHEMA.PROCESSLIST` visible with zero rows,
+  and reduces the stripped archive to 26,569,272 bytes, 25.34 MiB, and 704
+  members.
 - `mariadb/sql/item_create.cc` registers Oracle compatibility aliases such as
   `DECODE_ORACLE`, `LPAD_ORACLE`, `RTRIM_ORACLE`, `SUBSTR_ORACLE`, and
   `CONCAT_OPERATOR_ORACLE`, and builds a separate
@@ -401,6 +413,14 @@ status Information Schema tables return empty result sets. Ordinary SQL
 diagnostics, warnings, result metadata, and public C API diagnostics remain
 available.
 
+The embedded archive omits process-list metadata by setting
+`MYLITE_WITH_PROCESSLIST_METADATA=0` in the MyLite baseline. The option
+defaults to `ON` so normal MariaDB server builds keep upstream process-list
+behavior. The disabled profile compiles out `SHOW PROCESSLIST` and
+`INFORMATION_SCHEMA.PROCESSLIST` thread-walk producers, rejects
+`SHOW PROCESSLIST` and `SHOW FULL PROCESSLIST` through policy, and keeps
+`INFORMATION_SCHEMA.PROCESSLIST` queryable with zero rows.
+
 The wrapper keeps this behavior enabled by default because it is the
 distributed archive profile. Developers can set `STRIP_ARCHIVE=0` when they
 need an unstripped archive for local inspection.
@@ -425,8 +445,10 @@ query-log handlers are compiled to inert embedded paths while shared error-log
 behavior remains available. Statement digest normalization is replaced with
 inert digest helper symbols, and per-session digest token buffers are disabled
 at startup. Server status-variable publication arrays and dynamic registry
-updates are compiled to empty embedded paths. The embedded English server
-error-message catalog is compacted while keeping MariaDB error numbers,
+updates are compiled to empty embedded paths. Process-list metadata row
+producers are compiled out while the information-schema table shape remains
+visible. The embedded English server error-message catalog is compacted while
+keeping MariaDB error numbers,
 SQLSTATEs, and common diagnostics available. Dynamic plugin shared-object
 loading and the corresponding dynamic service injection table are compiled out
 of the default embedded archive, while static built-in plugins, native engines,
@@ -495,6 +517,11 @@ Server status-variable publication is a server diagnostic path. Omitting it
 removes `SHOW STATUS` rows and status Information Schema rows, not ordinary
 SQL diagnostics, warnings, result metadata, prepared statements, JSON,
 GEOMETRY/GIS, native storage engines, DDL, DML, or the public C API.
+Process-list metadata is a daemon thread/session inventory surface. Omitting it
+rejects `SHOW PROCESSLIST` and makes `INFORMATION_SCHEMA.PROCESSLIST` return
+zero rows; it does not affect ordinary SQL diagnostics, warnings, result
+metadata, prepared statements, JSON, GEOMETRY/GIS, native storage engines, DDL,
+DML, or the public C API.
 The full English server error-message catalog is diagnostic text. Compacting it
 does not change MariaDB errno, SQLSTATE, SQL execution, prepared statements,
 warnings, result metadata, JSON, GEOMETRY/GIS, native storage engines, DDL,
@@ -621,6 +648,11 @@ current archive to 26,609,024 bytes / 25.38 MiB, 4,920,680 bytes smaller than
 the Release build with Performance Schema disabled, 6,520,616 bytes smaller
 than the symbol-stripped baseline with Performance Schema still built, and
 7,233,296 bytes smaller than the original broad archive.
+Omitting process-list metadata brings the current archive to 26,569,272 bytes /
+25.34 MiB, 4,960,432 bytes smaller than the Release build with Performance
+Schema disabled, 6,560,368 bytes smaller than the symbol-stripped baseline with
+Performance Schema still built, and 7,273,048 bytes smaller than the original
+broad archive.
 
 ## License Or Dependency Impact
 
@@ -649,6 +681,9 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
 - Confirm `rpl_injector.cc.o` and `rpl_record.cc.o` are absent from
   `libmariadbd.a`, while `gtid_index.cc.o`, `log_event.cc.o`, and
   `log_event_server.cc.o` remain.
+- Confirm `MYLITE_WITH_PROCESSLIST_METADATA=OFF` appears in the embedded CMake
+  cache, direct and prepared process-list SHOW commands are rejected, and
+  `INFORMATION_SCHEMA.PROCESSLIST` returns zero rows.
 - Run `cmake --build --preset dev`.
 - Run `ctest --preset dev --output-on-failure`.
 - Run `cmake --build --preset embedded-dev`.
@@ -686,6 +721,9 @@ No new dependencies or license changes. The wrapper uses standard `strip` and
   remains covered, no binlog/relay-log sidecars are created, and the embedded
   archive omits the active binlog transaction/event core plus the unsupported
   injector root.
+- Process-list SHOW commands are rejected, the process-list Information Schema
+  table returns zero rows, and the embedded archive omits process-list row
+  producers.
 - Direct and prepared `SELECT ... PROCEDURE ANALYSE()` fail predictably, quoted
   literal mentions remain normal SQL, and the embedded archive omits
   `sql_analyse.cc.o`.

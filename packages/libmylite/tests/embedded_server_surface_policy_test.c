@@ -49,6 +49,7 @@ static mylite_db *open_database(open_database_paths paths);
 static void assert_runtime_policy_variables(mylite_db *db, const char *database_path);
 static void assert_system_variable_help_text_omitted(mylite_db *db);
 static void assert_status_variables_omitted(mylite_db *db);
+static void assert_processlist_metadata_omitted(mylite_db *db);
 static void assert_oracle_compat_functions_omitted(mylite_db *db);
 static void assert_compact_error_catalog(mylite_db *db);
 static void assert_performance_schema_omitted_or_disabled(mylite_db *db);
@@ -113,6 +114,7 @@ static void test_server_surfaces_are_disabled_or_contained(void) {
     assert_runtime_policy_variables(db, database_path);
     assert_system_variable_help_text_omitted(db);
     assert_status_variables_omitted(db);
+    assert_processlist_metadata_omitted(db);
     assert_oracle_compat_functions_omitted(db);
     assert_compact_error_catalog(db);
     assert_server_sql_rejected(db);
@@ -275,6 +277,19 @@ static void assert_status_variables_omitted(mylite_db *db) {
     assert(mylite_finalize(stmt) == MYLITE_OK);
 }
 
+static void assert_processlist_metadata_omitted(mylite_db *db) {
+    query_expect(
+        db,
+        (expected_query){
+            .sql = "SELECT ID, USER FROM information_schema.PROCESSLIST LIMIT 1",
+            .column_count = 2,
+            .row_count = 0,
+            .column_names = NULL,
+            .values = NULL,
+        }
+    );
+}
+
 static void assert_oracle_compat_functions_omitted(mylite_db *db) {
     static const char *const column_names[] = {
         "concat_value",
@@ -386,6 +401,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SET sql_mode = @@sql_mode");
     exec_ok(db, "SELECT 'PROCEDURE ANALYSE()' AS literal");
     exec_ok(db, "SELECT 'INFORMATION_SCHEMA.OPTIMIZER_TRACE' AS literal");
+    exec_ok(db, "SELECT 'SHOW PROCESSLIST' AS literal");
     exec_ok(db, "SHOW VARIABLES LIKE 'version'");
 
     expect_error(
@@ -488,6 +504,9 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_error(db, "SHOW AUTHORS", "server-owned SQL surface");
     expect_error(db, "SHOW CONTRIBUTORS", "server-owned SQL surface");
     expect_error(db, "SHOW PRIVILEGES", "server-owned SQL surface");
+    expect_error(db, "SHOW PROCESSLIST", "server-owned SQL surface");
+    expect_error(db, "SHOW FULL PROCESSLIST", "server-owned SQL surface");
+    expect_error(db, "/*! SHOW PROCESSLIST */", "server-owned SQL surface");
     expect_error(db, "SHOW PROFILES", "server-owned SQL surface");
     expect_error(db, "SHOW PROFILE CPU FOR QUERY 1", "server-owned SQL surface");
     expect_error(db, "SET profiling = 1", "server-owned SQL surface");
@@ -576,6 +595,8 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_prepare_error(db, "SHOW AUTHORS", "server-owned SQL surface");
     expect_prepare_error(db, "SHOW CONTRIBUTORS", "server-owned SQL surface");
     expect_prepare_error(db, "SHOW PRIVILEGES", "server-owned SQL surface");
+    expect_prepare_error(db, "SHOW PROCESSLIST", "server-owned SQL surface");
+    expect_prepare_error(db, "SHOW FULL PROCESSLIST", "server-owned SQL surface");
     expect_prepare_error(
         db,
         "CREATE FUNCTION prepared_udf RETURNS INTEGER SONAME 'prepared_udf.so'",

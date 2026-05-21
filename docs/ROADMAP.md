@@ -53,6 +53,7 @@ surface that does not fit a local directory-owned library:
 - general and slow query logs,
 - statement digest diagnostics,
 - server status variables,
+- process-list metadata,
 - optional Oracle SQL compatibility mode,
 - optional Oracle compatibility function aliases,
 - full inherited server diagnostic text,
@@ -116,6 +117,9 @@ Server status-variable publication is omitted after measurement proves
 `SHOW STATUS` and status Information Schema rows are daemon diagnostics, not
 application SQL or storage behavior; direct and prepared status queries keep
 stable empty result behavior while ordinary diagnostics remain available.
+Process-list metadata is omitted after coverage proves `SHOW PROCESSLIST` and
+`SHOW FULL PROCESSLIST` are daemon thread/session inventory surfaces;
+`INFORMATION_SCHEMA.PROCESSLIST` remains queryable and returns zero rows.
 Oracle compatibility function aliases and `oracle_schema` routing are omitted
 after coverage proves the normal MySQL/MariaDB string functions remain
 available, Oracle-only aliases fail predictably, and `oracle_schema` no
