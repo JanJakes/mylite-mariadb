@@ -476,6 +476,16 @@ mylite_storage_result mylite_storage_index_prefix_exists(
     size_t key_prefix_size,
     int *out_exists
 );
+mylite_storage_result mylite_storage_index_prefix_exists_for_index(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    const unsigned char *key_prefix,
+    size_t key_prefix_size,
+    unsigned long long skip_row_id,
+    int *out_exists
+);
 mylite_storage_result mylite_storage_read_auto_increment(
     const char *filename,
     const char *schema_name,

@@ -4694,29 +4694,12 @@ static int mylite_index_prefix_exists(const char *primary_file,
                                       int *out_exists)
 {
   *out_exists= 0;
-  mylite_storage_index_entryset entryset= {sizeof(entryset), NULL, 0, 0,
-                                           NULL, NULL, NULL};
   const mylite_storage_result storage_result=
-    mylite_storage_read_index_entries(primary_file, schema_name, table_name,
-                                      index_number, &entryset);
+      mylite_storage_index_prefix_exists_for_index(
+          primary_file, schema_name, table_name, index_number, key_prefix,
+          key_prefix_size, skip_row_id, out_exists);
   if (storage_result != MYLITE_STORAGE_OK)
     return mylite_storage_to_handler_error(storage_result);
-
-  for (size_t i= 0; i < entryset.entry_count; ++i)
-  {
-    if (skip_row_id && entryset.row_ids[i] == skip_row_id)
-      continue;
-    if (entryset.key_sizes[i] < key_prefix_size)
-      continue;
-    const uchar *entry_key= entryset.keys + entryset.key_offsets[i];
-    if (memcmp(entry_key, key_prefix, key_prefix_size) == 0)
-    {
-      *out_exists= 1;
-      break;
-    }
-  }
-
-  mylite_storage_free_index_entryset(&entryset);
   return 0;
 }
 

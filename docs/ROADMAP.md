@@ -364,6 +364,9 @@ overlays no longer resize the list on every discovered row id.
 Leaf-run exact and full-read helpers now reuse the validated root leaf page
 decoded during run discovery for offset `0`, avoiding redundant leaf-page cache
 lookups on single-page published roots.
+Durable foreign-key prefix checks now probe complete static published leaf roots
+and single-page maintained roots directly, falling back to the materialized
+overlay path when append-tail history or missing roots require it.
 Handler row-DML now prepares small index-entry/key buffers on the stack for
 common fixed-width tables, avoiding hot per-row heap churn while larger key
 sets still use the existing heap path.

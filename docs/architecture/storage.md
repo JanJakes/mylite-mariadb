@@ -544,6 +544,10 @@ match. Leaf-run exact and full-read helpers reuse the validated root page from
 run discovery for page offset `0`, avoiding redundant leaf-page cache lookups
 for single-page published roots. The cache is disabled for active statements and
 read snapshots, and it is cleared by durable mutation invalidation.
+Durable foreign-key prefix checks use an index-specific storage helper that can
+answer directly from complete static published leaf roots and single-page
+maintained roots. Roots with append-tail history, missing roots, and unsupported
+shapes still fall back to the existing materialized index-entry overlay path.
 
 MariaDB handler instances also cache proven child and parent foreign-key
 metadata absence for their opened table. Ordinary non-FK row-DML paths use that
