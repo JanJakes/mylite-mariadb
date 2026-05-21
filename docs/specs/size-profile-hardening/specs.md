@@ -54,7 +54,9 @@ they expose optional server counters rather than application SQL, native
 storage, or public API behavior. User-variable diagnostics, Unix socket server
 authentication, full event parse-data validation, and SQL `BINLOG` replay are
 omitted because they belong to diagnostic, authentication, scheduler, and
-replication replay surfaces outside the core embedded profile.
+replication replay surfaces outside the core embedded profile. Host-file
+SELECT exports are omitted because they write arbitrary user-named filesystem
+paths rather than returning rows through the embedded API.
 
 ## Source Findings
 
@@ -485,6 +487,14 @@ The embedded archive omits top-level SQL `HANDLER` command runtime by setting
 disabled embedded source keeps generic cleanup hooks as no-ops and leaves the
 storage-engine `handler` abstraction untouched. MyLite policy rejects direct
 and prepared top-level `HANDLER ...` statements before dispatch.
+
+The embedded archive omits `SELECT ... INTO OUTFILE` and
+`SELECT ... INTO DUMPFILE` host-file writer bodies by setting
+`MYLITE_WITH_SELECT_INTO_FILE=0` in the MyLite baseline. The option defaults to
+`ON` so normal MariaDB server builds keep upstream host-file export behavior.
+The disabled embedded methods fail closed, and MyLite policy rejects direct
+and prepared host-file SELECT exports before dispatch while retaining
+`SELECT ... INTO @variable`.
 
 The embedded archive disables `PROCEDURE ANALYSE()` by setting
 `MYLITE_WITH_PROCEDURE_ANALYSE=0` in the MyLite baseline, replacing
@@ -978,6 +988,12 @@ Omitting SQL `HANDLER` command runtime brings the current archive to
 with Performance Schema disabled, 6,853,856 bytes smaller than the
 symbol-stripped baseline with Performance Schema still built, and 7,566,536
 bytes smaller than the original broad archive.
+Omitting `SELECT ... INTO OUTFILE` and `SELECT ... INTO DUMPFILE` host-file
+writers brings the current archive to 26,269,664 bytes / 25.05 MiB, 5,260,040
+bytes smaller than the Release build with Performance Schema disabled,
+6,859,976 bytes smaller than the symbol-stripped baseline with Performance
+Schema still built, and 7,572,656 bytes smaller than the original broad
+archive.
 
 ## License Or Dependency Impact
 
@@ -1009,6 +1025,8 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   cache.
 - Confirm `MYLITE_WITH_GTID_STATE=OFF` appears in the embedded CMake cache.
 - Confirm `MYLITE_WITH_SQL_HANDLER=OFF` appears in the embedded CMake cache.
+- Confirm `MYLITE_WITH_SELECT_INTO_FILE=OFF` appears in the embedded CMake
+  cache.
 - Confirm `rpl_injector.cc.o`, `rpl_record.cc.o`, and `log_event_server.cc.o`
   are absent from `libmariadbd.a`, while `gtid_index.cc.o`, `log_event.cc.o`,
   `mylite_log_event_server_disabled.cc.o`, and
@@ -1021,6 +1039,9 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   `mylite_sql_handler_disabled.cc.o` remains, and direct and prepared
   top-level `HANDLER ...` statements fail through server-surface policy
   coverage.
+- Confirm direct and prepared `SELECT ... INTO OUTFILE` and
+  `SELECT ... INTO DUMPFILE` statements fail through server-surface policy
+  coverage while `SELECT ... INTO @variable` succeeds.
 - Confirm `MYLITE_WITH_BINLOG_REPLAY=OFF` appears in the embedded CMake cache,
   `sql_binlog.cc.o` is absent from `libmariadbd.a`, and direct and prepared
   SQL `BINLOG` replay statements fail through server-surface policy coverage.
@@ -1132,7 +1153,9 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   assignments are rejected, and `rpl_gtid.cc.o` is absent from the embedded
   archive. SQL `HANDLER` command runtime is replaced with a disabled embedded
   source, top-level `HANDLER ...` statements are rejected, and
-  `sql_handler.cc.o` is absent from the embedded archive. Persistent
+  `sql_handler.cc.o` is absent from the embedded archive. Host-file SELECT
+  exports are rejected, and `SELECT ... INTO @variable` remains supported.
+  Persistent
   optimizer-statistics storage is omitted, `use_stat_tables` starts as `NEVER`,
   histogram collection starts at size `0`, persistent statistics SQL and
   variable changes are rejected, and ordinary engine estimates,

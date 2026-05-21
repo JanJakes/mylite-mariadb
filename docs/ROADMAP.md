@@ -63,6 +63,7 @@ surface that does not fit a local directory-owned library:
 - server help text such as system-variable comments,
 - static server-information `SHOW` commands,
 - command-line option help prose,
+- host-file SELECT exports,
 - rarely used optional engines or plugins unless a slice justifies them.
 
 The minimal embedded build establishes the first baseline. Later slices record
@@ -106,6 +107,9 @@ SQL `HANDLER` command runtime is replaced with a disabled embedded source after
 source review proves top-level `HANDLER ...` commands are a server table-cursor
 surface, not the storage-engine handler abstraction needed by normal table
 execution.
+`SELECT ... INTO OUTFILE` and `SELECT ... INTO DUMPFILE` host-file writers are
+omitted after coverage proves they are server filesystem export surfaces;
+ordinary result delivery and `SELECT ... INTO @variable` remain covered.
 Replication execution, slave protocol, checksum, replication-event, and
 semi-sync system variables are also omitted after policy coverage proves those
 configuration rows belong to unsupported topology behavior; compatibility

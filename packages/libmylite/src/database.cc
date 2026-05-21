@@ -243,6 +243,7 @@ bool is_unsupported_replication_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_binlog_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_replication_function_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_sql_handler_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_select_file_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_help_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_static_show_info_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_processlist_metadata_statement(const SqlPolicyTokens &tokens);
@@ -1179,7 +1180,8 @@ bool is_unsupported_server_surface_sql(std::string_view sql, const std::string &
            is_unsupported_replication_statement(tokens) ||
            is_unsupported_binlog_statement(tokens) ||
            is_unsupported_replication_function_statement(tokens) ||
-           is_unsupported_sql_handler_statement(tokens) || is_unsupported_help_statement(tokens) ||
+           is_unsupported_sql_handler_statement(tokens) ||
+           is_unsupported_select_file_statement(tokens) || is_unsupported_help_statement(tokens) ||
            is_unsupported_static_show_info_statement(tokens) ||
            is_unsupported_processlist_metadata_statement(tokens) ||
            is_unsupported_foreign_server_metadata_statement(tokens) ||
@@ -1310,6 +1312,22 @@ bool is_unsupported_replication_function_statement(const SqlPolicyTokens &tokens
 
 bool is_unsupported_sql_handler_statement(const SqlPolicyTokens &tokens) {
     return token_equals(identifier_token_at(tokens, 0), "HANDLER");
+}
+
+bool is_unsupported_select_file_statement(const SqlPolicyTokens &tokens) {
+    const std::string_view first = identifier_token_at(tokens, 0);
+
+    if (!token_in(first, "SELECT", "WITH")) {
+        return false;
+    }
+
+    for (std::size_t index = 0; index + 1U < tokens.count; ++index) {
+        if (token_equals(tokens.values[index], "INTO") &&
+            token_in(tokens.values[index + 1U], "OUTFILE", "DUMPFILE")) {
+            return true;
+        }
+    }
+    return false;
 }
 
 bool is_unsupported_help_statement(const SqlPolicyTokens &tokens) {

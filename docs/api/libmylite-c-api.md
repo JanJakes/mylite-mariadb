@@ -408,9 +408,10 @@ compatibility features that do not fit the embedded library model:
   information.
 
 Top-level SQL command families for users, roles, grants, password changes,
-dynamic plugins, events, replication, binlog administration, SQL `HANDLER`, and
-foreign-server metadata are rejected before direct execution or prepared-statement
-preparation. Replication GTID helper functions such as `MASTER_GTID_WAIT()`,
+dynamic plugins, events, replication, binlog administration, SQL `HANDLER`,
+host-file SELECT exports, and foreign-server metadata are rejected before
+direct execution or prepared-statement preparation. Replication GTID helper
+functions such as `MASTER_GTID_WAIT()`,
 `BINLOG_GTID_POS()`, and `WSREP_SYNC_WAIT_UPTO_GTID()` plus GTID state variable
 assignments are rejected by the same policy. The default embedded profile
 starts with binary logging disabled and compiles binlog transaction, row-event,
@@ -432,6 +433,9 @@ replaced by empty embedded state for retained GTID-index link paths.
 SQL `HANDLER` command runtime is replaced by a disabled embedded source; the
 storage-engine `handler` abstraction remains available for normal table
 execution.
+`SELECT ... INTO OUTFILE` and `SELECT ... INTO DUMPFILE` host-file writers are
+replaced by disabled embedded methods; ordinary result delivery and
+`SELECT ... INTO @variable` remain available.
 The default profile omits the `unix_socket` server authentication plugin for
 the same reason; `libmylite` opens a local database directory directly instead
 of authenticating network or socket clients.

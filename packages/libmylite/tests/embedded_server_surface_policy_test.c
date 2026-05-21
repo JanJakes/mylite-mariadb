@@ -637,6 +637,8 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SET @sql_mode = 'ORACLE'");
     exec_ok(db, "SET @password = 'local'");
     exec_ok(db, "SET sql_mode = @@sql_mode");
+    exec_ok(db, "SELECT 1 INTO @select_into_variable");
+    exec_ok(db, "SELECT @select_into_variable");
     exec_ok(db, "SELECT 'PROCEDURE ANALYSE()' AS literal");
     exec_ok(db, "SELECT 'INFORMATION_SCHEMA.PROFILING' AS literal");
     exec_ok(db, "SELECT 'INFORMATION_SCHEMA.OPTIMIZER_TRACE' AS literal");
@@ -645,6 +647,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SELECT 'SHOW PROCESSLIST' AS literal");
     exec_ok(db, "SELECT 'MASTER_GTID_WAIT()' AS literal");
     exec_ok(db, "SELECT 'HANDLER app.t OPEN' AS literal");
+    exec_ok(db, "SELECT 'INTO OUTFILE /tmp/mylite-out.txt' AS literal");
     exec_ok(db, "SHOW VARIABLES LIKE 'version'");
     exec_ok(db, "SET @GTID_BINLOG_STATE = 'local'");
 
@@ -775,6 +778,22 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_error(db, "HANDLER app.t OPEN", "server-owned SQL surface");
     expect_error(db, "HANDLER t READ FIRST", "server-owned SQL surface");
     expect_error(db, "HANDLER t CLOSE", "server-owned SQL surface");
+    expect_error(
+        db,
+        "SELECT 1 INTO OUTFILE '/tmp/mylite-outfile-policy.txt'",
+        "server-owned SQL surface"
+    );
+    expect_error(
+        db,
+        "SELECT 1 INTO DUMPFILE '/tmp/mylite-dumpfile-policy.txt'",
+        "server-owned SQL surface"
+    );
+    expect_error(
+        db,
+        "WITH c AS (SELECT 1 AS id) SELECT id FROM c INTO OUTFILE "
+        "'/tmp/mylite-cte-outfile-policy.txt'",
+        "server-owned SQL surface"
+    );
     expect_error(db, "HELP SELECT", "server-owned SQL surface");
     expect_error(db, "SHOW AUTHORS", "server-owned SQL surface");
     expect_error(db, "SHOW CONTRIBUTORS", "server-owned SQL surface");
@@ -955,6 +974,16 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_prepare_error(db, "HANDLER app.t OPEN", "server-owned SQL surface");
     expect_prepare_error(db, "HANDLER t READ FIRST", "server-owned SQL surface");
     expect_prepare_error(db, "HANDLER t CLOSE", "server-owned SQL surface");
+    expect_prepare_error(
+        db,
+        "SELECT 1 INTO OUTFILE '/tmp/mylite-prepared-outfile-policy.txt'",
+        "server-owned SQL surface"
+    );
+    expect_prepare_error(
+        db,
+        "SELECT 1 INTO DUMPFILE '/tmp/mylite-prepared-dumpfile-policy.txt'",
+        "server-owned SQL surface"
+    );
     expect_prepare_error(db, "BACKUP STAGE START", "server-owned SQL surface");
     expect_prepare_error(db, "BACKUP LOCK app.t", "server-owned SQL surface");
     expect_prepare_error(db, "BACKUP UNLOCK", "server-owned SQL surface");

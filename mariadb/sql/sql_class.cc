@@ -73,6 +73,10 @@
 #include <sys/syscall.h>
 #endif
 
+#ifndef MYLITE_WITH_SELECT_INTO_FILE
+#define MYLITE_WITH_SELECT_INTO_FILE 1
+#endif
+
 /*
   The following is used to initialise Table_ident with a internal
   table name
@@ -3337,6 +3341,8 @@ bool select_send::send_eof()
   Handling writing to file
 ************************************************************************/
 
+#if MYLITE_WITH_SELECT_INTO_FILE
+
 bool select_to_file::free_recources()
 {
   if (file >= 0)
@@ -3852,6 +3858,68 @@ int select_dump::send_data(List<Item> &items)
 err:
   DBUG_RETURN(1);
 }
+
+#else
+
+static bool mylite_select_into_file_unsupported(THD *thd, const char *feature)
+{
+  my_error(ER_NOT_SUPPORTED_YET, MYF(0), feature);
+  return TRUE;
+}
+
+bool select_to_file::free_recources()
+{
+  return FALSE;
+}
+
+bool select_to_file::send_eof()
+{
+  return thd->is_error();
+}
+
+void select_to_file::abort_result_set()
+{
+  select_result_interceptor::abort_result_set();
+}
+
+void select_to_file::reset_for_next_ps_execution()
+{
+  path[0]= '\0';
+  row_count= 0;
+}
+
+select_to_file::~select_to_file()
+{
+  DBUG_ASSERT(file < 0);
+}
+
+select_export::~select_export()
+{
+}
+
+int select_export::prepare(List<Item> &, SELECT_LEX_UNIT *u)
+{
+  unit= u;
+  return mylite_select_into_file_unsupported(thd, "SELECT INTO OUTFILE");
+}
+
+int select_export::send_data(List<Item> &)
+{
+  return 1;
+}
+
+int select_dump::prepare(List<Item> &, SELECT_LEX_UNIT *u)
+{
+  unit= u;
+  return mylite_select_into_file_unsupported(thd, "SELECT INTO DUMPFILE");
+}
+
+int select_dump::send_data(List<Item> &)
+{
+  return 1;
+}
+
+#endif
 
 
 int select_singlerow_subselect::send_data(List<Item> &items)
