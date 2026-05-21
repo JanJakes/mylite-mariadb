@@ -373,6 +373,9 @@ Already-empty handler index cursor cleanup also returns before rewriting cursor
 state while preserving logical no-row cursor resets.
 Small buffered-page undo captures now skip duplicate lookup and bucket ensure
 work when the active statement has no prior undo entries and no buckets yet.
+Small non-bucketed buffered-page undo lists now also scan duplicate page ids
+directly in the capture helper, leaving the bucketed lookup path for larger
+statements.
 Durable handler write locks now defer MEMORY/HEAP statement snapshots until a
 volatile table participates, while transaction and savepoint snapshots remain
 eager at their SQL boundaries.

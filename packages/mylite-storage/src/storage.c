@@ -12775,8 +12775,16 @@ static mylite_storage_result capture_buffered_page_undo_from_page(
     }
 
     mylite_storage_buffered_page_undo_list *undos = &statement->buffered_page_undos;
-    if (undos->count != 0U && find_buffered_page_undo(undos, page_id) != NULL) {
-        return MYLITE_STORAGE_OK;
+    if (undos->count != 0U) {
+        if (undos->bucket_capacity == 0U) {
+            for (size_t i = 0U; i < undos->count; ++i) {
+                if (undos->entries[i].page_id == page_id) {
+                    return MYLITE_STORAGE_OK;
+                }
+            }
+        } else if (find_buffered_page_undo(undos, page_id) != NULL) {
+            return MYLITE_STORAGE_OK;
+        }
     }
 
     if (page == NULL) {
