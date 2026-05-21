@@ -1888,7 +1888,15 @@ static void encode_blob_page(
     size_t payload_size,
     unsigned page_type
 );
-static mylite_storage_result find_table_id_in_statement(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result find_table_id_in_statement(
+    FILE *file,
+    const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long *out_table_id
+);
+static mylite_storage_result load_table_id_in_statement(
     FILE *file,
     const mylite_storage_header *header,
     mylite_storage_statement *active_cache_statement,
@@ -17038,7 +17046,7 @@ static void encode_blob_page(
     );
 }
 
-static mylite_storage_result find_table_id_in_statement(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result find_table_id_in_statement(
     FILE *file,
     const mylite_storage_header *header,
     mylite_storage_statement *active_cache_statement,
@@ -17046,7 +17054,6 @@ static mylite_storage_result find_table_id_in_statement(
     const char *table_name,
     unsigned long long *out_table_id
 ) {
-    mylite_storage_catalog_image catalog = {0};
     mylite_storage_catalog_entry entry = {0};
     if (find_active_table_entry_cache_in_statement(
             active_cache_statement,
@@ -17059,6 +17066,26 @@ static mylite_storage_result find_table_id_in_statement(
         return MYLITE_STORAGE_OK;
     }
 
+    return load_table_id_in_statement(
+        file,
+        header,
+        active_cache_statement,
+        schema_name,
+        table_name,
+        out_table_id
+    );
+}
+
+static mylite_storage_result load_table_id_in_statement(
+    FILE *file,
+    const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long *out_table_id
+) {
+    mylite_storage_catalog_image catalog = {0};
+    mylite_storage_catalog_entry entry = {0};
     mylite_storage_result result = read_catalog_image(file, header, &catalog);
     if (result == MYLITE_STORAGE_OK) {
         result = find_table_record(&catalog, schema_name, table_name, &entry);

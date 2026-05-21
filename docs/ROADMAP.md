@@ -403,6 +403,8 @@ Prepared point materialization now hot-inlines cached row-payload output helpers
 and avoids refreshing an already-current table-name pointer identity.
 Active update rewrite probes now hot-inline row-shape, row-id hash, and compact
 undo-size helpers used by prepared point-update rewrites.
+Repeated table-id resolution now returns through an inlined active table-entry
+cache hit and leaves catalog materialization in a cold fallback.
 Exact unique index cursor construction now reuses the existing row-materialize
 eligibility flag instead of scanning table fields again for BLOB/TEXT columns
 on prepared point-update reads.
