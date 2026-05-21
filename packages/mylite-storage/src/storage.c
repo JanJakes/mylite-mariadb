@@ -421,6 +421,12 @@ typedef struct mylite_storage_append_page_buffer {
     unsigned char *checksum_dirty;
 } mylite_storage_append_page_buffer;
 
+typedef struct mylite_storage_pager {
+    FILE *file;
+    const char *filename;
+    const mylite_storage_header *header;
+} mylite_storage_pager;
+
 typedef struct mylite_storage_buffered_page_undo {
     unsigned long long page_id;
     size_t used_size;
@@ -943,6 +949,21 @@ static mylite_storage_result read_page_at(
     unsigned long long page_id,
     unsigned page_size,
     unsigned char *out_page
+);
+static mylite_storage_pager open_storage_pager(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header
+);
+static mylite_storage_result pager_read_page(
+    const mylite_storage_pager *pager,
+    unsigned long long page_id,
+    unsigned char *out_page
+);
+static mylite_storage_result pager_write_page(
+    const mylite_storage_pager *pager,
+    unsigned long long page_id,
+    const unsigned char *page
 );
 static mylite_storage_result publish_header(FILE *file, const mylite_storage_header *header);
 static mylite_storage_result publish_header_for_statement(
@@ -1786,8 +1807,7 @@ static mylite_storage_result publish_index_leaf_rebuild_roots(
     size_t rebuild_count
 );
 static mylite_storage_result write_index_leaf_rebuild_pages(
-    FILE *file,
-    const mylite_storage_header *header,
+    const mylite_storage_pager *pager,
     const mylite_storage_index_leaf_rebuild *rebuilds,
     size_t rebuild_count
 );
@@ -4462,7 +4482,8 @@ mylite_storage_result mylite_storage_rebuild_index_leaves(
         result = begin_write_journal(file, filename, &header, 1);
     }
     if (result == MYLITE_STORAGE_OK) {
-        result = write_index_leaf_rebuild_pages(file, &header, rebuilds, index_number_count);
+        const mylite_storage_pager pager = open_storage_pager(file, filename, &header);
+        result = write_index_leaf_rebuild_pages(&pager, rebuilds, index_number_count);
     }
     if (result == MYLITE_STORAGE_OK) {
         header.page_count = next_page;
@@ -9579,6 +9600,34 @@ static mylite_storage_result read_page_at(
     return read_file_at(file, offset, out_page, page_size);
 }
 
+static mylite_storage_pager open_storage_pager(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header
+) {
+    return (mylite_storage_pager){
+        .file = file,
+        .filename = filename,
+        .header = header,
+    };
+}
+
+static mylite_storage_result pager_read_page(
+    const mylite_storage_pager *pager,
+    unsigned long long page_id,
+    unsigned char *out_page
+) {
+    return read_page_at(pager->file, page_id, pager->header->page_size, out_page);
+}
+
+static mylite_storage_result pager_write_page(
+    const mylite_storage_pager *pager,
+    unsigned long long page_id,
+    const unsigned char *page
+) {
+    return write_page_at(pager->file, page_id, pager->header->page_size, page);
+}
+
 static mylite_storage_result publish_header(FILE *file, const mylite_storage_header *header) {
     return publish_header_for_statement(
         file,
@@ -14645,7 +14694,8 @@ static mylite_storage_result read_index_leaf_page(
         return result;
     }
 
-    result = read_page_at(file, page_id, header->page_size, page);
+    const mylite_storage_pager pager = open_storage_pager(file, filename, header);
+    result = pager_read_page(&pager, page_id, page);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
@@ -15029,18 +15079,16 @@ static mylite_storage_result publish_index_leaf_rebuild_roots(
 }
 
 static mylite_storage_result write_index_leaf_rebuild_pages(
-    FILE *file,
-    const mylite_storage_header *header,
+    const mylite_storage_pager *pager,
     const mylite_storage_index_leaf_rebuild *rebuilds,
     size_t rebuild_count
 ) {
     for (size_t rebuild_index = 0U; rebuild_index < rebuild_count; ++rebuild_index) {
         const mylite_storage_index_leaf_rebuild *rebuild = rebuilds + rebuild_index;
         for (size_t page_index = 0U; page_index < rebuild->leaf_page_count; ++page_index) {
-            mylite_storage_result result = write_page_at(
-                file,
+            mylite_storage_result result = pager_write_page(
+                pager,
                 rebuild->root_page + (unsigned long long)page_index,
-                header->page_size,
                 rebuild->leaf_pages + (page_index * MYLITE_STORAGE_FORMAT_PAGE_SIZE)
             );
             if (result != MYLITE_STORAGE_OK) {

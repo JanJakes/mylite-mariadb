@@ -981,9 +981,9 @@ validates the row page and table id without repeating the row-state visibility
 scan. This provides correct indexed insert, lookup, update, delete, reopen, and
 copy `ALTER` behavior for the supported shapes, but it is still an interim
 performance structure because maintained B-tree navigation and pager-style write
-paths are not implemented. The next storage step is a pager foundation that
-centralizes page ownership and rollback before maintained B-tree pages start
-rewriting index roots. Standalone
+paths are not implemented. A first pager foundation now wraps fixed-page access
+for index leaf reads and rebuild writes, but dirty-page ownership and rollback
+for maintained B-tree updates remain planned. Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, row/index free-space reclamation, multi-statement
 transaction rollback, and transaction-aware index maintenance remain planned.

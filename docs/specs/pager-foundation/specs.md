@@ -69,6 +69,18 @@ row payload reads, not catalog publication. Those paths already have storage
 unit coverage and exercise cached, active, and durable views without changing
 metadata semantics.
 
+## Initial Implementation
+
+The first implementation adds the internal `mylite_storage_pager` wrapper and
+migrates index leaf page reads plus batched index leaf rebuild writes through
+it. The pager currently delegates to the existing fixed-page read/write helpers,
+so file bytes, journal selection, active append-buffer reads, and header-view
+semantics are unchanged.
+
+Dirty-page tracking, in-place rewrites, page allocation, and WAL/checkpoint
+ownership remain follow-on work before maintained B-tree pages can update roots
+through the pager.
+
 ## Follow-On Design For Maintained Indexes
 
 Maintained index pages should build on the pager, not bypass it:
@@ -155,6 +167,15 @@ ctest --test-dir build/storage-smoke-dev -R libmylite.embedded-storage-engine --
 - Existing storage and relevant storage-smoke tests pass.
 - The next maintained-index spec can depend on a pager-owned dirty-page and
   rollback boundary instead of defining its own ad hoc page ownership.
+
+## Verification Results
+
+- `cmake --build --preset dev --target mylite_storage_test`
+- `ctest --test-dir build/dev -R mylite-storage --output-on-failure`
+- `git diff --check`
+- `git clang-format --diff HEAD -- packages/mylite-storage/src/storage.c`
+- `cmake --build --preset storage-smoke-dev --target mylite_embedded_storage_engine_test`
+- `ctest --test-dir build/storage-smoke-dev -R libmylite.embedded-storage-engine --output-on-failure`
 
 ## Risks And Unresolved Questions
 
