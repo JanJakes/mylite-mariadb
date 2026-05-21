@@ -144,8 +144,8 @@ replication replay surfaces outside the core embedded profile.
   GTID-index update paths allows the unsupported `rpl_injector.cc.o` root to
   be omitted. The stripped archive is reduced to 26,609,024 bytes, 25.38 MiB,
   and 704 members. `gtid_index.cc.o`, `log_event.cc.o`, and
-  `log_event_server.cc.o` remain because retained MariaDB code still references
-  them.
+  `log_event_server.cc.o` still remain at this point because retained MariaDB
+  code references event helpers.
 - `mariadb/sql/procedure.cc` registers the built-in `analyse` SELECT procedure
   and dispatches it to `proc_analyse_init()`. `mariadb/sql/sql_analyse.cc`
   implements that analyzer and is included in the embedded SQL archive by
@@ -463,6 +463,13 @@ The embedded archive omits SQL `BINLOG` statement replay by setting
 policy rejects direct and prepared `BINLOG` statements before dispatch, while
 the embedded MariaDB dispatcher remains a fail-closed backstop.
 
+The embedded archive omits server-side binary-log event writers by setting
+`MYLITE_WITH_LOG_EVENT_SERVER=0` in the MyLite baseline. The option defaults to
+`ON` so normal MariaDB server builds keep upstream event-writing behavior. The
+disabled embedded source keeps the real `append_query_string()` SQL
+string-quoting helper for ordinary `Item` and type rendering, while unsupported
+binary-log event write paths fail closed.
+
 The embedded archive disables `PROCEDURE ANALYSE()` by setting
 `MYLITE_WITH_PROCEDURE_ANALYSE=0` in the MyLite baseline, replacing
 `sql_analyse.cc` with a small `proc_analyse_init()` unsupported stub. The
@@ -657,7 +664,8 @@ with fail-closed embedded stubs. User statistics Information Schema plugin
 registration and the `userstat` system variable are omitted. User-variable
 diagnostics, Unix socket server authentication, full event parse-data
 validation, and SQL `BINLOG` replay are also omitted from the default embedded
-profile.
+profile. Server-side binary-log event writers are replaced with a disabled
+embedded source while the ordinary SQL string-quoting helper remains available.
 
 ## Compatibility Impact
 
@@ -939,6 +947,11 @@ brings the current archive to 26,402,232 bytes / 25.18 MiB, 5,127,472 bytes
 smaller than the Release build with Performance Schema disabled, 6,727,408
 bytes smaller than the symbol-stripped baseline with Performance Schema still
 built, and 7,440,088 bytes smaller than the original broad archive.
+Omitting server-side binary-log event writers brings the current archive to
+26,341,584 bytes / 25.12 MiB, 5,188,120 bytes smaller than the Release build
+with Performance Schema disabled, 6,788,056 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 7,500,736
+bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
 
@@ -966,9 +979,11 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
 - Confirm `MYLITE_WITH_DYNAMIC_PLUGIN_LOADING=OFF` appears in the embedded
   CMake cache, `@@have_dynamic_loading=NO` is covered by server-surface policy
   coverage, and plugin SQL remains rejected.
-- Confirm `rpl_injector.cc.o` and `rpl_record.cc.o` are absent from
-  `libmariadbd.a`, while `gtid_index.cc.o`, `log_event.cc.o`, and
-  `log_event_server.cc.o` remain.
+- Confirm `MYLITE_WITH_LOG_EVENT_SERVER=OFF` appears in the embedded CMake
+  cache.
+- Confirm `rpl_injector.cc.o`, `rpl_record.cc.o`, and `log_event_server.cc.o`
+  are absent from `libmariadbd.a`, while `gtid_index.cc.o`, `log_event.cc.o`,
+  and `mylite_log_event_server_disabled.cc.o` remain.
 - Confirm `MYLITE_WITH_BINLOG_REPLAY=OFF` appears in the embedded CMake cache,
   `sql_binlog.cc.o` is absent from `libmariadbd.a`, and direct and prepared
   SQL `BINLOG` replay statements fail through server-surface policy coverage.
@@ -1072,10 +1087,13 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   event DDL and metadata statements remain rejected, and the embedded archive
   keeps only a parser-link event parse-data stub. SQL `BINLOG` replay is
   rejected directly and in prepared statements, and `sql_binlog.cc.o` is absent
-  from the embedded archive. Persistent optimizer-statistics storage is
-  omitted, `use_stat_tables` starts as `NEVER`, histogram collection starts at
-  size `0`, persistent statistics SQL and variable changes are rejected, and
-  ordinary engine estimates, `ANALYZE TABLE`, and `EXPLAIN` remain covered.
+  from the embedded archive. Server-side binary-log event writers are replaced
+  with a disabled embedded source, `append_query_string()` still supports
+  ordinary SQL literal rendering, and `log_event_server.cc.o` is absent from
+  the embedded archive. Persistent optimizer-statistics storage is omitted,
+  `use_stat_tables` starts as `NEVER`, histogram collection starts at size `0`,
+  persistent statistics SQL and variable changes are rejected, and ordinary
+  engine estimates, `ANALYZE TABLE`, and `EXPLAIN` remain covered.
 - Process-list SHOW commands are rejected, the process-list Information Schema
   table returns zero rows, and the embedded archive omits process-list row
   producers.
@@ -1127,10 +1145,10 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
 - Unwind-table omission should stay scoped to targets where it is non-semantic.
 - Stored functions remain planned application SQL. Dynamic UDF policy and size
   trimming must stay scoped to shared-library UDF registration and execution.
-- `log.cc`, `gtid_index.cc`, `log_event.cc`, `log_event_server.cc`,
-  `rpl_gtid.cc`, `sql_repl.cc`, and replication utility files still have
-  shared references. Removing more binlog code needs separate source and link
-  evidence rather than file-name pruning.
+- `log.cc`, `gtid_index.cc`, `log_event.cc`, `rpl_gtid.cc`, `sql_repl.cc`,
+  and replication utility files still have shared references. Removing more
+  binlog code needs separate source and link evidence rather than file-name
+  pruning.
 - The generic SELECT procedure dispatch remains linked after omitting
   `PROCEDURE ANALYSE()`. Removing it should be a separate slice.
 - Clients that build help UIs from

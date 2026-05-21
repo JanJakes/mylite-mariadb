@@ -33,6 +33,15 @@ ELSE()
   SET(MYLITE_SQL_BINLOG_SOURCE)
 ENDIF()
 
+OPTION(MYLITE_WITH_LOG_EVENT_SERVER "Build server binary-log event writing runtime" ON)
+IF(MYLITE_WITH_LOG_EVENT_SERVER)
+  ADD_DEFINITIONS(-DMYLITE_WITH_LOG_EVENT_SERVER=1)
+  SET(MYLITE_LOG_EVENT_SERVER_SOURCE ../sql/log_event_server.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_LOG_EVENT_SERVER=0)
+  SET(MYLITE_LOG_EVENT_SERVER_SOURCE ../sql/mylite_log_event_server_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_QUERY_LOGS "Build general and slow query log runtime" ON)
 IF(MYLITE_WITH_QUERY_LOGS)
   ADD_DEFINITIONS(-DMYLITE_WITH_QUERY_LOGS=1)
@@ -253,7 +262,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/item_xmlfunc.cc ../sql/item_jsonfunc.cc
            ../sql/json_schema.cc ../sql/json_schema_helper.cc
            ../sql/key.cc ../sql/lock.cc ../sql/log.cc ../sql/log_cache.cc
-           ../sql/log_event.cc ../sql/log_event_server.cc 
+           ../sql/log_event.cc ${MYLITE_LOG_EVENT_SERVER_SOURCE}
            ../sql/mf_iocache.cc ../sql/my_decimal.cc 
            ../sql/net_serv.cc ../sql/opt_range.cc
            ../sql/opt_group_by_cardinality.cc

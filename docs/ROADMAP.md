@@ -95,6 +95,9 @@ retained MariaDB code still references remain for narrower review.
 SQL `BINLOG` statement replay is omitted after coverage proves it is an
 unsupported replication replay surface and the embedded dispatcher already
 fail-closes it.
+Server-side binary-log event writers are replaced with a disabled embedded
+source after link evidence proves the only ordinary SQL helper that must remain
+is `append_query_string()`.
 Replication execution, slave protocol, checksum, replication-event, and
 semi-sync system variables are also omitted after policy coverage proves those
 configuration rows belong to unsupported topology behavior; compatibility

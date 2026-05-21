@@ -422,7 +422,9 @@ binlog filter variables such as `replicate_do_db`,
 `replicate_wild_ignore_table`, and `binlog_do_db` are also omitted because the
 core embedded profile has no replication or binary-log topology to filter.
 SQL `BINLOG` statement replay is rejected before dispatch and omitted from the
-embedded archive.
+embedded archive. Server-side binary-log event writers are also replaced by a
+disabled embedded source; ordinary SQL value rendering keeps MariaDB's
+`append_query_string()` escaping behavior.
 The default profile omits the `unix_socket` server authentication plugin for
 the same reason; `libmylite` opens a local database directory directly instead
 of authenticating network or socket clients.
