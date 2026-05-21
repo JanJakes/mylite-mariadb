@@ -170,8 +170,8 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,491,536 bytes / 25.26 MiB |
-| Archive members | 702 |
+| Archive size | 26,474,416 bytes / 25.25 MiB |
+| Archive members | 699 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
 32.27 MiB. With `MinSizeRel`, the unused Performance Schema static plugin
@@ -214,8 +214,11 @@ filter runtime reduces the pre-strip archive to 27,085,072 bytes /
 25.83 MiB. Replacing statement profiling metadata with a fail-closed stub
 reduces the pre-strip archive to 27,080,800 bytes / 25.83 MiB. Omitting user
 statistics diagnostics reduces the pre-strip archive to 27,059,928 bytes /
-25.81 MiB.
-Post-build `strip -S -x` plus `ranlib` saves another 568,392 bytes
+25.81 MiB. Omitting user-variable diagnostics, reducing event parse-data
+validation to a parser-link stub, omitting Unix socket server authentication,
+and omitting SQL `BINLOG` replay bring the current pre-strip archive to
+27,041,656 bytes / 25.79 MiB.
+Post-build `strip -S -x` plus `ranlib` saves another 567,240 bytes
 without changing archive membership or runtime behavior. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -248,10 +251,15 @@ change. Omitting PROXY protocol listener support saves 6,728 bytes with no
 member-count change. Omitting replication and binary-log filter runtime saves
 12,272 bytes with no member-count change. Replacing the remaining profiling
 metadata saves 4,272 bytes with no member-count change. Omitting user
-statistics diagnostics saves 20,872 bytes and one archive member.
-The final archive is 5,038,168 bytes smaller than the Release build with
-Performance Schema disabled, 6,638,104 bytes smaller than the symbol-stripped
-baseline that still built Performance Schema, and 7,350,784 bytes smaller than
+statistics diagnostics saves 20,872 bytes and one archive member. Omitting
+user-variable diagnostics saves 6,576 bytes and one archive member. Reducing
+event parse-data validation to a parser-link stub saves 4,744 bytes with no
+member-count change. Omitting Unix socket server authentication saves 2,160
+bytes and one archive member. Omitting SQL `BINLOG` statement replay saves
+3,640 bytes and one archive member.
+The final archive is 5,055,288 bytes smaller than the Release build with
+Performance Schema disabled, 6,655,224 bytes smaller than the symbol-stripped
+baseline that still built Performance Schema, and 7,367,904 bytes smaller than
 the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
