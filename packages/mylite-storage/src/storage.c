@@ -1533,12 +1533,14 @@ static mylite_storage_result read_max_row_table_id(
 );
 static mylite_storage_result write_definition_blob_pages(
     FILE *file,
+    const mylite_storage_header *header,
     unsigned long long first_page_id,
     const unsigned char *definition,
     size_t definition_size
 );
 static mylite_storage_result write_foreign_key_blob_pages(
     FILE *file,
+    const mylite_storage_header *header,
     unsigned long long first_page_id,
     const unsigned char *metadata,
     size_t metadata_size
@@ -1556,6 +1558,7 @@ static void encode_foreign_key_column_names(
 );
 static mylite_storage_result write_blob_pages(
     FILE *file,
+    const mylite_storage_header *header,
     unsigned long long first_page_id,
     mylite_storage_blob_write blob
 );
@@ -3347,6 +3350,7 @@ mylite_storage_result mylite_storage_store_table_definition(
     if (result == MYLITE_STORAGE_OK) {
         result = write_definition_blob_pages(
             file,
+            &header,
             first_blob_page,
             definition->definition,
             definition->definition_size
@@ -3696,7 +3700,8 @@ mylite_storage_result mylite_storage_store_foreign_key_definition(
         result = begin_write_journal(file, filename, &header, 1);
     }
     if (result == MYLITE_STORAGE_OK) {
-        result = write_foreign_key_blob_pages(file, first_blob_page, metadata, metadata_size);
+        result =
+            write_foreign_key_blob_pages(file, &header, first_blob_page, metadata, metadata_size);
     }
     if (result == MYLITE_STORAGE_OK) {
         header.page_count += blob_page_count;
@@ -3879,6 +3884,7 @@ mylite_storage_result mylite_storage_update_foreign_key_referenced_key_name(
         if (result == MYLITE_STORAGE_OK) {
             result = write_foreign_key_blob_pages(
                 file,
+                &header,
                 first_blob_page,
                 new_metadata,
                 new_metadata_size
@@ -5451,7 +5457,8 @@ static mylite_storage_result update_row_with_index_entries(
             };
             unsigned char state_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
             encode_row_state_page(state_page, next_page_id, &row_state);
-            result = write_page_at(file, next_page_id, header.page_size, state_page);
+            const mylite_storage_pager pager = open_storage_pager(file, NULL, &header);
+            result = pager_write_page(&pager, next_page_id, state_page);
         }
         if (result == MYLITE_STORAGE_OK) {
             ++next_page_id;
@@ -5585,7 +5592,8 @@ mylite_storage_result mylite_storage_delete_row(
         };
         unsigned char state_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
         encode_row_state_page(state_page, state_page_id, &row_state);
-        result = write_page_at(file, state_page_id, header.page_size, state_page);
+        const mylite_storage_pager pager = open_storage_pager(file, NULL, &header);
+        result = pager_write_page(&pager, state_page_id, state_page);
         if (result == MYLITE_STORAGE_OK) {
             ++header.page_count;
             result = publish_header(file, &header);
@@ -11995,7 +12003,8 @@ static mylite_storage_result allocate_catalog_page_run(
     }
 
     encode_free_list_page(page, free_list_page.run_start_page, &free_list_page);
-    return write_page_at(file, free_list_page.run_start_page, header->page_size, page);
+    const mylite_storage_pager pager = open_storage_pager(file, NULL, header);
+    return pager_write_page(&pager, free_list_page.run_start_page, page);
 }
 
 static mylite_storage_result reclaim_catalog_page_run(
@@ -12023,7 +12032,8 @@ static mylite_storage_result reclaim_catalog_page_run(
     };
     unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     encode_free_list_page(page, first_page_id, &free_list_page);
-    result = write_page_at(file, first_page_id, header->page_size, page);
+    const mylite_storage_pager pager = open_storage_pager(file, NULL, header);
+    result = pager_write_page(&pager, first_page_id, page);
     if (result == MYLITE_STORAGE_OK) {
         header->free_list_root_page = first_page_id;
         result = publish_header(file, header);
@@ -13480,12 +13490,14 @@ static mylite_storage_result read_max_row_table_id(
 
 static mylite_storage_result write_definition_blob_pages(
     FILE *file,
+    const mylite_storage_header *header,
     unsigned long long first_page_id,
     const unsigned char *definition,
     size_t definition_size
 ) {
     return write_blob_pages(
         file,
+        header,
         first_page_id,
         (mylite_storage_blob_write){
             .payload = definition,
@@ -13497,12 +13509,14 @@ static mylite_storage_result write_definition_blob_pages(
 
 static mylite_storage_result write_foreign_key_blob_pages(
     FILE *file,
+    const mylite_storage_header *header,
     unsigned long long first_page_id,
     const unsigned char *metadata,
     size_t metadata_size
 ) {
     return write_blob_pages(
         file,
+        header,
         first_page_id,
         (mylite_storage_blob_write){
             .payload = metadata,
@@ -13629,6 +13643,7 @@ static void encode_foreign_key_column_names(
 
 static mylite_storage_result write_blob_pages(
     FILE *file,
+    const mylite_storage_header *header,
     unsigned long long first_page_id,
     mylite_storage_blob_write blob
 ) {
@@ -13636,6 +13651,7 @@ static mylite_storage_result write_blob_pages(
         MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_BLOB_PAYLOAD_OFFSET;
     size_t written = 0U;
     unsigned long long page_id = first_page_id;
+    const mylite_storage_pager pager = open_storage_pager(file, NULL, header);
     while (written < blob.payload_size) {
         const size_t remaining = blob.payload_size - written;
         const size_t chunk_size = remaining < payload_capacity ? remaining : payload_capacity;
@@ -13651,8 +13667,7 @@ static mylite_storage_result write_blob_pages(
             blob.page_type
         );
 
-        const mylite_storage_result result =
-            write_page_at(file, page_id, MYLITE_STORAGE_FORMAT_PAGE_SIZE, blob_page);
+        const mylite_storage_result result = pager_write_page(&pager, page_id, blob_page);
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
@@ -13830,6 +13845,7 @@ static mylite_storage_result write_row_payload_pages(
     if (first_blob_page != 0ULL) {
         mylite_storage_result result = write_blob_pages(
             file,
+            header,
             first_blob_page,
             (mylite_storage_blob_write){
                 .payload = row,
@@ -13854,7 +13870,8 @@ static mylite_storage_result write_row_payload_pages(
         }
     );
 
-    mylite_storage_result result = write_page_at(file, row_page_id, header->page_size, row_page);
+    const mylite_storage_pager pager = open_storage_pager(file, NULL, header);
+    mylite_storage_result result = pager_write_page(&pager, row_page_id, row_page);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
@@ -14335,6 +14352,7 @@ static mylite_storage_result write_index_entry_pages(
         return MYLITE_STORAGE_FULL;
     }
 
+    const mylite_storage_pager pager = open_storage_pager(file, NULL, header);
     size_t changed_index = 0U;
     for (size_t i = 0U; i < write.index_entry_count; ++i) {
         if (!is_index_entry_changed(write.index_entry_changed, i)) {
@@ -14350,8 +14368,7 @@ static mylite_storage_result write_index_entry_pages(
             write.index_entries + i
         );
 
-        const mylite_storage_result result =
-            write_page_at(file, page_id, header->page_size, index_page);
+        const mylite_storage_result result = pager_write_page(&pager, page_id, index_page);
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
@@ -18731,6 +18748,7 @@ static mylite_storage_result write_truncate_row_state_pages(
     unsigned long long *out_next_page_id
 ) {
     unsigned long long next_page_id = first_page_id;
+    const mylite_storage_pager pager = open_storage_pager(file, NULL, header);
     for (size_t i = 0U; i < live_rows->count; ++i) {
         const mylite_storage_row_state_page row_state = {
             .table_id = table_id,
@@ -18741,8 +18759,7 @@ static mylite_storage_result write_truncate_row_state_pages(
         unsigned char state_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
         encode_row_state_page(state_page, next_page_id, &row_state);
 
-        const mylite_storage_result result =
-            write_page_at(file, next_page_id, header->page_size, state_page);
+        const mylite_storage_result result = pager_write_page(&pager, next_page_id, state_page);
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
@@ -18763,8 +18780,8 @@ static mylite_storage_result write_truncate_auto_increment_page(
     unsigned char autoincrement_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     encode_autoincrement_page(autoincrement_page, page_id, table_id, 1ULL);
 
-    const mylite_storage_result result =
-        write_page_at(file, page_id, header->page_size, autoincrement_page);
+    const mylite_storage_pager pager = open_storage_pager(file, NULL, header);
+    const mylite_storage_result result = pager_write_page(&pager, page_id, autoincrement_page);
     if (result == MYLITE_STORAGE_OK) {
         *out_next_page_id = page_id + 1ULL;
     }
@@ -21866,7 +21883,8 @@ static mylite_storage_result publish_auto_increment_value(
     unsigned char autoincrement_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     encode_autoincrement_page(autoincrement_page, page_id, table_id, next_value);
 
-    result = write_page_at(file, page_id, header->page_size, autoincrement_page);
+    const mylite_storage_pager pager = open_storage_pager(file, filename, header);
+    result = pager_write_page(&pager, page_id, autoincrement_page);
     if (result == MYLITE_STORAGE_OK) {
         result = publish_header_page_count(file, header, page_id + 1ULL);
     }

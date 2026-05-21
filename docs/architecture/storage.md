@@ -982,8 +982,8 @@ scan. This provides correct indexed insert, lookup, update, delete, reopen, and
 copy `ALTER` behavior for the supported shapes, but it is still an interim
 performance structure because maintained B-tree navigation and pager-style write
 paths are not implemented. A first pager foundation now wraps fixed-page access
-for row-page, row-state, autoincrement, BLOB payload, and free-list reads plus
-index leaf reads and rebuild writes, but dirty-page ownership and rollback for
+for row-page, row-state, autoincrement, BLOB payload, free-list, append-only
+index-entry, and index leaf access, but dirty-page ownership and rollback for
 maintained B-tree updates remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
