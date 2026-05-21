@@ -149,10 +149,11 @@ updates, and full rowset reads now collect live row ids in one file pass before
 materializing only surviving row pages. SQLite-like
 row-write and point-read performance still requires the planned navigable index
 and pager work. The first pager foundation now wraps fixed-page access for
-index leaf reads and rebuild writes while preserving existing storage bytes;
-maintained B-tree pages still need pager-owned dirty-page and rollback
-semantics. Durable table-local row, payload, exact-index, and published
-leaf-page caches now retarget across unrelated table row mutations, so one
+row-page and free-list reads plus index leaf reads and rebuild writes while
+preserving existing storage bytes; maintained B-tree pages still need pager-owned
+dirty-page and rollback semantics. Durable table-local row, payload,
+exact-index, and published leaf-page caches now retarget across unrelated table
+row mutations, so one
 table's insert/update/delete does not strand another table's hot durable cache
 solely because the file page count advanced. Durable handler
 index cursors also materialize their current row payloads in one ordered batch,

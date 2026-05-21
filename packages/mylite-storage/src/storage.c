@@ -12044,7 +12044,8 @@ static mylite_storage_result read_free_list_page(
     if (!is_reusable_page_id(header, page_id)) {
         return MYLITE_STORAGE_CORRUPT;
     }
-    mylite_storage_result result = read_page_at(file, page_id, header->page_size, page);
+    const mylite_storage_pager pager = open_storage_pager(file, NULL, header);
+    mylite_storage_result result = pager_read_page(&pager, page_id, page);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
@@ -17274,7 +17275,8 @@ static mylite_storage_result read_row_page(
         return MYLITE_STORAGE_CORRUPT;
     }
 
-    mylite_storage_result result = read_page_at(file, page_id, header->page_size, page);
+    const mylite_storage_pager pager = open_storage_pager(file, NULL, header);
+    mylite_storage_result result = pager_read_page(&pager, page_id, page);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }

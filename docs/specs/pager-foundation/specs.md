@@ -72,10 +72,10 @@ metadata semantics.
 ## Initial Implementation
 
 The first implementation adds the internal `mylite_storage_pager` wrapper and
-migrates index leaf page reads plus batched index leaf rebuild writes through
-it. The pager currently delegates to the existing fixed-page read/write helpers,
-so file bytes, journal selection, active append-buffer reads, and header-view
-semantics are unchanged.
+migrates row page reads, free-list reads, index leaf page reads, and batched
+index leaf rebuild writes through it. The pager currently delegates to the
+existing fixed-page read/write helpers, so file bytes, journal selection, active
+append-buffer reads, and header-view semantics are unchanged.
 
 Dirty-page tracking, in-place rewrites, page allocation, and WAL/checkpoint
 ownership remain follow-on work before maintained B-tree pages can update roots
