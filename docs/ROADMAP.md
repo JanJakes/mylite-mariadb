@@ -142,7 +142,9 @@ for exact cursor builds and row-write table-id resolution while the catalog
 root and generation are unchanged. Active statement, table-entry, and
 row-payload cache lookups now inline their hottest resolution helpers and
 short-circuit identical string identities before falling back to value
-comparison. Per-index change predicates and exact-cache bucket resolution now
+comparison. Active and durable row-lifecycle cache sets now also keep
+revalidated last-hit indexes for repeated live-row, live-row-id, and row-payload
+lookups. Per-index change predicates and exact-cache bucket resolution now
 inline on the row-DML hot path. Durable row, row-state, and append-only
 index-entry page decoders now validate their existing used-byte checksum shape
 without scanning unused fixed-page tails.
