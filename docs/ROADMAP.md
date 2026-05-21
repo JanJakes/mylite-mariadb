@@ -342,6 +342,8 @@ as its single cache update, since that mark already records the row as both
 live and validated.
 Exact-index cache probes now compare 1/2/4/8-byte key images with fixed-size
 loads, keeping `memcmp()` only for larger or variable-width keys.
+Those same fixed-width exact-index cache probes now hash 1/2/4/8-byte keys with
+integer loads instead of the generic byte loop before bucket lookup.
 Exact unique index cursor construction now reuses the existing row-materialize
 eligibility flag instead of scanning table fields again for BLOB/TEXT columns
 on prepared point-update reads.

@@ -3517,6 +3517,7 @@ static size_t exact_index_cache_bucket_for_key(
 static size_t exact_index_cache_bucket_count(size_t entry_count);
 static int key_bytes_equal(const unsigned char *left, const unsigned char *right, size_t key_size);
 static size_t hash_key_bytes(const unsigned char *key, size_t key_size);
+static size_t hash_fixed_key_value(uint64_t value, size_t key_size);
 static uint64_t checksum_bytes(const unsigned char *bytes, size_t size);
 static void clear_exact_index_cache_buckets(mylite_storage_exact_index_cache *cache);
 static void unlink_exact_index_cache_row_id_bucket_entry(
@@ -24953,12 +24954,41 @@ static int key_bytes_equal(const unsigned char *left, const unsigned char *right
 }
 
 static size_t hash_key_bytes(const unsigned char *key, size_t key_size) {
+    switch (key_size) {
+    case 1U:
+        return hash_fixed_key_value(key[0], key_size);
+    case 2U: {
+        uint16_t value = 0U;
+        memcpy(&value, key, sizeof(value));
+        return hash_fixed_key_value(value, key_size);
+    }
+    case 4U: {
+        uint32_t value = 0U;
+        memcpy(&value, key, sizeof(value));
+        return hash_fixed_key_value(value, key_size);
+    }
+    case 8U: {
+        uint64_t value = 0ULL;
+        memcpy(&value, key, sizeof(value));
+        return hash_fixed_key_value(value, key_size);
+    }
+    default:
+        break;
+    }
+
     uint64_t hash = 1469598103934665603ULL;
     for (size_t i = 0U; i < key_size; ++i) {
         hash ^= key[i];
         hash *= 1099511628211ULL;
     }
     return (size_t)hash;
+}
+
+static size_t hash_fixed_key_value(uint64_t value, size_t key_size) {
+    value ^= (uint64_t)key_size * 0x9e3779b97f4a7c15ULL;
+    value *= 0x9e3779b97f4a7c15ULL;
+    value ^= value >> 32U;
+    return (size_t)value;
 }
 
 static uint64_t checksum_bytes(const unsigned char *bytes, size_t size) {
