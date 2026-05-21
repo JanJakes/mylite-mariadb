@@ -1413,6 +1413,10 @@ private:
   QUICK_RANGE_SELECT *get_quick_select_for_ref(THD *thd, TABLE *table,
                                                struct st_table_ref *ref,
                                                ha_rows records);
+  friend QUICK_RANGE_SELECT *
+  get_quick_select_for_exact_key(THD *thd, TABLE *table, uint keynr,
+                                 const uchar *key_buff, uint key_length,
+                                 ha_rows records);
   friend bool get_quick_keys(PARAM *param, QUICK_RANGE_SELECT *quick, 
                              KEY_PART *key, SEL_ARG *key_tree, 
                              uchar *min_key, uint min_key_flag,
@@ -1945,14 +1949,7 @@ class SQL_SELECT :public Sql_alloc {
       false   - Ok
   */
   bool check_quick(THD *thd, bool force_quick_range, ha_rows limit,
-                   Item_func::Bitmap note_unusable_keys)
-  {
-    key_map tmp;
-    tmp.set_all();
-    return test_quick_select(thd, tmp, 0, limit, force_quick_range,
-                             FALSE, FALSE, FALSE,
-                             note_unusable_keys) != OK;
-  }
+                   Item_func::Bitmap note_unusable_keys);
 
   /* 
     RETURN

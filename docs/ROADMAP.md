@@ -158,7 +158,10 @@ reset before re-execution while result-producing statements keep the full reset
 path. Prepared non-result execution now also reuses the immutable SQL policy
 classified at prepare time, so ordinary prepared DML no longer reparses its SQL
 text for no-op transaction or temporary-table lifecycle updates after every
-successful step.
+successful step. Single-part non-null unique-key `UPDATE` predicates now build
+their exact range quick path directly during execution, avoiding the full
+range-optimizer rebuild for hot prepared primary-key update loops while leaving
+the original `WHERE` condition in place for MariaDB expression semantics.
 Durable exact-index cache reads now bulk-grow matching entrysets in one pass,
 removing per-match array reallocations from many-match secondary cursors that do
 not use published leaf roots. Exact-index caches now add transient hash buckets

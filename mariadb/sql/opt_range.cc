@@ -117,6 +117,25 @@
 #include "uniques.h"
 #include "my_json_writer.h"
 
+static quick_select_return try_simple_update_unique_key_quick_select(
+    THD *thd, SQL_SELECT *select, key_map keys_to_use, bool force_quick_range,
+    bool *out_handled);
+static quick_select_return
+make_simple_update_unique_key_quick_select(THD *thd, SQL_SELECT *select,
+                                           uint keynr, Item *value_item,
+                                           ha_rows table_records);
+static bool find_simple_unique_key_equal_item(Item *cond, TABLE *table,
+                                              Field *field,
+                                              Item **out_value_item);
+static bool find_key_field_equal_item(Item *item, TABLE *table, Field *field,
+                                      Item **out_value_item);
+static bool is_simple_unique_key_candidate(TABLE *table, KEY *key_info);
+QUICK_RANGE_SELECT *get_quick_select_for_exact_key(THD *thd, TABLE *table,
+                                                   uint keynr,
+                                                   const uchar *key_buff,
+                                                   uint key_length,
+                                                   ha_rows records);
+
 #ifndef EXTRA_DEBUG
 #define test_rb_tree(A,B) {}
 #define test_use_count(A) {}
@@ -2705,6 +2724,22 @@ static int fill_used_fields_bitmap(PARAM *param)
           or can't use quick_select
 */
 
+bool SQL_SELECT::check_quick(THD *thd, bool force_quick_range, ha_rows limit,
+                             Item_func::Bitmap note_unusable_keys)
+{
+  key_map tmp;
+  bool quick_handled= false;
+  DBUG_ENTER("SQL_SELECT::check_quick");
+
+  tmp.set_all();
+  quick_select_return result= try_simple_update_unique_key_quick_select(
+      thd, this, tmp, force_quick_range, &quick_handled);
+  if (!quick_handled)
+    result= test_quick_select(thd, tmp, 0, limit, force_quick_range, FALSE,
+                              FALSE, FALSE, note_unusable_keys);
+  DBUG_RETURN(result != OK);
+}
+
 quick_select_return
 SQL_SELECT::test_quick_select(THD *thd,
                               key_map keys_to_use,
@@ -3190,6 +3225,190 @@ SQL_SELECT::test_quick_select(THD *thd,
   */
   set_if_smaller(records, table_records);
   DBUG_RETURN(returnval);
+}
+
+static quick_select_return try_simple_update_unique_key_quick_select(
+    THD *thd, SQL_SELECT *select, key_map keys_to_use, bool force_quick_range,
+    bool *out_handled)
+{
+  TABLE *table= select->head;
+  *out_handled= false;
+
+  if (thd->lex->sql_command != SQLCOM_UPDATE || !select->cond || !table ||
+      table->is_filled_at_execution())
+    return SQL_SELECT::OK;
+
+  delete select->quick;
+  select->quick= 0;
+  select->needed_reg.clear_all();
+  select->quick_keys.clear_all();
+  table->with_impossible_ranges.clear_all();
+  select->records= table->stat_records();
+  if (table->file->ha_table_flags() & HA_NON_COMPARABLE_ROWID)
+    return SQL_SELECT::OK;
+
+  if (table->force_index || force_quick_range)
+    select->read_time= DBL_MAX;
+  else
+    select->read_time= table->file->cost(
+        table->file->ha_scan_and_compare_time(select->records));
+  select->possible_keys.clear_all();
+
+  keys_to_use.intersect(table->keys_in_use_for_query);
+  if (keys_to_use.is_clear_all())
+    return SQL_SELECT::OK;
+
+  for (uint keynr= 0; keynr < table->s->keys; keynr++)
+  {
+    if (!keys_to_use.is_set(keynr))
+      continue;
+
+    KEY *key_info= table->key_info + keynr;
+    if (!is_simple_unique_key_candidate(table, key_info))
+      continue;
+
+    Item *value_item= NULL;
+    if (find_simple_unique_key_equal_item(
+            select->cond, table, key_info->key_part[0].field, &value_item))
+    {
+      *out_handled= true;
+      return make_simple_update_unique_key_quick_select(
+          thd, select, keynr, value_item, select->records);
+    }
+  }
+
+  return SQL_SELECT::OK;
+}
+
+static quick_select_return
+make_simple_update_unique_key_quick_select(THD *thd, SQL_SELECT *select,
+                                           uint keynr, Item *value_item,
+                                           ha_rows table_records)
+{
+  TABLE *table= select->head;
+  KEY *key_info= table->key_info + keynr;
+  KEY_PART_INFO *key_part= key_info->key_part;
+  uchar key_buff[MAX_KEY_LENGTH];
+
+  DBUG_ASSERT(key_info->key_length <= MAX_KEY_LENGTH);
+  bzero(key_buff, key_info->key_length);
+
+  if (value_item->maybe_null() && value_item->is_null())
+  {
+    if (thd->is_error())
+      return SQL_SELECT::ERROR;
+    select->records= 0;
+    return SQL_SELECT::IMPOSSIBLE_RANGE;
+  }
+
+  store_key_item key_copy(thd, key_part->field, key_buff, NULL,
+                          key_part->length, value_item, FALSE);
+  if (thd->is_error())
+    return SQL_SELECT::ERROR;
+
+  enum_check_fields org_count_cuted_fields= thd->count_cuted_fields;
+  MY_BITMAP *old_map= dbug_tmp_use_all_columns(table, &table->write_set);
+  thd->count_cuted_fields= CHECK_FIELD_IGNORE;
+  store_key::store_key_result copy_result= key_copy.copy(thd);
+  thd->count_cuted_fields= org_count_cuted_fields;
+  dbug_tmp_restore_column_map(&table->write_set, old_map);
+  if (copy_result == store_key::STORE_KEY_FATAL)
+    return SQL_SELECT::ERROR;
+  if (key_copy.null_key)
+  {
+    select->records= 0;
+    return SQL_SELECT::IMPOSSIBLE_RANGE;
+  }
+
+  QUICK_RANGE_SELECT *quick= get_quick_select_for_exact_key(
+      thd, table, keynr, key_buff, key_info->key_length, 1);
+  if (!quick)
+    return SQL_SELECT::ERROR;
+
+  quick->records= MY_MIN(table_records, 1);
+  quick->read_time= 1.0;
+  select->set_quick(quick);
+  select->records= quick->records;
+  select->read_time= quick->read_time;
+  select->read_cost.reset();
+  select->possible_keys.set_bit(keynr);
+  select->quick_keys.set_bit(keynr);
+  return SQL_SELECT::OK;
+}
+
+static bool find_simple_unique_key_equal_item(Item *cond, TABLE *table,
+                                              Field *field,
+                                              Item **out_value_item)
+{
+  if (cond->type() == Item::COND_ITEM &&
+      ((Item_func *) cond)->functype() == Item_func::COND_AND_FUNC)
+  {
+    List_iterator<Item> it(*((Item_cond *) cond)->argument_list());
+    Item *item;
+    while ((item= it++))
+    {
+      if (find_simple_unique_key_equal_item(item, table, field,
+                                            out_value_item))
+        return true;
+    }
+    return false;
+  }
+
+  return find_key_field_equal_item(cond, table, field, out_value_item);
+}
+
+static bool find_key_field_equal_item(Item *item, TABLE *table, Field *field,
+                                      Item **out_value_item)
+{
+  if (item->type() != Item::FUNC_ITEM)
+    return false;
+
+  Item_func *func= (Item_func *) item;
+  if (func->functype() != Item_func::EQ_FUNC || func->argument_count() != 2)
+    return false;
+
+  Item **args= func->arguments();
+  for (uint field_arg= 0; field_arg < 2; field_arg++)
+  {
+    Item *real_field_item= args[field_arg]->real_item();
+    if (real_field_item->type() != Item::FIELD_ITEM)
+      continue;
+
+    Item_field *field_item= (Item_field *) real_field_item;
+    if (field_item->field != field)
+      continue;
+
+    Item *value_item= args[1 - field_arg];
+    const table_map used_tables= value_item->used_tables();
+    if (!value_item->const_item() ||
+        (used_tables & (table->map | OUTER_REF_TABLE_BIT | RAND_TABLE_BIT)))
+      return false;
+
+    *out_value_item= value_item;
+    return true;
+  }
+
+  return false;
+}
+
+static bool is_simple_unique_key_candidate(TABLE *table, KEY *key_info)
+{
+  if ((key_info->algorithm != HA_KEY_ALG_UNDEF &&
+       key_info->algorithm != HA_KEY_ALG_BTREE) ||
+      table->actual_n_key_parts(key_info) != 1 ||
+      key_info->user_defined_key_parts != 1 ||
+      key_info->key_length > MAX_KEY_LENGTH)
+    return false;
+
+  const ulong key_flags= table->actual_key_flags(key_info);
+  if ((key_flags & (HA_NOSAME | HA_NULL_PART_KEY)) != HA_NOSAME)
+    return false;
+
+  KEY_PART_INFO *key_part= key_info->key_part;
+  return key_part->field && !key_part->field->vcol_info &&
+         key_part->length == key_part->field->key_length() &&
+         key_part->store_length == key_info->key_length &&
+         !(key_part->key_part_flag & (HA_BLOB_PART | HA_VAR_LENGTH_PART));
 }
 
 /****************************************************************************
@@ -12869,6 +13088,81 @@ FT_SELECT *get_ft_select(THD *thd, TABLE *table, uint key)
   }
   else
     return fts;
+}
+
+/*
+  Create quick select from a fully built exact key image.
+*/
+
+QUICK_RANGE_SELECT *get_quick_select_for_exact_key(THD *thd, TABLE *table,
+                                                   uint keynr,
+                                                   const uchar *key_buff,
+                                                   uint key_length,
+                                                   ha_rows records)
+{
+  MEM_ROOT *old_root, *alloc;
+  QUICK_RANGE_SELECT *quick;
+  KEY *key_info= &table->key_info[keynr];
+  KEY_PART *key_part;
+  QUICK_RANGE *range;
+  uchar *range_key;
+  bool create_err= FALSE;
+  Cost_estimate cost;
+  uint max_used_key_len;
+  uint key_parts= 1;
+
+  old_root= thd->mem_root;
+  quick= new QUICK_RANGE_SELECT(thd, table, keynr, 0, 0, &create_err);
+  alloc= thd->mem_root;
+  thd->mem_root= old_root;
+
+  if (!quick || create_err || quick->init())
+    goto err;
+  quick->records= records;
+
+  range_key= (uchar *) alloc_root(alloc, key_length);
+  if (!range_key || unlikely(!(range= new (alloc) QUICK_RANGE())))
+    goto err;
+  memcpy(range_key, key_buff, key_length);
+
+  range->min_key= range->max_key= range_key;
+  range->min_length= range->max_length= key_length;
+  range->min_keypart_map= range->max_keypart_map=
+      make_prev_keypart_map(key_parts);
+  range->flag= EQ_RANGE;
+
+  if (unlikely(!(quick->key_parts= key_part= (KEY_PART *) alloc_root(
+                     &quick->alloc, sizeof(KEY_PART) * key_parts))))
+    goto err;
+
+  key_part->part= 0;
+  key_part->field= key_info->key_part[0].field;
+  key_part->length= key_info->key_part[0].length;
+  key_part->store_length= key_info->key_part[0].store_length;
+  key_part->null_bit= key_info->key_part[0].null_bit;
+  key_part->flag= (uint8) key_info->key_part[0].key_part_flag;
+
+  max_used_key_len= key_info->key_part[0].store_length;
+  quick->max_used_key_length= max_used_key_len;
+
+  if (insert_dynamic(&quick->ranges, (uchar *) &range))
+    goto err;
+
+  quick->mrr_flags= HA_MRR_NO_ASSOCIATION |
+                    (table->file->keyread_enabled() ? HA_MRR_INDEX_ONLY : 0);
+  if (thd->lex->sql_command != SQLCOM_SELECT)
+    quick->mrr_flags|= HA_MRR_USE_DEFAULT_IMPL;
+
+  quick->mrr_buf_size= thd->variables.mrr_buff_size;
+  if (table->file->multi_range_read_info(quick->index, 1, (uint) records, ~0,
+                                         &quick->mrr_buf_size,
+                                         &quick->mrr_flags, &cost))
+    goto err;
+
+  return quick;
+err:
+  delete quick;
+  return 0;
 }
 
 /*

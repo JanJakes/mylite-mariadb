@@ -249,6 +249,7 @@ static void test_autoincrement_insert_select_on_duplicate_key_update(void);
 static void test_autoincrement_insert_select_failed_dml(void);
 static void test_indexed_rows(void);
 static void test_prepared_routed_select_reads(void);
+static void test_prepared_primary_key_update_rebinds(void);
 static void test_standalone_index_ddl(void);
 static void test_copy_alter_leaf_root_publication(void);
 static void test_index_ddl_if_exists(void);
@@ -654,6 +655,7 @@ int main(int argc, char **argv) {
     test_autoincrement_insert_select_failed_dml();
     test_indexed_rows();
     test_prepared_routed_select_reads();
+    test_prepared_primary_key_update_rebinds();
     test_standalone_index_ddl();
     test_copy_alter_leaf_root_publication();
     test_index_ddl_if_exists();
@@ -16873,6 +16875,115 @@ static void test_prepared_routed_select_reads(void) {
         "SELECT slug FROM prepared_select_posts WHERE id = ?",
         1,
         "first"
+    );
+
+    assert(mylite_close(db) == MYLITE_OK);
+    assert_no_durable_sidecars(root, "storage-engine.mylite");
+
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_prepared_primary_key_update_rebinds(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    mylite_stmt *stmt = NULL;
+
+    assert_exec_succeeds(db, "CREATE DATABASE prepared_updates");
+    assert_exec_succeeds(db, "USE prepared_updates");
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE prepared_update_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO prepared_update_posts VALUES (0, 100), (1, 10), (2, 20)");
+
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE prepared_update_posts SET value = value + 1 WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(stmt != NULL);
+    assert(mylite_bind_parameter_count(stmt) == 1U);
+
+    assert(mylite_bind_int64(stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+
+    assert(mylite_bind_int64(stmt, 1U, 2) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+
+    assert(mylite_bind_null(stmt, 1U) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 0);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+
+    assert(mylite_bind_int64(stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE prepared_update_posts SET value = value + 5 WHERE ? = id",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE prepared_update_posts SET value = value + 50 "
+            "WHERE id = ? AND value < 100",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(stmt, 1U, 0) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 0);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+
+    assert(mylite_bind_int64(stmt, 1U, 2) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+
+    assert_query_single_value(
+        db,
+        "SELECT CAST(value AS CHAR) FROM prepared_update_posts WHERE id = 0",
+        "100"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT CAST(value AS CHAR) FROM prepared_update_posts WHERE id = 1",
+        "17"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT CAST(value AS CHAR) FROM prepared_update_posts WHERE id = 2",
+        "71"
     );
 
     assert(mylite_close(db) == MYLITE_OK);
