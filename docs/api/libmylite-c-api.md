@@ -471,6 +471,11 @@ functions such as `BENCHMARK()`, named-lock helpers,
 such as `VERSION()` and `FORMAT()` remain available. Query-cache
 SELECT hints remain accepted no-op syntax. `INFORMATION_SCHEMA.PROFILING` is
 rejected as part of the statement-profiling server diagnostic surface.
+MariaDB vector SQL functions and MHNSW vector indexes are also outside the
+default embedded profile. `VEC_FROMTEXT()`, `VEC_TOTEXT()`, `VEC_DISTANCE()`,
+`VEC_DISTANCE_EUCLIDEAN()`, and `VEC_DISTANCE_COSINE()` fail through MyLite
+policy, while the retained `VECTOR(N)` type parser is a separate compatibility
+surface.
 Optimizer trace variables and
 `INFORMATION_SCHEMA.OPTIMIZER_TRACE`, including unqualified reads while
 `information_schema` is the current schema, are rejected as server diagnostics.

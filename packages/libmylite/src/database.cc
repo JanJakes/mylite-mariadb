@@ -236,6 +236,7 @@ void update_current_schema_after_successful_sql(mylite_db &db, std::string_view 
 bool is_unsupported_server_surface_sql(std::string_view sql, const std::string &current_schema);
 bool is_unsupported_oracle_sql_mode_statement(std::string_view sql);
 bool is_unsupported_procedure_analyse_statement(std::string_view sql);
+bool is_unsupported_vector_runtime_statement(std::string_view sql);
 bool is_unsupported_account_or_event_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_plugin_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_udf_statement(const SqlPolicyTokens &tokens);
@@ -243,6 +244,8 @@ bool is_unsupported_replication_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_binlog_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_xa_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_replication_function_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_vector_sql_function_statement(const SqlPolicyTokens &tokens);
+bool is_unsupported_vector_index_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_server_utility_function_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_sql_handler_statement(const SqlPolicyTokens &tokens);
 bool is_unsupported_select_file_statement(const SqlPolicyTokens &tokens);
@@ -1132,6 +1135,11 @@ int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql) {
         return MYLITE_ERROR;
     }
 
+    if (is_unsupported_vector_runtime_statement(sql)) {
+        set_error(db, MYLITE_ERROR, "vector SQL runtime is not supported by MyLite");
+        return MYLITE_ERROR;
+    }
+
     if (is_unsupported_server_surface_sql(sql, db.current_schema)) {
         set_error(db, MYLITE_ERROR, "server-owned SQL surface is not supported by MyLite");
         return MYLITE_ERROR;
@@ -1170,6 +1178,12 @@ bool is_unsupported_procedure_analyse_statement(std::string_view sql) {
         }
     }
     return false;
+}
+
+bool is_unsupported_vector_runtime_statement(std::string_view sql) {
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(sql);
+    return is_unsupported_vector_sql_function_statement(tokens) ||
+           is_unsupported_vector_index_statement(tokens);
 }
 
 bool is_unsupported_server_surface_sql(std::string_view sql, const std::string &current_schema) {
@@ -1315,6 +1329,37 @@ bool is_unsupported_replication_function_statement(const SqlPolicyTokens &tokens
              identifier_token_equals(tokens.values[index], "BINLOG_GTID_POS") ||
              identifier_token_equals(tokens.values[index], "WSREP_SYNC_WAIT_UPTO_GTID")) &&
             token_equals(tokens.values[index + 1U], "(")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool is_unsupported_vector_sql_function_statement(const SqlPolicyTokens &tokens) {
+    for (std::size_t index = 0; index + 1U < tokens.count; ++index) {
+        if ((identifier_token_equals(tokens.values[index], "VEC_DISTANCE") ||
+             identifier_token_equals(tokens.values[index], "VEC_DISTANCE_COSINE") ||
+             identifier_token_equals(tokens.values[index], "VEC_DISTANCE_EUCLIDEAN") ||
+             identifier_token_equals(tokens.values[index], "VEC_FROMTEXT") ||
+             identifier_token_equals(tokens.values[index], "VEC_TOTEXT")) &&
+            token_equals(tokens.values[index + 1U], "(")) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool is_unsupported_vector_index_statement(const SqlPolicyTokens &tokens) {
+    for (std::size_t index = 0; index + 1U < tokens.count; ++index) {
+        if (!identifier_token_equals(tokens.values[index], "VECTOR")) {
+            continue;
+        }
+        if (identifier_token_equals(tokens.values[index + 1U], "KEY") ||
+            identifier_token_equals(tokens.values[index + 1U], "INDEX")) {
+            return true;
+        }
+        if (token_equals(tokens.values[index + 1U], "(") && index > 0U &&
+            token_in(tokens.values[index - 1U], "(", ",")) {
             return true;
         }
     }

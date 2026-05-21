@@ -121,6 +121,7 @@ behavior. It does not require a daemon in the default test path.
 | User-variable diagnostics | ➖&nbsp;Out&nbsp;of&nbsp;scope | Optional session introspection/reset surface; the default embedded archive omits the `user_variables` plugin, rejects `INFORMATION_SCHEMA.USER_VARIABLES`, `SHOW USER_VARIABLES`, and `FLUSH USER_VARIABLES`, and keeps ordinary `@variable` SQL plus application tables named `user_variables` usable |
 | External backup runtime | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server backup-tool coordination surface; `BACKUP STAGE`, `BACKUP LOCK`, and `BACKUP UNLOCK` are rejected by policy coverage, and the default embedded archive omits the active backup runtime while keeping ordinary DDL hooks inert |
 | Server utility SQL functions | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server benchmarking, named locks, host-file reads, replication waits, sleeping, and server-id based ID generation; direct and prepared `BENCHMARK()`, `GET_LOCK()` and related helpers, `LOAD_FILE()`, replication wait/position helpers, `SLEEP()`, and `UUID_SHORT()` are rejected by policy and omitted from the default embedded archive, while ordinary scalar functions, JSON, GEOMETRY/GIS, DDL/DML, transactions, and native storage remain supported |
+| Vector SQL runtime | ➖&nbsp;Out&nbsp;of&nbsp;scope | MariaDB vector conversion, distance, and MHNSW vector-index runtime are not part of the current embedded profile; direct and prepared `VEC_FROMTEXT()`, `VEC_TOTEXT()`, `VEC_DISTANCE()`, `VEC_DISTANCE_EUCLIDEAN()`, and `VEC_DISTANCE_COSINE()` calls are rejected by policy, vector-index DDL is covered as rejected, and the default embedded archive omits `item_vectorfunc.cc`, `vector_mhnsw.cc`, and mandatory `mhnsw` plugin registration while retaining `VECTOR(N)` type parsing as a separate compatibility decision |
 | `SFORMAT()` | ➖&nbsp;Out&nbsp;of&nbsp;scope | Optional MariaDB fmtlib-backed formatting helper; omitted from the embedded profile so the embedded SQL target can build without C++ exceptions, while ordinary `FORMAT()` remains available |
 | `PROCEDURE ANALYSE()` | ➖&nbsp;Out&nbsp;of&nbsp;scope | Legacy diagnostic SELECT extension; rejected by policy and omitted from the default embedded archive while ordinary SELECT queries remain supported |
 | System-variable help comments | 🟡&nbsp;Partial | `SHOW VARIABLES` and system-variable rows, values, defaults, and validation remain available; `INFORMATION_SCHEMA.SYSTEM_VARIABLES.VARIABLE_COMMENT` is empty in the default embedded profile to omit server help text |
@@ -139,7 +140,7 @@ behavior. It does not require a daemon in the default test path.
 | CHECK constraints | ⚪&nbsp;Planned | Use MariaDB expression evaluation and persist metadata through native metadata paths |
 | Foreign keys | ⚪&nbsp;Planned | InnoDB-compatible semantics where practical; reject unsupported cases explicitly |
 | Generated columns | ⚪&nbsp;Planned | Preserve MariaDB virtual/stored generated-column behavior through storage support |
-| FULLTEXT and SPATIAL indexes | ⚪&nbsp;Planned | Support only where the selected native engine and embedded profile support them |
+| FULLTEXT, SPATIAL, and vector indexes | ⚪&nbsp;Planned | Support only where the selected native engine and embedded profile support them |
 
 ## Transactions, Recovery, And Concurrency
 

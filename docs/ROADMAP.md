@@ -73,6 +73,7 @@ surface that does not fit a local directory-owned library:
 - host-file SQL imports,
 - network client authentication plugin handshake support,
 - server utility SQL functions,
+- vector SQL functions and MHNSW vector indexes,
 - rarely used optional engines or plugins unless a slice justifies them.
 
 The minimal embedded build establishes the first baseline. Later slices record
@@ -132,6 +133,11 @@ named locks, host-file reads, replication waits, sleeping, and server-id based
 ID generation are outside the embedded application SQL profile; ordinary scalar
 functions, JSON, GEOMETRY/GIS, DDL/DML, transactions, and native storage remain
 covered.
+Vector SQL functions and MHNSW vector-index runtime are omitted after coverage
+proves direct and prepared `VEC_*` calls fail predictably and vector-index DDL
+does not create application tables; ordinary scalar functions, JSON,
+GEOMETRY/GIS, DDL/DML, transactions, native storage, and retained `VECTOR(N)`
+type parsing remain separate supported or planned surfaces.
 Startup option rows for disabled server topology and dynamic-plugin-loading
 surfaces are omitted after source review proves the retained `libmylite`
 startup vector still uses only serverless, directory-owned options.

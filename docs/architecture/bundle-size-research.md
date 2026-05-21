@@ -39,7 +39,7 @@ The original production-size comparison baseline used here was:
 | `libmariadbd.a` | 43,405,432 | 41.39 |
 | stripped linked open-close smoke | 19,331,904 | 18.44 |
 
-The current direct-session stack is:
+The most reduced research-stack measurement captured on the source branch was:
 
 | Artifact | Bytes | MiB |
 | --- | ---: | ---: |
@@ -192,6 +192,6 @@ The current direct-session stack is:
 | Binlog removal boundary | The initially identified binlog/replay object cluster was roughly 512 KiB of archive code before compression, but `mysql_bin_log` and `binlog_tp` stayed tied into transaction-manager paths. | Safe work had to proceed through section GC, command-surface rejection, and small no-binlog stubs instead of deleting `log.cc` wholesale. |
 | Minimal linked consumer proxy | Before direct sessions, a minimal executable that only called `mylite_open()` and `mylite_close()` was 4,344,120 bytes stripped, 107,984 bytes smaller than the stripped open-close smoke at that point. | The open-close smoke was a conservative linked-payload proxy; it included about 0.10 MiB of harness overhead before later direct-session work. |
 | Early PHP-shaped shared probe | After the SQL-exceptions cut, a one-export shared-object probe was 3,886,048 bytes stripped and depended only on `libstdc++`, `libm`, `libgcc_s`, and `libc`. | Extension-shaped artifacts were already smaller than the executable smoke; later direct-session and audit work made this the better packaging signal. |
-| Current bundle audit | The corrected current PHP-shaped shared probe is 3,861,728 bytes stripped and 3,859,368 bytes without section headers, with one export, no unused direct dynamic dependencies, and no checked embedded-client C API roots. | This is the best current GCC packaging floor; it is more representative than the open-close executable for PHP-extension-style delivery. |
+| Research-stack bundle audit | The corrected PHP-shaped shared probe in that research stack is 3,861,728 bytes stripped and 3,859,368 bytes without section headers, with one export, no unused direct dynamic dependencies, and no checked embedded-client C API roots. | This is useful historical GCC packaging evidence, but it is not the current default-profile artifact; rerun candidates against the current baseline before accepting them. |
 | Vendored dynamic dependencies | Bundling the current dynamic dependencies would add 5,081,640 bytes, or 4.85 MiB, before compression. | These libraries are outside `libmariadbd.a`; dependency bundling is a packaging decision, not a static archive saving. |
 | Remaining binlog shell | After lld `-O2`, the residual shell was about 4.4 KiB of `mysql_bin_log` BSS, 160 bytes of `binlog_tp`, and small no-op methods/vtables. | Further binlog-shell removal is not worth near-term size work unless MyLite undertakes a broader transaction-log class-layout refactor. |

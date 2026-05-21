@@ -36,7 +36,12 @@
 #include "sp.h"
 #include "sql_time.h"
 #include "sql_type_geom.h"
+#ifndef MYLITE_WITH_VECTOR_SQL_RUNTIME
+#define MYLITE_WITH_VECTOR_SQL_RUNTIME 1
+#endif
+#if MYLITE_WITH_VECTOR_SQL_RUNTIME
 #include "item_vectorfunc.h"
+#endif
 #include <mysql/plugin_function.h>
 
 #ifndef MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS
@@ -6327,6 +6332,7 @@ Create_func_year_week::create_native(THD *thd, const LEX_CSTRING *name,
 }
 
 
+#if MYLITE_WITH_VECTOR_SQL_RUNTIME
 class Create_func_vec_distance_euclidean: public Create_func_arg2
 {
 public:
@@ -6407,6 +6413,7 @@ protected:
 };
 
 Create_func_vec_fromtext Create_func_vec_fromtext::s_singleton;
+#endif
 
 
 #define BUILDER(F) & F::s_singleton
@@ -6672,11 +6679,13 @@ const Native_func_registry func_array[] =
 #if MYLITE_WITH_SERVER_UTILITY_FUNCTIONS
   { { STRING_WITH_LEN("UUID_SHORT") }, BUILDER(Create_func_uuid_short)},
 #endif
+#if MYLITE_WITH_VECTOR_SQL_RUNTIME
   { { STRING_WITH_LEN("VEC_DISTANCE_EUCLIDEAN") }, BUILDER(Create_func_vec_distance_euclidean)},
   { { STRING_WITH_LEN("VEC_DISTANCE_COSINE") }, BUILDER(Create_func_vec_distance_cosine)},
   { { STRING_WITH_LEN("VEC_DISTANCE") }, BUILDER(Create_func_vec_distance)},
   { { STRING_WITH_LEN("VEC_FROMTEXT") }, BUILDER(Create_func_vec_fromtext)},
   { { STRING_WITH_LEN("VEC_TOTEXT") }, BUILDER(Create_func_vec_totext)},
+#endif
   { { STRING_WITH_LEN("VERSION") }, BUILDER(Create_func_version)},
   { { STRING_WITH_LEN("WEEK") }, BUILDER(Create_func_week)},
   { { STRING_WITH_LEN("WEEKDAY") }, BUILDER(Create_func_weekday)},

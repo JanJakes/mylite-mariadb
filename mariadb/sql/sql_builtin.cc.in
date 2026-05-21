@@ -32,8 +32,9 @@ extern
 builtin_maria_plugin 
   @mysql_mandatory_plugins@ @mysql_optional_plugins@
 #if !defined(MYLITE_WITH_BINLOG_CORE) || MYLITE_WITH_BINLOG_CORE
-  builtin_maria_binlog_plugin, builtin_maria_mhnsw_plugin,
-#else
+  builtin_maria_binlog_plugin,
+#endif
+#if !defined(MYLITE_WITH_VECTOR_SQL_RUNTIME) || MYLITE_WITH_VECTOR_SQL_RUNTIME
   builtin_maria_mhnsw_plugin,
 #endif
   builtin_maria_mysql_password_plugin;
@@ -49,6 +50,8 @@ struct st_maria_plugin *mysql_mandatory_plugins[]=
   builtin_maria_binlog_plugin,
 #endif
   builtin_maria_mysql_password_plugin,
+#if !defined(MYLITE_WITH_VECTOR_SQL_RUNTIME) || MYLITE_WITH_VECTOR_SQL_RUNTIME
   builtin_maria_mhnsw_plugin,
+#endif
   @mysql_mandatory_plugins@ 0
 };

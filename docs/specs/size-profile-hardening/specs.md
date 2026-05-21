@@ -79,6 +79,11 @@ replication waits, and server-id based ID generation rather than application
 DDL/DML behavior. Host-file SQL imports are omitted because `LOAD DATA` and
 `LOAD XML` read caller-named files or protocol file streams outside the
 `libmylite` parameter-binding and result API.
+Vector SQL functions and MHNSW vector-index runtime are omitted because
+MariaDB vector search is a newer optional search surface outside the current
+embedded compatibility target; ordinary scalar functions, JSON, GEOMETRY/GIS,
+DDL/DML, transactions, native storage, and retained `VECTOR(N)` type parsing
+remain separate surfaces.
 
 ## Source Findings
 
@@ -100,8 +105,8 @@ DDL/DML behavior. Host-file SQL imports are omitted because `LOAD DATA` and
   packaging-only reduction that passed relinked smokes. The old `strip -g`
   command is GNU-specific; Apple `strip` accepts `-S -x` for debug/local-symbol
   stripping and `-u -r` for a relink-safe undefined/dynamic-symbol strip.
-- On the current macOS baseline, `strip -u -r` plus `ranlib` on
-  `libmariadbd.a` saves 567,616 bytes without changing archive membership.
+- On the current macOS baseline, `strip -S -x -u -r` plus `ranlib` on
+  `libmariadbd.a` saves 558,576 bytes without changing archive membership.
 - Setting `PLUGIN_PERFSCHEMA=NO` and keeping archive stripping enabled reduces
   the current archive to 31,529,704 bytes, 30.07 MiB, and 712 members.
 - Building the same profile with `CMAKE_BUILD_TYPE=MinSizeRel` reduces the
@@ -444,18 +449,28 @@ DDL/DML behavior. Host-file SQL imports are omitted because `LOAD DATA` and
   retained XA command symbols fail-closed, preserves `XA RECOVER` prepare-time
   metadata, leaves ordinary native-engine transactions on implicit XIDs, and
   reduces the stripped archive to 26,028,560 bytes, 24.82 MiB, and 693 members.
-- Applying the Darwin relink-safe archive strip mode keeps the archive
-  relinkable with the current embedded tests, records the strip signature in
-  the marker file, and reduces the stripped archive to 26,020,528 bytes,
-  24.82 MiB, and 693 members.
+- Omitting vector SQL function and MHNSW vector-index runtime behind
+  `MYLITE_WITH_VECTOR_SQL_RUNTIME=0` reduces the pre-strip archive to
+  26,496,392 bytes, 25.27 MiB, and 692 members.
+- Applying the combined Darwin relink-safe archive strip mode keeps the
+  archive relinkable with the current embedded tests, records the strip
+  signature in the marker file, and reduces the stripped archive to 25,937,816
+  bytes, 24.74 MiB, and 692 members.
+- `mariadb/sql/item_vectorfunc.cc` implements MariaDB `VEC_*` conversion and
+  distance functions, while `mariadb/sql/vector_mhnsw.cc` implements the
+  mandatory `mhnsw` vector-index plugin, cache, transaction participant, and
+  index maintenance entry points. Retained SQL/table/handler sources reference
+  `mhnsw_*` declarations, so the embedded profile needs fail-closed stubs when
+  the runtime is omitted.
 
 ## Proposed Design
 
 After building the embedded archive, `tools/mariadb-embedded-build` strips
 symbols from `libmariadbd.a` and refreshes the archive index with `ranlib`. On
-Darwin, it uses `strip -u -r`, which was verified by relinking and running the
-embedded tests against a copied archive. Other platforms keep the existing
-debug/local-symbol strip mode. The wrapper records a build-local marker after
+Darwin, it uses `strip -S -x -u -r`, which was verified by relinking and
+running the embedded tests against a clean rebuilt archive. Other platforms
+keep the existing debug/local-symbol strip mode. The wrapper records a
+build-local marker after
 stripping so a no-op rebuild does not mutate an already-stripped archive or
 drift the measured size; the marker includes a strip signature so policy
 changes trigger a fresh strip pass.
@@ -790,6 +805,15 @@ helpers, `SLEEP()`, and `UUID_SHORT()` while keeping ordinary scalar
 functions, JSON, GEOMETRY/GIS, DDL/DML, transactions, and native storage
 available.
 
+The embedded archive omits MariaDB vector SQL function and MHNSW vector-index
+runtime by setting `MYLITE_WITH_VECTOR_SQL_RUNTIME=0` in the MyLite baseline.
+The option defaults to `ON` so inherited MariaDB builds keep upstream vector
+behavior. The disabled profile omits `item_vectorfunc.cc`, replaces
+`vector_mhnsw.cc` with fail-closed retained `mhnsw_*` symbols, and removes the
+mandatory `mhnsw` plugin registration. MyLite policy rejects direct and
+prepared `VEC_*` calls before dispatch, and vector-index DDL fails without
+creating application tables.
+
 The embedded archive omits PROXY protocol listener support by setting
 `MYLITE_WITH_PROXY_PROTOCOL=0` in the MyLite baseline. The option defaults to
 `ON` so normal MariaDB builds keep upstream listener behavior. The disabled
@@ -1030,7 +1054,7 @@ run against the same native engine members.
 ## Binary-Size Impact
 
 The first step was archive-only symbol stripping; the current Darwin strip
-mode saves 567,616 bytes on the current archive. Disabling Performance Schema
+mode saves 558,576 bytes on the current archive. Disabling Performance Schema
 removes unused static plugin members.
 Switching the same profile to `MinSizeRel`, omitting Feedback, and compiling
 embedded `HELP` to stubs brings the archive to 30,296,952 bytes / 28.89 MiB.
@@ -1263,10 +1287,11 @@ Omitting the full external-XA runtime brings the current archive to
 with Performance Schema disabled, 7,101,080 bytes smaller than the
 symbol-stripped baseline with Performance Schema still built, and 7,813,760
 bytes smaller than the original broad archive.
-Using the Darwin relink-safe archive strip mode brings the current archive to
-26,020,528 bytes / 24.82 MiB, 5,509,176 bytes smaller than the Release build
-with Performance Schema disabled, 7,109,112 bytes smaller than the
-symbol-stripped baseline with Performance Schema still built, and 7,821,792
+Omitting vector SQL function and MHNSW vector-index runtime, then applying the
+combined Darwin relink-safe archive strip mode, brings the current archive to
+25,937,816 bytes / 24.74 MiB, 5,591,888 bytes smaller than the Release build
+with Performance Schema disabled, 7,191,824 bytes smaller than the
+symbol-stripped baseline with Performance Schema still built, and 7,904,504
 bytes smaller than the original broad archive.
 
 ## License Or Dependency Impact
@@ -1477,6 +1502,11 @@ artifacts while retaining `libcrypto` for SQL crypto and password functions.
   replication wait/position helpers, `SLEEP()`, and `UUID_SHORT()` are
   rejected, while retained scalar functions, JSON, GEOMETRY/GIS, DDL/DML,
   transactions, and native storage remain covered.
+  Vector SQL function and MHNSW vector-index runtime is omitted from the
+  embedded archive; direct and prepared `VEC_*` calls are rejected, vector-index
+  DDL fails without creating application tables, `item_vectorfunc.cc.o` and
+  `vector_mhnsw.cc.o` are absent, and `mylite_vector_sql_runtime_disabled.cc.o`
+  is present.
   Persistent
   optimizer-statistics storage is omitted, `use_stat_tables` starts as `NEVER`,
   histogram collection starts at size `0`, persistent statistics SQL and

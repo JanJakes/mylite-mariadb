@@ -187,6 +187,17 @@ ELSE()
   ADD_DEFINITIONS(-DMYLITE_WITH_SERVER_UTILITY_FUNCTIONS=0)
 ENDIF()
 
+OPTION(MYLITE_WITH_VECTOR_SQL_RUNTIME "Build vector SQL function and MHNSW runtime" ON)
+IF(MYLITE_WITH_VECTOR_SQL_RUNTIME)
+  ADD_DEFINITIONS(-DMYLITE_WITH_VECTOR_SQL_RUNTIME=1)
+  SET(MYLITE_VECTOR_SQL_FUNCTION_SOURCE ../sql/item_vectorfunc.cc)
+  SET(MYLITE_VECTOR_MHNSW_SOURCE ../sql/vector_mhnsw.cc)
+ELSE()
+  ADD_DEFINITIONS(-DMYLITE_WITH_VECTOR_SQL_RUNTIME=0)
+  SET(MYLITE_VECTOR_SQL_FUNCTION_SOURCE)
+  SET(MYLITE_VECTOR_MHNSW_SOURCE ../sql/mylite_vector_sql_runtime_disabled.cc)
+ENDIF()
+
 OPTION(MYLITE_WITH_FULL_ERROR_MESSAGES "Build full server error message catalog" ON)
 IF(MYLITE_WITH_FULL_ERROR_MESSAGES)
   ADD_DEFINITIONS(-DMYLITE_WITH_FULL_ERROR_MESSAGES=1)
@@ -438,7 +449,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/sql_show.cc ../sql/sql_state.c 
            ${MYLITE_SQL_STATISTICS_SOURCE} ../sql/sql_string.cc
            ../sql/sql_table.cc ../sql/sql_test.cc
-           ../sql/ddl_log.cc ../sql/item_vectorfunc.cc
+           ../sql/ddl_log.cc ${MYLITE_VECTOR_SQL_FUNCTION_SOURCE}
            ../sql/sql_trigger.cc ../sql/sql_union.cc
            ../sql/sql_update.cc ../sql/sql_view.cc ${MYLITE_SQL_PROFILE_SOURCE}
            ${MYLITE_SQL_UDF_SOURCE}
@@ -450,7 +461,7 @@ SET(SQL_EMBEDDED_SOURCES emb_qcache.cc libmysqld.c lib_sql.cc
            ../sql/sql_alter.cc ../sql/sql_partition_admin.cc
            ${MYLITE_EVENT_PARSE_DATA_SOURCE}
            ../sql/sql_signal.cc
-           ../sql/sys_vars.cc ../sql/vector_mhnsw.cc
+           ../sql/sys_vars.cc ${MYLITE_VECTOR_MHNSW_SOURCE}
            ${CMAKE_BINARY_DIR}/sql/sql_builtin.cc
            ../sql/mdl.cc ../sql/transaction.cc
            ../sql/sql_join_cache.cc

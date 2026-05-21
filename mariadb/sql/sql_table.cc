@@ -65,6 +65,10 @@
 #include "log.h"
 #include "vector_mhnsw.h"
 
+#ifndef MYLITE_WITH_VECTOR_SQL_RUNTIME
+#define MYLITE_WITH_VECTOR_SQL_RUNTIME 1
+#endif
+
 #ifdef WITH_WSREP
 #include "wsrep_mysqld.h"
 
@@ -3646,6 +3650,11 @@ mysql_prepare_create_table_finalize(THD *thd, HA_CREATE_INFO *create_info,
       key_number--;                             // Skip this key
       continue;
     case Key::VECTOR:
+#if !MYLITE_WITH_VECTOR_SQL_RUNTIME
+        my_error(ER_NOT_SUPPORTED_YET, MYF(0),
+                 "VECTOR INDEX in the MyLite embedded profile");
+        DBUG_RETURN(TRUE);
+#endif
         if (IF_PARTITIONING(thd->work_part_info, false))
         {
           my_error(ER_FEATURE_NOT_SUPPORTED_WITH_PARTITIONING, MYF(0), "VECTOR");

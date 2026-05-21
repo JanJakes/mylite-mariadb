@@ -696,6 +696,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SELECT 'LOAD_FILE()' AS literal");
     exec_ok(db, "SELECT 'LOAD DATA INFILE' AS literal");
     exec_ok(db, "SELECT 'SLEEP()' AS literal");
+    exec_ok(db, "SELECT 'VEC_FROMTEXT()' AS literal");
     exec_ok(db, "SELECT 'HANDLER app.t OPEN' AS literal");
     exec_ok(db, "SELECT 'INTO OUTFILE /tmp/mylite-out.txt' AS literal");
     exec_ok(db, "SHOW VARIABLES LIKE 'version'");
@@ -836,6 +837,15 @@ static void assert_server_sql_rejected(mylite_db *db) {
     expect_error(db, "SELECT LOAD_FILE('/tmp/mylite-policy.txt')", "server-owned SQL surface");
     expect_error(db, "SELECT SLEEP(0)", "server-owned SQL surface");
     expect_error(db, "SELECT UUID_SHORT()", "server-owned SQL surface");
+    expect_error(db, "SELECT VEC_FROMTEXT('[1,2]')", "vector SQL runtime");
+    expect_error(db, "SELECT VEC_TOTEXT(X'0000803F00000040')", "vector SQL runtime");
+    expect_error(db, "SELECT VEC_DISTANCE(X'0000803F', X'00000040')", "vector SQL runtime");
+    expect_error(
+        db,
+        "SELECT VEC_DISTANCE_EUCLIDEAN(X'0000803F', X'00000040')",
+        "vector SQL runtime"
+    );
+    expect_error(db, "SELECT VEC_DISTANCE_COSINE(X'0000803F', X'00000040')", "vector SQL runtime");
     expect_error(db, "SET GLOBAL gtid_binlog_state = '0-1-1'", "server-owned SQL surface");
     expect_error(db, "SET @@GLOBAL.gtid_slave_pos = '0-1-1'", "server-owned SQL surface");
     expect_error(db, "SET gtid_strict_mode = ON", "server-owned SQL surface");
@@ -1071,6 +1081,19 @@ static void assert_server_sql_rejected(mylite_db *db) {
     );
     expect_prepare_error(db, "SELECT SLEEP(0)", "server-owned SQL surface");
     expect_prepare_error(db, "SELECT UUID_SHORT()", "server-owned SQL surface");
+    expect_prepare_error(db, "SELECT VEC_FROMTEXT('[1,2]')", "vector SQL runtime");
+    expect_prepare_error(db, "SELECT VEC_TOTEXT(X'0000803F00000040')", "vector SQL runtime");
+    expect_prepare_error(db, "SELECT VEC_DISTANCE(X'0000803F', X'00000040')", "vector SQL runtime");
+    expect_prepare_error(
+        db,
+        "SELECT VEC_DISTANCE_EUCLIDEAN(X'0000803F', X'00000040')",
+        "vector SQL runtime"
+    );
+    expect_prepare_error(
+        db,
+        "SELECT VEC_DISTANCE_COSINE(X'0000803F', X'00000040')",
+        "vector SQL runtime"
+    );
     expect_prepare_error(db, "SET GLOBAL gtid_binlog_state = '0-1-1'", "server-owned SQL surface");
     expect_prepare_error(db, "SET gtid_strict_mode = ON", "server-owned SQL surface");
     expect_prepare_error(db, "HANDLER app.t OPEN", "server-owned SQL surface");

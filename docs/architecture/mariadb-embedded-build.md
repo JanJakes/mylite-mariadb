@@ -57,6 +57,7 @@ MYLITE_WITH_STATUS_VARIABLES=OFF
 MYLITE_WITH_STATEMENT_PROFILING_METADATA=OFF
 MYLITE_WITH_ORACLE_COMPAT_FUNCTIONS=OFF
 MYLITE_WITH_SERVER_UTILITY_FUNCTIONS=OFF
+MYLITE_WITH_VECTOR_SQL_RUNTIME=OFF
 MYLITE_WITH_FULL_ERROR_MESSAGES=OFF
 MYLITE_WITH_DYNAMIC_PLUGIN_LOADING=OFF
 MYLITE_WITH_UDF_RUNTIME=OFF
@@ -207,7 +208,11 @@ utility SQL functions behind `MYLITE_WITH_SERVER_UTILITY_FUNCTIONS=0`;
 `BENCHMARK()`, named-lock helpers, `LOAD_FILE()`, replication wait/position
 helpers, `SLEEP()`, and `UUID_SHORT()` are rejected by MyLite policy, while
 ordinary scalar functions, JSON, GEOMETRY/GIS, DDL/DML, transactions, and
-native storage remain available. It uses a compact
+native storage remain available. It omits MariaDB vector SQL function and
+MHNSW vector-index runtime behind `MYLITE_WITH_VECTOR_SQL_RUNTIME=0`;
+direct and prepared `VEC_*` calls are rejected by MyLite policy, vector-index
+DDL fails without creating application tables, and retained `VECTOR(N)` type
+parsing remains a separate compatibility surface. It uses a compact
 server error-message catalog behind `MYLITE_WITH_FULL_ERROR_MESSAGES=0`;
 MariaDB error numbers and SQLSTATEs remain available, common syntax and
 duplicate-key diagnostics stay readable, and uncommon inherited server errors
@@ -238,8 +243,8 @@ enabled.
 | Ninja | 1.13.2 |
 | Bison | GNU Bison 3.8.2 from Homebrew |
 | Archive | `build/mariadb-embedded/libmysqld/libmariadbd.a` |
-| Archive size | 26,020,528 bytes / 24.82 MiB |
-| Archive members | 693 |
+| Archive size | 25,937,816 bytes / 24.74 MiB |
+| Archive members | 692 |
 
 The original broad archive before safe size hardening was 33,842,320 bytes /
 32.27 MiB. With `MinSizeRel`, the unused Performance Schema static plugin
@@ -316,9 +321,11 @@ Omitting the mmap-backed `tc.log` transaction coordinator reduces the current
 pre-strip archive to 26,599,376 bytes / 25.37 MiB.
 Omitting the full external-XA runtime reduces the current pre-strip archive to
 26,588,144 bytes / 25.36 MiB.
+Omitting vector SQL function and MHNSW vector-index runtime reduces the current
+pre-strip archive to 26,496,392 bytes / 25.27 MiB.
 Post-build platform-specific archive stripping plus `ranlib` saves another
-567,616 bytes without changing archive membership or runtime behavior. On
-Darwin, the wrapper uses `strip -u -r` after relink verification; other
+558,576 bytes without changing archive membership or runtime behavior. On
+Darwin, the wrapper uses `strip -S -x -u -r` after relink verification; other
 platforms keep the debug/local-symbol strip mode. The `SFORMAT()` and
 exception cut accounts for 1,808,240
 bytes, unwind-table omission saves another 10,840 bytes, and dynamic UDF
@@ -377,12 +384,12 @@ client authentication plugin handshake support saves 6,704 pre-strip bytes and
 `tc.log` transaction coordinator saves 8,120 pre-strip bytes and 8,064
 stripped bytes with no member-count change. Omitting the full external-XA
 runtime saves 11,232 pre-strip bytes and 10,688 stripped bytes with no
-member-count change. Using the Darwin relink-safe archive strip mode saves
-another 8,032 stripped bytes with no member-count change. The final archive is
-5,509,176 bytes smaller than the Release build with Performance Schema
-disabled, 7,109,112 bytes smaller than the symbol-stripped baseline that still
-built Performance Schema, and 7,821,792 bytes smaller than the original broad
-archive.
+member-count change. Omitting vector SQL function and MHNSW vector-index
+runtime saves 91,752 pre-strip bytes, 82,712 stripped bytes, and one archive
+member. The final archive is 5,591,888 bytes smaller than the Release build
+with Performance Schema disabled, 7,191,824 bytes smaller than the
+symbol-stripped baseline that still built Performance Schema, and 7,904,504
+bytes smaller than the original broad archive.
 
 The build found system OpenSSL 3.6.2, bundled zlib, Curses, CURL, LibXml2,
 GSSAPI, BZip2, LZ4, LibLZMA, LZO, PCRE2, and Zstandard support on this
@@ -427,6 +434,9 @@ Server utility SQL functions such as `BENCHMARK()`, named-lock helpers,
 `SLEEP()`, and `UUID_SHORT()` are omitted from the embedded function registry
 and rejected by policy, while ordinary scalar functions such as `VERSION()`,
 `FORMAT()`, JSON functions, and GEOMETRY/GIS functions remain available.
+MariaDB vector SQL functions such as `VEC_FROMTEXT()`, `VEC_TOTEXT()`, and
+`VEC_DISTANCE()` plus the mandatory `mhnsw` vector-index plugin are omitted
+from the default embedded archive; `VECTOR(N)` type parsing remains linked.
 `SFORMAT()` is omitted from the
 embedded function registry, while ordinary `FORMAT()` remains available.
 Dynamic UDF lookup, execution, and registration are omitted; stored functions
@@ -594,6 +604,7 @@ The baseline explicitly disables:
 - PROXY protocol listener support
 - User statistics diagnostics
 - User-variable diagnostics
+- Vector SQL functions and MHNSW vector-index runtime
 - Persistent optimizer statistics and JSON histogram storage
 - Unix socket server authentication
 - Full event parse-data validation

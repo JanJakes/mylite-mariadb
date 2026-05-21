@@ -205,6 +205,14 @@ static void assert_unsupported_engine_rejected(mylite_db *db) {
         "id INT NOT NULL PRIMARY KEY"
         ") ENGINE=ARCHIVE"
     );
+    expect_error(
+        db,
+        "CREATE TABLE app.vector_items ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "embedding VECTOR(2) NOT NULL, "
+        "VECTOR(embedding)"
+        ") ENGINE=InnoDB"
+    );
 }
 
 static void insert_engine_rows(mylite_db *db) {

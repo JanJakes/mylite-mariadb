@@ -16,25 +16,26 @@ storage-engine, JSON, GEOMETRY/GIS, charset, collation, or API functionality.
 
 - `tools/mariadb-embedded-build` owns the post-build archive strip step and
   refreshes the archive index with `ranlib`.
-- Apple `strip(1)` documents `-u -r` as the maximum strip level for a
-  dynamically linked executable that still runs with its libraries. Applied to
-  the copied static archive, it preserves enough external symbol information
-  for the current `libmylite` embedded build to relink.
-- A copied current archive measured:
+- Apple `strip(1)` accepts `-S -x` for debug/local-symbol stripping and
+  documents `-u -r` as the maximum strip level for a dynamically linked
+  executable that still runs with its libraries. Applied together to the
+  static archive, the combined mode preserves enough external symbol
+  information for the current `libmylite` embedded build to relink.
+- A clean rebuilt current archive measured:
 
   | Mode | Bytes |
   | --- | ---: |
-  | Existing `strip -S -x` archive | 26,028,560 |
-  | Darwin `strip -u -r` archive | 26,020,528 |
+  | Pre-strip archive | 26,496,392 |
+  | Darwin `strip -S -x -u -r` archive | 25,937,816 |
 
-- A scratch embedded build linked against the copied `strip -u -r` archive and
-  passed all 14 embedded tests.
+- The current embedded build links against the `strip -S -x -u -r` archive and
+  passes all embedded tests.
 
 ## Design
 
 Keep archive stripping enabled by default. On Darwin, strip the archive with
-`strip -u -r`; on other platforms, keep the existing `strip -S -x` behavior
-until platform-specific relink evidence exists.
+`strip -S -x -u -r`; on other platforms, keep the existing `strip -S -x`
+behavior until platform-specific relink evidence exists.
 
 Record a strip signature in `libmariadbd.a.mylite-stripped`. The wrapper skips
 re-stripping only when the archive is older than the marker and the marker
@@ -53,10 +54,8 @@ copy of the more aggressively stripped archive.
 
 ## Binary-Size Impact
 
-The current macOS embedded archive changes from 26,028,560 bytes to 26,020,528
-bytes, saving 8,032 bytes with no archive-member count change. The full
-post-build strip step now saves 567,616 bytes from the current pre-strip
-archive.
+The current macOS embedded archive changes from 26,496,392 bytes to 25,937,816
+bytes, saving 558,576 bytes with no archive-member count change.
 
 ## Test And Verification Plan
 
@@ -79,10 +78,10 @@ git diff --check
 
 Additional verification:
 
-- build a scratch embedded tree against a copied `strip -u -r` archive;
-- run all embedded tests in the scratch tree; and
+- rebuild the embedded archive from a deleted generated archive and marker;
+- run all embedded tests against the stripped archive; and
 - confirm `tools/mariadb-embedded-build measure` reports
-  `strip_signature=strip-v2:darwin-undefined-and-dynamic`.
+  `strip_signature=strip-v3:darwin-debug-local-undefined-and-dynamic`.
 
 ## Acceptance Criteria
 
