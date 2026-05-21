@@ -3378,11 +3378,11 @@ static void remove_row_payload_cache_entry(
     mylite_storage_row_payload_cache *cache,
     unsigned long long row_id
 );
-static const mylite_storage_row_payload_cache_entry *find_row_payload_cache_entry(
+MYLITE_STORAGE_HOT_INLINE const mylite_storage_row_payload_cache_entry *find_row_payload_cache_entry(
     const mylite_storage_row_payload_cache *cache,
     unsigned long long row_id
 );
-static mylite_storage_row_payload_cache_bucket *find_mutable_row_payload_cache_bucket(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_row_payload_cache_bucket *find_mutable_row_payload_cache_bucket(
     mylite_storage_row_payload_cache *cache,
     unsigned long long row_id
 );
@@ -23880,7 +23880,7 @@ static void remove_row_payload_cache_entry(
     }
 }
 
-static const mylite_storage_row_payload_cache_entry *find_row_payload_cache_entry(
+MYLITE_STORAGE_HOT_INLINE const mylite_storage_row_payload_cache_entry *find_row_payload_cache_entry(
     const mylite_storage_row_payload_cache *cache,
     unsigned long long row_id
 ) {
@@ -23904,7 +23904,7 @@ static const mylite_storage_row_payload_cache_entry *find_row_payload_cache_entr
     return NULL;
 }
 
-static mylite_storage_row_payload_cache_bucket *find_mutable_row_payload_cache_bucket(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_row_payload_cache_bucket *find_mutable_row_payload_cache_bucket(
     mylite_storage_row_payload_cache *cache,
     unsigned long long row_id
 ) {

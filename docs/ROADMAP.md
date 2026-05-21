@@ -367,6 +367,8 @@ by the caller, avoiding another filename/header/table cache lookup on prepared
 point-update reads.
 Fixed-width exact-index cache key hash and compare helpers are now hot-inlined
 at their cache-probe call sites.
+Active row-payload cache probe helpers are now hot-inlined for indexed-row reads
+and same-row payload replacement.
 Handler index cursor cleanup now skips storage free-wrapper calls for already
 empty cursor buffers while preserving inline-buffer ownership checks.
 Already-empty handler index cursor cleanup also returns before rewriting cursor
