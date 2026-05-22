@@ -865,6 +865,10 @@ default runs descriptive and machine-local. It also has focused primary-key
 point-select phases so read-path slices can measure direct and prepared point
 lookups, including SQLite-style prepared reset-after-row lookups, without
 running the slower secondary-result phases.
+The next prepared-DML performance wall is repeated MariaDB table-open,
+`Sql_cmd_update::prepare_inner()`, and `JOIN::prepare()` work before the
+accepted MyLite direct-update path. The staged design is tracked in
+[Prepared DML execution reuse](specs/prepared-dml-execution-reuse/specs.md).
 
 ## Size And Profile Direction
 
