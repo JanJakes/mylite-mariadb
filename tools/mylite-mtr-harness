@@ -128,6 +128,7 @@ default_tests=(
   main.ps_11bugs
   main.ps_max_subselect-5113
   main.information_schema_prepare
+  main.sp-no-code
   main.signal
   main.signal_demo1
   main.signal_demo3
