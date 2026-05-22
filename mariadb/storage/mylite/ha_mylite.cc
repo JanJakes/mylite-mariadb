@@ -2234,11 +2234,6 @@ int ha_mylite::read_exact_unique_index_row_into(uint index_number,
   if (row_payload_size != table->s->reclength)
     DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
 
-  size_t slot= 0;
-  const int slot_error= record_blob_payload_slot(buf, &slot);
-  if (slot_error)
-    DBUG_RETURN(slot_error);
-
   /*
     The matching row is already in buf.  A full non-null unique exact lookup
     can only continue to EOF, so keep just enough cursor state for continuation
@@ -2249,11 +2244,7 @@ int ha_mylite::read_exact_unique_index_row_into(uint index_number,
   index_cursor_number= index_number;
   index_cursor_filtered= true;
   current_row_id= row_id;
-
-  if (record_blob_payloads[slot])
-    mylite_storage_free(record_blob_payloads[slot]);
-  record_blob_payloads[slot]= NULL;
-  record_blob_payloads_size[slot]= 0;
+  DBUG_ASSERT(!record_blob_payloads[0] && !record_blob_payloads[1]);
 
   *out_found= true;
   DBUG_RETURN(0);

@@ -139,7 +139,9 @@ metadata inline in the handler, avoiding per-lookup heap allocation on the
 primary-key point-read path. Direct exact unique reads that already copied the
 single matching row into MariaDB's record buffer now publish only minimal
 one-row continuation state instead of initializing unused cursor key and entry
-storage. Fixed-record point reads also reuse a handler-owned serialized-row scratch
+storage, and skip BLOB payload-slot cleanup because the direct path is limited
+to fixed-row tables without BLOB fields. Fixed-record point reads also reuse a
+handler-owned serialized-row scratch
 buffer for fixed-record point lookups, and reuse active table-entry metadata
 for exact cursor builds and row-write table-id resolution while the catalog
 root and generation are unchanged. Active statement, table-entry, and
