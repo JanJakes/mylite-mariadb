@@ -61,6 +61,7 @@ class ha_mylite: public handler
   unsigned char direct_update_key_buffer[MAX_KEY_LENGTH];
   uchar direct_update_key_supported[MAX_KEY];
   uchar direct_update_key_may_change[MAX_KEY];
+  uchar direct_update_shape_cache_key_may_change[MAX_KEY];
   Mylite_index_cursor_entry index_inline_entry;
   size_t *index_row_offsets;
   size_t *index_row_sizes;
@@ -84,6 +85,12 @@ class ha_mylite: public handler
   ulonglong current_row_id;
   mylite_storage_statement *active_storage_statement;
   const char *active_storage_statement_primary_file;
+  TABLE_SHARE *direct_update_shape_cache_table_share;
+  MY_BITMAP direct_update_shape_cache_write_set;
+  my_bitmap_map
+      direct_update_shape_cache_write_set_buf[bitmap_buffer_size(MAX_FIELDS) /
+                                              sizeof(my_bitmap_map)];
+  uint direct_update_shape_cache_key_count;
   uint duplicate_key_index;
   mutable ulonglong foreign_key_presence_epoch;
   mutable bool child_foreign_key_presence_known;
@@ -103,6 +110,10 @@ class ha_mylite: public handler
   bool direct_update_can_skip_duplicate_key_checks;
   bool direct_update_may_change_index_entries;
   bool direct_update_condition_guaranteed_by_key;
+  bool direct_update_shape_cache_valid;
+  bool direct_update_shape_cache_can_compare_record;
+  bool direct_update_shape_cache_can_skip_duplicate_key_checks;
+  bool direct_update_shape_cache_may_change_index_entries;
   COND *direct_update_condition;
   List<Item> *direct_update_fields;
   List<Item> *direct_update_values;
@@ -117,6 +128,7 @@ class ha_mylite: public handler
   void clear_index_row_scratch();
   void clear_record_blob_payloads();
   void clear_direct_update_state();
+  void clear_direct_update_shape_cache();
   const char *storage_schema() const;
   const char *storage_table() const;
   int build_index_cursor(uint index_number, const uchar *key_filter,
@@ -130,6 +142,8 @@ class ha_mylite: public handler
                                        bool *out_applied, bool *out_found,
                                        bool trusted_exact_unique_filter);
   int build_direct_update_key(bool *out_has_key);
+  bool use_direct_update_shape_cache();
+  void store_direct_update_shape_cache();
   int record_blob_payload_slot(const uchar *buf, size_t *out_slot) const;
   int preserve_record_blob_payloads(uchar *buf);
   void clear_foreign_key_presence_cache() const;

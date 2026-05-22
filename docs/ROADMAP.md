@@ -904,7 +904,10 @@ the MyLite single-update result-elision gate. The next step skips value-list
 preserving the normal setup path for expressions and contextual values. The
 current expression-update benchmark still shows repeated table-open,
 value-expression setup, and `JOIN::prepare()` work as the next prepared-DML
-performance wall.
+performance wall. The MyLite handler now also caches accepted non-key
+direct-update shape facts for prepared statements, avoiding repeated
+handler-side metadata walks for stable row-only updates while key-changing
+updates keep the existing uncached FK-sensitive path.
 
 ## Size And Profile Direction
 

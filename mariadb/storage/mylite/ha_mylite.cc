@@ -1340,7 +1340,9 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
       index_row_index(0), index_cursor_number(MAX_KEY), current_row_id(0),
       active_storage_statement(NULL),
       active_storage_statement_primary_file(NULL),
-      duplicate_key_index((uint) -1), foreign_key_presence_epoch(0ULL),
+      direct_update_shape_cache_table_share(NULL),
+      direct_update_shape_cache_key_count(0), duplicate_key_index((uint) -1),
+      foreign_key_presence_epoch(0ULL),
       child_foreign_key_presence_known(false),
       child_foreign_key_presence(false),
       parent_foreign_key_presence_known(false),
@@ -1353,6 +1355,10 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
       direct_update_can_skip_duplicate_key_checks(false),
       direct_update_may_change_index_entries(false),
       direct_update_condition_guaranteed_by_key(false),
+      direct_update_shape_cache_valid(false),
+      direct_update_shape_cache_can_compare_record(false),
+      direct_update_shape_cache_can_skip_duplicate_key_checks(false),
+      direct_update_shape_cache_may_change_index_entries(false),
       direct_update_condition(NULL), direct_update_fields(NULL),
       direct_update_values(NULL), direct_update_key_value(NULL),
       direct_update_key_number(MAX_KEY),
@@ -1362,6 +1368,9 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
   storage_table_name[0]= '\0';
   bzero(direct_update_key_supported, sizeof(direct_update_key_supported));
   bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
+  bzero(direct_update_shape_cache_key_may_change,
+        sizeof(direct_update_shape_cache_key_may_change));
+  my_bitmap_clear(&direct_update_shape_cache_write_set);
   strcpy(display_engine_name, MYLITE_STORAGE_ENGINE_NAME);
   display_engine_name_lex.str= display_engine_name;
   display_engine_name_lex.length= strlen(display_engine_name);
@@ -1454,6 +1463,19 @@ void ha_mylite::clear_direct_update_state()
   direct_update_may_change_index_entries= false;
   direct_update_condition_guaranteed_by_key= false;
   bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
+}
+
+void ha_mylite::clear_direct_update_shape_cache()
+{
+  direct_update_shape_cache_table_share= NULL;
+  direct_update_shape_cache_key_count= 0;
+  direct_update_shape_cache_valid= false;
+  direct_update_shape_cache_can_compare_record= false;
+  direct_update_shape_cache_can_skip_duplicate_key_checks= false;
+  direct_update_shape_cache_may_change_index_entries= false;
+  my_bitmap_clear(&direct_update_shape_cache_write_set);
+  bzero(direct_update_shape_cache_key_may_change,
+        sizeof(direct_update_shape_cache_key_may_change));
 }
 
 void ha_mylite::clear_foreign_key_presence_cache() const
@@ -1696,6 +1718,9 @@ int ha_mylite::direct_update_rows_init(List<Item> *update_fields)
        table->pos_in_table_list->belong_to_view))
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
 
+  if (use_direct_update_shape_cache())
+    DBUG_RETURN(0);
+
   direct_update_can_compare_record= records_are_comparable(table);
   direct_update_can_skip_duplicate_key_checks=
       !mylite_direct_update_may_change_unique_key(table);
@@ -1709,7 +1734,58 @@ int ha_mylite::direct_update_rows_init(List<Item> *update_fields)
         direct_update_key_may_change[key_number] != 0;
   }
 
+  if (!update_fields_change_key)
+    store_direct_update_shape_cache();
+
   DBUG_RETURN(0);
+}
+
+bool ha_mylite::use_direct_update_shape_cache()
+{
+  if (!direct_update_shape_cache_valid ||
+      direct_update_shape_cache_table_share != table->s ||
+      direct_update_shape_cache_key_count != table->s->keys ||
+      !direct_update_shape_cache_write_set.bitmap || !table->write_set ||
+      direct_update_shape_cache_write_set.n_bits != table->write_set->n_bits ||
+      !bitmap_cmp(&direct_update_shape_cache_write_set, table->write_set))
+    return false;
+
+  direct_update_can_compare_record=
+      direct_update_shape_cache_can_compare_record;
+  direct_update_can_skip_duplicate_key_checks=
+      direct_update_shape_cache_can_skip_duplicate_key_checks;
+  direct_update_may_change_index_entries=
+      direct_update_shape_cache_may_change_index_entries;
+  memcpy(direct_update_key_may_change,
+         direct_update_shape_cache_key_may_change,
+         sizeof(direct_update_key_may_change));
+  return true;
+}
+
+void ha_mylite::store_direct_update_shape_cache()
+{
+  if (!table->write_set || table->write_set->n_bits > MAX_FIELDS ||
+      my_bitmap_init(&direct_update_shape_cache_write_set,
+                     direct_update_shape_cache_write_set_buf,
+                     table->write_set->n_bits))
+  {
+    clear_direct_update_shape_cache();
+    return;
+  }
+  bitmap_copy(&direct_update_shape_cache_write_set, table->write_set);
+
+  direct_update_shape_cache_table_share= table->s;
+  direct_update_shape_cache_key_count= table->s->keys;
+  direct_update_shape_cache_can_compare_record=
+      direct_update_can_compare_record;
+  direct_update_shape_cache_can_skip_duplicate_key_checks=
+      direct_update_can_skip_duplicate_key_checks;
+  direct_update_shape_cache_may_change_index_entries=
+      direct_update_may_change_index_entries;
+  memcpy(direct_update_shape_cache_key_may_change,
+         direct_update_key_may_change,
+         sizeof(direct_update_shape_cache_key_may_change));
+  direct_update_shape_cache_valid= true;
 }
 
 int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
@@ -2411,6 +2487,7 @@ int ha_mylite::open(const char *name, int, uint)
 {
   DBUG_ENTER("ha_mylite::open");
 
+  clear_direct_update_shape_cache();
   clear_foreign_key_presence_cache();
   table_has_blob_fields= table && mylite_table_has_blob_fields(table);
   auto_increment_field= mylite_auto_increment_field(table);
@@ -2489,6 +2566,7 @@ int ha_mylite::close(void)
   clear_record_blob_payloads();
   clear_foreign_key_presence_cache();
   clear_direct_update_state();
+  clear_direct_update_shape_cache();
   active_storage_statement= NULL;
   active_storage_statement_primary_file= NULL;
   auto_increment_field= NULL;
