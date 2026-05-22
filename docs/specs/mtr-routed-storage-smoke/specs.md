@@ -154,5 +154,6 @@ links the existing `MyLite::storage` library and is built from the first-party
   public lifecycle replacement.
 - Some upstream MTR tests set `default_storage_engine` or depend on native table
   files; promoting them to storage mode will need per-test review.
-- Broader sidecar checks for the MTR storage var directory should be a separate
-  slice once more routed-storage MTR tests exist.
+- MyLite-owned schema sidecar checks are covered by the follow-up
+  `mtr-routed-storage-sidecar-smoke` slice; unrelated MTR bootstrap/system
+  schemas still use native files and are intentionally outside that check.

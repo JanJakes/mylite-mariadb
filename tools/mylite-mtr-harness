@@ -208,6 +208,7 @@ default_tests=(
 )
 storage_tests=(
   mylite.routed_storage_engines
+  mylite.routed_storage_sidecars
 )
 
 usage() {

@@ -1,0 +1,48 @@
+drop database if exists mylite_mtr_sidecars;
+create database mylite_mtr_sidecars;
+use mylite_mtr_sidecars;
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+create table default_alias (id int not null primary key, title varchar(16));
+create table innodb_alias (
+id int not null primary key,
+title varchar(16) not null unique
+) engine=InnoDB;
+create table myisam_alias (id int not null primary key, title varchar(16)) engine=MyISAM;
+create table aria_alias (id int not null primary key, title varchar(16)) engine=Aria;
+create table blackhole_alias (id int not null primary key) engine=BLACKHOLE;
+create table memory_alias (id int not null primary key, title varchar(16)) engine=MEMORY;
+create table heap_alias (id int not null primary key, title varchar(16)) engine=HEAP;
+insert into default_alias values (1, 'default');
+insert into innodb_alias values (1, 'innodb');
+insert into myisam_alias values (1, 'myisam');
+insert into aria_alias values (1, 'aria');
+insert into blackhole_alias values (1);
+insert into memory_alias values (1, 'memory');
+insert into heap_alias values (1, 'heap');
+alter table innodb_alias add column body varchar(16), add key body_idx (body);
+update innodb_alias set body = 'body' where id = 1;
+rename table aria_alias to aria_alias_renamed;
+create table ctas_alias engine=InnoDB as
+select id, title from default_alias;
+select title from innodb_alias where body = 'body';
+title
+innodb
+select title from aria_alias_renamed;
+title
+aria
+select title from ctas_alias;
+title
+default
+select count(*) as blackhole_rows from blackhole_alias;
+blackhole_rows
+0
+select title from memory_alias;
+title
+memory
+select title from heap_alias;
+title
+heap
+drop database mylite_mtr_sidecars;
