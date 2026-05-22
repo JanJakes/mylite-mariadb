@@ -76,8 +76,9 @@ and window-function behavior, scalar operator, string/format,
 charset-conversion expressions, crypto/KDF, disabled DES,
 aggregate DISTINCT, autoincrement ODKU, strict HEAP autoincrement,
 temporal scale, microsecond parsing, date-format, ASCII charset, selected
-Latin2, UTF-8 binary/general, and UTF-8 UCA 1400 charset, weight-string, and
-LIKE condition-propagation behavior, and multibyte charset recoding.
+Latin2, UTF-8 binary/general, UTF-8 UCA 1400, and utf8mb3 general-1400
+charset, weight-string, and LIKE condition-propagation behavior, and multibyte
+charset recoding.
 It uses a separate
 `build/mariadb-mtr-smoke`
 profile because the default embedded profile intentionally omits view, stored

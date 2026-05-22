@@ -129,6 +129,8 @@ default_tests=(
   main.ctype_utf32_def
   main.ctype_utf8mb3_bin
   main.ctype_utf8mb3_general_ci
+  main.ctype_utf8mb3_uca1400_ai_ci
+  main.ctype_utf8mb3_geeral1400_as_ci
   main.ctype_utf8mb4_bin
   main.ctype_utf8mb4_general_ci
   main.ctype_utf8mb4_uca1400_ai_ci
