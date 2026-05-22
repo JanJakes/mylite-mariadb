@@ -9,6 +9,7 @@ mtr_probe_testcase_timeout_minutes="${MTR_PROBE_TESTCASE_TIMEOUT_MINUTES:-5}"
 default_tests=(
   mylite.bootstrap_schema
   mylite.profile_disabled_metadata
+  mylite.profile_disabled_diagnostics
   mylite.profile_disabled_surfaces
   main.cast
   main.case

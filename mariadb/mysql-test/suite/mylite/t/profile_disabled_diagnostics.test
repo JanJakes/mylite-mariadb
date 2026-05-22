@@ -1,0 +1,24 @@
+#
+# Check diagnostic producers that the MyLite MTR smoke profile intentionally
+# compiles out of the embedded server build.
+#
+
+--error ER_NOT_SUPPORTED_YET
+show authors;
+--error ER_NOT_SUPPORTED_YET
+show contributors;
+--error ER_NOT_SUPPORTED_YET
+show privileges;
+
+show variables like 'have_profiling';
+--error ER_FEATURE_DISABLED
+show profiles;
+--error ER_FEATURE_DISABLED
+show profile;
+--error ER_FEATURE_DISABLED
+select count(*) as profiling_rows from information_schema.profiling;
+
+set optimizer_trace='enabled=on';
+select 1 as traced_value;
+select count(*) as optimizer_trace_rows from information_schema.optimizer_trace;
+set optimizer_trace='enabled=off';

@@ -1,0 +1,23 @@
+show authors;
+ERROR 42000: This version of MariaDB doesn't yet support 'static SHOW information in MyLite embedded profile'
+show contributors;
+ERROR 42000: This version of MariaDB doesn't yet support 'static SHOW information in MyLite embedded profile'
+show privileges;
+ERROR 42000: This version of MariaDB doesn't yet support 'static SHOW information in MyLite embedded profile'
+show variables like 'have_profiling';
+Variable_name	Value
+have_profiling	NO
+show profiles;
+ERROR HY000: The 'SHOW PROFILES' feature is disabled; you need MariaDB built with 'enable-profiling' to have it working
+show profile;
+ERROR HY000: The 'SHOW PROFILE' feature is disabled; you need MariaDB built with 'enable-profiling' to have it working
+select count(*) as profiling_rows from information_schema.profiling;
+ERROR HY000: The 'SHOW PROFILE' feature is disabled; you need MariaDB built with 'enable-profiling' to have it working
+set optimizer_trace='enabled=on';
+select 1 as traced_value;
+traced_value
+1
+select count(*) as optimizer_trace_rows from information_schema.optimizer_trace;
+optimizer_trace_rows
+0
+set optimizer_trace='enabled=off';
