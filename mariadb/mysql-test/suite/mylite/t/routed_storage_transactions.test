@@ -1,0 +1,61 @@
+#
+# Check routed MyLite transaction behavior under raw embedded MTR execution.
+#
+
+--disable_warnings
+drop database if exists mylite_mtr_transactions;
+--enable_warnings
+
+create database mylite_mtr_transactions;
+use mylite_mtr_transactions;
+
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+
+--let $mylite_sidecar_schema= mylite_mtr_transactions
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+create table tx (
+  id int not null primary key,
+  title varchar(32) not null,
+  unique key title_key (title)
+) engine=InnoDB;
+
+show create table tx;
+
+insert into tx values (1, 'seed');
+
+start transaction;
+insert into tx values (2, 'rolled-back');
+update tx set title = 'seed-rolled-back' where id = 1;
+rollback;
+
+select id, title from tx order by id;
+
+start transaction;
+insert into tx values (2, 'committed');
+update tx set title = 'seed-committed' where id = 1;
+commit;
+
+select id, title from tx order by id;
+
+start transaction;
+insert into tx values (3, 'savepoint-kept');
+savepoint after_insert;
+update tx set title = 'savepoint-undone' where id = 2;
+rollback to savepoint after_insert;
+
+select id, title from tx order by id;
+
+release savepoint after_insert;
+commit;
+
+select id, title from tx order by id;
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+drop database mylite_mtr_transactions;
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc

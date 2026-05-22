@@ -114,7 +114,9 @@ The same harness also exposes a separate storage-routed MTR mode with
 for MyLite-owned storage tests, prepares a fresh primary `.mylite` file, and
 currently covers selected engine-alias routing through
 `mylite.routed_storage_engines` plus MyLite-owned schema sidecar absence
-through `mylite.routed_storage_sidecars`.
+through `mylite.routed_storage_sidecars`, and routed `InnoDB` transaction,
+rollback, commit, and savepoint behavior through
+`mylite.routed_storage_transactions`.
 It remains outside the default compatibility groups because it builds
 `mariadbd` and several upstream client/support tools. Broader MTR integration
 should be a separate comparison slice with explicit include lists, expected

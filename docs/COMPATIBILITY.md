@@ -154,8 +154,9 @@ selected filesystem charset behavior, and selected charset
 diagnostics, collation-default behavior,
 UTF-32 `character_set_collations`, and column/context collation behavior,
 and the opt-in storage-routed MTR smoke runner covers selected engine-alias DDL
-and DML routing plus MyLite-owned schema sidecar absence against a static
-MyLite storage-engine build with a primary `.mylite` file,
+and DML routing, MyLite-owned schema sidecar absence, and routed `InnoDB`
+transaction, rollback, commit, and savepoint behavior against a static MyLite
+storage-engine build with a primary `.mylite` file,
 while MariaDB MTR comparison
 suites and broader application-schema and runtime suites remain planned.
 
