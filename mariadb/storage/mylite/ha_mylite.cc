@@ -3512,19 +3512,49 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
   }
 
   unsigned long long new_row_id= 0ULL;
-  const mylite_storage_result result=
-      volatile_rows ? mylite_volatile_update_row_with_index_entries(
-                          primary_file, schema_name, table_name,
-                          current_row_id, row_payload, row_payload_size,
-                          index_entries, index_entry_count, &new_row_id)
-      : preserve_index_entries
-          ? mylite_storage_update_row_preserving_index_entries(
-                primary_file, schema_name, table_name, current_row_id,
-                row_payload, row_payload_size, &new_row_id)
-          : mylite_storage_update_row_with_index_entry_changes(
-                primary_file, schema_name, table_name, current_row_id,
-                row_payload, row_payload_size, index_entries,
-                index_entry_count, index_entry_changed, &new_row_id);
+  mylite_storage_result result= MYLITE_STORAGE_OK;
+  if (volatile_rows)
+  {
+    result= mylite_volatile_update_row_with_index_entries(
+        primary_file, schema_name, table_name, current_row_id, row_payload,
+        row_payload_size, index_entries, index_entry_count, &new_row_id);
+  }
+  else
+  {
+    mylite_storage_statement *active_statement=
+        mylite_storage_borrow_active_statement(primary_file);
+    Mylite_trx_context *trx_ctx= mylite_trx_context(ha_thd(), false);
+    if (!active_statement && trx_ctx && trx_ctx->statement &&
+        mylite_storage_statement_matches(trx_ctx->statement, primary_file))
+      active_statement= trx_ctx->statement;
+    if (!active_statement && trx_ctx && trx_ctx->transaction &&
+        mylite_storage_statement_matches(trx_ctx->transaction, primary_file))
+      active_statement= trx_ctx->transaction;
+    if (preserve_index_entries)
+    {
+      result=
+          active_statement
+              ? mylite_storage_update_row_preserving_index_entries_in_statement(
+                    active_statement, schema_name, table_name, current_row_id,
+                    row_payload, row_payload_size, &new_row_id)
+              : mylite_storage_update_row_preserving_index_entries(
+                    primary_file, schema_name, table_name, current_row_id,
+                    row_payload, row_payload_size, &new_row_id);
+    }
+    else
+    {
+      result=
+          active_statement
+              ? mylite_storage_update_row_with_index_entry_changes_in_statement(
+                    active_statement, schema_name, table_name, current_row_id,
+                    row_payload, row_payload_size, index_entries,
+                    index_entry_count, index_entry_changed, &new_row_id)
+              : mylite_storage_update_row_with_index_entry_changes(
+                    primary_file, schema_name, table_name, current_row_id,
+                    row_payload, row_payload_size, index_entries,
+                    index_entry_count, index_entry_changed, &new_row_id);
+    }
+  }
   mylite_storage_free(owned_row_payload);
   if (index_entry_changed != stack_index_entry_changed)
     free(index_entry_changed);

@@ -293,6 +293,7 @@ static void test_cached_exact_index_entryset_bulk_append(void);
 static void test_active_exact_index_cache_many_replacements(void);
 static void test_large_append_buffer_savepoint_rollback(void);
 static void test_active_update_rewrite(void);
+static void test_active_statement_update_row_scope(void);
 static void test_active_single_index_same_size_rollback_after_checksum_refresh(void);
 static void test_active_row_only_same_size_rollback_after_checksum_refresh(void);
 static void test_unchanged_index_update_elision(void);
@@ -685,6 +686,7 @@ int main(void) {
     test_active_exact_index_cache_many_replacements();
     test_large_append_buffer_savepoint_rollback();
     test_active_update_rewrite();
+    test_active_statement_update_row_scope();
     test_active_single_index_same_size_rollback_after_checksum_refresh();
     test_active_row_only_same_size_rollback_after_checksum_refresh();
     test_unchanged_index_update_elision();
@@ -5283,6 +5285,99 @@ static void test_active_update_rewrite(void) {
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_active_statement_update_row_scope(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char primary_key[] = {0x10U, 0x01U};
+    static const unsigned char initial_row[] = {0x01U, 'i', 'n', 'i', 't'};
+    static const unsigned char updated_row[] = {0x02U, 'u', 'p', 'd', 't'};
+    static const unsigned char final_row[] = {0x03U, 'f', 'i', 'n', 'l'};
+    static const unsigned char unchanged_entries[] = {0U};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "active-statement-update-scope.mylite");
+    char *other_filename = path_join(root, "other.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_index_entry entries[] = {
+        {.size = sizeof(entries[0]),
+         .index_number = 0U,
+         .key = primary_key,
+         .key_size = sizeof(primary_key)},
+    };
+    mylite_storage_statement *statement = NULL;
+    unsigned long long row_id = 0ULL;
+    unsigned long long updated_row_id = 0ULL;
+    unsigned long long final_row_id = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            initial_row,
+            sizeof(initial_row),
+            entries,
+            sizeof(entries) / sizeof(entries[0]),
+            &row_id
+        ) == MYLITE_STORAGE_OK
+    );
+
+    assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_statement_matches(statement, filename) == 1);
+    assert(mylite_storage_statement_matches(statement, other_filename) == 0);
+    assert(mylite_storage_statement_matches(NULL, filename) == 0);
+    assert(
+        mylite_storage_update_row_preserving_index_entries_in_statement(
+            statement,
+            "app",
+            "posts",
+            row_id,
+            updated_row,
+            sizeof(updated_row),
+            &updated_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert_row_equals(filename, updated_row_id, updated_row, sizeof(updated_row));
+    assert(
+        mylite_storage_update_row_with_index_entry_changes_in_statement(
+            statement,
+            "app",
+            "posts",
+            updated_row_id,
+            final_row,
+            sizeof(final_row),
+            entries,
+            sizeof(entries) / sizeof(entries[0]),
+            unchanged_entries,
+            &final_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_commit_statement(statement) == MYLITE_STORAGE_OK);
+    assert_find_indexed_row_equals(
+        filename,
+        0U,
+        primary_key,
+        sizeof(primary_key),
+        final_row_id,
+        final_row,
+        sizeof(final_row)
+    );
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(other_filename);
     free(filename);
     free(root);
 }

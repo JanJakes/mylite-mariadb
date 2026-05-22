@@ -408,6 +408,15 @@ mylite_storage_result mylite_storage_update_row_preserving_index_entries(
     size_t row_size,
     unsigned long long *out_new_row_id
 );
+mylite_storage_result mylite_storage_update_row_preserving_index_entries_in_statement(
+    mylite_storage_statement *statement,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long row_id,
+    const unsigned char *row,
+    size_t row_size,
+    unsigned long long *out_new_row_id
+);
 mylite_storage_result mylite_storage_update_row_with_index_entries(
     const char *filename,
     const char *schema_name,
@@ -421,6 +430,18 @@ mylite_storage_result mylite_storage_update_row_with_index_entries(
 );
 mylite_storage_result mylite_storage_update_row_with_index_entry_changes(
     const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long row_id,
+    const unsigned char *row,
+    size_t row_size,
+    const mylite_storage_index_entry *index_entries,
+    size_t index_entry_count,
+    const unsigned char *index_entry_changed,
+    unsigned long long *out_new_row_id
+);
+mylite_storage_result mylite_storage_update_row_with_index_entry_changes_in_statement(
+    mylite_storage_statement *statement,
     const char *schema_name,
     const char *table_name,
     unsigned long long row_id,
@@ -581,6 +602,7 @@ int mylite_storage_statement_active(const char *filename);
 int mylite_storage_context_has_active_statement(void);
 int mylite_storage_context_has_active_read_statement(const char *filename);
 mylite_storage_statement *mylite_storage_borrow_active_statement(const char *filename);
+int mylite_storage_statement_matches(mylite_storage_statement *statement, const char *filename);
 mylite_storage_result mylite_storage_preserve_auto_increment_on_rollback(
     const char *filename
 );

@@ -166,7 +166,10 @@ now borrows the active read statement's decoded catalog view when available,
 avoiding a transient catalog copy before table and index-root scans. Active
 statement indexed-row reads now also use the statement's current header and
 cache chain directly, leaving the generic file-scope/header helper to raw
-filename callers. Fixed-record point
+filename callers. Handler row-update mutations now also reuse the resolved
+active statement or matching THD checkpoint, avoiding the generic update-file
+scope and header helper on the prepared direct-update mutation path while raw
+filename callers keep the scoped update lifecycle. Fixed-record point
 reads also reuse a
 handler-owned serialized-row scratch
 buffer for fixed-record point lookups, and reuse active table-entry metadata

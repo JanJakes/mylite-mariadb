@@ -1597,6 +1597,33 @@ static mylite_storage_result update_row_with_index_entries(
     int preserve_index_entries,
     unsigned long long *out_new_row_id
 );
+static mylite_storage_result update_row_with_index_entries_in_statement(
+    mylite_storage_statement *statement,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long row_id,
+    const unsigned char *row,
+    size_t row_size,
+    const mylite_storage_index_entry *index_entries,
+    size_t index_entry_count,
+    const unsigned char *index_entry_changed,
+    int preserve_index_entries,
+    unsigned long long *out_new_row_id
+);
+static mylite_storage_result update_row_with_index_entries_for_context(
+    mylite_storage_statement *statement,
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long row_id,
+    const unsigned char *row,
+    size_t row_size,
+    const mylite_storage_index_entry *index_entries,
+    size_t index_entry_count,
+    const unsigned char *index_entry_changed,
+    int preserve_index_entries,
+    unsigned long long *out_new_row_id
+);
 MYLITE_STORAGE_HOT_INLINE size_t
 changed_index_entry_count(const unsigned char *index_entry_changed, size_t index_entry_count);
 MYLITE_STORAGE_HOT_INLINE size_t changed_index_entry_count_and_first(
@@ -6785,6 +6812,30 @@ mylite_storage_result mylite_storage_update_row_preserving_index_entries(
     );
 }
 
+mylite_storage_result mylite_storage_update_row_preserving_index_entries_in_statement(
+    mylite_storage_statement *statement,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long row_id,
+    const unsigned char *row,
+    size_t row_size,
+    unsigned long long *out_new_row_id
+) {
+    return update_row_with_index_entries_in_statement(
+        statement,
+        schema_name,
+        table_name,
+        row_id,
+        row,
+        row_size,
+        NULL,
+        0U,
+        NULL,
+        1,
+        out_new_row_id
+    );
+}
+
 mylite_storage_result mylite_storage_update_row_with_index_entries(
     const char *filename,
     const char *schema_name,
@@ -6838,7 +6889,98 @@ mylite_storage_result mylite_storage_update_row_with_index_entry_changes(
     );
 }
 
+mylite_storage_result mylite_storage_update_row_with_index_entry_changes_in_statement(
+    mylite_storage_statement *statement,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long row_id,
+    const unsigned char *row,
+    size_t row_size,
+    const mylite_storage_index_entry *index_entries,
+    size_t index_entry_count,
+    const unsigned char *index_entry_changed,
+    unsigned long long *out_new_row_id
+) {
+    return update_row_with_index_entries_in_statement(
+        statement,
+        schema_name,
+        table_name,
+        row_id,
+        row,
+        row_size,
+        index_entries,
+        index_entry_count,
+        index_entry_changed,
+        0,
+        out_new_row_id
+    );
+}
+
 static mylite_storage_result update_row_with_index_entries(
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long row_id,
+    const unsigned char *row,
+    size_t row_size,
+    const mylite_storage_index_entry *index_entries,
+    size_t index_entry_count,
+    const unsigned char *index_entry_changed,
+    int preserve_index_entries,
+    unsigned long long *out_new_row_id
+) {
+    return update_row_with_index_entries_for_context(
+        NULL,
+        filename,
+        schema_name,
+        table_name,
+        row_id,
+        row,
+        row_size,
+        index_entries,
+        index_entry_count,
+        index_entry_changed,
+        preserve_index_entries,
+        out_new_row_id
+    );
+}
+
+static mylite_storage_result update_row_with_index_entries_in_statement(
+    mylite_storage_statement *statement,
+    const char *schema_name,
+    const char *table_name,
+    unsigned long long row_id,
+    const unsigned char *row,
+    size_t row_size,
+    const mylite_storage_index_entry *index_entries,
+    size_t index_entry_count,
+    const unsigned char *index_entry_changed,
+    int preserve_index_entries,
+    unsigned long long *out_new_row_id
+) {
+    if (statement == NULL || statement->file == NULL || statement->filename == NULL ||
+        statement->filename[0] == '\0') {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    return update_row_with_index_entries_for_context(
+        statement,
+        statement->filename,
+        schema_name,
+        table_name,
+        row_id,
+        row,
+        row_size,
+        index_entries,
+        index_entry_count,
+        index_entry_changed,
+        preserve_index_entries,
+        out_new_row_id
+    );
+}
+
+static mylite_storage_result update_row_with_index_entries_for_context(
+    mylite_storage_statement *statement,
     const char *filename,
     const char *schema_name,
     const char *table_name,
@@ -6871,9 +7013,14 @@ static mylite_storage_result update_row_with_index_entries(
     }
 
     mylite_storage_update_file_scope file_scope = {0};
-    result = open_existing_file_for_update_scope(filename, &file_scope);
-    if (result != MYLITE_STORAGE_OK) {
-        return result;
+    if (statement != NULL) {
+        file_scope.file = statement->file;
+        file_scope.active_statement = statement;
+    } else {
+        result = open_existing_file_for_update_scope(filename, &file_scope);
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
     }
     FILE *file = file_scope.file;
     mylite_storage_statement *active_file_statement = file_scope.active_statement;
@@ -6897,7 +7044,11 @@ static mylite_storage_result update_row_with_index_entries(
     unsigned char old_row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
     mylite_storage_row_write_position position = {0};
     init_maintained_index_update_plan(&maintained_index_plan);
-    result = read_header_from_update_file_scope(&file_scope, &header);
+    if (statement != NULL) {
+        header = statement->has_current_header ? statement->current_header : statement->header;
+    } else {
+        result = read_header_from_update_file_scope(&file_scope, &header);
+    }
     if (result == MYLITE_STORAGE_OK) {
         result = find_table_id_in_statement(
             file,
@@ -9102,6 +9253,13 @@ int mylite_storage_statement_active(const char *filename) {
 
 mylite_storage_statement *mylite_storage_borrow_active_statement(const char *filename) {
     return active_statement_for(filename);
+}
+
+int mylite_storage_statement_matches(mylite_storage_statement *statement, const char *filename) {
+    if (statement == NULL || statement->filename == NULL || filename == NULL) {
+        return 0;
+    }
+    return active_statement_filename_matches(statement, filename) ? 1 : 0;
 }
 
 int mylite_storage_context_has_active_statement(void) {
