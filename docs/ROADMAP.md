@@ -483,6 +483,9 @@ Handler write locks, exact unique reads, and row updates now also enter a
 trusted primary filename identity scope, letting active statement file-scope
 lookup avoid repeated filename comparisons while raw storage callers keep
 owned-string fallback matching.
+Live-row-id cache entries now also remember trusted filename identity pointers
+beside their owned filename copies, avoiding durable live-row-id cache filename
+comparisons under the handler primary filename scope.
 Existing active exact-index cache hits now go through a small hot-inline probe
 before falling back to cache creation and seeding, keeping the repeated
 prepared point-lookup path out of the miss-handling wrapper.
