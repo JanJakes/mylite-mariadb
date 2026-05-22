@@ -111,6 +111,7 @@ struct BoundValue {
         owned_data.clear();
         length = 0;
         mysql_length = 0;
+        mysql_buffer_length = 0;
         mysql_is_null = true;
     }
 
@@ -131,6 +132,7 @@ struct BoundValue {
         owned_data = std::move(other.owned_data);
         length = other.length;
         mysql_length = other.mysql_length;
+        mysql_buffer_length = other.mysql_buffer_length;
         mysql_is_null = other.mysql_is_null;
         destructor = other.destructor;
         destructor_arg = other.destructor_arg;
@@ -139,6 +141,7 @@ struct BoundValue {
         other.borrowed_data = nullptr;
         other.length = 0;
         other.mysql_length = 0;
+        other.mysql_buffer_length = 0;
         other.mysql_is_null = true;
         other.destructor = MYLITE_STATIC;
         other.destructor_arg = nullptr;
@@ -152,6 +155,7 @@ struct BoundValue {
     std::vector<unsigned char> owned_data;
     std::size_t length = 0;
     unsigned long mysql_length = 0;
+    unsigned long mysql_buffer_length = 0;
 #if MYLITE_WITH_MARIADB_EMBEDDED
     my_bool mysql_is_null = true;
 #else
@@ -2053,7 +2057,7 @@ int bind_statement_parameters(mylite_stmt &statement) {
         bind.buffer = const_cast<void *>(bound_value_data(value));
         bind.length = &value.mysql_length;
         bind.is_null = &value.mysql_is_null;
-        bind.buffer_length = value.mysql_length;
+        bind.buffer_length = value.mysql_buffer_length;
         bind.is_unsigned = value.kind == BoundValueKind::UInt64 ? 1 : 0;
     }
 
@@ -7541,14 +7545,47 @@ int bind_bytes(
 
     try {
         BoundValue &bound = statement->parameters[static_cast<std::size_t>(parameter)];
+        const unsigned long mysql_length = static_cast<unsigned long>(value_len);
+        const bool transient = is_transient_destructor(destructor);
+        if (transient && bound.kind == kind && bound.borrowed_data == nullptr &&
+            !is_custom_destructor(bound.destructor)) {
+            const void *previous_data = bound.owned_data.data();
+            const unsigned long previous_buffer_length = bound.mysql_buffer_length;
+            if (value_len > 0U) {
+                const auto *begin = static_cast<const unsigned char *>(value);
+                bound.owned_data.assign(begin, begin + value_len);
+            } else {
+                bound.owned_data.clear();
+            }
+            const void *current_data = bound.owned_data.data();
+            bound.length = value_len;
+            bound.mysql_length = mysql_length;
+            bound.mysql_is_null = false;
+            bound.borrowed_data = nullptr;
+            bound.destructor = MYLITE_STATIC;
+            bound.destructor_arg = nullptr;
+            const bool needs_rebind = !statement->parameter_binds_bound ||
+                                      previous_data != current_data ||
+                                      mysql_length > previous_buffer_length;
+            if (needs_rebind) {
+                statement->parameter_binds_dirty = true;
+                bound.mysql_buffer_length = mysql_length;
+            } else {
+                bound.mysql_buffer_length = previous_buffer_length;
+            }
+            set_ok_if_needed(*statement->database);
+            return MYLITE_OK;
+        }
+
         statement->parameter_binds_dirty = true;
         bound.reset_to_null();
         bound.kind = kind;
         bound.length = value_len;
-        bound.mysql_length = static_cast<unsigned long>(value_len);
+        bound.mysql_length = mysql_length;
+        bound.mysql_buffer_length = mysql_length;
         bound.mysql_is_null = false;
 
-        if (is_transient_destructor(destructor)) {
+        if (transient) {
             if (value_len > 0U) {
                 const auto *begin = static_cast<const unsigned char *>(value);
                 bound.owned_data.assign(begin, begin + value_len);

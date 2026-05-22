@@ -11,6 +11,7 @@
 
 static void test_scalar_select(void);
 static void test_table_roundtrip(void);
+static void test_transient_text_bind_reuse(void);
 static void test_statement_effects(void);
 static void test_transaction_statement_checkpoints(void);
 static void test_segment_reads(void);
@@ -51,6 +52,7 @@ static int destructor_calls = 0;
 int main(void) {
     test_scalar_select();
     test_table_roundtrip();
+    test_transient_text_bind_reuse();
     test_statement_effects();
     test_transaction_statement_checkpoints();
     test_segment_reads();
@@ -169,6 +171,71 @@ static void test_table_roundtrip(void) {
     assert(mylite_column_type(select, 2U) == MYLITE_TYPE_BLOB);
     assert(mylite_column_bytes(select, 2U) == sizeof(payload));
     assert(memcmp(mylite_column_blob(select, 2U), payload, sizeof(payload)) == 0);
+    assert(mylite_step(select) == MYLITE_DONE);
+    assert(mylite_finalize(select) == MYLITE_OK);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_transient_text_bind_reuse(void) {
+    const char *values[] = {
+        "alpha",
+        "bravo",
+        "tiny",
+        "transient-longer-value",
+        "",
+        "short",
+        "short",
+    };
+    const size_t value_count = sizeof(values) / sizeof(values[0]);
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    mylite_stmt *insert = NULL;
+    mylite_stmt *select = NULL;
+
+    assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "USE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(
+            db,
+            "CREATE TEMPORARY TABLE transient_bind_values ("
+            "id BIGINT NOT NULL PRIMARY KEY,"
+            "body VARCHAR(64) NOT NULL)",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+
+    insert = prepare_statement(db, "INSERT INTO transient_bind_values (id, body) VALUES (?, ?)");
+    for (size_t i = 0U; i < value_count; ++i) {
+        char scratch[64];
+        const int written = snprintf(scratch, sizeof(scratch), "%s", values[i]);
+        assert(written >= 0);
+        assert((size_t)written < sizeof(scratch));
+
+        assert(mylite_bind_int64(insert, 1U, (long long)(i + 1U)) == MYLITE_OK);
+        assert(
+            mylite_bind_text(insert, 2U, scratch, MYLITE_NUL_TERMINATED, MYLITE_TRANSIENT) ==
+            MYLITE_OK
+        );
+        memset(scratch, '?', sizeof(scratch));
+        assert(mylite_step(insert) == MYLITE_DONE);
+        assert(mylite_reset(insert) == MYLITE_OK);
+    }
+    assert(mylite_finalize(insert) == MYLITE_OK);
+
+    select = prepare_statement(db, "SELECT id, body FROM transient_bind_values ORDER BY id");
+    for (size_t i = 0U; i < value_count; ++i) {
+        assert(mylite_step(select) == MYLITE_ROW);
+        assert(mylite_column_int64(select, 0U) == (long long)(i + 1U));
+        assert(mylite_column_bytes(select, 1U) == strlen(values[i]));
+        assert(strcmp(mylite_column_text(select, 1U), values[i]) == 0);
+    }
     assert(mylite_step(select) == MYLITE_DONE);
     assert(mylite_finalize(select) == MYLITE_OK);
 

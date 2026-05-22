@@ -177,7 +177,8 @@ and index keys, while size-changing rewrites continue through the conservative
 prefix-undo path and upgrade any earlier compact undo entries.
 Fixed-width prepared result statements now reuse their result bindings across
 reset/re-execute loops and avoid freeing already-drained results a second time,
-leaving parameter binding/reset semantics as the next prepared-path bottleneck.
+which exposed parameter binding/reset semantics as the next prepared-path
+bottleneck.
 Fixed-width prepared result fetches now also skip full per-column current-row
 clearing before MariaDB overwrites the reusable result binds and publish fetched
 row state with one post-fetch column loop.
@@ -185,6 +186,8 @@ Prepared parameter bindings now follow SQLite-style reset semantics: reset keeps
 bindings for reuse, clear-bindings releases them explicitly, and repeated
 same-type scalar binds avoid redundant MariaDB `mysql_stmt_bind_param()` calls
 and object-wide binding resets.
+Repeated transient text/blob binds now also reuse stable owned buffers without
+rebinding MariaDB parameters when the last bound buffer remains valid.
 Successful non-result prepared resets also avoid a redundant MariaDB statement
 reset before re-execution. Fully drained result-producing prepared statements
 now do the same, while reset-before-drain and failed statements keep the full
