@@ -155,6 +155,7 @@ tools/mylite-perf-baseline --phase=storage-pk-entry-lookups-one-read 1000 10000
 tools/mylite-perf-baseline --phase=storage-pk-row-lookups 1000 10000
 tools/mylite-perf-baseline --phase=storage-pk-row-lookups-one-read 1000 10000
 tools/mylite-perf-baseline --phase=storage-read-statements 1000 10000
+tools/mylite-perf-baseline --phase=storage-row-updates 1000 10000
 tools/mylite-perf-baseline --phase=prepared-pk-selects 1000 10000
 tools/mylite-perf-baseline --phase=prepared-pk-select-components 1000 10000
 tools/mylite-perf-baseline --phase=prepared-pk-select-reset-after-row 1000 10000

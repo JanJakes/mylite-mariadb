@@ -229,7 +229,9 @@ stored primary-key bytes with the MyLite storage API directly, separating raw
 storage read-scope, row-materialization, and MariaDB prepared execution cost.
 Held-read-scope variants isolate steady-state exact-index and row materialization
 cost once one storage read statement is already open, while a storage
-read-statement phase measures begin/end overhead directly. A prepared
+read-statement phase measures begin/end overhead directly. A storage row-update
+phase measures direct MyLite row mutation under explicit statement checkpoints
+without MariaDB prepared execution overhead. A prepared
 primary-key component phase now splits the hot prepared loop into bind, row,
 done, and reset timings for targeted follow-up work.
 A prepared update component phase now splits the hot prepared row-DML loop into

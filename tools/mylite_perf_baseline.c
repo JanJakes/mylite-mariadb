@@ -25,6 +25,7 @@ typedef enum benchmark_phase {
     BENCHMARK_PHASE_STORAGE_PK_ROW_LOOKUPS,
     BENCHMARK_PHASE_STORAGE_PK_ROW_LOOKUPS_ONE_READ,
     BENCHMARK_PHASE_STORAGE_READ_STATEMENTS,
+    BENCHMARK_PHASE_STORAGE_ROW_UPDATES,
     BENCHMARK_PHASE_DIRECT_SECONDARY_SELECTS,
     BENCHMARK_PHASE_PREPARED_SECONDARY_SELECTS,
     BENCHMARK_PHASE_DIRECT_LEAF_SECONDARY_SELECTS,
@@ -52,6 +53,7 @@ typedef enum benchmark_metric {
     BENCHMARK_METRIC_STORAGE_PK_ROW_LOOKUPS,
     BENCHMARK_METRIC_STORAGE_PK_ROW_LOOKUPS_ONE_READ,
     BENCHMARK_METRIC_STORAGE_READ_STATEMENTS,
+    BENCHMARK_METRIC_STORAGE_ROW_UPDATES,
     BENCHMARK_METRIC_DIRECT_SECONDARY_SELECTS,
     BENCHMARK_METRIC_PREPARED_SECONDARY_SELECTS,
     BENCHMARK_METRIC_PREPARE_LEAF_ROWS,
@@ -142,6 +144,7 @@ static int benchmark_storage_point_lookups_with_scope(
     const char *operation
 );
 static int benchmark_storage_read_statements(benchmark_context *ctx);
+static int benchmark_storage_row_updates(benchmark_context *ctx);
 static int benchmark_secondary_selects(benchmark_context *ctx);
 static int benchmark_prepared_secondary_selects(benchmark_context *ctx);
 static int publish_secondary_leaf_index(benchmark_context *ctx);
@@ -205,6 +208,7 @@ static const benchmark_metric_definition k_metric_definitions[] = {
     {BENCHMARK_METRIC_STORAGE_PK_ROW_LOOKUPS, "storage-pk-row-lookups"},
     {BENCHMARK_METRIC_STORAGE_PK_ROW_LOOKUPS_ONE_READ, "storage-pk-row-lookups-one-read"},
     {BENCHMARK_METRIC_STORAGE_READ_STATEMENTS, "storage-read-statements"},
+    {BENCHMARK_METRIC_STORAGE_ROW_UPDATES, "storage-row-updates"},
     {BENCHMARK_METRIC_DIRECT_SECONDARY_SELECTS, "direct-secondary-selects"},
     {BENCHMARK_METRIC_PREPARED_SECONDARY_SELECTS, "prepared-secondary-selects"},
     {BENCHMARK_METRIC_PREPARE_LEAF_ROWS, "prepare-leaf-rows"},
@@ -332,6 +336,10 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         config->phase = BENCHMARK_PHASE_STORAGE_READ_STATEMENTS;
         return 0;
     }
+    if (strcmp(argument, "storage-row-updates") == 0) {
+        config->phase = BENCHMARK_PHASE_STORAGE_ROW_UPDATES;
+        return 0;
+    }
     if (strcmp(argument, "direct-secondary-selects") == 0) {
         config->phase = BENCHMARK_PHASE_DIRECT_SECONDARY_SELECTS;
         return 0;
@@ -373,6 +381,7 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         "`storage-pk-entry-lookups`, "
         "`storage-pk-entry-lookups-one-read`, `storage-pk-row-lookups`, "
         "`storage-pk-row-lookups-one-read`, `storage-read-statements`, "
+        "`storage-row-updates`, "
         "`direct-secondary-selects`, `prepared-secondary-selects`, "
         "`direct-leaf-secondary-selects`, `prepared-leaf-secondary-selects`, "
         "`updates`, `direct-updates`, `prepared-updates`, or "
@@ -450,6 +459,8 @@ static const char *benchmark_phase_name(benchmark_phase phase) {
         return "storage-pk-row-lookups-one-read";
     case BENCHMARK_PHASE_STORAGE_READ_STATEMENTS:
         return "storage-read-statements";
+    case BENCHMARK_PHASE_STORAGE_ROW_UPDATES:
+        return "storage-row-updates";
     case BENCHMARK_PHASE_DIRECT_SECONDARY_SELECTS:
         return "direct-secondary-selects";
     case BENCHMARK_PHASE_PREPARED_SECONDARY_SELECTS:
@@ -497,6 +508,7 @@ static int run_benchmark(const benchmark_config *config) {
         config->phase == BENCHMARK_PHASE_PREPARED_SECONDARY_SELECTS ||
         config->phase == BENCHMARK_PHASE_DIRECT_LEAF_SECONDARY_SELECTS ||
         config->phase == BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_SELECTS;
+    const int storage_update_phase = config->phase == BENCHMARK_PHASE_STORAGE_ROW_UPDATES;
 
     ctx.root = make_temp_root();
     if (ctx.root == NULL) {
@@ -539,6 +551,19 @@ static int run_benchmark(const benchmark_config *config) {
         goto cleanup;
     }
     if (verify_row_count(&ctx, config->rows) != 0) {
+        goto cleanup;
+    }
+    if (storage_update_phase) {
+        if (benchmark_storage_row_updates(&ctx) != 0) {
+            goto cleanup;
+        }
+        if (verify_row_count(&ctx, config->rows) != 0) {
+            goto cleanup;
+        }
+        if (benchmark_ordered_scan(&ctx) != 0) {
+            goto cleanup;
+        }
+        result = 0;
         goto cleanup;
     }
     if (point_select_phase) {
@@ -708,7 +733,7 @@ static void print_usage(const char *program) {
         "prepared-secondary-selects|"
         "direct-leaf-secondary-selects|prepared-leaf-secondary-selects|"
         "storage-pk-entry-lookups|storage-pk-entry-lookups-one-read|storage-pk-row-lookups|"
-        "storage-pk-row-lookups-one-read|storage-read-statements] "
+        "storage-pk-row-lookups-one-read|storage-read-statements|storage-row-updates] "
         "[--max-us=<metric>:<value>] [rows] [iterations]\n"
         "\n"
         "Defaults: phase=all rows=100 iterations=100.\n"
@@ -721,7 +746,8 @@ static void print_usage(const char *program) {
         "prepared-pk-select-reset-after-row, "
         "storage-pk-entry-lookups, storage-pk-entry-lookups-one-read, "
         "storage-pk-row-lookups, storage-pk-row-lookups-one-read, "
-        "storage-read-statements, direct-secondary-selects, prepared-secondary-selects, "
+        "storage-read-statements, storage-row-updates, "
+        "direct-secondary-selects, prepared-secondary-selects, "
         "prepare-leaf-rows, publish-leaf-index, "
         "direct-leaf-secondary-selects, "
         "prepared-leaf-secondary-selects, direct-updates, prepared-updates, "
@@ -1681,6 +1707,148 @@ static int benchmark_storage_read_statements(benchmark_context *ctx) {
 
 end_scope:
     mylite_storage_end_filename_identity_scope(&filename_scope);
+    return result;
+}
+
+static int benchmark_storage_row_updates(benchmark_context *ctx) {
+    mylite_storage_index_entryset primary_entries = {
+        .size = sizeof(primary_entries),
+    };
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+    mylite_storage_statement *transaction = NULL;
+    unsigned long long *row_ids = NULL;
+    uint64_t row_id_checksum = 0U;
+    int result = 1;
+
+    mylite_storage_result storage_result =
+        mylite_storage_read_index_entries(ctx->filename, "perf", "perf_rows", 0U, &primary_entries);
+    if (storage_result != MYLITE_STORAGE_OK) {
+        fprintf(stderr, "Failed to read primary-key index entries: %d\n", storage_result);
+        return 1;
+    }
+    if (primary_entries.entry_count != ctx->config->rows) {
+        fprintf(
+            stderr,
+            "Expected %zu primary entries, got %zu\n",
+            ctx->config->rows,
+            primary_entries.entry_count
+        );
+        goto cleanup;
+    }
+
+    row_ids = malloc(ctx->config->rows * sizeof(*row_ids));
+    if (row_ids == NULL) {
+        fprintf(stderr, "Failed to allocate storage update row-id map\n");
+        goto cleanup;
+    }
+    for (size_t i = 0; i < ctx->config->rows; ++i) {
+        row_ids[i] = primary_entries.row_ids[i];
+    }
+
+    storage_result = mylite_storage_read_indexed_rows(
+        ctx->filename,
+        "perf",
+        "perf_rows",
+        primary_entries.row_ids,
+        primary_entries.entry_count,
+        &rows
+    );
+    if (storage_result != MYLITE_STORAGE_OK || rows.row_count != primary_entries.entry_count) {
+        fprintf(stderr, "Failed to load storage update row payloads: %d\n", storage_result);
+        goto cleanup;
+    }
+    for (size_t i = 0; i < rows.row_count; ++i) {
+        if (rows.row_offsets[i] > rows.row_bytes ||
+            rows.row_sizes[i] > rows.row_bytes - rows.row_offsets[i]) {
+            fprintf(stderr, "Storage update row payload %zu is corrupt\n", i);
+            goto cleanup;
+        }
+    }
+
+    mylite_storage_filename_identity_scope filename_scope = {0};
+    mylite_storage_table_name_identity_scope table_scope = {0};
+    mylite_storage_begin_filename_identity_scope(ctx->filename, &filename_scope);
+    mylite_storage_begin_table_name_identity_scope("perf", "perf_rows", &table_scope);
+
+    storage_result = mylite_storage_begin_transaction(ctx->filename, &transaction);
+    if (storage_result != MYLITE_STORAGE_OK) {
+        fprintf(stderr, "Failed to begin storage update transaction: %d\n", storage_result);
+        goto end_scopes;
+    }
+
+    const uint64_t start_ns = monotonic_ns();
+    for (size_t i = 0; i < ctx->config->iterations; ++i) {
+        const size_t entry_index = i % primary_entries.entry_count;
+        const unsigned char *row = rows.rows + rows.row_offsets[entry_index];
+        const size_t row_size = rows.row_sizes[entry_index];
+
+        mylite_storage_statement *statement = NULL;
+        storage_result = mylite_storage_begin_nested_statement(transaction, &statement);
+        if (storage_result != MYLITE_STORAGE_OK) {
+            fprintf(stderr, "Failed to begin storage update statement: %d\n", storage_result);
+            goto rollback;
+        }
+
+        unsigned long long new_row_id = 0ULL;
+        storage_result = mylite_storage_update_row_preserving_index_entries(
+            ctx->filename,
+            "perf",
+            "perf_rows",
+            row_ids[entry_index],
+            row,
+            row_size,
+            &new_row_id
+        );
+        if (storage_result == MYLITE_STORAGE_OK) {
+            storage_result = mylite_storage_commit_statement(statement);
+            statement = NULL;
+        }
+        if (storage_result != MYLITE_STORAGE_OK) {
+            if (statement != NULL) {
+                (void)mylite_storage_rollback_statement(statement);
+            }
+            fprintf(stderr, "Storage row update failed: %d\n", storage_result);
+            goto rollback;
+        }
+
+        row_ids[entry_index] = new_row_id;
+        row_id_checksum += new_row_id;
+    }
+
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_STORAGE_ROW_UPDATES,
+            "storage row updates in one transaction",
+            ctx->config->iterations,
+            monotonic_ns() - start_ns
+        ) != 0) {
+        goto rollback;
+    }
+    printf("Storage row-update row-id checksum: %" PRIu64 "\n", row_id_checksum);
+
+    storage_result = mylite_storage_commit_statement(transaction);
+    transaction = NULL;
+    if (storage_result != MYLITE_STORAGE_OK) {
+        fprintf(stderr, "Failed to commit storage update transaction: %d\n", storage_result);
+        goto end_scopes;
+    }
+    result = 0;
+    goto end_scopes;
+
+rollback:
+    if (transaction != NULL) {
+        (void)mylite_storage_rollback_statement(transaction);
+        transaction = NULL;
+    }
+end_scopes:
+    mylite_storage_end_table_name_identity_scope(&table_scope);
+    mylite_storage_end_filename_identity_scope(&filename_scope);
+cleanup:
+    free(row_ids);
+    mylite_storage_free_rowset(&rows);
+    mylite_storage_free_index_entryset(&primary_entries);
     return result;
 }
 
