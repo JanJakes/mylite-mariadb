@@ -899,15 +899,18 @@ int mylite_reset(mylite_stmt *statement) {
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
     if (statement->statement != nullptr && statement->executed) {
+        bool abandoned_active_result = false;
         if (statement->result_active) {
             if (mysql_stmt_free_result(statement->statement) != 0) {
                 set_mariadb_statement_error(*statement);
                 return MYLITE_ERROR;
             }
             statement->result_active = false;
+            abandoned_active_result = true;
         }
-        const bool successful_drained_statement = statement->done && !statement->result_active;
-        if (!successful_drained_statement && mysql_stmt_reset(statement->statement) != 0) {
+        const bool reusable_without_reset =
+            (statement->done && !statement->result_active) || abandoned_active_result;
+        if (!reusable_without_reset && mysql_stmt_reset(statement->statement) != 0) {
             set_mariadb_statement_error(*statement);
             return MYLITE_ERROR;
         }
