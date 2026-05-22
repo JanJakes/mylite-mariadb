@@ -166,6 +166,7 @@ tools/mylite-perf-baseline --phase=prepared-leaf-secondary-selects 1000 10000
 tools/mylite-perf-baseline --phase=updates 1000 10000
 tools/mylite-perf-baseline --phase=prepared-updates 1000 10000
 tools/mylite-perf-baseline --phase=prepared-update-components 1000 10000
+tools/mylite-perf-baseline --phase=prepared-assignment-update-components 1000 10000
 tools/mylite-perf-baseline --phase=prepared-updates --max-us=prepared-updates:25 1000 10000
 ```
 

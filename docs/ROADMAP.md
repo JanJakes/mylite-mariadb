@@ -883,7 +883,12 @@ thresholds, giving performance slices a reusable regression gate while keeping
 default runs descriptive and machine-local. It also has focused primary-key
 point-select phases so read-path slices can measure direct and prepared point
 lookups, including SQLite-style prepared reset-after-row lookups, without
-running the slower secondary-result phases.
+running the slower secondary-result phases. It now also has a focused
+`prepared-assignment-update-components` phase for `SET value = ? WHERE id = ?`,
+separate from the expression-based `prepared-update-components` phase for
+`SET value = value + 1 WHERE id = ?`; the simple assignment phase locally
+measures about 1.62-1.63 us/op for the step component over 10000 rows /
+1000000 iterations.
 The next prepared-DML performance wall is repeated MariaDB table-open,
 `Sql_cmd_update::prepare_inner()`, and `JOIN::prepare()` work before the
 accepted MyLite direct-update path. The staged design is tracked in
