@@ -40,6 +40,10 @@ Small storage rewrites will not close most of the remaining gap.
 - MyLite has already narrowed the accepted hot update shape through
   `Mylite_update_exact_key_proof_cache`, handler direct-update proof pushdown,
   direct-update explain gating, and direct handler update execution.
+- The no-match exact-key prepared update path reaches the same repeated
+  table-open, prepare, lock, and handler lookup layers, but does not mutate a
+  row. It is useful as a diagnostic boundary before changing DML cleanup or
+  attempting `JOIN` reuse.
 
 ## Design Direction
 
@@ -80,6 +84,14 @@ be separated from unprepare for an eligible MyLite direct-update shape without
 changing behavior. If that cannot be done cleanly, stop at a measured
 instrumentation slice instead of bypassing core MariaDB checks.
 
+The current implementation proceeds with that instrumentation boundary first:
+`prepared-row-only-update-miss-components` binds out-of-range primary-key
+values against the row-only update table and records bind, step, and reset
+components. The phase keeps the same single-table prepared update SQL shape as
+`prepared-row-only-update-components`, but the step returns no matching row, so
+it separates table-open, DML prepare, lock, exact lookup, and reset cost from
+row materialization and storage mutation cost.
+
 Candidate acceptance for the first implementation:
 
 - Prepared exact-key updates keep affected-row, no-match, unchanged-row,
@@ -92,6 +104,8 @@ Candidate acceptance for the first implementation:
   path.
 - The local prepared-update sample shows a material reduction in
   `JOIN::prepare()` before claiming success.
+- The no-match component benchmark records a zero row-only checksum, proving
+  that the phase did not mutate rows while measuring the prepared-DML path.
 
 ## Affected Subsystems
 
@@ -137,11 +151,25 @@ added.
 - Run focused prepared statement and routed storage-engine tests.
 - Run full `ctest --preset storage-smoke-dev --output-on-failure`.
 - Run `mylite_perf_baseline --phase=prepared-update-components 1000 1000000`.
+- Run `mylite_perf_baseline --phase=prepared-row-only-update-miss-components
+  10000 1000000` to quantify no-match prepared update overhead.
 - Capture a focused prepared-update sample and compare `open_tables_for_query`,
   `Sql_cmd_update::prepare_inner()`, and `JOIN::prepare()` against the current
   baseline.
 - Add regression tests for unsupported-shape fallback before enabling any
   bypass.
+- Current instrumentation slice verification:
+  - Passed `git clang-format --diff -- tools/mylite_perf_baseline.c`.
+  - Passed `git diff --check`.
+  - Passed `cmake --build --preset storage-smoke-dev --target
+    mylite_perf_baseline`.
+  - Passed `ctest --preset storage-smoke-dev --output-on-failure`.
+  - Ran `build/storage-smoke-dev/tools/mylite_perf_baseline
+    --phase=prepared-row-only-update-miss-components 10000 1000000`:
+    - bind: `0.021 us/op`
+    - step: `1.134 us/op`
+    - reset: `0.023 us/op`
+    - row-only miss checksum: `0`
 
 ## Risks And Unresolved Questions
 

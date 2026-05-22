@@ -892,7 +892,11 @@ measures about 1.62-1.63 us/op for the step component over 10000 rows /
 `prepared-row-only-update-components`, keeps the same prepared exact-key SQL
 path but updates a non-indexed integer `counter` column in a separate table,
 separating SQL-layer prepared update overhead from secondary-index replacement
-cost.
+cost. A companion `prepared-row-only-update-miss-components` phase binds
+out-of-range primary keys against the same row-only table and records a zero
+checksum, isolating table-open, prepare, lock, exact lookup, and reset cost
+from row materialization and storage mutation; a local 10000-row /
+1000000-iteration sample measured the no-match step at about 1.14 us/op.
 The next prepared-DML performance wall is repeated MariaDB table-open,
 `Sql_cmd_update::prepare_inner()`, and `JOIN::prepare()` work before the
 accepted MyLite direct-update path. The staged design is tracked in
