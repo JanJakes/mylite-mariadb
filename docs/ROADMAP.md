@@ -320,6 +320,9 @@ Ordinary MyLite `UPDATE` / `DELETE` execution now skips eager quick-plan
 explain detail allocation unless explicit `EXPLAIN`, `ANALYZE`, or slow-log
 explain/engine detail needs it, while routed `EXPLAIN UPDATE` keeps the full
 plan-detail path.
+Accepted MyLite direct updates now also skip the remaining `Explain_update`
+node allocation when no explain, analyze, or slow-log detail can observe it,
+while non-direct updates keep the node for scan, buffer, and filesort trackers.
 Ordinary MyLite `SELECT` execution now applies the same explain-detail gate to
 table-access plan fields while keeping MariaDB's runtime trackers initialized,
 and explicit routed `EXPLAIN SELECT` stays on the full plan-detail path.

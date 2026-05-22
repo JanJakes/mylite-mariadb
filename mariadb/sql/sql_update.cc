@@ -207,6 +207,7 @@ static bool check_fields(THD *thd, TABLE_LIST *table, List<Item> &items,
 static bool
 mylite_prepared_update_ok_message_fast_path(THD *thd, TABLE *table,
                                             TABLE_LIST *table_list);
+static bool mylite_update_needs_explain_plan(THD *thd);
 
 bool TABLE::vers_check_update(List<Item> &items)
 {
@@ -379,6 +380,7 @@ bool Sql_cmd_update::update_single_table(THD *thd)
   List<Item> all_fields;
   killed_state killed_status= NOT_KILLED;
   bool has_triggers, binlog_is_row, do_direct_update= FALSE;
+  bool defer_explain_plan= FALSE;
   bool unique_key_quick= FALSE;
   /*
     TRUE if we are after the call to
@@ -391,7 +393,7 @@ bool Sql_cmd_update::update_single_table(THD *thd)
   */
   bool need_to_optimize= FALSE;
   Update_plan query_plan(thd->mem_root);
-  Explain_update *explain;
+  Explain_update *explain= NULL;
   query_plan.index= MAX_KEY;
   query_plan.using_filesort= FALSE;
 
@@ -662,13 +664,18 @@ bool Sql_cmd_update::update_single_table(THD *thd)
   */
   if (thd->lex->describe)
     goto produce_explain_and_leave;
-  if (!(explain= query_plan.save_explain_update_data(thd, query_plan.mem_root)))
-    goto err;
+  defer_explain_plan= !mylite_update_needs_explain_plan(thd);
+  if (!defer_explain_plan)
+  {
+    if (!(explain=
+              query_plan.save_explain_update_data(thd, query_plan.mem_root)))
+      goto err;
 
-  ANALYZE_START_TRACKING(thd, &explain->command_tracker);
+    ANALYZE_START_TRACKING(thd, &explain->command_tracker);
 
-  DBUG_EXECUTE_IF("show_explain_probe_update_exec_start", 
-                  dbug_serve_apcs(thd, 1););
+    DBUG_EXECUTE_IF("show_explain_probe_update_exec_start",
+                    dbug_serve_apcs(thd, 1););
+  }
 
   has_triggers= (table->triggers &&
                  (table->triggers->has_triggers(TRG_EVENT_UPDATE,
@@ -762,14 +769,30 @@ bool Sql_cmd_update::update_single_table(THD *thd)
         !table->file->direct_update_rows_init(fields))
     {
       do_direct_update= TRUE;
-
-      /* Direct update is not using_filesort and is not using_io_buffer */
-      goto update_begin;
     }
   }
 
-  if (select && select->materialize_mylite_update_exact_key_quick(thd))
+  if (!do_direct_update && select &&
+      select->materialize_mylite_update_exact_key_quick(thd))
     goto err;
+
+  if (defer_explain_plan && !do_direct_update)
+  {
+    if (!(explain=
+              query_plan.save_explain_update_data(thd, query_plan.mem_root)))
+      goto err;
+
+    ANALYZE_START_TRACKING(thd, &explain->command_tracker);
+
+    DBUG_EXECUTE_IF("show_explain_probe_update_exec_start",
+                    dbug_serve_apcs(thd, 1););
+  }
+
+  if (do_direct_update)
+  {
+    /* Direct update is not using_filesort and is not using_io_buffer */
+    goto update_begin;
+  }
 
   if (query_plan.using_filesort || query_plan.using_io_buffer)
   {
@@ -1228,7 +1251,8 @@ error:
       break;
     }
   }
-  ANALYZE_STOP_TRACKING(thd, &explain->command_tracker);
+  if (explain)
+    ANALYZE_STOP_TRACKING(thd, &explain->command_tracker);
   table->auto_increment_field_not_null= FALSE;
   dup_key_found= 0;
   /*
@@ -1589,6 +1613,14 @@ static bool mylite_prepared_update_ok_message_fast_path(THD *thd, TABLE *table,
          !thd->get_stmt_da()->is_bulk_op() && table && table_list &&
          !table->versioned(VERS_TIMESTAMP) && !table_list->has_period();
 #endif
+}
+
+static bool mylite_update_needs_explain_plan(THD *thd)
+{
+  return !mylite_schema_hooks_active() || thd->lex->describe ||
+         thd->lex->analyze_stmt ||
+         (thd->variables.log_slow_verbosity &
+          (LOG_SLOW_VERBOSITY_ENGINE | LOG_SLOW_VERBOSITY_EXPLAIN));
 }
 
 /**
