@@ -102,7 +102,8 @@ selected numeric, hex-hybrid literal/rounding, character/varchar,
 binary-string, binary/varbinary, national-character, interval, integer
 metadata/rounding, and type behavior, selected date,
 temporal-rounding, temporal-function, alternate-timezone conversion,
-temporal scale, microsecond parsing, and time/datetime comparison behavior,
+temporal scale, high-resolution temporal function, microsecond parsing, and
+time/datetime comparison behavior,
 selected parser/comment, keyword,
 CTE-cycle, precedence, expression, type-coercion, rounding, safe-update, and
 comparison behavior, selected `IN` / `NOT IN` predicate behavior, selected

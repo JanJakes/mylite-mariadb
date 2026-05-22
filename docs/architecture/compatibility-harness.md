@@ -75,7 +75,8 @@ SIGNAL/RESIGNAL diagnostics, row constructors, selected scalar
 and window-function behavior, scalar operator, string/format,
 charset-conversion expressions, crypto/KDF, disabled DES,
 aggregate DISTINCT, autoincrement ODKU, strict HEAP autoincrement,
-temporal scale, microsecond parsing, date-format, ASCII charset, selected
+temporal scale, high-resolution temporal functions, microsecond parsing,
+date-format, ASCII charset, selected
 Latin2, UTF-8 binary/general, UTF-8 UCA 1400, and utf8mb3 general-1400
 charset, weight-string, and LIKE condition-propagation behavior, and multibyte
 charset recoding.

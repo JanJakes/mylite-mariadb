@@ -26,6 +26,7 @@ create table t1 select sec_to_time(12345), sec_to_time(12345.6789),
                        utc_timestamp(1), utc_time(2), current_time(3),
                        current_timestamp(4), localtime(5), localtimestamp(6),
                        time_to_sec(123456), time_to_sec('12:34:56.789');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 --query_vertical select * from t1
 drop table t1;
@@ -68,6 +69,7 @@ create table t1 select CAST(@a AS DATETIME) as dauto,
                        CAST(@a AS TIME(4)) as t4,
                        CAST(@a AS TIME(5)) as t5,
                        CAST(@a AS TIME(6)) as t6;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 --query_vertical select * from t1
 drop table t1;
