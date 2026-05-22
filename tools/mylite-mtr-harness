@@ -98,6 +98,8 @@ default_tests=(
   main.create_drop_index
   main.create-uca
   main.create_w_max_indexes_64
+  main.alter_table_mdev539_maria
+  main.alter_table_upgrade_aria
   main.comment_column2
   main.check
   main.create_drop_db
