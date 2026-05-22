@@ -152,6 +152,7 @@ default_tests=(
   main.sum_distinct
   main.func_equal
   main.func_if
+  main.func_set
   main.func_op
   main.func_bit
   main.func_concat

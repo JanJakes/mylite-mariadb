@@ -75,8 +75,8 @@ rejection, `ORDER BY`, optimizer-cost metadata, selected EXPLAIN plan output,
 SIGNAL/RESIGNAL diagnostics, row constructors, selected scalar
 `LAST_VALUE()`, window `FIRST_VALUE()` / `LAST_VALUE()`, percentile/median,
 and window-function behavior, selected `IF()` / `NULLIF()` conditional
-expressions, scalar operator, string/format, charset-conversion expressions,
-crypto/KDF, disabled DES,
+expressions, selected SET-family scalar functions, scalar operator,
+string/format, charset-conversion expressions, crypto/KDF, disabled DES,
 aggregate DISTINCT, autoincrement ODKU, strict HEAP autoincrement,
 temporal scale, high-resolution temporal functions, microsecond parsing,
 date-format, ASCII charset, selected
