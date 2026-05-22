@@ -865,6 +865,9 @@ public:
   {
     if (!enabled)
       return;
+    if (mylite_storage_context_has_active_statement() ||
+        mylite_storage_context_has_active_read_statement(primary_file))
+      return;
     mylite_storage_result result=
         mylite_storage_begin_read_statement(primary_file, &statement);
     if (result != MYLITE_STORAGE_OK)

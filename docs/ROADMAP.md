@@ -241,6 +241,9 @@ scope across fully drained reset/re-execute loops and close it before
 connection-local writes, reducing the local routed prepared primary-key
 point-select sample to about 2.7 us/op while reset-before-drain remains on the
 short-lived read-scope path.
+Handler-local read scopes now detect that retained outer read scope and skip
+creating redundant nested read statements, reducing the same local point-select
+sample to about 2.3 us/op without broadening handler read-lock lifetime.
 The durable row-payload cache now retains a larger bounded hot set, reducing
 steady-state 10000-row storage row materialization and routed prepared
 primary-key point-select time for the local benchmark. Durable row-payload

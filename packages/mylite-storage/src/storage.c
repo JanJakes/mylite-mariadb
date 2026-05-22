@@ -8722,6 +8722,10 @@ int mylite_storage_context_has_active_statement(void) {
                : 0;
 }
 
+int mylite_storage_context_has_active_read_statement(const char *filename) {
+    return active_context_owner != NULL && active_read_statement_for(filename) != NULL ? 1 : 0;
+}
+
 mylite_storage_result mylite_storage_preserve_auto_increment_on_rollback(
     const char *filename
 ) {

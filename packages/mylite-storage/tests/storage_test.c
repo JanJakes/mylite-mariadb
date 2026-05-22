@@ -436,6 +436,7 @@ static void assert_statement_checkpoint_preserves_marked_auto_increment_rollback
     statement_checkpoint_test_context *ctx
 );
 static void test_read_statement_storage_session(void);
+static void test_active_read_statement_context_detection(void);
 static void test_read_checkpoint_snapshot_cache(void);
 static void test_read_statement_storage_reuse(void);
 static void test_read_statement_storage_reuse_replaces_filename(void);
@@ -681,6 +682,7 @@ int main(void) {
     test_truncate_table_lifecycle();
     test_statement_checkpoints();
     test_read_statement_storage_session();
+    test_active_read_statement_context_detection();
     test_read_checkpoint_snapshot_cache();
     test_read_statement_storage_reuse();
     test_read_statement_storage_reuse_replaces_filename();
@@ -9569,6 +9571,40 @@ static void test_read_statement_storage_session(void) {
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_active_read_statement_context_detection(void) {
+    char *root = make_temp_root();
+    char *filename = path_join(root, "active-read-context.mylite");
+    char *other_filename = path_join(root, "other-active-read-context.mylite");
+    int owner = 0;
+    int other_owner = 0;
+    mylite_storage_statement *read_statement = NULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_create_empty(other_filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_context_has_active_read_statement(filename) == 0);
+
+    mylite_storage_set_context_owner(&owner);
+    assert(mylite_storage_begin_read_statement(filename, &read_statement) == MYLITE_STORAGE_OK);
+    assert(read_statement != NULL);
+    assert(mylite_storage_context_has_active_read_statement(filename) == 1);
+    assert(mylite_storage_context_has_active_read_statement(other_filename) == 0);
+
+    mylite_storage_set_context_owner(&other_owner);
+    assert(mylite_storage_context_has_active_read_statement(filename) == 0);
+
+    mylite_storage_set_context_owner(&owner);
+    assert(mylite_storage_end_read_statement(read_statement) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_context_has_active_read_statement(filename) == 0);
+    mylite_storage_set_context_owner(NULL);
+
+    assert(unlink(other_filename) == 0);
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(other_filename);
     free(filename);
     free(root);
 }
