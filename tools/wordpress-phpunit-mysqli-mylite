@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+image="${MYLITE_WORDPRESS_DOCKER_IMAGE:-mylite-wordpress-phpunit:php83}"
+wordpress_repo="${MYLITE_WORDPRESS_REPO:-https://github.com/WordPress/wordpress-develop.git}"
+wordpress_ref="${MYLITE_WORDPRESS_REF:-trunk}"
+wordpress_dir="${MYLITE_WORDPRESS_DIR:-${root_dir}/build/wordpress-develop}"
+phpunit_tools_dir="${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR:-${root_dir}/build/wordpress-phpunit-tools}"
+mariadb_build_dir="${MYLITE_WORDPRESS_MARIADB_BUILD_DIR:-${root_dir}/build/wordpress-mariadb-embedded}"
+cmake_build_dir="${MYLITE_WORDPRESS_CMAKE_BUILD_DIR:-${root_dir}/build/wordpress-php-embedded}"
+db_dir="${MYLITE_WORDPRESS_DB_DIR:-${root_dir}/build/wordpress-tests.mylite}"
+container_root="/work"
+container_wordpress_dir="${container_root}${wordpress_dir#"${root_dir}"}"
+container_phpunit_tools_dir="${container_root}${phpunit_tools_dir#"${root_dir}"}"
+container_mariadb_build_dir="${container_root}${mariadb_build_dir#"${root_dir}"}"
+container_cmake_build_dir="${container_root}${cmake_build_dir#"${root_dir}"}"
+container_db_dir="${container_root}${db_dir#"${root_dir}"}"
+
+build_image() {
+  docker build -t "${image}" - <<'DOCKERFILE'
+FROM composer:2 AS composer
+FROM php:8.3-cli-bookworm
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    bison \
+    build-essential \
+    ca-certificates \
+    cmake \
+    git \
+    libcrypt-dev \
+    libncurses-dev \
+    libpcre2-dev \
+    libpng-dev \
+    libssl-dev \
+    libzip-dev \
+    ninja-build \
+    pkg-config \
+    unzip \
+    zlib1g-dev \
+  && docker-php-ext-install -j"$(nproc)" gd zip \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY --from=composer /usr/bin/composer /usr/local/bin/composer
+DOCKERFILE
+}
+
+run_suite() {
+  docker run --rm -i \
+    --user "$(id -u):$(id -g)" \
+    -e HOME=/tmp/mylite-home \
+    -e MYLITE_WORDPRESS_REPO="${wordpress_repo}" \
+    -e MYLITE_WORDPRESS_REF="${wordpress_ref}" \
+    -e MYLITE_WORDPRESS_DIR="${container_wordpress_dir}" \
+    -e MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR="${container_phpunit_tools_dir}" \
+    -e MYLITE_WORDPRESS_MARIADB_BUILD_DIR="${container_mariadb_build_dir}" \
+    -e MYLITE_WORDPRESS_CMAKE_BUILD_DIR="${container_cmake_build_dir}" \
+    -e MYLITE_WORDPRESS_DB_DIR="${container_db_dir}" \
+    -v "${root_dir}:${container_root}" \
+    -w "${container_root}" \
+    "${image}" \
+    bash -s -- "$@" <<'CONTAINER'
+set -euo pipefail
+
+php_wrapper="${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}/mylite-wordpress-php"
+mylite_extension="${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}/packages/php-ext-mylite/mylite.so"
+mysqli_extension="${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}/packages/php-ext-mysqli-mylite/mysqli_mylite.so"
+
+phase() {
+  printf '\n==> %s\n' "$*"
+}
+
+seconds_since() {
+  local start="$1"
+  local end
+  end="$(date +%s)"
+  echo "$((end - start))"
+}
+
+mkdir -p "${HOME}" "$(dirname "${MYLITE_WORDPRESS_DIR}")" "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}"
+
+phase "Fetch WordPress develop"
+fetch_start="$(date +%s)"
+if [ ! -d "${MYLITE_WORDPRESS_DIR}/.git" ]; then
+  git clone --depth 1 --branch "${MYLITE_WORDPRESS_REF}" "${MYLITE_WORDPRESS_REPO}" "${MYLITE_WORDPRESS_DIR}"
+else
+  git -C "${MYLITE_WORDPRESS_DIR}" fetch --depth 1 origin "${MYLITE_WORDPRESS_REF}"
+  git -C "${MYLITE_WORDPRESS_DIR}" checkout --detach FETCH_HEAD
+fi
+wordpress_sha="$(git -C "${MYLITE_WORDPRESS_DIR}" rev-parse HEAD)"
+echo "wordpress_sha=${wordpress_sha}"
+echo "wordpress_fetch_seconds=$(seconds_since "${fetch_start}")"
+
+phase "Build MyLite PHP extensions"
+build_start="$(date +%s)"
+BUILD_DIR="${MYLITE_WORDPRESS_MARIADB_BUILD_DIR}" tools/mariadb-embedded-build all
+cmake -S . -B "${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}" -G Ninja \
+  -DMYLITE_WARNINGS_AS_ERRORS=ON \
+  -DMYLITE_WITH_MARIADB_EMBEDDED=ON \
+  -DMYLITE_BUILD_PHP_EXTENSIONS=ON \
+  -DMYLITE_MARIADB_BUILD_DIR="${MYLITE_WORDPRESS_MARIADB_BUILD_DIR}" \
+  -DMYLITE_PHP_CONFIG_EXECUTABLE=/usr/local/bin/php-config \
+  -DMYLITE_PHP_EXECUTABLE=/usr/local/bin/php
+cmake --build "${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}"
+cat > "${php_wrapper}" <<PHP
+#!/usr/bin/env sh
+exec /usr/local/bin/php -d extension=${mylite_extension} -d extension=${mysqli_extension} "\$@"
+PHP
+chmod +x "${php_wrapper}"
+"${php_wrapper}" -r 'if (!extension_loaded("mylite") || !extension_loaded("mysqli_mylite") || !function_exists("mysqli_connect")) { exit(1); }'
+echo "mylite_build_seconds=$(seconds_since "${build_start}")"
+
+phase "Install WordPress PHPUnit dependencies"
+deps_start="$(date +%s)"
+composer --working-dir="${MYLITE_WORDPRESS_DIR}" install --no-interaction --no-progress --prefer-dist
+if [ ! -x "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/bin/phpunit" ]; then
+  composer --working-dir="${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}" require --no-interaction --no-progress --prefer-dist phpunit/phpunit:^9.6
+fi
+echo "wordpress_dependency_seconds=$(seconds_since "${deps_start}")"
+
+phase "Prepare MyLite database"
+rm -rf "${MYLITE_WORDPRESS_DB_DIR}"
+"${php_wrapper}" -r '
+$db = mysqli_connect($argv[1]);
+if (!$db) {
+    fwrite(STDERR, "connect failed: " . (mysqli_connect_error() ?? "") . PHP_EOL);
+    exit(1);
+}
+if (!mysqli_query($db, "CREATE DATABASE IF NOT EXISTS wordpress_tests")) {
+    fwrite(STDERR, "create database failed: " . mysqli_error($db) . PHP_EOL);
+    exit(1);
+}
+' "${MYLITE_WORDPRESS_DB_DIR}"
+
+cat > "${MYLITE_WORDPRESS_DIR}/wp-tests-config.php" <<PHP
+<?php
+define( 'ABSPATH', __DIR__ . '/src/' );
+define( 'WP_DEFAULT_THEME', 'default' );
+define( 'WP_DEBUG', true );
+define( 'DB_NAME', 'wordpress_tests' );
+define( 'DB_USER', 'root' );
+define( 'DB_PASSWORD', '' );
+define( 'DB_HOST', 'localhost:${MYLITE_WORDPRESS_DB_DIR}' );
+define( 'DB_CHARSET', 'utf8mb4' );
+define( 'DB_COLLATE', '' );
+define( 'AUTH_KEY', 'mylite' );
+define( 'SECURE_AUTH_KEY', 'mylite' );
+define( 'LOGGED_IN_KEY', 'mylite' );
+define( 'NONCE_KEY', 'mylite' );
+define( 'AUTH_SALT', 'mylite' );
+define( 'SECURE_AUTH_SALT', 'mylite' );
+define( 'LOGGED_IN_SALT', 'mylite' );
+define( 'NONCE_SALT', 'mylite' );
+\$table_prefix = 'wptests_';
+define( 'WP_TESTS_DOMAIN', 'example.org' );
+define( 'WP_TESTS_EMAIL', 'admin@example.org' );
+define( 'WP_TESTS_TITLE', 'MyLite WordPress Tests' );
+define( 'WP_PHP_BINARY', '${php_wrapper}' );
+define( 'WPLANG', '' );
+PHP
+
+phase "Run WordPress PHPUnit"
+suite_start="$(date +%s)"
+set +e
+(
+  cd "${MYLITE_WORDPRESS_DIR}"
+  "${php_wrapper}" "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/bin/phpunit" "$@"
+)
+suite_status="$?"
+set -e
+echo "wordpress_phpunit_seconds=$(seconds_since "${suite_start}")"
+exit "${suite_status}"
+CONTAINER
+}
+
+overall_start="$(date +%s)"
+build_image
+set +e
+run_suite "$@"
+overall_status="$?"
+set -e
+overall_end="$(date +%s)"
+echo "wordpress_total_seconds=$((overall_end - overall_start))"
+exit "${overall_status}"

@@ -100,6 +100,50 @@ remove_tree($path);
 
 if (MyLite\mysqli_mylite_global_symbols_enabled()) {
     $path = test_path('global');
+    expect_true(defined('MYSQLI_REPORT_OFF'), 'MYSQLI_REPORT_OFF should be defined');
+    expect_true(mysqli_report(MYSQLI_REPORT_OFF), 'mysqli_report failed');
+
+    $db = mysqli_init();
+    expect_true($db instanceof mysqli, 'mysqli_init did not return mysqli');
+    expect_true(mysqli_real_connect($db, $path), 'mysqli_real_connect failed: ' . (mysqli_connect_error() ?? ''));
+    expect_true(mysqli_query($db, 'CREATE DATABASE IF NOT EXISTS app') === true, 'global CREATE DATABASE failed');
+    expect_true(mysqli_select_db($db, 'app'), 'global select_db failed');
+    expect_true(mysqli_set_charset($db, 'utf8mb4'), 'global set_charset failed');
+    expect_true(mysqli_character_set_name($db) === 'utf8mb4', 'global character set mismatch');
+    expect_true(str_contains(mysqli_get_server_info($db), 'MariaDB'), 'global server info mismatch');
+    expect_true(mysqli_query($db, 'CREATE TABLE one (id INT PRIMARY KEY, name VARCHAR(16)) ENGINE=MyISAM') === true, 'global CREATE TABLE failed');
+    expect_true(mysqli_query($db, "INSERT INTO one VALUES (1, 'first')") === true, 'global INSERT failed');
+    expect_true((int)mysqli_affected_rows($db) === 1, 'global affected_rows mismatch');
+    $result = mysqli_query($db, 'SELECT id, name FROM one');
+    expect_true($result instanceof mysqli_result, 'global query did not return mysqli_result');
+    expect_true(mysqli_num_rows($result) === 1, 'global num_rows mismatch');
+    expect_true(mysqli_num_fields($result) === 2, 'global num_fields mismatch');
+    $field = mysqli_fetch_field($result);
+    expect_true($field->name === 'id', 'global fetch_field mismatch');
+    expect_true(mysqli_fetch_array($result, MYSQLI_BOTH) === [0 => 1, 1 => 'first', 'id' => 1, 'name' => 'first'], 'global fetch_array mismatch');
+    mysqli_free_result($result);
+    $result = mysqli_query($db, 'SELECT name FROM one');
+    $row = mysqli_fetch_object($result);
+    expect_true($row->name === 'first', 'global fetch_object mismatch');
+    $result = mysqli_query($db, 'SELECT id, name FROM one');
+    expect_true(mysqli_fetch_all($result, MYSQLI_NUM) === [[1, 'first']], 'global fetch_all numeric mismatch');
+    $result = mysqli_query($db, 'SELECT id, name FROM one');
+    expect_true($result->fetch_all(MYSQLI_ASSOC) === [['id' => 1, 'name' => 'first']], 'global method fetch_all associative mismatch');
+    expect_true(mysqli_more_results($db) === false, 'global more_results should be false');
+    expect_true(mysqli_next_result($db) === false, 'global next_result should be false without another result');
+    expect_true(mysqli_error($db) === '', 'global error should be clear');
+    expect_true(mysqli_errno($db) === 0, 'global errno should be clear');
+    expect_true(mysqli_close($db), 'global close failed');
+
+    $db = mysqli_init();
+    expect_true($db instanceof mysqli, 'mysqli_init did not return mysqli for socket path');
+    expect_true(
+        mysqli_real_connect($db, 'localhost', null, null, 'app', null, $path),
+        'mysqli_real_connect socket path failed: ' . (mysqli_connect_error() ?? '')
+    );
+    expect_true(mysqli_query($db, 'SELECT 1') instanceof mysqli_result, 'socket-path query failed');
+    expect_true(mysqli_close($db), 'global socket-path close failed');
+
     $db = mysqli_connect($path);
     expect_true($db instanceof mysqli, 'global mysqli_connect did not return mysqli');
     expect_true(mysqli_query($db, 'CREATE DATABASE app') === true, 'global CREATE DATABASE failed');
