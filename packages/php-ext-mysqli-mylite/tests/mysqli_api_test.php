@@ -147,8 +147,15 @@ if (MyLite\mysqli_mylite_global_symbols_enabled()) {
     expect_true(mysqli_num_fields($result) === 2, 'global num_fields mismatch');
     $field = mysqli_fetch_field($result);
     expect_true($field->name === 'id', 'global fetch_field mismatch');
+    expect_true($field->orgname === 'id', 'global fetch_field original name mismatch');
+    expect_true($field->table === 'one', 'global fetch_field table mismatch');
+    expect_true($field->orgtable === 'one', 'global fetch_field original table mismatch');
     expect_true(mysqli_fetch_array($result, MYSQLI_BOTH) === [0 => '1', 1 => 'first', 'id' => '1', 'name' => 'first'], 'global fetch_array mismatch');
     mysqli_free_result($result);
+    $result = mysqli_query($db, 'SELECT @@SESSION.sql_mode');
+    $row = mysqli_fetch_array($result);
+    expect_true(array_key_exists(0, $row), 'global fetch_array default should include numeric indexes');
+    expect_true(array_key_exists('@@SESSION.sql_mode', $row), 'global fetch_array default should include associative indexes');
     $result = mysqli_query($db, 'SELECT name FROM one');
     $row = mysqli_fetch_object($result);
     expect_true($row->name === 'first', 'global fetch_object mismatch');

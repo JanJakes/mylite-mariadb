@@ -128,7 +128,13 @@ static void php_mylite_mysqli_result_from_rows(
     zend_class_entry *result_ce
 );
 static void php_mylite_mysqli_fields_from_stmt(mylite_stmt *stmt, zval *fields);
-static void php_mylite_mysqli_add_field(zval *fields, const char *name);
+static void php_mylite_mysqli_add_field(
+    zval *fields,
+    const char *name,
+    const char *org_name,
+    const char *table,
+    const char *org_table
+);
 static int php_mylite_mysqli_add_current_row(mylite_stmt *stmt, zval *rows);
 static void php_mylite_mysqli_column_to_zval(mylite_stmt *stmt, unsigned column, zval *value);
 static void php_mylite_mysqli_fetch_array_row(
@@ -2141,17 +2147,29 @@ static void php_mylite_mysqli_result_from_rows(
 static void php_mylite_mysqli_fields_from_stmt(mylite_stmt *stmt, zval *fields) {
     const unsigned column_count = mylite_column_count(stmt);
     for (unsigned column = 0; column < column_count; ++column) {
-        php_mylite_mysqli_add_field(fields, mylite_column_name(stmt, column));
+        php_mylite_mysqli_add_field(
+            fields,
+            mylite_column_name(stmt, column),
+            mylite_column_org_name(stmt, column),
+            mylite_column_table(stmt, column),
+            mylite_column_org_table(stmt, column)
+        );
     }
 }
 
-static void php_mylite_mysqli_add_field(zval *fields, const char *name) {
+static void php_mylite_mysqli_add_field(
+    zval *fields,
+    const char *name,
+    const char *org_name,
+    const char *table,
+    const char *org_table
+) {
     zval field;
     object_init(&field);
     add_property_string(&field, "name", name != NULL ? name : "");
-    add_property_string(&field, "orgname", name != NULL ? name : "");
-    add_property_string(&field, "table", "");
-    add_property_string(&field, "orgtable", "");
+    add_property_string(&field, "orgname", org_name != NULL ? org_name : "");
+    add_property_string(&field, "table", table != NULL ? table : "");
+    add_property_string(&field, "orgtable", org_table != NULL ? org_table : "");
     add_property_string(&field, "def", "");
     add_property_long(&field, "max_length", 0);
     add_property_long(&field, "not_null", 0);

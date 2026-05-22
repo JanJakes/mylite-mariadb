@@ -92,6 +92,9 @@ struct ResultColumn {
     enum enum_field_types field_type = MYSQL_TYPE_NULL;
     unsigned int flags = 0;
     std::string name;
+    std::string org_name;
+    std::string table;
+    std::string org_table;
     std::vector<unsigned char> buffer;
     std::vector<unsigned char> retired_buffer;
     unsigned long length = 0;
@@ -233,7 +236,8 @@ int bind_bytes(
 void bind_parameter_buffer(ParameterBinding &parameter);
 int bind_parameters(mylite_stmt &stmt);
 mylite_value_type column_type(const ResultColumn &column);
-const ResultColumn *column_at(const mylite_stmt *stmt, unsigned column);
+const ResultColumn *metadata_column_at(const mylite_stmt *stmt, unsigned column);
+const ResultColumn *value_column_at(const mylite_stmt *stmt, unsigned column);
 void set_mariadb_statement_error(mylite_stmt &stmt);
 int reject_unsupported_sql_policy(mylite_db &db, std::string_view sql);
 void update_current_schema_after_successful_sql(mylite_db &db, std::string_view sql);
@@ -712,8 +716,41 @@ const char *mylite_column_name(mylite_stmt *stmt, unsigned column) {
     (void)column;
     return nullptr;
 #else
-    const ResultColumn *result_column = column_at(stmt, column);
+    const ResultColumn *result_column = metadata_column_at(stmt, column);
     return result_column != nullptr ? result_column->name.c_str() : nullptr;
+#endif
+}
+
+const char *mylite_column_org_name(mylite_stmt *stmt, unsigned column) {
+#if !MYLITE_WITH_MARIADB_EMBEDDED
+    (void)stmt;
+    (void)column;
+    return nullptr;
+#else
+    const ResultColumn *result_column = metadata_column_at(stmt, column);
+    return result_column != nullptr ? result_column->org_name.c_str() : nullptr;
+#endif
+}
+
+const char *mylite_column_table(mylite_stmt *stmt, unsigned column) {
+#if !MYLITE_WITH_MARIADB_EMBEDDED
+    (void)stmt;
+    (void)column;
+    return nullptr;
+#else
+    const ResultColumn *result_column = metadata_column_at(stmt, column);
+    return result_column != nullptr ? result_column->table.c_str() : nullptr;
+#endif
+}
+
+const char *mylite_column_org_table(mylite_stmt *stmt, unsigned column) {
+#if !MYLITE_WITH_MARIADB_EMBEDDED
+    (void)stmt;
+    (void)column;
+    return nullptr;
+#else
+    const ResultColumn *result_column = metadata_column_at(stmt, column);
+    return result_column != nullptr ? result_column->org_table.c_str() : nullptr;
 #endif
 }
 
@@ -723,7 +760,7 @@ mylite_value_type mylite_column_type(mylite_stmt *stmt, unsigned column) {
     (void)column;
     return MYLITE_TYPE_NULL;
 #else
-    const ResultColumn *result_column = column_at(stmt, column);
+    const ResultColumn *result_column = metadata_column_at(stmt, column);
     return result_column != nullptr ? column_type(*result_column) : MYLITE_TYPE_NULL;
 #endif
 }
@@ -749,7 +786,7 @@ const char *mylite_column_text(mylite_stmt *stmt, unsigned column) {
     (void)column;
     return nullptr;
 #else
-    const ResultColumn *result_column = column_at(stmt, column);
+    const ResultColumn *result_column = value_column_at(stmt, column);
     if (result_column == nullptr || result_column->is_null != 0) {
         return nullptr;
     }
@@ -763,7 +800,7 @@ const void *mylite_column_blob(mylite_stmt *stmt, unsigned column) {
     (void)column;
     return nullptr;
 #else
-    const ResultColumn *result_column = column_at(stmt, column);
+    const ResultColumn *result_column = value_column_at(stmt, column);
     if (result_column == nullptr || result_column->is_null != 0) {
         return nullptr;
     }
@@ -777,7 +814,7 @@ std::size_t mylite_column_bytes(mylite_stmt *stmt, unsigned column) {
     (void)column;
     return 0U;
 #else
-    const ResultColumn *result_column = column_at(stmt, column);
+    const ResultColumn *result_column = value_column_at(stmt, column);
     if (result_column == nullptr || result_column->is_null != 0) {
         return 0U;
     }
@@ -2196,6 +2233,9 @@ int initialize_statement_results(mylite_stmt &stmt) {
         column.field_type = fields[index].type;
         column.flags = fields[index].flags;
         column.name = fields[index].name != nullptr ? fields[index].name : "";
+        column.org_name = fields[index].org_name != nullptr ? fields[index].org_name : "";
+        column.table = fields[index].table != nullptr ? fields[index].table : "";
+        column.org_table = fields[index].org_table != nullptr ? fields[index].org_table : "";
         column.length = 0;
         column.is_null = 0;
         column.error = 0;
@@ -2461,7 +2501,14 @@ mylite_value_type column_type(const ResultColumn &column) {
     }
 }
 
-const ResultColumn *column_at(const mylite_stmt *stmt, unsigned column) {
+const ResultColumn *metadata_column_at(const mylite_stmt *stmt, unsigned column) {
+    if (stmt == nullptr || column >= stmt->columns.size()) {
+        return nullptr;
+    }
+    return &stmt->columns[column];
+}
+
+const ResultColumn *value_column_at(const mylite_stmt *stmt, unsigned column) {
     if (stmt == nullptr || !stmt->has_row || column >= stmt->columns.size()) {
         return nullptr;
     }

@@ -32,6 +32,7 @@ static void insert_second_prepared_row(mylite_db *db, mylite_stmt *stmt);
 static void insert_large_prepared_row(mylite_db *db, mylite_stmt *stmt);
 static void insert_empty_prepared_row(mylite_db *db, mylite_stmt *stmt);
 static void assert_prepared_row(mylite_stmt *stmt);
+static void assert_prepared_metadata(mylite_stmt *stmt);
 static void assert_large_payload_row(mylite_stmt *stmt);
 static void assert_empty_payload_row(mylite_stmt *stmt);
 static void assert_warning_access(mylite_db *db);
@@ -83,6 +84,9 @@ static void test_prepared_statement_bindings_and_columns(void) {
     assert(mylite_step(select_stmt) == MYLITE_ROW);
     assert_prepared_row(select_stmt);
     assert(mylite_step(select_stmt) == MYLITE_DONE);
+    assert_prepared_metadata(select_stmt);
+    assert(mylite_column_text(select_stmt, 3) == NULL);
+    assert(mylite_column_bytes(select_stmt, 3) == 0U);
     assert(mylite_reset(select_stmt) == MYLITE_OK);
 
     assert(mylite_bind_int64(select_stmt, 1, 3) == MYLITE_OK);
@@ -251,6 +255,15 @@ static void assert_prepared_row(mylite_stmt *stmt) {
     assert(mylite_column_text(stmt, 5) == NULL);
     assert(mylite_column_blob(stmt, 5) == NULL);
     assert(mylite_column_bytes(stmt, 5) == 0U);
+}
+
+static void assert_prepared_metadata(mylite_stmt *stmt) {
+    assert(mylite_column_count(stmt) == 6U);
+    assert(strcmp(mylite_column_name(stmt, 0), "id") == 0);
+    assert(strcmp(mylite_column_org_name(stmt, 0), "id") == 0);
+    assert(strcmp(mylite_column_table(stmt, 0), "prepared_values") == 0);
+    assert(strcmp(mylite_column_org_table(stmt, 0), "prepared_values") == 0);
+    assert(mylite_column_type(stmt, 0) == MYLITE_TYPE_INT64);
 }
 
 static void assert_large_payload_row(mylite_stmt *stmt) {
