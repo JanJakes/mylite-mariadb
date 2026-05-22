@@ -170,8 +170,10 @@ auth-plugin negotiation is outside the core embedded API. Direct execution and
 prepared-statement preparation reject those top-level SQL command families
 before they can create server sidecars, depend on `mysql.*` system tables,
 read or write caller-named files, or expose server-owned tuning state.
-`information_schema` remains virtual. Any future required `mysql.*` system
-surface should be created or maintained inside the MyLite database directory,
+`information_schema` remains virtual. MyLite initializes the minimal
+`mysql.proc` / `mysql.procs_priv` metadata needed by MariaDB stored routines
+inside the database directory. Any future required `mysql.*` system surface
+should likewise be created or maintained inside the MyLite database directory,
 or exposed as a read-only virtual surface when persistent server tables are
 unnecessary.
 

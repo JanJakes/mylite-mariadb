@@ -23,6 +23,7 @@ typedef struct open_database_paths {
 } open_database_paths;
 
 static void test_prepared_statement_bindings_and_columns(void);
+static void test_prepared_call_is_rejected_after_routine_creation(void);
 static mylite_db *open_database(open_database_paths paths, unsigned flags);
 static void create_prepared_schema(mylite_db *db);
 static mylite_stmt *prepare_statement(mylite_db *db, const char *sql);
@@ -50,6 +51,7 @@ static int remove_tree_entry(
 
 int main(void) {
     test_prepared_statement_bindings_and_columns();
+    test_prepared_call_is_rejected_after_routine_creation();
     return 0;
 }
 
@@ -105,6 +107,62 @@ static void test_prepared_statement_bindings_and_columns(void) {
     assert(mylite_close(db) == MYLITE_BUSY);
     assert(mylite_finalize(select_stmt) == MYLITE_OK);
     assert(mylite_finalize(insert_stmt) == MYLITE_OK);
+    assert(mylite_close(db) == MYLITE_OK);
+
+    free(database_path);
+    free(runtime_root);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_prepared_call_is_rejected_after_routine_creation(void) {
+    char *root = make_temp_root();
+    char *runtime_root = path_join(root, "runtime");
+    char *database_path = path_join(root, "stored-procedure.mylite");
+    open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
+    mylite_db *db = NULL;
+    mylite_stmt *call_stmt = NULL;
+    mylite_stmt *select_stmt = NULL;
+    const char *tail = NULL;
+
+    assert(mkdir(runtime_root, 0700) == 0);
+
+    db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE);
+    exec_ok(db, "CREATE DATABASE app");
+    exec_ok(
+        db,
+        "CREATE TABLE app.stored_values ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "label VARCHAR(32) NOT NULL"
+        ") ENGINE=MyISAM"
+    );
+    exec_ok(db, "INSERT INTO app.stored_values VALUES (7, 'stored')");
+    exec_ok(db, "DROP PROCEDURE IF EXISTS app.select_stored_value");
+    exec_ok(
+        db,
+        "CREATE PROCEDURE app.select_stored_value() "
+        "BEGIN SELECT id, label FROM app.stored_values ORDER BY id LIMIT 1; END"
+    );
+
+    assert(
+        mylite_prepare(
+            db,
+            "CALL app.select_stored_value()",
+            MYLITE_NUL_TERMINATED,
+            &call_stmt,
+            &tail
+        ) == MYLITE_ERROR
+    );
+    assert(call_stmt == NULL);
+    assert(strstr(mylite_errmsg(db), "prepared CALL") != NULL);
+
+    select_stmt = prepare_statement(db, "SELECT label FROM app.stored_values WHERE id = 7");
+    assert(mylite_step(select_stmt) == MYLITE_ROW);
+    assert(strcmp(mylite_column_text(select_stmt, 0), "stored") == 0);
+    assert(mylite_step(select_stmt) == MYLITE_DONE);
+    assert(mylite_finalize(select_stmt) == MYLITE_OK);
+
+    exec_ok(db, "DROP PROCEDURE IF EXISTS app.select_stored_value");
     assert(mylite_close(db) == MYLITE_OK);
 
     free(database_path);

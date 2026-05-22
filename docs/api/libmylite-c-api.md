@@ -199,7 +199,9 @@ non-NULL, receives the first uncompiled byte.
 Initial implementation status: `mylite_prepare()` wraps MariaDB prepared
 statements in embedded builds. `tail` is set to the end of the resolved SQL
 text on successful single-statement prepares. `mylite_close()` returns
-`MYLITE_BUSY` while statements are active.
+`MYLITE_BUSY` while statements are active. Prepared `CALL` statements are
+currently rejected; use direct execution for the covered result-returning
+stored-procedure path.
 
 ## Bindings
 

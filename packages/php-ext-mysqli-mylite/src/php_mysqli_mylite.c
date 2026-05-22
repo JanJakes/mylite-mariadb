@@ -42,6 +42,12 @@ typedef struct php_mylite_mysqli_stmt {
     zend_object std;
 } php_mylite_mysqli_stmt;
 
+typedef struct php_mylite_mysqli_exec_result_context {
+    zval *rows;
+    zval *fields;
+    bool fields_initialized;
+} php_mylite_mysqli_exec_result_context;
+
 static zend_class_entry *php_mylite_mysqli_link_ce;
 static zend_class_entry *php_mylite_mysqli_result_ce;
 static zend_class_entry *php_mylite_mysqli_stmt_ce;
@@ -114,6 +120,18 @@ static int php_mylite_mysqli_query_impl(
     size_t sql_len,
     zval *return_value
 );
+static int php_mylite_mysqli_exec_query_impl(
+    php_mylite_mysqli_link *link,
+    zend_object *link_object,
+    const char *sql,
+    zval *return_value
+);
+static int php_mylite_mysqli_exec_result_callback(
+    void *ctx,
+    int column_count,
+    char **values,
+    char **column_names
+);
 static int php_mylite_mysqli_prepare_impl(
     php_mylite_mysqli_link *link,
     zend_object *link_object,
@@ -163,6 +181,7 @@ static void php_mylite_mysqli_declare_link_properties(zend_class_entry *class_en
 static void php_mylite_mysqli_declare_result_properties(zend_class_entry *class_entry);
 static void php_mylite_mysqli_register_global_symbols(int module_number);
 static void php_mylite_mysqli_register_global_constants(int module_number);
+static bool php_mylite_mysqli_is_call_query(const char *sql, size_t sql_len);
 
 #define Z_MYLITE_MYSQLI_LINK_P(zval_ptr) php_mylite_mysqli_link_from_object(Z_OBJ_P((zval_ptr)))
 #define Z_MYLITE_MYSQLI_RESULT_P(zval_ptr) php_mylite_mysqli_result_from_object(Z_OBJ_P((zval_ptr)))
@@ -2041,6 +2060,10 @@ static int php_mylite_mysqli_query_impl(
         return FAILURE;
     }
 
+    if (php_mylite_mysqli_is_call_query(sql, sql_len)) {
+        return php_mylite_mysqli_exec_query_impl(link, link_object, sql, return_value);
+    }
+
     mylite_stmt *stmt = NULL;
     const int prepare_result = mylite_prepare(db, sql, sql_len, &stmt, NULL);
     if (prepare_result != MYLITE_OK) {
@@ -2083,6 +2106,88 @@ static int php_mylite_mysqli_query_impl(
         php_mylite_mysqli_result_class_for_link(link_object)
     );
     return SUCCESS;
+}
+
+static int php_mylite_mysqli_exec_query_impl(
+    php_mylite_mysqli_link *link,
+    zend_object *link_object,
+    const char *sql,
+    zval *return_value
+) {
+    zval rows;
+    zval fields;
+    array_init(&rows);
+    array_init(&fields);
+
+    php_mylite_mysqli_exec_result_context ctx = {
+        .rows = &rows,
+        .fields = &fields,
+        .fields_initialized = false,
+    };
+    char *errmsg = NULL;
+    const int result =
+        mylite_exec(link->db, sql, php_mylite_mysqli_exec_result_callback, &ctx, &errmsg);
+    mylite_free(errmsg);
+    if (result != MYLITE_OK) {
+        zval_ptr_dtor(&rows);
+        zval_ptr_dtor(&fields);
+        php_mylite_mysqli_set_error(link, link_object, result, "query failed");
+        return FAILURE;
+    }
+
+    php_mylite_mysqli_clear_error(link_object);
+    php_mylite_mysqli_sync_status(link, link_object);
+    if (!ctx.fields_initialized) {
+        zval_ptr_dtor(&rows);
+        zval_ptr_dtor(&fields);
+        ZVAL_TRUE(return_value);
+        return SUCCESS;
+    }
+
+    php_mylite_mysqli_result_from_rows(
+        return_value,
+        &rows,
+        &fields,
+        php_mylite_mysqli_result_class_for_link(link_object)
+    );
+    return SUCCESS;
+}
+
+// NOLINTNEXTLINE(bugprone-easily-swappable-parameters): required libmylite callback signature.
+static int php_mylite_mysqli_exec_result_callback(
+    void *ctx,
+    int column_count,
+    char **values,
+    char **column_names
+) {
+    php_mylite_mysqli_exec_result_context *result_ctx =
+        (php_mylite_mysqli_exec_result_context *)ctx;
+    if (!result_ctx->fields_initialized) {
+        for (int column = 0; column < column_count; ++column) {
+            const char *column_name = column_names[column] != NULL ? column_names[column] : "";
+            php_mylite_mysqli_add_field(result_ctx->fields, column_name, column_name, "", "");
+        }
+        result_ctx->fields_initialized = true;
+    }
+
+    zval row;
+    array_init(&row);
+    for (int column = 0; column < column_count; ++column) {
+        zval value;
+        if (values[column] == NULL) {
+            ZVAL_NULL(&value);
+        } else {
+            ZVAL_STRING(&value, values[column]);
+        }
+        add_assoc_zval_ex(
+            &row,
+            column_names[column] != NULL ? column_names[column] : "",
+            column_names[column] != NULL ? strlen(column_names[column]) : 0,
+            &value
+        );
+    }
+    add_next_index_zval(result_ctx->rows, &row);
+    return 0;
 }
 
 static int php_mylite_mysqli_prepare_impl(
@@ -2526,4 +2631,35 @@ static void php_mylite_mysqli_register_global_constants(int module_number) {
     REGISTER_LONG_CONSTANT("MYSQLI_REPORT_STRICT", 2, CONST_CS | CONST_PERSISTENT);
     REGISTER_LONG_CONSTANT("MYSQLI_REPORT_INDEX", 4, CONST_CS | CONST_PERSISTENT);
     REGISTER_LONG_CONSTANT("MYSQLI_REPORT_ALL", 255, CONST_CS | CONST_PERSISTENT);
+}
+
+static bool php_mylite_mysqli_is_call_query(const char *sql, size_t sql_len) {
+    size_t offset = 0;
+    while (offset < sql_len) {
+        const char value = sql[offset];
+        if (value != ' ' && value != '\t' && value != '\n' && value != '\r' && value != '\f') {
+            break;
+        }
+        ++offset;
+    }
+
+    if (sql_len - offset < 4U) {
+        return false;
+    }
+
+    const char c0 = sql[offset];
+    const char c1 = sql[offset + 1U];
+    const char c2 = sql[offset + 2U];
+    const char c3 = sql[offset + 3U];
+    if ((c0 != 'C' && c0 != 'c') || (c1 != 'A' && c1 != 'a') || (c2 != 'L' && c2 != 'l') ||
+        (c3 != 'L' && c3 != 'l')) {
+        return false;
+    }
+
+    if (sql_len == offset + 4U) {
+        return true;
+    }
+
+    const char next = sql[offset + 4U];
+    return next == ' ' || next == '\t' || next == '\n' || next == '\r' || next == '\f';
 }

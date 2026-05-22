@@ -59,6 +59,58 @@ constexpr const char *k_plugin_directory_name = "plugins";
 constexpr const char *k_mariadb_base_ref = "mariadb-11.8.6";
 constexpr const char *k_metadata_format_line = "format=1";
 constexpr const char *k_innodb_temp_data_file_path = "ibtmp1:12M:autoextend";
+constexpr const char *k_create_mysql_database_sql = "CREATE DATABASE IF NOT EXISTS mysql";
+constexpr const char *k_create_proc_table_sql =
+    "CREATE TABLE IF NOT EXISTS mysql.proc ("
+    "db char(64) collate utf8mb3_bin DEFAULT '' NOT NULL, "
+    "name char(64) DEFAULT '' NOT NULL, "
+    "type enum('FUNCTION','PROCEDURE','PACKAGE','PACKAGE BODY') NOT NULL, "
+    "specific_name char(64) DEFAULT '' NOT NULL, "
+    "language enum('SQL') DEFAULT 'SQL' NOT NULL, "
+    "sql_data_access enum('CONTAINS_SQL','NO_SQL','READS_SQL_DATA','MODIFIES_SQL_DATA') "
+    "DEFAULT 'CONTAINS_SQL' NOT NULL, "
+    "is_deterministic enum('YES','NO') DEFAULT 'NO' NOT NULL, "
+    "security_type enum('INVOKER','DEFINER') DEFAULT 'DEFINER' NOT NULL, "
+    "param_list blob DEFAULT '' NOT NULL, "
+    "returns longblob NOT NULL, "
+    "body longblob NOT NULL, "
+    "definer varchar(384) collate utf8mb3_bin DEFAULT '' NOT NULL, "
+    "created timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, "
+    "modified timestamp NOT NULL DEFAULT '0000-00-00 00:00:00', "
+    "sql_mode set('REAL_AS_FLOAT','PIPES_AS_CONCAT','ANSI_QUOTES','IGNORE_SPACE',"
+    "'IGNORE_BAD_TABLE_OPTIONS','ONLY_FULL_GROUP_BY','NO_UNSIGNED_SUBTRACTION',"
+    "'NO_DIR_IN_CREATE','POSTGRESQL','ORACLE','MSSQL','DB2','MAXDB','NO_KEY_OPTIONS',"
+    "'NO_TABLE_OPTIONS','NO_FIELD_OPTIONS','MYSQL323','MYSQL40','ANSI',"
+    "'NO_AUTO_VALUE_ON_ZERO','NO_BACKSLASH_ESCAPES','STRICT_TRANS_TABLES',"
+    "'STRICT_ALL_TABLES','NO_ZERO_IN_DATE','NO_ZERO_DATE','INVALID_DATES',"
+    "'ERROR_FOR_DIVISION_BY_ZERO','TRADITIONAL','NO_AUTO_CREATE_USER',"
+    "'HIGH_NOT_PRECEDENCE','NO_ENGINE_SUBSTITUTION','PAD_CHAR_TO_FULL_LENGTH',"
+    "'EMPTY_STRING_IS_NULL','SIMULTANEOUS_ASSIGNMENT','TIME_ROUND_FRACTIONAL') "
+    "DEFAULT '' NOT NULL, "
+    "comment text collate utf8mb3_bin NOT NULL, "
+    "character_set_client char(32) collate utf8mb3_bin, "
+    "collation_connection char(64) collate utf8mb3_bin, "
+    "db_collation char(64) collate utf8mb3_bin, "
+    "body_utf8 longblob, "
+    "aggregate enum('NONE','GROUP') DEFAULT 'NONE' NOT NULL, "
+    "PRIMARY KEY (db,name,type)) "
+    "engine=Aria transactional=1 character set utf8mb3 COLLATE utf8mb3_general_ci "
+    "comment='Stored Procedures'";
+constexpr const char *k_create_procs_priv_table_sql =
+    "CREATE TABLE IF NOT EXISTS mysql.procs_priv ("
+    "Host char(255) binary DEFAULT '' NOT NULL, "
+    "Db char(64) binary DEFAULT '' NOT NULL, "
+    "User char(128) binary DEFAULT '' NOT NULL, "
+    "Routine_name char(64) COLLATE utf8mb3_general_ci DEFAULT '' NOT NULL, "
+    "Routine_type enum('FUNCTION','PROCEDURE','PACKAGE','PACKAGE BODY') NOT NULL, "
+    "Grantor varchar(384) DEFAULT '' NOT NULL, "
+    "Proc_priv set('Execute','Alter Routine','Grant','Show Create Routine') "
+    "COLLATE utf8mb3_general_ci DEFAULT '' NOT NULL, "
+    "Timestamp timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, "
+    "PRIMARY KEY (Host,Db,User,Routine_name,Routine_type), "
+    "KEY Grantor (Grantor)) "
+    "engine=Aria transactional=1 CHARACTER SET utf8mb3 COLLATE utf8mb3_bin "
+    "comment='Procedure privileges'";
 constexpr int k_runtime_directory_attempts = 100;
 constexpr unsigned k_lock_poll_interval_ms = 10;
 constexpr unsigned long k_initial_result_buffer_size = 4096;
@@ -184,6 +236,8 @@ bool database_directory_is_empty(
 );
 int start_runtime(mylite_db &db, const mylite_open_config *config);
 int connect_runtime(mylite_db &db);
+int ensure_core_system_tables(mylite_db &db);
+int execute_system_table_statement(mylite_db &db, const char *sql);
 int acquire_database_lock(
     mylite_db &db,
     const std::filesystem::path &database_path,
@@ -216,8 +270,10 @@ int store_and_emit_result(
     void *ctx,
     bool *has_result
 );
-int initialize_statement_results(mylite_stmt &stmt);
+int drain_remaining_query_results(mylite_db &db);
+int initialize_statement_results(mylite_stmt &stmt, bool release_existing_results);
 int fetch_statement_row(mylite_stmt &stmt);
+int drain_remaining_statement_results(mylite_stmt &stmt);
 int refresh_dirty_result_binds(mylite_stmt &stmt);
 int fetch_truncated_statement_columns(mylite_stmt &stmt);
 int configure_column_buffer(ResultColumn &column, unsigned long buffer_length);
@@ -431,9 +487,9 @@ int mylite_step(mylite_stmt *stmt) {
         if (bind_result != MYLITE_OK) {
             return bind_result;
         }
-        const int result_setup = initialize_statement_results(*stmt);
-        if (result_setup != MYLITE_OK) {
-            return result_setup;
+        const int initial_result_setup = initialize_statement_results(*stmt, true);
+        if (initial_result_setup != MYLITE_OK) {
+            return initial_result_setup;
         }
         if (mysql_stmt_execute(stmt->stmt) != 0) {
             set_mariadb_statement_error(*stmt);
@@ -445,6 +501,12 @@ int mylite_step(mylite_stmt *stmt) {
             static_cast<unsigned long long>(mysql_stmt_insert_id(stmt->stmt));
         stmt->executed = true;
 
+        if (!stmt->has_result && mysql_stmt_field_count(stmt->stmt) != 0U) {
+            const int result_setup = initialize_statement_results(*stmt, false);
+            if (result_setup != MYLITE_OK) {
+                return result_setup;
+            }
+        }
         if (!stmt->has_result) {
             const my_ulonglong affected_rows = mysql_stmt_affected_rows(stmt->stmt);
             stmt->db->changes = affected_rows == static_cast<my_ulonglong>(-1)
@@ -970,6 +1032,13 @@ int open_impl(
             return connect_result;
         }
 
+        const int system_tables_result = ensure_core_system_tables(*db);
+        if (system_tables_result != MYLITE_OK) {
+            close_connection(*db);
+            release_runtime();
+            return system_tables_result;
+        }
+
         *out_db = db.release();
         return MYLITE_OK;
     } catch (const std::bad_alloc &) {
@@ -1066,6 +1135,9 @@ int exec_impl(
         set_mariadb_error(*db);
         return copy_error_message(*db, errmsg);
     }
+    const my_ulonglong affected_rows = mysql_affected_rows(&db->mysql);
+    const unsigned long long insert_id =
+        static_cast<unsigned long long>(mysql_insert_id(&db->mysql));
 
     bool has_result = false;
     const int result = store_and_emit_result(*db, callback, ctx, &has_result);
@@ -1074,14 +1146,13 @@ int exec_impl(
     }
     update_current_schema_after_successful_sql(*db, sql);
 
-    const my_ulonglong affected_rows = mysql_affected_rows(&db->mysql);
     db->changes =
         has_result || affected_rows == static_cast<my_ulonglong>(-1)
             ? 0
             : static_cast<long long>(
                   std::min<my_ulonglong>(affected_rows, static_cast<my_ulonglong>(LLONG_MAX))
               );
-    db->last_insert_id = static_cast<unsigned long long>(mysql_insert_id(&db->mysql));
+    db->last_insert_id = insert_id;
     return MYLITE_OK;
 #endif
 }
@@ -1125,6 +1196,11 @@ int prepare_impl(
     }
     set_ok(*db);
     if (reject_unsupported_sql_policy(*db, std::string_view(sql, resolved_len)) != MYLITE_OK) {
+        return MYLITE_ERROR;
+    }
+    const SqlPolicyTokens tokens = collect_sql_policy_tokens(std::string_view(sql, resolved_len));
+    if (token_equals(identifier_token_at(tokens, 0), "CALL")) {
+        set_error(*db, MYLITE_ERROR, "prepared CALL statements are not supported by MyLite");
         return MYLITE_ERROR;
     }
 
@@ -2180,7 +2256,7 @@ int store_and_emit_result(
             set_mariadb_error(db);
             return MYLITE_ERROR;
         }
-        return MYLITE_OK;
+        return drain_remaining_query_results(db);
     }
     *has_result = true;
 
@@ -2202,17 +2278,44 @@ int store_and_emit_result(
         if (callback != nullptr &&
             callback(ctx, static_cast<int>(field_count), row, column_names.data()) != 0) {
             mysql_free_result(result);
+            static_cast<void>(drain_remaining_query_results(db));
             set_error(db, MYLITE_ERROR, "query callback requested abort");
             return MYLITE_ERROR;
         }
     }
 
     mysql_free_result(result);
+    return drain_remaining_query_results(db);
+}
+
+int drain_remaining_query_results(mylite_db &db) {
+    for (;;) {
+        const int next_result = mysql_next_result(&db.mysql);
+        if (next_result < 0) {
+            return MYLITE_OK;
+        }
+        if (next_result > 0) {
+            set_mariadb_error(db);
+            return MYLITE_ERROR;
+        }
+
+        MYSQL_RES *result = mysql_store_result(&db.mysql);
+        if (result != nullptr) {
+            mysql_free_result(result);
+            continue;
+        }
+        if (mysql_field_count(&db.mysql) != 0U) {
+            set_mariadb_error(db);
+            return MYLITE_ERROR;
+        }
+    }
     return MYLITE_OK;
 }
 
-int initialize_statement_results(mylite_stmt &stmt) {
-    release_statement_results(stmt);
+int initialize_statement_results(mylite_stmt &stmt, bool release_existing_results) {
+    if (release_existing_results) {
+        release_statement_results(stmt);
+    }
 
     stmt.metadata = mysql_stmt_result_metadata(stmt.stmt);
     if (stmt.metadata == nullptr) {
@@ -2270,6 +2373,11 @@ int fetch_statement_row(mylite_stmt &stmt) {
     const int fetch_result = mysql_stmt_fetch(stmt.stmt);
     if (fetch_result == MYSQL_NO_DATA) {
         stmt.has_row = false;
+        const int drain_result = drain_remaining_statement_results(stmt);
+        if (drain_result != MYLITE_OK) {
+            return drain_result;
+        }
+        stmt.has_result = false;
         return MYLITE_DONE;
     }
     if (fetch_result != 0 && fetch_result != MYSQL_DATA_TRUNCATED) {
@@ -2292,6 +2400,32 @@ int fetch_statement_row(mylite_stmt &stmt) {
     }
     stmt.has_row = true;
     return MYLITE_ROW;
+}
+
+int drain_remaining_statement_results(mylite_stmt &stmt) {
+    for (;;) {
+        const int next_result = mysql_stmt_next_result(stmt.stmt);
+        if (next_result < 0) {
+            return MYLITE_OK;
+        }
+        if (next_result > 0) {
+            set_mariadb_statement_error(stmt);
+            return MYLITE_ERROR;
+        }
+
+        if (mysql_stmt_field_count(stmt.stmt) == 0U) {
+            continue;
+        }
+        if (mysql_stmt_store_result(stmt.stmt) != 0) {
+            set_mariadb_statement_error(stmt);
+            return MYLITE_ERROR;
+        }
+        if (mysql_stmt_free_result(stmt.stmt) != 0) {
+            set_mariadb_statement_error(stmt);
+            return MYLITE_ERROR;
+        }
+    }
+    return MYLITE_OK;
 }
 
 int refresh_dirty_result_binds(mylite_stmt &stmt) {
@@ -2370,7 +2504,7 @@ int allocate_column_buffer(std::vector<unsigned char> &buffer, unsigned long buf
 }
 
 void release_statement_results(mylite_stmt &stmt) {
-    if (stmt.stmt != nullptr) {
+    if (stmt.stmt != nullptr && stmt.has_result) {
         static_cast<void>(mysql_stmt_free_result(stmt.stmt));
     }
     if (stmt.metadata != nullptr) {
@@ -2734,6 +2868,33 @@ int connect_runtime(mylite_db &db) {
     }
 
     db.connected = true;
+    return MYLITE_OK;
+}
+
+int ensure_core_system_tables(mylite_db &db) {
+    int result = execute_system_table_statement(db, k_create_mysql_database_sql);
+    if (result != MYLITE_OK) {
+        return result;
+    }
+
+    result = execute_system_table_statement(db, k_create_proc_table_sql);
+    if (result != MYLITE_OK) {
+        return result;
+    }
+
+    return execute_system_table_statement(db, k_create_procs_priv_table_sql);
+}
+
+int execute_system_table_statement(mylite_db &db, const char *sql) {
+    if (mysql_query(&db.mysql, sql) != 0) {
+        set_mariadb_error(db);
+        return MYLITE_ERROR;
+    }
+    if (drain_remaining_query_results(db) != MYLITE_OK) {
+        return MYLITE_ERROR;
+    }
+
+    set_ok(db);
     return MYLITE_OK;
 }
 #endif

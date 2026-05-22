@@ -51,12 +51,26 @@ expect_true($db->query('USE app') === true, 'USE failed');
 expect_true($db->query('CREATE TABLE people (id INT PRIMARY KEY, name VARCHAR(32)) ENGINE=MyISAM') === true, 'CREATE TABLE failed');
 expect_true($db->query("INSERT INTO people VALUES (1, 'Ada')") === true, 'INSERT failed');
 expect_true((int)$db->affected_rows === 1, 'affected_rows mismatch');
+expect_true($db->query('DROP PROCEDURE IF EXISTS select_person') === true, 'DROP PROCEDURE failed');
+expect_true(
+    $db->query(
+        'CREATE PROCEDURE select_person() BEGIN SELECT id, name FROM people ORDER BY id LIMIT 1; END'
+    ) === true,
+    'CREATE PROCEDURE failed'
+);
 
 $result = $db->query('SELECT id, name FROM people ORDER BY id');
 expect_true($result instanceof MyLite\MySQLiResult, 'query did not return MySQLiResult');
 expect_true($result->num_rows === 1, 'num_rows property mismatch');
 expect_true($result->fetch_assoc() === ['id' => '1', 'name' => 'Ada'], 'fetch_assoc row mismatch');
 expect_true($result->fetch_assoc() === null, 'result should be exhausted');
+$result = $db->query('CALL select_person()');
+expect_true($result instanceof MyLite\MySQLiResult, 'CALL did not return MySQLiResult');
+expect_true($result->fetch_assoc() === ['id' => '1', 'name' => 'Ada'], 'CALL row mismatch');
+expect_true(
+    $db->query('SELECT id FROM people WHERE id = 1')->fetch_assoc() === ['id' => '1'],
+    'query after CALL failed'
+);
 $expectedEscape = 'A' . '\\0' . '\\n' . '\\r' . '\\\\' . "\\'" . '\\"' . '\\Z' . 'B';
 expect_true($db->real_escape_string("A\0\n\r\\'\"\x1aB") === $expectedEscape, 'real_escape_string mismatch');
 

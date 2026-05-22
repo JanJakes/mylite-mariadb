@@ -68,7 +68,7 @@ static int performance_schema_variable_callback(
     char **column_names
 );
 static void assert_server_sql_rejected(mylite_db *db);
-static void assert_no_server_sidecar_files(const char *database_path);
+static void assert_no_unplanned_server_sidecar_files(const char *database_path);
 static void assert_test_root_contains_only_database_and_runtime(root_entries entries);
 static void exec_ok(mylite_db *db, const char *sql);
 static void expect_error(mylite_db *db, const char *sql, const char *message_part);
@@ -138,11 +138,11 @@ static void test_server_surfaces_are_disabled_or_contained(void) {
     assert_oracle_compat_functions_omitted(db);
     assert_compact_error_catalog(db);
     assert_server_sql_rejected(db);
-    assert_no_server_sidecar_files(database_path);
+    assert_no_unplanned_server_sidecar_files(database_path);
     assert(mylite_close(db) == MYLITE_OK);
     assert(is_directory_empty(runtime_root));
     assert_test_root_contains_only_database_and_runtime(expected_root);
-    assert_no_server_sidecar_files(database_path);
+    assert_no_unplanned_server_sidecar_files(database_path);
 
     free(database_path);
     free(runtime_root);
@@ -1242,7 +1242,7 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "EXPLAIN FORMAT=JSON SELECT 1");
 }
 
-static void assert_no_server_sidecar_files(const char *database_path) {
+static void assert_no_unplanned_server_sidecar_files(const char *database_path) {
     char *data_path = path_join(database_path, "datadir");
     char *master_info_path = path_join(data_path, "master.info");
     char *relay_info_path = path_join(data_path, "relay-log.info");
@@ -1252,6 +1252,8 @@ static void assert_no_server_sidecar_files(const char *database_path) {
     char *tc_log_path = path_join(data_path, "tc.log");
     char *performance_schema_path = path_join(data_path, "performance_schema");
     char *mysql_system_path = path_join(data_path, "mysql");
+    char *mysql_proc_definition_path = path_join(mysql_system_path, "proc.frm");
+    char *mysql_procs_priv_definition_path = path_join(mysql_system_path, "procs_priv.frm");
 
     assert(!path_exists(master_info_path));
     assert(!path_exists(relay_info_path));
@@ -1260,8 +1262,12 @@ static void assert_no_server_sidecar_files(const char *database_path) {
     assert(!path_exists(binlog_cache_path));
     assert(!path_exists(tc_log_path));
     assert(!path_exists(performance_schema_path));
-    assert(!path_exists(mysql_system_path));
+    assert(path_exists(mysql_system_path));
+    assert(path_exists(mysql_proc_definition_path));
+    assert(path_exists(mysql_procs_priv_definition_path));
 
+    free(mysql_procs_priv_definition_path);
+    free(mysql_proc_definition_path);
     free(mysql_system_path);
     free(performance_schema_path);
     free(tc_log_path);
