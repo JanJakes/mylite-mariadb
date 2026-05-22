@@ -195,7 +195,13 @@ Accepted direct updates now prepare key images only for indexes marked
 may-change by MariaDB's direct-update write set, and duplicate checks plus
 exact-index cache maintenance handle those sparse entry lists without changing
 insert or non-direct update preparation. The prepared update component sample
-now shows exact-index row-id scanning as the next dominant write-path cost.
+then exposed exact-index row-id scanning as the next dominant write-path cost.
+Active exact-index caches can now be created after a prior mutation in the same
+transaction without seeding from stale durable caches, cutting the local
+1000-row/10000-iteration prepared update execute component from 4387.370 us/op
+to 482.426 us/op and amortizing to about 50 us/op over 100000 iterations. The
+first complete active exact-index cache build remains the next write-path cost
+to reduce for sparse prepared-update working sets.
 Same-size row-only active rewrites now capture only the row checksum-plus-payload
 undo range and rewrite only payload bytes while preserving rollback correctness
 after dirty buffered-page checksum refreshes and later size-changing rewrites in

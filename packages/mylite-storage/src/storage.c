@@ -13673,6 +13673,12 @@ int mylite_storage_test_statement_has_row_payload_cache(const mylite_storage_sta
     return statement != NULL && statement->row_payload_caches.count > 0U ? 1 : 0;
 }
 
+int mylite_storage_test_statement_exact_index_cache_count(
+    const mylite_storage_statement *statement
+) {
+    return statement != NULL ? (int)statement->exact_index_caches.count : 0;
+}
+
 int mylite_storage_test_durable_exact_index_cache_has_filename_identity(const char *filename) {
     if (filename == NULL) {
         return 0;
@@ -25090,10 +25096,6 @@ static mylite_storage_result load_cached_exact_index_entry_in_statement(
     mylite_storage_exact_index_cache *cache =
         find_exact_index_cache(&statement->exact_index_caches, table_id, index_number, key_size);
     const int created_cache = cache == NULL;
-    if (cache == NULL &&
-        statement_chain_has_deferred_durable_cache_retarget(mutation_statement, table_id)) {
-        return MYLITE_STORAGE_OK;
-    }
     if (cache == NULL) {
         mylite_storage_result result = append_exact_index_cache(
             &statement->exact_index_caches,
