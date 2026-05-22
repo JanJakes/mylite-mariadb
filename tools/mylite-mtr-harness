@@ -122,6 +122,7 @@ default_tests=(
   main.except
   main.except_all
   main.intersect
+  main.set_operation
   main.prepare
   main.ps_10nestset
   main.ps_11bugs
