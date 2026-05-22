@@ -518,7 +518,12 @@ the exact-index path before applying MariaDB's normal condition, assignment,
 constraint, no-op, and handler update semantics. Direct admission stays narrow:
 unique-key-changing updates and key changes on FK-involved tables fall back to
 the ordinary update loop, while non-unique secondary-index changes reuse the
-existing index-maintaining `ha_update_row()` path.
+existing index-maintaining update path. Accepted changed rows call MyLite's
+row-update implementation directly from the direct-update hook and then run the
+handler-owned hidden-index/stat side effects that the generic wrapper would
+normally provide. Tables with long-unique hash or `WITHOUT OVERLAPS`
+constraints still fall back to MariaDB's ordinary update loop because their
+in-server update checks are private to the handler wrapper.
 
 Active storage checkpoints also maintain a live-row validation cache per table
 and catalog generation. Rows proven live by visibility-checked storage reads,

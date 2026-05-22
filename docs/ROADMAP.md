@@ -292,6 +292,10 @@ for exact unique-key predicates, reusing MariaDB condition and assignment
 evaluation while skipping the normal quick row-read loop. The direct path falls
 back for unique-key-changing updates and FK-sensitive key changes, and keeps
 non-unique secondary-index maintenance on the existing handler update path.
+That direct path now writes accepted changed rows through a MyLite-owned inner
+row sequence instead of nesting `handler::ha_update_row()`, while retaining
+hidden-index maintenance, handler update statistics, and fallback for
+constraint-sensitive table shapes that need MariaDB's private in-server checks.
 Ordinary MyLite `UPDATE` / `DELETE` execution now skips eager quick-plan
 explain detail allocation unless explicit `EXPLAIN`, `ANALYZE`, or slow-log
 explain/engine detail needs it, while routed `EXPLAIN UPDATE` keeps the full

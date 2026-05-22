@@ -225,6 +225,7 @@ static bool mylite_find_direct_update_equal_item(Item *cond, TABLE *table,
 static bool mylite_find_direct_update_key_field_equal_item(
     Item *item, TABLE *table, Field *field, Item **out_value_item);
 static bool mylite_direct_update_key_is_supported(TABLE *table, KEY *key_info);
+static bool mylite_table_needs_inserver_update_constraints(TABLE *table);
 static int mylite_build_direct_update_key(THD *thd, TABLE *table,
                                           uint key_number, Item *value_item,
                                           uchar *key_buff, bool *out_has_key);
@@ -1591,6 +1592,9 @@ int ha_mylite::direct_update_rows_init(List<Item> *update_fields)
       !table_supports_row_lifecycle)
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
 
+  if (mylite_table_needs_inserver_update_constraints(table))
+    DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+
   bool update_fields_change_key= false;
   if (mylite_update_fields_change_direct_unsafe_key(table, update_fields,
                                                     &update_fields_change_key))
@@ -1692,13 +1696,19 @@ int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
     DBUG_RETURN(1);
   }
 
-  error= ha_update_row(table->record[1], table->record[0]);
+  DBUG_ASSERT(!mylite_table_needs_inserver_update_constraints(table));
+
+  error= update_row(table->record[1], table->record[0]);
   table->auto_increment_field_not_null= FALSE;
   if (error == HA_ERR_RECORD_IS_THE_SAME)
     DBUG_RETURN(0);
   if (error)
     DBUG_RETURN(error);
 
+  if ((error= table->hlindexes_on_update()))
+    DBUG_RETURN(error);
+
+  rows_stats.updated++;
   *update_rows= 1;
   DBUG_RETURN(0);
 }
@@ -4612,6 +4622,14 @@ static bool mylite_direct_update_key_is_supported(TABLE *table, KEY *key_info)
          key_part->store_length == key_info->key_length &&
          !(key_part->key_part_flag & (HA_BLOB_PART | HA_VAR_LENGTH_PART)) &&
          mylite_key_uses_raw_exact_filter(key_info);
+}
+
+static bool mylite_table_needs_inserver_update_constraints(TABLE *table)
+{
+  if (!table || !table->s)
+    return true;
+
+  return table->s->long_unique_table || table->s->period.unique_keys;
 }
 
 static int mylite_build_direct_update_key(THD *thd, TABLE *table,
