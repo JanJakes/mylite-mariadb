@@ -242,7 +242,9 @@ result cache while their retained read statement remains open; MariaDB still
 produces the first row, and writes close the read scope before cached rows can
 survive storage changes. That cache is now four-way set-associative so larger
 stable point-read working sets avoid direct-mapped eviction thrash without
-changing cache eligibility or write invalidation.
+changing cache eligibility or write invalidation. Fixed-width cached row replay
+now copies scalar column state in place instead of assigning whole
+`ColumnValue` vectors on each cache hit.
 Hot read-checkpoint cache hits now borrow the cached catalog image for scoped
 catalog views and defer catalog/header page copies until a caller needs page
 bytes, instead of deep-copying that state into every short-lived read statement.

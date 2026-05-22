@@ -557,6 +557,11 @@ void put_one_row_result_cache_entry(
     mylite_stmt &statement,
     const PreparedOneRowResultCacheKey &key
 );
+void copy_cached_column_values(
+    std::vector<ColumnValue> &target,
+    const std::vector<ColumnValue> &source
+);
+void copy_cached_column_value(ColumnValue &target, const ColumnValue &source);
 std::size_t one_row_result_cache_set_start(const PreparedOneRowResultCacheKey &key);
 bool one_row_result_cache_keys_equal(
     const PreparedOneRowResultCacheKey &left,
@@ -2559,7 +2564,7 @@ int execute_cached_one_row_result(mylite_stmt &statement, bool *out_used_cache) 
     }
 
     try {
-        statement.values = entry->values;
+        copy_cached_column_values(statement.values, entry->values);
     } catch (const std::bad_alloc &) {
         clear_one_row_result_cache(statement);
         set_error(*statement.database, MYLITE_NOMEM, "prepared result cache allocation failed");
@@ -2609,7 +2614,7 @@ void capture_one_row_result_cache_row(mylite_stmt &statement) {
     }
 
     try {
-        statement.one_row_result_cache_pending_values = statement.values;
+        copy_cached_column_values(statement.one_row_result_cache_pending_values, statement.values);
         statement.one_row_result_cache_pending = true;
         statement.one_row_result_cache_execution_had_row = true;
     } catch (const std::bad_alloc &) {
@@ -2645,6 +2650,7 @@ void store_one_row_result_cache_entry(mylite_stmt &statement) {
 void clear_one_row_result_cache(mylite_stmt &statement) {
     statement.one_row_result_cache.clear();
     statement.one_row_result_cache_next_way.clear();
+    statement.one_row_result_cache_pending_values.clear();
     clear_one_row_result_cache_execution(statement);
 }
 
@@ -2653,7 +2659,6 @@ void clear_one_row_result_cache_execution(mylite_stmt &statement) {
     statement.one_row_result_cache_execution_had_row = false;
     statement.one_row_result_cache_execution_multi_row = false;
     statement.one_row_result_cache_pending = false;
-    statement.one_row_result_cache_pending_values.clear();
 }
 
 bool prepared_statement_can_cache_one_row_results(const mylite_stmt &statement) {
@@ -2752,10 +2757,37 @@ void put_one_row_result_cache_entry(
 
         PreparedOneRowResultCacheEntry &entry = *target;
         entry.key = key;
-        entry.values = statement.one_row_result_cache_pending_values;
+        copy_cached_column_values(entry.values, statement.one_row_result_cache_pending_values);
         entry.occupied = true;
     } catch (const std::bad_alloc &) {
         clear_one_row_result_cache(statement);
+    }
+}
+
+void copy_cached_column_values(
+    std::vector<ColumnValue> &target,
+    const std::vector<ColumnValue> &source
+) {
+    if (target.size() != source.size()) {
+        target.resize(source.size());
+    }
+    for (std::size_t i = 0; i < source.size(); ++i) {
+        copy_cached_column_value(target[i], source[i]);
+    }
+}
+
+void copy_cached_column_value(ColumnValue &target, const ColumnValue &source) {
+    target.type = source.type;
+    target.int64_value = source.int64_value;
+    target.uint64_value = source.uint64_value;
+    target.double_value = source.double_value;
+    target.mysql_length = source.mysql_length;
+    target.buffer_length = source.buffer_length;
+    target.mysql_is_null = source.mysql_is_null;
+    target.mysql_error = source.mysql_error;
+    target.bytes_complete = source.bytes_complete;
+    if (is_variable_column_type(source.type)) {
+        target.bytes = source.bytes;
     }
 }
 
