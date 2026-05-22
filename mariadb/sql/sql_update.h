@@ -97,6 +97,8 @@ private:
   */
   bool update_single_table(THD *thd);
 
+  bool mylite_update_values_have_subquery(List<Item> &values);
+
   /* Original value of the 'multitable' flag set by constructor */
   const bool orig_multitable;
 
@@ -111,6 +113,9 @@ private:
   Multiupdate_prelocking_strategy multiupdate_prelocking_strategy;
 
   Mylite_update_exact_key_proof_cache mylite_update_exact_key_proof_cache;
+
+  bool mylite_update_values_have_subquery_known{false};
+  bool mylite_update_values_have_subquery_cached{false};
 
 public:
   /* The list of the updating expressions used in the set clause */

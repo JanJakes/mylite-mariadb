@@ -210,7 +210,7 @@ mylite_prepared_update_ok_message_fast_path(THD *thd, TABLE *table,
 static bool mylite_can_elide_single_update_result(THD *thd,
                                                   TABLE_LIST *table_list,
                                                   SELECT_LEX *select_lex,
-                                                  List<Item> &values,
+                                                  bool values_have_subquery,
                                                   bool multitable);
 static bool mylite_update_values_have_subquery(List<Item> &values);
 static bool mylite_prepare_single_update_values(THD *thd, List<Item> &fields,
@@ -1637,7 +1637,7 @@ static bool mylite_prepared_update_ok_message_fast_path(THD *thd, TABLE *table,
 static bool mylite_can_elide_single_update_result(THD *thd,
                                                   TABLE_LIST *table_list,
                                                   SELECT_LEX *select_lex,
-                                                  List<Item> &values,
+                                                  bool values_have_subquery,
                                                   bool multitable)
 {
   return mylite_schema_hooks_active() && !multitable && table_list &&
@@ -1645,8 +1645,7 @@ static bool mylite_can_elide_single_update_result(THD *thd,
          !table_list->has_period() && !table_list->is_multitable() &&
          !thd->lex->has_returning() && select_lex &&
          !select_lex->sj_subselects.elements &&
-         select_lex->first_inner_unit() == NULL &&
-         !mylite_update_values_have_subquery(values);
+         select_lex->first_inner_unit() == NULL && !values_have_subquery;
 }
 
 static bool mylite_update_values_have_subquery(List<Item> &values)
@@ -1659,6 +1658,17 @@ static bool mylite_update_values_have_subquery(List<Item> &values)
       return true;
   }
   return false;
+}
+
+bool Sql_cmd_update::mylite_update_values_have_subquery(List<Item> &values)
+{
+  if (!mylite_update_values_have_subquery_known)
+  {
+    mylite_update_values_have_subquery_cached=
+        ::mylite_update_values_have_subquery(values);
+    mylite_update_values_have_subquery_known= true;
+  }
+  return mylite_update_values_have_subquery_cached;
 }
 
 static bool mylite_prepare_single_update_values(THD *thd, List<Item> &fields,
@@ -3240,7 +3250,8 @@ bool Sql_cmd_update::prepare_inner(THD *thd)
   }
 
   const bool elide_single_update_result= mylite_can_elide_single_update_result(
-      thd, table_list, select_lex, lex->value_list, multitable);
+      thd, table_list, select_lex,
+      mylite_update_values_have_subquery(lex->value_list), multitable);
   result= NULL;
   if (!elide_single_update_result)
   {
