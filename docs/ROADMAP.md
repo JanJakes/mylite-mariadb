@@ -245,7 +245,9 @@ stable point-read working sets avoid direct-mapped eviction thrash without
 changing cache eligibility or write invalidation. Fixed-width cached row replay
 now copies scalar column state in place instead of assigning whole
 `ColumnValue` vectors on each cache hit, and cached-row replay plus cached
-`DONE` steps now bypass storage-context setup.
+`DONE` steps now bypass storage-context setup. The prepared point-read cache
+now uses a larger bounded set count so 10k-row recurring point-read working sets
+fall back to MariaDB less often.
 Hot read-checkpoint cache hits now borrow the cached catalog image for scoped
 catalog views and defer catalog/header page copies until a caller needs page
 bytes, instead of deep-copying that state into every short-lived read statement.

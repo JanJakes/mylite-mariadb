@@ -67,7 +67,7 @@ constexpr const char *k_not_an_error = "not an error";
 constexpr const char *k_bad_db_handle = "bad database handle";
 #if MYLITE_WITH_MARIADB_EMBEDDED
 constexpr unsigned long k_initial_column_buffer_size = 256;
-constexpr std::size_t k_prepared_one_row_result_cache_set_count = 4096;
+constexpr std::size_t k_prepared_one_row_result_cache_set_count = 8192;
 constexpr std::size_t k_prepared_one_row_result_cache_way_count = 4;
 constexpr std::size_t k_prepared_one_row_result_cache_entry_limit =
     k_prepared_one_row_result_cache_set_count * k_prepared_one_row_result_cache_way_count;
