@@ -375,6 +375,7 @@ struct mylite_stmt {
     std::string temporary_table_to_remember;
     std::vector<std::string> temporary_tables_to_forget;
     unsigned long long storage_metadata_epoch = 0;
+    bool changes_temporary_table_lifecycle = false;
     bool transaction_statement_checkpoint_plan_valid = false;
     bool transaction_statement_needs_storage_checkpoint = true;
     bool transaction_statement_needs_volatile_snapshot = true;
@@ -527,7 +528,6 @@ bool mylite_session_ansi_quotes(const mylite_db &database);
 void initialize_prepared_temporary_table_lifecycle(mylite_stmt &statement, std::string_view sql);
 void apply_prepared_temporary_table_lifecycle(mylite_db &database, const mylite_stmt &statement);
 void refresh_prepared_statement_checkpoint_plan(mylite_stmt &statement);
-bool prepared_statement_changes_temporary_table_lifecycle(const mylite_stmt &statement);
 bool row_dml_needs_volatile_snapshot(const mylite_db &database, std::string_view sql);
 bool row_dml_needs_storage_checkpoint(const mylite_db &database, std::string_view sql);
 bool storage_engine_name_is_volatile(std::string_view engine_name);
@@ -2118,13 +2118,16 @@ int prepare_impl(
 void initialize_prepared_temporary_table_lifecycle(mylite_stmt &statement, std::string_view sql) {
     statement.temporary_table_to_remember.clear();
     statement.temporary_tables_to_forget.clear();
+    statement.changes_temporary_table_lifecycle = false;
 
     std::string temporary_table_name;
     if (create_temporary_table_name(sql, &temporary_table_name)) {
         statement.temporary_table_to_remember = std::move(temporary_table_name);
+        statement.changes_temporary_table_lifecycle = true;
         return;
     }
     drop_table_names(sql, &statement.temporary_tables_to_forget);
+    statement.changes_temporary_table_lifecycle = !statement.temporary_tables_to_forget.empty();
 }
 #endif
 
@@ -2349,7 +2352,9 @@ int execute_statement(mylite_stmt &statement) {
                 return sync_result;
             }
         }
-        apply_prepared_temporary_table_lifecycle(*statement.database, statement);
+        if (statement.changes_temporary_table_lifecycle) {
+            apply_prepared_temporary_table_lifecycle(*statement.database, statement);
+        }
         checkpoint_result = checkpoint.commit(*statement.database);
         if (checkpoint_result != MYLITE_OK) {
             return checkpoint_result;
@@ -2358,7 +2363,7 @@ int execute_statement(mylite_stmt &statement) {
             apply_successful_storage_metadata_lifecycle(*statement.database, statement.sql);
         }
         if (!statement.uses_storage_outer_checkpoint &&
-            prepared_statement_changes_temporary_table_lifecycle(statement)) {
+            statement.changes_temporary_table_lifecycle) {
             note_storage_metadata_may_change(*statement.database);
         }
 #  endif
@@ -3238,11 +3243,6 @@ void refresh_prepared_statement_checkpoint_plan(mylite_stmt &statement) {
         row_dml_needs_volatile_snapshot(database, statement.sql);
     statement.storage_metadata_epoch = database.storage_metadata_epoch;
     statement.transaction_statement_checkpoint_plan_valid = true;
-}
-
-bool prepared_statement_changes_temporary_table_lifecycle(const mylite_stmt &statement) {
-    return !statement.temporary_table_to_remember.empty() ||
-           !statement.temporary_tables_to_forget.empty();
 }
 
 bool row_dml_needs_volatile_snapshot(const mylite_db &database, std::string_view sql) {

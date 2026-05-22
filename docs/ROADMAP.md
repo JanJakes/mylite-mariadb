@@ -841,6 +841,9 @@ copy scalar status directly to the connection and statement, avoiding the
 per-execute `MYSQL_DATA` / `embedded_query_result` allocation on hot no-result
 prepared loops while keeping result-set, error, direct text-query, and
 multi-result delivery on MariaDB's embedded result queue.
+Prepared no-result execution now also skips the cached temporary-table
+lifecycle apply helper when the prepared SQL has no lifecycle names, while
+still applying cached create/drop effects for prepared temporary-table DDL.
 The local performance baseline now accepts opt-in per-metric microsecond
 thresholds, giving performance slices a reusable regression gate while keeping
 default runs descriptive and machine-local. It also has focused primary-key
