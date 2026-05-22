@@ -1568,6 +1568,26 @@ int ha_mylite::info_push(uint info_type, void *info)
   DBUG_ENTER("ha_mylite::info_push");
   switch (info_type)
   {
+  case INFO_KIND_MYLITE_UPDATE_EXACT_KEY: {
+    direct_update_condition= NULL;
+    direct_update_key_value= NULL;
+    direct_update_key_number= MAX_KEY;
+
+    mylite_update_exact_key_info *key_info=
+        static_cast<mylite_update_exact_key_info *>(info);
+    if (!key_info || !key_info->condition || !key_info->value_item || !table ||
+        !table->s || key_info->key_number >= table->s->keys)
+      DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+
+    KEY *direct_key_info= table->key_info + key_info->key_number;
+    if (!mylite_direct_update_key_is_supported(table, direct_key_info))
+      DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+
+    direct_update_condition= key_info->condition;
+    direct_update_key_value= key_info->value_item;
+    direct_update_key_number= key_info->key_number;
+    break;
+  }
   case INFO_KIND_UPDATE_FIELDS:
     direct_update_fields= static_cast<List<Item> *>(info);
     break;

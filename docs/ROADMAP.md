@@ -312,6 +312,10 @@ Accepted MyLite direct updates now keep the SQL-layer exact unique-key proof as
 a lightweight marker and materialize `QUICK_EXACT_KEY_SELECT` only if execution
 falls back to SQL-layer row discovery, avoiding an unused quick object
 allocation on the hot prepared point-update path.
+The accepted direct-update path now hands that SQL-layer proof to the MyLite
+handler through `info_push()`, so the handler can skip rediscovering the same
+exact-key predicate while still evaluating the original `WHERE` condition
+before applying the row update.
 Ordinary MyLite `UPDATE` / `DELETE` execution now skips eager quick-plan
 explain detail allocation unless explicit `EXPLAIN`, `ANALYZE`, or slow-log
 explain/engine detail needs it, while routed `EXPLAIN UPDATE` keeps the full

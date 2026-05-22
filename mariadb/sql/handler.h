@@ -554,6 +554,7 @@ static const uint MYSQL_START_TRANS_OPT_READ_WRITE         = 4;
 #define INFO_KIND_UPDATE_VALUES       102
 #define INFO_KIND_FORCE_LIMIT_BEGIN   103
 #define INFO_KIND_FORCE_LIMIT_END     104
+#define INFO_KIND_MYLITE_UPDATE_EXACT_KEY 105
 
 enum legacy_db_type
 {
@@ -2759,6 +2760,13 @@ extern KEY_CREATE_INFO default_key_create_info;
 
 /* Forward declaration for condition pushdown to storage engine */
 typedef class Item COND;
+
+struct mylite_update_exact_key_info
+{
+  COND *condition;
+  Item *value_item;
+  uint key_number;
+};
 
 typedef struct st_ha_check_opt
 {

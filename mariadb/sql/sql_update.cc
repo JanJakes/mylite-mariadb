@@ -731,7 +731,22 @@ bool Sql_cmd_update::update_single_table(THD *thd)
         (select->cond->used_tables() & ~RAND_TABLE_BIT) == table->map)
     {
       DBUG_ASSERT(!table->file->pushed_cond);
-      if (!table->file->cond_push(select->cond))
+      bool pushed_direct_update_proof= false;
+      if (select->mylite_update_exact_key_quick)
+      {
+        mylite_update_exact_key_info key_info;
+        key_info.condition= select->cond;
+        key_info.value_item= select->mylite_update_exact_key_value;
+        key_info.key_number= select->mylite_update_exact_key_number;
+        if (!table->file->info_push(INFO_KIND_MYLITE_UPDATE_EXACT_KEY,
+                                    &key_info))
+        {
+          pushed_direct_update_proof= true;
+          use_direct_update= TRUE;
+          table->file->pushed_cond= select->cond;
+        }
+      }
+      if (!pushed_direct_update_proof && !table->file->cond_push(select->cond))
       {
         use_direct_update= TRUE;
         table->file->pushed_cond= select->cond;
