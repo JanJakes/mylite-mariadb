@@ -747,6 +747,10 @@ outermost append-buffer semantics while avoiding duplicate statement-chain scans
 Buffered row and index-entry rewrite helpers now use hot inline definitions,
 removing another pair of tiny MyLite-owned leaf calls from the prepared-update
 fast path without changing page bytes or checksum-dirty ownership.
+Same-size cached one-index buffered rewrites now batch their compact row and
+index-entry rollback range captures, preserving the existing prefix fallback
+for broader undo-list shapes while avoiding duplicate empty-list setup on the
+hot prepared-update path.
 Prepared row-update execution now threads resolved active live-row and
 row-payload cache pointers through validation and post-update cache maintenance,
 avoiding repeated cache-set scans and filename/catalog comparisons inside the

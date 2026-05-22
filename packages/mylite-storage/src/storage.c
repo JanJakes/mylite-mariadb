@@ -1413,6 +1413,19 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_result capture_buffered_page_undo_pair_
     const unsigned char *second_checksum_dirty,
     size_t second_used_size
 );
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result capture_buffered_page_undo_range_pair_from_pages(
+    mylite_storage_statement *statement,
+    unsigned long long first_page_id,
+    const unsigned char *first_page,
+    const unsigned char *first_checksum_dirty,
+    size_t first_offset,
+    size_t first_used_size,
+    unsigned long long second_page_id,
+    const unsigned char *second_page,
+    const unsigned char *second_checksum_dirty,
+    size_t second_offset,
+    size_t second_used_size
+);
 MYLITE_STORAGE_HOT_INLINE void init_buffered_page_undo_entry(
     mylite_storage_buffered_page_undo *undo,
     unsigned long long page_id,
@@ -13857,8 +13870,40 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_result capture_buffered_page_undo_pair_
     const unsigned char *second_checksum_dirty,
     size_t second_used_size
 ) {
+    return capture_buffered_page_undo_range_pair_from_pages(
+        statement,
+        first_page_id,
+        first_page,
+        first_checksum_dirty,
+        0U,
+        first_used_size,
+        second_page_id,
+        second_page,
+        second_checksum_dirty,
+        0U,
+        second_used_size
+    );
+}
+
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result capture_buffered_page_undo_range_pair_from_pages(
+    mylite_storage_statement *statement,
+    unsigned long long first_page_id,
+    const unsigned char *first_page,
+    const unsigned char *first_checksum_dirty,
+    size_t first_offset,
+    size_t first_used_size,
+    unsigned long long second_page_id,
+    const unsigned char *second_page,
+    const unsigned char *second_checksum_dirty,
+    size_t second_offset,
+    size_t second_used_size
+) {
     if (statement == NULL) {
         return MYLITE_STORAGE_OK;
+    }
+    if (first_offset > MYLITE_STORAGE_FORMAT_PAGE_SIZE ||
+        second_offset > MYLITE_STORAGE_FORMAT_PAGE_SIZE) {
+        return MYLITE_STORAGE_CORRUPT;
     }
 
     const int capture_first = first_page_id < statement->header.page_count;
@@ -13870,24 +13915,35 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_result capture_buffered_page_undo_pair_
         return MYLITE_STORAGE_CORRUPT;
     }
 
-    if ((capture_first && capture_second && first_page_id == second_page_id) ||
-        statement->buffered_page_undos.count != 0U ||
-        statement->buffered_page_undos.bucket_capacity != 0U) {
-        mylite_storage_result result = capture_buffered_page_undo_from_page(
+    if (capture_first && capture_second && first_page_id == second_page_id) {
+        return capture_buffered_page_undo_from_page(
             statement,
             first_page_id,
             first_page,
             first_checksum_dirty,
+            0U
+        );
+    }
+
+    if (statement->buffered_page_undos.count != 0U ||
+        statement->buffered_page_undos.bucket_capacity != 0U) {
+        mylite_storage_result result = capture_buffered_page_undo_range_from_page(
+            statement,
+            first_page_id,
+            first_page,
+            first_checksum_dirty,
+            first_offset,
             first_used_size
         );
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
-        return capture_buffered_page_undo_from_page(
+        return capture_buffered_page_undo_range_from_page(
             statement,
             second_page_id,
             second_page,
             second_checksum_dirty,
+            second_offset,
             second_used_size
         );
     }
@@ -13929,7 +13985,7 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_result capture_buffered_page_undo_pair_
             first_page_id,
             first_page,
             first_checksum_dirty,
-            0U,
+            first_offset,
             first_used_size
         );
         ++undos->count;
@@ -13940,7 +13996,7 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_result capture_buffered_page_undo_pair_
             second_page_id,
             second_page,
             second_checksum_dirty,
-            0U,
+            second_offset,
             second_used_size
         );
         ++undos->count;
@@ -18515,23 +18571,16 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_result rewrite_active_single_index_upda
         const size_t row_undo_offset = MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET;
         const size_t row_undo_size =
             MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET + row_size - row_undo_offset;
-        mylite_storage_result result = capture_buffered_page_undo_range_from_page(
+        const size_t index_undo_offset = MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET;
+        const size_t index_undo_size =
+            MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET + index_entry->key_size - index_undo_offset;
+        mylite_storage_result result = capture_buffered_page_undo_range_pair_from_pages(
             statement,
             row_id,
             row_page_ref.page,
             row_page_ref.checksum_dirty,
             row_undo_offset,
-            row_undo_size
-        );
-        if (result != MYLITE_STORAGE_OK) {
-            return result;
-        }
-
-        const size_t index_undo_offset = MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET;
-        const size_t index_undo_size =
-            MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET + index_entry->key_size - index_undo_offset;
-        result = capture_buffered_page_undo_range_from_page(
-            statement,
+            row_undo_size,
             index_page_id,
             index_page_ref.page,
             index_page_ref.checksum_dirty,
