@@ -96,6 +96,7 @@ class ha_mylite: public handler
   bool direct_update_row_in_progress;
   bool direct_update_can_compare_record;
   bool direct_update_can_skip_duplicate_key_checks;
+  bool direct_update_condition_guaranteed_by_key;
   COND *direct_update_condition;
   List<Item> *direct_update_fields;
   List<Item> *direct_update_values;

@@ -341,6 +341,9 @@ default could still alter a unique key part.
 They now also cache the accepted statement's per-index key-change mask at
 direct-update initialization and reuse it during row mutation, avoiding
 repeated key metadata walks for indexes that cannot change.
+Pure exact-key direct-update predicates now reuse the accepted key proof for
+the final row condition check, while broader `AND` predicates keep evaluating
+the full `WHERE` expression after the exact row read.
 Ordinary MyLite `SELECT` execution now applies the same explain-detail gate to
 table-access plan fields while keeping MariaDB's runtime trackers initialized,
 and explicit routed `EXPLAIN SELECT` stays on the full plan-detail path.

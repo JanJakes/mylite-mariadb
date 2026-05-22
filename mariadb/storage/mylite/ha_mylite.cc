@@ -222,6 +222,10 @@ static bool mylite_find_direct_update_exact_key(TABLE *table, Item *cond,
 static bool mylite_find_direct_update_equal_item(Item *cond, TABLE *table,
                                                  Field *field,
                                                  Item **out_value_item);
+static bool mylite_direct_update_condition_is_key_equality(Item *cond,
+                                                           TABLE *table,
+                                                           Field *field,
+                                                           Item *value_item);
 static bool mylite_find_direct_update_key_field_equal_item(
     Item *item, TABLE *table, Field *field, Item **out_value_item);
 static bool mylite_direct_update_key_is_supported(TABLE *table, KEY *key_info);
@@ -1343,6 +1347,7 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
       direct_update_row_in_progress(false),
       direct_update_can_compare_record(false),
       direct_update_can_skip_duplicate_key_checks(false),
+      direct_update_condition_guaranteed_by_key(false),
       direct_update_condition(NULL), direct_update_fields(NULL),
       direct_update_values(NULL), direct_update_key_value(NULL),
       direct_update_key_number(MAX_KEY),
@@ -1440,6 +1445,7 @@ void ha_mylite::clear_direct_update_state()
   direct_update_row_in_progress= false;
   direct_update_can_compare_record= false;
   direct_update_can_skip_duplicate_key_checks= false;
+  direct_update_condition_guaranteed_by_key= false;
   bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
 }
 
@@ -1554,6 +1560,7 @@ const COND *ha_mylite::cond_push(const COND *cond)
   direct_update_key_number= MAX_KEY;
   direct_update_can_compare_record= false;
   direct_update_can_skip_duplicate_key_checks= false;
+  direct_update_condition_guaranteed_by_key= false;
   bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
   if (!cond)
     DBUG_RETURN(cond);
@@ -1567,6 +1574,10 @@ const COND *ha_mylite::cond_push(const COND *cond)
   direct_update_condition= const_cast<COND *>(cond);
   direct_update_key_value= value_item;
   direct_update_key_number= key_number;
+  direct_update_condition_guaranteed_by_key=
+      mylite_direct_update_condition_is_key_equality(
+          const_cast<COND *>(cond), table,
+          table->key_info[key_number].key_part[0].field, value_item);
   DBUG_RETURN(NULL);
 }
 
@@ -1577,6 +1588,7 @@ void ha_mylite::cond_pop()
   direct_update_key_number= MAX_KEY;
   direct_update_can_compare_record= false;
   direct_update_can_skip_duplicate_key_checks= false;
+  direct_update_condition_guaranteed_by_key= false;
   bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
 }
 
@@ -1591,6 +1603,7 @@ int ha_mylite::info_push(uint info_type, void *info)
     direct_update_key_number= MAX_KEY;
     direct_update_can_compare_record= false;
     direct_update_can_skip_duplicate_key_checks= false;
+    direct_update_condition_guaranteed_by_key= false;
     bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
 
     mylite_update_exact_key_info *key_info=
@@ -1606,6 +1619,8 @@ int ha_mylite::info_push(uint info_type, void *info)
     direct_update_condition= key_info->condition;
     direct_update_key_value= key_info->value_item;
     direct_update_key_number= key_info->key_number;
+    direct_update_condition_guaranteed_by_key=
+        key_info->condition_guaranteed_by_key;
     break;
   }
   case INFO_KIND_UPDATE_FIELDS:
@@ -1711,7 +1726,8 @@ int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
   if (!direct_found)
     DBUG_RETURN(0);
 
-  if (!direct_update_condition->val_bool())
+  if (!direct_update_condition_guaranteed_by_key &&
+      !direct_update_condition->val_bool())
   {
     if (ha_thd()->is_error())
       DBUG_RETURN(1);
@@ -4688,6 +4704,17 @@ static bool mylite_find_direct_update_equal_item(Item *cond, TABLE *table,
 
   return mylite_find_direct_update_key_field_equal_item(cond, table, field,
                                                         out_value_item);
+}
+
+static bool mylite_direct_update_condition_is_key_equality(Item *cond,
+                                                           TABLE *table,
+                                                           Field *field,
+                                                           Item *value_item)
+{
+  Item *matched_value_item= NULL;
+  return mylite_find_direct_update_key_field_equal_item(cond, table, field,
+                                                        &matched_value_item) &&
+         matched_value_item == value_item;
 }
 
 static bool mylite_find_direct_update_key_field_equal_item(

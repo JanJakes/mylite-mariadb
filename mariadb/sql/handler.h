@@ -2766,6 +2766,7 @@ struct mylite_update_exact_key_info
   COND *condition;
   Item *value_item;
   uint key_number;
+  bool condition_guaranteed_by_key;
 };
 
 typedef struct st_ha_check_opt

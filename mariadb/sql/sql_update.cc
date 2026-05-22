@@ -758,6 +758,8 @@ bool Sql_cmd_update::update_single_table(THD *thd)
         key_info.condition= select->cond;
         key_info.value_item= select->mylite_update_exact_key_value;
         key_info.key_number= select->mylite_update_exact_key_number;
+        key_info.condition_guaranteed_by_key=
+            select->mylite_update_exact_key_condition_guaranteed_by_key;
         if (!table->file->info_push(INFO_KIND_MYLITE_UPDATE_EXACT_KEY,
                                     &key_info))
         {

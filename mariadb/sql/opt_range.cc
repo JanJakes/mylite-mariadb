@@ -125,14 +125,14 @@ static quick_select_return
 make_simple_update_unique_key_quick_select(THD *thd, SQL_SELECT *select,
                                            uint keynr, Item *value_item,
                                            ha_rows table_records);
-static quick_select_return
-mark_simple_update_unique_key_quick_select(THD *thd, SQL_SELECT *select,
-                                           uint keynr, Item *value_item,
-                                           ha_rows table_records);
+static quick_select_return mark_simple_update_unique_key_quick_select(
+    THD *thd, SQL_SELECT *select, uint keynr, Item *value_item,
+    bool condition_guaranteed_by_key, ha_rows table_records);
 static bool mylite_update_exact_key_can_use_marker(THD *thd);
 static bool find_simple_unique_key_equal_item(Item *cond, TABLE *table,
                                               Field *field,
-                                              Item **out_value_item);
+                                              Item **out_value_item,
+                                              Item **out_matched_item);
 static bool find_key_field_equal_item(Item *item, TABLE *table, Field *field,
                                       Item **out_value_item);
 static bool is_simple_unique_key_candidate(TABLE *table, KEY *key_info);
@@ -1261,7 +1261,8 @@ SQL_SELECT::SQL_SELECT()
     : quick(0), cond(0), pre_idx_push_select_cond(NULL),
       mylite_update_exact_key_quick(false),
       mylite_update_exact_key_number(MAX_KEY),
-      mylite_update_exact_key_value(NULL), free_cond(0)
+      mylite_update_exact_key_value(NULL),
+      mylite_update_exact_key_condition_guaranteed_by_key(false), free_cond(0)
 {
   quick_keys.clear_all(); needed_reg.clear_all();
   my_b_clear(&file);
@@ -1293,18 +1294,20 @@ void SQL_SELECT::clear_mylite_update_exact_key_quick()
   mylite_update_exact_key_quick= false;
   mylite_update_exact_key_number= MAX_KEY;
   mylite_update_exact_key_value= NULL;
+  mylite_update_exact_key_condition_guaranteed_by_key= false;
 }
 
-void SQL_SELECT::set_mylite_update_exact_key_quick(uint keynr,
-                                                   Item *value_item,
-                                                   ha_rows records_arg,
-                                                   double read_time_arg)
+void SQL_SELECT::set_mylite_update_exact_key_quick(
+    uint keynr, Item *value_item, bool condition_guaranteed_by_key_arg,
+    ha_rows records_arg, double read_time_arg)
 {
   delete quick;
   quick= 0;
   mylite_update_exact_key_quick= true;
   mylite_update_exact_key_number= keynr;
   mylite_update_exact_key_value= value_item;
+  mylite_update_exact_key_condition_guaranteed_by_key=
+      condition_guaranteed_by_key_arg;
   records= records_arg;
   read_time= read_time_arg;
   read_cost.reset();
@@ -3316,15 +3319,18 @@ static quick_select_return try_simple_update_unique_key_quick_select(
     if (!is_simple_unique_key_candidate(table, key_info))
       continue;
 
-    Item *value_item= NULL;
-    if (find_simple_unique_key_equal_item(
-            select->cond, table, key_info->key_part[0].field, &value_item))
+    Item *value_item= NULL, *matched_item= NULL;
+    if (find_simple_unique_key_equal_item(select->cond, table,
+                                          key_info->key_part[0].field,
+                                          &value_item, &matched_item))
     {
+      const bool condition_guaranteed_by_key= matched_item == select->cond;
       *out_handled= true;
       if ((table->file->ha_table_flags() & HA_CAN_DIRECT_UPDATE_AND_DELETE) &&
           mylite_update_exact_key_can_use_marker(thd))
         return mark_simple_update_unique_key_quick_select(
-            thd, select, keynr, value_item, select->records);
+            thd, select, keynr, value_item, condition_guaranteed_by_key,
+            select->records);
       return make_simple_update_unique_key_quick_select(
           thd, select, keynr, value_item, select->records);
     }
@@ -3364,10 +3370,9 @@ make_simple_update_unique_key_quick_select(THD *thd, SQL_SELECT *select,
   return SQL_SELECT::OK;
 }
 
-static quick_select_return
-mark_simple_update_unique_key_quick_select(THD *thd, SQL_SELECT *select,
-                                           uint keynr, Item *value_item,
-                                           ha_rows table_records)
+static quick_select_return mark_simple_update_unique_key_quick_select(
+    THD *thd, SQL_SELECT *select, uint keynr, Item *value_item,
+    bool condition_guaranteed_by_key, ha_rows table_records)
 {
   if (value_item->maybe_null() && value_item->is_null())
   {
@@ -3378,6 +3383,7 @@ mark_simple_update_unique_key_quick_select(THD *thd, SQL_SELECT *select,
   }
 
   select->set_mylite_update_exact_key_quick(keynr, value_item,
+                                            condition_guaranteed_by_key,
                                             MY_MIN(table_records, 1), 1.0);
   return SQL_SELECT::OK;
 }
@@ -3392,7 +3398,8 @@ static bool mylite_update_exact_key_can_use_marker(THD *thd)
 
 static bool find_simple_unique_key_equal_item(Item *cond, TABLE *table,
                                               Field *field,
-                                              Item **out_value_item)
+                                              Item **out_value_item,
+                                              Item **out_matched_item)
 {
   if (cond->type() == Item::COND_ITEM &&
       ((Item_func *) cond)->functype() == Item_func::COND_AND_FUNC)
@@ -3401,14 +3408,18 @@ static bool find_simple_unique_key_equal_item(Item *cond, TABLE *table,
     Item *item;
     while ((item= it++))
     {
-      if (find_simple_unique_key_equal_item(item, table, field,
-                                            out_value_item))
+      if (find_simple_unique_key_equal_item(item, table, field, out_value_item,
+                                            out_matched_item))
         return true;
     }
     return false;
   }
 
-  return find_key_field_equal_item(cond, table, field, out_value_item);
+  if (!find_key_field_equal_item(cond, table, field, out_value_item))
+    return false;
+
+  *out_matched_item= cond;
+  return true;
 }
 
 static bool find_key_field_equal_item(Item *item, TABLE *table, Field *field,

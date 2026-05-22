@@ -1934,6 +1934,7 @@ class SQL_SELECT :public Sql_alloc {
   bool mylite_update_exact_key_quick;
   uint mylite_update_exact_key_number;
   Item *mylite_update_exact_key_value;
+  bool mylite_update_exact_key_condition_guaranteed_by_key;
   bool	free_cond; /* Currently not used and always FALSE */
 
   SQL_SELECT();
@@ -1947,6 +1948,7 @@ class SQL_SELECT :public Sql_alloc {
   }
   void clear_mylite_update_exact_key_quick();
   void set_mylite_update_exact_key_quick(uint keynr, Item *value_item,
+                                         bool condition_guaranteed_by_key_arg,
                                          ha_rows records_arg,
                                          double read_time_arg);
   bool has_quick_plan() const
