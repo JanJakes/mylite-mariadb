@@ -763,6 +763,11 @@ Prepared embedded MyLite updates now skip formatting the connection-level
 MariaDB OK information string on the ordinary no-result statement path, while
 preserving affected rows, last insert ids, warning counts, direct text-query
 info strings, bulk diagnostics, and system-versioned update messages.
+Eligible embedded prepared MyLite OK responses with no information string now
+copy scalar status directly to the connection and statement, avoiding the
+per-execute `MYSQL_DATA` / `embedded_query_result` allocation on hot no-result
+prepared loops while keeping result-set, error, direct text-query, and
+multi-result delivery on MariaDB's embedded result queue.
 The local performance baseline now accepts opt-in per-metric microsecond
 thresholds, giving performance slices a reusable regression gate while keeping
 default runs descriptive and machine-local. It also has focused primary-key

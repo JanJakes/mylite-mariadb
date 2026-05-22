@@ -32,6 +32,7 @@ extern "C"
 }
 
 #include "../sql/mysqld.cc"
+#include "../sql/mylite_schema_hook.h"
 
 C_MODE_START
 
@@ -45,6 +46,7 @@ extern char mysql_server_last_error[MYSQL_ERRMSG_SIZE];
 static my_bool emb_read_query_result(MYSQL *mysql);
 static void free_embedded_thd(MYSQL *mysql);
 static bool embedded_print_errors= 0;
+static MY_THREAD_LOCAL bool mylite_embedded_prepared_execute_active= false;
 
 extern "C" void unireg_clear(int exit_code)
 {
@@ -114,6 +116,8 @@ emb_advanced_command(MYSQL *mysql, enum enum_server_command command,
   THD *thd=(THD *) mysql->thd, *old_current_thd= current_thd;
   NET *net= &mysql->net;
   my_bool stmt_skip= stmt ? stmt->state != MYSQL_STMT_INIT_DONE : FALSE;
+  const bool old_mylite_embedded_prepared_execute_active=
+      mylite_embedded_prepared_execute_active;
 
   if (thd && thd->killed != NOT_KILLED)
   {
@@ -151,6 +155,7 @@ emb_advanced_command(MYSQL *mysql, enum enum_server_command command,
   mysql->field_count= 0;
   net_clear_error(net);
   thd->current_stmt= stmt;
+  mylite_embedded_prepared_execute_active= stmt && command == COM_STMT_EXECUTE;
 
   thd->thread_stack= (char*) &thd;
   thd->store_globals();				// Fix if more than one connect
@@ -180,6 +185,8 @@ emb_advanced_command(MYSQL *mysql, enum enum_server_command command,
   thd->mysys_var= 0;
 
 end:
+  mylite_embedded_prepared_execute_active=
+      old_mylite_embedded_prepared_execute_active;
   thd->reset_globals();
   if (old_current_thd)
     old_current_thd->store_globals();
@@ -355,8 +362,16 @@ static int emb_stmt_execute(MYSQL_STMT *stmt)
   thd->client_params= stmt->params;
 
   res= MY_TEST(emb_advanced_command(stmt->mysql, COM_STMT_EXECUTE, 0, 0,
-                                    header, sizeof(header), 1, stmt) ||
-            emb_read_query_result(stmt->mysql));
+                                    header, sizeof(header), 1, stmt));
+  const bool ok_sent_directly=
+      !thd->first_data && stmt->mysql->affected_rows != ~(my_ulonglong) 0;
+  if (!res && thd->first_data)
+    res= MY_TEST(emb_read_query_result(stmt->mysql));
+  else if (!res && !ok_sent_directly)
+  {
+    set_stmt_error(stmt, CR_SERVER_LOST, unknown_sqlstate, NULL);
+    DBUG_RETURN(1);
+  }
   stmt->affected_rows= stmt->mysql->affected_rows;
   stmt->insert_id= stmt->mysql->insert_id;
   stmt->server_status= stmt->mysql->server_status;
@@ -1290,6 +1305,10 @@ bool Protocol_binary::write()
     @retval FALSE Success
 */
 
+static bool mylite_send_prepared_ok_directly(
+    THD *thd, MYSQL *mysql, uint server_status, uint statement_warn_count,
+    ulonglong affected_rows, ulonglong id, const char *message);
+
 bool Protocol::net_send_ok(THD *thd,
             uint server_status, uint statement_warn_count,
             ulonglong affected_rows, ulonglong id, const char *message,
@@ -1301,6 +1320,13 @@ bool Protocol::net_send_ok(THD *thd,
 
   if (!mysql)            // bootstrap file handling
     DBUG_RETURN(FALSE);
+  if (mylite_send_prepared_ok_directly(thd, mysql, server_status,
+                                       statement_warn_count, affected_rows, id,
+                                       message))
+  {
+    thd->cur_data= 0;
+    DBUG_RETURN(FALSE);
+  }
   if (!(data= thd->alloc_new_dataset()))
     DBUG_RETURN(TRUE);
   data->embedded_info->affected_rows= affected_rows;
@@ -1313,6 +1339,29 @@ bool Protocol::net_send_ok(THD *thd,
   DBUG_RETURN(error);
 }
 
+static bool mylite_send_prepared_ok_directly(THD *thd, MYSQL *mysql,
+                                             uint server_status,
+                                             uint statement_warn_count,
+                                             ulonglong affected_rows,
+                                             ulonglong id, const char *message)
+{
+  if (!thd->current_stmt || !mylite_embedded_prepared_execute_active ||
+      !mylite_schema_hooks_active() || (message && message[0]) ||
+      (server_status & SERVER_MORE_RESULTS_EXISTS))
+    return false;
+
+  if (thd->is_fatal_error)
+    thd->server_status&= ~SERVER_MORE_RESULTS_EXISTS;
+  mysql->warning_count= thd->spcont ? 0 : MY_MIN(statement_warn_count, 65535);
+  mysql->server_status= server_status;
+  mysql->field_count= 0;
+  mysql->fields= 0;
+  mysql->affected_rows= affected_rows;
+  mysql->insert_id= id;
+  mysql->info= 0;
+  net_clear_error(&mysql->net);
+  return true;
+}
 
 /**
   Embedded library implementation of EOF response.
