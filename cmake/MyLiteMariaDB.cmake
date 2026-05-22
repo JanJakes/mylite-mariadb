@@ -1,3 +1,5 @@
+include(CheckFunctionExists)
+
 set(MYLITE_MARIADB_BUILD_DIR
   "${PROJECT_SOURCE_DIR}/build/mariadb-embedded"
   CACHE PATH
@@ -74,6 +76,11 @@ function(mylite_add_mariadb_embedded_target)
     endif()
     if(NOT APPLE)
       target_link_libraries(mylite_mariadb_embedded INTERFACE dl m)
+      check_function_exists(crypt MYLITE_HAVE_CRYPT_IN_LIBC)
+      if(NOT MYLITE_HAVE_CRYPT_IN_LIBC)
+        find_library(MYLITE_CRYPT_LIBRARY crypt REQUIRED)
+        target_link_libraries(mylite_mariadb_embedded INTERFACE "${MYLITE_CRYPT_LIBRARY}")
+      endif()
     endif()
   endif()
 endfunction()
