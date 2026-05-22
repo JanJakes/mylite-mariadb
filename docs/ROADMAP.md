@@ -759,6 +759,10 @@ row-validation proof for the same active checkpoint view, reducing duplicate
 live-row validation cache work after indexed row reads. Row-update validation
 now also reuses the already-resolved active payload cache pointer instead of
 rediscovering that cache owner for each mutation.
+Prepared embedded MyLite updates now skip formatting the connection-level
+MariaDB OK information string on the ordinary no-result statement path, while
+preserving affected rows, last insert ids, warning counts, direct text-query
+info strings, bulk diagnostics, and system-versioned update messages.
 The local performance baseline now accepts opt-in per-metric microsecond
 thresholds, giving performance slices a reusable regression gate while keeping
 default runs descriptive and machine-local. It also has focused primary-key

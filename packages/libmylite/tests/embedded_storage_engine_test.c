@@ -17020,6 +17020,22 @@ static void test_prepared_primary_key_update_rebinds(void) {
     assert(mylite_step(stmt) == MYLITE_DONE);
     assert(mylite_changes(db) == 1);
     assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE IGNORE prepared_update_posts SET value = NULL WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(stmt, 1U, 2) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_warning_count(db) >= 1U);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
 
     assert_query_single_value(
         db,
@@ -17034,7 +17050,7 @@ static void test_prepared_primary_key_update_rebinds(void) {
     assert_query_single_value(
         db,
         "SELECT CAST(value AS CHAR) FROM prepared_update_posts WHERE id = 2",
-        "71"
+        "0"
     );
 
     assert_exec_succeeds(

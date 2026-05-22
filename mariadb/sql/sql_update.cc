@@ -41,7 +41,7 @@
 #include "sql_derived.h" // mysql_derived_prepare,
                          // mysql_handle_derived,
                          // mysql_derived_filling
-
+#include "mylite_schema_hook.h" // MyLite embedded profile signal
 
 #include "sql_insert.h"  // For vers_insert_history_row() that may be
                          //   needed for System Versioning.
@@ -204,6 +204,9 @@ static bool check_fields(THD *thd, TABLE_LIST *table, List<Item> &items,
   return FALSE;
 }
 
+static bool
+mylite_prepared_update_ok_message_fast_path(THD *thd, TABLE *table,
+                                            TABLE_LIST *table_list);
 
 bool TABLE::vers_check_update(List<Item> &items)
 {
@@ -1341,20 +1344,28 @@ update_end:
   if (likely(error < 0) && likely(!thd->lex->analyze_stmt))
   {
     char buff[MYSQL_ERRMSG_SIZE];
-    if (!table->versioned(VERS_TIMESTAMP) && !table_list->has_period())
-      my_snprintf(buff, sizeof(buff), ER_THD(thd, ER_UPDATE_INFO), (ulong) found,
-                  (ulong) updated,
-                  (ulong) thd->get_stmt_da()->current_statement_warn_count());
-    else
-      my_snprintf(buff, sizeof(buff),
-                  ER_THD(thd, ER_UPDATE_INFO_WITH_SYSTEM_VERSIONING),
-                  (ulong) found, (ulong) updated, (ulong) rows_inserted,
-                  (ulong) thd->get_stmt_da()->current_statement_warn_count());
+    const char *message= NULL;
+    if (!mylite_prepared_update_ok_message_fast_path(thd, table, table_list))
+    {
+      if (!table->versioned(VERS_TIMESTAMP) && !table_list->has_period())
+        my_snprintf(
+            buff, sizeof(buff), ER_THD(thd, ER_UPDATE_INFO), (ulong) found,
+            (ulong) updated,
+            (ulong) thd->get_stmt_da()->current_statement_warn_count());
+      else
+        my_snprintf(
+            buff, sizeof(buff),
+            ER_THD(thd, ER_UPDATE_INFO_WITH_SYSTEM_VERSIONING), (ulong) found,
+            (ulong) updated, (ulong) rows_inserted,
+            (ulong) thd->get_stmt_da()->current_statement_warn_count());
+      message= buff;
+    }
     thd->collect_unit_results(
             id,
             (thd->client_capabilities & CLIENT_FOUND_ROWS) ? found : updated);
-    my_ok(thd, (thd->client_capabilities & CLIENT_FOUND_ROWS) ? found : updated,
-          id, buff);
+    my_ok(thd,
+          (thd->client_capabilities & CLIENT_FOUND_ROWS) ? found : updated, id,
+          message);
     if (thd->get_stmt_da()->is_bulk_op())
     {
       /*
@@ -1563,6 +1574,21 @@ bool unsafe_key_update(List<TABLE_LIST> leaves, table_map tables_for_update)
     }
   }
   return false;
+}
+
+static bool mylite_prepared_update_ok_message_fast_path(THD *thd, TABLE *table,
+                                                        TABLE_LIST *table_list)
+{
+#ifndef EMBEDDED_LIBRARY
+  (void) thd;
+  (void) table;
+  (void) table_list;
+  return false;
+#else
+  return thd && thd->current_stmt && mylite_schema_hooks_active() &&
+         !thd->get_stmt_da()->is_bulk_op() && table && table_list &&
+         !table->versioned(VERS_TIMESTAMP) && !table_list->has_period();
+#endif
 }
 
 /**
