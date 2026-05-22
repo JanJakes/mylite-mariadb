@@ -6984,14 +6984,27 @@ static mylite_storage_result update_row_with_index_entries(
                 position.row_page_id
             );
         }
-        replace_active_row_payload_in_cache(
-            active_row_payload_cache,
-            row_id,
-            position.row_page_id,
-            row,
-            row_size,
-            active_row_payload_entry
-        );
+        if (active_row_payload_cache != NULL) {
+            replace_active_row_payload_in_cache(
+                active_row_payload_cache,
+                row_id,
+                position.row_page_id,
+                row,
+                row_size,
+                active_row_payload_entry
+            );
+        }
+        if (active_row_payload_entry == NULL) {
+            (void)store_active_row_payload_in_statement(
+                active_cache_statement,
+                filename,
+                &header,
+                table_id,
+                position.row_page_id,
+                row,
+                row_size
+            );
+        }
         retarget_durable_caches_after_table_mutation_in_statement(
             active_file_statement,
             filename,

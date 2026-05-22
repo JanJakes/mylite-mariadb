@@ -520,9 +520,12 @@ update/delete validation without rescanning later row-state pages. Rows whose
 payloads were read, or whose row pages were just written by a successful
 mutation, also carry a stronger table-validation proof, so later validation can
 skip rereading the old row page. Successful mutations remove hidden source row
-ids and add replacement row ids. Non-checkpointed direct storage calls keep the
-row-page and row-state scan path, and truncate/catalog invalidation or
-savepoint rollback clears cached live rows.
+ids and add replacement row ids. Successful durable updates also seed the
+active checkpoint's row-payload cache with the replacement row when the update
+entered without an existing payload entry, so repeated updates inside the same
+outer checkpoint can validate from active cache state. Non-checkpointed direct
+storage calls keep the row-page and row-state scan path, and truncate/catalog
+invalidation or savepoint rollback clears cached live rows.
 
 Small inline row updates append the replacement row page, row-state page, and
 replacement index-entry pages as one contiguous page run. The durable page
