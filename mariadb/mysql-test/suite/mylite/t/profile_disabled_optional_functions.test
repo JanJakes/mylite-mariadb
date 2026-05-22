@@ -1,0 +1,22 @@
+#
+# Check optional SQL function families that the MyLite MTR smoke profile
+# intentionally compiles out of the embedded server build.
+#
+
+--error ER_SP_DOES_NOT_EXIST
+select benchmark(1, 1 + 1);
+--error ER_SP_DOES_NOT_EXIST
+select sleep(0);
+--error ER_SP_DOES_NOT_EXIST
+select uuid_short();
+
+--error ER_SP_DOES_NOT_EXIST
+select extractvalue('<root><a>1</a></root>', '/root/a');
+--error ER_SP_DOES_NOT_EXIST
+select updatexml('<root><a>1</a></root>', '/root/a', '<a>2</a>');
+--error ER_SP_DOES_NOT_EXIST
+select json_schema_valid('{}', '{}');
+--error ER_SP_DOES_NOT_EXIST
+select sformat('{0}', 'value');
+--error ER_SP_DOES_NOT_EXIST
+select vec_totext(vec_fromtext('[1,2]'));

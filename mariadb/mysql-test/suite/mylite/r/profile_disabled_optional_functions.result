@@ -1,0 +1,16 @@
+select benchmark(1, 1 + 1);
+ERROR 42000: FUNCTION test.benchmark does not exist
+select sleep(0);
+ERROR 42000: FUNCTION test.sleep does not exist
+select uuid_short();
+ERROR 42000: FUNCTION test.uuid_short does not exist
+select extractvalue('<root><a>1</a></root>', '/root/a');
+ERROR 42000: FUNCTION test.extractvalue does not exist
+select updatexml('<root><a>1</a></root>', '/root/a', '<a>2</a>');
+ERROR 42000: FUNCTION test.updatexml does not exist
+select json_schema_valid('{}', '{}');
+ERROR 42000: FUNCTION test.json_schema_valid does not exist
+select sformat('{0}', 'value');
+ERROR 42000: FUNCTION test.sformat does not exist
+select vec_totext(vec_fromtext('[1,2]'));
+ERROR 42000: FUNCTION test.vec_totext does not exist
