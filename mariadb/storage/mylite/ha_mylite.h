@@ -56,6 +56,7 @@ class ha_mylite: public handler
   unsigned char *index_row_scratch;
   ulonglong *index_row_id_scratch;
   unsigned char index_inline_key[MAX_KEY_LENGTH];
+  unsigned char direct_update_key_buffer[MAX_KEY_LENGTH];
   Mylite_index_cursor_entry index_inline_entry;
   size_t *index_row_offsets;
   size_t *index_row_sizes;
@@ -84,6 +85,7 @@ class ha_mylite: public handler
   mutable bool parent_foreign_key_presence_known;
   mutable bool parent_foreign_key_presence;
   Field *auto_increment_field;
+  Field *direct_update_key_field;
   bool index_cursor_filtered;
   bool discard_rows;
   bool volatile_rows;
@@ -95,6 +97,8 @@ class ha_mylite: public handler
   List<Item> *direct_update_values;
   Item *direct_update_key_value;
   uint direct_update_key_number;
+  uint direct_update_key_field_number;
+  uchar direct_update_key_null;
 
   Mylite_share *get_share();
   void clear_scan_rows();
@@ -113,6 +117,7 @@ class ha_mylite: public handler
                                        const uchar *key_filter,
                                        uint key_filter_length, uchar *buf,
                                        bool *out_applied, bool *out_found);
+  int build_direct_update_key(bool *out_has_key);
   int record_blob_payload_slot(const uchar *buf, size_t *out_slot) const;
   int preserve_record_blob_payloads(uchar *buf);
   void clear_foreign_key_presence_cache() const;

@@ -296,6 +296,10 @@ That direct path now writes accepted changed rows through a MyLite-owned inner
 row sequence instead of nesting `handler::ha_update_row()`, while retaining
 hidden-index maintenance, handler update statistics, and fallback for
 constraint-sensitive table shapes that need MariaDB's private in-server checks.
+The handler-side direct key builder now reuses a table-lifetime cloned key
+field and key buffer for the accepted one-part integer raw-key subset, avoiding
+per-execute `Field::new_key_field()` allocation in MyLite's direct hook while
+keeping MariaDB item-to-field conversion semantics.
 Ordinary MyLite `UPDATE` / `DELETE` execution now skips eager quick-plan
 explain detail allocation unless explicit `EXPLAIN`, `ANALYZE`, or slow-log
 explain/engine detail needs it, while routed `EXPLAIN UPDATE` keeps the full

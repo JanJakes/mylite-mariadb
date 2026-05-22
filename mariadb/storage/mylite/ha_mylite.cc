@@ -226,9 +226,6 @@ static bool mylite_find_direct_update_key_field_equal_item(
     Item *item, TABLE *table, Field *field, Item **out_value_item);
 static bool mylite_direct_update_key_is_supported(TABLE *table, KEY *key_info);
 static bool mylite_table_needs_inserver_update_constraints(TABLE *table);
-static int mylite_build_direct_update_key(THD *thd, TABLE *table,
-                                          uint key_number, Item *value_item,
-                                          uchar *key_buff, bool *out_has_key);
 static Field *mylite_auto_increment_field(TABLE *table);
 static bool mylite_next_auto_increment_value_from_field(Field *auto_field,
                                                         ulonglong *out_value);
@@ -1337,11 +1334,13 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
       child_foreign_key_presence(false),
       parent_foreign_key_presence_known(false),
       parent_foreign_key_presence(false), auto_increment_field(NULL),
-      index_cursor_filtered(false), discard_rows(false), volatile_rows(false),
-      table_has_blob_fields(false), table_supports_row_write(false),
-      table_supports_row_lifecycle(false), direct_update_condition(NULL),
-      direct_update_fields(NULL), direct_update_values(NULL),
-      direct_update_key_value(NULL), direct_update_key_number(MAX_KEY)
+      direct_update_key_field(NULL), index_cursor_filtered(false),
+      discard_rows(false), volatile_rows(false), table_has_blob_fields(false),
+      table_supports_row_write(false), table_supports_row_lifecycle(false),
+      direct_update_condition(NULL), direct_update_fields(NULL),
+      direct_update_values(NULL), direct_update_key_value(NULL),
+      direct_update_key_number(MAX_KEY),
+      direct_update_key_field_number(MAX_KEY), direct_update_key_null(0)
 {
   storage_schema_name[0]= '\0';
   storage_table_name[0]= '\0';
@@ -1637,11 +1636,8 @@ int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
       direct_update_key_number >= table->s->keys)
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
 
-  uchar key_buff[MAX_KEY_LENGTH];
   bool has_key= false;
-  int error= mylite_build_direct_update_key(
-      ha_thd(), table, direct_update_key_number, direct_update_key_value,
-      key_buff, &has_key);
+  int error= build_direct_update_key(&has_key);
   if (error || !has_key)
     DBUG_RETURN(error);
 
@@ -1649,7 +1645,7 @@ int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
   bool direct_applied= false;
   bool direct_found= false;
   error= read_exact_unique_index_row_into(
-      direct_update_key_number, key_buff, key_info->key_length,
+      direct_update_key_number, direct_update_key_buffer, key_info->key_length,
       table->record[0], &direct_applied, &direct_found);
   if (error)
     DBUG_RETURN(error);
@@ -1710,6 +1706,61 @@ int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
 
   rows_stats.updated++;
   *update_rows= 1;
+  DBUG_RETURN(0);
+}
+
+int ha_mylite::build_direct_update_key(bool *out_has_key)
+{
+  DBUG_ENTER("ha_mylite::build_direct_update_key");
+  *out_has_key= false;
+
+  THD *thd= ha_thd();
+  if (!thd || !table || !direct_update_key_value ||
+      direct_update_key_number >= table->s->keys)
+    DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
+
+  KEY *key_info= table->key_info + direct_update_key_number;
+  KEY_PART_INFO *key_part= key_info->key_part;
+  bzero(direct_update_key_buffer, key_info->key_length);
+  direct_update_key_null= 0;
+
+  if (direct_update_key_value->maybe_null() &&
+      direct_update_key_value->is_null())
+    DBUG_RETURN(thd->is_error() ? 1 : 0);
+
+  if (!direct_update_key_field ||
+      direct_update_key_field_number != direct_update_key_number)
+  {
+    direct_update_key_field= key_part->field->new_key_field(
+        &table->mem_root, key_part->field->table, direct_update_key_buffer,
+        key_part->length, &direct_update_key_null, 1);
+    if (!direct_update_key_field)
+      DBUG_RETURN(HA_ERR_OUT_OF_MEM);
+    direct_update_key_field_number= direct_update_key_number;
+  }
+
+  enum_check_fields old_count_cuted_fields= thd->count_cuted_fields;
+  MY_BITMAP *old_map= dbug_tmp_use_all_columns(table, &table->write_set);
+  thd->count_cuted_fields= CHECK_FIELD_IGNORE;
+  int res= FALSE;
+  {
+    Use_relaxed_field_copy relaxed_copy(
+        direct_update_key_field->table->in_use);
+    direct_update_key_field->reset();
+    res= direct_update_key_value->save_in_field(direct_update_key_field, 1);
+    if (!res && direct_update_key_field->table->in_use->is_error())
+      res= 1;
+  }
+  thd->count_cuted_fields= old_count_cuted_fields;
+  dbug_tmp_restore_column_map(&table->write_set, old_map);
+
+  if (res < 0 || res > 2)
+    DBUG_RETURN(thd->is_error() ? 1 : HA_ERR_CRASHED_ON_USAGE);
+  if (direct_update_key_field->is_null() ||
+      direct_update_key_value->null_value)
+    DBUG_RETURN(0);
+
+  *out_has_key= true;
   DBUG_RETURN(0);
 }
 
@@ -2333,7 +2384,11 @@ int ha_mylite::close(void)
   clear_index_row_scratch();
   clear_record_blob_payloads();
   clear_foreign_key_presence_cache();
+  clear_direct_update_state();
   auto_increment_field= NULL;
+  direct_update_key_field= NULL;
+  direct_update_key_field_number= MAX_KEY;
+  direct_update_key_null= 0;
   discard_rows= false;
   volatile_rows= false;
   table_has_blob_fields= false;
@@ -4630,43 +4685,6 @@ static bool mylite_table_needs_inserver_update_constraints(TABLE *table)
     return true;
 
   return table->s->long_unique_table || table->s->period.unique_keys;
-}
-
-static int mylite_build_direct_update_key(THD *thd, TABLE *table,
-                                          uint key_number, Item *value_item,
-                                          uchar *key_buff, bool *out_has_key)
-{
-  *out_has_key= false;
-  if (!thd || !table || !value_item || !key_buff ||
-      key_number >= table->s->keys)
-    return HA_ERR_CRASHED_ON_USAGE;
-
-  KEY *key_info= table->key_info + key_number;
-  KEY_PART_INFO *key_part= key_info->key_part;
-  bzero(key_buff, key_info->key_length);
-
-  if (value_item->maybe_null() && value_item->is_null())
-    return thd->is_error() ? 1 : 0;
-
-  store_key_item key_copy(thd, key_part->field, key_buff, NULL,
-                          key_part->length, value_item, FALSE);
-  if (thd->is_error())
-    return 1;
-
-  enum_check_fields old_count_cuted_fields= thd->count_cuted_fields;
-  MY_BITMAP *old_map= dbug_tmp_use_all_columns(table, &table->write_set);
-  thd->count_cuted_fields= CHECK_FIELD_IGNORE;
-  store_key::store_key_result copy_result= key_copy.copy(thd);
-  thd->count_cuted_fields= old_count_cuted_fields;
-  dbug_tmp_restore_column_map(&table->write_set, old_map);
-
-  if (copy_result == store_key::STORE_KEY_FATAL)
-    return thd->is_error() ? 1 : HA_ERR_CRASHED_ON_USAGE;
-  if (key_copy.null_key)
-    return 0;
-
-  *out_has_key= true;
-  return 0;
 }
 
 static Field *mylite_auto_increment_field(TABLE *table)
