@@ -256,6 +256,7 @@ static bool mylite_update_fields_change_direct_unsafe_key(
 static bool mylite_field_is_direct_unsafe_key_part(TABLE *table,
                                                    const Field *field,
                                                    bool *out_is_key_part);
+static bool mylite_direct_update_may_change_unique_key(TABLE *table);
 static bool mylite_key_fields_may_change(TABLE *table, const KEY *key);
 static bool mylite_update_preserves_all_index_entries(TABLE *table,
                                                       const uchar *old_data,
@@ -1337,9 +1338,12 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
       direct_update_key_field(NULL), index_cursor_filtered(false),
       discard_rows(false), volatile_rows(false), table_has_blob_fields(false),
       table_supports_row_write(false), table_supports_row_lifecycle(false),
-      direct_update_can_compare_record(false), direct_update_condition(NULL),
-      direct_update_fields(NULL), direct_update_values(NULL),
-      direct_update_key_value(NULL), direct_update_key_number(MAX_KEY),
+      direct_update_row_in_progress(false),
+      direct_update_can_compare_record(false),
+      direct_update_can_skip_duplicate_key_checks(false),
+      direct_update_condition(NULL), direct_update_fields(NULL),
+      direct_update_values(NULL), direct_update_key_value(NULL),
+      direct_update_key_number(MAX_KEY),
       direct_update_key_field_number(MAX_KEY), direct_update_key_null(0)
 {
   storage_schema_name[0]= '\0';
@@ -1430,7 +1434,9 @@ void ha_mylite::clear_direct_update_state()
   direct_update_values= NULL;
   direct_update_key_value= NULL;
   direct_update_key_number= MAX_KEY;
+  direct_update_row_in_progress= false;
   direct_update_can_compare_record= false;
+  direct_update_can_skip_duplicate_key_checks= false;
 }
 
 void ha_mylite::clear_foreign_key_presence_cache() const
@@ -1543,6 +1549,7 @@ const COND *ha_mylite::cond_push(const COND *cond)
   direct_update_key_value= NULL;
   direct_update_key_number= MAX_KEY;
   direct_update_can_compare_record= false;
+  direct_update_can_skip_duplicate_key_checks= false;
   if (!cond)
     DBUG_RETURN(cond);
 
@@ -1564,6 +1571,7 @@ void ha_mylite::cond_pop()
   direct_update_key_value= NULL;
   direct_update_key_number= MAX_KEY;
   direct_update_can_compare_record= false;
+  direct_update_can_skip_duplicate_key_checks= false;
 }
 
 int ha_mylite::info_push(uint info_type, void *info)
@@ -1576,6 +1584,7 @@ int ha_mylite::info_push(uint info_type, void *info)
     direct_update_key_value= NULL;
     direct_update_key_number= MAX_KEY;
     direct_update_can_compare_record= false;
+    direct_update_can_skip_duplicate_key_checks= false;
 
     mylite_update_exact_key_info *key_info=
         static_cast<mylite_update_exact_key_info *>(info);
@@ -1594,10 +1603,12 @@ int ha_mylite::info_push(uint info_type, void *info)
   }
   case INFO_KIND_UPDATE_FIELDS:
     direct_update_can_compare_record= false;
+    direct_update_can_skip_duplicate_key_checks= false;
     direct_update_fields= static_cast<List<Item> *>(info);
     break;
   case INFO_KIND_UPDATE_VALUES:
     direct_update_can_compare_record= false;
+    direct_update_can_skip_duplicate_key_checks= false;
     direct_update_values= static_cast<List<Item> *>(info);
     break;
   default:
@@ -1649,6 +1660,8 @@ int ha_mylite::direct_update_rows_init(List<Item> *update_fields)
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
 
   direct_update_can_compare_record= records_are_comparable(table);
+  direct_update_can_skip_duplicate_key_checks=
+      !mylite_direct_update_may_change_unique_key(table);
 
   DBUG_RETURN(0);
 }
@@ -1722,7 +1735,9 @@ int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
 
   DBUG_ASSERT(!mylite_table_needs_inserver_update_constraints(table));
 
+  direct_update_row_in_progress= true;
   error= update_row(table->record[1], table->record[0]);
+  direct_update_row_in_progress= false;
   table->auto_increment_field_not_null= FALSE;
   if (error == HA_ERR_RECORD_IS_THE_SAME)
     DBUG_RETURN(0);
@@ -2422,6 +2437,8 @@ int ha_mylite::close(void)
   table_has_blob_fields= false;
   table_supports_row_write= false;
   table_supports_row_lifecycle= false;
+  direct_update_row_in_progress= false;
+  direct_update_can_skip_duplicate_key_checks= false;
   DBUG_RETURN(0);
 }
 
@@ -3309,25 +3326,29 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
       DBUG_RETURN(error);
     }
 
-    uint duplicate_key= (uint) -1;
-    error= volatile_rows
-               ? mylite_check_volatile_duplicate_keys(
-                     primary_file, schema_name, table_name, table,
-                     index_entries, index_entry_count, index_entry_changed,
-                     new_data, current_row_id, &duplicate_key)
-               : mylite_check_duplicate_keys(
-                     primary_file, schema_name, table_name, table,
-                     index_entries, index_entry_count, index_entry_changed,
-                     new_data, current_row_id, &duplicate_key);
-    if (error)
+    if (!(direct_update_row_in_progress &&
+          direct_update_can_skip_duplicate_key_checks))
     {
-      if (index_entry_changed != stack_index_entry_changed)
-        free(index_entry_changed);
-      mylite_free_index_entries_with_scratch(index_entries, index_key_storage,
-                                             stack_index_entries,
-                                             stack_index_key_storage);
-      duplicate_key_index= duplicate_key;
-      DBUG_RETURN(error);
+      uint duplicate_key= (uint) -1;
+      error= volatile_rows
+                 ? mylite_check_volatile_duplicate_keys(
+                       primary_file, schema_name, table_name, table,
+                       index_entries, index_entry_count, index_entry_changed,
+                       new_data, current_row_id, &duplicate_key)
+                 : mylite_check_duplicate_keys(
+                       primary_file, schema_name, table_name, table,
+                       index_entries, index_entry_count, index_entry_changed,
+                       new_data, current_row_id, &duplicate_key);
+      if (error)
+      {
+        if (index_entry_changed != stack_index_entry_changed)
+          free(index_entry_changed);
+        mylite_free_index_entries_with_scratch(
+            index_entries, index_key_storage, stack_index_entries,
+            stack_index_key_storage);
+        duplicate_key_index= duplicate_key;
+        DBUG_RETURN(error);
+      }
     }
   }
 
@@ -4934,6 +4955,35 @@ static bool mylite_field_is_direct_unsafe_key_part(TABLE *table,
         if (key->flags & HA_NOSAME)
           return true;
       }
+    }
+  }
+
+  return false;
+}
+
+static bool mylite_direct_update_may_change_unique_key(TABLE *table)
+{
+  if (!table || !table->write_set || !table->s)
+    return true;
+
+  for (uint key_number= 0; key_number < table->s->keys; ++key_number)
+  {
+    const KEY *key= table->key_info + key_number;
+    if (!(key->flags & HA_NOSAME))
+      continue;
+    if (!key->key_part)
+      return true;
+
+    for (uint part= 0; part < key->user_defined_key_parts; ++part)
+    {
+      const KEY_PART_INFO *key_part= key->key_part + part;
+      if (!key_part->field ||
+          key_part->field->field_index >= table->s->fields ||
+          key_part->field->vcol_info)
+        return true;
+      if (bitmap_is_set(table->write_set, key_part->field->field_index) ||
+          key_part->field->has_update_default_function())
+        return true;
     }
   }
 
