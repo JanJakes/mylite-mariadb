@@ -3198,7 +3198,6 @@ int fetch_statement_row(mylite_stmt &statement) {
     if (fetch_result == MYSQL_NO_DATA) {
         statement.done = true;
         const unsigned warning_count = mysql_warning_count(&statement.database->mysql);
-        mysql_stmt_free_result(statement.statement);
         statement.result_active = false;
         const int warning_result = capture_warnings(*statement.database, warning_count);
         return warning_result == MYLITE_OK ? MYLITE_DONE : warning_result;

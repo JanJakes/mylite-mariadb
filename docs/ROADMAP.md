@@ -170,7 +170,10 @@ and object-wide binding resets.
 Successful non-result prepared resets also avoid a redundant MariaDB statement
 reset before re-execution. Fully drained result-producing prepared statements
 now do the same, while reset-before-drain and failed statements keep the full
-MariaDB reset path. Prepared non-result execution now also reuses the immutable
+MariaDB reset path. The fully drained `MYSQL_NO_DATA` path also avoids
+`mysql_stmt_free_result()` for MyLite's unbuffered prepared result loop, while
+reset-before-drain still frees active results. Prepared non-result execution
+now also reuses the immutable
 SQL policy classified at prepare time, so ordinary prepared DML no longer
 reparses its SQL text for no-op transaction or temporary-table lifecycle
 updates after every successful step. Hot successful prepared binds, resets, and
