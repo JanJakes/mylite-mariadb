@@ -51,6 +51,10 @@ int mylite_storage_test_statement_filename_is(
     const char *filename
 );
 int mylite_storage_test_statement_has_table_entry_cache(const mylite_storage_statement *statement);
+int mylite_storage_test_statement_has_live_row_cache(const mylite_storage_statement *statement);
+int mylite_storage_test_statement_has_row_state_map_cache(
+    const mylite_storage_statement *statement
+);
 int mylite_storage_test_statement_has_row_payload_cache(const mylite_storage_statement *statement);
 int mylite_storage_test_durable_exact_index_cache_has_filename_identity(const char *filename);
 int mylite_storage_test_durable_exact_index_cache_count(const char *filename);
@@ -282,6 +286,7 @@ static void test_active_row_payload_cache_many_replacements(void);
 static void test_durable_live_row_cache(void);
 static void test_deferred_durable_cache_retarget(void);
 static void test_active_live_row_list_maintenance(void);
+static void test_transaction_live_row_cache_nested_update_scope(void);
 static void test_index_entries(void);
 static void test_exact_index_cache_fixed_size_keys(void);
 static void test_cached_exact_index_entryset_bulk_append(void);
@@ -673,6 +678,7 @@ int main(void) {
     test_durable_live_row_cache();
     test_deferred_durable_cache_retarget();
     test_active_live_row_list_maintenance();
+    test_transaction_live_row_cache_nested_update_scope();
     test_index_entries();
     test_exact_index_cache_fixed_size_keys();
     test_cached_exact_index_entryset_bulk_append();
@@ -3793,6 +3799,126 @@ static void test_active_live_row_list_maintenance(void) {
     assert(rmdir(root) == 0);
     free(filename);
     free(root);
+}
+
+static void test_transaction_live_row_cache_nested_update_scope(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row_1[] = {0x00U, 0x11U, 'a'};
+    static const unsigned char row_2[] = {0x00U, 0x22U, 'b'};
+    static const unsigned char row_3[] = {0x00U, 0x33U, 'c'};
+    static const unsigned char row_4[] = {0x00U, 0x44U, 'd'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "transaction-live-row-cache.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_statement *transaction = NULL;
+    mylite_storage_statement *savepoint = NULL;
+    unsigned long long row_1_id = 0ULL;
+    unsigned long long row_2_id = 0ULL;
+    unsigned long long row_3_id = 0ULL;
+    unsigned long long row_4_id = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_1,
+            sizeof(row_1),
+            NULL,
+            0U,
+            &row_1_id
+        ) == MYLITE_STORAGE_OK
+    );
+
+    assert(mylite_storage_begin_transaction(filename, &transaction) == MYLITE_STORAGE_OK);
+    assert(!mylite_storage_test_statement_has_live_row_cache(transaction));
+    assert(!mylite_storage_test_statement_has_row_state_map_cache(transaction));
+
+    assert(mylite_storage_begin_nested_statement(transaction, &savepoint) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_update_row(
+            filename,
+            "app",
+            "posts",
+            row_1_id,
+            row_2,
+            sizeof(row_2),
+            &row_2_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(row_2_id != 0ULL);
+    assert(mylite_storage_test_statement_has_live_row_cache(transaction));
+    assert(mylite_storage_test_statement_has_row_state_map_cache(transaction));
+    assert(mylite_storage_rollback_statement(savepoint) == MYLITE_STORAGE_OK);
+    savepoint = NULL;
+    assert(!mylite_storage_test_statement_has_live_row_cache(transaction));
+    assert(!mylite_storage_test_statement_has_row_state_map_cache(transaction));
+    assert_row_equals(filename, row_1_id, row_1, sizeof(row_1));
+    if (row_2_id != row_1_id) {
+        assert_row_not_found(filename, row_2_id);
+    }
+
+    assert(mylite_storage_begin_nested_statement(transaction, &savepoint) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_update_row(
+            filename,
+            "app",
+            "posts",
+            row_1_id,
+            row_3,
+            sizeof(row_3),
+            &row_3_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(row_3_id != 0ULL);
+    assert(mylite_storage_test_statement_has_live_row_cache(transaction));
+    assert(mylite_storage_commit_statement(savepoint) == MYLITE_STORAGE_OK);
+    savepoint = NULL;
+    assert(mylite_storage_test_statement_has_live_row_cache(transaction));
+
+    assert(mylite_storage_begin_nested_statement(transaction, &savepoint) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_update_row(
+            filename,
+            "app",
+            "posts",
+            row_3_id,
+            row_4,
+            sizeof(row_4),
+            &row_4_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(row_4_id != 0ULL);
+    assert(mylite_storage_commit_statement(savepoint) == MYLITE_STORAGE_OK);
+    savepoint = NULL;
+    assert(mylite_storage_test_statement_has_live_row_cache(transaction));
+    assert(mylite_storage_commit_statement(transaction) == MYLITE_STORAGE_OK);
+    transaction = NULL;
+
+    if (row_1_id != row_4_id) {
+        assert_row_not_found(filename, row_1_id);
+    }
+    if (row_3_id != row_4_id) {
+        assert_row_not_found(filename, row_3_id);
+    }
+    assert_row_equals(filename, row_4_id, row_4, sizeof(row_4));
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+#endif
 }
 
 static void test_index_entries(void) {

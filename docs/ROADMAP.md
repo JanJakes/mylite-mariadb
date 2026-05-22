@@ -339,6 +339,10 @@ visibility.
 Active row-DML statements now remember when no durable live-row-id cache exists
 for the current table/header view, avoiding repeated negative cache probes in
 hot update loops.
+Nested row updates now use the transaction-level live-row validation cache and
+cache the table row-state map on the first cold validation miss, so committed
+savepoint-sized updates do not repeat row-state visibility scans while rolled
+back savepoints still clear speculative parent cache entries.
 Transient row-state maps now hash hidden source row ids, removing the
 per-candidate linear visibility lookup that dominated full scans after many
 updates, and full rowset reads now collect live row ids in one file pass before
