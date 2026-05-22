@@ -1,0 +1,25 @@
+show status like 'Empty_queries';
+Variable_name	Value
+select count(*) as global_status_rows from information_schema.global_status;
+global_status_rows
+0
+select count(*) as session_status_rows from information_schema.session_status;
+session_status_rows
+0
+show processlist;
+ERROR 42000: This version of MariaDB doesn't yet support 'process-list metadata in MyLite embedded profile'
+show full processlist;
+ERROR 42000: This version of MariaDB doesn't yet support 'process-list metadata in MyLite embedded profile'
+select count(*) as processlist_rows from information_schema.processlist;
+processlist_rows
+0
+show procedure status like 'blocked_proc';
+Db	Name	Type	Definer	Modified	Created	Security_type	Comment	character_set_client	collation_connection	Database Collation
+show function status like 'blocked_func';
+Db	Name	Type	Definer	Modified	Created	Security_type	Comment	character_set_client	collation_connection	Database Collation
+select count(*) as routine_rows from information_schema.routines;
+routine_rows
+0
+select count(*) as parameter_rows from information_schema.parameters;
+parameter_rows
+0

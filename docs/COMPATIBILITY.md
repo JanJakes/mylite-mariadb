@@ -116,6 +116,7 @@ selected MTR-profile view, trigger, and stored-procedure DDL/runtime behavior,
 selected DDL constraint/index metadata and UCA CTAS behavior, selected Aria
 ALTER/index-upgrade behavior, selected lock-table DDL behavior, selected
 deprecated server syntax rejection,
+selected embedded-profile disabled metadata behavior,
 selected embedded-profile disabled SQL-surface behavior,
 selected `ORDER BY` optimizer
 and aggregate-ordering behavior, optimizer-cost metadata, selected EXPLAIN

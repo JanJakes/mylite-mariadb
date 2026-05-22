@@ -40,6 +40,10 @@ MariaDB base: `mariadb-11.8.6`
   `mariadb/mysql-test/suite/mylite/t/bootstrap_schema.test`.
 - Verified command:
   `tools/mylite-mtr-harness run mylite.bootstrap_schema`.
+- [MTR profile disabled metadata smoke](../mtr-profile-disabled-metadata-smoke/specs.md)
+  adds `mylite.profile_disabled_metadata`, covering selected status,
+  process-list, and routine metadata producers that the MyLite MTR smoke
+  profile intentionally compiles out.
 - [MTR profile disabled surface smoke](../mtr-profile-disabled-surface-smoke/specs.md)
   adds `mylite.profile_disabled_surfaces`, covering selected SQL surfaces that
   the MyLite MTR smoke profile intentionally compiles out.
@@ -178,6 +182,7 @@ feature checks is treated as no coverage and fails `run` or the overall
 The default curated list remains intentionally baseline-oriented:
 
 - `mylite.bootstrap_schema`.
+- `mylite.profile_disabled_metadata`.
 - `mylite.profile_disabled_surfaces`.
 - `main.cast`.
 - `main.case`.

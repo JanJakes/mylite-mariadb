@@ -1,0 +1,19 @@
+#
+# Check metadata producers that the MyLite MTR smoke profile intentionally
+# compiles out of the embedded server build.
+#
+
+show status like 'Empty_queries';
+select count(*) as global_status_rows from information_schema.global_status;
+select count(*) as session_status_rows from information_schema.session_status;
+
+--error ER_NOT_SUPPORTED_YET
+show processlist;
+--error ER_NOT_SUPPORTED_YET
+show full processlist;
+select count(*) as processlist_rows from information_schema.processlist;
+
+show procedure status like 'blocked_proc';
+show function status like 'blocked_func';
+select count(*) as routine_rows from information_schema.routines;
+select count(*) as parameter_rows from information_schema.parameters;
