@@ -202,11 +202,15 @@ transaction without seeding from stale durable caches, and sparse changed-entry
 updates retarget omitted unchanged indexes by row id instead of clearing the
 active exact cache. Accepted direct updates now also skip empty CHECK,
 hidden-index, and in-server helper guard calls after direct-update
-initialization has proven the ordinary table shape. The local prepared-update
-execute component now holds near 2.1-2.4 us/op in the
-1000-row/10000-iteration and 10000-row/100000-iteration samples, and amortizes
-to about 1.75 us/op over 10000 rows / 1000000 iterations; broader prepared
-update work can move to remaining MariaDB handler and checkpoint overhead.
+initialization has proven the ordinary table shape. MyLite's single-table
+update prepare path now also skips value-list `setup_fields()` when every
+assigned value is an evaluable basic constant, keeping expression updates on
+the normal setup path. The local prepared-update execute component now holds
+near 2.1-2.4 us/op in the 1000-row/10000-iteration and
+10000-row/100000-iteration samples, and the 10000-row / 1000000-iteration
+component sample improved from about 1.75 us/op to 1.65-1.69 us/op; broader
+prepared update work can move to remaining MariaDB table-open, JOIN prepare,
+handler, and checkpoint overhead.
 Same-size row-only active rewrites now capture only the row checksum-plus-payload
 undo range and rewrite only payload bytes while preserving rollback correctness
 after dirty buffered-page checksum refreshes and later size-changing rewrites in
@@ -887,7 +891,10 @@ accepted MyLite direct-update path. The staged design is tracked in
 [Prepared DML execution reuse](specs/prepared-dml-execution-reuse/specs.md).
 The first implementation step caches the immutable prepared-update value-list
 subquery shape on `Sql_cmd_update`, avoiding repeated value-list scans before
-the MyLite single-update result-elision gate.
+the MyLite single-update result-elision gate. The next step skips value-list
+`setup_fields()` for simple literal and bound-scalar update values, moving the
+hot prepared-update step sample to about 1.65-1.69 us/op while preserving the
+normal setup path for expressions and contextual values.
 
 ## Size And Profile Direction
 

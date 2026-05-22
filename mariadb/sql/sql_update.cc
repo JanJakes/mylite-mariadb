@@ -215,7 +215,10 @@ static bool mylite_can_elide_single_update_result(THD *thd,
 static bool mylite_update_values_have_subquery(List<Item> &values);
 static bool mylite_prepare_single_update_values(THD *thd, List<Item> &fields,
                                                 List<Item> &values,
-                                                bool ignore);
+                                                bool ignore,
+                                                bool values_need_setup);
+static bool mylite_update_values_need_setup(List<Item> &values);
+static bool mylite_update_value_needs_setup(Item *value);
 static bool mylite_update_needs_explain_plan(THD *thd);
 
 bool TABLE::vers_check_update(List<Item> &items)
@@ -1673,11 +1676,36 @@ bool Sql_cmd_update::mylite_update_values_have_subquery(List<Item> &values)
 
 static bool mylite_prepare_single_update_values(THD *thd, List<Item> &fields,
                                                 List<Item> &values,
-                                                bool ignore)
+                                                bool ignore,
+                                                bool values_need_setup)
 {
-  return setup_fields(thd, Ref_ptr_array(), values, MARK_COLUMNS_READ, 0, NULL,
-                      0) ||
+  return (values_need_setup &&
+          setup_fields(thd, Ref_ptr_array(), values, MARK_COLUMNS_READ, 0,
+                       NULL, 0)) ||
          TABLE::check_assignability_explicit_fields(fields, values, ignore);
+}
+
+static bool mylite_update_values_need_setup(List<Item> &values)
+{
+  List_iterator_fast<Item> value_it(values);
+  Item *value;
+  while ((value= value_it++))
+  {
+    if (mylite_update_value_needs_setup(value))
+      return true;
+  }
+  return false;
+}
+
+static bool mylite_update_value_needs_setup(Item *value)
+{
+  if (!value)
+    return true;
+
+  if (!value->is_evaluable_expression())
+    return true;
+
+  return !value->basic_const_item();
 }
 
 static bool mylite_update_needs_explain_plan(THD *thd)
@@ -3308,10 +3336,15 @@ bool Sql_cmd_update::prepare_inner(THD *thd)
       multitable= true;
   }
 
-  if (elide_single_update_result &&
-      mylite_prepare_single_update_values(thd, select_lex->item_list,
-                                          lex->value_list, lex->ignore))
-    goto err;
+  if (elide_single_update_result)
+  {
+    const bool values_need_setup=
+        ::mylite_update_values_need_setup(lex->value_list);
+    if (mylite_prepare_single_update_values(thd, select_lex->item_list,
+                                            lex->value_list, lex->ignore,
+                                            values_need_setup))
+      goto err;
+  }
 
   if (table_list->has_period())
   {
