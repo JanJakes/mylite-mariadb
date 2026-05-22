@@ -17141,6 +17141,48 @@ static void test_prepared_primary_key_update_rebinds(void) {
         "0"
     );
 
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE prefix_update_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "title VARCHAR(32) NOT NULL, "
+        "KEY title_prefix (title(3))"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(
+        db,
+        "INSERT INTO prefix_update_posts VALUES (1, 'abc-one'), (2, 'xyz-one')"
+    );
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE prefix_update_posts SET title = ? WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(
+        mylite_bind_text(stmt, 1U, "abc-two", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(stmt, 2U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+    assert_query_single_value(
+        db,
+        "SELECT title FROM prefix_update_posts "
+        "FORCE INDEX (title_prefix) WHERE title LIKE 'abc%' AND id = 1",
+        "abc-two"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM prefix_update_posts "
+        "FORCE INDEX (title_prefix) WHERE title = 'abc-one'",
+        "0"
+    );
+
     assert(
         mylite_prepare(
             db,

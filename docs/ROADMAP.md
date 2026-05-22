@@ -344,6 +344,10 @@ Accepted MyLite direct updates now compute MariaDB row-comparison readiness
 once during handler direct-update initialization and reuse that decision during
 row mutation, matching the normal update loop's per-statement readiness cache
 while preserving unchanged-row affected-count behavior.
+They also reuse the cached direct-update key-change mask to skip the redundant
+preserve-all index-entry probe on accepted indexed-key updates, while still
+computing the changed-entry bitmap from old/new key bytes before storage
+mutation.
 Accepted MyLite direct updates also skip handler duplicate-key probes during
 their inner row update, relying on the direct-update init gate that rejects
 unique-key-changing assignments and keeping the probes when an `ON UPDATE`

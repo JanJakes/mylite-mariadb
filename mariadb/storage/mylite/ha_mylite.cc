@@ -1347,6 +1347,7 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
       direct_update_row_in_progress(false),
       direct_update_can_compare_record(false),
       direct_update_can_skip_duplicate_key_checks(false),
+      direct_update_may_change_index_entries(false),
       direct_update_condition_guaranteed_by_key(false),
       direct_update_condition(NULL), direct_update_fields(NULL),
       direct_update_values(NULL), direct_update_key_value(NULL),
@@ -1445,6 +1446,7 @@ void ha_mylite::clear_direct_update_state()
   direct_update_row_in_progress= false;
   direct_update_can_compare_record= false;
   direct_update_can_skip_duplicate_key_checks= false;
+  direct_update_may_change_index_entries= false;
   direct_update_condition_guaranteed_by_key= false;
   bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
 }
@@ -1560,6 +1562,7 @@ const COND *ha_mylite::cond_push(const COND *cond)
   direct_update_key_number= MAX_KEY;
   direct_update_can_compare_record= false;
   direct_update_can_skip_duplicate_key_checks= false;
+  direct_update_may_change_index_entries= false;
   direct_update_condition_guaranteed_by_key= false;
   bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
   if (!cond)
@@ -1588,6 +1591,7 @@ void ha_mylite::cond_pop()
   direct_update_key_number= MAX_KEY;
   direct_update_can_compare_record= false;
   direct_update_can_skip_duplicate_key_checks= false;
+  direct_update_may_change_index_entries= false;
   direct_update_condition_guaranteed_by_key= false;
   bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
 }
@@ -1603,6 +1607,7 @@ int ha_mylite::info_push(uint info_type, void *info)
     direct_update_key_number= MAX_KEY;
     direct_update_can_compare_record= false;
     direct_update_can_skip_duplicate_key_checks= false;
+    direct_update_may_change_index_entries= false;
     direct_update_condition_guaranteed_by_key= false;
     bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
 
@@ -1626,12 +1631,14 @@ int ha_mylite::info_push(uint info_type, void *info)
   case INFO_KIND_UPDATE_FIELDS:
     direct_update_can_compare_record= false;
     direct_update_can_skip_duplicate_key_checks= false;
+    direct_update_may_change_index_entries= false;
     bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
     direct_update_fields= static_cast<List<Item> *>(info);
     break;
   case INFO_KIND_UPDATE_VALUES:
     direct_update_can_compare_record= false;
     direct_update_can_skip_duplicate_key_checks= false;
+    direct_update_may_change_index_entries= false;
     bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
     direct_update_values= static_cast<List<Item> *>(info);
     break;
@@ -1688,10 +1695,13 @@ int ha_mylite::direct_update_rows_init(List<Item> *update_fields)
   direct_update_can_skip_duplicate_key_checks=
       !mylite_direct_update_may_change_unique_key(table);
   bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
+  direct_update_may_change_index_entries= false;
   for (uint key_number= 0; key_number < table->s->keys; ++key_number)
   {
     direct_update_key_may_change[key_number]=
         mylite_key_fields_may_change(table, table->key_info + key_number);
+    direct_update_may_change_index_entries|=
+        direct_update_key_may_change[key_number] != 0;
   }
 
   DBUG_RETURN(0);
@@ -2471,6 +2481,7 @@ int ha_mylite::close(void)
   table_supports_row_lifecycle= false;
   direct_update_row_in_progress= false;
   direct_update_can_skip_duplicate_key_checks= false;
+  direct_update_may_change_index_entries= false;
   DBUG_RETURN(0);
 }
 
@@ -3328,8 +3339,10 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
   const uchar *key_may_change=
       direct_update_row_in_progress ? direct_update_key_may_change : NULL;
   const bool preserve_index_entries=
-      !volatile_rows && mylite_update_preserves_all_index_entries(
-                            table, old_data, new_data, key_may_change);
+      !volatile_rows && (direct_update_row_in_progress
+                             ? !direct_update_may_change_index_entries
+                             : mylite_update_preserves_all_index_entries(
+                                   table, old_data, new_data, key_may_change));
   if (!preserve_index_entries)
   {
     error= mylite_prepare_checked_index_entries_with_scratch(
