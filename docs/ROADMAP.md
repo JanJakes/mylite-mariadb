@@ -330,6 +330,10 @@ Ordinary MyLite single-table base-table UPDATE prepare now elides the
 multi-table `multi_update` result helper when `update_single_table()` owns
 execution and statement-effect reporting, while broader update shapes keep the
 existing helper.
+Accepted MyLite direct updates now compute MariaDB row-comparison readiness
+once during handler direct-update initialization and reuse that decision during
+row mutation, matching the normal update loop's per-statement readiness cache
+while preserving unchanged-row affected-count behavior.
 Ordinary MyLite `SELECT` execution now applies the same explain-detail gate to
 table-access plan fields while keeping MariaDB's runtime trackers initialized,
 and explicit routed `EXPLAIN SELECT` stays on the full plan-detail path.

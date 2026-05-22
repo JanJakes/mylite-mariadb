@@ -1337,9 +1337,9 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
       direct_update_key_field(NULL), index_cursor_filtered(false),
       discard_rows(false), volatile_rows(false), table_has_blob_fields(false),
       table_supports_row_write(false), table_supports_row_lifecycle(false),
-      direct_update_condition(NULL), direct_update_fields(NULL),
-      direct_update_values(NULL), direct_update_key_value(NULL),
-      direct_update_key_number(MAX_KEY),
+      direct_update_can_compare_record(false), direct_update_condition(NULL),
+      direct_update_fields(NULL), direct_update_values(NULL),
+      direct_update_key_value(NULL), direct_update_key_number(MAX_KEY),
       direct_update_key_field_number(MAX_KEY), direct_update_key_null(0)
 {
   storage_schema_name[0]= '\0';
@@ -1430,6 +1430,7 @@ void ha_mylite::clear_direct_update_state()
   direct_update_values= NULL;
   direct_update_key_value= NULL;
   direct_update_key_number= MAX_KEY;
+  direct_update_can_compare_record= false;
 }
 
 void ha_mylite::clear_foreign_key_presence_cache() const
@@ -1541,6 +1542,7 @@ const COND *ha_mylite::cond_push(const COND *cond)
   direct_update_condition= NULL;
   direct_update_key_value= NULL;
   direct_update_key_number= MAX_KEY;
+  direct_update_can_compare_record= false;
   if (!cond)
     DBUG_RETURN(cond);
 
@@ -1561,6 +1563,7 @@ void ha_mylite::cond_pop()
   direct_update_condition= NULL;
   direct_update_key_value= NULL;
   direct_update_key_number= MAX_KEY;
+  direct_update_can_compare_record= false;
 }
 
 int ha_mylite::info_push(uint info_type, void *info)
@@ -1572,6 +1575,7 @@ int ha_mylite::info_push(uint info_type, void *info)
     direct_update_condition= NULL;
     direct_update_key_value= NULL;
     direct_update_key_number= MAX_KEY;
+    direct_update_can_compare_record= false;
 
     mylite_update_exact_key_info *key_info=
         static_cast<mylite_update_exact_key_info *>(info);
@@ -1589,9 +1593,11 @@ int ha_mylite::info_push(uint info_type, void *info)
     break;
   }
   case INFO_KIND_UPDATE_FIELDS:
+    direct_update_can_compare_record= false;
     direct_update_fields= static_cast<List<Item> *>(info);
     break;
   case INFO_KIND_UPDATE_VALUES:
+    direct_update_can_compare_record= false;
     direct_update_values= static_cast<List<Item> *>(info);
     break;
   default:
@@ -1641,6 +1647,8 @@ int ha_mylite::direct_update_rows_init(List<Item> *update_fields)
       (table->pos_in_table_list->is_view_or_derived() ||
        table->pos_in_table_list->belong_to_view))
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+
+  direct_update_can_compare_record= records_are_comparable(table);
 
   DBUG_RETURN(0);
 }
@@ -1693,7 +1701,7 @@ int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
   }
 
   const bool need_update=
-      !records_are_comparable(table) || compare_record(table);
+      !direct_update_can_compare_record || compare_record(table);
   if (!need_update)
   {
     table->auto_increment_field_not_null= FALSE;

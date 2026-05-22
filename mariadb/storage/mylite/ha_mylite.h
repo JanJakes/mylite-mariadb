@@ -92,6 +92,7 @@ class ha_mylite: public handler
   bool table_has_blob_fields;
   bool table_supports_row_write;
   bool table_supports_row_lifecycle;
+  bool direct_update_can_compare_record;
   COND *direct_update_condition;
   List<Item> *direct_update_fields;
   List<Item> *direct_update_values;
