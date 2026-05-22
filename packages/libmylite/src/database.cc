@@ -2669,6 +2669,7 @@ void release_runtime(void) {
     }
 
 #if MYLITE_WITH_MARIADB_EMBEDDED
+    mysql_thread_end();
     mysql_server_end();
 #endif
     remove_directory_if_present(g_runtime.cleanup_directory);

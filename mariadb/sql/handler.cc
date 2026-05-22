@@ -858,6 +858,10 @@ int ha_init()
   DBUG_RETURN(error);
 }
 
+#ifdef EMBEDDED_LIBRARY
+static void reset_embedded_handler_state();
+#endif
+
 int ha_end()
 {
   int error= 0;
@@ -871,8 +875,32 @@ int ha_end()
   if (unlikely(ha_finish_errors()))
     error= 1;
 
+#ifdef EMBEDDED_LIBRARY
+  reset_embedded_handler_state();
+#endif
+
   DBUG_RETURN(error);
 }
+
+#ifdef EMBEDDED_LIBRARY
+static void reset_embedded_handler_state()
+{
+  /*
+    Normal server shutdown exits the process. Embedded shutdown can be followed
+    by mysql_server_init() in the same process, so reset handler state that is
+    rebuilt by plugin_init(), ha_signal_ddl_recovery_done(), and ha_init().
+  */
+  bzero(hton2plugin, sizeof(hton2plugin));
+  bzero(installed_htons, sizeof(installed_htons));
+  total_ha= 0;
+  total_ha_2pc= 0;
+#ifdef DBUG_ASSERT_EXISTS
+  failed_ha_2pc= 0;
+#endif
+  savepoint_alloc_size= 0;
+  ddl_recovery_done= false;
+}
+#endif
 
 
 /*
