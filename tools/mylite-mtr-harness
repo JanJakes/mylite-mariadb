@@ -129,6 +129,7 @@ default_tests=(
   main.ps_max_subselect-5113
   main.information_schema_prepare
   main.sp-no-code
+  main.sp_missing_4665
   main.signal
   main.signal_demo1
   main.signal_demo3
