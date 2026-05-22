@@ -2612,18 +2612,36 @@ int ha_mylite::read_exact_unique_index_row_into(
   Mylite_filename_identity_scope filename_scope(primary_file);
   Mylite_table_name_identity_scope table_name_scope(schema_name, table_name);
 
-  Mylite_read_statement_scope read_scope(
-      primary_file,
-      !mylite_thd_has_active_storage_checkpoint(ha_thd(), primary_file));
-  if (read_scope.error())
-    DBUG_RETURN(read_scope.error());
-
   clear_index_cursor();
   ulonglong row_id= 0ULL;
   size_t row_payload_size= 0;
-  mylite_storage_result storage_result= mylite_storage_find_indexed_row_into(
-      primary_file, schema_name, table_name, index_number, key_filter,
-      key_filter_length, &row_id, buf, table->s->reclength, &row_payload_size);
+  mylite_storage_statement *active_statement=
+      mylite_storage_borrow_active_statement(primary_file);
+  Mylite_trx_context *trx_ctx= mylite_trx_context(ha_thd(), false);
+  if (!active_statement)
+    active_statement= trx_ctx && trx_ctx->statement     ? trx_ctx->statement
+                      : trx_ctx && trx_ctx->transaction ? trx_ctx->transaction
+                                                        : NULL;
+  mylite_storage_result storage_result= MYLITE_STORAGE_OK;
+  if (active_statement)
+  {
+    storage_result= mylite_storage_find_indexed_row_in_statement_into(
+        active_statement, schema_name, table_name, index_number, key_filter,
+        key_filter_length, &row_id, buf, table->s->reclength,
+        &row_payload_size);
+  }
+  else
+  {
+    Mylite_read_statement_scope read_scope(
+        primary_file,
+        !mylite_thd_has_active_storage_checkpoint(ha_thd(), primary_file));
+    if (read_scope.error())
+      DBUG_RETURN(read_scope.error());
+    storage_result= mylite_storage_find_indexed_row_into(
+        primary_file, schema_name, table_name, index_number, key_filter,
+        key_filter_length, &row_id, buf, table->s->reclength,
+        &row_payload_size);
+  }
   *out_applied= true;
   if (storage_result == MYLITE_STORAGE_NOTFOUND)
   {

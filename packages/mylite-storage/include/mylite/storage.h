@@ -493,6 +493,18 @@ mylite_storage_result mylite_storage_find_indexed_row_into(
     size_t out_row_capacity,
     size_t *out_row_size
 );
+mylite_storage_result mylite_storage_find_indexed_row_in_statement_into(
+    mylite_storage_statement *statement,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id,
+    unsigned char *out_row,
+    size_t out_row_capacity,
+    size_t *out_row_size
+);
 mylite_storage_result mylite_storage_read_exact_index_entries(
     const char *filename,
     const char *schema_name,
@@ -568,6 +580,7 @@ mylite_storage_result mylite_storage_begin_read_statement(
 int mylite_storage_statement_active(const char *filename);
 int mylite_storage_context_has_active_statement(void);
 int mylite_storage_context_has_active_read_statement(const char *filename);
+mylite_storage_statement *mylite_storage_borrow_active_statement(const char *filename);
 mylite_storage_result mylite_storage_preserve_auto_increment_on_rollback(
     const char *filename
 );

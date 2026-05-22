@@ -3301,6 +3301,21 @@ static mylite_storage_result find_indexed_row_payload(
     size_t out_row_capacity,
     size_t *out_row_size
 );
+static mylite_storage_result find_indexed_row_payload_in_scope(
+    mylite_storage_file_scope *file_scope,
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id,
+    unsigned char **out_row,
+    size_t *inout_row_capacity,
+    unsigned char *out_row_buffer,
+    size_t out_row_capacity,
+    size_t *out_row_size
+);
 static mylite_storage_result append_row_id_to_list(
     mylite_storage_row_id_list *list,
     unsigned long long row_id
@@ -8077,6 +8092,47 @@ mylite_storage_result mylite_storage_find_indexed_row_into(
     );
 }
 
+mylite_storage_result mylite_storage_find_indexed_row_in_statement_into(
+    mylite_storage_statement *statement,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id,
+    unsigned char *out_row,
+    size_t out_row_capacity,
+    size_t *out_row_size
+) {
+    if (statement == NULL || statement->file == NULL || statement->filename == NULL ||
+        statement->filename[0] == '\0' || schema_name == NULL || schema_name[0] == '\0' ||
+        table_name == NULL || table_name[0] == '\0' || key == NULL || key_size == 0U ||
+        out_row_id == NULL || out_row == NULL || out_row_size == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    *out_row_id = 0ULL;
+    *out_row_size = 0U;
+    mylite_storage_file_scope file_scope = {0};
+    file_scope.file = statement->file;
+    file_scope.active_statement = statement;
+    return find_indexed_row_payload_in_scope(
+        &file_scope,
+        statement->filename,
+        schema_name,
+        table_name,
+        index_number,
+        key,
+        key_size,
+        out_row_id,
+        NULL,
+        NULL,
+        out_row,
+        out_row_capacity,
+        out_row_size
+    );
+}
+
 static mylite_storage_result find_indexed_row_payload(
     const char *filename,
     const char *schema_name,
@@ -8102,19 +8158,59 @@ static mylite_storage_result find_indexed_row_payload(
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
-    FILE *file = file_scope.file;
+    result = find_indexed_row_payload_in_scope(
+        &file_scope,
+        filename,
+        schema_name,
+        table_name,
+        index_number,
+        key,
+        key_size,
+        out_row_id,
+        out_row,
+        inout_row_capacity,
+        out_row_buffer,
+        out_row_capacity,
+        out_row_size
+    );
+    if (close_existing_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    return result;
+}
+
+static mylite_storage_result find_indexed_row_payload_in_scope(
+    mylite_storage_file_scope *file_scope,
+    const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id,
+    unsigned char **out_row,
+    size_t *inout_row_capacity,
+    unsigned char *out_row_buffer,
+    size_t out_row_capacity,
+    size_t *out_row_size
+) {
+    if (file_scope == NULL || file_scope->file == NULL) {
+        return MYLITE_STORAGE_MISUSE;
+    }
+    FILE *file = file_scope->file;
 
     mylite_storage_header header = {0};
     mylite_storage_catalog_image catalog = {0};
     const mylite_storage_catalog_image *catalog_view = NULL;
     mylite_storage_catalog_entry table_entry = {0};
     mylite_storage_statement *active_cache_statement =
-        active_cache_statement_from_statement(file_scope.active_statement);
+        active_cache_statement_from_statement(file_scope->active_statement);
     if (active_cache_statement == NULL) {
         active_cache_statement =
-            active_cache_statement_from_statement(file_scope.active_read_statement);
+            active_cache_statement_from_statement(file_scope->active_read_statement);
     }
-    result = read_header_from_file_scope(&file_scope, &header);
+    mylite_storage_result result = read_header_from_file_scope(file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
         const int used_cached_table_entry = find_active_table_entry_cache_in_statement(
             active_cache_statement,
@@ -8145,7 +8241,7 @@ static mylite_storage_result find_indexed_row_payload(
             filename,
             &header,
             active_cache_statement,
-            file_scope.active_statement,
+            file_scope->active_statement,
             catalog_view,
             &table_entry,
             schema_name,
@@ -8184,16 +8280,12 @@ static mylite_storage_result find_indexed_row_payload(
         }
         if (result == MYLITE_STORAGE_OK && !active_payload_cached) {
             (void)mark_active_validated_live_row_in_statement(
-                file_scope.active_statement,
+                file_scope->active_statement,
                 &header,
                 table_entry.table_id,
                 *out_row_id
             );
         }
-    }
-    if (close_existing_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
-        result == MYLITE_STORAGE_OK) {
-        result = MYLITE_STORAGE_IOERR;
     }
     free_catalog_image(&catalog);
     if (result != MYLITE_STORAGE_OK) {
@@ -8899,6 +8991,10 @@ mylite_storage_result mylite_storage_begin_read_statement(
 
 int mylite_storage_statement_active(const char *filename) {
     return active_statement_for(filename) != NULL ? 1 : 0;
+}
+
+mylite_storage_statement *mylite_storage_borrow_active_statement(const char *filename) {
+    return active_statement_for(filename);
 }
 
 int mylite_storage_context_has_active_statement(void) {
