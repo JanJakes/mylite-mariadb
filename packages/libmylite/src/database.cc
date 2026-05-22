@@ -6,6 +6,7 @@
 #include <chrono>
 #include <climits>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -66,6 +67,7 @@ constexpr const char *k_not_an_error = "not an error";
 constexpr const char *k_bad_db_handle = "bad database handle";
 #if MYLITE_WITH_MARIADB_EMBEDDED
 constexpr unsigned long k_initial_column_buffer_size = 256;
+constexpr std::size_t k_prepared_one_row_result_cache_entry_limit = 4096;
 #endif
 
 enum class BoundValueKind : unsigned char {
@@ -193,6 +195,18 @@ struct ColumnValue {
     my_bool mysql_is_null = true;
     my_bool mysql_error = 0;
     bool bytes_complete = false;
+};
+
+struct PreparedOneRowResultCacheKey {
+    BoundValueKind kind = BoundValueKind::Null;
+    long long int64_value = 0;
+    unsigned long long uint64_value = 0;
+};
+
+struct PreparedOneRowResultCacheEntry {
+    bool occupied = false;
+    PreparedOneRowResultCacheKey key;
+    std::vector<ColumnValue> values;
 };
 
 struct SchemaDefinition {
@@ -326,6 +340,8 @@ struct mylite_stmt {
     std::vector<MYSQL_BIND> parameter_binds;
     std::vector<MYSQL_BIND> result_binds;
     std::vector<ColumnValue> values;
+    std::vector<PreparedOneRowResultCacheEntry> one_row_result_cache;
+    std::vector<ColumnValue> one_row_result_cache_pending_values;
 #endif
     std::vector<BoundValue> parameters;
     bool executed = false;
@@ -343,12 +359,18 @@ struct mylite_stmt {
     bool uses_simple_result_execution = false;
 #if MYLITE_WITH_MARIADB_EMBEDDED && MYLITE_MARIADB_HAS_MYLITE_SE
     mylite_storage_statement *prepared_read_statement = nullptr;
+    PreparedOneRowResultCacheKey one_row_result_cache_pending_key;
     std::string temporary_table_to_remember;
     std::vector<std::string> temporary_tables_to_forget;
     unsigned long long storage_metadata_epoch = 0;
     bool transaction_statement_checkpoint_plan_valid = false;
     bool transaction_statement_needs_storage_checkpoint = true;
     bool transaction_statement_needs_volatile_snapshot = true;
+    bool uses_one_row_result_cache = false;
+    bool one_row_result_cache_hit_active = false;
+    bool one_row_result_cache_execution_had_row = false;
+    bool one_row_result_cache_execution_multi_row = false;
+    bool one_row_result_cache_pending = false;
 #endif
     bool sync_schema_catalog_after_execute = false;
     bool writes_storage = false;
@@ -503,6 +525,35 @@ int close_prepared_read_scope_before_write(mylite_db &database);
 bool prepared_read_scope_result_is_active(const mylite_stmt &statement);
 bool prepared_statement_can_reuse_read_scope(const mylite_stmt &statement);
 bool prepared_statement_has_table_result_column(const mylite_stmt &statement);
+int execute_cached_one_row_result(mylite_stmt &statement, bool *out_used_cache);
+void begin_one_row_result_cache_execution(mylite_stmt &statement);
+void capture_one_row_result_cache_row(mylite_stmt &statement);
+void store_one_row_result_cache_entry(mylite_stmt &statement);
+void clear_one_row_result_cache(mylite_stmt &statement);
+void clear_one_row_result_cache_execution(mylite_stmt &statement);
+bool prepared_statement_can_cache_one_row_results(const mylite_stmt &statement);
+bool one_row_result_cache_key_from_statement(
+    const mylite_stmt &statement,
+    PreparedOneRowResultCacheKey *out_key
+);
+const PreparedOneRowResultCacheEntry *find_one_row_result_cache_entry(
+    const mylite_stmt &statement,
+    const PreparedOneRowResultCacheKey &key
+);
+void put_one_row_result_cache_entry(
+    mylite_stmt &statement,
+    const PreparedOneRowResultCacheKey &key
+);
+std::size_t one_row_result_cache_slot(const PreparedOneRowResultCacheKey &key);
+bool one_row_result_cache_keys_equal(
+    const PreparedOneRowResultCacheKey &left,
+    const PreparedOneRowResultCacheKey &right
+);
+bool one_row_result_cache_values_complete(const mylite_stmt &statement);
+bool simple_single_parameter_select_sql(std::string_view sql);
+bool pop_simple_select_identifier_reference(std::string_view &sql);
+bool consume_sql_keyword(std::string_view &sql, const char *keyword);
+bool consume_sql_byte(std::string_view &sql, char expected);
 void apply_successful_storage_metadata_lifecycle(mylite_db &database, std::string_view sql);
 bool remember_created_table_engine(mylite_db &database, std::string_view sql);
 void remember_table_engine(
@@ -919,7 +970,14 @@ int mylite_reset(mylite_stmt *statement) {
 #if MYLITE_WITH_MARIADB_EMBEDDED
     if (statement->statement != nullptr && statement->executed) {
         bool abandoned_active_result = false;
-        if (statement->result_active) {
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        if (statement->one_row_result_cache_hit_active) {
+            statement->one_row_result_cache_hit_active = false;
+            statement->result_active = false;
+            abandoned_active_result = true;
+        } else
+#  endif
+            if (statement->result_active) {
             if (mysql_stmt_free_result(statement->statement) != 0) {
                 set_mariadb_statement_error(*statement);
                 return MYLITE_ERROR;
@@ -947,6 +1005,9 @@ int mylite_reset(mylite_stmt *statement) {
     statement->executed = false;
     statement->done = false;
     statement->has_current_row = false;
+#if MYLITE_WITH_MARIADB_EMBEDDED && MYLITE_MARIADB_HAS_MYLITE_SE
+    clear_one_row_result_cache_execution(*statement);
+#endif
     if (statement->database != nullptr) {
         set_ok_if_needed(*statement->database);
     }
@@ -962,11 +1023,18 @@ int mylite_finalize(mylite_stmt *statement) {
     int result = MYLITE_OK;
 #if MYLITE_WITH_MARIADB_EMBEDDED
     if (statement->statement != nullptr) {
-        if (statement->result_active) {
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        const bool cache_hit_result_active = statement->one_row_result_cache_hit_active;
+#  else
+        const bool cache_hit_result_active = false;
+#  endif
+        if (statement->result_active && !cache_hit_result_active) {
             mysql_stmt_free_result(statement->statement);
             statement->result_active = false;
         }
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
+        statement->one_row_result_cache_hit_active = false;
+        statement->result_active = false;
         const int read_scope_result = close_prepared_read_scope(*statement);
         if (read_scope_result != MYLITE_OK) {
             result = read_scope_result;
@@ -1987,6 +2055,10 @@ int prepare_impl(
             !statement->sync_schema_catalog_after_execute && !statement->writes_storage &&
             !statement->uses_storage_outer_checkpoint && !statement->uses_statement_checkpoint &&
             !statement->uses_transaction_statement_checkpoint;
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        statement->uses_one_row_result_cache =
+            prepared_statement_can_cache_one_row_results(*statement);
+#  endif
 
         ++database->active_statements;
         if (tail != nullptr) {
@@ -2292,6 +2364,14 @@ int execute_statement(mylite_stmt &statement) {
 }
 
 int execute_simple_result_statement(mylite_stmt &statement) {
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+    bool used_cache = false;
+    const int cache_result = execute_cached_one_row_result(statement, &used_cache);
+    if (used_cache || cache_result != MYLITE_OK) {
+        return cache_result;
+    }
+#  endif
+
     const int bind_result = bind_statement_parameters(statement);
     if (bind_result != MYLITE_OK) {
         return bind_result;
@@ -2302,12 +2382,14 @@ int execute_simple_result_statement(mylite_stmt &statement) {
     if (read_scope_result != MYLITE_OK) {
         return read_scope_result;
     }
+    begin_one_row_result_cache_execution(statement);
 #  endif
 
     if (mysql_stmt_execute(statement.statement) != 0) {
         const unsigned warning_count = mysql_warning_count(&statement.database->mysql);
         set_mariadb_statement_error(statement);
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
+        clear_one_row_result_cache_execution(statement);
         const int close_result = close_prepared_read_scope(statement);
         if (close_result != MYLITE_OK) {
             return close_result;
@@ -2326,6 +2408,7 @@ int execute_simple_result_statement(mylite_stmt &statement) {
     const int result_bind_result = bind_statement_results(statement);
     if (result_bind_result != MYLITE_OK) {
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
+        clear_one_row_result_cache_execution(statement);
         const int close_result = close_prepared_read_scope(statement);
         if (close_result != MYLITE_OK) {
             return close_result;
@@ -2378,12 +2461,14 @@ int begin_prepared_read_scope(mylite_stmt &statement) {
 
 int close_prepared_read_scope(mylite_stmt &statement) {
     if (statement.prepared_read_statement == nullptr) {
+        clear_one_row_result_cache(statement);
         return MYLITE_OK;
     }
 
     mylite_db &database = *statement.database;
     mylite_storage_statement *read_statement = statement.prepared_read_statement;
     statement.prepared_read_statement = nullptr;
+    clear_one_row_result_cache(statement);
     if (database.prepared_read_statement_owner == &statement) {
         database.prepared_read_statement_owner = nullptr;
     }
@@ -2434,6 +2519,277 @@ bool prepared_statement_has_table_result_column(const mylite_stmt &statement) {
         }
     }
     return false;
+}
+
+int execute_cached_one_row_result(mylite_stmt &statement, bool *out_used_cache) {
+    *out_used_cache = false;
+    if (!statement.uses_one_row_result_cache || statement.prepared_read_statement == nullptr) {
+        return MYLITE_OK;
+    }
+
+    PreparedOneRowResultCacheKey key;
+    if (!one_row_result_cache_key_from_statement(statement, &key)) {
+        return MYLITE_OK;
+    }
+
+    const PreparedOneRowResultCacheEntry *entry = find_one_row_result_cache_entry(statement, key);
+    if (entry == nullptr) {
+        return MYLITE_OK;
+    }
+
+    try {
+        statement.values = entry->values;
+    } catch (const std::bad_alloc &) {
+        clear_one_row_result_cache(statement);
+        set_error(*statement.database, MYLITE_NOMEM, "prepared result cache allocation failed");
+        return MYLITE_NOMEM;
+    }
+
+    statement.executed = true;
+    statement.done = false;
+    statement.has_current_row = true;
+    statement.result_active = true;
+    statement.one_row_result_cache_hit_active = true;
+    statement.database->changes = 0;
+    statement.database->last_insert_id = 0;
+    clear_warnings_if_needed(*statement.database);
+    *out_used_cache = true;
+    return MYLITE_ROW;
+}
+
+void begin_one_row_result_cache_execution(mylite_stmt &statement) {
+    clear_one_row_result_cache_execution(statement);
+    if (!statement.uses_one_row_result_cache) {
+        return;
+    }
+    (void)one_row_result_cache_key_from_statement(
+        statement,
+        &statement.one_row_result_cache_pending_key
+    );
+}
+
+void capture_one_row_result_cache_row(mylite_stmt &statement) {
+    if (!statement.uses_one_row_result_cache ||
+        statement.one_row_result_cache_execution_multi_row) {
+        return;
+    }
+    if (statement.one_row_result_cache_execution_had_row) {
+        statement.one_row_result_cache_execution_multi_row = true;
+        statement.one_row_result_cache_pending = false;
+        statement.one_row_result_cache_pending_values.clear();
+        return;
+    }
+    if (!one_row_result_cache_key_from_statement(
+            statement,
+            &statement.one_row_result_cache_pending_key
+        ) ||
+        !one_row_result_cache_values_complete(statement)) {
+        return;
+    }
+
+    try {
+        statement.one_row_result_cache_pending_values = statement.values;
+        statement.one_row_result_cache_pending = true;
+        statement.one_row_result_cache_execution_had_row = true;
+    } catch (const std::bad_alloc &) {
+        statement.one_row_result_cache_pending = false;
+        statement.one_row_result_cache_pending_values.clear();
+    }
+}
+
+void store_one_row_result_cache_entry(mylite_stmt &statement) {
+    if (!statement.one_row_result_cache_pending ||
+        statement.one_row_result_cache_execution_multi_row) {
+        clear_one_row_result_cache_execution(statement);
+        return;
+    }
+
+    put_one_row_result_cache_entry(statement, statement.one_row_result_cache_pending_key);
+    clear_one_row_result_cache_execution(statement);
+}
+
+void clear_one_row_result_cache(mylite_stmt &statement) {
+    statement.one_row_result_cache.clear();
+    clear_one_row_result_cache_execution(statement);
+}
+
+void clear_one_row_result_cache_execution(mylite_stmt &statement) {
+    statement.one_row_result_cache_hit_active = false;
+    statement.one_row_result_cache_execution_had_row = false;
+    statement.one_row_result_cache_execution_multi_row = false;
+    statement.one_row_result_cache_pending = false;
+    statement.one_row_result_cache_pending_values.clear();
+}
+
+bool prepared_statement_can_cache_one_row_results(const mylite_stmt &statement) {
+    if (!statement.uses_simple_result_execution || statement.parameters.size() != 1U ||
+        statement.columns.empty() || !simple_single_parameter_select_sql(statement.sql)) {
+        return false;
+    }
+    for (const ColumnInfo &column : statement.columns) {
+        if (column.table_name.empty() && column.origin_table_name.empty()) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool one_row_result_cache_key_from_statement(
+    const mylite_stmt &statement,
+    PreparedOneRowResultCacheKey *out_key
+) {
+    if (statement.parameters.size() != 1U) {
+        return false;
+    }
+    const BoundValue &parameter = statement.parameters.front();
+    switch (parameter.kind) {
+    case BoundValueKind::Int64:
+        *out_key = PreparedOneRowResultCacheKey{
+            BoundValueKind::Int64,
+            parameter.int64_value,
+            0ULL,
+        };
+        return true;
+    case BoundValueKind::UInt64:
+        *out_key = PreparedOneRowResultCacheKey{
+            BoundValueKind::UInt64,
+            0,
+            parameter.uint64_value,
+        };
+        return true;
+    case BoundValueKind::Null:
+    case BoundValueKind::Double:
+    case BoundValueKind::Text:
+    case BoundValueKind::Blob:
+        return false;
+    }
+    return false;
+}
+
+const PreparedOneRowResultCacheEntry *find_one_row_result_cache_entry(
+    const mylite_stmt &statement,
+    const PreparedOneRowResultCacheKey &key
+) {
+    if (statement.one_row_result_cache.empty()) {
+        return nullptr;
+    }
+    const PreparedOneRowResultCacheEntry &entry =
+        statement.one_row_result_cache[one_row_result_cache_slot(key)];
+    return entry.occupied && one_row_result_cache_keys_equal(entry.key, key) ? &entry : nullptr;
+}
+
+void put_one_row_result_cache_entry(
+    mylite_stmt &statement,
+    const PreparedOneRowResultCacheKey &key
+) {
+    try {
+        if (statement.one_row_result_cache.empty()) {
+            statement.one_row_result_cache.resize(k_prepared_one_row_result_cache_entry_limit);
+        }
+
+        PreparedOneRowResultCacheEntry &entry =
+            statement.one_row_result_cache[one_row_result_cache_slot(key)];
+        entry.key = key;
+        entry.values = statement.one_row_result_cache_pending_values;
+        entry.occupied = true;
+    } catch (const std::bad_alloc &) {
+        clear_one_row_result_cache(statement);
+    }
+}
+
+std::size_t one_row_result_cache_slot(const PreparedOneRowResultCacheKey &key) {
+    std::uint64_t value = key.kind == BoundValueKind::Int64
+                              ? static_cast<std::uint64_t>(key.int64_value)
+                              : key.uint64_value;
+    value ^= value >> 33U;
+    value *= 0xff51afd7ed558ccdULL;
+    value ^= value >> 33U;
+    return static_cast<std::size_t>(value) & (k_prepared_one_row_result_cache_entry_limit - 1U);
+}
+
+bool one_row_result_cache_keys_equal(
+    const PreparedOneRowResultCacheKey &left,
+    const PreparedOneRowResultCacheKey &right
+) {
+    if (left.kind != right.kind) {
+        return false;
+    }
+    return left.kind == BoundValueKind::Int64 ? left.int64_value == right.int64_value
+                                              : left.uint64_value == right.uint64_value;
+}
+
+bool one_row_result_cache_values_complete(const mylite_stmt &statement) {
+    for (const ColumnValue &value : statement.values) {
+        if (!value.bytes_complete) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool simple_single_parameter_select_sql(std::string_view sql) {
+    if (!consume_sql_keyword(sql, "SELECT")) {
+        return false;
+    }
+    if (!pop_simple_select_identifier_reference(sql)) {
+        return false;
+    }
+    for (;;) {
+        std::string_view next = skip_sql_leading_noise(sql);
+        if (next.empty() || next.front() != ',') {
+            break;
+        }
+        next.remove_prefix(1);
+        sql = next;
+        if (!pop_simple_select_identifier_reference(sql)) {
+            return false;
+        }
+    }
+    if (!consume_sql_keyword(sql, "FROM") || !pop_simple_select_identifier_reference(sql) ||
+        !consume_sql_keyword(sql, "WHERE") || !pop_simple_select_identifier_reference(sql) ||
+        !consume_sql_byte(sql, '=') || !consume_sql_byte(sql, '?')) {
+        return false;
+    }
+    return sql_rest_is_statement_end(sql);
+}
+
+bool pop_simple_select_identifier_reference(std::string_view &sql) {
+    std::string_view token;
+    if (!pop_sql_identifier_token(sql, token)) {
+        return false;
+    }
+
+    std::string_view after_identifier = sql;
+    if (!consume_sql_reference_dot(after_identifier)) {
+        return true;
+    }
+    if (!pop_sql_identifier_token(after_identifier, token)) {
+        return false;
+    }
+    if (consume_sql_reference_dot(after_identifier)) {
+        return false;
+    }
+    sql = after_identifier;
+    return true;
+}
+
+bool consume_sql_keyword(std::string_view &sql, const char *keyword) {
+    std::string_view candidate = skip_sql_leading_noise(sql);
+    const std::string_view token = pop_sql_token(candidate);
+    if (!sql_token_equals(token, keyword)) {
+        return false;
+    }
+    sql = candidate;
+    return true;
+}
+
+bool consume_sql_byte(std::string_view &sql, char expected) {
+    sql = skip_sql_leading_noise(sql);
+    if (sql.empty() || sql.front() != expected) {
+        return false;
+    }
+    sql.remove_prefix(1);
+    return true;
 }
 #  endif
 
@@ -3410,6 +3766,16 @@ int finish_volatile_snapshot(
 
 int fetch_statement_row(mylite_stmt &statement) {
     clear_current_row_for_reuse(statement);
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+    if (statement.one_row_result_cache_hit_active) {
+        statement.one_row_result_cache_hit_active = false;
+        statement.done = true;
+        statement.result_active = false;
+        clear_warnings_if_needed(*statement.database);
+        return MYLITE_DONE;
+    }
+#  endif
+
     const int fetch_result = mysql_stmt_fetch(statement.statement);
 
     if (fetch_result == MYSQL_NO_DATA) {
@@ -3419,6 +3785,7 @@ int fetch_statement_row(mylite_stmt &statement) {
         const int warning_result = capture_warnings(*statement.database, warning_count);
         if (warning_result != MYLITE_OK) {
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
+            clear_one_row_result_cache_execution(statement);
             const int close_result = close_prepared_read_scope(statement);
             if (close_result != MYLITE_OK) {
                 return close_result;
@@ -3426,11 +3793,15 @@ int fetch_statement_row(mylite_stmt &statement) {
 #  endif
             return warning_result;
         }
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        store_one_row_result_cache_entry(statement);
+#  endif
         return MYLITE_DONE;
     }
     if (fetch_result != 0 && fetch_result != MYSQL_DATA_TRUNCATED) {
         set_mariadb_statement_error(statement);
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
+        clear_one_row_result_cache_execution(statement);
         const int close_result = close_prepared_read_scope(statement);
         if (close_result != MYLITE_OK) {
             return close_result;
@@ -3445,6 +3816,7 @@ int fetch_statement_row(mylite_stmt &statement) {
         if (value.mysql_error != 0 && !is_variable_column_type(column_type)) {
             set_error(*statement.database, MYLITE_ERROR, "numeric column truncated during fetch");
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
+            clear_one_row_result_cache_execution(statement);
             const int close_result = close_prepared_read_scope(statement);
             if (close_result != MYLITE_OK) {
                 return close_result;
@@ -3470,6 +3842,9 @@ int fetch_statement_row(mylite_stmt &statement) {
     }
 
     statement.has_current_row = true;
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+    capture_one_row_result_cache_row(statement);
+#  endif
     return MYLITE_ROW;
 }
 

@@ -16825,6 +16825,7 @@ static void test_prepared_routed_select_reads(void) {
     char *root = make_temp_root();
     char *filename = NULL;
     mylite_db *db = open_database(root, &filename);
+    mylite_stmt *cached_stmt = NULL;
 
     assert_exec_succeeds(db, "CREATE DATABASE prepared_reads");
     assert_exec_succeeds(db, "USE prepared_reads");
@@ -16881,6 +16882,36 @@ static void test_prepared_routed_select_reads(void) {
         1,
         "first"
     );
+    assert(
+        mylite_prepare(
+            db,
+            "SELECT slug FROM prepared_select_posts WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &cached_stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(cached_stmt != NULL);
+    assert(mylite_bind_int64(cached_stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(cached_stmt) == MYLITE_ROW);
+    assert(strcmp(mylite_column_text(cached_stmt, 0U), "first") == 0);
+    assert(mylite_step(cached_stmt) == MYLITE_DONE);
+    assert(mylite_reset(cached_stmt) == MYLITE_OK);
+    assert(mylite_bind_int64(cached_stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(cached_stmt) == MYLITE_ROW);
+    assert(strcmp(mylite_column_text(cached_stmt, 0U), "first") == 0);
+    assert(mylite_reset(cached_stmt) == MYLITE_OK);
+    assert(mylite_bind_int64(cached_stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(cached_stmt) == MYLITE_ROW);
+    assert(strcmp(mylite_column_text(cached_stmt, 0U), "first") == 0);
+    assert(mylite_step(cached_stmt) == MYLITE_DONE);
+    assert(mylite_reset(cached_stmt) == MYLITE_OK);
+    assert_exec_succeeds(db, "UPDATE prepared_select_posts SET slug = 'updated' WHERE id = 1");
+    assert(mylite_bind_int64(cached_stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(cached_stmt) == MYLITE_ROW);
+    assert(strcmp(mylite_column_text(cached_stmt, 0U), "updated") == 0);
+    assert(mylite_step(cached_stmt) == MYLITE_DONE);
+    assert(mylite_finalize(cached_stmt) == MYLITE_OK);
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");

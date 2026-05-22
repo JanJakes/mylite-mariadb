@@ -232,6 +232,10 @@ cost once one storage read statement is already open, while a storage
 read-statement phase measures begin/end overhead directly. A prepared
 primary-key component phase now splits the hot prepared loop into bind, row,
 done, and reset timings for targeted follow-up work.
+Simple one-parameter prepared point reads can now reuse a bounded one-row
+result cache while their retained read statement remains open; MariaDB still
+produces the first row, and writes close the read scope before cached rows can
+survive storage changes.
 Hot read-checkpoint cache hits now borrow the cached catalog image for scoped
 catalog views and defer catalog/header page copies until a caller needs page
 bytes, instead of deep-copying that state into every short-lived read statement.
