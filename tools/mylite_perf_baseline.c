@@ -24,6 +24,10 @@ typedef enum benchmark_phase {
     BENCHMARK_PHASE_STORAGE_PK_ROW_LOOKUPS,
     BENCHMARK_PHASE_STORAGE_PK_ROW_LOOKUPS_ONE_READ,
     BENCHMARK_PHASE_STORAGE_READ_STATEMENTS,
+    BENCHMARK_PHASE_DIRECT_SECONDARY_SELECTS,
+    BENCHMARK_PHASE_PREPARED_SECONDARY_SELECTS,
+    BENCHMARK_PHASE_DIRECT_LEAF_SECONDARY_SELECTS,
+    BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_SELECTS,
     BENCHMARK_PHASE_UPDATES,
     BENCHMARK_PHASE_DIRECT_UPDATES,
     BENCHMARK_PHASE_PREPARED_UPDATES,
@@ -306,6 +310,22 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         config->phase = BENCHMARK_PHASE_STORAGE_READ_STATEMENTS;
         return 0;
     }
+    if (strcmp(argument, "direct-secondary-selects") == 0) {
+        config->phase = BENCHMARK_PHASE_DIRECT_SECONDARY_SELECTS;
+        return 0;
+    }
+    if (strcmp(argument, "prepared-secondary-selects") == 0) {
+        config->phase = BENCHMARK_PHASE_PREPARED_SECONDARY_SELECTS;
+        return 0;
+    }
+    if (strcmp(argument, "direct-leaf-secondary-selects") == 0) {
+        config->phase = BENCHMARK_PHASE_DIRECT_LEAF_SECONDARY_SELECTS;
+        return 0;
+    }
+    if (strcmp(argument, "prepared-leaf-secondary-selects") == 0) {
+        config->phase = BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_SELECTS;
+        return 0;
+    }
     if (strcmp(argument, "updates") == 0) {
         config->phase = BENCHMARK_PHASE_UPDATES;
         return 0;
@@ -326,6 +346,8 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         "`prepared-pk-select-reset-after-row`, `storage-pk-entry-lookups`, "
         "`storage-pk-entry-lookups-one-read`, `storage-pk-row-lookups`, "
         "`storage-pk-row-lookups-one-read`, `storage-read-statements`, "
+        "`direct-secondary-selects`, `prepared-secondary-selects`, "
+        "`direct-leaf-secondary-selects`, `prepared-leaf-secondary-selects`, "
         "`updates`, `direct-updates`, or `prepared-updates`, got: %s\n",
         argument
     );
@@ -398,6 +420,14 @@ static const char *benchmark_phase_name(benchmark_phase phase) {
         return "storage-pk-row-lookups-one-read";
     case BENCHMARK_PHASE_STORAGE_READ_STATEMENTS:
         return "storage-read-statements";
+    case BENCHMARK_PHASE_DIRECT_SECONDARY_SELECTS:
+        return "direct-secondary-selects";
+    case BENCHMARK_PHASE_PREPARED_SECONDARY_SELECTS:
+        return "prepared-secondary-selects";
+    case BENCHMARK_PHASE_DIRECT_LEAF_SECONDARY_SELECTS:
+        return "direct-leaf-secondary-selects";
+    case BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_SELECTS:
+        return "prepared-leaf-secondary-selects";
     case BENCHMARK_PHASE_UPDATES:
         return "updates";
     case BENCHMARK_PHASE_DIRECT_UPDATES:
@@ -429,6 +459,11 @@ static int run_benchmark(const benchmark_config *config) {
         config->phase == BENCHMARK_PHASE_STORAGE_PK_ROW_LOOKUPS ||
         config->phase == BENCHMARK_PHASE_STORAGE_PK_ROW_LOOKUPS_ONE_READ ||
         config->phase == BENCHMARK_PHASE_STORAGE_READ_STATEMENTS;
+    const int secondary_select_phase =
+        config->phase == BENCHMARK_PHASE_DIRECT_SECONDARY_SELECTS ||
+        config->phase == BENCHMARK_PHASE_PREPARED_SECONDARY_SELECTS ||
+        config->phase == BENCHMARK_PHASE_DIRECT_LEAF_SECONDARY_SELECTS ||
+        config->phase == BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_SELECTS;
 
     ctx.root = make_temp_root();
     if (ctx.root == NULL) {
@@ -527,6 +562,32 @@ static int run_benchmark(const benchmark_config *config) {
         result = 0;
         goto cleanup;
     }
+    if (secondary_select_phase) {
+        if (config->phase == BENCHMARK_PHASE_DIRECT_SECONDARY_SELECTS &&
+            benchmark_secondary_selects(&ctx) != 0) {
+            goto cleanup;
+        }
+        if (config->phase == BENCHMARK_PHASE_PREPARED_SECONDARY_SELECTS &&
+            benchmark_prepared_secondary_selects(&ctx) != 0) {
+            goto cleanup;
+        }
+        if (config->phase == BENCHMARK_PHASE_DIRECT_LEAF_SECONDARY_SELECTS ||
+            config->phase == BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_SELECTS) {
+            if (publish_secondary_leaf_index(&ctx) != 0) {
+                goto cleanup;
+            }
+            if (config->phase == BENCHMARK_PHASE_DIRECT_LEAF_SECONDARY_SELECTS &&
+                benchmark_leaf_secondary_selects(&ctx) != 0) {
+                goto cleanup;
+            }
+            if (config->phase == BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_SELECTS &&
+                benchmark_prepared_leaf_secondary_selects(&ctx) != 0) {
+                goto cleanup;
+            }
+        }
+        result = 0;
+        goto cleanup;
+    }
     if (benchmark_prepared_insert_rows(&ctx) != 0) {
         goto cleanup;
     }
@@ -597,12 +658,15 @@ static void print_usage(const char *program) {
         stderr,
         "Usage: %s [--phase=all|prepared-scalar-selects|point-selects|direct-pk-selects|"
         "prepared-pk-selects|prepared-pk-select-reset-after-row|updates|direct-updates|"
-        "prepared-updates|storage-pk-entry-lookups|storage-pk-entry-lookups-one-read|"
-        "storage-pk-row-lookups|storage-pk-row-lookups-one-read|storage-read-statements] "
+        "prepared-updates|direct-secondary-selects|prepared-secondary-selects|"
+        "direct-leaf-secondary-selects|prepared-leaf-secondary-selects|"
+        "storage-pk-entry-lookups|storage-pk-entry-lookups-one-read|storage-pk-row-lookups|"
+        "storage-pk-row-lookups-one-read|storage-read-statements] "
         "[--max-us=<metric>:<value>] [rows] [iterations]\n"
         "\n"
         "Defaults: phase=all rows=100 iterations=100.\n"
-        "Focused scalar, point-select, and update phases skip unrelated timings after setup.\n"
+        "Focused scalar, point-select, secondary-select, and update phases skip unrelated "
+        "timings after setup.\n"
         "Thresholds are opt-in and may be supplied more than once. Metrics: "
         "open-setup, prepared-scalar-selects, direct-inserts, prepared-inserts, "
         "direct-pk-selects, prepared-pk-selects, prepared-pk-select-reset-after-row, "

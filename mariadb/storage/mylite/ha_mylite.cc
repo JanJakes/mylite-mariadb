@@ -1291,9 +1291,10 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
     : handler(hton, table_arg), share(NULL), scan_rows(NULL),
       scan_blob_payloads(NULL), scan_row_ids(NULL),
       record_blob_payloads{NULL, NULL}, index_keys(NULL), index_entries(NULL),
-      index_rows(NULL), index_row_scratch(NULL), index_inline_entry{0, 0, 0},
-      index_row_offsets(NULL), index_row_sizes(NULL),
-      index_row_scratch_capacity(0), index_inline_row_offset(0),
+      index_rows(NULL), index_row_scratch(NULL), index_row_id_scratch(NULL),
+      index_inline_entry{0, 0, 0}, index_row_offsets(NULL),
+      index_row_sizes(NULL), index_row_scratch_capacity(0),
+      index_row_id_scratch_capacity(0), index_inline_row_offset(0),
       index_inline_row_size(0), scan_row_size(0), scan_row_count(0),
       scan_row_index(0), scan_blob_payloads_size(0),
       record_blob_payloads_size{0, 0}, index_row_bytes(0), index_row_count(0),
@@ -1371,8 +1372,11 @@ void ha_mylite::clear_index_cursor()
 void ha_mylite::clear_index_row_scratch()
 {
   mylite_storage_free(index_row_scratch);
+  mylite_storage_free(index_row_id_scratch);
   index_row_scratch= NULL;
+  index_row_id_scratch= NULL;
   index_row_scratch_capacity= 0;
+  index_row_id_scratch_capacity= 0;
 }
 
 void ha_mylite::clear_record_blob_payloads()
@@ -1757,19 +1761,17 @@ int ha_mylite::materialize_index_cursor_rows(const char *primary_file)
   if (index_row_count > SIZE_MAX / sizeof(unsigned long long))
     DBUG_RETURN(HA_ERR_RECORD_FILE_FULL);
 
-  unsigned long long *row_ids= static_cast<unsigned long long *>(
-      malloc(index_row_count * sizeof(unsigned long long)));
-  if (!row_ids)
-    DBUG_RETURN(HA_ERR_OUT_OF_MEM);
+  int error= ensure_index_row_id_scratch(index_row_count);
+  if (error)
+    DBUG_RETURN(error);
 
   for (size_t i= 0; i < index_row_count; ++i)
-    row_ids[i]= index_entries[i].row_id;
+    index_row_id_scratch[i]= index_entries[i].row_id;
 
   mylite_storage_rowset rowset= {sizeof(rowset), NULL, 0, 0};
   mylite_storage_result storage_result= mylite_storage_read_indexed_rows(
-      primary_file, storage_schema(), storage_table(), row_ids,
+      primary_file, storage_schema(), storage_table(), index_row_id_scratch,
       index_row_count, &rowset);
-  free(row_ids);
   if (storage_result != MYLITE_STORAGE_OK)
     DBUG_RETURN(mylite_storage_to_handler_error(storage_result));
 
@@ -1797,6 +1799,24 @@ int ha_mylite::materialize_index_cursor_rows(const char *primary_file)
   rowset.row_offsets= NULL;
   rowset.row_sizes= NULL;
   mylite_storage_free_rowset(&rowset);
+  DBUG_RETURN(0);
+}
+
+int ha_mylite::ensure_index_row_id_scratch(size_t row_count)
+{
+  DBUG_ENTER("ha_mylite::ensure_index_row_id_scratch");
+  if (row_count <= index_row_id_scratch_capacity)
+    DBUG_RETURN(0);
+  if (row_count > SIZE_MAX / sizeof(*index_row_id_scratch))
+    DBUG_RETURN(HA_ERR_RECORD_FILE_FULL);
+
+  ulonglong *scratch= static_cast<ulonglong *>(realloc(
+      index_row_id_scratch, row_count * sizeof(*index_row_id_scratch)));
+  if (!scratch)
+    DBUG_RETURN(HA_ERR_OUT_OF_MEM);
+
+  index_row_id_scratch= scratch;
+  index_row_id_scratch_capacity= row_count;
   DBUG_RETURN(0);
 }
 

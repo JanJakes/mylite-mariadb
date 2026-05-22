@@ -54,11 +54,13 @@ class ha_mylite: public handler
   Mylite_index_cursor_entry *index_entries;
   unsigned char *index_rows;
   unsigned char *index_row_scratch;
+  ulonglong *index_row_id_scratch;
   unsigned char index_inline_key[MAX_KEY_LENGTH];
   Mylite_index_cursor_entry index_inline_entry;
   size_t *index_row_offsets;
   size_t *index_row_sizes;
   size_t index_row_scratch_capacity;
+  size_t index_row_id_scratch_capacity;
   size_t index_inline_row_offset;
   size_t index_inline_row_size;
   char storage_schema_name[NAME_LEN + 1];
@@ -99,6 +101,7 @@ class ha_mylite: public handler
   int build_index_cursor(uint index_number, const uchar *key_filter,
                          uint key_filter_length);
   int materialize_index_cursor_rows(const char *primary_file);
+  int ensure_index_row_id_scratch(size_t row_count);
   int read_index_cursor_row(uchar *buf, size_t row_index);
   int read_exact_unique_index_row_into(uint index_number,
                                        const uchar *key_filter,

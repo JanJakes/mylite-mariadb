@@ -158,7 +158,9 @@ changes, truncate, rollback, and cache-limit rotation keep broad file-level
 invalidation. Indexed row materialization resolves active and durable
 row-payload cache availability once per batch and reuses durable cache pointers
 while the cache-set generation is stable, avoiding per-row control-plane probes
-when secondary cursors return many row ids.
+when secondary cursors return many row ids. Handler cursor materialization also
+reuses a handler-owned row-id scratch buffer, avoiding per-cursor allocation
+when secondary exact reads repeatedly batch the same shape of row ids.
 
 The local storage performance baseline remains machine-dependent, but it now
 accepts opt-in `--max-us=<metric>:<value>` thresholds so a slice can record an
