@@ -70,9 +70,10 @@ integer, varchar, binary-string, binary/national character, date/timezone,
 parser/comment, comparison, DDL/comment metadata, DDL constraint/index
 metadata, selected lock-table DDL behavior, deprecated server syntax
 rejection, `ORDER BY`, optimizer-cost metadata, selected EXPLAIN plan output,
-SIGNAL/RESIGNAL diagnostics, row constructors, scalar
-operator, string/format, charset-conversion expressions, crypto/KDF, disabled
-DES, aggregate DISTINCT, autoincrement ODKU, strict HEAP autoincrement,
+SIGNAL/RESIGNAL diagnostics, row constructors, selected `LAST_VALUE()` and
+window-function behavior, scalar operator, string/format,
+charset-conversion expressions, crypto/KDF, disabled DES,
+aggregate DISTINCT, autoincrement ODKU, strict HEAP autoincrement,
 temporal scale, microsecond parsing, date-format, ASCII charset, selected
 Latin2, UTF-8 binary/general, and UTF-8 UCA 1400 charset, weight-string, and
 LIKE condition-propagation behavior, and multibyte charset recoding.

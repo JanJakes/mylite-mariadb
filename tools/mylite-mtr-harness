@@ -55,6 +55,21 @@ default_tests=(
   main.item_types
   main.round
   main.row
+  main.last_value
+  main.win_lead_lag
+  main.win_rank
+  main.win_sum
+  main.win_min_max
+  main.win_orderby
+  main.win_empty_over
+  main.win_avg
+  main.win_bit
+  main.win_nth_value
+  main.win_ntile
+  main.win_percent_cume
+  main.win_std
+  main.win_as_arg_to_aggregate_func
+  main.win_insert_select
   main.mdev316
   main.sql_safe_updates
   main.func_in

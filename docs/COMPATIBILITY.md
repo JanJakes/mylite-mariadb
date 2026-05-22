@@ -113,7 +113,8 @@ lock-table DDL behavior, selected deprecated server syntax rejection,
 selected `ORDER BY` optimizer
 and aggregate-ordering behavior, optimizer-cost metadata, selected EXPLAIN
 plan output, UNION, prepared-statement behavior, selected SIGNAL/RESIGNAL
-diagnostics and row-constructor behavior, selected scalar operator behavior, selected
+diagnostics and row-constructor behavior, selected `LAST_VALUE()` and
+window-function behavior, selected scalar operator behavior, selected
 bit/extraction/replacement/regexp scalar-function behavior, selected
 default-expression and weight-string behavior, selected string/format function
 behavior, selected charset-conversion expression behavior, selected crypto/KDF
