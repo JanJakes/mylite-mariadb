@@ -1726,13 +1726,15 @@ void skip_sql_spacing_and_comments(std::string_view sql, std::size_t &offset) {
 }
 
 bool enter_executable_sql_comment(std::string_view sql, std::size_t &offset) {
-    if (offset + 2U < sql.size() && sql[offset] == '/' && sql[offset + 1U] == '*' &&
-        sql[offset + 2U] == '!') {
-        offset += 3U;
-    } else if (
+    const bool is_mysql_comment = offset + 2U < sql.size() && sql[offset] == '/' &&
+                                  sql[offset + 1U] == '*' && sql[offset + 2U] == '!';
+    const bool is_mariadb_comment =
         offset + 3U < sql.size() && sql[offset] == '/' && sql[offset + 1U] == '*' &&
-        (sql[offset + 2U] == 'M' || sql[offset + 2U] == 'm') && sql[offset + 3U] == '!'
-    ) {
+        (sql[offset + 2U] == 'M' || sql[offset + 2U] == 'm') && sql[offset + 3U] == '!';
+
+    if (is_mysql_comment) {
+        offset += 3U;
+    } else if (is_mariadb_comment) {
         offset += 4U;
     } else {
         return false;

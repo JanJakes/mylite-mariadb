@@ -83,7 +83,7 @@ typedef enum mylite_warning_level {
 #define MYLITE_DURABILITY_NORMAL 1
 #define MYLITE_DURABILITY_FULL 2
 
-#define MYLITE_NUL_TERMINATED ((size_t)-1)
+#define MYLITE_NUL_TERMINATED ((size_t)(-1))
 #define MYLITE_STATIC ((mylite_destructor)0)
 #define MYLITE_TRANSIENT ((mylite_destructor)(-1))
 

@@ -87,6 +87,10 @@ static void test_engine_clauses_and_wordpress_schema_survive_reopen(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "engine-schema.mylite");
+    const root_entries expected_root = {
+        .root = root,
+        .database_name = "engine-schema.mylite",
+    };
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     mylite_db *db = NULL;
 
@@ -107,9 +111,7 @@ static void test_engine_clauses_and_wordpress_schema_survive_reopen(void) {
     assert_database_closed_layout(database_path);
     assert_engine_files(database_path);
     assert(is_directory_empty(runtime_root));
-    assert_test_root_contains_only_database_and_runtime(
-        (root_entries){.root = root, .database_name = "engine-schema.mylite"}
-    );
+    assert_test_root_contains_only_database_and_runtime(expected_root);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert_database_open_layout(database_path);
@@ -120,9 +122,7 @@ static void test_engine_clauses_and_wordpress_schema_survive_reopen(void) {
     assert_database_closed_layout(database_path);
     assert_engine_files(database_path);
     assert(is_directory_empty(runtime_root));
-    assert_test_root_contains_only_database_and_runtime(
-        (root_entries){.root = root, .database_name = "engine-schema.mylite"}
-    );
+    assert_test_root_contains_only_database_and_runtime(expected_root);
 
     free(database_path);
     free(runtime_root);

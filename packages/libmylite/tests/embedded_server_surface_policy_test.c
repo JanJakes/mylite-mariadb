@@ -113,6 +113,10 @@ static void test_server_surfaces_are_disabled_or_contained(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "server-surface.mylite");
+    const root_entries expected_root = {
+        .root = root,
+        .database_name = "server-surface.mylite",
+    };
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     mylite_db *db = NULL;
 
@@ -137,9 +141,7 @@ static void test_server_surfaces_are_disabled_or_contained(void) {
     assert_no_server_sidecar_files(database_path);
     assert(mylite_close(db) == MYLITE_OK);
     assert(is_directory_empty(runtime_root));
-    assert_test_root_contains_only_database_and_runtime(
-        (root_entries){.root = root, .database_name = "server-surface.mylite"}
-    );
+    assert_test_root_contains_only_database_and_runtime(expected_root);
     assert_no_server_sidecar_files(database_path);
 
     free(database_path);

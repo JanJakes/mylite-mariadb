@@ -116,6 +116,10 @@ static void run_mariadb_comparison_group(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "compat-mariadb.mylite");
+    const root_entries expected_root = {
+        .root = root,
+        .database_name = "compat-mariadb.mylite",
+    };
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     mylite_db *db = NULL;
 
@@ -176,9 +180,7 @@ static void run_mariadb_comparison_group(void) {
     assert(mylite_close(db) == MYLITE_OK);
     assert_database_closed_layout(database_path);
     assert(is_directory_empty(runtime_root));
-    assert_test_root_contains_only_database_and_runtime(
-        (root_entries){.root = root, .database_name = "compat-mariadb.mylite"}
-    );
+    assert_test_root_contains_only_database_and_runtime(expected_root);
 
     free(database_path);
     free(runtime_root);
@@ -190,6 +192,10 @@ static void run_application_queries_group(void) {
     char *root = make_temp_root();
     char *runtime_root = path_join(root, "runtime");
     char *database_path = path_join(root, "compat-app.mylite");
+    const root_entries expected_root = {
+        .root = root,
+        .database_name = "compat-app.mylite",
+    };
     open_database_paths paths = {.database_path = database_path, .runtime_root = runtime_root};
     mylite_db *db = NULL;
 
@@ -204,9 +210,7 @@ static void run_application_queries_group(void) {
     assert(mylite_close(db) == MYLITE_OK);
     assert_database_closed_layout(database_path);
     assert(is_directory_empty(runtime_root));
-    assert_test_root_contains_only_database_and_runtime(
-        (root_entries){.root = root, .database_name = "compat-app.mylite"}
-    );
+    assert_test_root_contains_only_database_and_runtime(expected_root);
 
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert_database_open_layout(database_path);
@@ -214,9 +218,7 @@ static void run_application_queries_group(void) {
     assert(mylite_close(db) == MYLITE_OK);
     assert_database_closed_layout(database_path);
     assert(is_directory_empty(runtime_root));
-    assert_test_root_contains_only_database_and_runtime(
-        (root_entries){.root = root, .database_name = "compat-app.mylite"}
-    );
+    assert_test_root_contains_only_database_and_runtime(expected_root);
 
     free(database_path);
     free(runtime_root);
