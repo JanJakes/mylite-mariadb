@@ -153,6 +153,10 @@ generic changed-index page-ref array and second changed-index loop after the
 existing buffered-shape cache has validated the row/index layout, and that
 fast path trusts the handler-provided changed-key proof instead of comparing the
 same serialized key bytes again.
+Same-size row-only active rewrites now capture only the row checksum-plus-payload
+undo range and rewrite only payload bytes while preserving rollback correctness
+after dirty buffered-page checksum refreshes and later size-changing rewrites in
+the same savepoint.
 Fixed-width prepared result statements now reuse their result bindings across
 reset/re-execute loops and avoid freeing already-drained results a second time,
 leaving parameter binding/reset semantics as the next prepared-path bottleneck.
