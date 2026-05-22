@@ -108,7 +108,8 @@ CTE-cycle, precedence, expression, type-coercion, rounding, safe-update, and
 comparison behavior, selected `IN` / `NOT IN` predicate behavior, selected
 subquery, update-ignore, `REPLACE`, `RETURNING`, temporary create-or-replace,
 primary-key lookup, selected DDL/name and comment metadata behavior,
-selected DDL constraint/index metadata and UCA CTAS behavior,
+selected DDL constraint/index metadata and UCA CTAS behavior, selected
+lock-table DDL behavior, selected deprecated server syntax rejection,
 selected `ORDER BY` optimizer
 and aggregate-ordering behavior, optimizer-cost metadata, selected EXPLAIN
 plan output, UNION, prepared-statement behavior, selected SIGNAL/RESIGNAL

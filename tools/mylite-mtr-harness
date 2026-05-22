@@ -80,6 +80,7 @@ default_tests=(
   main.comment_column2
   main.check
   main.create_drop_db
+  main.mdev19198
   main.lowercase_utf8
   main.key_diff
   main.subselect_nulls
@@ -100,6 +101,7 @@ default_tests=(
   main.signal_demo1
   main.signal_demo3
   main.signal_sqlmode
+  main.deprecated_features
   main.ctype_ascii
   main.ctype_cp850
   main.ctype_cp866
