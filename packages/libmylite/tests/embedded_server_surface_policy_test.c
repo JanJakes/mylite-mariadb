@@ -664,6 +664,8 @@ static void assert_server_sql_rejected(mylite_db *db) {
     exec_ok(db, "SELECT SQL_CACHE 1");
     exec_ok(db, "SELECT SQL_NO_CACHE 1");
     exec_ok(db, "SELECT FORMAT(1234.5, 2)");
+    exec_ok(db, "SELECT JSON_VALID('{\"enabled\": true}')");
+    exec_ok(db, "SELECT ST_AsText(ST_GeomFromText('POINT(1 2)'))");
     exec_ok(db, "SELECT VERSION()");
     exec_ok(db, "SET @profiling = 1");
     exec_ok(db, "SET @profiling_history_size = 10");
