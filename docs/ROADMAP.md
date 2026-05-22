@@ -123,9 +123,11 @@ statement object per thread, avoiding repeated large statement allocation and
 cleanup on point-read loops while leaving recovery probes, shared locks, and
 checkpoint header reads unchanged. When a trusted filename identity scope is
 active, short-lived read statements also borrow that stable filename pointer
-instead of allocating an identical copy. Fixed-size random page reads and writes use
-offset-addressed `pread()` / `pwrite()` calls, avoiding per-page stdio seek and
-refill overhead while leaving sequential journal writes on the stream path.
+instead of allocating an identical copy; unscoped reusable read statements now
+retain their owned filename for same-file reuse while still replacing it across
+different files. Fixed-size random page reads and writes use offset-addressed
+`pread()` / `pwrite()` calls, avoiding per-page stdio seek and refill overhead
+while leaving sequential journal writes on the stream path.
 MariaDB table-discovery callbacks now use the same scoped read sessions for
 catalog table-definition, table-list, and existence reads, reducing repeated
 prepared statement table-open validation before cursor execution.

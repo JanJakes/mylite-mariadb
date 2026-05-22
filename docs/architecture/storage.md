@@ -113,7 +113,9 @@ scratch state; it does not keep read locks open between SQL statements and does
 not bypass recovery or checkpoint snapshot validation.
 When the caller opens a matching filename identity scope, a read statement
 borrows that stable filename pointer instead of copying it. Unscoped callers
-keep owned filename copies.
+keep owned filename copies, and the reusable read statement retains that owned
+copy for the next same-file read statement while still replacing it when the
+next read targets another file.
 
 Durable full-row and count reads also keep a small process-local live-row-id
 cache keyed by the durable header fingerprint and table id. When an unchanged
