@@ -1119,7 +1119,7 @@ static void store_active_index_root_entry_cache_in_statement(
     const mylite_storage_catalog_entry *entry
 );
 static void clear_index_root_entry_cache(mylite_storage_index_root_entry_cache *cache);
-static int table_index_roots_absent_in_statement(
+MYLITE_STORAGE_HOT_INLINE int table_index_roots_absent_in_statement(
     mylite_storage_statement *statement,
     const mylite_storage_header *header,
     unsigned long long table_id
@@ -12079,7 +12079,7 @@ static void clear_index_root_entry_cache(mylite_storage_index_root_entry_cache *
     *cache = (mylite_storage_index_root_entry_cache){0};
 }
 
-static int table_index_roots_absent_in_statement(
+MYLITE_STORAGE_HOT_INLINE int table_index_roots_absent_in_statement(
     mylite_storage_statement *statement,
     const mylite_storage_header *header,
     unsigned long long table_id

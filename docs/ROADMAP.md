@@ -416,6 +416,8 @@ Cached single-index active rewrites now inline the rewrite and buffered-page
 undo pair capture path while preserving rollback preimage copies.
 Active exact-index cache maintenance now hot-inlines the unchanged single-cache
 case and leaves changed-key, remap, removal, and multi-cache cases in fallback.
+Maintained-index-root absence checks now inline repeated statement-cache hits
+while preserving catalog planning for uncached or root-backed tables.
 Exact unique index cursor construction now reuses the existing row-materialize
 eligibility flag instead of scanning table fields again for BLOB/TEXT columns
 on prepared point-update reads.
