@@ -74,7 +74,7 @@ metadata, DDL constraint/index metadata, selected Aria
 ALTER/index-upgrade behavior, selected lock-table DDL behavior, deprecated
 server syntax rejection, `ORDER BY`, optimizer-cost metadata, selected EXPLAIN plan output,
 selected Aria range, semijoin, and rowid-filter optimizer behavior, selected
-UNION and EXCEPT / EXCEPT ALL set-operation behavior, SIGNAL/RESIGNAL
+UNION, EXCEPT / EXCEPT ALL, and INTERSECT set-operation behavior, SIGNAL/RESIGNAL
 diagnostics, row constructors, selected scalar
 `LAST_VALUE()`, window `FIRST_VALUE()` / `LAST_VALUE()`, percentile/median,
 and window-function behavior, selected `IF()` / `NULLIF()` conditional

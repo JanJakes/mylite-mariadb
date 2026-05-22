@@ -12,9 +12,12 @@ insert into t2 values (2,2),(3,3);
 drop tables t1,t2;
 
 
-create table t1 (a int, b int) engine=MyISAM;
-create table t2 (c int, d int) engine=MyISAM;
-create table t3 (e int, f int) engine=MyISAM;
+--replace_result engine=Aria engine=MyISAM
+create table t1 (a int, b int) engine=Aria;
+--replace_result engine=Aria engine=MyISAM
+create table t2 (c int, d int) engine=Aria;
+--replace_result engine=Aria engine=MyISAM
+create table t3 (e int, f int) engine=Aria;
 insert into t1 values (1,1),(2,2),(3,3);
 insert into t2 values (2,2),(3,3),(4,4);
 insert into t3 values (1,1),(2,2),(5,5);
@@ -85,9 +88,12 @@ insert into t2 values (2, "fgh", 2, "dffggtt"),(3, "ffggddd", 3, "dfgg");
 
 drop tables t1,t2;
 
-create table t1 (a int, b blob) engine=MyISAM;
-create table t2 (c int, d blob) engine=MyISAM;
-create table t3 (e int, f blob) engine=MyISAM;
+--replace_result engine=Aria engine=MyISAM
+create table t1 (a int, b blob) engine=Aria;
+--replace_result engine=Aria engine=MyISAM
+create table t2 (c int, d blob) engine=Aria;
+--replace_result engine=Aria engine=MyISAM
+create table t3 (e int, f blob) engine=Aria;
 insert into t1 values (1,1),(2,2),(3,3);
 insert into t2 values (2,2),(3,3),(4,4);
 insert into t3 values (1,1),(2,2),(5,5);
@@ -105,13 +111,17 @@ execute stmt;
 
 # make sure that blob is used
 create table t4  (select a,b from t1) intersect (select c,d from t2) intersect (select e,f from t3);
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t4;
 
 drop tables t1,t2,t3,t4;
 
-create table t1 (a int, b blob) engine=MyISAM;
-create table t2 (c int, d blob) engine=MyISAM;
-create table t3 (e int, f blob) engine=MyISAM;
+--replace_result engine=Aria engine=MyISAM
+create table t1 (a int, b blob) engine=Aria;
+--replace_result engine=Aria engine=MyISAM
+create table t2 (c int, d blob) engine=Aria;
+--replace_result engine=Aria engine=MyISAM
+create table t3 (e int, f blob) engine=Aria;
 insert into t1 values (1,1),(2,2),(3,3);
 insert into t2 values (2,2),(3,3);
 insert into t3 values (1,1),(2,2),(3,3);
@@ -142,9 +152,12 @@ drop tables t1,t2,t3;
 --echo #
 --echo # INTERSECT precedence
 --echo #
-create table t1 (a int, b blob) engine=MyISAM;
-create table t2 (c int, d blob) engine=MyISAM;
-create table t3 (e int, f blob) engine=MyISAM;
+--replace_result engine=Aria engine=MyISAM
+create table t1 (a int, b blob) engine=Aria;
+--replace_result engine=Aria engine=MyISAM
+create table t2 (c int, d blob) engine=Aria;
+--replace_result engine=Aria engine=MyISAM
+create table t3 (e int, f blob) engine=Aria;
 insert into t1 values (5,5),(6,6);
 insert into t2 values (2,2),(3,3);
 insert into t3 values (1,1),(3,3);
@@ -217,7 +230,8 @@ drop table t;
 --echo # JOIN_CACHE::generate_full_extensions on INTERSECT
 --echo #
 
-CREATE TABLE t1 (a varchar(32)) ENGINE=MyISAM;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
+CREATE TABLE t1 (a varchar(32)) ENGINE=Aria;
 INSERT INTO t1 VALUES
 ('Jakarta'),('Lisbon'),('Honolulu'),('Lusaka'),('Barcelona'),('Taipei'),
 ('Brussels'),('Orlando'),('Osaka'),('Quito'),('Lima'),('Tunis'),
@@ -227,7 +241,8 @@ INSERT INTO t1 VALUES
 ('Wellington'),('Zibo'),('Qiqihar'),('Delhi'),('Hamburg'),('Ottawa'),
 ('Vaduz');
 
-CREATE TABLE t2 (b varchar(32)) ENGINE=MyISAM;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
+CREATE TABLE t2 (b varchar(32)) ENGINE=Aria;
 INSERT INTO t2 VALUES
 ('Gaza'),('Jeddah'),('Beirut'),('Incheon'),('Tbilisi'),('Izmir'),
 ('Quito'),('Riga'),('Freetown'),('Zagreb'),('Caracas'),('Orlando'),
@@ -238,7 +253,8 @@ INSERT INTO t2 VALUES
 ('Vienna'),('Jackson'),('Jakarta'),('Sydney'),('Oslo'),('Novgorod'),
 ('Norilsk'),('Izhevsk'),('Istanbul'),('Nice');
 
-CREATE TABLE t3 (c varchar(32)) ENGINE=MyISAM;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
+CREATE TABLE t3 (c varchar(32)) ENGINE=Aria;
 INSERT INTO t3 VALUES
 ('Nicosia'),('Istanbul'),('Richmond'),('Stockholm'),('Dublin'),
 ('Wichita'),('Warsaw'),('Glasgow'),('Winnipeg'),('Irkutsk'),('Quito'),
@@ -253,7 +269,8 @@ select count(*) from (
 
 drop table t1,t2,t3;
 
-CREATE TABLE t1 (a varchar(32) not null) ENGINE=MyISAM;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
+CREATE TABLE t1 (a varchar(32) not null) ENGINE=Aria;
 INSERT INTO t1 VALUES
 ('Jakarta'),('Lisbon'),('Honolulu'),('Lusaka'),('Barcelona'),('Taipei'),
 ('Brussels'),('Orlando'),('Osaka'),('Quito'),('Lima'),('Tunis'),
@@ -263,7 +280,8 @@ INSERT INTO t1 VALUES
 ('Wellington'),('Zibo'),('Qiqihar'),('Delhi'),('Hamburg'),('Ottawa'),
 ('Vaduz');
 
-CREATE TABLE t2 (b varchar(32) not null) ENGINE=MyISAM;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
+CREATE TABLE t2 (b varchar(32) not null) ENGINE=Aria;
 INSERT INTO t2 VALUES
 ('Gaza'),('Jeddah'),('Beirut'),('Incheon'),('Tbilisi'),('Izmir'),
 ('Quito'),('Riga'),('Freetown'),('Zagreb'),('Caracas'),('Orlando'),
@@ -274,7 +292,8 @@ INSERT INTO t2 VALUES
 ('Vienna'),('Jackson'),('Jakarta'),('Sydney'),('Oslo'),('Novgorod'),
 ('Norilsk'),('Izhevsk'),('Istanbul'),('Nice');
 
-CREATE TABLE t3 (c varchar(32) not null) ENGINE=MyISAM;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
+CREATE TABLE t3 (c varchar(32) not null) ENGINE=Aria;
 INSERT INTO t3 VALUES
 ('Nicosia'),('Istanbul'),('Richmond'),('Stockholm'),('Dublin'),
 ('Wichita'),('Warsaw'),('Glasgow'),('Winnipeg'),('Irkutsk'),('Quito'),

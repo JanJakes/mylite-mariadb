@@ -121,6 +121,7 @@ default_tests=(
   main.subselect_union_rand
   main.except
   main.except_all
+  main.intersect
   main.prepare
   main.ps_10nestset
   main.ps_11bugs
