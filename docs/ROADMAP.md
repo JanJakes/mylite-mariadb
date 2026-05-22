@@ -333,6 +333,9 @@ Prepared MyLite exact-key updates now keep that reusable SQL-layer proof on
 `Sql_cmd_update`, letting each per-execute `SQL_SELECT` borrow it so hot
 prepared loops skip condition-tree proof rediscovery while still rerunning NULL
 parameter handling and handler acceptance checks.
+MyLite handlers now cache direct-update key-shape support at open time, so
+accepted prepared exact-key updates do not recompute raw exact-filter support
+during every `info_push()`.
 Ordinary MyLite `UPDATE` / `DELETE` execution now skips eager quick-plan
 explain detail allocation unless explicit `EXPLAIN`, `ANALYZE`, or slow-log
 explain/engine detail needs it, while routed `EXPLAIN UPDATE` keeps the full

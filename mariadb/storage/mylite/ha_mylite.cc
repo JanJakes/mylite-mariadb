@@ -1356,6 +1356,7 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
 {
   storage_schema_name[0]= '\0';
   storage_table_name[0]= '\0';
+  bzero(direct_update_key_supported, sizeof(direct_update_key_supported));
   bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
   strcpy(display_engine_name, MYLITE_STORAGE_ENGINE_NAME);
   display_engine_name_lex.str= display_engine_name;
@@ -1614,11 +1615,11 @@ int ha_mylite::info_push(uint info_type, void *info)
     mylite_update_exact_key_info *key_info=
         static_cast<mylite_update_exact_key_info *>(info);
     if (!key_info || !key_info->condition || !key_info->value_item || !table ||
-        !table->s || key_info->key_number >= table->s->keys)
+        !table->s || key_info->key_number >= table->s->keys ||
+        key_info->key_number >= MAX_KEY)
       DBUG_RETURN(HA_ERR_WRONG_COMMAND);
 
-    KEY *direct_key_info= table->key_info + key_info->key_number;
-    if (!mylite_direct_update_key_is_supported(table, direct_key_info))
+    if (!direct_update_key_supported[key_info->key_number])
       DBUG_RETURN(HA_ERR_WRONG_COMMAND);
 
     direct_update_condition= key_info->condition;
@@ -2407,6 +2408,14 @@ int ha_mylite::open(const char *name, int, uint)
       mylite_table_supports_row_write_with_auto_increment(
           table, auto_increment_field);
   table_supports_row_lifecycle= table_supports_row_write;
+  bzero(direct_update_key_supported, sizeof(direct_update_key_supported));
+  if (table && table->s && table->s->keys <= MAX_KEY)
+  {
+    for (uint key_number= 0; key_number < table->s->keys; ++key_number)
+      direct_update_key_supported[key_number]=
+          mylite_direct_update_key_is_supported(table,
+                                                table->key_info + key_number);
+  }
 
   int path_error= mylite_table_name_from_path(name, storage_schema_name,
                                               sizeof(storage_schema_name),
@@ -2474,6 +2483,7 @@ int ha_mylite::close(void)
   direct_update_key_field= NULL;
   direct_update_key_field_number= MAX_KEY;
   direct_update_key_null= 0;
+  bzero(direct_update_key_supported, sizeof(direct_update_key_supported));
   discard_rows= false;
   volatile_rows= false;
   table_has_blob_fields= false;
