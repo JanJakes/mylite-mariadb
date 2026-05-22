@@ -9666,8 +9666,7 @@ static mylite_storage_result copy_read_checkpoint_cache_to_statement(
 ) {
     statement->header = cache->header;
     statement->current_header = cache->header;
-    memcpy(statement->header_page, cache->header_page, sizeof(statement->header_page));
-    statement->has_header_page = 1;
+    statement->has_header_page = 0;
     statement->has_rollback_catalog_page = 0;
     statement->current_catalog_root_page = cache->current_catalog_root_page;
     statement->current_catalog_generation = cache->current_catalog_generation;

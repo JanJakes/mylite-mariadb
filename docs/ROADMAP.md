@@ -219,8 +219,8 @@ Held-read-scope variants isolate steady-state exact-index and row materializatio
 cost once one storage read statement is already open, while a storage
 read-statement phase measures begin/end overhead directly.
 Hot read-checkpoint cache hits now borrow the cached catalog image for scoped
-catalog views and defer catalog page copies until a caller needs page bytes,
-instead of deep-copying that state into every short-lived read statement.
+catalog views and defer catalog/header page copies until a caller needs page
+bytes, instead of deep-copying that state into every short-lived read statement.
 Recent local storage-smoke benchmark samples show read-statement begin/end at
 3.527 us/op, storage primary-key row lookups in the 4-5 us/op range, and routed
 prepared primary-key point selects at 7.800 us/op on the current machine after
