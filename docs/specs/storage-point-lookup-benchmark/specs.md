@@ -32,18 +32,20 @@ MariaDB base: `mariadb-11.8.6`
 
 ## Design
 
-- Add a `storage-pk-row-lookups` phase to `tools/mylite_perf_baseline`.
+- Add `storage-pk-entry-lookups` and `storage-pk-row-lookups` phases to
+  `tools/mylite_perf_baseline`.
 - After normal setup and row insertion, read primary-key index entries for
   `perf.perf_rows` index `0` before the timed section.
 - Use the stored key bytes as lookup inputs and call
+  `mylite_storage_find_index_entry()` or
   `mylite_storage_find_indexed_row_into()` directly for each iteration.
 - Wrap each lookup in `mylite_storage_begin_read_statement()` /
   `mylite_storage_end_read_statement()` so the benchmark includes the same
   storage read-scope setup used by the handler exact read path.
-- Verify each lookup returns a row payload and an expected row id from the
-  stored primary-key entryset.
-- Report checksum and row-size checksum to keep the compiler from optimizing
-  the loop away and to catch obvious lookup drift.
+- Verify each lookup returns the expected row id from the stored primary-key
+  entryset; the row phase also verifies a row payload size.
+- Report row-id checksum and, for the row phase, row-size checksum to keep the
+  compiler from optimizing the loop away and to catch obvious lookup drift.
 
 ## Compatibility Impact
 
@@ -72,6 +74,8 @@ Benchmark-tool-only code. No dependency change.
 - `BUILD_DIR=build/mariadb-mylite-storage-smoke tools/mariadb-embedded-build build libmariadbd.a`
 - `cmake --build --preset storage-smoke-dev --target mylite_perf_baseline`
 - `build/storage-smoke-dev/tools/mylite_perf_baseline --help`
+- `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=storage-pk-entry-lookups 10000 1000000`
+  - `storage primary-key entry lookups`: `4.198 us/op`
 - `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=storage-pk-row-lookups 10000 1000000`
   - `storage primary-key row lookups`: `5.946 us/op`
 - `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=prepared-pk-selects 10000 1000000`
@@ -84,9 +88,9 @@ Benchmark-tool-only code. No dependency change.
 
 ## Acceptance Criteria
 
-- `tools/mylite_perf_baseline --help` lists the new phase and metric.
-- The new phase verifies row ids and row payload sizes for repeated storage
-  point lookups.
+- `tools/mylite_perf_baseline --help` lists the new phases and metrics.
+- The new phases verify row ids, and the row phase verifies row payload sizes,
+  for repeated storage point lookups.
 - Benchmark output gives a storage-level lower-level comparison point for the
   existing prepared SQL point-select phase.
 
