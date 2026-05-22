@@ -168,11 +168,13 @@ bindings for reuse, clear-bindings releases them explicitly, and repeated
 same-type scalar binds avoid redundant MariaDB `mysql_stmt_bind_param()` calls
 and object-wide binding resets.
 Successful non-result prepared resets also avoid a redundant MariaDB statement
-reset before re-execution while result-producing statements keep the full reset
-path. Prepared non-result execution now also reuses the immutable SQL policy
-classified at prepare time, so ordinary prepared DML no longer reparses its SQL
-text for no-op transaction or temporary-table lifecycle updates after every
-successful step. Single-part non-null unique-key `UPDATE` predicates now build
+reset before re-execution. Fully drained result-producing prepared statements
+now do the same, while reset-before-drain and failed statements keep the full
+MariaDB reset path. Prepared non-result execution now also reuses the immutable
+SQL policy classified at prepare time, so ordinary prepared DML no longer
+reparses its SQL text for no-op transaction or temporary-table lifecycle
+updates after every successful step. Single-part non-null unique-key `UPDATE`
+predicates now build
 their exact range quick path directly during execution, avoiding the full
 range-optimizer rebuild for hot prepared primary-key update loops while leaving
 the original `WHERE` condition in place for MariaDB expression semantics.

@@ -15,6 +15,7 @@ static void test_statement_effects(void);
 static void test_transaction_statement_checkpoints(void);
 static void test_segment_reads(void);
 static void test_reset_reuse_and_destructors(void);
+static void test_empty_result_reset_reuse(void);
 static void test_reset_before_drain_reuse(void);
 static void test_variable_result_reset_reuse(void);
 static void test_finalize_before_drain(void);
@@ -54,6 +55,7 @@ int main(void) {
     test_transaction_statement_checkpoints();
     test_segment_reads();
     test_reset_reuse_and_destructors();
+    test_empty_result_reset_reuse();
     test_reset_before_drain_reuse();
     test_variable_result_reset_reuse();
     test_finalize_before_drain();
@@ -478,6 +480,29 @@ static void test_reset_reuse_and_destructors(void) {
     assert(destructor_calls == 1);
     assert(mylite_step(stmt) == MYLITE_ROW);
     assert(mylite_column_int64(stmt, 0U) == 9);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_empty_result_reset_reuse(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    mylite_stmt *stmt = prepare_statement(db, "SELECT CAST(? AS SIGNED) WHERE ? = 1");
+
+    assert(mylite_bind_int64(stmt, 1U, 42) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 2U, 0) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+
+    assert(mylite_bind_int64(stmt, 2U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(stmt, 0U) == 42);
     assert(mylite_step(stmt) == MYLITE_DONE);
     assert(mylite_finalize(stmt) == MYLITE_OK);
 
