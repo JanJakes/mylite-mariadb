@@ -14,6 +14,7 @@
 #include <memory>
 #include <mutex>
 #include <new>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -2270,11 +2271,12 @@ int execute_statement(mylite_stmt &statement) {
         return bind_result;
     }
 
-    std::vector<TransactionControlKind> resolved_transaction_controls;
+    std::optional<std::vector<TransactionControlKind>> resolved_transaction_controls;
     if (statement.statement_transaction_control ==
         TransactionControlKind::SetParameterizedTransactionControl) {
+        resolved_transaction_controls.emplace();
         const int resolve_result =
-            resolve_parameterized_transaction_controls(statement, resolved_transaction_controls);
+            resolve_parameterized_transaction_controls(statement, *resolved_transaction_controls);
         if (resolve_result != MYLITE_OK) {
             return resolve_result;
         }
@@ -2375,7 +2377,7 @@ int execute_statement(mylite_stmt &statement) {
             TransactionControlKind::SetParameterizedTransactionControl) {
             transaction_result = apply_successful_resolved_transaction_controls(
                 *statement.database,
-                resolved_transaction_controls
+                *resolved_transaction_controls
             );
         } else if (statement.statement_transaction_control != TransactionControlKind::None) {
             transaction_result = apply_successful_transaction_control(
