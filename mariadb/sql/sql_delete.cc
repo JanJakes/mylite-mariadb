@@ -164,9 +164,9 @@ bool Update_plan::save_explain_data_intern(THD *thd,
 
 
   /* Set jtype */
-  if (select && select->quick)
+  if (select && select->has_quick_plan())
   {
-    if (is_index_merge(select->quick->get_type()))
+    if (select->quick && is_index_merge(select->quick->get_type()))
       explain->jtype= JT_INDEX_MERGE;
     else
       explain->jtype= JT_RANGE;

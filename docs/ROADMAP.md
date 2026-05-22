@@ -308,6 +308,10 @@ No-order unique-key `UPDATE` planning now skips the full
 `TABLE::update_const_key_parts()` condition walk once the unique quick path has
 proved a single candidate row, while still clearing stale const-key state for
 the statement.
+Accepted MyLite direct updates now keep the SQL-layer exact unique-key proof as
+a lightweight marker and materialize `QUICK_EXACT_KEY_SELECT` only if execution
+falls back to SQL-layer row discovery, avoiding an unused quick object
+allocation on the hot prepared point-update path.
 Ordinary MyLite `UPDATE` / `DELETE` execution now skips eager quick-plan
 explain detail allocation unless explicit `EXPLAIN`, `ANALYZE`, or slow-log
 explain/engine detail needs it, while routed `EXPLAIN UPDATE` keeps the full

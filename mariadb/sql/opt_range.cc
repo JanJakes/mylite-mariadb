@@ -116,6 +116,7 @@
 #include "sql_statistics.h"
 #include "uniques.h"
 #include "my_json_writer.h"
+#include "mylite_schema_hook.h"
 
 static quick_select_return try_simple_update_unique_key_quick_select(
     THD *thd, SQL_SELECT *select, key_map keys_to_use, bool force_quick_range,
@@ -124,6 +125,11 @@ static quick_select_return
 make_simple_update_unique_key_quick_select(THD *thd, SQL_SELECT *select,
                                            uint keynr, Item *value_item,
                                            ha_rows table_records);
+static quick_select_return
+mark_simple_update_unique_key_quick_select(THD *thd, SQL_SELECT *select,
+                                           uint keynr, Item *value_item,
+                                           ha_rows table_records);
+static bool mylite_update_exact_key_can_use_marker(THD *thd);
 static bool find_simple_unique_key_equal_item(Item *cond, TABLE *table,
                                               Field *field,
                                               Item **out_value_item);
@@ -1251,8 +1257,11 @@ SQL_SELECT *make_select(TABLE *head, table_map const_tables,
   DBUG_RETURN(select);
 }
 
-
-SQL_SELECT::SQL_SELECT() :quick(0),cond(0),pre_idx_push_select_cond(NULL),free_cond(0)
+SQL_SELECT::SQL_SELECT()
+    : quick(0), cond(0), pre_idx_push_select_cond(NULL),
+      mylite_update_exact_key_quick(false),
+      mylite_update_exact_key_number(MAX_KEY),
+      mylite_update_exact_key_value(NULL), free_cond(0)
 {
   quick_keys.clear_all(); needed_reg.clear_all();
   my_b_clear(&file);
@@ -1263,6 +1272,7 @@ void SQL_SELECT::cleanup()
 {
   delete quick;
   quick= 0;
+  clear_mylite_update_exact_key_quick();
   if (free_cond)
   {
     free_cond=0;
@@ -1276,6 +1286,44 @@ void SQL_SELECT::cleanup()
 SQL_SELECT::~SQL_SELECT()
 {
   cleanup();
+}
+
+void SQL_SELECT::clear_mylite_update_exact_key_quick()
+{
+  mylite_update_exact_key_quick= false;
+  mylite_update_exact_key_number= MAX_KEY;
+  mylite_update_exact_key_value= NULL;
+}
+
+void SQL_SELECT::set_mylite_update_exact_key_quick(uint keynr,
+                                                   Item *value_item,
+                                                   ha_rows records_arg,
+                                                   double read_time_arg)
+{
+  delete quick;
+  quick= 0;
+  mylite_update_exact_key_quick= true;
+  mylite_update_exact_key_number= keynr;
+  mylite_update_exact_key_value= value_item;
+  records= records_arg;
+  read_time= read_time_arg;
+  read_cost.reset();
+  possible_keys.set_bit(keynr);
+  quick_keys.set_bit(keynr);
+}
+
+bool SQL_SELECT::materialize_mylite_update_exact_key_quick(THD *thd)
+{
+  if (!mylite_update_exact_key_quick || quick)
+    return false;
+
+  const uint keynr= mylite_update_exact_key_number;
+  Item *value_item= mylite_update_exact_key_value;
+  const ha_rows table_records= records;
+  clear_mylite_update_exact_key_quick();
+
+  return make_simple_update_unique_key_quick_select(
+             thd, this, keynr, value_item, table_records) != SQL_SELECT::OK;
 }
 
 #undef index					// Fix for Unixware 7
@@ -2766,6 +2814,7 @@ SQL_SELECT::test_quick_select(THD *thd,
 
   delete quick;
   quick=0;
+  clear_mylite_update_exact_key_quick();
   needed_reg.clear_all();
   quick_keys.clear_all();
   head->with_impossible_ranges.clear_all();
@@ -3239,6 +3288,7 @@ static quick_select_return try_simple_update_unique_key_quick_select(
 
   delete select->quick;
   select->quick= 0;
+  select->clear_mylite_update_exact_key_quick();
   select->needed_reg.clear_all();
   select->quick_keys.clear_all();
   table->with_impossible_ranges.clear_all();
@@ -3271,6 +3321,10 @@ static quick_select_return try_simple_update_unique_key_quick_select(
             select->cond, table, key_info->key_part[0].field, &value_item))
     {
       *out_handled= true;
+      if ((table->file->ha_table_flags() & HA_CAN_DIRECT_UPDATE_AND_DELETE) &&
+          mylite_update_exact_key_can_use_marker(thd))
+        return mark_simple_update_unique_key_quick_select(
+            thd, select, keynr, value_item, select->records);
       return make_simple_update_unique_key_quick_select(
           thd, select, keynr, value_item, select->records);
     }
@@ -3308,6 +3362,32 @@ make_simple_update_unique_key_quick_select(THD *thd, SQL_SELECT *select,
   select->possible_keys.set_bit(keynr);
   select->quick_keys.set_bit(keynr);
   return SQL_SELECT::OK;
+}
+
+static quick_select_return
+mark_simple_update_unique_key_quick_select(THD *thd, SQL_SELECT *select,
+                                           uint keynr, Item *value_item,
+                                           ha_rows table_records)
+{
+  if (value_item->maybe_null() && value_item->is_null())
+  {
+    if (thd->is_error())
+      return SQL_SELECT::ERROR;
+    select->records= 0;
+    return SQL_SELECT::IMPOSSIBLE_RANGE;
+  }
+
+  select->set_mylite_update_exact_key_quick(keynr, value_item,
+                                            MY_MIN(table_records, 1), 1.0);
+  return SQL_SELECT::OK;
+}
+
+static bool mylite_update_exact_key_can_use_marker(THD *thd)
+{
+  return mylite_schema_hooks_active() && !thd->lex->describe &&
+         !thd->lex->analyze_stmt &&
+         !(thd->variables.log_slow_verbosity &
+           (LOG_SLOW_VERBOSITY_ENGINE | LOG_SLOW_VERBOSITY_EXPLAIN));
 }
 
 static bool find_simple_unique_key_equal_item(Item *cond, TABLE *table,

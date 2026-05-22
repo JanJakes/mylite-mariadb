@@ -552,7 +552,7 @@ bool Sql_cmd_update::update_single_table(THD *thd)
   }
 
   /* If running in safe sql mode, don't allow updates without keys */
-  if (!select || !select->quick)
+  if (!select || !select->has_quick_plan())
   {
     thd->set_status_no_index_used();
     if (safe_update && !using_limit)
@@ -575,8 +575,7 @@ bool Sql_cmd_update::update_single_table(THD *thd)
     table->mark_columns_needed_for_update();
   }
 
-  unique_key_quick=
-      select && select->quick && select->quick->unique_key_range();
+  unique_key_quick= select && select->unique_key_quick_range();
   if (!order && unique_key_quick)
     table->clear_const_key_parts();
   else
@@ -686,7 +685,7 @@ bool Sql_cmd_update::update_single_table(THD *thd)
   binlog_is_row= thd->is_current_stmt_binlog_format_row();
   DBUG_PRINT("info", ("binlog_is_row: %s", binlog_is_row ? "TRUE" : "FALSE"));
 
-  if (!(select && select->quick))
+  if (!(select && select->has_quick_plan()))
     status_var_increment(thd->status_var.update_scan_count);
 
   /*
@@ -750,6 +749,9 @@ bool Sql_cmd_update::update_single_table(THD *thd)
       goto update_begin;
     }
   }
+
+  if (select && select->materialize_mylite_update_exact_key_quick(thd))
+    goto err;
 
   if (query_plan.using_filesort || query_plan.using_io_buffer)
   {
@@ -891,7 +893,8 @@ bool Sql_cmd_update::update_single_table(THD *thd)
 	if (select->free_cond)
 	  delete select->cond;
 	select->quick=0;
-	select->cond=0;
+        select->clear_mylite_update_exact_key_quick();
+        select->cond= 0;
       }
       else
       {

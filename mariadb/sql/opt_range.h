@@ -1931,12 +1931,34 @@ class SQL_SELECT :public Sql_alloc {
   table_map const_tables,read_tables;
   /* See PARAM::possible_keys */
   key_map possible_keys;
+  bool mylite_update_exact_key_quick;
+  uint mylite_update_exact_key_number;
+  Item *mylite_update_exact_key_value;
   bool	free_cond; /* Currently not used and always FALSE */
 
   SQL_SELECT();
   ~SQL_SELECT();
   void cleanup();
-  void set_quick(QUICK_SELECT_I *new_quick) { delete quick; quick= new_quick; }
+  void set_quick(QUICK_SELECT_I *new_quick)
+  {
+    clear_mylite_update_exact_key_quick();
+    delete quick;
+    quick= new_quick;
+  }
+  void clear_mylite_update_exact_key_quick();
+  void set_mylite_update_exact_key_quick(uint keynr, Item *value_item,
+                                         ha_rows records_arg,
+                                         double read_time_arg);
+  bool has_quick_plan() const
+  {
+    return quick || mylite_update_exact_key_quick;
+  }
+  bool unique_key_quick_range() const
+  {
+    return (quick && quick->unique_key_range()) ||
+           mylite_update_exact_key_quick;
+  }
+  bool materialize_mylite_update_exact_key_quick(THD *thd);
 
   /*
     @return
