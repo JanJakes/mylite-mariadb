@@ -128,6 +128,7 @@ date-format behavior, selected ASCII, legacy, and UTF-32 charset edge
 behavior, selected Latin2, UTF-8 binary/general, UTF-8 UCA 1400, and utf8mb3
 general-1400 charset, weight-string, and LIKE condition-propagation behavior,
 selected multibyte charset recoding,
+selected charset CREATE/ALTER inheritance and conversion diagnostics,
 selected filesystem charset behavior, and selected charset
 diagnostics, collation-default behavior,
 UTF-32 `character_set_collations`, and column/context collation behavior,

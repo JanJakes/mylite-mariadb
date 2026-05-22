@@ -80,7 +80,8 @@ temporal scale, high-resolution temporal functions, microsecond parsing,
 date-format, ASCII charset, selected
 Latin2, UTF-8 binary/general, UTF-8 UCA 1400, and utf8mb3 general-1400
 charset, weight-string, and LIKE condition-propagation behavior, and multibyte
-charset recoding.
+charset recoding, plus selected charset CREATE/ALTER inheritance and conversion
+diagnostics.
 It uses a separate
 `build/mariadb-mtr-smoke`
 profile because the default embedded profile intentionally omits view, stored

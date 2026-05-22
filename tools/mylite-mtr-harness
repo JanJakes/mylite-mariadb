@@ -145,6 +145,7 @@ default_tests=(
   main.ctype_collate_implicit_def
   main.ctype_collate_implicit_utf32
   main.ctype_collate_table
+  main.ctype_create
   main.ctype_errors
   main.count_distinct
   main.sum_distinct
