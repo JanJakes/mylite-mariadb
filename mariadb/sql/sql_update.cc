@@ -207,6 +207,15 @@ static bool check_fields(THD *thd, TABLE_LIST *table, List<Item> &items,
 static bool
 mylite_prepared_update_ok_message_fast_path(THD *thd, TABLE *table,
                                             TABLE_LIST *table_list);
+static bool mylite_can_elide_single_update_result(THD *thd,
+                                                  TABLE_LIST *table_list,
+                                                  SELECT_LEX *select_lex,
+                                                  List<Item> &values,
+                                                  bool multitable);
+static bool mylite_update_values_have_subquery(List<Item> &values);
+static bool mylite_prepare_single_update_values(THD *thd, List<Item> &fields,
+                                                List<Item> &values,
+                                                bool ignore);
 static bool mylite_update_needs_explain_plan(THD *thd);
 
 bool TABLE::vers_check_update(List<Item> &items)
@@ -1416,8 +1425,11 @@ update_end:
     thd->lex->current_select->leaf_tables_saved= true;
     thd->lex->current_select->first_cond_optimization= 0;
   }
-  ((multi_update *)result)->set_found(found);
-  ((multi_update *)result)->set_updated(updated);
+  if (result)
+  {
+    ((multi_update *) result)->set_found(found);
+    ((multi_update *) result)->set_updated(updated);
+  }
 
   if (unlikely(thd->lex->analyze_stmt))
     goto emit_explain_and_leave;
@@ -1615,6 +1627,42 @@ static bool mylite_prepared_update_ok_message_fast_path(THD *thd, TABLE *table,
          !thd->get_stmt_da()->is_bulk_op() && table && table_list &&
          !table->versioned(VERS_TIMESTAMP) && !table_list->has_period();
 #endif
+}
+
+static bool mylite_can_elide_single_update_result(THD *thd,
+                                                  TABLE_LIST *table_list,
+                                                  SELECT_LEX *select_lex,
+                                                  List<Item> &values,
+                                                  bool multitable)
+{
+  return mylite_schema_hooks_active() && !multitable && table_list &&
+         table_list->table && !table_list->is_view_or_derived() &&
+         !table_list->has_period() && !table_list->is_multitable() &&
+         !thd->lex->has_returning() && select_lex &&
+         !select_lex->sj_subselects.elements &&
+         select_lex->first_inner_unit() == NULL &&
+         !mylite_update_values_have_subquery(values);
+}
+
+static bool mylite_update_values_have_subquery(List<Item> &values)
+{
+  List_iterator_fast<Item> value_it(values);
+  Item *value;
+  while ((value= value_it++))
+  {
+    if (value->with_subquery())
+      return true;
+  }
+  return false;
+}
+
+static bool mylite_prepare_single_update_values(THD *thd, List<Item> &fields,
+                                                List<Item> &values,
+                                                bool ignore)
+{
+  return setup_fields(thd, Ref_ptr_array(), values, MARK_COLUMNS_READ, 0, NULL,
+                      0) ||
+         TABLE::check_assignability_explicit_fields(fields, values, ignore);
 }
 
 static bool mylite_update_needs_explain_plan(THD *thd)
@@ -3185,18 +3233,22 @@ bool Sql_cmd_update::prepare_inner(THD *thd)
       lex->set_stmt_unsafe(LEX::BINLOG_STMT_UNSAFE_UPDATE_IGNORE);
   }
 
-  if (!(result= new (thd->mem_root) multi_update(thd, table_list,
-                                                 &select_lex->leaf_tables,
-                                                 &select_lex->item_list,
-                                                 &lex->value_list,
-                                                 lex->duplicates,
-                                                 lex->ignore)))
+  const bool elide_single_update_result= mylite_can_elide_single_update_result(
+      thd, table_list, select_lex, lex->value_list, multitable);
+  result= NULL;
+  if (!elide_single_update_result)
   {
-    DBUG_RETURN(TRUE);
-  }
+    if (!(result= new (thd->mem_root)
+              multi_update(thd, table_list, &select_lex->leaf_tables,
+                           &select_lex->item_list, &lex->value_list,
+                           lex->duplicates, lex->ignore)))
+    {
+      DBUG_RETURN(TRUE);
+    }
 
-  if (((multi_update *)result)->init(thd))
-    DBUG_RETURN(TRUE);
+    if (((multi_update *) result)->init(thd))
+      DBUG_RETURN(TRUE);
+  }
 
   if (setup_tables(thd, &select_lex->context, &select_lex->top_join_list,
                    table_list, select_lex->leaf_tables, false, false))
@@ -3238,6 +3290,11 @@ bool Sql_cmd_update::prepare_inner(THD *thd)
         select_lex->sj_subselects.elements)
       multitable= true;
   }
+
+  if (elide_single_update_result &&
+      mylite_prepare_single_update_values(thd, select_lex->item_list,
+                                          lex->value_list, lex->ignore))
+    goto err;
 
   if (table_list->has_period())
   {

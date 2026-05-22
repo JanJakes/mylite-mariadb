@@ -326,6 +326,10 @@ while non-direct updates keep the node for scan, buffer, and filesort trackers.
 They also skip the outer `Explain_query` object created during `JOIN::prepare()`
 on the accepted no-explain direct path, while lazily creating it before any
 fallback or explain-observable update path needs normal trackers.
+Ordinary MyLite single-table base-table UPDATE prepare now elides the
+multi-table `multi_update` result helper when `update_single_table()` owns
+execution and statement-effect reporting, while broader update shapes keep the
+existing helper.
 Ordinary MyLite `SELECT` execution now applies the same explain-detail gate to
 table-access plan fields while keeping MariaDB's runtime trackers initialized,
 and explicit routed `EXPLAIN SELECT` stays on the full plan-detail path.
