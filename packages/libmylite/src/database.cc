@@ -761,6 +761,7 @@ int copy_error_message(mylite_db &database, char **errmsg);
 #if MYLITE_WITH_MARIADB_EMBEDDED
 void clear_warnings(mylite_db &database);
 #endif
+void set_ok_if_needed(mylite_db &database);
 void set_ok(mylite_db &database);
 void set_error(mylite_db &database, int code, const char *message);
 #if MYLITE_WITH_MARIADB_EMBEDDED
@@ -916,7 +917,7 @@ int mylite_reset(mylite_stmt *statement) {
     statement->done = false;
     statement->has_current_row = false;
     if (statement->database != nullptr) {
-        set_ok(*statement->database);
+        set_ok_if_needed(*statement->database);
     }
     return MYLITE_OK;
 }
@@ -973,7 +974,7 @@ int mylite_bind_null(mylite_stmt *statement, unsigned index) {
         statement->parameter_binds_dirty = true;
     }
     bound.reset_to_null();
-    set_ok(*statement->database);
+    set_ok_if_needed(*statement->database);
     return MYLITE_OK;
 }
 
@@ -992,7 +993,7 @@ int mylite_bind_int64(mylite_stmt *statement, unsigned index, long long value) {
     }
     bound.int64_value = value;
     bound.mysql_is_null = false;
-    set_ok(*statement->database);
+    set_ok_if_needed(*statement->database);
     return MYLITE_OK;
 }
 
@@ -1010,7 +1011,7 @@ int mylite_bind_uint64(mylite_stmt *statement, unsigned index, unsigned long lon
     }
     bound.uint64_value = value;
     bound.mysql_is_null = false;
-    set_ok(*statement->database);
+    set_ok_if_needed(*statement->database);
     return MYLITE_OK;
 }
 
@@ -1028,7 +1029,7 @@ int mylite_bind_double(mylite_stmt *statement, unsigned index, double value) {
     }
     bound.double_value = value;
     bound.mysql_is_null = false;
-    set_ok(*statement->database);
+    set_ok_if_needed(*statement->database);
     return MYLITE_OK;
 }
 
@@ -2052,7 +2053,7 @@ int bind_statement_parameters(mylite_stmt &statement) {
 }
 
 int execute_statement(mylite_stmt &statement) {
-    set_ok(*statement.database);
+    set_ok_if_needed(*statement.database);
     clear_warnings(*statement.database);
     clear_current_row(statement);
 
@@ -7507,7 +7508,7 @@ int bind_bytes(
         return MYLITE_NOMEM;
     }
 
-    set_ok(*statement->database);
+    set_ok_if_needed(*statement->database);
     return MYLITE_OK;
 }
 
@@ -7524,6 +7525,14 @@ void reset_statement_bindings(mylite_stmt &statement) {
         parameter.reset_to_null();
     }
     statement.parameter_binds_dirty = true;
+}
+
+void set_ok_if_needed(mylite_db &database) {
+    if (database.errcode == MYLITE_OK && database.extended_errcode == MYLITE_OK &&
+        database.mariadb_errno == 0) {
+        return;
+    }
+    set_ok(database);
 }
 
 void set_ok(mylite_db &database) {

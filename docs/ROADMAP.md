@@ -173,7 +173,9 @@ now do the same, while reset-before-drain and failed statements keep the full
 MariaDB reset path. Prepared non-result execution now also reuses the immutable
 SQL policy classified at prepare time, so ordinary prepared DML no longer
 reparses its SQL text for no-op transaction or temporary-table lifecycle
-updates after every successful step. Single-part non-null unique-key `UPDATE`
+updates after every successful step. Hot successful prepared binds, resets, and
+execution entry also skip redundant OK diagnostic string assignment when the
+database handle is already in the OK state. Single-part non-null unique-key `UPDATE`
 predicates now build
 their exact range quick path directly during execution, avoiding the full
 range-optimizer rebuild for hot prepared primary-key update loops while leaving

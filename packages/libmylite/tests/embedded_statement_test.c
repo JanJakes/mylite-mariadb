@@ -1502,7 +1502,17 @@ static void test_invalid_indexes(void) {
     assert(mylite_bind_null(stmt, 0U) == MYLITE_MISUSE);
     assert(mylite_bind_int64(stmt, 2U, 1) == MYLITE_MISUSE);
     assert(mylite_bind_text(stmt, 1U, NULL, MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_MISUSE);
+    assert(mylite_errcode(db) == MYLITE_MISUSE);
+    assert(strcmp(mylite_sqlstate(db), "HY000") == 0);
+    assert(strstr(mylite_errmsg(db), "NUL-terminated text is NULL") != NULL);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+    assert(mylite_errcode(db) == MYLITE_OK);
+    assert(strcmp(mylite_sqlstate(db), "00000") == 0);
+    assert(strcmp(mylite_errmsg(db), "not an error") == 0);
     assert(mylite_bind_int64(stmt, 1U, 11) == MYLITE_OK);
+    assert(mylite_errcode(db) == MYLITE_OK);
+    assert(strcmp(mylite_sqlstate(db), "00000") == 0);
+    assert(strcmp(mylite_errmsg(db), "not an error") == 0);
     assert(mylite_step(stmt) == MYLITE_ROW);
     assert(mylite_column_name(stmt, 1U) == NULL);
     assert(mylite_column_database_name(stmt, 1U) == NULL);
