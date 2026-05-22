@@ -24,6 +24,7 @@ typedef struct open_database_paths {
 static void test_myisam_ddl_lifecycle_stays_in_database_directory(void);
 static mylite_db *open_database(open_database_paths paths, unsigned flags);
 static void exec_ok(mylite_db *db, const char *sql);
+static void trace_step(const char *step);
 static int altered_row_callback(void *ctx, int column_count, char **values, char **column_names);
 static char *make_temp_root(void);
 static char *path_join(const char *directory, const char *name);
@@ -65,6 +66,7 @@ static void test_myisam_ddl_lifecycle_stays_in_database_directory(void) {
 
     assert(mkdir(runtime_root, 0700) == 0);
 
+    trace_step("open create");
     db = open_database(paths, MYLITE_OPEN_READWRITE | MYLITE_OPEN_CREATE);
     assert_database_open_layout(database_path);
     assert(is_directory_empty(runtime_root));
@@ -80,6 +82,7 @@ static void test_myisam_ddl_lifecycle_stays_in_database_directory(void) {
     exec_ok(db, "ALTER TABLE app.notes ADD COLUMN revision INT NOT NULL DEFAULT 0");
     exec_ok(db, "UPDATE app.notes SET revision = 7 WHERE id = 1");
     exec_ok(db, "RENAME TABLE app.notes TO app.notes_archive");
+    trace_step("close after rename");
     assert(mylite_close(db) == MYLITE_OK);
     assert_database_closed_layout(database_path);
     assert(is_directory_empty(runtime_root));
@@ -103,8 +106,10 @@ static void test_myisam_ddl_lifecycle_stays_in_database_directory(void) {
     assert(path_exists(renamed_data_path));
     assert(path_exists(renamed_index_path));
 
+    trace_step("reopen");
     db = open_database(paths, MYLITE_OPEN_READWRITE);
     assert_database_open_layout(database_path);
+    trace_step("select renamed table");
     assert(
         mylite_exec(
             db,
@@ -121,6 +126,7 @@ static void test_myisam_ddl_lifecycle_stays_in_database_directory(void) {
     assert(!path_exists(renamed_index_path));
     exec_ok(db, "DROP DATABASE app");
     assert(!path_exists(app_schema_path));
+    trace_step("close after drop");
     assert(mylite_close(db) == MYLITE_OK);
     assert_database_closed_layout(database_path);
     assert(is_directory_empty(runtime_root));
@@ -158,8 +164,16 @@ static mylite_db *open_database(open_database_paths paths, unsigned flags) {
 
 static void exec_ok(mylite_db *db, const char *sql) {
     char *errmsg = NULL;
+
+    fprintf(stderr, "sql: %s\n", sql);
+    fflush(stderr);
     assert(mylite_exec(db, sql, NULL, NULL, &errmsg) == MYLITE_OK);
     assert(errmsg == NULL);
+}
+
+static void trace_step(const char *step) {
+    fprintf(stderr, "step: %s\n", step);
+    fflush(stderr);
 }
 
 // NOLINTNEXTLINE(bugprone-easily-swappable-parameters): required callback signature.

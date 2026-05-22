@@ -74,6 +74,10 @@
     {
       "name": "dev",
       "configurePreset": "dev",
+      "execution": {
+        "stopOnFailure": true,
+        "timeout": 60
+      },
       "output": {
         "outputOnFailure": true
       }
@@ -81,6 +85,10 @@
     {
       "name": "embedded-dev",
       "configurePreset": "embedded-dev",
+      "execution": {
+        "stopOnFailure": true,
+        "timeout": 60
+      },
       "output": {
         "outputOnFailure": true
       }
@@ -88,6 +96,10 @@
     {
       "name": "php-embedded-dev",
       "configurePreset": "php-embedded-dev",
+      "execution": {
+        "stopOnFailure": true,
+        "timeout": 60
+      },
       "output": {
         "outputOnFailure": true
       }
