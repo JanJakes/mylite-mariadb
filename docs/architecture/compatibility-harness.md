@@ -76,6 +76,7 @@ behavior, selected lock-table DDL behavior, deprecated server syntax rejection,
 selected embedded-profile native-engine absence,
 selected embedded-profile disabled diagnostic behavior,
 selected embedded-profile disabled metadata behavior,
+selected embedded-profile host-file SQL I/O rejection,
 selected embedded-profile disabled SQL-surface behavior,
 `ORDER BY`, optimizer-cost metadata, selected EXPLAIN plan output,
 selected Aria range, semijoin, and rowid-filter optimizer behavior, selected

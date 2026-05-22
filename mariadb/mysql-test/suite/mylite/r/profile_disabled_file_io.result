@@ -1,0 +1,6 @@
+select 1 into outfile '/tmp/mylite-mtr-disabled-file-io.out';
+ERROR 42000: This version of MariaDB doesn't yet support 'SELECT ... INTO OUTFILE in the MyLite embedded profile'
+select 1 into dumpfile '/tmp/mylite-mtr-disabled-file-io.dump';
+ERROR 42000: This version of MariaDB doesn't yet support 'SELECT ... INTO DUMPFILE in the MyLite embedded profile'
+select load_file('/tmp/mylite-mtr-disabled-file-io.in');
+ERROR 42000: FUNCTION test.load_file does not exist

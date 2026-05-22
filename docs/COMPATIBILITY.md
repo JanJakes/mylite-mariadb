@@ -119,6 +119,7 @@ deprecated server syntax rejection,
 selected embedded-profile native-engine absence,
 selected embedded-profile disabled diagnostic behavior,
 selected embedded-profile disabled metadata behavior,
+selected embedded-profile host-file SQL I/O rejection,
 selected embedded-profile disabled SQL-surface behavior,
 selected `ORDER BY` optimizer
 and aggregate-ordering behavior, optimizer-cost metadata, selected EXPLAIN

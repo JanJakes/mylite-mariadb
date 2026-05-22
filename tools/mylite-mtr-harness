@@ -11,6 +11,7 @@ default_tests=(
   mylite.profile_disabled_engines
   mylite.profile_disabled_metadata
   mylite.profile_disabled_diagnostics
+  mylite.profile_disabled_file_io
   mylite.profile_disabled_surfaces
   main.cast
   main.case

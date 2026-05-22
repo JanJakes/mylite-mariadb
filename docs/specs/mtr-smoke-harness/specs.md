@@ -51,6 +51,9 @@ MariaDB base: `mariadb-11.8.6`
   adds `mylite.profile_disabled_diagnostics`, covering selected static `SHOW`,
   profiling, and optimizer-trace diagnostics that the MyLite MTR smoke profile
   intentionally compiles out.
+- [MTR profile disabled file I/O smoke](../mtr-profile-disabled-file-io-smoke/specs.md)
+  adds `mylite.profile_disabled_file_io`, covering selected host-file SQL I/O
+  surfaces that the MyLite MTR smoke profile intentionally compiles out.
 - [MTR profile disabled surface smoke](../mtr-profile-disabled-surface-smoke/specs.md)
   adds `mylite.profile_disabled_surfaces`, covering selected SQL surfaces that
   the MyLite MTR smoke profile intentionally compiles out.
@@ -192,6 +195,7 @@ The default curated list remains intentionally baseline-oriented:
 - `mylite.profile_disabled_engines`.
 - `mylite.profile_disabled_metadata`.
 - `mylite.profile_disabled_diagnostics`.
+- `mylite.profile_disabled_file_io`.
 - `mylite.profile_disabled_surfaces`.
 - `main.cast`.
 - `main.case`.

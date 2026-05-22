@@ -1,0 +1,11 @@
+#
+# Check host-file SQL I/O surfaces that the MyLite MTR smoke profile
+# intentionally compiles out of the embedded server build.
+#
+
+--error ER_NOT_SUPPORTED_YET
+select 1 into outfile '/tmp/mylite-mtr-disabled-file-io.out';
+--error ER_NOT_SUPPORTED_YET
+select 1 into dumpfile '/tmp/mylite-mtr-disabled-file-io.dump';
+--error ER_SP_DOES_NOT_EXIST
+select load_file('/tmp/mylite-mtr-disabled-file-io.in');
