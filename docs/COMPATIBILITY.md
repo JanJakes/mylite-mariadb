@@ -112,8 +112,8 @@ aggregate/HAVING expression behavior,
 selected `IN` / `NOT IN` predicate behavior, selected
 subquery, update-ignore, `REPLACE`, `RETURNING`, temporary create-or-replace,
 primary-key lookup, selected DDL/name and comment metadata behavior,
-selected MTR-profile view and trigger DDL/runtime behavior, selected DDL
-constraint/index metadata and UCA CTAS behavior, selected Aria
+selected MTR-profile view, trigger, and stored-procedure DDL/runtime behavior,
+selected DDL constraint/index metadata and UCA CTAS behavior, selected Aria
 ALTER/index-upgrade behavior, selected lock-table DDL behavior, selected
 deprecated server syntax rejection,
 selected `ORDER BY` optimizer
