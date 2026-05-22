@@ -24942,12 +24942,13 @@ static mylite_storage_result find_exact_index_row_id(
         out_row_id,
         &used_cache
     );
-    if (result == MYLITE_STORAGE_OK && !used_cache) {
-        if (catalog_view == NULL) {
-            result = catalog_image_view_for_file(file, header, &owned_catalog, &catalog_view);
-        }
+    if (result != MYLITE_STORAGE_OK || used_cache) {
+        return result;
     }
-    if (result == MYLITE_STORAGE_OK && !used_cache) {
+    if (catalog_view == NULL) {
+        result = catalog_image_view_for_file(file, header, &owned_catalog, &catalog_view);
+    }
+    if (result == MYLITE_STORAGE_OK) {
         result = load_cached_exact_index_entry_in_statement(
             active_cache_statement,
             active_mutation_statement,
@@ -24965,7 +24966,11 @@ static mylite_storage_result find_exact_index_row_id(
             &used_cache
         );
     }
-    if (result == MYLITE_STORAGE_OK && !used_cache) {
+    if (result != MYLITE_STORAGE_OK || used_cache) {
+        free_catalog_image(&owned_catalog);
+        return result;
+    }
+    if (result == MYLITE_STORAGE_OK) {
         result = find_index_leaf_exact_static_row_id(
             file,
             filename,
@@ -24982,7 +24987,7 @@ static mylite_storage_result find_exact_index_row_id(
             &used_leaf
         );
     }
-    if (result == MYLITE_STORAGE_OK && !used_cache && !used_leaf) {
+    if (result == MYLITE_STORAGE_OK && !used_leaf) {
         result = read_index_leaf_exact_row_ids(
             file,
             filename,
@@ -24999,7 +25004,7 @@ static mylite_storage_result find_exact_index_row_id(
             &used_leaf
         );
     }
-    if (result == MYLITE_STORAGE_OK && !used_cache && !used_leaf) {
+    if (result == MYLITE_STORAGE_OK && !used_leaf) {
         result = find_cached_durable_exact_index_entry(
             file,
             header,
@@ -25012,7 +25017,12 @@ static mylite_storage_result find_exact_index_row_id(
             &used_cache
         );
     }
-    if (result == MYLITE_STORAGE_OK && !used_cache && !used_leaf) {
+    if (result != MYLITE_STORAGE_OK || used_cache) {
+        free(row_ids.row_ids);
+        free_catalog_image(&owned_catalog);
+        return result;
+    }
+    if (result == MYLITE_STORAGE_OK && !used_leaf) {
         result = scan_exact_index_row_ids(
             file,
             header,
