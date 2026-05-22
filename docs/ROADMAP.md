@@ -232,6 +232,8 @@ cost once one storage read statement is already open, while a storage
 read-statement phase measures begin/end overhead directly. A prepared
 primary-key component phase now splits the hot prepared loop into bind, row,
 done, and reset timings for targeted follow-up work.
+A prepared update component phase now splits the hot prepared row-DML loop into
+bind, execute, and reset timings before the next write-path optimization pass.
 Simple one-parameter prepared point reads can now reuse a bounded one-row
 result cache while their retained read statement remains open; MariaDB still
 produces the first row, and writes close the read scope before cached rows can
