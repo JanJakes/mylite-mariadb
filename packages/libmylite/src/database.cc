@@ -333,6 +333,7 @@ struct mylite_stmt {
     std::string prepared_transaction_control_name;
     TransactionControlKind statement_transaction_control = TransactionControlKind::None;
     bool selects_schema = false;
+    bool uses_simple_result_execution = false;
 #if MYLITE_WITH_MARIADB_EMBEDDED && MYLITE_MARIADB_HAS_MYLITE_SE
     std::string temporary_table_to_remember;
     std::vector<std::string> temporary_tables_to_forget;
@@ -443,6 +444,7 @@ int prepare_impl(
 int initialize_statement_metadata(mylite_stmt &statement);
 int bind_statement_parameters(mylite_stmt &statement);
 int execute_statement(mylite_stmt &statement);
+int execute_simple_result_statement(mylite_stmt &statement);
 int resolve_parameterized_transaction_controls(
     mylite_stmt &statement,
     std::vector<TransactionControlKind> &out_controls
@@ -1934,6 +1936,13 @@ int prepare_impl(
             statement->statement = nullptr;
             return metadata_result;
         }
+        statement->uses_simple_result_execution =
+            !statement->columns.empty() && !statement->selects_schema &&
+            statement->prepared_transaction_control == TransactionControlKind::None &&
+            statement->statement_transaction_control == TransactionControlKind::None &&
+            !statement->sync_schema_catalog_after_execute && !statement->writes_storage &&
+            !statement->uses_storage_outer_checkpoint && !statement->uses_statement_checkpoint &&
+            !statement->uses_transaction_statement_checkpoint;
 
         ++database->active_statements;
         if (tail != nullptr) {
@@ -2060,6 +2069,10 @@ int execute_statement(mylite_stmt &statement) {
     set_ok_if_needed(*statement.database);
     clear_warnings(*statement.database);
     clear_current_row_for_reuse(statement);
+
+    if (statement.uses_simple_result_execution) {
+        return execute_simple_result_statement(statement);
+    }
 
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
     if (statement.prepared_transaction_control != TransactionControlKind::None) {
@@ -2220,6 +2233,32 @@ int execute_statement(mylite_stmt &statement) {
         return checkpoint_result;
     }
 #  endif
+    return fetch_statement_row(statement);
+}
+
+int execute_simple_result_statement(mylite_stmt &statement) {
+    const int bind_result = bind_statement_parameters(statement);
+    if (bind_result != MYLITE_OK) {
+        return bind_result;
+    }
+
+    if (mysql_stmt_execute(statement.statement) != 0) {
+        const unsigned warning_count = mysql_warning_count(&statement.database->mysql);
+        set_mariadb_statement_error(statement);
+        const int warning_result = capture_warnings(*statement.database, warning_count, true);
+        return warning_result == MYLITE_OK ? MYLITE_ERROR : warning_result;
+    }
+
+    statement.executed = true;
+    statement.result_active = true;
+    statement.database->changes = 0;
+    statement.database->last_insert_id =
+        static_cast<unsigned long long>(mysql_stmt_insert_id(statement.statement));
+
+    const int result_bind_result = bind_statement_results(statement);
+    if (result_bind_result != MYLITE_OK) {
+        return result_bind_result;
+    }
     return fetch_statement_row(statement);
 }
 
