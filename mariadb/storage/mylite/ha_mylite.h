@@ -57,6 +57,7 @@ class ha_mylite: public handler
   ulonglong *index_row_id_scratch;
   unsigned char index_inline_key[MAX_KEY_LENGTH];
   unsigned char direct_update_key_buffer[MAX_KEY_LENGTH];
+  uchar direct_update_key_may_change[MAX_KEY];
   Mylite_index_cursor_entry index_inline_entry;
   size_t *index_row_offsets;
   size_t *index_row_sizes;

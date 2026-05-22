@@ -338,6 +338,9 @@ Accepted MyLite direct updates also skip handler duplicate-key probes during
 their inner row update, relying on the direct-update init gate that rejects
 unique-key-changing assignments and keeping the probes when an `ON UPDATE`
 default could still alter a unique key part.
+They now also cache the accepted statement's per-index key-change mask at
+direct-update initialization and reuse it during row mutation, avoiding
+repeated key metadata walks for indexes that cannot change.
 Ordinary MyLite `SELECT` execution now applies the same explain-detail gate to
 table-access plan fields while keeping MariaDB's runtime trackers initialized,
 and explicit routed `EXPLAIN SELECT` stays on the full plan-detail path.

@@ -250,7 +250,8 @@ static int mylite_prepare_checked_index_entries_with_scratch(
 static int mylite_prepare_index_entry_changes(
     TABLE *table, const uchar *old_buf,
     const mylite_storage_index_entry *new_entries, size_t new_entry_count,
-    uchar *entry_changed, size_t entry_changed_count);
+    uchar *entry_changed, size_t entry_changed_count,
+    const uchar *key_may_change);
 static bool mylite_update_fields_change_direct_unsafe_key(
     TABLE *table, List<Item> *update_fields, bool *out_changes_key);
 static bool mylite_field_is_direct_unsafe_key_part(TABLE *table,
@@ -258,9 +259,10 @@ static bool mylite_field_is_direct_unsafe_key_part(TABLE *table,
                                                    bool *out_is_key_part);
 static bool mylite_direct_update_may_change_unique_key(TABLE *table);
 static bool mylite_key_fields_may_change(TABLE *table, const KEY *key);
-static bool mylite_update_preserves_all_index_entries(TABLE *table,
-                                                      const uchar *old_data,
-                                                      const uchar *new_data);
+static bool
+mylite_update_preserves_all_index_entries(TABLE *table, const uchar *old_data,
+                                          const uchar *new_data,
+                                          const uchar *key_may_change);
 static bool mylite_key_part_records_equal(TABLE *table, const KEY *key,
                                           const uchar *old_data,
                                           const uchar *new_data);
@@ -1348,6 +1350,7 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
 {
   storage_schema_name[0]= '\0';
   storage_table_name[0]= '\0';
+  bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
   strcpy(display_engine_name, MYLITE_STORAGE_ENGINE_NAME);
   display_engine_name_lex.str= display_engine_name;
   display_engine_name_lex.length= strlen(display_engine_name);
@@ -1437,6 +1440,7 @@ void ha_mylite::clear_direct_update_state()
   direct_update_row_in_progress= false;
   direct_update_can_compare_record= false;
   direct_update_can_skip_duplicate_key_checks= false;
+  bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
 }
 
 void ha_mylite::clear_foreign_key_presence_cache() const
@@ -1550,6 +1554,7 @@ const COND *ha_mylite::cond_push(const COND *cond)
   direct_update_key_number= MAX_KEY;
   direct_update_can_compare_record= false;
   direct_update_can_skip_duplicate_key_checks= false;
+  bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
   if (!cond)
     DBUG_RETURN(cond);
 
@@ -1572,6 +1577,7 @@ void ha_mylite::cond_pop()
   direct_update_key_number= MAX_KEY;
   direct_update_can_compare_record= false;
   direct_update_can_skip_duplicate_key_checks= false;
+  bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
 }
 
 int ha_mylite::info_push(uint info_type, void *info)
@@ -1585,6 +1591,7 @@ int ha_mylite::info_push(uint info_type, void *info)
     direct_update_key_number= MAX_KEY;
     direct_update_can_compare_record= false;
     direct_update_can_skip_duplicate_key_checks= false;
+    bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
 
     mylite_update_exact_key_info *key_info=
         static_cast<mylite_update_exact_key_info *>(info);
@@ -1604,11 +1611,13 @@ int ha_mylite::info_push(uint info_type, void *info)
   case INFO_KIND_UPDATE_FIELDS:
     direct_update_can_compare_record= false;
     direct_update_can_skip_duplicate_key_checks= false;
+    bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
     direct_update_fields= static_cast<List<Item> *>(info);
     break;
   case INFO_KIND_UPDATE_VALUES:
     direct_update_can_compare_record= false;
     direct_update_can_skip_duplicate_key_checks= false;
+    bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
     direct_update_values= static_cast<List<Item> *>(info);
     break;
   default:
@@ -1621,11 +1630,12 @@ int ha_mylite::direct_update_rows_init(List<Item> *update_fields)
 {
   DBUG_ENTER("ha_mylite::direct_update_rows_init");
 
-  if (!update_fields || update_fields != direct_update_fields ||
-      !direct_update_values || !direct_update_condition ||
-      !direct_update_key_value || direct_update_key_number == MAX_KEY ||
-      discard_rows || volatile_rows || table_has_blob_fields ||
-      !table_supports_row_lifecycle)
+  if (!table || !table->s || table->s->keys > MAX_KEY || !update_fields ||
+      update_fields != direct_update_fields || !direct_update_values ||
+      !direct_update_condition || !direct_update_key_value ||
+      direct_update_key_number == MAX_KEY ||
+      direct_update_key_number >= table->s->keys || discard_rows ||
+      volatile_rows || table_has_blob_fields || !table_supports_row_lifecycle)
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
 
   if (mylite_table_needs_inserver_update_constraints(table))
@@ -1662,6 +1672,12 @@ int ha_mylite::direct_update_rows_init(List<Item> *update_fields)
   direct_update_can_compare_record= records_are_comparable(table);
   direct_update_can_skip_duplicate_key_checks=
       !mylite_direct_update_may_change_unique_key(table);
+  bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
+  for (uint key_number= 0; key_number < table->s->keys; ++key_number)
+  {
+    direct_update_key_may_change[key_number]=
+        mylite_key_fields_may_change(table, table->key_info + key_number);
+  }
 
   DBUG_RETURN(0);
 }
@@ -3293,9 +3309,11 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
   uchar stack_index_entry_changed[64];
   uchar *index_entry_changed= NULL;
   size_t index_entry_count= 0;
+  const uchar *key_may_change=
+      direct_update_row_in_progress ? direct_update_key_may_change : NULL;
   const bool preserve_index_entries=
-      !volatile_rows &&
-      mylite_update_preserves_all_index_entries(table, old_data, new_data);
+      !volatile_rows && mylite_update_preserves_all_index_entries(
+                            table, old_data, new_data, key_may_change);
   if (!preserve_index_entries)
   {
     error= mylite_prepare_checked_index_entries_with_scratch(
@@ -3315,7 +3333,7 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
     if (!error)
       error= mylite_prepare_index_entry_changes(
           table, old_data, index_entries, index_entry_count,
-          index_entry_changed, index_entry_count);
+          index_entry_changed, index_entry_count, key_may_change);
     if (error)
     {
       if (index_entry_changed != stack_index_entry_changed)
@@ -4868,7 +4886,8 @@ static int mylite_prepare_checked_index_entries_with_scratch(
 static int mylite_prepare_index_entry_changes(
     TABLE *table, const uchar *old_buf,
     const mylite_storage_index_entry *new_entries, size_t new_entry_count,
-    uchar *entry_changed, size_t entry_changed_count)
+    uchar *entry_changed, size_t entry_changed_count,
+    const uchar *key_may_change)
 {
   if (new_entry_count == 0)
     return 0;
@@ -4884,7 +4903,8 @@ static int mylite_prepare_index_entry_changes(
         key_info->key_length > MYLITE_STORAGE_MAX_INDEX_KEY_SIZE)
       return HA_ERR_CRASHED_ON_USAGE;
 
-    if (!mylite_key_fields_may_change(table, key_info))
+    if (key_may_change ? !key_may_change[i]
+                       : !mylite_key_fields_may_change(table, key_info))
     {
       entry_changed[i]= 0;
       continue;
@@ -5009,9 +5029,10 @@ static bool mylite_key_fields_may_change(TABLE *table, const KEY *key)
   return false;
 }
 
-static bool mylite_update_preserves_all_index_entries(TABLE *table,
-                                                      const uchar *old_data,
-                                                      const uchar *new_data)
+static bool
+mylite_update_preserves_all_index_entries(TABLE *table, const uchar *old_data,
+                                          const uchar *new_data,
+                                          const uchar *key_may_change)
 {
   if (!table || !old_data || !new_data)
     return false;
@@ -5022,6 +5043,8 @@ static bool mylite_update_preserves_all_index_entries(TABLE *table,
 
   for (uint i= 0; i < table->s->keys; ++i)
   {
+    if (key_may_change && !key_may_change[i])
+      continue;
     if (!mylite_key_part_records_equal(table, table->key_info + i, old_data,
                                        new_data))
       return false;
