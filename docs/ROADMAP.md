@@ -146,6 +146,9 @@ prepared statement table-open validation before cursor execution.
 File-backed `libmylite` sessions now default `use_stat_tables=NEVER`, avoiding
 repeated MariaDB persistent `mysql.*_stats` table discovery for ordinary query
 planning until MyLite has file-owned statistics.
+The single-table update prepare path now also skips entering the persistent
+statistics reader when that session mode is `NEVER`, removing a redundant
+disabled-statistics frame from prepared update execution.
 Direct and prepared SQL entry points now summarize token-wide unsupported
 surface checks through one shared dispatch helper while preserving the existing
 command-specific diagnostic priority, reducing repeated MyLite policy preflight

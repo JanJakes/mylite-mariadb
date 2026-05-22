@@ -3188,7 +3188,8 @@ bool Sql_cmd_update::prepare_inner(THD *thd)
   bool free_join= 1;
   DBUG_ENTER("Sql_cmd_update::prepare_inner");
 
-  (void) read_statistics_for_tables_if_needed(thd, table_list);
+  if (get_use_stat_tables_mode(thd) != NEVER)
+    (void) read_statistics_for_tables_if_needed(thd, table_list);
 
   THD_STAGE_INFO(thd, stage_init_update);
 
