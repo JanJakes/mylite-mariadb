@@ -21,6 +21,7 @@ static void test_statement_effects(void);
 static void test_transaction_statement_checkpoints(void);
 static void test_prepared_read_scope_invalidates_before_write(void);
 static void test_prepared_read_scope_rejects_active_result_write(void);
+static void test_reset_before_drain_cache_invalidates_before_write(void);
 #endif
 static void test_segment_reads(void);
 static void test_reset_reuse_and_destructors(void);
@@ -68,6 +69,7 @@ int main(void) {
     test_transaction_statement_checkpoints();
     test_prepared_read_scope_invalidates_before_write();
     test_prepared_read_scope_rejects_active_result_write();
+    test_reset_before_drain_cache_invalidates_before_write();
 #endif
     test_segment_reads();
     test_reset_reuse_and_destructors();
@@ -554,6 +556,58 @@ static void test_prepared_read_scope_rejects_active_result_write(void) {
     assert(mylite_finalize(select_stmt) == MYLITE_OK);
 
     assert_query_single_int(db, "SELECT COUNT(*) FROM active_read_posts", 3);
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_reset_before_drain_cache_invalidates_before_write(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    mylite_stmt *select_stmt = NULL;
+
+    assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "USE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(
+            db,
+            "CREATE TABLE reset_cache_posts ("
+            "id INT NOT NULL PRIMARY KEY,"
+            "qty INT NOT NULL"
+            ") ENGINE=InnoDB",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(
+        mylite_exec(db, "INSERT INTO reset_cache_posts VALUES (1, 10)", NULL, NULL, NULL) ==
+        MYLITE_OK
+    );
+
+    select_stmt = prepare_statement(db, "SELECT qty FROM reset_cache_posts WHERE id = ?");
+    assert(mylite_bind_int64(select_stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(select_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(select_stmt, 0U) == 10);
+    assert(mylite_reset(select_stmt) == MYLITE_OK);
+
+    assert(mylite_bind_int64(select_stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(select_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(select_stmt, 0U) == 10);
+    assert(mylite_reset(select_stmt) == MYLITE_OK);
+
+    assert(
+        mylite_exec(db, "UPDATE reset_cache_posts SET qty = 11 WHERE id = 1", NULL, NULL, NULL) ==
+        MYLITE_OK
+    );
+    assert(mylite_bind_int64(select_stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(select_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(select_stmt, 0U) == 11);
+    assert(mylite_finalize(select_stmt) == MYLITE_OK);
+
+    assert_query_single_int(db, "SELECT qty FROM reset_cache_posts WHERE id = 1", 11);
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);
     remove_tree(root);

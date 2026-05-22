@@ -528,6 +528,7 @@ bool prepared_statement_has_table_result_column(const mylite_stmt &statement);
 int execute_cached_one_row_result(mylite_stmt &statement, bool *out_used_cache);
 void begin_one_row_result_cache_execution(mylite_stmt &statement);
 void capture_one_row_result_cache_row(mylite_stmt &statement);
+int finish_one_row_result_cache_before_reset(mylite_stmt &statement);
 void store_one_row_result_cache_entry(mylite_stmt &statement);
 void clear_one_row_result_cache(mylite_stmt &statement);
 void clear_one_row_result_cache_execution(mylite_stmt &statement);
@@ -974,10 +975,18 @@ int mylite_reset(mylite_stmt *statement) {
         if (statement->one_row_result_cache_hit_active) {
             statement->one_row_result_cache_hit_active = false;
             statement->result_active = false;
-            abandoned_active_result = true;
+            statement->done = true;
         } else
 #  endif
             if (statement->result_active) {
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+            const int finish_cache_result = finish_one_row_result_cache_before_reset(*statement);
+            if (finish_cache_result != MYLITE_OK) {
+                return finish_cache_result;
+            }
+#  endif
+        }
+        if (statement->result_active) {
             if (mysql_stmt_free_result(statement->statement) != 0) {
                 set_mariadb_statement_error(*statement);
                 return MYLITE_ERROR;
@@ -2595,6 +2604,19 @@ void capture_one_row_result_cache_row(mylite_stmt &statement) {
         statement.one_row_result_cache_pending = false;
         statement.one_row_result_cache_pending_values.clear();
     }
+}
+
+int finish_one_row_result_cache_before_reset(mylite_stmt &statement) {
+    if (!statement.uses_one_row_result_cache || !statement.one_row_result_cache_pending ||
+        statement.one_row_result_cache_execution_multi_row || !statement.reusable_result_binds) {
+        return MYLITE_OK;
+    }
+
+    const int fetch_result = fetch_statement_row(statement);
+    if (fetch_result == MYLITE_ERROR) {
+        return MYLITE_ERROR;
+    }
+    return MYLITE_OK;
 }
 
 void store_one_row_result_cache_entry(mylite_stmt &statement) {

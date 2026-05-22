@@ -204,14 +204,14 @@ Repeated transient text/blob binds now also reuse stable owned buffers without
 rebinding MariaDB parameters when the last bound buffer remains valid.
 Successful non-result prepared resets also avoid a redundant MariaDB statement
 reset before re-execution. Fully drained result-producing prepared statements
-now do the same, while reset-before-drain and failed statements keep the full
-MariaDB reset path. The fully drained `MYSQL_NO_DATA` path also avoids
-`mysql_stmt_free_result()` for MyLite's unbuffered prepared result loop, while
-reset-before-drain still frees active results. Reset-after-row prepared result
-reuse now also skips the redundant MariaDB statement reset after the active
-result is successfully freed. Successful non-result prepared execution now also
-skips the redundant post-DML `mysql_stmt_free_result()` call because the next
-MariaDB execute resets stored-result state before running. Prepared non-result
+now do the same, while failed statements keep the full MariaDB reset path. The
+fully drained `MYSQL_NO_DATA` path also avoids `mysql_stmt_free_result()` for
+MyLite's unbuffered prepared result loop. Reset-before-drain for fixed-width
+one-row cache candidates now probes one additional row; if it reaches `DONE`,
+it publishes the cache entry and keeps the read scope instead of freeing the
+active result. Successful non-result prepared execution now also skips the
+redundant post-DML `mysql_stmt_free_result()` call because the next MariaDB
+execute resets stored-result state before running. Prepared non-result
 execution now also reuses the
 immutable
 SQL policy classified at prepare time, so ordinary prepared DML no longer
@@ -259,10 +259,11 @@ read-statement object reuse, scoped filename borrowing, clean prepared-state
 bookkeeping, lean reusable read-statement reset, and SELECT explain-detail
 gating.
 Reusable file-backed prepared reads now retain one connection-owned storage read
-scope across fully drained reset/re-execute loops and close it before
-connection-local writes, reducing the local routed prepared primary-key
-point-select sample to about 2.7 us/op while reset-before-drain remains on the
-short-lived read-scope path.
+scope across reset/re-execute loops and close it before connection-local writes,
+reducing the local routed prepared primary-key point-select sample to about
+2.7 us/op. Fixed-width one-row reset-before-drain now reuses that same retained
+scope after a bounded `DONE` probe, reducing the local reset-after-row sample
+from about 5015 us/op to about 1.1 us/op.
 Handler-local read scopes now detect that retained outer read scope and skip
 creating redundant nested read statements, reducing the same local point-select
 sample to about 2.3 us/op without broadening handler read-lock lifetime.
