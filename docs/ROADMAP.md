@@ -202,9 +202,11 @@ reparses its SQL text for no-op transaction or temporary-table lifecycle
 updates after every successful step. Ordinary result-producing prepared
 statements that do not need MyLite lifecycle, transaction-control, or checkpoint
 machinery now execute through a smaller first-step fast path before binding
-results and fetching the first row. The local performance baseline now includes
-a prepared scalar-result phase that avoids routed storage, providing a lower
-bound for prepared result overhead when judging point-read storage/pager work.
+results and fetching the first row. Clean prepared result loops now skip
+warning-vector clearing and current-row cleanup when the database handle and
+statement are already in that clean state. The local performance baseline now
+includes a prepared scalar-result phase that avoids routed storage, providing a
+lower bound for prepared result overhead when judging point-read storage/pager work.
 It also includes storage-level primary-key entry and row lookup phases that use
 stored primary-key bytes with the MyLite storage API directly, separating raw
 storage read-scope, row-materialization, and MariaDB prepared execution cost.
@@ -214,10 +216,11 @@ read-statement phase measures begin/end overhead directly.
 Hot read-checkpoint cache hits now borrow the cached catalog image for scoped
 catalog views and defer catalog page copies until a caller needs page bytes,
 instead of deep-copying that state into every short-lived read statement.
-The local storage-smoke benchmark now shows read-statement begin/end at
-3.527 us/op, storage primary-key row lookups at 4.255 us/op, and routed
-prepared primary-key point selects at 7.243 us/op on the current machine after
-read-statement object reuse and scoped filename borrowing.
+Recent local storage-smoke benchmark samples show read-statement begin/end at
+3.527 us/op, storage primary-key row lookups in the 4-5 us/op range, and routed
+prepared primary-key point selects at 7.800 us/op on the current machine after
+read-statement object reuse, scoped filename borrowing, and clean prepared-state
+bookkeeping.
 The durable row-payload cache now retains a larger bounded hot set, reducing
 steady-state 10000-row storage row materialization and routed prepared
 primary-key point-select time for the local benchmark.

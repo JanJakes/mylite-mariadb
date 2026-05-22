@@ -763,6 +763,7 @@ void remove_directory_if_present(const std::filesystem::path &directory);
 int copy_error_message(mylite_db &database, char **errmsg);
 #if MYLITE_WITH_MARIADB_EMBEDDED
 void clear_warnings(mylite_db &database);
+void clear_warnings_if_needed(mylite_db &database);
 #endif
 void set_ok_if_needed(mylite_db &database);
 void set_ok(mylite_db &database);
@@ -1622,7 +1623,7 @@ int exec_impl(
     StorageBusyTimeoutScope busy_timeout(database->busy_timeout_ms);
     StorageContextScope storage_context(database);
     set_ok(*database);
-    clear_warnings(*database);
+    clear_warnings_if_needed(*database);
     const std::string_view sql_view(sql);
     const bool schema_selection_sql = is_use_schema_sql(sql_view);
     const bool ansi_quotes = mylite_session_ansi_quotes(*database);
@@ -1829,7 +1830,7 @@ int prepare_impl(
     StorageBusyTimeoutScope busy_timeout(database->busy_timeout_ms);
     StorageContextScope storage_context(database);
     set_ok(*database);
-    clear_warnings(*database);
+    clear_warnings_if_needed(*database);
     const std::string_view sql_view(sql, sql_len);
     const bool ansi_quotes = mylite_session_ansi_quotes(*database);
     const TransactionControlKind transaction_control =
@@ -2067,7 +2068,7 @@ int bind_statement_parameters(mylite_stmt &statement) {
 
 int execute_statement(mylite_stmt &statement) {
     set_ok_if_needed(*statement.database);
-    clear_warnings(*statement.database);
+    clear_warnings_if_needed(*statement.database);
     clear_current_row_for_reuse(statement);
 
     if (statement.uses_simple_result_execution) {
@@ -3389,12 +3390,13 @@ int materialize_column_value(mylite_stmt &statement, unsigned column) {
 }
 
 int capture_warnings(mylite_db &database, unsigned warning_count, bool force_query) {
-    clear_warnings(database);
-    database.warning_count = warning_count;
     if (warning_count == 0U && !force_query) {
+        clear_warnings_if_needed(database);
         return MYLITE_OK;
     }
 
+    clear_warnings(database);
+    database.warning_count = warning_count;
     if (mysql_query(&database.mysql, "SHOW WARNINGS") != 0) {
         clear_warnings(database);
         set_mariadb_error(database);
@@ -3459,6 +3461,9 @@ bool mylite_session_ansi_quotes(const mylite_db &database) {
 }
 
 void clear_current_row_for_reuse(mylite_stmt &statement) {
+    if (!statement.has_current_row) {
+        return;
+    }
     if (statement.reusable_result_binds) {
         statement.has_current_row = false;
         return;
@@ -7491,6 +7496,13 @@ int copy_error_message(mylite_db &database, char **errmsg) {
 void clear_warnings(mylite_db &database) {
     database.warning_count = 0;
     database.warnings.clear();
+}
+
+void clear_warnings_if_needed(mylite_db &database) {
+    if (database.warning_count == 0U && database.warnings.empty()) {
+        return;
+    }
+    clear_warnings(database);
 }
 #endif
 
