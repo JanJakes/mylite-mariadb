@@ -93,6 +93,7 @@ struct ResultColumn {
     unsigned int flags = 0;
     std::string name;
     std::vector<unsigned char> buffer;
+    std::vector<unsigned char> retired_buffer;
     unsigned long length = 0;
     my_bool is_null = 0;
     my_bool error = 0;
@@ -146,6 +147,7 @@ struct mylite_stmt {
     std::vector<MYSQL_BIND> parameter_binds;
     std::vector<ResultColumn> columns;
     std::vector<MYSQL_BIND> result_binds;
+    bool result_binds_dirty = false;
 #endif
     bool executed = false;
     bool has_result = false;
@@ -213,8 +215,10 @@ int store_and_emit_result(
 );
 int initialize_statement_results(mylite_stmt &stmt);
 int fetch_statement_row(mylite_stmt &stmt);
+int refresh_dirty_result_binds(mylite_stmt &stmt);
 int fetch_truncated_statement_columns(mylite_stmt &stmt);
 int configure_column_buffer(ResultColumn &column, unsigned long buffer_length);
+int allocate_column_buffer(std::vector<unsigned char> &buffer, unsigned long buffer_length);
 void release_statement_results(mylite_stmt &stmt);
 ParameterBinding *parameter_at(mylite_stmt &stmt, unsigned index);
 int bind_null_value(mylite_stmt &stmt, unsigned index);
@@ -2218,6 +2222,11 @@ int initialize_statement_results(mylite_stmt &stmt) {
 }
 
 int fetch_statement_row(mylite_stmt &stmt) {
+    const int bind_result = refresh_dirty_result_binds(stmt);
+    if (bind_result != MYLITE_OK) {
+        return bind_result;
+    }
+
     const int fetch_result = mysql_stmt_fetch(stmt.stmt);
     if (fetch_result == MYSQL_NO_DATA) {
         stmt.has_row = false;
@@ -2245,6 +2254,22 @@ int fetch_statement_row(mylite_stmt &stmt) {
     return MYLITE_ROW;
 }
 
+int refresh_dirty_result_binds(mylite_stmt &stmt) {
+    if (!stmt.result_binds_dirty) {
+        return MYLITE_OK;
+    }
+
+    if (mysql_stmt_bind_result(stmt.stmt, stmt.result_binds.data()) != 0) {
+        set_mariadb_statement_error(stmt);
+        return MYLITE_ERROR;
+    }
+    for (ResultColumn &column : stmt.columns) {
+        std::vector<unsigned char>().swap(column.retired_buffer);
+    }
+    stmt.result_binds_dirty = false;
+    return MYLITE_OK;
+}
+
 int fetch_truncated_statement_columns(mylite_stmt &stmt) {
     for (unsigned index = 0; index < stmt.columns.size(); ++index) {
         ResultColumn &column = stmt.columns[index];
@@ -2257,31 +2282,50 @@ int fetch_truncated_statement_columns(mylite_stmt &stmt) {
         }
 
         const unsigned long buffer_length = std::max(column.length, 1UL);
-        if (configure_column_buffer(column, buffer_length) != MYLITE_OK) {
+        std::vector<unsigned char> buffer;
+        if (allocate_column_buffer(buffer, buffer_length) != MYLITE_OK) {
             set_error(*stmt.db, MYLITE_NOMEM, "result column buffer could not be allocated");
             return MYLITE_NOMEM;
         }
-        stmt.result_binds[index] = column.bind;
-        if (mysql_stmt_fetch_column(stmt.stmt, &stmt.result_binds[index], index, 0) != 0) {
+
+        MYSQL_BIND fetch_bind = column.bind;
+        fetch_bind.buffer = buffer.data();
+        fetch_bind.buffer_length = buffer_length;
+        if (mysql_stmt_fetch_column(stmt.stmt, &fetch_bind, index, 0) != 0) {
             set_mariadb_statement_error(stmt);
             return MYLITE_ERROR;
         }
+
+        column.retired_buffer = std::move(column.buffer);
+        column.buffer = std::move(buffer);
+        column.bind = fetch_bind;
+        column.bind.buffer = column.buffer.data();
+        stmt.result_binds[index] = column.bind;
+        stmt.result_binds_dirty = true;
     }
     return MYLITE_OK;
 }
 
 int configure_column_buffer(ResultColumn &column, unsigned long buffer_length) {
+    const int result = allocate_column_buffer(column.buffer, buffer_length);
+    if (result != MYLITE_OK) {
+        return result;
+    }
+    column.bind.buffer = column.buffer.data();
+    column.bind.buffer_length = buffer_length;
+    return MYLITE_OK;
+}
+
+int allocate_column_buffer(std::vector<unsigned char> &buffer, unsigned long buffer_length) {
     if (buffer_length == ULONG_MAX) {
         return MYLITE_NOMEM;
     }
 
     try {
-        column.buffer.assign(buffer_length + 1UL, 0U);
+        buffer.assign(buffer_length + 1UL, 0U);
     } catch (const std::bad_alloc &) {
         return MYLITE_NOMEM;
     }
-    column.bind.buffer = column.buffer.data();
-    column.bind.buffer_length = buffer_length;
     return MYLITE_OK;
 }
 
@@ -2295,6 +2339,7 @@ void release_statement_results(mylite_stmt &stmt) {
     }
     stmt.columns.clear();
     stmt.result_binds.clear();
+    stmt.result_binds_dirty = false;
     stmt.has_result = false;
     stmt.has_row = false;
 }

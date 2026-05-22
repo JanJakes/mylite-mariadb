@@ -60,6 +60,23 @@ expect_true($result->fetch_assoc() === null, 'result should be exhausted');
 $expectedEscape = 'A' . '\\0' . '\\n' . '\\r' . '\\\\' . "\\'" . '\\"' . '\\Z' . 'B';
 expect_true($db->real_escape_string("A\0\n\r\\'\"\x1aB") === $expectedEscape, 'real_escape_string mismatch');
 
+$largeBody = str_repeat('large-result-', 600);
+expect_true(
+    $db->query('CREATE TABLE large_notes (body LONGTEXT) ENGINE=MyISAM') === true,
+    'large result CREATE TABLE failed'
+);
+expect_true(
+    $db->query("INSERT INTO large_notes VALUES ('" . $db->real_escape_string($largeBody) . "')") === true,
+    'large result INSERT failed'
+);
+$result = $db->query('SELECT body FROM large_notes');
+expect_true($result instanceof MyLite\MySQLiResult, 'large result SELECT did not return MySQLiResult');
+expect_true($result->fetch_assoc() === ['body' => $largeBody], 'large truncated result body mismatch');
+expect_true(
+    $db->query('SELECT id FROM people WHERE id = 1')->fetch_assoc() === ['id' => 1],
+    'query after large result failed'
+);
+
 $stmt = $db->prepare('INSERT INTO people VALUES (?, ?)');
 $id = 2;
 $name = 'Grace';
