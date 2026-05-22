@@ -201,6 +201,9 @@ bound for prepared result overhead when judging point-read storage/pager work.
 It also includes storage-level primary-key entry and row lookup phases that use
 stored primary-key bytes with the MyLite storage API directly, separating raw
 storage read-scope, row-materialization, and MariaDB prepared execution cost.
+The durable row-payload cache now retains a larger bounded hot set, reducing
+steady-state 10000-row storage row materialization and routed prepared
+primary-key point-select time for the local benchmark.
 Hot successful prepared binds, resets, and
 execution entry also skip redundant OK diagnostic string assignment when the
 database handle is already in the OK state. Single-part non-null unique-key `UPDATE`
