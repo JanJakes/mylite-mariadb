@@ -1,0 +1,17 @@
+select @@have_dynamic_loading;
+@@have_dynamic_loading
+NO
+create table load_target (id int);
+load data infile '/tmp/mylite-load.csv' into table load_target;
+ERROR 42000: This version of MariaDB doesn't yet support 'LOAD DATA/LOAD XML in the MyLite embedded profile'
+drop table load_target;
+handler no_such_table open;
+ERROR 42000: This version of MariaDB doesn't yet support 'SQL HANDLER in the MyLite embedded profile'
+handler no_such_table read first;
+ERROR 42000: This version of MariaDB doesn't yet support 'SQL HANDLER in the MyLite embedded profile'
+create sequence blocked_seq;
+ERROR 42000: This version of MariaDB doesn't yet support 'SQL sequences in the MyLite embedded profile'
+select * from json_table('[1]', '$[*]' columns (id int path '$')) as jt;
+ERROR 42000: This version of MariaDB doesn't yet support 'JSON_TABLE in the MyLite embedded profile'
+select st_astext(st_pointfromtext('POINT(1 1)'));
+ERROR 42000: FUNCTION test.st_astext does not exist

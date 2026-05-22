@@ -40,6 +40,9 @@ MariaDB base: `mariadb-11.8.6`
   `mariadb/mysql-test/suite/mylite/t/bootstrap_schema.test`.
 - Verified command:
   `tools/mylite-mtr-harness run mylite.bootstrap_schema`.
+- [MTR profile disabled surface smoke](../mtr-profile-disabled-surface-smoke/specs.md)
+  adds `mylite.profile_disabled_surfaces`, covering selected SQL surfaces that
+  the MyLite MTR smoke profile intentionally compiles out.
 - `mariadb/mysql-test/main/cast.test` exercises MariaDB scalar CAST/CONVERT
   semantics, temporal precision conversion, numeric overflow and truncation
   warnings, character-set conversion, and result metadata through a mix of
@@ -175,6 +178,7 @@ feature checks is treated as no coverage and fails `run` or the overall
 The default curated list remains intentionally baseline-oriented:
 
 - `mylite.bootstrap_schema`.
+- `mylite.profile_disabled_surfaces`.
 - `main.cast`.
 - `main.case`.
 - `main.ansi`.

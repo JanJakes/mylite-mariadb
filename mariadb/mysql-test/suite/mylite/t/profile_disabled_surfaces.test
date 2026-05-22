@@ -1,0 +1,22 @@
+#
+# Check SQL surfaces that the MyLite MTR smoke profile intentionally compiles
+# out of the embedded server build.
+#
+
+select @@have_dynamic_loading;
+
+create table load_target (id int);
+--error ER_NOT_SUPPORTED_YET
+load data infile '/tmp/mylite-load.csv' into table load_target;
+drop table load_target;
+
+--error ER_NOT_SUPPORTED_YET
+handler no_such_table open;
+--error ER_NOT_SUPPORTED_YET
+handler no_such_table read first;
+--error ER_NOT_SUPPORTED_YET
+create sequence blocked_seq;
+--error ER_NOT_SUPPORTED_YET
+select * from json_table('[1]', '$[*]' columns (id int path '$')) as jt;
+--error ER_SP_DOES_NOT_EXIST
+select st_astext(st_pointfromtext('POINT(1 1)'));

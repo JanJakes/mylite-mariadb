@@ -8,6 +8,7 @@ mtr_build_thread="${MTR_BUILD_THREAD:-auto}"
 mtr_probe_testcase_timeout_minutes="${MTR_PROBE_TESTCASE_TIMEOUT_MINUTES:-5}"
 default_tests=(
   mylite.bootstrap_schema
+  mylite.profile_disabled_surfaces
   main.cast
   main.case
   main.ansi

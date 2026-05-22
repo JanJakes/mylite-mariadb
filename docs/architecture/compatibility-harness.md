@@ -73,6 +73,7 @@ behavior, selected boolean aggregate/HAVING expression behavior, DDL/comment
 metadata, selected MTR-profile view, trigger, and stored-procedure DDL/runtime
 behavior, DDL constraint/index metadata, selected Aria ALTER/index-upgrade
 behavior, selected lock-table DDL behavior, deprecated server syntax rejection,
+selected embedded-profile disabled SQL-surface behavior,
 `ORDER BY`, optimizer-cost metadata, selected EXPLAIN plan output,
 selected Aria range, semijoin, and rowid-filter optimizer behavior, selected
 UNION, EXCEPT / EXCEPT ALL, INTERSECT, and mixed set-operation behavior,
@@ -96,8 +97,8 @@ It uses a separate
 profile because the default embedded profile intentionally omits view, stored
 program, trigger, and binlog sysvar surfaces that MTR bootstrap still expects.
 The curated list also covers selected filesystem charset,
-UTF-32 `character_set_collations`, and JSON equality/normalization behavior. It remains
-outside the default compatibility groups because it builds
+UTF-32 `character_set_collations`, and JSON equality/normalization behavior.
+It remains outside the default compatibility groups because it builds
 `mariadbd` and several upstream client/support tools. Broader MTR integration
 should be a separate comparison slice with explicit include lists, expected
 unsupported surfaces, and stable result normalization.
