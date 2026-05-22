@@ -72,7 +72,8 @@ parser/comment, comparison, selected boolean aggregate/HAVING expression
 behavior, DDL/comment metadata, DDL constraint/index metadata, selected
 lock-table DDL behavior, deprecated server syntax
 rejection, `ORDER BY`, optimizer-cost metadata, selected EXPLAIN plan output,
-SIGNAL/RESIGNAL diagnostics, row constructors, selected scalar
+selected Aria rowid-filter optimizer behavior, SIGNAL/RESIGNAL diagnostics,
+row constructors, selected scalar
 `LAST_VALUE()`, window `FIRST_VALUE()` / `LAST_VALUE()`, percentile/median,
 and window-function behavior, selected `IF()` / `NULLIF()` conditional
 expressions, selected SET-family scalar functions, scalar operator,

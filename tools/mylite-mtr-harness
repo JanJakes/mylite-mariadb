@@ -110,6 +110,7 @@ default_tests=(
   main.order_by_optimizer
   main.order_by-mdev-10122
   main.optimizer_costs2
+  main.rowid_filter_aria
   main.explain
   main.order_fill_sortbuf
   main.subselect_union_rand

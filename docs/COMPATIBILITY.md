@@ -115,7 +115,8 @@ selected DDL constraint/index metadata and UCA CTAS behavior, selected
 lock-table DDL behavior, selected deprecated server syntax rejection,
 selected `ORDER BY` optimizer
 and aggregate-ordering behavior, optimizer-cost metadata, selected EXPLAIN
-plan output, UNION, prepared-statement behavior, selected SIGNAL/RESIGNAL
+plan output, selected Aria rowid-filter optimizer behavior, UNION,
+prepared-statement behavior, selected SIGNAL/RESIGNAL
 diagnostics and row-constructor behavior, selected scalar `LAST_VALUE()`,
 window `FIRST_VALUE()` / `LAST_VALUE()`, percentile/median, and
 window-function behavior, selected `IF()` / `NULLIF()` conditional expression
