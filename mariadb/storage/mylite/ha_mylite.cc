@@ -1728,7 +1728,7 @@ int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
   bool direct_found= false;
   error= read_exact_unique_index_row_into(
       direct_update_key_number, direct_update_key_buffer, key_info->key_length,
-      table->record[0], &direct_applied, &direct_found);
+      table->record[0], &direct_applied, &direct_found, true);
   if (error)
     DBUG_RETURN(error);
   if (!direct_applied)
@@ -2527,7 +2527,8 @@ int ha_mylite::index_read_map(uchar *buf, const uchar *key,
     bool direct_applied= false;
     bool direct_found= false;
     const int error= read_exact_unique_index_row_into(
-        active_index, key, key_length, buf, &direct_applied, &direct_found);
+        active_index, key, key_length, buf, &direct_applied, &direct_found,
+        false);
     if (error)
       DBUG_RETURN(error);
     if (direct_applied)
@@ -2559,31 +2560,39 @@ int ha_mylite::index_read_map(uchar *buf, const uchar *key,
   DBUG_RETURN(read_index_cursor_row(buf, entry_index));
 }
 
-int ha_mylite::read_exact_unique_index_row_into(uint index_number,
-                                                const uchar *key_filter,
-                                                uint key_filter_length,
-                                                uchar *buf, bool *out_applied,
-                                                bool *out_found)
+int ha_mylite::read_exact_unique_index_row_into(
+    uint index_number, const uchar *key_filter, uint key_filter_length,
+    uchar *buf, bool *out_applied, bool *out_found,
+    bool trusted_exact_unique_filter)
 {
   DBUG_ENTER("ha_mylite::read_exact_unique_index_row_into");
   *out_applied= false;
   *out_found= false;
 
   if (discard_rows || volatile_rows || table_has_blob_fields ||
-      index_number >= table->s->keys ||
-      !mylite_key_is_supported(table->key_info + index_number))
+      index_number >= table->s->keys)
     DBUG_RETURN(0);
 
   KEY *key_info= table->key_info + index_number;
   const bool full_key_filter= key_filter != NULL && key_filter_length > 0 &&
                               key_filter_length == key_info->key_length;
-  const bool non_nullable_full_key_filter=
-      full_key_filter && !(key_info->flags & HA_NULL_PART_KEY);
-  const bool raw_exact_unique_filter=
-      non_nullable_full_key_filter && (key_info->flags & HA_NOSAME) &&
-      mylite_key_uses_raw_exact_filter(key_info);
-  if (!raw_exact_unique_filter)
-    DBUG_RETURN(0);
+  if (trusted_exact_unique_filter)
+  {
+    if (!full_key_filter)
+      DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+  }
+  else
+  {
+    if (!mylite_key_is_supported(key_info))
+      DBUG_RETURN(0);
+    const bool non_nullable_full_key_filter=
+        full_key_filter && !(key_info->flags & HA_NULL_PART_KEY);
+    const bool raw_exact_unique_filter=
+        non_nullable_full_key_filter && (key_info->flags & HA_NOSAME) &&
+        mylite_key_uses_raw_exact_filter(key_info);
+    if (!raw_exact_unique_filter)
+      DBUG_RETURN(0);
+  }
 
   const char *primary_file= mylite_primary_file_path();
   if (!primary_file)
@@ -2659,7 +2668,7 @@ int ha_mylite::index_read_idx_map(uchar *buf, uint index, const uchar *key,
     bool direct_applied= false;
     bool direct_found= false;
     const int direct_error= read_exact_unique_index_row_into(
-        index, key, key_length, buf, &direct_applied, &direct_found);
+        index, key, key_length, buf, &direct_applied, &direct_found, false);
     if (direct_error)
       DBUG_RETURN(direct_error);
     if (direct_applied)

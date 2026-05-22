@@ -122,7 +122,8 @@ class ha_mylite: public handler
   int read_exact_unique_index_row_into(uint index_number,
                                        const uchar *key_filter,
                                        uint key_filter_length, uchar *buf,
-                                       bool *out_applied, bool *out_found);
+                                       bool *out_applied, bool *out_found,
+                                       bool trusted_exact_unique_filter);
   int build_direct_update_key(bool *out_has_key);
   int record_blob_payload_slot(const uchar *buf, size_t *out_slot) const;
   int preserve_record_blob_payloads(uchar *buf);

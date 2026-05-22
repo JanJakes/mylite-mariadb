@@ -326,6 +326,9 @@ The accepted direct-update path now hands that SQL-layer proof to the MyLite
 handler through `info_push()`, so the handler can skip rediscovering the same
 exact-key predicate while still evaluating the original `WHERE` condition
 before applying the row update.
+The handler direct-update row read now trusts that accepted exact-key proof for
+its private target-row lookup, leaving generic index reads on the defensive
+key-support and raw-exact eligibility path.
 Ordinary MyLite `UPDATE` / `DELETE` execution now skips eager quick-plan
 explain detail allocation unless explicit `EXPLAIN`, `ANALYZE`, or slow-log
 explain/engine detail needs it, while routed `EXPLAIN UPDATE` keeps the full
