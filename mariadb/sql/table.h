@@ -1784,6 +1784,10 @@ public:
   */
   bool is_filled_at_execution();
 
+  void clear_const_key_parts()
+  {
+    bzero((char *) const_key_parts, sizeof(key_part_map) * s->total_keys);
+  }
   bool update_const_key_parts(COND *conds);
   void update_keypart_vcol_info();
 

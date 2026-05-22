@@ -9161,7 +9161,7 @@ void init_mdl_requests(TABLE_LIST *table_list)
 
 bool TABLE::update_const_key_parts(COND *conds)
 {
-  bzero((char*) const_key_parts, sizeof(key_part_map) * s->total_keys);
+  clear_const_key_parts();
 
   if (conds == NULL)
     return FALSE;

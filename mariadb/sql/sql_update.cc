@@ -376,6 +376,7 @@ bool Sql_cmd_update::update_single_table(THD *thd)
   List<Item> all_fields;
   killed_state killed_status= NOT_KILLED;
   bool has_triggers, binlog_is_row, do_direct_update= FALSE;
+  bool unique_key_quick= FALSE;
   /*
     TRUE if we are after the call to
     select_lex->optimize_unflattened_subqueries(true) and before the
@@ -574,7 +575,12 @@ bool Sql_cmd_update::update_single_table(THD *thd)
     table->mark_columns_needed_for_update();
   }
 
-  table->update_const_key_parts(conds);
+  unique_key_quick=
+      select && select->quick && select->quick->unique_key_range();
+  if (!order && unique_key_quick)
+    table->clear_const_key_parts();
+  else
+    table->update_const_key_parts(conds);
   order= simple_remove_const(order, conds);
 
   /*
@@ -590,7 +596,7 @@ bool Sql_cmd_update::update_single_table(THD *thd)
     DBUG_RETURN(TRUE);
   need_to_optimize= FALSE;
 
-  if (select && select->quick && select->quick->unique_key_range())
+  if (unique_key_quick)
   {
     /* Single row select (always "ordered"): Ok to use with key field UPDATE */
     need_sort= FALSE;
