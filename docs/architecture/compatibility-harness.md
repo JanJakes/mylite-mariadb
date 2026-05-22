@@ -68,8 +68,9 @@ smoke list covering the MyLite trimmed bootstrap schema, upstream scalar
 CAST/CONVERT, CASE-family and ANSI SQL-mode expression, selected numeric,
 integer, varchar, binary-string, binary/national character, date/timezone,
 temporal literal, system-timezone,
-parser/comment, comparison, DDL/comment metadata, DDL constraint/index
-metadata, selected lock-table DDL behavior, deprecated server syntax
+parser/comment, comparison, selected boolean aggregate/HAVING expression
+behavior, DDL/comment metadata, DDL constraint/index metadata, selected
+lock-table DDL behavior, deprecated server syntax
 rejection, `ORDER BY`, optimizer-cost metadata, selected EXPLAIN plan output,
 SIGNAL/RESIGNAL diagnostics, row constructors, selected scalar
 `LAST_VALUE()`, window `FIRST_VALUE()` / `LAST_VALUE()`, percentile/median,

@@ -3,7 +3,8 @@
 --echo # do_select
 --echo #
 
-CREATE TABLE t (a INT) ENGINE=MyISAM;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
+CREATE TABLE t (a INT) ENGINE=Aria;
 INSERT INTO t VALUES (1);
 SELECT VARIANCE(a) AS f1, VARIANCE(a) AS f2 FROM t WHERE ROWNUM() = 2 HAVING f1 > 1;
 

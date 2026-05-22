@@ -107,7 +107,8 @@ high-resolution temporal function, microsecond parsing, and time/datetime
 comparison behavior,
 selected parser/comment, keyword,
 CTE-cycle, precedence, expression, type-coercion, rounding, safe-update, and
-comparison behavior, selected `IN` / `NOT IN` predicate behavior, selected
+comparison behavior, selected boolean aggregate/HAVING expression behavior,
+selected `IN` / `NOT IN` predicate behavior, selected
 subquery, update-ignore, `REPLACE`, `RETURNING`, temporary create-or-replace,
 primary-key lookup, selected DDL/name and comment metadata behavior,
 selected DDL constraint/index metadata and UCA CTAS behavior, selected
