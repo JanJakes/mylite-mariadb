@@ -2797,7 +2797,7 @@ static mylite_storage_result validate_direct_live_row_in_statement(
     unsigned char *page,
     mylite_storage_row_page *out_row_page
 );
-static mylite_storage_result validate_direct_live_row_in_statement_cache(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result validate_direct_live_row_in_statement_cache(
     mylite_storage_statement *statement,
     mylite_storage_live_row_cache **inout_cache,
     int active_row_payload_cache_resolved,
@@ -2809,6 +2809,16 @@ static mylite_storage_result validate_direct_live_row_in_statement_cache(
     unsigned char *page,
     mylite_storage_row_page *out_row_page,
     mylite_storage_row_payload_cache_entry **out_active_payload_entry
+);
+static mylite_storage_result load_direct_live_row_in_statement_cache(
+    mylite_storage_statement *statement,
+    mylite_storage_live_row_cache **inout_cache,
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned long long row_id,
+    unsigned char *page,
+    mylite_storage_row_page *out_row_page
 );
 static mylite_storage_result row_is_hidden_after(
     FILE *file,
@@ -21623,7 +21633,7 @@ static mylite_storage_result validate_direct_live_row_in_statement(
     );
 }
 
-static mylite_storage_result validate_direct_live_row_in_statement_cache(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result validate_direct_live_row_in_statement_cache(
     mylite_storage_statement *statement,
     mylite_storage_live_row_cache **inout_cache,
     int active_row_payload_cache_resolved,
@@ -21675,6 +21685,28 @@ static mylite_storage_result validate_direct_live_row_in_statement_cache(
         return MYLITE_STORAGE_OK;
     }
 
+    return load_direct_live_row_in_statement_cache(
+        statement,
+        inout_cache,
+        file,
+        header,
+        table_id,
+        row_id,
+        page,
+        out_row_page
+    );
+}
+
+static mylite_storage_result load_direct_live_row_in_statement_cache(
+    mylite_storage_statement *statement,
+    mylite_storage_live_row_cache **inout_cache,
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long table_id,
+    unsigned long long row_id,
+    unsigned char *page,
+    mylite_storage_row_page *out_row_page
+) {
     mylite_storage_row_page row_page = {0};
     mylite_storage_result result = read_row_page(file, header, row_id, page, &row_page);
     if (result == MYLITE_STORAGE_NOTFOUND) {

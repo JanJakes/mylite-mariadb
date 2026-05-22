@@ -405,6 +405,9 @@ Active update rewrite probes now hot-inline row-shape, row-id hash, and compact
 undo-size helpers used by prepared point-update rewrites.
 Repeated table-id resolution now returns through an inlined active table-entry
 cache hit and leaves catalog materialization in a cold fallback.
+Direct live-row validation now returns through inlined active row-payload and
+validated live-row cache hits, leaving storage reads and hidden-row scans in a
+cold fallback.
 Exact unique index cursor construction now reuses the existing row-materialize
 eligibility flag instead of scanning table fields again for BLOB/TEXT columns
 on prepared point-update reads.
