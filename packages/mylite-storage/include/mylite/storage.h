@@ -185,6 +185,12 @@ typedef struct mylite_storage_index_entryset {
 
 typedef struct mylite_storage_statement mylite_storage_statement;
 
+/* Callers must keep the pointed-to filename bytes stable for active statements. */
+typedef struct mylite_storage_filename_identity_scope {
+    const char *previous_filename;
+    int previous_active;
+} mylite_storage_filename_identity_scope;
+
 /* Callers must keep the pointed-to table-name bytes immutable until scope end. */
 typedef struct mylite_storage_table_name_identity_scope {
     const char *previous_schema_name;
@@ -566,6 +572,13 @@ mylite_storage_result mylite_storage_preserve_auto_increment_on_rollback(
 );
 const void *mylite_storage_context_owner(void);
 void mylite_storage_set_context_owner(const void *owner);
+void mylite_storage_begin_filename_identity_scope(
+    const char *filename,
+    mylite_storage_filename_identity_scope *scope
+);
+void mylite_storage_end_filename_identity_scope(
+    const mylite_storage_filename_identity_scope *scope
+);
 void mylite_storage_begin_table_name_identity_scope(
     const char *schema_name,
     const char *table_name,

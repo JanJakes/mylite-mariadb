@@ -479,6 +479,10 @@ lookup on every row-DML execution inside the same transaction.
 Handler exact unique reads, write locks, and statement checkpoint setup now
 also trust a non-null libmylite storage context owner with an active statement
 before falling back to filename-based storage active-chain lookup.
+Handler write locks, exact unique reads, and row updates now also enter a
+trusted primary filename identity scope, letting active statement file-scope
+lookup avoid repeated filename comparisons while raw storage callers keep
+owned-string fallback matching.
 Existing active exact-index cache hits now go through a small hot-inline probe
 before falling back to cache creation and seeding, keeping the repeated
 prepared point-lookup path out of the miss-handling wrapper.

@@ -601,6 +601,7 @@ typedef struct mylite_storage_buffered_page_ref {
 struct mylite_storage_statement {
     FILE *file;
     char *filename;
+    const char *filename_identity;
     dev_t device;
     ino_t inode;
     struct mylite_storage_statement *parent;
@@ -618,6 +619,7 @@ struct mylite_storage_statement {
     int has_rollback_catalog_page;
     int owns_file;
     int owns_filename;
+    int has_filename_identity;
     int has_current_header;
     int current_header_dirty;
     int has_current_catalog_page;
@@ -703,6 +705,8 @@ typedef mylite_storage_result (*mylite_storage_row_page_callback)(
 
 static _Thread_local mylite_storage_statement *active_statement;
 static _Thread_local const void *active_context_owner;
+static _Thread_local const char *active_filename_identity_filename;
+static _Thread_local int active_filename_identity_active;
 static _Thread_local const char *active_table_name_identity_schema;
 static _Thread_local const char *active_table_name_identity_table;
 static _Thread_local int active_table_name_identity_active;
@@ -950,6 +954,22 @@ static mylite_storage_statement *active_statement_for_any_owner(const char *file
 static mylite_storage_statement *active_read_statement_for(const char *filename);
 static mylite_storage_statement *active_read_statement_for_any_owner(const char *filename);
 static mylite_storage_statement *active_read_snapshot_for(const char *filename);
+MYLITE_STORAGE_HOT_INLINE int active_statement_filename_matches(
+    mylite_storage_statement *statement,
+    const char *filename
+);
+MYLITE_STORAGE_HOT_INLINE void store_active_statement_filename_identity(
+    mylite_storage_statement *statement,
+    const char *filename
+);
+MYLITE_STORAGE_HOT_INLINE void inherit_statement_filename_identity(
+    mylite_storage_statement *statement,
+    const mylite_storage_statement *parent
+);
+MYLITE_STORAGE_HOT_INLINE void maybe_store_active_filename_identity(
+    mylite_storage_statement *statement,
+    const char *filename
+);
 MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_cache_statement_for(
     const char *filename
 );
@@ -8550,6 +8570,7 @@ mylite_storage_result mylite_storage_begin_nested_statement(
     statement->filename = parent->filename;
     statement->owns_filename = 0;
     statement->owner = active_context_owner;
+    inherit_statement_filename_identity(statement, parent);
 
     mylite_storage_result result =
         initialize_checkpoint_statement(statement, parent->filename, parent);
@@ -8598,6 +8619,7 @@ mylite_storage_result mylite_storage_begin_read_statement(
     statement->owns_filename = 1;
     statement->owner = active_context_owner;
     statement->parent = active_read_statement;
+    maybe_store_active_filename_identity(statement, filename);
 
     mylite_storage_result result = initialize_read_statement(statement, filename, same_file_parent);
     if (result != MYLITE_STORAGE_OK) {
@@ -8643,6 +8665,31 @@ const void *mylite_storage_context_owner(void) {
 
 void mylite_storage_set_context_owner(const void *owner) {
     active_context_owner = owner;
+}
+
+void mylite_storage_begin_filename_identity_scope(
+    const char *filename,
+    mylite_storage_filename_identity_scope *scope
+) {
+    if (scope == NULL) {
+        return;
+    }
+
+    scope->previous_filename = active_filename_identity_filename;
+    scope->previous_active = active_filename_identity_active;
+    active_filename_identity_filename = filename;
+    active_filename_identity_active = filename != NULL;
+}
+
+void mylite_storage_end_filename_identity_scope(
+    const mylite_storage_filename_identity_scope *scope
+) {
+    if (scope == NULL) {
+        return;
+    }
+
+    active_filename_identity_filename = scope->previous_filename;
+    active_filename_identity_active = scope->previous_active;
 }
 
 void mylite_storage_begin_table_name_identity_scope(
@@ -9028,6 +9075,7 @@ static mylite_storage_result begin_checkpoint(
     if (parent != NULL) {
         statement->filename = parent->filename;
         statement->owns_filename = 0;
+        inherit_statement_filename_identity(statement, parent);
     } else {
         statement->filename = copy_filename(filename);
         if (statement->filename == NULL) {
@@ -9035,6 +9083,7 @@ static mylite_storage_result begin_checkpoint(
             return MYLITE_STORAGE_NOMEM;
         }
         statement->owns_filename = 1;
+        maybe_store_active_filename_identity(statement, filename);
     }
     statement->owner = active_context_owner;
 
@@ -9083,6 +9132,7 @@ static mylite_storage_statement *allocate_checkpoint_statement(
 static void initialize_nested_checkpoint_storage(mylite_storage_statement *statement) {
     statement->file = NULL;
     statement->filename = NULL;
+    statement->filename_identity = NULL;
     statement->device = 0;
     statement->inode = 0;
     statement->parent = NULL;
@@ -9097,6 +9147,7 @@ static void initialize_nested_checkpoint_storage(mylite_storage_statement *state
     statement->has_rollback_catalog_page = 0;
     statement->owns_file = 0;
     statement->owns_filename = 0;
+    statement->has_filename_identity = 0;
     statement->has_current_header = 0;
     statement->current_header_dirty = 0;
     statement->has_current_catalog_page = 0;
@@ -11153,7 +11204,7 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_statement_for(const c
     for (mylite_storage_statement *statement = active_statement; statement != NULL;
          statement = statement->parent) {
         if (statement->owner == active_context_owner &&
-            (statement->filename == filename || strcmp(statement->filename, filename) == 0)) {
+            active_statement_filename_matches(statement, filename)) {
             return statement;
         }
     }
@@ -11182,7 +11233,7 @@ static mylite_storage_statement *active_read_statement_for(const char *filename)
     for (mylite_storage_statement *statement = active_read_statement; statement != NULL;
          statement = statement->parent) {
         if (statement->owner == active_context_owner &&
-            (statement->filename == filename || strcmp(statement->filename, filename) == 0)) {
+            active_statement_filename_matches(statement, filename)) {
             return statement;
         }
     }
@@ -11211,10 +11262,15 @@ static mylite_storage_statement *active_read_snapshot_for(const char *filename) 
     mylite_storage_statement *snapshot = NULL;
     for (mylite_storage_statement *statement = active_statement; statement != NULL;
          statement = statement->parent) {
-        if (statement->filename != filename && strcmp(statement->filename, filename) != 0) {
+        const int current_owner = statement->owner == active_context_owner;
+        if (current_owner) {
+            if (!active_statement_filename_matches(statement, filename)) {
+                continue;
+            }
+        } else if (statement->filename != filename && strcmp(statement->filename, filename) != 0) {
             continue;
         }
-        if (statement->owner == active_context_owner) {
+        if (current_owner) {
             return NULL;
         }
         snapshot = statement;
@@ -11233,11 +11289,55 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_cache_statement_for(
     for (mylite_storage_statement *statement = active_statement; statement != NULL;
          statement = statement->parent) {
         if (statement->owner == active_context_owner &&
-            (statement->filename == filename || strcmp(statement->filename, filename) == 0)) {
+            active_statement_filename_matches(statement, filename)) {
             cache_statement = statement;
         }
     }
     return cache_statement;
+}
+
+MYLITE_STORAGE_HOT_INLINE int active_statement_filename_matches(
+    mylite_storage_statement *statement,
+    const char *filename
+) {
+    if (statement->has_filename_identity && active_filename_identity_active &&
+        statement->filename_identity == filename && active_filename_identity_filename == filename) {
+        return 1;
+    }
+    if (statement->filename == filename || strcmp(statement->filename, filename) == 0) {
+        store_active_statement_filename_identity(statement, filename);
+        return 1;
+    }
+    return 0;
+}
+
+MYLITE_STORAGE_HOT_INLINE void store_active_statement_filename_identity(
+    mylite_storage_statement *statement,
+    const char *filename
+) {
+    if (!active_filename_identity_active || active_filename_identity_filename != filename) {
+        return;
+    }
+
+    statement->filename_identity = filename;
+    statement->has_filename_identity = 1;
+}
+
+MYLITE_STORAGE_HOT_INLINE void inherit_statement_filename_identity(
+    mylite_storage_statement *statement,
+    const mylite_storage_statement *parent
+) {
+    statement->filename_identity = parent->filename_identity;
+    statement->has_filename_identity = parent->has_filename_identity;
+}
+
+MYLITE_STORAGE_HOT_INLINE void maybe_store_active_filename_identity(
+    mylite_storage_statement *statement,
+    const char *filename
+) {
+    statement->filename_identity = NULL;
+    statement->has_filename_identity = 0;
+    store_active_statement_filename_identity(statement, filename);
 }
 
 MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_cache_statement_from_statement(
@@ -11871,6 +11971,7 @@ static void free_statement(mylite_storage_statement *statement) {
 static void reset_reusable_nested_checkpoint_storage(mylite_storage_statement *statement) {
     statement->file = NULL;
     statement->filename = NULL;
+    statement->filename_identity = NULL;
     statement->device = 0;
     statement->inode = 0;
     statement->parent = NULL;
@@ -11882,6 +11983,7 @@ static void reset_reusable_nested_checkpoint_storage(mylite_storage_statement *s
     statement->has_current_catalog_image = 0;
     statement->owns_file = 0;
     statement->owns_filename = 0;
+    statement->has_filename_identity = 0;
     statement->owns_recovery_journal = 0;
     statement->owns_transaction_journal = 0;
     statement->preserve_auto_increment_rollback = 0;

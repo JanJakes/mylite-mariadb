@@ -265,6 +265,7 @@ static void test_active_row_payload_cache_large_window(void);
 static void test_active_row_payload_cache_validates_update(void);
 static void test_active_table_entry_cache_catalog_invalidation(void);
 static void test_active_table_entry_cache_mutable_name_buffers(void);
+static void test_filename_identity_scope_mutable_filename_buffer(void);
 static void test_active_row_payload_cache_many_replacements(void);
 static void test_durable_live_row_cache(void);
 static void test_deferred_durable_cache_retarget(void);
@@ -641,6 +642,7 @@ int main(void) {
     test_active_row_payload_cache_validates_update();
     test_active_table_entry_cache_catalog_invalidation();
     test_active_table_entry_cache_mutable_name_buffers();
+    test_filename_identity_scope_mutable_filename_buffer();
     test_active_row_payload_cache_many_replacements();
     test_durable_live_row_cache();
     test_deferred_durable_cache_retarget();
@@ -3046,6 +3048,38 @@ static void test_active_table_entry_cache_mutable_name_buffers(void) {
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
     free(filename);
+    free(root);
+}
+
+static void test_filename_identity_scope_mutable_filename_buffer(void) {
+    char *root = make_temp_root();
+    char *first_filename = path_join(root, "filename-identity-first.mylite");
+    char *second_filename = path_join(root, "filename-identity-second.mylite");
+    char filename_buffer[PATH_MAX];
+    mylite_storage_filename_identity_scope scope = {0};
+    mylite_storage_statement *transaction = NULL;
+    int written = 0;
+
+    assert(mylite_storage_create_empty(first_filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_create_empty(second_filename) == MYLITE_STORAGE_OK);
+
+    written = snprintf(filename_buffer, sizeof(filename_buffer), "%s", first_filename);
+    assert(written > 0 && (size_t)written < sizeof(filename_buffer));
+    mylite_storage_begin_filename_identity_scope(filename_buffer, &scope);
+    assert(mylite_storage_begin_transaction(filename_buffer, &transaction) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_statement_active(filename_buffer));
+    mylite_storage_end_filename_identity_scope(&scope);
+
+    written = snprintf(filename_buffer, sizeof(filename_buffer), "%s", second_filename);
+    assert(written > 0 && (size_t)written < sizeof(filename_buffer));
+    assert(!mylite_storage_statement_active(filename_buffer));
+
+    assert(mylite_storage_rollback_statement(transaction) == MYLITE_STORAGE_OK);
+    assert(unlink(first_filename) == 0);
+    assert(unlink(second_filename) == 0);
+    assert(rmdir(root) == 0);
+    free(second_filename);
+    free(first_filename);
     free(root);
 }
 

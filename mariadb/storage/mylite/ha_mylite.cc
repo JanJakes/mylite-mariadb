@@ -899,6 +899,23 @@ public:
   }
 };
 
+class Mylite_filename_identity_scope
+{
+  mylite_storage_filename_identity_scope scope;
+
+public:
+  explicit Mylite_filename_identity_scope(const char *filename)
+      : scope{NULL, 0}
+  {
+    mylite_storage_begin_filename_identity_scope(filename, &scope);
+  }
+
+  ~Mylite_filename_identity_scope()
+  {
+    mylite_storage_end_filename_identity_scope(&scope);
+  }
+};
+
 struct Mylite_discover_context
 {
   handlerton::discovered_list *result;
@@ -2187,6 +2204,7 @@ int ha_mylite::read_exact_unique_index_row_into(uint index_number,
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
   const char *schema_name= storage_schema();
   const char *table_name= storage_table();
+  Mylite_filename_identity_scope filename_scope(primary_file);
   Mylite_table_name_identity_scope table_name_scope(schema_name, table_name);
 
   Mylite_read_statement_scope read_scope(
@@ -2626,6 +2644,7 @@ int ha_mylite::external_lock(THD *thd, int lock_type)
   const char *primary_file= mylite_primary_file_path();
   if (!primary_file)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
+  Mylite_filename_identity_scope filename_scope(primary_file);
 
   bool storage_statement_active= false;
   if (thd_test_options(thd, OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN))
@@ -2926,6 +2945,7 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
     DBUG_RETURN(HA_ERR_NO_CONNECTION);
   const char *schema_name= storage_schema();
   const char *table_name= storage_table();
+  Mylite_filename_identity_scope filename_scope(primary_file);
   Mylite_table_name_identity_scope table_name_scope(schema_name, table_name);
 
   int error= 0;
