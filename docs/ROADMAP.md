@@ -222,7 +222,9 @@ stored primary-key bytes with the MyLite storage API directly, separating raw
 storage read-scope, row-materialization, and MariaDB prepared execution cost.
 Held-read-scope variants isolate steady-state exact-index and row materialization
 cost once one storage read statement is already open, while a storage
-read-statement phase measures begin/end overhead directly.
+read-statement phase measures begin/end overhead directly. A prepared
+primary-key component phase now splits the hot prepared loop into bind, row,
+done, and reset timings for targeted follow-up work.
 Hot read-checkpoint cache hits now borrow the cached catalog image for scoped
 catalog views and defer catalog/header page copies until a caller needs page
 bytes, instead of deep-copying that state into every short-lived read statement.

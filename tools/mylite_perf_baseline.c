@@ -18,6 +18,7 @@ typedef enum benchmark_phase {
     BENCHMARK_PHASE_POINT_SELECTS,
     BENCHMARK_PHASE_DIRECT_PK_SELECTS,
     BENCHMARK_PHASE_PREPARED_PK_SELECTS,
+    BENCHMARK_PHASE_PREPARED_PK_SELECT_COMPONENTS,
     BENCHMARK_PHASE_PREPARED_PK_SELECT_RESET_AFTER_ROW,
     BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS,
     BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS_ONE_READ,
@@ -40,6 +41,10 @@ typedef enum benchmark_metric {
     BENCHMARK_METRIC_PREPARED_INSERTS,
     BENCHMARK_METRIC_DIRECT_PK_SELECTS,
     BENCHMARK_METRIC_PREPARED_PK_SELECTS,
+    BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_BIND,
+    BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_ROW,
+    BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_DONE,
+    BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_RESET,
     BENCHMARK_METRIC_PREPARED_PK_SELECT_RESET_AFTER_ROW,
     BENCHMARK_METRIC_STORAGE_PK_ENTRY_LOOKUPS,
     BENCHMARK_METRIC_STORAGE_PK_ENTRY_LOOKUPS_ONE_READ,
@@ -114,6 +119,7 @@ static int benchmark_insert_rows(benchmark_context *ctx);
 static int benchmark_prepared_insert_rows(benchmark_context *ctx);
 static int benchmark_point_selects(benchmark_context *ctx);
 static int benchmark_prepared_point_selects(benchmark_context *ctx);
+static int benchmark_prepared_point_select_components(benchmark_context *ctx);
 static int benchmark_prepared_point_select_reset_after_row(benchmark_context *ctx);
 static int benchmark_storage_entry_lookups(benchmark_context *ctx);
 static int benchmark_storage_entry_lookups_in_one_read_statement(benchmark_context *ctx);
@@ -184,6 +190,10 @@ static const benchmark_metric_definition k_metric_definitions[] = {
     {BENCHMARK_METRIC_PREPARED_INSERTS, "prepared-inserts"},
     {BENCHMARK_METRIC_DIRECT_PK_SELECTS, "direct-pk-selects"},
     {BENCHMARK_METRIC_PREPARED_PK_SELECTS, "prepared-pk-selects"},
+    {BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_BIND, "prepared-pk-select-bind"},
+    {BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_ROW, "prepared-pk-select-row"},
+    {BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_DONE, "prepared-pk-select-done"},
+    {BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_RESET, "prepared-pk-select-reset"},
     {BENCHMARK_METRIC_PREPARED_PK_SELECT_RESET_AFTER_ROW, "prepared-pk-select-reset-after-row"},
     {BENCHMARK_METRIC_STORAGE_PK_ENTRY_LOOKUPS, "storage-pk-entry-lookups"},
     {BENCHMARK_METRIC_STORAGE_PK_ENTRY_LOOKUPS_ONE_READ, "storage-pk-entry-lookups-one-read"},
@@ -286,6 +296,10 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         config->phase = BENCHMARK_PHASE_PREPARED_PK_SELECTS;
         return 0;
     }
+    if (strcmp(argument, "prepared-pk-select-components") == 0) {
+        config->phase = BENCHMARK_PHASE_PREPARED_PK_SELECT_COMPONENTS;
+        return 0;
+    }
     if (strcmp(argument, "prepared-pk-select-reset-after-row") == 0) {
         config->phase = BENCHMARK_PHASE_PREPARED_PK_SELECT_RESET_AFTER_ROW;
         return 0;
@@ -343,7 +357,8 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         stderr,
         "Expected phase `all`, `prepared-scalar-selects`, `point-selects`, "
         "`direct-pk-selects`, `prepared-pk-selects`, "
-        "`prepared-pk-select-reset-after-row`, `storage-pk-entry-lookups`, "
+        "`prepared-pk-select-components`, `prepared-pk-select-reset-after-row`, "
+        "`storage-pk-entry-lookups`, "
         "`storage-pk-entry-lookups-one-read`, `storage-pk-row-lookups`, "
         "`storage-pk-row-lookups-one-read`, `storage-read-statements`, "
         "`direct-secondary-selects`, `prepared-secondary-selects`, "
@@ -408,6 +423,8 @@ static const char *benchmark_phase_name(benchmark_phase phase) {
         return "direct-pk-selects";
     case BENCHMARK_PHASE_PREPARED_PK_SELECTS:
         return "prepared-pk-selects";
+    case BENCHMARK_PHASE_PREPARED_PK_SELECT_COMPONENTS:
+        return "prepared-pk-select-components";
     case BENCHMARK_PHASE_PREPARED_PK_SELECT_RESET_AFTER_ROW:
         return "prepared-pk-select-reset-after-row";
     case BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS:
@@ -453,6 +470,7 @@ static int run_benchmark(const benchmark_config *config) {
         config->phase == BENCHMARK_PHASE_POINT_SELECTS ||
         config->phase == BENCHMARK_PHASE_DIRECT_PK_SELECTS ||
         config->phase == BENCHMARK_PHASE_PREPARED_PK_SELECTS ||
+        config->phase == BENCHMARK_PHASE_PREPARED_PK_SELECT_COMPONENTS ||
         config->phase == BENCHMARK_PHASE_PREPARED_PK_SELECT_RESET_AFTER_ROW ||
         config->phase == BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS ||
         config->phase == BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS_ONE_READ ||
@@ -545,17 +563,24 @@ static int run_benchmark(const benchmark_config *config) {
             goto cleanup;
         }
         if (config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECTS &&
+            config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECT_COMPONENTS &&
             config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECT_RESET_AFTER_ROW &&
             benchmark_point_selects(&ctx) != 0) {
             goto cleanup;
         }
         if (config->phase != BENCHMARK_PHASE_DIRECT_PK_SELECTS &&
+            config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECT_COMPONENTS &&
             config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECT_RESET_AFTER_ROW &&
             benchmark_prepared_point_selects(&ctx) != 0) {
             goto cleanup;
         }
+        if (config->phase == BENCHMARK_PHASE_PREPARED_PK_SELECT_COMPONENTS &&
+            benchmark_prepared_point_select_components(&ctx) != 0) {
+            goto cleanup;
+        }
         if (config->phase != BENCHMARK_PHASE_DIRECT_PK_SELECTS &&
             config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECTS &&
+            config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECT_COMPONENTS &&
             benchmark_prepared_point_select_reset_after_row(&ctx) != 0) {
             goto cleanup;
         }
@@ -657,7 +682,8 @@ static void print_usage(const char *program) {
     fprintf(
         stderr,
         "Usage: %s [--phase=all|prepared-scalar-selects|point-selects|direct-pk-selects|"
-        "prepared-pk-selects|prepared-pk-select-reset-after-row|updates|direct-updates|"
+        "prepared-pk-selects|prepared-pk-select-components|"
+        "prepared-pk-select-reset-after-row|updates|direct-updates|"
         "prepared-updates|direct-secondary-selects|prepared-secondary-selects|"
         "direct-leaf-secondary-selects|prepared-leaf-secondary-selects|"
         "storage-pk-entry-lookups|storage-pk-entry-lookups-one-read|storage-pk-row-lookups|"
@@ -669,7 +695,9 @@ static void print_usage(const char *program) {
         "timings after setup.\n"
         "Thresholds are opt-in and may be supplied more than once. Metrics: "
         "open-setup, prepared-scalar-selects, direct-inserts, prepared-inserts, "
-        "direct-pk-selects, prepared-pk-selects, prepared-pk-select-reset-after-row, "
+        "direct-pk-selects, prepared-pk-selects, prepared-pk-select-bind, "
+        "prepared-pk-select-row, prepared-pk-select-done, prepared-pk-select-reset, "
+        "prepared-pk-select-reset-after-row, "
         "storage-pk-entry-lookups, storage-pk-entry-lookups-one-read, "
         "storage-pk-row-lookups, storage-pk-row-lookups-one-read, "
         "storage-read-statements, direct-secondary-selects, prepared-secondary-selects, "
@@ -1093,6 +1121,131 @@ static int benchmark_prepared_point_selects(benchmark_context *ctx) {
 cleanup:
     if (mylite_finalize(stmt) != MYLITE_OK) {
         report_database_error(ctx, "finalize prepared primary-key point select");
+        return 1;
+    }
+    return result;
+}
+
+static int benchmark_prepared_point_select_components(benchmark_context *ctx) {
+    mylite_stmt *stmt = NULL;
+    uint64_t checksum = 0U;
+    uint64_t bind_ns = 0U;
+    uint64_t row_ns = 0U;
+    uint64_t done_ns = 0U;
+    uint64_t reset_ns = 0U;
+    int result = 1;
+
+    if (mylite_prepare(
+            ctx->db,
+            "SELECT value FROM perf_rows WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) != MYLITE_OK) {
+        report_database_error(ctx, "prepare primary-key point select components");
+        return 1;
+    }
+
+    for (size_t i = 0; i < ctx->config->iterations; ++i) {
+        const size_t id = (i % ctx->config->rows) + 1U;
+        uint64_t start_ns = monotonic_ns();
+        const int bind_result = mylite_bind_int64(stmt, 1U, (long long)id);
+        bind_ns += monotonic_ns() - start_ns;
+        if (bind_result != MYLITE_OK) {
+            report_database_error(ctx, "bind prepared primary-key point select components");
+            goto cleanup;
+        }
+
+        start_ns = monotonic_ns();
+        const int row_result = mylite_step(stmt);
+        const int row_is_int =
+            row_result == MYLITE_ROW && mylite_column_type(stmt, 0U) == MYLITE_TYPE_INT64;
+        if (row_is_int) {
+            checksum += (uint64_t)mylite_column_int64(stmt, 0U);
+        }
+        row_ns += monotonic_ns() - start_ns;
+        if (row_result != MYLITE_ROW) {
+            fprintf(
+                stderr,
+                "Prepared primary-key point select component phase returned no row for id %zu\n",
+                id
+            );
+            report_database_error(ctx, "prepared primary-key point select components");
+            goto cleanup;
+        }
+        if (!row_is_int) {
+            fprintf(
+                stderr,
+                "Prepared primary-key point select component phase returned a non-integer value\n"
+            );
+            goto cleanup;
+        }
+
+        start_ns = monotonic_ns();
+        const int done_result = mylite_step(stmt);
+        done_ns += monotonic_ns() - start_ns;
+        if (done_result != MYLITE_DONE) {
+            fprintf(
+                stderr,
+                "Prepared primary-key point select component phase returned extra rows for id "
+                "%zu\n",
+                id
+            );
+            report_database_error(ctx, "prepared primary-key point select component drain");
+            goto cleanup;
+        }
+
+        start_ns = monotonic_ns();
+        const int reset_result = mylite_reset(stmt);
+        reset_ns += monotonic_ns() - start_ns;
+        if (reset_result != MYLITE_OK) {
+            report_database_error(ctx, "reset prepared primary-key point select components");
+            goto cleanup;
+        }
+    }
+
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_BIND,
+            "prepared primary-key bind component",
+            ctx->config->iterations,
+            bind_ns
+        ) != 0) {
+        goto cleanup;
+    }
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_ROW,
+            "prepared primary-key row component",
+            ctx->config->iterations,
+            row_ns
+        ) != 0) {
+        goto cleanup;
+    }
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_DONE,
+            "prepared primary-key done component",
+            ctx->config->iterations,
+            done_ns
+        ) != 0) {
+        goto cleanup;
+    }
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_PK_SELECT_COMPONENT_RESET,
+            "prepared primary-key reset component",
+            ctx->config->iterations,
+            reset_ns
+        ) != 0) {
+        goto cleanup;
+    }
+    printf("Prepared point-select component checksum: %" PRIu64 "\n", checksum);
+    result = 0;
+
+cleanup:
+    if (mylite_finalize(stmt) != MYLITE_OK) {
+        report_database_error(ctx, "finalize prepared primary-key point select components");
         return 1;
     }
     return result;
