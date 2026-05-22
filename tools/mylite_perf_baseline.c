@@ -27,6 +27,7 @@ typedef enum benchmark_phase {
     BENCHMARK_PHASE_STORAGE_READ_STATEMENTS,
     BENCHMARK_PHASE_STORAGE_ROW_UPDATES,
     BENCHMARK_PHASE_STORAGE_ROW_UPDATE_COMPONENTS,
+    BENCHMARK_PHASE_STORAGE_INDEXED_ROW_UPDATE_COMPONENTS,
     BENCHMARK_PHASE_DIRECT_SECONDARY_SELECTS,
     BENCHMARK_PHASE_PREPARED_SECONDARY_SELECTS,
     BENCHMARK_PHASE_DIRECT_LEAF_SECONDARY_SELECTS,
@@ -58,6 +59,9 @@ typedef enum benchmark_metric {
     BENCHMARK_METRIC_STORAGE_ROW_UPDATE_COMPONENT_BEGIN,
     BENCHMARK_METRIC_STORAGE_ROW_UPDATE_COMPONENT_MUTATE,
     BENCHMARK_METRIC_STORAGE_ROW_UPDATE_COMPONENT_COMMIT,
+    BENCHMARK_METRIC_STORAGE_INDEXED_ROW_UPDATE_COMPONENT_BEGIN,
+    BENCHMARK_METRIC_STORAGE_INDEXED_ROW_UPDATE_COMPONENT_MUTATE,
+    BENCHMARK_METRIC_STORAGE_INDEXED_ROW_UPDATE_COMPONENT_COMMIT,
     BENCHMARK_METRIC_DIRECT_SECONDARY_SELECTS,
     BENCHMARK_METRIC_PREPARED_SECONDARY_SELECTS,
     BENCHMARK_METRIC_PREPARE_LEAF_ROWS,
@@ -151,6 +155,11 @@ static int benchmark_storage_read_statements(benchmark_context *ctx);
 static int benchmark_storage_row_updates(benchmark_context *ctx);
 static int benchmark_storage_row_update_components(benchmark_context *ctx);
 static int benchmark_storage_row_update_loop(benchmark_context *ctx, int components);
+static int benchmark_storage_indexed_row_update_components(benchmark_context *ctx);
+static size_t find_storage_entry_index_for_row_id(
+    const mylite_storage_index_entryset *entries,
+    unsigned long long row_id
+);
 static int benchmark_secondary_selects(benchmark_context *ctx);
 static int benchmark_prepared_secondary_selects(benchmark_context *ctx);
 static int publish_secondary_leaf_index(benchmark_context *ctx);
@@ -218,6 +227,12 @@ static const benchmark_metric_definition k_metric_definitions[] = {
     {BENCHMARK_METRIC_STORAGE_ROW_UPDATE_COMPONENT_BEGIN, "storage-row-update-begin"},
     {BENCHMARK_METRIC_STORAGE_ROW_UPDATE_COMPONENT_MUTATE, "storage-row-update-mutate"},
     {BENCHMARK_METRIC_STORAGE_ROW_UPDATE_COMPONENT_COMMIT, "storage-row-update-commit"},
+    {BENCHMARK_METRIC_STORAGE_INDEXED_ROW_UPDATE_COMPONENT_BEGIN,
+     "storage-indexed-row-update-begin"},
+    {BENCHMARK_METRIC_STORAGE_INDEXED_ROW_UPDATE_COMPONENT_MUTATE,
+     "storage-indexed-row-update-mutate"},
+    {BENCHMARK_METRIC_STORAGE_INDEXED_ROW_UPDATE_COMPONENT_COMMIT,
+     "storage-indexed-row-update-commit"},
     {BENCHMARK_METRIC_DIRECT_SECONDARY_SELECTS, "direct-secondary-selects"},
     {BENCHMARK_METRIC_PREPARED_SECONDARY_SELECTS, "prepared-secondary-selects"},
     {BENCHMARK_METRIC_PREPARE_LEAF_ROWS, "prepare-leaf-rows"},
@@ -353,6 +368,10 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         config->phase = BENCHMARK_PHASE_STORAGE_ROW_UPDATE_COMPONENTS;
         return 0;
     }
+    if (strcmp(argument, "storage-indexed-row-update-components") == 0) {
+        config->phase = BENCHMARK_PHASE_STORAGE_INDEXED_ROW_UPDATE_COMPONENTS;
+        return 0;
+    }
     if (strcmp(argument, "direct-secondary-selects") == 0) {
         config->phase = BENCHMARK_PHASE_DIRECT_SECONDARY_SELECTS;
         return 0;
@@ -395,6 +414,7 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         "`storage-pk-entry-lookups-one-read`, `storage-pk-row-lookups`, "
         "`storage-pk-row-lookups-one-read`, `storage-read-statements`, "
         "`storage-row-updates`, `storage-row-update-components`, "
+        "`storage-indexed-row-update-components`, "
         "`direct-secondary-selects`, `prepared-secondary-selects`, "
         "`direct-leaf-secondary-selects`, `prepared-leaf-secondary-selects`, "
         "`updates`, `direct-updates`, `prepared-updates`, or "
@@ -476,6 +496,8 @@ static const char *benchmark_phase_name(benchmark_phase phase) {
         return "storage-row-updates";
     case BENCHMARK_PHASE_STORAGE_ROW_UPDATE_COMPONENTS:
         return "storage-row-update-components";
+    case BENCHMARK_PHASE_STORAGE_INDEXED_ROW_UPDATE_COMPONENTS:
+        return "storage-indexed-row-update-components";
     case BENCHMARK_PHASE_DIRECT_SECONDARY_SELECTS:
         return "direct-secondary-selects";
     case BENCHMARK_PHASE_PREPARED_SECONDARY_SELECTS:
@@ -523,8 +545,10 @@ static int run_benchmark(const benchmark_config *config) {
         config->phase == BENCHMARK_PHASE_PREPARED_SECONDARY_SELECTS ||
         config->phase == BENCHMARK_PHASE_DIRECT_LEAF_SECONDARY_SELECTS ||
         config->phase == BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_SELECTS;
-    const int storage_update_phase = config->phase == BENCHMARK_PHASE_STORAGE_ROW_UPDATES ||
-                                     config->phase == BENCHMARK_PHASE_STORAGE_ROW_UPDATE_COMPONENTS;
+    const int storage_update_phase =
+        config->phase == BENCHMARK_PHASE_STORAGE_ROW_UPDATES ||
+        config->phase == BENCHMARK_PHASE_STORAGE_ROW_UPDATE_COMPONENTS ||
+        config->phase == BENCHMARK_PHASE_STORAGE_INDEXED_ROW_UPDATE_COMPONENTS;
 
     ctx.root = make_temp_root();
     if (ctx.root == NULL) {
@@ -572,6 +596,10 @@ static int run_benchmark(const benchmark_config *config) {
     if (storage_update_phase) {
         if (config->phase == BENCHMARK_PHASE_STORAGE_ROW_UPDATE_COMPONENTS) {
             if (benchmark_storage_row_update_components(&ctx) != 0) {
+                goto cleanup;
+            }
+        } else if (config->phase == BENCHMARK_PHASE_STORAGE_INDEXED_ROW_UPDATE_COMPONENTS) {
+            if (benchmark_storage_indexed_row_update_components(&ctx) != 0) {
                 goto cleanup;
             }
         } else if (benchmark_storage_row_updates(&ctx) != 0) {
@@ -754,7 +782,7 @@ static void print_usage(const char *program) {
         "direct-leaf-secondary-selects|prepared-leaf-secondary-selects|"
         "storage-pk-entry-lookups|storage-pk-entry-lookups-one-read|storage-pk-row-lookups|"
         "storage-pk-row-lookups-one-read|storage-read-statements|storage-row-updates|"
-        "storage-row-update-components] "
+        "storage-row-update-components|storage-indexed-row-update-components] "
         "[--max-us=<metric>:<value>] [rows] [iterations]\n"
         "\n"
         "Defaults: phase=all rows=100 iterations=100.\n"
@@ -768,6 +796,8 @@ static void print_usage(const char *program) {
         "storage-pk-entry-lookups, storage-pk-entry-lookups-one-read, "
         "storage-pk-row-lookups, storage-pk-row-lookups-one-read, "
         "storage-read-statements, storage-row-updates, storage-row-update-components, "
+        "storage-indexed-row-update-begin, storage-indexed-row-update-mutate, "
+        "storage-indexed-row-update-commit, "
         "direct-secondary-selects, prepared-secondary-selects, "
         "prepare-leaf-rows, publish-leaf-index, "
         "direct-leaf-secondary-selects, "
@@ -1931,6 +1961,280 @@ cleanup:
     mylite_storage_free_rowset(&rows);
     mylite_storage_free_index_entryset(&primary_entries);
     return result;
+}
+
+static int benchmark_storage_indexed_row_update_components(benchmark_context *ctx) {
+    mylite_storage_index_entryset primary_entries = {
+        .size = sizeof(primary_entries),
+    };
+    mylite_storage_index_entryset secondary_entries = {
+        .size = sizeof(secondary_entries),
+    };
+    mylite_storage_rowset rows = {
+        .size = sizeof(rows),
+    };
+    mylite_storage_statement *transaction = NULL;
+    unsigned long long *row_ids = NULL;
+    size_t *secondary_entry_indexes = NULL;
+    size_t *alternate_primary_indexes = NULL;
+    unsigned char *secondary_key_is_alternate = NULL;
+    uint64_t row_id_checksum = 0U;
+    uint64_t begin_ns = 0U;
+    uint64_t mutate_ns = 0U;
+    uint64_t commit_ns = 0U;
+    int result = 1;
+
+    if (ctx->config->rows < 2U) {
+        fprintf(stderr, "Storage indexed row update components require at least two rows\n");
+        return 1;
+    }
+
+    mylite_storage_result storage_result =
+        mylite_storage_read_index_entries(ctx->filename, "perf", "perf_rows", 0U, &primary_entries);
+    if (storage_result != MYLITE_STORAGE_OK) {
+        fprintf(stderr, "Failed to read primary-key index entries: %d\n", storage_result);
+        return 1;
+    }
+    storage_result = mylite_storage_read_index_entries(
+        ctx->filename,
+        "perf",
+        "perf_rows",
+        1U,
+        &secondary_entries
+    );
+    if (storage_result != MYLITE_STORAGE_OK) {
+        fprintf(stderr, "Failed to read secondary index entries: %d\n", storage_result);
+        goto cleanup;
+    }
+    if (primary_entries.entry_count != ctx->config->rows ||
+        secondary_entries.entry_count != ctx->config->rows) {
+        fprintf(
+            stderr,
+            "Expected %zu primary and secondary entries, got %zu/%zu\n",
+            ctx->config->rows,
+            primary_entries.entry_count,
+            secondary_entries.entry_count
+        );
+        goto cleanup;
+    }
+
+    row_ids = malloc(ctx->config->rows * sizeof(*row_ids));
+    secondary_entry_indexes = malloc(ctx->config->rows * sizeof(*secondary_entry_indexes));
+    alternate_primary_indexes = malloc(ctx->config->rows * sizeof(*alternate_primary_indexes));
+    secondary_key_is_alternate = calloc(ctx->config->rows, sizeof(*secondary_key_is_alternate));
+    if (row_ids == NULL || secondary_entry_indexes == NULL || alternate_primary_indexes == NULL ||
+        secondary_key_is_alternate == NULL) {
+        fprintf(stderr, "Failed to allocate storage indexed update maps\n");
+        goto cleanup;
+    }
+
+    for (size_t i = 0; i < ctx->config->rows; ++i) {
+        row_ids[i] = primary_entries.row_ids[i];
+        secondary_entry_indexes[i] =
+            find_storage_entry_index_for_row_id(&secondary_entries, primary_entries.row_ids[i]);
+        if (secondary_entry_indexes[i] == SIZE_MAX) {
+            fprintf(stderr, "Missing secondary entry for storage row id %llu\n", row_ids[i]);
+            goto cleanup;
+        }
+    }
+    for (size_t i = 0; i < ctx->config->rows; ++i) {
+        const size_t current_secondary_index = secondary_entry_indexes[i];
+        const unsigned char *current_key =
+            secondary_entries.keys + secondary_entries.key_offsets[current_secondary_index];
+        const size_t current_key_size = secondary_entries.key_sizes[current_secondary_index];
+        alternate_primary_indexes[i] = SIZE_MAX;
+        for (size_t candidate = 0; candidate < ctx->config->rows; ++candidate) {
+            const size_t candidate_secondary_index = secondary_entry_indexes[candidate];
+            const unsigned char *candidate_key =
+                secondary_entries.keys + secondary_entries.key_offsets[candidate_secondary_index];
+            const size_t candidate_key_size =
+                secondary_entries.key_sizes[candidate_secondary_index];
+            if (candidate_key_size == current_key_size &&
+                memcmp(candidate_key, current_key, current_key_size) != 0) {
+                alternate_primary_indexes[i] = candidate;
+                break;
+            }
+        }
+        if (alternate_primary_indexes[i] == SIZE_MAX) {
+            fprintf(stderr, "Storage indexed update component phase needs distinct keys\n");
+            goto cleanup;
+        }
+    }
+
+    storage_result = mylite_storage_read_indexed_rows(
+        ctx->filename,
+        "perf",
+        "perf_rows",
+        primary_entries.row_ids,
+        primary_entries.entry_count,
+        &rows
+    );
+    if (storage_result != MYLITE_STORAGE_OK || rows.row_count != primary_entries.entry_count) {
+        fprintf(stderr, "Failed to load storage indexed update row payloads: %d\n", storage_result);
+        goto cleanup;
+    }
+    for (size_t i = 0; i < rows.row_count; ++i) {
+        if (rows.row_offsets[i] > rows.row_bytes ||
+            rows.row_sizes[i] > rows.row_bytes - rows.row_offsets[i]) {
+            fprintf(stderr, "Storage indexed update row payload %zu is corrupt\n", i);
+            goto cleanup;
+        }
+    }
+
+    mylite_storage_filename_identity_scope filename_scope = {0};
+    mylite_storage_table_name_identity_scope table_scope = {0};
+    mylite_storage_begin_filename_identity_scope(ctx->filename, &filename_scope);
+    mylite_storage_begin_table_name_identity_scope("perf", "perf_rows", &table_scope);
+
+    storage_result = mylite_storage_begin_transaction(ctx->filename, &transaction);
+    if (storage_result != MYLITE_STORAGE_OK) {
+        fprintf(stderr, "Failed to begin storage indexed update transaction: %d\n", storage_result);
+        goto end_scopes;
+    }
+
+    for (size_t i = 0; i < ctx->config->iterations; ++i) {
+        const size_t entry_index = i % primary_entries.entry_count;
+        const size_t target_primary_index = secondary_key_is_alternate[entry_index]
+                                                ? entry_index
+                                                : alternate_primary_indexes[entry_index];
+        const size_t target_secondary_index = secondary_entry_indexes[target_primary_index];
+        const unsigned char *row = rows.rows + rows.row_offsets[entry_index];
+        const size_t row_size = rows.row_sizes[entry_index];
+        const mylite_storage_index_entry index_entries[] = {
+            {
+                .size = sizeof(index_entries[0]),
+                .index_number = 0U,
+                .key = primary_entries.keys + primary_entries.key_offsets[entry_index],
+                .key_size = primary_entries.key_sizes[entry_index],
+            },
+            {
+                .size = sizeof(index_entries[1]),
+                .index_number = 1U,
+                .key =
+                    secondary_entries.keys + secondary_entries.key_offsets[target_secondary_index],
+                .key_size = secondary_entries.key_sizes[target_secondary_index],
+            },
+        };
+        const unsigned char index_entry_changed[] = {0U, 1U};
+
+        mylite_storage_statement *statement = NULL;
+        uint64_t component_start_ns = monotonic_ns();
+        storage_result = mylite_storage_begin_nested_statement(transaction, &statement);
+        begin_ns += monotonic_ns() - component_start_ns;
+        if (storage_result != MYLITE_STORAGE_OK) {
+            fprintf(
+                stderr,
+                "Failed to begin storage indexed update statement: %d\n",
+                storage_result
+            );
+            goto rollback;
+        }
+
+        unsigned long long new_row_id = 0ULL;
+        component_start_ns = monotonic_ns();
+        storage_result = mylite_storage_update_row_with_index_entry_changes(
+            ctx->filename,
+            "perf",
+            "perf_rows",
+            row_ids[entry_index],
+            row,
+            row_size,
+            index_entries,
+            sizeof(index_entries) / sizeof(index_entries[0]),
+            index_entry_changed,
+            &new_row_id
+        );
+        mutate_ns += monotonic_ns() - component_start_ns;
+        if (storage_result == MYLITE_STORAGE_OK) {
+            component_start_ns = monotonic_ns();
+            storage_result = mylite_storage_commit_statement(statement);
+            commit_ns += monotonic_ns() - component_start_ns;
+            statement = NULL;
+        }
+        if (storage_result != MYLITE_STORAGE_OK) {
+            if (statement != NULL) {
+                (void)mylite_storage_rollback_statement(statement);
+            }
+            fprintf(stderr, "Storage indexed row update failed: %d\n", storage_result);
+            goto rollback;
+        }
+
+        row_ids[entry_index] = new_row_id;
+        secondary_key_is_alternate[entry_index] = !secondary_key_is_alternate[entry_index];
+        row_id_checksum += new_row_id;
+    }
+
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_STORAGE_INDEXED_ROW_UPDATE_COMPONENT_BEGIN,
+            "storage indexed row update nested statement begin component",
+            ctx->config->iterations,
+            begin_ns
+        ) != 0) {
+        goto rollback;
+    }
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_STORAGE_INDEXED_ROW_UPDATE_COMPONENT_MUTATE,
+            "storage indexed row update mutation component",
+            ctx->config->iterations,
+            mutate_ns
+        ) != 0) {
+        goto rollback;
+    }
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_STORAGE_INDEXED_ROW_UPDATE_COMPONENT_COMMIT,
+            "storage indexed row update nested statement commit component",
+            ctx->config->iterations,
+            commit_ns
+        ) != 0) {
+        goto rollback;
+    }
+    printf("Storage indexed row-update row-id checksum: %" PRIu64 "\n", row_id_checksum);
+
+    storage_result = mylite_storage_commit_statement(transaction);
+    transaction = NULL;
+    if (storage_result != MYLITE_STORAGE_OK) {
+        fprintf(
+            stderr,
+            "Failed to commit storage indexed update transaction: %d\n",
+            storage_result
+        );
+        goto end_scopes;
+    }
+    result = 0;
+    goto end_scopes;
+
+rollback:
+    if (transaction != NULL) {
+        (void)mylite_storage_rollback_statement(transaction);
+        transaction = NULL;
+    }
+end_scopes:
+    mylite_storage_end_table_name_identity_scope(&table_scope);
+    mylite_storage_end_filename_identity_scope(&filename_scope);
+cleanup:
+    free(secondary_key_is_alternate);
+    free(alternate_primary_indexes);
+    free(secondary_entry_indexes);
+    free(row_ids);
+    mylite_storage_free_rowset(&rows);
+    mylite_storage_free_index_entryset(&secondary_entries);
+    mylite_storage_free_index_entryset(&primary_entries);
+    return result;
+}
+
+static size_t find_storage_entry_index_for_row_id(
+    const mylite_storage_index_entryset *entries,
+    unsigned long long row_id
+) {
+    for (size_t i = 0; i < entries->entry_count; ++i) {
+        if (entries->row_ids[i] == row_id) {
+            return i;
+        }
+    }
+    return SIZE_MAX;
 }
 
 static int benchmark_secondary_selects(benchmark_context *ctx) {
