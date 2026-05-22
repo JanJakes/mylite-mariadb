@@ -7120,17 +7120,6 @@ static mylite_storage_result update_row_with_index_entries_for_context(
             &active_row_payload_entry
         );
     }
-    if (result == MYLITE_STORAGE_OK) {
-        result = begin_write_journal_for_statement_pages(
-            file,
-            filename,
-            &header,
-            0,
-            active_file_statement,
-            maintained_index_plan.protected_page_ids,
-            maintained_index_plan.protected_page_count
-        );
-    }
     unsigned long long next_page_id = 0ULL;
     int used_inline_update_pages = 0;
     int used_active_update_rewrite = 0;
@@ -7161,6 +7150,17 @@ static mylite_storage_result update_row_with_index_entries_for_context(
             };
             next_page_id = header.page_count;
         }
+    }
+    if (result == MYLITE_STORAGE_OK && !used_active_update_rewrite) {
+        result = begin_write_journal_for_statement_pages(
+            file,
+            filename,
+            &header,
+            0,
+            active_file_statement,
+            maintained_index_plan.protected_page_ids,
+            maintained_index_plan.protected_page_count
+        );
     }
     if (result == MYLITE_STORAGE_OK) {
         if (!used_active_update_rewrite && maintained_index_plan.count == 0U) {

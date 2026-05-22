@@ -792,6 +792,10 @@ hot prepared-update path.
 Successful active buffered rewrites now skip publishing the unchanged header
 and the no-op active write-journal finish, while append and maintained-root
 update paths still publish any advanced header.
+Active buffered row-update rewrites now defer write-journal setup until after
+the rewrite attempt, so steady prepared updates that only mutate buffered pages
+avoid the journal-begin check while append and maintained-root update paths
+still journal before durable writes.
 Prepared row-update execution now threads resolved active live-row and
 row-payload cache pointers through validation and post-update cache maintenance,
 avoiding repeated cache-set scans and filename/catalog comparisons inside the
