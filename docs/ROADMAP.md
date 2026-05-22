@@ -177,7 +177,10 @@ MariaDB reset path. The fully drained `MYSQL_NO_DATA` path also avoids
 `mysql_stmt_free_result()` for MyLite's unbuffered prepared result loop, while
 reset-before-drain still frees active results. Reset-after-row prepared result
 reuse now also skips the redundant MariaDB statement reset after the active
-result is successfully freed. Prepared non-result execution now also reuses the
+result is successfully freed. Successful non-result prepared execution now also
+skips the redundant post-DML `mysql_stmt_free_result()` call because the next
+MariaDB execute resets stored-result state before running. Prepared non-result
+execution now also reuses the
 immutable
 SQL policy classified at prepare time, so ordinary prepared DML no longer
 reparses its SQL text for no-op transaction or temporary-table lifecycle

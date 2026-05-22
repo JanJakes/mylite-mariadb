@@ -2147,7 +2147,6 @@ int execute_statement(mylite_stmt &statement) {
                   );
         statement.done = true;
         const unsigned warning_count = mysql_warning_count(&statement.database->mysql);
-        mysql_stmt_free_result(statement.statement);
         const int warning_result = capture_warnings(*statement.database, warning_count);
         if (warning_result != MYLITE_OK) {
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
