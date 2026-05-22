@@ -24,6 +24,7 @@ static void test_prepared_read_scope_rejects_active_result_write(void);
 static void test_reset_before_drain_cache_invalidates_before_write(void);
 #endif
 static void test_segment_reads(void);
+static void test_materialized_large_column_keeps_fetch_buffer(void);
 static void test_reset_reuse_and_destructors(void);
 static void test_empty_result_reset_reuse(void);
 static void test_reset_before_drain_reuse(void);
@@ -72,6 +73,7 @@ int main(void) {
     test_reset_before_drain_cache_invalidates_before_write();
 #endif
     test_segment_reads();
+    test_materialized_large_column_keeps_fetch_buffer();
     test_reset_reuse_and_destructors();
     test_empty_result_reset_reuse();
     test_reset_before_drain_reuse();
@@ -677,6 +679,66 @@ static void test_segment_reads(void) {
 
     assert(mylite_column_bytes(select, 0U) == sizeof(payload));
     assert(memcmp(mylite_column_blob(select, 0U), payload, sizeof(payload)) == 0);
+    assert(mylite_step(select) == MYLITE_DONE);
+    assert(mylite_finalize(select) == MYLITE_OK);
+
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_materialized_large_column_keeps_fetch_buffer(void) {
+    enum { value_len = 400 };
+    char first[value_len + 1U];
+    char second[value_len + 1U];
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    mylite_stmt *insert = NULL;
+    mylite_stmt *select = NULL;
+    const void *actual = NULL;
+
+    memset(first, 'a', value_len);
+    first[value_len] = '\0';
+    memset(second, 'b', value_len);
+    second[value_len] = '\0';
+
+    assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "USE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(
+            db,
+            "CREATE TEMPORARY TABLE large_texts ("
+            "id BIGINT NOT NULL PRIMARY KEY,"
+            "value LONGTEXT)",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+
+    insert = prepare_statement(db, "INSERT INTO large_texts(id, value) VALUES (?, ?)");
+    assert(mylite_bind_int64(insert, 1U, 1) == MYLITE_OK);
+    assert(mylite_bind_text(insert, 2U, first, value_len, MYLITE_TRANSIENT) == MYLITE_OK);
+    assert(mylite_step(insert) == MYLITE_DONE);
+    assert(mylite_reset(insert) == MYLITE_OK);
+    assert(mylite_bind_int64(insert, 1U, 2) == MYLITE_OK);
+    assert(mylite_bind_text(insert, 2U, second, value_len, MYLITE_TRANSIENT) == MYLITE_OK);
+    assert(mylite_step(insert) == MYLITE_DONE);
+    assert(mylite_finalize(insert) == MYLITE_OK);
+
+    select = prepare_statement(db, "SELECT value FROM large_texts ORDER BY id");
+    assert(mylite_step(select) == MYLITE_ROW);
+    assert(mylite_column_bytes(select, 0U) == value_len);
+    actual = mylite_column_blob(select, 0U);
+    assert(actual != NULL);
+    assert(memcmp(actual, first, value_len) == 0);
+    assert(mylite_step(select) == MYLITE_ROW);
+    assert(mylite_column_bytes(select, 0U) == value_len);
+    actual = mylite_column_blob(select, 0U);
+    assert(actual != NULL);
+    assert(memcmp(actual, second, value_len) == 0);
     assert(mylite_step(select) == MYLITE_DONE);
     assert(mylite_finalize(select) == MYLITE_OK);
 

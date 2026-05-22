@@ -201,6 +201,7 @@ struct ColumnValue {
     unsigned long long uint64_value = 0;
     double double_value = 0.0;
     std::vector<unsigned char> bytes;
+    std::vector<unsigned char> fetch_buffer;
     unsigned long mysql_length = 0;
     unsigned long buffer_length = 0;
     my_bool mysql_is_null = true;
@@ -3946,11 +3947,16 @@ int fetch_statement_row(mylite_stmt &statement) {
             const std::size_t stored_bytes =
                 std::min<std::size_t>(value.buffer_length, value.mysql_length);
             value.bytes_complete = value.mysql_is_null != 0 || stored_bytes >= value.mysql_length;
+            if (value.mysql_is_null != 0) {
+                value.bytes.clear();
+                continue;
+            }
+            value.bytes.assign(
+                value.fetch_buffer.begin(),
+                value.fetch_buffer.begin() + stored_bytes
+            );
             if (value.type == MYLITE_TYPE_TEXT) {
-                if (value.bytes.size() <= stored_bytes) {
-                    value.bytes.resize(stored_bytes + 1U);
-                }
-                value.bytes[stored_bytes] = '\0';
+                value.bytes.push_back('\0');
             }
         } else {
             value.bytes_complete = true;
@@ -4002,13 +4008,13 @@ int bind_statement_results(mylite_stmt &statement) {
         case MYLITE_TYPE_TEXT:
             value.buffer_length = k_initial_column_buffer_size;
             value.bytes_complete = false;
-            value.bytes.assign(
+            value.fetch_buffer.assign(
                 static_cast<std::size_t>(value.buffer_length) +
                     (type == MYLITE_TYPE_TEXT ? 1U : 0U),
                 0
             );
             bind.buffer_type = type == MYLITE_TYPE_BLOB ? MYSQL_TYPE_BLOB : MYSQL_TYPE_STRING;
-            bind.buffer = value.bytes.data();
+            bind.buffer = value.fetch_buffer.data();
             bind.buffer_length = value.buffer_length;
             break;
         case MYLITE_TYPE_NULL:
@@ -4035,9 +4041,9 @@ int fetch_truncated_column(mylite_stmt &statement, unsigned column) {
         return MYLITE_ERROR;
     }
 
-    value.buffer_length = value.mysql_length;
+    const unsigned long full_length = value.mysql_length;
     value.bytes.assign(
-        static_cast<std::size_t>(value.buffer_length) + (type == MYLITE_TYPE_TEXT ? 1U : 0U),
+        static_cast<std::size_t>(full_length) + (type == MYLITE_TYPE_TEXT ? 1U : 0U),
         0
     );
     value.mysql_error = 0;
@@ -4045,7 +4051,7 @@ int fetch_truncated_column(mylite_stmt &statement, unsigned column) {
     MYSQL_BIND bind = {};
     bind.buffer_type = type == MYLITE_TYPE_BLOB ? MYSQL_TYPE_BLOB : MYSQL_TYPE_STRING;
     bind.buffer = value.bytes.data();
-    bind.buffer_length = value.buffer_length;
+    bind.buffer_length = full_length;
     bind.length = &value.mysql_length;
     bind.is_null = &value.mysql_is_null;
     bind.error = &value.mysql_error;
@@ -4059,8 +4065,6 @@ int fetch_truncated_column(mylite_stmt &statement, unsigned column) {
         value.bytes[static_cast<std::size_t>(value.mysql_length)] = '\0';
     }
     value.bytes_complete = true;
-    statement.result_binds[column].buffer = value.bytes.data();
-    statement.result_binds[column].buffer_length = value.buffer_length;
     return MYLITE_OK;
 }
 
