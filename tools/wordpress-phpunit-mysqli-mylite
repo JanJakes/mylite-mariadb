@@ -139,23 +139,55 @@ if (str_contains($source, $marker)) {
     exit(0);
 }
 
+$closeWpdbs = <<<'PATCH'
+        // MYLITE_WORDPRESS_RELEASE_DB_LOCKS_FOR_CHILD_PROCESSES
+        $myliteWordPressClosedWpdbs = [];
+        $myliteWordPressSeenWpdbs = [];
+        $myliteWordPressCloseWpdb = static function ($candidate) use (&$myliteWordPressClosedWpdbs, &$myliteWordPressSeenWpdbs): void {
+            if (!is_object($candidate) || !method_exists($candidate, 'close') || !method_exists($candidate, 'db_connect')) {
+                return;
+            }
+
+            $objectId = spl_object_id($candidate);
+            if (isset($myliteWordPressSeenWpdbs[$objectId])) {
+                return;
+            }
+
+            $myliteWordPressSeenWpdbs[$objectId] = true;
+            if (method_exists($candidate, 'flush')) {
+                $candidate->flush();
+            }
+            if ($candidate->close()) {
+                $myliteWordPressClosedWpdbs[] = $candidate;
+            }
+        };
+        $myliteWordPressCloseWpdb($GLOBALS['wpdb'] ?? null);
+        foreach (get_declared_classes() as $myliteWordPressClass) {
+            try {
+                $myliteWordPressReflection = new \ReflectionClass($myliteWordPressClass);
+                foreach ($myliteWordPressReflection->getProperties(\ReflectionProperty::IS_STATIC) as $myliteWordPressProperty) {
+                    $myliteWordPressProperty->setAccessible(true);
+                    if (!$myliteWordPressProperty->isInitialized()) {
+                        continue;
+                    }
+                    $myliteWordPressCloseWpdb($myliteWordPressProperty->getValue());
+                }
+            } catch (\Throwable $myliteWordPressIgnored) {
+            }
+        }
+
+PATCH;
+
 $patched = str_replace(
     "        \$process = proc_open(\n",
-    "        // {$marker}\n" .
-    "        \$myliteWordPressWpdb = \$GLOBALS['wpdb'] ?? null;\n" .
-    "        \$myliteWordPressWpdbWasClosed = false;\n" .
-    "        if (is_object(\$myliteWordPressWpdb) && method_exists(\$myliteWordPressWpdb, 'close') && method_exists(\$myliteWordPressWpdb, 'db_connect')) {\n" .
-    "            \$myliteWordPressWpdb->close();\n" .
-    "            \$myliteWordPressWpdbWasClosed = true;\n" .
-    "        }\n\n" .
-    "        \$process = proc_open(\n",
+    $closeWpdbs . "        \$process = proc_open(\n",
     $source
 );
 
 $patched = str_replace(
     "        if (!is_resource(\$process)) {\n            throw new Exception(\n",
     "        if (!is_resource(\$process)) {\n" .
-    "            if (\$myliteWordPressWpdbWasClosed) {\n" .
+    "            foreach (\$myliteWordPressClosedWpdbs as \$myliteWordPressWpdb) {\n" .
     "                \$myliteWordPressWpdb->db_connect(false);\n" .
     "            }\n\n" .
     "            throw new Exception(\n",
@@ -165,7 +197,7 @@ $patched = str_replace(
 $patched = str_replace(
     "        proc_close(\$process);\n\n        \$this->cleanup();\n",
     "        proc_close(\$process);\n\n" .
-    "        if (\$myliteWordPressWpdbWasClosed) {\n" .
+    "        foreach (\$myliteWordPressClosedWpdbs as \$myliteWordPressWpdb) {\n" .
     "            \$myliteWordPressWpdb->db_connect(false);\n" .
     "        }\n\n" .
     "        \$this->cleanup();\n",
