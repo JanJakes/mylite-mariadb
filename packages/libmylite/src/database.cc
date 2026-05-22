@@ -7537,6 +7537,9 @@ void release_runtime(void) {
         runtime_dir = g_runtime.directory;
 #if MYLITE_WITH_MARIADB_EMBEDDED
         mysql_server_end();
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        mylite_storage_clear_thread_caches();
+#  endif
 #endif
         g_runtime.directory.clear();
         g_runtime.filename.clear();

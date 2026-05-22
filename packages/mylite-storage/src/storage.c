@@ -1041,6 +1041,7 @@ static mylite_storage_result initialize_read_statement(
     const char *filename,
     mylite_storage_statement *same_file_parent
 );
+static void free_reusable_statement(mylite_storage_statement **slot);
 static mylite_storage_result assign_read_statement_filename(
     mylite_storage_statement *statement,
     const char *filename
@@ -3283,6 +3284,9 @@ static mylite_storage_result load_cached_exact_index_entry_in_statement(
     FILE *file,
     const mylite_storage_header *header,
     const char *filename,
+    const mylite_storage_catalog_image *catalog,
+    const char *schema_name,
+    const char *table_name,
     unsigned long long table_id,
     unsigned index_number,
     const unsigned char *key,
@@ -3770,6 +3774,20 @@ static mylite_storage_result load_exact_index_cache(
     FILE *file,
     const mylite_storage_header *header,
     mylite_storage_exact_index_cache *cache
+);
+static mylite_storage_result load_complete_exact_index_cache(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
+    const mylite_storage_catalog_image *catalog,
+    const char *schema_name,
+    const char *table_name,
+    mylite_storage_exact_index_cache *cache
+);
+static mylite_storage_result append_index_entryset_to_exact_index_cache(
+    mylite_storage_exact_index_cache *cache,
+    const mylite_storage_index_entryset *entryset
 );
 static mylite_storage_result append_exact_index_cache_entry(
     mylite_storage_exact_index_cache *cache,
@@ -8796,6 +8814,18 @@ void mylite_storage_set_context_owner(const void *owner) {
     active_context_owner = owner;
 }
 
+void mylite_storage_clear_thread_caches(void) {
+    clear_read_checkpoint_cache();
+    clear_cached_read_file(NULL);
+    clear_journal_path_cache(NULL);
+    clear_durable_live_row_id_caches(NULL);
+    clear_durable_row_payload_caches(NULL);
+    clear_durable_index_leaf_page_caches(NULL);
+    clear_durable_exact_index_caches(NULL);
+    free_reusable_statement(&reusable_read_statement);
+    free_reusable_statement(&reusable_nested_checkpoint_statement);
+}
+
 void mylite_storage_begin_filename_identity_scope(
     const char *filename,
     mylite_storage_filename_identity_scope *scope
@@ -12109,6 +12139,12 @@ static void clear_catalog_root_cache(mylite_storage_statement *statement) {
     clear_table_entry_cache(&statement->table_entry_cache);
     clear_index_root_entry_cache(&statement->index_root_entry_cache);
     statement->table_index_root_absence_cache = (mylite_storage_table_index_root_absence_cache){0};
+}
+
+static void free_reusable_statement(mylite_storage_statement **slot) {
+    mylite_storage_statement *statement = *slot;
+    *slot = NULL;
+    free_statement(statement);
 }
 
 static void free_statement(mylite_storage_statement *statement) {
@@ -24078,12 +24114,20 @@ static mylite_storage_result find_exact_index_row_id(
         &used_cache
     );
     if (result == MYLITE_STORAGE_OK && !used_cache) {
+        if (catalog_view == NULL) {
+            result = catalog_image_view_for_file(file, header, &owned_catalog, &catalog_view);
+        }
+    }
+    if (result == MYLITE_STORAGE_OK && !used_cache) {
         result = load_cached_exact_index_entry_in_statement(
             active_cache_statement,
             active_mutation_statement,
             file,
             header,
             filename,
+            catalog_view,
+            schema_name,
+            table_name,
             table_entry->table_id,
             index_number,
             key,
@@ -24091,9 +24135,6 @@ static mylite_storage_result find_exact_index_row_id(
             out_row_id,
             &used_cache
         );
-    }
-    if (result == MYLITE_STORAGE_OK && !used_cache && catalog_view == NULL) {
-        result = catalog_image_view_for_file(file, header, &owned_catalog, &catalog_view);
     }
     if (result == MYLITE_STORAGE_OK && !used_cache) {
         result = find_index_leaf_exact_static_row_id(
@@ -24192,6 +24233,9 @@ static mylite_storage_result load_cached_exact_index_entry_in_statement(
     FILE *file,
     const mylite_storage_header *header,
     const char *filename,
+    const mylite_storage_catalog_image *catalog,
+    const char *schema_name,
+    const char *table_name,
     unsigned long long table_id,
     unsigned index_number,
     const unsigned char *key,
@@ -24235,7 +24279,16 @@ static mylite_storage_result load_cached_exact_index_entry_in_statement(
             &seeded_cache
         );
         if (result == MYLITE_STORAGE_OK && !seeded_cache) {
-            result = load_exact_index_cache(file, header, cache);
+            result = load_complete_exact_index_cache(
+                file,
+                filename,
+                header,
+                statement,
+                catalog,
+                schema_name,
+                table_name,
+                cache
+            );
         }
         if (result != MYLITE_STORAGE_OK) {
             free_exact_index_cache(cache);
@@ -25980,14 +26033,8 @@ static void retarget_durable_index_leaf_page_caches_after_table_mutation(
     const char *filename,
     const mylite_storage_header *header
 ) {
-    for (size_t i = 0U; i < durable_index_leaf_page_caches.count; ++i) {
-        mylite_storage_index_leaf_page_cache *cache = durable_index_leaf_page_caches.entries + i;
-        if (cache->filename != NULL && strcmp(cache->filename, filename) == 0) {
-            cache->catalog_root_page = header->catalog_root_page;
-            cache->catalog_generation = header->catalog_generation;
-            cache->page_count = header->page_count;
-        }
-    }
+    (void)header;
+    clear_durable_index_leaf_page_caches(filename);
 }
 
 static mylite_storage_index_leaf_page_cache *durable_index_leaf_page_cache_for(
@@ -26569,17 +26616,69 @@ static mylite_storage_result load_exact_index_cache(
     };
     mylite_storage_result result =
         read_live_index_entries(file, header, cache->table_id, cache->index_number, &entryset);
-    for (size_t i = 0U; result == MYLITE_STORAGE_OK && i < entryset.entry_count; ++i) {
-        if (entryset.key_sizes[i] != cache->key_size) {
+    if (result == MYLITE_STORAGE_OK) {
+        result = append_index_entryset_to_exact_index_cache(cache, &entryset);
+    }
+    mylite_storage_free_index_entryset(&entryset);
+    return result;
+}
+
+static mylite_storage_result load_complete_exact_index_cache(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
+    const mylite_storage_catalog_image *catalog,
+    const char *schema_name,
+    const char *table_name,
+    mylite_storage_exact_index_cache *cache
+) {
+    mylite_storage_index_entryset entryset = {
+        .size = sizeof(entryset),
+    };
+    int used_leaf = 0;
+    mylite_storage_result result = MYLITE_STORAGE_OK;
+    if (catalog != NULL && schema_name != NULL && table_name != NULL) {
+        result = read_index_leaf_entries(
+            file,
+            filename,
+            header,
+            active_cache_statement,
+            catalog,
+            cache->table_id,
+            schema_name,
+            table_name,
+            cache->index_number,
+            &entryset,
+            &used_leaf
+        );
+    }
+    if (result == MYLITE_STORAGE_OK && !used_leaf) {
+        result =
+            read_live_index_entries(file, header, cache->table_id, cache->index_number, &entryset);
+    }
+    if (result == MYLITE_STORAGE_OK) {
+        result = append_index_entryset_to_exact_index_cache(cache, &entryset);
+    }
+    mylite_storage_free_index_entryset(&entryset);
+    return result;
+}
+
+static mylite_storage_result append_index_entryset_to_exact_index_cache(
+    mylite_storage_exact_index_cache *cache,
+    const mylite_storage_index_entryset *entryset
+) {
+    mylite_storage_result result = MYLITE_STORAGE_OK;
+    for (size_t i = 0U; result == MYLITE_STORAGE_OK && i < entryset->entry_count; ++i) {
+        if (entryset->key_sizes[i] != cache->key_size) {
             continue;
         }
         result = append_exact_index_cache_entry(
             cache,
-            entryset.keys + entryset.key_offsets[i],
-            entryset.row_ids[i]
+            entryset->keys + entryset->key_offsets[i],
+            entryset->row_ids[i]
         );
     }
-    mylite_storage_free_index_entryset(&entryset);
     return result;
 }
 

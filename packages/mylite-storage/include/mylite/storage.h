@@ -573,6 +573,7 @@ mylite_storage_result mylite_storage_preserve_auto_increment_on_rollback(
 );
 const void *mylite_storage_context_owner(void);
 void mylite_storage_set_context_owner(const void *owner);
+void mylite_storage_clear_thread_caches(void);
 void mylite_storage_begin_filename_identity_scope(
     const char *filename,
     mylite_storage_filename_identity_scope *scope

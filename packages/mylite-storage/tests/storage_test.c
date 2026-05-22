@@ -3225,6 +3225,9 @@ static void test_durable_lookup_caches_borrow_filename_identity(void) {
     assert(memcmp(found_row, row, sizeof(row)) == 0);
     assert(mylite_storage_test_durable_exact_index_cache_has_filename_identity(scoped_filename));
     assert(mylite_storage_test_durable_row_payload_cache_has_filename_identity(scoped_filename));
+    mylite_storage_clear_thread_caches();
+    assert(!mylite_storage_test_durable_exact_index_cache_has_filename_identity(scoped_filename));
+    assert(!mylite_storage_test_durable_row_payload_cache_has_filename_identity(scoped_filename));
 
     assert(unlink(unscoped_filename) == 0);
     assert(unlink(scoped_filename) == 0);
