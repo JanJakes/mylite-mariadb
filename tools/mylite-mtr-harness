@@ -106,10 +106,12 @@ default_tests=(
   main.key_diff
   main.subselect_nulls
   main.subselect_extra
+  main.subselect_sj_aria
   main.order_by_zerolength-4285
   main.order_by_optimizer
   main.order_by-mdev-10122
   main.optimizer_costs2
+  main.range_aria_dbt3
   main.rowid_filter_aria
   main.explain
   main.order_fill_sortbuf
