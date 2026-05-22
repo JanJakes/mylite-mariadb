@@ -221,11 +221,15 @@ read-statement phase measures begin/end overhead directly.
 Hot read-checkpoint cache hits now borrow the cached catalog image for scoped
 catalog views and defer catalog/header page copies until a caller needs page
 bytes, instead of deep-copying that state into every short-lived read statement.
+Reusable short read statements now also use a read-specific scalar reset after
+their owned resources are released, avoiding the generic reusable statement
+initializer on the hot close path while retaining same-file owned filename
+reuse.
 Recent local storage-smoke benchmark samples show read-statement begin/end at
-3.527 us/op, storage primary-key row lookups in the 4-5 us/op range, and routed
-prepared primary-key point selects at 7.800 us/op on the current machine after
-read-statement object reuse, scoped filename borrowing, and clean prepared-state
-bookkeeping.
+3.519 us/op, storage primary-key row lookups in the 4-5 us/op range, and routed
+prepared primary-key point selects at 7.207 us/op on the current machine after
+read-statement object reuse, scoped filename borrowing, clean prepared-state
+bookkeeping, and lean reusable read-statement reset.
 The durable row-payload cache now retains a larger bounded hot set, reducing
 steady-state 10000-row storage row materialization and routed prepared
 primary-key point-select time for the local benchmark. Durable row-payload

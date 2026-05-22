@@ -9783,6 +9783,12 @@ static void test_read_statement_filename_identity_borrows_filename(void) {
     assert(mylite_storage_test_statement_filename_is(read_statement, filename) == 1);
     assert(mylite_storage_end_read_statement(read_statement) == MYLITE_STORAGE_OK);
     mylite_storage_end_filename_identity_scope(&filename_scope);
+    read_statement = NULL;
+
+    assert(mylite_storage_begin_read_statement(filename, &read_statement) == MYLITE_STORAGE_OK);
+    assert(read_statement != NULL);
+    assert(mylite_storage_test_statement_owns_filename(read_statement) == 1);
+    assert(mylite_storage_end_read_statement(read_statement) == MYLITE_STORAGE_OK);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);

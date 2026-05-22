@@ -12143,11 +12143,37 @@ static void reset_reusable_read_statement_storage(mylite_storage_statement *stat
         filename = statement->filename;
     }
 
-    initialize_reusable_statement_storage(statement);
-    if (filename != NULL) {
-        statement->filename = filename;
-        statement->owns_filename = 1;
-    }
+    statement->file = NULL;
+    statement->filename = filename;
+    statement->filename_identity = NULL;
+    statement->device = 0;
+    statement->inode = 0;
+    statement->parent = NULL;
+    statement->owner = NULL;
+    statement->header = (mylite_storage_header){0};
+    statement->current_header = (mylite_storage_header){0};
+    statement->deferred_durable_cache_retarget_header = (mylite_storage_header){0};
+    statement->current_catalog_root_page = 0ULL;
+    statement->current_catalog_generation = 0ULL;
+    statement->has_header_page = 0;
+    statement->has_rollback_catalog_page = 0;
+    statement->owns_file = 0;
+    statement->owns_filename = filename != NULL ? 1 : 0;
+    statement->reuse_read_statement_storage = 0;
+    statement->has_filename_identity = 0;
+    statement->has_current_header = 0;
+    statement->current_header_dirty = 0;
+    statement->has_current_catalog_page = 0;
+    statement->has_current_catalog_image = 0;
+    statement->owns_recovery_journal = 0;
+    statement->owns_transaction_journal = 0;
+    statement->preserve_auto_increment_rollback = 0;
+    statement->cache_file_on_close = 0;
+    statement->has_identity = 0;
+    statement->has_deferred_durable_cache_retarget = 0;
+    statement->deferred_durable_cache_retarget_all_tables = 0;
+    statement->deferred_durable_cache_retarget_table_id = 0ULL;
+    statement->table_index_root_absence_cache = (mylite_storage_table_index_root_absence_cache){0};
 }
 
 MYLITE_STORAGE_HOT_INLINE int find_active_table_entry_cache_in_statement(
