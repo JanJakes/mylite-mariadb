@@ -512,6 +512,13 @@ journal construction.
 Catalog discovery for table-open flows uses the same scoped read-session cache,
 so repeated prepared statements avoid a separate header/catalog validation path
 before the handler reaches the index cursor.
+For exact unique-key prepared point updates, the MyLite handler can accept
+MariaDB's direct-update hook and materialize the target row directly through
+the exact-index path before applying MariaDB's normal condition, assignment,
+constraint, no-op, and handler update semantics. Direct admission stays narrow:
+unique-key-changing updates and key changes on FK-involved tables fall back to
+the ordinary update loop, while non-unique secondary-index changes reuse the
+existing index-maintaining `ha_update_row()` path.
 
 Active storage checkpoints also maintain a live-row validation cache per table
 and catalog generation. Rows proven live by visibility-checked storage reads,

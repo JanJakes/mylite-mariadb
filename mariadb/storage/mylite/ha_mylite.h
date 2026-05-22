@@ -90,12 +90,18 @@ class ha_mylite: public handler
   bool table_has_blob_fields;
   bool table_supports_row_write;
   bool table_supports_row_lifecycle;
+  COND *direct_update_condition;
+  List<Item> *direct_update_fields;
+  List<Item> *direct_update_values;
+  Item *direct_update_key_value;
+  uint direct_update_key_number;
 
   Mylite_share *get_share();
   void clear_scan_rows();
   void clear_index_cursor();
   void clear_index_row_scratch();
   void clear_record_blob_payloads();
+  void clear_direct_update_state();
   const char *storage_schema() const;
   const char *storage_table() const;
   int build_index_cursor(uint index_number, const uchar *key_filter,
@@ -122,7 +128,7 @@ public:
   {
     return HA_NULL_IN_KEY | HA_REC_NOT_IN_SEQ | HA_CAN_INDEX_BLOBS |
            HA_AUTO_PART_KEY | HA_CAN_VIRTUAL_COLUMNS | HA_BINLOG_STMT_CAPABLE |
-           HA_NO_ONLINE_ALTER;
+           HA_NO_ONLINE_ALTER | HA_CAN_DIRECT_UPDATE_AND_DELETE;
   }
 
   ulong index_flags(uint index_number, uint part, bool all_parts) const override;
@@ -152,6 +158,11 @@ public:
   int index_prev(uchar *buf) override;
   int index_first(uchar *buf) override;
   int index_last(uchar *buf) override;
+  const COND *cond_push(const COND *cond) override;
+  void cond_pop() override;
+  int info_push(uint info_type, void *info) override;
+  int direct_update_rows_init(List<Item> *update_fields) override;
+  int direct_update_rows(ha_rows *update_rows, ha_rows *found_rows) override;
   int rnd_init(bool scan) override;
   int rnd_end(void) override;
   int rnd_next(uchar *buf) override;
@@ -169,6 +180,7 @@ public:
   int update_row(const uchar *old_data, const uchar *new_data) override;
   int delete_row(const uchar *buf) override;
   int truncate() override;
+  int reset() override;
   char *get_foreign_key_create_info() override;
   void free_foreign_key_create_info(char *str) override;
   int get_foreign_key_list(THD *thd,

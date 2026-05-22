@@ -27,13 +27,25 @@
 #include "ha_mylite.h"
 #include "field.h"
 #include "handler.h"
+#ifdef __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Winconsistent-missing-override"
+#endif
+#include "item.h"
+#include "item_cmpfunc.h"
+#ifdef __clang__
+#pragma clang diagnostic pop
+#endif
 #include "mylite_schema_hook.h"
 #include "mylite_volatile_rows.h"
 #include "key.h"
+#include "sql_base.h"
 #include "sql_class.h"
 #include "sql_cmd.h"
+#include "sql_select.h"
 #include "sql_show.h"
 #include "sql_string.h"
+#include "sql_update.h"
 #include "table.h"
 
 struct Mylite_catalog_table_share
@@ -204,6 +216,18 @@ static bool mylite_table_has_grouped_auto_increment_field(TABLE *table,
                                                           Field *auto_field);
 static bool mylite_table_supports_indexes(TABLE *table);
 static bool mylite_key_is_supported(const KEY *key);
+static bool mylite_find_direct_update_exact_key(TABLE *table, Item *cond,
+                                                uint *out_key_number,
+                                                Item **out_value_item);
+static bool mylite_find_direct_update_equal_item(Item *cond, TABLE *table,
+                                                 Field *field,
+                                                 Item **out_value_item);
+static bool mylite_find_direct_update_key_field_equal_item(
+    Item *item, TABLE *table, Field *field, Item **out_value_item);
+static bool mylite_direct_update_key_is_supported(TABLE *table, KEY *key_info);
+static int mylite_build_direct_update_key(THD *thd, TABLE *table,
+                                          uint key_number, Item *value_item,
+                                          uchar *key_buff, bool *out_has_key);
 static Field *mylite_auto_increment_field(TABLE *table);
 static bool mylite_next_auto_increment_value_from_field(Field *auto_field,
                                                         ulonglong *out_value);
@@ -229,6 +253,11 @@ static int mylite_prepare_index_entry_changes(
     TABLE *table, const uchar *old_buf,
     const mylite_storage_index_entry *new_entries, size_t new_entry_count,
     uchar *entry_changed, size_t entry_changed_count);
+static bool mylite_update_fields_change_direct_unsafe_key(
+    TABLE *table, List<Item> *update_fields, bool *out_changes_key);
+static bool mylite_field_is_direct_unsafe_key_part(TABLE *table,
+                                                   const Field *field,
+                                                   bool *out_is_key_part);
 static bool mylite_key_fields_may_change(TABLE *table, const KEY *key);
 static bool mylite_update_preserves_all_index_entries(TABLE *table,
                                                       const uchar *old_data,
@@ -1309,7 +1338,9 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
       parent_foreign_key_presence(false), auto_increment_field(NULL),
       index_cursor_filtered(false), discard_rows(false), volatile_rows(false),
       table_has_blob_fields(false), table_supports_row_write(false),
-      table_supports_row_lifecycle(false)
+      table_supports_row_lifecycle(false), direct_update_condition(NULL),
+      direct_update_fields(NULL), direct_update_values(NULL),
+      direct_update_key_value(NULL), direct_update_key_number(MAX_KEY)
 {
   storage_schema_name[0]= '\0';
   storage_table_name[0]= '\0';
@@ -1390,6 +1421,15 @@ void ha_mylite::clear_record_blob_payloads()
     record_blob_payloads[i]= NULL;
     record_blob_payloads_size[i]= 0;
   }
+}
+
+void ha_mylite::clear_direct_update_state()
+{
+  direct_update_condition= NULL;
+  direct_update_fields= NULL;
+  direct_update_values= NULL;
+  direct_update_key_value= NULL;
+  direct_update_key_number= MAX_KEY;
 }
 
 void ha_mylite::clear_foreign_key_presence_cache() const
@@ -1492,6 +1532,175 @@ ulong ha_mylite::index_flags(uint index_number, uint, bool) const
     return 0;
 
   return HA_READ_NEXT | HA_READ_PREV | HA_READ_ORDER | HA_READ_RANGE;
+}
+
+const COND *ha_mylite::cond_push(const COND *cond)
+{
+  DBUG_ENTER("ha_mylite::cond_push");
+
+  direct_update_condition= NULL;
+  direct_update_key_value= NULL;
+  direct_update_key_number= MAX_KEY;
+  if (!cond)
+    DBUG_RETURN(cond);
+
+  uint key_number= MAX_KEY;
+  Item *value_item= NULL;
+  if (!mylite_find_direct_update_exact_key(table, const_cast<COND *>(cond),
+                                           &key_number, &value_item))
+    DBUG_RETURN(cond);
+
+  direct_update_condition= const_cast<COND *>(cond);
+  direct_update_key_value= value_item;
+  direct_update_key_number= key_number;
+  DBUG_RETURN(NULL);
+}
+
+void ha_mylite::cond_pop()
+{
+  direct_update_condition= NULL;
+  direct_update_key_value= NULL;
+  direct_update_key_number= MAX_KEY;
+}
+
+int ha_mylite::info_push(uint info_type, void *info)
+{
+  DBUG_ENTER("ha_mylite::info_push");
+  switch (info_type)
+  {
+  case INFO_KIND_UPDATE_FIELDS:
+    direct_update_fields= static_cast<List<Item> *>(info);
+    break;
+  case INFO_KIND_UPDATE_VALUES:
+    direct_update_values= static_cast<List<Item> *>(info);
+    break;
+  default:
+    break;
+  }
+  DBUG_RETURN(0);
+}
+
+int ha_mylite::direct_update_rows_init(List<Item> *update_fields)
+{
+  DBUG_ENTER("ha_mylite::direct_update_rows_init");
+
+  if (!update_fields || update_fields != direct_update_fields ||
+      !direct_update_values || !direct_update_condition ||
+      !direct_update_key_value || direct_update_key_number == MAX_KEY ||
+      discard_rows || volatile_rows || table_has_blob_fields ||
+      !table_supports_row_lifecycle)
+    DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+
+  bool update_fields_change_key= false;
+  if (mylite_update_fields_change_direct_unsafe_key(table, update_fields,
+                                                    &update_fields_change_key))
+    DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+  if (update_fields_change_key)
+  {
+    bool has_foreign_keys= false;
+    int error= has_child_foreign_keys(&has_foreign_keys);
+    if (error)
+      DBUG_RETURN(error);
+    if (has_foreign_keys)
+      DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+
+    error= has_parent_foreign_keys(&has_foreign_keys);
+    if (error)
+      DBUG_RETURN(error);
+    if (has_foreign_keys)
+      DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+  }
+
+  if (!mylite_primary_file_path())
+    DBUG_RETURN(HA_ERR_NO_CONNECTION);
+
+  if (table && table->pos_in_table_list &&
+      (table->pos_in_table_list->is_view_or_derived() ||
+       table->pos_in_table_list->belong_to_view))
+    DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+
+  DBUG_RETURN(0);
+}
+
+int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
+{
+  DBUG_ENTER("ha_mylite::direct_update_rows");
+  *update_rows= 0;
+  *found_rows= 0;
+
+  if (!direct_update_fields || !direct_update_values ||
+      !direct_update_condition || direct_update_key_number == MAX_KEY ||
+      direct_update_key_number >= table->s->keys)
+    DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+
+  uchar key_buff[MAX_KEY_LENGTH];
+  bool has_key= false;
+  int error= mylite_build_direct_update_key(
+      ha_thd(), table, direct_update_key_number, direct_update_key_value,
+      key_buff, &has_key);
+  if (error || !has_key)
+    DBUG_RETURN(error);
+
+  KEY *key_info= table->key_info + direct_update_key_number;
+  bool direct_applied= false;
+  bool direct_found= false;
+  error= read_exact_unique_index_row_into(
+      direct_update_key_number, key_buff, key_info->key_length,
+      table->record[0], &direct_applied, &direct_found);
+  if (error)
+    DBUG_RETURN(error);
+  if (!direct_applied)
+    DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+  if (!direct_found)
+    DBUG_RETURN(0);
+
+  if (!direct_update_condition->val_bool())
+  {
+    if (ha_thd()->is_error())
+      DBUG_RETURN(1);
+    DBUG_RETURN(0);
+  }
+  if (ha_thd()->is_error())
+    DBUG_RETURN(1);
+
+  *found_rows= 1;
+  store_record(table, record[1]);
+  if (fill_record(ha_thd(), table, *direct_update_fields,
+                  *direct_update_values, false, true))
+  {
+    table->auto_increment_field_not_null= FALSE;
+    DBUG_RETURN(1);
+  }
+
+  const bool need_update=
+      !records_are_comparable(table) || compare_record(table);
+  if (!need_update)
+  {
+    table->auto_increment_field_not_null= FALSE;
+    DBUG_RETURN(0);
+  }
+
+  if (table->verify_constraints(false) != VIEW_CHECK_OK)
+  {
+    table->auto_increment_field_not_null= FALSE;
+    DBUG_RETURN(1);
+  }
+
+  if (prepare_for_modify(true, true))
+  {
+    table->auto_increment_field_not_null= FALSE;
+    DBUG_RETURN(1);
+  }
+
+  error= ha_update_row(table->record[1], table->record[0]);
+  table->auto_increment_field_not_null= FALSE;
+  if (error == HA_ERR_RECORD_IS_THE_SAME)
+    DBUG_RETURN(0);
+  if (error)
+    DBUG_RETURN(error);
+
+  *update_rows= 1;
+  DBUG_RETURN(0);
 }
 
 int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
@@ -3210,6 +3419,12 @@ int ha_mylite::truncate()
   DBUG_RETURN(0);
 }
 
+int ha_mylite::reset()
+{
+  clear_direct_update_state();
+  return 0;
+}
+
 char *ha_mylite::get_foreign_key_create_info()
 {
   DBUG_ENTER("ha_mylite::get_foreign_key_create_info");
@@ -4295,6 +4510,147 @@ static bool mylite_key_is_supported(const KEY *key)
   return true;
 }
 
+static bool mylite_find_direct_update_exact_key(TABLE *table, Item *cond,
+                                                uint *out_key_number,
+                                                Item **out_value_item)
+{
+  if (!table || !cond || !out_key_number || !out_value_item)
+    return false;
+
+  for (uint key_number= 0; key_number < table->s->keys; ++key_number)
+  {
+    KEY *key_info= table->key_info + key_number;
+    if (!mylite_direct_update_key_is_supported(table, key_info))
+      continue;
+
+    Item *value_item= NULL;
+    if (mylite_find_direct_update_equal_item(
+            cond, table, key_info->key_part[0].field, &value_item))
+    {
+      *out_key_number= key_number;
+      *out_value_item= value_item;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+static bool mylite_find_direct_update_equal_item(Item *cond, TABLE *table,
+                                                 Field *field,
+                                                 Item **out_value_item)
+{
+  if (cond->type() == Item::COND_ITEM &&
+      ((Item_func *) cond)->functype() == Item_func::COND_AND_FUNC)
+  {
+    List_iterator<Item> it(*((Item_cond *) cond)->argument_list());
+    Item *item;
+    while ((item= it++))
+    {
+      if (mylite_find_direct_update_equal_item(item, table, field,
+                                               out_value_item))
+        return true;
+    }
+    return false;
+  }
+
+  return mylite_find_direct_update_key_field_equal_item(cond, table, field,
+                                                        out_value_item);
+}
+
+static bool mylite_find_direct_update_key_field_equal_item(
+    Item *item, TABLE *table, Field *field, Item **out_value_item)
+{
+  if (item->type() != Item::FUNC_ITEM)
+    return false;
+
+  Item_func *func= (Item_func *) item;
+  if (func->functype() != Item_func::EQ_FUNC || func->argument_count() != 2)
+    return false;
+
+  Item **args= func->arguments();
+  for (uint field_arg= 0; field_arg < 2; ++field_arg)
+  {
+    Item *real_field_item= args[field_arg]->real_item();
+    if (real_field_item->type() != Item::FIELD_ITEM)
+      continue;
+
+    Item_field *field_item= (Item_field *) real_field_item;
+    if (field_item->field != field)
+      continue;
+
+    Item *value_item= args[1 - field_arg];
+    const table_map used_tables= value_item->used_tables();
+    if (!value_item->const_item() ||
+        (used_tables & (table->map | OUTER_REF_TABLE_BIT | RAND_TABLE_BIT)))
+      return false;
+
+    *out_value_item= value_item;
+    return true;
+  }
+
+  return false;
+}
+
+static bool mylite_direct_update_key_is_supported(TABLE *table, KEY *key_info)
+{
+  if (!table || !key_info || !mylite_key_is_supported(key_info) ||
+      (key_info->algorithm != HA_KEY_ALG_UNDEF &&
+       key_info->algorithm != HA_KEY_ALG_BTREE) ||
+      table->actual_n_key_parts(key_info) != 1 ||
+      key_info->user_defined_key_parts != 1 ||
+      key_info->key_length > MAX_KEY_LENGTH)
+    return false;
+
+  const ulong key_flags= table->actual_key_flags(key_info);
+  if ((key_flags & (HA_NOSAME | HA_NULL_PART_KEY)) != HA_NOSAME)
+    return false;
+
+  KEY_PART_INFO *key_part= key_info->key_part;
+  return key_part->field && !key_part->field->vcol_info &&
+         key_part->length == key_part->field->key_length() &&
+         key_part->store_length == key_info->key_length &&
+         !(key_part->key_part_flag & (HA_BLOB_PART | HA_VAR_LENGTH_PART)) &&
+         mylite_key_uses_raw_exact_filter(key_info);
+}
+
+static int mylite_build_direct_update_key(THD *thd, TABLE *table,
+                                          uint key_number, Item *value_item,
+                                          uchar *key_buff, bool *out_has_key)
+{
+  *out_has_key= false;
+  if (!thd || !table || !value_item || !key_buff ||
+      key_number >= table->s->keys)
+    return HA_ERR_CRASHED_ON_USAGE;
+
+  KEY *key_info= table->key_info + key_number;
+  KEY_PART_INFO *key_part= key_info->key_part;
+  bzero(key_buff, key_info->key_length);
+
+  if (value_item->maybe_null() && value_item->is_null())
+    return thd->is_error() ? 1 : 0;
+
+  store_key_item key_copy(thd, key_part->field, key_buff, NULL,
+                          key_part->length, value_item, FALSE);
+  if (thd->is_error())
+    return 1;
+
+  enum_check_fields old_count_cuted_fields= thd->count_cuted_fields;
+  MY_BITMAP *old_map= dbug_tmp_use_all_columns(table, &table->write_set);
+  thd->count_cuted_fields= CHECK_FIELD_IGNORE;
+  store_key::store_key_result copy_result= key_copy.copy(thd);
+  thd->count_cuted_fields= old_count_cuted_fields;
+  dbug_tmp_restore_column_map(&table->write_set, old_map);
+
+  if (copy_result == store_key::STORE_KEY_FATAL)
+    return thd->is_error() ? 1 : HA_ERR_CRASHED_ON_USAGE;
+  if (key_copy.null_key)
+    return 0;
+
+  *out_has_key= true;
+  return 0;
+}
+
 static Field *mylite_auto_increment_field(TABLE *table)
 {
   if (table->found_next_number_field)
@@ -4456,6 +4812,68 @@ static int mylite_prepare_index_entry_changes(
   }
 
   return 0;
+}
+
+static bool mylite_update_fields_change_direct_unsafe_key(
+    TABLE *table, List<Item> *update_fields, bool *out_changes_key)
+{
+  if (out_changes_key)
+    *out_changes_key= false;
+  if (!table || !update_fields || !out_changes_key)
+    return true;
+
+  List_iterator_fast<Item> field_it(*update_fields);
+  Item *item;
+  while ((item= field_it++))
+  {
+    Item_field *item_field= item->field_for_view_update();
+    if (!item_field || !item_field->field)
+      return true;
+
+    Field *field= item_field->field;
+    if (field->table != table || field->field_index >= table->s->fields)
+      return true;
+
+    bool is_key_part= false;
+    if (mylite_field_is_direct_unsafe_key_part(table, field, &is_key_part))
+      return true;
+    if (is_key_part)
+      *out_changes_key= true;
+  }
+
+  return false;
+}
+
+static bool mylite_field_is_direct_unsafe_key_part(TABLE *table,
+                                                   const Field *field,
+                                                   bool *out_is_key_part)
+{
+  if (out_is_key_part)
+    *out_is_key_part= false;
+  if (!table || !field || !out_is_key_part)
+    return true;
+
+  for (uint key_number= 0; key_number < table->s->keys; ++key_number)
+  {
+    const KEY *key= table->key_info + key_number;
+    if (!key->key_part)
+      return true;
+    for (uint part= 0; part < key->user_defined_key_parts; ++part)
+    {
+      const KEY_PART_INFO *key_part= key->key_part + part;
+      if (!key_part->field)
+        return true;
+      if (key_part->field == field ||
+          key_part->field->field_index == field->field_index)
+      {
+        *out_is_key_part= true;
+        if (key->flags & HA_NOSAME)
+          return true;
+      }
+    }
+  }
+
+  return false;
 }
 
 static bool mylite_key_fields_may_change(TABLE *table, const KEY *key)

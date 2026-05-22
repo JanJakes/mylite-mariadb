@@ -287,6 +287,11 @@ That exact update quick path now executes through a single exact key-read quick
 object instead of generic one-range MRR quick machinery, avoiding dynamic range
 allocation and `multi_range_read_next()` overhead for the accepted prepared
 point-update shape.
+Stable-key prepared point updates now use MyLite's handler direct-update hook
+for exact unique-key predicates, reusing MariaDB condition and assignment
+evaluation while skipping the normal quick row-read loop. The direct path falls
+back for unique-key-changing updates and FK-sensitive key changes, and keeps
+non-unique secondary-index maintenance on the existing handler update path.
 Ordinary MyLite `UPDATE` / `DELETE` execution now skips eager quick-plan
 explain detail allocation unless explicit `EXPLAIN`, `ANALYZE`, or slow-log
 explain/engine detail needs it, while routed `EXPLAIN UPDATE` keeps the full

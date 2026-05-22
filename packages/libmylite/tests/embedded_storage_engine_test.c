@@ -16974,6 +16974,21 @@ static void test_prepared_primary_key_update_rebinds(void) {
     assert(
         mylite_prepare(
             db,
+            "UPDATE prepared_update_posts SET value = value WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 0);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+
+    assert(
+        mylite_prepare(
+            db,
             "UPDATE prepared_update_posts SET value = value + 5 WHERE ? = id",
             MYLITE_NUL_TERMINATED,
             &stmt,
@@ -17073,6 +17088,59 @@ static void test_prepared_primary_key_update_rebinds(void) {
         "16"
     );
     assert_exec_succeeds(db, "COMMIT");
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE secondary_update_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "score INT NOT NULL, "
+        "KEY score_key (score)"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO secondary_update_posts VALUES (1, 10), (2, 20)");
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE secondary_update_posts SET score = score + 10 WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+    assert_query_single_value(
+        db,
+        "SELECT CAST(score AS CHAR) FROM secondary_update_posts "
+        "FORCE INDEX (score_key) WHERE score = 20 AND id = 1",
+        "20"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT COUNT(*) FROM secondary_update_posts "
+        "FORCE INDEX (score_key) WHERE score = 10",
+        "0"
+    );
+
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE stable_update_posts SET slug = 'second' WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_ERROR);
+    assert(strstr(mylite_errmsg(db), "Duplicate entry") != NULL);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+    assert_query_single_value(db, "SELECT slug FROM stable_update_posts WHERE id = 1", "first");
+    assert_query_single_value(db, "SELECT slug FROM stable_update_posts WHERE id = 2", "second");
 
     assert(mylite_close(db) == MYLITE_OK);
     assert_no_durable_sidecars(root, "storage-engine.mylite");
