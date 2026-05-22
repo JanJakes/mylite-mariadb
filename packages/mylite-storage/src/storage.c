@@ -25584,6 +25584,13 @@ static void replace_active_exact_index_cache_entries_in_statement_slow(
                 cache_entry_changed = 1;
             }
         }
+        if (!cache_entry_matched) {
+            if (old_row_id == new_row_id) {
+                continue;
+            }
+            clear_exact_index_caches(statement);
+            return;
+        }
         if (old_row_id == new_row_id && cache_entry_matched && !cache_entry_changed) {
             continue;
         }

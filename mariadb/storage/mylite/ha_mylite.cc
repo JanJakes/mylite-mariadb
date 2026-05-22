@@ -252,7 +252,7 @@ static int mylite_prepare_checked_index_entries_with_scratch(
     size_t *out_entry_count, uchar **out_key_storage,
     mylite_storage_index_entry *entry_scratch, size_t entry_scratch_count,
     uchar *key_storage_scratch, size_t key_storage_scratch_size,
-    bool indexes_known_supported);
+    bool indexes_known_supported, const uchar *key_may_change);
 static int mylite_prepare_index_entry_changes(
     TABLE *table, const uchar *old_buf,
     const mylite_storage_index_entry *new_entries, size_t new_entry_count,
@@ -3222,7 +3222,7 @@ int ha_mylite::write_row(const uchar *buf)
       table, buf, &index_entries, &index_entry_count, &index_key_storage,
       stack_index_entries,
       sizeof(stack_index_entries) / sizeof(stack_index_entries[0]),
-      stack_index_key_storage, sizeof(stack_index_key_storage), true);
+      stack_index_key_storage, sizeof(stack_index_key_storage), true, NULL);
   if (error)
     DBUG_RETURN(error);
 
@@ -3403,7 +3403,8 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
         table, new_data, &index_entries, &index_entry_count,
         &index_key_storage, stack_index_entries,
         sizeof(stack_index_entries) / sizeof(stack_index_entries[0]),
-        stack_index_key_storage, sizeof(stack_index_key_storage), true);
+        stack_index_key_storage, sizeof(stack_index_key_storage), true,
+        key_may_change);
     if (error)
       DBUG_RETURN(error);
 
@@ -4947,7 +4948,7 @@ static int mylite_prepare_index_entries_with_scratch(
   return mylite_prepare_checked_index_entries_with_scratch(
       table, buf, out_entries, out_entry_count, out_key_storage, entry_scratch,
       entry_scratch_count, key_storage_scratch, key_storage_scratch_size,
-      false);
+      false, NULL);
 }
 
 static int mylite_prepare_checked_index_entries_with_scratch(
@@ -4955,7 +4956,7 @@ static int mylite_prepare_checked_index_entries_with_scratch(
     size_t *out_entry_count, uchar **out_key_storage,
     mylite_storage_index_entry *entry_scratch, size_t entry_scratch_count,
     uchar *key_storage_scratch, size_t key_storage_scratch_size,
-    bool indexes_known_supported)
+    bool indexes_known_supported, const uchar *key_may_change)
 {
   *out_entries= NULL;
   *out_entry_count= 0;
@@ -4967,15 +4968,20 @@ static int mylite_prepare_checked_index_entries_with_scratch(
     return HA_ERR_UNSUPPORTED;
 
   size_t key_storage_size= 0;
+  size_t key_count= 0;
   for (uint i= 0; i < table->s->keys; ++i)
   {
+    if (key_may_change && !key_may_change[i])
+      continue;
     if (table->key_info[i].key_length > SIZE_MAX - key_storage_size)
       return HA_ERR_RECORD_FILE_FULL;
     key_storage_size+= table->key_info[i].key_length;
+    ++key_count;
   }
+  if (key_count == 0)
+    return 0;
   if (key_storage_size == 0)
     return HA_ERR_UNSUPPORTED;
-  const size_t key_count= table->s->keys;
   if (key_count > SIZE_MAX / sizeof(mylite_storage_index_entry))
     return HA_ERR_RECORD_FILE_FULL;
 
@@ -5001,19 +5007,23 @@ static int mylite_prepare_checked_index_entries_with_scratch(
   }
 
   size_t key_offset= 0;
+  size_t entry_index= 0;
   for (uint i= 0; i < table->s->keys; ++i)
   {
+    if (key_may_change && !key_may_change[i])
+      continue;
     KEY *key_info= table->key_info + i;
     key_copy(key_storage + key_offset, buf, key_info, 0);
-    entries[i].size= sizeof(entries[i]);
-    entries[i].index_number= i;
-    entries[i].key= key_storage + key_offset;
-    entries[i].key_size= key_info->key_length;
+    entries[entry_index].size= sizeof(entries[entry_index]);
+    entries[entry_index].index_number= i;
+    entries[entry_index].key= key_storage + key_offset;
+    entries[entry_index].key_size= key_info->key_length;
     key_offset+= key_info->key_length;
+    ++entry_index;
   }
 
   *out_entries= entries;
-  *out_entry_count= table->s->keys;
+  *out_entry_count= key_count;
   *out_key_storage= key_storage;
   return 0;
 }
@@ -5026,19 +5036,22 @@ static int mylite_prepare_index_entry_changes(
 {
   if (new_entry_count == 0)
     return 0;
-  if (!entry_changed || entry_changed_count < new_entry_count ||
-      table->s->keys != new_entry_count)
+  if (!entry_changed || entry_changed_count < new_entry_count || !table ||
+      !table->s)
     return HA_ERR_CRASHED_ON_USAGE;
 
   for (size_t i= 0; i < new_entry_count; ++i)
   {
-    KEY *key_info= table->key_info + i;
-    if (new_entries[i].index_number != i ||
-        key_info->key_length != new_entries[i].key_size ||
+    const uint key_number= new_entries[i].index_number;
+    if (key_number >= table->s->keys)
+      return HA_ERR_CRASHED_ON_USAGE;
+
+    KEY *key_info= table->key_info + key_number;
+    if (key_info->key_length != new_entries[i].key_size ||
         key_info->key_length > MYLITE_STORAGE_MAX_INDEX_KEY_SIZE)
       return HA_ERR_CRASHED_ON_USAGE;
 
-    if (key_may_change ? !key_may_change[i]
+    if (key_may_change ? !key_may_change[key_number]
                        : !mylite_key_fields_may_change(table, key_info))
     {
       entry_changed[i]= 0;
@@ -5589,27 +5602,32 @@ static int mylite_check_duplicate_keys(
   *out_duplicate_key= (uint) -1;
   if (table->s->keys == 0)
     return 0;
-  if (index_entry_count != table->s->keys)
+  if (index_entry_count != 0 && !index_entries)
     return HA_ERR_CRASHED_ON_USAGE;
 
-  for (uint i= 0; i < table->s->keys; ++i)
+  for (size_t entry_index= 0; entry_index < index_entry_count; ++entry_index)
   {
+    const uint i= index_entries[entry_index].index_number;
+    if (i >= table->s->keys)
+      return HA_ERR_CRASHED_ON_USAGE;
+
     KEY *key_info= table->key_info + i;
-    if (index_entry_changed && !index_entry_changed[i])
+    if (index_entry_changed && !index_entry_changed[entry_index])
       continue;
     if (!(key_info->flags & HA_NOSAME) ||
         mylite_unique_key_allows_duplicate_null(table, key_info, buf))
       continue;
 
     if (!(key_info->flags & HA_NULL_PART_KEY) &&
-        index_entries[i].key_size == key_info->key_length &&
+        index_entries[entry_index].key_size == key_info->key_length &&
         mylite_key_uses_raw_exact_filter(key_info))
     {
       ulonglong row_id= 0ULL;
       const mylite_storage_result storage_result=
-          mylite_storage_find_index_entry(primary_file, schema_name,
-                                          table_name, i, index_entries[i].key,
-                                          index_entries[i].key_size, &row_id);
+          mylite_storage_find_index_entry(
+              primary_file, schema_name, table_name, i,
+              index_entries[entry_index].key,
+              index_entries[entry_index].key_size, &row_id);
       if (storage_result == MYLITE_STORAGE_NOTFOUND)
         continue;
       if (storage_result != MYLITE_STORAGE_OK)
@@ -5632,7 +5650,7 @@ static int mylite_check_duplicate_keys(
     {
       if (entryset.row_ids[j] == skip_row_id)
         continue;
-      if (entryset.key_sizes[j] != index_entries[i].key_size)
+      if (entryset.key_sizes[j] != index_entries[entry_index].key_size)
       {
         mylite_storage_free_index_entryset(&entryset);
         return HA_ERR_CRASHED_ON_USAGE;
@@ -5640,7 +5658,7 @@ static int mylite_check_duplicate_keys(
 
       const uchar *entry_key= entryset.keys + entryset.key_offsets[j];
       if (!key_buf_cmp(key_info, key_info->user_defined_key_parts, entry_key,
-                       index_entries[i].key))
+                       index_entries[entry_index].key))
       {
         mylite_storage_free_index_entryset(&entryset);
         *out_duplicate_key= i;
@@ -5663,27 +5681,32 @@ static int mylite_check_volatile_duplicate_keys(
   *out_duplicate_key= (uint) -1;
   if (table->s->keys == 0)
     return 0;
-  if (index_entry_count != table->s->keys)
+  if (index_entry_count != 0 && !index_entries)
     return HA_ERR_CRASHED_ON_USAGE;
 
-  for (uint i= 0; i < table->s->keys; ++i)
+  for (size_t entry_index= 0; entry_index < index_entry_count; ++entry_index)
   {
+    const uint i= index_entries[entry_index].index_number;
+    if (i >= table->s->keys)
+      return HA_ERR_CRASHED_ON_USAGE;
+
     KEY *key_info= table->key_info + i;
-    if (index_entry_changed && !index_entry_changed[i])
+    if (index_entry_changed && !index_entry_changed[entry_index])
       continue;
     if (!(key_info->flags & HA_NOSAME) ||
         mylite_unique_key_allows_duplicate_null(table, key_info, buf))
       continue;
 
     if (!(key_info->flags & HA_NULL_PART_KEY) &&
-        index_entries[i].key_size == key_info->key_length &&
+        index_entries[entry_index].key_size == key_info->key_length &&
         mylite_key_uses_raw_exact_filter(key_info))
     {
       ulonglong row_id= 0ULL;
       const mylite_storage_result storage_result=
-          mylite_volatile_find_index_entry(primary_file, schema_name,
-                                           table_name, i, index_entries[i].key,
-                                           index_entries[i].key_size, &row_id);
+          mylite_volatile_find_index_entry(
+              primary_file, schema_name, table_name, i,
+              index_entries[entry_index].key,
+              index_entries[entry_index].key_size, &row_id);
       if (storage_result == MYLITE_STORAGE_NOTFOUND)
         continue;
       if (storage_result != MYLITE_STORAGE_OK)
@@ -5706,15 +5729,15 @@ static int mylite_check_volatile_duplicate_keys(
     {
       if (entryset.row_ids[j] == skip_row_id)
         continue;
-      if (entryset.key_sizes[j] != index_entries[i].key_size)
+      if (entryset.key_sizes[j] != index_entries[entry_index].key_size)
       {
         mylite_storage_free_index_entryset(&entryset);
         return HA_ERR_CRASHED_ON_USAGE;
       }
 
       const uchar *entry_key= entryset.keys + entryset.key_offsets[j];
-      if (!key_buf_cmp(key_info, key_info->user_defined_key_parts,
-                       entry_key, index_entries[i].key))
+      if (!key_buf_cmp(key_info, key_info->user_defined_key_parts, entry_key,
+                       index_entries[entry_index].key))
       {
         mylite_storage_free_index_entryset(&entryset);
         *out_duplicate_key= i;

@@ -191,6 +191,11 @@ generic changed-index page-ref array and second changed-index loop after the
 existing buffered-shape cache has validated the row/index layout, and that
 fast path trusts the handler-provided changed-key proof instead of comparing the
 same serialized key bytes again.
+Accepted direct updates now prepare key images only for indexes marked
+may-change by MariaDB's direct-update write set, and duplicate checks plus
+exact-index cache maintenance handle those sparse entry lists without changing
+insert or non-direct update preparation. The prepared update component sample
+now shows exact-index row-id scanning as the next dominant write-path cost.
 Same-size row-only active rewrites now capture only the row checksum-plus-payload
 undo range and rewrite only payload bytes while preserving rollback correctness
 after dirty buffered-page checksum refreshes and later size-changing rewrites in
