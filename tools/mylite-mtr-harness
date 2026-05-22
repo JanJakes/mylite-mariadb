@@ -83,6 +83,7 @@ default_tests=(
   main.update_ignore_216
   main.insert_update_autoinc-7150
   main.strict_autoinc_3heap
+  main.mdev_14586
   main.replace
   main.bulk_replace
   main.create_replace_tmp

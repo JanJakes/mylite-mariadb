@@ -132,7 +132,7 @@ default-expression and weight-string behavior, selected string/format function
 behavior, selected charset-conversion expression behavior, selected crypto/KDF
 function behavior, selected disabled DES encryption-function behavior,
 selected JSON equality and normalization behavior, selected aggregate DISTINCT behavior,
-selected autoincrement ODKU and strict HEAP autoincrement behavior, selected
+selected BIT-key, ODKU, and strict HEAP autoincrement behavior, selected
 date-format behavior, selected ASCII, legacy, and UTF-32 charset edge
 behavior, selected Latin2, UTF-8 binary/general, UTF-8 UCA 1400, and utf8mb3
 general-1400 charset, weight-string, and LIKE condition-propagation behavior,
