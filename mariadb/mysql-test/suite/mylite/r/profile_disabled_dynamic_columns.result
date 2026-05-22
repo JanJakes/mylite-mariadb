@@ -1,0 +1,13 @@
+select column_create('color', 'blue');
+ERROR HY000: Encountered illegal format of dynamic column string
+select column_check('');
+column_check('')
+0
+select column_exists('', 'color');
+ERROR HY000: Encountered illegal format of dynamic column string
+select column_get('', 'color' as char);
+ERROR HY000: Encountered illegal format of dynamic column string
+select column_json('');
+ERROR HY000: Encountered illegal format of dynamic column string
+select column_list('');
+ERROR HY000: Encountered illegal format of dynamic column string

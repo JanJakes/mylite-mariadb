@@ -78,6 +78,7 @@ selected embedded-profile disabled diagnostic behavior,
 selected embedded-profile disabled metadata behavior,
 selected embedded-profile host-file SQL I/O rejection,
 selected embedded-profile optional SQL function absence,
+selected embedded-profile dynamic-column disabled fallback behavior,
 selected embedded-profile disabled SQL-surface behavior,
 `ORDER BY`, optimizer-cost metadata, selected EXPLAIN plan output,
 selected Aria range, semijoin, and rowid-filter optimizer behavior, selected
@@ -102,7 +103,8 @@ It uses a separate
 profile because the default embedded profile intentionally omits view, stored
 program, trigger, and binlog sysvar surfaces that MTR bootstrap still expects.
 The curated list also covers selected filesystem charset,
-UTF-32 `character_set_collations`, and JSON equality/normalization behavior.
+UTF-32 `character_set_collations`, JSON equality/normalization behavior, and
+raw embedded dynamic-column disabled fallback behavior.
 It remains outside the default compatibility groups because it builds
 `mariadbd` and several upstream client/support tools. Broader MTR integration
 should be a separate comparison slice with explicit include lists, expected

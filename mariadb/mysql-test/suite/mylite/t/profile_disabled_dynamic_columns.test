@@ -1,0 +1,18 @@
+#
+# Check dynamic-column functions in the MyLite MTR smoke profile. The SQL
+# function names remain registered, but the packed dynamic-column runtime is
+# intentionally stubbed out of the embedded server build.
+#
+
+--error ER_DYN_COL_WRONG_FORMAT
+select column_create('color', 'blue');
+
+select column_check('');
+--error ER_DYN_COL_WRONG_FORMAT
+select column_exists('', 'color');
+--error ER_DYN_COL_WRONG_FORMAT
+select column_get('', 'color' as char);
+--error ER_DYN_COL_WRONG_FORMAT
+select column_json('');
+--error ER_DYN_COL_WRONG_FORMAT
+select column_list('');

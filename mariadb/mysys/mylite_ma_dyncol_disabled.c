@@ -15,6 +15,12 @@ static enum enum_dyncol_func_result mylite_dyncol_disabled(void)
   return ER_DYNCOL_FORMAT;
 }
 
+static void mylite_dyncol_init_if_new(DYNAMIC_COLUMN *str, my_bool new_string)
+{
+  if (new_string && str)
+    mariadb_dyncol_init(str);
+}
+
 my_bool mariadb_dyncol_has_names(DYNAMIC_COLUMN *str)
 {
   (void) str;
@@ -48,7 +54,7 @@ enum enum_dyncol_func_result
 dynamic_column_create(DYNAMIC_COLUMN *str, uint column_nr,
                       DYNAMIC_COLUMN_VALUE *value)
 {
-  (void) str;
+  mylite_dyncol_init_if_new(str, TRUE);
   (void) column_nr;
   (void) value;
   return mylite_dyncol_disabled();
@@ -59,7 +65,7 @@ dynamic_column_create_many(DYNAMIC_COLUMN *str, uint column_count,
                            uint *column_numbers,
                            DYNAMIC_COLUMN_VALUE *values)
 {
-  (void) str;
+  mylite_dyncol_init_if_new(str, TRUE);
   (void) column_count;
   (void) column_numbers;
   (void) values;
@@ -72,11 +78,10 @@ mariadb_dyncol_create_many_num(DYNAMIC_COLUMN *str, uint column_count,
                                DYNAMIC_COLUMN_VALUE *values,
                                my_bool new_string)
 {
-  (void) str;
+  mylite_dyncol_init_if_new(str, new_string);
   (void) column_count;
   (void) column_numbers;
   (void) values;
-  (void) new_string;
   return mylite_dyncol_disabled();
 }
 
@@ -86,11 +91,10 @@ mariadb_dyncol_create_many_named(DYNAMIC_COLUMN *str, uint column_count,
                                  DYNAMIC_COLUMN_VALUE *values,
                                  my_bool new_string)
 {
-  (void) str;
+  mylite_dyncol_init_if_new(str, new_string);
   (void) column_count;
   (void) column_keys;
   (void) values;
-  (void) new_string;
   return mylite_dyncol_disabled();
 }
 
@@ -235,8 +239,8 @@ mariadb_dyncol_check(DYNAMIC_COLUMN *str)
 enum enum_dyncol_func_result
 mariadb_dyncol_json(DYNAMIC_COLUMN *str, DYNAMIC_STRING *json)
 {
+  mylite_dyncol_init_if_new(json, TRUE);
   (void) str;
-  (void) json;
   return mylite_dyncol_disabled();
 }
 
@@ -254,7 +258,8 @@ mariadb_dyncol_val_str(DYNAMIC_STRING *str, DYNAMIC_COLUMN_VALUE *val,
 enum enum_dyncol_func_result
 mariadb_dyncol_val_long(longlong *ll, DYNAMIC_COLUMN_VALUE *val)
 {
-  (void) ll;
+  if (ll)
+    *ll= 0;
   (void) val;
   return mylite_dyncol_disabled();
 }
@@ -262,7 +267,8 @@ mariadb_dyncol_val_long(longlong *ll, DYNAMIC_COLUMN_VALUE *val)
 enum enum_dyncol_func_result
 mariadb_dyncol_val_double(double *dbl, DYNAMIC_COLUMN_VALUE *val)
 {
-  (void) dbl;
+  if (dbl)
+    *dbl= 0;
   (void) val;
   return mylite_dyncol_disabled();
 }
@@ -300,5 +306,6 @@ mariadb_dyncol_column_count(DYNAMIC_COLUMN *str, uint *column_count)
 
 void mariadb_dyncol_free(DYNAMIC_COLUMN *str)
 {
-  dynstr_free(str);
+  if (str)
+    dynstr_free(str);
 }

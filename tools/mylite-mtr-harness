@@ -13,6 +13,7 @@ default_tests=(
   mylite.profile_disabled_diagnostics
   mylite.profile_disabled_file_io
   mylite.profile_disabled_optional_functions
+  mylite.profile_disabled_dynamic_columns
   mylite.profile_disabled_surfaces
   main.cast
   main.case
