@@ -244,7 +244,8 @@ survive storage changes. That cache is now four-way set-associative so larger
 stable point-read working sets avoid direct-mapped eviction thrash without
 changing cache eligibility or write invalidation. Fixed-width cached row replay
 now copies scalar column state in place instead of assigning whole
-`ColumnValue` vectors on each cache hit.
+`ColumnValue` vectors on each cache hit, and cached-row replay plus cached
+`DONE` steps now bypass storage-context setup.
 Hot read-checkpoint cache hits now borrow the cached catalog image for scoped
 catalog views and defer catalog/header page copies until a caller needs page
 bytes, instead of deep-copying that state into every short-lived read statement.

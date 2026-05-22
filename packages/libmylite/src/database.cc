@@ -538,6 +538,7 @@ bool prepared_read_scope_result_is_active(const mylite_stmt &statement);
 bool prepared_statement_can_reuse_read_scope(const mylite_stmt &statement);
 bool prepared_statement_has_table_result_column(const mylite_stmt &statement);
 int execute_cached_one_row_result(mylite_stmt &statement, bool *out_used_cache);
+int finish_cached_one_row_result(mylite_stmt &statement);
 void begin_one_row_result_cache_execution(mylite_stmt &statement);
 void capture_one_row_result_cache_row(mylite_stmt &statement);
 int finish_one_row_result_cache_before_reset(mylite_stmt &statement);
@@ -959,14 +960,28 @@ int mylite_step(mylite_stmt *statement) {
     set_error(*statement->database, MYLITE_ERROR, "MariaDB embedded backend is not enabled");
     return MYLITE_ERROR;
 #else
-    StorageBusyTimeoutScope busy_timeout(
-        statement->database != nullptr ? statement->database->busy_timeout_ms : 0U
-    );
-    StorageContextScope storage_context(statement->database);
     try {
         if (statement->done) {
             return MYLITE_DONE;
         }
+
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        if (statement->one_row_result_cache_hit_active) {
+            return finish_cached_one_row_result(*statement);
+        }
+        if (!statement->executed) {
+            bool used_cache = false;
+            const int cache_result = execute_cached_one_row_result(*statement, &used_cache);
+            if (used_cache || cache_result != MYLITE_OK) {
+                return cache_result;
+            }
+        }
+#  endif
+
+        StorageBusyTimeoutScope busy_timeout(
+            statement->database != nullptr ? statement->database->busy_timeout_ms : 0U
+        );
+        StorageContextScope storage_context(statement->database);
 
         if (!statement->executed) {
             return execute_statement(*statement);
@@ -2583,6 +2598,15 @@ int execute_cached_one_row_result(mylite_stmt &statement, bool *out_used_cache) 
     return MYLITE_ROW;
 }
 
+int finish_cached_one_row_result(mylite_stmt &statement) {
+    clear_current_row_for_reuse(statement);
+    statement.one_row_result_cache_hit_active = false;
+    statement.done = true;
+    statement.result_active = false;
+    clear_warnings_if_needed(*statement.database);
+    return MYLITE_DONE;
+}
+
 void begin_one_row_result_cache_execution(mylite_stmt &statement) {
     clear_one_row_result_cache_execution(statement);
     if (!statement.uses_one_row_result_cache) {
@@ -3864,11 +3888,7 @@ int fetch_statement_row(mylite_stmt &statement) {
     clear_current_row_for_reuse(statement);
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
     if (statement.one_row_result_cache_hit_active) {
-        statement.one_row_result_cache_hit_active = false;
-        statement.done = true;
-        statement.result_active = false;
-        clear_warnings_if_needed(*statement.database);
-        return MYLITE_DONE;
+        return finish_cached_one_row_result(statement);
     }
 #  endif
 
