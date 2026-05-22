@@ -300,6 +300,10 @@ The handler-side direct key builder now reuses a table-lifetime cloned key
 field and key buffer for the accepted one-part integer raw-key subset, avoiding
 per-execute `Field::new_key_field()` allocation in MyLite's direct hook while
 keeping MariaDB item-to-field conversion semantics.
+The SQL-layer exact-update quick shortcut now defers key materialization until
+a quick reader is actually reset, and handler-direct updates skip the unused
+quick reset/read-record setup, so accepted direct updates no longer build a
+second unused lookup key in `SQL_SELECT::check_quick()`.
 Ordinary MyLite `UPDATE` / `DELETE` execution now skips eager quick-plan
 explain detail allocation unless explicit `EXPLAIN`, `ANALYZE`, or slow-log
 explain/engine detail needs it, while routed `EXPLAIN UPDATE` keeps the full

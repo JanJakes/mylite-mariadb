@@ -908,27 +908,19 @@ bool Sql_cmd_update::update_single_table(THD *thd)
 update_begin:
   if (ignore)
     table->file->extra(HA_EXTRA_IGNORE_DUP_KEY);
-  
-  if (select && select->quick && select->quick->reset())
-    goto err;
-  table->file->try_semi_consistent_read(1);
-  if (init_read_record(&info, thd, table, select, file_sort, 0, 1, FALSE))
-    goto err;
 
   updated= updated_or_same= found= 0;
-  /*
-    Generate an error (in TRADITIONAL mode) or warning
-    when trying to set a NOT NULL field to NULL.
-  */
-  thd->count_cuted_fields= CHECK_FIELD_WARN;
-  thd->cuted_fields=0L;
-
-  thd->abort_on_warning= !ignore && thd->is_strict_mode();
-
   if (do_direct_update)
   {
     /* Direct updating is supported */
     ha_rows update_rows= 0, found_rows= 0;
+    /*
+      Generate an error (in TRADITIONAL mode) or warning when trying to set a
+      NOT NULL field to NULL.
+    */
+    thd->count_cuted_fields= CHECK_FIELD_WARN;
+    thd->cuted_fields= 0L;
+    thd->abort_on_warning= !ignore && thd->is_strict_mode();
     DBUG_PRINT("info", ("Using direct update"));
     table->reset_default_fields();
     if (unlikely(!(error= table->file->ha_direct_update_rows(&update_rows,
@@ -940,6 +932,21 @@ update_begin:
       found= updated;
     goto update_end;
   }
+
+  if (select && select->quick && select->quick->reset())
+    goto err;
+  table->file->try_semi_consistent_read(1);
+  if (init_read_record(&info, thd, table, select, file_sort, 0, 1, FALSE))
+    goto err;
+
+  /*
+    Generate an error (in TRADITIONAL mode) or warning
+    when trying to set a NOT NULL field to NULL.
+  */
+  thd->count_cuted_fields= CHECK_FIELD_WARN;
+  thd->cuted_fields= 0L;
+
+  thd->abort_on_warning= !ignore && thd->is_strict_mode();
 
   if (!table->prepare_triggers_for_update_stmt_or_event() &&
       !thd->lex->with_rownum &&

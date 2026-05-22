@@ -130,11 +130,10 @@ static bool find_simple_unique_key_equal_item(Item *cond, TABLE *table,
 static bool find_key_field_equal_item(Item *item, TABLE *table, Field *field,
                                       Item **out_value_item);
 static bool is_simple_unique_key_candidate(TABLE *table, KEY *key_info);
-QUICK_SELECT_I *get_quick_select_for_exact_key(THD *thd, TABLE *table,
-                                               uint keynr,
-                                               const uchar *key_buff,
-                                               uint key_length,
-                                               ha_rows records);
+QUICK_SELECT_I *get_quick_select_for_update_exact_key(THD *thd, TABLE *table,
+                                                      uint keynr,
+                                                      Item *value_item,
+                                                      ha_rows records);
 
 #ifndef EXTRA_DEBUG
 #define test_rb_tree(A,B) {}
@@ -3286,12 +3285,6 @@ make_simple_update_unique_key_quick_select(THD *thd, SQL_SELECT *select,
                                            ha_rows table_records)
 {
   TABLE *table= select->head;
-  KEY *key_info= table->key_info + keynr;
-  KEY_PART_INFO *key_part= key_info->key_part;
-  uchar key_buff[MAX_KEY_LENGTH];
-
-  DBUG_ASSERT(key_info->key_length <= MAX_KEY_LENGTH);
-  bzero(key_buff, key_info->key_length);
 
   if (value_item->maybe_null() && value_item->is_null())
   {
@@ -3301,27 +3294,8 @@ make_simple_update_unique_key_quick_select(THD *thd, SQL_SELECT *select,
     return SQL_SELECT::IMPOSSIBLE_RANGE;
   }
 
-  store_key_item key_copy(thd, key_part->field, key_buff, NULL,
-                          key_part->length, value_item, FALSE);
-  if (thd->is_error())
-    return SQL_SELECT::ERROR;
-
-  enum_check_fields org_count_cuted_fields= thd->count_cuted_fields;
-  MY_BITMAP *old_map= dbug_tmp_use_all_columns(table, &table->write_set);
-  thd->count_cuted_fields= CHECK_FIELD_IGNORE;
-  store_key::store_key_result copy_result= key_copy.copy(thd);
-  thd->count_cuted_fields= org_count_cuted_fields;
-  dbug_tmp_restore_column_map(&table->write_set, old_map);
-  if (copy_result == store_key::STORE_KEY_FATAL)
-    return SQL_SELECT::ERROR;
-  if (key_copy.null_key)
-  {
-    select->records= 0;
-    return SQL_SELECT::IMPOSSIBLE_RANGE;
-  }
-
-  QUICK_SELECT_I *quick= get_quick_select_for_exact_key(
-      thd, table, keynr, key_buff, key_info->key_length, 1);
+  QUICK_SELECT_I *quick=
+      get_quick_select_for_update_exact_key(thd, table, keynr, value_item, 1);
   if (!quick)
     return SQL_SELECT::ERROR;
 
@@ -13093,12 +13067,13 @@ FT_SELECT *get_ft_select(THD *thd, TABLE *table, uint key)
 class QUICK_EXACT_KEY_SELECT : public QUICK_SELECT_I
 {
 public:
-  QUICK_EXACT_KEY_SELECT(TABLE *table, uint keynr, const uchar *key,
-                         uint key_length_arg, ha_rows records_arg)
-      : file(table->file), keypart_map(make_prev_keypart_map(1)),
-        exhausted(false)
+  QUICK_EXACT_KEY_SELECT(THD *thd_arg, TABLE *table, uint keynr,
+                         Item *value_item_arg, ha_rows records_arg)
+      : thd(thd_arg), file(table->file), value_item(value_item_arg),
+        keypart_map(make_prev_keypart_map(1)), key_ready(false),
+        key_is_null(false), exhausted(false)
   {
-    DBUG_ASSERT(key_length_arg <= MAX_KEY_LENGTH);
+    DBUG_ASSERT(table->key_info[keynr].key_length <= MAX_KEY_LENGTH);
     head= table;
     index= keynr;
     record= head->record[0];
@@ -13106,7 +13081,6 @@ public:
     read_time= 1.0;
     max_used_key_length= head->key_info[index].key_part[0].store_length;
     used_key_parts= 1;
-    memcpy(key_buff, key, key_length_arg);
   }
 
   ~QUICK_EXACT_KEY_SELECT() override
@@ -13130,6 +13104,23 @@ public:
     int error;
     DBUG_ENTER("QUICK_EXACT_KEY_SELECT::reset");
     exhausted= false;
+
+    if (!key_ready)
+    {
+      if (unlikely((error= build_key())))
+        DBUG_RETURN(error);
+    }
+
+    if (key_is_null)
+    {
+      exhausted= true;
+      if (file->inited != handler::NONE)
+      {
+        if (unlikely((error= file->ha_index_or_rnd_end())))
+          DBUG_RETURN(error);
+      }
+      DBUG_RETURN(0);
+    }
 
     if (file->inited == handler::RND)
     {
@@ -13205,23 +13196,62 @@ public:
 #endif
 
 private:
+  int build_key()
+  {
+    DBUG_ENTER("QUICK_EXACT_KEY_SELECT::build_key");
+    KEY *key_info= head->key_info + index;
+    KEY_PART_INFO *key_part= key_info->key_part;
+    bzero(key_buff, key_info->key_length);
+
+    if (value_item->maybe_null() && value_item->is_null())
+    {
+      if (thd->is_error())
+        DBUG_RETURN(1);
+      key_is_null= true;
+      key_ready= true;
+      DBUG_RETURN(0);
+    }
+
+    store_key_item key_copy(thd, key_part->field, key_buff, NULL,
+                            key_part->length, value_item, FALSE);
+    if (thd->is_error())
+      DBUG_RETURN(1);
+
+    enum_check_fields org_count_cuted_fields= thd->count_cuted_fields;
+    MY_BITMAP *old_map= dbug_tmp_use_all_columns(head, &head->write_set);
+    thd->count_cuted_fields= CHECK_FIELD_IGNORE;
+    store_key::store_key_result copy_result= key_copy.copy(thd);
+    thd->count_cuted_fields= org_count_cuted_fields;
+    dbug_tmp_restore_column_map(&head->write_set, old_map);
+    if (copy_result == store_key::STORE_KEY_FATAL)
+      DBUG_RETURN(1);
+
+    key_is_null= key_copy.null_key;
+    key_ready= true;
+    DBUG_RETURN(0);
+  }
+
+  THD *thd;
   handler *file;
+  Item *value_item;
   uchar key_buff[MAX_KEY_LENGTH];
   key_part_map keypart_map;
+  bool key_ready;
+  bool key_is_null;
   bool exhausted;
 };
 
 /*
-  Create quick select from a fully built exact key image.
+  Create quick select from a lazily built exact update key image.
 */
 
-QUICK_SELECT_I *
-get_quick_select_for_exact_key(THD *thd __attribute__((unused)), TABLE *table,
-                               uint keynr, const uchar *key_buff,
-                               uint key_length, ha_rows records)
+QUICK_SELECT_I *get_quick_select_for_update_exact_key(THD *thd, TABLE *table,
+                                                      uint keynr,
+                                                      Item *value_item,
+                                                      ha_rows records)
 {
   QUICK_SELECT_I *quick=
-      new QUICK_EXACT_KEY_SELECT(table, keynr, key_buff, key_length, records);
+      new QUICK_EXACT_KEY_SELECT(thd, table, keynr, value_item, records);
   if (!quick || quick->init())
   {
     delete quick;
