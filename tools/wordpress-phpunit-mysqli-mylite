@@ -29,16 +29,21 @@ RUN apt-get update \
     ca-certificates \
     cmake \
     git \
+    libavif-dev \
     libcrypt-dev \
+    libfreetype6-dev \
+    libjpeg62-turbo-dev \
     libncurses-dev \
     libpcre2-dev \
     libpng-dev \
     libssl-dev \
+    libwebp-dev \
     libzip-dev \
     ninja-build \
     pkg-config \
     unzip \
     zlib1g-dev \
+  && docker-php-ext-configure gd --with-avif --with-freetype --with-jpeg --with-webp \
   && docker-php-ext-install -j"$(nproc)" gd zip \
   && rm -rf /var/lib/apt/lists/*
 
@@ -66,6 +71,7 @@ set -euo pipefail
 php_wrapper="${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}/mylite-wordpress-php"
 mylite_extension="${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}/packages/php-ext-mylite/mylite.so"
 mysqli_extension="${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}/packages/php-ext-mysqli-mylite/mysqli_mylite.so"
+php_ini_dir="${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}/php-conf.d"
 
 phase() {
   printf '\n==> %s\n' "$*"
@@ -103,9 +109,15 @@ cmake -S . -B "${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}" -G Ninja \
   -DMYLITE_PHP_CONFIG_EXECUTABLE=/usr/local/bin/php-config \
   -DMYLITE_PHP_EXECUTABLE=/usr/local/bin/php
 cmake --build "${MYLITE_WORDPRESS_CMAKE_BUILD_DIR}"
+mkdir -p "${php_ini_dir}"
+cat > "${php_ini_dir}/mylite.ini" <<INI
+extension=${mylite_extension}
+extension=${mysqli_extension}
+INI
 cat > "${php_wrapper}" <<PHP
 #!/usr/bin/env sh
-exec /usr/local/bin/php -d extension=${mylite_extension} -d extension=${mysqli_extension} "\$@"
+export PHP_INI_SCAN_DIR="/usr/local/etc/php/conf.d:${php_ini_dir}"
+exec /usr/local/bin/php "\$@"
 PHP
 chmod +x "${php_wrapper}"
 "${php_wrapper}" -r 'if (!extension_loaded("mylite") || !extension_loaded("mysqli_mylite") || !function_exists("mysqli_connect")) { exit(1); }'
@@ -117,6 +129,56 @@ composer --working-dir="${MYLITE_WORDPRESS_DIR}" install --no-interaction --no-p
 if [ ! -x "${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/bin/phpunit" ]; then
   composer --working-dir="${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}" require --no-interaction --no-progress --prefer-dist phpunit/phpunit:^9.6
 fi
+PHPUNIT_PROCESS_FILE="${MYLITE_WORDPRESS_PHPUNIT_TOOLS_DIR}/vendor/phpunit/phpunit/src/Util/PHP/DefaultPhpProcess.php" /usr/local/bin/php <<'PHP'
+<?php
+$file = getenv('PHPUNIT_PROCESS_FILE');
+$source = file_get_contents($file);
+$marker = 'MYLITE_WORDPRESS_RELEASE_DB_LOCKS_FOR_CHILD_PROCESSES';
+
+if (str_contains($source, $marker)) {
+    exit(0);
+}
+
+$patched = str_replace(
+    "        \$process = proc_open(\n",
+    "        // {$marker}\n" .
+    "        \$myliteWordPressWpdb = \$GLOBALS['wpdb'] ?? null;\n" .
+    "        \$myliteWordPressWpdbWasClosed = false;\n" .
+    "        if (is_object(\$myliteWordPressWpdb) && method_exists(\$myliteWordPressWpdb, 'close') && method_exists(\$myliteWordPressWpdb, 'db_connect')) {\n" .
+    "            \$myliteWordPressWpdb->close();\n" .
+    "            \$myliteWordPressWpdbWasClosed = true;\n" .
+    "        }\n\n" .
+    "        \$process = proc_open(\n",
+    $source
+);
+
+$patched = str_replace(
+    "        if (!is_resource(\$process)) {\n            throw new Exception(\n",
+    "        if (!is_resource(\$process)) {\n" .
+    "            if (\$myliteWordPressWpdbWasClosed) {\n" .
+    "                \$myliteWordPressWpdb->db_connect(false);\n" .
+    "            }\n\n" .
+    "            throw new Exception(\n",
+    $patched
+);
+
+$patched = str_replace(
+    "        proc_close(\$process);\n\n        \$this->cleanup();\n",
+    "        proc_close(\$process);\n\n" .
+    "        if (\$myliteWordPressWpdbWasClosed) {\n" .
+    "            \$myliteWordPressWpdb->db_connect(false);\n" .
+    "        }\n\n" .
+    "        \$this->cleanup();\n",
+    $patched
+);
+
+if ($patched === $source) {
+    fwrite(STDERR, "Could not patch PHPUnit child process database lock release.\n");
+    exit(1);
+}
+
+file_put_contents($file, $patched);
+PHP
 echo "wordpress_dependency_seconds=$(seconds_since "${deps_start}")"
 
 phase "Prepare MyLite database"
@@ -155,7 +217,7 @@ define( 'NONCE_SALT', 'mylite' );
 \$table_prefix = 'wptests_';
 define( 'WP_TESTS_DOMAIN', 'example.org' );
 define( 'WP_TESTS_EMAIL', 'admin@example.org' );
-define( 'WP_TESTS_TITLE', 'MyLite WordPress Tests' );
+define( 'WP_TESTS_TITLE', 'Test Blog' );
 define( 'WP_PHP_BINARY', '${php_wrapper}' );
 define( 'WPLANG', '' );
 PHP
