@@ -3866,6 +3866,26 @@ static void replace_index_entries_row_id(
     unsigned long long old_row_id,
     unsigned long long new_row_id
 );
+static mylite_storage_result append_tracked_index_entry_to_entryset(
+    mylite_storage_index_entryset *entryset,
+    mylite_storage_live_row_id_set *tracked_row_ids,
+    const mylite_storage_index_entry_page *entry_page
+);
+static mylite_storage_result track_index_entryset_row_ids(
+    const mylite_storage_index_entryset *entryset,
+    mylite_storage_live_row_id_set *tracked_row_ids
+);
+static void remove_tracked_index_entries_by_row_id(
+    mylite_storage_index_entryset *entryset,
+    mylite_storage_live_row_id_set *tracked_row_ids,
+    unsigned long long row_id
+);
+static mylite_storage_result replace_tracked_index_entries_row_id(
+    mylite_storage_index_entryset *entryset,
+    mylite_storage_live_row_id_set *tracked_row_ids,
+    unsigned long long old_row_id,
+    unsigned long long new_row_id
+);
 static void encode_autoincrement_page(
     unsigned char *page,
     unsigned long long page_id,
@@ -19383,7 +19403,8 @@ static mylite_storage_result read_live_index_entries_from(
     mylite_storage_index_entryset *out_entries
 ) {
     mylite_storage_row_state_map row_state_map = {0};
-    mylite_storage_result result = MYLITE_STORAGE_OK;
+    mylite_storage_live_row_id_set tracked_row_ids = {0};
+    mylite_storage_result result = track_index_entryset_row_ids(out_entries, &tracked_row_ids);
     for (unsigned long long page_id = first_page_id;
          result == MYLITE_STORAGE_OK && page_id < header->page_count;
          ++page_id) {
@@ -19399,8 +19420,11 @@ static mylite_storage_result read_live_index_entries_from(
             if (result == MYLITE_STORAGE_OK && entry_page.table_id == table_id &&
                 entry_page.index_number == index_number &&
                 find_row_state_entry(&row_state_map, entry_page.row_id) == NULL) {
-                remove_index_entries_by_row_id(out_entries, entry_page.row_id);
-                result = append_index_entry_to_entryset(out_entries, &entry_page);
+                result = append_tracked_index_entry_to_entryset(
+                    out_entries,
+                    &tracked_row_ids,
+                    &entry_page
+                );
             }
             continue;
         }
@@ -19412,13 +19436,18 @@ static mylite_storage_result read_live_index_entries_from(
                 result = set_row_state_entry(&row_state_map, &row_state_page);
                 if (result == MYLITE_STORAGE_OK) {
                     if (row_state_page.state_kind == MYLITE_STORAGE_FORMAT_ROW_STATE_KIND_REPLACE) {
-                        replace_index_entries_row_id(
+                        result = replace_tracked_index_entries_row_id(
                             out_entries,
+                            &tracked_row_ids,
                             row_state_page.source_row_id,
                             row_state_page.replacement_row_id
                         );
                     } else {
-                        remove_index_entries_by_row_id(out_entries, row_state_page.source_row_id);
+                        remove_tracked_index_entries_by_row_id(
+                            out_entries,
+                            &tracked_row_ids,
+                            row_state_page.source_row_id
+                        );
                     }
                 }
             }
@@ -19430,6 +19459,7 @@ static mylite_storage_result read_live_index_entries_from(
         }
     }
 
+    free_live_row_id_set(&tracked_row_ids);
     free_row_state_map(&row_state_map);
     return result;
 }
@@ -21274,7 +21304,8 @@ static mylite_storage_result scan_exact_index_entries_from(
     mylite_storage_index_entryset *out_entries
 ) {
     mylite_storage_row_state_map row_state_map = {0};
-    mylite_storage_result result = MYLITE_STORAGE_OK;
+    mylite_storage_live_row_id_set tracked_row_ids = {0};
+    mylite_storage_result result = track_index_entryset_row_ids(out_entries, &tracked_row_ids);
     for (unsigned long long page_id = first_page_id;
          result == MYLITE_STORAGE_OK && page_id < header->page_count;
          ++page_id) {
@@ -21290,9 +21321,17 @@ static mylite_storage_result scan_exact_index_entries_from(
             if (result == MYLITE_STORAGE_OK && entry_page.table_id == table_id &&
                 entry_page.index_number == index_number &&
                 find_row_state_entry(&row_state_map, entry_page.row_id) == NULL) {
-                remove_index_entries_by_row_id(out_entries, entry_page.row_id);
+                remove_tracked_index_entries_by_row_id(
+                    out_entries,
+                    &tracked_row_ids,
+                    entry_page.row_id
+                );
                 if (entry_page.key_size == key_size && memcmp(entry_page.key, key, key_size) == 0) {
-                    result = append_index_entry_to_entryset(out_entries, &entry_page);
+                    result = append_tracked_index_entry_to_entryset(
+                        out_entries,
+                        &tracked_row_ids,
+                        &entry_page
+                    );
                 }
             }
             continue;
@@ -21305,13 +21344,18 @@ static mylite_storage_result scan_exact_index_entries_from(
                 result = set_row_state_entry(&row_state_map, &row_state_page);
                 if (result == MYLITE_STORAGE_OK) {
                     if (row_state_page.state_kind == MYLITE_STORAGE_FORMAT_ROW_STATE_KIND_REPLACE) {
-                        replace_index_entries_row_id(
+                        result = replace_tracked_index_entries_row_id(
                             out_entries,
+                            &tracked_row_ids,
                             row_state_page.source_row_id,
                             row_state_page.replacement_row_id
                         );
                     } else {
-                        remove_index_entries_by_row_id(out_entries, row_state_page.source_row_id);
+                        remove_tracked_index_entries_by_row_id(
+                            out_entries,
+                            &tracked_row_ids,
+                            row_state_page.source_row_id
+                        );
                     }
                 }
             }
@@ -21323,6 +21367,7 @@ static mylite_storage_result scan_exact_index_entries_from(
         }
     }
 
+    free_live_row_id_set(&tracked_row_ids);
     free_row_state_map(&row_state_map);
     return result;
 }
@@ -27467,6 +27512,69 @@ static void replace_index_entries_row_id(
             entryset->row_ids[i] = new_row_id;
         }
     }
+}
+
+static mylite_storage_result append_tracked_index_entry_to_entryset(
+    mylite_storage_index_entryset *entryset,
+    mylite_storage_live_row_id_set *tracked_row_ids,
+    const mylite_storage_index_entry_page *entry_page
+) {
+    if (live_row_id_set_contains(tracked_row_ids, entry_page->row_id)) {
+        remove_index_entries_by_row_id(entryset, entry_page->row_id);
+        remove_live_row_id_from_set(tracked_row_ids, entry_page->row_id);
+    }
+
+    mylite_storage_result result = append_index_entry_to_entryset(entryset, entry_page);
+    if (result == MYLITE_STORAGE_OK) {
+        result = add_live_row_id_to_set(tracked_row_ids, entry_page->row_id);
+    }
+    return result;
+}
+
+static mylite_storage_result track_index_entryset_row_ids(
+    const mylite_storage_index_entryset *entryset,
+    mylite_storage_live_row_id_set *tracked_row_ids
+) {
+    for (size_t i = 0U; i < entryset->entry_count; ++i) {
+        mylite_storage_result result =
+            add_live_row_id_to_set(tracked_row_ids, entryset->row_ids[i]);
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+    }
+    return MYLITE_STORAGE_OK;
+}
+
+static void remove_tracked_index_entries_by_row_id(
+    mylite_storage_index_entryset *entryset,
+    mylite_storage_live_row_id_set *tracked_row_ids,
+    unsigned long long row_id
+) {
+    if (!live_row_id_set_contains(tracked_row_ids, row_id)) {
+        return;
+    }
+
+    remove_index_entries_by_row_id(entryset, row_id);
+    remove_live_row_id_from_set(tracked_row_ids, row_id);
+}
+
+static mylite_storage_result replace_tracked_index_entries_row_id(
+    mylite_storage_index_entryset *entryset,
+    mylite_storage_live_row_id_set *tracked_row_ids,
+    unsigned long long old_row_id,
+    unsigned long long new_row_id
+) {
+    if (!live_row_id_set_contains(tracked_row_ids, old_row_id)) {
+        return MYLITE_STORAGE_OK;
+    }
+    if (live_row_id_set_contains(tracked_row_ids, new_row_id)) {
+        remove_index_entries_by_row_id(entryset, new_row_id);
+        remove_live_row_id_from_set(tracked_row_ids, new_row_id);
+    }
+
+    replace_index_entries_row_id(entryset, old_row_id, new_row_id);
+    remove_live_row_id_from_set(tracked_row_ids, old_row_id);
+    return add_live_row_id_to_set(tracked_row_ids, new_row_id);
 }
 
 static void encode_autoincrement_page(

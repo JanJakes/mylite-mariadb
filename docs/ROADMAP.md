@@ -332,6 +332,10 @@ transient row-id bucket index for source-row invalidation, avoiding a full
 exact-index cache scan per maintained replacement/delete, and same-row active
 updates can replace changed cached key bytes in place without remove-plus-append
 cache churn.
+Complete durable exact-index cache builds now also track the row ids already
+represented in the temporary entryset, avoiding an unconditional entryset scan
+before each append-history index entry while preserving replacement/delete
+visibility.
 Transient row-state maps now hash hidden source row ids, removing the
 per-candidate linear visibility lookup that dominated full scans after many
 updates, and full rowset reads now collect live row ids in one file pass before
