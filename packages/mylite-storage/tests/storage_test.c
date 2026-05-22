@@ -50,6 +50,7 @@ int mylite_storage_test_statement_filename_is(
     const mylite_storage_statement *statement,
     const char *filename
 );
+int mylite_storage_test_statement_has_table_entry_cache(const mylite_storage_statement *statement);
 int mylite_storage_test_durable_exact_index_cache_has_filename_identity(const char *filename);
 int mylite_storage_test_durable_row_payload_cache_has_filename_identity(const char *filename);
 #endif
@@ -444,6 +445,8 @@ static void test_read_checkpoint_snapshot_cache(void);
 static void test_read_statement_storage_reuse(void);
 static void test_read_statement_storage_reuse_replaces_filename(void);
 static void test_read_statement_filename_identity_borrows_filename(void);
+static void test_read_statement_index_entry_uses_table_entry_cache(void);
+static void test_read_statement_indexed_row_uses_table_entry_cache(void);
 static void test_read_statement_multi_page_catalog_image_cache(void);
 static void test_read_statement_file_cache_path_replacement(void);
 static void test_transaction_journals(void);
@@ -533,6 +536,10 @@ static void assert_find_indexed_row_not_found(
     unsigned index_number,
     const unsigned char *key,
     size_t key_size
+);
+static void assert_read_statement_index_lookup_uses_table_entry_cache(
+    int fetch_payload,
+    const char *filename_basename
 );
 static void assert_index_entry(
     const mylite_storage_index_entryset *index_entries,
@@ -691,6 +698,8 @@ int main(void) {
     test_read_statement_storage_reuse();
     test_read_statement_storage_reuse_replaces_filename();
     test_read_statement_filename_identity_borrows_filename();
+    test_read_statement_index_entry_uses_table_entry_cache();
+    test_read_statement_indexed_row_uses_table_entry_cache();
     test_read_statement_multi_page_catalog_image_cache();
     test_read_statement_file_cache_path_replacement();
     test_transaction_journals();
@@ -9949,6 +9958,117 @@ static void test_read_statement_filename_identity_borrows_filename(void) {
     assert(read_statement != NULL);
     assert(mylite_storage_test_statement_owns_filename(read_statement) == 1);
     assert(mylite_storage_end_read_statement(read_statement) == MYLITE_STORAGE_OK);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+#endif
+}
+
+static void test_read_statement_index_entry_uses_table_entry_cache(void) {
+    assert_read_statement_index_lookup_uses_table_entry_cache(
+        0,
+        "read-statement-index-entry-cache.mylite"
+    );
+}
+
+static void test_read_statement_indexed_row_uses_table_entry_cache(void) {
+    assert_read_statement_index_lookup_uses_table_entry_cache(
+        1,
+        "read-statement-indexed-row-cache.mylite"
+    );
+}
+
+static void assert_read_statement_index_lookup_uses_table_entry_cache(
+    int fetch_payload,
+    const char *filename_basename
+) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row[] = {0x00U, 0x11U, 'a'};
+    static const unsigned char key[] = {0x11U};
+    char *root = make_temp_root();
+    char *filename = path_join(root, filename_basename);
+    int owner = 0;
+    mylite_storage_statement *read_statement = NULL;
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_index_entry index_entry = {
+        .size = sizeof(index_entry),
+        .index_number = 0U,
+        .key = key,
+        .key_size = sizeof(key),
+    };
+    unsigned long long row_id = 0ULL;
+    unsigned long long found_row_id = 0ULL;
+    size_t found_row_size = 0U;
+    unsigned char found_row[sizeof(row)] = {0};
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row,
+            sizeof(row),
+            &index_entry,
+            1U,
+            &row_id
+        ) == MYLITE_STORAGE_OK
+    );
+
+    mylite_storage_set_context_owner(&owner);
+    assert(mylite_storage_begin_read_statement(filename, &read_statement) == MYLITE_STORAGE_OK);
+    assert(read_statement != NULL);
+    assert(!mylite_storage_test_statement_has_table_entry_cache(read_statement));
+
+    if (fetch_payload) {
+        assert(
+            mylite_storage_find_indexed_row_into(
+                filename,
+                "app",
+                "posts",
+                0U,
+                key,
+                sizeof(key),
+                &found_row_id,
+                found_row,
+                sizeof(found_row),
+                &found_row_size
+            ) == MYLITE_STORAGE_OK
+        );
+    } else {
+        assert(
+            mylite_storage_find_index_entry(
+                filename,
+                "app",
+                "posts",
+                0U,
+                key,
+                sizeof(key),
+                &found_row_id
+            ) == MYLITE_STORAGE_OK
+        );
+    }
+    assert(found_row_id == row_id);
+    if (fetch_payload) {
+        assert(found_row_size == sizeof(row));
+        assert(memcmp(found_row, row, sizeof(row)) == 0);
+    }
+    assert(mylite_storage_test_statement_has_table_entry_cache(read_statement));
+
+    assert(mylite_storage_end_read_statement(read_statement) == MYLITE_STORAGE_OK);
+    mylite_storage_set_context_owner(NULL);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);

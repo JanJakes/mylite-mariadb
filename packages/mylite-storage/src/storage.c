@@ -7751,6 +7751,10 @@ mylite_storage_result mylite_storage_find_index_entry(
     mylite_storage_catalog_entry table_entry = {0};
     mylite_storage_statement *active_cache_statement =
         active_cache_statement_from_statement(file_scope.active_statement);
+    if (active_cache_statement == NULL) {
+        active_cache_statement =
+            active_cache_statement_from_statement(file_scope.active_read_statement);
+    }
     result = read_header_from_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
         const int used_cached_table_entry = find_active_table_entry_cache_in_statement(
@@ -7949,6 +7953,10 @@ static mylite_storage_result find_indexed_row_payload(
     mylite_storage_catalog_entry table_entry = {0};
     mylite_storage_statement *active_cache_statement =
         active_cache_statement_from_statement(file_scope.active_statement);
+    if (active_cache_statement == NULL) {
+        active_cache_statement =
+            active_cache_statement_from_statement(file_scope.active_read_statement);
+    }
     result = read_header_from_file_scope(&file_scope, &header);
     if (result == MYLITE_STORAGE_OK) {
         const int used_cached_table_entry = find_active_table_entry_cache_in_statement(
@@ -12999,6 +13007,10 @@ int mylite_storage_test_statement_filename_is(
     const char *filename
 ) {
     return statement != NULL && statement->filename == filename ? 1 : 0;
+}
+
+int mylite_storage_test_statement_has_table_entry_cache(const mylite_storage_statement *statement) {
+    return statement != NULL && statement->table_entry_cache.has_entry ? 1 : 0;
 }
 
 int mylite_storage_test_durable_exact_index_cache_has_filename_identity(const char *filename) {
