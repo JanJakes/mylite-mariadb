@@ -527,6 +527,7 @@ int finish_volatile_snapshot(
 );
 mylite_storage_statement *active_storage_checkpoint_parent(mylite_db &database);
 #  endif
+void clear_current_row_for_reuse(mylite_stmt &statement);
 void clear_current_row(mylite_stmt &statement);
 bool is_variable_column_type(mylite_value_type type);
 const void *bound_value_data(const BoundValue &value);
@@ -2055,7 +2056,7 @@ int bind_statement_parameters(mylite_stmt &statement) {
 int execute_statement(mylite_stmt &statement) {
     set_ok_if_needed(*statement.database);
     clear_warnings(*statement.database);
-    clear_current_row(statement);
+    clear_current_row_for_reuse(statement);
 
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
     if (statement.prepared_transaction_control != TransactionControlKind::None) {
@@ -3192,7 +3193,7 @@ int finish_volatile_snapshot(
 #  endif
 
 int fetch_statement_row(mylite_stmt &statement) {
-    clear_current_row(statement);
+    clear_current_row_for_reuse(statement);
     const int fetch_result = mysql_stmt_fetch(statement.statement);
 
     if (fetch_result == MYSQL_NO_DATA) {
@@ -3209,17 +3210,13 @@ int fetch_statement_row(mylite_stmt &statement) {
 
     for (unsigned i = 0; i < statement.values.size(); ++i) {
         ColumnValue &value = statement.values[i];
-        if (value.mysql_error != 0 &&
-            !is_variable_column_type(map_column_type(statement.columns[i]))) {
+        const mylite_value_type column_type = map_column_type(statement.columns[i]);
+        if (value.mysql_error != 0 && !is_variable_column_type(column_type)) {
             set_error(*statement.database, MYLITE_ERROR, "numeric column truncated during fetch");
             return MYLITE_ERROR;
         }
-    }
 
-    for (unsigned i = 0; i < statement.values.size(); ++i) {
-        ColumnValue &value = statement.values[i];
-        value.type =
-            value.mysql_is_null != 0 ? MYLITE_TYPE_NULL : map_column_type(statement.columns[i]);
+        value.type = value.mysql_is_null != 0 ? MYLITE_TYPE_NULL : column_type;
         if (is_variable_column_type(value.type)) {
             const std::size_t stored_bytes =
                 std::min<std::size_t>(value.buffer_length, value.mysql_length);
@@ -3418,6 +3415,14 @@ int capture_warnings(mylite_db &database, unsigned warning_count, bool force_que
 
 bool mylite_session_ansi_quotes(const mylite_db &database) {
     return (database.mysql.server_status & SERVER_STATUS_ANSI_QUOTES) != 0U;
+}
+
+void clear_current_row_for_reuse(mylite_stmt &statement) {
+    if (statement.reusable_result_binds) {
+        statement.has_current_row = false;
+        return;
+    }
+    clear_current_row(statement);
 }
 
 void clear_current_row(mylite_stmt &statement) {
