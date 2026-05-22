@@ -1,0 +1,55 @@
+#
+# Check MyLite storage routing under raw embedded MTR execution with an active
+# primary .mylite file.
+#
+
+--disable_warnings
+drop database if exists mylite_mtr_storage;
+--enable_warnings
+
+create database mylite_mtr_storage;
+use mylite_mtr_storage;
+
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+
+select @@default_storage_engine, @@enforce_storage_engine;
+select engine, support
+from information_schema.engines
+where engine = 'MYLITE';
+
+create table default_alias (id int not null primary key, title varchar(16));
+create table innodb_alias (
+  id int not null primary key,
+  title varchar(16) not null unique
+) engine=InnoDB;
+create table myisam_alias (id int not null primary key, title varchar(16)) engine=MyISAM;
+create table aria_alias (id int not null primary key, title varchar(16)) engine=Aria;
+create table blackhole_alias (id int not null primary key) engine=BLACKHOLE;
+create table memory_alias (id int not null primary key, title varchar(16)) engine=MEMORY;
+create table heap_alias (id int not null primary key, title varchar(16)) engine=HEAP;
+
+show create table default_alias;
+show create table innodb_alias;
+show create table myisam_alias;
+show create table memory_alias;
+
+insert into default_alias values (1, 'default');
+insert into innodb_alias values (1, 'innodb');
+insert into myisam_alias values (1, 'myisam');
+insert into aria_alias values (1, 'aria');
+insert into blackhole_alias values (1);
+insert into memory_alias values (1, 'memory');
+insert into heap_alias values (1, 'heap');
+
+select title from default_alias;
+select title from innodb_alias;
+select title from myisam_alias;
+select title from aria_alias;
+select count(*) as blackhole_rows from blackhole_alias;
+select title from memory_alias;
+select title from heap_alias;
+
+drop database mylite_mtr_storage;

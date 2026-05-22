@@ -150,7 +150,8 @@ static const Lex_ident_engine sys_table_aliases[]=
 
 static plugin_ref ha_resolve_mylite_engine_alias(THD *thd,
                                                  const LEX_CSTRING *name);
-static bool ha_is_mylite_engine_alias(const LEX_CSTRING *name);
+static bool ha_is_mylite_engine_alias(THD *thd, const LEX_CSTRING *name);
+static bool ha_is_mylite_enforced_engine(THD *thd);
 
 const LEX_CSTRING ha_row_type[]=
 {
@@ -315,7 +316,7 @@ redo:
 static plugin_ref ha_resolve_mylite_engine_alias(THD *thd,
                                                  const LEX_CSTRING *name)
 {
-  if (!ha_is_mylite_engine_alias(name))
+  if (!ha_is_mylite_engine_alias(thd, name))
     return NULL;
 
   static const Lex_ident_engine mylite_engine= "MYLITE"_Lex_ident_engine;
@@ -332,9 +333,9 @@ static plugin_ref ha_resolve_mylite_engine_alias(THD *thd,
   return NULL;
 }
 
-static bool ha_is_mylite_engine_alias(const LEX_CSTRING *name)
+static bool ha_is_mylite_engine_alias(THD *thd, const LEX_CSTRING *name)
 {
-  if (!mylite_schema_hooks_active())
+  if (!mylite_schema_hooks_active() || !ha_is_mylite_enforced_engine(thd))
     return false;
 
   static const Lex_ident_engine mylite_engine_aliases[]= {
@@ -351,6 +352,15 @@ static bool ha_is_mylite_engine_alias(const LEX_CSTRING *name)
       return true;
   }
   return false;
+}
+
+static bool ha_is_mylite_enforced_engine(THD *thd)
+{
+  if (!thd || !thd->variables.enforced_table_plugin)
+    return false;
+
+  static const Lex_ident_engine mylite_engine= "MYLITE"_Lex_ident_engine;
+  return mylite_engine.streq(*plugin_name(thd->variables.enforced_table_plugin));
 }
 
 /*

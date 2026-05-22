@@ -4,8 +4,16 @@ set -euo pipefail
 root_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 build_dir="${BUILD_DIR:-"${root_dir}/build/mariadb-mtr-smoke"}"
 mtr_profile="${PROFILE:-"${root_dir}/cmake/mariadb-mtr-smoke.cmake"}"
+storage_build_dir="${STORAGE_BUILD_DIR:-"${root_dir}/build/mariadb-mtr-storage-smoke"}"
+storage_mtr_profile="${STORAGE_PROFILE:-"${root_dir}/cmake/mariadb-mtr-storage-smoke.cmake"}"
+storage_primary_file="${STORAGE_PRIMARY_FILE:-"${storage_build_dir}/mylite-mtr-storage.mylite"}"
+storage_init_build_dir="${STORAGE_INIT_BUILD_DIR:-"${root_dir}/build/dev"}"
+storage_init_tool="${STORAGE_INIT_TOOL:-"${storage_init_build_dir}/tools/mylite-storage-init"}"
 mtr_build_thread="${MTR_BUILD_THREAD:-auto}"
 mtr_probe_testcase_timeout_minutes="${MTR_PROBE_TESTCASE_TIMEOUT_MINUTES:-5}"
+mtr_default_storage_engine="Aria"
+mtr_primary_file=""
+mtr_extra_mysqld_args=()
 default_tests=(
   mylite.bootstrap_schema
   mylite.profile_disabled_engines
@@ -198,23 +206,37 @@ default_tests=(
   main.long_tmpdir
   main.renamedb
 )
+storage_tests=(
+  mylite.routed_storage_engines
+)
 
 usage() {
   cat <<EOF
-Usage: tools/mylite-mtr-harness [list|run|probe] [suite.test...]
+Usage: tools/mylite-mtr-harness [list|run|probe|list-storage|run-storage|probe-storage] [suite.test...]
 
 Commands:
-  list       Show curated MariaDB MTR smoke tests.
-  run        Build the MTR smoke prerequisites and run exact selected tests.
-             Defaults to the curated smoke list.
-  probe      Build the MTR smoke prerequisites, run exact selected tests, and
-             continue after failures. Exits nonzero if any test does not
-             report an MTR pass. Removes newly generated .reject files.
+  list           Show curated MariaDB MTR smoke tests.
+  run            Build the MTR smoke prerequisites and run exact selected tests.
+                 Defaults to the curated smoke list.
+  probe          Build the MTR smoke prerequisites, run exact selected tests,
+                 and continue after failures. Exits nonzero if any test does
+                 not report an MTR pass. Removes newly generated .reject files.
+  list-storage   Show MyLite storage-routed MTR smoke tests.
+  run-storage    Build the storage MTR prerequisites and run exact selected
+                 storage-routed tests. Defaults to the storage smoke list.
+  probe-storage  Probe exact selected tests against the storage MTR profile.
 
 Environment:
-  BUILD_DIR          MariaDB build directory. Defaults to build/mariadb-mtr-smoke.
-  PROFILE            Initial CMake cache. Defaults to cmake/mariadb-mtr-smoke.cmake.
-  MTR_BUILD_THREAD  MTR build thread/port block. Defaults to auto.
+  BUILD_DIR          Baseline MariaDB build directory. Defaults to build/mariadb-mtr-smoke.
+  PROFILE            Baseline CMake cache. Defaults to cmake/mariadb-mtr-smoke.cmake.
+  STORAGE_BUILD_DIR  Storage MariaDB build directory. Defaults to build/mariadb-mtr-storage-smoke.
+  STORAGE_PROFILE    Storage CMake cache. Defaults to cmake/mariadb-mtr-storage-smoke.cmake.
+  STORAGE_PRIMARY_FILE
+                     Storage primary .mylite file for run-storage/probe-storage.
+  STORAGE_INIT_BUILD_DIR
+                     First-party build directory for mylite-storage-init. Defaults to build/dev.
+  STORAGE_INIT_TOOL  Existing mylite-storage-init path to use instead of building one.
+  MTR_BUILD_THREAD   MTR build thread/port block. Defaults to auto.
   MTR_PROBE_TESTCASE_TIMEOUT_MINUTES
                      Probe testcase timeout passed to MTR. Defaults to 5.
 EOF
@@ -245,7 +267,7 @@ mtr_targets=(
   replace
 )
 
-mtr_required_cache_entries=(
+baseline_mtr_required_cache_entries=(
   "MYLITE_WITH_VIEW_RUNTIME:BOOL=ON"
   "MYLITE_WITH_STORED_PROGRAM_RUNTIME:BOOL=ON"
   "MYLITE_WITH_TRIGGER_RUNTIME:BOOL=ON"
@@ -257,6 +279,11 @@ mtr_required_cache_entries=(
   "PLUGIN_INNOBASE:STRING=NO"
   "PLUGIN_PARTITION:STRING=NO"
 )
+storage_mtr_required_cache_entries=(
+  "${baseline_mtr_required_cache_entries[@]}"
+  "PLUGIN_MYLITE_SE:STRING=STATIC"
+)
+mtr_required_cache_entries=("${baseline_mtr_required_cache_entries[@]}")
 
 require_command() {
   local command_name="$1"
@@ -271,6 +298,14 @@ list_tests() {
   local test_name
 
   for test_name in "${default_tests[@]}"; do
+    echo "${test_name}"
+  done
+}
+
+list_storage_tests() {
+  local test_name
+
+  for test_name in "${storage_tests[@]}"; do
     echo "${test_name}"
   done
 }
@@ -325,8 +360,67 @@ run_tests() {
     tests=("${default_tests[@]}")
   fi
 
+  configure_baseline_mtr_context
   prepare_mtr_build
   run_mtr_suite_batches "${tests[@]}"
+}
+
+run_storage_tests() {
+  local tests=("$@")
+
+  if [ "${#tests[@]}" -eq 0 ]; then
+    tests=("${storage_tests[@]}")
+  fi
+
+  configure_storage_mtr_context
+  prepare_storage_primary_file
+  prepare_mtr_build
+  run_mtr_suite_batches "${tests[@]}"
+}
+
+configure_baseline_mtr_context() {
+  build_dir="${BUILD_DIR:-"${root_dir}/build/mariadb-mtr-smoke"}"
+  mtr_profile="${PROFILE:-"${root_dir}/cmake/mariadb-mtr-smoke.cmake"}"
+  mtr_default_storage_engine="Aria"
+  mtr_primary_file=""
+  mtr_extra_mysqld_args=()
+  mtr_required_cache_entries=("${baseline_mtr_required_cache_entries[@]}")
+}
+
+configure_storage_mtr_context() {
+  build_dir="${storage_build_dir}"
+  mtr_profile="${storage_mtr_profile}"
+  mtr_default_storage_engine="Aria"
+  mtr_primary_file="${storage_primary_file}"
+  mtr_extra_mysqld_args=()
+  mtr_required_cache_entries=("${storage_mtr_required_cache_entries[@]}")
+}
+
+prepare_storage_primary_file() {
+  prepare_storage_init_tool
+
+  mkdir -p "$(dirname "${storage_primary_file}")"
+  rm -f \
+    "${storage_primary_file}" \
+    "${storage_primary_file}-journal" \
+    "${storage_primary_file}-journal.rewrite" \
+    "${storage_primary_file}-transaction-journal" \
+    "${storage_primary_file}-transaction-journal.rewrite"
+  "${storage_init_tool}" "${storage_primary_file}"
+}
+
+prepare_storage_init_tool() {
+  if [ -x "${storage_init_tool}" ]; then
+    return
+  fi
+
+  cmake --preset dev
+  cmake --build --preset dev --target mylite_storage_init
+
+  if [ ! -x "${storage_init_tool}" ]; then
+    echo "Could not find built mylite-storage-init at ${storage_init_tool}" >&2
+    exit 1
+  fi
 }
 
 run_mtr_suite_batches() {
@@ -386,6 +480,33 @@ run_mtr_suite_batches() {
 
 probe_tests() {
   local tests=("$@")
+
+  if [ "${#tests[@]}" -eq 0 ]; then
+    echo "Expected at least one suite.test name for probe" >&2
+    exit 1
+  fi
+
+  configure_baseline_mtr_context
+  prepare_mtr_build
+  probe_with_current_mtr_context "${tests[@]}"
+}
+
+probe_storage_tests() {
+  local tests=("$@")
+
+  if [ "${#tests[@]}" -eq 0 ]; then
+    echo "Expected at least one suite.test name for probe-storage" >&2
+    exit 1
+  fi
+
+  configure_storage_mtr_context
+  prepare_storage_primary_file
+  prepare_mtr_build
+  probe_with_current_mtr_context "${tests[@]}"
+}
+
+probe_with_current_mtr_context() {
+  local tests=("$@")
   local failures=0
   local passed_count=0
   local failed_count=0
@@ -395,12 +516,6 @@ probe_tests() {
   local test_name
   local output_file
 
-  if [ "${#tests[@]}" -eq 0 ]; then
-    echo "Expected at least one suite.test name for probe" >&2
-    exit 1
-  fi
-
-  prepare_mtr_build
   reject_baseline_file="$(mktemp "${TMPDIR:-/tmp}/mylite-mtr-rejects.XXXXXX")"
   snapshot_reject_files "${reject_baseline_file}"
 
@@ -503,12 +618,14 @@ run_mtr_suite_cases() {
       cd "${build_dir}/mysql-test"
       MTR_BUILD_THREAD="${mtr_build_thread}" \
       MYLITE_MTR_WITHOUT_NATIVE_MYISAM_TOOLS=1 \
-      MYLITE_MTR_DEFAULT_STORAGE_ENGINE=Aria \
+      MYLITE_MTR_DEFAULT_STORAGE_ENGINE="${mtr_default_storage_engine}" \
+      MYLITE_MTR_PRIMARY_FILE="${mtr_primary_file}" \
         perl ./mariadb-test-run.pl \
           --embedded-server \
           --skip-rpl \
           --force \
-          --mysqld=--default-storage-engine=Aria \
+          --mysqld=--default-storage-engine="${mtr_default_storage_engine}" \
+          ${mtr_extra_mysqld_args[@]+"${mtr_extra_mysqld_args[@]}"} \
           --suite="${suite_name}" \
           --do-test="${do_test_pattern}" \
           ${testcase_timeout_args[@]+"${testcase_timeout_args[@]}"} \
@@ -523,12 +640,14 @@ run_mtr_suite_cases() {
     cd "${build_dir}/mysql-test"
     MTR_BUILD_THREAD="${mtr_build_thread}" \
     MYLITE_MTR_WITHOUT_NATIVE_MYISAM_TOOLS=1 \
-    MYLITE_MTR_DEFAULT_STORAGE_ENGINE=Aria \
+    MYLITE_MTR_DEFAULT_STORAGE_ENGINE="${mtr_default_storage_engine}" \
+    MYLITE_MTR_PRIMARY_FILE="${mtr_primary_file}" \
       perl ./mariadb-test-run.pl \
         --embedded-server \
         --skip-rpl \
         --force \
-        --mysqld=--default-storage-engine=Aria \
+        --mysqld=--default-storage-engine="${mtr_default_storage_engine}" \
+        ${mtr_extra_mysqld_args[@]+"${mtr_extra_mysqld_args[@]}"} \
         --suite="${suite_name}" \
         --do-test="${do_test_pattern}" \
         ${testcase_timeout_args[@]+"${testcase_timeout_args[@]}"} \
@@ -595,6 +714,15 @@ case "${command_name}" in
     ;;
   probe)
     probe_tests "$@"
+    ;;
+  list-storage)
+    list_storage_tests
+    ;;
+  run-storage)
+    run_storage_tests "$@"
+    ;;
+  probe-storage)
+    probe_storage_tests "$@"
     ;;
   -h|--help|help)
     usage

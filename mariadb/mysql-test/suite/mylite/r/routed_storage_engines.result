@@ -1,0 +1,83 @@
+drop database if exists mylite_mtr_storage;
+create database mylite_mtr_storage;
+use mylite_mtr_storage;
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+select @@default_storage_engine, @@enforce_storage_engine;
+@@default_storage_engine	@@enforce_storage_engine
+MYLITE	MYLITE
+select engine, support
+from information_schema.engines
+where engine = 'MYLITE';
+engine	support
+MYLITE	DEFAULT
+create table default_alias (id int not null primary key, title varchar(16));
+create table innodb_alias (
+id int not null primary key,
+title varchar(16) not null unique
+) engine=InnoDB;
+create table myisam_alias (id int not null primary key, title varchar(16)) engine=MyISAM;
+create table aria_alias (id int not null primary key, title varchar(16)) engine=Aria;
+create table blackhole_alias (id int not null primary key) engine=BLACKHOLE;
+create table memory_alias (id int not null primary key, title varchar(16)) engine=MEMORY;
+create table heap_alias (id int not null primary key, title varchar(16)) engine=HEAP;
+show create table default_alias;
+Table	Create Table
+default_alias	CREATE TABLE `default_alias` (
+  `id` int(11) NOT NULL,
+  `title` varchar(16) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=MYLITE DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+show create table innodb_alias;
+Table	Create Table
+innodb_alias	CREATE TABLE `innodb_alias` (
+  `id` int(11) NOT NULL,
+  `title` varchar(16) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `title` (`title`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+show create table myisam_alias;
+Table	Create Table
+myisam_alias	CREATE TABLE `myisam_alias` (
+  `id` int(11) NOT NULL,
+  `title` varchar(16) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+show create table memory_alias;
+Table	Create Table
+memory_alias	CREATE TABLE `memory_alias` (
+  `id` int(11) NOT NULL,
+  `title` varchar(16) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=MEMORY DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+insert into default_alias values (1, 'default');
+insert into innodb_alias values (1, 'innodb');
+insert into myisam_alias values (1, 'myisam');
+insert into aria_alias values (1, 'aria');
+insert into blackhole_alias values (1);
+insert into memory_alias values (1, 'memory');
+insert into heap_alias values (1, 'heap');
+select title from default_alias;
+title
+default
+select title from innodb_alias;
+title
+innodb
+select title from myisam_alias;
+title
+myisam
+select title from aria_alias;
+title
+aria
+select count(*) as blackhole_rows from blackhole_alias;
+blackhole_rows
+0
+select title from memory_alias;
+title
+memory
+select title from heap_alias;
+title
+heap
+drop database mylite_mtr_storage;

@@ -108,6 +108,12 @@ raw embedded dynamic-column disabled fallback behavior, plus selected ODBC
 compatibility syntax, optimizer-trace default metadata, SHOW row-order, system
 `mysql` table reference, long-tmpdir view, and deprecated rename-database
 diagnostic behavior.
+The same harness also exposes a separate storage-routed MTR mode with
+`list-storage`, `run-storage`, and `probe-storage`. That mode uses
+`build/mariadb-mtr-storage-smoke`, enables the static MyLite storage engine only
+for MyLite-owned storage tests, prepares a fresh primary `.mylite` file, and
+currently covers selected engine-alias routing through
+`mylite.routed_storage_engines`.
 It remains outside the default compatibility groups because it builds
 `mariadbd` and several upstream client/support tools. Broader MTR integration
 should be a separate comparison slice with explicit include lists, expected

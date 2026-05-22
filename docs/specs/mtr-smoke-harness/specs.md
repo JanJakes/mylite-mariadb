@@ -178,6 +178,10 @@ MariaDB base: `mariadb-11.8.6`
   for repeatable candidate discovery without treating skipped tests as
   coverage, prints a final probe summary, removes newly generated `.reject`
   files after probe failures, and applies a probe-only testcase timeout.
+- [MTR routed storage smoke](../mtr-routed-storage-smoke/specs.md) adds a
+  separate storage MTR profile and `list-storage`, `run-storage`, and
+  `probe-storage` commands for MyLite-owned tests that need the static MyLite
+  storage engine and a primary `.mylite` file.
 
 ## Design
 
@@ -194,6 +198,18 @@ Add `tools/mylite-mtr-harness` with three commands:
   `.reject` files so failed discovery runs do not dirty the source tree. Probe
   also passes a configurable testcase timeout to MTR so deadlock-oriented
   candidates do not stall local discovery indefinitely.
+
+The runner also has a separate storage-routed mode:
+
+- `list-storage` prints MyLite-owned storage MTR tests;
+- `run-storage [suite.test...]` builds the storage MTR profile, prepares a
+  fresh primary `.mylite` file with the first-party storage init helper, and
+  runs exact selected storage tests;
+- `probe-storage suite.test...` mirrors `probe` against the storage profile.
+
+Storage mode keeps MariaDB bootstrap on `Aria`; individual MyLite-owned test
+option files enable the static MyLite plugin and pass the prepared primary file
+to embedded MariaDB for the test session.
 
 The runner anchors exact selected case names and requires the matching MTR
 summary line to report `[ pass ]`. A selected test that is skipped by MTR
@@ -342,10 +358,11 @@ meaningful MTR-scale coverage.
 - Curated upstream baseline test execution.
 - Reuse of the MariaDB 11.8.6 embedded source through a separate MTR smoke
   build directory and CMake profile.
+- Opt-in MyLite-owned storage MTR smoke execution through a separate storage
+  build directory and CMake profile.
 
 ## Non-Goals
 
-- Running MTR against MyLite storage-engine routing.
 - Adding MTR to the default `tools/mylite-compat-harness run` group set.
 - Broad SQL result normalization, flaky-test quarantine, parallel MTR shards,
   or CI dashboard integration.
@@ -361,7 +378,8 @@ embedded MTR smoke coverage, with MTR-scale comparison still planned.
 
 No MyLite file format or runtime behavior changes. The smoke runner exercises
 MariaDB's embedded baseline under `build/mariadb-mtr-smoke/mysql-test/var`, not
-MyLite `.mylite` storage.
+MyLite `.mylite` storage. Storage-routed MTR smoke uses a separate build tree
+and fresh primary file, and remains limited to MyLite-owned tests.
 
 ## Build, Size, And Dependencies
 
@@ -397,5 +415,6 @@ artifacts, not default MyLite linked-library artifacts.
 - Building MTR prerequisites materially increases local build size. Use
   `rm -rf build/mariadb-mtr-smoke` or `rm -rf build` to reclaim it.
 - The first curated test does not exercise MyLite storage; a later slice should
-  decide how to compare MTR cases against MyLite's embedded API and routed
-  storage without introducing daemon-only behavior into the core library.
+  decide how to compare upstream MTR cases against MyLite's embedded API and
+  routed storage without introducing daemon-only behavior into the core
+  library.
