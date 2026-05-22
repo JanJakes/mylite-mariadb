@@ -808,6 +808,9 @@ statement-chain walk from `FILE *` on each prepared point update.
 Row-only active buffered rewrites now use a dedicated no-index helper after the
 row/state shape has been validated, avoiding generic changed-index shape checks
 on stable-key prepared updates.
+Active buffered row-update rewrites now resolve the contiguous append-buffer
+rewrite range once and derive row, row-state, and changed-index page refs from
+it, avoiding repeated range and page-ref checks on the prepared update path.
 Nested statement checkpoints inside active transactions now begin from the
 known transaction or savepoint parent, avoiding filename-based active-statement
 rediscovery on prepared row-DML loops.
