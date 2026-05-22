@@ -888,7 +888,11 @@ running the slower secondary-result phases. It now also has a focused
 separate from the expression-based `prepared-update-components` phase for
 `SET value = value + 1 WHERE id = ?`; the simple assignment phase locally
 measures about 1.62-1.63 us/op for the step component over 10000 rows /
-1000000 iterations.
+1000000 iterations. A row-only expression phase,
+`prepared-row-only-update-components`, keeps the same prepared exact-key SQL
+path but updates a non-indexed integer `counter` column in a separate table,
+separating SQL-layer prepared update overhead from secondary-index replacement
+cost.
 The next prepared-DML performance wall is repeated MariaDB table-open,
 `Sql_cmd_update::prepare_inner()`, and `JOIN::prepare()` work before the
 accepted MyLite direct-update path. The staged design is tracked in

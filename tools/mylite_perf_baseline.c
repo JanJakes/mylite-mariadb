@@ -37,6 +37,7 @@ typedef enum benchmark_phase {
     BENCHMARK_PHASE_PREPARED_UPDATES,
     BENCHMARK_PHASE_PREPARED_UPDATE_COMPONENTS,
     BENCHMARK_PHASE_PREPARED_ASSIGNMENT_UPDATE_COMPONENTS,
+    BENCHMARK_PHASE_PREPARED_ROW_ONLY_UPDATE_COMPONENTS,
 } benchmark_phase;
 
 typedef enum benchmark_metric {
@@ -77,6 +78,9 @@ typedef enum benchmark_metric {
     BENCHMARK_METRIC_PREPARED_ASSIGNMENT_UPDATE_COMPONENT_BIND,
     BENCHMARK_METRIC_PREPARED_ASSIGNMENT_UPDATE_COMPONENT_STEP,
     BENCHMARK_METRIC_PREPARED_ASSIGNMENT_UPDATE_COMPONENT_RESET,
+    BENCHMARK_METRIC_PREPARED_ROW_ONLY_UPDATE_COMPONENT_BIND,
+    BENCHMARK_METRIC_PREPARED_ROW_ONLY_UPDATE_COMPONENT_STEP,
+    BENCHMARK_METRIC_PREPARED_ROW_ONLY_UPDATE_COMPONENT_RESET,
     BENCHMARK_METRIC_ORDERED_SCAN,
     BENCHMARK_METRIC_COUNT,
 } benchmark_metric;
@@ -173,6 +177,8 @@ static int benchmark_updates(benchmark_context *ctx);
 static int benchmark_prepared_updates(benchmark_context *ctx);
 static int benchmark_prepared_update_components(benchmark_context *ctx);
 static int benchmark_prepared_assignment_update_components(benchmark_context *ctx);
+static int benchmark_prepared_row_only_update_components(benchmark_context *ctx);
+static int prepare_row_only_update_rows(benchmark_context *ctx);
 static int benchmark_ordered_scan(benchmark_context *ctx);
 static int benchmark_secondary_selects_for_index(
     benchmark_context *ctx,
@@ -253,6 +259,9 @@ static const benchmark_metric_definition k_metric_definitions[] = {
     {BENCHMARK_METRIC_PREPARED_ASSIGNMENT_UPDATE_COMPONENT_STEP, "prepared-assignment-update-step"},
     {BENCHMARK_METRIC_PREPARED_ASSIGNMENT_UPDATE_COMPONENT_RESET,
      "prepared-assignment-update-reset"},
+    {BENCHMARK_METRIC_PREPARED_ROW_ONLY_UPDATE_COMPONENT_BIND, "prepared-row-only-update-bind"},
+    {BENCHMARK_METRIC_PREPARED_ROW_ONLY_UPDATE_COMPONENT_STEP, "prepared-row-only-update-step"},
+    {BENCHMARK_METRIC_PREPARED_ROW_ONLY_UPDATE_COMPONENT_RESET, "prepared-row-only-update-reset"},
     {BENCHMARK_METRIC_ORDERED_SCAN, "ordered-scan"},
 };
 
@@ -417,6 +426,10 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         config->phase = BENCHMARK_PHASE_PREPARED_ASSIGNMENT_UPDATE_COMPONENTS;
         return 0;
     }
+    if (strcmp(argument, "prepared-row-only-update-components") == 0) {
+        config->phase = BENCHMARK_PHASE_PREPARED_ROW_ONLY_UPDATE_COMPONENTS;
+        return 0;
+    }
 
     fprintf(
         stderr,
@@ -432,7 +445,8 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         "`direct-leaf-secondary-selects`, `prepared-leaf-secondary-selects`, "
         "`updates`, `direct-updates`, `prepared-updates`, "
         "`prepared-update-components`, or "
-        "`prepared-assignment-update-components`, got: %s\n",
+        "`prepared-assignment-update-components`, or "
+        "`prepared-row-only-update-components`, got: %s\n",
         argument
     );
     return 1;
@@ -530,6 +544,8 @@ static const char *benchmark_phase_name(benchmark_phase phase) {
         return "prepared-update-components";
     case BENCHMARK_PHASE_PREPARED_ASSIGNMENT_UPDATE_COMPONENTS:
         return "prepared-assignment-update-components";
+    case BENCHMARK_PHASE_PREPARED_ROW_ONLY_UPDATE_COMPONENTS:
+        return "prepared-row-only-update-components";
     }
     return "unknown";
 }
@@ -750,7 +766,8 @@ static int run_benchmark(const benchmark_config *config) {
 updates:
     if (config->phase != BENCHMARK_PHASE_PREPARED_UPDATES &&
         config->phase != BENCHMARK_PHASE_PREPARED_UPDATE_COMPONENTS &&
-        config->phase != BENCHMARK_PHASE_PREPARED_ASSIGNMENT_UPDATE_COMPONENTS) {
+        config->phase != BENCHMARK_PHASE_PREPARED_ASSIGNMENT_UPDATE_COMPONENTS &&
+        config->phase != BENCHMARK_PHASE_PREPARED_ROW_ONLY_UPDATE_COMPONENTS) {
         if (benchmark_updates(&ctx) != 0) {
             goto cleanup;
         }
@@ -761,6 +778,10 @@ updates:
         }
     } else if (config->phase == BENCHMARK_PHASE_PREPARED_ASSIGNMENT_UPDATE_COMPONENTS) {
         if (benchmark_prepared_assignment_update_components(&ctx) != 0) {
+            goto cleanup;
+        }
+    } else if (config->phase == BENCHMARK_PHASE_PREPARED_ROW_ONLY_UPDATE_COMPONENTS) {
+        if (benchmark_prepared_row_only_update_components(&ctx) != 0) {
             goto cleanup;
         }
     } else if (config->phase != BENCHMARK_PHASE_DIRECT_UPDATES) {
@@ -799,7 +820,8 @@ static void print_usage(const char *program) {
         "prepared-pk-selects|prepared-pk-select-components|"
         "prepared-pk-select-reset-after-row|updates|direct-updates|"
         "prepared-updates|prepared-update-components|"
-        "prepared-assignment-update-components|direct-secondary-selects|"
+        "prepared-assignment-update-components|prepared-row-only-update-components|"
+        "direct-secondary-selects|"
         "prepared-secondary-selects|"
         "direct-leaf-secondary-selects|prepared-leaf-secondary-selects|"
         "storage-pk-entry-lookups|storage-pk-entry-lookups-one-read|storage-pk-row-lookups|"
@@ -826,7 +848,8 @@ static void print_usage(const char *program) {
         "prepared-leaf-secondary-selects, direct-updates, prepared-updates, "
         "prepared-update-bind, prepared-update-step, prepared-update-reset, "
         "prepared-assignment-update-bind, prepared-assignment-update-step, "
-        "prepared-assignment-update-reset, ordered-scan.\n"
+        "prepared-assignment-update-reset, prepared-row-only-update-bind, "
+        "prepared-row-only-update-step, prepared-row-only-update-reset, ordered-scan.\n"
         "Set MYLITE_PERF_KEEP_ROOT=1 to keep the temporary benchmark directory.\n",
         program
     );
@@ -2949,6 +2972,189 @@ static int benchmark_prepared_assignment_update_components(benchmark_context *ct
 rollback:
     if (stmt != NULL && mylite_finalize(stmt) != MYLITE_OK) {
         report_database_error(ctx, "finalize prepared assignment update components");
+        result = 1;
+    }
+    if (result != 0) {
+        (void)mylite_exec(ctx->db, "ROLLBACK", NULL, NULL, NULL);
+    }
+    return result;
+}
+
+static int benchmark_prepared_row_only_update_components(benchmark_context *ctx) {
+    mylite_stmt *stmt = NULL;
+    uint64_t bind_ns = 0U;
+    uint64_t step_ns = 0U;
+    uint64_t reset_ns = 0U;
+    int result = 1;
+
+    if (prepare_row_only_update_rows(ctx) != 0) {
+        return 1;
+    }
+    if (exec_sql(ctx, "BEGIN") != 0) {
+        return 1;
+    }
+    if (mylite_prepare(
+            ctx->db,
+            "UPDATE perf_row_only_rows SET counter = counter + 1 WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) != MYLITE_OK) {
+        report_database_error(ctx, "prepare prepared row-only update components");
+        goto rollback;
+    }
+
+    for (size_t i = 0; i < ctx->config->iterations; ++i) {
+        const size_t id = (i % ctx->config->rows) + 1U;
+
+        uint64_t start_ns = monotonic_ns();
+        const int bind_result = mylite_bind_int64(stmt, 1U, (long long)id);
+        bind_ns += monotonic_ns() - start_ns;
+        if (bind_result != MYLITE_OK) {
+            report_database_error(ctx, "bind prepared row-only update component");
+            goto rollback;
+        }
+
+        start_ns = monotonic_ns();
+        const int step_result = mylite_step(stmt);
+        step_ns += monotonic_ns() - start_ns;
+        if (step_result != MYLITE_DONE) {
+            fprintf(stderr, "Prepared row-only update failed for id %zu\n", id);
+            report_database_error(ctx, "prepared row-only update component");
+            goto rollback;
+        }
+
+        start_ns = monotonic_ns();
+        const int reset_result = mylite_reset(stmt);
+        reset_ns += monotonic_ns() - start_ns;
+        if (reset_result != MYLITE_OK) {
+            report_database_error(ctx, "reset prepared row-only update component");
+            goto rollback;
+        }
+    }
+
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_ROW_ONLY_UPDATE_COMPONENT_BIND,
+            "prepared row-only update bind component",
+            ctx->config->iterations,
+            bind_ns
+        ) != 0) {
+        goto rollback;
+    }
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_ROW_ONLY_UPDATE_COMPONENT_STEP,
+            "prepared row-only update step component",
+            ctx->config->iterations,
+            step_ns
+        ) != 0) {
+        goto rollback;
+    }
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_ROW_ONLY_UPDATE_COMPONENT_RESET,
+            "prepared row-only update reset component",
+            ctx->config->iterations,
+            reset_ns
+        ) != 0) {
+        goto rollback;
+    }
+
+    if (mylite_finalize(stmt) != MYLITE_OK) {
+        stmt = NULL;
+        report_database_error(ctx, "finalize prepared row-only update components");
+        goto rollback;
+    }
+    stmt = NULL;
+    if (exec_sql(ctx, "COMMIT") != 0) {
+        return 1;
+    }
+    unsigned long long checksum = 0U;
+    if (query_uint64(ctx, "SELECT SUM(counter) FROM perf_row_only_rows", &checksum) != 0) {
+        return 1;
+    }
+    printf("Row-only update checksum: %llu\n", checksum);
+    result = 0;
+
+rollback:
+    if (stmt != NULL && mylite_finalize(stmt) != MYLITE_OK) {
+        report_database_error(ctx, "finalize prepared row-only update components");
+        result = 1;
+    }
+    if (result != 0) {
+        (void)mylite_exec(ctx->db, "ROLLBACK", NULL, NULL, NULL);
+    }
+    return result;
+}
+
+static int prepare_row_only_update_rows(benchmark_context *ctx) {
+    mylite_stmt *stmt = NULL;
+    int result = 1;
+
+    if (exec_sql(
+            ctx,
+            "CREATE TABLE perf_row_only_rows ("
+            "id INT NOT NULL PRIMARY KEY,"
+            "counter INT NOT NULL,"
+            "pad VARCHAR(64) NOT NULL"
+            ") ENGINE=InnoDB"
+        ) != 0) {
+        return 1;
+    }
+    if (exec_sql(ctx, "BEGIN") != 0) {
+        return 1;
+    }
+    if (mylite_prepare(
+            ctx->db,
+            "INSERT INTO perf_row_only_rows (id, counter, pad) VALUES (?, 0, ?)",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) != MYLITE_OK) {
+        report_database_error(ctx, "prepare row-only update rows");
+        goto rollback;
+    }
+
+    for (size_t i = 0; i < ctx->config->rows; ++i) {
+        char pad[32];
+        const size_t row_id = i + 1U;
+        const int written = snprintf(pad, sizeof(pad), "row-%zu", row_id);
+        if (written < 0 || (size_t)written >= sizeof(pad)) {
+            goto rollback;
+        }
+        if (mylite_bind_int64(stmt, 1U, (long long)row_id) != MYLITE_OK ||
+            mylite_bind_text(stmt, 2U, pad, MYLITE_NUL_TERMINATED, MYLITE_TRANSIENT) != MYLITE_OK) {
+            report_database_error(ctx, "bind row-only update row");
+            goto rollback;
+        }
+
+        const int step_result = mylite_step(stmt);
+        if (step_result != MYLITE_DONE) {
+            fprintf(stderr, "Row-only update row insert failed for id %zu\n", row_id);
+            report_database_error(ctx, "row-only update row insert");
+            goto rollback;
+        }
+        if (mylite_reset(stmt) != MYLITE_OK) {
+            report_database_error(ctx, "reset row-only update row insert");
+            goto rollback;
+        }
+    }
+
+    if (mylite_finalize(stmt) != MYLITE_OK) {
+        stmt = NULL;
+        report_database_error(ctx, "finalize row-only update rows");
+        goto rollback;
+    }
+    stmt = NULL;
+    if (exec_sql(ctx, "COMMIT") != 0) {
+        return 1;
+    }
+    result = 0;
+
+rollback:
+    if (stmt != NULL && mylite_finalize(stmt) != MYLITE_OK) {
+        report_database_error(ctx, "finalize row-only update rows");
         result = 1;
     }
     if (result != 0) {
