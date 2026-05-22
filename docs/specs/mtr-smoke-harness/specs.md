@@ -169,6 +169,9 @@ MariaDB base: `mariadb-11.8.6`
   optional quoted MTR variant suffixes in pass-result assertions.
 - [MTR disabled DES smoke](../mtr-disabled-des-smoke/specs.md) adds
   `main.func_encrypt_nossl`.
+- [MTR misc runtime smoke](../mtr-misc-runtime-smoke/specs.md) adds
+  `main.opt_trace_default`, `main.odbc`, `main.show_row_order-9226`,
+  `main.system_mysql_db_refs`, `main.long_tmpdir`, and `main.renamedb`.
 - [MTR require-pass harness](../mtr-require-pass-harness/specs.md) makes
   selected tests fail unless MTR reports an actual `[ pass ]` result.
 - [MTR probe harness](../mtr-probe-harness/specs.md) adds a `probe` command
@@ -323,6 +326,12 @@ The default curated list remains intentionally baseline-oriented:
 - `main.json_normalize`.
 - `main.func_kdf`.
 - `main.func_encrypt_nossl`.
+- `main.opt_trace_default`.
+- `main.odbc`.
+- `main.show_row_order-9226`.
+- `main.system_mysql_db_refs`.
+- `main.long_tmpdir`.
+- `main.renamedb`.
 
 This establishes a working MTR path while avoiding a false claim that MyLite has
 meaningful MTR-scale coverage.

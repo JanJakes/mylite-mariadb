@@ -191,6 +191,12 @@ default_tests=(
   main.json_normalize
   main.func_kdf
   main.func_encrypt_nossl
+  main.opt_trace_default
+  main.odbc
+  main.show_row_order-9226
+  main.system_mysql_db_refs
+  main.long_tmpdir
+  main.renamedb
 )
 
 usage() {

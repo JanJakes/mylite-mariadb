@@ -104,7 +104,10 @@ profile because the default embedded profile intentionally omits view, stored
 program, trigger, and binlog sysvar surfaces that MTR bootstrap still expects.
 The curated list also covers selected filesystem charset,
 UTF-32 `character_set_collations`, JSON equality/normalization behavior, and
-raw embedded dynamic-column disabled fallback behavior.
+raw embedded dynamic-column disabled fallback behavior, plus selected ODBC
+compatibility syntax, optimizer-trace default metadata, SHOW row-order, system
+`mysql` table reference, long-tmpdir view, and deprecated rename-database
+diagnostic behavior.
 It remains outside the default compatibility groups because it builds
 `mariadbd` and several upstream client/support tools. Broader MTR integration
 should be a separate comparison slice with explicit include lists, expected
