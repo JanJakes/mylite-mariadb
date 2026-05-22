@@ -231,7 +231,8 @@ Held-read-scope variants isolate steady-state exact-index and row materializatio
 cost once one storage read statement is already open, while a storage
 read-statement phase measures begin/end overhead directly. A storage row-update
 phase measures direct MyLite row mutation under explicit statement checkpoints
-without MariaDB prepared execution overhead. A prepared
+without MariaDB prepared execution overhead, and a component variant splits
+that direct path into nested checkpoint begin, mutation, and commit timings. A prepared
 primary-key component phase now splits the hot prepared loop into bind, row,
 done, and reset timings for targeted follow-up work.
 A prepared update component phase now splits the hot prepared row-DML loop into

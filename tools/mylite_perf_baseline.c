@@ -26,6 +26,7 @@ typedef enum benchmark_phase {
     BENCHMARK_PHASE_STORAGE_PK_ROW_LOOKUPS_ONE_READ,
     BENCHMARK_PHASE_STORAGE_READ_STATEMENTS,
     BENCHMARK_PHASE_STORAGE_ROW_UPDATES,
+    BENCHMARK_PHASE_STORAGE_ROW_UPDATE_COMPONENTS,
     BENCHMARK_PHASE_DIRECT_SECONDARY_SELECTS,
     BENCHMARK_PHASE_PREPARED_SECONDARY_SELECTS,
     BENCHMARK_PHASE_DIRECT_LEAF_SECONDARY_SELECTS,
@@ -54,6 +55,9 @@ typedef enum benchmark_metric {
     BENCHMARK_METRIC_STORAGE_PK_ROW_LOOKUPS_ONE_READ,
     BENCHMARK_METRIC_STORAGE_READ_STATEMENTS,
     BENCHMARK_METRIC_STORAGE_ROW_UPDATES,
+    BENCHMARK_METRIC_STORAGE_ROW_UPDATE_COMPONENT_BEGIN,
+    BENCHMARK_METRIC_STORAGE_ROW_UPDATE_COMPONENT_MUTATE,
+    BENCHMARK_METRIC_STORAGE_ROW_UPDATE_COMPONENT_COMMIT,
     BENCHMARK_METRIC_DIRECT_SECONDARY_SELECTS,
     BENCHMARK_METRIC_PREPARED_SECONDARY_SELECTS,
     BENCHMARK_METRIC_PREPARE_LEAF_ROWS,
@@ -145,6 +149,8 @@ static int benchmark_storage_point_lookups_with_scope(
 );
 static int benchmark_storage_read_statements(benchmark_context *ctx);
 static int benchmark_storage_row_updates(benchmark_context *ctx);
+static int benchmark_storage_row_update_components(benchmark_context *ctx);
+static int benchmark_storage_row_update_loop(benchmark_context *ctx, int components);
 static int benchmark_secondary_selects(benchmark_context *ctx);
 static int benchmark_prepared_secondary_selects(benchmark_context *ctx);
 static int publish_secondary_leaf_index(benchmark_context *ctx);
@@ -209,6 +215,9 @@ static const benchmark_metric_definition k_metric_definitions[] = {
     {BENCHMARK_METRIC_STORAGE_PK_ROW_LOOKUPS_ONE_READ, "storage-pk-row-lookups-one-read"},
     {BENCHMARK_METRIC_STORAGE_READ_STATEMENTS, "storage-read-statements"},
     {BENCHMARK_METRIC_STORAGE_ROW_UPDATES, "storage-row-updates"},
+    {BENCHMARK_METRIC_STORAGE_ROW_UPDATE_COMPONENT_BEGIN, "storage-row-update-begin"},
+    {BENCHMARK_METRIC_STORAGE_ROW_UPDATE_COMPONENT_MUTATE, "storage-row-update-mutate"},
+    {BENCHMARK_METRIC_STORAGE_ROW_UPDATE_COMPONENT_COMMIT, "storage-row-update-commit"},
     {BENCHMARK_METRIC_DIRECT_SECONDARY_SELECTS, "direct-secondary-selects"},
     {BENCHMARK_METRIC_PREPARED_SECONDARY_SELECTS, "prepared-secondary-selects"},
     {BENCHMARK_METRIC_PREPARE_LEAF_ROWS, "prepare-leaf-rows"},
@@ -340,6 +349,10 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         config->phase = BENCHMARK_PHASE_STORAGE_ROW_UPDATES;
         return 0;
     }
+    if (strcmp(argument, "storage-row-update-components") == 0) {
+        config->phase = BENCHMARK_PHASE_STORAGE_ROW_UPDATE_COMPONENTS;
+        return 0;
+    }
     if (strcmp(argument, "direct-secondary-selects") == 0) {
         config->phase = BENCHMARK_PHASE_DIRECT_SECONDARY_SELECTS;
         return 0;
@@ -381,7 +394,7 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         "`storage-pk-entry-lookups`, "
         "`storage-pk-entry-lookups-one-read`, `storage-pk-row-lookups`, "
         "`storage-pk-row-lookups-one-read`, `storage-read-statements`, "
-        "`storage-row-updates`, "
+        "`storage-row-updates`, `storage-row-update-components`, "
         "`direct-secondary-selects`, `prepared-secondary-selects`, "
         "`direct-leaf-secondary-selects`, `prepared-leaf-secondary-selects`, "
         "`updates`, `direct-updates`, `prepared-updates`, or "
@@ -461,6 +474,8 @@ static const char *benchmark_phase_name(benchmark_phase phase) {
         return "storage-read-statements";
     case BENCHMARK_PHASE_STORAGE_ROW_UPDATES:
         return "storage-row-updates";
+    case BENCHMARK_PHASE_STORAGE_ROW_UPDATE_COMPONENTS:
+        return "storage-row-update-components";
     case BENCHMARK_PHASE_DIRECT_SECONDARY_SELECTS:
         return "direct-secondary-selects";
     case BENCHMARK_PHASE_PREPARED_SECONDARY_SELECTS:
@@ -508,7 +523,8 @@ static int run_benchmark(const benchmark_config *config) {
         config->phase == BENCHMARK_PHASE_PREPARED_SECONDARY_SELECTS ||
         config->phase == BENCHMARK_PHASE_DIRECT_LEAF_SECONDARY_SELECTS ||
         config->phase == BENCHMARK_PHASE_PREPARED_LEAF_SECONDARY_SELECTS;
-    const int storage_update_phase = config->phase == BENCHMARK_PHASE_STORAGE_ROW_UPDATES;
+    const int storage_update_phase = config->phase == BENCHMARK_PHASE_STORAGE_ROW_UPDATES ||
+                                     config->phase == BENCHMARK_PHASE_STORAGE_ROW_UPDATE_COMPONENTS;
 
     ctx.root = make_temp_root();
     if (ctx.root == NULL) {
@@ -554,7 +570,11 @@ static int run_benchmark(const benchmark_config *config) {
         goto cleanup;
     }
     if (storage_update_phase) {
-        if (benchmark_storage_row_updates(&ctx) != 0) {
+        if (config->phase == BENCHMARK_PHASE_STORAGE_ROW_UPDATE_COMPONENTS) {
+            if (benchmark_storage_row_update_components(&ctx) != 0) {
+                goto cleanup;
+            }
+        } else if (benchmark_storage_row_updates(&ctx) != 0) {
             goto cleanup;
         }
         if (verify_row_count(&ctx, config->rows) != 0) {
@@ -733,7 +753,8 @@ static void print_usage(const char *program) {
         "prepared-secondary-selects|"
         "direct-leaf-secondary-selects|prepared-leaf-secondary-selects|"
         "storage-pk-entry-lookups|storage-pk-entry-lookups-one-read|storage-pk-row-lookups|"
-        "storage-pk-row-lookups-one-read|storage-read-statements|storage-row-updates] "
+        "storage-pk-row-lookups-one-read|storage-read-statements|storage-row-updates|"
+        "storage-row-update-components] "
         "[--max-us=<metric>:<value>] [rows] [iterations]\n"
         "\n"
         "Defaults: phase=all rows=100 iterations=100.\n"
@@ -746,7 +767,7 @@ static void print_usage(const char *program) {
         "prepared-pk-select-reset-after-row, "
         "storage-pk-entry-lookups, storage-pk-entry-lookups-one-read, "
         "storage-pk-row-lookups, storage-pk-row-lookups-one-read, "
-        "storage-read-statements, storage-row-updates, "
+        "storage-read-statements, storage-row-updates, storage-row-update-components, "
         "direct-secondary-selects, prepared-secondary-selects, "
         "prepare-leaf-rows, publish-leaf-index, "
         "direct-leaf-secondary-selects, "
@@ -1711,6 +1732,14 @@ end_scope:
 }
 
 static int benchmark_storage_row_updates(benchmark_context *ctx) {
+    return benchmark_storage_row_update_loop(ctx, 0);
+}
+
+static int benchmark_storage_row_update_components(benchmark_context *ctx) {
+    return benchmark_storage_row_update_loop(ctx, 1);
+}
+
+static int benchmark_storage_row_update_loop(benchmark_context *ctx, int components) {
     mylite_storage_index_entryset primary_entries = {
         .size = sizeof(primary_entries),
     };
@@ -1720,6 +1749,9 @@ static int benchmark_storage_row_updates(benchmark_context *ctx) {
     mylite_storage_statement *transaction = NULL;
     unsigned long long *row_ids = NULL;
     uint64_t row_id_checksum = 0U;
+    uint64_t begin_ns = 0U;
+    uint64_t mutate_ns = 0U;
+    uint64_t commit_ns = 0U;
     int result = 1;
 
     mylite_storage_result storage_result =
@@ -1785,13 +1817,23 @@ static int benchmark_storage_row_updates(benchmark_context *ctx) {
         const size_t row_size = rows.row_sizes[entry_index];
 
         mylite_storage_statement *statement = NULL;
+        uint64_t component_start_ns = 0U;
+        if (components) {
+            component_start_ns = monotonic_ns();
+        }
         storage_result = mylite_storage_begin_nested_statement(transaction, &statement);
+        if (components) {
+            begin_ns += monotonic_ns() - component_start_ns;
+        }
         if (storage_result != MYLITE_STORAGE_OK) {
             fprintf(stderr, "Failed to begin storage update statement: %d\n", storage_result);
             goto rollback;
         }
 
         unsigned long long new_row_id = 0ULL;
+        if (components) {
+            component_start_ns = monotonic_ns();
+        }
         storage_result = mylite_storage_update_row_preserving_index_entries(
             ctx->filename,
             "perf",
@@ -1801,8 +1843,17 @@ static int benchmark_storage_row_updates(benchmark_context *ctx) {
             row_size,
             &new_row_id
         );
+        if (components) {
+            mutate_ns += monotonic_ns() - component_start_ns;
+        }
         if (storage_result == MYLITE_STORAGE_OK) {
+            if (components) {
+                component_start_ns = monotonic_ns();
+            }
             storage_result = mylite_storage_commit_statement(statement);
+            if (components) {
+                commit_ns += monotonic_ns() - component_start_ns;
+            }
             statement = NULL;
         }
         if (storage_result != MYLITE_STORAGE_OK) {
@@ -1817,14 +1868,44 @@ static int benchmark_storage_row_updates(benchmark_context *ctx) {
         row_id_checksum += new_row_id;
     }
 
-    if (print_result(
-            ctx->config,
-            BENCHMARK_METRIC_STORAGE_ROW_UPDATES,
-            "storage row updates in one transaction",
-            ctx->config->iterations,
-            monotonic_ns() - start_ns
-        ) != 0) {
-        goto rollback;
+    if (components) {
+        if (print_result(
+                ctx->config,
+                BENCHMARK_METRIC_STORAGE_ROW_UPDATE_COMPONENT_BEGIN,
+                "storage row update nested statement begin component",
+                ctx->config->iterations,
+                begin_ns
+            ) != 0) {
+            goto rollback;
+        }
+        if (print_result(
+                ctx->config,
+                BENCHMARK_METRIC_STORAGE_ROW_UPDATE_COMPONENT_MUTATE,
+                "storage row update mutation component",
+                ctx->config->iterations,
+                mutate_ns
+            ) != 0) {
+            goto rollback;
+        }
+        if (print_result(
+                ctx->config,
+                BENCHMARK_METRIC_STORAGE_ROW_UPDATE_COMPONENT_COMMIT,
+                "storage row update nested statement commit component",
+                ctx->config->iterations,
+                commit_ns
+            ) != 0) {
+            goto rollback;
+        }
+    } else {
+        if (print_result(
+                ctx->config,
+                BENCHMARK_METRIC_STORAGE_ROW_UPDATES,
+                "storage row updates in one transaction",
+                ctx->config->iterations,
+                monotonic_ns() - start_ns
+            ) != 0) {
+            goto rollback;
+        }
     }
     printf("Storage row-update row-id checksum: %" PRIu64 "\n", row_id_checksum);
 
