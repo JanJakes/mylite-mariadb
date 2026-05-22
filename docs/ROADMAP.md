@@ -227,9 +227,10 @@ initializer on the hot close path while retaining same-file owned filename
 reuse.
 Recent local storage-smoke benchmark samples show read-statement begin/end at
 3.519 us/op, storage primary-key row lookups in the 4-5 us/op range, and routed
-prepared primary-key point selects at 7.207 us/op on the current machine after
+prepared primary-key point selects at 7.218 us/op on the current machine after
 read-statement object reuse, scoped filename borrowing, clean prepared-state
-bookkeeping, and lean reusable read-statement reset.
+bookkeeping, lean reusable read-statement reset, and SELECT explain-detail
+gating.
 The durable row-payload cache now retains a larger bounded hot set, reducing
 steady-state 10000-row storage row materialization and routed prepared
 primary-key point-select time for the local benchmark. Durable row-payload
@@ -250,6 +251,9 @@ Ordinary MyLite `UPDATE` / `DELETE` execution now skips eager quick-plan
 explain detail allocation unless explicit `EXPLAIN`, `ANALYZE`, or slow-log
 explain/engine detail needs it, while routed `EXPLAIN UPDATE` keeps the full
 plan-detail path.
+Ordinary MyLite `SELECT` execution now applies the same explain-detail gate to
+table-access plan fields while keeping MariaDB's runtime trackers initialized,
+and explicit routed `EXPLAIN SELECT` stays on the full plan-detail path.
 Stable-key durable handler updates now use MariaDB's write set to skip
 new index-entry serialization, duplicate-key checks, and maintained-root
 planning when no supported index key part can change, while retargeting active

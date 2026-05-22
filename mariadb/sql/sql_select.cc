@@ -68,6 +68,7 @@
 #include "create_tmp_table.h"
 #include "optimizer_defaults.h"
 #include "derived_handler.h"
+#include "mylite_schema_hook.h"
 
 /*
   A key part number that means we're using a fulltext scan.
@@ -30768,6 +30769,11 @@ bool JOIN_TAB::save_explain_data(Explain_table_access *eta,
   int quick_type= -1;
   CHARSET_INFO *cs= system_charset_info;
   THD *thd=      join->thd;
+  const bool collect_explain_details=
+      !mylite_schema_hooks_active() || thd->lex->describe ||
+      thd->lex->analyze_stmt ||
+      (thd->variables.log_slow_verbosity &
+       (LOG_SLOW_VERBOSITY_ENGINE | LOG_SLOW_VERBOSITY_EXPLAIN));
   TABLE_LIST *table_list= table->pos_in_table_list;
   QUICK_SELECT_I *cur_quick= NULL;
   my_bool key_read;
@@ -30833,6 +30839,28 @@ bool JOIN_TAB::save_explain_data(Explain_table_access *eta,
       eta->jbuf_unpack_tracker.set_gap_tracker(&eta->jbuf_extra_time_tracker);
     }
   }
+
+  if (!collect_explain_details)
+  {
+    if (rowid_filter)
+    {
+      Range_rowid_filter *range_filter= (Range_rowid_filter *) rowid_filter;
+      QUICK_SELECT_I *quick= range_filter->get_select()->quick;
+
+      Explain_rowid_filter *erf= new (thd->mem_root) Explain_rowid_filter;
+      if (!erf)
+        return 1;
+      erf->quick= NULL;
+      erf->selectivity= range_rowid_filter_info->selectivity;
+      erf->rows= quick->records;
+      if (!(erf->tracker= new Rowid_filter_tracker(thd->lex->analyze_stmt)))
+        return 1;
+      rowid_filter->set_tracker(erf->tracker);
+      eta->rowid_filter= erf;
+    }
+    return 0;
+  }
+
   /* No need to save id and select_type here, they are kept in Explain_select */
 
   /* table */
