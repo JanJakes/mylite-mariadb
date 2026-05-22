@@ -14,6 +14,9 @@
 
 typedef enum benchmark_phase {
     BENCHMARK_PHASE_ALL,
+    BENCHMARK_PHASE_POINT_SELECTS,
+    BENCHMARK_PHASE_DIRECT_PK_SELECTS,
+    BENCHMARK_PHASE_PREPARED_PK_SELECTS,
     BENCHMARK_PHASE_UPDATES,
     BENCHMARK_PHASE_DIRECT_UPDATES,
     BENCHMARK_PHASE_PREPARED_UPDATES,
@@ -223,6 +226,18 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         config->phase = BENCHMARK_PHASE_ALL;
         return 0;
     }
+    if (strcmp(argument, "point-selects") == 0) {
+        config->phase = BENCHMARK_PHASE_POINT_SELECTS;
+        return 0;
+    }
+    if (strcmp(argument, "direct-pk-selects") == 0) {
+        config->phase = BENCHMARK_PHASE_DIRECT_PK_SELECTS;
+        return 0;
+    }
+    if (strcmp(argument, "prepared-pk-selects") == 0) {
+        config->phase = BENCHMARK_PHASE_PREPARED_PK_SELECTS;
+        return 0;
+    }
     if (strcmp(argument, "updates") == 0) {
         config->phase = BENCHMARK_PHASE_UPDATES;
         return 0;
@@ -238,7 +253,8 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
 
     fprintf(
         stderr,
-        "Expected phase `all`, `updates`, `direct-updates`, or `prepared-updates`, got: %s\n",
+        "Expected phase `all`, `point-selects`, `direct-pk-selects`, "
+        "`prepared-pk-selects`, `updates`, `direct-updates`, or `prepared-updates`, got: %s\n",
         argument
     );
     return 1;
@@ -290,6 +306,12 @@ static const char *benchmark_phase_name(benchmark_phase phase) {
     switch (phase) {
     case BENCHMARK_PHASE_ALL:
         return "all";
+    case BENCHMARK_PHASE_POINT_SELECTS:
+        return "point-selects";
+    case BENCHMARK_PHASE_DIRECT_PK_SELECTS:
+        return "direct-pk-selects";
+    case BENCHMARK_PHASE_PREPARED_PK_SELECTS:
+        return "prepared-pk-selects";
     case BENCHMARK_PHASE_UPDATES:
         return "updates";
     case BENCHMARK_PHASE_DIRECT_UPDATES:
@@ -310,6 +332,9 @@ static int run_benchmark(const benchmark_config *config) {
     };
     int result = 1;
     uint64_t start_ns;
+    const int point_select_phase = config->phase == BENCHMARK_PHASE_POINT_SELECTS ||
+                                   config->phase == BENCHMARK_PHASE_DIRECT_PK_SELECTS ||
+                                   config->phase == BENCHMARK_PHASE_PREPARED_PK_SELECTS;
 
     ctx.root = make_temp_root();
     if (ctx.root == NULL) {
@@ -342,6 +367,18 @@ static int run_benchmark(const benchmark_config *config) {
         goto cleanup;
     }
     if (verify_row_count(&ctx, config->rows) != 0) {
+        goto cleanup;
+    }
+    if (point_select_phase) {
+        if (config->phase != BENCHMARK_PHASE_PREPARED_PK_SELECTS &&
+            benchmark_point_selects(&ctx) != 0) {
+            goto cleanup;
+        }
+        if (config->phase != BENCHMARK_PHASE_DIRECT_PK_SELECTS &&
+            benchmark_prepared_point_selects(&ctx) != 0) {
+            goto cleanup;
+        }
+        result = 0;
         goto cleanup;
     }
     if (benchmark_prepared_insert_rows(&ctx) != 0) {
@@ -409,11 +446,12 @@ cleanup:
 static void print_usage(const char *program) {
     fprintf(
         stderr,
-        "Usage: %s [--phase=all|updates|direct-updates|prepared-updates] "
+        "Usage: %s [--phase=all|point-selects|direct-pk-selects|prepared-pk-selects|updates|"
+        "direct-updates|prepared-updates] "
         "[--max-us=<metric>:<value>] [rows] [iterations]\n"
         "\n"
         "Defaults: phase=all rows=100 iterations=100.\n"
-        "The update phases skip point-read and secondary-index read timings after setup.\n"
+        "Focused point-select and update phases skip unrelated timings after setup.\n"
         "Thresholds are opt-in and may be supplied more than once. Metrics: "
         "open-setup, direct-inserts, prepared-inserts, direct-pk-selects, "
         "prepared-pk-selects, direct-secondary-selects, prepared-secondary-selects, "

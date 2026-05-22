@@ -149,6 +149,7 @@ published-leaf secondary index reads labelled separately:
 ```sh
 tools/mylite-perf-baseline
 tools/mylite-perf-baseline 1000 1000
+tools/mylite-perf-baseline --phase=prepared-pk-selects 1000 10000
 tools/mylite-perf-baseline --phase=updates 1000 10000
 tools/mylite-perf-baseline --phase=prepared-updates 1000 10000
 tools/mylite-perf-baseline --phase=prepared-updates --max-us=prepared-updates:25 1000 10000

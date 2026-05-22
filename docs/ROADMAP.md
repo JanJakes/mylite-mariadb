@@ -608,7 +608,9 @@ now also reuses the already-resolved active payload cache pointer instead of
 rediscovering that cache owner for each mutation.
 The local performance baseline now accepts opt-in per-metric microsecond
 thresholds, giving performance slices a reusable regression gate while keeping
-default runs descriptive and machine-local.
+default runs descriptive and machine-local. It also has focused primary-key
+point-select phases so read-path slices can measure direct and prepared point
+lookups without running the slower secondary-result phases.
 
 ## Size And Profile Direction
 
