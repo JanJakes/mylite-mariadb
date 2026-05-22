@@ -1,0 +1,11 @@
+select engine, support from information_schema.engines
+where engine in ('CSV', 'InnoDB', 'MyISAM', 'MRG_MyISAM', 'PERFORMANCE_SCHEMA',
+'SEQUENCE')
+order by engine;
+engine	support
+select count(*) as disabled_engine_rows
+from information_schema.engines
+where engine in ('CSV', 'InnoDB', 'MyISAM', 'MRG_MyISAM', 'PERFORMANCE_SCHEMA',
+'SEQUENCE');
+disabled_engine_rows
+0

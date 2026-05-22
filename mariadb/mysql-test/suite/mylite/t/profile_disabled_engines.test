@@ -1,0 +1,14 @@
+#
+# Check native storage engines that the MyLite MTR smoke profile intentionally
+# leaves out of the embedded server build.
+#
+
+select engine, support from information_schema.engines
+where engine in ('CSV', 'InnoDB', 'MyISAM', 'MRG_MyISAM', 'PERFORMANCE_SCHEMA',
+                 'SEQUENCE')
+order by engine;
+
+select count(*) as disabled_engine_rows
+from information_schema.engines
+where engine in ('CSV', 'InnoDB', 'MyISAM', 'MRG_MyISAM', 'PERFORMANCE_SCHEMA',
+                 'SEQUENCE');

@@ -73,6 +73,7 @@ behavior, selected boolean aggregate/HAVING expression behavior, DDL/comment
 metadata, selected MTR-profile view, trigger, and stored-procedure DDL/runtime
 behavior, DDL constraint/index metadata, selected Aria ALTER/index-upgrade
 behavior, selected lock-table DDL behavior, deprecated server syntax rejection,
+selected embedded-profile native-engine absence,
 selected embedded-profile disabled diagnostic behavior,
 selected embedded-profile disabled metadata behavior,
 selected embedded-profile disabled SQL-surface behavior,
