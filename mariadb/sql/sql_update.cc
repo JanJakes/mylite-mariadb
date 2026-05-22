@@ -667,6 +667,7 @@ bool Sql_cmd_update::update_single_table(THD *thd)
   defer_explain_plan= !mylite_update_needs_explain_plan(thd);
   if (!defer_explain_plan)
   {
+    create_explain_query_if_not_exists(thd->lex, thd->mem_root);
     if (!(explain=
               query_plan.save_explain_update_data(thd, query_plan.mem_root)))
       goto err;
@@ -778,6 +779,7 @@ bool Sql_cmd_update::update_single_table(THD *thd)
 
   if (defer_explain_plan && !do_direct_update)
   {
+    create_explain_query_if_not_exists(thd->lex, thd->mem_root);
     if (!(explain=
               query_plan.save_explain_update_data(thd, query_plan.mem_root)))
       goto err;

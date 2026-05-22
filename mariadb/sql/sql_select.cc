@@ -178,6 +178,7 @@ make_cond_after_sjm(THD *thd, Item *root_cond, Item *cond, table_map tables,
 static bool make_join_select(JOIN *join,SQL_SELECT *select,COND *item);
 static void revise_cache_usage(JOIN_TAB *join_tab);
 static bool make_join_readinfo(JOIN *join, ulonglong options, uint no_jbuf_after);
+static bool mylite_can_skip_join_prepare_explain_query(THD *thd);
 static bool only_eq_ref_tables(JOIN *join, ORDER *order, table_map tables);
 static void update_depend_map(JOIN *join);
 static void update_depend_map_for_order(JOIN *join, ORDER *order);
@@ -1468,8 +1469,9 @@ JOIN::prepare(TABLE_LIST *tables_init, COND *conds_init, uint og_num,
     constant subquery like (SELECT 'x') can be called with statement arena
     during prepare phase of top SELECT).
   */
-  if (!(thd->lex->context_analysis_only & CONTEXT_ANALYSIS_ONLY_PREPARE))
-      create_explain_query_if_not_exists(thd->lex, thd->mem_root);
+  if (!(thd->lex->context_analysis_only & CONTEXT_ANALYSIS_ONLY_PREPARE) &&
+      !mylite_can_skip_join_prepare_explain_query(thd))
+    create_explain_query_if_not_exists(thd->lex, thd->mem_root);
 
   if (select_lex->handle_derived(thd->lex, DT_PREPARE))
     DBUG_RETURN(-1);
@@ -1886,6 +1888,14 @@ err:
   DBUG_RETURN(-1);                /* purecov: inspected */
 }
 
+static bool mylite_can_skip_join_prepare_explain_query(THD *thd)
+{
+  return mylite_schema_hooks_active() &&
+         thd->lex->sql_command == SQLCOM_UPDATE && !thd->lex->describe &&
+         !thd->lex->analyze_stmt &&
+         !(thd->variables.log_slow_verbosity &
+           (LOG_SLOW_VERBOSITY_ENGINE | LOG_SLOW_VERBOSITY_EXPLAIN));
+}
 
 /**
   Second phase of prepare where we collect some statistic.

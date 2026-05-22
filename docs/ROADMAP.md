@@ -323,6 +323,9 @@ plan-detail path.
 Accepted MyLite direct updates now also skip the remaining `Explain_update`
 node allocation when no explain, analyze, or slow-log detail can observe it,
 while non-direct updates keep the node for scan, buffer, and filesort trackers.
+They also skip the outer `Explain_query` object created during `JOIN::prepare()`
+on the accepted no-explain direct path, while lazily creating it before any
+fallback or explain-observable update path needs normal trackers.
 Ordinary MyLite `SELECT` execution now applies the same explain-detail gate to
 table-access plan fields while keeping MariaDB's runtime trackers initialized,
 and explicit routed `EXPLAIN SELECT` stays on the full plan-detail path.
