@@ -351,7 +351,11 @@ live-row caches keep amortized row-id capacity under their existing entry bound
 instead of resizing on every maintained append. The
 common inline update path now writes replacement row, row-state, and
 replacement index-entry pages as one contiguous append run, reducing per-update
-write syscall overhead without changing the durable page format. Active
+write syscall overhead without changing the durable page format. Inline
+inserts now batch the inserted row page and fallback append-only
+index-entry pages into one contiguous append run before maintained-root page
+updates, reducing per-insert write overhead without changing row ids, page
+ordering, or durable bytes. Active
 checkpoints now buffer bounded contiguous append runs across nested statement
 commits with a 16 MiB transient flush window and flush them before top-level
 header publication, reducing large transaction update syscall overhead while
