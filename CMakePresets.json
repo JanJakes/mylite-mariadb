@@ -24,6 +24,15 @@
       "cacheVariables": {
         "MYLITE_WITH_MARIADB_EMBEDDED": "ON"
       }
+    },
+    {
+      "name": "php-embedded-dev",
+      "displayName": "Developer build with MariaDB embedded backend and PHP extensions",
+      "inherits": "embedded-dev",
+      "binaryDir": "${sourceDir}/build/php-embedded-dev",
+      "cacheVariables": {
+        "MYLITE_BUILD_PHP_EXTENSIONS": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -34,6 +43,10 @@
     {
       "name": "embedded-dev",
       "configurePreset": "embedded-dev"
+    },
+    {
+      "name": "php-embedded-dev",
+      "configurePreset": "php-embedded-dev"
     },
     {
       "name": "format",
@@ -68,6 +81,13 @@
     {
       "name": "embedded-dev",
       "configurePreset": "embedded-dev",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "php-embedded-dev",
+      "configurePreset": "php-embedded-dev",
       "output": {
         "outputOnFailure": true
       }

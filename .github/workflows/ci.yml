@@ -69,19 +69,21 @@ jobs:
             libssl-dev \
             ninja-build \
             pkg-config \
+            php-cli \
+            php-dev \
             zlib1g-dev
 
       - name: Build MariaDB embedded archive
         run: tools/mariadb-embedded-build all
 
       - name: Configure
-        run: cmake --preset embedded-dev
+        run: cmake --preset php-embedded-dev
 
       - name: Build
-        run: cmake --build --preset embedded-dev
+        run: cmake --build --preset php-embedded-dev
 
       - name: Test
-        run: ctest --preset embedded-dev
+        run: ctest --preset php-embedded-dev
 
   clang-tools:
     name: clang-format and clang-tidy

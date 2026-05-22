@@ -16,6 +16,9 @@ mechanical imports and local MyLite changes remain reviewable.
 | `docs/specs/` | Slice specifications for substantive compatibility and storage work. |
 | `mariadb/` | Mechanical import of the pinned MariaDB source tree. MyLite patches land after the import commit. |
 | `packages/libmylite/` | First-party embedded runtime library. This owns the public MyLite C API boundary. |
+| `packages/php-ext-mylite/` | PHP `mylite` extension. This owns the loaded `libmylite` runtime for PHP processes. |
+| `packages/php-ext-mysqli-mylite/` | PHP `mysqli_mylite` extension. This exposes a MyLite-backed mysqli-shaped API. |
+| `packages/php-ext-pdo-mylite/` | PHP `pdo_mylite` extension. This registers the PDO driver name `mylite`. |
 | `tests/` | Cross-package and integration tests. Package-local tests stay next to the package they exercise. |
 | `tools/` | Command-line tools and developer utilities. Buildable tools live in subdirectories. |
 
@@ -63,6 +66,18 @@ The wrapper keeps MyLite-owned build orchestration outside `mariadb/`, uses the
 initial cache in `cmake/mariadb-embedded-baseline.cmake`, and records
 `libmariadbd.a` size evidence. The current baseline is documented in
 [MariaDB Embedded Build](mariadb-embedded-build.md).
+
+Build and test the PHP extensions with the PHP-enabled embedded preset:
+
+```sh
+cmake --preset php-embedded-dev
+cmake --build --preset php-embedded-dev
+ctest --preset php-embedded-dev -L php
+```
+
+`php-ext-mylite` links `libmylite`; `php-ext-mysqli-mylite` and
+`php-ext-pdo-mylite` depend on the loaded `mylite` extension and do not link a
+second embedded runtime.
 
 ## Import Discipline
 

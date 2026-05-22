@@ -111,7 +111,7 @@ integration packages. The main components are:
 - The `libmylite` library code.
 - MySQL/MariaDB wire protocol support.
 - Command-line tooling.
-- Language and runtime integration packages.
+- Language and runtime integration packages, including PHP extensions.
 - Test suites.
 
 ## Development
@@ -136,6 +136,18 @@ ctest --preset embedded-dev
 
 See [docs/architecture/monorepo.md](docs/architecture/monorepo.md) for the
 repository layout and import discipline.
+
+The PHP integration packages are opt-in because they require PHP development
+headers for the target PHP ABI:
+
+```sh
+cmake --preset php-embedded-dev
+cmake --build --preset php-embedded-dev
+ctest --preset php-embedded-dev -L php
+```
+
+See [docs/api/php-extensions.md](docs/api/php-extensions.md) for the package
+layout and API notes.
 
 ## References
 
