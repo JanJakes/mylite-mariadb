@@ -56,6 +56,7 @@ default_tests=(
   main.round
   main.row
   main.last_value
+  main.win_first_last_value
   main.win_lead_lag
   main.win_rank
   main.win_sum
@@ -67,6 +68,7 @@ default_tests=(
   main.win_nth_value
   main.win_ntile
   main.win_percent_cume
+  main.win_percentile
   main.win_std
   main.win_as_arg_to_aggregate_func
   main.win_insert_select
