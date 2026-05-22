@@ -1037,6 +1037,10 @@ static mylite_storage_result initialize_read_statement(
     const char *filename,
     mylite_storage_statement *same_file_parent
 );
+static mylite_storage_result assign_read_statement_filename(
+    mylite_storage_statement *statement,
+    const char *filename
+);
 static mylite_storage_result read_checkpoint_snapshot(mylite_storage_statement *statement);
 static mylite_storage_result read_cached_checkpoint_snapshot(mylite_storage_statement *statement);
 static mylite_storage_result read_checkpoint_snapshot_from_header_page(
@@ -8659,18 +8663,16 @@ mylite_storage_result mylite_storage_begin_read_statement(
         return MYLITE_STORAGE_NOMEM;
     }
 
-    statement->filename = copy_filename(filename);
-    if (statement->filename == NULL) {
+    mylite_storage_result result = assign_read_statement_filename(statement, filename);
+    if (result != MYLITE_STORAGE_OK) {
         free(statement);
-        return MYLITE_STORAGE_NOMEM;
+        return result;
     }
-    statement->owns_filename = 1;
     statement->reuse_read_statement_storage = 1;
     statement->owner = active_context_owner;
     statement->parent = active_read_statement;
-    maybe_store_active_filename_identity(statement, filename);
 
-    mylite_storage_result result = initialize_read_statement(statement, filename, same_file_parent);
+    result = initialize_read_statement(statement, filename, same_file_parent);
     if (result != MYLITE_STORAGE_OK) {
         free_statement(statement);
         return result;
@@ -9507,6 +9509,27 @@ static mylite_storage_result initialize_read_statement(
         return result;
     }
     return read_cached_checkpoint_snapshot(statement);
+}
+
+static mylite_storage_result assign_read_statement_filename(
+    mylite_storage_statement *statement,
+    const char *filename
+) {
+    statement->filename = NULL;
+    statement->owns_filename = 0;
+    if (active_filename_identity_active && active_filename_identity_filename == filename) {
+        statement->filename = (char *)filename;
+        store_active_statement_filename_identity(statement, filename);
+        return MYLITE_STORAGE_OK;
+    }
+
+    statement->filename = copy_filename(filename);
+    if (statement->filename == NULL) {
+        return MYLITE_STORAGE_NOMEM;
+    }
+    statement->owns_filename = 1;
+    maybe_store_active_filename_identity(statement, filename);
+    return MYLITE_STORAGE_OK;
 }
 
 static mylite_storage_result read_checkpoint_snapshot(mylite_storage_statement *statement) {
@@ -12861,6 +12884,17 @@ static int journal_dirty_page_exists_in_statement_chain(
 #ifdef MYLITE_STORAGE_TEST_HOOKS
 int mylite_storage_test_reusable_read_statement_cached(void) {
     return reusable_read_statement != NULL ? 1 : 0;
+}
+
+int mylite_storage_test_statement_owns_filename(const mylite_storage_statement *statement) {
+    return statement != NULL && statement->owns_filename ? 1 : 0;
+}
+
+int mylite_storage_test_statement_filename_is(
+    const mylite_storage_statement *statement,
+    const char *filename
+) {
+    return statement != NULL && statement->filename == filename ? 1 : 0;
 }
 
 mylite_storage_result mylite_storage_test_encode_maintained_index_root_page(

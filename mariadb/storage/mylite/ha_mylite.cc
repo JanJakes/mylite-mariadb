@@ -1523,6 +1523,7 @@ int ha_mylite::build_index_cursor(uint index_number, const uchar *key_filter,
   /* Keep this scoped to cursor construction; statement-wide read locks break
      MariaDB flows that interleave reads and writes through separate handlers.
    */
+  Mylite_filename_identity_scope filename_scope(primary_file);
   Mylite_read_statement_scope read_scope(primary_file, !volatile_rows);
   if (read_scope.error())
     DBUG_RETURN(read_scope.error());

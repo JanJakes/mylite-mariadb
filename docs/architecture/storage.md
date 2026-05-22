@@ -111,6 +111,9 @@ Short-lived read statements also reuse one cleaned statement object per thread.
 The object reuse only avoids repeated allocation and cleanup of storage-layer
 scratch state; it does not keep read locks open between SQL statements and does
 not bypass recovery or checkpoint snapshot validation.
+When the caller opens a matching filename identity scope, a read statement
+borrows that stable filename pointer instead of copying it. Unscoped callers
+keep owned filename copies.
 
 Durable full-row and count reads also keep a small process-local live-row-id
 cache keyed by the durable header fingerprint and table id. When an unchanged
@@ -489,6 +492,9 @@ creation and durable mutation paths.
 The statement object itself is also retained after cleanup, bounded to one
 object per thread, so hot point-read loops do not allocate the large
 `mylite_storage_statement` scratch structure on every short read scope.
+Read statements under a trusted filename identity scope borrow the scoped
+filename pointer for the same active lifetime; raw callers without that scope
+keep the owned-string path.
 Read-statement startup also keeps cached deterministic recovery and transaction
 journal path strings for the current filename. It still checks both journal
 paths on every startup before taking a shared read lock, preserving

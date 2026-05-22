@@ -45,6 +45,11 @@ mylite_storage_result mylite_storage_test_flip_active_page_byte(
     size_t offset
 );
 int mylite_storage_test_reusable_read_statement_cached(void);
+int mylite_storage_test_statement_owns_filename(const mylite_storage_statement *statement);
+int mylite_storage_test_statement_filename_is(
+    const mylite_storage_statement *statement,
+    const char *filename
+);
 #endif
 
 typedef struct index_entries_test_context {
@@ -433,6 +438,7 @@ static void assert_statement_checkpoint_preserves_marked_auto_increment_rollback
 static void test_read_statement_storage_session(void);
 static void test_read_checkpoint_snapshot_cache(void);
 static void test_read_statement_storage_reuse(void);
+static void test_read_statement_filename_identity_borrows_filename(void);
 static void test_read_statement_multi_page_catalog_image_cache(void);
 static void test_read_statement_file_cache_path_replacement(void);
 static void test_transaction_journals(void);
@@ -676,6 +682,7 @@ int main(void) {
     test_read_statement_storage_session();
     test_read_checkpoint_snapshot_cache();
     test_read_statement_storage_reuse();
+    test_read_statement_filename_identity_borrows_filename();
     test_read_statement_multi_page_catalog_image_cache();
     test_read_statement_file_cache_path_replacement();
     test_transaction_journals();
@@ -9671,6 +9678,36 @@ static void test_read_statement_storage_reuse(void) {
     mylite_storage_free(stored_definition);
     assert(mylite_storage_end_read_statement(second_statement) == MYLITE_STORAGE_OK);
     assert(mylite_storage_test_reusable_read_statement_cached() == 1);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+#endif
+}
+
+static void test_read_statement_filename_identity_borrows_filename(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    char *root = make_temp_root();
+    char *filename = path_join(root, "read-statement-filename-borrow.mylite");
+    mylite_storage_statement *read_statement = NULL;
+    mylite_storage_filename_identity_scope filename_scope = {0};
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+
+    assert(mylite_storage_begin_read_statement(filename, &read_statement) == MYLITE_STORAGE_OK);
+    assert(read_statement != NULL);
+    assert(mylite_storage_test_statement_owns_filename(read_statement) == 1);
+    assert(mylite_storage_end_read_statement(read_statement) == MYLITE_STORAGE_OK);
+    read_statement = NULL;
+
+    mylite_storage_begin_filename_identity_scope(filename, &filename_scope);
+    assert(mylite_storage_begin_read_statement(filename, &read_statement) == MYLITE_STORAGE_OK);
+    assert(read_statement != NULL);
+    assert(mylite_storage_test_statement_owns_filename(read_statement) == 0);
+    assert(mylite_storage_test_statement_filename_is(read_statement, filename) == 1);
+    assert(mylite_storage_end_read_statement(read_statement) == MYLITE_STORAGE_OK);
+    mylite_storage_end_filename_identity_scope(&filename_scope);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
