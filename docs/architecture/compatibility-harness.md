@@ -70,9 +70,10 @@ integer, varchar, binary-string, binary/national character, date/timezone,
 temporal literal, system-timezone,
 parser/comment, comparison, selected negation-elimination predicate optimizer
 behavior, selected boolean aggregate/HAVING expression behavior, DDL/comment
-metadata, DDL constraint/index metadata, selected Aria
-ALTER/index-upgrade behavior, selected lock-table DDL behavior, deprecated
-server syntax rejection, `ORDER BY`, optimizer-cost metadata, selected EXPLAIN plan output,
+metadata, selected MTR-profile view DDL/runtime behavior, DDL constraint/index
+metadata, selected Aria ALTER/index-upgrade behavior, selected lock-table DDL
+behavior, deprecated server syntax rejection, `ORDER BY`, optimizer-cost
+metadata, selected EXPLAIN plan output,
 selected Aria range, semijoin, and rowid-filter optimizer behavior, selected
 UNION, EXCEPT / EXCEPT ALL, INTERSECT, and mixed set-operation behavior,
 selected compound-statement parser diagnostics, selected missing-routine

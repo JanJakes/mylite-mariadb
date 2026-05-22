@@ -105,6 +105,7 @@ default_tests=(
   main.comment_column2
   main.check
   main.create_drop_db
+  main.create_drop_view
   main.mdev19198
   main.lowercase_utf8
   main.key_diff
