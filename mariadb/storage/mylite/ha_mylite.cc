@@ -2289,6 +2289,17 @@ int ha_mylite::index_read_idx_map(uchar *buf, uint index, const uchar *key,
   const bool filter_cursor=
       key_length > 0 &&
       (find_flag == HA_READ_KEY_EXACT || find_flag == HA_READ_PREFIX);
+  if (filter_cursor && find_flag == HA_READ_KEY_EXACT)
+  {
+    bool direct_applied= false;
+    bool direct_found= false;
+    const int direct_error= read_exact_unique_index_row_into(
+        index, key, key_length, buf, &direct_applied, &direct_found);
+    if (direct_error)
+      DBUG_RETURN(direct_error);
+    if (direct_applied)
+      DBUG_RETURN(direct_found ? 0 : HA_ERR_KEY_NOT_FOUND);
+  }
   int error= build_index_cursor(index, filter_cursor ? key : NULL,
                                 filter_cursor ? key_length : 0);
   if (error)
