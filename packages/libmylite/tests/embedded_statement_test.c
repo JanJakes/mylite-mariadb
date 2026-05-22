@@ -19,6 +19,8 @@ static void test_transient_text_bind_reuse(void);
 static void test_statement_effects(void);
 #if MYLITE_TEST_HAS_MYLITE_SE
 static void test_transaction_statement_checkpoints(void);
+static void test_prepared_read_scope_invalidates_before_write(void);
+static void test_prepared_read_scope_rejects_active_result_write(void);
 #endif
 static void test_segment_reads(void);
 static void test_reset_reuse_and_destructors(void);
@@ -64,6 +66,8 @@ int main(void) {
     test_statement_effects();
 #if MYLITE_TEST_HAS_MYLITE_SE
     test_transaction_statement_checkpoints();
+    test_prepared_read_scope_invalidates_before_write();
+    test_prepared_read_scope_rejects_active_result_write();
 #endif
     test_segment_reads();
     test_reset_reuse_and_destructors();
@@ -434,6 +438,122 @@ static void test_transaction_statement_checkpoints(void) {
     assert(mylite_exec(db, "ROLLBACK", NULL, NULL, NULL) == MYLITE_OK);
     assert(mylite_finalize(memory_duplicate_insert) == MYLITE_OK);
 
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_prepared_read_scope_invalidates_before_write(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    mylite_stmt *insert_stmt = NULL;
+    mylite_stmt *select_stmt = NULL;
+
+    assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "USE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(
+            db,
+            "CREATE TABLE read_scope_posts ("
+            "id INT NOT NULL PRIMARY KEY,"
+            "qty INT NOT NULL"
+            ") ENGINE=InnoDB",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_exec(db, "INSERT INTO read_scope_posts VALUES (1, 10)", NULL, NULL, NULL) ==
+           MYLITE_OK);
+
+    select_stmt = prepare_statement(db, "SELECT qty FROM read_scope_posts WHERE id = ?");
+    assert(mylite_bind_int64(select_stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(select_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(select_stmt, 0U) == 10);
+    assert(mylite_step(select_stmt) == MYLITE_DONE);
+    assert(mylite_reset(select_stmt) == MYLITE_OK);
+
+    assert(mylite_bind_int64(select_stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(select_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(select_stmt, 0U) == 10);
+    assert(mylite_step(select_stmt) == MYLITE_DONE);
+    assert(mylite_exec(db, "INSERT INTO read_scope_posts VALUES (2, 20)", NULL, NULL, NULL) ==
+           MYLITE_OK);
+    assert(mylite_reset(select_stmt) == MYLITE_OK);
+
+    assert(mylite_bind_int64(select_stmt, 1U, 2) == MYLITE_OK);
+    assert(mylite_step(select_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(select_stmt, 0U) == 20);
+    assert(mylite_step(select_stmt) == MYLITE_DONE);
+
+    insert_stmt = prepare_statement(db, "INSERT INTO read_scope_posts VALUES (?, ?)");
+    assert(mylite_bind_int64(insert_stmt, 1U, 3) == MYLITE_OK);
+    assert(mylite_bind_int64(insert_stmt, 2U, 30) == MYLITE_OK);
+    assert(mylite_step(insert_stmt) == MYLITE_DONE);
+    assert(mylite_finalize(insert_stmt) == MYLITE_OK);
+    assert(mylite_reset(select_stmt) == MYLITE_OK);
+    assert(mylite_bind_int64(select_stmt, 1U, 3) == MYLITE_OK);
+    assert(mylite_step(select_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(select_stmt, 0U) == 30);
+    assert(mylite_step(select_stmt) == MYLITE_DONE);
+
+    assert(mylite_finalize(select_stmt) == MYLITE_OK);
+    assert(mylite_close(db) == MYLITE_OK);
+    free(filename);
+    remove_tree(root);
+    free(root);
+}
+
+static void test_prepared_read_scope_rejects_active_result_write(void) {
+    char *root = make_temp_root();
+    char *filename = NULL;
+    mylite_db *db = open_database(root, &filename);
+    mylite_stmt *select_stmt = NULL;
+
+    assert(mylite_exec(db, "CREATE DATABASE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(mylite_exec(db, "USE app", NULL, NULL, NULL) == MYLITE_OK);
+    assert(
+        mylite_exec(
+            db,
+            "CREATE TABLE active_read_posts ("
+            "id INT NOT NULL PRIMARY KEY,"
+            "qty INT NOT NULL"
+            ") ENGINE=InnoDB",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(
+        mylite_exec(
+            db,
+            "INSERT INTO active_read_posts VALUES (1, 10), (2, 20)",
+            NULL,
+            NULL,
+            NULL
+        ) == MYLITE_OK
+    );
+
+    select_stmt = prepare_statement(db, "SELECT qty FROM active_read_posts ORDER BY id");
+    assert(mylite_step(select_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(select_stmt, 0U) == 10);
+    assert(
+        mylite_exec(db, "INSERT INTO active_read_posts VALUES (3, 30)", NULL, NULL, NULL) ==
+        MYLITE_ERROR
+    );
+    assert(strstr(mylite_errmsg(db), "prepared read result is active") != NULL);
+    assert(mylite_step(select_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(select_stmt, 0U) == 20);
+    assert(mylite_step(select_stmt) == MYLITE_DONE);
+    assert(
+        mylite_exec(db, "INSERT INTO active_read_posts VALUES (3, 30)", NULL, NULL, NULL) ==
+        MYLITE_OK
+    );
+    assert(mylite_finalize(select_stmt) == MYLITE_OK);
+
+    assert_query_single_int(db, "SELECT COUNT(*) FROM active_read_posts", 3);
     assert(mylite_close(db) == MYLITE_OK);
     free(filename);
     remove_tree(root);

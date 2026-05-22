@@ -311,7 +311,13 @@ variable text and BLOB result buffers continue to bind per execution because
 large-value reads can reallocate their backing storage. Successful non-result
 prepared statements can reset and re-execute without an internal MariaDB
 statement reset; result-producing statements still free/reset through MariaDB
-before reuse.
+before reuse. File-backed result-producing prepared reads over table-backed
+columns retain one connection-owned storage read scope after a fully drained
+result so reset/re-execute loops can reuse the same validated snapshot.
+Connection-local writes, DDL, and transaction controls close an idle retained
+read scope before execution. A write attempted while a prepared read result is
+still active fails explicitly instead of changing storage underneath an
+unfinished result.
 Rich parameter metadata is not exposed on the current MariaDB base because
 `mysql_stmt_param_metadata()` is reserved and returns no metadata. Multi-result
 execution, array binding, streaming parameter binding, parser-derived parameter

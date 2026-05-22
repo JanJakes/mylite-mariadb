@@ -236,6 +236,11 @@ prepared primary-key point selects at 7.218 us/op on the current machine after
 read-statement object reuse, scoped filename borrowing, clean prepared-state
 bookkeeping, lean reusable read-statement reset, and SELECT explain-detail
 gating.
+Reusable file-backed prepared reads now retain one connection-owned storage read
+scope across fully drained reset/re-execute loops and close it before
+connection-local writes, reducing the local routed prepared primary-key
+point-select sample to about 2.7 us/op while reset-before-drain remains on the
+short-lived read-scope path.
 The durable row-payload cache now retains a larger bounded hot set, reducing
 steady-state 10000-row storage row materialization and routed prepared
 primary-key point-select time for the local benchmark. Durable row-payload

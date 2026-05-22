@@ -279,6 +279,8 @@ struct TrackedTableEngine {
 
 } // namespace
 
+struct mylite_stmt;
+
 struct mylite_db {
 #if MYLITE_WITH_MARIADB_EMBEDDED
     MYSQL mysql = {};
@@ -287,6 +289,7 @@ struct mylite_db {
 #if MYLITE_WITH_MARIADB_EMBEDDED && MYLITE_MARIADB_HAS_MYLITE_SE
     mylite_storage_statement *transaction_statement = nullptr;
     Mylite_volatile_snapshot *transaction_volatile_snapshot = nullptr;
+    mylite_stmt *prepared_read_statement_owner = nullptr;
     std::vector<DirectSavepoint> savepoints;
     std::vector<TrackedTableEngine> table_engines;
     unsigned long long storage_metadata_epoch = 0;
@@ -339,6 +342,7 @@ struct mylite_stmt {
     bool selects_schema = false;
     bool uses_simple_result_execution = false;
 #if MYLITE_WITH_MARIADB_EMBEDDED && MYLITE_MARIADB_HAS_MYLITE_SE
+    mylite_storage_statement *prepared_read_statement = nullptr;
     std::string temporary_table_to_remember;
     std::vector<std::string> temporary_tables_to_forget;
     unsigned long long storage_metadata_epoch = 0;
@@ -493,6 +497,12 @@ bool prepared_statement_changes_temporary_table_lifecycle(const mylite_stmt &sta
 bool row_dml_needs_volatile_snapshot(const mylite_db &database, std::string_view sql);
 bool row_dml_needs_storage_checkpoint(const mylite_db &database, std::string_view sql);
 bool storage_engine_name_is_volatile(std::string_view engine_name);
+int begin_prepared_read_scope(mylite_stmt &statement);
+int close_prepared_read_scope(mylite_stmt &statement);
+int close_prepared_read_scope_before_write(mylite_db &database);
+bool prepared_read_scope_result_is_active(const mylite_stmt &statement);
+bool prepared_statement_can_reuse_read_scope(const mylite_stmt &statement);
+bool prepared_statement_has_table_result_column(const mylite_stmt &statement);
 void apply_successful_storage_metadata_lifecycle(mylite_db &database, std::string_view sql);
 bool remember_created_table_engine(mylite_db &database, std::string_view sql);
 void remember_table_engine(
@@ -917,6 +927,14 @@ int mylite_reset(mylite_stmt *statement) {
             statement->result_active = false;
             abandoned_active_result = true;
         }
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        if (abandoned_active_result) {
+            const int read_scope_result = close_prepared_read_scope(*statement);
+            if (read_scope_result != MYLITE_OK) {
+                return read_scope_result;
+            }
+        }
+#  endif
         const bool reusable_without_reset =
             (statement->done && !statement->result_active) || abandoned_active_result;
         if (!reusable_without_reset && mysql_stmt_reset(statement->statement) != 0) {
@@ -941,12 +959,19 @@ int mylite_finalize(mylite_stmt *statement) {
     }
 
     mylite_db *database = statement->database;
+    int result = MYLITE_OK;
 #if MYLITE_WITH_MARIADB_EMBEDDED
     if (statement->statement != nullptr) {
         if (statement->result_active) {
             mysql_stmt_free_result(statement->statement);
             statement->result_active = false;
         }
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        const int read_scope_result = close_prepared_read_scope(*statement);
+        if (read_scope_result != MYLITE_OK) {
+            result = read_scope_result;
+        }
+#  endif
         mysql_stmt_close(statement->statement);
         statement->statement = nullptr;
     }
@@ -956,10 +981,10 @@ int mylite_finalize(mylite_stmt *statement) {
     if (database != nullptr && database->active_statements > 0U) {
         --database->active_statements;
     }
-    if (database != nullptr) {
+    if (database != nullptr && result == MYLITE_OK) {
         set_ok(*database);
     }
-    return MYLITE_OK;
+    return result;
 }
 
 unsigned mylite_bind_parameter_count(mylite_stmt *statement) {
@@ -1663,6 +1688,10 @@ int exec_impl(
                 set_error(*database, MYLITE_ERROR, "unsupported savepoint transaction control");
                 return copy_error_message(*database, errmsg);
             }
+            const int read_scope_result = close_prepared_read_scope_before_write(*database);
+            if (read_scope_result != MYLITE_OK) {
+                return copy_error_message(*database, errmsg);
+            }
             const int savepoint_result =
                 execute_direct_savepoint_control(*database, transaction_control, savepoint_name);
             if (savepoint_result != MYLITE_OK) {
@@ -1700,6 +1729,14 @@ int exec_impl(
     }
 
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
+    if (transaction_control != TransactionControlKind::None || storage_outer_checkpoint_sql ||
+        row_dml_checkpoint_sql) {
+        const int read_scope_result = close_prepared_read_scope_before_write(*database);
+        if (read_scope_result != MYLITE_OK) {
+            return copy_error_message(*database, errmsg);
+        }
+    }
+
     StorageStatementCheckpoint checkpoint;
     const bool checkpoint_enabled =
         database->filename != ":memory:" &&
@@ -2083,6 +2120,10 @@ int execute_statement(mylite_stmt &statement) {
 
 #  if MYLITE_MARIADB_HAS_MYLITE_SE
     if (statement.prepared_transaction_control != TransactionControlKind::None) {
+        const int read_scope_result = close_prepared_read_scope_before_write(*statement.database);
+        if (read_scope_result != MYLITE_OK) {
+            return read_scope_result;
+        }
         return execute_prepared_savepoint_control(statement);
     }
     if (statement.database->transaction_active && statement.uses_storage_outer_checkpoint) {
@@ -2098,6 +2139,13 @@ int execute_statement(mylite_stmt &statement) {
             "unsupported read-only transaction write SQL surface"
         );
         return MYLITE_ERROR;
+    }
+    if (statement.writes_storage ||
+        statement.statement_transaction_control != TransactionControlKind::None) {
+        const int read_scope_result = close_prepared_read_scope_before_write(*statement.database);
+        if (read_scope_result != MYLITE_OK) {
+            return read_scope_result;
+        }
     }
 #  endif
 
@@ -2249,9 +2297,22 @@ int execute_simple_result_statement(mylite_stmt &statement) {
         return bind_result;
     }
 
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+    const int read_scope_result = begin_prepared_read_scope(statement);
+    if (read_scope_result != MYLITE_OK) {
+        return read_scope_result;
+    }
+#  endif
+
     if (mysql_stmt_execute(statement.statement) != 0) {
         const unsigned warning_count = mysql_warning_count(&statement.database->mysql);
         set_mariadb_statement_error(statement);
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        const int close_result = close_prepared_read_scope(statement);
+        if (close_result != MYLITE_OK) {
+            return close_result;
+        }
+#  endif
         const int warning_result = capture_warnings(*statement.database, warning_count, true);
         return warning_result == MYLITE_OK ? MYLITE_ERROR : warning_result;
     }
@@ -2264,10 +2325,117 @@ int execute_simple_result_statement(mylite_stmt &statement) {
 
     const int result_bind_result = bind_statement_results(statement);
     if (result_bind_result != MYLITE_OK) {
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        const int close_result = close_prepared_read_scope(statement);
+        if (close_result != MYLITE_OK) {
+            return close_result;
+        }
+#  endif
         return result_bind_result;
     }
     return fetch_statement_row(statement);
 }
+
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+int begin_prepared_read_scope(mylite_stmt &statement) {
+    if (!prepared_statement_can_reuse_read_scope(statement)) {
+        return MYLITE_OK;
+    }
+
+    mylite_db &database = *statement.database;
+    if (database.prepared_read_statement_owner == &statement &&
+        statement.prepared_read_statement != nullptr) {
+        return MYLITE_OK;
+    }
+
+    if (database.prepared_read_statement_owner != nullptr &&
+        database.prepared_read_statement_owner != &statement) {
+        mylite_stmt &owner = *database.prepared_read_statement_owner;
+        if (prepared_read_scope_result_is_active(owner)) {
+            return MYLITE_OK;
+        }
+        const int close_result = close_prepared_read_scope(owner);
+        if (close_result != MYLITE_OK) {
+            return close_result;
+        }
+    }
+
+    mylite_storage_statement *read_statement = nullptr;
+    const mylite_storage_result result =
+        mylite_storage_begin_read_statement(database.filename.c_str(), &read_statement);
+    if (result != MYLITE_STORAGE_OK) {
+        set_error(database, map_storage_result(result), "failed to begin prepared read scope");
+        return database.errcode;
+    }
+    if (read_statement == nullptr) {
+        return MYLITE_OK;
+    }
+
+    statement.prepared_read_statement = read_statement;
+    database.prepared_read_statement_owner = &statement;
+    return MYLITE_OK;
+}
+
+int close_prepared_read_scope(mylite_stmt &statement) {
+    if (statement.prepared_read_statement == nullptr) {
+        return MYLITE_OK;
+    }
+
+    mylite_db &database = *statement.database;
+    mylite_storage_statement *read_statement = statement.prepared_read_statement;
+    statement.prepared_read_statement = nullptr;
+    if (database.prepared_read_statement_owner == &statement) {
+        database.prepared_read_statement_owner = nullptr;
+    }
+
+    StorageContextScope storage_context(&database);
+    const mylite_storage_result result = mylite_storage_end_read_statement(read_statement);
+    if (result != MYLITE_STORAGE_OK) {
+        set_error(database, map_storage_result(result), "failed to close prepared read scope");
+        return database.errcode;
+    }
+    return MYLITE_OK;
+}
+
+int close_prepared_read_scope_before_write(mylite_db &database) {
+    mylite_stmt *owner = database.prepared_read_statement_owner;
+    if (owner == nullptr) {
+        return MYLITE_OK;
+    }
+    if (owner->prepared_read_statement == nullptr) {
+        database.prepared_read_statement_owner = nullptr;
+        return MYLITE_OK;
+    }
+    if (prepared_read_scope_result_is_active(*owner)) {
+        set_error(
+            database,
+            MYLITE_ERROR,
+            "unsupported write while prepared read result is active"
+        );
+        return MYLITE_ERROR;
+    }
+    return close_prepared_read_scope(*owner);
+}
+
+bool prepared_read_scope_result_is_active(const mylite_stmt &statement) {
+    return statement.result_active && !statement.done;
+}
+
+bool prepared_statement_can_reuse_read_scope(const mylite_stmt &statement) {
+    return statement.database != nullptr && statement.database->filename != ":memory:" &&
+           statement.uses_simple_result_execution &&
+           prepared_statement_has_table_result_column(statement);
+}
+
+bool prepared_statement_has_table_result_column(const mylite_stmt &statement) {
+    for (const ColumnInfo &column : statement.columns) {
+        if (!column.table_name.empty() || !column.origin_table_name.empty()) {
+            return true;
+        }
+    }
+    return false;
+}
+#  endif
 
 int resolve_parameterized_transaction_controls(
     mylite_stmt &statement,
@@ -3249,10 +3417,25 @@ int fetch_statement_row(mylite_stmt &statement) {
         const unsigned warning_count = mysql_warning_count(&statement.database->mysql);
         statement.result_active = false;
         const int warning_result = capture_warnings(*statement.database, warning_count);
-        return warning_result == MYLITE_OK ? MYLITE_DONE : warning_result;
+        if (warning_result != MYLITE_OK) {
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+            const int close_result = close_prepared_read_scope(statement);
+            if (close_result != MYLITE_OK) {
+                return close_result;
+            }
+#  endif
+            return warning_result;
+        }
+        return MYLITE_DONE;
     }
     if (fetch_result != 0 && fetch_result != MYSQL_DATA_TRUNCATED) {
         set_mariadb_statement_error(statement);
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+        const int close_result = close_prepared_read_scope(statement);
+        if (close_result != MYLITE_OK) {
+            return close_result;
+        }
+#  endif
         return MYLITE_ERROR;
     }
 
@@ -3261,6 +3444,12 @@ int fetch_statement_row(mylite_stmt &statement) {
         const mylite_value_type column_type = map_column_type(statement.columns[i]);
         if (value.mysql_error != 0 && !is_variable_column_type(column_type)) {
             set_error(*statement.database, MYLITE_ERROR, "numeric column truncated during fetch");
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+            const int close_result = close_prepared_read_scope(statement);
+            if (close_result != MYLITE_OK) {
+                return close_result;
+            }
+#  endif
             return MYLITE_ERROR;
         }
 
