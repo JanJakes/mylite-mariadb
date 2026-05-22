@@ -200,11 +200,13 @@ existing tables instead of stranding them on the prior header identity. Active
 exact-index caches can now be created after a prior mutation in the same
 transaction without seeding from stale durable caches, and sparse changed-entry
 updates retarget omitted unchanged indexes by row id instead of clearing the
-active exact cache. The local prepared-update execute component now holds near
-2.1-2.4 us/op in the 1000-row/10000-iteration and
-10000-row/100000-iteration samples, and amortizes to 1.707 us/op over
-10000 rows / 1000000 iterations; broader prepared update work can move to
-remaining MariaDB handler and checkpoint overhead.
+active exact cache. Accepted direct updates now also skip empty CHECK,
+hidden-index, and in-server helper guard calls after direct-update
+initialization has proven the ordinary table shape. The local prepared-update
+execute component now holds near 2.1-2.4 us/op in the
+1000-row/10000-iteration and 10000-row/100000-iteration samples, and amortizes
+to about 1.75 us/op over 10000 rows / 1000000 iterations; broader prepared
+update work can move to remaining MariaDB handler and checkpoint overhead.
 Same-size row-only active rewrites now capture only the row checksum-plus-payload
 undo range and rewrite only payload bytes while preserving rollback correctness
 after dirty buffered-page checksum refreshes and later size-changing rewrites in

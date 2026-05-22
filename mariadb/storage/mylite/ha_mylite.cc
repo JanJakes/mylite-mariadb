@@ -1768,13 +1768,19 @@ int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
     DBUG_RETURN(0);
   }
 
-  if (table->verify_constraints(false) != VIEW_CHECK_OK)
+  if (table->check_constraints &&
+      table->verify_constraints(false) != VIEW_CHECK_OK)
+  {
+    table->auto_increment_field_not_null= FALSE;
+    DBUG_RETURN(1);
+  }
+  if (!table->check_constraints && ha_thd()->is_error())
   {
     table->auto_increment_field_not_null= FALSE;
     DBUG_RETURN(1);
   }
 
-  if (prepare_for_modify(true, true))
+  if (table->s->hlindexes() && prepare_for_modify(true, true))
   {
     table->auto_increment_field_not_null= FALSE;
     DBUG_RETURN(1);
@@ -1791,7 +1797,7 @@ int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
   if (error)
     DBUG_RETURN(error);
 
-  if ((error= table->hlindexes_on_update()))
+  if (table->s->hlindexes() && (error= table->hlindexes_on_update()))
     DBUG_RETURN(error);
 
   rows_stats.updated++;

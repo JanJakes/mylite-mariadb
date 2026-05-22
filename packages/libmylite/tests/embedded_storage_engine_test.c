@@ -7595,7 +7595,7 @@ static void test_create_table_persists_catalog_metadata(void) {
     blob_row_context blob_rows = {0};
     mutable_row_context mutable_rows = {0};
     auto_row_context auto_rows = {0};
-    single_value_context checked_rating = {.expected_value = "4"};
+    single_value_context checked_rating = {.expected_value = "3"};
     single_value_context checked_disabled_rating = {.expected_value = "7"};
     single_value_context checked_row_count = {.expected_value = "5"};
     single_value_context generated_title_len = {.expected_value = "5"};
@@ -7806,6 +7806,12 @@ static void test_create_table_persists_catalog_metadata(void) {
     assert_exec_fails(db, "INSERT INTO checked_posts VALUES (3, 6)");
     assert_exec_fails(db, "UPDATE checked_posts SET rating = 6 WHERE id = 1");
     assert_exec_succeeds(db, "UPDATE checked_posts SET rating = 4 WHERE id = 1");
+    assert_prepared_fails_with_message(
+        db,
+        "UPDATE checked_posts SET rating = 6 WHERE id = 1",
+        "CONSTRAINT"
+    );
+    assert_prepared_succeeds(db, "UPDATE checked_posts SET rating = 3 WHERE id = 1");
     assert_exec_succeeds(db, "SET check_constraint_checks=OFF");
     assert_exec_succeeds(db, "INSERT INTO checked_posts VALUES (2, 7)");
     assert_exec_succeeds(db, "SET check_constraint_checks=ON");
@@ -8398,7 +8404,7 @@ static void test_create_table_persists_catalog_metadata(void) {
     blob_rows = (blob_row_context){0};
     mutable_rows = (mutable_row_context){0};
     auto_rows = (auto_row_context){0};
-    checked_rating = (single_value_context){.expected_value = "4"};
+    checked_rating = (single_value_context){.expected_value = "3"};
     checked_disabled_rating = (single_value_context){.expected_value = "7"};
     checked_row_count = (single_value_context){.expected_value = "5"};
     generated_title_len = (single_value_context){.expected_value = "9"};
