@@ -3364,7 +3364,15 @@ static int store_active_row_payload(
     const unsigned char *row,
     size_t row_size
 );
-static void replace_active_row_payload_in_cache(
+MYLITE_STORAGE_HOT_INLINE void replace_active_row_payload_in_cache(
+    mylite_storage_row_payload_cache *cache,
+    unsigned long long old_row_id,
+    unsigned long long new_row_id,
+    const unsigned char *new_row,
+    size_t new_row_size,
+    mylite_storage_row_payload_cache_entry *known_entry
+);
+static void replace_active_row_payload_in_cache_slow(
     mylite_storage_row_payload_cache *cache,
     unsigned long long old_row_id,
     unsigned long long new_row_id,
@@ -24042,7 +24050,7 @@ static int store_active_row_payload(
     return put_row_payload_cache_entry(cache, row_id, row, row_size) == MYLITE_STORAGE_OK;
 }
 
-static void replace_active_row_payload_in_cache(
+MYLITE_STORAGE_HOT_INLINE void replace_active_row_payload_in_cache(
     mylite_storage_row_payload_cache *cache,
     unsigned long long old_row_id,
     unsigned long long new_row_id,
@@ -24053,6 +24061,32 @@ static void replace_active_row_payload_in_cache(
     if (cache == NULL) {
         return;
     }
+    if (known_entry != NULL && known_entry->row_id == old_row_id && old_row_id == new_row_id &&
+        known_entry->row != NULL && known_entry->row_size == new_row_size &&
+        new_row_size <= MYLITE_STORAGE_ACTIVE_ROW_PAYLOAD_BYTES_LIMIT) {
+        memcpy(known_entry->row, new_row, new_row_size);
+        known_entry->checksum = 0ULL;
+        return;
+    }
+
+    replace_active_row_payload_in_cache_slow(
+        cache,
+        old_row_id,
+        new_row_id,
+        new_row,
+        new_row_size,
+        known_entry
+    );
+}
+
+static void replace_active_row_payload_in_cache_slow(
+    mylite_storage_row_payload_cache *cache,
+    unsigned long long old_row_id,
+    unsigned long long new_row_id,
+    const unsigned char *new_row,
+    size_t new_row_size,
+    mylite_storage_row_payload_cache_entry *known_entry
+) {
     mylite_storage_row_payload_cache_entry *entry = known_entry;
     if (entry == NULL || entry->row_id != old_row_id) {
         mylite_storage_row_payload_cache_bucket *bucket =
