@@ -2239,32 +2239,11 @@ int ha_mylite::read_exact_unique_index_row_into(uint index_number,
   if (slot_error)
     DBUG_RETURN(slot_error);
 
-  const bool use_inline_cursor_storage=
-      key_filter_length <= sizeof(index_inline_key);
-  uchar *keys= use_inline_cursor_storage
-                   ? index_inline_key
-                   : static_cast<uchar *>(malloc(key_filter_length));
-  Mylite_index_cursor_entry *entries=
-      use_inline_cursor_storage
-          ? &index_inline_entry
-          : static_cast<Mylite_index_cursor_entry *>(
-                malloc(sizeof(Mylite_index_cursor_entry)));
-  if (!keys || !entries)
-  {
-    if (!use_inline_cursor_storage)
-    {
-      free(keys);
-      free(entries);
-    }
-    DBUG_RETURN(HA_ERR_OUT_OF_MEM);
-  }
-
-  memcpy(keys, key_filter, key_filter_length);
-  entries[0].key_offset= 0;
-  entries[0].key_size= key_filter_length;
-  entries[0].row_id= row_id;
-  index_keys= keys;
-  index_entries= entries;
+  /*
+    The matching row is already in buf.  A full non-null unique exact lookup
+    can only continue to EOF, so keep just enough cursor state for continuation
+    and position() without allocating an unused one-entry cursor.
+  */
   index_row_count= 1;
   index_row_index= 0;
   index_cursor_number= index_number;

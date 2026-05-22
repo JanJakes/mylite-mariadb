@@ -136,7 +136,10 @@ index key and materializes the row payload through one storage operation,
 avoiding a second open/header/catalog pass for primary-key point reads. Those
 single-entry exact unique cursors now also keep small key, entry, and row-offset
 metadata inline in the handler, avoiding per-lookup heap allocation on the
-primary-key point-read path, reuse a handler-owned serialized-row scratch
+primary-key point-read path. Direct exact unique reads that already copied the
+single matching row into MariaDB's record buffer now publish only minimal
+one-row continuation state instead of initializing unused cursor key and entry
+storage. Fixed-record point reads also reuse a handler-owned serialized-row scratch
 buffer for fixed-record point lookups, and reuse active table-entry metadata
 for exact cursor builds and row-write table-id resolution while the catalog
 root and generation are unchanged. Active statement, table-entry, and
