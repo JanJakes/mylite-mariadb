@@ -751,6 +751,9 @@ Same-size cached one-index buffered rewrites now batch their compact row and
 index-entry rollback range captures, preserving the existing prefix fallback
 for broader undo-list shapes while avoiding duplicate empty-list setup on the
 hot prepared-update path.
+Successful active buffered rewrites now skip publishing the unchanged header
+and the no-op active write-journal finish, while append and maintained-root
+update paths still publish any advanced header.
 Prepared row-update execution now threads resolved active live-row and
 row-payload cache pointers through validation and post-update cache maintenance,
 avoiding repeated cache-set scans and filename/catalog comparisons inside the

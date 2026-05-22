@@ -7021,7 +7021,7 @@ static mylite_storage_result update_row_with_index_entries(
             );
         }
     }
-    if (result == MYLITE_STORAGE_OK) {
+    if (result == MYLITE_STORAGE_OK && !used_active_update_rewrite) {
         header.page_count = next_page_id;
         result = publish_header_for_statement(
             file,
