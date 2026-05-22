@@ -408,6 +408,8 @@ cache hit and leaves catalog materialization in a cold fallback.
 Direct live-row validation now returns through inlined active row-payload and
 validated live-row cache hits, leaving storage reads and hidden-row scans in a
 cold fallback.
+Live-row-id seeding now hot-inlines repeated active statement cache hits and
+keeps durable cache promotion in a cold fallback.
 Exact unique index cursor construction now reuses the existing row-materialize
 eligibility flag instead of scanning table fields again for BLOB/TEXT columns
 on prepared point-update reads.

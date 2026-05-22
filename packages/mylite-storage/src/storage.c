@@ -2650,7 +2650,13 @@ static void seed_active_live_row_id_cache(
     const mylite_storage_header *header,
     unsigned long long table_id
 );
-static void seed_active_live_row_id_cache_in_statement(
+MYLITE_STORAGE_HOT_INLINE void seed_active_live_row_id_cache_in_statement(
+    mylite_storage_statement *statement,
+    const char *filename,
+    const mylite_storage_header *header,
+    unsigned long long table_id
+);
+static void load_active_live_row_id_cache_in_statement(
     mylite_storage_statement *statement,
     const char *filename,
     const mylite_storage_header *header,
@@ -2682,7 +2688,7 @@ static mylite_storage_live_row_id_cache *active_live_row_id_cache_for_statement(
     const mylite_storage_header *header,
     unsigned long long table_id
 );
-static mylite_storage_live_row_id_cache *find_active_live_row_id_cache(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_live_row_id_cache *find_active_live_row_id_cache(
     mylite_storage_live_row_id_cache_set *caches,
     const char *filename,
     const mylite_storage_header *header,
@@ -20862,7 +20868,7 @@ static void seed_active_live_row_id_cache(
     );
 }
 
-static void seed_active_live_row_id_cache_in_statement(
+MYLITE_STORAGE_HOT_INLINE void seed_active_live_row_id_cache_in_statement(
     mylite_storage_statement *statement,
     const char *filename,
     const mylite_storage_header *header,
@@ -20874,6 +20880,15 @@ static void seed_active_live_row_id_cache_in_statement(
         return;
     }
 
+    load_active_live_row_id_cache_in_statement(statement, filename, header, table_id);
+}
+
+static void load_active_live_row_id_cache_in_statement(
+    mylite_storage_statement *statement,
+    const char *filename,
+    const mylite_storage_header *header,
+    unsigned long long table_id
+) {
     const mylite_storage_live_row_id_cache *durable_cache =
         find_durable_live_row_id_cache(filename, header, table_id);
     if (durable_cache == NULL) {
@@ -20976,7 +20991,7 @@ static mylite_storage_live_row_id_cache *active_live_row_id_cache_for_statement(
     );
 }
 
-static mylite_storage_live_row_id_cache *find_active_live_row_id_cache(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_live_row_id_cache *find_active_live_row_id_cache(
     mylite_storage_live_row_id_cache_set *caches,
     const char *filename,
     const mylite_storage_header *header,
