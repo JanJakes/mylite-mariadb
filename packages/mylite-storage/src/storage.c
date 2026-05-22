@@ -10094,6 +10094,10 @@ static mylite_storage_result begin_write_journal_for_statement_pages(
     mylite_storage_statement *recovery_journal_owner = NULL;
     mylite_storage_statement *transaction_journal_owner = NULL;
     statement_chain_journal_owners(statement, &recovery_journal_owner, &transaction_journal_owner);
+    if (protected_page_count == 0U &&
+        (transaction_journal_owner != NULL || recovery_journal_owner != NULL)) {
+        return MYLITE_STORAGE_OK;
+    }
     if (transaction_journal_owner != NULL) {
         const mylite_storage_pager pager = open_storage_pager(file, filename, header);
         return ensure_existing_journal_protects_pages(

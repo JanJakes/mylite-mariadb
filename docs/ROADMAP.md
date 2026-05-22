@@ -420,6 +420,8 @@ Maintained-index-root absence checks now inline repeated statement-cache hits
 while preserving catalog planning for uncached or root-backed tables.
 Statement journal-owner lookup now inlines the active statement-chain scan used
 by prepared update write-journal protection.
+Existing transaction/recovery journal owners now skip pager setup and rewrite
+checks when a row update has no extra maintained-root protected pages.
 Exact unique index cursor construction now reuses the existing row-materialize
 eligibility flag instead of scanning table fields again for BLOB/TEXT columns
 on prepared point-update reads.
