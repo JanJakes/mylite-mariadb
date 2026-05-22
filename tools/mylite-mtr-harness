@@ -41,7 +41,9 @@ default_tests=(
   main.type_time_6065
   main.type_timestamp_round
   main.temporal_scale_4283
+  main.temporal_literal
   main.second_frac-9175
+  main.timezone
   main.timezone4
   main.brackets
   main.comments
