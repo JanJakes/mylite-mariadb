@@ -118,7 +118,10 @@ device/inode validation, reducing repeated `fopen()` overhead without holding
 shared locks between cursor builds. That read handle now stores its device and
 inode when cached, avoiding repeated `fstat()` during reuse, and read startup
 reuses deterministic journal path strings while still checking both journal
-paths each time. Fixed-size random page reads and writes now use
+paths each time. Short-lived read statements now also retain one cleaned
+statement object per thread, avoiding repeated large statement allocation and
+cleanup on point-read loops while leaving recovery probes, shared locks, and
+checkpoint header reads unchanged. Fixed-size random page reads and writes use
 offset-addressed `pread()` / `pwrite()` calls, avoiding per-page stdio seek and
 refill overhead while leaving sequential journal writes on the stream path.
 MariaDB table-discovery callbacks now use the same scoped read sessions for
@@ -207,6 +210,10 @@ read-statement phase measures begin/end overhead directly.
 Hot read-checkpoint cache hits now borrow the cached catalog image for scoped
 catalog views and defer catalog page copies until a caller needs page bytes,
 instead of deep-copying that state into every short-lived read statement.
+The local storage-smoke benchmark now shows read-statement begin/end at
+3.660 us/op, storage primary-key row lookups at 4.356 us/op, and routed
+prepared primary-key point selects at 7.394 us/op on the current machine after
+read-statement object reuse.
 The durable row-payload cache now retains a larger bounded hot set, reducing
 steady-state 10000-row storage row materialization and routed prepared
 primary-key point-select time for the local benchmark.

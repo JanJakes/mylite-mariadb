@@ -44,6 +44,7 @@ mylite_storage_result mylite_storage_test_flip_active_page_byte(
     unsigned long long page_id,
     size_t offset
 );
+int mylite_storage_test_reusable_read_statement_cached(void);
 #endif
 
 typedef struct index_entries_test_context {
@@ -431,6 +432,7 @@ static void assert_statement_checkpoint_preserves_marked_auto_increment_rollback
 );
 static void test_read_statement_storage_session(void);
 static void test_read_checkpoint_snapshot_cache(void);
+static void test_read_statement_storage_reuse(void);
 static void test_read_statement_multi_page_catalog_image_cache(void);
 static void test_read_statement_file_cache_path_replacement(void);
 static void test_transaction_journals(void);
@@ -673,6 +675,7 @@ int main(void) {
     test_statement_checkpoints();
     test_read_statement_storage_session();
     test_read_checkpoint_snapshot_cache();
+    test_read_statement_storage_reuse();
     test_read_statement_multi_page_catalog_image_cache();
     test_read_statement_file_cache_path_replacement();
     test_transaction_journals();
@@ -9622,6 +9625,58 @@ static void test_read_checkpoint_snapshot_cache(void) {
     assert(rmdir(root) == 0);
     free(filename);
     free(root);
+}
+
+static void test_read_statement_storage_reuse(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    static const unsigned char definition[] = {0x01U, 'p', 'o', 's', 't'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "read-statement-reuse.mylite");
+    mylite_storage_statement *first_statement = NULL;
+    mylite_storage_statement *second_statement = NULL;
+    unsigned char *stored_definition = NULL;
+    size_t stored_definition_size = 0U;
+    mylite_storage_table_definition posts = {
+        .size = sizeof(posts),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_begin_read_statement(filename, &first_statement) == MYLITE_STORAGE_OK);
+    assert(first_statement != NULL);
+    assert(mylite_storage_test_reusable_read_statement_cached() == 0);
+    assert(mylite_storage_end_read_statement(first_statement) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_test_reusable_read_statement_cached() == 1);
+
+    assert(mylite_storage_store_table_definition(filename, &posts) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_begin_read_statement(filename, &second_statement) == MYLITE_STORAGE_OK);
+    assert(second_statement == first_statement);
+    assert(mylite_storage_test_reusable_read_statement_cached() == 0);
+    assert(
+        mylite_storage_read_table_definition(
+            filename,
+            "app",
+            "posts",
+            &stored_definition,
+            &stored_definition_size
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(stored_definition_size == sizeof(definition));
+    assert(memcmp(stored_definition, definition, sizeof(definition)) == 0);
+    mylite_storage_free(stored_definition);
+    assert(mylite_storage_end_read_statement(second_statement) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_test_reusable_read_statement_cached() == 1);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+#endif
 }
 
 static void test_read_statement_multi_page_catalog_image_cache(void) {

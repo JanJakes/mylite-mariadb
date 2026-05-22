@@ -107,6 +107,10 @@ header and catalog root bytes under the normal shared lock; when those bytes
 match a previously validated snapshot, it reuses the decoded header/catalog
 state instead of checksumming the same pages again. If either page differs,
 normal validation runs and replaces the cache.
+Short-lived read statements also reuse one cleaned statement object per thread.
+The object reuse only avoids repeated allocation and cleanup of storage-layer
+scratch state; it does not keep read locks open between SQL statements and does
+not bypass recovery or checkpoint snapshot validation.
 
 Durable full-row and count reads also keep a small process-local live-row-id
 cache keyed by the durable header fingerprint and table id. When an unchanged
@@ -482,6 +486,9 @@ then it takes the ordinary shared lock and reads the checkpoint snapshot as
 usual. The cache records the handle identity when it is stored, so reuse does
 not repeat `fstat()` on every read statement. The cache is cleared on same-file
 creation and durable mutation paths.
+The statement object itself is also retained after cleanup, bounded to one
+object per thread, so hot point-read loops do not allocate the large
+`mylite_storage_statement` scratch structure on every short read scope.
 Read-statement startup also keeps cached deterministic recovery and transaction
 journal path strings for the current filename. It still checks both journal
 paths on every startup before taking a shared read lock, preserving
