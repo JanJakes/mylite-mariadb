@@ -51,6 +51,7 @@ int mylite_storage_test_statement_filename_is(
     const char *filename
 );
 int mylite_storage_test_statement_has_table_entry_cache(const mylite_storage_statement *statement);
+int mylite_storage_test_statement_has_row_payload_cache(const mylite_storage_statement *statement);
 int mylite_storage_test_durable_exact_index_cache_has_filename_identity(const char *filename);
 int mylite_storage_test_durable_row_payload_cache_has_filename_identity(const char *filename);
 #endif
@@ -10031,6 +10032,7 @@ static void assert_read_statement_index_lookup_uses_table_entry_cache(
     assert(mylite_storage_begin_read_statement(filename, &read_statement) == MYLITE_STORAGE_OK);
     assert(read_statement != NULL);
     assert(!mylite_storage_test_statement_has_table_entry_cache(read_statement));
+    assert(!mylite_storage_test_statement_has_row_payload_cache(read_statement));
 
     if (fetch_payload) {
         assert(
@@ -10064,6 +10066,9 @@ static void assert_read_statement_index_lookup_uses_table_entry_cache(
     if (fetch_payload) {
         assert(found_row_size == sizeof(row));
         assert(memcmp(found_row, row, sizeof(row)) == 0);
+        assert(mylite_storage_test_statement_has_row_payload_cache(read_statement));
+    } else {
+        assert(!mylite_storage_test_statement_has_row_payload_cache(read_statement));
     }
     assert(mylite_storage_test_statement_has_table_entry_cache(read_statement));
 

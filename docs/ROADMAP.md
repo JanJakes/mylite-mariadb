@@ -134,10 +134,12 @@ different files. Durable exact-index and row-payload caches now use that same
 trusted filename identity before falling back to filename value comparisons on
 hot point-read cache lookups. Direct exact-index and indexed-row payload reads
 now also use the active read statement as their table-entry, exact-index, and
-row-payload cache owner when a prepared read scope is active. Fixed-size random
-page reads and writes use offset-addressed `pread()` / `pwrite()` calls,
-avoiding per-page stdio seek and refill overhead while leaving sequential
-journal writes on the stream path.
+row-payload cache owner when a prepared read scope is active. Indexed-row
+payload reads now seed row-payload caches through that resolved statement owner
+and skip durable row-payload cache probes while an active statement owns the
+current file view. Fixed-size random page reads and writes use offset-addressed
+`pread()` / `pwrite()` calls, avoiding per-page stdio seek and refill overhead
+while leaving sequential journal writes on the stream path.
 MariaDB table-discovery callbacks now use the same scoped read sessions for
 catalog table-definition, table-list, and existence reads, reducing repeated
 prepared statement table-open validation before cursor execution.
