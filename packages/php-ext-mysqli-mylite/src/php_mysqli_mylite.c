@@ -2180,39 +2180,19 @@ static int php_mylite_mysqli_add_current_row(mylite_stmt *stmt, zval *rows) {
     return SUCCESS;
 }
 
-// NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void php_mylite_mysqli_column_to_zval(mylite_stmt *stmt, unsigned column, zval *value) {
-    switch (mylite_column_type(stmt, column)) {
-    case MYLITE_TYPE_NULL:
+    if (mylite_column_type(stmt, column) == MYLITE_TYPE_NULL) {
         ZVAL_NULL(value);
         return;
-    case MYLITE_TYPE_INT64:
-        ZVAL_LONG(value, (zend_long)mylite_column_int64(stmt, column));
-        return;
-    case MYLITE_TYPE_UINT64: {
-        const unsigned long long uint_value = mylite_column_uint64(stmt, column);
-        if (uint_value <= (unsigned long long)ZEND_LONG_MAX) {
-            ZVAL_LONG(value, (zend_long)uint_value);
-        } else {
-            ZVAL_STR(value, zend_u64_to_str(uint_value));
-        }
+    }
+
+    const char *text = mylite_column_text(stmt, column);
+    if (text == NULL) {
+        ZVAL_NULL(value);
         return;
     }
-    case MYLITE_TYPE_DOUBLE:
-        ZVAL_DOUBLE(value, mylite_column_double(stmt, column));
-        return;
-    case MYLITE_TYPE_TEXT:
-    case MYLITE_TYPE_BLOB: {
-        const char *text = mylite_column_text(stmt, column);
-        if (text == NULL) {
-            ZVAL_NULL(value);
-        } else {
-            ZVAL_STRINGL(value, text, mylite_column_bytes(stmt, column));
-        }
-        return;
-    }
-    }
-    ZVAL_NULL(value);
+
+    ZVAL_STRINGL(value, text, mylite_column_bytes(stmt, column));
 }
 
 static void php_mylite_mysqli_fetch_array_row(

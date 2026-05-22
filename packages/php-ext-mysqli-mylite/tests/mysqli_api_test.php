@@ -55,7 +55,7 @@ expect_true((int)$db->affected_rows === 1, 'affected_rows mismatch');
 $result = $db->query('SELECT id, name FROM people ORDER BY id');
 expect_true($result instanceof MyLite\MySQLiResult, 'query did not return MySQLiResult');
 expect_true($result->num_rows === 1, 'num_rows property mismatch');
-expect_true($result->fetch_assoc() === ['id' => 1, 'name' => 'Ada'], 'fetch_assoc row mismatch');
+expect_true($result->fetch_assoc() === ['id' => '1', 'name' => 'Ada'], 'fetch_assoc row mismatch');
 expect_true($result->fetch_assoc() === null, 'result should be exhausted');
 $expectedEscape = 'A' . '\\0' . '\\n' . '\\r' . '\\\\' . "\\'" . '\\"' . '\\Z' . 'B';
 expect_true($db->real_escape_string("A\0\n\r\\'\"\x1aB") === $expectedEscape, 'real_escape_string mismatch');
@@ -73,7 +73,7 @@ $result = $db->query('SELECT body FROM large_notes');
 expect_true($result instanceof MyLite\MySQLiResult, 'large result SELECT did not return MySQLiResult');
 expect_true($result->fetch_assoc() === ['body' => $largeBody], 'large truncated result body mismatch');
 expect_true(
-    $db->query('SELECT id FROM people WHERE id = 1')->fetch_assoc() === ['id' => 1],
+    $db->query('SELECT id FROM people WHERE id = 1')->fetch_assoc() === ['id' => '1'],
     'query after large result failed'
 );
 
@@ -93,6 +93,16 @@ expect_true($stmt->execute(), 'SELECT execute failed');
 $result = $stmt->get_result();
 expect_true($result instanceof MyLite\MySQLiResult, 'get_result did not return result');
 expect_true($result->fetch_assoc() === ['name' => 'Katherine'], 'prepared get_result row mismatch');
+
+$result = $db->query('SELECT CAST(0 AS SIGNED) AS signed_zero, CAST(1 AS UNSIGNED) AS unsigned_one, 1.5 AS float_value');
+expect_true(
+    $result->fetch_assoc() === [
+        'signed_zero' => '0',
+        'unsigned_one' => '1',
+        'float_value' => '1.5',
+    ],
+    'mysqli should return numeric result columns as strings by default'
+);
 
 expect_true($db->query('SELECT * FROM missing_table') === false, 'invalid query should fail');
 expect_true($db->errno > 0, 'mysqli errno should be populated');
@@ -137,15 +147,15 @@ if (MyLite\mysqli_mylite_global_symbols_enabled()) {
     expect_true(mysqli_num_fields($result) === 2, 'global num_fields mismatch');
     $field = mysqli_fetch_field($result);
     expect_true($field->name === 'id', 'global fetch_field mismatch');
-    expect_true(mysqli_fetch_array($result, MYSQLI_BOTH) === [0 => 1, 1 => 'first', 'id' => 1, 'name' => 'first'], 'global fetch_array mismatch');
+    expect_true(mysqli_fetch_array($result, MYSQLI_BOTH) === [0 => '1', 1 => 'first', 'id' => '1', 'name' => 'first'], 'global fetch_array mismatch');
     mysqli_free_result($result);
     $result = mysqli_query($db, 'SELECT name FROM one');
     $row = mysqli_fetch_object($result);
     expect_true($row->name === 'first', 'global fetch_object mismatch');
     $result = mysqli_query($db, 'SELECT id, name FROM one');
-    expect_true(mysqli_fetch_all($result, MYSQLI_NUM) === [[1, 'first']], 'global fetch_all numeric mismatch');
+    expect_true(mysqli_fetch_all($result, MYSQLI_NUM) === [['1', 'first']], 'global fetch_all numeric mismatch');
     $result = mysqli_query($db, 'SELECT id, name FROM one');
-    expect_true($result->fetch_all(MYSQLI_ASSOC) === [['id' => 1, 'name' => 'first']], 'global method fetch_all associative mismatch');
+    expect_true($result->fetch_all(MYSQLI_ASSOC) === [['id' => '1', 'name' => 'first']], 'global method fetch_all associative mismatch');
     expect_true(mysqli_more_results($db) === false, 'global more_results should be false');
     expect_true(mysqli_next_result($db) === false, 'global next_result should be false without another result');
     expect_true(mysqli_error($db) === '', 'global error should be clear');
