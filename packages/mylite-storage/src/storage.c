@@ -7013,6 +7013,7 @@ static mylite_storage_result update_row_with_index_entries_for_context(
     }
 
     mylite_storage_update_file_scope file_scope = {0};
+    const int owns_update_file_scope = statement == NULL;
     if (statement != NULL) {
         file_scope.file = statement->file;
         file_scope.active_statement = statement;
@@ -7316,9 +7317,13 @@ static mylite_storage_result update_row_with_index_entries_for_context(
     free(old_row_page.owned_payload);
     clear_maintained_index_update_plan(&maintained_index_plan);
     free_catalog_image(&catalog);
-    if (close_existing_update_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
-        result == MYLITE_STORAGE_OK) {
-        result = MYLITE_STORAGE_IOERR;
+    if (owns_update_file_scope) {
+        if (close_existing_update_file_scope(&file_scope) != MYLITE_STORAGE_OK &&
+            result == MYLITE_STORAGE_OK) {
+            result = MYLITE_STORAGE_IOERR;
+        }
+    } else {
+        clear_existing_file_error_state(file);
     }
     if (result != MYLITE_STORAGE_OK) {
         *out_new_row_id = 0ULL;
