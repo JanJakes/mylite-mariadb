@@ -252,6 +252,10 @@ Successful durable row updates now seed the active transaction row-payload
 cache when they entered without an existing payload entry, reducing the local
 direct storage row-update mutation component from about 189 us/op to about
 7.6 us/op.
+Short-lived read statements now promote exact-index and live-row-id caches into
+the durable thread-local cache on successful top-level close, avoiding repeated
+complete exact-index cache rebuilds across direct point-select loops after
+unrelated append history has accumulated.
 Recent local storage-smoke benchmark samples show read-statement begin/end at
 3.519 us/op, storage primary-key row lookups in the 4-5 us/op range, and routed
 prepared primary-key point selects at 7.218 us/op on the current machine after

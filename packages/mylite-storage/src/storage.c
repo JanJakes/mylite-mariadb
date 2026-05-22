@@ -2739,6 +2739,7 @@ static void retarget_durable_live_row_id_caches_after_table_mutation(
     unsigned long long table_id
 );
 static void promote_statement_live_row_id_caches(const mylite_storage_statement *statement);
+static void promote_read_statement_live_row_id_caches(const mylite_storage_statement *statement);
 static void seed_active_live_row_id_cache(
     const char *filename,
     const mylite_storage_header *header,
@@ -3351,6 +3352,7 @@ static mylite_storage_result durable_exact_index_cache_for(
     mylite_storage_exact_index_cache **out_cache
 );
 static void promote_statement_exact_index_caches(const mylite_storage_statement *statement);
+static void promote_read_statement_exact_index_caches(const mylite_storage_statement *statement);
 static mylite_storage_result seed_active_exact_index_cache(
     const char *filename,
     const mylite_storage_header *header,
@@ -9061,8 +9063,13 @@ mylite_storage_result mylite_storage_end_read_statement(mylite_storage_statement
         return MYLITE_STORAGE_MISUSE;
     }
 
+    const int promote_active_caches = statement->parent == NULL;
     active_read_statement = statement->parent;
     mylite_storage_result result = close_statement(statement);
+    if (result == MYLITE_STORAGE_OK && promote_active_caches) {
+        promote_read_statement_exact_index_caches(statement);
+        promote_read_statement_live_row_id_caches(statement);
+    }
     free_statement(statement);
     return result;
 }
@@ -13095,6 +13102,20 @@ int mylite_storage_test_durable_exact_index_cache_has_filename_identity(const ch
         }
     }
     return 0;
+}
+
+int mylite_storage_test_durable_exact_index_cache_count(const char *filename) {
+    if (filename == NULL) {
+        return 0;
+    }
+    int count = 0;
+    for (size_t i = 0U; i < durable_exact_index_caches.count; ++i) {
+        const mylite_storage_exact_index_cache *cache = durable_exact_index_caches.entries + i;
+        if (cache->filename != NULL && strcmp(cache->filename, filename) == 0) {
+            ++count;
+        }
+    }
+    return count;
 }
 
 int mylite_storage_test_durable_row_payload_cache_has_filename_identity(const char *filename) {
@@ -21667,8 +21688,28 @@ static void promote_statement_live_row_id_caches(const mylite_storage_statement 
     const mylite_storage_header *header =
         statement->has_current_header ? &statement->current_header : &statement->header;
     for (size_t i = 0U; i < statement->live_row_id_caches.count; ++i) {
+        const mylite_storage_live_row_id_cache *cache = statement->live_row_id_caches.entries + i;
+        mylite_storage_row_id_list row_ids = {
+            .row_ids = cache->row_ids,
+            .count = cache->count,
+        };
+        store_durable_live_row_ids(statement->filename, header, cache->table_id, &row_ids);
+    }
+}
+
+static void promote_read_statement_live_row_id_caches(const mylite_storage_statement *statement) {
+    if (statement == NULL || statement->live_row_id_caches.count == 0U) {
+        return;
+    }
+
+    const mylite_storage_header *header =
+        statement->has_current_header ? &statement->current_header : &statement->header;
+    for (size_t i = 0U; i < statement->live_row_id_caches.count; ++i) {
         const mylite_storage_live_row_id_cache *cache =
             statement->live_row_id_caches.entries + i;
+        if (find_durable_live_row_id_cache(statement->filename, header, cache->table_id) != NULL) {
+            continue;
+        }
         mylite_storage_row_id_list row_ids = {
             .row_ids = cache->row_ids,
             .count = cache->count,
@@ -24540,8 +24581,43 @@ static void promote_statement_exact_index_caches(const mylite_storage_statement 
     const mylite_storage_header *header =
         statement->has_current_header ? &statement->current_header : &statement->header;
     for (size_t i = 0U; i < statement->exact_index_caches.count; ++i) {
+        const mylite_storage_exact_index_cache *source = statement->exact_index_caches.entries + i;
+        mylite_storage_exact_index_cache *destination = ensure_durable_exact_index_cache(
+            statement->filename,
+            header,
+            source->table_id,
+            source->index_number,
+            source->key_size
+        );
+        if (destination != NULL) {
+            (void)copy_exact_index_cache_entries(destination, source);
+        }
+    }
+}
+
+static void promote_read_statement_exact_index_caches(const mylite_storage_statement *statement) {
+    if (statement == NULL || statement->exact_index_caches.count == 0U) {
+        return;
+    }
+    if (active_statement_for_any_owner(statement->filename) != NULL ||
+        active_read_snapshot_for(statement->filename)) {
+        return;
+    }
+
+    const mylite_storage_header *header =
+        statement->has_current_header ? &statement->current_header : &statement->header;
+    for (size_t i = 0U; i < statement->exact_index_caches.count; ++i) {
         const mylite_storage_exact_index_cache *source =
             statement->exact_index_caches.entries + i;
+        if (find_durable_exact_index_cache(
+                statement->filename,
+                header,
+                source->table_id,
+                source->index_number,
+                source->key_size
+            ) != NULL) {
+            continue;
+        }
         mylite_storage_exact_index_cache *destination = ensure_durable_exact_index_cache(
             statement->filename,
             header,

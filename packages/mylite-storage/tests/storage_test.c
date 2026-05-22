@@ -53,6 +53,7 @@ int mylite_storage_test_statement_filename_is(
 int mylite_storage_test_statement_has_table_entry_cache(const mylite_storage_statement *statement);
 int mylite_storage_test_statement_has_row_payload_cache(const mylite_storage_statement *statement);
 int mylite_storage_test_durable_exact_index_cache_has_filename_identity(const char *filename);
+int mylite_storage_test_durable_exact_index_cache_count(const char *filename);
 int mylite_storage_test_durable_row_payload_cache_has_filename_identity(const char *filename);
 #endif
 
@@ -448,6 +449,7 @@ static void test_read_statement_storage_reuse_replaces_filename(void);
 static void test_read_statement_filename_identity_borrows_filename(void);
 static void test_read_statement_index_entry_uses_table_entry_cache(void);
 static void test_read_statement_indexed_row_uses_table_entry_cache(void);
+static void test_read_statement_exact_index_cache_promotes_to_durable(void);
 static void test_read_statement_multi_page_catalog_image_cache(void);
 static void test_read_statement_file_cache_path_replacement(void);
 static void test_transaction_journals(void);
@@ -701,6 +703,7 @@ int main(void) {
     test_read_statement_filename_identity_borrows_filename();
     test_read_statement_index_entry_uses_table_entry_cache();
     test_read_statement_indexed_row_uses_table_entry_cache();
+    test_read_statement_exact_index_cache_promotes_to_durable();
     test_read_statement_multi_page_catalog_image_cache();
     test_read_statement_file_cache_path_replacement();
     test_transaction_journals();
@@ -10077,6 +10080,80 @@ static void assert_read_statement_index_lookup_uses_table_entry_cache(
 
     assert(mylite_storage_end_read_statement(read_statement) == MYLITE_STORAGE_OK);
     mylite_storage_set_context_owner(NULL);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+#endif
+}
+
+static void test_read_statement_exact_index_cache_promotes_to_durable(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row[] = {0x00U, 0x11U, 'a'};
+    static const unsigned char key[] = {0x11U};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "read-statement-exact-cache-promotion.mylite");
+    int owner = 0;
+    mylite_storage_statement *read_statement = NULL;
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_index_entry index_entry = {
+        .size = sizeof(index_entry),
+        .index_number = 0U,
+        .key = key,
+        .key_size = sizeof(key),
+    };
+    unsigned long long row_id = 0ULL;
+    unsigned long long found_row_id = 0ULL;
+
+    mylite_storage_clear_thread_caches();
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row,
+            sizeof(row),
+            &index_entry,
+            1U,
+            &row_id
+        ) == MYLITE_STORAGE_OK
+    );
+
+    mylite_storage_set_context_owner(&owner);
+    assert(mylite_storage_begin_read_statement(filename, &read_statement) == MYLITE_STORAGE_OK);
+    assert(read_statement != NULL);
+    assert(mylite_storage_test_durable_exact_index_cache_count(filename) == 0);
+    assert(
+        mylite_storage_find_index_entry(
+            filename,
+            "app",
+            "posts",
+            0U,
+            key,
+            sizeof(key),
+            &found_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(found_row_id == row_id);
+    assert(mylite_storage_test_durable_exact_index_cache_count(filename) == 0);
+
+    assert(mylite_storage_end_read_statement(read_statement) == MYLITE_STORAGE_OK);
+    mylite_storage_set_context_owner(NULL);
+    assert(mylite_storage_test_durable_exact_index_cache_count(filename) == 1);
+    mylite_storage_clear_thread_caches();
+    assert(mylite_storage_test_durable_exact_index_cache_count(filename) == 0);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
