@@ -120,8 +120,9 @@ and aggregate-ordering behavior, optimizer-cost metadata, selected EXPLAIN
 plan output, selected Aria range, semijoin, and rowid-filter optimizer
 behavior, selected UNION, EXCEPT / EXCEPT ALL, INTERSECT, and mixed
 set-operation behavior,
-prepared-statement behavior, selected missing-routine diagnostics, selected
-SIGNAL/RESIGNAL diagnostics and row-constructor behavior, selected scalar
+prepared-statement behavior, selected compound-statement parser diagnostics,
+selected missing-routine diagnostics, selected SIGNAL/RESIGNAL diagnostics and
+row-constructor behavior, selected scalar
 `LAST_VALUE()`,
 window `FIRST_VALUE()` / `LAST_VALUE()`, percentile/median, and
 window-function behavior, selected `IF()` / `NULLIF()` conditional expression
