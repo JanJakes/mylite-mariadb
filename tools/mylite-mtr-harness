@@ -78,6 +78,7 @@ default_tests=(
   main.win_insert_select
   main.mdev316
   main.sql_safe_updates
+  main.negation_elimination
   main.func_in
   main.update_ignore_216
   main.insert_update_autoinc-7150

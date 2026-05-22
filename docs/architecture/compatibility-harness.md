@@ -68,8 +68,9 @@ smoke list covering the MyLite trimmed bootstrap schema, upstream scalar
 CAST/CONVERT, CASE-family and ANSI SQL-mode expression, selected numeric,
 integer, varchar, binary-string, binary/national character, date/timezone,
 temporal literal, system-timezone,
-parser/comment, comparison, selected boolean aggregate/HAVING expression
-behavior, DDL/comment metadata, DDL constraint/index metadata, selected Aria
+parser/comment, comparison, selected negation-elimination predicate optimizer
+behavior, selected boolean aggregate/HAVING expression behavior, DDL/comment
+metadata, DDL constraint/index metadata, selected Aria
 ALTER/index-upgrade behavior, selected lock-table DDL behavior, deprecated
 server syntax rejection, `ORDER BY`, optimizer-cost metadata, selected EXPLAIN plan output,
 selected Aria range, semijoin, and rowid-filter optimizer behavior,
