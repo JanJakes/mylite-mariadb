@@ -9,11 +9,17 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#ifndef MYLITE_TEST_HAS_MYLITE_SE
+#  define MYLITE_TEST_HAS_MYLITE_SE 0
+#endif
+
 static void test_scalar_select(void);
 static void test_table_roundtrip(void);
 static void test_transient_text_bind_reuse(void);
 static void test_statement_effects(void);
+#if MYLITE_TEST_HAS_MYLITE_SE
 static void test_transaction_statement_checkpoints(void);
+#endif
 static void test_segment_reads(void);
 static void test_reset_reuse_and_destructors(void);
 static void test_empty_result_reset_reuse(void);
@@ -37,7 +43,9 @@ static void assert_prepare_one_text_step_succeeds(
     const char *value
 );
 static void assert_prepare_savepoint_control_policy(mylite_db *db, const char *sql);
+#if MYLITE_TEST_HAS_MYLITE_SE
 static void assert_query_single_int(mylite_db *db, const char *sql, long long value);
+#endif
 static mylite_stmt *prepare_statement(mylite_db *db, const char *sql);
 static mylite_db *open_database(const char *root, char **filename);
 static char *make_temp_root(void);
@@ -54,7 +62,9 @@ int main(void) {
     test_table_roundtrip();
     test_transient_text_bind_reuse();
     test_statement_effects();
+#if MYLITE_TEST_HAS_MYLITE_SE
     test_transaction_statement_checkpoints();
+#endif
     test_segment_reads();
     test_reset_reuse_and_destructors();
     test_empty_result_reset_reuse();
@@ -327,6 +337,7 @@ static void test_statement_effects(void) {
     free(root);
 }
 
+#if MYLITE_TEST_HAS_MYLITE_SE
 static void test_transaction_statement_checkpoints(void) {
     char *root = make_temp_root();
     char *filename = NULL;
@@ -428,6 +439,7 @@ static void test_transaction_statement_checkpoints(void) {
     remove_tree(root);
     free(root);
 }
+#endif
 
 static void test_segment_reads(void) {
     unsigned char payload[600];
@@ -1700,6 +1712,7 @@ static void assert_prepare_savepoint_control_policy(mylite_db *db, const char *s
     assert(mylite_finalize(stmt) == MYLITE_OK);
 }
 
+#if MYLITE_TEST_HAS_MYLITE_SE
 static void assert_query_single_int(mylite_db *db, const char *sql, long long value) {
     mylite_stmt *stmt = prepare_statement(db, sql);
     assert(mylite_column_count(stmt) == 1U);
@@ -1708,6 +1721,7 @@ static void assert_query_single_int(mylite_db *db, const char *sql, long long va
     assert(mylite_step(stmt) == MYLITE_DONE);
     assert(mylite_finalize(stmt) == MYLITE_OK);
 }
+#endif
 
 static mylite_stmt *prepare_statement(mylite_db *db, const char *sql) {
     mylite_stmt *stmt = NULL;

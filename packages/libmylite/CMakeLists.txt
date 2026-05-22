@@ -66,6 +66,11 @@ if(BUILD_TESTING)
     add_executable(mylite_embedded_statement_test
       tests/embedded_statement_test.c
     )
+    if(MYLITE_MARIADB_HAS_MYLITE_SE)
+      target_compile_definitions(mylite_embedded_statement_test PRIVATE MYLITE_TEST_HAS_MYLITE_SE=1)
+    else()
+      target_compile_definitions(mylite_embedded_statement_test PRIVATE MYLITE_TEST_HAS_MYLITE_SE=0)
+    endif()
     target_link_libraries(mylite_embedded_statement_test PRIVATE MyLite::mylite)
     mylite_configure_c_target(mylite_embedded_statement_test)
 
