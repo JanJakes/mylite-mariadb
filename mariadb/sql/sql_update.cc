@@ -526,6 +526,9 @@ bool Sql_cmd_update::update_single_table(THD *thd)
   set_statistics_for_table(thd, table);
 
   select= make_select(table, 0, 0, conds, (SORT_INFO*) 0, 0, &error);
+  if (select)
+    select->set_mylite_update_exact_key_proof_cache(
+        &mylite_update_exact_key_proof_cache);
   if (error || !limit || thd->is_error() || table->stat_records() == 0 ||
       (select && select->check_quick(thd, safe_update, limit,
                                       Item_func::BITMAP_ALL)))

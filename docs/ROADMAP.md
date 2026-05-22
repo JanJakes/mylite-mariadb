@@ -329,6 +329,10 @@ before applying the row update.
 The handler direct-update row read now trusts that accepted exact-key proof for
 its private target-row lookup, leaving generic index reads on the defensive
 key-support and raw-exact eligibility path.
+Prepared MyLite exact-key updates now keep that reusable SQL-layer proof on
+`Sql_cmd_update`, letting each per-execute `SQL_SELECT` borrow it so hot
+prepared loops skip condition-tree proof rediscovery while still rerunning NULL
+parameter handling and handler acceptance checks.
 Ordinary MyLite `UPDATE` / `DELETE` execution now skips eager quick-plan
 explain detail allocation unless explicit `EXPLAIN`, `ANALYZE`, or slow-log
 explain/engine detail needs it, while routed `EXPLAIN UPDATE` keeps the full

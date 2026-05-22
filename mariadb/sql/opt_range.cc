@@ -1262,7 +1262,8 @@ SQL_SELECT::SQL_SELECT()
       mylite_update_exact_key_quick(false),
       mylite_update_exact_key_number(MAX_KEY),
       mylite_update_exact_key_value(NULL),
-      mylite_update_exact_key_condition_guaranteed_by_key(false), free_cond(0)
+      mylite_update_exact_key_condition_guaranteed_by_key(false),
+      mylite_update_exact_key_proof_cache(NULL), free_cond(0)
 {
   quick_keys.clear_all(); needed_reg.clear_all();
   my_b_clear(&file);
@@ -1295,6 +1296,32 @@ void SQL_SELECT::clear_mylite_update_exact_key_quick()
   mylite_update_exact_key_number= MAX_KEY;
   mylite_update_exact_key_value= NULL;
   mylite_update_exact_key_condition_guaranteed_by_key= false;
+}
+
+void SQL_SELECT::set_mylite_update_exact_key_proof_cache(
+    Mylite_update_exact_key_proof_cache *proof_cache)
+{
+  mylite_update_exact_key_proof_cache= proof_cache;
+}
+
+void SQL_SELECT::clear_mylite_update_exact_key_proof_cache()
+{
+  if (mylite_update_exact_key_proof_cache)
+    mylite_update_exact_key_proof_cache->valid= false;
+}
+
+void SQL_SELECT::store_mylite_update_exact_key_proof_cache(
+    uint keynr, Item *value_item, bool condition_guaranteed_by_key_arg)
+{
+  if (!mylite_update_exact_key_proof_cache)
+    return;
+
+  mylite_update_exact_key_proof_cache->valid= true;
+  mylite_update_exact_key_proof_cache->cond= cond;
+  mylite_update_exact_key_proof_cache->key_number= keynr;
+  mylite_update_exact_key_proof_cache->value= value_item;
+  mylite_update_exact_key_proof_cache->condition_guaranteed_by_key=
+      condition_guaranteed_by_key_arg;
 }
 
 void SQL_SELECT::set_mylite_update_exact_key_quick(
@@ -3310,6 +3337,28 @@ static quick_select_return try_simple_update_unique_key_quick_select(
   if (keys_to_use.is_clear_all())
     return SQL_SELECT::OK;
 
+  if ((table->file->ha_table_flags() & HA_CAN_DIRECT_UPDATE_AND_DELETE) &&
+      mylite_update_exact_key_can_use_marker(thd) &&
+      select->mylite_update_exact_key_proof_cache &&
+      select->mylite_update_exact_key_proof_cache->valid &&
+      select->mylite_update_exact_key_proof_cache->cond == select->cond)
+  {
+    const Mylite_update_exact_key_proof_cache *proof_cache=
+        select->mylite_update_exact_key_proof_cache;
+    const uint keynr= proof_cache->key_number;
+    if (keynr < table->s->keys && keys_to_use.is_set(keynr) &&
+        is_simple_unique_key_candidate(table, table->key_info + keynr))
+    {
+      const bool condition_guaranteed_by_key=
+          proof_cache->condition_guaranteed_by_key;
+      *out_handled= true;
+      return mark_simple_update_unique_key_quick_select(
+          thd, select, keynr, proof_cache->value, condition_guaranteed_by_key,
+          select->records);
+    }
+    select->clear_mylite_update_exact_key_proof_cache();
+  }
+
   for (uint keynr= 0; keynr < table->s->keys; keynr++)
   {
     if (!keys_to_use.is_set(keynr))
@@ -3328,9 +3377,16 @@ static quick_select_return try_simple_update_unique_key_quick_select(
       *out_handled= true;
       if ((table->file->ha_table_flags() & HA_CAN_DIRECT_UPDATE_AND_DELETE) &&
           mylite_update_exact_key_can_use_marker(thd))
-        return mark_simple_update_unique_key_quick_select(
-            thd, select, keynr, value_item, condition_guaranteed_by_key,
-            select->records);
+      {
+        const quick_select_return marked=
+            mark_simple_update_unique_key_quick_select(
+                thd, select, keynr, value_item, condition_guaranteed_by_key,
+                select->records);
+        if (marked != SQL_SELECT::ERROR)
+          select->store_mylite_update_exact_key_proof_cache(
+              keynr, value_item, condition_guaranteed_by_key);
+        return marked;
+      }
       return make_simple_update_unique_key_quick_select(
           thd, select, keynr, value_item, select->records);
     }

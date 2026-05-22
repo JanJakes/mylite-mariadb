@@ -19,6 +19,7 @@
 #include "sql_class.h"                          /* enum_duplicates */
 #include "sql_cmd.h"                            // Sql_cmd_dml
 #include "sql_base.h"
+#include "opt_range.h"
 
 class Item;
 struct TABLE_LIST;
@@ -109,7 +110,9 @@ private:
   /* The prelocking strategy used when opening the used tables */
   Multiupdate_prelocking_strategy multiupdate_prelocking_strategy;
 
- public:
+  Mylite_update_exact_key_proof_cache mylite_update_exact_key_proof_cache;
+
+public:
   /* The list of the updating expressions used in the set clause */
   List<Item> *update_value_list;
 };

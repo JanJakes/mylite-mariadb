@@ -35,6 +35,15 @@
 class JOIN;
 class Item_sum;
 
+struct Mylite_update_exact_key_proof_cache
+{
+  bool valid{false};
+  COND *cond{NULL};
+  uint key_number{0};
+  Item *value{NULL};
+  bool condition_guaranteed_by_key{false};
+};
+
 /*
   When processing an OR clause with more than MAX_OR_ELEMENTS_FOR_INDEX_MERGE
   disjuncts (i.e. OR-parts), do not construct index_merge plans from it.
@@ -1935,6 +1944,7 @@ class SQL_SELECT :public Sql_alloc {
   uint mylite_update_exact_key_number;
   Item *mylite_update_exact_key_value;
   bool mylite_update_exact_key_condition_guaranteed_by_key;
+  Mylite_update_exact_key_proof_cache *mylite_update_exact_key_proof_cache;
   bool	free_cond; /* Currently not used and always FALSE */
 
   SQL_SELECT();
@@ -1947,6 +1957,11 @@ class SQL_SELECT :public Sql_alloc {
     quick= new_quick;
   }
   void clear_mylite_update_exact_key_quick();
+  void set_mylite_update_exact_key_proof_cache(
+      Mylite_update_exact_key_proof_cache *proof_cache);
+  void clear_mylite_update_exact_key_proof_cache();
+  void store_mylite_update_exact_key_proof_cache(
+      uint keynr, Item *value_item, bool condition_guaranteed_by_key_arg);
   void set_mylite_update_exact_key_quick(uint keynr, Item *value_item,
                                          bool condition_guaranteed_by_key_arg,
                                          ha_rows records_arg,
