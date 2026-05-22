@@ -560,6 +560,7 @@ mylite_storage_result mylite_storage_begin_read_statement(
     mylite_storage_statement **out_statement
 );
 int mylite_storage_statement_active(const char *filename);
+int mylite_storage_context_has_active_statement(void);
 mylite_storage_result mylite_storage_preserve_auto_increment_on_rollback(
     const char *filename
 );

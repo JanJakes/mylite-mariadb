@@ -2630,10 +2630,8 @@ int ha_mylite::external_lock(THD *thd, int lock_type)
   bool storage_statement_active= false;
   if (thd_test_options(thd, OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN))
   {
-    Mylite_trx_context *ctx= mylite_trx_context(thd, false);
-    storage_statement_active= ctx && ctx->transaction;
-    if (!storage_statement_active)
-      storage_statement_active= mylite_storage_statement_active(primary_file);
+    storage_statement_active=
+        mylite_thd_has_active_storage_checkpoint(thd, primary_file);
     if (!storage_statement_active)
     {
       int transaction_error=
@@ -3922,7 +3920,7 @@ static int mylite_begin_statement_checkpoint(
   bool began_statement= false;
   if (needs_storage_checkpoint && !ctx->statement &&
       !storage_statement_known_active &&
-      !mylite_storage_statement_active(primary_file))
+      !mylite_thd_has_active_storage_checkpoint(thd, primary_file))
   {
     mylite_storage_result result=
       mylite_storage_begin_statement(primary_file, &ctx->statement);
@@ -4104,8 +4102,11 @@ static bool mylite_thd_has_active_storage_checkpoint(THD *thd,
                                                      const char *primary_file)
 {
   Mylite_trx_context *ctx= mylite_trx_context(thd, false);
-  return (ctx && (ctx->statement || ctx->transaction)) ||
-         mylite_storage_statement_active(primary_file);
+  if (ctx && (ctx->statement || ctx->transaction))
+    return true;
+  if (mylite_storage_context_has_active_statement())
+    return true;
+  return mylite_storage_statement_active(primary_file) != 0;
 }
 
 static int mylite_table_name_from_path(const char *path, char *out_schema_name,

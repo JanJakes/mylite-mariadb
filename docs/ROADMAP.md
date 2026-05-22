@@ -476,6 +476,9 @@ byte-loop fallbacks for other targets and 64-bit stores.
 Handler write locks now trust an existing THD transaction checkpoint as the
 active storage statement proof, avoiding a filename-based storage active-chain
 lookup on every row-DML execution inside the same transaction.
+Handler exact unique reads, write locks, and statement checkpoint setup now
+also trust a non-null libmylite storage context owner with an active statement
+before falling back to filename-based storage active-chain lookup.
 Existing active exact-index cache hits now go through a small hot-inline probe
 before falling back to cache creation and seeding, keeping the repeated
 prepared point-lookup path out of the miss-handling wrapper.
