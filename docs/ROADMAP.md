@@ -163,7 +163,10 @@ to fixed-row tables without BLOB fields. MariaDB const-table reads through
 `index_read_idx_map()` now use the same guarded direct exact-unique
 materialization path for supported full-key lookups. Exact indexed row lookup
 now borrows the active read statement's decoded catalog view when available,
-avoiding a transient catalog copy before table and index-root scans. Fixed-record point
+avoiding a transient catalog copy before table and index-root scans. Active
+statement indexed-row reads now also use the statement's current header and
+cache chain directly, leaving the generic file-scope/header helper to raw
+filename callers. Fixed-record point
 reads also reuse a
 handler-owned serialized-row scratch
 buffer for fixed-record point lookups, and reuse active table-entry metadata

@@ -1001,6 +1001,9 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_cache_statement_for(
 MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_cache_statement_from_statement(
     mylite_storage_statement *statement
 );
+MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_cache_statement_from_borrowed_statement(
+    mylite_storage_statement *statement
+);
 MYLITE_STORAGE_HOT_INLINE void active_cache_and_append_buffer_from_statement(
     mylite_storage_statement *statement,
     mylite_storage_statement **out_cache,
@@ -3304,6 +3307,38 @@ static mylite_storage_result find_indexed_row_payload(
 static mylite_storage_result find_indexed_row_payload_in_scope(
     mylite_storage_file_scope *file_scope,
     const char *filename,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id,
+    unsigned char **out_row,
+    size_t *inout_row_capacity,
+    unsigned char *out_row_buffer,
+    size_t out_row_capacity,
+    size_t *out_row_size
+);
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result find_indexed_row_payload_in_statement(
+    mylite_storage_statement *statement,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id,
+    unsigned char **out_row,
+    size_t *inout_row_capacity,
+    unsigned char *out_row_buffer,
+    size_t out_row_capacity,
+    size_t *out_row_size
+);
+static mylite_storage_result find_indexed_row_payload_with_header(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
+    mylite_storage_statement *active_mutation_statement,
     const char *schema_name,
     const char *table_name,
     unsigned index_number,
@@ -8113,12 +8148,8 @@ mylite_storage_result mylite_storage_find_indexed_row_in_statement_into(
 
     *out_row_id = 0ULL;
     *out_row_size = 0U;
-    mylite_storage_file_scope file_scope = {0};
-    file_scope.file = statement->file;
-    file_scope.active_statement = statement;
-    return find_indexed_row_payload_in_scope(
-        &file_scope,
-        statement->filename,
+    return find_indexed_row_payload_in_statement(
+        statement,
         schema_name,
         table_name,
         index_number,
@@ -8201,9 +8232,6 @@ static mylite_storage_result find_indexed_row_payload_in_scope(
     FILE *file = file_scope->file;
 
     mylite_storage_header header = {0};
-    mylite_storage_catalog_image catalog = {0};
-    const mylite_storage_catalog_image *catalog_view = NULL;
-    mylite_storage_catalog_entry table_entry = {0};
     mylite_storage_statement *active_cache_statement =
         active_cache_statement_from_statement(file_scope->active_statement);
     if (active_cache_statement == NULL) {
@@ -8211,37 +8239,116 @@ static mylite_storage_result find_indexed_row_payload_in_scope(
             active_cache_statement_from_statement(file_scope->active_read_statement);
     }
     mylite_storage_result result = read_header_from_file_scope(file_scope, &header);
-    if (result == MYLITE_STORAGE_OK) {
-        const int used_cached_table_entry = find_active_table_entry_cache_in_statement(
-            active_cache_statement,
-            &header,
-            schema_name,
-            table_name,
-            &table_entry
-        );
-        if (!used_cached_table_entry) {
-            result = catalog_image_view_for_file(file, &header, &catalog, &catalog_view);
-            if (result == MYLITE_STORAGE_OK) {
-                result = find_table_record(catalog_view, schema_name, table_name, &table_entry);
-            }
-            if (result == MYLITE_STORAGE_OK) {
-                store_active_table_entry_cache_in_statement(
-                    active_cache_statement,
-                    &header,
-                    schema_name,
-                    table_name,
-                    &table_entry
-                );
-            }
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    return find_indexed_row_payload_with_header(
+        file,
+        filename,
+        &header,
+        active_cache_statement,
+        file_scope->active_statement,
+        schema_name,
+        table_name,
+        index_number,
+        key,
+        key_size,
+        out_row_id,
+        out_row,
+        inout_row_capacity,
+        out_row_buffer,
+        out_row_capacity,
+        out_row_size
+    );
+}
+
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result find_indexed_row_payload_in_statement(
+    mylite_storage_statement *statement,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id,
+    unsigned char **out_row,
+    size_t *inout_row_capacity,
+    unsigned char *out_row_buffer,
+    size_t out_row_capacity,
+    size_t *out_row_size
+) {
+    const mylite_storage_header *header =
+        statement->has_current_header ? &statement->current_header : &statement->header;
+    return find_indexed_row_payload_with_header(
+        statement->file,
+        statement->filename,
+        header,
+        active_cache_statement_from_borrowed_statement(statement),
+        statement,
+        schema_name,
+        table_name,
+        index_number,
+        key,
+        key_size,
+        out_row_id,
+        out_row,
+        inout_row_capacity,
+        out_row_buffer,
+        out_row_capacity,
+        out_row_size
+    );
+}
+
+static mylite_storage_result find_indexed_row_payload_with_header(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
+    mylite_storage_statement *active_mutation_statement,
+    const char *schema_name,
+    const char *table_name,
+    unsigned index_number,
+    const unsigned char *key,
+    size_t key_size,
+    unsigned long long *out_row_id,
+    unsigned char **out_row,
+    size_t *inout_row_capacity,
+    unsigned char *out_row_buffer,
+    size_t out_row_capacity,
+    size_t *out_row_size
+) {
+    mylite_storage_catalog_image catalog = {0};
+    const mylite_storage_catalog_image *catalog_view = NULL;
+    mylite_storage_catalog_entry table_entry = {0};
+    mylite_storage_result result = MYLITE_STORAGE_OK;
+    const int used_cached_table_entry = find_active_table_entry_cache_in_statement(
+        active_cache_statement,
+        header,
+        schema_name,
+        table_name,
+        &table_entry
+    );
+    if (!used_cached_table_entry) {
+        result = catalog_image_view_for_file(file, header, &catalog, &catalog_view);
+        if (result == MYLITE_STORAGE_OK) {
+            result = find_table_record(catalog_view, schema_name, table_name, &table_entry);
+        }
+        if (result == MYLITE_STORAGE_OK) {
+            store_active_table_entry_cache_in_statement(
+                active_cache_statement,
+                header,
+                schema_name,
+                table_name,
+                &table_entry
+            );
         }
     }
     if (result == MYLITE_STORAGE_OK) {
         result = find_exact_index_row_id(
             file,
             filename,
-            &header,
+            header,
             active_cache_statement,
-            file_scope->active_statement,
+            active_mutation_statement,
             catalog_view,
             &table_entry,
             schema_name,
@@ -8257,13 +8364,13 @@ static mylite_storage_result find_indexed_row_payload_in_scope(
         mylite_storage_row_payload_cache *active_row_payload_cache =
             active_row_payload_cache_for_resolved_statement(
                 active_cache_statement,
-                &header,
+                header,
                 table_entry.table_id
             );
         result = read_indexed_row_payload_from_open_file(
             file,
             filename,
-            &header,
+            header,
             active_cache_statement,
             active_row_payload_cache,
             table_entry.table_id,
@@ -8280,8 +8387,8 @@ static mylite_storage_result find_indexed_row_payload_in_scope(
         }
         if (result == MYLITE_STORAGE_OK && !active_payload_cached) {
             (void)mark_active_validated_live_row_in_statement(
-                file_scope->active_statement,
-                &header,
+                active_mutation_statement,
+                header,
                 table_entry.table_id,
                 *out_row_id
             );
@@ -11769,6 +11876,16 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_cache_statement_from_
         if (statement->owner == active_context_owner) {
             cache_statement = statement;
         }
+    }
+    return cache_statement;
+}
+
+MYLITE_STORAGE_HOT_INLINE mylite_storage_statement *active_cache_statement_from_borrowed_statement(
+    mylite_storage_statement *statement
+) {
+    mylite_storage_statement *cache_statement = NULL;
+    for (; statement != NULL; statement = statement->parent) {
+        cache_statement = statement;
     }
     return cache_statement;
 }
