@@ -1576,6 +1576,20 @@ static mylite_storage_result read_catalog_image(
     const mylite_storage_header *header,
     mylite_storage_catalog_image *out_catalog
 );
+static mylite_storage_result catalog_image_view_for_file(
+    FILE *file,
+    const mylite_storage_header *header,
+    mylite_storage_catalog_image *owned_catalog,
+    const mylite_storage_catalog_image **out_catalog
+);
+MYLITE_STORAGE_HOT_INLINE const mylite_storage_catalog_image *borrow_current_catalog_image_for_file(
+    FILE *file,
+    const mylite_storage_header *header
+);
+MYLITE_STORAGE_HOT_INLINE const mylite_storage_catalog_image *borrow_current_catalog_image_from_statement(
+    const mylite_storage_statement *statement,
+    const mylite_storage_header *header
+);
 static mylite_storage_result copy_cached_catalog_image_for_file(
     FILE *file,
     const mylite_storage_header *header,
@@ -3239,8 +3253,7 @@ static mylite_storage_result find_exact_index_row_id(
     const mylite_storage_header *header,
     mylite_storage_statement *active_cache_statement,
     const mylite_storage_statement *active_mutation_statement,
-    mylite_storage_catalog_image *catalog,
-    int *has_catalog,
+    const mylite_storage_catalog_image *catalog,
     const mylite_storage_catalog_entry *table_entry,
     const char *schema_name,
     const char *table_name,
@@ -3248,12 +3261,6 @@ static mylite_storage_result find_exact_index_row_id(
     const unsigned char *key,
     size_t key_size,
     unsigned long long *out_row_id
-);
-static mylite_storage_result ensure_catalog_image_loaded(
-    FILE *file,
-    const mylite_storage_header *header,
-    mylite_storage_catalog_image *catalog,
-    int *has_catalog
 );
 static mylite_storage_result find_cached_durable_exact_index_entry(
     FILE *file,
@@ -7667,7 +7674,7 @@ mylite_storage_result mylite_storage_find_index_entry(
 
     mylite_storage_header header = {0};
     mylite_storage_catalog_image catalog = {0};
-    int has_catalog = 0;
+    const mylite_storage_catalog_image *catalog_view = NULL;
     mylite_storage_catalog_entry table_entry = {0};
     mylite_storage_statement *active_cache_statement =
         active_cache_statement_from_statement(file_scope.active_statement);
@@ -7681,10 +7688,9 @@ mylite_storage_result mylite_storage_find_index_entry(
             &table_entry
         );
         if (!used_cached_table_entry) {
-            result = read_catalog_image(file, &header, &catalog);
+            result = catalog_image_view_for_file(file, &header, &catalog, &catalog_view);
             if (result == MYLITE_STORAGE_OK) {
-                has_catalog = 1;
-                result = find_table_record(&catalog, schema_name, table_name, &table_entry);
+                result = find_table_record(catalog_view, schema_name, table_name, &table_entry);
             }
             if (result == MYLITE_STORAGE_OK) {
                 store_active_table_entry_cache_in_statement(
@@ -7704,8 +7710,7 @@ mylite_storage_result mylite_storage_find_index_entry(
             &header,
             active_cache_statement,
             file_scope.active_statement,
-            &catalog,
-            &has_catalog,
+            catalog_view,
             &table_entry,
             schema_name,
             table_name,
@@ -7867,7 +7872,7 @@ static mylite_storage_result find_indexed_row_payload(
 
     mylite_storage_header header = {0};
     mylite_storage_catalog_image catalog = {0};
-    int has_catalog = 0;
+    const mylite_storage_catalog_image *catalog_view = NULL;
     mylite_storage_catalog_entry table_entry = {0};
     mylite_storage_statement *active_cache_statement =
         active_cache_statement_from_statement(file_scope.active_statement);
@@ -7881,10 +7886,9 @@ static mylite_storage_result find_indexed_row_payload(
             &table_entry
         );
         if (!used_cached_table_entry) {
-            result = read_catalog_image(file, &header, &catalog);
+            result = catalog_image_view_for_file(file, &header, &catalog, &catalog_view);
             if (result == MYLITE_STORAGE_OK) {
-                has_catalog = 1;
-                result = find_table_record(&catalog, schema_name, table_name, &table_entry);
+                result = find_table_record(catalog_view, schema_name, table_name, &table_entry);
             }
             if (result == MYLITE_STORAGE_OK) {
                 store_active_table_entry_cache_in_statement(
@@ -7904,8 +7908,7 @@ static mylite_storage_result find_indexed_row_payload(
             &header,
             active_cache_statement,
             file_scope.active_statement,
-            &catalog,
-            &has_catalog,
+            catalog_view,
             &table_entry,
             schema_name,
             table_name,
@@ -15022,6 +15025,56 @@ static mylite_storage_result read_catalog_image(
         maybe_cache_catalog_image_for_file(file, header, out_catalog);
     }
     return result;
+}
+
+static mylite_storage_result catalog_image_view_for_file(
+    FILE *file,
+    const mylite_storage_header *header,
+    mylite_storage_catalog_image *owned_catalog,
+    const mylite_storage_catalog_image **out_catalog
+) {
+    *owned_catalog = (mylite_storage_catalog_image){0};
+    *out_catalog = borrow_current_catalog_image_for_file(file, header);
+    if (*out_catalog != NULL) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    const mylite_storage_result result = read_catalog_image(file, header, owned_catalog);
+    if (result == MYLITE_STORAGE_OK) {
+        *out_catalog = owned_catalog;
+    }
+    return result;
+}
+
+MYLITE_STORAGE_HOT_INLINE const mylite_storage_catalog_image *borrow_current_catalog_image_for_file(
+    FILE *file,
+    const mylite_storage_header *header
+) {
+    const mylite_storage_catalog_image *catalog =
+        borrow_current_catalog_image_from_statement(active_statement_for_file(file), header);
+    if (catalog != NULL) {
+        return catalog;
+    }
+
+    catalog =
+        borrow_current_catalog_image_from_statement(active_read_statement_for_file(file), header);
+    if (catalog != NULL) {
+        return catalog;
+    }
+
+    if (active_read_snapshot_has_file(file)) {
+        return borrow_current_catalog_image_from_statement(active_read_snapshot, header);
+    }
+    return NULL;
+}
+
+MYLITE_STORAGE_HOT_INLINE const mylite_storage_catalog_image *borrow_current_catalog_image_from_statement(
+    const mylite_storage_statement *statement,
+    const mylite_storage_header *header
+) {
+    return statement_has_current_catalog_image(statement, header)
+               ? &statement->current_catalog_image
+               : NULL;
 }
 
 static mylite_storage_result copy_cached_catalog_image_for_file(
@@ -23611,8 +23664,7 @@ static mylite_storage_result find_exact_index_row_id(
     const mylite_storage_header *header,
     mylite_storage_statement *active_cache_statement,
     const mylite_storage_statement *active_mutation_statement,
-    mylite_storage_catalog_image *catalog,
-    int *has_catalog,
+    const mylite_storage_catalog_image *catalog,
     const mylite_storage_catalog_entry *table_entry,
     const char *schema_name,
     const char *table_name,
@@ -23624,6 +23676,8 @@ static mylite_storage_result find_exact_index_row_id(
     mylite_storage_row_id_list row_ids = {0};
     int used_cache = 0;
     int used_leaf = 0;
+    mylite_storage_catalog_image owned_catalog = {0};
+    const mylite_storage_catalog_image *catalog_view = catalog;
     mylite_storage_result result = find_existing_cached_exact_index_entry_in_statement(
         active_cache_statement,
         table_entry->table_id,
@@ -23648,8 +23702,8 @@ static mylite_storage_result find_exact_index_row_id(
             &used_cache
         );
     }
-    if (result == MYLITE_STORAGE_OK && !used_cache) {
-        result = ensure_catalog_image_loaded(file, header, catalog, has_catalog);
+    if (result == MYLITE_STORAGE_OK && !used_cache && catalog_view == NULL) {
+        result = catalog_image_view_for_file(file, header, &owned_catalog, &catalog_view);
     }
     if (result == MYLITE_STORAGE_OK && !used_cache) {
         result = find_index_leaf_exact_static_row_id(
@@ -23657,7 +23711,7 @@ static mylite_storage_result find_exact_index_row_id(
             filename,
             header,
             active_cache_statement,
-            catalog,
+            catalog_view,
             table_entry->table_id,
             schema_name,
             table_name,
@@ -23674,7 +23728,7 @@ static mylite_storage_result find_exact_index_row_id(
             filename,
             header,
             active_cache_statement,
-            catalog,
+            catalog_view,
             table_entry->table_id,
             schema_name,
             table_name,
@@ -23714,23 +23768,7 @@ static mylite_storage_result find_exact_index_row_id(
     }
 
     free(row_ids.row_ids);
-    return result;
-}
-
-static mylite_storage_result ensure_catalog_image_loaded(
-    FILE *file,
-    const mylite_storage_header *header,
-    mylite_storage_catalog_image *catalog,
-    int *has_catalog
-) {
-    if (*has_catalog) {
-        return MYLITE_STORAGE_OK;
-    }
-
-    const mylite_storage_result result = read_catalog_image(file, header, catalog);
-    if (result == MYLITE_STORAGE_OK) {
-        *has_catalog = 1;
-    }
+    free_catalog_image(&owned_catalog);
     return result;
 }
 
