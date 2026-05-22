@@ -336,6 +336,9 @@ Complete durable exact-index cache builds now also track the row ids already
 represented in the temporary entryset, avoiding an unconditional entryset scan
 before each append-history index entry while preserving replacement/delete
 visibility.
+Active row-DML statements now remember when no durable live-row-id cache exists
+for the current table/header view, avoiding repeated negative cache probes in
+hot update loops.
 Transient row-state maps now hash hidden source row ids, removing the
 per-candidate linear visibility lookup that dominated full scans after many
 updates, and full rowset reads now collect live row ids in one file pass before
