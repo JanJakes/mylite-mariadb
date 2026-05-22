@@ -106,6 +106,7 @@ default_tests=(
   main.check
   main.create_drop_db
   main.create_drop_view
+  main.create_drop_trigger
   main.mdev19198
   main.lowercase_utf8
   main.key_diff
