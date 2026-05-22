@@ -176,6 +176,8 @@ static int mylite_finish_volatile_snapshot(
   Mylite_volatile_snapshot *snapshot, bool commit);
 static int mylite_finish_transaction_checkpoint(THD *thd, bool commit);
 static Mylite_trx_context *mylite_trx_context(THD *thd, bool create);
+static mylite_storage_statement *
+mylite_thd_active_storage_checkpoint(THD *thd, const char *primary_file);
 static bool mylite_thd_has_active_storage_checkpoint(THD *thd,
                                                      const char *primary_file);
 static int mylite_table_name_from_path(const char *path, char *out_schema_name,
@@ -1336,6 +1338,8 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
       scan_row_index(0), scan_blob_payloads_size(0),
       record_blob_payloads_size{0, 0}, index_row_bytes(0), index_row_count(0),
       index_row_index(0), index_cursor_number(MAX_KEY), current_row_id(0),
+      active_storage_statement(NULL),
+      active_storage_statement_primary_file(NULL),
       duplicate_key_index((uint) -1), foreign_key_presence_epoch(0ULL),
       child_foreign_key_presence_known(false),
       child_foreign_key_presence(false),
@@ -2479,6 +2483,8 @@ int ha_mylite::close(void)
   clear_record_blob_payloads();
   clear_foreign_key_presence_cache();
   clear_direct_update_state();
+  active_storage_statement= NULL;
+  active_storage_statement_primary_file= NULL;
   auto_increment_field= NULL;
   direct_update_key_field= NULL;
   direct_update_key_field_number= MAX_KEY;
@@ -2616,12 +2622,10 @@ int ha_mylite::read_exact_unique_index_row_into(
   ulonglong row_id= 0ULL;
   size_t row_payload_size= 0;
   mylite_storage_statement *active_statement=
-      mylite_storage_borrow_active_statement(primary_file);
-  Mylite_trx_context *trx_ctx= mylite_trx_context(ha_thd(), false);
-  if (!active_statement)
-    active_statement= trx_ctx && trx_ctx->statement     ? trx_ctx->statement
-                      : trx_ctx && trx_ctx->transaction ? trx_ctx->transaction
-                                                        : NULL;
+      active_storage_statement != NULL &&
+              active_storage_statement_primary_file == primary_file
+          ? active_storage_statement
+          : mylite_thd_active_storage_checkpoint(ha_thd(), primary_file);
   mylite_storage_result storage_result= MYLITE_STORAGE_OK;
   if (active_statement)
   {
@@ -3043,7 +3047,11 @@ int ha_mylite::external_lock(THD *thd, int lock_type)
   DBUG_ENTER("ha_mylite::external_lock");
 
   if (lock_type != F_WRLCK)
+  {
+    active_storage_statement= NULL;
+    active_storage_statement_primary_file= NULL;
     DBUG_RETURN(0);
+  }
 
   const char *primary_file= mylite_primary_file_path();
   if (!primary_file)
@@ -3068,7 +3076,16 @@ int ha_mylite::external_lock(THD *thd, int lock_type)
                                                !volatile_rows, volatile_rows,
                                                storage_statement_active);
   if (error)
+  {
+    active_storage_statement= NULL;
+    active_storage_statement_primary_file= NULL;
     DBUG_RETURN(error);
+  }
+
+  active_storage_statement=
+      mylite_thd_active_storage_checkpoint(thd, primary_file);
+  active_storage_statement_primary_file=
+      active_storage_statement ? primary_file : NULL;
 
   trans_register_ha(thd, false, mylite_hton, 0);
   if (thd_test_options(thd, OPTION_NOT_AUTOCOMMIT | OPTION_BEGIN))
@@ -3522,14 +3539,10 @@ int ha_mylite::update_row(const uchar *old_data, const uchar *new_data)
   else
   {
     mylite_storage_statement *active_statement=
-        mylite_storage_borrow_active_statement(primary_file);
-    Mylite_trx_context *trx_ctx= mylite_trx_context(ha_thd(), false);
-    if (!active_statement && trx_ctx && trx_ctx->statement &&
-        mylite_storage_statement_matches(trx_ctx->statement, primary_file))
-      active_statement= trx_ctx->statement;
-    if (!active_statement && trx_ctx && trx_ctx->transaction &&
-        mylite_storage_statement_matches(trx_ctx->transaction, primary_file))
-      active_statement= trx_ctx->transaction;
+        active_storage_statement != NULL &&
+                active_storage_statement_primary_file == primary_file
+            ? active_storage_statement
+            : mylite_thd_active_storage_checkpoint(ha_thd(), primary_file);
     if (preserve_index_entries)
     {
       result=
@@ -3650,6 +3663,8 @@ int ha_mylite::truncate()
 int ha_mylite::reset()
 {
   clear_direct_update_state();
+  active_storage_statement= NULL;
+  active_storage_statement_primary_file= NULL;
   return 0;
 }
 
@@ -4564,6 +4579,19 @@ static Mylite_trx_context *mylite_trx_context(THD *thd, bool create)
 
   thd->ha_data[mylite_hton->slot].ha_ptr= ctx;
   return ctx;
+}
+
+static mylite_storage_statement *
+mylite_thd_active_storage_checkpoint(THD *thd, const char *primary_file)
+{
+  Mylite_trx_context *ctx= mylite_trx_context(thd, false);
+  if (ctx && ctx->statement &&
+      mylite_storage_statement_matches(ctx->statement, primary_file))
+    return ctx->statement;
+  if (ctx && ctx->transaction &&
+      mylite_storage_statement_matches(ctx->transaction, primary_file))
+    return ctx->transaction;
+  return mylite_storage_borrow_active_statement(primary_file);
 }
 
 static bool mylite_thd_has_active_storage_checkpoint(THD *thd,

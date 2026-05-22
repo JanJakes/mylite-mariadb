@@ -23,6 +23,8 @@
 #include "my_global.h"
 #include "thr_lock.h"
 
+struct mylite_storage_statement;
+
 class Mylite_share: public Handler_share
 {
 public:
@@ -80,6 +82,8 @@ class ha_mylite: public handler
   size_t index_row_index;
   uint index_cursor_number;
   ulonglong current_row_id;
+  mylite_storage_statement *active_storage_statement;
+  const char *active_storage_statement_primary_file;
   uint duplicate_key_index;
   mutable ulonglong foreign_key_presence_epoch;
   mutable bool child_foreign_key_presence_known;
