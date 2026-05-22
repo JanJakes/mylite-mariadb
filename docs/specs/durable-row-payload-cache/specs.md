@@ -60,8 +60,9 @@ memory and is invalidated by durable mutations.
 ## Acceptance Criteria
 
 - Repeated durable secondary exact-select cursor materialization avoids
-  repeated row page checksums and linear row-payload cache scans for cached row
-  ids.
+  repeated row page reads/checksums and linear row-payload cache scans for
+  cached row ids. Later trusted-cache work also avoids rehashing cached row
+  bytes on durable cache hits.
 - Existing storage and routed-engine compatibility tests pass.
 - Secondary exact-select timings improve materially in the local benchmark.
 

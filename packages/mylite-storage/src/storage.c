@@ -210,7 +210,6 @@ typedef struct mylite_storage_row_payload_cache_entry {
     unsigned long long row_id;
     unsigned char *row;
     size_t row_size;
-    uint64_t checksum;
 } mylite_storage_row_payload_cache_entry;
 
 typedef struct mylite_storage_row_payload_cache_bucket {
@@ -3452,10 +3451,7 @@ static mylite_storage_result append_cached_row_payload_to_builder(
     mylite_storage_rowset_builder *builder,
     int *out_used_cache
 );
-static int active_row_payload_cache_entry_is_usable(
-    const mylite_storage_row_payload_cache_entry *entry
-);
-static int row_payload_cache_entry_is_valid(const mylite_storage_row_payload_cache_entry *entry);
+static int row_payload_cache_entry_is_usable(const mylite_storage_row_payload_cache_entry *entry);
 static int store_active_row_payload(
     const char *filename,
     const mylite_storage_header *header,
@@ -3782,7 +3778,6 @@ MYLITE_STORAGE_HOT_INLINE int key_bytes_equal(
 );
 MYLITE_STORAGE_HOT_INLINE size_t hash_key_bytes(const unsigned char *key, size_t key_size);
 MYLITE_STORAGE_HOT_INLINE size_t hash_fixed_key_value(uint64_t value, size_t key_size);
-static uint64_t checksum_bytes(const unsigned char *bytes, size_t size);
 static void clear_exact_index_cache_buckets(mylite_storage_exact_index_cache *cache);
 static void unlink_exact_index_cache_row_id_bucket_entry(
     mylite_storage_exact_index_cache *cache,
@@ -6465,7 +6460,7 @@ static mylite_storage_result read_indexed_row_payload_from_open_file(
         active_row_payload_cache == NULL
             ? NULL
             : find_row_payload_cache_entry(active_row_payload_cache, row_id);
-    if (active_row_payload_cache_entry_is_usable(active_entry)) {
+    if (row_payload_cache_entry_is_usable(active_entry)) {
         *out_active_payload_cached = 1;
         return copy_cached_row_payload(
             active_entry,
@@ -6483,7 +6478,7 @@ static mylite_storage_result read_indexed_row_payload_from_open_file(
     if (row_payload_cache != NULL) {
         const mylite_storage_row_payload_cache_entry *entry =
             find_row_payload_cache_entry(row_payload_cache, row_id);
-        if (row_payload_cache_entry_is_valid(entry)) {
+        if (row_payload_cache_entry_is_usable(entry)) {
             return copy_cached_row_payload(
                 entry,
                 out_row,
@@ -24711,7 +24706,7 @@ static mylite_storage_result append_cached_row_payload_to_builder(
     if (entry == NULL) {
         return MYLITE_STORAGE_OK;
     }
-    if (!row_payload_cache_entry_is_valid(entry)) {
+    if (!row_payload_cache_entry_is_usable(entry)) {
         remove_row_payload_cache_entry(cache, row_id);
         return MYLITE_STORAGE_OK;
     }
@@ -24720,15 +24715,8 @@ static mylite_storage_result append_cached_row_payload_to_builder(
     return append_row_to_rowset_builder(builder, row_id, entry->row, entry->row_size);
 }
 
-static int active_row_payload_cache_entry_is_usable(
-    const mylite_storage_row_payload_cache_entry *entry
-) {
+static int row_payload_cache_entry_is_usable(const mylite_storage_row_payload_cache_entry *entry) {
     return entry != NULL && entry->row != NULL;
-}
-
-static int row_payload_cache_entry_is_valid(const mylite_storage_row_payload_cache_entry *entry) {
-    return entry != NULL && entry->row != NULL &&
-           checksum_bytes(entry->row, entry->row_size) == entry->checksum;
 }
 
 static int store_active_row_payload(
@@ -24776,7 +24764,6 @@ MYLITE_STORAGE_HOT_INLINE void replace_active_row_payload_in_cache(
         known_entry->row != NULL && known_entry->row_size == new_row_size &&
         new_row_size <= MYLITE_STORAGE_ACTIVE_ROW_PAYLOAD_BYTES_LIMIT) {
         memcpy(known_entry->row, new_row, new_row_size);
-        known_entry->checksum = 0ULL;
         return;
     }
 
@@ -24833,7 +24820,6 @@ static void replace_active_row_payload_in_cache_slow(
         }
         memcpy(entry->row, new_row, new_row_size);
         entry->row_size = new_row_size;
-        entry->checksum = 0ULL;
         cache->row_bytes = retained_bytes + new_row_size;
         return;
     }
@@ -25438,7 +25424,6 @@ static mylite_storage_result append_row_payload_cache_entry(
         .row_id = row_id,
         .row = row_copy,
         .row_size = row_size,
-        .checksum = checksum_bytes(row_copy, row_size),
     };
     ++cache->count;
     result = insert_row_payload_cache_bucket(cache, row_id, entry_index);
@@ -25511,7 +25496,6 @@ static mylite_storage_result replace_active_row_payload_cache_entry(
     memcpy(entry->row, new_row, new_row_size);
     entry->row_size = new_row_size;
     entry->row_id = new_row_id;
-    entry->checksum = 0ULL;
     cache->row_bytes = retained_bytes + new_row_size;
     if (old_row_id != new_row_id) {
         maybe_rebuild_row_payload_cache_buckets_after_tombstone(cache);
@@ -26867,15 +26851,6 @@ MYLITE_STORAGE_HOT_INLINE size_t hash_fixed_key_value(uint64_t value, size_t key
     value *= 0x9e3779b97f4a7c15ULL;
     value ^= value >> 32U;
     return (size_t)value;
-}
-
-static uint64_t checksum_bytes(const unsigned char *bytes, size_t size) {
-    uint64_t checksum = k_fnv1a64_offset_basis;
-    for (size_t i = 0U; i < size; ++i) {
-        checksum ^= bytes[i];
-        checksum *= k_fnv1a64_prime;
-    }
-    return checksum;
 }
 
 static void clear_exact_index_cache_buckets(mylite_storage_exact_index_cache *cache) {

@@ -9,10 +9,10 @@ active checkpoint, and the update-validation path already accepts active
 row-payload cache presence as proof that the row was validated for the same
 catalog generation and table.
 
-Durable row-payload caches still need checksum validation because they can be
-retargeted across durable checkpoints and survive outside the active statement
-lifetime. Active caches have narrower ownership and are cleared or maintained by
-the existing active update/delete/truncate/rollback paths.
+Durable row-payload caches had a wider lifetime than active caches and kept
+their checksum validation in this slice. The later
+`trusted-durable-row-payload-cache` slice removes that checksum after making the
+durable cache identity and mutation-invalidation boundary explicit.
 
 ## Source Findings
 
@@ -43,8 +43,7 @@ the existing active update/delete/truncate/rollback paths.
   `read_indexed_row_payload_from_open_file()`.
 - Stop recomputing row checksums when replacing active row-payload cache
   entries after successful updates.
-- Keep `row_payload_cache_entry_is_valid()` and checksum validation for durable
-  row-payload cache reads and rowset-builder cache materialization.
+- Keep durable row-payload cache validation unchanged in this slice.
 - Do not change cache invalidation, replacement, rollback, durable cache
   retargeting, or row copy semantics.
 
@@ -115,7 +114,7 @@ Sampled rerun:
   them to indexed-row read output.
 - Active row-payload cache replacement no longer computes checksums that active
   readers do not use.
-- Durable row-payload cache hits still checksum row bytes before use.
+- Durable row-payload cache behavior is unchanged by this slice.
 - Existing active row-payload cache rollback, update, delete, and storage smoke
   tests remain green.
 

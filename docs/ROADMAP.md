@@ -228,7 +228,9 @@ read-statement object reuse, scoped filename borrowing, and clean prepared-state
 bookkeeping.
 The durable row-payload cache now retains a larger bounded hot set, reducing
 steady-state 10000-row storage row materialization and routed prepared
-primary-key point-select time for the local benchmark.
+primary-key point-select time for the local benchmark. Durable row-payload
+cache hits now trust the resolved cache identity and no longer rehash cached
+row bytes before copy-out.
 Hot successful prepared binds, resets, and
 execution entry also skip redundant OK diagnostic string assignment when the
 database handle is already in the OK state. Single-part non-null unique-key `UPDATE`
@@ -449,8 +451,7 @@ Row-update maintained-root planning now caches table-level index-root absence
 for the active catalog generation, avoiding repeated catalog copies on hot
 append-only update loops.
 Active row-payload cache reads and replacements now trust active-checkpoint
-cache ownership without repeated row-byte checksums, while durable row-payload
-caches keep checksum validation before use.
+cache ownership without repeated row-byte checksums.
 Same-row active row-payload replacements now update the cached payload entry
 after one bucket lookup, leaving bucket remapping to the row-id-changing path.
 Scoped exact-index and indexed-row lookup paths also mark statement live-row
