@@ -157,6 +157,9 @@ Same-size row-only active rewrites now capture only the row checksum-plus-payloa
 undo range and rewrite only payload bytes while preserving rollback correctness
 after dirty buffered-page checksum refreshes and later size-changing rewrites in
 the same savepoint.
+Cached one-index active rewrites now do the same for unchanged-size row payloads
+and index keys, while size-changing rewrites continue through the conservative
+prefix-undo path and upgrade any earlier compact undo entries.
 Fixed-width prepared result statements now reuse their result bindings across
 reset/re-execute loops and avoid freeing already-drained results a second time,
 leaving parameter binding/reset semantics as the next prepared-path bottleneck.

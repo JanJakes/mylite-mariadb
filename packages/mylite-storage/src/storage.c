@@ -17861,6 +17861,58 @@ MYLITE_STORAGE_HOT_INLINE mylite_storage_result rewrite_active_single_index_upda
         return MYLITE_STORAGE_OK;
     }
 
+    const size_t old_row_size =
+        get_u32_le(row_page_ref.page, MYLITE_STORAGE_FORMAT_ROW_RECORD_SIZE_OFFSET);
+    const size_t old_key_size =
+        get_u32_le(index_page_ref.page, MYLITE_STORAGE_FORMAT_INDEX_KEY_SIZE_OFFSET);
+    if (old_row_size == row_size && old_key_size == index_entry->key_size) {
+        const size_t row_undo_offset = MYLITE_STORAGE_FORMAT_ROW_CHECKSUM_OFFSET;
+        const size_t row_undo_size =
+            MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET + row_size - row_undo_offset;
+        mylite_storage_result result = capture_buffered_page_undo_range_from_page(
+            statement,
+            row_id,
+            row_page_ref.page,
+            row_page_ref.checksum_dirty,
+            row_undo_offset,
+            row_undo_size
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+
+        const size_t index_undo_offset = MYLITE_STORAGE_FORMAT_INDEX_CHECKSUM_OFFSET;
+        const size_t index_undo_size =
+            MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET + index_entry->key_size - index_undo_offset;
+        result = capture_buffered_page_undo_range_from_page(
+            statement,
+            index_page_id,
+            index_page_ref.page,
+            index_page_ref.checksum_dirty,
+            index_undo_offset,
+            index_undo_size
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+
+        memcpy(row_page_ref.page + MYLITE_STORAGE_FORMAT_ROW_PAYLOAD_OFFSET, row, row_size);
+        if (row_page_ref.checksum_dirty != NULL) {
+            *row_page_ref.checksum_dirty = 1U;
+        }
+        memcpy(
+            index_page_ref.page + MYLITE_STORAGE_FORMAT_INDEX_KEY_OFFSET,
+            index_entry->key,
+            index_entry->key_size
+        );
+        if (index_page_ref.checksum_dirty != NULL) {
+            *index_page_ref.checksum_dirty = 1U;
+        }
+
+        *out_rewritten = 1;
+        return MYLITE_STORAGE_OK;
+    }
+
     mylite_storage_result result = capture_buffered_page_undo_pair_from_pages(
         statement,
         row_id,
