@@ -1340,7 +1340,7 @@ static mylite_storage_result capture_buffered_page_undo_from_page(
     const unsigned char *checksum_dirty,
     size_t used_size
 );
-static mylite_storage_result capture_buffered_page_undo_pair_from_pages(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result capture_buffered_page_undo_pair_from_pages(
     mylite_storage_statement *statement,
     unsigned long long first_page_id,
     const unsigned char *first_page,
@@ -1351,7 +1351,7 @@ static mylite_storage_result capture_buffered_page_undo_pair_from_pages(
     const unsigned char *second_checksum_dirty,
     size_t second_used_size
 );
-static void init_buffered_page_undo_entry(
+MYLITE_STORAGE_HOT_INLINE void init_buffered_page_undo_entry(
     mylite_storage_buffered_page_undo *undo,
     unsigned long long page_id,
     const unsigned char *page,
@@ -2088,7 +2088,7 @@ static mylite_storage_result rewrite_active_row_only_update_page(
     size_t row_size,
     int *out_rewritten
 );
-static mylite_storage_result rewrite_active_single_index_update_page(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result rewrite_active_single_index_update_page(
     mylite_storage_statement *statement,
     unsigned long long row_id,
     const unsigned char *row,
@@ -13209,7 +13209,7 @@ static mylite_storage_result capture_buffered_page_undo_from_page(
     return MYLITE_STORAGE_OK;
 }
 
-static mylite_storage_result capture_buffered_page_undo_pair_from_pages(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result capture_buffered_page_undo_pair_from_pages(
     mylite_storage_statement *statement,
     unsigned long long first_page_id,
     const unsigned char *first_page,
@@ -13309,7 +13309,7 @@ static mylite_storage_result capture_buffered_page_undo_pair_from_pages(
     return MYLITE_STORAGE_OK;
 }
 
-static void init_buffered_page_undo_entry(
+MYLITE_STORAGE_HOT_INLINE void init_buffered_page_undo_entry(
     mylite_storage_buffered_page_undo *undo,
     unsigned long long page_id,
     const unsigned char *page,
@@ -17601,7 +17601,7 @@ done:
     return result;
 }
 
-static mylite_storage_result rewrite_active_single_index_update_page(
+MYLITE_STORAGE_HOT_INLINE mylite_storage_result rewrite_active_single_index_update_page(
     mylite_storage_statement *statement,
     unsigned long long row_id,
     const unsigned char *row,

@@ -412,6 +412,8 @@ Live-row-id seeding now hot-inlines repeated active statement cache hits and
 keeps durable cache promotion in a cold fallback.
 Active row-payload replacement now hot-inlines known-entry same-size updates and
 leaves cache lookup, resize, removal, and row-id remap cases in a cold fallback.
+Cached single-index active rewrites now inline the rewrite and buffered-page
+undo pair capture path while preserving rollback preimage copies.
 Exact unique index cursor construction now reuses the existing row-materialize
 eligibility flag instead of scanning table fields again for BLOB/TEXT columns
 on prepared point-update reads.
