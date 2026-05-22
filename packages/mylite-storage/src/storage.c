@@ -855,7 +855,7 @@ static mylite_storage_statement *recovery_journal_owner_in_statement_chain(
 static mylite_storage_statement *transaction_journal_owner_in_statement_chain(
     mylite_storage_statement *statement
 );
-static void statement_chain_journal_owners(
+MYLITE_STORAGE_HOT_INLINE void statement_chain_journal_owners(
     mylite_storage_statement *statement,
     mylite_storage_statement **out_recovery,
     mylite_storage_statement **out_transaction
@@ -10500,7 +10500,7 @@ static mylite_storage_statement *transaction_journal_owner_in_statement_chain(
     return NULL;
 }
 
-static void statement_chain_journal_owners(
+MYLITE_STORAGE_HOT_INLINE void statement_chain_journal_owners(
     mylite_storage_statement *statement,
     mylite_storage_statement **out_recovery,
     mylite_storage_statement **out_transaction

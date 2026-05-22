@@ -418,6 +418,8 @@ Active exact-index cache maintenance now hot-inlines the unchanged single-cache
 case and leaves changed-key, remap, removal, and multi-cache cases in fallback.
 Maintained-index-root absence checks now inline repeated statement-cache hits
 while preserving catalog planning for uncached or root-backed tables.
+Statement journal-owner lookup now inlines the active statement-chain scan used
+by prepared update write-journal protection.
 Exact unique index cursor construction now reuses the existing row-materialize
 eligibility flag instead of scanning table fields again for BLOB/TEXT columns
 on prepared point-update reads.
