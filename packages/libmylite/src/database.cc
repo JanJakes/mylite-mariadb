@@ -8127,6 +8127,7 @@ std::vector<std::string> runtime_arguments(
         "--skip-grant-tables",
         "--skip-log-bin",
         "--skip-networking",
+        "--log-output=NONE",
         "--default-storage-engine=Aria",
 #  if MYLITE_MARIADB_HAS_PERFSCHEMA
         "--performance-schema=OFF",
