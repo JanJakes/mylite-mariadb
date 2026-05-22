@@ -119,6 +119,8 @@ default_tests=(
   main.explain
   main.order_fill_sortbuf
   main.subselect_union_rand
+  main.except
+  main.except_all
   main.prepare
   main.ps_10nestset
   main.ps_11bugs

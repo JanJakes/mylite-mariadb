@@ -2,8 +2,10 @@
 --source include/default_optimizer_switch.inc
 set @@join_buffer_size=256*1024;
 
-create table t1 (a int, b int) engine=MyISAM;
-create table t2 (c int, d int) engine=MyISAM;
+--replace_result engine=Aria engine=MyISAM
+create table t1 (a int, b int) engine=Aria;
+--replace_result engine=Aria engine=MyISAM
+create table t2 (c int, d int) engine=Aria;
 insert into t1 values (1,1),(2,2);
 insert into t2 values (2,2),(3,3);
 
@@ -31,10 +33,14 @@ execute stmt;
 drop tables t1,t2;
 
 
-create table t1 (a int, b int) engine=MyISAM;
-create table t2 (c int, d int) engine=MyISAM;
-create table t3 (e int, f int) engine=MyISAM;
-create table t4 (g int, h int) engine=MyISAM;
+--replace_result engine=Aria engine=MyISAM
+create table t1 (a int, b int) engine=Aria;
+--replace_result engine=Aria engine=MyISAM
+create table t2 (c int, d int) engine=Aria;
+--replace_result engine=Aria engine=MyISAM
+create table t3 (e int, f int) engine=Aria;
+--replace_result engine=Aria engine=MyISAM
+create table t4 (g int, h int) engine=Aria;
 insert into t1 values (1,1),(2,2);
 insert into t2 values (2,2),(3,3);
 insert into t3 values (4,4),(5,5);
@@ -74,14 +80,17 @@ select 1 from dual ORDER BY 1 except select 1 from dual;
 select 1 as a from dual union all select 1 from dual;
 
 
-create table t1 (a int, b blob, a1 int, b1 blob) engine=MyISAM;
-create table t2 (c int, d blob, c1 int, d1 blob) engine=MyISAM;
+--replace_result engine=Aria engine=MyISAM
+create table t1 (a int, b blob, a1 int, b1 blob) engine=Aria;
+--replace_result engine=Aria engine=MyISAM
+create table t2 (c int, d blob, c1 int, d1 blob) engine=Aria;
 insert into t1 values (1,"ddd", 1, "sdfrrwwww"),(2, "fgh", 2, "dffggtt");
 insert into t2 values (2, "fgh", 2, "dffggtt"),(3, "ffggddd", 3, "dfgg");
 
 (select a,b,b1 from t1) except (select c,d,d1 from t2);
 # make sure that blob is used
 create table t3 (select a,b,b1 from t1) except (select c,d,d1 from t2);
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t3;
 
 drop tables t1,t2,t3;

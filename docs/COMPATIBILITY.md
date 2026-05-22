@@ -118,8 +118,9 @@ deprecated server syntax rejection,
 selected `ORDER BY` optimizer
 and aggregate-ordering behavior, optimizer-cost metadata, selected EXPLAIN
 plan output, selected Aria range, semijoin, and rowid-filter optimizer
-behavior, UNION, prepared-statement behavior, selected SIGNAL/RESIGNAL
-diagnostics and row-constructor behavior, selected scalar `LAST_VALUE()`,
+behavior, UNION and selected EXCEPT / EXCEPT ALL set-operation behavior,
+prepared-statement behavior, selected SIGNAL/RESIGNAL diagnostics and
+row-constructor behavior, selected scalar `LAST_VALUE()`,
 window `FIRST_VALUE()` / `LAST_VALUE()`, percentile/median, and
 window-function behavior, selected `IF()` / `NULLIF()` conditional expression
 behavior, selected SET-family scalar-function behavior, selected scalar
