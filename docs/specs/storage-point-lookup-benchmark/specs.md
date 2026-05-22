@@ -46,6 +46,8 @@ MariaDB base: `mariadb-11.8.6`
 - For `*-one-read` phases, open one storage read statement around the timed
   loop to isolate steady-state lookup cost when file, header, and catalog state
   are already scoped by one read statement.
+- Add `storage-read-statements` to time the begin/end pair directly against the
+  same populated benchmark file.
 - Verify each lookup returns the expected row id from the stored primary-key
   entryset; the row phase also verifies a row payload size.
 - Report row-id checksum and, for the row phase, row-size checksum to keep the
@@ -86,6 +88,8 @@ Benchmark-tool-only code. No dependency change.
   - `storage primary-key row lookups`: `4.747 us/op`
 - `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=storage-pk-row-lookups-one-read 10000 1000000`
   - `storage primary-key row lookups in one read statement`: `0.508 us/op`
+- `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=storage-read-statements 10000 1000000`
+  - `storage read statement begin/end pairs`: `3.910 us/op`
 - `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=prepared-pk-selects 10000 1000000`
   - `prepared primary-key point selects`: `7.845 us/op`
 - `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=prepared-scalar-selects 10000 1000000`

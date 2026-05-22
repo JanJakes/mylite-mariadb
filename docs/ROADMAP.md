@@ -202,7 +202,8 @@ It also includes storage-level primary-key entry and row lookup phases that use
 stored primary-key bytes with the MyLite storage API directly, separating raw
 storage read-scope, row-materialization, and MariaDB prepared execution cost.
 Held-read-scope variants isolate steady-state exact-index and row materialization
-cost once one storage read statement is already open.
+cost once one storage read statement is already open, while a storage
+read-statement phase measures begin/end overhead directly.
 The durable row-payload cache now retains a larger bounded hot set, reducing
 steady-state 10000-row storage row materialization and routed prepared
 primary-key point-select time for the local benchmark.
