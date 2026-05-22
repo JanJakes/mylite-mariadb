@@ -20,7 +20,9 @@ typedef enum benchmark_phase {
     BENCHMARK_PHASE_PREPARED_PK_SELECTS,
     BENCHMARK_PHASE_PREPARED_PK_SELECT_RESET_AFTER_ROW,
     BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS,
+    BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS_ONE_READ,
     BENCHMARK_PHASE_STORAGE_PK_ROW_LOOKUPS,
+    BENCHMARK_PHASE_STORAGE_PK_ROW_LOOKUPS_ONE_READ,
     BENCHMARK_PHASE_UPDATES,
     BENCHMARK_PHASE_DIRECT_UPDATES,
     BENCHMARK_PHASE_PREPARED_UPDATES,
@@ -35,7 +37,9 @@ typedef enum benchmark_metric {
     BENCHMARK_METRIC_PREPARED_PK_SELECTS,
     BENCHMARK_METRIC_PREPARED_PK_SELECT_RESET_AFTER_ROW,
     BENCHMARK_METRIC_STORAGE_PK_ENTRY_LOOKUPS,
+    BENCHMARK_METRIC_STORAGE_PK_ENTRY_LOOKUPS_ONE_READ,
     BENCHMARK_METRIC_STORAGE_PK_ROW_LOOKUPS,
+    BENCHMARK_METRIC_STORAGE_PK_ROW_LOOKUPS_ONE_READ,
     BENCHMARK_METRIC_DIRECT_SECONDARY_SELECTS,
     BENCHMARK_METRIC_PREPARED_SECONDARY_SELECTS,
     BENCHMARK_METRIC_PREPARE_LEAF_ROWS,
@@ -106,7 +110,21 @@ static int benchmark_point_selects(benchmark_context *ctx);
 static int benchmark_prepared_point_selects(benchmark_context *ctx);
 static int benchmark_prepared_point_select_reset_after_row(benchmark_context *ctx);
 static int benchmark_storage_entry_lookups(benchmark_context *ctx);
+static int benchmark_storage_entry_lookups_in_one_read_statement(benchmark_context *ctx);
+static int benchmark_storage_entry_lookups_with_scope(
+    benchmark_context *ctx,
+    int one_read_statement,
+    benchmark_metric metric,
+    const char *operation
+);
 static int benchmark_storage_point_lookups(benchmark_context *ctx);
+static int benchmark_storage_point_lookups_in_one_read_statement(benchmark_context *ctx);
+static int benchmark_storage_point_lookups_with_scope(
+    benchmark_context *ctx,
+    int one_read_statement,
+    benchmark_metric metric,
+    const char *operation
+);
 static int benchmark_secondary_selects(benchmark_context *ctx);
 static int benchmark_prepared_secondary_selects(benchmark_context *ctx);
 static int publish_secondary_leaf_index(benchmark_context *ctx);
@@ -161,7 +179,9 @@ static const benchmark_metric_definition k_metric_definitions[] = {
     {BENCHMARK_METRIC_PREPARED_PK_SELECTS, "prepared-pk-selects"},
     {BENCHMARK_METRIC_PREPARED_PK_SELECT_RESET_AFTER_ROW, "prepared-pk-select-reset-after-row"},
     {BENCHMARK_METRIC_STORAGE_PK_ENTRY_LOOKUPS, "storage-pk-entry-lookups"},
+    {BENCHMARK_METRIC_STORAGE_PK_ENTRY_LOOKUPS_ONE_READ, "storage-pk-entry-lookups-one-read"},
     {BENCHMARK_METRIC_STORAGE_PK_ROW_LOOKUPS, "storage-pk-row-lookups"},
+    {BENCHMARK_METRIC_STORAGE_PK_ROW_LOOKUPS_ONE_READ, "storage-pk-row-lookups-one-read"},
     {BENCHMARK_METRIC_DIRECT_SECONDARY_SELECTS, "direct-secondary-selects"},
     {BENCHMARK_METRIC_PREPARED_SECONDARY_SELECTS, "prepared-secondary-selects"},
     {BENCHMARK_METRIC_PREPARE_LEAF_ROWS, "prepare-leaf-rows"},
@@ -266,8 +286,16 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         config->phase = BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS;
         return 0;
     }
+    if (strcmp(argument, "storage-pk-entry-lookups-one-read") == 0) {
+        config->phase = BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS_ONE_READ;
+        return 0;
+    }
     if (strcmp(argument, "storage-pk-row-lookups") == 0) {
         config->phase = BENCHMARK_PHASE_STORAGE_PK_ROW_LOOKUPS;
+        return 0;
+    }
+    if (strcmp(argument, "storage-pk-row-lookups-one-read") == 0) {
+        config->phase = BENCHMARK_PHASE_STORAGE_PK_ROW_LOOKUPS_ONE_READ;
         return 0;
     }
     if (strcmp(argument, "updates") == 0) {
@@ -288,8 +316,9 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         "Expected phase `all`, `prepared-scalar-selects`, `point-selects`, "
         "`direct-pk-selects`, `prepared-pk-selects`, "
         "`prepared-pk-select-reset-after-row`, `storage-pk-entry-lookups`, "
-        "`storage-pk-row-lookups`, `updates`, `direct-updates`, "
-        "or `prepared-updates`, got: %s\n",
+        "`storage-pk-entry-lookups-one-read`, `storage-pk-row-lookups`, "
+        "`storage-pk-row-lookups-one-read`, `updates`, `direct-updates`, or "
+        "`prepared-updates`, got: %s\n",
         argument
     );
     return 1;
@@ -353,8 +382,12 @@ static const char *benchmark_phase_name(benchmark_phase phase) {
         return "prepared-pk-select-reset-after-row";
     case BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS:
         return "storage-pk-entry-lookups";
+    case BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS_ONE_READ:
+        return "storage-pk-entry-lookups-one-read";
     case BENCHMARK_PHASE_STORAGE_PK_ROW_LOOKUPS:
         return "storage-pk-row-lookups";
+    case BENCHMARK_PHASE_STORAGE_PK_ROW_LOOKUPS_ONE_READ:
+        return "storage-pk-row-lookups-one-read";
     case BENCHMARK_PHASE_UPDATES:
         return "updates";
     case BENCHMARK_PHASE_DIRECT_UPDATES:
@@ -382,7 +415,9 @@ static int run_benchmark(const benchmark_config *config) {
         config->phase == BENCHMARK_PHASE_PREPARED_PK_SELECTS ||
         config->phase == BENCHMARK_PHASE_PREPARED_PK_SELECT_RESET_AFTER_ROW ||
         config->phase == BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS ||
-        config->phase == BENCHMARK_PHASE_STORAGE_PK_ROW_LOOKUPS;
+        config->phase == BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS_ONE_READ ||
+        config->phase == BENCHMARK_PHASE_STORAGE_PK_ROW_LOOKUPS ||
+        config->phase == BENCHMARK_PHASE_STORAGE_PK_ROW_LOOKUPS_ONE_READ;
 
     ctx.root = make_temp_root();
     if (ctx.root == NULL) {
@@ -435,8 +470,22 @@ static int run_benchmark(const benchmark_config *config) {
             result = 0;
             goto cleanup;
         }
+        if (config->phase == BENCHMARK_PHASE_STORAGE_PK_ENTRY_LOOKUPS_ONE_READ) {
+            if (benchmark_storage_entry_lookups_in_one_read_statement(&ctx) != 0) {
+                goto cleanup;
+            }
+            result = 0;
+            goto cleanup;
+        }
         if (config->phase == BENCHMARK_PHASE_STORAGE_PK_ROW_LOOKUPS) {
             if (benchmark_storage_point_lookups(&ctx) != 0) {
+                goto cleanup;
+            }
+            result = 0;
+            goto cleanup;
+        }
+        if (config->phase == BENCHMARK_PHASE_STORAGE_PK_ROW_LOOKUPS_ONE_READ) {
+            if (benchmark_storage_point_lookups_in_one_read_statement(&ctx) != 0) {
                 goto cleanup;
             }
             result = 0;
@@ -530,7 +579,8 @@ static void print_usage(const char *program) {
         stderr,
         "Usage: %s [--phase=all|prepared-scalar-selects|point-selects|direct-pk-selects|"
         "prepared-pk-selects|prepared-pk-select-reset-after-row|updates|direct-updates|"
-        "prepared-updates|storage-pk-entry-lookups|storage-pk-row-lookups] "
+        "prepared-updates|storage-pk-entry-lookups|storage-pk-entry-lookups-one-read|"
+        "storage-pk-row-lookups|storage-pk-row-lookups-one-read] "
         "[--max-us=<metric>:<value>] [rows] [iterations]\n"
         "\n"
         "Defaults: phase=all rows=100 iterations=100.\n"
@@ -538,7 +588,8 @@ static void print_usage(const char *program) {
         "Thresholds are opt-in and may be supplied more than once. Metrics: "
         "open-setup, prepared-scalar-selects, direct-inserts, prepared-inserts, "
         "direct-pk-selects, prepared-pk-selects, prepared-pk-select-reset-after-row, "
-        "storage-pk-entry-lookups, storage-pk-row-lookups, direct-secondary-selects, "
+        "storage-pk-entry-lookups, storage-pk-entry-lookups-one-read, "
+        "storage-pk-row-lookups, storage-pk-row-lookups-one-read, direct-secondary-selects, "
         "prepared-secondary-selects, prepare-leaf-rows, publish-leaf-index, "
         "direct-leaf-secondary-selects, "
         "prepared-leaf-secondary-selects, direct-updates, prepared-updates, ordered-scan.\n"
@@ -1034,9 +1085,33 @@ cleanup:
 }
 
 static int benchmark_storage_entry_lookups(benchmark_context *ctx) {
+    return benchmark_storage_entry_lookups_with_scope(
+        ctx,
+        0,
+        BENCHMARK_METRIC_STORAGE_PK_ENTRY_LOOKUPS,
+        "storage primary-key entry lookups"
+    );
+}
+
+static int benchmark_storage_entry_lookups_in_one_read_statement(benchmark_context *ctx) {
+    return benchmark_storage_entry_lookups_with_scope(
+        ctx,
+        1,
+        BENCHMARK_METRIC_STORAGE_PK_ENTRY_LOOKUPS_ONE_READ,
+        "storage primary-key entry lookups in one read statement"
+    );
+}
+
+static int benchmark_storage_entry_lookups_with_scope(
+    benchmark_context *ctx,
+    int one_read_statement,
+    benchmark_metric metric,
+    const char *operation
+) {
     mylite_storage_index_entryset entries = {
         .size = sizeof(entries),
     };
+    mylite_storage_statement *shared_statement = NULL;
     uint64_t row_id_checksum = 0U;
     int result = 1;
 
@@ -1061,6 +1136,14 @@ static int benchmark_storage_entry_lookups(benchmark_context *ctx) {
     mylite_storage_begin_filename_identity_scope(ctx->filename, &filename_scope);
     mylite_storage_begin_table_name_identity_scope("perf", "perf_rows", &table_scope);
 
+    if (one_read_statement) {
+        storage_result = mylite_storage_begin_read_statement(ctx->filename, &shared_statement);
+        if (storage_result != MYLITE_STORAGE_OK) {
+            fprintf(stderr, "Failed to begin storage read statement: %d\n", storage_result);
+            goto end_scopes;
+        }
+    }
+
     const uint64_t start_ns = monotonic_ns();
     for (size_t i = 0; i < ctx->config->iterations; ++i) {
         const size_t entry_index = i % entries.entry_count;
@@ -1072,10 +1155,12 @@ static int benchmark_storage_entry_lookups(benchmark_context *ctx) {
         }
 
         mylite_storage_statement *statement = NULL;
-        storage_result = mylite_storage_begin_read_statement(ctx->filename, &statement);
-        if (storage_result != MYLITE_STORAGE_OK) {
-            fprintf(stderr, "Failed to begin storage read statement: %d\n", storage_result);
-            goto end_scopes;
+        if (!one_read_statement) {
+            storage_result = mylite_storage_begin_read_statement(ctx->filename, &statement);
+            if (storage_result != MYLITE_STORAGE_OK) {
+                fprintf(stderr, "Failed to begin storage read statement: %d\n", storage_result);
+                goto end_read_statement;
+            }
         }
 
         unsigned long long row_id = 0ULL;
@@ -1088,14 +1173,17 @@ static int benchmark_storage_entry_lookups(benchmark_context *ctx) {
             entries.key_sizes[entry_index],
             &row_id
         );
-        const mylite_storage_result end_result = mylite_storage_end_read_statement(statement);
+        mylite_storage_result end_result = MYLITE_STORAGE_OK;
+        if (!one_read_statement) {
+            end_result = mylite_storage_end_read_statement(statement);
+        }
         if (storage_result != MYLITE_STORAGE_OK) {
             fprintf(stderr, "Storage entry lookup failed: %d\n", storage_result);
-            goto end_scopes;
+            goto end_read_statement;
         }
         if (end_result != MYLITE_STORAGE_OK) {
             fprintf(stderr, "Failed to end storage read statement: %d\n", end_result);
-            goto end_scopes;
+            goto end_read_statement;
         }
         if (row_id != entries.row_ids[entry_index]) {
             fprintf(
@@ -1105,7 +1193,7 @@ static int benchmark_storage_entry_lookups(benchmark_context *ctx) {
                 entry_index,
                 entries.row_ids[entry_index]
             );
-            goto end_scopes;
+            goto end_read_statement;
         }
 
         row_id_checksum += row_id;
@@ -1113,16 +1201,25 @@ static int benchmark_storage_entry_lookups(benchmark_context *ctx) {
 
     if (print_result(
             ctx->config,
-            BENCHMARK_METRIC_STORAGE_PK_ENTRY_LOOKUPS,
-            "storage primary-key entry lookups",
+            metric,
+            operation,
             ctx->config->iterations,
             monotonic_ns() - start_ns
         ) != 0) {
-        goto end_scopes;
+        goto end_read_statement;
     }
     printf("Storage entry-lookup row-id checksum: %" PRIu64 "\n", row_id_checksum);
     result = 0;
 
+end_read_statement:
+    if (shared_statement != NULL) {
+        const mylite_storage_result end_result =
+            mylite_storage_end_read_statement(shared_statement);
+        if (end_result != MYLITE_STORAGE_OK) {
+            fprintf(stderr, "Failed to end storage read statement: %d\n", end_result);
+            result = 1;
+        }
+    }
 end_scopes:
     mylite_storage_end_table_name_identity_scope(&table_scope);
     mylite_storage_end_filename_identity_scope(&filename_scope);
@@ -1132,9 +1229,33 @@ cleanup:
 }
 
 static int benchmark_storage_point_lookups(benchmark_context *ctx) {
+    return benchmark_storage_point_lookups_with_scope(
+        ctx,
+        0,
+        BENCHMARK_METRIC_STORAGE_PK_ROW_LOOKUPS,
+        "storage primary-key row lookups"
+    );
+}
+
+static int benchmark_storage_point_lookups_in_one_read_statement(benchmark_context *ctx) {
+    return benchmark_storage_point_lookups_with_scope(
+        ctx,
+        1,
+        BENCHMARK_METRIC_STORAGE_PK_ROW_LOOKUPS_ONE_READ,
+        "storage primary-key row lookups in one read statement"
+    );
+}
+
+static int benchmark_storage_point_lookups_with_scope(
+    benchmark_context *ctx,
+    int one_read_statement,
+    benchmark_metric metric,
+    const char *operation
+) {
     mylite_storage_index_entryset entries = {
         .size = sizeof(entries),
     };
+    mylite_storage_statement *shared_statement = NULL;
     unsigned char row[1024];
     uint64_t row_id_checksum = 0U;
     uint64_t row_size_checksum = 0U;
@@ -1161,6 +1282,14 @@ static int benchmark_storage_point_lookups(benchmark_context *ctx) {
     mylite_storage_begin_filename_identity_scope(ctx->filename, &filename_scope);
     mylite_storage_begin_table_name_identity_scope("perf", "perf_rows", &table_scope);
 
+    if (one_read_statement) {
+        storage_result = mylite_storage_begin_read_statement(ctx->filename, &shared_statement);
+        if (storage_result != MYLITE_STORAGE_OK) {
+            fprintf(stderr, "Failed to begin storage read statement: %d\n", storage_result);
+            goto end_scopes;
+        }
+    }
+
     const uint64_t start_ns = monotonic_ns();
     for (size_t i = 0; i < ctx->config->iterations; ++i) {
         const size_t entry_index = i % entries.entry_count;
@@ -1172,10 +1301,12 @@ static int benchmark_storage_point_lookups(benchmark_context *ctx) {
         }
 
         mylite_storage_statement *statement = NULL;
-        storage_result = mylite_storage_begin_read_statement(ctx->filename, &statement);
-        if (storage_result != MYLITE_STORAGE_OK) {
-            fprintf(stderr, "Failed to begin storage read statement: %d\n", storage_result);
-            goto end_scopes;
+        if (!one_read_statement) {
+            storage_result = mylite_storage_begin_read_statement(ctx->filename, &statement);
+            if (storage_result != MYLITE_STORAGE_OK) {
+                fprintf(stderr, "Failed to begin storage read statement: %d\n", storage_result);
+                goto end_read_statement;
+            }
         }
 
         unsigned long long row_id = 0ULL;
@@ -1192,14 +1323,17 @@ static int benchmark_storage_point_lookups(benchmark_context *ctx) {
             sizeof(row),
             &row_size
         );
-        const mylite_storage_result end_result = mylite_storage_end_read_statement(statement);
+        mylite_storage_result end_result = MYLITE_STORAGE_OK;
+        if (!one_read_statement) {
+            end_result = mylite_storage_end_read_statement(statement);
+        }
         if (storage_result != MYLITE_STORAGE_OK) {
             fprintf(stderr, "Storage point lookup failed: %d\n", storage_result);
-            goto end_scopes;
+            goto end_read_statement;
         }
         if (end_result != MYLITE_STORAGE_OK) {
             fprintf(stderr, "Failed to end storage read statement: %d\n", end_result);
-            goto end_scopes;
+            goto end_read_statement;
         }
         if (row_id != entries.row_ids[entry_index] || row_size == 0U || row_size > sizeof(row)) {
             fprintf(
@@ -1211,7 +1345,7 @@ static int benchmark_storage_point_lookups(benchmark_context *ctx) {
                 entry_index,
                 entries.row_ids[entry_index]
             );
-            goto end_scopes;
+            goto end_read_statement;
         }
 
         row_id_checksum += row_id;
@@ -1220,17 +1354,26 @@ static int benchmark_storage_point_lookups(benchmark_context *ctx) {
 
     if (print_result(
             ctx->config,
-            BENCHMARK_METRIC_STORAGE_PK_ROW_LOOKUPS,
-            "storage primary-key row lookups",
+            metric,
+            operation,
             ctx->config->iterations,
             monotonic_ns() - start_ns
         ) != 0) {
-        goto end_scopes;
+        goto end_read_statement;
     }
     printf("Storage point-lookup row-id checksum: %" PRIu64 "\n", row_id_checksum);
     printf("Storage point-lookup row-size checksum: %" PRIu64 "\n", row_size_checksum);
     result = 0;
 
+end_read_statement:
+    if (shared_statement != NULL) {
+        const mylite_storage_result end_result =
+            mylite_storage_end_read_statement(shared_statement);
+        if (end_result != MYLITE_STORAGE_OK) {
+            fprintf(stderr, "Failed to end storage read statement: %d\n", end_result);
+            result = 1;
+        }
+    }
 end_scopes:
     mylite_storage_end_table_name_identity_scope(&table_scope);
     mylite_storage_end_filename_identity_scope(&filename_scope);

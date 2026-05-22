@@ -32,7 +32,8 @@ MariaDB base: `mariadb-11.8.6`
 
 ## Design
 
-- Add `storage-pk-entry-lookups` and `storage-pk-row-lookups` phases to
+- Add `storage-pk-entry-lookups`, `storage-pk-entry-lookups-one-read`,
+  `storage-pk-row-lookups`, and `storage-pk-row-lookups-one-read` phases to
   `tools/mylite_perf_baseline`.
 - After normal setup and row insertion, read primary-key index entries for
   `perf.perf_rows` index `0` before the timed section.
@@ -42,6 +43,9 @@ MariaDB base: `mariadb-11.8.6`
 - Wrap each lookup in `mylite_storage_begin_read_statement()` /
   `mylite_storage_end_read_statement()` so the benchmark includes the same
   storage read-scope setup used by the handler exact read path.
+- For `*-one-read` phases, open one storage read statement around the timed
+  loop to isolate steady-state lookup cost when file, header, and catalog state
+  are already scoped by one read statement.
 - Verify each lookup returns the expected row id from the stored primary-key
   entryset; the row phase also verifies a row payload size.
 - Report row-id checksum and, for the row phase, row-size checksum to keep the
@@ -75,22 +79,26 @@ Benchmark-tool-only code. No dependency change.
 - `cmake --build --preset storage-smoke-dev --target mylite_perf_baseline`
 - `build/storage-smoke-dev/tools/mylite_perf_baseline --help`
 - `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=storage-pk-entry-lookups 10000 1000000`
-  - `storage primary-key entry lookups`: `4.198 us/op`
+  - `storage primary-key entry lookups`: `4.152 us/op`
+- `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=storage-pk-entry-lookups-one-read 10000 1000000`
+  - `storage primary-key entry lookups in one read statement`: `0.173 us/op`
 - `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=storage-pk-row-lookups 10000 1000000`
-  - `storage primary-key row lookups`: `5.946 us/op`
+  - `storage primary-key row lookups`: `4.747 us/op`
+- `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=storage-pk-row-lookups-one-read 10000 1000000`
+  - `storage primary-key row lookups in one read statement`: `0.508 us/op`
 - `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=prepared-pk-selects 10000 1000000`
-  - `prepared primary-key point selects`: `9.099 us/op`
+  - `prepared primary-key point selects`: `7.845 us/op`
 - `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=prepared-scalar-selects 10000 1000000`
-  - `prepared scalar selects`: `0.707 us/op`
+  - `prepared scalar selects`: `0.738 us/op`
 - `ctest --preset storage-smoke-dev --output-on-failure`
 - `git diff --check`
 - `git clang-format --diff -- tools/mylite_perf_baseline.c`
 
 ## Acceptance Criteria
 
-- `tools/mylite_perf_baseline --help` lists the new phases and metrics.
-- The new phases verify row ids, and the row phase verifies row payload sizes,
-  for repeated storage point lookups.
+- `tools/mylite_perf_baseline --help` lists the storage phases and metrics.
+- The storage phases verify row ids, and the row phases verify row payload
+  sizes, for repeated storage point lookups.
 - Benchmark output gives a storage-level lower-level comparison point for the
   existing prepared SQL point-select phase.
 
