@@ -205,7 +205,8 @@ Held-read-scope variants isolate steady-state exact-index and row materializatio
 cost once one storage read statement is already open, while a storage
 read-statement phase measures begin/end overhead directly.
 Hot read-checkpoint cache hits now borrow the cached catalog image for scoped
-catalog views instead of deep-copying it into every short-lived read statement.
+catalog views and defer catalog page copies until a caller needs page bytes,
+instead of deep-copying that state into every short-lived read statement.
 The durable row-payload cache now retains a larger bounded hot set, reducing
 steady-state 10000-row storage row materialization and routed prepared
 primary-key point-select time for the local benchmark.

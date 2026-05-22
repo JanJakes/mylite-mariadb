@@ -81,19 +81,19 @@ Benchmark-tool-only code. No dependency change.
 - `cmake --build --preset storage-smoke-dev --target mylite_perf_baseline`
 - `build/storage-smoke-dev/tools/mylite_perf_baseline --help`
 - `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=storage-pk-entry-lookups 10000 1000000`
-  - `storage primary-key entry lookups`: `4.086 us/op`
+  - `storage primary-key entry lookups`: `3.994 us/op`
 - `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=storage-pk-entry-lookups-one-read 10000 1000000`
-  - `storage primary-key entry lookups in one read statement`: `0.174 us/op`
+  - `storage primary-key entry lookups in one read statement`: `0.180 us/op`
 - `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=storage-pk-row-lookups 10000 1000000`
-  - `storage primary-key row lookups`: `4.584 us/op`
+  - `storage primary-key row lookups`: `4.444 us/op`
 - `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=storage-pk-row-lookups-one-read 10000 1000000`
-  - `storage primary-key row lookups in one read statement`: `0.511 us/op`
+  - `storage primary-key row lookups in one read statement`: `0.546 us/op`
 - `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=storage-read-statements 10000 1000000`
-  - `storage read statement begin/end pairs`: `3.729 us/op`
+  - `storage read statement begin/end pairs`: `3.706 us/op`
 - `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=prepared-pk-selects 10000 1000000`
-  - `prepared primary-key point selects`: `7.635 us/op`
+  - `prepared primary-key point selects`: `7.570 us/op`
 - `build/storage-smoke-dev/tools/mylite_perf_baseline --phase=prepared-scalar-selects 10000 1000000`
-  - `prepared scalar selects`: `0.681 us/op`
+  - `prepared scalar selects`: `0.709 us/op`
 - `ctest --preset storage-smoke-dev --output-on-failure`
 - `git diff --check`
 - `git clang-format --diff -- tools/mylite_perf_baseline.c`
