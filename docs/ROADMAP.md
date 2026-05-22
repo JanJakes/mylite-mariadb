@@ -205,12 +205,11 @@ hidden-index, and in-server helper guard calls after direct-update
 initialization has proven the ordinary table shape. MyLite's single-table
 update prepare path now also skips value-list `setup_fields()` when every
 assigned value is an evaluable basic constant, keeping expression updates on
-the normal setup path. The local prepared-update execute component now holds
-near 2.1-2.4 us/op in the 1000-row/10000-iteration and
-10000-row/100000-iteration samples, and the 10000-row / 1000000-iteration
-component sample improved from about 1.75 us/op to 1.65-1.69 us/op; broader
-prepared update work can move to remaining MariaDB table-open, JOIN prepare,
-handler, and checkpoint overhead.
+the normal setup path. The local expression-based prepared-update execute
+component still holds near 1.65-1.75 us/op in the 10000-row /
+1000000-iteration samples; broader prepared update work can move to remaining
+MariaDB table-open, value-expression setup, JOIN prepare, handler, and
+checkpoint overhead.
 Same-size row-only active rewrites now capture only the row checksum-plus-payload
 undo range and rewrite only payload bytes while preserving rollback correctness
 after dirty buffered-page checksum refreshes and later size-changing rewrites in
@@ -892,9 +891,11 @@ accepted MyLite direct-update path. The staged design is tracked in
 The first implementation step caches the immutable prepared-update value-list
 subquery shape on `Sql_cmd_update`, avoiding repeated value-list scans before
 the MyLite single-update result-elision gate. The next step skips value-list
-`setup_fields()` for simple literal and bound-scalar update values, moving the
-hot prepared-update step sample to about 1.65-1.69 us/op while preserving the
-normal setup path for expressions and contextual values.
+`setup_fields()` for simple literal and bound-scalar update values while
+preserving the normal setup path for expressions and contextual values. The
+current expression-update benchmark still shows repeated table-open,
+value-expression setup, and `JOIN::prepare()` work as the next prepared-DML
+performance wall.
 
 ## Size And Profile Direction
 

@@ -8,10 +8,15 @@ path. A current local sample shows time in `Sql_cmd_update::prepare_inner()`,
 `JOIN::prepare()`, `open_tables_for_query()`, and the value-list
 `setup_fields()` call used by MyLite's single-update result-elision path.
 
-The benchmark's `SET` list assigns one bound scalar parameter. That value
-cannot read table columns, introduce subqueries, or require read-map
-registration. Running the full value `setup_fields()` pass for that shape is
-therefore empty work.
+Prepared updates that assign a literal or bound scalar parameter, such as
+`SET value = ?`, cannot read table columns, introduce subqueries, or require
+read-map registration for the assigned value. Running the full value
+`setup_fields()` pass for that shape is therefore empty work.
+
+The current prepared-update component benchmark uses
+`SET value = value + 1 WHERE id = ?`, so it intentionally remains on the
+normal value setup path. This slice does not claim to remove that benchmark's
+expression setup cost.
 
 ## Source Findings
 
@@ -71,7 +76,8 @@ No public `libmylite` API or `.mylite` file-format change.
   `mylite_embedded_storage_engine_test`, and `mylite_perf_baseline`.
 - Run focused prepared-statement and embedded storage-engine tests.
 - Run full `ctest --preset storage-smoke-dev --output-on-failure`.
-- Run `mylite_perf_baseline --phase=prepared-update-components 10000 1000000`.
+- Run `mylite_perf_baseline --phase=prepared-update-components 10000 1000000`
+  to verify the expression-update benchmark does not materially regress.
 - Keep expression-based prepared update coverage passing so the fallback setup
   path remains covered.
 
@@ -82,7 +88,8 @@ No public `libmylite` API or `.mylite` file-format change.
 - Prepared expression updates still execute the normal value setup path.
 - Existing prepared DML semantics, diagnostics, statement effects, rollback,
   CHECK, generated-column, and FK coverage pass.
-- The local prepared-update step component does not regress.
+- The local expression-based prepared-update step component does not materially
+  regress.
 
 ## Risks
 
