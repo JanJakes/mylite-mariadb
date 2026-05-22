@@ -67,7 +67,18 @@ constexpr const char *k_not_an_error = "not an error";
 constexpr const char *k_bad_db_handle = "bad database handle";
 #if MYLITE_WITH_MARIADB_EMBEDDED
 constexpr unsigned long k_initial_column_buffer_size = 256;
-constexpr std::size_t k_prepared_one_row_result_cache_entry_limit = 4096;
+constexpr std::size_t k_prepared_one_row_result_cache_set_count = 4096;
+constexpr std::size_t k_prepared_one_row_result_cache_way_count = 4;
+constexpr std::size_t k_prepared_one_row_result_cache_entry_limit =
+    k_prepared_one_row_result_cache_set_count * k_prepared_one_row_result_cache_way_count;
+static_assert(
+    (k_prepared_one_row_result_cache_set_count &
+     (k_prepared_one_row_result_cache_set_count - 1U)) == 0U
+);
+static_assert(
+    (k_prepared_one_row_result_cache_way_count &
+     (k_prepared_one_row_result_cache_way_count - 1U)) == 0U
+);
 #endif
 
 enum class BoundValueKind : unsigned char {
@@ -341,6 +352,7 @@ struct mylite_stmt {
     std::vector<MYSQL_BIND> result_binds;
     std::vector<ColumnValue> values;
     std::vector<PreparedOneRowResultCacheEntry> one_row_result_cache;
+    std::vector<unsigned char> one_row_result_cache_next_way;
     std::vector<ColumnValue> one_row_result_cache_pending_values;
 #endif
     std::vector<BoundValue> parameters;
@@ -545,7 +557,7 @@ void put_one_row_result_cache_entry(
     mylite_stmt &statement,
     const PreparedOneRowResultCacheKey &key
 );
-std::size_t one_row_result_cache_slot(const PreparedOneRowResultCacheKey &key);
+std::size_t one_row_result_cache_set_start(const PreparedOneRowResultCacheKey &key);
 bool one_row_result_cache_keys_equal(
     const PreparedOneRowResultCacheKey &left,
     const PreparedOneRowResultCacheKey &right
@@ -2632,6 +2644,7 @@ void store_one_row_result_cache_entry(mylite_stmt &statement) {
 
 void clear_one_row_result_cache(mylite_stmt &statement) {
     statement.one_row_result_cache.clear();
+    statement.one_row_result_cache_next_way.clear();
     clear_one_row_result_cache_execution(statement);
 }
 
@@ -2695,9 +2708,15 @@ const PreparedOneRowResultCacheEntry *find_one_row_result_cache_entry(
     if (statement.one_row_result_cache.empty()) {
         return nullptr;
     }
-    const PreparedOneRowResultCacheEntry &entry =
-        statement.one_row_result_cache[one_row_result_cache_slot(key)];
-    return entry.occupied && one_row_result_cache_keys_equal(entry.key, key) ? &entry : nullptr;
+    const std::size_t set_start = one_row_result_cache_set_start(key);
+    for (std::size_t way = 0; way < k_prepared_one_row_result_cache_way_count; ++way) {
+        const PreparedOneRowResultCacheEntry &entry =
+            statement.one_row_result_cache[set_start + way];
+        if (entry.occupied && one_row_result_cache_keys_equal(entry.key, key)) {
+            return &entry;
+        }
+    }
+    return nullptr;
 }
 
 void put_one_row_result_cache_entry(
@@ -2707,10 +2726,31 @@ void put_one_row_result_cache_entry(
     try {
         if (statement.one_row_result_cache.empty()) {
             statement.one_row_result_cache.resize(k_prepared_one_row_result_cache_entry_limit);
+            statement.one_row_result_cache_next_way.assign(
+                k_prepared_one_row_result_cache_set_count,
+                0U
+            );
         }
 
-        PreparedOneRowResultCacheEntry &entry =
-            statement.one_row_result_cache[one_row_result_cache_slot(key)];
+        const std::size_t set_start = one_row_result_cache_set_start(key);
+        PreparedOneRowResultCacheEntry *target = nullptr;
+        for (std::size_t way = 0; way < k_prepared_one_row_result_cache_way_count; ++way) {
+            PreparedOneRowResultCacheEntry &entry = statement.one_row_result_cache[set_start + way];
+            if (!entry.occupied || one_row_result_cache_keys_equal(entry.key, key)) {
+                target = &entry;
+                break;
+            }
+        }
+        if (target == nullptr) {
+            const std::size_t set_index = set_start / k_prepared_one_row_result_cache_way_count;
+            const std::size_t way = statement.one_row_result_cache_next_way[set_index];
+            statement.one_row_result_cache_next_way[set_index] = static_cast<unsigned char>(
+                (way + 1U) & (k_prepared_one_row_result_cache_way_count - 1U)
+            );
+            target = &statement.one_row_result_cache[set_start + way];
+        }
+
+        PreparedOneRowResultCacheEntry &entry = *target;
         entry.key = key;
         entry.values = statement.one_row_result_cache_pending_values;
         entry.occupied = true;
@@ -2719,14 +2759,16 @@ void put_one_row_result_cache_entry(
     }
 }
 
-std::size_t one_row_result_cache_slot(const PreparedOneRowResultCacheKey &key) {
+std::size_t one_row_result_cache_set_start(const PreparedOneRowResultCacheKey &key) {
     std::uint64_t value = key.kind == BoundValueKind::Int64
                               ? static_cast<std::uint64_t>(key.int64_value)
                               : key.uint64_value;
     value ^= value >> 33U;
     value *= 0xff51afd7ed558ccdULL;
     value ^= value >> 33U;
-    return static_cast<std::size_t>(value) & (k_prepared_one_row_result_cache_entry_limit - 1U);
+    const std::size_t set_index =
+        static_cast<std::size_t>(value) & (k_prepared_one_row_result_cache_set_count - 1U);
+    return set_index * k_prepared_one_row_result_cache_way_count;
 }
 
 bool one_row_result_cache_keys_equal(
