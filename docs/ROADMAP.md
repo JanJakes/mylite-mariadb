@@ -187,7 +187,10 @@ reparses its SQL text for no-op transaction or temporary-table lifecycle
 updates after every successful step. Ordinary result-producing prepared
 statements that do not need MyLite lifecycle, transaction-control, or checkpoint
 machinery now execute through a smaller first-step fast path before binding
-results and fetching the first row. Hot successful prepared binds, resets, and
+results and fetching the first row. The local performance baseline now includes
+a prepared scalar-result phase that avoids routed storage, providing a lower
+bound for prepared result overhead when judging point-read storage/pager work.
+Hot successful prepared binds, resets, and
 execution entry also skip redundant OK diagnostic string assignment when the
 database handle is already in the OK state. Single-part non-null unique-key `UPDATE`
 predicates now build

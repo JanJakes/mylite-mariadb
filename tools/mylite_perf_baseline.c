@@ -14,6 +14,7 @@
 
 typedef enum benchmark_phase {
     BENCHMARK_PHASE_ALL,
+    BENCHMARK_PHASE_PREPARED_SCALAR_SELECTS,
     BENCHMARK_PHASE_POINT_SELECTS,
     BENCHMARK_PHASE_DIRECT_PK_SELECTS,
     BENCHMARK_PHASE_PREPARED_PK_SELECTS,
@@ -25,6 +26,7 @@ typedef enum benchmark_phase {
 
 typedef enum benchmark_metric {
     BENCHMARK_METRIC_OPEN_SETUP,
+    BENCHMARK_METRIC_PREPARED_SCALAR_SELECTS,
     BENCHMARK_METRIC_DIRECT_INSERTS,
     BENCHMARK_METRIC_PREPARED_INSERTS,
     BENCHMARK_METRIC_DIRECT_PK_SELECTS,
@@ -93,6 +95,7 @@ static int print_result(
     uint64_t elapsed_ns
 );
 static int setup_database(benchmark_context *ctx);
+static int benchmark_prepared_scalar_selects(benchmark_context *ctx);
 static int benchmark_insert_rows(benchmark_context *ctx);
 static int benchmark_prepared_insert_rows(benchmark_context *ctx);
 static int benchmark_point_selects(benchmark_context *ctx);
@@ -145,6 +148,7 @@ static void remove_tree_entry(const char *path);
 
 static const benchmark_metric_definition k_metric_definitions[] = {
     {BENCHMARK_METRIC_OPEN_SETUP, "open-setup"},
+    {BENCHMARK_METRIC_PREPARED_SCALAR_SELECTS, "prepared-scalar-selects"},
     {BENCHMARK_METRIC_DIRECT_INSERTS, "direct-inserts"},
     {BENCHMARK_METRIC_PREPARED_INSERTS, "prepared-inserts"},
     {BENCHMARK_METRIC_DIRECT_PK_SELECTS, "direct-pk-selects"},
@@ -230,6 +234,10 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
         config->phase = BENCHMARK_PHASE_ALL;
         return 0;
     }
+    if (strcmp(argument, "prepared-scalar-selects") == 0) {
+        config->phase = BENCHMARK_PHASE_PREPARED_SCALAR_SELECTS;
+        return 0;
+    }
     if (strcmp(argument, "point-selects") == 0) {
         config->phase = BENCHMARK_PHASE_POINT_SELECTS;
         return 0;
@@ -261,9 +269,10 @@ static int parse_phase_argument(const char *argument, benchmark_config *config) 
 
     fprintf(
         stderr,
-        "Expected phase `all`, `point-selects`, `direct-pk-selects`, "
-        "`prepared-pk-selects`, `prepared-pk-select-reset-after-row`, `updates`, "
-        "`direct-updates`, or `prepared-updates`, got: %s\n",
+        "Expected phase `all`, `prepared-scalar-selects`, `point-selects`, "
+        "`direct-pk-selects`, `prepared-pk-selects`, "
+        "`prepared-pk-select-reset-after-row`, `updates`, `direct-updates`, "
+        "or `prepared-updates`, got: %s\n",
         argument
     );
     return 1;
@@ -315,6 +324,8 @@ static const char *benchmark_phase_name(benchmark_phase phase) {
     switch (phase) {
     case BENCHMARK_PHASE_ALL:
         return "all";
+    case BENCHMARK_PHASE_PREPARED_SCALAR_SELECTS:
+        return "prepared-scalar-selects";
     case BENCHMARK_PHASE_POINT_SELECTS:
         return "point-selects";
     case BENCHMARK_PHASE_DIRECT_PK_SELECTS:
@@ -343,6 +354,7 @@ static int run_benchmark(const benchmark_config *config) {
     };
     int result = 1;
     uint64_t start_ns;
+    const int scalar_phase = config->phase == BENCHMARK_PHASE_PREPARED_SCALAR_SELECTS;
     const int point_select_phase =
         config->phase == BENCHMARK_PHASE_POINT_SELECTS ||
         config->phase == BENCHMARK_PHASE_DIRECT_PK_SELECTS ||
@@ -374,6 +386,16 @@ static int run_benchmark(const benchmark_config *config) {
             monotonic_ns() - start_ns
         ) != 0) {
         goto cleanup;
+    }
+
+    if (config->phase == BENCHMARK_PHASE_ALL || scalar_phase) {
+        if (benchmark_prepared_scalar_selects(&ctx) != 0) {
+            goto cleanup;
+        }
+        if (scalar_phase) {
+            result = 0;
+            goto cleanup;
+        }
     }
 
     if (benchmark_insert_rows(&ctx) != 0) {
@@ -469,16 +491,17 @@ cleanup:
 static void print_usage(const char *program) {
     fprintf(
         stderr,
-        "Usage: %s [--phase=all|point-selects|direct-pk-selects|prepared-pk-selects|"
-        "prepared-pk-select-reset-after-row|updates|direct-updates|prepared-updates] "
+        "Usage: %s [--phase=all|prepared-scalar-selects|point-selects|direct-pk-selects|"
+        "prepared-pk-selects|prepared-pk-select-reset-after-row|updates|direct-updates|"
+        "prepared-updates] "
         "[--max-us=<metric>:<value>] [rows] [iterations]\n"
         "\n"
         "Defaults: phase=all rows=100 iterations=100.\n"
-        "Focused point-select and update phases skip unrelated timings after setup.\n"
+        "Focused scalar, point-select, and update phases skip unrelated timings after setup.\n"
         "Thresholds are opt-in and may be supplied more than once. Metrics: "
-        "open-setup, direct-inserts, prepared-inserts, direct-pk-selects, "
-        "prepared-pk-selects, prepared-pk-select-reset-after-row, direct-secondary-selects, "
-        "prepared-secondary-selects, "
+        "open-setup, prepared-scalar-selects, direct-inserts, prepared-inserts, "
+        "direct-pk-selects, prepared-pk-selects, prepared-pk-select-reset-after-row, "
+        "direct-secondary-selects, prepared-secondary-selects, "
         "prepare-leaf-rows, publish-leaf-index, direct-leaf-secondary-selects, "
         "prepared-leaf-secondary-selects, direct-updates, prepared-updates, ordered-scan.\n"
         "Set MYLITE_PERF_KEEP_ROOT=1 to keep the temporary benchmark directory.\n",
@@ -574,6 +597,91 @@ static int setup_database(benchmark_context *ctx) {
         "KEY value_key (value)"
         ") ENGINE=InnoDB"
     );
+}
+
+static int benchmark_prepared_scalar_selects(benchmark_context *ctx) {
+    mylite_stmt *stmt = NULL;
+    uint64_t checksum = 0U;
+    int result = 1;
+
+    if (mylite_prepare(
+            ctx->db,
+            "SELECT CAST(? AS SIGNED) + 1",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) != MYLITE_OK) {
+        report_database_error(ctx, "prepare scalar select");
+        return 1;
+    }
+
+    const uint64_t start_ns = monotonic_ns();
+    for (size_t i = 0; i < ctx->config->iterations; ++i) {
+        const unsigned long long input = (unsigned long long)(i % 1000000U);
+        const unsigned long long expected = input + 1U;
+        if (mylite_bind_int64(stmt, 1U, (long long)input) != MYLITE_OK) {
+            report_database_error(ctx, "bind prepared scalar select");
+            goto cleanup;
+        }
+
+        const int row_result = mylite_step(stmt);
+        if (row_result != MYLITE_ROW) {
+            fprintf(stderr, "Prepared scalar select returned no row\n");
+            report_database_error(ctx, "prepared scalar select");
+            goto cleanup;
+        }
+
+        unsigned long long value = 0U;
+        const mylite_value_type value_type = mylite_column_type(stmt, 0U);
+        if (value_type == MYLITE_TYPE_INT64) {
+            value = (unsigned long long)mylite_column_int64(stmt, 0U);
+        } else if (value_type == MYLITE_TYPE_UINT64) {
+            value = mylite_column_uint64(stmt, 0U);
+        } else {
+            fprintf(stderr, "Prepared scalar select returned a non-integer value\n");
+            goto cleanup;
+        }
+        if (value != expected) {
+            fprintf(
+                stderr,
+                "Prepared scalar select returned %llu; expected %llu\n",
+                value,
+                expected
+            );
+            goto cleanup;
+        }
+        checksum += value;
+
+        const int done_result = mylite_step(stmt);
+        if (done_result != MYLITE_DONE) {
+            fprintf(stderr, "Prepared scalar select returned extra rows\n");
+            report_database_error(ctx, "prepared scalar select completion");
+            goto cleanup;
+        }
+        if (mylite_reset(stmt) != MYLITE_OK) {
+            report_database_error(ctx, "reset prepared scalar select");
+            goto cleanup;
+        }
+    }
+
+    if (print_result(
+            ctx->config,
+            BENCHMARK_METRIC_PREPARED_SCALAR_SELECTS,
+            "prepared scalar selects",
+            ctx->config->iterations,
+            monotonic_ns() - start_ns
+        ) != 0) {
+        goto cleanup;
+    }
+    printf("Prepared scalar checksum: %" PRIu64 "\n", checksum);
+    result = 0;
+
+cleanup:
+    if (mylite_finalize(stmt) != MYLITE_OK) {
+        report_database_error(ctx, "finalize prepared scalar select");
+        return 1;
+    }
+    return result;
 }
 
 static int benchmark_insert_rows(benchmark_context *ctx) {
