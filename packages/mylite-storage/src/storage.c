@@ -1035,6 +1035,9 @@ static mylite_storage_statement *allocate_read_statement(void);
 static void initialize_reusable_statement_storage(mylite_storage_statement *statement);
 static void reset_reusable_nested_checkpoint_storage(mylite_storage_statement *statement);
 static void reset_reusable_read_statement_storage(mylite_storage_statement *statement);
+static int reusable_nested_checkpoint_can_skip_general_cleanup(
+    const mylite_storage_statement *statement
+);
 static mylite_storage_result initialize_checkpoint_statement(
     mylite_storage_statement *statement,
     const char *filename,
@@ -12292,6 +12295,13 @@ static void free_statement(mylite_storage_statement *statement) {
     if (statement->file != NULL && statement->owns_file) {
         fclose(statement->file);
     }
+    if (keep_reusable_nested_storage &&
+        reusable_nested_checkpoint_can_skip_general_cleanup(statement)) {
+        reset_buffered_page_undos_for_reuse(statement);
+        reset_reusable_nested_checkpoint_storage(statement);
+        reusable_nested_checkpoint_statement = statement;
+        return;
+    }
     clear_exact_index_caches(statement);
     clear_live_row_caches(statement);
     clear_live_row_id_caches(statement);
@@ -12326,6 +12336,50 @@ static void free_statement(mylite_storage_statement *statement) {
         return;
     }
     free(statement);
+}
+
+static int reusable_nested_checkpoint_can_skip_general_cleanup(
+    const mylite_storage_statement *statement
+) {
+    return statement->exact_index_caches.entries == NULL &&
+           statement->exact_index_caches.count == 0U &&
+           !statement->exact_index_caches.has_last_lookup_index &&
+           statement->live_row_caches.entries == NULL && statement->live_row_caches.count == 0U &&
+           !statement->live_row_caches.has_last_lookup_index &&
+           statement->live_row_id_caches.entries == NULL &&
+           statement->live_row_id_caches.count == 0U &&
+           !statement->live_row_id_caches.has_last_lookup_index &&
+           statement->row_payload_caches.entries == NULL &&
+           statement->row_payload_caches.count == 0U &&
+           !statement->row_payload_caches.has_last_lookup_index &&
+           statement->table_entry_cache.schema_name == NULL &&
+           statement->table_entry_cache.table_name == NULL &&
+           !statement->table_entry_cache.has_entry &&
+           statement->index_root_entry_cache.schema_name == NULL &&
+           statement->index_root_entry_cache.table_name == NULL &&
+           !statement->index_root_entry_cache.has_entry &&
+           !statement->table_index_root_absence_cache.has_absence &&
+           statement->row_state_map_cache.row_state_map.entries == NULL &&
+           statement->row_state_map_cache.row_state_map.buckets == NULL &&
+           !statement->row_state_map_cache.has_map &&
+           !statement->live_row_id_cache_absence_cache.has_absence &&
+           statement->current_catalog_image.bytes == NULL &&
+           statement->current_catalog_image.used_bytes == 0U &&
+           statement->current_catalog_image.capacity == 0U &&
+           statement->current_catalog_image.record_count == 0ULL &&
+           !statement->has_current_catalog_image && !statement->has_current_catalog_page &&
+           statement->append_pages.pages == NULL &&
+           statement->append_pages.checksum_dirty == NULL &&
+           statement->append_pages.page_count == 0U &&
+           statement->append_pages.capacity_pages == 0U &&
+           statement->dirty_page_undos.entries == NULL && statement->dirty_page_undos.count == 0U &&
+           statement->dirty_page_undos.capacity == 0U &&
+           statement->journal_dirty_pages.entries == NULL &&
+           statement->journal_dirty_pages.count == 0U &&
+           statement->journal_dirty_pages.capacity == 0U &&
+           statement->buffered_update_rewrites.buckets == NULL &&
+           statement->buffered_update_rewrites.count == 0U &&
+           statement->buffered_update_rewrites.bucket_capacity == 0U;
 }
 
 static void reset_reusable_nested_checkpoint_storage(mylite_storage_statement *statement) {

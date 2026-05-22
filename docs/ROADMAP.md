@@ -692,6 +692,10 @@ snapshot cloning.
 Those reusable nested checkpoint objects now also keep bounded buffered-page
 undo entry storage attached between prepared row-DML executions, resetting
 rollback state without releasing and re-adopting the same small array.
+Reusable nested checkpoint cleanup now also skips the general cache/resource
+clear path when every resource-owning cache is already empty, reducing hot
+prepared row-DML commit cleanup while leaving broader statement cleanup
+unchanged.
 Already-flushed replacement runs keep the append-only path.
 Capacity failures from physical
 primary-file writes, sequential journal writes, flushes, syncs, and truncation
