@@ -130,7 +130,9 @@ checkpoint header reads unchanged. When a trusted filename identity scope is
 active, short-lived read statements also borrow that stable filename pointer
 instead of allocating an identical copy; unscoped reusable read statements now
 retain their owned filename for same-file reuse while still replacing it across
-different files. Fixed-size random page reads and writes use offset-addressed
+different files. Durable exact-index and row-payload caches now use that same
+trusted filename identity before falling back to filename value comparisons on
+hot point-read cache lookups. Fixed-size random page reads and writes use offset-addressed
 `pread()` / `pwrite()` calls, avoiding per-page stdio seek and refill overhead
 while leaving sequential journal writes on the stream path.
 MariaDB table-discovery callbacks now use the same scoped read sessions for

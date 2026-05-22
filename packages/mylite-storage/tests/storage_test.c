@@ -50,6 +50,8 @@ int mylite_storage_test_statement_filename_is(
     const mylite_storage_statement *statement,
     const char *filename
 );
+int mylite_storage_test_durable_exact_index_cache_has_filename_identity(const char *filename);
+int mylite_storage_test_durable_row_payload_cache_has_filename_identity(const char *filename);
 #endif
 
 typedef struct index_entries_test_context {
@@ -272,6 +274,7 @@ static void test_active_row_payload_cache_validates_update(void);
 static void test_active_table_entry_cache_catalog_invalidation(void);
 static void test_active_table_entry_cache_mutable_name_buffers(void);
 static void test_filename_identity_scope_mutable_filename_buffer(void);
+static void test_durable_lookup_caches_borrow_filename_identity(void);
 static void test_active_row_payload_cache_many_replacements(void);
 static void test_durable_live_row_cache(void);
 static void test_deferred_durable_cache_retarget(void);
@@ -655,6 +658,7 @@ int main(void) {
     test_active_table_entry_cache_catalog_invalidation();
     test_active_table_entry_cache_mutable_name_buffers();
     test_filename_identity_scope_mutable_filename_buffer();
+    test_durable_lookup_caches_borrow_filename_identity();
     test_active_row_payload_cache_many_replacements();
     test_durable_live_row_cache();
     test_deferred_durable_cache_retarget();
@@ -3099,6 +3103,126 @@ static void test_filename_identity_scope_mutable_filename_buffer(void) {
     free(second_filename);
     free(first_filename);
     free(root);
+}
+
+static void test_durable_lookup_caches_borrow_filename_identity(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row[] = {0x00U, 0x11U, 'a'};
+    static const unsigned char key[] = {0x11U};
+    char *root = make_temp_root();
+    char *unscoped_filename = path_join(root, "durable-cache-identity-unscoped.mylite");
+    char *scoped_filename = path_join(root, "durable-cache-identity-scoped.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_index_entry index_entry = {
+        .size = sizeof(index_entry),
+        .index_number = 0U,
+        .key = key,
+        .key_size = sizeof(key),
+    };
+    unsigned long long unscoped_row_id = 0ULL;
+    unsigned long long scoped_row_id = 0ULL;
+    unsigned long long found_row_id = 0ULL;
+    size_t found_row_size = 0U;
+    unsigned char found_row[sizeof(row)] = {0};
+    mylite_storage_filename_identity_scope filename_scope = {0};
+
+    assert(mylite_storage_create_empty(unscoped_filename) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_store_table_definition(unscoped_filename, &table_definition) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            unscoped_filename,
+            "app",
+            "posts",
+            row,
+            sizeof(row),
+            &index_entry,
+            1U,
+            &unscoped_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+
+    assert(mylite_storage_create_empty(scoped_filename) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_store_table_definition(scoped_filename, &table_definition) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            scoped_filename,
+            "app",
+            "posts",
+            row,
+            sizeof(row),
+            &index_entry,
+            1U,
+            &scoped_row_id
+        ) == MYLITE_STORAGE_OK
+    );
+
+    assert(
+        mylite_storage_find_indexed_row_into(
+            unscoped_filename,
+            "app",
+            "posts",
+            0U,
+            key,
+            sizeof(key),
+            &found_row_id,
+            found_row,
+            sizeof(found_row),
+            &found_row_size
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(found_row_id == unscoped_row_id);
+    assert(found_row_size == sizeof(row));
+    assert(memcmp(found_row, row, sizeof(row)) == 0);
+    assert(!mylite_storage_test_durable_exact_index_cache_has_filename_identity(unscoped_filename));
+    assert(!mylite_storage_test_durable_row_payload_cache_has_filename_identity(unscoped_filename));
+
+    found_row_id = 0ULL;
+    found_row_size = 0U;
+    memset(found_row, 0, sizeof(found_row));
+    mylite_storage_begin_filename_identity_scope(scoped_filename, &filename_scope);
+    assert(
+        mylite_storage_find_indexed_row_into(
+            scoped_filename,
+            "app",
+            "posts",
+            0U,
+            key,
+            sizeof(key),
+            &found_row_id,
+            found_row,
+            sizeof(found_row),
+            &found_row_size
+        ) == MYLITE_STORAGE_OK
+    );
+    mylite_storage_end_filename_identity_scope(&filename_scope);
+    assert(found_row_id == scoped_row_id);
+    assert(found_row_size == sizeof(row));
+    assert(memcmp(found_row, row, sizeof(row)) == 0);
+    assert(mylite_storage_test_durable_exact_index_cache_has_filename_identity(scoped_filename));
+    assert(mylite_storage_test_durable_row_payload_cache_has_filename_identity(scoped_filename));
+
+    assert(unlink(unscoped_filename) == 0);
+    assert(unlink(scoped_filename) == 0);
+    assert(rmdir(root) == 0);
+    free(scoped_filename);
+    free(unscoped_filename);
+    free(root);
+#endif
 }
 
 static void test_active_row_payload_cache_many_replacements(void) {
