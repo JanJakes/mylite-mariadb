@@ -46,7 +46,8 @@ DROP TABLE t1;
 --echo #
 --echo # Testing of IFNULL
 --echo #
-create table t1 (a int, b int) engine=myisam;
+--replace_result engine=Aria engine=myisam
+create table t1 (a int, b int) engine=Aria;
 insert into t1 values(20,null);
 select t2.b, ifnull(t2.b,"this is null") from t1 as t2 left join t1 as t3 on
 t2.b=t3.a;
@@ -116,10 +117,12 @@ insert into t1 select i*2 from t1;
 insert into t1 select i*2 from t1;
 insert into t1 select i*2 from t1;
 insert into t1 values(null);
+--replace_column 9 9
 explain select * from t1 where i=2 or i is null;
 select count(*) from t1 where i=2 or i is null;
 SET STATEMENT sql_mode = 'NO_ENGINE_SUBSTITUTION' FOR
 alter table t1 change i i int not null;
+--replace_column 9 8
 explain select * from t1 where i=2 or i is null;
 select count(*) from t1 where i=2 or i is null;
 drop table t1;
@@ -171,6 +174,7 @@ create table t1 select
   lpad('str', 10, null) as c37,
   rpad(null, 10, 'str') as c38;
   
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 drop table t1;
 
@@ -195,10 +199,13 @@ set names latin1;
 --echo #
 --echo # Bug#19145: mysqld crashes if you set the default value of an enum field to NULL
 --echo #
-create table bug19145a (e enum('a','b','c') default 'b' , s set('x', 'y', 'z') default 'y' ) engine=MyISAM;
-create table bug19145b (e enum('a','b','c') default null, s set('x', 'y', 'z') default null) engine=MyISAM;
+--replace_result engine=Aria engine=MyISAM
+create table bug19145a (e enum('a','b','c') default 'b' , s set('x', 'y', 'z') default 'y' ) engine=Aria;
+--replace_result engine=Aria engine=MyISAM
+create table bug19145b (e enum('a','b','c') default null, s set('x', 'y', 'z') default null) engine=Aria;
 
-create table bug19145c (e enum('a','b','c') not null default 'b' , s set('x', 'y', 'z') not null default 'y' ) engine=MyISAM;
+--replace_result engine=Aria engine=MyISAM
+create table bug19145c (e enum('a','b','c') not null default 'b' , s set('x', 'y', 'z') not null default 'y' ) engine=Aria;
 
 # Invalid default value for 's'
 --error ER_INVALID_DEFAULT
@@ -225,8 +232,11 @@ alter table bug19145c alter column e set default null;
 alter table bug19145c alter column s set default null;
 alter table bug19145c add column (i int);
 
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table bug19145a;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table bug19145b;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table bug19145c;
 
 drop table bug19145a;
@@ -294,8 +304,10 @@ DROP TABLE t1;
 --echo # MDEV-5132 crash when exeicuting a join query with IS NULL and IS NOT NULL in where
 --echo #
 
-CREATE TABLE t1 (a DATE, b INT, c INT, KEY(a), KEY(b), KEY(c)) ENGINE=MyISAM; 
-CREATE TABLE t2 (d DATE) ENGINE=MyISAM; 
+--replace_result ENGINE=Aria ENGINE=MyISAM
+CREATE TABLE t1 (a DATE, b INT, c INT, KEY(a), KEY(b), KEY(c)) ENGINE=Aria;
+--replace_result ENGINE=Aria ENGINE=MyISAM
+CREATE TABLE t2 (d DATE) ENGINE=Aria;
 
 SELECT  * FROM t1,t2 WHERE  1 IS NOT NULL AND t1.b IS NULL;
 
@@ -334,6 +346,7 @@ DROP TABLE t1;
 
 CREATE TABLE t1 (a TIME);
 CREATE TABLE t2 AS SELECT a,NULLIF(a,a), CASE WHEN a=a THEN NULL ELSE a END FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t1,t2;
 
@@ -347,6 +360,7 @@ CREATE TABLE t1 AS SELECT
   NULLIF(1,1e0),
   NULLIF(1,'2001-01-01'),
   NULLIF(1,TIME'00:00:00');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 DROP TABLE t1;
 
@@ -357,6 +371,7 @@ CREATE TABLE t1 AS SELECT
   NULLIF(1.0,1e0),
   NULLIF(1.0,'2001-01-01'),
   NULLIF(1.0,TIME'00:00:00');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 DROP TABLE t1;
 
@@ -367,6 +382,7 @@ CREATE TABLE t1 AS SELECT
   NULLIF(1e0,1e0),
   NULLIF(1e0,'2001-01-01'),
   NULLIF(1e0,TIME'00:00:00');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 DROP TABLE t1;
 
@@ -376,6 +392,7 @@ CREATE TABLE t1 AS SELECT
   NULLIF('1',1e0),
   NULLIF('1','2001-01-01'),
   NULLIF('1',TIME'00:00:00');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 DROP TABLE t1;
 
@@ -386,6 +403,7 @@ CREATE TABLE t1 AS SELECT
   NULLIF(TIMESTAMP'2001-01-01 00:00:00',1e0),
   NULLIF(TIMESTAMP'2001-01-01 00:00:00','2001-01-01'),
   NULLIF(TIMESTAMP'2001-01-01 00:00:00',TIME'00:00:00');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 DROP TABLE t1;
 
@@ -396,6 +414,7 @@ CREATE TABLE t1 AS SELECT
   NULLIF(DATE'2001-01-01',1e0),
   NULLIF(DATE'2001-01-01','2001-01-01'),
   NULLIF(DATE'2001-01-01',TIME'00:00:00');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 DROP TABLE t1;
 
@@ -405,6 +424,7 @@ CREATE TABLE t1 AS SELECT
   NULLIF(TIME'00:00:01',1e0),
   NULLIF(TIME'00:00:01','00:00:00'),
   NULLIF(TIME'00:00:01',DATE'2001-01-01');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 DROP TABLE t1;
 
@@ -455,6 +475,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(c_tinyint,  c_date),
   NULLIF(c_tinyint,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -476,6 +497,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(c_smallint,  c_date),
   NULLIF(c_smallint,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -497,6 +519,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(c_int,  c_date),
   NULLIF(c_int,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -518,6 +541,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(c_bigint,  c_date),
   NULLIF(c_bigint,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -540,6 +564,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(c_float,  c_date),
   NULLIF(c_float,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -561,6 +586,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(c_double,  c_date),
   NULLIF(c_double,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -582,6 +608,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(c_decimal103,  c_date),
   NULLIF(c_decimal103,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -603,6 +630,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(c_varchar10,  c_date),
   NULLIF(c_varchar10,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -624,6 +652,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(c_tinytext,  c_date),
   NULLIF(c_tinytext,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -645,6 +674,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(c_text,  c_date),
   NULLIF(c_text,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -666,6 +696,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(c_mediumtext,  c_date),
   NULLIF(c_mediumtext,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -687,6 +718,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(c_longtext,  c_date),
   NULLIF(c_longtext,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -709,6 +741,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(c_tinyblob,  c_date),
   NULLIF(c_tinyblob,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -730,6 +763,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(c_blob,  c_date),
   NULLIF(c_blob,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -751,6 +785,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(c_mediumblob,  c_date),
   NULLIF(c_mediumblob,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -772,6 +807,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(c_longblob,  c_date),
   NULLIF(c_longblob,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -795,6 +831,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(c_enum,  c_date),
   NULLIF(c_enum,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -816,6 +853,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(c_datetime3,  c_date),
   NULLIF(c_datetime3,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -837,6 +875,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(c_timestamp3,  c_date),
   NULLIF(c_timestamp3,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -858,6 +897,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(c_date,  c_date),
   NULLIF(c_date,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -879,6 +919,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(c_time,  c_date),
   NULLIF(c_time,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -904,6 +945,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(1,  c_date),
   NULLIF(1,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -925,6 +967,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(1.0,  c_date),
   NULLIF(1.0,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -946,6 +989,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(1e0,  c_date),
   NULLIF(1e0,  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -967,6 +1011,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF('1',  c_date),
   NULLIF('1',  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 
@@ -988,6 +1033,7 @@ CREATE TABLE t2 AS SELECT
   NULLIF(TIME'10:10:10',  c_date),
   NULLIF(TIME'10:10:10',  c_time)
 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t2;
 

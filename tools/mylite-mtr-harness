@@ -32,6 +32,7 @@ default_tests=(
   main.type_float
   main.type_uint
   main.type_bool
+  main.null
   main.type_hex_hybrid
   main.type_int
   main.type_char
