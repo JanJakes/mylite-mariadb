@@ -214,9 +214,10 @@ entry path. Static exact entryset reads over no-tail branch roots now start
 from the selected child and stream later branch leaves only until the exact key
 range ends, including duplicate keys that span adjacent leaves. Static prefix
 entryset reads over no-tail branch roots follow the same branch-bounded stream
-for matching prefix ranges. Static full entryset reads over no-tail branch
-roots stream branch leaves directly without first materializing the full branch
-leaf list.
+for matching prefix ranges, and static prefix-existence checks use that direct
+branch stream before falling back to the overlay-aware path. Static full
+entryset reads over no-tail branch roots stream branch leaves directly without
+first materializing the full branch leaf list.
 When an insert first overflows a maintained single-page root and the live
 entries fit in one branch, storage appends immutable leaf pages and rewrites
 the same root page as a branch snapshot; later row DML against that index
@@ -1139,8 +1140,8 @@ return only live entries matching a serialized key prefix for durable grouped
 autoincrement allocation, and durable prefix-existence fallback checks reuse
 an allocation-free row-id overlay instead of materializing full or narrowed key
 entrysets.
-Static no-tail prefix-existence checks use leaf-run page bounds before the
-existing allocation-free page-local prefix check.
+Static no-tail prefix-existence checks use leaf-run page bounds or branch
+child-range bounds before the existing allocation-free page-local prefix check.
 Durable exact lookups classify each
 published append-only page once and prune candidates as later row-state pages
 hide older row ids. Contiguous index leaf runs can serve as exact and prefix
@@ -1157,7 +1158,8 @@ materialization and read the selected target leaf directly. Static exact
 entryset reads likewise stream the selected key range from branch leaves
 without materializing the full branch leaf list, and static prefix entryset
 reads stream matching branch leaf ranges without building that list. Static
-full entryset reads also stream branch leaves directly for no-tail branch roots.
+prefix-existence checks use the same direct branch range for no-tail roots, and
+static full entryset reads also stream branch leaves directly.
 Branch roots now report their page-owned entry counts for metadata reads when
 present, while zero-count legacy branch pages keep using the catalog record
 count. Eligible final-child deletes can

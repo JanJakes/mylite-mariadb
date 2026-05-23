@@ -14656,6 +14656,7 @@ static void test_branch_prefix_entryset_spans_leaves(void) {
         (long)(first_leaf_page * MYLITE_STORAGE_FORMAT_PAGE_SIZE) +
             MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET
     );
+    assert_index_prefix_exists_for_index(filename, 0U, prefix, sizeof(prefix), 0ULL, 1);
     mylite_storage_index_entryset entries = {
         .size = sizeof(entries),
     };

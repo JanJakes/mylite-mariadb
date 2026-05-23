@@ -145,8 +145,10 @@ selected target leaf after branch descent, leaving append-tail overlays on the
 existing overlay-aware exact path; static no-tail exact entryset reads now
 stream the selected branch key range without materializing the full branch leaf
 list, and static no-tail prefix entryset reads now stream the selected prefix
-range the same way. Static no-tail full entryset reads now stream branch leaves
-without first building the full transient branch leaf list.
+range the same way. Static no-tail prefix-existence checks now stream the
+selected prefix branch range without building the leaf run. Static no-tail full
+entryset reads now stream branch leaves without first building the full
+transient branch leaf list.
 insert overflow of a maintained single-page root now promotes fitting live
 root-plus-tail entries to a stable single-level branch snapshot without a
 catalog rewrite, while unsupported later branch-root row DML remains on the
@@ -220,7 +222,8 @@ construction falls through to published roots or append-history scans.
 Prefix-existence fallback checks now use an allocation-free row-id overlay,
 avoiding full or narrowed key-entryset materialization when static no-tail leaf
 roots cannot answer directly. Static no-tail prefix-existence checks now start
-from the first leaf page whose last key is not below the requested prefix.
+from the first leaf page or branch child range whose last key is not below the
+requested prefix.
 Published leaf-root readers now cache resolved index-root catalog entries on
 the active statement, avoiding repeated catalog-record scans for the same table
 and index root. Repeated read statements over unchanged durable header bytes
