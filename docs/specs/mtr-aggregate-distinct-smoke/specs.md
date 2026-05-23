@@ -3,10 +3,11 @@
 ## Goal
 
 Extend the opt-in MariaDB MTR smoke runner with exact upstream tests
-`main.count_distinct` and `main.sum_distinct`. This adds curated embedded
-baseline coverage for `COUNT(DISTINCT ...)`, `SUM(DISTINCT ...)`, aggregate
-NULL behavior, aggregate use across joins, views, subqueries, grouped results,
-small temporary-table limits, and selected aggregate cleanup regressions.
+`main.count_distinct`, `main.bench_count_distinct`, and `main.sum_distinct`.
+This adds curated embedded baseline coverage for `COUNT(DISTINCT ...)`,
+`SUM(DISTINCT ...)`, aggregate NULL behavior, aggregate use across joins,
+views, subqueries, grouped results, indexed `COUNT(DISTINCT ...)`, small
+temporary-table limits, and selected aggregate cleanup regressions.
 
 ## Non-Goals
 
@@ -25,11 +26,15 @@ MariaDB base: `mariadb-11.8.6`
   `COUNT(DISTINCT ...)` across left joins, `HAVING`, user variables, empty
   inputs, views, grouped rows, temporary-table memory pressure, and regression
   cases around cleanup and null grouping.
+- `mariadb/mysql-test/main/bench_count_distinct.test` exercises indexed
+  `COUNT(DISTINCT ...)` over duplicate inserted values with
+  `DELAY_KEY_WRITE`.
 - `mariadb/mysql-test/main/sum_distinct.test` exercises
   `SUM(DISTINCT ...)` over empty inputs, all-NULL inputs, nested subqueries,
   cross joins, grouped rows, `SQL_BUFFER_RESULT`, string-to-number conversion,
   and a derived-table empty-input regression.
-- Both tests pass under the MyLite MTR smoke profile without source changes.
+- All three tests pass under the MyLite MTR smoke profile without source
+  changes.
 - Nearby aggregate/query candidates are not yet suitable for the curated list:
   `main.distinct` and `main.group_by` are skipped because the profile disables
   the Sequence engine, `main.having` and `main.func_group` require native
@@ -48,9 +53,10 @@ storage-routing evidence.
 
 ## Design
 
-Add `main.count_distinct` and `main.sum_distinct` to
+Add `main.count_distinct`, `main.bench_count_distinct`, and
+`main.sum_distinct` to
 `tools/mylite-mtr-harness`'s default curated list. No MariaDB test-source
-normalization is needed for these two cases.
+normalization is needed for these three cases.
 
 ## File Lifecycle
 
@@ -70,6 +76,7 @@ still be reclaimed with `rm -rf build/mariadb-mtr-smoke` or `rm -rf build`.
 ## Test Plan
 
 - `tools/mylite-mtr-harness run main.count_distinct`
+- `tools/mylite-mtr-harness run main.bench_count_distinct`
 - `tools/mylite-mtr-harness run main.sum_distinct`
 - `tools/mylite-mtr-harness run`
 - `bash -n tools/mariadb-embedded-build tools/mylite-mtr-harness tools/mylite-compat-harness tools/mylite-size-report`
@@ -78,9 +85,9 @@ still be reclaimed with `rm -rf build/mariadb-mtr-smoke` or `rm -rf build`.
 
 ## Acceptance Criteria
 
-- The default MTR smoke list includes `main.count_distinct` and
-  `main.sum_distinct`.
-- Both tests pass under the MyLite MTR smoke profile.
+- The default MTR smoke list includes `main.count_distinct`,
+  `main.bench_count_distinct`, and `main.sum_distinct`.
+- All three tests pass under the MyLite MTR smoke profile.
 - Docs keep the claim scoped to curated opt-in MTR smoke coverage.
 
 ## Risks And Open Questions

@@ -67,7 +67,7 @@ excludes server surfaces that many upstream suites assume. The opt-in
 smoke list covering the MyLite trimmed bootstrap schema, upstream scalar
 CAST/CONVERT, CASE-family and ANSI SQL-mode expression, selected numeric,
 integer, varchar, binary-string, binary/national character, date/timezone,
-temporal literal, system-timezone,
+leap-second timezone, temporal literal, system-timezone,
 parser/comment, comparison, selected negation-elimination predicate optimizer
 behavior, selected boolean aggregate/HAVING expression behavior, DDL/comment
 metadata, selected MTR-profile view, trigger, and stored-procedure DDL/runtime
@@ -90,7 +90,7 @@ diagnostics, SIGNAL/RESIGNAL diagnostics, row constructors, selected scalar
 and window-function behavior, selected `IF()` / `NULLIF()` conditional
 expressions, selected SET-family scalar functions, scalar operator,
 string/format, charset-conversion expressions, crypto/KDF, disabled DES,
-aggregate DISTINCT, BIT-key autoincrement, autoincrement ODKU,
+aggregate DISTINCT and indexed count-distinct, BIT-key autoincrement, autoincrement ODKU,
 strict HEAP autoincrement,
 temporal scale, high-resolution temporal functions, microsecond parsing,
 date-format, ASCII charset, selected
@@ -106,8 +106,8 @@ The curated list also covers selected filesystem charset,
 UTF-32 `character_set_collations`, JSON equality/normalization behavior, and
 raw embedded dynamic-column disabled fallback behavior, plus selected ODBC
 compatibility syntax, optimizer-trace default metadata, SHOW row-order, system
-`mysql` table reference, long-tmpdir view, and deprecated rename-database
-diagnostic behavior.
+`mysql` table reference, long-tmpdir view, selected slow-log variable and
+general-log path state, and deprecated rename-database diagnostic behavior.
 The same harness also exposes a separate storage-routed MTR mode with
 `list-storage`, `run-storage`, and `probe-storage`. That mode uses
 `build/mariadb-mtr-storage-smoke`, enables the static MyLite storage engine only
@@ -156,7 +156,7 @@ unsupported surfaces, and stable result normalization.
 `tools/mylite-mtr-harness coverage` reports the accepted curated MTR count
 against the imported test-file inventory without configuring, building, or
 running MTR. The current inventory contains 5,901 imported upstream MTR test
-files plus 25 MyLite-owned MTR files; accepted coverage is 192 upstream baseline
+files plus 25 MyLite-owned MTR files; accepted coverage is 199 upstream baseline
 tests, 8 MyLite profile tests, and 17 MyLite storage-routed tests. This is a
 scale measurement, not compatibility proof for unrun tests.
 Probe summaries distinguish passed, failed, and skipped candidates; skipped

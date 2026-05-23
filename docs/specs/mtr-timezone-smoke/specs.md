@@ -15,6 +15,10 @@ taking on broad temporal suite normalization.
   CET daylight-saving transitions, `FROM_UNIXTIME()`, `UNIX_TIMESTAMP()`,
   timestamp warnings for spring time-gap values, timezone-table primary-key
   shape handling, and `%z` / `%Z` `DATE_FORMAT()` timezone output.
+- `mariadb/mysql-test/main/timezone3.test` covers leap-second timezone
+  conversion under the Moscow leap timezone fixture, including
+  `UNIX_TIMESTAMP()`, `FROM_UNIXTIME()`, spring time-gap, ambiguous daylight
+  saving, and leap-second boundary behavior.
 - `mariadb/mysql-test/main/timezone4-master.opt` starts the test with
   `--timezone=GMT+10`.
 - `mariadb/mysql-test/main/timezone4.test` exercises `FROM_UNIXTIME()` and
@@ -43,16 +47,16 @@ under server-surface policy work rather than temporal SQL coverage.
 
 ## Design
 
-Add `main.timezone` beside `main.timezone4` in the default MTR smoke list near
-the existing temporal MTR tests. Do not add result normalization or alternate
-expected files.
+Add `main.timezone3` beside `main.timezone` and `main.timezone4` in the
+default MTR smoke list near the existing temporal MTR tests. Do not add result
+normalization or alternate expected files.
 
 ## Compatibility Impact
 
-This expands upstream MariaDB compatibility evidence for system time zone and
-timestamp conversion behavior under default and non-default server timezones.
-It does not change MyLite SQL behavior, storage routing, public API, file
-format, or single-file lifecycle policy.
+This expands upstream MariaDB compatibility evidence for system time zone,
+leap-second timezone, and timestamp conversion behavior under default and
+non-default server timezones. It does not change MyLite SQL behavior, storage
+routing, public API, file format, or single-file lifecycle policy.
 
 ## Test And Verification Plan
 
@@ -61,16 +65,18 @@ format, or single-file lifecycle policy.
 - `tools/mylite-mtr-harness probe main.type_date main.type_time main.type_datetime main.type_timestamp`
 - `tools/mylite-mtr-harness probe main.temporal_literal main.type_temporal_mysql56 main.type_timestamp_hires main.timezone`
 - `tools/mylite-mtr-harness run main.timezone`
+- `tools/mylite-mtr-harness run main.timezone3`
 - `tools/mylite-mtr-harness run main.timezone4`
-- `tools/mylite-mtr-harness run main.timezone main.timezone4`
+- `tools/mylite-mtr-harness run main.timezone main.timezone3 main.timezone4`
 - `tools/mylite-mtr-harness run`
 - `bash -n tools/mariadb-embedded-build tools/mylite-mtr-harness tools/mylite-compat-harness tools/mylite-size-report`
 - `git diff --check`
 
 ## Acceptance Criteria
 
-- `main.timezone` and `main.timezone4` appear in the curated MTR smoke list.
-- A strict selected run reports both tests as MTR passes.
+- `main.timezone`, `main.timezone3`, and `main.timezone4` appear in the
+  curated MTR smoke list.
+- A strict selected run reports all three tests as MTR passes.
 - The full default MTR smoke run remains green.
 - Roadmap and compatibility docs name the new timezone coverage without
   claiming broad temporal-suite coverage.

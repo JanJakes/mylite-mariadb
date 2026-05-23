@@ -65,6 +65,7 @@ default_tests=(
   main.temporal_literal
   main.second_frac-9175
   main.timezone
+  main.timezone3
   main.timezone4
   main.brackets
   main.comments
@@ -124,6 +125,8 @@ default_tests=(
   main.gcc296
   main.fulltext_multi
   main.fulltext_charsets
+  main.fulltext_update
+  main.fulltext_cache
   main.alter_table_mdev539_maria
   main.alter_table_upgrade_aria
   main.comment_column2
@@ -191,6 +194,7 @@ default_tests=(
   main.ctype_create
   main.ctype_errors
   main.count_distinct
+  main.bench_count_distinct
   main.sum_distinct
   main.func_equal
   main.func_if
@@ -210,6 +214,9 @@ default_tests=(
   main.func_kdf
   main.func_encrypt_nossl
   main.opt_trace_default
+  main.log_slow_filter
+  main.my_getopt_case_insensitive
+  main.log_state_bug33693
   main.odbc
   main.show_row_order-9226
   main.system_mysql_db_refs

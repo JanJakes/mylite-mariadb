@@ -104,7 +104,8 @@ literal/rounding, character/varchar, binary-string, binary/varbinary,
 national-character, interval, integer metadata/rounding, and type behavior,
 selected date,
 temporal-rounding, temporal-function, alternate-timezone conversion,
-system-timezone behavior, temporal literal behavior, temporal scale,
+leap-second timezone conversion, system-timezone behavior, temporal literal
+behavior, temporal scale,
 high-resolution temporal function, microsecond parsing, and time/datetime
 comparison behavior,
 selected parser/comment, alias, wildcard-alias, keyword,
@@ -120,7 +121,8 @@ table-close lifecycle under `RENAME TABLE` / `FLUSH TABLES`,
 selected MTR-profile view, trigger, and stored-procedure DDL/runtime behavior,
 selected DDL constraint/index metadata and UCA CTAS behavior, selected Aria
 ALTER/index-upgrade behavior, selected lock-table DDL behavior, selected
-baseline FULLTEXT declarations and Aria FULLTEXT search behavior,
+baseline FULLTEXT declarations, Aria FULLTEXT update/cache behavior, and Aria
+FULLTEXT search behavior,
 deprecated server syntax rejection,
 selected embedded-profile native-engine absence,
 selected embedded-profile disabled diagnostic behavior,
@@ -146,10 +148,12 @@ bit/extraction/replacement/regexp scalar-function behavior, selected
 default-expression and weight-string behavior, selected string/format function
 behavior, selected charset-conversion expression behavior, selected crypto/KDF
 function behavior, selected disabled DES encryption-function behavior,
-selected JSON equality and normalization behavior, selected aggregate DISTINCT behavior,
+selected JSON equality and normalization behavior, selected aggregate DISTINCT
+and indexed count-distinct behavior,
 selected ODBC compatibility syntax, optimizer-trace default metadata, SHOW
-row-order, system `mysql` table reference, long-tmpdir view, and deprecated
-rename-database diagnostics,
+row-order, system `mysql` table reference, long-tmpdir view, selected slow-log
+variable and general-log path-state behavior, and deprecated rename-database
+diagnostics,
 selected BIT-key, ODKU, and strict HEAP autoincrement behavior, selected
 date-format behavior, selected ASCII, legacy, and UTF-32 charset edge
 behavior, selected Latin2, UTF-8 binary/general, UTF-8 UCA 1400, and utf8mb3

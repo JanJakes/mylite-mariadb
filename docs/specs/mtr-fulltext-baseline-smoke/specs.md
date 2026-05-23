@@ -3,10 +3,12 @@
 ## Goal
 
 Extend the opt-in MariaDB MTR smoke runner with `main.gcc296`,
-`main.fulltext_multi`, and `main.fulltext_charsets`. This adds curated embedded
-baseline coverage for selected FULLTEXT declarations, multiple FULLTEXT indexes,
-`MATCH ... AGAINST` execution, and UTF-8 fulltext search edge behavior over the
-MTR profile's Aria-backed scratch tables.
+`main.fulltext_multi`, `main.fulltext_charsets`, `main.fulltext_update`, and
+`main.fulltext_cache`. This adds curated embedded baseline coverage for
+selected FULLTEXT declarations, multiple FULLTEXT indexes, `MATCH ... AGAINST`
+execution, UTF-8 fulltext search edge behavior, FULLTEXT index updates, table
+checks, and join/cache search ordering over the MTR profile's Aria-backed
+scratch tables.
 
 ## Non-Goals
 
@@ -29,7 +31,11 @@ MariaDB base: `mariadb-11.8.6`
   and combined indexed columns.
 - `mariadb/mysql-test/main/fulltext_charsets.test` exercises an `utf8mb4`
   FULLTEXT index over combining marks and boolean fulltext search.
-- All three tests pass unmodified under the MyLite MTR smoke profile, which
+- `mariadb/mysql-test/main/fulltext_update.test` updates rows covered by a
+  multi-column FULLTEXT index and checks the table afterward.
+- `mariadb/mysql-test/main/fulltext_cache.test` verifies `MATCH ... AGAINST`
+  scoring and ordering across join orders.
+- All five tests pass unmodified under the MyLite MTR smoke profile, which
   uses Aria as the default storage engine and keeps native MyISAM disabled.
 
 ## Design
@@ -67,8 +73,8 @@ No production dependency, binary-size, or default-build change.
 
 ## Test Plan
 
-- `tools/mylite-mtr-harness probe main.gcc296 main.fulltext_charsets main.fulltext_multi`
-- `tools/mylite-mtr-harness run main.gcc296 main.fulltext_charsets main.fulltext_multi`
+- `tools/mylite-mtr-harness probe main.gcc296 main.fulltext_charsets main.fulltext_multi main.fulltext_update main.fulltext_cache`
+- `tools/mylite-mtr-harness run main.gcc296 main.fulltext_charsets main.fulltext_multi main.fulltext_update main.fulltext_cache`
 - `tools/mylite-mtr-harness run`
 - `tools/mylite-mtr-harness list`
 - `bash -n tools/mylite-mtr-harness`
@@ -77,7 +83,7 @@ No production dependency, binary-size, or default-build change.
 
 ## Acceptance Criteria
 
-- All three selected tests report MTR passes under strict harness execution.
+- All five selected tests report MTR passes under strict harness execution.
 - The default MTR smoke list includes the selected FULLTEXT baseline tests.
 - No `.reject` files remain.
 - Docs keep routed-storage FULLTEXT support explicitly out of scope.
@@ -86,11 +92,13 @@ No production dependency, binary-size, or default-build change.
 
 - `tools/mylite-mtr-harness probe main.gcc296 main.fulltext_charsets main.fulltext_multi`:
   passed.
-- `tools/mylite-mtr-harness run main.gcc296 main.fulltext_charsets main.fulltext_multi`:
+- `tools/mylite-mtr-harness probe main.fulltext_update main.fulltext_cache`:
   passed.
-- `tools/mylite-mtr-harness run`: passed all 8 MyLite profile tests plus 187
+- `tools/mylite-mtr-harness run main.gcc296 main.fulltext_charsets main.fulltext_multi main.fulltext_update main.fulltext_cache`:
+  passed.
+- `tools/mylite-mtr-harness run`: passed all 8 MyLite profile tests plus 199
   selected `main` MTR smoke tests.
-- `tools/mylite-mtr-harness list | wc -l`: `195`.
+- `tools/mylite-mtr-harness list | wc -l`: `207`.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `find mariadb/mysql-test -name '*.reject' -print`: no output.
 - `git diff --check`: passed.
