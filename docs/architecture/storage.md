@@ -763,8 +763,9 @@ catalog publication, after which the parent can be dropped normally. Dropped
 table-definition blobs, row pages, index-entry pages, and FK metadata blob pages
 remain orphaned inside the primary file until broader free-space management
 exists; superseded catalog-chain pages are reclaimed into the catalog free-list.
-Catalog and branch-leaf reclamation coalesce a reclaimed run with the current
-free-list root when the reclaimed run is directly before or after that root run.
+Catalog and branch-leaf reclamation coalesce a reclaimed run with adjacent runs
+anywhere in the linked free-list chain, including bridge cases that connect two
+existing free-list runs.
 New table ids are allocated above both live catalog records and existing row
 pages so drop/recreate does not expose old rows. Simple
 `RENAME TABLE` rewrites the catalog record identity while preserving table id,
@@ -1161,8 +1162,8 @@ removed leaf is directly adjacent to the current free-list root run. When
 deleting from a multi-entry child reduces the expected child count, eligible
 single-level branch roots can refold the remaining entries into one fewer
 existing child page and reclaim the old final child page. When
-that removal leaves a live entryset that fits in one maintained root page,
-and no live append-tail overlay would be hidden, storage collapses the branch
+that removal leaves a live entryset that fits in one maintained root page and
+no live append-tail overlay would be hidden, storage collapses the branch
 root back to the maintained root format by materializing live branch entries
 before applying the current delete.
 Copy-rebuild DDL publishes supported fixed-width leaf roots for every current
@@ -1246,9 +1247,9 @@ restore covered single-level branch
 final-leaf deletes, same-child updates and deletes, bounded cross-child
 updates, interior child splits, branch-page-full root splits, arbitrary child
 removals, child-count-reducing branch refold deletes, no-overlay branch
-collapse deletes, and final-leaf free-list publication. Unbounded/deep branch
-cursors, branch-page merge/redistribution, arbitrary-chain free-list run
-coalescing, and
+collapse deletes, arbitrary-chain free-list run coalescing, and final-leaf
+free-list publication. Unbounded/deep branch cursors,
+branch-page merge/redistribution, and
 broader transactional maintained index mutation remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index

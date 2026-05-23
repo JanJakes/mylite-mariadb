@@ -321,6 +321,11 @@ static void test_catalog_free_list_prepend_coalescing(void);
 static void test_branch_free_list_prepend_coalescing(void);
 static void test_catalog_free_list_append_coalescing(void);
 static void test_branch_free_list_append_coalescing(void);
+static void test_catalog_free_list_chain_prepend_coalescing(void);
+static void test_catalog_free_list_chain_append_coalescing(void);
+static void test_catalog_free_list_chain_bridge_coalescing(void);
+static void test_branch_free_list_chain_prepend_coalescing(void);
+static void test_free_list_reclaim_rejects_overlapping_run(void);
 static void test_catalog_free_list_skips_active_statement_checkpoint(void);
 static void test_rejects_corrupt_free_list_root(void);
 static void test_rejects_corrupt_promoted_free_list_root(void);
@@ -761,6 +766,11 @@ int main(void) {
     test_branch_free_list_prepend_coalescing();
     test_catalog_free_list_append_coalescing();
     test_branch_free_list_append_coalescing();
+    test_catalog_free_list_chain_prepend_coalescing();
+    test_catalog_free_list_chain_append_coalescing();
+    test_catalog_free_list_chain_bridge_coalescing();
+    test_branch_free_list_chain_prepend_coalescing();
+    test_free_list_reclaim_rejects_overlapping_run();
     test_catalog_free_list_skips_active_statement_checkpoint();
     test_rejects_corrupt_free_list_root();
     test_rejects_corrupt_promoted_free_list_root();
@@ -1532,6 +1542,200 @@ static void test_branch_free_list_append_coalescing(void) {
     );
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     assert(header.page_count == 5ULL);
+    assert(header.free_list_root_page == 2ULL);
+    assert_free_list_run(filename, 2ULL, 0ULL, 2ULL, 3ULL);
+    assert_file_size_matches_header(filename);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+#endif
+}
+
+static void test_catalog_free_list_chain_prepend_coalescing(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    char *root = make_temp_root();
+    char *filename = path_join(root, "catalog-free-list-chain-prepend-coalescing.mylite");
+    char *journal_filename = journal_path(filename);
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+    mylite_storage_statement *statement = NULL;
+    unsigned char empty_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char free_list_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    write_test_page(filename, 6ULL, empty_page);
+    mylite_storage_test_encode_free_list_page(free_list_page, 2ULL, 5ULL, 1ULL);
+    write_test_page(filename, 2ULL, free_list_page);
+    mylite_storage_test_encode_free_list_page(free_list_page, 5ULL, 0ULL, 2ULL);
+    write_test_page(filename, 5ULL, free_list_page);
+    mylite_storage_test_encode_free_list_page(free_list_page, 4ULL, 0ULL, 1ULL);
+    write_test_page(filename, 4ULL, free_list_page);
+    write_test_header_page_count_and_free_list_root(filename, 7ULL, 2ULL);
+
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == 7ULL);
+    assert(header.free_list_root_page == 2ULL);
+    assert_free_list_run(filename, 2ULL, 5ULL, 2ULL, 1ULL);
+    assert_free_list_run(filename, 5ULL, 0ULL, 5ULL, 2ULL);
+
+    assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_test_reclaim_catalog_page_run(filename, 4ULL, 1ULL) == MYLITE_STORAGE_OK);
+    assert(access(journal_filename, F_OK) == 0);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == 7ULL);
+    assert(header.free_list_root_page == 2ULL);
+    assert_free_list_run(filename, 2ULL, 4ULL, 2ULL, 1ULL);
+    assert_free_list_run(filename, 4ULL, 0ULL, 4ULL, 3ULL);
+    assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
+    statement = NULL;
+    assert_file_missing(journal_filename);
+    assert_file_size_matches_header(filename);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == 7ULL);
+    assert(header.free_list_root_page == 2ULL);
+    assert_free_list_run(filename, 2ULL, 5ULL, 2ULL, 1ULL);
+    assert_free_list_run(filename, 5ULL, 0ULL, 5ULL, 2ULL);
+
+    assert(mylite_storage_test_reclaim_catalog_page_run(filename, 4ULL, 1ULL) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == 7ULL);
+    assert(header.free_list_root_page == 2ULL);
+    assert_free_list_run(filename, 2ULL, 4ULL, 2ULL, 1ULL);
+    assert_free_list_run(filename, 4ULL, 0ULL, 4ULL, 3ULL);
+    assert_file_size_matches_header(filename);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(journal_filename);
+    free(filename);
+    free(root);
+#endif
+}
+
+static void test_catalog_free_list_chain_append_coalescing(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    char *root = make_temp_root();
+    char *filename = path_join(root, "catalog-free-list-chain-append-coalescing.mylite");
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+    unsigned char empty_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char free_list_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    write_test_page(filename, 6ULL, empty_page);
+    mylite_storage_test_encode_free_list_page(free_list_page, 5ULL, 2ULL, 1ULL);
+    write_test_page(filename, 5ULL, free_list_page);
+    mylite_storage_test_encode_free_list_page(free_list_page, 2ULL, 0ULL, 1ULL);
+    write_test_page(filename, 2ULL, free_list_page);
+    write_test_header_page_count_and_free_list_root(filename, 7ULL, 5ULL);
+
+    assert(mylite_storage_test_reclaim_catalog_page_run(filename, 3ULL, 1ULL) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == 7ULL);
+    assert(header.free_list_root_page == 5ULL);
+    assert_free_list_run(filename, 5ULL, 2ULL, 5ULL, 1ULL);
+    assert_free_list_run(filename, 2ULL, 0ULL, 2ULL, 2ULL);
+    assert_file_size_matches_header(filename);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+#endif
+}
+
+static void test_catalog_free_list_chain_bridge_coalescing(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    char *root = make_temp_root();
+    char *filename = path_join(root, "catalog-free-list-chain-bridge-coalescing.mylite");
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+    unsigned char empty_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char free_list_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    write_test_page(filename, 6ULL, empty_page);
+    mylite_storage_test_encode_free_list_page(free_list_page, 2ULL, 5ULL, 1ULL);
+    write_test_page(filename, 2ULL, free_list_page);
+    mylite_storage_test_encode_free_list_page(free_list_page, 5ULL, 0ULL, 1ULL);
+    write_test_page(filename, 5ULL, free_list_page);
+    write_test_header_page_count_and_free_list_root(filename, 7ULL, 2ULL);
+
+    assert(mylite_storage_test_reclaim_catalog_page_run(filename, 3ULL, 2ULL) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == 7ULL);
+    assert(header.free_list_root_page == 2ULL);
+    assert_free_list_run(filename, 2ULL, 0ULL, 2ULL, 4ULL);
+    assert_file_size_matches_header(filename);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+#endif
+}
+
+static void test_branch_free_list_chain_prepend_coalescing(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    char *root = make_temp_root();
+    char *filename = path_join(root, "branch-free-list-chain-prepend-coalescing.mylite");
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+    unsigned char empty_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char free_list_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    write_test_page(filename, 6ULL, empty_page);
+    mylite_storage_test_encode_free_list_page(free_list_page, 2ULL, 5ULL, 1ULL);
+    write_test_page(filename, 2ULL, free_list_page);
+    mylite_storage_test_encode_free_list_page(free_list_page, 5ULL, 0ULL, 2ULL);
+    write_test_page(filename, 5ULL, free_list_page);
+    write_test_header_page_count_and_free_list_root(filename, 7ULL, 2ULL);
+
+    assert(
+        mylite_storage_test_reclaim_removed_branch_leaf_page(filename, 4ULL) == MYLITE_STORAGE_OK
+    );
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == 7ULL);
+    assert(header.free_list_root_page == 2ULL);
+    assert_free_list_run(filename, 2ULL, 4ULL, 2ULL, 1ULL);
+    assert_free_list_run(filename, 4ULL, 0ULL, 4ULL, 3ULL);
+    assert_file_size_matches_header(filename);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+#endif
+}
+
+static void test_free_list_reclaim_rejects_overlapping_run(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    char *root = make_temp_root();
+    char *filename = path_join(root, "free-list-overlapping-reclaim.mylite");
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+    unsigned char empty_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char free_list_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    write_test_page(filename, 5ULL, empty_page);
+    mylite_storage_test_encode_free_list_page(free_list_page, 2ULL, 0ULL, 3ULL);
+    write_test_page(filename, 2ULL, free_list_page);
+    write_test_header_page_count_and_free_list_root(filename, 6ULL, 2ULL);
+
+    assert(
+        mylite_storage_test_reclaim_catalog_page_run(filename, 3ULL, 1ULL) == MYLITE_STORAGE_CORRUPT
+    );
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == 6ULL);
     assert(header.free_list_root_page == 2ULL);
     assert_free_list_run(filename, 2ULL, 0ULL, 2ULL, 3ULL);
     assert_file_size_matches_header(filename);

@@ -603,6 +603,19 @@ typedef struct mylite_storage_free_list_page {
     unsigned long long run_page_count;
 } mylite_storage_free_list_page;
 
+typedef struct mylite_storage_free_list_reclaim_write {
+    unsigned long long page_id;
+    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+} mylite_storage_free_list_reclaim_write;
+
+enum { MYLITE_STORAGE_FREE_LIST_RECLAIM_MAX_WRITES = 2U };
+
+typedef struct mylite_storage_free_list_reclaim_plan {
+    unsigned long long root_page_id;
+    mylite_storage_free_list_reclaim_write writes[MYLITE_STORAGE_FREE_LIST_RECLAIM_MAX_WRITES];
+    size_t write_count;
+} mylite_storage_free_list_reclaim_plan;
+
 typedef struct mylite_storage_append_page_buffer {
     unsigned long long first_page_id;
     size_t page_count;
@@ -1893,20 +1906,32 @@ static mylite_storage_result reclaim_catalog_page_run(
     unsigned long long first_page_id,
     unsigned long long page_count
 );
-static mylite_storage_result encode_reclaimed_free_list_root_page(
+static mylite_storage_result plan_reclaimed_free_list_run(
     FILE *file,
     const mylite_storage_header *header,
     unsigned long long first_page_id,
     unsigned long long page_count,
-    unsigned long long *out_root_page_id,
-    unsigned char *out_page
+    mylite_storage_free_list_reclaim_plan *out_plan
 );
-static mylite_storage_result reclaimed_run_appends_to_current_free_list_root(
-    FILE *file,
-    const mylite_storage_header *header,
+static mylite_storage_result append_free_list_reclaim_plan_write(
+    mylite_storage_free_list_reclaim_plan *plan,
+    unsigned long long first_page_id,
+    const mylite_storage_free_list_page *free_list_page
+);
+static int free_list_runs_overlap(
     unsigned long long first_page_id,
     unsigned long long page_count,
-    int *out_appends
+    const mylite_storage_free_list_page *free_list_page
+);
+static mylite_storage_result append_free_list_reclaim_existing_write_page_ids(
+    const mylite_storage_free_list_reclaim_plan *plan,
+    unsigned long long first_page_id,
+    unsigned long long *page_ids,
+    size_t *page_count
+);
+static mylite_storage_result write_free_list_reclaim_plan(
+    const mylite_storage_pager *pager,
+    const mylite_storage_free_list_reclaim_plan *plan
 );
 static mylite_storage_result read_free_list_page(
     FILE *file,
@@ -2459,6 +2484,13 @@ static mylite_storage_result append_maintained_index_delete_plan_branch(
 static mylite_storage_result append_maintained_index_delete_plan_protected_page(
     mylite_storage_maintained_index_delete_plan *plan,
     unsigned long long page_id
+);
+static mylite_storage_result append_maintained_index_delete_plan_free_list_reclaim_pages(
+    mylite_storage_maintained_index_delete_plan *plan,
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long first_page_id,
+    unsigned long long page_count
 );
 static int maintained_index_delete_plan_has_protected_page(
     const mylite_storage_maintained_index_delete_plan *plan,
@@ -10949,6 +10981,37 @@ static mylite_storage_result append_maintained_index_delete_plan_protected_page(
     return MYLITE_STORAGE_OK;
 }
 
+static mylite_storage_result append_maintained_index_delete_plan_free_list_reclaim_pages(
+    mylite_storage_maintained_index_delete_plan *plan,
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long first_page_id,
+    unsigned long long page_count
+) {
+    mylite_storage_free_list_reclaim_plan reclaim_plan = {0};
+    mylite_storage_result result =
+        plan_reclaimed_free_list_run(file, header, first_page_id, page_count, &reclaim_plan);
+    unsigned long long protected_page_ids[MYLITE_STORAGE_FREE_LIST_RECLAIM_MAX_WRITES] = {0};
+    size_t protected_page_count = 0U;
+    if (result == MYLITE_STORAGE_OK) {
+        result = append_free_list_reclaim_existing_write_page_ids(
+            &reclaim_plan,
+            first_page_id,
+            protected_page_ids,
+            &protected_page_count
+        );
+    }
+    for (size_t protected_index = 0U;
+         result == MYLITE_STORAGE_OK && protected_index < protected_page_count;
+         ++protected_index) {
+        result = append_maintained_index_delete_plan_protected_page(
+            plan,
+            protected_page_ids[protected_index]
+        );
+    }
+    return result;
+}
+
 static int maintained_index_delete_plan_has_protected_page(
     const mylite_storage_maintained_index_delete_plan *plan,
     unsigned long long page_id
@@ -11078,24 +11141,17 @@ static mylite_storage_result plan_branch_index_root_delete(
                     reclaimed_cell,
                     MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_CHILD_PAGE_ID_OFFSET
                 );
-                int appends_to_free_list_root = 0;
                 result = append_maintained_index_delete_plan_protected_page(
                     out_plan,
                     reclaimed_leaf_page_id
                 );
                 if (result == MYLITE_STORAGE_OK) {
-                    result = reclaimed_run_appends_to_current_free_list_root(
+                    result = append_maintained_index_delete_plan_free_list_reclaim_pages(
+                        out_plan,
                         file,
                         header,
                         reclaimed_leaf_page_id,
-                        1ULL,
-                        &appends_to_free_list_root
-                    );
-                }
-                if (result == MYLITE_STORAGE_OK && appends_to_free_list_root) {
-                    result = append_maintained_index_delete_plan_protected_page(
-                        out_plan,
-                        header->free_list_root_page
+                        1ULL
                     );
                 }
             }
@@ -11129,29 +11185,19 @@ static mylite_storage_result plan_branch_index_root_delete(
             continue;
         }
         if (removes_child) {
-            int appends_to_free_list_root = 0;
-            result = reclaimed_run_appends_to_current_free_list_root(
+            result = append_maintained_index_delete_plan_free_list_reclaim_pages(
+                out_plan,
                 file,
                 header,
                 leaf_page_id,
-                1ULL,
-                &appends_to_free_list_root
+                1ULL
             );
+            if (result == MYLITE_STORAGE_UNSUPPORTED) {
+                *out_plan = (mylite_storage_maintained_index_delete_plan){0};
+                return MYLITE_STORAGE_OK;
+            }
             if (result != MYLITE_STORAGE_OK) {
                 return result;
-            }
-            if (appends_to_free_list_root) {
-                result = append_maintained_index_delete_plan_protected_page(
-                    out_plan,
-                    header->free_list_root_page
-                );
-                if (result == MYLITE_STORAGE_UNSUPPORTED) {
-                    *out_plan = (mylite_storage_maintained_index_delete_plan){0};
-                    return MYLITE_STORAGE_OK;
-                }
-                if (result != MYLITE_STORAGE_OK) {
-                    return result;
-                }
             }
         }
         result = append_maintained_index_delete_plan_branch(
@@ -11981,22 +12027,15 @@ static mylite_storage_result reclaim_removed_branch_leaf_page(
     mylite_storage_header *header,
     unsigned long long leaf_page_id
 ) {
-    unsigned long long free_list_root_page = leaf_page_id;
-    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    mylite_storage_result result = encode_reclaimed_free_list_root_page(
-        pager->file,
-        header,
-        leaf_page_id,
-        1ULL,
-        &free_list_root_page,
-        page
-    );
+    mylite_storage_free_list_reclaim_plan plan = {0};
+    mylite_storage_result result =
+        plan_reclaimed_free_list_run(pager->file, header, leaf_page_id, 1ULL, &plan);
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
-    result = pager_write_page(pager, free_list_root_page, page);
+    result = write_free_list_reclaim_plan(pager, &plan);
     if (result == MYLITE_STORAGE_OK) {
-        header->free_list_root_page = free_list_root_page;
+        header->free_list_root_page = plan.root_page_id;
     }
     return result;
 }
@@ -21355,36 +21394,39 @@ static mylite_storage_result reclaim_catalog_page_run(
         return MYLITE_STORAGE_OK;
     }
 
-    unsigned long long free_list_root_page = first_page_id;
-    unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    mylite_storage_result result = encode_reclaimed_free_list_root_page(
-        file,
-        header,
-        first_page_id,
-        page_count,
-        &free_list_root_page,
-        page
-    );
-    if (result == MYLITE_STORAGE_OK && free_list_root_page != first_page_id) {
+    mylite_storage_free_list_reclaim_plan plan = {0};
+    mylite_storage_result result =
+        plan_reclaimed_free_list_run(file, header, first_page_id, page_count, &plan);
+    unsigned long long protected_page_ids[MYLITE_STORAGE_FREE_LIST_RECLAIM_MAX_WRITES] = {0};
+    size_t protected_page_count = 0U;
+    if (result == MYLITE_STORAGE_OK) {
+        result = append_free_list_reclaim_existing_write_page_ids(
+            &plan,
+            first_page_id,
+            protected_page_ids,
+            &protected_page_count
+        );
+    }
+    if (result == MYLITE_STORAGE_OK && protected_page_count != 0U) {
         result = begin_write_journal_for_statement_pages(
             file,
             filename,
             header,
             0,
             active_statement_for(filename),
-            &free_list_root_page,
-            1U
+            protected_page_ids,
+            protected_page_count
         );
     }
-    if (result == MYLITE_STORAGE_OK && free_list_root_page == first_page_id) {
+    if (result == MYLITE_STORAGE_OK && protected_page_count == 0U) {
         result = begin_write_journal(file, filename, header, 0);
     }
     const mylite_storage_pager pager = open_storage_pager(file, NULL, header);
     if (result == MYLITE_STORAGE_OK) {
-        result = pager_write_page(&pager, free_list_root_page, page);
+        result = write_free_list_reclaim_plan(&pager, &plan);
     }
     if (result == MYLITE_STORAGE_OK) {
-        header->free_list_root_page = free_list_root_page;
+        header->free_list_root_page = plan.root_page_id;
         result = publish_header(file, header);
     }
     if (result == MYLITE_STORAGE_OK) {
@@ -21393,84 +21435,216 @@ static mylite_storage_result reclaim_catalog_page_run(
     return result;
 }
 
-static mylite_storage_result encode_reclaimed_free_list_root_page(
+static mylite_storage_result plan_reclaimed_free_list_run(
     FILE *file,
     const mylite_storage_header *header,
     unsigned long long first_page_id,
     unsigned long long page_count,
-    unsigned long long *out_root_page_id,
-    unsigned char *out_page
+    mylite_storage_free_list_reclaim_plan *out_plan
 ) {
-    *out_root_page_id = first_page_id;
-    mylite_storage_free_list_page free_list_page = {
+    *out_plan = (mylite_storage_free_list_reclaim_plan){
+        .root_page_id = header->free_list_root_page,
+    };
+    if (page_count == 0ULL) {
+        return MYLITE_STORAGE_OK;
+    }
+    if (first_page_id > ULLONG_MAX - page_count) {
+        return MYLITE_STORAGE_CORRUPT;
+    }
+
+    mylite_storage_free_list_page reclaimed_page = {
         .next_root_page = header->free_list_root_page,
         .run_start_page = first_page_id,
         .run_page_count = page_count,
     };
-    if (header->free_list_root_page != 0ULL && page_count != 0ULL &&
-        first_page_id <= ULLONG_MAX - page_count) {
-        unsigned char current_root_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-        mylite_storage_free_list_page current_root = {0};
-        const mylite_storage_result result = read_free_list_page(
-            file,
-            header,
-            header->free_list_root_page,
-            current_root_page,
-            &current_root
-        );
+
+    if (header->free_list_root_page == 0ULL) {
+        out_plan->root_page_id = first_page_id;
+        return append_free_list_reclaim_plan_write(out_plan, first_page_id, &reclaimed_page);
+    }
+
+    typedef struct free_list_reclaim_node {
+        unsigned long long page_id;
+        mylite_storage_free_list_page page;
+        unsigned long long previous_page_id;
+        mylite_storage_free_list_page previous_page;
+        int has_previous;
+        int found;
+    } free_list_reclaim_node;
+
+    free_list_reclaim_node before = {0};
+    free_list_reclaim_node after = {0};
+    mylite_storage_free_list_page previous_page = {0};
+    unsigned long long previous_page_id = 0ULL;
+    int has_previous = 0;
+    unsigned long long current_page_id = header->free_list_root_page;
+    for (unsigned long long visited = 0ULL; current_page_id != 0ULL; ++visited) {
+        if (visited >= header->page_count) {
+            return MYLITE_STORAGE_CORRUPT;
+        }
+
+        unsigned char current_page_bytes[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        mylite_storage_free_list_page current_page = {0};
+        mylite_storage_result result =
+            read_free_list_page(file, header, current_page_id, current_page_bytes, &current_page);
         if (result != MYLITE_STORAGE_OK) {
             return result;
         }
-        if (first_page_id + page_count == current_root.run_start_page) {
-            if (current_root.run_page_count > ULLONG_MAX - page_count) {
-                return MYLITE_STORAGE_CORRUPT;
-            }
-            free_list_page.next_root_page = current_root.next_root_page;
-            free_list_page.run_page_count = page_count + current_root.run_page_count;
-        } else if (
-            current_root.run_start_page <= ULLONG_MAX - current_root.run_page_count &&
-            current_root.run_start_page + current_root.run_page_count == first_page_id
-        ) {
-            if (current_root.run_page_count > ULLONG_MAX - page_count) {
-                return MYLITE_STORAGE_CORRUPT;
-            }
-            current_root.run_page_count += page_count;
-            *out_root_page_id = header->free_list_root_page;
-            encode_free_list_page(out_page, header->free_list_root_page, &current_root);
-            return MYLITE_STORAGE_OK;
+
+        if (free_list_runs_overlap(first_page_id, page_count, &current_page)) {
+            return MYLITE_STORAGE_CORRUPT;
         }
+        if (current_page.run_start_page > ULLONG_MAX - current_page.run_page_count) {
+            return MYLITE_STORAGE_CORRUPT;
+        }
+
+        if (current_page.run_start_page + current_page.run_page_count == first_page_id) {
+            if (before.found) {
+                return MYLITE_STORAGE_CORRUPT;
+            }
+            before = (free_list_reclaim_node){
+                .page_id = current_page_id,
+                .page = current_page,
+                .previous_page_id = previous_page_id,
+                .previous_page = previous_page,
+                .has_previous = has_previous,
+                .found = 1,
+            };
+        }
+        if (first_page_id + page_count == current_page.run_start_page) {
+            if (after.found) {
+                return MYLITE_STORAGE_CORRUPT;
+            }
+            after = (free_list_reclaim_node){
+                .page_id = current_page_id,
+                .page = current_page,
+                .previous_page_id = previous_page_id,
+                .previous_page = previous_page,
+                .has_previous = has_previous,
+                .found = 1,
+            };
+        }
+
+        previous_page_id = current_page_id;
+        previous_page = current_page;
+        has_previous = 1;
+        current_page_id = current_page.next_root_page;
     }
-    encode_free_list_page(out_page, first_page_id, &free_list_page);
+
+    if (before.found) {
+        if (before.page.run_page_count > ULLONG_MAX - page_count) {
+            return MYLITE_STORAGE_CORRUPT;
+        }
+        before.page.run_page_count += page_count;
+        if (after.found && before.page.next_root_page == after.page_id) {
+            if (before.page.run_page_count > ULLONG_MAX - after.page.run_page_count) {
+                return MYLITE_STORAGE_CORRUPT;
+            }
+            before.page.next_root_page = after.page.next_root_page;
+            before.page.run_page_count += after.page.run_page_count;
+        }
+        out_plan->root_page_id = header->free_list_root_page;
+        return append_free_list_reclaim_plan_write(out_plan, before.page_id, &before.page);
+    }
+
+    if (after.found) {
+        if (reclaimed_page.run_page_count > ULLONG_MAX - after.page.run_page_count) {
+            return MYLITE_STORAGE_CORRUPT;
+        }
+        reclaimed_page.next_root_page = after.page.next_root_page;
+        reclaimed_page.run_page_count += after.page.run_page_count;
+        if (after.has_previous) {
+            after.previous_page.next_root_page = first_page_id;
+            mylite_storage_result result = append_free_list_reclaim_plan_write(
+                out_plan,
+                after.previous_page_id,
+                &after.previous_page
+            );
+            if (result != MYLITE_STORAGE_OK) {
+                return result;
+            }
+            out_plan->root_page_id = header->free_list_root_page;
+        } else {
+            out_plan->root_page_id = first_page_id;
+        }
+        return append_free_list_reclaim_plan_write(out_plan, first_page_id, &reclaimed_page);
+    }
+
+    out_plan->root_page_id = first_page_id;
+    return append_free_list_reclaim_plan_write(out_plan, first_page_id, &reclaimed_page);
+}
+
+static mylite_storage_result append_free_list_reclaim_plan_write(
+    mylite_storage_free_list_reclaim_plan *plan,
+    unsigned long long page_id,
+    const mylite_storage_free_list_page *free_list_page
+) {
+    if (plan->write_count >= sizeof(plan->writes) / sizeof(plan->writes[0])) {
+        return MYLITE_STORAGE_UNSUPPORTED;
+    }
+
+    mylite_storage_free_list_reclaim_write *write = plan->writes + plan->write_count;
+    write->page_id = page_id;
+    encode_free_list_page(write->page, page_id, free_list_page);
+    ++plan->write_count;
     return MYLITE_STORAGE_OK;
 }
 
-static mylite_storage_result reclaimed_run_appends_to_current_free_list_root(
-    FILE *file,
-    const mylite_storage_header *header,
+static int free_list_runs_overlap(
     unsigned long long first_page_id,
     unsigned long long page_count,
-    int *out_appends
+    const mylite_storage_free_list_page *free_list_page
 ) {
-    *out_appends = 0;
-    if (header->free_list_root_page == 0ULL || page_count == 0ULL) {
-        return MYLITE_STORAGE_OK;
+    if (page_count == 0ULL || first_page_id > ULLONG_MAX - page_count ||
+        free_list_page->run_start_page > ULLONG_MAX - free_list_page->run_page_count) {
+        return 1;
     }
 
-    unsigned char current_root_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    mylite_storage_free_list_page current_root = {0};
-    mylite_storage_result result = read_free_list_page(
-        file,
-        header,
-        header->free_list_root_page,
-        current_root_page,
-        &current_root
-    );
-    if (result != MYLITE_STORAGE_OK) {
-        return result;
+    const unsigned long long reclaimed_end = first_page_id + page_count;
+    const unsigned long long free_run_end =
+        free_list_page->run_start_page + free_list_page->run_page_count;
+    return first_page_id < free_run_end && reclaimed_end > free_list_page->run_start_page;
+}
+
+static mylite_storage_result append_free_list_reclaim_existing_write_page_ids(
+    const mylite_storage_free_list_reclaim_plan *plan,
+    unsigned long long first_page_id,
+    unsigned long long *page_ids,
+    size_t *page_count
+) {
+    for (size_t i = 0U; i < plan->write_count; ++i) {
+        unsigned long long page_id = plan->writes[i].page_id;
+        if (page_id == first_page_id) {
+            continue;
+        }
+        for (size_t existing = 0U; existing < *page_count; ++existing) {
+            if (page_ids[existing] == page_id) {
+                page_id = 0ULL;
+                break;
+            }
+        }
+        if (page_id == 0ULL) {
+            continue;
+        }
+        if (*page_count >= MYLITE_STORAGE_FREE_LIST_RECLAIM_MAX_WRITES) {
+            return MYLITE_STORAGE_UNSUPPORTED;
+        }
+        page_ids[*page_count] = page_id;
+        ++*page_count;
     }
-    if (current_root.run_start_page <= ULLONG_MAX - current_root.run_page_count &&
-        current_root.run_start_page + current_root.run_page_count == first_page_id) {
-        *out_appends = 1;
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result write_free_list_reclaim_plan(
+    const mylite_storage_pager *pager,
+    const mylite_storage_free_list_reclaim_plan *plan
+) {
+    for (size_t i = 0U; i < plan->write_count; ++i) {
+        const mylite_storage_result result =
+            pager_write_page(pager, plan->writes[i].page_id, plan->writes[i].page);
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
     }
     return MYLITE_STORAGE_OK;
 }
