@@ -106,7 +106,7 @@ temporal-rounding, temporal-function, alternate-timezone conversion,
 system-timezone behavior, temporal literal behavior, temporal scale,
 high-resolution temporal function, microsecond parsing, and time/datetime
 comparison behavior,
-selected parser/comment, keyword,
+selected parser/comment, alias, wildcard-alias, keyword,
 CTE-cycle, precedence, expression, type-coercion, rounding, safe-update,
 negation-elimination, and comparison behavior, selected boolean
 aggregate/HAVING expression behavior,

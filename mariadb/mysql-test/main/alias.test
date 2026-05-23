@@ -51,7 +51,7 @@ CREATE TABLE t1 (
   KEY mcbs_aufnr(mcbs_aufnr),
   KEY kundentyp(kundentyp),
   KEY p_nr(p_nr,suffix)
-) ENGINE=MyISAM;
+) ENGINE=Aria;
 
 INSERT INTO t1 VALUES (3359356,405,3359356,'Mustermann Musterfrau',52500,'2000-05-20','workflow','Auftrag erledigt','Originalvertrag eingegangen und geprüft','','privat',1485525,2122316,'+','','N',1909160,'MobilComSuper92000D2',NULL,NULL,'MS9ND2',3,24,'MobilCom Shop Koeln',52500,NULL,'auto',20010202105916,'Mobilfunk','PP','','','');
 INSERT INTO t1 VALUES (3359357,468,3359357,'Mustermann Musterfrau',7001,'2000-05-20','workflow','Auftrag erledigt','Originalvertrag eingegangen und geprüft','','privat',1503580,2139699,'+','','P',1909171,'MobilComSuper9D1T10SFreisprech(Akquise)',NULL,NULL,'MS9NS1',327,24,'MobilCom Intern',7003,NULL,'auto',20010202105916,'Mobilfunk','PP','','','');
@@ -270,44 +270,58 @@ DELIMITER ;$$
 
 SELECT x'FF32', CONCAT(x'FF32') LIMIT 0;
 CREATE TABLE t1 AS SELECT x'FF32', CONCAT(x'FF32');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 DROP TABLE t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL test_inject(x'FF32');
 
 SELECT x'32FF', CONCAT(x'32FF') LIMIT 0;
 CREATE TABLE t1 AS SELECT x'32FF', CONCAT(x'32FF');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 DROP TABLE t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL test_inject(x'32FF');
 
 SELECT x'0032', CONCAT(x'0032') LIMIT 0;
 CREATE TABLE t1 AS SELECT x'0032', CONCAT(x'0032');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 DROP TABLE t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL test_inject(x'0032');
 
 SELECT x'3200', CONCAT(x'3200') LIMIT 0;
 CREATE TABLE t1 AS SELECT x'3200', CONCAT(x'3200');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 DROP TABLE t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL test_inject(x'3200');
 
 SELECT '0\a', CONCAT('0\a') LIMIT 0;
 CREATE TABLE t1 AS SELECT '0\a', CONCAT('0\a');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 DROP TABLE t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL test_inject('0\a');
 
 SELECT 'a\0', CONCAT('a\0') LIMIT 0;
 CREATE TABLE t1 AS SELECT 'a\0', CONCAT('a\0');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 DROP TABLE t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL test_inject('a\0');
 
 SELECT 'a\0b', CONCAT('a\0b') LIMIT 0;
 CREATE TABLE t1 AS SELECT 'a\0b', CONCAT('a\0b');
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 DROP TABLE t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 CALL test_inject('a\0b');
 
 DROP PROCEDURE test_inject;
