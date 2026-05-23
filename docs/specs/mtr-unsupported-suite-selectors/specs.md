@@ -21,8 +21,14 @@ a per-file probe result.
   `include/master-slave.inc`, `sync_slave_with_master`, `CHANGE MASTER`, slave
   status, relay-log, and replication cleanup includes.
 - `mariadb/mysql-test/suite/sys_vars/t` contains variable-family tests for
-  disabled topology surfaces: `binlog*`, `gtid*`, `relay*`, `replicate*`,
-  `rpl*`, `slave*`, and `wsrep*`.
+  disabled topology surfaces: `binlog*`, `debug_binlog*`, `expire_logs*`,
+  `log_bin*`, `max_binlog*`, `read_binlog*`, `sql_log_bin*`, `sync_binlog*`,
+  `gtid*`, `init_slave*`, `log_slave_updates*`,
+  `master_verify_checksum*`, `pseudo_slave_mode_notembedded`, `relay*`,
+  `replicate*`, `report_*`, `rpl*`, `secure_timestamp_rpl`,
+  `server_id_grant`, `slave*`, `skip_parallel_replication*`,
+  `skip_replication*`, `sync_master_info_grant`, `sync_relay_log*`, and
+  `wsrep*`.
 - `mariadb/mysql-test/suite/galera*/t` and
   `mariadb/mysql-test/suite/wsrep/t` cover Galera/wsrep runtime behavior.
 - `mariadb/mysql-test/suite/perfschema*/t` covers Performance Schema runtime
@@ -157,14 +163,14 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  3,801, and unclassified upstream files dropped to 1,687.
+  3,843, and unclassified upstream files dropped to 1,645.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
-  - `replication-surface`: 822 rows.
+  - `replication-surface`: 841 rows.
   - `disabled-galera-runtime`: 708 rows.
   - `native-innodb-profile`: 688 rows.
   - `disabled-performance-schema`: 496 rows.
-  - `disabled-binlog-runtime`: 186 rows.
+  - `disabled-binlog-runtime`: 209 rows.
   - `disabled-partition-engine`: 220 rows.
   - `disabled-oracle-mode`: 89 rows, including 87 selector-expanded `compat`
     rows plus two earlier exact probes.
@@ -207,9 +213,16 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   `large_tests`; it also no longer prints `engines.rpl*` or `engines.ld_*`
   tests, nor `sys_vars` tests whose names start with `binlog`, `gtid`,
   `innodb`, `pfs`, `relay`, `replicate`, `rpl`, `slave`, or `wsrep`, nor
-  `main.partition*` or `engines.tc_partition*` tests, nor `sys_vars` tests
-  whose names start with `myisam`, `performance_schema`, `profiling`,
-  `query_cache`, `thread_pool`, or `userstat`, nor `main` tests from the
+  `sys_vars` topology tests whose names start with `debug_binlog`,
+  `expire_logs`, `log_bin`, `max_binlog`, `read_binlog`, `sql_log_bin`,
+  `sync_binlog`, `init_slave`, `log_slave_updates`, `master_verify_checksum`,
+  `report_`, `skip_parallel_replication`, `skip_replication`, or
+  `sync_relay_log`, nor exact `sys_vars.pseudo_slave_mode_notembedded`,
+  `sys_vars.secure_timestamp_rpl`, `sys_vars.server_id_grant`, and
+  `sys_vars.sync_master_info_grant` tests, nor `main.partition*` or
+  `engines.tc_partition*` tests, nor `sys_vars` tests whose names start with
+  `myisam`, `performance_schema`, `profiling`, `query_cache`, `thread_pool`,
+  or `userstat`, nor `main` tests from the
   account, TLS, plugin, backup, query-cache, binlog, replication, file-I/O,
   foreign-server, processlist, UDF, XA, userstat, vector, or GIS families
   listed above, nor `funcs_1` routine, trigger, view, or processlist families.

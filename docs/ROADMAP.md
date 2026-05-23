@@ -66,10 +66,11 @@ deprecated rename-database diagnostics plus selected system-variable metadata,
 path, charset/collation, cache/limit, function-style mutation, session-control,
 and default/version behavior while capping current accepted upstream MTR
 coverage at 413 of 5,901 imported
-upstream test files through the harness inventory, with 3,801 upstream MTR
+upstream test files through the harness inventory, with 3,843 upstream MTR
 files recorded separately as known unsupported/profile-mismatched non-coverage
 through exact probes or suite selectors, including source-backed `funcs_1`
-routine, trigger, view, and processlist families. The storage-routed MTR smoke
+routine, trigger, view, and processlist families plus additional binlog and
+replication system-variable families. The storage-routed MTR smoke
 runner also
 covers selected explicit MyLite and engine-alias DDL/DML routing,
 requested-engine `SHOW CREATE TABLE` metadata, sidecar absence, representative
