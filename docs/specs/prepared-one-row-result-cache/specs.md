@@ -119,6 +119,38 @@ structure and simple SQL-shape classifier in `libmylite`.
   warm-up reported outside the hot component loop.
 - Non-matching SQL stays on the normal MariaDB path.
 
+## Zero-Copy Cache-Hit Replay
+
+Cache-served row hits now publish the cached entry as the current row instead
+of copying cached `ColumnValue` records back into the statement value vector on
+every hit. Public column accessors resolve the current row through a small
+helper, so normal MariaDB-produced rows still read `statement.values` while
+cache hits read the immutable cache entry directly. Text, BLOB, scalar, byte
+length, and segmented reads keep the same public behavior; cached variable
+values are stored only after complete materialization, so cache-hit access does
+not need `mysql_stmt_fetch_column()`.
+
+This remains statement-owned in-memory state. The active cache-entry pointer is
+cleared on `DONE`, reset, cache invalidation, read-scope close, and current-row
+cleanup. Writes still close the retained read scope before they can change
+storage visibility.
+
+Verification on 2026-05-23, macOS arm64 local worktree:
+
+```sh
+git diff --check
+git clang-format --diff HEAD -- packages/libmylite/src/database.cc
+cmake --build --preset storage-smoke-dev --target mylite_embedded_statement_test mylite_embedded_storage_engine_test mylite_perf_baseline
+ctest --test-dir build/storage-smoke-dev -R 'libmylite.embedded-statement|libmylite.embedded-storage-engine' --output-on-failure
+build/storage-smoke-dev/tools/mylite_perf_baseline --phase=prepared-pk-select-components 10000 500000
+```
+
+The focused local benchmark recorded the prepared primary-key row component at
+`0.331 us/op` over 10000 rows and 500000 iterations. The earlier same-session
+sample before this change was `0.466 us/op` over 10000 rows and 200000
+iterations, so treat the delta as local evidence rather than a portable
+threshold.
+
 ## Risks And Open Questions
 
 - This is deliberately a cache, not a general optimizer bypass. It helps hot

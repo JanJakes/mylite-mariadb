@@ -388,6 +388,7 @@ struct mylite_stmt {
     bool one_row_result_cache_execution_had_row = false;
     bool one_row_result_cache_execution_multi_row = false;
     bool one_row_result_cache_pending = false;
+    const PreparedOneRowResultCacheEntry *one_row_result_cache_current_entry = nullptr;
 #endif
     bool sync_schema_catalog_after_execute = false;
     bool writes_storage = false;
@@ -569,6 +570,7 @@ void copy_cached_column_values(
     const std::vector<ColumnValue> &source
 );
 void copy_cached_column_value(ColumnValue &target, const ColumnValue &source);
+const ColumnValue *current_column_value(const mylite_stmt &statement, unsigned column);
 std::size_t one_row_result_cache_set_start(const PreparedOneRowResultCacheKey &key);
 std::uint64_t one_row_result_cache_hash_bytes(const std::vector<unsigned char> &bytes);
 bool one_row_result_cache_keys_equal(
@@ -1378,10 +1380,11 @@ unsigned long mylite_column_max_length(mylite_stmt *statement, unsigned column) 
 
 mylite_value_type mylite_column_type(mylite_stmt *statement, unsigned column) {
 #if MYLITE_WITH_MARIADB_EMBEDDED
-    if (statement == nullptr || !statement->has_current_row || column >= statement->values.size()) {
+    if (statement == nullptr) {
         return MYLITE_TYPE_NULL;
     }
-    return statement->values[column].type;
+    const ColumnValue *value = current_column_value(*statement, column);
+    return value != nullptr ? value->type : MYLITE_TYPE_NULL;
 #else
     (void)statement;
     (void)column;
@@ -1391,10 +1394,11 @@ mylite_value_type mylite_column_type(mylite_stmt *statement, unsigned column) {
 
 long long mylite_column_int64(mylite_stmt *statement, unsigned column) {
 #if MYLITE_WITH_MARIADB_EMBEDDED
-    if (statement == nullptr || !statement->has_current_row || column >= statement->values.size()) {
+    if (statement == nullptr) {
         return 0;
     }
-    return statement->values[column].int64_value;
+    const ColumnValue *value = current_column_value(*statement, column);
+    return value != nullptr ? value->int64_value : 0;
 #else
     (void)statement;
     (void)column;
@@ -1404,10 +1408,11 @@ long long mylite_column_int64(mylite_stmt *statement, unsigned column) {
 
 unsigned long long mylite_column_uint64(mylite_stmt *statement, unsigned column) {
 #if MYLITE_WITH_MARIADB_EMBEDDED
-    if (statement == nullptr || !statement->has_current_row || column >= statement->values.size()) {
+    if (statement == nullptr) {
         return 0U;
     }
-    return statement->values[column].uint64_value;
+    const ColumnValue *value = current_column_value(*statement, column);
+    return value != nullptr ? value->uint64_value : 0U;
 #else
     (void)statement;
     (void)column;
@@ -1417,10 +1422,11 @@ unsigned long long mylite_column_uint64(mylite_stmt *statement, unsigned column)
 
 double mylite_column_double(mylite_stmt *statement, unsigned column) {
 #if MYLITE_WITH_MARIADB_EMBEDDED
-    if (statement == nullptr || !statement->has_current_row || column >= statement->values.size()) {
+    if (statement == nullptr) {
         return 0.0;
     }
-    return statement->values[column].double_value;
+    const ColumnValue *value = current_column_value(*statement, column);
+    return value != nullptr ? value->double_value : 0.0;
 #else
     (void)statement;
     (void)column;
@@ -1430,17 +1436,21 @@ double mylite_column_double(mylite_stmt *statement, unsigned column) {
 
 const char *mylite_column_text(mylite_stmt *statement, unsigned column) {
 #if MYLITE_WITH_MARIADB_EMBEDDED
-    if (statement == nullptr || !statement->has_current_row || column >= statement->values.size()) {
+    if (statement == nullptr) {
         return nullptr;
     }
-    ColumnValue &value = statement->values[column];
-    if (value.type != MYLITE_TYPE_TEXT || value.mysql_is_null != 0) {
+    const ColumnValue *value = current_column_value(*statement, column);
+    if (value == nullptr || value->type != MYLITE_TYPE_TEXT || value->mysql_is_null != 0) {
         return nullptr;
     }
-    if (!value.bytes_complete && materialize_column_value(*statement, column) != MYLITE_OK) {
+    if (!value->bytes_complete && materialize_column_value(*statement, column) != MYLITE_OK) {
         return nullptr;
     }
-    return reinterpret_cast<const char *>(value.bytes.data());
+    value = current_column_value(*statement, column);
+    if (value == nullptr || !value->bytes_complete) {
+        return nullptr;
+    }
+    return reinterpret_cast<const char *>(value->bytes.data());
 #else
     (void)statement;
     (void)column;
@@ -1450,17 +1460,21 @@ const char *mylite_column_text(mylite_stmt *statement, unsigned column) {
 
 const void *mylite_column_blob(mylite_stmt *statement, unsigned column) {
 #if MYLITE_WITH_MARIADB_EMBEDDED
-    if (statement == nullptr || !statement->has_current_row || column >= statement->values.size()) {
+    if (statement == nullptr) {
         return nullptr;
     }
-    ColumnValue &value = statement->values[column];
-    if (!is_variable_column_type(value.type) || value.mysql_is_null != 0) {
+    const ColumnValue *value = current_column_value(*statement, column);
+    if (value == nullptr || !is_variable_column_type(value->type) || value->mysql_is_null != 0) {
         return nullptr;
     }
-    if (!value.bytes_complete && materialize_column_value(*statement, column) != MYLITE_OK) {
+    if (!value->bytes_complete && materialize_column_value(*statement, column) != MYLITE_OK) {
         return nullptr;
     }
-    return value.bytes.data();
+    value = current_column_value(*statement, column);
+    if (value == nullptr || !value->bytes_complete) {
+        return nullptr;
+    }
+    return value->bytes.data();
 #else
     (void)statement;
     (void)column;
@@ -1470,11 +1484,13 @@ const void *mylite_column_blob(mylite_stmt *statement, unsigned column) {
 
 std::size_t mylite_column_bytes(mylite_stmt *statement, unsigned column) {
 #if MYLITE_WITH_MARIADB_EMBEDDED
-    if (statement == nullptr || !statement->has_current_row || column >= statement->values.size()) {
+    if (statement == nullptr) {
         return 0U;
     }
-    const ColumnValue &value = statement->values[column];
-    return value.mysql_is_null != 0 ? 0U : static_cast<std::size_t>(value.mysql_length);
+    const ColumnValue *value = current_column_value(*statement, column);
+    return value == nullptr || value->mysql_is_null != 0
+               ? 0U
+               : static_cast<std::size_t>(value->mysql_length);
 #else
     (void)statement;
     (void)column;
@@ -1512,25 +1528,29 @@ int mylite_column_read(
         return MYLITE_MISUSE;
     }
 
-    ColumnValue &value = statement->values[column];
-    if (value.mysql_is_null != 0) {
+    const ColumnValue *current_value = current_column_value(*statement, column);
+    if (current_value == nullptr) {
+        set_error(*statement->database, MYLITE_MISUSE, "invalid column read");
+        return MYLITE_MISUSE;
+    }
+    if (current_value->mysql_is_null != 0) {
         set_ok(*statement->database);
         return MYLITE_OK;
     }
-    if (!is_variable_column_type(value.type)) {
+    if (!is_variable_column_type(current_value->type)) {
         set_error(*statement->database, MYLITE_MISUSE, "column is not TEXT or BLOB");
         return MYLITE_MISUSE;
     }
 
-    const auto total_length = static_cast<std::size_t>(value.mysql_length);
+    const auto total_length = static_cast<std::size_t>(current_value->mysql_length);
     if (offset >= total_length || buffer_len == 0U) {
         set_ok(*statement->database);
         return MYLITE_OK;
     }
 
     const std::size_t requested = std::min(buffer_len, total_length - offset);
-    if (value.bytes_complete) {
-        std::memcpy(buffer, value.bytes.data() + offset, requested);
+    if (current_value->bytes_complete) {
+        std::memcpy(buffer, current_value->bytes.data() + offset, requested);
         *out_read = requested;
         set_ok(*statement->database);
         return MYLITE_OK;
@@ -1546,7 +1566,8 @@ int mylite_column_read(
     my_bool mysql_is_null = false;
     my_bool mysql_error = 0;
     MYSQL_BIND bind = {};
-    bind.buffer_type = value.type == MYLITE_TYPE_BLOB ? MYSQL_TYPE_BLOB : MYSQL_TYPE_STRING;
+    bind.buffer_type =
+        current_value->type == MYLITE_TYPE_BLOB ? MYSQL_TYPE_BLOB : MYSQL_TYPE_STRING;
     bind.buffer = buffer;
     bind.buffer_length = static_cast<unsigned long>(requested);
     bind.length = &mysql_length;
@@ -2595,6 +2616,7 @@ int execute_cached_one_row_result(mylite_stmt &statement, bool *out_used_cache) 
         statement.done = true;
         statement.has_current_row = false;
         statement.result_active = false;
+        statement.one_row_result_cache_current_entry = nullptr;
         statement.database->changes = 0;
         statement.database->last_insert_id = 0;
         clear_warnings_if_needed(*statement.database);
@@ -2602,12 +2624,9 @@ int execute_cached_one_row_result(mylite_stmt &statement, bool *out_used_cache) 
         return MYLITE_DONE;
     }
 
-    try {
-        copy_cached_column_values(statement.values, entry->values);
-    } catch (const std::bad_alloc &) {
+    if (entry->values.size() != statement.values.size()) {
         clear_one_row_result_cache(statement);
-        set_error(*statement.database, MYLITE_NOMEM, "prepared result cache allocation failed");
-        return MYLITE_NOMEM;
+        return MYLITE_OK;
     }
 
     statement.executed = true;
@@ -2615,6 +2634,7 @@ int execute_cached_one_row_result(mylite_stmt &statement, bool *out_used_cache) 
     statement.has_current_row = true;
     statement.result_active = true;
     statement.one_row_result_cache_hit_active = true;
+    statement.one_row_result_cache_current_entry = entry;
     statement.database->changes = 0;
     statement.database->last_insert_id = 0;
     clear_warnings_if_needed(*statement.database);
@@ -2713,14 +2733,15 @@ void store_one_row_result_cache_miss(mylite_stmt &statement) {
 }
 
 void clear_one_row_result_cache(mylite_stmt &statement) {
+    clear_one_row_result_cache_execution(statement);
     statement.one_row_result_cache.clear();
     statement.one_row_result_cache_next_way.clear();
     statement.one_row_result_cache_pending_values.clear();
-    clear_one_row_result_cache_execution(statement);
 }
 
 void clear_one_row_result_cache_execution(mylite_stmt &statement) {
     statement.one_row_result_cache_hit_active = false;
+    statement.one_row_result_cache_current_entry = nullptr;
     statement.one_row_result_cache_execution_had_row = false;
     statement.one_row_result_cache_execution_multi_row = false;
     statement.one_row_result_cache_pending = false;
@@ -2891,6 +2912,25 @@ void copy_cached_column_value(ColumnValue &target, const ColumnValue &source) {
     if (is_variable_column_type(source.type)) {
         target.bytes = source.bytes;
     }
+}
+
+const ColumnValue *current_column_value(const mylite_stmt &statement, unsigned column) {
+    if (!statement.has_current_row) {
+        return nullptr;
+    }
+#    if MYLITE_MARIADB_HAS_MYLITE_SE
+    if (statement.one_row_result_cache_hit_active &&
+        statement.one_row_result_cache_current_entry != nullptr) {
+        if (column >= statement.one_row_result_cache_current_entry->values.size()) {
+            return nullptr;
+        }
+        return &statement.one_row_result_cache_current_entry->values[column];
+    }
+#    endif
+    if (column >= statement.values.size()) {
+        return nullptr;
+    }
+    return &statement.values[column];
 }
 
 std::size_t one_row_result_cache_set_start(const PreparedOneRowResultCacheKey &key) {
@@ -4253,6 +4293,9 @@ void clear_current_row_for_reuse(mylite_stmt &statement) {
     if (!statement.has_current_row) {
         return;
     }
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+    statement.one_row_result_cache_current_entry = nullptr;
+#  endif
     if (statement.reusable_result_binds) {
         statement.has_current_row = false;
         return;
@@ -4262,6 +4305,9 @@ void clear_current_row_for_reuse(mylite_stmt &statement) {
 
 void clear_current_row(mylite_stmt &statement) {
     statement.has_current_row = false;
+#  if MYLITE_MARIADB_HAS_MYLITE_SE
+    statement.one_row_result_cache_current_entry = nullptr;
+#  endif
     for (ColumnValue &value : statement.values) {
         value.type = MYLITE_TYPE_NULL;
         value.mysql_length = 0;
