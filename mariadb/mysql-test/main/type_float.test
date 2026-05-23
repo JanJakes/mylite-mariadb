@@ -48,6 +48,7 @@ create table t2 select c1 + c1 * (c2 / 100) as col1, round(c1, 5) as col2, round
 --disable_ps_protocol
 select * from t2;
 --enable_ps_protocol
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t2;
 drop table t1,t2;
 
@@ -129,11 +130,12 @@ drop table t1;
 # floats for everything.
 #
 
+--replace_result ENGINE=Aria ENGINE=MyISAM
 CREATE TABLE t1 (
   reckey int unsigned NOT NULL,
   recdesc varchar(50) NOT NULL,
   PRIMARY KEY  (reckey)
-) ENGINE=MyISAM DEFAULT CHARSET=latin1;
+) ENGINE=Aria DEFAULT CHARSET=latin1;
 
 INSERT INTO t1 VALUES (108, 'Has 108 as key');
 INSERT INTO t1 VALUES (109, 'Has 109 as key');
@@ -152,6 +154,7 @@ insert into t1 values ("100000000.0");
 insert into t2 values ("1.23456780");
 create table t3 select * from t2 union select * from t1;
 select * from t3;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t3;
 drop table t1, t2, t3;
 
@@ -569,18 +572,25 @@ create or replace table t1 (a double(40,30));
 --error ER_TOO_BIG_SCALE 1425
 create or replace table t1 (a double(40,31));
 create or replace table t1 as select 1.01e1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 create or replace table t1 as select truncate(10.000000000001e1, 30) as t;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 create or replace table t1 as select truncate(10.000000000001e1, 31) as t;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 create or replace table t1 as select truncate(10.000000000001e1, 39) as t;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 create or replace table t1 as select truncate(10.000000000001e1, 51) as t;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 create or replace table t1 as select truncate(10.000000000001e1, 20)/2 as t;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 create or replace table t1 as select truncate(10.000000000001e1, 28)/2 as t;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 show create table t1;
 
 drop table if exists t1;
@@ -654,16 +664,19 @@ SET sql_mode=DEFAULT;
 EXPLAIN EXTENDED SELECT CAST(0.671437 AS FLOAT);
 
 CREATE TABLE t1 AS SELECT CAST(0.671437 AS FLOAT) AS c1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 SELECT * FROM t1;
 DROP TABLE t1;
 
 CREATE TABLE t1 (a FLOAT);
 CREATE TABLE t2 AS SELECT CONCAT(a) AS c1, CONCAT(CAST(a AS FLOAT)) AS c2 FROM t1;
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t2;
 DROP TABLE t1, t2;
 
 CREATE TABLE t1 (a FLOAT DEFAULT CAST(0.671437 AS FLOAT));
+--replace_result ENGINE=Aria ENGINE=MyISAM " PAGE_CHECKSUM=1" ""
 SHOW CREATE TABLE t1;
 DROP TABLE t1;
 

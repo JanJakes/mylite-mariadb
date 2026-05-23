@@ -29,6 +29,7 @@ default_tests=(
   main.bigint
   main.type_ranges
   main.type_num
+  main.type_float
   main.type_uint
   main.type_bool
   main.type_hex_hybrid
