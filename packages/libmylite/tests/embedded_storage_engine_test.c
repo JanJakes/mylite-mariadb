@@ -16832,6 +16832,7 @@ static void test_prepared_routed_select_reads(void) {
     char *filename = NULL;
     mylite_db *db = open_database(root, &filename);
     mylite_stmt *cached_stmt = NULL;
+    mylite_stmt *text_stmt = NULL;
     mylite_stmt *large_stmt = NULL;
     const void *large_body = NULL;
 
@@ -16944,6 +16945,53 @@ static void test_prepared_routed_select_reads(void) {
     assert(mylite_step(cached_stmt) == MYLITE_DONE);
     assert(mylite_finalize(cached_stmt) == MYLITE_OK);
     cached_stmt = NULL;
+
+    assert(
+        mylite_prepare(
+            db,
+            "SELECT id FROM prepared_select_posts WHERE slug = ?",
+            MYLITE_NUL_TERMINATED,
+            &text_stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(text_stmt != NULL);
+    assert(
+        mylite_bind_text(text_stmt, 1U, "second", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK
+    );
+    assert(mylite_step(text_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(text_stmt, 0U) == 2);
+    assert(mylite_step(text_stmt) == MYLITE_DONE);
+    assert(mylite_reset(text_stmt) == MYLITE_OK);
+    assert(
+        mylite_bind_text(text_stmt, 1U, "second", MYLITE_NUL_TERMINATED, MYLITE_STATIC) == MYLITE_OK
+    );
+    assert(mylite_step(text_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(text_stmt, 0U) == 2);
+    assert(mylite_step(text_stmt) == MYLITE_DONE);
+    assert(mylite_reset(text_stmt) == MYLITE_OK);
+    assert(
+        mylite_bind_text(text_stmt, 1U, "missing", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+        MYLITE_OK
+    );
+    assert(mylite_step(text_stmt) == MYLITE_DONE);
+    assert(mylite_reset(text_stmt) == MYLITE_OK);
+    assert(
+        mylite_bind_text(text_stmt, 1U, "missing", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+        MYLITE_OK
+    );
+    assert(mylite_step(text_stmt) == MYLITE_DONE);
+    assert(mylite_reset(text_stmt) == MYLITE_OK);
+    assert_exec_succeeds(db, "INSERT INTO prepared_select_posts VALUES (5, 'missing', 'news')");
+    assert(
+        mylite_bind_text(text_stmt, 1U, "missing", MYLITE_NUL_TERMINATED, MYLITE_STATIC) ==
+        MYLITE_OK
+    );
+    assert(mylite_step(text_stmt) == MYLITE_ROW);
+    assert(mylite_column_int64(text_stmt, 0U) == 5);
+    assert(mylite_step(text_stmt) == MYLITE_DONE);
+    assert(mylite_finalize(text_stmt) == MYLITE_OK);
+    text_stmt = NULL;
 
     assert(
         mylite_prepare(

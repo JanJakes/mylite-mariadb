@@ -295,7 +295,10 @@ now copies scalar column state in place instead of assigning whole
 now uses a larger bounded set count so 10k-row recurring point-read working sets
 fall back to MariaDB less often. It also caches deterministic no-row outcomes
 under the same retained read scope, so repeated prepared point misses can return
-`DONE` without re-entering MariaDB until a write invalidates the scope.
+`DONE` without re-entering MariaDB until a write invalidates the scope. The same
+prepared point-read cache now accepts bounded exact text/blob parameter keys,
+covering repeated secondary-key-style reads without broadening collation
+equivalence beyond identical bound bytes.
 Hot read-checkpoint cache hits now borrow the cached catalog image for scoped
 catalog views and defer catalog/header page copies until a caller needs page
 bytes, instead of deep-copying that state into every short-lived read statement.

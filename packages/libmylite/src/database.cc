@@ -70,6 +70,7 @@ constexpr const char *k_bad_db_handle = "bad database handle";
 constexpr unsigned long k_initial_column_buffer_size = 256;
 constexpr std::size_t k_prepared_one_row_result_cache_set_count = 8192;
 constexpr std::size_t k_prepared_one_row_result_cache_way_count = 4;
+constexpr std::size_t k_prepared_one_row_result_cache_max_key_bytes = 256;
 constexpr std::size_t k_prepared_one_row_result_cache_entry_limit =
     k_prepared_one_row_result_cache_set_count * k_prepared_one_row_result_cache_way_count;
 static_assert(
@@ -213,6 +214,7 @@ struct PreparedOneRowResultCacheKey {
     BoundValueKind kind = BoundValueKind::Null;
     long long int64_value = 0;
     unsigned long long uint64_value = 0;
+    std::vector<unsigned char> bytes;
 };
 
 struct PreparedOneRowResultCacheEntry {
@@ -568,6 +570,7 @@ void copy_cached_column_values(
 );
 void copy_cached_column_value(ColumnValue &target, const ColumnValue &source);
 std::size_t one_row_result_cache_set_start(const PreparedOneRowResultCacheKey &key);
+std::uint64_t one_row_result_cache_hash_bytes(const std::vector<unsigned char> &bytes);
 bool one_row_result_cache_keys_equal(
     const PreparedOneRowResultCacheKey &left,
     const PreparedOneRowResultCacheKey &right
@@ -2750,6 +2753,7 @@ bool one_row_result_cache_key_from_statement(
             BoundValueKind::Int64,
             parameter.int64_value,
             0ULL,
+            {},
         };
         return true;
     case BoundValueKind::UInt64:
@@ -2757,12 +2761,35 @@ bool one_row_result_cache_key_from_statement(
             BoundValueKind::UInt64,
             0,
             parameter.uint64_value,
+            {},
         };
         return true;
+    case BoundValueKind::Text:
+    case BoundValueKind::Blob: {
+        if (parameter.length > k_prepared_one_row_result_cache_max_key_bytes) {
+            return false;
+        }
+        const void *data = bound_value_data(parameter);
+        if (data == nullptr && parameter.length != 0U) {
+            return false;
+        }
+        try {
+            const auto *begin = static_cast<const unsigned char *>(data);
+            *out_key = PreparedOneRowResultCacheKey{
+                parameter.kind,
+                0,
+                0ULL,
+                {},
+            };
+            out_key->bytes.assign(begin, begin + parameter.length);
+        } catch (const std::bad_alloc &) {
+            out_key->bytes.clear();
+            return false;
+        }
+        return true;
+    }
     case BoundValueKind::Null:
     case BoundValueKind::Double:
-    case BoundValueKind::Text:
-    case BoundValueKind::Blob:
         return false;
     }
     return false;
@@ -2860,15 +2887,29 @@ void copy_cached_column_value(ColumnValue &target, const ColumnValue &source) {
 }
 
 std::size_t one_row_result_cache_set_start(const PreparedOneRowResultCacheKey &key) {
-    std::uint64_t value = key.kind == BoundValueKind::Int64
-                              ? static_cast<std::uint64_t>(key.int64_value)
-                              : key.uint64_value;
+    std::uint64_t value = 0;
+    if (key.kind == BoundValueKind::Text || key.kind == BoundValueKind::Blob) {
+        value = one_row_result_cache_hash_bytes(key.bytes);
+        value ^= static_cast<std::uint64_t>(key.kind);
+    } else {
+        value = key.kind == BoundValueKind::Int64 ? static_cast<std::uint64_t>(key.int64_value)
+                                                  : key.uint64_value;
+    }
     value ^= value >> 33U;
     value *= 0xff51afd7ed558ccdULL;
     value ^= value >> 33U;
     const std::size_t set_index =
         static_cast<std::size_t>(value) & (k_prepared_one_row_result_cache_set_count - 1U);
     return set_index * k_prepared_one_row_result_cache_way_count;
+}
+
+std::uint64_t one_row_result_cache_hash_bytes(const std::vector<unsigned char> &bytes) {
+    std::uint64_t value = 1469598103934665603ULL;
+    for (const unsigned char byte : bytes) {
+        value ^= static_cast<std::uint64_t>(byte);
+        value *= 1099511628211ULL;
+    }
+    return value;
 }
 
 bool one_row_result_cache_keys_equal(
@@ -2878,8 +2919,19 @@ bool one_row_result_cache_keys_equal(
     if (left.kind != right.kind) {
         return false;
     }
-    return left.kind == BoundValueKind::Int64 ? left.int64_value == right.int64_value
-                                              : left.uint64_value == right.uint64_value;
+    switch (left.kind) {
+    case BoundValueKind::Int64:
+        return left.int64_value == right.int64_value;
+    case BoundValueKind::UInt64:
+        return left.uint64_value == right.uint64_value;
+    case BoundValueKind::Text:
+    case BoundValueKind::Blob:
+        return left.bytes == right.bytes;
+    case BoundValueKind::Null:
+    case BoundValueKind::Double:
+        return false;
+    }
+    return false;
 }
 
 bool one_row_result_cache_values_complete(const mylite_stmt &statement) {

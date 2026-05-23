@@ -39,8 +39,9 @@ MariaDB still re-enters SELECT optimization for each re-execute.
 - MyLite also caches deterministic misses after MariaDB returns `MYSQL_NO_DATA`
   for the same simple shape. The miss cache is only reused inside the same
   retained prepared read scope and is invalidated before any write.
-- Cache keys are the single bound integer parameter value. Unsupported
-  parameter kinds use the normal MariaDB path.
+- Cache keys are the single bound integer parameter value, or a bounded exact
+  bound text/blob byte value. Unsupported and oversized parameter kinds use the
+  normal MariaDB path.
 - Cached rows are valid only while the retained prepared read statement remains
   open. Cached misses use the same lifetime. Closing that read scope clears the
   cache.
@@ -87,6 +88,8 @@ structure and simple SQL-shape classifier in `libmylite`.
 - Extend prepared routed-select tests with repeated simple point reads, repeated
   no-row point reads, and subsequent writes that must invalidate the retained
   read-scope cache.
+- Cover exact bound text keys for row and no-row results without claiming
+  broader collation-equivalence reuse across different bound bytes.
 - Cover a row result that is not cacheable before user-side large-value
   materialization, so the miss cache cannot treat a drained non-cacheable row
   as a no-row result.
@@ -101,6 +104,8 @@ structure and simple SQL-shape classifier in `libmylite`.
   write and updated values after a write.
 - Repeated simple one-parameter point misses return `MYLITE_DONE`, and a later
   insert for the same key is visible after write invalidation.
+- Repeated exact text-key point reads and misses follow the same cache
+  invalidation rules as integer keys.
 - A non-cacheable row result is not converted into a cached miss after drain.
 - Reset-before-drain and finalization do not call MariaDB result cleanup for a
   cache-served row.
