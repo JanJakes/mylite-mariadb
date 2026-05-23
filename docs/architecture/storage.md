@@ -208,8 +208,8 @@ requiring physically contiguous leaf pages.
 When an insert first overflows a maintained single-page root and the live
 entries fit in one branch, storage appends immutable leaf pages and rewrites
 the same root page as a branch snapshot; later row DML against that index
-remains visible through the append-tail overlay until branch maintenance
-exists.
+uses branch maintenance for the currently supported shapes and remains visible
+through the append-tail overlay for unsupported shapes.
 Fitting inserts into existing single-level branch roots now rewrite the selected
 leaf and branch page directly when the leaf has spare capacity, suppressing the
 fallback index-entry page for that index. Inserts outside the current branch
@@ -226,7 +226,11 @@ full-leaf cases still use the append-tail overlay. Eligible deletes from the
 final child leaf rewrite that leaf and refresh the final branch fence when the
 branch still needs the same child count; interior-child deletes and final-child
 removal remain on the row-state overlay path until broader branch merge work
-exists.
+exists. Eligible updates whose source row is in the final child leaf and whose
+replacement `(key, row_id)` still belongs in that final child now rewrite the
+leaf and refresh the final branch fence without changing the branch entry
+count; updates that cross child boundaries remain on the append-tail
+replacement path.
 `TRUNCATE TABLE` logically
 deletes live rows and resets autoincrement state without changing catalog
 metadata. Ordinary `CREATE TABLE IF NOT EXISTS` creates missing routed tables
@@ -1118,7 +1122,9 @@ scan path. Branch roots now report their page-owned entry counts for metadata
 reads when present, while zero-count legacy branch pages keep using the catalog
 record count. Eligible final-child deletes can physically remove the leaf entry
 and refresh the final branch fence while preserving the branch-root invariant
-that every non-final child leaf remains full.
+that every non-final child leaf remains full. Eligible final-child updates can
+physically replace the leaf entry and refresh the final branch fence when the
+replacement entry remains in the same final child.
 Copy-rebuild DDL publishes supported fixed-width leaf roots for every current
 key that fits the raw format in the rebuilt table, including retained primary
 keys after forced rebuilds, by scanning the append history once for the table's
@@ -1192,9 +1198,10 @@ state while an active statement chain has deferred table-local durable cache
 retargeting. Statement rollback, savepoint rollback, transaction rollback,
 stale statement-journal recovery, and stale transaction-journal recovery now
 restore single-page maintained root bytes and logical visibility for covered
-insert, update, and delete paths. Root splits, multi-page navigable indexes,
-branch-page split/merge, and broader transactional maintained index mutation
-remain planned.
+insert, update, and delete paths, and restore covered single-level branch
+final-leaf deletes and updates. Root splits, multi-page navigable indexes,
+branch-page split/merge, child-boundary updates, and broader transactional
+maintained index mutation remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, row/index free-space reclamation, and broader
