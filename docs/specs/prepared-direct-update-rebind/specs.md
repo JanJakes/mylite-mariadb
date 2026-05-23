@@ -79,6 +79,10 @@ stale expression and table state.
   evaluates the pushed condition, fills the target row with MariaDB update
   values, enforces row checks through the normal handler update path, and
   reports found/updated rows through MariaDB's direct-update contract.
+- `mariadb/storage/innobase/handler/ha_innodb.cc::ha_innobase::lock_count()`
+  returns zero SQL-layer `THR_LOCK` rows. Its source comment confirms MariaDB
+  still calls `store_lock()`, `start_stmt()`, and `external_lock()` for InnoDB
+  tables even without `THR_LOCK` rows.
 
 ## Design
 
@@ -157,18 +161,18 @@ of rediscovering key-changing updates after it has already entered handler
 execution.
 
 The third implementation step enables the first guarded shortcut. It still runs
-MariaDB's per-execution precheck, table open, metadata validation, and table
-locking, but after a previously accepted shape is rebound against the current
-table it can skip `JOIN::prepare()` for row-only exact-key prepared updates
-whose condition is fully guaranteed by the key. The shortcut resolves update
-target fields and value setup through MariaDB helpers, pushes the current
-exact-key proof and update lists into the MyLite handler, and then uses the
-same direct-update handler contract and OK/binlog/query-cache completion
-semantics as the normal single-table update path. Key-changing writes,
-additional predicates, triggers, views, period tables, `IGNORE`, `LIMIT`,
-versioned tables, `RETURNING`, row-binlog mode, explain/analyze-observable
-modes, metadata changes, and any stale shape fail closed before handler
-execution and continue on the normal MariaDB path.
+MariaDB's per-execution precheck, table open, metadata validation, MDL, and
+handler external-lock lifecycle, but after a previously accepted shape is
+rebound against the current table it can skip `JOIN::prepare()` for row-only
+exact-key prepared updates whose condition is fully guaranteed by the key. The
+shortcut resolves update target fields and value setup through MariaDB helpers,
+pushes the current exact-key proof and update lists into the MyLite handler,
+and then uses the same direct-update handler contract and OK/binlog/query-cache
+completion semantics as the normal single-table update path. Key-changing
+writes, additional predicates, triggers, views, period tables, `IGNORE`,
+`LIMIT`, versioned tables, `RETURNING`, row-binlog mode,
+explain/analyze-observable modes, metadata changes, and any stale shape fail
+closed before handler execution and continue on the normal MariaDB path.
 
 The fourth implementation step broadens that same rebind shortcut to
 key-changing exact-key updates when the first normal execution already accepted
@@ -179,6 +183,13 @@ direct-update execution errors. Generated/virtual-column shapes, extra
 predicates, triggers, views, period/versioned tables, `IGNORE`, `LIMIT`,
 `RETURNING`, row-binlog mode, explain/analyze-observable modes, metadata
 changes, and stale shapes continue to fail closed before handler execution.
+
+A handler lock-row optimization then mirrors InnoDB's lock ownership shape:
+MyLite reports zero SQL-layer `THR_LOCK` rows but still lets MariaDB call
+`store_lock()` and `external_lock()` for routed tables. MDL plus MyLite file
+locks and statement checkpoints remain the correctness boundary for metadata
+and durable state. This keeps explicit lock and statement lifecycle coverage in
+place while removing repeated `THR_LOCK_DATA` setup from hot prepared updates.
 
 ## Non-Goals
 
@@ -276,9 +287,10 @@ Current guarded-shortcut verification:
   contract. Unsupported shapes continue through the existing MariaDB path.
 - `git diff --check` passed.
 - `git clang-format --diff HEAD -- mariadb/sql/sql_update.cc
-  mariadb/sql/sql_update.h` passed.
+  mariadb/sql/sql_update.h mariadb/storage/mylite/ha_mylite.cc
+  mariadb/storage/mylite/ha_mylite.h` passed.
 - `cmake --build build/mariadb-mylite-storage-smoke --target
-  libmariadbd.a` passed; resulting archive size is 21,282,504 bytes.
+  libmariadbd.a` passed; resulting archive size is 21,282,488 bytes.
 - `cmake --build --preset storage-smoke-dev --target
   mylite_embedded_statement_test mylite_embedded_storage_engine_test
   mylite_perf_baseline` passed.
@@ -290,15 +302,24 @@ Current guarded-shortcut verification:
 - `ctest --preset storage-smoke-dev --output-on-failure` passed 10/10.
 - `build/storage-smoke-dev/tools/mylite_perf_baseline
   --phase=prepared-row-only-update-components 10000 1000000` measured the
-  prepared row-only update step at 1.288 us/op.
+  prepared row-only update step at 1.267 us/op.
 - `build/storage-smoke-dev/tools/mylite_perf_baseline
   --phase=prepared-row-only-update-miss-components 10000 1000000` measured the
-  prepared row-only update miss step at 0.866 us/op.
+  prepared row-only update miss step at 0.867 us/op.
 - `build/storage-smoke-dev/tools/mylite_perf_baseline
   --phase=prepared-assignment-update-components 10000 1000000` measured the
-  prepared assignment update step at 1.309 us/op; this benchmark updates an
+  prepared assignment update step at 1.293 us/op; this benchmark updates an
   indexed secondary-key column and now uses the rebound shortcut after the
   first accepted execution.
+- `build/storage-smoke-dev/tools/mylite_perf_baseline
+  --phase=prepared-update-components 10000 1000000` measured the prepared
+  primary-key update step at 1.358 us/op.
+- `build/storage-smoke-dev/tools/mylite_perf_baseline
+  --phase=prepared-row-only-update-components --profile-iterations=10000000
+  10000` measured the prepared row-only update step at 1.214 us/op.
+- `build/storage-smoke-dev/tools/mylite_perf_baseline
+  --phase=prepared-assignment-update-components --profile-iterations=10000000
+  10000` measured the prepared assignment update step at 1.264 us/op.
 
 Current safety-net coverage extends
 `test_prepared_primary_key_update_rebinds()` around the shortcut. The

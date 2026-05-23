@@ -264,6 +264,7 @@ public:
   int create(const char *name, TABLE *form, HA_CREATE_INFO *create_info) override;
   int delete_table(const char *name) override;
   int rename_table(const char *from, const char *to) override;
+  uint lock_count(void) const override;
   THR_LOCK_DATA **store_lock(THD *thd, THR_LOCK_DATA **to,
                              enum thr_lock_type lock_type) override;
 };

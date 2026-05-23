@@ -9704,13 +9704,22 @@ static void mylite_put_u64(uchar *ptr, ulonglong value)
     ptr[i]= (uchar)((value >> (i * 8U)) & UINT8_MAX);
 }
 
+uint ha_mylite::lock_count(void) const
+{
+  /*
+    MyLite does not rely on SQL-layer THR_LOCK rows. The SQL layer still calls
+    store_lock() and external_lock(), while MDL plus MyLite file/checkpoint
+    locking protect table metadata and durable state.
+  */
+  return 0;
+}
+
 THR_LOCK_DATA **ha_mylite::store_lock(THD *, THR_LOCK_DATA **to,
                                       enum thr_lock_type lock_type)
 {
   if (lock_type != TL_IGNORE && lock.type == TL_UNLOCK)
     lock.type= lock_type;
 
-  *to++= &lock;
   return to;
 }
 

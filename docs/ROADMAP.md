@@ -1120,14 +1120,21 @@ against the freshly opened table and MariaDB table reference before retargeting
 the SQL-layer exact-key proof cache to a copied prepared-condition tree. The
 direct execution shortcut is now enabled for exact-key prepared updates whose
 condition is fully guaranteed by the key: it still runs MariaDB's table open
-and lock lifecycle, but skips repeated `JOIN::prepare()` after a fail-closed
-fresh-table rebind boundary instead of retaining stale `TABLE`, `JOIN`, or
-range-planner state. Stable repeated executions retain the cached fingerprint
-when the current accepted proof still targets the same MariaDB table reference,
-avoiding another key-shape walk in the hot path. Key-changing updates also use
-the shortcut after the first normal execution has accepted MyLite's direct
-update contract, while generated/virtual-column, metadata-stale, and
-unsupported observable paths keep the normal MariaDB route.
+and MDL/external-lock lifecycle, but skips repeated `JOIN::prepare()` after a
+fail-closed fresh-table rebind boundary instead of retaining stale `TABLE`,
+`JOIN`, or range-planner state. Stable repeated executions retain the cached
+fingerprint when the current accepted proof still targets the same MariaDB
+table reference, avoiding another key-shape walk in the hot path. Key-changing
+updates also use the shortcut after the first normal execution has accepted
+MyLite's direct update contract, while generated/virtual-column,
+metadata-stale, and unsupported observable paths keep the normal MariaDB route.
+The MyLite handler now mirrors InnoDB by advertising zero SQL-layer
+`THR_LOCK` rows; MariaDB still calls `store_lock()` and `external_lock()`, while
+MDL plus MyLite file and checkpoint locks own storage correctness. Local
+samples after that lock-row optimization measured prepared row-only update
+steps at 1.214 us/op and assignment update steps at 1.264 us/op over 10000
+rows / 10000000 iterations; 1000000-iteration samples measured row-only misses
+at 0.867 us/op and expression key-changing updates at 1.358 us/op.
 The first implementation step caches the immutable prepared-update value-list
 subquery shape on `Sql_cmd_update`, avoiding repeated value-list scans before
 the MyLite single-update result-elision gate. `Sql_cmd_update` now also caches

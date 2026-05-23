@@ -1363,6 +1363,10 @@ handlerton in MariaDB's statement transaction list, and releases or restores
 the checkpoint from MariaDB's statement commit/rollback hooks. DDL and catalog
 paths that do not reliably enter `external_lock()` keep the outer `libmylite`
 checkpoint before MariaDB execution.
+At the SQL handler boundary, MyLite follows InnoDB's ownership shape by
+advertising zero SQL-layer `THR_LOCK` rows while still receiving
+`store_lock()` and `external_lock()` calls. MDL plus MyLite file locks and
+statement checkpoints remain the storage correctness boundary.
 The handler statement context also owns a volatile snapshot for routed
 MEMORY/HEAP rows, so failed statements restore process-local row and supported
 index visibility at the same MariaDB statement boundary. User temporary
