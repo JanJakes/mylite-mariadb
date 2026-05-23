@@ -234,6 +234,7 @@ static bool mylite_direct_update_key_is_supported(TABLE *table, KEY *key_info);
 static bool mylite_table_needs_inserver_update_constraints(TABLE *table);
 static int mylite_store_direct_update_integer_key(Field *key_field,
                                                   Item *value_item,
+                                                  bool value_item_is_integer,
                                                   bool *out_handled,
                                                   bool *out_has_key);
 static Field *mylite_auto_increment_field(TABLE *table);
@@ -1930,7 +1931,10 @@ int ha_mylite::build_direct_update_key(bool *out_has_key)
   bzero(direct_update_key_buffer, key_info->key_length);
   direct_update_key_null= 0;
 
-  if (direct_update_key_value->maybe_null() &&
+  const bool direct_update_key_value_is_integer=
+      direct_update_key_value->result_type() == INT_RESULT;
+  if (!direct_update_key_value_is_integer &&
+      direct_update_key_value->maybe_null() &&
       direct_update_key_value->is_null())
     DBUG_RETURN(thd->is_error() ? 1 : 0);
 
@@ -1955,8 +1959,8 @@ int ha_mylite::build_direct_update_key(bool *out_has_key)
     direct_update_key_field->reset();
     bool handled_integer_key= false;
     res= mylite_store_direct_update_integer_key(
-        direct_update_key_field, direct_update_key_value, &handled_integer_key,
-        out_has_key);
+        direct_update_key_field, direct_update_key_value,
+        direct_update_key_value_is_integer, &handled_integer_key, out_has_key);
     if (!handled_integer_key)
       res= direct_update_key_value->save_in_field(direct_update_key_field, 1);
     if (!res && direct_update_key_field->table->in_use->is_error())
@@ -1977,11 +1981,12 @@ int ha_mylite::build_direct_update_key(bool *out_has_key)
 
 static int mylite_store_direct_update_integer_key(Field *key_field,
                                                   Item *value_item,
+                                                  bool value_item_is_integer,
                                                   bool *out_handled,
                                                   bool *out_has_key)
 {
   *out_handled= false;
-  if (!key_field || !value_item || value_item->result_type() != INT_RESULT)
+  if (!key_field || !value_item || !value_item_is_integer)
     return 0;
 
   *out_handled= true;

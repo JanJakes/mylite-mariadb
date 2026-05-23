@@ -193,6 +193,9 @@ Direct and prepared SQL entry points now summarize token-wide unsupported
 surface checks through one shared dispatch helper while preserving the existing
 command-specific diagnostic priority, reducing repeated MyLite policy preflight
 work before MariaDB execution.
+Integer exact-key direct updates now skip the eager nullable-value probe before
+building the key image, letting the integer store evaluate bound key values once
+while preserving non-integer `NULL` no-match behavior.
 Fixed-record durable exact unique-key cursor construction now resolves the
 index key and materializes the row payload through one storage operation,
 avoiding a second open/header/catalog pass for primary-key point reads. Those
