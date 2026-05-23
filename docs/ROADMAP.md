@@ -1133,6 +1133,10 @@ and continuation behavior. Direct row-only updates that already proved stable
 indexed key images now skip per-row foreign-key presence probes, while
 key-changing direct updates and ordinary row updates keep the existing FK
 validation path.
+Stable row-only direct updates now also cache their compact old-value snapshot
+field indexes and byte lengths through the handler direct-update shape cache,
+so row execution copies and compares cached field bytes instead of walking the
+update-field item list for no-op affected-row detection.
 
 ## Size And Profile Direction
 

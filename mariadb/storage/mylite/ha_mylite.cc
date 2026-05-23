@@ -1355,8 +1355,12 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
       active_storage_statement(NULL),
       active_storage_statement_primary_file(NULL),
       direct_update_shape_cache_table_share(NULL),
-      direct_update_shape_cache_key_count(0), duplicate_key_index((uint) -1),
-      foreign_key_presence_epoch(0ULL),
+      direct_update_snapshot_field_count(0),
+      direct_update_shape_cache_snapshot_field_count(0),
+      direct_update_shape_cache_key_count(0),
+      direct_update_snapshot_byte_count(0),
+      direct_update_shape_cache_snapshot_byte_count(0),
+      duplicate_key_index((uint) -1), foreign_key_presence_epoch(0ULL),
       child_foreign_key_presence_known(false),
       child_foreign_key_presence(false),
       parent_foreign_key_presence_known(false),
@@ -1368,11 +1372,13 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
       direct_update_can_compare_record(false),
       direct_update_can_skip_duplicate_key_checks(false),
       direct_update_may_change_index_entries(false),
+      direct_update_can_use_compact_snapshot(false),
       direct_update_condition_guaranteed_by_key(false),
       direct_update_shape_cache_valid(false),
       direct_update_shape_cache_can_compare_record(false),
       direct_update_shape_cache_can_skip_duplicate_key_checks(false),
       direct_update_shape_cache_may_change_index_entries(false),
+      direct_update_shape_cache_can_use_compact_snapshot(false),
       direct_update_condition(NULL), direct_update_fields(NULL),
       direct_update_values(NULL), direct_update_key_value(NULL),
       direct_update_key_number(MAX_KEY),
@@ -1384,6 +1390,9 @@ ha_mylite::ha_mylite(handlerton *hton, TABLE_SHARE *table_arg)
   bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
   bzero(direct_update_shape_cache_key_may_change,
         sizeof(direct_update_shape_cache_key_may_change));
+  bzero(direct_update_snapshot_fields, sizeof(direct_update_snapshot_fields));
+  bzero(direct_update_shape_cache_snapshot_fields,
+        sizeof(direct_update_shape_cache_snapshot_fields));
   my_bitmap_clear(&direct_update_shape_cache_write_set);
   strcpy(display_engine_name, MYLITE_STORAGE_ENGINE_NAME);
   display_engine_name_lex.str= display_engine_name;
@@ -1475,21 +1484,30 @@ void ha_mylite::clear_direct_update_state()
   direct_update_can_compare_record= false;
   direct_update_can_skip_duplicate_key_checks= false;
   direct_update_may_change_index_entries= false;
+  direct_update_can_use_compact_snapshot= false;
   direct_update_condition_guaranteed_by_key= false;
+  direct_update_snapshot_field_count= 0;
+  direct_update_snapshot_byte_count= 0;
   bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
+  bzero(direct_update_snapshot_fields, sizeof(direct_update_snapshot_fields));
 }
 
 void ha_mylite::clear_direct_update_shape_cache()
 {
   direct_update_shape_cache_table_share= NULL;
+  direct_update_shape_cache_snapshot_field_count= 0;
   direct_update_shape_cache_key_count= 0;
+  direct_update_shape_cache_snapshot_byte_count= 0;
   direct_update_shape_cache_valid= false;
   direct_update_shape_cache_can_compare_record= false;
   direct_update_shape_cache_can_skip_duplicate_key_checks= false;
   direct_update_shape_cache_may_change_index_entries= false;
+  direct_update_shape_cache_can_use_compact_snapshot= false;
   my_bitmap_clear(&direct_update_shape_cache_write_set);
   bzero(direct_update_shape_cache_key_may_change,
         sizeof(direct_update_shape_cache_key_may_change));
+  bzero(direct_update_shape_cache_snapshot_fields,
+        sizeof(direct_update_shape_cache_snapshot_fields));
 }
 
 void ha_mylite::clear_foreign_key_presence_cache() const
@@ -1604,8 +1622,12 @@ const COND *ha_mylite::cond_push(const COND *cond)
   direct_update_can_compare_record= false;
   direct_update_can_skip_duplicate_key_checks= false;
   direct_update_may_change_index_entries= false;
+  direct_update_can_use_compact_snapshot= false;
   direct_update_condition_guaranteed_by_key= false;
+  direct_update_snapshot_field_count= 0;
+  direct_update_snapshot_byte_count= 0;
   bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
+  bzero(direct_update_snapshot_fields, sizeof(direct_update_snapshot_fields));
   if (!cond)
     DBUG_RETURN(cond);
 
@@ -1633,8 +1655,12 @@ void ha_mylite::cond_pop()
   direct_update_can_compare_record= false;
   direct_update_can_skip_duplicate_key_checks= false;
   direct_update_may_change_index_entries= false;
+  direct_update_can_use_compact_snapshot= false;
   direct_update_condition_guaranteed_by_key= false;
+  direct_update_snapshot_field_count= 0;
+  direct_update_snapshot_byte_count= 0;
   bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
+  bzero(direct_update_snapshot_fields, sizeof(direct_update_snapshot_fields));
 }
 
 int ha_mylite::info_push(uint info_type, void *info)
@@ -1649,8 +1675,13 @@ int ha_mylite::info_push(uint info_type, void *info)
     direct_update_can_compare_record= false;
     direct_update_can_skip_duplicate_key_checks= false;
     direct_update_may_change_index_entries= false;
+    direct_update_can_use_compact_snapshot= false;
     direct_update_condition_guaranteed_by_key= false;
+    direct_update_snapshot_field_count= 0;
+    direct_update_snapshot_byte_count= 0;
     bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
+    bzero(direct_update_snapshot_fields,
+          sizeof(direct_update_snapshot_fields));
 
     mylite_update_exact_key_info *key_info=
         static_cast<mylite_update_exact_key_info *>(info);
@@ -1673,14 +1704,24 @@ int ha_mylite::info_push(uint info_type, void *info)
     direct_update_can_compare_record= false;
     direct_update_can_skip_duplicate_key_checks= false;
     direct_update_may_change_index_entries= false;
+    direct_update_can_use_compact_snapshot= false;
+    direct_update_snapshot_field_count= 0;
+    direct_update_snapshot_byte_count= 0;
     bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
+    bzero(direct_update_snapshot_fields,
+          sizeof(direct_update_snapshot_fields));
     direct_update_fields= static_cast<List<Item> *>(info);
     break;
   case INFO_KIND_UPDATE_VALUES:
     direct_update_can_compare_record= false;
     direct_update_can_skip_duplicate_key_checks= false;
     direct_update_may_change_index_entries= false;
+    direct_update_can_use_compact_snapshot= false;
+    direct_update_snapshot_field_count= 0;
+    direct_update_snapshot_byte_count= 0;
     bzero(direct_update_key_may_change, sizeof(direct_update_key_may_change));
+    bzero(direct_update_snapshot_fields,
+          sizeof(direct_update_snapshot_fields));
     direct_update_values= static_cast<List<Item> *>(info);
     break;
   default:
@@ -1711,6 +1752,11 @@ int ha_mylite::direct_update_rows_init(List<Item> *update_fields)
       (table->pos_in_table_list->is_view_or_derived() ||
        table->pos_in_table_list->belong_to_view))
     DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+
+  direct_update_can_use_compact_snapshot= false;
+  direct_update_snapshot_field_count= 0;
+  direct_update_snapshot_byte_count= 0;
+  bzero(direct_update_snapshot_fields, sizeof(direct_update_snapshot_fields));
 
   if (use_direct_update_shape_cache())
     DBUG_RETURN(0);
@@ -1747,6 +1793,7 @@ int ha_mylite::direct_update_rows_init(List<Item> *update_fields)
     direct_update_may_change_index_entries|=
         direct_update_key_may_change[key_number] != 0;
   }
+  prepare_direct_update_compact_snapshot(update_fields);
 
   if (!update_fields_change_key)
     store_direct_update_shape_cache();
@@ -1770,9 +1817,27 @@ bool ha_mylite::use_direct_update_shape_cache()
       direct_update_shape_cache_can_skip_duplicate_key_checks;
   direct_update_may_change_index_entries=
       direct_update_shape_cache_may_change_index_entries;
+  direct_update_can_use_compact_snapshot=
+      direct_update_shape_cache_can_use_compact_snapshot;
+  direct_update_snapshot_field_count=
+      direct_update_shape_cache_snapshot_field_count;
+  direct_update_snapshot_byte_count=
+      direct_update_shape_cache_snapshot_byte_count;
   memcpy(direct_update_key_may_change,
          direct_update_shape_cache_key_may_change,
          sizeof(direct_update_key_may_change));
+  memcpy(direct_update_snapshot_fields,
+         direct_update_shape_cache_snapshot_fields,
+         sizeof(direct_update_snapshot_fields));
+  if (direct_update_can_use_compact_snapshot &&
+      !direct_update_compact_snapshot_shape_supported())
+  {
+    direct_update_can_use_compact_snapshot= false;
+    direct_update_snapshot_field_count= 0;
+    direct_update_snapshot_byte_count= 0;
+    bzero(direct_update_snapshot_fields,
+          sizeof(direct_update_snapshot_fields));
+  }
   return true;
 }
 
@@ -1796,96 +1861,23 @@ void ha_mylite::store_direct_update_shape_cache()
       direct_update_can_skip_duplicate_key_checks;
   direct_update_shape_cache_may_change_index_entries=
       direct_update_may_change_index_entries;
+  direct_update_shape_cache_can_use_compact_snapshot=
+      direct_update_can_use_compact_snapshot;
+  direct_update_shape_cache_snapshot_field_count=
+      direct_update_snapshot_field_count;
+  direct_update_shape_cache_snapshot_byte_count=
+      direct_update_snapshot_byte_count;
   memcpy(direct_update_shape_cache_key_may_change,
          direct_update_key_may_change,
          sizeof(direct_update_shape_cache_key_may_change));
+  memcpy(direct_update_shape_cache_snapshot_fields,
+         direct_update_snapshot_fields,
+         sizeof(direct_update_shape_cache_snapshot_fields));
   direct_update_shape_cache_valid= true;
 }
 
 int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
 {
-  class Direct_update_changed_field_snapshot
-  {
-    struct Entry
-    {
-      Field *field;
-      size_t offset;
-      uint32 length;
-    };
-
-    enum
-    {
-      SNAPSHOT_MAX_FIELDS= 8,
-      SNAPSHOT_MAX_BYTES= 64
-    };
-
-    Entry entries[SNAPSHOT_MAX_FIELDS];
-    uchar bytes[SNAPSHOT_MAX_BYTES];
-    size_t used;
-    uint count;
-
-  public:
-    Direct_update_changed_field_snapshot() : used(0), count(0) {}
-
-    bool capture(TABLE *table, List<Item> *fields)
-    {
-      if (!table || !table->s || !fields ||
-          table->s->has_update_default_function)
-        return false;
-
-      List_iterator_fast<Item> field_it(*fields);
-      Item *item;
-      while ((item= field_it++))
-      {
-        if (count == SNAPSHOT_MAX_FIELDS)
-          return false;
-
-        Item_field *item_field= item->field_for_view_update();
-        if (!item_field || !item_field->field)
-          return false;
-
-        Field *field= item_field->field;
-        if (!field_snapshot_supported(table, field))
-          return false;
-
-        const uint32 length= field->pack_length();
-        if (length == 0 || length > SNAPSHOT_MAX_BYTES - used)
-          return false;
-
-        entries[count++]= {field, used, length};
-        memcpy(bytes + used, field->ptr, length);
-        used+= length;
-      }
-
-      return count != 0;
-    }
-
-    bool changed() const
-    {
-      for (uint i= 0; i < count; ++i)
-      {
-        const Entry &entry= entries[i];
-        if (memcmp(entry.field->ptr, bytes + entry.offset, entry.length))
-          return true;
-      }
-      return false;
-    }
-
-  private:
-    static bool field_snapshot_supported(TABLE *table, Field *field)
-    {
-      if (!field || !field->stored_in_db() || field->vcol_info ||
-          field->real_maybe_null() || field->cmp_type() != INT_RESULT)
-        return false;
-
-      const uint32 length= field->pack_length();
-      const uchar *record_start= table->record[0];
-      const uchar *record_end= record_start + table->s->rec_buff_length;
-      return field->ptr >= record_start && field->ptr <= record_end &&
-             length <= (uint32) (record_end - field->ptr);
-    }
-  };
-
   class Direct_update_row_scope
   {
     bool *flag;
@@ -1951,10 +1943,10 @@ int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
     DBUG_RETURN(1);
 
   *found_rows= 1;
-  Direct_update_changed_field_snapshot field_snapshot;
+  uchar snapshot_bytes[MYLITE_DIRECT_UPDATE_SNAPSHOT_MAX_BYTES];
   const bool use_compact_snapshot=
       use_inner_row_write && direct_update_can_compare_record &&
-      field_snapshot.capture(table, direct_update_fields);
+      capture_direct_update_compact_snapshot(snapshot_bytes);
   if (!use_compact_snapshot)
     store_record(table, record[1]);
   if (fill_record(ha_thd(), table, *direct_update_fields,
@@ -1966,7 +1958,7 @@ int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
 
   const bool need_update=
       use_compact_snapshot
-          ? field_snapshot.changed()
+          ? direct_update_compact_snapshot_changed(snapshot_bytes)
           : !direct_update_can_compare_record || compare_record(table);
   if (!need_update)
   {
@@ -2010,6 +2002,182 @@ int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
   rows_stats.updated++;
   *update_rows= 1;
   DBUG_RETURN(0);
+}
+
+bool ha_mylite::prepare_direct_update_compact_snapshot(List<Item> *fields)
+{
+  direct_update_can_use_compact_snapshot= false;
+  direct_update_snapshot_field_count= 0;
+  direct_update_snapshot_byte_count= 0;
+  bzero(direct_update_snapshot_fields, sizeof(direct_update_snapshot_fields));
+
+  bool supported=
+      table && table->s && fields && !table->s->has_update_default_function;
+  if (supported)
+  {
+    List_iterator_fast<Item> field_it(*fields);
+    Item *item;
+    while ((item= field_it++))
+    {
+      if (direct_update_snapshot_field_count ==
+          MYLITE_DIRECT_UPDATE_SNAPSHOT_MAX_FIELDS)
+      {
+        supported= false;
+        break;
+      }
+
+      Item_field *item_field= item->field_for_view_update();
+      if (!item_field || !item_field->field)
+      {
+        supported= false;
+        break;
+      }
+
+      uint32 length= 0;
+      Field *field= item_field->field;
+      if (!direct_update_compact_snapshot_field_supported(field, &length) ||
+          length > MYLITE_DIRECT_UPDATE_SNAPSHOT_MAX_BYTES -
+                       direct_update_snapshot_byte_count)
+      {
+        supported= false;
+        break;
+      }
+
+      Mylite_direct_update_snapshot_field *snapshot_field=
+          direct_update_snapshot_fields + direct_update_snapshot_field_count++;
+      snapshot_field->field_index= field->field_index;
+      snapshot_field->length= length;
+      direct_update_snapshot_byte_count+= length;
+    }
+  }
+
+  direct_update_can_use_compact_snapshot=
+      supported && direct_update_snapshot_field_count != 0;
+  if (!direct_update_can_use_compact_snapshot)
+  {
+    direct_update_snapshot_field_count= 0;
+    direct_update_snapshot_byte_count= 0;
+    bzero(direct_update_snapshot_fields,
+          sizeof(direct_update_snapshot_fields));
+  }
+  return direct_update_can_use_compact_snapshot;
+}
+
+bool ha_mylite::direct_update_compact_snapshot_shape_supported() const
+{
+  if (!direct_update_can_use_compact_snapshot ||
+      direct_update_snapshot_field_count == 0 ||
+      direct_update_snapshot_field_count >
+          MYLITE_DIRECT_UPDATE_SNAPSHOT_MAX_FIELDS ||
+      direct_update_snapshot_byte_count >
+          MYLITE_DIRECT_UPDATE_SNAPSHOT_MAX_BYTES)
+    return false;
+
+  size_t used= 0;
+  for (uint i= 0; i < direct_update_snapshot_field_count; ++i)
+  {
+    const Mylite_direct_update_snapshot_field *snapshot_field=
+        direct_update_snapshot_fields + i;
+    if (!table || !table->s || snapshot_field->field_index >= table->s->fields)
+      return false;
+
+    Field *field= table->field[snapshot_field->field_index];
+    uint32 length= 0;
+    if (!direct_update_compact_snapshot_field_supported(field, &length) ||
+        length != snapshot_field->length ||
+        length > MYLITE_DIRECT_UPDATE_SNAPSHOT_MAX_BYTES - used)
+      return false;
+    used+= length;
+  }
+
+  return used == direct_update_snapshot_byte_count;
+}
+
+bool ha_mylite::direct_update_compact_snapshot_field_supported(
+    Field *field, uint32 *out_length) const
+{
+  DBUG_ASSERT(out_length);
+  *out_length= 0;
+
+  if (!table || !table->s || !table->field || !table->record[0] || !field ||
+      field->field_index >= table->s->fields ||
+      table->field[field->field_index] != field || !field->stored_in_db() ||
+      field->vcol_info || field->real_maybe_null() ||
+      field->cmp_type() != INT_RESULT)
+    return false;
+
+  const uint32 length= field->pack_length();
+  if (length == 0)
+    return false;
+
+  const uchar *record_start= table->record[0];
+  const uchar *record_end= record_start + table->s->rec_buff_length;
+  if (field->ptr < record_start || field->ptr > record_end ||
+      length > (uint32) (record_end - field->ptr))
+    return false;
+
+  *out_length= length;
+  return true;
+}
+
+bool ha_mylite::capture_direct_update_compact_snapshot(uchar *bytes) const
+{
+  if (!direct_update_can_use_compact_snapshot || !bytes || !table ||
+      !table->s || !table->field || direct_update_snapshot_field_count == 0 ||
+      direct_update_snapshot_field_count >
+          MYLITE_DIRECT_UPDATE_SNAPSHOT_MAX_FIELDS ||
+      direct_update_snapshot_byte_count >
+          MYLITE_DIRECT_UPDATE_SNAPSHOT_MAX_BYTES)
+    return false;
+
+  size_t used= 0;
+  for (uint i= 0; i < direct_update_snapshot_field_count; ++i)
+  {
+    const Mylite_direct_update_snapshot_field *snapshot_field=
+        direct_update_snapshot_fields + i;
+    if (!table || !table->s || snapshot_field->field_index >= table->s->fields)
+      return false;
+
+    Field *field= table->field[snapshot_field->field_index];
+    const uint32 length= snapshot_field->length;
+    if (!field || length > MYLITE_DIRECT_UPDATE_SNAPSHOT_MAX_BYTES - used)
+      return false;
+
+    memcpy(bytes + used, field->ptr, length);
+    used+= length;
+  }
+
+  return used == direct_update_snapshot_byte_count;
+}
+
+bool ha_mylite::direct_update_compact_snapshot_changed(
+    const uchar *bytes) const
+{
+  if (!bytes || !table || !table->s || !table->field ||
+      direct_update_snapshot_field_count >
+          MYLITE_DIRECT_UPDATE_SNAPSHOT_MAX_FIELDS ||
+      direct_update_snapshot_byte_count >
+          MYLITE_DIRECT_UPDATE_SNAPSHOT_MAX_BYTES)
+    return true;
+
+  size_t offset= 0;
+  for (uint i= 0; i < direct_update_snapshot_field_count; ++i)
+  {
+    const Mylite_direct_update_snapshot_field *snapshot_field=
+        direct_update_snapshot_fields + i;
+    if (!table || !table->s || snapshot_field->field_index >= table->s->fields)
+      return true;
+
+    Field *field= table->field[snapshot_field->field_index];
+    const uint32 length= snapshot_field->length;
+    if (!field || length > MYLITE_DIRECT_UPDATE_SNAPSHOT_MAX_BYTES - offset)
+      return true;
+
+    if (memcmp(field->ptr, bytes + offset, length))
+      return true;
+    offset+= length;
+  }
+  return false;
 }
 
 bool ha_mylite::can_direct_update_row_preserving_index_entries() const
