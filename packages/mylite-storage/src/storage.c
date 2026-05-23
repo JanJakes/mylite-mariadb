@@ -13,8 +13,10 @@
 
 #if defined(__GNUC__) || defined(__clang__)
 #  define MYLITE_STORAGE_HOT_INLINE static inline __attribute__((always_inline))
+#  define MYLITE_STORAGE_NOINLINE __attribute__((noinline))
 #else
 #  define MYLITE_STORAGE_HOT_INLINE static inline
+#  define MYLITE_STORAGE_NOINLINE
 #endif
 
 #if defined(__BYTE_ORDER__) && defined(__ORDER_LITTLE_ENDIAN__) &&                                 \
@@ -4328,6 +4330,23 @@ static mylite_storage_result read_indexed_row_payload_from_open_file(
     const mylite_storage_header *header,
     mylite_storage_statement *active_cache_statement,
     mylite_storage_row_payload_cache *active_row_payload_cache,
+    unsigned long long table_id,
+    unsigned long long row_id,
+    unsigned char **out_row,
+    size_t *inout_row_capacity,
+    unsigned char *out_row_buffer,
+    size_t out_row_capacity,
+    size_t *out_row_size,
+    int *out_active_payload_cached
+);
+static mylite_storage_result MYLITE_STORAGE_NOINLINE
+read_uncached_indexed_row_payload_from_open_file(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
+    mylite_storage_row_payload_cache **inout_durable_row_payload_cache,
+    unsigned long long *inout_durable_row_payload_cache_generation,
     unsigned long long table_id,
     unsigned long long row_id,
     unsigned char **out_row,
@@ -9368,6 +9387,41 @@ static mylite_storage_result read_indexed_row_payload_from_open_file(
         }
     }
 
+    return read_uncached_indexed_row_payload_from_open_file(
+        file,
+        filename,
+        header,
+        active_cache_statement,
+        &row_payload_cache,
+        &row_payload_cache_generation,
+        table_id,
+        row_id,
+        out_row,
+        inout_row_capacity,
+        out_row_buffer,
+        out_row_capacity,
+        out_row_size,
+        out_active_payload_cached
+    );
+}
+
+static mylite_storage_result MYLITE_STORAGE_NOINLINE
+read_uncached_indexed_row_payload_from_open_file(
+    FILE *file,
+    const char *filename,
+    const mylite_storage_header *header,
+    mylite_storage_statement *active_cache_statement,
+    mylite_storage_row_payload_cache **inout_durable_row_payload_cache,
+    unsigned long long *inout_durable_row_payload_cache_generation,
+    unsigned long long table_id,
+    unsigned long long row_id,
+    unsigned char **out_row,
+    size_t *inout_row_capacity,
+    unsigned char *out_row_buffer,
+    size_t out_row_capacity,
+    size_t *out_row_size,
+    int *out_active_payload_cached
+) {
     mylite_storage_result result = MYLITE_STORAGE_OK;
     mylite_storage_row_page row_page = {0};
     unsigned char row_buffer[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
@@ -9405,8 +9459,8 @@ static mylite_storage_result read_indexed_row_payload_from_open_file(
                     filename,
                     header,
                     table_id,
-                    &row_payload_cache,
-                    &row_payload_cache_generation,
+                    inout_durable_row_payload_cache,
+                    inout_durable_row_payload_cache_generation,
                     row_id,
                     row_page.payload,
                     row_page.row_size
