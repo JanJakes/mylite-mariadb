@@ -1162,9 +1162,9 @@ deleting from a multi-entry child reduces the expected child count, eligible
 single-level branch roots can refold the remaining entries into one fewer
 existing child page and reclaim the old final child page. When
 that removal leaves a live entryset that fits in one maintained root page,
-storage collapses the branch root back to the maintained root format by
-materializing live branch entries and existing tail overlays before applying
-the current delete.
+and no live append-tail overlay would be hidden, storage collapses the branch
+root back to the maintained root format by materializing live branch entries
+before applying the current delete.
 Copy-rebuild DDL publishes supported fixed-width leaf roots for every current
 key that fits the raw format in the rebuilt table, including retained primary
 keys after forced rebuilds, by scanning the append history once for the table's
@@ -1245,9 +1245,10 @@ insert, update, and delete paths, read bounded multi-level branch roots, and
 restore covered single-level branch
 final-leaf deletes, same-child updates and deletes, bounded cross-child
 updates, interior child splits, branch-page-full root splits, arbitrary child
-removals, child-count-reducing branch refold deletes, and final-leaf free-list
-publication. Unbounded/deep branch cursors, branch-page merge/redistribution,
-arbitrary-chain free-list run coalescing, and
+removals, child-count-reducing branch refold deletes, no-overlay branch
+collapse deletes, and final-leaf free-list publication. Unbounded/deep branch
+cursors, branch-page merge/redistribution, arbitrary-chain free-list run
+coalescing, and
 broader transactional maintained index mutation remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index

@@ -177,8 +177,9 @@ now refold the branch into one fewer existing child page and reclaim the old
 final child page when the refold remains journal-bounded. Eligible child
 removals that leave a live entryset fitting one
 maintained root page now collapse the branch root back to the maintained root
-format. Catalog page-run reclamation uses the same root-adjacent free-list
-coalescing. Unbounded/deep branch cursors, merge/redistribution where child
+format when no live append-tail overlay would be hidden. Catalog page-run
+reclamation uses the same root-adjacent free-list coalescing.
+Unbounded/deep branch cursors, merge/redistribution where child
 count stays stable, arbitrary-chain free-list coalescing, and broader branch
 update/delete maintenance remain pending. SQL copy-rebuild DDL now
 opportunistically publishes those roots for all current supported fixed-width

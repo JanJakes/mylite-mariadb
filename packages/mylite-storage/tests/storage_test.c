@@ -376,6 +376,7 @@ static void test_index_leaf_pages(void);
 static void test_maintained_index_root_overflow_tail(void);
 static void test_branch_arbitrary_child_removal(void);
 static void test_branch_refold_child_count_delete(void);
+static void test_branch_child_count_delete_collapse(void);
 static void test_maintained_index_root_transaction_rollback(void);
 static void test_batched_index_leaf_pages(void);
 static void test_multi_page_index_leaf_pages(void);
@@ -809,6 +810,7 @@ int main(void) {
     test_maintained_index_root_overflow_tail();
     test_branch_arbitrary_child_removal();
     test_branch_refold_child_count_delete();
+    test_branch_child_count_delete_collapse();
     test_maintained_index_root_transaction_rollback();
     test_batched_index_leaf_pages();
     test_multi_page_index_leaf_pages();
@@ -11957,6 +11959,236 @@ static void test_branch_refold_child_count_delete(void) {
     assert_index_entry(&entries, 3U, row_ids[3], keys[3], key_size);
     assert_index_entry(&entries, 4U, row_ids[5], keys[5], key_size);
     assert_index_entry(&entries, 5U, row_ids[6], keys[6], key_size);
+    mylite_storage_free_index_entryset(&entries);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(transaction_journal_filename);
+    free(journal_filename);
+    free(filename);
+    free(root);
+}
+
+static void test_branch_child_count_delete_collapse(void) {
+    enum {
+        entry_count = 4U,
+        key_size = 1322U,
+    };
+
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    unsigned char rows[entry_count][4] = {{0}};
+    unsigned char keys[entry_count][key_size] = {{0}};
+    unsigned long long row_ids[entry_count] = {0};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "branch-child-count-delete-collapse.mylite");
+    char *journal_filename = journal_path(filename);
+    char *transaction_journal_filename = transaction_journal_path(filename);
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+    mylite_storage_statement *statement = NULL;
+    int status = 0;
+
+    const size_t leaf_capacity =
+        (MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET) /
+        (MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_HEADER_SIZE + key_size);
+    const size_t root_capacity =
+        (MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_INDEX_ROOT_PAYLOAD_OFFSET) /
+        (MYLITE_STORAGE_FORMAT_INDEX_ROOT_ENTRY_HEADER_SIZE + key_size);
+    assert(leaf_capacity == 3U);
+    assert(root_capacity == 3U);
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    for (size_t i = 0U; i < entry_count; ++i) {
+        put_test_u32_le(rows[i], 0U, (unsigned)i + 1U);
+        keys[i][0] = (unsigned char)(i + 1U);
+        mylite_storage_index_entry index_entry = {
+            .size = sizeof(index_entry),
+            .index_number = 0U,
+            .key = keys[i],
+            .key_size = key_size,
+        };
+        assert(
+            mylite_storage_append_row_with_index_entries(
+                filename,
+                "app",
+                "posts",
+                rows[i],
+                sizeof(rows[i]),
+                &index_entry,
+                1U,
+                row_ids + i
+            ) == MYLITE_STORAGE_OK
+        );
+    }
+
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    const unsigned long long before_rebuild_pages = header.page_count;
+    assert(mylite_storage_rebuild_index_leaf(filename, "app", "posts", 0U) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    const unsigned long long root_page = before_rebuild_pages;
+    const unsigned long long reclaimed_leaf_page = root_page + 2ULL;
+    const unsigned long long before_delete_pages = header.page_count;
+    const unsigned long long before_delete_free_list_root = header.free_list_root_page;
+    assert(header.page_count == before_rebuild_pages + 3ULL);
+    assert_index_root(filename, "app", "posts", 0U, root_page, entry_count);
+    assert_index_root_page_type(
+        filename,
+        root_page,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH
+    );
+
+    assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_delete_row(filename, "app", "posts", row_ids[1]) == MYLITE_STORAGE_OK);
+    assert(access(journal_filename, F_OK) == 0);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_delete_pages + 1ULL);
+    assert(header.free_list_root_page == reclaimed_leaf_page);
+    assert_index_root(filename, "app", "posts", 0U, root_page, entry_count - 1U);
+    assert_index_root_page_type(
+        filename,
+        root_page,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_ROOT
+    );
+    assert_index_entry_lookup(filename, 0U, keys[1], key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
+    assert_index_entry_lookup(filename, 0U, keys[3], key_size, MYLITE_STORAGE_OK, row_ids[3]);
+    assert_find_indexed_row_equals(
+        filename,
+        0U,
+        keys[3],
+        key_size,
+        row_ids[3],
+        rows[3],
+        sizeof(rows[3])
+    );
+    const unsigned char *expected_prefix_keys[] = {keys[3]};
+    const unsigned long long expected_prefix_row_ids[] = {row_ids[3]};
+    assert_prefix_index_entries(
+        filename,
+        0U,
+        keys[3],
+        1U,
+        expected_prefix_keys,
+        key_size,
+        expected_prefix_row_ids,
+        sizeof(expected_prefix_row_ids) / sizeof(expected_prefix_row_ids[0])
+    );
+    assert_index_prefix_exists_for_index(filename, 0U, keys[3], 1U, 0ULL, 1);
+    assert_free_list_run(
+        filename,
+        header.free_list_root_page,
+        before_delete_free_list_root,
+        reclaimed_leaf_page,
+        1ULL
+    );
+    mylite_storage_index_entryset entries = {
+        .size = sizeof(entries),
+    };
+    assert(
+        mylite_storage_read_index_entries(filename, "app", "posts", 0U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == entry_count - 1U);
+    assert_index_entry(&entries, 0U, row_ids[0], keys[0], key_size);
+    assert_index_entry(&entries, 1U, row_ids[2], keys[2], key_size);
+    assert_index_entry(&entries, 2U, row_ids[3], keys[3], key_size);
+    mylite_storage_free_index_entryset(&entries);
+    assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
+    statement = NULL;
+    assert_file_missing(journal_filename);
+    assert_file_size_matches_header(filename);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_delete_pages);
+    assert(header.free_list_root_page == before_delete_free_list_root);
+    assert_index_root(filename, "app", "posts", 0U, root_page, entry_count);
+    assert_index_root_page_type(
+        filename,
+        root_page,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH
+    );
+    assert_index_entry_lookup(filename, 0U, keys[1], key_size, MYLITE_STORAGE_OK, row_ids[1]);
+
+    const pid_t statement_pid = fork();
+    assert(statement_pid >= 0);
+    if (statement_pid == 0) {
+        mylite_storage_statement *child_statement = NULL;
+        if (mylite_storage_begin_statement(filename, &child_statement) != MYLITE_STORAGE_OK) {
+            _exit(2);
+        }
+        if (mylite_storage_delete_row(filename, "app", "posts", row_ids[1]) != MYLITE_STORAGE_OK) {
+            _exit(3);
+        }
+        _exit(0);
+    }
+    status = 0;
+    assert(waitpid(statement_pid, &status, 0) == statement_pid);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
+    assert(access(journal_filename, F_OK) == 0);
+    assert_index_entry_lookup(filename, 0U, keys[1], key_size, MYLITE_STORAGE_OK, row_ids[1]);
+    assert_file_missing(journal_filename);
+    assert_file_size_matches_header(filename);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_delete_pages);
+    assert(header.free_list_root_page == before_delete_free_list_root);
+    assert_index_root(filename, "app", "posts", 0U, root_page, entry_count);
+
+    const pid_t transaction_pid = fork();
+    assert(transaction_pid >= 0);
+    if (transaction_pid == 0) {
+        mylite_storage_statement *child_transaction = NULL;
+        if (mylite_storage_begin_transaction(filename, &child_transaction) != MYLITE_STORAGE_OK) {
+            _exit(2);
+        }
+        if (mylite_storage_delete_row(filename, "app", "posts", row_ids[1]) != MYLITE_STORAGE_OK) {
+            _exit(3);
+        }
+        _exit(0);
+    }
+    status = 0;
+    assert(waitpid(transaction_pid, &status, 0) == transaction_pid);
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
+    assert_file_missing(journal_filename);
+    assert(access(transaction_journal_filename, F_OK) == 0);
+    assert_index_entry_lookup(filename, 0U, keys[1], key_size, MYLITE_STORAGE_OK, row_ids[1]);
+    assert_file_missing(transaction_journal_filename);
+    assert_file_size_matches_header(filename);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_delete_pages);
+    assert(header.free_list_root_page == before_delete_free_list_root);
+    assert_index_root(filename, "app", "posts", 0U, root_page, entry_count);
+
+    assert(mylite_storage_delete_row(filename, "app", "posts", row_ids[1]) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_delete_pages + 1ULL);
+    assert(header.free_list_root_page == reclaimed_leaf_page);
+    assert_index_root(filename, "app", "posts", 0U, root_page, entry_count - 1U);
+    assert_index_root_page_type(
+        filename,
+        root_page,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_ROOT
+    );
+    assert_index_entry_lookup(filename, 0U, keys[1], key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
+    assert_index_entry_lookup(filename, 0U, keys[3], key_size, MYLITE_STORAGE_OK, row_ids[3]);
+    assert(
+        mylite_storage_read_index_entries(filename, "app", "posts", 0U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == entry_count - 1U);
+    assert_index_entry(&entries, 0U, row_ids[0], keys[0], key_size);
+    assert_index_entry(&entries, 1U, row_ids[2], keys[2], key_size);
+    assert_index_entry(&entries, 2U, row_ids[3], keys[3], key_size);
     mylite_storage_free_index_entryset(&entries);
 
     assert(unlink(filename) == 0);
