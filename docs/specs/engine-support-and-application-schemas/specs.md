@@ -16,8 +16,9 @@ reopened inside the MyLite database directory.
   `ha_resolve_by_name()` and rejects non-user-selectable engines. Disabled
   engines fall back through `ha_checktype()` only when substitution is allowed.
 - `mariadb/sql/sys_vars.cc` exposes `default_storage_engine` as the session
-  table plugin. `mariadb/sql/mysqld.cc` initializes the compiled default and
-  MyLite currently overrides it with `--default-storage-engine=MyISAM`.
+  table plugin. `mariadb/sql/mysqld.cc` initializes the compiled default; a
+  later default-engine slice removed MyLite's temporary MyISAM override so
+  omitted `ENGINE=` clauses now follow that MariaDB default.
 - `mariadb/sql/sql_table.cc` routes `CREATE TABLE` through
   `mysql_create_table()`, `mysql_create_table_no_lock()`, and
   `create_table_impl()`, where MariaDB checks engine options, builds the table
@@ -45,7 +46,7 @@ Add a focused embedded compatibility test that:
 2. Rejects optional dynamic-engine requests such as `ENGINE=BLACKHOLE` and
    `ENGINE=ARCHIVE` instead of silently falling back to another engine.
 3. Creates a table without an explicit engine and verifies MariaDB resolves it
-   to MyLite's current configured default engine, MyISAM.
+   to the selected build's default engine.
 4. Verifies resolved engines with `information_schema.TABLES`.
 5. Inserts and queries representative rows before close.
 6. Closes and reopens the database directory, then verifies durable engines
@@ -55,9 +56,10 @@ Add a focused embedded compatibility test that:
    database directory.
 8. Creates and queries WordPress-shaped InnoDB tables in a separate schema.
 
-The slice does not change the default engine. Keeping MyISAM as the temporary
-default avoids a behavior change until a later storage-policy slice decides
-whether the default should move to InnoDB or become configurable.
+This slice originally recorded the then-current MyISAM temporary default. The
+later default-engine slice changes the active behavior so no-engine table
+creation follows MariaDB's compiled default, which is InnoDB in the current
+embedded profile.
 
 ## Affected MariaDB Subsystems
 
@@ -141,8 +143,9 @@ No new dependencies or license changes.
 
 ## Risks And Unresolved Questions
 
-- MyLite's current default engine is still temporary MyISAM. This slice records
-  and tests that behavior rather than changing it.
+- No-engine table creation is controlled by MariaDB's compiled default. In the
+  current embedded profile that resolves to InnoDB; a future build that omits
+  InnoDB must update expectations accordingly.
 - Blackhole and Archive are rejected in the current default profile because the
   embedded build leaves them as dynamic plugin candidates. Supporting them needs
   a dedicated profile decision.

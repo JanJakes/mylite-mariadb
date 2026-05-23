@@ -117,9 +117,10 @@ Supported MariaDB engines use their own formats inside `datadir/`.
   unless a slice explicitly designs loading, ownership, and directory-boundary
   guarantees.
 
-The default storage engine should be a MariaDB native engine selected by MyLite
-configuration. Application `ENGINE=` clauses should be honored for supported
-native engines and rejected clearly for unsupported engines.
+The default storage engine should be the selected MariaDB build's native
+default unless a later slice adds an explicit MyLite configuration policy.
+Application `ENGINE=` clauses should be honored for supported native engines
+and rejected clearly for unsupported engines.
 
 ## Metadata And Schemas
 
@@ -150,14 +151,23 @@ Transaction and recovery coverage validates explicit `ENGINE=InnoDB` tables for
 commit, rollback, savepoint rollback, release savepoint, clean reopen, and
 child-process recovery. That coverage proves representative native InnoDB
 transaction behavior and file containment inside the MyLite database directory;
-it does not make InnoDB the default engine, prove all isolation levels, prove
-foreign keys or online DDL, or claim cross-process writer safety.
+it does not prove all isolation levels, online DDL, or cross-process writer
+safety.
 
 Engine and application-schema coverage validates explicit `ENGINE=InnoDB`,
 `ENGINE=MyISAM`, `ENGINE=Aria`, and `ENGINE=MEMORY` table creation, MyISAM
-default-engine resolution, durable row state for durable engines, MEMORY table
-definitions with empty row state after reopen, and representative
-WordPress-shaped InnoDB DDL.
+durable row state for durable engines, MEMORY table definitions with empty row
+state after reopen, MariaDB default-engine resolution, and representative
+WordPress-shaped InnoDB DDL. MyLite follows the selected MariaDB build default;
+the current embedded profile resolves no-engine DDL to InnoDB.
+
+Broader DDL coverage validates representative `CREATE TABLE ... LIKE`,
+`CREATE TABLE ... SELECT`, standalone index create/drop, default-engine
+`ALTER TABLE` column and index changes, CHECK constraint enforcement, InnoDB
+foreign-key enforcement with cascade delete, and stored/virtual generated
+columns. This is still bounded compatibility evidence; views, triggers, stored
+functions, online DDL algorithms, partition DDL, and metadata edge cases need
+separate slices before they can be claimed.
 
 The default embedded profile does not expose server account administration,
 dynamic plugin or UDF loading, replication metadata, binlog administration, SQL

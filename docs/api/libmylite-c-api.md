@@ -131,7 +131,10 @@ includes it. The final close removes `run/` and clears temporary files under
 an advisory lock anchor and may remain after close or process exit. A clean
 open replaces stale inactive `run/` state after taking the directory lock.
 `mylite_open_config.temp_directory` is currently used only by the `:memory:`
-bootstrap path.
+path. `:memory:` creates a transient MyLite-owned MariaDB runtime directory
+under that location, removes it on final close, and starts fresh on the next
+open. Live handles opened against `:memory:` in the same process share the
+current transient runtime until the last handle closes.
 
 ## Direct Execution
 
@@ -164,9 +167,12 @@ on query failure. Native-storage smoke coverage verifies controlled
 `ENGINE=MyISAM` DDL and DML persist across close and reopen. Explicit
 `ENGINE=InnoDB` coverage verifies commit, rollback, savepoints, clean reopen,
 and child-process recovery through SQL transaction statements. Additional engine
-coverage verifies explicit InnoDB, MyISAM, Aria, MEMORY, and default-engine
-table creation plus representative WordPress-shaped InnoDB DDL. Broader DDL
-forms remain later slices.
+coverage verifies explicit InnoDB, MyISAM, Aria, MEMORY, MariaDB default-engine
+table creation, `:memory:` direct/prepared SQL, and representative
+WordPress-shaped InnoDB DDL. Broader DDL coverage includes `CREATE TABLE ...
+LIKE`, `CREATE TABLE ... SELECT`, standalone index DDL, representative
+`ALTER TABLE` column and index changes, CHECK constraints, foreign keys, and
+generated columns; more specialized DDL remains later work.
 
 ## Prepared Statements
 

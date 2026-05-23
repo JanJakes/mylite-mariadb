@@ -59,7 +59,7 @@ behavior. It does not require a daemon in the default test path.
 
 | SQL engine request | MyLite status | Target behavior |
 | --- | --- | --- |
-| No explicit engine | 🟡&nbsp;Partial | The baseline configures MariaDB's native MyISAM engine as the temporary default; default-engine table creation and persistence are covered while broader engine policy is designed |
+| No explicit engine | 🟡&nbsp;Partial | MyLite follows MariaDB's compiled default storage engine; the current embedded profile resolves to InnoDB and covers no-engine table creation, metadata, persistence, and `@@default_storage_engine` |
 | `ENGINE=MYLITE` | ➖&nbsp;Out&nbsp;of&nbsp;scope | No separate MyLite engine in the native-storage directory model |
 | `ENGINE=InnoDB` | 🟡&nbsp;Partial | Explicit InnoDB tables use native InnoDB files inside the MyLite database directory; controlled transaction/recovery behavior and WordPress-shaped DDL are covered, while broader InnoDB features remain planned |
 | `ENGINE=MyISAM` | 🟡&nbsp;Partial | Controlled create/alter/rename/drop/reopen and row/index coverage verifies `.frm`, `.MYD`, and `.MYI` files inside `datadir/` |
@@ -77,18 +77,18 @@ behavior. It does not require a daemon in the default test path.
 | MyISAM files | 🟡&nbsp;Partial | Controlled lifecycle and native table operation coverage verifies `.MYD` and `.MYI` table files stay inside `datadir/` across create, row DML, copy alter, rename, drop, and reopen |
 | Aria files | 🟡&nbsp;Partial | Runtime startup sets `--aria-log-dir-path=<db>/datadir`; explicit Aria table coverage verifies `.MAI` and `.MAD` files under `datadir/` |
 | MEMORY definitions | 🟡&nbsp;Partial | Explicit MEMORY table coverage verifies persistent table metadata under `datadir/` and empty row state after reopen |
-| MyLite-owned transient paths | 🟡&nbsp;Partial | Durable database paths use `tmp/`, `run/`, and `mylite.lock` inside the database directory; clean close removes `run/` and clears `tmp/`, and clean open replaces stale inactive `run/` state after taking the directory lock |
+| MyLite-owned transient paths | 🟡&nbsp;Partial | Durable database paths use `tmp/`, `run/`, and `mylite.lock` inside the database directory; clean close removes `run/` and clears `tmp/`, clean open replaces stale inactive `run/` state after taking the directory lock, and `:memory:` uses a transient runtime directory that is removed on final close |
 | Durable files outside the database directory | ➖&nbsp;Out&nbsp;of&nbsp;scope | Server-surface policy coverage rejects or disables known server-owned paths that could create replication, binlog, performance-schema, or `mysql.*` sidecars outside the supported application-storage model |
 
 ## SQL Surface
 
 | Capability | MyLite status | Compatibility target |
 | --- | --- | --- |
-| `CREATE TABLE`, `DROP TABLE`, `RENAME TABLE` | 🟡&nbsp;Partial | Controlled MyISAM create, drop, and rename lifecycle is covered for native metadata and engine files; explicit InnoDB, Aria, MEMORY, and default-engine create coverage is also present, while broader DDL forms remain planned |
-| `ALTER TABLE` | 🟡&nbsp;Partial | Controlled MyISAM `ADD COLUMN` and copy-style `ADD KEY` lifecycle is covered across close and reopen; broader algorithms and engines remain planned |
-| Standalone `CREATE INDEX` / `DROP INDEX` | ⚪&nbsp;Planned | Route through MariaDB DDL and native engine index updates |
-| `CREATE TABLE ... LIKE` | ⚪&nbsp;Planned | Preserve MariaDB table definition behavior |
-| `CREATE TABLE ... SELECT` | ⚪&nbsp;Planned | Preserve MariaDB statement semantics over MyLite tables |
+| `CREATE TABLE`, `DROP TABLE`, `RENAME TABLE` | 🟡&nbsp;Partial | Controlled MyISAM create, drop, and rename lifecycle is covered for native metadata and engine files; explicit InnoDB, Aria, MEMORY, MariaDB default-engine create, `CREATE TABLE ... LIKE`, and `CREATE TABLE ... SELECT` coverage is also present |
+| `ALTER TABLE` | 🟡&nbsp;Partial | Controlled MyISAM `ADD COLUMN` and copy-style `ADD KEY` lifecycle is covered across close and reopen; representative default-engine InnoDB column modify/change and index add/drop changes are covered, while online algorithms and broader edge cases remain planned |
+| Standalone `CREATE INDEX` / `DROP INDEX` | 🟡&nbsp;Partial | Representative default-engine InnoDB standalone index create/drop is covered through MariaDB DDL and native engine metadata |
+| `CREATE TABLE ... LIKE` | 🟡&nbsp;Partial | Representative MariaDB table-definition copy behavior is covered for default-engine tables |
+| `CREATE TABLE ... SELECT` | 🟡&nbsp;Partial | Representative CTAS behavior is covered over MyLite tables |
 | Schemas/databases | 🟡&nbsp;Partial | Controlled `CREATE DATABASE`, qualified table access, and `DROP DATABASE` lifecycle are covered inside `datadir/`; broader schema behavior remains planned |
 | Sequences | 🟡&nbsp;Partial | Simple MariaDB `CREATE SEQUENCE ... NOCACHE` and `NEXT VALUE FOR` behavior is covered across close and reopen; broader sequence DDL and edge cases remain planned |
 | Representative application schemas | 🟡&nbsp;Partial | WordPress-shaped InnoDB `wp_options`, `wp_posts`, and `wp_postmeta` DDL and queries are covered as representative application-schema evidence |
@@ -139,9 +139,9 @@ behavior. It does not require a daemon in the default test path.
 | Primary and secondary indexes | 🟡&nbsp;Partial | Controlled MyISAM primary and secondary indexed predicates are covered, including an index added by copy-style `ALTER TABLE` |
 | Unique indexes | 🟡&nbsp;Partial | Controlled MyISAM duplicate-key diagnostics and nullable unique-key inserts are covered |
 | Autoincrement | 🟡&nbsp;Partial | Controlled MyISAM table-local autoincrement state is covered across close and reopen |
-| CHECK constraints | ⚪&nbsp;Planned | Use MariaDB expression evaluation and persist metadata through native metadata paths |
-| Foreign keys | ⚪&nbsp;Planned | InnoDB-compatible semantics where practical; reject unsupported cases explicitly |
-| Generated columns | ⚪&nbsp;Planned | Preserve MariaDB virtual/stored generated-column behavior through storage support |
+| CHECK constraints | 🟡&nbsp;Partial | Representative default-engine CHECK constraint metadata and enforcement are covered through MariaDB expression evaluation |
+| Foreign keys | 🟡&nbsp;Partial | Representative InnoDB foreign-key enforcement and cascade delete behavior are covered; broader referential edge cases remain planned |
+| Generated columns | 🟡&nbsp;Partial | Representative stored and virtual generated-column behavior is covered through native storage support |
 | FULLTEXT, SPATIAL, and vector indexes | ⚪&nbsp;Planned | Support only where the selected native engine and embedded profile support them |
 
 ## Transactions, Recovery, And Concurrency

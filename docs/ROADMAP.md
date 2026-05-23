@@ -38,6 +38,7 @@ native storage files inside that directory.
 | 15 | Server-surface policy | ✅&nbsp;Done | Explicitly reject users/auth, replication/binlog, dynamic plugins, events, server-owned metadata, SQL help, profiling, and query-cache management, while disabling server topology features at startup. |
 | 16 | Size profile hardening | 🟡&nbsp;In&nbsp;progress | Trim safe archive/package overhead first, then evaluate daemon-only and low-value optional components after the embedded runtime and storage shape are measurable. |
 | 17 | PHP extension packages | ✅&nbsp;Done | Add the core `mylite` PHP extension, a MyLite-backed mysqli-shaped extension, and a PDO driver that all share one loaded `libmylite` runtime. |
+| 18 | Default engine, memory databases, and broader DDL | ✅&nbsp;Done | Follow MariaDB's default storage engine, cover transient `:memory:` behavior, and test representative table-copy, CTAS, index, constraint, foreign-key, generated-column, and default-engine DDL. |
 
 ## Size And Profile Direction
 

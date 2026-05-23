@@ -9,7 +9,8 @@ savepoints, clean reopen, and process-crash recovery behavior through
 
 ## Non-Goals
 
-- Do not change the default storage engine away from MyISAM yet.
+- Do not change the default storage engine in this slice; later default-engine
+  work lets MariaDB's compiled default control no-engine table creation.
 - Do not claim complete InnoDB compatibility, all isolation levels, foreign-key
   behavior, online DDL, or every recovery mode.
 - Do not claim cross-process writer safety or multi-writer behavior; that
@@ -58,9 +59,10 @@ temporary locations to the MyLite database directory.
 ## Compatibility Impact
 
 This slice introduces partial InnoDB coverage for explicit `ENGINE=InnoDB`
-tables. It should not alter existing default-engine behavior, which remains
-MyISAM until engine policy is broadened. MyISAM remains non-transactional; tests
-and docs must not imply MyISAM rollback support.
+tables. It originally left MyLite's temporary MyISAM default unchanged; a later
+default-engine slice removes that override so no-engine DDL follows MariaDB's
+compiled default. MyISAM remains non-transactional; tests and docs must not
+imply MyISAM rollback support.
 
 ## Design
 
@@ -75,8 +77,9 @@ the MyLite database directory:
 - `--innodb-flush-log-at-trx-commit=1`
 - `--innodb-fast-shutdown=1`
 
-Keep `--default-storage-engine=MyISAM` so existing tests and caller behavior do
-not silently shift to InnoDB.
+At the time of this slice, MyLite kept the temporary MyISAM default to avoid
+silently shifting no-engine DDL to InnoDB before explicit default-engine
+coverage existed. Current startup no longer forces MyISAM.
 
 Add an embedded integration test that:
 
@@ -124,8 +127,9 @@ size profile.
 
 ## Test Plan
 
-1. Enable InnoDB runtime paths under the MyLite database directory while keeping
-   MyISAM as the default engine.
+1. Enable InnoDB runtime paths under the MyLite database directory. At the time
+   of this slice, MyISAM remained the temporary default; current startup follows
+   MariaDB's compiled default.
 2. Add `libmylite.embedded-transactions-recovery`.
 3. Cover InnoDB commit, rollback, savepoint rollback, release savepoint, close,
    and reopen.

@@ -62,13 +62,13 @@ arguments:
 - `--aria-log-dir-path=<db>/datadir`
 - `--skip-grant-tables`
 - `--skip-networking`
-- `--default-storage-engine=MyISAM`
 - `--innodb=OFF`
 - explicit message and character-set directories from the MariaDB build/source
 
 The later transactions and recovery slice replaces the temporary `--innodb=OFF`
 argument with explicit InnoDB paths under the MyLite database directory while
-keeping MyISAM as the default engine.
+later default-engine work removes the temporary MyISAM default override and
+lets MariaDB choose its compiled default.
 
 `mylite.meta` is a MyLite lifecycle marker. The first version records the layout
 format and MariaDB base tag; future directory-version policy can expand it
@@ -78,13 +78,14 @@ Clean shutdown removes `run/` and clears contents under `tmp/`. Durable MariaDB
 metadata, MyISAM files, Aria control/log state, and other native-storage state
 remain under `datadir/`.
 
-`--default-storage-engine=MyISAM` is a temporary baseline choice. It provides a
-small native engine surface for DDL/DML persistence tests while avoiding InnoDB
-sidecars until InnoDB's tablespace, redo, undo, and recovery lifecycle is
-designed and tested inside the MyLite directory.
+The first native-storage baseline used an explicit MyISAM table for DDL/DML
+persistence tests while avoiding InnoDB sidecars until InnoDB's tablespace,
+redo, undo, and recovery lifecycle was designed and tested inside the MyLite
+directory. Current startup follows MariaDB's compiled default engine instead
+of forcing MyISAM.
 
-`:memory:` remains on the bootstrap temporary-runtime path. That special path
-is not durable and is outside this slice's database-directory guarantee.
+`:memory:` remains a transient-runtime path. That special path is not durable
+and is outside this slice's database-directory guarantee.
 
 ## Compatibility Impact
 

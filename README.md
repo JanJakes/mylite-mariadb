@@ -99,9 +99,10 @@ location. The key difference is that MyLite's directory can hold multiple
 databases, following MariaDB engine capabilities. Use a `.mylite/` directory
 name for new databases unless there is a project-specific reason not to.
 
-MyLite should also be capable of setting up a full in-memory database regardless
-of what engines are defined for table storage in the SQL. This should be
-supported via the special `:memory:` database path.
+MyLite supports a transient database via the special `:memory:` path. The
+current implementation still uses MariaDB native engine files inside a
+MyLite-owned temporary runtime directory, then removes that directory on final
+close; no application state survives reopening `:memory:`.
 
 ### Integration packages
 

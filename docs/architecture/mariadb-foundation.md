@@ -41,8 +41,9 @@ behavior was being proven. The native-storage baseline now starts durable
 database paths with MariaDB's `datadir`, `tmpdir`, plugin directory, and Aria
 log directory under the MyLite database directory. InnoDB is enabled for
 explicit `ENGINE=InnoDB` tables, with data, redo, undo, and temporary paths
-pinned under the same directory. The default storage engine remains MyISAM
-until the broader engine policy is designed.
+pinned under the same directory. MyLite now follows MariaDB's compiled default
+storage engine for no-engine table creation; the current embedded profile
+resolves that default to InnoDB.
 
 The core startup path also disables server topology and server-management
 surfaces that do not fit `mylite_open()`: grant tables, networking, binlog,
