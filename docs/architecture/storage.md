@@ -222,21 +222,19 @@ root with the new child. If live tail overlay exists but the refolded live
 entryset plus the inserted entry still fits in one branch page, storage can
 append a fresh leaf run and rewrite the existing branch root to point at that
 new snapshot instead of hiding the overlay behind a moved branch tail. Other
-full-leaf cases still use the append-tail overlay. Eligible deletes from the
-final child leaf rewrite that leaf and refresh the final branch fence when the
-branch still needs the same child count. When deleting the only entry in the
-final child reduces the expected child count by one and another child remains,
-storage now removes the final branch child cell and publishes the old leaf page
-as a durable free-list run, coalescing when that leaf immediately precedes the
-current free-list root run. Interior-child deletes remain on the row-state
-overlay path until broader branch merge work exists.
-Eligible updates whose source row is in the final child leaf and whose
-replacement `(key, row_id)` still belongs in that final child now rewrite the
-leaf and refresh the final branch fence without changing the branch entry
-count. Interior-child updates can use the same rewrite path when the
-replacement tuple remains above the previous child fence and at or below that
-child's current fence; updates that cross child boundaries remain on the
-append-tail replacement path.
+full-leaf cases still use the append-tail overlay. Eligible deletes from any
+child leaf rewrite that leaf and refresh its branch fence when the child remains
+non-empty and the branch still needs the same child count. When deleting the
+only entry in a child reduces the expected child count by one and another child
+remains, storage now removes that branch child cell and publishes the old leaf
+page as a durable free-list run, coalescing when that leaf immediately precedes
+the current free-list root run. Underfull-child merge/redistribution where the
+branch child count stays stable remains on the row-state overlay path.
+Eligible updates can rewrite a source child in place when the replacement
+`(key, row_id)` remains inside that child range, or move the entry between
+existing child leaves when the source remains non-empty and the target has room;
+other cross-child or child-count-changing updates remain on the append-tail
+replacement path.
 `TRUNCATE TABLE` logically
 deletes live rows and resets autoincrement state without changing catalog
 metadata. Ordinary `CREATE TABLE IF NOT EXISTS` creates missing routed tables
@@ -1140,11 +1138,10 @@ the target has room, and the branch child count stays stable. Eligible
 full-child inserts can split any existing child leaf when the branch root has
 room for another child and no live append-tail overlay would be hidden.
 Eligible same-child deletes can physically remove entries from interior leaves
-when the child remains non-empty. Eligible final-child removals can drop the
-final branch child when the branch child count decreases by one and reclaim the
-removed leaf page through the durable free-list,
-including coalescing when the removed leaf immediately precedes the current
-free-list root run. When
+when the child remains non-empty. Eligible one-entry child removals can drop any
+branch child when the branch child count decreases by one and reclaim the
+removed leaf page through the durable free-list, including coalescing when the
+removed leaf immediately precedes the current free-list root run. When
 that removal leaves a live entryset that fits in one maintained root page,
 storage collapses the branch root back to the maintained root format by
 materializing live branch entries and existing tail overlays before applying
@@ -1216,7 +1213,10 @@ overflow flag and avoiding stale tail scans.
 Statement-owned recovery journals can now be rewritten to protect late dirty
 pages introduced after the journal was first created. This keeps maintained-root
 updates recoverable when another page owner, such as autoincrement metadata,
-opens the recovery journal before row append reaches the index root.
+opens the recovery journal before row append reaches the index root. Late
+protection requests for pages appended after the journal's saved header do not
+require a saved preimage because rollback and stale-journal recovery truncate
+those pages.
 Active exact-index and published-root cache reads bypass stale durable cache
 state while an active statement chain has deferred table-local durable cache
 retargeting. Statement rollback, savepoint rollback, transaction rollback,
@@ -1224,8 +1224,8 @@ stale statement-journal recovery, and stale transaction-journal recovery now
 restore single-page maintained root bytes and logical visibility for covered
 insert, update, and delete paths, and restore covered single-level branch
 final-leaf deletes, same-child updates and deletes, bounded cross-child
-updates, interior child splits, final-child removals, and final-leaf free-list
-publication. Branch-page-full root splits, multi-page navigable indexes,
+updates, interior child splits, arbitrary child removals, and final-leaf
+free-list publication. Branch-page-full root splits, multi-page navigable indexes,
 branch-page merge/redistribution,
 higher-adjacent and arbitrary-chain free-list run coalescing, and broader
 transactional maintained index mutation remain planned.
