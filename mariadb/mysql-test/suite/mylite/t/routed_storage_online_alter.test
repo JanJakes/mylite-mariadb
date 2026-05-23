@@ -1,0 +1,58 @@
+#
+# Check routed online and in-place ALTER rejection under raw embedded MTR
+# execution.
+#
+
+--disable_warnings
+drop database if exists mylite_mtr_online_alter;
+--enable_warnings
+
+create database mylite_mtr_online_alter;
+use mylite_mtr_online_alter;
+
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+
+--let $mylite_sidecar_schema= mylite_mtr_online_alter
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+create table posts (
+  id int not null primary key,
+  title varchar(32) not null
+) engine=InnoDB;
+insert into posts values (1, 'kept');
+
+--error ER_ALTER_OPERATION_NOT_SUPPORTED,ER_ALTER_OPERATION_NOT_SUPPORTED_REASON,ER_CANT_CREATE_TABLE
+alter online table posts add column blocked_online int;
+
+--error ER_ALTER_OPERATION_NOT_SUPPORTED,ER_ALTER_OPERATION_NOT_SUPPORTED_REASON,ER_CANT_CREATE_TABLE
+alter table posts add column blocked_inplace int, algorithm=inplace;
+
+--error ER_ALTER_OPERATION_NOT_SUPPORTED,ER_ALTER_OPERATION_NOT_SUPPORTED_REASON,ER_CANT_CREATE_TABLE
+alter table posts add column blocked_instant int, algorithm=instant;
+
+--error ER_ALTER_OPERATION_NOT_SUPPORTED,ER_ALTER_OPERATION_NOT_SUPPORTED_REASON,ER_CANT_CREATE_TABLE
+alter table posts add column blocked_nocopy int, algorithm=nocopy;
+
+--error ER_ALTER_OPERATION_NOT_SUPPORTED,ER_ALTER_OPERATION_NOT_SUPPORTED_REASON,ER_CANT_CREATE_TABLE
+alter table posts add column blocked_lock int, lock=none;
+
+alter table posts add column copy_ok int null, algorithm=copy;
+update posts set copy_ok = 7 where id = 1;
+
+select id, title, copy_ok from posts;
+show create table posts;
+select column_name
+from information_schema.columns
+where table_schema = 'mylite_mtr_online_alter'
+  and table_name = 'posts'
+  and column_name like 'blocked_%'
+order by column_name;
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+drop database mylite_mtr_online_alter;
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc

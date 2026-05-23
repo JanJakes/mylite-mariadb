@@ -229,6 +229,7 @@ storage_tests=(
   mylite.routed_storage_unsupported_indexes
   mylite.routed_storage_volatile_transactions
   mylite.routed_storage_partitions
+  mylite.routed_storage_online_alter
 )
 
 usage() {

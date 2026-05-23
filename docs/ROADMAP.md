@@ -66,7 +66,8 @@ failed table metadata absence, plus representative unsupported FULLTEXT/SPATIAL
 index rejection, plus representative raw MEMORY/HEAP volatile transaction,
 savepoint, failed-statement rollback, and autoincrement gap behavior, plus
 representative raw partition-definition rejection and failed table metadata
-absence.
+absence, plus representative raw online and in-place ALTER rejection with
+copy-ALTER preservation and blocked-column metadata absence.
 The baseline MTR smoke list now also includes `main.1st` for the trimmed
 embedded-profile bootstrap schema, `main.type_float` for selected
 floating-point conversion, comparison, rounding, and metadata inference

@@ -1,0 +1,43 @@
+drop database if exists mylite_mtr_online_alter;
+create database mylite_mtr_online_alter;
+use mylite_mtr_online_alter;
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+create table posts (
+id int not null primary key,
+title varchar(32) not null
+) engine=InnoDB;
+insert into posts values (1, 'kept');
+alter online table posts add column blocked_online int;
+Got one of the listed errors
+alter table posts add column blocked_inplace int, algorithm=inplace;
+Got one of the listed errors
+alter table posts add column blocked_instant int, algorithm=instant;
+Got one of the listed errors
+alter table posts add column blocked_nocopy int, algorithm=nocopy;
+Got one of the listed errors
+alter table posts add column blocked_lock int, lock=none;
+Got one of the listed errors
+alter table posts add column copy_ok int null, algorithm=copy;
+update posts set copy_ok = 7 where id = 1;
+select id, title, copy_ok from posts;
+id	title	copy_ok
+1	kept	7
+show create table posts;
+Table	Create Table
+posts	CREATE TABLE `posts` (
+  `id` int(11) NOT NULL,
+  `title` varchar(32) NOT NULL,
+  `copy_ok` int(11) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+select column_name
+from information_schema.columns
+where table_schema = 'mylite_mtr_online_alter'
+  and table_name = 'posts'
+  and column_name like 'blocked_%'
+order by column_name;
+column_name
+drop database mylite_mtr_online_alter;

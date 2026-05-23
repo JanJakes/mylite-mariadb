@@ -140,7 +140,9 @@ MEMORY/HEAP volatile transaction, savepoint, failed-statement rollback, and
 autoincrement gap behavior through
 `mylite.routed_storage_volatile_transactions`, plus representative raw
 partition-definition rejection and failed table metadata absence through
-`mylite.routed_storage_partitions`.
+`mylite.routed_storage_partitions`, plus representative raw online and
+in-place ALTER rejection, copy-ALTER preservation, blocked-column metadata
+absence, and sidecar absence through `mylite.routed_storage_online_alter`.
 It remains outside the default compatibility groups because it builds
 `mariadbd` and several upstream client/support tools. Broader MTR integration
 should be a separate comparison slice with explicit include lists, expected
