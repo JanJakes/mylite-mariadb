@@ -219,9 +219,10 @@ embedded storage-engine test now exercises repeated exact-key prepared updates
 through match, no-match, bound `NULL`, unchanged-row, commuted-predicate,
 additional-condition, warning, strict-conversion error recovery, CHECK error
 recovery, generated-column index maintenance, transaction rollback, secondary
-index, prefix index, duplicate-key, and stable foreign-key paths. Future rebind
-work should extend that test instead of replacing it, and must keep the existing
-MariaDB fallback semantics visible for every unsupported shape.
+index, prefix index, duplicate-key, metadata reprepare after `ALTER TABLE`,
+same-name temporary-table shadowing, and stable foreign-key paths. Future
+rebind work should extend that test instead of replacing it, and must keep the
+existing MariaDB fallback semantics visible for every unsupported shape.
 
 ## Acceptance Criteria
 

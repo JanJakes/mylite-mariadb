@@ -17383,6 +17383,103 @@ static void test_prepared_primary_key_update_rebinds(void) {
 
     assert_exec_succeeds(
         db,
+        "CREATE TABLE prepared_reprepare_update_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO prepared_reprepare_update_posts VALUES (1, 10)");
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE prepared_reprepare_update_posts SET value = value + 1 WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+    assert_exec_succeeds(
+        db,
+        "ALTER TABLE prepared_reprepare_update_posts "
+        "ADD COLUMN note INT NOT NULL DEFAULT 7"
+    );
+    assert(mylite_bind_int64(stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+    assert_query_single_value(
+        db,
+        "SELECT CAST(value AS CHAR) FROM prepared_reprepare_update_posts WHERE id = 1",
+        "12"
+    );
+    assert_query_single_value(
+        db,
+        "SELECT CAST(note AS CHAR) FROM prepared_reprepare_update_posts WHERE id = 1",
+        "7"
+    );
+
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE prepared_shadow_update_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO prepared_shadow_update_posts VALUES (1, 10)");
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE prepared_shadow_update_posts SET value = value + 1 WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+    assert_exec_succeeds(
+        db,
+        "CREATE TEMPORARY TABLE prepared_shadow_update_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO prepared_shadow_update_posts VALUES (1, 100)");
+    assert(mylite_bind_int64(stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+    assert_query_single_value(
+        db,
+        "SELECT CAST(value AS CHAR) FROM prepared_shadow_update_posts WHERE id = 1",
+        "101"
+    );
+    assert_exec_succeeds(db, "DROP TEMPORARY TABLE prepared_shadow_update_posts");
+    assert_query_single_value(
+        db,
+        "SELECT CAST(value AS CHAR) FROM prepared_shadow_update_posts WHERE id = 1",
+        "11"
+    );
+    assert(mylite_bind_int64(stmt, 1U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+    assert_query_single_value(
+        db,
+        "SELECT CAST(value AS CHAR) FROM prepared_shadow_update_posts WHERE id = 1",
+        "12"
+    );
+
+    assert_exec_succeeds(
+        db,
         "CREATE TABLE stable_update_posts ("
         "id INT NOT NULL PRIMARY KEY, "
         "slug VARCHAR(32) NOT NULL, "
