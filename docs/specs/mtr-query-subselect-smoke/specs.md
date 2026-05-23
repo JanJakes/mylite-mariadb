@@ -3,10 +3,11 @@
 ## Goal
 
 Extend the opt-in MariaDB MTR smoke runner with exact upstream tests
-`main.update_ignore_216`, `main.subselect_nulls`, and `main.subselect_extra`.
-This adds curated embedded baseline coverage for an `UPDATE IGNORE` subquery
-regression, NULL-sensitive subquery predicates, and selected optimizer
-subquery cases.
+`main.update_ignore_216`, `main.subselect_nulls`, `main.subselect_extra`, and
+`main.subselect_mat_analyze_json`. This adds curated embedded baseline
+coverage for an `UPDATE IGNORE` subquery regression, NULL-sensitive subquery
+predicates, selected optimizer subquery cases, and JSON `ANALYZE` output for
+materialized subquery strategies.
 
 ## Non-Goals
 
@@ -34,6 +35,11 @@ MariaDB base: `mariadb-11.8.6`
   `group_by`, and `derived_view` tests, including datetime subqueries,
   grouped min/max index plans, `IGNORE INDEX` plans, derived tables, views, and
   materialized-view `IN` subquery regressions.
+- `mariadb/mysql-test/main/subselect_mat_analyze_json.test` covers
+  `EXPLAIN FORMAT=JSON` and `ANALYZE FORMAT=JSON` output for complete and
+  partial materialized subquery matching, `NOT IN`, grouped/order/having
+  subqueries, nested `IN`, outer-join `ON` subqueries, and row-valued
+  predicates.
 - All selected tests pass under the MyLite MTR smoke profile without upstream
   source changes.
 - Probed nearby query and subselect suites stay outside this slice:
@@ -57,7 +63,8 @@ MariaDB base: `mariadb-11.8.6`
 ## Compatibility Impact
 
 The compatibility matrix can say the opt-in embedded MTR smoke runner covers
-selected subquery and update-ignore behavior in addition to existing bootstrap,
+selected subquery, subquery `ANALYZE FORMAT=JSON`, and update-ignore behavior
+in addition to existing bootstrap,
 CAST/CONVERT, CASE-family, numeric/type, date/temporal, parser/comparison,
 `IN` predicate, scalar operator, scalar-function, aggregate DISTINCT,
 charset/collation, KDF, disabled-DES, and REGEXP coverage. This remains curated
@@ -90,7 +97,7 @@ still be reclaimed with `rm -rf build/mariadb-mtr-smoke` or `rm -rf build`.
 ## Test Plan
 
 - `tools/mylite-mtr-harness list`
-- `tools/mylite-mtr-harness run main.update_ignore_216 main.subselect_nulls main.subselect_extra`
+- `tools/mylite-mtr-harness run main.update_ignore_216 main.subselect_nulls main.subselect_extra main.subselect_mat_analyze_json`
 - `tools/mylite-mtr-harness run`
 - `bash -n tools/mariadb-embedded-build tools/mylite-mtr-harness tools/mylite-compat-harness tools/mylite-size-report`
 - `find mariadb/mysql-test -name '*.reject' -print`

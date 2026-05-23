@@ -96,9 +96,9 @@ No production dependency, binary-size, or default-build change.
   passed.
 - `tools/mylite-mtr-harness run main.gcc296 main.fulltext_charsets main.fulltext_multi main.fulltext_update main.fulltext_cache`:
   passed.
-- `tools/mylite-mtr-harness run`: passed all 8 MyLite profile tests plus 199
+- `tools/mylite-mtr-harness run`: passed all 8 MyLite profile tests plus 200
   selected `main` MTR smoke tests.
-- `tools/mylite-mtr-harness list | wc -l`: `207`.
+- `tools/mylite-mtr-harness list | wc -l`: `208`.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `find mariadb/mysql-test -name '*.reject' -print`: no output.
 - `git diff --check`: passed.

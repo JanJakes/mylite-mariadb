@@ -141,6 +141,7 @@ default_tests=(
   main.key_diff
   main.subselect_nulls
   main.subselect_extra
+  main.subselect_mat_analyze_json
   main.subselect_sj_aria
   main.order_by_zerolength-4285
   main.order_by_optimizer
