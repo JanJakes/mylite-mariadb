@@ -9126,7 +9126,7 @@ mylite_storage_result mylite_storage_index_prefix_exists_for_index(
             .size = sizeof(entries),
         };
         int used_leaf = 0;
-        result = read_index_leaf_entries(
+        result = read_index_leaf_prefix_entries(
             file,
             filename,
             &header,
@@ -9136,15 +9136,20 @@ mylite_storage_result mylite_storage_index_prefix_exists_for_index(
             schema_name,
             table_name,
             index_number,
+            key_prefix,
+            key_prefix_size,
             &entries,
             &used_leaf
         );
         if (result == MYLITE_STORAGE_OK && !used_leaf) {
-            result = read_live_index_entries(
+            result = scan_index_prefix_entries_from(
                 file,
                 &header,
                 table_entry.table_id,
                 index_number,
+                key_prefix,
+                key_prefix_size,
+                MYLITE_STORAGE_FORMAT_EMPTY_PAGE_COUNT,
                 &entries
             );
         }

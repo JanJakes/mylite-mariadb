@@ -1071,7 +1071,9 @@ unique integer entry, and use storage-level exact-entry or exact-entryset lookup
 for guarded raw equality paths so the handler does not allocate unrelated index
 entries for common integer point reads. Storage prefix-entryset reads similarly
 return only live entries matching a serialized key prefix for durable grouped
-autoincrement allocation. Durable exact lookups classify each
+autoincrement allocation, and durable prefix-existence fallback checks reuse
+the same narrowed entryset path instead of materializing full index entrysets.
+Durable exact lookups classify each
 published append-only page once and prune candidates as later row-state pages
 hide older row ids. Contiguous index leaf runs can serve as exact lookup base
 snapshots by searching run page key ranges and walking only duplicate-spanning

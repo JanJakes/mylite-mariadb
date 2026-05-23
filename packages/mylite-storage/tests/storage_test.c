@@ -7757,6 +7757,15 @@ static void test_index_leaf_pages(void) {
     assert(header.page_count == before_maintained_insert_pages + 1ULL);
     assert_index_entry_lookup(filename, 0U, key_3, sizeof(key_3), MYLITE_STORAGE_OK, row_3_id);
     assert_index_prefix_exists_for_index(filename, 0U, key_3, sizeof(key_3), 0ULL, 1);
+    assert_index_prefix_exists_for_index(filename, 0U, key_3, sizeof(key_3), row_3_id, 0);
+    assert_index_prefix_exists_for_index(
+        filename,
+        0U,
+        missing_prefix,
+        sizeof(missing_prefix),
+        0ULL,
+        0
+    );
     const unsigned char *key_3_prefix_keys[] = {key_3};
     const unsigned long long key_3_prefix_rows[] = {row_3_id};
     assert_prefix_index_entries(
@@ -7864,6 +7873,7 @@ static void test_index_leaf_pages(void) {
     assert_index_root(filename, "app", "posts", 0U, primary_root_page, 2ULL);
     assert_index_root(filename, "app", "posts", 1U, secondary_root_page, 2ULL);
     assert_index_entry_lookup(filename, 0U, key_1, sizeof(key_1), MYLITE_STORAGE_NOTFOUND, 0ULL);
+    assert_index_prefix_exists_for_index(filename, 0U, key_1, sizeof(key_1), 0ULL, 0);
     assert_prefix_index_entries(filename, 0U, key_1, 1U, NULL, sizeof(key_1), NULL, 0U);
     const unsigned long long delete_tail_row_ids[] = {row_3_id};
     assert_exact_index_entries(

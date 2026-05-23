@@ -139,6 +139,9 @@ primary-file header and catalog image for point lookups and exact-index cursor
 builds. Durable exact and full entryset reads now use the same scoped
 file/header setup as point lookups and FK prefix probes before ordered cursor
 construction falls through to published roots or append-history scans.
+Prefix-existence fallback checks now also reuse the storage prefix-entryset
+reader, avoiding full index entryset materialization when static no-tail leaf
+roots cannot answer directly.
 Published leaf-root readers now cache resolved index-root catalog entries on
 the active statement, avoiding repeated catalog-record scans for the same table
 and index root. Repeated read statements over unchanged durable header bytes
