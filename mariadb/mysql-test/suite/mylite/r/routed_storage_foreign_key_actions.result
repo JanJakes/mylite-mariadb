@@ -1,0 +1,162 @@
+drop database if exists mylite_mtr_foreign_key_actions;
+create database mylite_mtr_foreign_key_actions;
+use mylite_mtr_foreign_key_actions;
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+create table setnull_parent (
+id int not null primary key,
+title varchar(32) not null unique
+) engine=InnoDB;
+create table setnull_child (
+id int not null primary key,
+parent_id int null,
+title varchar(32) not null,
+key parent_idx (parent_id),
+constraint setnull_child_parent_fk
+foreign key (parent_id) references setnull_parent (id)
+on delete set null on update set null
+) engine=InnoDB;
+create table mylite_setnull_parent (
+id int not null primary key,
+title varchar(32) not null unique
+) engine=MYLITE;
+create table mylite_setnull_child (
+id int not null primary key,
+parent_id int null,
+title varchar(32) not null,
+key parent_idx (parent_id),
+constraint mylite_setnull_child_parent_fk
+foreign key (parent_id) references mylite_setnull_parent (id)
+on delete set null on update set null
+) engine=MYLITE;
+show create table setnull_child;
+Table	Create Table
+setnull_child	CREATE TABLE `setnull_child` (
+  `id` int(11) NOT NULL,
+  `parent_id` int(11) DEFAULT NULL,
+  `title` varchar(32) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `parent_idx` (`parent_id`),
+  CONSTRAINT `setnull_child_parent_fk` FOREIGN KEY (`parent_id`) REFERENCES `setnull_parent` (`id`) ON DELETE SET NULL ON UPDATE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+show create table mylite_setnull_child;
+Table	Create Table
+mylite_setnull_child	CREATE TABLE `mylite_setnull_child` (
+  `id` int(11) NOT NULL,
+  `parent_id` int(11) DEFAULT NULL,
+  `title` varchar(32) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `parent_idx` (`parent_id`),
+  CONSTRAINT `mylite_setnull_child_parent_fk` FOREIGN KEY (`parent_id`) REFERENCES `mylite_setnull_parent` (`id`) ON DELETE SET NULL ON UPDATE SET NULL
+) ENGINE=MYLITE DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+insert into setnull_parent values (1, 'parent');
+insert into setnull_child values (10, 1, 'child');
+insert into setnull_parent values (3, 'delete-parent');
+insert into setnull_child values (11, 3, 'delete-child');
+insert into mylite_setnull_parent values (1, 'mylite-parent');
+insert into mylite_setnull_child values (10, 1, 'mylite-child');
+insert into mylite_setnull_parent values (3, 'mylite-delete-parent');
+insert into mylite_setnull_child values (11, 3, 'mylite-delete-child');
+update setnull_parent set id = 2 where id = 1;
+update mylite_setnull_parent set id = 2 where id = 1;
+select id, parent_id is null as parent_is_null
+from setnull_child where id = 10;
+id	parent_is_null
+10	1
+select id, parent_id is null as parent_is_null
+from mylite_setnull_child where id = 10;
+id	parent_is_null
+10	1
+delete from setnull_parent where id = 2;
+delete from setnull_parent where id = 3;
+delete from mylite_setnull_parent where id = 2;
+delete from mylite_setnull_parent where id = 3;
+select id, parent_id is null as parent_is_null
+from setnull_child order by id;
+id	parent_is_null
+10	1
+11	1
+select id, parent_id is null as parent_is_null
+from mylite_setnull_child order by id;
+id	parent_is_null
+10	1
+11	1
+select count(*) as child_rows from setnull_child;
+child_rows
+2
+select count(*) as child_rows from mylite_setnull_child;
+child_rows
+2
+create table cascade_parent (
+id int not null primary key,
+title varchar(32) not null unique
+) engine=InnoDB;
+create table cascade_child (
+id int not null primary key,
+parent_id int not null,
+title varchar(32) not null,
+key parent_idx (parent_id),
+constraint cascade_child_parent_fk
+foreign key (parent_id) references cascade_parent (id)
+on delete cascade on update cascade
+) engine=InnoDB;
+create table mylite_cascade_parent (
+id int not null primary key,
+title varchar(32) not null unique
+) engine=MYLITE;
+create table mylite_cascade_child (
+id int not null primary key,
+parent_id int not null,
+title varchar(32) not null,
+key parent_idx (parent_id),
+constraint mylite_cascade_child_parent_fk
+foreign key (parent_id) references mylite_cascade_parent (id)
+on delete cascade on update cascade
+) engine=MYLITE;
+show create table cascade_child;
+Table	Create Table
+cascade_child	CREATE TABLE `cascade_child` (
+  `id` int(11) NOT NULL,
+  `parent_id` int(11) NOT NULL,
+  `title` varchar(32) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `parent_idx` (`parent_id`),
+  CONSTRAINT `cascade_child_parent_fk` FOREIGN KEY (`parent_id`) REFERENCES `cascade_parent` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+show create table mylite_cascade_child;
+Table	Create Table
+mylite_cascade_child	CREATE TABLE `mylite_cascade_child` (
+  `id` int(11) NOT NULL,
+  `parent_id` int(11) NOT NULL,
+  `title` varchar(32) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `parent_idx` (`parent_id`),
+  CONSTRAINT `mylite_cascade_child_parent_fk` FOREIGN KEY (`parent_id`) REFERENCES `mylite_cascade_parent` (`id`) ON DELETE CASCADE ON UPDATE CASCADE
+) ENGINE=MYLITE DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+insert into cascade_parent values (10, 'cascade-parent');
+insert into cascade_child values (100, 10, 'cascade-child');
+insert into mylite_cascade_parent values (10, 'mylite-cascade-parent');
+insert into mylite_cascade_child values (100, 10, 'mylite-cascade-child');
+update cascade_parent set id = 11 where id = 10;
+update mylite_cascade_parent set id = 11 where id = 10;
+select id, parent_id, title
+from cascade_child force index (parent_idx)
+where parent_id = 11;
+id	parent_id	title
+100	11	cascade-child
+select id, parent_id, title
+from mylite_cascade_child force index (parent_idx)
+where parent_id = 11;
+id	parent_id	title
+100	11	mylite-cascade-child
+delete from cascade_parent where id = 11;
+delete from mylite_cascade_parent where id = 11;
+select count(*) as child_rows from cascade_child;
+child_rows
+0
+select count(*) as child_rows from mylite_cascade_child;
+child_rows
+0
+drop database mylite_mtr_foreign_key_actions;
