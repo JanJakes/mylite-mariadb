@@ -172,12 +172,15 @@ tools/mylite-perf-baseline --phase=prepared-assignment-update-components 1000 10
 tools/mylite-perf-baseline --phase=prepared-row-only-update-components 1000 10000
 tools/mylite-perf-baseline --phase=prepared-row-only-update-miss-components 1000 10000
 tools/mylite-perf-baseline --phase=prepared-updates --max-us=prepared-updates:25 1000 10000
+tools/mylite-perf-baseline --phase=prepared-row-only-update-components --profile-iterations=10000000 10000
 ```
 
 Set `MYLITE_PERF_KEEP_ROOT=1` when investigating a failed benchmark run and
 the generated temporary `.mylite` file should be preserved for inspection.
 Thresholds are opt-in and machine-local; use `--max-us=<metric>:<value>` for
-explicit regression gates.
+explicit regression gates. Use `--profile-iterations=<n>` only for intentional
+long local sampling runs; ordinary positional rows and iterations remain capped
+for quick checks.
 
 See [docs/architecture/monorepo.md](docs/architecture/monorepo.md) for the
 repository layout and import discipline.

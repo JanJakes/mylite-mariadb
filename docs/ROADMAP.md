@@ -221,7 +221,10 @@ the normal setup path. The local expression-based prepared-update execute
 component still holds near 1.65-1.75 us/op in the 10000-row /
 1000000-iteration samples; broader prepared update work can move to remaining
 MariaDB table-open, value-expression setup, JOIN prepare, handler, and
-checkpoint overhead.
+checkpoint overhead. The performance harness now keeps ordinary positional
+runs capped while adding an explicit `--profile-iterations` option for longer
+local sampling runs, so follow-up hot-path work can separate steady execution
+frames from short-run setup and cold-cache noise.
 Same-size row-only active rewrites now capture only the row checksum-plus-payload
 undo range and rewrite only payload bytes while preserving rollback correctness
 after dirty buffered-page checksum refreshes and later size-changing rewrites in

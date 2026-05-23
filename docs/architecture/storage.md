@@ -167,7 +167,8 @@ when secondary exact reads repeatedly batch the same shape of row ids.
 The local storage performance baseline remains machine-dependent, but it now
 accepts opt-in `--max-us=<metric>:<value>` thresholds so a slice can record an
 explicit local regression gate without making default benchmark runs fail on
-slower hardware.
+slower hardware. It also keeps quick positional runs capped while exposing
+explicit `--profile-iterations=<n>` runs for longer local profiler samples.
 
 MariaDB table-discovery callbacks also use scoped read sessions while they read
 table definitions, discovered table names, or table existence from the MyLite

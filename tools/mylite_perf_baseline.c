@@ -12,6 +12,9 @@
 #include <time.h>
 #include <unistd.h>
 
+#define BENCHMARK_DEFAULT_MAX_ARGUMENT 1000000ULL
+#define BENCHMARK_PROFILE_MAX_ITERATIONS 100000000ULL
+
 typedef enum benchmark_phase {
     BENCHMARK_PHASE_ALL,
     BENCHMARK_PHASE_PREPARED_SCALAR_SELECTS,
@@ -141,6 +144,12 @@ typedef struct secondary_result {
 } secondary_result;
 
 static int parse_config(int argc, char **argv, benchmark_config *config);
+static int parse_positive_size_argument(
+    const char *argument,
+    unsigned long long max_value,
+    const char *description,
+    size_t *out_value
+);
 static int parse_phase_argument(const char *argument, benchmark_config *config);
 static int parse_threshold_argument(const char *argument, benchmark_config *config);
 static int find_metric_by_name(const char *name, size_t name_size, benchmark_metric *out_metric);
@@ -334,6 +343,7 @@ int main(int argc, char **argv) {
 
 static int parse_config(int argc, char **argv, benchmark_config *config) {
     int numeric_argument = 0;
+    int iterations_seen = 0;
     for (int i = 1; i < argc; ++i) {
         if (strcmp(argv[i], "--help") == 0) {
             print_usage(argv[0]);
@@ -353,32 +363,82 @@ static int parse_config(int argc, char **argv, benchmark_config *config) {
             }
             continue;
         }
+        if (strncmp(argv[i], "--profile-iterations=", 21U) == 0) {
+            if (iterations_seen) {
+                fprintf(stderr, "Iterations were specified more than once\n");
+                print_usage(argv[0]);
+                return 1;
+            }
+            if (parse_positive_size_argument(
+                    argv[i] + 21U,
+                    BENCHMARK_PROFILE_MAX_ITERATIONS,
+                    "profile iterations",
+                    &config->iterations
+                ) != 0) {
+                print_usage(argv[0]);
+                return 1;
+            }
+            iterations_seen = 1;
+            continue;
+        }
         if (strncmp(argv[i], "--", 2U) == 0) {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             print_usage(argv[0]);
             return 1;
         }
 
-        char *end = NULL;
-        errno = 0;
-        const unsigned long long value = strtoull(argv[i], &end, 10);
-        if (errno != 0 || end == argv[i] || *end != '\0' || value == 0U || value > 1000000U) {
-            fprintf(stderr, "Expected a positive integer up to 1000000, got: %s\n", argv[i]);
+        size_t value = 0U;
+        if (parse_positive_size_argument(
+                argv[i],
+                BENCHMARK_DEFAULT_MAX_ARGUMENT,
+                "ordinary rows or iterations",
+                &value
+            ) != 0) {
             print_usage(argv[0]);
             return 1;
         }
 
         ++numeric_argument;
         if (numeric_argument == 1) {
-            config->rows = (size_t)value;
+            config->rows = value;
         } else if (numeric_argument == 2) {
-            config->iterations = (size_t)value;
+            if (iterations_seen) {
+                fprintf(stderr, "Iterations were specified more than once\n");
+                print_usage(argv[0]);
+                return 1;
+            }
+            config->iterations = value;
+            iterations_seen = 1;
         } else {
             print_usage(argv[0]);
             return 1;
         }
     }
 
+    return 0;
+}
+
+static int parse_positive_size_argument(
+    const char *argument,
+    unsigned long long max_value,
+    const char *description,
+    size_t *out_value
+) {
+    char *end = NULL;
+    errno = 0;
+    const unsigned long long value = strtoull(argument, &end, 10);
+    if (errno != 0 || end == argument || *end != '\0' || value == 0U || value > max_value) {
+        fprintf(
+            stderr,
+            "Expected positive %s up to %llu, got: %s\n",
+            description,
+            max_value,
+            argument
+        );
+        return 1;
+    }
+
+    *out_value = (size_t)value;
     return 0;
 }
 
@@ -923,9 +983,12 @@ static void print_usage(const char *program) {
         "storage-pk-entry-lookups|storage-pk-entry-lookups-one-read|storage-pk-row-lookups|"
         "storage-pk-row-lookups-one-read|storage-read-statements|storage-row-updates|"
         "storage-row-update-components|storage-indexed-row-update-components] "
-        "[--max-us=<metric>:<value>] [rows] [iterations]\n"
+        "[--max-us=<metric>:<value>] [--profile-iterations=<n>] [rows] [iterations]\n"
         "\n"
         "Defaults: phase=all rows=100 iterations=100.\n"
+        "Positional rows and iterations accept values up to 1000000. "
+        "--profile-iterations accepts up to 100000000 explicit iterations for local "
+        "sampling runs.\n"
         "Focused scalar, point-select, secondary-select, and update phases skip unrelated "
         "timings after setup.\n"
         "Thresholds are opt-in and may be supplied more than once. Metrics: "
