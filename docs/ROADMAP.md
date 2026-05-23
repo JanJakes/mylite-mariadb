@@ -409,6 +409,9 @@ default could still alter a unique key part.
 They now also cache the accepted statement's per-index key-change mask at
 direct-update initialization and reuse it during row mutation, avoiding
 repeated key metadata walks for indexes that cannot change.
+Stable non-key direct-update shapes now also consult that handler shape cache
+before repeating the updated-field key-safety and FK-gate admission work, while
+key-changing direct updates stay on the uncached gate path.
 Pure exact-key direct-update predicates now reuse the accepted key proof for
 the final row condition check, while broader `AND` predicates keep evaluating
 the full `WHERE` expression after the exact row read.
