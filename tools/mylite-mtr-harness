@@ -227,26 +227,50 @@ default_tests=(
   sys_vars.aria_page_checksum_basic
   sys_vars.aria_pagecache_buffer_size_basic
   sys_vars.aria_used_for_temp_tables_basic
+  sys_vars.auto_increment_increment_basic
+  sys_vars.auto_increment_offset_basic
+  sys_vars.autocommit_basic
   sys_vars.back_log_basic
   sys_vars.character_sets_dir_basic
+  sys_vars.completion_type_basic
+  sys_vars.default_week_format_basic
+  sys_vars.div_precision_increment_basic
+  sys_vars.error_count_basic
   sys_vars.expensive_subquery_limit_basic
+  sys_vars.foreign_key_checks_basic
+  sys_vars.group_concat_max_len_basic
   sys_vars.host_cache_size_auto
+  sys_vars.identity_basic
   sys_vars.in_transaction_basic
+  sys_vars.insert_id_basic
+  sys_vars.interactive_timeout_basic
+  sys_vars.join_buffer_size_basic
   sys_vars.join_buffer_space_limit_basic
   sys_vars.join_cache_level_basic
   sys_vars.large_files_support_basic
   sys_vars.large_pages_basic
   sys_vars.last_insert_id_basic
+  sys_vars.lc_messages_basic
   sys_vars.lc_messages_dir_basic
+  sys_vars.lc_time_names_basic
   sys_vars.locked_in_memory_basic
   sys_vars.log_tc_size_basic
   sys_vars.lower_case_file_system_basic
   sys_vars.lower_case_table_names_basic
+  sys_vars.low_priority_updates_basic
   sys_vars.maximum_basic
+  sys_vars.max_error_count_basic
+  sys_vars.max_join_size_basic
+  sys_vars.max_seeks_for_key_basic
+  sys_vars.max_statement_time_basic
   sys_vars.metadata_locks_cache_size_basic
+  sys_vars.min_examined_row_limit_basic
   sys_vars.mrr_buffer_size_basic
   sys_vars.old_basic
+  sys_vars.old_passwords_basic
   sys_vars.open_files_limit_basic
+  sys_vars.optimizer_prune_level_basic
+  sys_vars.optimizer_search_depth_basic
   sys_vars.pid_file_basic
   sys_vars.plugin_maturity_basic
   sys_vars.port_basic
@@ -260,11 +284,24 @@ default_tests=(
   sys_vars.skip_networking_basic
   sys_vars.skip_show_database_basic
   sys_vars.socket_basic
+  sys_vars.sql_auto_is_null_basic
+  sys_vars.sql_big_selects_basic
+  sys_vars.sql_buffer_result_basic
+  sys_vars.sql_log_off_basic
+  sys_vars.sql_quote_show_create_basic
+  sys_vars.sql_safe_updates_basic
   sys_vars.sql_select_limit_basic
+  sys_vars.sql_warnings_basic
   sys_vars.sync_master_info_basic
   sys_vars.thread_stack_basic
+  sys_vars.time_zone_basic
+  sys_vars.transaction_isolation_basic
+  sys_vars.transaction_read_only_basic
+  sys_vars.unique_checks_basic
   sys_vars.version
   sys_vars.version_ssl_library_basic
+  sys_vars.wait_timeout_basic
+  sys_vars.warning_count_basic
 )
 storage_tests=(
   mylite.routed_storage_engines
