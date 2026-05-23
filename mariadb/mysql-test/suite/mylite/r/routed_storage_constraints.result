@@ -70,4 +70,69 @@ from generated_checked_posts force index (label_key)
 where label = 'draft-1';
 old_label_rows
 0
+create table mylite_generated_checked_posts (
+id int not null primary key,
+title varchar(64) not null,
+rating int check (rating between 0 and 5),
+title_key varchar(80) as (concat(title, '-key')) virtual,
+title_len int as (char_length(title)) virtual,
+label varchar(80) as (concat(title, '-', id)) stored,
+constraint title_not_blank check (char_length(trim(title)) > 0),
+unique key title_key_unique (title_key),
+key title_len_key (title_len),
+key label_key (label)
+) engine=MYLITE;
+show create table mylite_generated_checked_posts;
+Table	Create Table
+mylite_generated_checked_posts	CREATE TABLE `mylite_generated_checked_posts` (
+  `id` int(11) NOT NULL,
+  `title` varchar(64) NOT NULL,
+  `rating` int(11) DEFAULT NULL CHECK (`rating` between 0 and 5),
+  `title_key` varchar(80) GENERATED ALWAYS AS (concat(`title`,'-key')) VIRTUAL,
+  `title_len` int(11) GENERATED ALWAYS AS (char_length(`title`)) VIRTUAL,
+  `label` varchar(80) GENERATED ALWAYS AS (concat(`title`,'-',`id`)) STORED,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `title_key_unique` (`title_key`),
+  KEY `title_len_key` (`title_len`),
+  KEY `label_key` (`label`),
+  CONSTRAINT `title_not_blank` CHECK (char_length(trim(`title`)) > 0)
+) ENGINE=MYLITE DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+insert into mylite_generated_checked_posts (id, title, rating) values (1, 'draft', 5);
+select id, title_key, title_len, label
+from mylite_generated_checked_posts
+where id = 1;
+id	title_key	title_len	label
+1	draft-key	5	draft-1
+select id
+from mylite_generated_checked_posts force index (title_len_key)
+where title_len = 5 and id = 1;
+id
+1
+select id
+from mylite_generated_checked_posts force index (label_key)
+where label = 'draft-1';
+id
+1
+insert into mylite_generated_checked_posts (id, title, rating) values (2, 'bad', 6);
+ERROR 23000: CONSTRAINT `mylite_generated_checked_posts.rating` failed for `mylite_mtr_constraints`.`mylite_generated_checked_posts`
+insert into mylite_generated_checked_posts (id, title, rating) values (2, '   ', 1);
+ERROR 23000: CONSTRAINT `title_not_blank` failed for `mylite_mtr_constraints`.`mylite_generated_checked_posts`
+insert into mylite_generated_checked_posts (id, title, rating) values (3, 'draft', 2);
+ERROR 23000: Duplicate entry 'draft-key' for key 'title_key_unique'
+update mylite_generated_checked_posts set title = 'published', rating = 4 where id = 1;
+select id, title_key, title_len, label
+from mylite_generated_checked_posts
+where id = 1;
+id	title_key	title_len	label
+1	published-key	9	published-1
+select id
+from mylite_generated_checked_posts force index (title_len_key)
+where title_len = 9 and id = 1;
+id
+1
+select count(*) as old_label_rows
+from mylite_generated_checked_posts force index (label_key)
+where label = 'draft-1';
+old_label_rows
+0
 drop database mylite_mtr_constraints;

@@ -51,9 +51,10 @@ MyLite rollback/commit and DML statement effects, and routed `InnoDB`
 rollback, commit, savepoint, and representative foreign-key behavior against a
 static MyLite storage-engine build with a primary `.mylite` file, including
 explicit MyLite foreign-key publication and enforcement. It
-also covers representative routed `InnoDB` CHECK and generated-column
-metadata, enforcement, generated values, generated-index reads, and generated
-unique-key diagnostics through the same raw embedded storage path, plus
+also covers representative routed `InnoDB` and explicit MyLite CHECK and
+generated-column metadata, enforcement, generated values, generated-index
+reads, and generated unique-key diagnostics through the same raw embedded
+storage path, plus
 representative routed `InnoDB` DDL lifecycle behavior for LIKE, CTAS, copy
 `ALTER`, indexed reads after rebuild, and `RENAME TABLE`, plus representative
 routed `InnoDB` DML statement effects for ODKU, `REPLACE`, keyed `UPDATE`,

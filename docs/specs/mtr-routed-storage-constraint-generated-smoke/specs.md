@@ -6,14 +6,16 @@ MyLite has first-party `libmylite` coverage for CHECK constraints and
 generated columns, but the storage-routed MTR suite does not yet prove those
 surfaces through raw embedded MTR execution. The gap matters because
 applications commonly declare `ENGINE=InnoDB` while relying on MariaDB SQL
-constraint and generated-column semantics.
+constraint and generated-column semantics, and explicit `ENGINE=MYLITE`
+should exercise the same handler path directly.
 
 ## Source Findings
 
 - MariaDB base: `mariadb-11.8.6`
   (`9bfea48ce1214cc4470f6f6f8a4e30352cef84e7`).
 - `mariadb/storage/mylite/ha_mylite.cc::mylite_supported_engine_request()`
-  accepts `InnoDB` as a MyLite-routed requested-engine name.
+  accepts `InnoDB` and explicit `MYLITE` as MyLite-routed requested-engine
+  names.
 - `mariadb/storage/mylite/ha_mylite.h` advertises
   `HA_CAN_VIRTUAL_COLUMNS`, allowing MariaDB generated-column machinery to
   operate over MyLite-routed tables.
@@ -33,8 +35,9 @@ constraint and generated-column semantics.
 ## Design
 
 Add `mylite.routed_storage_constraints` to the storage MTR list. The test runs
-with a primary `.mylite` file, enforces MyLite storage, creates an explicit
-`ENGINE=InnoDB` table, and verifies:
+with a primary `.mylite` file, enforces MyLite storage, creates explicit
+`ENGINE=InnoDB` and `ENGINE=MYLITE` tables, and verifies each table's
+representative:
 
 - `SHOW CREATE TABLE` preserves the requested `InnoDB` engine and publishes
   CHECK and generated-column metadata.
@@ -57,9 +60,10 @@ behavior, or claim exhaustive CHECK/generated parity.
 
 The storage MTR runner gains evidence that routed `ENGINE=InnoDB` tables keep
 representative CHECK and generated-column behavior under raw embedded MTR
-execution. CHECK constraints and generated columns remain partial; broader
-expression, SQL-mode, and environment-sensitive matrices remain separate
-coverage.
+execution, and that explicit `ENGINE=MYLITE` tables use the same representative
+metadata, validation, generated values, and generated-index behavior. CHECK
+constraints and generated columns remain partial; broader expression, SQL-mode,
+and environment-sensitive matrices remain separate coverage.
 
 ## Storage And Lifecycle Impact
 
@@ -80,6 +84,11 @@ to reject native `.frm`, `.ibd`, MyISAM, Aria, binlog, and relay-log files.
 - The new storage MTR constraints test passes.
 - The full storage-routed MTR list passes.
 - Compatibility docs and roadmap mention routed CHECK/generated MTR coverage.
+
+## Verification Results
+
+- `tools/mylite-mtr-harness probe-storage mylite.routed_storage_constraints`
+  passed after adding explicit `ENGINE=MYLITE` CHECK/generated coverage.
 
 ## Risks
 
