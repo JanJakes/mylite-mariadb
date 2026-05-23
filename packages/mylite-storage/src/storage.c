@@ -2286,6 +2286,8 @@ static mylite_storage_result rewrite_active_row_only_update_page(
     unsigned long long row_id,
     const unsigned char *row,
     size_t row_size,
+    mylite_storage_buffered_page_ref current_page_ref,
+    const unsigned char *state_page,
     int *out_rewritten
 );
 MYLITE_STORAGE_HOT_INLINE mylite_storage_result rewrite_active_single_index_update_page(
@@ -18904,6 +18906,10 @@ static mylite_storage_result rewrite_active_update_pages(
         return MYLITE_STORAGE_OK;
     }
     if (changed_entry_count == 0U) {
+        const mylite_storage_buffered_page_ref current_page_ref = {
+            .page = rewrite_range.first_page,
+            .checksum_dirty = rewrite_range.first_checksum_dirty,
+        };
         return rewrite_active_row_only_update_page(
             statement,
             buffer_statement,
@@ -18912,6 +18918,8 @@ static mylite_storage_result rewrite_active_update_pages(
             row_id,
             row,
             row_size,
+            current_page_ref,
+            rewrite_range.first_page + MYLITE_STORAGE_FORMAT_PAGE_SIZE,
             out_rewritten
         );
     }
@@ -19207,12 +19215,12 @@ static mylite_storage_result rewrite_active_row_only_update_page(
     unsigned long long row_id,
     const unsigned char *row,
     size_t row_size,
+    mylite_storage_buffered_page_ref current_page_ref,
+    const unsigned char *state_page,
     int *out_rewritten
 ) {
     const int use_cached_shape =
         buffered_update_rewrite_row_only_shape_known(buffer_statement, row_id, table_id);
-    const mylite_storage_buffered_page_ref current_page_ref =
-        buffered_append_page_ref_in_statement(buffer_statement, row_id, header->page_size);
     if (current_page_ref.page == NULL) {
         return MYLITE_STORAGE_OK;
     }
@@ -19237,8 +19245,6 @@ static mylite_storage_result rewrite_active_row_only_update_page(
         }
 
         const unsigned long long state_page_id = row_id + 1ULL;
-        const unsigned char *state_page =
-            buffered_append_page_in_statement(buffer_statement, state_page_id, header->page_size);
         if (state_page == NULL) {
             return MYLITE_STORAGE_OK;
         }

@@ -587,7 +587,10 @@ per-statement preimages first when rollback needs them. Row and index-entry
 preimages store only the meaningful checksummed prefix plus an implicit zero
 tail, while other page types keep full-page undo. The active row/index rewrite
 path passes typed prefix sizes into undo capture instead of rediscovering the
-page type from the full preimage. Successful statement cleanup can retain one
+page type from the full preimage. Row-only rewrite calls reuse the buffered
+row/state page references that the rewrite dispatcher already resolved instead
+of probing the append buffer again for the same pages. Successful statement
+cleanup can retain one
 small thread-local undo-list allocation for later statements, but active
 statements never share mutable undo storage. Rewritten buffered row and
 index-entry pages mark their checksums dirty and refresh them only before a
