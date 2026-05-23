@@ -1089,8 +1089,8 @@ running the slower secondary-result phases. It now also has a focused
 `prepared-assignment-update-components` phase for `SET value = ? WHERE id = ?`,
 separate from the expression-based `prepared-update-components` phase for
 `SET value = value + 1 WHERE id = ?`; the simple assignment phase locally
-measures about 1.62-1.63 us/op for the step component over 10000 rows /
-1000000 iterations. A row-only expression phase,
+measures about 1.68 us/op for the step component over 10000 rows / 1000000
+iterations. A row-only expression phase,
 `prepared-row-only-update-components`, keeps the same prepared exact-key SQL
 path but updates a non-indexed integer `counter` column in a separate table,
 separating SQL-layer prepared update overhead from secondary-index replacement
@@ -1098,20 +1098,18 @@ cost. A companion `prepared-row-only-update-miss-components` phase binds
 out-of-range primary keys against the same row-only table and records a zero
 checksum, isolating table-open, prepare, lock, exact lookup, and reset cost
 from row materialization and storage mutation; a local 10000-row /
-1000000-iteration sample measured the no-match step at about 1.14 us/op.
-The next prepared-DML performance wall is repeated MariaDB table-open,
-`Sql_cmd_update::prepare_inner()`, and `JOIN::prepare()` work before the
-accepted MyLite direct-update path. The staged design is tracked in
-[Prepared DML execution reuse](specs/prepared-dml-execution-reuse/specs.md).
-The next implementation boundary is
-[Prepared direct update rebind](specs/prepared-direct-update-rebind/specs.md):
-keep table opening and locking per execution, explicitly rebind the freshly
-opened table state, and only then attempt to bypass repeated `JOIN::prepare()`
-for the already-proven exact-key MyLite direct-update subset.
-Before enabling that shortcut, the embedded storage-engine regression now
-covers repeated prepared exact-key updates across strict conversion errors,
-CHECK failures, generated-column index maintenance, transaction rollback,
-metadata reprepare, and same-name temporary-table shadowing.
+1000000-iteration sample measured the no-match step at about 0.89 us/op after
+the row-only shortcut. Prepared-DML execution reuse is tracked in
+[Prepared DML execution reuse](specs/prepared-dml-execution-reuse/specs.md),
+with the direct-update rebind subset detailed in
+[Prepared direct update rebind](specs/prepared-direct-update-rebind/specs.md).
+The implemented shortcut keeps table opening and locking per execution, then
+rebinds the freshly opened table state before bypassing repeated
+`JOIN::prepare()` for the already-proven exact-key MyLite direct-update subset.
+The embedded storage-engine regression covers repeated prepared exact-key
+updates across strict conversion errors, CHECK failures, generated-column index
+maintenance, transaction rollback, metadata reprepare, and same-name
+temporary-table shadowing.
 `Sql_cmd_update` now records the exact MyLite direct-update shape accepted by
 the normal path for embedded prepared statements, giving the rebind work an
 explicit cache to validate against freshly opened tables instead of relying on
@@ -1131,20 +1129,19 @@ parts, keeping the execution shortcut limited to row-only updates without
 rediscovering key-changing writes after entering handler execution.
 The first implementation step caches the immutable prepared-update value-list
 subquery shape on `Sql_cmd_update`, avoiding repeated value-list scans before
-the MyLite single-update result-elision gate. The next step skips value-list
-`setup_fields()` for simple literal and bound-scalar update values while
-preserving the normal setup path for expressions and contextual values.
-`Sql_cmd_update` now also caches that immutable simple-value setup
+the MyLite single-update result-elision gate. `Sql_cmd_update` now also caches
+the immutable simple-value setup
 classification, avoiding another assignment-list walk on repeated prepared
-executions. The current expression-update benchmark still shows repeated table-open,
-value-expression setup, and `JOIN::prepare()` work as the next prepared-DML
-performance wall. The MyLite handler now also caches accepted non-key
-direct-update shape facts for prepared statements, avoiding repeated
-handler-side metadata walks for stable row-only updates while key-changing
-updates keep the existing uncached FK-sensitive path. Accepted integer-key
-direct updates now also serialize bound integer lookup keys through a guarded
-handler-local `Field::store()` path instead of the generic `Item::save_in_field()`
-dispatcher, while non-integer predicate values keep the existing MariaDB
+executions. The current unsupported expression-update and key-changing
+benchmarks still show repeated table-open, value-expression setup, and
+`JOIN::prepare()` work outside the guarded row-only shortcut. The MyLite
+handler now also caches accepted non-key direct-update shape facts for prepared
+statements, avoiding repeated handler-side metadata walks for stable row-only
+updates while key-changing updates keep the existing uncached FK-sensitive
+path. Accepted integer-key direct updates now also serialize bound integer
+lookup keys through a guarded handler-local `Field::store()` path instead of
+the generic `Item::save_in_field()` dispatcher, while non-integer predicate
+values keep the existing MariaDB
 conversion path. The same integer-key path now skips generic key-field reset
 and key-buffer zeroing before the fixed-width integer store, while text-bound
 key predicates keep the existing reset plus generic conversion path. Accepted
