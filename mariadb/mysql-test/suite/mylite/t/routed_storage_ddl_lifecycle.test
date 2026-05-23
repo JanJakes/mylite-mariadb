@@ -61,6 +61,72 @@ from renamed_like_posts force index (rating_key)
 where rating >= 3
 order by id;
 
+create table replace_plain_posts (
+  id int not null primary key,
+  old_slug varchar(32) not null,
+  key old_slug_key (old_slug)
+) engine=InnoDB;
+insert into replace_plain_posts values (9, 'old-plain');
+
+create or replace table replace_plain_posts (
+  id int not null auto_increment primary key,
+  title varchar(32) not null,
+  body text null,
+  unique key title_key (title),
+  key body_prefix (body(8))
+) engine=InnoDB;
+
+--error ER_BAD_FIELD_ERROR
+select old_slug from replace_plain_posts;
+select count(*) from replace_plain_posts;
+insert into replace_plain_posts (title, body) values
+  ('replace-alpha', 'first body'),
+  ('replace-beta', 'second body');
+--error ER_DUP_ENTRY
+insert into replace_plain_posts (title, body) values
+  ('replace-alpha', 'duplicate body');
+select id, title
+from replace_plain_posts force index (title_key)
+where title = 'replace-alpha';
+select id, title
+from replace_plain_posts force index (body_prefix)
+where body = 'second body';
+
+create table replace_like_posts (
+  id int not null primary key,
+  legacy_title varchar(32) not null
+) engine=InnoDB;
+insert into replace_like_posts values (99, 'old-like');
+
+create or replace table replace_like_posts like lifecycle_posts;
+show create table replace_like_posts;
+select count(*) from replace_like_posts;
+insert into replace_like_posts
+select * from lifecycle_posts where id = 1;
+select id, title, rating
+from replace_like_posts force index (title_key)
+order by id;
+
+create table replace_ctas_posts (
+  id int not null primary key,
+  legacy_title varchar(32) not null
+) engine=InnoDB;
+insert into replace_ctas_posts values (99, 'old-ctas');
+
+create or replace table replace_ctas_posts (
+  id int not null,
+  title varchar(32) not null,
+  primary key (id),
+  unique key title_key (title)
+) engine=InnoDB
+select id, title
+from lifecycle_posts
+where rating >= 4;
+
+select id, title from replace_ctas_posts order by id;
+--error ER_DUP_ENTRY
+insert into replace_ctas_posts values (3, 'published');
+
 create table mylite_lifecycle_posts (
   id int not null primary key,
   title varchar(32) not null,
@@ -105,10 +171,36 @@ from renamed_mylite_like_posts force index (rating_key)
 where rating >= 3
 order by id;
 
+create table mylite_replace_plain_posts (
+  id int not null primary key,
+  old_title varchar(32) not null
+) engine=MYLITE;
+insert into mylite_replace_plain_posts values (9, 'old-mylite');
+
+create or replace table mylite_replace_plain_posts (
+  id int not null auto_increment primary key,
+  title varchar(32) not null,
+  rating int not null,
+  unique key title_key (title),
+  key rating_key (rating)
+) engine=MYLITE;
+
+--error ER_BAD_FIELD_ERROR
+select old_title from mylite_replace_plain_posts;
+select count(*) from mylite_replace_plain_posts;
+insert into mylite_replace_plain_posts (title, rating) values
+  ('mylite-replace-alpha', 3),
+  ('mylite-replace-beta', 5);
+select id, title, rating
+from mylite_replace_plain_posts force index (rating_key)
+where rating = 5;
+
 --source suite/mylite/include/assert_no_routed_storage_sidecars.inc
 
-drop table mylite_ctas_posts, renamed_mylite_like_posts, mylite_lifecycle_posts,
-  ctas_posts, renamed_like_posts, lifecycle_posts;
+drop table mylite_replace_plain_posts, mylite_ctas_posts,
+  renamed_mylite_like_posts, mylite_lifecycle_posts, replace_ctas_posts,
+  replace_like_posts, replace_plain_posts, ctas_posts, renamed_like_posts,
+  lifecycle_posts;
 drop database mylite_mtr_ddl_lifecycle;
 
 --source suite/mylite/include/assert_no_routed_storage_sidecars.inc

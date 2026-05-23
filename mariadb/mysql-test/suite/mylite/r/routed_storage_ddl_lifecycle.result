@@ -75,6 +75,84 @@ order by id;
 id	title	rating	summary
 1	draft	3	fresh
 2	published	5	fresh
+create table replace_plain_posts (
+id int not null primary key,
+old_slug varchar(32) not null,
+key old_slug_key (old_slug)
+) engine=InnoDB;
+insert into replace_plain_posts values (9, 'old-plain');
+create or replace table replace_plain_posts (
+id int not null auto_increment primary key,
+title varchar(32) not null,
+body text null,
+unique key title_key (title),
+key body_prefix (body(8))
+) engine=InnoDB;
+select old_slug from replace_plain_posts;
+ERROR 42S22: Unknown column 'old_slug' in 'SELECT'
+select count(*) from replace_plain_posts;
+count(*)
+0
+insert into replace_plain_posts (title, body) values
+('replace-alpha', 'first body'),
+('replace-beta', 'second body');
+insert into replace_plain_posts (title, body) values
+('replace-alpha', 'duplicate body');
+ERROR 23000: Duplicate entry 'replace-alpha' for key 'title_key'
+select id, title
+from replace_plain_posts force index (title_key)
+where title = 'replace-alpha';
+id	title
+1	replace-alpha
+select id, title
+from replace_plain_posts force index (body_prefix)
+where body = 'second body';
+id	title
+2	replace-beta
+create table replace_like_posts (
+id int not null primary key,
+legacy_title varchar(32) not null
+) engine=InnoDB;
+insert into replace_like_posts values (99, 'old-like');
+create or replace table replace_like_posts like lifecycle_posts;
+show create table replace_like_posts;
+Table	Create Table
+replace_like_posts	CREATE TABLE `replace_like_posts` (
+  `id` int(11) NOT NULL,
+  `title` varchar(32) NOT NULL,
+  `rating` int(11) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `title_key` (`title`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+select count(*) from replace_like_posts;
+count(*)
+0
+insert into replace_like_posts
+select * from lifecycle_posts where id = 1;
+select id, title, rating
+from replace_like_posts force index (title_key)
+order by id;
+id	title	rating
+1	draft	3
+create table replace_ctas_posts (
+id int not null primary key,
+legacy_title varchar(32) not null
+) engine=InnoDB;
+insert into replace_ctas_posts values (99, 'old-ctas');
+create or replace table replace_ctas_posts (
+id int not null,
+title varchar(32) not null,
+primary key (id),
+unique key title_key (title)
+) engine=InnoDB
+select id, title
+from lifecycle_posts
+where rating >= 4;
+select id, title from replace_ctas_posts order by id;
+id	title
+2	published
+insert into replace_ctas_posts values (3, 'published');
+ERROR 23000: Duplicate entry 'published' for key 'title_key'
 create table mylite_lifecycle_posts (
 id int not null primary key,
 title varchar(32) not null,
@@ -145,6 +223,33 @@ order by id;
 id	title	rating	summary
 1	mylite-draft	3	fresh
 2	mylite-published	5	fresh
-drop table mylite_ctas_posts, renamed_mylite_like_posts, mylite_lifecycle_posts,
-ctas_posts, renamed_like_posts, lifecycle_posts;
+create table mylite_replace_plain_posts (
+id int not null primary key,
+old_title varchar(32) not null
+) engine=MYLITE;
+insert into mylite_replace_plain_posts values (9, 'old-mylite');
+create or replace table mylite_replace_plain_posts (
+id int not null auto_increment primary key,
+title varchar(32) not null,
+rating int not null,
+unique key title_key (title),
+key rating_key (rating)
+) engine=MYLITE;
+select old_title from mylite_replace_plain_posts;
+ERROR 42S22: Unknown column 'old_title' in 'SELECT'
+select count(*) from mylite_replace_plain_posts;
+count(*)
+0
+insert into mylite_replace_plain_posts (title, rating) values
+('mylite-replace-alpha', 3),
+('mylite-replace-beta', 5);
+select id, title, rating
+from mylite_replace_plain_posts force index (rating_key)
+where rating = 5;
+id	title	rating
+2	mylite-replace-beta	5
+drop table mylite_replace_plain_posts, mylite_ctas_posts,
+renamed_mylite_like_posts, mylite_lifecycle_posts, replace_ctas_posts,
+replace_like_posts, replace_plain_posts, ctas_posts, renamed_like_posts,
+lifecycle_posts;
 drop database mylite_mtr_ddl_lifecycle;
