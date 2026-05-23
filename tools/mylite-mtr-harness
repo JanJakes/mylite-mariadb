@@ -117,6 +117,9 @@ default_tests=(
   main.create_drop_index
   main.create-uca
   main.create_w_max_indexes_64
+  main.gcc296
+  main.fulltext_multi
+  main.fulltext_charsets
   main.alter_table_mdev539_maria
   main.alter_table_upgrade_aria
   main.comment_column2

@@ -117,6 +117,7 @@ primary-key lookup, selected DDL/name and comment metadata behavior,
 selected MTR-profile view, trigger, and stored-procedure DDL/runtime behavior,
 selected DDL constraint/index metadata and UCA CTAS behavior, selected Aria
 ALTER/index-upgrade behavior, selected lock-table DDL behavior, selected
+baseline FULLTEXT declarations and Aria FULLTEXT search behavior,
 deprecated server syntax rejection,
 selected embedded-profile native-engine absence,
 selected embedded-profile disabled diagnostic behavior,

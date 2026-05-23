@@ -59,6 +59,9 @@ The baseline MTR smoke list now also includes `main.type_float` for selected
 floating-point conversion, comparison, rounding, and metadata inference
 coverage, and `main.null` for selected NULL/NULLIF expression, metadata, and
 `IS NULL` optimizer coverage under the embedded profile.
+It also includes selected baseline FULLTEXT declaration and Aria FULLTEXT
+search coverage while MyLite routed storage continues to reject unsupported
+FULLTEXT index definitions explicitly.
 
 Recent row and index storage performance slices include lazy handler row
 materialization from index cursors, deferred durable row-page validation for
