@@ -8489,6 +8489,7 @@ static void test_maintained_index_root_overflow_tail(void) {
     static const unsigned char row_1[] = {0x00U, 0x01U, 'a'};
     static const unsigned char row_2[] = {0x00U, 0x02U, 'b'};
     static const unsigned char row_3[] = {0x00U, 0x03U, 'c'};
+    static const unsigned char cross_child_row_2[] = {0x00U, 0x25U, 'b'};
     static const unsigned char updated_interior_row_2[] = {0x00U, 0x20U, 'b'};
     static const unsigned char row_5[] = {0x00U, 0x05U, 'e'};
     static const unsigned char row_6[] = {0x00U, 0x06U, 'f'};
@@ -8536,6 +8537,14 @@ static void test_maintained_index_root_overflow_tail(void) {
             .size = sizeof(row_2_entry[0]),
             .index_number = 0U,
             .key = key_2,
+            .key_size = key_size,
+        },
+    };
+    mylite_storage_index_entry cross_child_row_2_entry[] = {
+        {
+            .size = sizeof(cross_child_row_2_entry[0]),
+            .index_number = 0U,
+            .key = key_5,
             .key_size = key_size,
         },
     };
@@ -9057,6 +9066,157 @@ static void test_maintained_index_root_overflow_tail(void) {
     assert_index_entry(&entries, 3U, row_6_id, key_6, key_size);
     assert_index_entry(&entries, 4U, row_4_id, key_4, key_size);
     mylite_storage_free_index_entryset(&entries);
+
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    const unsigned long long before_cross_child_update_pages = header.page_count;
+    unsigned long long rolled_back_cross_child_row_2_id = 0ULL;
+    assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_update_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_2_id,
+            cross_child_row_2,
+            sizeof(cross_child_row_2),
+            cross_child_row_2_entry,
+            sizeof(cross_child_row_2_entry) / sizeof(cross_child_row_2_entry[0]),
+            &rolled_back_cross_child_row_2_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(rolled_back_cross_child_row_2_id != 0ULL);
+    assert(access(journal_filename, F_OK) == 0);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_cross_child_update_pages + 2ULL);
+    assert_index_root(filename, "app", "posts", 0U, root_page, 5ULL);
+    assert_index_entry_lookup(filename, 0U, key_2, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
+    assert_index_entry_lookup(
+        filename,
+        0U,
+        key_5,
+        key_size,
+        MYLITE_STORAGE_OK,
+        rolled_back_cross_child_row_2_id
+    );
+    assert_find_indexed_row_equals(
+        filename,
+        0U,
+        key_5,
+        key_size,
+        rolled_back_cross_child_row_2_id,
+        cross_child_row_2,
+        sizeof(cross_child_row_2)
+    );
+    read_test_page(filename, promoted_first_leaf_page, root_page_bytes);
+    assert(
+        get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_COUNT_OFFSET) == 2U
+    );
+    read_test_page(filename, promoted_first_leaf_page + 1ULL, root_page_bytes);
+    assert(
+        get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_COUNT_OFFSET) == 3U
+    );
+    entries = (mylite_storage_index_entryset){
+        .size = sizeof(entries),
+    };
+    assert(
+        mylite_storage_read_index_entries(filename, "app", "posts", 0U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == 5U);
+    assert(entries.key_bytes == 5U * key_size);
+    assert_index_entry(&entries, 0U, row_1_id, key_1, key_size);
+    assert_index_entry(&entries, 1U, row_3_id, key_3, key_size);
+    assert_index_entry(&entries, 2U, row_6_id, key_6, key_size);
+    assert_index_entry(&entries, 3U, row_4_id, key_4, key_size);
+    assert_index_entry(&entries, 4U, rolled_back_cross_child_row_2_id, key_5, key_size);
+    mylite_storage_free_index_entryset(&entries);
+    assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
+    statement = NULL;
+    assert_file_missing(journal_filename);
+    assert_file_size_matches_header(filename);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_cross_child_update_pages);
+    assert_index_root(filename, "app", "posts", 0U, root_page, 5ULL);
+    assert_index_entry_lookup(filename, 0U, key_2, key_size, MYLITE_STORAGE_OK, row_2_id);
+    assert_index_entry_lookup(filename, 0U, key_5, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
+
+    const pid_t cross_child_update_statement_pid = fork();
+    assert(cross_child_update_statement_pid >= 0);
+    if (cross_child_update_statement_pid == 0) {
+        mylite_storage_statement *child_statement = NULL;
+        unsigned long long child_cross_child_row_2_id = 0ULL;
+        if (mylite_storage_begin_statement(filename, &child_statement) != MYLITE_STORAGE_OK) {
+            _exit(2);
+        }
+        if (mylite_storage_update_row_with_index_entries(
+                filename,
+                "app",
+                "posts",
+                row_2_id,
+                cross_child_row_2,
+                sizeof(cross_child_row_2),
+                cross_child_row_2_entry,
+                sizeof(cross_child_row_2_entry) / sizeof(cross_child_row_2_entry[0]),
+                &child_cross_child_row_2_id
+            ) != MYLITE_STORAGE_OK) {
+            _exit(3);
+        }
+        _exit(child_cross_child_row_2_id == 0ULL ? 4 : 0);
+    }
+    status = 0;
+    assert(
+        waitpid(cross_child_update_statement_pid, &status, 0) == cross_child_update_statement_pid
+    );
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
+    assert(access(journal_filename, F_OK) == 0);
+    assert_index_entry_lookup(filename, 0U, key_2, key_size, MYLITE_STORAGE_OK, row_2_id);
+    assert_index_entry_lookup(filename, 0U, key_5, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
+    assert_file_missing(journal_filename);
+    assert_file_size_matches_header(filename);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_cross_child_update_pages);
+    assert_index_root(filename, "app", "posts", 0U, root_page, 5ULL);
+
+    const pid_t cross_child_update_transaction_pid = fork();
+    assert(cross_child_update_transaction_pid >= 0);
+    if (cross_child_update_transaction_pid == 0) {
+        mylite_storage_statement *child_transaction = NULL;
+        unsigned long long child_cross_child_row_2_id = 0ULL;
+        if (mylite_storage_begin_transaction(filename, &child_transaction) != MYLITE_STORAGE_OK) {
+            _exit(2);
+        }
+        if (mylite_storage_update_row_with_index_entries(
+                filename,
+                "app",
+                "posts",
+                row_2_id,
+                cross_child_row_2,
+                sizeof(cross_child_row_2),
+                cross_child_row_2_entry,
+                sizeof(cross_child_row_2_entry) / sizeof(cross_child_row_2_entry[0]),
+                &child_cross_child_row_2_id
+            ) != MYLITE_STORAGE_OK) {
+            _exit(3);
+        }
+        _exit(child_cross_child_row_2_id == 0ULL ? 4 : 0);
+    }
+    status = 0;
+    assert(
+        waitpid(cross_child_update_transaction_pid, &status, 0) ==
+        cross_child_update_transaction_pid
+    );
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
+    assert_file_missing(journal_filename);
+    assert(access(transaction_journal_filename, F_OK) == 0);
+    assert_index_entry_lookup(filename, 0U, key_2, key_size, MYLITE_STORAGE_OK, row_2_id);
+    assert_index_entry_lookup(filename, 0U, key_5, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
+    assert_file_missing(transaction_journal_filename);
+    assert_file_size_matches_header(filename);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_cross_child_update_pages);
+    assert_index_root(filename, "app", "posts", 0U, root_page, 5ULL);
 
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     const unsigned long long before_interior_delete_pages = header.page_count;

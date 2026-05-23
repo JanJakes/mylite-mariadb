@@ -155,7 +155,11 @@ entry remains above the previous child fence and at or below the current child
 fence. Eligible same-child deletes now also rewrite interior child leaves when
 the child remains non-empty, with branch readers accepting non-empty underfull
 children and branch inserts refolding when a later full-child insert can use
-slack created by an earlier physical delete. Eligible final-child removals now
+slack created by an earlier physical delete. Eligible cross-child updates now
+move entries between existing child leaves when the source remains non-empty,
+the target has room, and the branch child count stays stable, refreshing both
+branch fences without appending a fallback index-entry page. Eligible
+final-child removals now
 drop the final branch child cell when deletion reduces
 the expected child count by one and publish the removed leaf as a one-page
 durable free-list run, coalescing when the removed leaf immediately precedes
@@ -163,8 +167,8 @@ the current free-list root run. Eligible final-child removals that leave a live
 entryset fitting one maintained root page now collapse the branch root back to
 the maintained root format. Catalog page-run reclamation uses the same
 lower-adjacent free-list root coalescing. Interior split/merge, higher-adjacent
-and arbitrary-chain free-list coalescing, cross-child update movement, and
-broader branch update/delete maintenance remain pending. SQL copy-rebuild DDL now
+and arbitrary-chain free-list coalescing, and broader branch update/delete
+maintenance remain pending. SQL copy-rebuild DDL now
 opportunistically publishes those roots for all current supported fixed-width
 keys in rebuilt tables, including retained primary keys after forced copy
 rebuilds, with one shared append-history scan and one catalog publication for

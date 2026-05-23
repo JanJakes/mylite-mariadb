@@ -1134,7 +1134,11 @@ that every non-final child leaf remains full. Eligible final-child updates can
 physically replace the leaf entry and refresh the final branch fence when the
 replacement entry remains in the same final child. Eligible same-child updates
 can also physically replace entries in interior leaves when the replacement
-tuple stays inside that child range. Eligible final-child
+tuple stays inside that child range. Eligible cross-child updates can move an
+entry from one existing child leaf to another when the source remains non-empty,
+the target has room, and the branch child count stays stable. Eligible
+same-child deletes can physically remove entries from interior leaves when the
+child remains non-empty. Eligible final-child
 removals can drop the final branch child when the branch child count decreases
 by one and reclaim the removed leaf page through the durable free-list,
 including coalescing when the removed leaf immediately precedes the current
@@ -1217,11 +1221,11 @@ retargeting. Statement rollback, savepoint rollback, transaction rollback,
 stale statement-journal recovery, and stale transaction-journal recovery now
 restore single-page maintained root bytes and logical visibility for covered
 insert, update, and delete paths, and restore covered single-level branch
-final-leaf deletes, updates, final-child removals, and final-leaf free-list
-publication. Root splits, multi-page navigable indexes, branch-page
-split/merge, cross-child update movement, higher-adjacent and arbitrary-chain
-free-list run coalescing, and broader transactional maintained index mutation
-remain planned.
+final-leaf deletes, same-child updates and deletes, bounded cross-child
+updates, final-child removals, and final-leaf free-list publication. Root
+splits, multi-page navigable indexes, branch-page split/merge,
+higher-adjacent and arbitrary-chain free-list run coalescing, and broader
+transactional maintained index mutation remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, row/index free-space reclamation, and broader
