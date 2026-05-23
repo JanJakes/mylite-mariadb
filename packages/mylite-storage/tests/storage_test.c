@@ -9800,21 +9800,20 @@ static void test_multi_page_index_leaf_pages(void) {
         (MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET) /
         (MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_HEADER_SIZE + 4U);
     const size_t expected_leaf_pages = ((entry_count - 1U) / entry_capacity) + 1U;
-    assert_index_root(
+    const size_t expected_branch_pages = expected_leaf_pages + 1U;
+    const unsigned long long immutable_branch_root_page =
+        header.page_count - (unsigned long long)expected_branch_pages;
+    assert_index_root(filename, "app", "posts", 0U, immutable_branch_root_page, entry_count);
+    assert_index_root_page_type(
         filename,
-        "app",
-        "posts",
-        0U,
-        header.page_count - (unsigned long long)expected_leaf_pages,
-        entry_count
+        immutable_branch_root_page,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH
     );
     assert_index_root_page_type(
         filename,
-        header.page_count - (unsigned long long)expected_leaf_pages,
+        immutable_branch_root_page + 1ULL,
         MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_LEAF
     );
-    const unsigned long long immutable_leaf_root_page =
-        header.page_count - (unsigned long long)expected_leaf_pages;
 
     unsigned char first_key[4] = {0};
     unsigned char second_page_key[4] = {0};
@@ -10004,11 +10003,11 @@ static void test_multi_page_index_leaf_pages(void) {
         .schema_name = "app",
         .table_name = "posts",
         .index_number = 0U,
-        .root_page = immutable_leaf_root_page,
+        .root_page = immutable_branch_root_page,
         .entry_count = entry_count - 1ULL,
     };
     assert(mylite_storage_store_index_root(filename, &stale_leaf_root) == MYLITE_STORAGE_OK);
-    assert_index_root(filename, "app", "posts", 0U, immutable_leaf_root_page, entry_count - 1ULL);
+    assert_index_root(filename, "app", "posts", 0U, immutable_branch_root_page, entry_count - 1ULL);
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
