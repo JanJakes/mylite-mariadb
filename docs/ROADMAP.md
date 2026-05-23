@@ -164,8 +164,11 @@ children and branch inserts refolding when a later full-child insert can use
 slack created by an earlier physical delete. Eligible cross-child updates now
 move entries between existing child leaves when the source remains non-empty,
 the target has room, and the branch child count stays stable, refreshing both
-branch fences without appending a fallback index-entry page. Eligible full-child
-inserts now split any existing child leaf when the branch root has child
+branch fences without appending a fallback index-entry page; stable child-count
+cross-child updates that would empty the source child or overflow the target
+now refold sorted live entries across the existing child pages under the
+protected-page journal path. Eligible full-child inserts now split any existing
+child leaf when the branch root has child
 capacity and no live append-tail overlay would be hidden, inserting the
 appended leaf's child cell in branch order; when the single-level branch page
 itself is full and packed, the same split can promote the root to a bounded
@@ -182,9 +185,8 @@ format when no live append-tail overlay would be hidden. Catalog page-run
 allocation now reuses suitable non-root free-list runs, while catalog
 reclamation and branch-leaf reclamation coalesce reclaimed runs with adjacent
 runs anywhere in the linked free-list chain.
-Merge/redistribution where child count stays stable, broader file
-shrinking/free-space compaction, and broader branch update/delete maintenance
-remain pending. SQL copy-rebuild DDL now
+Broader file shrinking/free-space compaction and broader branch update/delete
+maintenance remain pending. SQL copy-rebuild DDL now
 opportunistically publishes those roots for all current supported fixed-width
 keys in rebuilt tables, including retained primary keys after forced copy
 rebuilds, with one shared append-history scan and one catalog publication for
@@ -653,7 +655,10 @@ root-plus-tail entries when they fit again; maintained root mutations now reject
 unprotected dirty-root fallback plans. Maintained root insert and update
 planning now keeps journal-bounded plan entries and common changed-entry maps
 inline, avoiding tiny per-row heap allocations on hot rooted index mutations.
-Broader transactional maintained index mutation remains planned.
+Stable child-count branch update refolds now cover source-emptying and
+target-full cross-child updates when the existing branch children fit the
+protected-page journal bound. Broader transactional maintained index mutation
+remains planned.
 Durable table-local row,
 payload, exact-index, and published leaf-page caches now retarget across
 unrelated table row mutations, so one

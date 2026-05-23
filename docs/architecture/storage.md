@@ -238,14 +238,14 @@ page as a durable free-list run, coalescing when that leaf is directly adjacent
 to the current free-list root run. When deleting from a multi-entry child also
 reduces the expected child count, storage can refold all branch child entries
 into one fewer existing child page and reclaim the old final child page when
-the refold stays within the protected-page journal bound. Underfull-child
-merge/redistribution where the branch child count stays stable remains on the
-row-state overlay path.
+the refold stays within the protected-page journal bound.
 Eligible updates can rewrite a source child in place when the replacement
 `(key, row_id)` remains inside that child range, or move the entry between
 existing child leaves when the source remains non-empty and the target has room;
-other cross-child or child-count-changing updates remain on the append-tail
-replacement path.
+stable child-count cross-child updates that would empty the source child or
+overflow the target can refold the sorted live entries across the existing
+child pages. Other cross-child or child-count-changing updates remain on the
+append-tail replacement path.
 `TRUNCATE TABLE` logically
 deletes live rows and resets autoincrement state without changing catalog
 metadata. Ordinary `CREATE TABLE IF NOT EXISTS` creates missing routed tables
@@ -1248,12 +1248,12 @@ restore single-page maintained root bytes and logical visibility for covered
 insert, update, and delete paths, read deep multi-level branch roots, and
 restore covered single-level branch
 final-leaf deletes, same-child updates and deletes, bounded cross-child
-updates, interior child splits, branch-page-full root splits, arbitrary child
-removals, child-count-reducing branch refold deletes, no-overlay branch
-collapse deletes, arbitrary-chain free-list run coalescing, deep branch
-cursors, and final-leaf free-list publication. Branch-page
-merge/redistribution and broader transactional maintained index mutation
-remain planned.
+updates, stable child-count update refolds, interior child splits,
+branch-page-full root splits, arbitrary child removals, child-count-reducing
+branch refold deletes, no-overlay branch collapse deletes, arbitrary-chain
+free-list run coalescing, deep branch cursors, and final-leaf free-list
+publication. Broader multi-level branch mutation and broader transactional
+maintained index mutation remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, row/index free-space reclamation, and broader
