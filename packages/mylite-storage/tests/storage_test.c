@@ -14680,6 +14680,27 @@ static void test_multi_level_branch_navigation(void) {
         MYLITE_STORAGE_OK,
         row_ids[entry_count - 1U]
     );
+    mylite_storage_clear_thread_caches();
+    assert(leaf_page_ids[0] <= (unsigned long long)LONG_MAX / MYLITE_STORAGE_FORMAT_PAGE_SIZE);
+    flip_file_byte(
+        filename,
+        (long)(leaf_page_ids[0] * MYLITE_STORAGE_FORMAT_PAGE_SIZE) +
+            MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET
+    );
+    assert_index_entry_lookup(
+        filename,
+        0U,
+        last_key,
+        sizeof(last_key),
+        MYLITE_STORAGE_OK,
+        row_ids[entry_count - 1U]
+    );
+    flip_file_byte(
+        filename,
+        (long)(leaf_page_ids[0] * MYLITE_STORAGE_FORMAT_PAGE_SIZE) +
+            MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET
+    );
+    mylite_storage_clear_thread_caches();
 
     const unsigned char *split_prefix_keys[] = {split_key};
     const unsigned long long split_prefix_row_ids[] = {row_ids[split_leaf * entry_capacity]};
