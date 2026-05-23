@@ -218,6 +218,7 @@ static bool mylite_prepare_single_update_values(THD *thd, List<Item> &fields,
                                                 bool ignore,
                                                 bool values_need_setup);
 static bool mylite_is_simple_unique_key_candidate(TABLE *table, KEY *key_info);
+static bool mylite_update_writes_any_key(TABLE *table);
 static bool mylite_same_field_name(const char *lhs, uint lhs_length,
                                    const LEX_CSTRING &rhs);
 static bool mylite_item_tree_contains_item(Item *tree, Item *needle);
@@ -809,7 +810,8 @@ bool Sql_cmd_update::update_single_table(THD *thd)
         table, pushed_mylite_direct_update_key_number,
         pushed_mylite_direct_update_key_value,
         pushed_mylite_direct_update_condition_guaranteed_by_key,
-        mylite_update_values_need_setup(*values));
+        mylite_update_values_need_setup(*values),
+        !mylite_update_writes_any_key(table));
   }
   else
   {
@@ -1714,7 +1716,8 @@ bool Sql_cmd_update::mylite_prepared_direct_update_shape_matches(
 
 void Sql_cmd_update::store_mylite_prepared_direct_update_shape(
     TABLE *table, uint key_number, Item *key_value,
-    bool condition_guaranteed_by_key, bool values_need_setup)
+    bool condition_guaranteed_by_key, bool values_need_setup,
+    bool row_only_update)
 {
   if (!table || !table->s || key_number >= table->s->keys || !key_value)
   {
@@ -1732,7 +1735,8 @@ void Sql_cmd_update::store_mylite_prepared_direct_update_shape(
       mylite_prepared_direct_update_shape_condition_guaranteed_by_key ==
           condition_guaranteed_by_key &&
       mylite_prepared_direct_update_shape_values_need_setup ==
-          values_need_setup)
+          values_need_setup &&
+      mylite_prepared_direct_update_shape_row_only_update == row_only_update)
   {
     return;
   }
@@ -1775,6 +1779,7 @@ void Sql_cmd_update::store_mylite_prepared_direct_update_shape(
   mylite_prepared_direct_update_shape_condition_guaranteed_by_key=
       condition_guaranteed_by_key;
   mylite_prepared_direct_update_shape_values_need_setup= values_need_setup;
+  mylite_prepared_direct_update_shape_row_only_update= row_only_update;
 }
 
 void Sql_cmd_update::clear_mylite_prepared_direct_update_shape()
@@ -1790,6 +1795,7 @@ void Sql_cmd_update::clear_mylite_prepared_direct_update_shape()
   mylite_prepared_direct_update_shape_key_value= NULL;
   mylite_prepared_direct_update_shape_condition_guaranteed_by_key= false;
   mylite_prepared_direct_update_shape_values_need_setup= false;
+  mylite_prepared_direct_update_shape_row_only_update= false;
 }
 
 static bool mylite_is_simple_unique_key_candidate(TABLE *table, KEY *key_info)
@@ -1810,6 +1816,19 @@ static bool mylite_is_simple_unique_key_candidate(TABLE *table, KEY *key_info)
          key_part->length == key_part->field->key_length() &&
          key_part->store_length == key_info->key_length &&
          !(key_part->key_part_flag & (HA_BLOB_PART | HA_VAR_LENGTH_PART));
+}
+
+static bool mylite_update_writes_any_key(TABLE *table)
+{
+  if (!table || !table->s)
+    return true;
+
+  for (uint key_number= 0; key_number < table->s->keys; ++key_number)
+  {
+    if (is_key_used(table, key_number, table->write_set))
+      return true;
+  }
+  return false;
 }
 
 static bool mylite_same_field_name(const char *lhs, uint lhs_length,

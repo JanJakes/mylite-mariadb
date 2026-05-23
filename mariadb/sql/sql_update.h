@@ -105,7 +105,8 @@ private:
                                                    Item *condition);
   void store_mylite_prepared_direct_update_shape(
       TABLE *table, uint key_number, Item *key_value,
-      bool condition_guaranteed_by_key, bool values_need_setup);
+      bool condition_guaranteed_by_key, bool values_need_setup,
+      bool row_only_update);
   void clear_mylite_prepared_direct_update_shape();
 
   bool mylite_update_values_have_subquery(List<Item> &values);
@@ -140,6 +141,7 @@ private:
   Item *mylite_prepared_direct_update_shape_key_value{NULL};
   bool mylite_prepared_direct_update_shape_condition_guaranteed_by_key{false};
   bool mylite_prepared_direct_update_shape_values_need_setup{false};
+  bool mylite_prepared_direct_update_shape_row_only_update{false};
 
 public:
   /* The list of the updating expressions used in the set clause */
