@@ -149,10 +149,12 @@ also refold the live entryset into a fresh single-level branch snapshot when it
 still fits in one branch page. Eligible final-child deletes now rewrite the
 final leaf and branch fence when the branch child count stays stable, and
 eligible final-child updates now rewrite the final leaf and refresh its branch
-fence when the replacement entry stays in that final child. Interior
-split/merge, branch leaf reclamation, final-child removal, child-boundary
-updates, and broader branch update/delete maintenance remain pending. SQL
-copy-rebuild DDL now
+fence when the replacement entry stays in that final child. Eligible
+final-child removals now drop the final branch child cell when deletion reduces
+the expected child count by one, leaving unreferenced leaves for future
+reclamation. Interior split/merge, branch leaf reclamation, branch root
+collapse, child-boundary updates, and broader branch update/delete maintenance
+remain pending. SQL copy-rebuild DDL now
 opportunistically publishes those roots for all current supported fixed-width
 keys in rebuilt tables, including retained primary keys after forced copy
 rebuilds, with one shared append-history scan and one catalog publication for

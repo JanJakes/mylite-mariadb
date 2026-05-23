@@ -224,9 +224,12 @@ append a fresh leaf run and rewrite the existing branch root to point at that
 new snapshot instead of hiding the overlay behind a moved branch tail. Other
 full-leaf cases still use the append-tail overlay. Eligible deletes from the
 final child leaf rewrite that leaf and refresh the final branch fence when the
-branch still needs the same child count; interior-child deletes and final-child
-removal remain on the row-state overlay path until broader branch merge work
-exists. Eligible updates whose source row is in the final child leaf and whose
+branch still needs the same child count. When deleting the only entry in the
+final child reduces the expected child count by one and another child remains,
+storage now removes the final branch child cell and leaves the old leaf page as
+unreferenced durable dead space for later reclamation. Interior-child deletes
+remain on the row-state overlay path until broader branch merge work exists.
+Eligible updates whose source row is in the final child leaf and whose
 replacement `(key, row_id)` still belongs in that final child now rewrite the
 leaf and refresh the final branch fence without changing the branch entry
 count; updates that cross child boundaries remain on the append-tail
@@ -1124,7 +1127,9 @@ record count. Eligible final-child deletes can physically remove the leaf entry
 and refresh the final branch fence while preserving the branch-root invariant
 that every non-final child leaf remains full. Eligible final-child updates can
 physically replace the leaf entry and refresh the final branch fence when the
-replacement entry remains in the same final child.
+replacement entry remains in the same final child. Eligible final-child
+removals can drop the final branch child when the branch child count decreases
+by one, while leaving the unreferenced leaf page for future reclamation.
 Copy-rebuild DDL publishes supported fixed-width leaf roots for every current
 key that fits the raw format in the rebuilt table, including retained primary
 keys after forced rebuilds, by scanning the append history once for the table's
@@ -1199,9 +1204,10 @@ retargeting. Statement rollback, savepoint rollback, transaction rollback,
 stale statement-journal recovery, and stale transaction-journal recovery now
 restore single-page maintained root bytes and logical visibility for covered
 insert, update, and delete paths, and restore covered single-level branch
-final-leaf deletes and updates. Root splits, multi-page navigable indexes,
-branch-page split/merge, child-boundary updates, and broader transactional
-maintained index mutation remain planned.
+final-leaf deletes, updates, and final-child removals. Root splits, multi-page
+navigable indexes, branch-page split/merge, child-boundary updates, branch
+root collapse, leaf reclamation, and broader transactional maintained index
+mutation remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, row/index free-space reclamation, and broader

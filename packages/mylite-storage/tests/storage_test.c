@@ -9849,24 +9849,221 @@ static void test_maintained_index_root_overflow_tail(void) {
     assert_find_indexed_row_not_found(filename, 0U, key_10, key_size);
     assert_exact_index_entries(filename, 0U, key_10, key_size, NULL, 0U);
 
+    const unsigned long long before_final_child_removal_pages = header.page_count;
+    assert(mylite_storage_begin_statement(filename, &statement) == MYLITE_STORAGE_OK);
     assert(mylite_storage_delete_row(filename, "app", "posts", row_7_id) == MYLITE_STORAGE_OK);
+    assert(access(journal_filename, F_OK) == 0);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_final_child_removal_pages + 1ULL);
+    assert_index_root(filename, "app", "posts", 0U, root_page, 6ULL);
+    read_test_page(filename, root_page, root_page_bytes);
+    assert(
+        get_test_u64_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET) ==
+        6ULL
+    );
+    assert(
+        get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        2U
+    );
+    split_branch_cell =
+        root_page_bytes + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET + branch_cell_size;
+    assert(
+        get_test_u64_le(
+            split_branch_cell,
+            MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_ROW_ID_OFFSET
+        ) == row_5_id
+    );
+    assert(
+        memcmp(
+            split_branch_cell + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_KEY_OFFSET,
+            key_5,
+            key_size
+        ) == 0
+    );
+    assert_index_entry_lookup(filename, 0U, key_7, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
+    assert(mylite_storage_rollback_statement(statement) == MYLITE_STORAGE_OK);
+    statement = NULL;
+    assert_file_missing(journal_filename);
+    assert_file_size_matches_header(filename);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_final_child_removal_pages);
+    assert_index_root(filename, "app", "posts", 0U, root_page, 7ULL);
+    read_test_page(filename, root_page, root_page_bytes);
+    assert(
+        get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        3U
+    );
+    split_branch_cell = root_page_bytes + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET +
+                        (2U * branch_cell_size);
+    assert(
+        get_test_u64_le(
+            split_branch_cell,
+            MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_ROW_ID_OFFSET
+        ) == row_7_id
+    );
+    assert_index_entry_lookup(filename, 0U, key_7, key_size, MYLITE_STORAGE_OK, row_7_id);
+
+    const pid_t final_child_removal_statement_pid = fork();
+    assert(final_child_removal_statement_pid >= 0);
+    if (final_child_removal_statement_pid == 0) {
+        mylite_storage_statement *child_statement = NULL;
+        if (mylite_storage_begin_statement(filename, &child_statement) != MYLITE_STORAGE_OK) {
+            _exit(2);
+        }
+        if (mylite_storage_delete_row(filename, "app", "posts", row_7_id) != MYLITE_STORAGE_OK) {
+            _exit(3);
+        }
+        _exit(0);
+    }
+    status = 0;
+    assert(
+        waitpid(final_child_removal_statement_pid, &status, 0) == final_child_removal_statement_pid
+    );
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
+    assert(access(journal_filename, F_OK) == 0);
+    read_test_page(filename, root_page, root_page_bytes);
+    assert(
+        get_test_u64_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET) ==
+        6ULL
+    );
+    assert(
+        get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        2U
+    );
+    split_branch_cell =
+        root_page_bytes + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET + branch_cell_size;
+    assert(
+        get_test_u64_le(
+            split_branch_cell,
+            MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_ROW_ID_OFFSET
+        ) == row_5_id
+    );
+    assert_index_entry_lookup(filename, 0U, key_7, key_size, MYLITE_STORAGE_OK, row_7_id);
+    assert_file_missing(journal_filename);
+    assert_file_size_matches_header(filename);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_final_child_removal_pages);
+    assert_index_root(filename, "app", "posts", 0U, root_page, 7ULL);
+
+    const pid_t final_child_removal_transaction_pid = fork();
+    assert(final_child_removal_transaction_pid >= 0);
+    if (final_child_removal_transaction_pid == 0) {
+        mylite_storage_statement *child_transaction = NULL;
+        if (mylite_storage_begin_transaction(filename, &child_transaction) != MYLITE_STORAGE_OK) {
+            _exit(2);
+        }
+        if (mylite_storage_delete_row(filename, "app", "posts", row_7_id) != MYLITE_STORAGE_OK) {
+            _exit(3);
+        }
+        _exit(0);
+    }
+    status = 0;
+    assert(
+        waitpid(final_child_removal_transaction_pid, &status, 0) ==
+        final_child_removal_transaction_pid
+    );
+    assert(WIFEXITED(status));
+    assert(WEXITSTATUS(status) == 0);
+    assert_file_missing(journal_filename);
+    assert(access(transaction_journal_filename, F_OK) == 0);
+    read_test_page(filename, root_page, root_page_bytes);
+    assert(
+        get_test_u64_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET) ==
+        6ULL
+    );
+    assert(
+        get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        2U
+    );
+    split_branch_cell =
+        root_page_bytes + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET + branch_cell_size;
+    assert(
+        get_test_u64_le(
+            split_branch_cell,
+            MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_ROW_ID_OFFSET
+        ) == row_5_id
+    );
+    assert_index_entry_lookup(filename, 0U, key_7, key_size, MYLITE_STORAGE_OK, row_7_id);
+    assert_file_missing(transaction_journal_filename);
+    assert_file_size_matches_header(filename);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_final_child_removal_pages);
+    assert_index_root(filename, "app", "posts", 0U, root_page, 7ULL);
+
+    assert(mylite_storage_delete_row(filename, "app", "posts", row_7_id) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == before_final_child_removal_pages + 1ULL);
+    assert_index_root(filename, "app", "posts", 0U, root_page, 6ULL);
+    read_test_page(filename, root_page, root_page_bytes);
+    assert(
+        get_test_u64_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_ENTRY_COUNT_OFFSET) ==
+        6ULL
+    );
+    assert(
+        get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        2U
+    );
+    split_branch_cell =
+        root_page_bytes + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET + branch_cell_size;
+    assert(
+        get_test_u64_le(
+            split_branch_cell,
+            MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_ROW_ID_OFFSET
+        ) == row_5_id
+    );
+    assert(
+        memcmp(
+            split_branch_cell + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_KEY_OFFSET,
+            key_5,
+            key_size
+        ) == 0
+    );
     assert_index_entry_lookup(filename, 0U, key_7, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
     assert_find_indexed_row_not_found(filename, 0U, key_7, key_size);
     assert_exact_index_entries(filename, 0U, key_7, key_size, NULL, 0U);
 
     assert(mylite_storage_delete_row(filename, "app", "posts", row_6_id) == MYLITE_STORAGE_OK);
+    assert_index_root(filename, "app", "posts", 0U, root_page, 5ULL);
+    read_test_page(filename, root_page, root_page_bytes);
+    assert(
+        get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        2U
+    );
+    split_branch_cell =
+        root_page_bytes + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET + branch_cell_size;
+    assert(
+        get_test_u64_le(
+            split_branch_cell,
+            MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_ROW_ID_OFFSET
+        ) == row_5_id
+    );
     assert_index_entry_lookup(filename, 0U, key_6, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
     assert_find_indexed_row_not_found(filename, 0U, key_6, key_size);
     assert_exact_index_entries(filename, 0U, key_6, key_size, NULL, 0U);
 
     assert(mylite_storage_delete_row(filename, "app", "posts", row_5_id) == MYLITE_STORAGE_OK);
+    assert_index_root(filename, "app", "posts", 0U, root_page, 4ULL);
+    read_test_page(filename, root_page, root_page_bytes);
+    assert(
+        get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        2U
+    );
+    split_branch_cell =
+        root_page_bytes + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET + branch_cell_size;
+    assert(
+        get_test_u64_le(
+            split_branch_cell,
+            MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_ROW_ID_OFFSET
+        ) == row_4_id
+    );
     assert_index_entry_lookup(filename, 0U, key_5, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
     assert_find_indexed_row_not_found(filename, 0U, key_5, key_size);
     assert_exact_index_entries(filename, 0U, key_5, key_size, NULL, 0U);
 
     assert(mylite_storage_delete_row(filename, "app", "posts", row_1_id) == MYLITE_STORAGE_OK);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
-    assert_index_root(filename, "app", "posts", 0U, root_page, 7ULL);
+    assert_index_root(filename, "app", "posts", 0U, root_page, 4ULL);
     assert_index_root_page_type(
         filename,
         root_page,
@@ -9902,11 +10099,31 @@ static void test_maintained_index_root_overflow_tail(void) {
     );
     assert(updated_row_4_id != row_4_id);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
-    assert_index_root(filename, "app", "posts", 0U, root_page, 7ULL);
+    assert_index_root(filename, "app", "posts", 0U, root_page, 4ULL);
     assert_index_root_page_type(
         filename,
         root_page,
         MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH
+    );
+    read_test_page(filename, root_page, root_page_bytes);
+    assert(
+        get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        2U
+    );
+    split_branch_cell =
+        root_page_bytes + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_PAYLOAD_OFFSET + branch_cell_size;
+    assert(
+        get_test_u64_le(
+            split_branch_cell,
+            MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_ROW_ID_OFFSET
+        ) == updated_row_4_id
+    );
+    assert(
+        memcmp(
+            split_branch_cell + MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CELL_MAX_KEY_OFFSET,
+            key_5,
+            key_size
+        ) == 0
     );
     assert_index_entry_lookup(filename, 0U, key_4, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
     assert_index_entry_lookup(filename, 0U, key_5, key_size, MYLITE_STORAGE_OK, updated_row_4_id);
@@ -9944,11 +10161,16 @@ static void test_maintained_index_root_overflow_tail(void) {
         mylite_storage_delete_row(filename, "app", "posts", updated_row_4_id) == MYLITE_STORAGE_OK
     );
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
-    assert_index_root(filename, "app", "posts", 0U, root_page, 7ULL);
+    assert_index_root(filename, "app", "posts", 0U, root_page, 3ULL);
     assert_index_root_page_type(
         filename,
         root_page,
         MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH
+    );
+    read_test_page(filename, root_page, root_page_bytes);
+    assert(
+        get_test_u32_le(root_page_bytes, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) ==
+        1U
     );
     assert_index_entry_lookup(filename, 0U, key_5, key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
     assert_find_indexed_row_not_found(filename, 0U, key_5, key_size);
