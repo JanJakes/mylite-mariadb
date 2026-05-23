@@ -460,6 +460,7 @@ storage_tests=(
 )
 unsupported_test_selectors=(
   "compat.*|disabled-oracle-mode|The imported compat suite files are Oracle-compatibility MTR cases, and ORACLE SQL mode is intentionally disabled in the embedded profile."
+  "encryption.*|disabled-native-encryption-profile|The upstream encryption suite depends on key-management plugins and native engine, binlog, or tempfile encryption surfaces that are outside the current embedded profile."
   "binlog.*|disabled-binlog-runtime|The upstream binlog suite depends on binary-log runtime behavior, which is intentionally disabled in the embedded profile."
   "rpl.*|replication-surface|The upstream replication suite depends on daemon replication runtime behavior, which is intentionally outside the embedded profile."
   "galera.*|disabled-galera-runtime|The upstream Galera suite depends on wsrep/Galera runtime behavior, which is intentionally disabled in the embedded profile."
