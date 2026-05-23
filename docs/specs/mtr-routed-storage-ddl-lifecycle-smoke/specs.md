@@ -7,7 +7,7 @@ transactions, foreign keys, and representative CHECK/generated-column
 semantics. It does not yet prove the raw embedded MTR path for a compact DDL
 lifecycle that combines `CREATE TABLE ... LIKE`, `CREATE TABLE ... SELECT`,
 copy `ALTER`, indexed reads after rebuild, and `RENAME TABLE` under explicit
-`ENGINE=InnoDB` routing.
+`ENGINE=InnoDB` routing and explicit `ENGINE=MYLITE` requests.
 
 ## Source Findings
 
@@ -22,7 +22,8 @@ copy `ALTER`, indexed reads after rebuild, and `RENAME TABLE` under explicit
 - `mariadb/sql/sql_table.cc::mysql_rename_table()` is the server rename entry
   point used by table rename and copy ALTER swaps.
 - `mariadb/storage/mylite/ha_mylite.cc::mylite_supported_engine_request()`
-  accepts `InnoDB` as a MyLite-routed requested-engine name.
+  accepts `MYLITE` directly and `InnoDB` as a MyLite-routed requested-engine
+  name.
 - `mariadb/storage/mylite/ha_mylite.cc` routes MyLite rename operations to
   `mylite_storage_rename_table()` for durable catalog metadata.
 
@@ -30,13 +31,14 @@ copy `ALTER`, indexed reads after rebuild, and `RENAME TABLE` under explicit
 
 Add `mylite.routed_storage_ddl_lifecycle` to the storage MTR list. The test
 runs with a primary `.mylite` file, enforces MyLite storage, and uses explicit
-`ENGINE=InnoDB` where the SQL shape accepts an engine clause. It verifies:
+`ENGINE=InnoDB` plus explicit `ENGINE=MYLITE` where the SQL shape accepts an
+engine clause. It verifies:
 
 - source table DDL and rows route to MyLite while preserving requested
-  `InnoDB` metadata;
+  `InnoDB` and `MYLITE` metadata;
 - `CREATE TABLE ... LIKE` preserves source table shape and accepts copied rows;
-- `CREATE TABLE ... SELECT` creates an `InnoDB` target and inserts selected
-  rows;
+- `CREATE TABLE ... SELECT` creates requested-engine targets and inserts
+  selected rows;
 - copy `ALTER` can add a defaulted column and secondary index;
 - forced indexed reads work after the copy rebuild;
 - `RENAME TABLE` preserves rebuilt metadata and rows; and
@@ -53,8 +55,9 @@ partition metadata, or broader SQL rollback guarantees.
 
 The storage MTR runner gains evidence that common MySQL/MariaDB DDL lifecycle
 patterns continue to work when applications request `ENGINE=InnoDB` but the
-active MyLite file routes storage to the MyLite handler. Broader DDL matrices
-and MTR-scale comparison remain separate planned work.
+active MyLite file routes storage to the MyLite handler, and when applications
+request `ENGINE=MYLITE` directly. Broader DDL matrices and MTR-scale comparison
+remain separate planned work.
 
 ## Storage And Lifecycle Impact
 
@@ -74,7 +77,8 @@ the MyLite-owned schema.
 
 - The new storage MTR DDL lifecycle test passes.
 - The full storage-routed MTR list passes.
-- Compatibility docs and roadmap mention routed DDL lifecycle MTR coverage.
+- Compatibility docs and roadmap mention routed and explicit MyLite DDL
+  lifecycle MTR coverage.
 
 ## Risks
 

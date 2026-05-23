@@ -61,9 +61,54 @@ from renamed_like_posts force index (rating_key)
 where rating >= 3
 order by id;
 
+create table mylite_lifecycle_posts (
+  id int not null primary key,
+  title varchar(32) not null,
+  rating int not null,
+  unique key title_key (title)
+) engine=MYLITE;
+
+insert into mylite_lifecycle_posts values
+  (1, 'mylite-draft', 3),
+  (2, 'mylite-published', 5);
+
+show create table mylite_lifecycle_posts;
+
+create table mylite_like_posts like mylite_lifecycle_posts;
+insert into mylite_like_posts select * from mylite_lifecycle_posts;
+
+show create table mylite_like_posts;
+
+create table mylite_ctas_posts engine=MYLITE as
+select id, title
+from mylite_lifecycle_posts
+where rating >= 4;
+
+show create table mylite_ctas_posts;
+select id, title from mylite_ctas_posts order by id;
+
+alter table mylite_like_posts
+  add column summary varchar(32) not null default 'fresh',
+  add key rating_key (rating),
+  algorithm=copy;
+
+select id, title, rating, summary
+from mylite_like_posts force index (rating_key)
+where rating = 5;
+
+rename table mylite_like_posts to renamed_mylite_like_posts;
+
+show create table renamed_mylite_like_posts;
+
+select id, title, rating, summary
+from renamed_mylite_like_posts force index (rating_key)
+where rating >= 3
+order by id;
+
 --source suite/mylite/include/assert_no_routed_storage_sidecars.inc
 
-drop table ctas_posts, renamed_like_posts, lifecycle_posts;
+drop table mylite_ctas_posts, renamed_mylite_like_posts, mylite_lifecycle_posts,
+  ctas_posts, renamed_like_posts, lifecycle_posts;
 drop database mylite_mtr_ddl_lifecycle;
 
 --source suite/mylite/include/assert_no_routed_storage_sidecars.inc

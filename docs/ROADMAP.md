@@ -54,9 +54,9 @@ explicit MyLite foreign-key publication and enforcement. It
 also covers representative routed `InnoDB` and explicit MyLite CHECK and
 generated-column metadata, enforcement, generated values, generated-index
 reads, and generated unique-key diagnostics through the same raw embedded
-storage path, plus
-representative routed `InnoDB` DDL lifecycle behavior for LIKE, CTAS, copy
-`ALTER`, indexed reads after rebuild, and `RENAME TABLE`, plus representative
+storage path, plus representative routed `InnoDB` and explicit MyLite DDL
+lifecycle behavior for LIKE, CTAS, copy `ALTER`, indexed reads after rebuild,
+and `RENAME TABLE`, plus representative
 routed `InnoDB` DML statement effects for ODKU, `REPLACE`, keyed `UPDATE`,
 keyed `DELETE`, affected rows, insert ids, and final indexed visibility.
 The baseline MTR smoke list now also includes `main.1st` for the trimmed

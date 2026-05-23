@@ -75,5 +75,76 @@ order by id;
 id	title	rating	summary
 1	draft	3	fresh
 2	published	5	fresh
-drop table ctas_posts, renamed_like_posts, lifecycle_posts;
+create table mylite_lifecycle_posts (
+id int not null primary key,
+title varchar(32) not null,
+rating int not null,
+unique key title_key (title)
+) engine=MYLITE;
+insert into mylite_lifecycle_posts values
+(1, 'mylite-draft', 3),
+(2, 'mylite-published', 5);
+show create table mylite_lifecycle_posts;
+Table	Create Table
+mylite_lifecycle_posts	CREATE TABLE `mylite_lifecycle_posts` (
+  `id` int(11) NOT NULL,
+  `title` varchar(32) NOT NULL,
+  `rating` int(11) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `title_key` (`title`)
+) ENGINE=MYLITE DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+create table mylite_like_posts like mylite_lifecycle_posts;
+insert into mylite_like_posts select * from mylite_lifecycle_posts;
+show create table mylite_like_posts;
+Table	Create Table
+mylite_like_posts	CREATE TABLE `mylite_like_posts` (
+  `id` int(11) NOT NULL,
+  `title` varchar(32) NOT NULL,
+  `rating` int(11) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `title_key` (`title`)
+) ENGINE=MYLITE DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+create table mylite_ctas_posts engine=MYLITE as
+select id, title
+from mylite_lifecycle_posts
+where rating >= 4;
+show create table mylite_ctas_posts;
+Table	Create Table
+mylite_ctas_posts	CREATE TABLE `mylite_ctas_posts` (
+  `id` int(11) NOT NULL,
+  `title` varchar(32) NOT NULL
+) ENGINE=MYLITE DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+select id, title from mylite_ctas_posts order by id;
+id	title
+2	mylite-published
+alter table mylite_like_posts
+add column summary varchar(32) not null default 'fresh',
+add key rating_key (rating),
+algorithm=copy;
+select id, title, rating, summary
+from mylite_like_posts force index (rating_key)
+where rating = 5;
+id	title	rating	summary
+2	mylite-published	5	fresh
+rename table mylite_like_posts to renamed_mylite_like_posts;
+show create table renamed_mylite_like_posts;
+Table	Create Table
+renamed_mylite_like_posts	CREATE TABLE `renamed_mylite_like_posts` (
+  `id` int(11) NOT NULL,
+  `title` varchar(32) NOT NULL,
+  `rating` int(11) NOT NULL,
+  `summary` varchar(32) NOT NULL DEFAULT 'fresh',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `title_key` (`title`),
+  KEY `rating_key` (`rating`)
+) ENGINE=MYLITE DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+select id, title, rating, summary
+from renamed_mylite_like_posts force index (rating_key)
+where rating >= 3
+order by id;
+id	title	rating	summary
+1	mylite-draft	3	fresh
+2	mylite-published	5	fresh
+drop table mylite_ctas_posts, renamed_mylite_like_posts, mylite_lifecycle_posts,
+ctas_posts, renamed_like_posts, lifecycle_posts;
 drop database mylite_mtr_ddl_lifecycle;
