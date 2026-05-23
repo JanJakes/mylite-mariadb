@@ -281,14 +281,27 @@ default_tests=(
   sys_vars.extra_port_basic
   sys_vars.flush_time_basic
   sys_vars.foreign_key_checks_basic
+  sys_vars.ft_boolean_syntax_basic
+  sys_vars.general_log_file_basic
   sys_vars.group_concat_max_len_basic
   sys_vars.group_concat_max_len_func
+  sys_vars.have_compress_basic
+  sys_vars.have_crypt_basic
+  sys_vars.have_dynamic_loading_basic
+  sys_vars.have_geometry_basic
+  sys_vars.have_openssl_basic
+  sys_vars.have_profiling_basic
+  sys_vars.have_query_cache_basic
+  sys_vars.have_rtree_keys_basic
+  sys_vars.have_ssl_basic
+  sys_vars.have_symlink_basic
   sys_vars.histogram_size_basic
   sys_vars.histogram_type_basic
   sys_vars.host_cache_size_auto
   sys_vars.hostname_basic
   sys_vars.identity_basic
   sys_vars.ignore_db_dirs_basic
+  sys_vars.init_connect_basic
   sys_vars.in_transaction_basic
   sys_vars.insert_id_basic
   sys_vars.insert_id_func
@@ -307,6 +320,7 @@ default_tests=(
   sys_vars.lc_messages_dir_basic
   sys_vars.lc_time_names_basic
   sys_vars.lc_time_names_func
+  sys_vars.local_infile_basic
   sys_vars.lock_wait_timeout_basic
   sys_vars.locked_in_memory_basic
   sys_vars.log_disabled_statements_basic
@@ -373,6 +387,7 @@ default_tests=(
   sys_vars.read_buffer_size_basic
   sys_vars.read_rnd_buffer_size_basic
   sys_vars.rowid_merge_buff_size_basic
+  sys_vars.secure_auth_basic
   sys_vars.skip_external_locking_basic
   sys_vars.skip_name_resolve_basic
   sys_vars.skip_networking_basic
@@ -492,12 +507,17 @@ unsupported_tests=(
   "sys_vars.completion_type_func|disabled-innodb-bootstrap|MTR starts the embedded runtime with disabled InnoDB information-schema options."
   "sys_vars.concurrent_insert_basic|native-myisam-sysvar|The trimmed profile omits the native MyISAM-only concurrent_insert variable."
   "sys_vars.default_master_connection_basic|embedded-skip|Upstream MTR marks the replication connection test not runnable for embedded server."
+  "sys_vars.default_storage_engine_basic|embedded-skip|Upstream MTR marks the default storage engine test not runnable for embedded server."
+  "sys_vars.default_tmp_storage_engine_basic|native-engine-profile|The test assigns native MyISAM as the default temporary engine, which is absent in the trimmed profile."
   "sys_vars.delay_key_write_basic|native-myisam-sysvar|The trimmed profile omits the native MyISAM-only delay_key_write variable."
   "sys_vars.delayed_insert_limit_func|embedded-skip|Upstream MTR marks the test not runnable for embedded server."
+  "sys_vars.enforce_storage_engine_basic|embedded-skip|Upstream MTR marks the enforced storage engine test not runnable for embedded server."
+  "sys_vars.event_scheduler_basic|embedded-skip|Upstream MTR marks the event scheduler test not runnable for embedded server."
   "sys_vars.explicit_defaults_for_timestamp_off|native-engine-result-text|The result expects native MyISAM SHOW CREATE TABLE output."
   "sys_vars.explicit_defaults_for_timestamp_on|native-engine-result-text|The result expects native MyISAM SHOW CREATE TABLE output."
   "sys_vars.flush_basic|disabled-server-sysvar|The trimmed embedded profile omits the server flush system variable."
   "sys_vars.foreign_key_checks_func|disabled-innodb-bootstrap|MTR starts the embedded runtime with disabled InnoDB information-schema options."
+  "sys_vars.general_log_basic|disabled-log-table|The trimmed bootstrap schema omits mysql.general_log."
   "sys_vars.host_cache_size_basic|embedded-skip|Upstream MTR marks the test not runnable for embedded server."
   "sys_vars.identity_func|disabled-innodb-bootstrap|MTR starts the embedded runtime with disabled InnoDB information-schema options."
   "sys_vars.key_buffer_size_func|disabled-status-metadata|The trimmed profile omits the status rows expected by the upstream test."
