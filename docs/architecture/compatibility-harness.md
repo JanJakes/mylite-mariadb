@@ -142,7 +142,9 @@ autoincrement gap behavior through
 partition-definition rejection and failed table metadata absence through
 `mylite.routed_storage_partitions`, plus representative raw online and
 in-place ALTER rejection, copy-ALTER preservation, blocked-column metadata
-absence, and sidecar absence through `mylite.routed_storage_online_alter`.
+absence, and sidecar absence through `mylite.routed_storage_online_alter`,
+plus representative raw temporary LIKE, CTAS, same-name shadowing, and
+post-drop metadata cleanup through `mylite.routed_storage_temporary_tables`.
 It remains outside the default compatibility groups because it builds
 `mariadbd` and several upstream client/support tools. Broader MTR integration
 should be a separate comparison slice with explicit include lists, expected

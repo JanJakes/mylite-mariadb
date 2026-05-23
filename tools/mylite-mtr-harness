@@ -230,6 +230,7 @@ storage_tests=(
   mylite.routed_storage_volatile_transactions
   mylite.routed_storage_partitions
   mylite.routed_storage_online_alter
+  mylite.routed_storage_temporary_tables
 )
 
 usage() {

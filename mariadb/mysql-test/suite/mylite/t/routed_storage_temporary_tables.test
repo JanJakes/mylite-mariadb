@@ -1,0 +1,70 @@
+#
+# Check routed temporary table catalog isolation under raw embedded MTR
+# execution.
+#
+
+--disable_warnings
+drop database if exists mylite_mtr_temporary_tables;
+--enable_warnings
+
+create database mylite_mtr_temporary_tables;
+use mylite_mtr_temporary_tables;
+
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+
+--let $mylite_sidecar_schema= mylite_mtr_temporary_tables
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+create table source_posts (
+  id int not null primary key,
+  title varchar(32) not null,
+  key title_key (title)
+) engine=InnoDB;
+insert into source_posts values (1, 'durable-source'), (2, 'copy-source');
+
+create temporary table temp_like like source_posts;
+insert into temp_like values (101, 'temp-like');
+select id, title from temp_like order by id;
+
+create temporary table temp_ctas engine=InnoDB as
+select id, title from source_posts where id = 2;
+select id, title from temp_ctas order by id;
+
+create table shadow_posts (
+  id int not null primary key,
+  title varchar(32) not null,
+  key title_key (title)
+) engine=InnoDB;
+insert into shadow_posts values (1, 'durable-shadow');
+
+create temporary table shadow_posts (
+  id int not null primary key,
+  title varchar(32) not null
+) engine=InnoDB;
+insert into shadow_posts values (201, 'temp-shadow');
+select id, title from shadow_posts order by id;
+
+select table_name
+from information_schema.tables
+where table_schema = 'mylite_mtr_temporary_tables'
+  and table_name in ('temp_like', 'temp_ctas')
+order by table_name;
+
+drop temporary table temp_like, temp_ctas, shadow_posts;
+select id, title
+from shadow_posts force index (title_key)
+where title = 'durable-shadow';
+
+select table_name
+from information_schema.tables
+where table_schema = 'mylite_mtr_temporary_tables'
+order by table_name;
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+drop database mylite_mtr_temporary_tables;
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
