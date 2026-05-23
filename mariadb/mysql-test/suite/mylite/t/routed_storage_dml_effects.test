@@ -1,0 +1,67 @@
+#
+# Check routed MyLite DML statement effects under raw embedded MTR execution.
+#
+
+--disable_warnings
+drop database if exists mylite_mtr_dml_effects;
+--enable_warnings
+
+create database mylite_mtr_dml_effects;
+use mylite_mtr_dml_effects;
+
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+
+--let $mylite_sidecar_schema= mylite_mtr_dml_effects
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+create table dml_posts (
+  id int not null auto_increment primary key,
+  slug varchar(32) not null unique,
+  title varchar(32) not null,
+  views int not null default 0,
+  key views_key (views)
+) engine=InnoDB;
+
+insert into dml_posts (slug, title, views) values
+  ('draft', 'Draft', 1),
+  ('published', 'Published', 5);
+select row_count() as affected_rows, last_insert_id() as last_id;
+
+insert into dml_posts (id, slug, title, views)
+values (1, 'draft', 'Draft v2', 2)
+on duplicate key update
+  title = values(title),
+  views = views + values(views),
+  id = last_insert_id(id);
+select row_count() as affected_rows, last_insert_id() as last_id;
+
+insert into dml_posts (slug, title, views)
+values ('third', 'Third', 7)
+on duplicate key update
+  title = values(title),
+  views = values(views);
+select row_count() as affected_rows, last_insert_id() as last_id;
+
+replace into dml_posts (id, slug, title, views)
+values (2, 'published', 'Republished', 9);
+select row_count() as affected_rows, last_insert_id() as last_id;
+
+update dml_posts set views = views + 1 where slug = 'third';
+select row_count() as affected_rows;
+
+delete from dml_posts where slug = 'draft';
+select row_count() as affected_rows;
+
+select id, slug, title, views
+from dml_posts force index (views_key)
+where views >= 3
+order by id;
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+drop database mylite_mtr_dml_effects;
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc

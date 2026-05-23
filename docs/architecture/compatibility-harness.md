@@ -124,7 +124,10 @@ reads, and generated unique-key diagnostics through
 `mylite.routed_storage_constraints`, plus representative routed `InnoDB` DDL
 lifecycle behavior for `CREATE TABLE ... LIKE`, CTAS, copy `ALTER`, indexed
 reads after rebuild, and `RENAME TABLE` through
-`mylite.routed_storage_ddl_lifecycle`.
+`mylite.routed_storage_ddl_lifecycle`, plus representative routed `InnoDB`
+DML statement effects for ODKU, `REPLACE`, keyed `UPDATE`, keyed `DELETE`,
+affected rows, insert ids, and final indexed visibility through
+`mylite.routed_storage_dml_effects`.
 It remains outside the default compatibility groups because it builds
 `mariadbd` and several upstream client/support tools. Broader MTR integration
 should be a separate comparison slice with explicit include lists, expected

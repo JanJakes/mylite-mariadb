@@ -161,7 +161,9 @@ storage-engine build with a primary `.mylite` file, plus representative
 routed `InnoDB` CHECK and generated-column metadata, enforcement, generated
 values, generated-index reads, and generated unique-key diagnostics, and
 representative routed `InnoDB` DDL lifecycle behavior for LIKE, CTAS, copy
-`ALTER`, indexed reads after rebuild, and `RENAME TABLE`,
+`ALTER`, indexed reads after rebuild, and `RENAME TABLE`, plus representative
+routed `InnoDB` DML statement effects for ODKU, `REPLACE`, keyed `UPDATE`,
+keyed `DELETE`, affected rows, insert ids, and final indexed visibility,
 while MariaDB MTR comparison
 suites and broader application-schema and runtime suites remain planned.
 
