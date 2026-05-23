@@ -777,7 +777,10 @@ row validation shortcut while avoiding repeated allocation/free in ordinary
 single-row prepared updates. Active row DML now defers durable cache retargeting
 to statement commit, so prepared updates in a transaction do not rescan durable
 cache sets on every row mutation while rollback still discards pending cache
-work. Cached-shape buffered row rewrites with unchanged index entries now skip
+work. Active in-place rewrites that are already covered by a statement-chain
+durable-cache retarget marker now skip recording redundant nested markers, while
+header-advancing mutations keep the existing marker refresh path. Cached-shape
+buffered row rewrites with unchanged index entries now skip
 replacement state-page and index-page checks after the shape has been validated
 once in the active append buffer, while still capturing per-statement rollback
 preimages before mutation.

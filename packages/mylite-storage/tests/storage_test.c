@@ -134,6 +134,9 @@ int mylite_storage_test_statement_has_row_payload_cache(const mylite_storage_sta
 int mylite_storage_test_statement_exact_index_cache_count(
     const mylite_storage_statement *statement
 );
+int mylite_storage_test_statement_has_deferred_durable_cache_retarget(
+    const mylite_storage_statement *statement
+);
 int mylite_storage_test_durable_exact_index_cache_has_filename_identity(const char *filename);
 int mylite_storage_test_durable_exact_index_cache_count(const char *filename);
 int mylite_storage_test_durable_row_payload_cache_has_filename_identity(const char *filename);
@@ -375,6 +378,7 @@ static void test_durable_lookup_caches_borrow_filename_identity(void);
 static void test_active_row_payload_cache_many_replacements(void);
 static void test_durable_live_row_cache(void);
 static void test_deferred_durable_cache_retarget(void);
+static void test_covered_deferred_cache_retarget_marker(void);
 static void test_active_live_row_list_maintenance(void);
 static void test_transaction_live_row_cache_nested_update_scope(void);
 static void test_index_entries(void);
@@ -821,6 +825,7 @@ int main(void) {
     test_active_row_payload_cache_many_replacements();
     test_durable_live_row_cache();
     test_deferred_durable_cache_retarget();
+    test_covered_deferred_cache_retarget_marker();
     test_active_live_row_list_maintenance();
     test_transaction_live_row_cache_nested_update_scope();
     test_index_entries();
@@ -4300,6 +4305,97 @@ static void test_deferred_durable_cache_retarget(void) {
     assert_row_equals(filename, row_5_id, row_5, sizeof(row_5));
     assert(row_6_id != 0ULL);
     assert_row_not_found(filename, row_6_id);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_covered_deferred_cache_retarget_marker(void) {
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char key[] = {0x00U, 0x00U, 0x00U, 0x01U};
+    static const unsigned char row_1[] = {0x00U, 0x11U, 'a'};
+    static const unsigned char row_2[] = {0x00U, 0x22U, 'b'};
+    static const unsigned char row_3[] = {0x00U, 0x33U, 'c'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "covered-deferred-cache-retarget-marker.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_index_entry row_entry = {
+        .size = sizeof(row_entry),
+        .index_number = 0U,
+        .key = key,
+        .key_size = sizeof(key),
+    };
+    mylite_storage_statement *transaction = NULL;
+    mylite_storage_statement *savepoint = NULL;
+    unsigned long long row_1_id = 0ULL;
+    unsigned long long row_2_id = 0ULL;
+    unsigned long long row_3_id = 0ULL;
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_1,
+            sizeof(row_1),
+            &row_entry,
+            1U,
+            &row_1_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert_find_indexed_row_equals(filename, 0U, key, sizeof(key), row_1_id, row_1, sizeof(row_1));
+
+    assert(mylite_storage_begin_transaction(filename, &transaction) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_begin_nested_statement(transaction, &savepoint) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_update_row_preserving_index_entries_in_statement(
+            savepoint,
+            "app",
+            "posts",
+            row_1_id,
+            row_2,
+            sizeof(row_2),
+            &row_2_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(row_2_id != 0ULL);
+    assert(mylite_storage_test_statement_has_deferred_durable_cache_retarget(savepoint));
+    assert(mylite_storage_commit_statement(savepoint) == MYLITE_STORAGE_OK);
+    savepoint = NULL;
+    assert(mylite_storage_test_statement_has_deferred_durable_cache_retarget(transaction));
+
+    assert(mylite_storage_begin_nested_statement(transaction, &savepoint) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_update_row_preserving_index_entries_in_statement(
+            savepoint,
+            "app",
+            "posts",
+            row_2_id,
+            row_3,
+            sizeof(row_3),
+            &row_3_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(row_3_id == row_2_id);
+    assert(!mylite_storage_test_statement_has_deferred_durable_cache_retarget(savepoint));
+    assert(mylite_storage_commit_statement(savepoint) == MYLITE_STORAGE_OK);
+    savepoint = NULL;
+    assert(mylite_storage_test_statement_has_deferred_durable_cache_retarget(transaction));
+    assert(mylite_storage_commit_statement(transaction) == MYLITE_STORAGE_OK);
+
+    assert_find_indexed_row_equals(filename, 0U, key, sizeof(key), row_3_id, row_3, sizeof(row_3));
 
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
