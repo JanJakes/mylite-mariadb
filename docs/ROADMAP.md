@@ -808,6 +808,11 @@ overlays no longer resize the list on every discovered row id.
 Leaf-run exact and full-read helpers now reuse the validated root leaf page
 decoded during run discovery for offset `0`, avoiding redundant leaf-page cache
 lookups on single-page published roots.
+Full fixed-size index reads that still fall through to append-history scans now
+seed and reuse complete exact-index entryset caches through active read
+statements and durable thread-local cache guards. This keeps non-raw text-key
+equality under MariaDB comparison semantics while avoiding repeated full storage
+scans during prepared text-key cache warm-up.
 Durable foreign-key prefix checks now probe complete static published leaf roots
 and single-page maintained roots directly, falling back to the materialized
 overlay path when append-tail history or missing roots require it. Static

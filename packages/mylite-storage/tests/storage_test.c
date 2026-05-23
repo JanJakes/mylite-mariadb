@@ -293,6 +293,7 @@ static void test_transaction_live_row_cache_nested_update_scope(void);
 static void test_index_entries(void);
 static void test_exact_index_cache_fixed_size_keys(void);
 static void test_cached_exact_index_entryset_bulk_append(void);
+static void test_full_index_read_seeds_exact_cache(void);
 static void test_active_exact_index_cache_many_replacements(void);
 static void test_active_exact_index_cache_after_mutation_creation(void);
 static void test_additive_table_catalog_retargets_durable_exact_cache(void);
@@ -690,6 +691,7 @@ int main(void) {
     test_index_entries();
     test_exact_index_cache_fixed_size_keys();
     test_cached_exact_index_entryset_bulk_append();
+    test_full_index_read_seeds_exact_cache();
     test_active_exact_index_cache_many_replacements();
     test_active_exact_index_cache_after_mutation_creation();
     test_additive_table_catalog_retargets_durable_exact_cache();
@@ -4521,6 +4523,148 @@ static void test_cached_exact_index_entryset_bulk_append(void) {
     assert(rmdir(root) == 0);
     free(filename);
     free(root);
+}
+
+static void test_full_index_read_seeds_exact_cache(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    static const unsigned char row_1[] = {0x01U, 'a'};
+    static const unsigned char row_2[] = {0x02U, 'b'};
+    static const unsigned char key_1[] = {'a', 'b', 'c'};
+    static const unsigned char key_1_prefix[] = {'a', 'b'};
+    static const unsigned char key_2[] = {'d', 'e', 'f'};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "full-index-read-exact-cache.mylite");
+    int owner = 0;
+    mylite_storage_statement *read_statement = NULL;
+    mylite_storage_index_entryset entries = {
+        .size = sizeof(entries),
+    };
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    mylite_storage_index_entry row_1_entry = {
+        .size = sizeof(row_1_entry),
+        .index_number = 1U,
+        .key = key_1,
+        .key_size = sizeof(key_1),
+    };
+    mylite_storage_index_entry row_2_entry = {
+        .size = sizeof(row_2_entry),
+        .index_number = 1U,
+        .key = key_2,
+        .key_size = sizeof(key_2),
+    };
+    unsigned long long row_1_id = 0ULL;
+    unsigned long long row_2_id = 0ULL;
+
+    mylite_storage_clear_thread_caches();
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_1,
+            sizeof(row_1),
+            &row_1_entry,
+            1U,
+            &row_1_id
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(
+        mylite_storage_append_row_with_index_entries(
+            filename,
+            "app",
+            "posts",
+            row_2,
+            sizeof(row_2),
+            &row_2_entry,
+            1U,
+            &row_2_id
+        ) == MYLITE_STORAGE_OK
+    );
+
+    assert(
+        mylite_storage_read_exact_index_entries(
+            filename,
+            "app",
+            "posts",
+            1U,
+            key_1_prefix,
+            sizeof(key_1_prefix),
+            &entries
+        ) == MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == 0U);
+    assert(mylite_storage_test_durable_exact_index_cache_count(filename) == 1);
+    mylite_storage_free_index_entryset(&entries);
+    entries = (mylite_storage_index_entryset){
+        .size = sizeof(entries),
+    };
+
+    mylite_storage_set_context_owner(&owner);
+    assert(mylite_storage_begin_read_statement(filename, &read_statement) == MYLITE_STORAGE_OK);
+    assert(read_statement != NULL);
+    assert(mylite_storage_test_statement_exact_index_cache_count(read_statement) == 0);
+    assert(mylite_storage_test_durable_exact_index_cache_count(filename) == 1);
+
+    assert(
+        mylite_storage_read_index_entries(filename, "app", "posts", 1U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == 2U);
+    assert_index_entry(&entries, 0U, row_1_id, key_1, sizeof(key_1));
+    assert_index_entry(&entries, 1U, row_2_id, key_2, sizeof(key_2));
+    assert(mylite_storage_test_statement_exact_index_cache_count(read_statement) == 1);
+    mylite_storage_free_index_entryset(&entries);
+
+    entries = (mylite_storage_index_entryset){
+        .size = sizeof(entries),
+    };
+    assert(
+        mylite_storage_read_index_entries(filename, "app", "posts", 1U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == 2U);
+    assert_index_entry(&entries, 0U, row_1_id, key_1, sizeof(key_1));
+    assert_index_entry(&entries, 1U, row_2_id, key_2, sizeof(key_2));
+    assert(mylite_storage_test_statement_exact_index_cache_count(read_statement) == 1);
+    mylite_storage_free_index_entryset(&entries);
+
+    assert(mylite_storage_end_read_statement(read_statement) == MYLITE_STORAGE_OK);
+    mylite_storage_set_context_owner(NULL);
+    assert(mylite_storage_test_durable_exact_index_cache_count(filename) == 2);
+
+    entries = (mylite_storage_index_entryset){
+        .size = sizeof(entries),
+    };
+    assert(
+        mylite_storage_read_index_entries(filename, "app", "posts", 1U, &entries) ==
+        MYLITE_STORAGE_OK
+    );
+    assert(entries.entry_count == 2U);
+    assert_index_entry(&entries, 0U, row_1_id, key_1, sizeof(key_1));
+    assert_index_entry(&entries, 1U, row_2_id, key_2, sizeof(key_2));
+    assert(mylite_storage_test_durable_exact_index_cache_count(filename) == 2);
+    mylite_storage_free_index_entryset(&entries);
+
+    assert(mylite_storage_delete_row(filename, "app", "posts", row_1_id) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_test_durable_exact_index_cache_count(filename) == 0);
+
+    mylite_storage_clear_thread_caches();
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+#endif
 }
 
 static void test_active_exact_index_cache_many_replacements(void) {
