@@ -1674,6 +1674,17 @@ bool Sql_cmd_update::mylite_update_values_have_subquery(List<Item> &values)
   return mylite_update_values_have_subquery_cached;
 }
 
+bool Sql_cmd_update::mylite_update_values_need_setup(List<Item> &values)
+{
+  if (!mylite_update_values_need_setup_known)
+  {
+    mylite_update_values_need_setup_cached=
+        ::mylite_update_values_need_setup(values);
+    mylite_update_values_need_setup_known= true;
+  }
+  return mylite_update_values_need_setup_cached;
+}
+
 static bool mylite_prepare_single_update_values(THD *thd, List<Item> &fields,
                                                 List<Item> &values,
                                                 bool ignore,
@@ -3339,7 +3350,7 @@ bool Sql_cmd_update::prepare_inner(THD *thd)
   if (elide_single_update_result)
   {
     const bool values_need_setup=
-        ::mylite_update_values_need_setup(lex->value_list);
+        mylite_update_values_need_setup(lex->value_list);
     if (mylite_prepare_single_update_values(thd, select_lex->item_list,
                                             lex->value_list, lex->ignore,
                                             values_need_setup))

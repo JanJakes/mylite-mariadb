@@ -137,6 +137,12 @@ components. The phase keeps the same single-table prepared update SQL shape as
 it separates table-open, DML prepare, lock, exact lookup, and reset cost from
 row materialization and storage mutation cost.
 
+The current implementation also caches immutable assignment-list
+classifications on `Sql_cmd_update`. The value-list subquery check and the
+simple value-setup requirement are both statement-shape properties, so prepared
+executions can reuse them without retaining `TABLE`, `Field`, `JOIN`,
+diagnostic, lock, or row-buffer state.
+
 An attempted shortcut that cached only "value setup already done" on
 `Sql_cmd_update` was rejected. It built, but focused embedded statement and
 storage-engine tests segfaulted after repeated prepared update execution.

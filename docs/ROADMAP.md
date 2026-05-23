@@ -999,8 +999,10 @@ The first implementation step caches the immutable prepared-update value-list
 subquery shape on `Sql_cmd_update`, avoiding repeated value-list scans before
 the MyLite single-update result-elision gate. The next step skips value-list
 `setup_fields()` for simple literal and bound-scalar update values while
-preserving the normal setup path for expressions and contextual values. The
-current expression-update benchmark still shows repeated table-open,
+preserving the normal setup path for expressions and contextual values.
+`Sql_cmd_update` now also caches that immutable simple-value setup
+classification, avoiding another assignment-list walk on repeated prepared
+executions. The current expression-update benchmark still shows repeated table-open,
 value-expression setup, and `JOIN::prepare()` work as the next prepared-DML
 performance wall. The MyLite handler now also caches accepted non-key
 direct-update shape facts for prepared statements, avoiding repeated

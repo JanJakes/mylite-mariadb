@@ -98,6 +98,7 @@ private:
   bool update_single_table(THD *thd);
 
   bool mylite_update_values_have_subquery(List<Item> &values);
+  bool mylite_update_values_need_setup(List<Item> &values);
 
   /* Original value of the 'multitable' flag set by constructor */
   const bool orig_multitable;
@@ -116,6 +117,8 @@ private:
 
   bool mylite_update_values_have_subquery_known{false};
   bool mylite_update_values_have_subquery_cached{false};
+  bool mylite_update_values_need_setup_known{false};
+  bool mylite_update_values_need_setup_cached{false};
 
 public:
   /* The list of the updating expressions used in the set clause */
