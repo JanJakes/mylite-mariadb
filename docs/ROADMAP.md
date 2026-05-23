@@ -164,14 +164,13 @@ capacity and no live append-tail overlay would be hidden, inserting the
 appended leaf's child cell in branch order. Eligible one-entry child removals
 now drop any branch child cell when deletion reduces the expected child count by
 one and publish the removed leaf as a one-page durable free-list run,
-coalescing when the removed leaf immediately precedes the current free-list root
-run. Eligible child removals that leave a live entryset fitting one maintained
-root page now collapse the branch root back to the maintained root format.
-Catalog page-run reclamation uses the same
-lower-adjacent free-list root coalescing. Branch-page-full root splits,
-merge/redistribution where child count stays stable, higher-adjacent and
-arbitrary-chain free-list coalescing, and broader branch update/delete
-maintenance remain pending. SQL copy-rebuild DDL now
+coalescing when the removed leaf is directly adjacent to the current free-list
+root run. Eligible child removals that leave a live entryset fitting one
+maintained root page now collapse the branch root back to the maintained root
+format. Catalog page-run reclamation uses the same root-adjacent free-list
+coalescing. Branch-page-full root splits, merge/redistribution where child
+count stays stable, arbitrary-chain free-list coalescing, and broader branch
+update/delete maintenance remain pending. SQL copy-rebuild DDL now
 opportunistically publishes those roots for all current supported fixed-width
 keys in rebuilt tables, including retained primary keys after forced copy
 rebuilds, with one shared append-history scan and one catalog publication for

@@ -1888,7 +1888,15 @@ static mylite_storage_result encode_reclaimed_free_list_root_page(
     const mylite_storage_header *header,
     unsigned long long first_page_id,
     unsigned long long page_count,
+    unsigned long long *out_root_page_id,
     unsigned char *out_page
+);
+static mylite_storage_result reclaimed_run_appends_to_current_free_list_root(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long first_page_id,
+    unsigned long long page_count,
+    int *out_appends
 );
 static mylite_storage_result read_free_list_page(
     FILE *file,
@@ -10590,6 +10598,32 @@ static mylite_storage_result plan_branch_index_root_delete(
         }
         for (size_t i = 0U; i < leaf_page.entry_count; ++i) {
             if (index_leaf_entry_row_id(&leaf_page, i) == row_id) {
+                if (removes_child) {
+                    int appends_to_free_list_root = 0;
+                    result = reclaimed_run_appends_to_current_free_list_root(
+                        file,
+                        header,
+                        leaf_page_id,
+                        1ULL,
+                        &appends_to_free_list_root
+                    );
+                    if (result != MYLITE_STORAGE_OK) {
+                        return result;
+                    }
+                    if (appends_to_free_list_root) {
+                        result = append_maintained_index_delete_plan_protected_page(
+                            out_plan,
+                            header->free_list_root_page
+                        );
+                        if (result == MYLITE_STORAGE_UNSUPPORTED) {
+                            *out_plan = (mylite_storage_maintained_index_delete_plan){0};
+                            return MYLITE_STORAGE_OK;
+                        }
+                        if (result != MYLITE_STORAGE_OK) {
+                            return result;
+                        }
+                    }
+                }
                 result = append_maintained_index_delete_plan_branch(
                     out_plan,
                     root_page_id,
@@ -11034,15 +11068,22 @@ static mylite_storage_result reclaim_removed_branch_leaf_page(
     mylite_storage_header *header,
     unsigned long long leaf_page_id
 ) {
+    unsigned long long free_list_root_page = leaf_page_id;
     unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    mylite_storage_result result =
-        encode_reclaimed_free_list_root_page(pager->file, header, leaf_page_id, 1ULL, page);
+    mylite_storage_result result = encode_reclaimed_free_list_root_page(
+        pager->file,
+        header,
+        leaf_page_id,
+        1ULL,
+        &free_list_root_page,
+        page
+    );
     if (result != MYLITE_STORAGE_OK) {
         return result;
     }
-    result = pager_write_page(pager, leaf_page_id, page);
+    result = pager_write_page(pager, free_list_root_page, page);
     if (result == MYLITE_STORAGE_OK) {
-        header->free_list_root_page = leaf_page_id;
+        header->free_list_root_page = free_list_root_page;
     }
     return result;
 }
@@ -20373,19 +20414,36 @@ static mylite_storage_result reclaim_catalog_page_run(
         return MYLITE_STORAGE_OK;
     }
 
-    mylite_storage_result result = begin_write_journal(file, filename, header, 0);
-    if (result != MYLITE_STORAGE_OK) {
-        return result;
-    }
-
+    unsigned long long free_list_root_page = first_page_id;
     unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    result = encode_reclaimed_free_list_root_page(file, header, first_page_id, page_count, page);
+    mylite_storage_result result = encode_reclaimed_free_list_root_page(
+        file,
+        header,
+        first_page_id,
+        page_count,
+        &free_list_root_page,
+        page
+    );
+    if (result == MYLITE_STORAGE_OK && free_list_root_page != first_page_id) {
+        result = begin_write_journal_for_statement_pages(
+            file,
+            filename,
+            header,
+            0,
+            active_statement_for(filename),
+            &free_list_root_page,
+            1U
+        );
+    }
+    if (result == MYLITE_STORAGE_OK && free_list_root_page == first_page_id) {
+        result = begin_write_journal(file, filename, header, 0);
+    }
     const mylite_storage_pager pager = open_storage_pager(file, NULL, header);
     if (result == MYLITE_STORAGE_OK) {
-        result = pager_write_page(&pager, first_page_id, page);
+        result = pager_write_page(&pager, free_list_root_page, page);
     }
     if (result == MYLITE_STORAGE_OK) {
-        header->free_list_root_page = first_page_id;
+        header->free_list_root_page = free_list_root_page;
         result = publish_header(file, header);
     }
     if (result == MYLITE_STORAGE_OK) {
@@ -20399,8 +20457,10 @@ static mylite_storage_result encode_reclaimed_free_list_root_page(
     const mylite_storage_header *header,
     unsigned long long first_page_id,
     unsigned long long page_count,
+    unsigned long long *out_root_page_id,
     unsigned char *out_page
 ) {
+    *out_root_page_id = first_page_id;
     mylite_storage_free_list_page free_list_page = {
         .next_root_page = header->free_list_root_page,
         .run_start_page = first_page_id,
@@ -20426,9 +20486,51 @@ static mylite_storage_result encode_reclaimed_free_list_root_page(
             }
             free_list_page.next_root_page = current_root.next_root_page;
             free_list_page.run_page_count = page_count + current_root.run_page_count;
+        } else if (
+            current_root.run_start_page <= ULLONG_MAX - current_root.run_page_count &&
+            current_root.run_start_page + current_root.run_page_count == first_page_id
+        ) {
+            if (current_root.run_page_count > ULLONG_MAX - page_count) {
+                return MYLITE_STORAGE_CORRUPT;
+            }
+            current_root.run_page_count += page_count;
+            *out_root_page_id = header->free_list_root_page;
+            encode_free_list_page(out_page, header->free_list_root_page, &current_root);
+            return MYLITE_STORAGE_OK;
         }
     }
     encode_free_list_page(out_page, first_page_id, &free_list_page);
+    return MYLITE_STORAGE_OK;
+}
+
+static mylite_storage_result reclaimed_run_appends_to_current_free_list_root(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long first_page_id,
+    unsigned long long page_count,
+    int *out_appends
+) {
+    *out_appends = 0;
+    if (header->free_list_root_page == 0ULL || page_count == 0ULL) {
+        return MYLITE_STORAGE_OK;
+    }
+
+    unsigned char current_root_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+    mylite_storage_free_list_page current_root = {0};
+    mylite_storage_result result = read_free_list_page(
+        file,
+        header,
+        header->free_list_root_page,
+        current_root_page,
+        &current_root
+    );
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    if (current_root.run_start_page <= ULLONG_MAX - current_root.run_page_count &&
+        current_root.run_start_page + current_root.run_page_count == first_page_id) {
+        *out_appends = 1;
+    }
     return MYLITE_STORAGE_OK;
 }
 

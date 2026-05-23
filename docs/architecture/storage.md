@@ -227,8 +227,8 @@ child leaf rewrite that leaf and refresh its branch fence when the child remains
 non-empty and the branch still needs the same child count. When deleting the
 only entry in a child reduces the expected child count by one and another child
 remains, storage now removes that branch child cell and publishes the old leaf
-page as a durable free-list run, coalescing when that leaf immediately precedes
-the current free-list root run. Underfull-child merge/redistribution where the
+page as a durable free-list run, coalescing when that leaf is directly adjacent
+to the current free-list root run. Underfull-child merge/redistribution where the
 branch child count stays stable remains on the row-state overlay path.
 Eligible updates can rewrite a source child in place when the replacement
 `(key, row_id)` remains inside that child range, or move the entry between
@@ -754,7 +754,7 @@ table-definition blobs, row pages, index-entry pages, and FK metadata blob pages
 remain orphaned inside the primary file until broader free-space management
 exists; superseded catalog-chain pages are reclaimed into the catalog free-list.
 Catalog and branch-leaf reclamation coalesce a reclaimed run with the current
-free-list root when the reclaimed run immediately precedes that root run.
+free-list root when the reclaimed run is directly before or after that root run.
 New table ids are allocated above both live catalog records and existing row
 pages so drop/recreate does not expose old rows. Simple
 `RENAME TABLE` rewrites the catalog record identity while preserving table id,
@@ -1141,7 +1141,7 @@ Eligible same-child deletes can physically remove entries from interior leaves
 when the child remains non-empty. Eligible one-entry child removals can drop any
 branch child when the branch child count decreases by one and reclaim the
 removed leaf page through the durable free-list, including coalescing when the
-removed leaf immediately precedes the current free-list root run. When
+removed leaf is directly adjacent to the current free-list root run. When
 that removal leaves a live entryset that fits in one maintained root page,
 storage collapses the branch root back to the maintained root format by
 materializing live branch entries and existing tail overlays before applying
@@ -1225,10 +1225,9 @@ restore single-page maintained root bytes and logical visibility for covered
 insert, update, and delete paths, and restore covered single-level branch
 final-leaf deletes, same-child updates and deletes, bounded cross-child
 updates, interior child splits, arbitrary child removals, and final-leaf
-free-list publication. Branch-page-full root splits, multi-page navigable indexes,
-branch-page merge/redistribution,
-higher-adjacent and arbitrary-chain free-list run coalescing, and broader
-transactional maintained index mutation remain planned.
+free-list publication. Branch-page-full root splits, multi-page navigable
+indexes, branch-page merge/redistribution, arbitrary-chain free-list run
+coalescing, and broader transactional maintained index mutation remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, row/index free-space reclamation, and broader
