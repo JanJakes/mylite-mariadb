@@ -1813,7 +1813,8 @@ int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
   bool direct_found= false;
   error= read_exact_unique_index_row_into(
       direct_update_key_number, direct_update_key_buffer, key_info->key_length,
-      table->record[0], &direct_applied, &direct_found, true);
+      table->record[0], &direct_applied, &direct_found, true,
+      MYLITE_EXACT_UNIQUE_SKIP_CURSOR_STATE);
   if (error)
     DBUG_RETURN(error);
   if (!direct_applied)
@@ -2656,7 +2657,7 @@ int ha_mylite::index_read_map(uchar *buf, const uchar *key,
     bool direct_found= false;
     const int error= read_exact_unique_index_row_into(
         active_index, key, key_length, buf, &direct_applied, &direct_found,
-        false);
+        false, MYLITE_EXACT_UNIQUE_PUBLISH_CURSOR_STATE);
     if (error)
       DBUG_RETURN(error);
     if (direct_applied)
@@ -2691,11 +2692,14 @@ int ha_mylite::index_read_map(uchar *buf, const uchar *key,
 int ha_mylite::read_exact_unique_index_row_into(
     uint index_number, const uchar *key_filter, uint key_filter_length,
     uchar *buf, bool *out_applied, bool *out_found,
-    bool trusted_exact_unique_filter)
+    bool trusted_exact_unique_filter,
+    mylite_exact_unique_cursor_state cursor_state)
 {
   DBUG_ENTER("ha_mylite::read_exact_unique_index_row_into");
   *out_applied= false;
   *out_found= false;
+  const bool publish_cursor_state=
+      cursor_state == MYLITE_EXACT_UNIQUE_PUBLISH_CURSOR_STATE;
 
   if (discard_rows || volatile_rows || table_has_blob_fields ||
       index_number >= table->s->keys)
@@ -2761,8 +2765,11 @@ int ha_mylite::read_exact_unique_index_row_into(
   *out_applied= true;
   if (storage_result == MYLITE_STORAGE_NOTFOUND)
   {
-    index_cursor_number= index_number;
-    index_cursor_filtered= true;
+    if (publish_cursor_state)
+    {
+      index_cursor_number= index_number;
+      index_cursor_filtered= true;
+    }
     DBUG_RETURN(0);
   }
   if (storage_result == MYLITE_STORAGE_FULL &&
@@ -2773,15 +2780,19 @@ int ha_mylite::read_exact_unique_index_row_into(
   if (row_payload_size != table->s->reclength)
     DBUG_RETURN(HA_ERR_CRASHED_ON_USAGE);
 
-  /*
-    The matching row is already in buf.  A full non-null unique exact lookup
-    can only continue to EOF, so keep just enough cursor state for continuation
-    and position() without allocating an unused one-entry cursor.
-  */
-  index_row_count= 1;
-  index_row_index= 0;
-  index_cursor_number= index_number;
-  index_cursor_filtered= true;
+  if (publish_cursor_state)
+  {
+    /*
+      The matching row is already in buf.  A full non-null unique exact lookup
+      can only continue to EOF, so keep just enough cursor state for
+      continuation and position() without allocating an unused one-entry
+      cursor.
+    */
+    index_row_count= 1;
+    index_row_index= 0;
+    index_cursor_number= index_number;
+    index_cursor_filtered= true;
+  }
   current_row_id= row_id;
   DBUG_ASSERT(!record_blob_payloads[0] && !record_blob_payloads[1]);
 
@@ -2812,7 +2823,8 @@ int ha_mylite::index_read_idx_map(uchar *buf, uint index, const uchar *key,
     bool direct_applied= false;
     bool direct_found= false;
     const int direct_error= read_exact_unique_index_row_into(
-        index, key, key_length, buf, &direct_applied, &direct_found, false);
+        index, key, key_length, buf, &direct_applied, &direct_found, false,
+        MYLITE_EXACT_UNIQUE_PUBLISH_CURSOR_STATE);
     if (direct_error)
       DBUG_RETURN(direct_error);
     if (direct_applied)

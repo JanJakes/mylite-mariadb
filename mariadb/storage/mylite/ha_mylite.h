@@ -122,6 +122,12 @@ class ha_mylite: public handler
   uint direct_update_key_field_number;
   uchar direct_update_key_null;
 
+  enum mylite_exact_unique_cursor_state
+  {
+    MYLITE_EXACT_UNIQUE_SKIP_CURSOR_STATE,
+    MYLITE_EXACT_UNIQUE_PUBLISH_CURSOR_STATE
+  };
+
   Mylite_share *get_share();
   void clear_scan_rows();
   void clear_index_cursor();
@@ -136,11 +142,11 @@ class ha_mylite: public handler
   int materialize_index_cursor_rows(const char *primary_file);
   int ensure_index_row_id_scratch(size_t row_count);
   int read_index_cursor_row(uchar *buf, size_t row_index);
-  int read_exact_unique_index_row_into(uint index_number,
-                                       const uchar *key_filter,
-                                       uint key_filter_length, uchar *buf,
-                                       bool *out_applied, bool *out_found,
-                                       bool trusted_exact_unique_filter);
+  int read_exact_unique_index_row_into(
+      uint index_number, const uchar *key_filter, uint key_filter_length,
+      uchar *buf, bool *out_applied, bool *out_found,
+      bool trusted_exact_unique_filter,
+      mylite_exact_unique_cursor_state cursor_state);
   int build_direct_update_key(bool *out_has_key);
   bool use_direct_update_shape_cache();
   void store_direct_update_shape_cache();

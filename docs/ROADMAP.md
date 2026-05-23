@@ -172,7 +172,10 @@ primary-key point-read path. Direct exact unique reads that already copied the
 single matching row into MariaDB's record buffer now publish only minimal
 one-row continuation state instead of initializing unused cursor key and entry
 storage, and skip BLOB payload-slot cleanup because the direct path is limited
-to fixed-row tables without BLOB fields. MariaDB const-table reads through
+to fixed-row tables without BLOB fields. Direct-update exact unique reads now
+skip even that one-row continuation state because the update path needs only the
+matched row id and row image, while ordinary indexed reads still publish cursor
+state for continuation. MariaDB const-table reads through
 `index_read_idx_map()` now use the same guarded direct exact-unique
 materialization path for supported full-key lookups. Exact indexed row lookup
 now borrows the active read statement's decoded catalog view when available,
