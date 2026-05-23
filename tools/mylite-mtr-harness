@@ -224,6 +224,7 @@ storage_tests=(
   mylite.routed_storage_constraints
   mylite.routed_storage_ddl_lifecycle
   mylite.routed_storage_dml_effects
+  mylite.routed_storage_autoincrement
 )
 
 usage() {

@@ -112,22 +112,26 @@ The same harness also exposes a separate storage-routed MTR mode with
 `list-storage`, `run-storage`, and `probe-storage`. That mode uses
 `build/mariadb-mtr-storage-smoke`, enables the static MyLite storage engine only
 for MyLite-owned storage tests, prepares a fresh primary `.mylite` file, and
-currently covers selected engine-alias routing through
+currently covers selected explicit MyLite and engine-alias routing through
 `mylite.routed_storage_engines` plus MyLite-owned schema sidecar absence
 through `mylite.routed_storage_sidecars`, and routed `InnoDB` transaction,
-rollback, commit, and savepoint behavior through
+explicit MyLite transaction, rollback, commit, and savepoint behavior through
 `mylite.routed_storage_transactions`, plus representative routed `InnoDB`
-foreign-key publication and enforcement through
+and explicit MyLite foreign-key publication and enforcement through
 `mylite.routed_storage_foreign_keys`, and representative routed `InnoDB` CHECK
-and generated-column metadata, enforcement, generated values, generated-index
-reads, and generated unique-key diagnostics through
+and explicit MyLite CHECK and generated-column metadata, enforcement, generated
+values, generated-index reads, and generated unique-key diagnostics through
 `mylite.routed_storage_constraints`, plus representative routed `InnoDB` DDL
-lifecycle behavior for `CREATE TABLE ... LIKE`, CTAS, copy `ALTER`, indexed
-reads after rebuild, and `RENAME TABLE` through
+lifecycle behavior plus explicit MyLite DDL lifecycle behavior for
+`CREATE TABLE ... LIKE`, CTAS, copy `ALTER`, indexed reads after rebuild, and
+`RENAME TABLE` through
 `mylite.routed_storage_ddl_lifecycle`, plus representative routed `InnoDB`
-DML statement effects for ODKU, `REPLACE`, keyed `UPDATE`, keyed `DELETE`,
-affected rows, insert ids, and final indexed visibility through
-`mylite.routed_storage_dml_effects`.
+DML statement effects plus explicit MyLite DML statement effects for ODKU,
+`REPLACE`, keyed `UPDATE`, keyed `DELETE`, affected rows, insert ids, and
+final indexed visibility through `mylite.routed_storage_dml_effects`, and
+representative routed `InnoDB` plus explicit MyLite autoincrement generated
+ids, explicit high-value advancement, rollback gaps, offset/increment values,
+and truncate reset through `mylite.routed_storage_autoincrement`.
 It remains outside the default compatibility groups because it builds
 `mariadbd` and several upstream client/support tools. Broader MTR integration
 should be a separate comparison slice with explicit include lists, expected

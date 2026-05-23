@@ -1,0 +1,122 @@
+drop database if exists mylite_mtr_autoincrement;
+create database mylite_mtr_autoincrement;
+use mylite_mtr_autoincrement;
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+create table ai_posts (
+id int not null auto_increment primary key,
+slug varchar(32) not null unique
+) engine=InnoDB;
+create table ai_mylite_posts (
+id int not null auto_increment primary key,
+slug varchar(32) not null unique
+) engine=MYLITE;
+insert into ai_posts (slug) values ('draft'), ('published');
+select row_count() as affected_rows, last_insert_id() as first_id;
+affected_rows	first_id
+2	1
+insert into ai_mylite_posts (slug) values
+('mylite-draft'),
+('mylite-published');
+select row_count() as affected_rows, last_insert_id() as first_id;
+affected_rows	first_id
+2	1
+insert into ai_posts (id, slug) values (10, 'explicit-high');
+select row_count() as affected_rows;
+affected_rows
+1
+insert into ai_posts (slug) values ('after-explicit-high');
+select row_count() as affected_rows, last_insert_id() as generated_id;
+affected_rows	generated_id
+1	11
+insert into ai_mylite_posts (id, slug)
+values (10, 'mylite-explicit-high');
+select row_count() as affected_rows;
+affected_rows
+1
+insert into ai_mylite_posts (slug) values ('mylite-after-explicit-high');
+select row_count() as affected_rows, last_insert_id() as generated_id;
+affected_rows	generated_id
+1	11
+start transaction;
+insert into ai_posts (slug) values ('rolled-back');
+select last_insert_id() as rolled_back_id;
+rolled_back_id
+12
+insert into ai_mylite_posts (slug) values ('mylite-rolled-back');
+select last_insert_id() as rolled_back_id;
+rolled_back_id
+12
+rollback;
+insert into ai_posts (slug) values ('after-rollback');
+select last_insert_id() as after_rollback_id;
+after_rollback_id
+13
+insert into ai_mylite_posts (slug) values ('mylite-after-rollback');
+select last_insert_id() as after_rollback_id;
+after_rollback_id
+13
+select id, slug from ai_posts order by id;
+id	slug
+1	draft
+2	published
+10	explicit-high
+11	after-explicit-high
+13	after-rollback
+select id, slug from ai_mylite_posts order by id;
+id	slug
+1	mylite-draft
+2	mylite-published
+10	mylite-explicit-high
+11	mylite-after-explicit-high
+13	mylite-after-rollback
+set session auto_increment_increment=4;
+set session auto_increment_offset=3;
+create table ai_offset_posts (
+id int not null auto_increment primary key,
+slug varchar(32) not null unique
+) engine=InnoDB;
+create table ai_mylite_offset_posts (
+id int not null auto_increment primary key,
+slug varchar(32) not null unique
+) engine=MYLITE;
+insert into ai_offset_posts (slug) values ('a'), ('b'), ('c');
+select row_count() as affected_rows, last_insert_id() as first_id;
+affected_rows	first_id
+3	3
+insert into ai_mylite_offset_posts (slug)
+values ('mylite-a'), ('mylite-b'), ('mylite-c');
+select row_count() as affected_rows, last_insert_id() as first_id;
+affected_rows	first_id
+3	3
+set session auto_increment_increment=1;
+set session auto_increment_offset=1;
+select id, slug from ai_offset_posts order by id;
+id	slug
+3	a
+7	b
+11	c
+select id, slug from ai_mylite_offset_posts order by id;
+id	slug
+3	mylite-a
+7	mylite-b
+11	mylite-c
+truncate table ai_posts;
+insert into ai_posts (slug) values ('after-truncate');
+select row_count() as affected_rows, last_insert_id() as reset_id;
+affected_rows	reset_id
+1	1
+truncate table ai_mylite_posts;
+insert into ai_mylite_posts (slug) values ('mylite-after-truncate');
+select row_count() as affected_rows, last_insert_id() as reset_id;
+affected_rows	reset_id
+1	1
+select id, slug from ai_posts order by id;
+id	slug
+1	after-truncate
+select id, slug from ai_mylite_posts order by id;
+id	slug
+1	mylite-after-truncate
+drop database mylite_mtr_autoincrement;
