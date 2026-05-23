@@ -16,6 +16,10 @@ a per-file probe result.
   (`9bfea48ce1214cc4470f6f6f8a4e30352cef84e7`).
 - `mariadb/mysql-test/suite/binlog/t` covers binary-log runtime behavior.
 - `mariadb/mysql-test/suite/rpl/t` covers replication runtime behavior.
+- `mariadb/mysql-test/suite/engines/funcs/t/rpl*.test` files either source
+  `suite/rpl/t` cases directly or use replication harness primitives such as
+  `include/master-slave.inc`, `sync_slave_with_master`, `CHANGE MASTER`, slave
+  status, relay-log, and replication cleanup includes.
 - `mariadb/mysql-test/suite/galera*/t` and
   `mariadb/mysql-test/suite/wsrep/t` cover Galera/wsrep runtime behavior.
 - `mariadb/mysql-test/suite/perfschema*/t` covers Performance Schema runtime
@@ -117,11 +121,11 @@ No new dependency and no binary-size change. The harness remains a Bash script.
 - `bash -n tools/mylite-mtr-harness`: passed.
 - `tools/mylite-mtr-harness coverage`: accepted upstream coverage stayed at
   413 of 5,901 imported upstream files, known unsupported upstream files became
-  3,110, and unclassified upstream files dropped to 2,378.
+  3,192, and unclassified upstream files dropped to 2,296.
 - `tools/mylite-mtr-harness list-unsupported` expanded the selector-backed
   categories to concrete rows:
   - `disabled-galera-runtime`: 674 rows.
-  - `replication-surface`: 649 rows.
+  - `replication-surface`: 731 rows.
   - `native-innodb-profile`: 560 rows.
   - `disabled-performance-schema`: 464 rows.
   - `disabled-binlog-runtime`: 155 rows.
@@ -141,7 +145,7 @@ No new dependency and no binary-size change. The harness remains a Bash script.
   `galera_3nodes_sr`, `wsrep`, `perfschema`, `perfschema_stress`, `innodb`,
   `innodb_fts`, `innodb_gis`, `innodb_zip`, `parts`, `compat`, `plugins`,
   `encryption`, `sysschema`, `versioning`, `period`, `mtr`, `stress`, or
-  `large_tests`.
+  `large_tests`; it also no longer prints `engines.rpl*` tests.
 - `git diff --check`: passed.
 
 ## Acceptance Criteria

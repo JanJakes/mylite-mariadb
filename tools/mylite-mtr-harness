@@ -463,6 +463,7 @@ unsupported_test_selectors=(
   "encryption.*|disabled-native-encryption-profile|The upstream encryption suite depends on key-management plugins and native engine, binlog, or tempfile encryption surfaces that are outside the current embedded profile."
   "binlog.*|disabled-binlog-runtime|The upstream binlog suite depends on binary-log runtime behavior, which is intentionally disabled in the embedded profile."
   "rpl.*|replication-surface|The upstream replication suite depends on daemon replication runtime behavior, which is intentionally outside the embedded profile."
+  "engines.rpl*|replication-surface|The upstream engines replication tests source suite/rpl cases or use master/slave orchestration, replication status, and relay-log behavior that are intentionally outside the embedded profile."
   "galera.*|disabled-galera-runtime|The upstream Galera suite depends on wsrep/Galera runtime behavior, which is intentionally disabled in the embedded profile."
   "galera_sr.*|disabled-galera-runtime|The upstream Galera streaming-replication suite depends on wsrep/Galera runtime behavior, which is intentionally disabled in the embedded profile."
   "galera_3nodes.*|disabled-galera-runtime|The upstream multi-node Galera suite depends on wsrep/Galera runtime behavior, which is intentionally disabled in the embedded profile."
