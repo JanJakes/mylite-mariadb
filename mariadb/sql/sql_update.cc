@@ -217,6 +217,10 @@ static bool mylite_prepare_single_update_values(THD *thd, List<Item> &fields,
                                                 List<Item> &values,
                                                 bool ignore,
                                                 bool values_need_setup);
+static bool mylite_is_simple_unique_key_candidate(TABLE *table, KEY *key_info);
+static bool mylite_same_field_name(const char *lhs, uint lhs_length,
+                                   const LEX_CSTRING &rhs);
+static bool mylite_item_tree_contains_item(Item *tree, Item *needle);
 static bool mylite_update_values_need_setup(List<Item> &values);
 static bool mylite_update_value_needs_setup(Item *value);
 static bool mylite_update_needs_explain_plan(THD *thd);
@@ -801,23 +805,15 @@ bool Sql_cmd_update::update_single_table(THD *thd)
   if (do_direct_update && pushed_mylite_direct_update_proof &&
       thd->current_stmt && mylite_schema_hooks_active())
   {
-    mylite_prepared_direct_update_shape_valid= true;
-    mylite_prepared_direct_update_shape_key_number=
-        pushed_mylite_direct_update_key_number;
-    mylite_prepared_direct_update_shape_key_value=
-        pushed_mylite_direct_update_key_value;
-    mylite_prepared_direct_update_shape_condition_guaranteed_by_key=
-        pushed_mylite_direct_update_condition_guaranteed_by_key;
-    mylite_prepared_direct_update_shape_values_need_setup=
-        mylite_update_values_need_setup(*values);
+    store_mylite_prepared_direct_update_shape(
+        table, pushed_mylite_direct_update_key_number,
+        pushed_mylite_direct_update_key_value,
+        pushed_mylite_direct_update_condition_guaranteed_by_key,
+        mylite_update_values_need_setup(*values));
   }
   else
   {
-    mylite_prepared_direct_update_shape_valid= false;
-    mylite_prepared_direct_update_shape_key_number= 0;
-    mylite_prepared_direct_update_shape_key_value= NULL;
-    mylite_prepared_direct_update_shape_condition_guaranteed_by_key= false;
-    mylite_prepared_direct_update_shape_values_need_setup= false;
+    clear_mylite_prepared_direct_update_shape();
   }
 
   if (!do_direct_update && select &&
@@ -1647,6 +1643,192 @@ bool unsafe_key_update(List<TABLE_LIST> leaves, table_map tables_for_update)
           }
         }
       }
+    }
+  }
+  return false;
+}
+
+bool Sql_cmd_update::mylite_rebind_prepared_direct_update_shape(
+    THD *thd, TABLE_LIST *table_list, SELECT_LEX *select_lex,
+    bool elide_result)
+{
+  if (!mylite_prepared_direct_update_shape_valid)
+    return false;
+
+  Item *condition= select_lex ? select_lex->where_cond_after_prepare : NULL;
+  TABLE *table= table_list ? table_list->table : NULL;
+  if (!thd || !thd->current_stmt || !mylite_schema_hooks_active() ||
+      mylite_update_needs_explain_plan(thd) || !elide_result || multitable ||
+      !condition || !table ||
+      !mylite_prepared_direct_update_shape_matches(table, condition))
+  {
+    clear_mylite_prepared_direct_update_shape();
+    return false;
+  }
+
+  mylite_update_exact_key_proof_cache.valid= true;
+  mylite_update_exact_key_proof_cache.cond= condition;
+  mylite_update_exact_key_proof_cache.key_number=
+      mylite_prepared_direct_update_shape_key_number;
+  mylite_update_exact_key_proof_cache.value=
+      mylite_prepared_direct_update_shape_key_value;
+  mylite_update_exact_key_proof_cache.condition_guaranteed_by_key=
+      mylite_prepared_direct_update_shape_condition_guaranteed_by_key;
+  return true;
+}
+
+bool Sql_cmd_update::mylite_prepared_direct_update_shape_matches(
+    TABLE *table, Item *condition)
+{
+  if (!table || !table->s || !table->file ||
+      mylite_prepared_direct_update_shape_table_ref_type !=
+          table->s->get_table_ref_type() ||
+      mylite_prepared_direct_update_shape_table_ref_version !=
+          table->s->get_table_ref_version() ||
+      mylite_prepared_direct_update_shape_key_number >= table->s->keys ||
+      !mylite_prepared_direct_update_shape_key_value ||
+      !mylite_prepared_direct_update_shape_key_field_name_length ||
+      mylite_update_values_need_setup(lex->value_list) !=
+          mylite_prepared_direct_update_shape_values_need_setup ||
+      !(table->file->ha_table_flags() & HA_CAN_DIRECT_UPDATE_AND_DELETE))
+  {
+    return false;
+  }
+
+  KEY *key_info=
+      table->key_info + mylite_prepared_direct_update_shape_key_number;
+  if (!mylite_is_simple_unique_key_candidate(table, key_info))
+    return false;
+
+  Field *key_field= key_info->key_part[0].field;
+  return key_field &&
+         key_field->field_index ==
+             mylite_prepared_direct_update_shape_key_field_index &&
+         mylite_same_field_name(
+             mylite_prepared_direct_update_shape_key_field_name,
+             mylite_prepared_direct_update_shape_key_field_name_length,
+             key_field->field_name) &&
+         mylite_item_tree_contains_item(
+             condition, mylite_prepared_direct_update_shape_key_value);
+}
+
+void Sql_cmd_update::store_mylite_prepared_direct_update_shape(
+    TABLE *table, uint key_number, Item *key_value,
+    bool condition_guaranteed_by_key, bool values_need_setup)
+{
+  if (!table || !table->s || key_number >= table->s->keys || !key_value)
+  {
+    clear_mylite_prepared_direct_update_shape();
+    return;
+  }
+
+  KEY *key_info= table->key_info + key_number;
+  if (!mylite_is_simple_unique_key_candidate(table, key_info))
+  {
+    clear_mylite_prepared_direct_update_shape();
+    return;
+  }
+
+  Field *key_field= key_info->key_part[0].field;
+  if (!key_field || !key_field->field_name.str)
+  {
+    clear_mylite_prepared_direct_update_shape();
+    return;
+  }
+
+  const uint key_field_name_length= key_field->field_name.length;
+  if (key_field_name_length > NAME_LEN)
+  {
+    clear_mylite_prepared_direct_update_shape();
+    return;
+  }
+
+  mylite_prepared_direct_update_shape_valid= true;
+  mylite_prepared_direct_update_shape_table_ref_type=
+      table->s->get_table_ref_type();
+  mylite_prepared_direct_update_shape_table_ref_version=
+      table->s->get_table_ref_version();
+  mylite_prepared_direct_update_shape_key_number= key_number;
+  mylite_prepared_direct_update_shape_key_field_index= key_field->field_index;
+  mylite_prepared_direct_update_shape_key_field_name_length=
+      key_field_name_length;
+  memcpy(mylite_prepared_direct_update_shape_key_field_name,
+         key_field->field_name.str, key_field_name_length);
+  mylite_prepared_direct_update_shape_key_field_name[key_field_name_length]=
+      '\0';
+  mylite_prepared_direct_update_shape_key_value= key_value;
+  mylite_prepared_direct_update_shape_condition_guaranteed_by_key=
+      condition_guaranteed_by_key;
+  mylite_prepared_direct_update_shape_values_need_setup= values_need_setup;
+}
+
+void Sql_cmd_update::clear_mylite_prepared_direct_update_shape()
+{
+  mylite_update_exact_key_proof_cache.valid= false;
+  mylite_prepared_direct_update_shape_valid= false;
+  mylite_prepared_direct_update_shape_table_ref_type= 0;
+  mylite_prepared_direct_update_shape_table_ref_version= 0;
+  mylite_prepared_direct_update_shape_key_number= 0;
+  mylite_prepared_direct_update_shape_key_field_index= 0;
+  mylite_prepared_direct_update_shape_key_field_name_length= 0;
+  mylite_prepared_direct_update_shape_key_field_name[0]= '\0';
+  mylite_prepared_direct_update_shape_key_value= NULL;
+  mylite_prepared_direct_update_shape_condition_guaranteed_by_key= false;
+  mylite_prepared_direct_update_shape_values_need_setup= false;
+}
+
+static bool mylite_is_simple_unique_key_candidate(TABLE *table, KEY *key_info)
+{
+  if ((key_info->algorithm != HA_KEY_ALG_UNDEF &&
+       key_info->algorithm != HA_KEY_ALG_BTREE) ||
+      table->actual_n_key_parts(key_info) != 1 ||
+      key_info->user_defined_key_parts != 1 ||
+      key_info->key_length > MAX_KEY_LENGTH)
+    return false;
+
+  const ulong key_flags= table->actual_key_flags(key_info);
+  if ((key_flags & (HA_NOSAME | HA_NULL_PART_KEY)) != HA_NOSAME)
+    return false;
+
+  KEY_PART_INFO *key_part= key_info->key_part;
+  return key_part->field && !key_part->field->vcol_info &&
+         key_part->length == key_part->field->key_length() &&
+         key_part->store_length == key_info->key_length &&
+         !(key_part->key_part_flag & (HA_BLOB_PART | HA_VAR_LENGTH_PART));
+}
+
+static bool mylite_same_field_name(const char *lhs, uint lhs_length,
+                                   const LEX_CSTRING &rhs)
+{
+  return lhs && rhs.str && lhs_length == rhs.length &&
+         !memcmp(lhs, rhs.str, lhs_length);
+}
+
+static bool mylite_item_tree_contains_item(Item *tree, Item *needle)
+{
+  if (!tree || !needle)
+    return false;
+  if (tree == needle)
+    return true;
+
+  if (tree->type() == Item::COND_ITEM)
+  {
+    Item_cond *condition= static_cast<Item_cond *>(tree);
+    List_iterator_fast<Item> it(*condition->argument_list());
+    while (Item *arg= it++)
+    {
+      if (mylite_item_tree_contains_item(arg, needle))
+        return true;
+    }
+    return false;
+  }
+
+  if (Item_func *func= tree->get_item_func())
+  {
+    for (uint i= 0; i < func->argument_count(); ++i)
+    {
+      if (mylite_item_tree_contains_item(func->arguments()[i], needle))
+        return true;
     }
   }
   return false;
@@ -3375,6 +3557,21 @@ bool Sql_cmd_update::prepare_inner(THD *thd)
     if (!multitable &&
         select_lex->sj_subselects.elements)
       multitable= true;
+  }
+
+  if (mylite_prepared_direct_update_shape_valid)
+  {
+    TABLE *mylite_rebind_table= table_list ? table_list->table : NULL;
+    if (!mylite_update_exact_key_proof_cache.valid ||
+        mylite_update_exact_key_proof_cache.cond !=
+            select_lex->where_cond_after_prepare ||
+        !mylite_rebind_table || !mylite_rebind_table->s ||
+        mylite_prepared_direct_update_shape_table_ref_type !=
+            mylite_rebind_table->s->get_table_ref_type() ||
+        mylite_prepared_direct_update_shape_table_ref_version !=
+            mylite_rebind_table->s->get_table_ref_version())
+      mylite_rebind_prepared_direct_update_shape(thd, table_list, select_lex,
+                                                 elide_single_update_result);
   }
 
   if (elide_single_update_result)

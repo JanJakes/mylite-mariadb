@@ -97,6 +97,17 @@ private:
   */
   bool update_single_table(THD *thd);
 
+  bool mylite_rebind_prepared_direct_update_shape(THD *thd,
+                                                  TABLE_LIST *table_list,
+                                                  SELECT_LEX *select_lex,
+                                                  bool elide_result);
+  bool mylite_prepared_direct_update_shape_matches(TABLE *table,
+                                                   Item *condition);
+  void store_mylite_prepared_direct_update_shape(
+      TABLE *table, uint key_number, Item *key_value,
+      bool condition_guaranteed_by_key, bool values_need_setup);
+  void clear_mylite_prepared_direct_update_shape();
+
   bool mylite_update_values_have_subquery(List<Item> &values);
   bool mylite_update_values_need_setup(List<Item> &values);
 
@@ -120,7 +131,12 @@ private:
   bool mylite_update_values_need_setup_known{false};
   bool mylite_update_values_need_setup_cached{false};
   bool mylite_prepared_direct_update_shape_valid{false};
+  uint mylite_prepared_direct_update_shape_table_ref_type{0};
+  ulonglong mylite_prepared_direct_update_shape_table_ref_version{0};
   uint mylite_prepared_direct_update_shape_key_number{0};
+  uint mylite_prepared_direct_update_shape_key_field_index{0};
+  uint mylite_prepared_direct_update_shape_key_field_name_length{0};
+  char mylite_prepared_direct_update_shape_key_field_name[NAME_LEN + 1]{0};
   Item *mylite_prepared_direct_update_shape_key_value{NULL};
   bool mylite_prepared_direct_update_shape_condition_guaranteed_by_key{false};
   bool mylite_prepared_direct_update_shape_values_need_setup{false};

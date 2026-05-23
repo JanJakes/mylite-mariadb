@@ -135,6 +135,21 @@ prepared-direct-update shape fields. The cache is cleared whenever the current
 execution does not take that accepted MyLite proof path. Later rebind work must
 validate these cached facts against the freshly opened table before using them.
 
+The second implementation step adds that validation boundary without enabling
+the direct execution shortcut. Accepted normal executions now also record the
+accepted key field index and field name. On later executions, when MariaDB's
+existing proof-cache condition pointer no longer matches the current prepared
+condition tree, `Sql_cmd_update` validates the cached key number, key field
+fingerprint, MariaDB table reference type/version, simple unique-key shape,
+value-list setup classification, and key value item against the freshly opened
+table and current condition tree before retargeting the exact-key proof cache
+to the current condition. Simple prepared updates whose existing
+condition-pointer proof and table reference are still current skip this extra
+validation so the hottest row-only update loop does not pay for future
+shortcut scaffolding. Clearing the prepared shape also clears the SQL-layer
+exact-key proof cache, so unsupported or changed shapes fail closed into the
+normal MariaDB update path.
+
 ## Non-Goals
 
 - Retain `TABLE *`, MDL tickets, handler objects, `JOIN` objects, row buffers,
@@ -221,17 +236,18 @@ storage-smoke `libmariadbd.a` size before keeping an implementation.
   performance win.
 - Run `git diff --check` and formatting checks for touched C/C++ files.
 
-Current first-step verification:
+Current validation-step verification:
 
 - The prepared direct-update shape cache is populated only after the normal
   MyLite exact-key direct-update proof is accepted by the handler path.
-- The cache is not used for execution yet, so there is no SQL-visible behavior
-  change in this step.
+- The cache is not used for direct execution yet. It is used only to retarget
+  the SQL-layer exact-key proof cache after validating the current opened table
+  shape, so there is no intended SQL-visible behavior change in this step.
 - `git diff --check` passed.
 - `git clang-format --diff HEAD -- mariadb/sql/sql_update.cc
   mariadb/sql/sql_update.h` passed.
 - `cmake --build build/mariadb-mylite-storage-smoke --target
-  libmariadbd.a` passed; resulting archive size is 21,275,792 bytes.
+  libmariadbd.a` passed; resulting archive size is 21,278,896 bytes.
 - `cmake --build --preset storage-smoke-dev --target
   mylite_embedded_statement_test mylite_embedded_storage_engine_test
   mylite_perf_baseline` passed.
@@ -243,7 +259,7 @@ Current first-step verification:
 - `ctest --preset storage-smoke-dev --output-on-failure` passed 10/10.
 - `build/storage-smoke-dev/tools/mylite_perf_baseline
   --phase=prepared-row-only-update-components 10000 1000000` measured the
-  prepared row-only update step at 1.547 us/op.
+  prepared row-only update step at 1.556 us/op.
 
 Current safety-net coverage extends
 `test_prepared_primary_key_update_rebinds()` before enabling the shortcut. The
@@ -254,7 +270,10 @@ recovery, generated-column index maintenance, transaction rollback, secondary
 index, prefix index, duplicate-key, metadata reprepare after `ALTER TABLE`,
 same-name temporary-table shadowing, and stable foreign-key paths. Future
 rebind work should extend that test instead of replacing it, and must keep the
-existing MariaDB fallback semantics visible for every unsupported shape.
+existing MariaDB fallback semantics visible for every unsupported shape. The
+shadowing coverage includes a same-name temporary table with a different
+primary-key field so stale exact-key proof reuse cannot update the wrong row
+after a table-reference change.
 
 ## Acceptance Criteria
 

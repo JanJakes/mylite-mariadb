@@ -1116,6 +1116,12 @@ metadata reprepare, and same-name temporary-table shadowing.
 the normal path for embedded prepared statements, giving the rebind work an
 explicit cache to validate against freshly opened tables instead of relying on
 transient range-planner state.
+That shape cache now records a key-field fingerprint and can validate it
+against the freshly opened table and MariaDB table reference before retargeting
+the SQL-layer exact-key proof cache to a copied prepared-condition tree. The
+actual direct execution shortcut is still disabled, but the next step has an
+explicit fail-closed fresh-table rebind boundary instead of stale `TABLE`,
+`JOIN`, or range-planner state.
 The first implementation step caches the immutable prepared-update value-list
 subquery shape on `Sql_cmd_update`, avoiding repeated value-list scans before
 the MyLite single-update result-elision gate. The next step skips value-list
