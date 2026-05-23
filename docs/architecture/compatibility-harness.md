@@ -137,7 +137,10 @@ absence through `mylite.routed_storage_unsupported_engines`, and representative
 unsupported FULLTEXT/SPATIAL index rejection through
 `mylite.routed_storage_unsupported_indexes`, plus representative raw
 MEMORY/HEAP volatile transaction, savepoint, failed-statement rollback, and
-autoincrement gap behavior through `mylite.routed_storage_volatile_transactions`.
+autoincrement gap behavior through
+`mylite.routed_storage_volatile_transactions`, plus representative raw
+partition-definition rejection and failed table metadata absence through
+`mylite.routed_storage_partitions`.
 It remains outside the default compatibility groups because it builds
 `mariadbd` and several upstream client/support tools. Broader MTR integration
 should be a separate comparison slice with explicit include lists, expected

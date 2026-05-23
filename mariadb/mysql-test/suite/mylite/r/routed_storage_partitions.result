@@ -1,0 +1,33 @@
+drop database if exists mylite_mtr_partitions;
+create database mylite_mtr_partitions;
+use mylite_mtr_partitions;
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+create table posts (
+id int not null primary key,
+title varchar(32) not null
+) engine=InnoDB;
+insert into posts values (1, 'kept');
+create table partitioned_posts (
+id int not null primary key,
+title varchar(32) not null
+) engine=InnoDB
+partition by hash (id) partitions 2;
+Got one of the listed errors
+alter table posts partition by hash (id) partitions 2;
+Got one of the listed errors
+select id, title from posts;
+id	title
+1	kept
+show tables;
+Tables_in_mylite_mtr_partitions
+posts
+select table_name
+from information_schema.tables
+where table_schema = 'mylite_mtr_partitions'
+  and table_name = 'partitioned_posts'
+order by table_name;
+table_name
+drop database mylite_mtr_partitions;

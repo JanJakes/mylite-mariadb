@@ -1,0 +1,48 @@
+#
+# Check routed partition DDL rejection under raw embedded MTR execution.
+#
+
+--disable_warnings
+drop database if exists mylite_mtr_partitions;
+--enable_warnings
+
+create database mylite_mtr_partitions;
+use mylite_mtr_partitions;
+
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+
+--let $mylite_sidecar_schema= mylite_mtr_partitions
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+create table posts (
+  id int not null primary key,
+  title varchar(32) not null
+) engine=InnoDB;
+insert into posts values (1, 'kept');
+
+--error ER_CHECK_NOT_IMPLEMENTED,ER_FEATURE_DISABLED,ER_NOT_SUPPORTED_YET
+create table partitioned_posts (
+  id int not null primary key,
+  title varchar(32) not null
+) engine=InnoDB
+partition by hash (id) partitions 2;
+
+--error ER_CHECK_NOT_IMPLEMENTED,ER_FEATURE_DISABLED,ER_NOT_SUPPORTED_YET
+alter table posts partition by hash (id) partitions 2;
+
+select id, title from posts;
+show tables;
+select table_name
+from information_schema.tables
+where table_schema = 'mylite_mtr_partitions'
+  and table_name = 'partitioned_posts'
+order by table_name;
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+drop database mylite_mtr_partitions;
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
