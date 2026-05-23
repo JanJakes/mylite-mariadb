@@ -16,6 +16,17 @@ title varchar(32) not null,
 key parent_idx (parent_id),
 constraint child_parent_fk foreign key (parent_id) references parents (id)
 ) engine=InnoDB;
+create table mylite_parents (
+id int not null primary key,
+title varchar(32) not null unique
+) engine=MYLITE;
+create table mylite_children (
+id int not null primary key,
+parent_id int not null,
+title varchar(32) not null,
+key parent_idx (parent_id),
+constraint mylite_child_parent_fk foreign key (parent_id) references mylite_parents (id)
+) engine=MYLITE;
 show create table children;
 Table	Create Table
 children	CREATE TABLE `children` (
@@ -26,23 +37,52 @@ children	CREATE TABLE `children` (
   KEY `parent_idx` (`parent_id`),
   CONSTRAINT `child_parent_fk` FOREIGN KEY (`parent_id`) REFERENCES `parents` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+show create table mylite_children;
+Table	Create Table
+mylite_children	CREATE TABLE `mylite_children` (
+  `id` int(11) NOT NULL,
+  `parent_id` int(11) NOT NULL,
+  `title` varchar(32) NOT NULL,
+  PRIMARY KEY (`id`),
+  KEY `parent_idx` (`parent_id`),
+  CONSTRAINT `mylite_child_parent_fk` FOREIGN KEY (`parent_id`) REFERENCES `mylite_parents` (`id`)
+) ENGINE=MYLITE DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
 insert into parents values (1, 'parent');
 insert into children values (1, 1, 'child');
+insert into mylite_parents values (1, 'mylite-parent');
+insert into mylite_children values (1, 1, 'mylite-child');
 insert into children values (2, 2, 'orphan');
 ERROR 23000: Cannot add or update a child row: a foreign key constraint fails
+insert into mylite_children values (2, 2, 'mylite-orphan');
+ERROR 23000: Cannot add or update a child row: a foreign key constraint fails
 delete from parents where id = 1;
+ERROR 23000: Cannot delete or update a parent row: a foreign key constraint fails
+delete from mylite_parents where id = 1;
 ERROR 23000: Cannot delete or update a parent row: a foreign key constraint fails
 select p.id as parent_id, c.id as child_id
 from parents p join children c on c.parent_id = p.id
 order by p.id, c.id;
 parent_id	child_id
 1	1
+select p.id as parent_id, c.id as child_id
+from mylite_parents p join mylite_children c on c.parent_id = p.id
+order by p.id, c.id;
+parent_id	child_id
+1	1
 alter table children drop foreign key child_parent_fk;
 delete from parents where id = 1;
+alter table mylite_children drop foreign key mylite_child_parent_fk;
+delete from mylite_parents where id = 1;
 select count(*) as parent_rows from parents;
 parent_rows
 0
 select id, parent_id, title from children order by id;
 id	parent_id	title
 1	1	child
+select count(*) as parent_rows from mylite_parents;
+parent_rows
+0
+select id, parent_id, title from mylite_children order by id;
+id	parent_id	title
+1	1	mylite-child
 drop database mylite_mtr_foreign_keys;

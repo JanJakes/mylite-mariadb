@@ -4,9 +4,10 @@
 
 MyLite has first-party routed-storage foreign-key coverage, but the
 storage-routed MTR suite does not yet prove that raw embedded MTR execution can
-create and enforce a representative `ENGINE=InnoDB` foreign key through the
-MyLite handler. This leaves the MTR storage runner focused on basic engine
-routing and transaction behavior rather than relational integrity.
+create and enforce representative `ENGINE=InnoDB` and explicit
+`ENGINE=MYLITE` foreign keys through the MyLite handler. This leaves the MTR
+storage runner focused on basic engine routing and transaction behavior rather
+than relational integrity.
 
 ## Source Findings
 
@@ -15,7 +16,8 @@ routing and transaction behavior rather than relational integrity.
 - `mariadb/storage/mylite/ha_mylite.cc::mylite_init_func()` advertises
   `HTON_SUPPORTS_FOREIGN_KEYS` for the MyLite handlerton.
 - `mariadb/storage/mylite/ha_mylite.cc::mylite_supported_engine_request()`
-  accepts `InnoDB` as a requested engine routed to MyLite storage.
+  accepts `InnoDB` and explicit `MYLITE` as requested engines routed to MyLite
+  storage.
 - `mariadb/storage/mylite/ha_mylite.cc` validates supported FK definitions in
   `mylite_validate_foreign_key_definitions()` during routed table creation and
   copy ALTER.
@@ -30,11 +32,11 @@ routing and transaction behavior rather than relational integrity.
 ## Design
 
 Add `mylite.routed_storage_foreign_keys` to the storage MTR list. The test
-creates `ENGINE=InnoDB` parent and child tables while MyLite is the enforced
-storage engine, checks `SHOW CREATE TABLE` FK publication, verifies child
-orphan insert rejection, verifies parent delete rejection while referenced,
-then drops the FK and confirms the parent can be deleted without native
-sidecars.
+creates `ENGINE=InnoDB` and explicit `ENGINE=MYLITE` parent/child table pairs
+while MyLite is the enforced storage engine, checks `SHOW CREATE TABLE` FK
+publication, verifies child orphan insert rejection, verifies parent delete
+rejection while referenced, then drops the FK and confirms each parent can be
+deleted without native sidecars.
 
 ## Scope
 
@@ -46,8 +48,8 @@ actions, or full InnoDB parity.
 ## Compatibility Impact
 
 The new test backs the compatibility claim that application DDL using
-`ENGINE=InnoDB` can route to MyLite storage while retaining representative
-foreign-key metadata and enforcement.
+`ENGINE=InnoDB` or explicit `ENGINE=MYLITE` can route to MyLite storage while
+retaining representative foreign-key metadata and enforcement.
 
 ## Storage And Lifecycle Impact
 
@@ -67,3 +69,8 @@ native `.frm`, `.ibd`, MyISAM, Aria, binlog, and relay-log files.
 - The new storage MTR FK test passes.
 - The full storage-routed MTR list passes.
 - Compatibility docs mention routed FK coverage in storage MTR mode.
+
+## Verification Results
+
+- `tools/mylite-mtr-harness probe-storage mylite.routed_storage_foreign_keys`
+  passed after adding explicit `ENGINE=MYLITE` FK coverage.

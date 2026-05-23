@@ -30,26 +30,53 @@ create table children (
   constraint child_parent_fk foreign key (parent_id) references parents (id)
 ) engine=InnoDB;
 
+create table mylite_parents (
+  id int not null primary key,
+  title varchar(32) not null unique
+) engine=MYLITE;
+
+create table mylite_children (
+  id int not null primary key,
+  parent_id int not null,
+  title varchar(32) not null,
+  key parent_idx (parent_id),
+  constraint mylite_child_parent_fk foreign key (parent_id) references mylite_parents (id)
+) engine=MYLITE;
+
 show create table children;
+show create table mylite_children;
 
 insert into parents values (1, 'parent');
 insert into children values (1, 1, 'child');
+insert into mylite_parents values (1, 'mylite-parent');
+insert into mylite_children values (1, 1, 'mylite-child');
 
 --error ER_NO_REFERENCED_ROW_2
 insert into children values (2, 2, 'orphan');
+--error ER_NO_REFERENCED_ROW_2
+insert into mylite_children values (2, 2, 'mylite-orphan');
 
 --error ER_ROW_IS_REFERENCED_2
 delete from parents where id = 1;
+--error ER_ROW_IS_REFERENCED_2
+delete from mylite_parents where id = 1;
 
 select p.id as parent_id, c.id as child_id
 from parents p join children c on c.parent_id = p.id
 order by p.id, c.id;
+select p.id as parent_id, c.id as child_id
+from mylite_parents p join mylite_children c on c.parent_id = p.id
+order by p.id, c.id;
 
 alter table children drop foreign key child_parent_fk;
 delete from parents where id = 1;
+alter table mylite_children drop foreign key mylite_child_parent_fk;
+delete from mylite_parents where id = 1;
 
 select count(*) as parent_rows from parents;
 select id, parent_id, title from children order by id;
+select count(*) as parent_rows from mylite_parents;
+select id, parent_id, title from mylite_children order by id;
 
 --source suite/mylite/include/assert_no_routed_storage_sidecars.inc
 
