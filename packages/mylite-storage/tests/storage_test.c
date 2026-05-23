@@ -345,6 +345,7 @@ static void test_maintained_index_root_overflow_tail(void);
 static void test_maintained_index_root_transaction_rollback(void);
 static void test_batched_index_leaf_pages(void);
 static void test_multi_page_index_leaf_pages(void);
+static void test_branch_prefix_lookup_uses_root_page(void);
 static void test_multi_page_index_leaf_duplicate_boundaries(void);
 static void test_full_index_reads_use_leaf_runs(void);
 static void assert_index_prefix_exists(
@@ -755,6 +756,7 @@ int main(void) {
     test_maintained_index_root_transaction_rollback();
     test_batched_index_leaf_pages();
     test_multi_page_index_leaf_pages();
+    test_branch_prefix_lookup_uses_root_page();
     test_multi_page_index_leaf_duplicate_boundaries();
     test_full_index_reads_use_leaf_runs();
     test_autoincrement_state();
@@ -10009,6 +10011,117 @@ static void test_multi_page_index_leaf_pages(void) {
     assert(mylite_storage_store_index_root(filename, &stale_leaf_root) == MYLITE_STORAGE_OK);
     assert_index_root(filename, "app", "posts", 0U, immutable_branch_root_page, entry_count - 1ULL);
 
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+}
+
+static void test_branch_prefix_lookup_uses_root_page(void) {
+    enum { entry_count = 1200U };
+
+    static const unsigned char definition[] = {0x01U, 'f', 'r', 'm', 0x00U};
+    char *root = make_temp_root();
+    char *filename = path_join(root, "branch-prefix-lookup.mylite");
+    mylite_storage_table_definition table_definition = {
+        .size = sizeof(table_definition),
+        .schema_name = "app",
+        .table_name = "posts",
+        .requested_engine_name = "MYLITE",
+        .effective_engine_name = "MYLITE",
+        .definition = definition,
+        .definition_size = sizeof(definition),
+    };
+    unsigned long long row_ids[entry_count];
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_store_table_definition(filename, &table_definition) == MYLITE_STORAGE_OK);
+    for (unsigned i = 0U; i < entry_count; ++i) {
+        unsigned char row[8] = {0};
+        unsigned char key[4] = {0};
+        put_test_u32_le(row, 0U, i + 1U);
+        put_test_u32_le(key, 0U, i + 1U);
+        mylite_storage_index_entry index_entry = {
+            .size = sizeof(index_entry),
+            .index_number = 0U,
+            .key = key,
+            .key_size = sizeof(key),
+        };
+        assert(
+            mylite_storage_append_row_with_index_entries(
+                filename,
+                "app",
+                "posts",
+                row,
+                sizeof(row),
+                &index_entry,
+                1U,
+                &row_ids[i]
+            ) == MYLITE_STORAGE_OK
+        );
+    }
+
+    assert(mylite_storage_rebuild_index_leaf(filename, "app", "posts", 0U) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    const size_t entry_capacity =
+        (MYLITE_STORAGE_FORMAT_PAGE_SIZE - MYLITE_STORAGE_FORMAT_INDEX_LEAF_PAYLOAD_OFFSET) /
+        (MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_HEADER_SIZE + 4U);
+    const size_t expected_leaf_pages = ((entry_count - 1U) / entry_capacity) + 1U;
+    assert(expected_leaf_pages >= 4U);
+    const size_t expected_branch_pages = expected_leaf_pages + 1U;
+    const unsigned long long immutable_branch_root_page =
+        header.page_count - (unsigned long long)expected_branch_pages;
+    assert_index_root_page_type(
+        filename,
+        immutable_branch_root_page,
+        MYLITE_STORAGE_FORMAT_INDEX_PAGE_TYPE_TABLE_INDEX_BRANCH
+    );
+
+    const unsigned last_page_first_value =
+        (unsigned)(((expected_leaf_pages - 1U) * entry_capacity) + 1U);
+    assert(last_page_first_value <= entry_count);
+    unsigned char last_page_first_key[4] = {0};
+    put_test_u32_le(last_page_first_key, 0U, last_page_first_value);
+
+    const unsigned long long corrupt_child_offset = (unsigned long long)(expected_leaf_pages / 2U);
+    assert(corrupt_child_offset != 0ULL);
+    assert(corrupt_child_offset + 1ULL < (unsigned long long)expected_leaf_pages);
+    const unsigned long long corrupt_leaf_page =
+        immutable_branch_root_page + 1ULL + corrupt_child_offset;
+    assert(corrupt_leaf_page <= (unsigned long long)LONG_MAX / MYLITE_STORAGE_FORMAT_PAGE_SIZE);
+
+    mylite_storage_clear_thread_caches();
+    flip_file_byte(
+        filename,
+        (long)(corrupt_leaf_page * MYLITE_STORAGE_FORMAT_PAGE_SIZE) +
+            MYLITE_STORAGE_FORMAT_INDEX_LEAF_CHECKSUM_OFFSET
+    );
+
+    const unsigned char *expected_keys[] = {last_page_first_key};
+    const unsigned long long expected_row_ids[] = {row_ids[last_page_first_value - 1U]};
+    assert_prefix_index_entries(
+        filename,
+        0U,
+        last_page_first_key,
+        sizeof(last_page_first_key),
+        expected_keys,
+        sizeof(last_page_first_key),
+        expected_row_ids,
+        sizeof(expected_row_ids) / sizeof(expected_row_ids[0])
+    );
+    assert_index_prefix_exists_for_index(
+        filename,
+        0U,
+        last_page_first_key,
+        sizeof(last_page_first_key),
+        0ULL,
+        1
+    );
+
+    mylite_storage_clear_thread_caches();
     assert(unlink(filename) == 0);
     assert(rmdir(root) == 0);
     free(filename);

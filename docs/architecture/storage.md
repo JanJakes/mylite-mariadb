@@ -201,6 +201,8 @@ SQL layer asks for a row. When a catalog-backed published leaf run exists for
 a raw fixed-width key, full durable index cursor construction uses that
 immutable run as the base snapshot and overlays later append-tail mutations,
 rather than rebuilding the same index from the whole append history.
+Single-level branch roots over those leaf runs choose exact-key and prefix
+lower-bound child pages when the rebuilt snapshot fits in one branch page.
 `TRUNCATE TABLE` logically
 deletes live rows and resets autoincrement state without changing catalog
 metadata. Ordinary `CREATE TABLE IF NOT EXISTS` creates missing routed tables
@@ -1081,10 +1083,11 @@ Static no-tail prefix-existence checks use leaf-run page bounds before the
 existing allocation-free page-local prefix check.
 Durable exact lookups classify each
 published append-only page once and prune candidates as later row-state pages
-hide older row ids. Contiguous index leaf runs can serve as exact lookup base
-snapshots by searching run page key ranges and walking only duplicate-spanning
-neighbor pages, with only pages appended after the published run scanned as a
-visibility overlay; missing roots fall back to the append-only scan path.
+hide older row ids. Contiguous index leaf runs can serve as exact and prefix
+lookup base snapshots by searching run page key ranges, or by using a
+single-level branch root's high key fences when one is published, with only
+pages appended after the published run scanned as a visibility overlay; missing
+roots fall back to the append-only scan path.
 Copy-rebuild DDL publishes supported fixed-width leaf roots for every current
 key that fits the raw format in the rebuilt table, including retained primary
 keys after forced rebuilds, by scanning the append history once for the table's

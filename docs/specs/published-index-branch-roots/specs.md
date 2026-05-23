@@ -104,8 +104,9 @@ ctest --test-dir build/storage-smoke-dev -R 'mylite-storage|libmylite.embedded-s
   design with fanout, split, merge, and recovery tests.
 - Branch roots are published by rebuild only. Row-DML maintenance still updates
   maintained single-page roots or append-tail overlays.
-- Prefix reads still use existing leaf-run page-range search; a later slice
-  should use branch fences for prefix lower-bound selection.
+- Prefix lower-bound selection is covered by the follow-up
+  `branch-assisted-prefix-lookup` slice. Multi-level branch navigation remains
+  pending.
 
 ## Implementation Notes
 
