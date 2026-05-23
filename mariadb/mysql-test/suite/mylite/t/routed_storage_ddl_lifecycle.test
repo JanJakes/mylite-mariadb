@@ -1,0 +1,69 @@
+#
+# Check routed MyLite DDL lifecycle behavior under raw embedded MTR execution.
+#
+
+--disable_warnings
+drop database if exists mylite_mtr_ddl_lifecycle;
+--enable_warnings
+
+create database mylite_mtr_ddl_lifecycle;
+use mylite_mtr_ddl_lifecycle;
+
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+
+--let $mylite_sidecar_schema= mylite_mtr_ddl_lifecycle
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+create table lifecycle_posts (
+  id int not null primary key,
+  title varchar(32) not null,
+  rating int not null,
+  unique key title_key (title)
+) engine=InnoDB;
+
+insert into lifecycle_posts values
+  (1, 'draft', 3),
+  (2, 'published', 5);
+
+show create table lifecycle_posts;
+
+create table like_posts like lifecycle_posts;
+insert into like_posts select * from lifecycle_posts;
+
+show create table like_posts;
+
+create table ctas_posts engine=InnoDB as
+select id, title
+from lifecycle_posts
+where rating >= 4;
+
+show create table ctas_posts;
+select id, title from ctas_posts order by id;
+
+alter table like_posts
+  add column summary varchar(32) not null default 'fresh',
+  add key rating_key (rating),
+  algorithm=copy;
+
+select id, title, rating, summary
+from like_posts force index (rating_key)
+where rating = 5;
+
+rename table like_posts to renamed_like_posts;
+
+show create table renamed_like_posts;
+
+select id, title, rating, summary
+from renamed_like_posts force index (rating_key)
+where rating >= 3
+order by id;
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc
+
+drop table ctas_posts, renamed_like_posts, lifecycle_posts;
+drop database mylite_mtr_ddl_lifecycle;
+
+--source suite/mylite/include/assert_no_routed_storage_sidecars.inc

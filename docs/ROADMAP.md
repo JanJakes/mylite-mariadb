@@ -50,7 +50,9 @@ covers selected engine-alias DDL/DML routing, sidecar absence, and routed
 against a static MyLite storage-engine build with a primary `.mylite` file. It
 also covers representative routed `InnoDB` CHECK and generated-column
 metadata, enforcement, generated values, generated-index reads, and generated
-unique-key diagnostics through the same raw embedded storage path.
+unique-key diagnostics through the same raw embedded storage path, plus
+representative routed `InnoDB` DDL lifecycle behavior for LIKE, CTAS, copy
+`ALTER`, indexed reads after rebuild, and `RENAME TABLE`.
 
 Recent row and index storage performance slices include lazy handler row
 materialization from index cursors, deferred durable row-page validation for

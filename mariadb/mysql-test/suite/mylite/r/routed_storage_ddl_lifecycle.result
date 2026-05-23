@@ -1,0 +1,79 @@
+drop database if exists mylite_mtr_ddl_lifecycle;
+create database mylite_mtr_ddl_lifecycle;
+use mylite_mtr_ddl_lifecycle;
+set session sql_mode='NO_ENGINE_SUBSTITUTION';
+set session default_storage_engine=MYLITE;
+set session enforce_storage_engine=MYLITE;
+set session use_stat_tables=NEVER;
+create table lifecycle_posts (
+id int not null primary key,
+title varchar(32) not null,
+rating int not null,
+unique key title_key (title)
+) engine=InnoDB;
+insert into lifecycle_posts values
+(1, 'draft', 3),
+(2, 'published', 5);
+show create table lifecycle_posts;
+Table	Create Table
+lifecycle_posts	CREATE TABLE `lifecycle_posts` (
+  `id` int(11) NOT NULL,
+  `title` varchar(32) NOT NULL,
+  `rating` int(11) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `title_key` (`title`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+create table like_posts like lifecycle_posts;
+insert into like_posts select * from lifecycle_posts;
+show create table like_posts;
+Table	Create Table
+like_posts	CREATE TABLE `like_posts` (
+  `id` int(11) NOT NULL,
+  `title` varchar(32) NOT NULL,
+  `rating` int(11) NOT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `title_key` (`title`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+create table ctas_posts engine=InnoDB as
+select id, title
+from lifecycle_posts
+where rating >= 4;
+show create table ctas_posts;
+Table	Create Table
+ctas_posts	CREATE TABLE `ctas_posts` (
+  `id` int(11) NOT NULL,
+  `title` varchar(32) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+select id, title from ctas_posts order by id;
+id	title
+2	published
+alter table like_posts
+add column summary varchar(32) not null default 'fresh',
+add key rating_key (rating),
+algorithm=copy;
+select id, title, rating, summary
+from like_posts force index (rating_key)
+where rating = 5;
+id	title	rating	summary
+2	published	5	fresh
+rename table like_posts to renamed_like_posts;
+show create table renamed_like_posts;
+Table	Create Table
+renamed_like_posts	CREATE TABLE `renamed_like_posts` (
+  `id` int(11) NOT NULL,
+  `title` varchar(32) NOT NULL,
+  `rating` int(11) NOT NULL,
+  `summary` varchar(32) NOT NULL DEFAULT 'fresh',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `title_key` (`title`),
+  KEY `rating_key` (`rating`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+select id, title, rating, summary
+from renamed_like_posts force index (rating_key)
+where rating >= 3
+order by id;
+id	title	rating	summary
+1	draft	3	fresh
+2	published	5	fresh
+drop table ctas_posts, renamed_like_posts, lifecycle_posts;
+drop database mylite_mtr_ddl_lifecycle;

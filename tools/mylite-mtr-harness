@@ -212,6 +212,7 @@ storage_tests=(
   mylite.routed_storage_transactions
   mylite.routed_storage_foreign_keys
   mylite.routed_storage_constraints
+  mylite.routed_storage_ddl_lifecycle
 )
 
 usage() {

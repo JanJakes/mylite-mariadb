@@ -159,7 +159,9 @@ transaction, rollback, commit, and savepoint behavior, and representative
 routed `InnoDB` foreign-key publication and enforcement against a static MyLite
 storage-engine build with a primary `.mylite` file, plus representative
 routed `InnoDB` CHECK and generated-column metadata, enforcement, generated
-values, generated-index reads, and generated unique-key diagnostics,
+values, generated-index reads, and generated unique-key diagnostics, and
+representative routed `InnoDB` DDL lifecycle behavior for LIKE, CTAS, copy
+`ALTER`, indexed reads after rebuild, and `RENAME TABLE`,
 while MariaDB MTR comparison
 suites and broader application-schema and runtime suites remain planned.
 
