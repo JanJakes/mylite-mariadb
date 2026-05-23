@@ -234,8 +234,12 @@ non-empty and the branch still needs the same child count. When deleting the
 only entry in a child reduces the expected child count by one and another child
 remains, storage now removes that branch child cell and publishes the old leaf
 page as a durable free-list run, coalescing when that leaf is directly adjacent
-to the current free-list root run. Underfull-child merge/redistribution where the
-branch child count stays stable remains on the row-state overlay path.
+to the current free-list root run. When deleting from a multi-entry child also
+reduces the expected child count, storage can refold all branch child entries
+into one fewer existing child page and reclaim the old final child page when
+the refold stays within the protected-page journal bound. Underfull-child
+merge/redistribution where the branch child count stays stable remains on the
+row-state overlay path.
 Eligible updates can rewrite a source child in place when the replacement
 `(key, row_id)` remains inside that child range, or move the entry between
 existing child leaves when the source remains non-empty and the target has room;
@@ -1154,6 +1158,9 @@ when the child remains non-empty. Eligible one-entry child removals can drop any
 branch child when the branch child count decreases by one and reclaim the
 removed leaf page through the durable free-list, including coalescing when the
 removed leaf is directly adjacent to the current free-list root run. When
+deleting from a multi-entry child reduces the expected child count, eligible
+single-level branch roots can refold the remaining entries into one fewer
+existing child page and reclaim the old final child page. When
 that removal leaves a live entryset that fits in one maintained root page,
 storage collapses the branch root back to the maintained root format by
 materializing live branch entries and existing tail overlays before applying
@@ -1238,8 +1245,9 @@ insert, update, and delete paths, read bounded multi-level branch roots, and
 restore covered single-level branch
 final-leaf deletes, same-child updates and deletes, bounded cross-child
 updates, interior child splits, branch-page-full root splits, arbitrary child
-removals, and final-leaf free-list publication. Unbounded/deep branch cursors,
-branch-page merge/redistribution, arbitrary-chain free-list run coalescing, and
+removals, child-count-reducing branch refold deletes, and final-leaf free-list
+publication. Unbounded/deep branch cursors, branch-page merge/redistribution,
+arbitrary-chain free-list run coalescing, and
 broader transactional maintained index mutation remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index

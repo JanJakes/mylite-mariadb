@@ -172,7 +172,10 @@ level-`2` branch. Eligible one-entry child removals
 now drop any branch child cell when deletion reduces the expected child count by
 one and publish the removed leaf as a one-page durable free-list run,
 coalescing when the removed leaf is directly adjacent to the current free-list
-root run. Eligible child removals that leave a live entryset fitting one
+root run. Eligible child-count-reducing deletes from multi-entry child leaves
+now refold the branch into one fewer existing child page and reclaim the old
+final child page when the refold remains journal-bounded. Eligible child
+removals that leave a live entryset fitting one
 maintained root page now collapse the branch root back to the maintained root
 format. Catalog page-run reclamation uses the same root-adjacent free-list
 coalescing. Unbounded/deep branch cursors, merge/redistribution where child
