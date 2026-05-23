@@ -178,8 +178,10 @@ one and publish the removed leaf as a one-page durable free-list run,
 coalescing when the removed leaf is directly adjacent to the current free-list
 root run. Eligible child-count-reducing deletes from multi-entry child leaves
 now refold the branch into one fewer existing child page and reclaim the old
-final child page when the refold remains journal-bounded. Eligible child
-removals that leave a live entryset fitting one
+final child page when the refold remains journal-bounded; when a branch delete
+reclaims the physical tail page, the following delete row-state write now
+reuses that page instead of growing the file and publishing a free-list node.
+Eligible child removals that leave a live entryset fitting one
 maintained root page now collapse the branch root back to the maintained root
 format when no live append-tail overlay would be hidden. Catalog page-run
 allocation now reuses suitable non-root free-list runs, while catalog
@@ -657,8 +659,9 @@ planning now keeps journal-bounded plan entries and common changed-entry maps
 inline, avoiding tiny per-row heap allocations on hot rooted index mutations.
 Stable child-count branch update refolds now cover source-emptying and
 target-full cross-child updates when the existing branch children fit the
-protected-page journal bound. Broader transactional maintained index mutation
-remains planned.
+protected-page journal bound. Branch deletes that reclaim the current physical
+tail page now reuse it for the required delete row-state page. Broader
+transactional maintained index mutation remains planned.
 Durable table-local row,
 payload, exact-index, and published leaf-page caches now retarget across
 unrelated table row mutations, so one

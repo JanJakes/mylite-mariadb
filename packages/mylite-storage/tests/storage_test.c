@@ -11760,15 +11760,8 @@ static void test_branch_arbitrary_child_removal(void) {
     assert(mylite_storage_delete_row(filename, "app", "posts", row_3_id) == MYLITE_STORAGE_OK);
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
-    assert(header.page_count == before_same_statement_split_pages + 3ULL);
-    assert(header.free_list_root_page == before_same_statement_split_pages + 1ULL);
-    assert_free_list_run(
-        filename,
-        header.free_list_root_page,
-        before_same_statement_free_list_root,
-        before_same_statement_split_pages + 1ULL,
-        1ULL
-    );
+    assert(header.page_count == before_same_statement_split_pages + 2ULL);
+    assert(header.free_list_root_page == before_same_statement_free_list_root);
     assert_index_root(filename, "app", "posts", 0U, root_page, 6ULL);
     read_test_page(filename, root_page, root_page_bytes);
     assert(
@@ -11883,15 +11876,8 @@ static void test_branch_arbitrary_child_removal(void) {
     assert(mylite_storage_delete_row(filename, "app", "posts", row_3_id) == MYLITE_STORAGE_OK);
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
-    assert(header.page_count == before_removal_pages + 1ULL);
-    assert(header.free_list_root_page == removed_leaf_page);
-    assert_free_list_run(
-        filename,
-        removed_leaf_page,
-        before_removal_free_list_root,
-        removed_leaf_page,
-        1ULL
-    );
+    assert(header.page_count == before_removal_pages);
+    assert(header.free_list_root_page == before_removal_free_list_root);
     assert_index_root(filename, "app", "posts", 0U, root_page, 6ULL);
     read_test_page(filename, root_page, root_page_bytes);
     assert(
@@ -12017,15 +12003,8 @@ static void test_branch_arbitrary_child_removal(void) {
 
     assert(mylite_storage_delete_row(filename, "app", "posts", row_3_id) == MYLITE_STORAGE_OK);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
-    assert(header.page_count == before_removal_pages + 1ULL);
-    assert(header.free_list_root_page == removed_leaf_page);
-    assert_free_list_run(
-        filename,
-        removed_leaf_page,
-        before_removal_free_list_root,
-        removed_leaf_page,
-        1ULL
-    );
+    assert(header.page_count == before_removal_pages);
+    assert(header.free_list_root_page == before_removal_free_list_root);
     assert_index_root(filename, "app", "posts", 0U, root_page, 6ULL);
     read_test_page(filename, root_page, root_page_bytes);
     assert(
@@ -12155,7 +12134,6 @@ static void test_branch_refold_child_count_delete(void) {
     const unsigned long long root_page = before_rebuild_pages;
     const unsigned long long first_leaf_page = root_page + 1ULL;
     const unsigned long long second_leaf_page = root_page + 2ULL;
-    const unsigned long long reclaimed_leaf_page = root_page + 3ULL;
     const unsigned long long before_delete_pages = header.page_count;
     const unsigned long long before_delete_free_list_root = header.free_list_root_page;
     assert(header.page_count == before_rebuild_pages + 4ULL);
@@ -12165,8 +12143,8 @@ static void test_branch_refold_child_count_delete(void) {
     assert(mylite_storage_delete_row(filename, "app", "posts", row_ids[4]) == MYLITE_STORAGE_OK);
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
-    assert(header.page_count == before_delete_pages + 1ULL);
-    assert(header.free_list_root_page == reclaimed_leaf_page);
+    assert(header.page_count == before_delete_pages);
+    assert(header.free_list_root_page == before_delete_free_list_root);
     assert_index_root(filename, "app", "posts", 0U, root_page, entry_count - 1U);
     read_test_page(filename, root_page, page);
     assert(
@@ -12193,13 +12171,6 @@ static void test_branch_refold_child_count_delete(void) {
     assert(get_test_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_COUNT_OFFSET) == 3U);
     read_test_page(filename, second_leaf_page, page);
     assert(get_test_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_LEAF_ENTRY_COUNT_OFFSET) == 3U);
-    assert_free_list_run(
-        filename,
-        header.free_list_root_page,
-        before_delete_free_list_root,
-        reclaimed_leaf_page,
-        1ULL
-    );
     assert_index_entry_lookup(filename, 0U, keys[4], key_size, MYLITE_STORAGE_NOTFOUND, 0ULL);
     assert_index_entry_lookup(filename, 0U, keys[6], key_size, MYLITE_STORAGE_OK, row_ids[6]);
     assert_find_indexed_row_equals(
@@ -12302,8 +12273,8 @@ static void test_branch_refold_child_count_delete(void) {
 
     assert(mylite_storage_delete_row(filename, "app", "posts", row_ids[4]) == MYLITE_STORAGE_OK);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
-    assert(header.page_count == before_delete_pages + 1ULL);
-    assert(header.free_list_root_page == reclaimed_leaf_page);
+    assert(header.page_count == before_delete_pages);
+    assert(header.free_list_root_page == before_delete_free_list_root);
     assert_index_root(filename, "app", "posts", 0U, root_page, entry_count - 1U);
     read_test_page(filename, root_page, page);
     assert(get_test_u32_le(page, MYLITE_STORAGE_FORMAT_INDEX_BRANCH_CHILD_COUNT_OFFSET) == 2U);
@@ -12719,7 +12690,6 @@ static void test_branch_child_count_delete_collapse(void) {
     assert(mylite_storage_rebuild_index_leaf(filename, "app", "posts", 0U) == MYLITE_STORAGE_OK);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
     const unsigned long long root_page = before_rebuild_pages;
-    const unsigned long long reclaimed_leaf_page = root_page + 2ULL;
     const unsigned long long before_delete_pages = header.page_count;
     const unsigned long long before_delete_free_list_root = header.free_list_root_page;
     assert(header.page_count == before_rebuild_pages + 3ULL);
@@ -12734,8 +12704,8 @@ static void test_branch_child_count_delete_collapse(void) {
     assert(mylite_storage_delete_row(filename, "app", "posts", row_ids[1]) == MYLITE_STORAGE_OK);
     assert(access(journal_filename, F_OK) == 0);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
-    assert(header.page_count == before_delete_pages + 1ULL);
-    assert(header.free_list_root_page == reclaimed_leaf_page);
+    assert(header.page_count == before_delete_pages);
+    assert(header.free_list_root_page == before_delete_free_list_root);
     assert_index_root(filename, "app", "posts", 0U, root_page, entry_count - 1U);
     assert_index_root_page_type(
         filename,
@@ -12766,13 +12736,6 @@ static void test_branch_child_count_delete_collapse(void) {
         sizeof(expected_prefix_row_ids) / sizeof(expected_prefix_row_ids[0])
     );
     assert_index_prefix_exists_for_index(filename, 0U, keys[3], 1U, 0ULL, 1);
-    assert_free_list_run(
-        filename,
-        header.free_list_root_page,
-        before_delete_free_list_root,
-        reclaimed_leaf_page,
-        1ULL
-    );
     mylite_storage_index_entryset entries = {
         .size = sizeof(entries),
     };
@@ -12853,8 +12816,8 @@ static void test_branch_child_count_delete_collapse(void) {
 
     assert(mylite_storage_delete_row(filename, "app", "posts", row_ids[1]) == MYLITE_STORAGE_OK);
     assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
-    assert(header.page_count == before_delete_pages + 1ULL);
-    assert(header.free_list_root_page == reclaimed_leaf_page);
+    assert(header.page_count == before_delete_pages);
+    assert(header.free_list_root_page == before_delete_free_list_root);
     assert_index_root(filename, "app", "posts", 0U, root_page, entry_count - 1U);
     assert_index_root_page_type(
         filename,

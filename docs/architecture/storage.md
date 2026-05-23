@@ -238,7 +238,10 @@ page as a durable free-list run, coalescing when that leaf is directly adjacent
 to the current free-list root run. When deleting from a multi-entry child also
 reduces the expected child count, storage can refold all branch child entries
 into one fewer existing child page and reclaim the old final child page when
-the refold stays within the protected-page journal bound.
+the refold stays within the protected-page journal bound. When the reclaimed
+branch leaf is the physical final page and the same delete will publish a
+row-state page, storage reuses that tail page for the row-state write instead
+of growing the file and publishing a free-list node.
 Eligible updates can rewrite a source child in place when the replacement
 `(key, row_id)` remains inside that child range, or move the entry between
 existing child leaves when the source remains non-empty and the target has room;
@@ -1252,8 +1255,9 @@ updates, stable child-count update refolds, interior child splits,
 branch-page-full root splits, arbitrary child removals, child-count-reducing
 branch refold deletes, no-overlay branch collapse deletes, arbitrary-chain
 free-list run coalescing, deep branch cursors, and final-leaf free-list
-publication. Broader multi-level branch mutation and broader transactional
-maintained index mutation remain planned.
+publication, and branch-delete tail-page reuse for the following row-state
+write. Broader multi-level branch mutation, broader transactional maintained
+index mutation, and general file compaction remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, row/index free-space reclamation, and broader
