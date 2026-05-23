@@ -73,8 +73,9 @@ MariaDB base: `mariadb-11.8.6`
   Its `.opt` file enables the MyLite plugin and passes the storage primary file
   as embedded server arguments. The test then sets session
   `default_storage_engine=MYLITE` and `enforce_storage_engine=MYLITE`, creates
-  representative engine aliases, checks `SHOW CREATE TABLE`, inserts rows, and
-  verifies `BLACKHOLE` discards while `MEMORY` / `HEAP` retain runtime rows.
+  representative engine forms, checks `SHOW CREATE TABLE` requested-engine
+  metadata for each created form, inserts rows, and verifies `BLACKHOLE`
+  discards while `MEMORY` / `HEAP` retain runtime rows.
 
 ## File Lifecycle
 
@@ -142,6 +143,8 @@ links the existing `MyLite::storage` library and is built from the first-party
 - `bash -n tools/mariadb-embedded-build tools/mylite-mtr-harness tools/mylite-compat-harness tools/mylite-size-report` passed.
 - `tools/mylite-mtr-harness list-storage` printed
   `mylite.routed_storage_engines`.
+- `tools/mylite-mtr-harness probe-storage mylite.routed_storage_engines`
+  passed after expanding requested-engine metadata assertions.
 - `tools/mylite-mtr-harness run-storage mylite.routed_storage_engines` passed.
 - `tools/mylite-mtr-harness run-storage` passed.
 - `tools/mylite-mtr-harness run mylite.bootstrap_schema` passed.

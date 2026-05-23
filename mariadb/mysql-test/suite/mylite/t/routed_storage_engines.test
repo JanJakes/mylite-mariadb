@@ -34,7 +34,10 @@ create table heap_alias (id int not null primary key, title varchar(16)) engine=
 show create table default_alias;
 show create table innodb_alias;
 show create table myisam_alias;
+show create table aria_alias;
+show create table blackhole_alias;
 show create table memory_alias;
+show create table heap_alias;
 
 insert into default_alias values (1, 'default');
 insert into innodb_alias values (1, 'innodb');

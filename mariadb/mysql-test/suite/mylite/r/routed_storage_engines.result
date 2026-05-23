@@ -45,6 +45,19 @@ myisam_alias	CREATE TABLE `myisam_alias` (
   `title` varchar(16) DEFAULT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+show create table aria_alias;
+Table	Create Table
+aria_alias	CREATE TABLE `aria_alias` (
+  `id` int(11) NOT NULL,
+  `title` varchar(16) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=Aria DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+show create table blackhole_alias;
+Table	Create Table
+blackhole_alias	CREATE TABLE `blackhole_alias` (
+  `id` int(11) NOT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=BLACKHOLE DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
 show create table memory_alias;
 Table	Create Table
 memory_alias	CREATE TABLE `memory_alias` (
@@ -52,6 +65,13 @@ memory_alias	CREATE TABLE `memory_alias` (
   `title` varchar(16) DEFAULT NULL,
   PRIMARY KEY (`id`)
 ) ENGINE=MEMORY DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
+show create table heap_alias;
+Table	Create Table
+heap_alias	CREATE TABLE `heap_alias` (
+  `id` int(11) NOT NULL,
+  `title` varchar(16) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=HEAP DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_uca1400_ai_ci
 insert into default_alias values (1, 'default');
 insert into innodb_alias values (1, 'innodb');
 insert into myisam_alias values (1, 'myisam');
