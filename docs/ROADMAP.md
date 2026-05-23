@@ -155,9 +155,10 @@ the expected child count by one and publish the removed leaf as a one-page
 durable free-list run, coalescing when the removed leaf immediately precedes
 the current free-list root run. Eligible final-child removals that leave a live
 entryset fitting one maintained root page now collapse the branch root back to
-the maintained root format. Interior split/merge, broader free-list run
-coalescing, child-boundary updates, and broader branch update/delete
-maintenance remain pending. SQL copy-rebuild DDL now
+the maintained root format. Catalog page-run reclamation uses the same
+lower-adjacent free-list root coalescing. Interior split/merge, higher-adjacent
+and arbitrary-chain free-list coalescing, child-boundary updates, and broader
+branch update/delete maintenance remain pending. SQL copy-rebuild DDL now
 opportunistically publishes those roots for all current supported fixed-width
 keys in rebuilt tables, including retained primary keys after forced copy
 rebuilds, with one shared append-history scan and one catalog publication for

@@ -753,6 +753,8 @@ catalog publication, after which the parent can be dropped normally. Dropped
 table-definition blobs, row pages, index-entry pages, and FK metadata blob pages
 remain orphaned inside the primary file until broader free-space management
 exists; superseded catalog-chain pages are reclaimed into the catalog free-list.
+Catalog and branch-leaf reclamation coalesce a reclaimed run with the current
+free-list root when the reclaimed run immediately precedes that root run.
 New table ids are allocated above both live catalog records and existing row
 pages so drop/recreate does not expose old rows. Simple
 `RENAME TABLE` rewrites the catalog record identity while preserving table id,
@@ -1213,8 +1215,9 @@ restore single-page maintained root bytes and logical visibility for covered
 insert, update, and delete paths, and restore covered single-level branch
 final-leaf deletes, updates, final-child removals, and final-leaf free-list
 publication. Root splits, multi-page navigable indexes, branch-page
-split/merge, child-boundary updates, broader free-list run coalescing, and
-broader transactional maintained index mutation remain planned.
+split/merge, child-boundary updates, higher-adjacent and arbitrary-chain
+free-list run coalescing, and broader transactional maintained index mutation
+remain planned.
 Standalone
 `CREATE INDEX` and `DROP INDEX` are covered for supported copy-rebuild index
 definitions. B-tree pages, row/index free-space reclamation, and broader

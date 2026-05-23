@@ -69,6 +69,11 @@ mylite_storage_result mylite_storage_test_reclaim_removed_branch_leaf_page(
     const char *filename,
     unsigned long long leaf_page_id
 );
+mylite_storage_result mylite_storage_test_reclaim_catalog_page_run(
+    const char *filename,
+    unsigned long long first_page_id,
+    unsigned long long page_count
+);
 void mylite_storage_test_encode_free_list_page(
     unsigned char *page,
     unsigned long long page_id,
@@ -299,6 +304,7 @@ static void test_store_and_read_table_definition(void);
 static void test_store_large_table_definition(void);
 static void test_multi_page_catalog_chain(void);
 static void test_catalog_free_list_reuses_reclaimed_chain(void);
+static void test_catalog_free_list_prepend_coalescing(void);
 static void test_branch_free_list_prepend_coalescing(void);
 static void test_catalog_free_list_skips_active_statement_checkpoint(void);
 static void test_rejects_corrupt_free_list_root(void);
@@ -731,6 +737,7 @@ int main(void) {
     test_store_large_table_definition();
     test_multi_page_catalog_chain();
     test_catalog_free_list_reuses_reclaimed_chain();
+    test_catalog_free_list_prepend_coalescing();
     test_branch_free_list_prepend_coalescing();
     test_catalog_free_list_skips_active_statement_checkpoint();
     test_rejects_corrupt_free_list_root();
@@ -1344,6 +1351,41 @@ static void test_catalog_free_list_reuses_reclaimed_chain(void) {
     assert(rmdir(root) == 0);
     free(filename);
     free(root);
+}
+
+static void test_catalog_free_list_prepend_coalescing(void) {
+#ifdef MYLITE_STORAGE_TEST_HOOKS
+    char *root = make_temp_root();
+    char *filename = path_join(root, "catalog-free-list-coalescing.mylite");
+    mylite_storage_header header = {
+        .size = sizeof(header),
+    };
+    unsigned char empty_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+    unsigned char free_list_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE] = {0};
+
+    assert(mylite_storage_create_empty(filename) == MYLITE_STORAGE_OK);
+    write_test_page(filename, 5ULL, empty_page);
+    mylite_storage_test_encode_free_list_page(free_list_page, 4ULL, 0ULL, 2ULL);
+    write_test_page(filename, 4ULL, free_list_page);
+    write_test_header_page_count_and_free_list_root(filename, 6ULL, 4ULL);
+
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == 6ULL);
+    assert(header.free_list_root_page == 4ULL);
+    assert_free_list_run(filename, 4ULL, 0ULL, 4ULL, 2ULL);
+
+    assert(mylite_storage_test_reclaim_catalog_page_run(filename, 2ULL, 2ULL) == MYLITE_STORAGE_OK);
+    assert(mylite_storage_open_header(filename, &header) == MYLITE_STORAGE_OK);
+    assert(header.page_count == 6ULL);
+    assert(header.free_list_root_page == 2ULL);
+    assert_free_list_run(filename, 2ULL, 0ULL, 2ULL, 4ULL);
+    assert_file_size_matches_header(filename);
+
+    assert(unlink(filename) == 0);
+    assert(rmdir(root) == 0);
+    free(filename);
+    free(root);
+#endif
 }
 
 static void test_branch_free_list_prepend_coalescing(void) {

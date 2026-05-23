@@ -1878,6 +1878,13 @@ static mylite_storage_result reclaim_catalog_page_run(
     unsigned long long first_page_id,
     unsigned long long page_count
 );
+static mylite_storage_result encode_reclaimed_free_list_root_page(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long first_page_id,
+    unsigned long long page_count,
+    unsigned char *out_page
+);
 static mylite_storage_result read_free_list_page(
     FILE *file,
     const mylite_storage_header *header,
@@ -10633,32 +10640,13 @@ static mylite_storage_result reclaim_removed_branch_leaf_page(
     mylite_storage_header *header,
     unsigned long long leaf_page_id
 ) {
-    mylite_storage_free_list_page free_list_page = {
-        .next_root_page = header->free_list_root_page,
-        .run_start_page = leaf_page_id,
-        .run_page_count = 1ULL,
-    };
-    if (header->free_list_root_page != 0ULL && leaf_page_id != ULLONG_MAX) {
-        unsigned char current_root_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-        mylite_storage_free_list_page current_root = {0};
-        mylite_storage_result result = read_free_list_page(
-            pager->file,
-            header,
-            header->free_list_root_page,
-            current_root_page,
-            &current_root
-        );
-        if (result != MYLITE_STORAGE_OK) {
-            return result;
-        }
-        if (leaf_page_id + 1ULL == current_root.run_start_page) {
-            free_list_page.next_root_page = current_root.next_root_page;
-            free_list_page.run_page_count = current_root.run_page_count + 1ULL;
-        }
-    }
     unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    encode_free_list_page(page, leaf_page_id, &free_list_page);
-    mylite_storage_result result = pager_write_page(pager, leaf_page_id, page);
+    mylite_storage_result result =
+        encode_reclaimed_free_list_root_page(pager->file, header, leaf_page_id, 1ULL, page);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+    result = pager_write_page(pager, leaf_page_id, page);
     if (result == MYLITE_STORAGE_OK) {
         header->free_list_root_page = leaf_page_id;
     }
@@ -17044,6 +17032,33 @@ mylite_storage_result mylite_storage_test_reclaim_removed_branch_leaf_page(
     return result;
 }
 
+mylite_storage_result mylite_storage_test_reclaim_catalog_page_run(
+    const char *filename,
+    unsigned long long first_page_id,
+    unsigned long long page_count
+) {
+    if (filename == NULL || filename[0] == '\0') {
+        return MYLITE_STORAGE_MISUSE;
+    }
+
+    mylite_storage_update_file_scope scope = {0};
+    mylite_storage_result result = open_existing_file_for_update_scope(filename, &scope);
+    if (result != MYLITE_STORAGE_OK) {
+        return result;
+    }
+
+    mylite_storage_header header = {0};
+    result = read_header_from_update_file_scope(&scope, &header);
+    if (result == MYLITE_STORAGE_OK) {
+        result = reclaim_catalog_page_run(scope.file, filename, &header, first_page_id, page_count);
+    }
+    if (close_existing_update_file_scope(&scope) != MYLITE_STORAGE_OK &&
+        result == MYLITE_STORAGE_OK) {
+        result = MYLITE_STORAGE_IOERR;
+    }
+    return result;
+}
+
 void mylite_storage_test_encode_free_list_page(
     unsigned char *page,
     unsigned long long page_id,
@@ -19963,15 +19978,12 @@ static mylite_storage_result reclaim_catalog_page_run(
         return result;
     }
 
-    const mylite_storage_free_list_page free_list_page = {
-        .next_root_page = header->free_list_root_page,
-        .run_start_page = first_page_id,
-        .run_page_count = page_count,
-    };
     unsigned char page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
-    encode_free_list_page(page, first_page_id, &free_list_page);
+    result = encode_reclaimed_free_list_root_page(file, header, first_page_id, page_count, page);
     const mylite_storage_pager pager = open_storage_pager(file, NULL, header);
-    result = pager_write_page(&pager, first_page_id, page);
+    if (result == MYLITE_STORAGE_OK) {
+        result = pager_write_page(&pager, first_page_id, page);
+    }
     if (result == MYLITE_STORAGE_OK) {
         header->free_list_root_page = first_page_id;
         result = publish_header(file, header);
@@ -19980,6 +19992,44 @@ static mylite_storage_result reclaim_catalog_page_run(
         result = finish_write_journal(file, filename);
     }
     return result;
+}
+
+static mylite_storage_result encode_reclaimed_free_list_root_page(
+    FILE *file,
+    const mylite_storage_header *header,
+    unsigned long long first_page_id,
+    unsigned long long page_count,
+    unsigned char *out_page
+) {
+    mylite_storage_free_list_page free_list_page = {
+        .next_root_page = header->free_list_root_page,
+        .run_start_page = first_page_id,
+        .run_page_count = page_count,
+    };
+    if (header->free_list_root_page != 0ULL && page_count != 0ULL &&
+        first_page_id <= ULLONG_MAX - page_count) {
+        unsigned char current_root_page[MYLITE_STORAGE_FORMAT_PAGE_SIZE];
+        mylite_storage_free_list_page current_root = {0};
+        const mylite_storage_result result = read_free_list_page(
+            file,
+            header,
+            header->free_list_root_page,
+            current_root_page,
+            &current_root
+        );
+        if (result != MYLITE_STORAGE_OK) {
+            return result;
+        }
+        if (first_page_id + page_count == current_root.run_start_page) {
+            if (current_root.run_page_count > ULLONG_MAX - page_count) {
+                return MYLITE_STORAGE_CORRUPT;
+            }
+            free_list_page.next_root_page = current_root.next_root_page;
+            free_list_page.run_page_count = page_count + current_root.run_page_count;
+        }
+    }
+    encode_free_list_page(out_page, first_page_id, &free_list_page);
+    return MYLITE_STORAGE_OK;
 }
 
 static mylite_storage_result read_free_list_page(
