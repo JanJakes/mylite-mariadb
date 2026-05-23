@@ -9745,8 +9745,6 @@ static mylite_storage_result update_row_with_index_entries_for_context(
         store_table_index_roots_absent_in_statement(active_cache_statement, &header, table_id);
     }
     if (result == MYLITE_STORAGE_OK) {
-        active_live_row_cache =
-            live_row_cache_for_statement(active_cache_statement, &header, table_id);
         active_row_payload_cache = active_row_payload_cache_for_resolved_statement(
             active_cache_statement,
             &header,
@@ -9947,6 +9945,10 @@ static mylite_storage_result update_row_with_index_entries_for_context(
                 position.row_page_id,
                 MYLITE_STORAGE_FORMAT_ROW_STATE_KIND_REPLACE
             );
+            if (active_live_row_cache == NULL) {
+                active_live_row_cache =
+                    live_row_cache_for_statement(active_cache_statement, &header, table_id);
+            }
             replace_active_live_row_in_cache(
                 active_cache_statement,
                 &header,
