@@ -156,6 +156,20 @@ the later direct-execution shortcut a cached row-only eligibility bit instead
 of rediscovering key-changing updates after it has already entered handler
 execution.
 
+The third implementation step enables the first guarded shortcut. It still runs
+MariaDB's per-execution precheck, table open, metadata validation, and table
+locking, but after a previously accepted shape is rebound against the current
+table it can skip `JOIN::prepare()` for row-only exact-key prepared updates
+whose condition is fully guaranteed by the key. The shortcut resolves update
+target fields and value setup through MariaDB helpers, pushes the current
+exact-key proof and update lists into the MyLite handler, and then uses the
+same direct-update handler contract and OK/binlog/query-cache completion
+semantics as the normal single-table update path. Key-changing writes,
+additional predicates, triggers, views, period tables, `IGNORE`, `LIMIT`,
+versioned tables, `RETURNING`, row-binlog mode, explain/analyze-observable
+modes, metadata changes, and any stale shape fail closed before handler
+execution and continue on the normal MariaDB path.
+
 ## Non-Goals
 
 - Retain `TABLE *`, MDL tickets, handler objects, `JOIN` objects, row buffers,
@@ -242,18 +256,18 @@ storage-smoke `libmariadbd.a` size before keeping an implementation.
   performance win.
 - Run `git diff --check` and formatting checks for touched C/C++ files.
 
-Current validation-step verification:
+Current guarded-shortcut verification:
 
 - The prepared direct-update shape cache is populated only after the normal
   MyLite exact-key direct-update proof is accepted by the handler path.
-- The cache is not used for direct execution yet. It is used only to retarget
-  the SQL-layer exact-key proof cache after validating the current opened table
-  shape, so there is no intended SQL-visible behavior change in this step.
+- The first direct execution shortcut is enabled only for row-only exact-key
+  prepared updates whose condition is fully guaranteed by the key. Unsupported
+  shapes continue through the existing MariaDB path.
 - `git diff --check` passed.
 - `git clang-format --diff HEAD -- mariadb/sql/sql_update.cc
   mariadb/sql/sql_update.h` passed.
 - `cmake --build build/mariadb-mylite-storage-smoke --target
-  libmariadbd.a` passed; resulting archive size is 21,279,328 bytes.
+  libmariadbd.a` passed; resulting archive size is 21,282,512 bytes.
 - `cmake --build --preset storage-smoke-dev --target
   mylite_embedded_statement_test mylite_embedded_storage_engine_test
   mylite_perf_baseline` passed.
@@ -265,10 +279,18 @@ Current validation-step verification:
 - `ctest --preset storage-smoke-dev --output-on-failure` passed 10/10.
 - `build/storage-smoke-dev/tools/mylite_perf_baseline
   --phase=prepared-row-only-update-components 10000 1000000` measured the
-  prepared row-only update step at 1.603 us/op.
+  prepared row-only update step at 1.283 us/op.
+- `build/storage-smoke-dev/tools/mylite_perf_baseline
+  --phase=prepared-row-only-update-miss-components 10000 1000000` measured the
+  prepared row-only update miss step at 0.892 us/op.
+- `build/storage-smoke-dev/tools/mylite_perf_baseline
+  --phase=prepared-assignment-update-components 10000 1000000` measured the
+  prepared assignment update step at 1.683 us/op; this benchmark updates an
+  indexed secondary-key column and intentionally remains on the normal
+  key-changing path.
 
 Current safety-net coverage extends
-`test_prepared_primary_key_update_rebinds()` before enabling the shortcut. The
+`test_prepared_primary_key_update_rebinds()` around the shortcut. The
 embedded storage-engine test now exercises repeated exact-key prepared updates
 through match, no-match, bound `NULL`, unchanged-row, commuted-predicate,
 additional-condition, warning, strict-conversion error recovery, CHECK error

@@ -1119,14 +1119,16 @@ transient range-planner state.
 That shape cache now records a key-field fingerprint and can validate it
 against the freshly opened table and MariaDB table reference before retargeting
 the SQL-layer exact-key proof cache to a copied prepared-condition tree. The
-actual direct execution shortcut is still disabled, but the next step has an
-explicit fail-closed fresh-table rebind boundary instead of stale `TABLE`,
-`JOIN`, or range-planner state. Stable repeated executions now retain that
+row-only direct execution shortcut is now enabled for exact-key prepared
+updates whose condition is fully guaranteed by the key: it still runs
+MariaDB's table open and lock lifecycle, but skips repeated `JOIN::prepare()`
+after a fail-closed fresh-table rebind boundary instead of retaining stale
+`TABLE`, `JOIN`, or range-planner state. Stable repeated executions retain the
 cached fingerprint when the current accepted proof still targets the same
 MariaDB table reference, avoiding another key-shape walk in the hot path. The
-shape cache now also records whether the accepted update writes any indexed key
-parts, so the later execution shortcut can remain limited to row-only updates
-without rediscovering key-changing writes after entering handler execution.
+shape cache also records whether the accepted update writes any indexed key
+parts, keeping the execution shortcut limited to row-only updates without
+rediscovering key-changing writes after entering handler execution.
 The first implementation step caches the immutable prepared-update value-list
 subquery shape on `Sql_cmd_update`, avoiding repeated value-list scans before
 the MyLite single-update result-elision gate. The next step skips value-list

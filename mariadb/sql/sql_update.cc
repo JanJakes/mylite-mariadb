@@ -1679,6 +1679,225 @@ bool Sql_cmd_update::mylite_rebind_prepared_direct_update_shape(
   return true;
 }
 
+int Sql_cmd_update::prepare_mylite_prepared_direct_update(
+    THD *thd, TABLE_LIST *table_list, SELECT_LEX *select_lex,
+    bool elide_result)
+{
+  mylite_prepared_direct_update_execution_ready= false;
+  if (!mylite_prepared_direct_update_shape_valid ||
+      !mylite_prepared_direct_update_shape_row_only_update ||
+      !mylite_prepared_direct_update_shape_condition_guaranteed_by_key ||
+      !thd || !thd->current_stmt || !mylite_schema_hooks_active() ||
+      mylite_update_needs_explain_plan(thd) || !elide_result || multitable ||
+      lex->ignore || thd->is_current_stmt_binlog_format_row() ||
+      thd->lex->has_returning() ||
+      lex->unit.lim.get_select_limit() != HA_POS_ERROR)
+    return 0;
+
+  TABLE *table= table_list ? table_list->table : NULL;
+  if (!table || !table->s || !table->file ||
+      !table_list->single_table_updatable() || table_list->has_period() ||
+      table->versioned() || table_list->is_view_or_derived() ||
+      table_list->belong_to_view || table->triggers ||
+      mylite_prepared_direct_update_shape_table_ref_type !=
+          table->s->get_table_ref_type() ||
+      mylite_prepared_direct_update_shape_table_ref_version !=
+          table->s->get_table_ref_version())
+    return 0;
+
+  select_lex->where_cond_after_prepare= select_lex->where;
+  if (!mylite_rebind_prepared_direct_update_shape(thd, table_list, select_lex,
+                                                  elide_result))
+    return 0;
+
+  select_lex->item_list_usage= MARK_COLUMNS_WRITE;
+  enum_parsing_place save_place=
+      thd->lex->current_select->context_analysis_place;
+  thd->lex->current_select->context_analysis_place= SELECT_LIST;
+  if (setup_fields(thd, Ref_ptr_array(), select_lex->item_list,
+                   MARK_COLUMNS_WRITE, 0, NULL, 0))
+  {
+    thd->lex->current_select->context_analysis_place= save_place;
+    return -1;
+  }
+  thd->lex->current_select->context_analysis_place= save_place;
+
+  if (mylite_prepare_single_update_values(
+          thd, select_lex->item_list, lex->value_list, lex->ignore,
+          mylite_prepared_direct_update_shape_values_need_setup))
+    return -1;
+
+  List_iterator_fast<Item> fs(select_lex->item_list), vs(lex->value_list);
+  while (Item *field_item= fs++)
+  {
+    Item *value_item= vs++;
+    Item_field *target_field= field_item->field_for_view_update();
+    if (!value_item)
+      return -1;
+    if (!target_field ||
+        value_item->associate_with_target_field(thd, target_field))
+      return -1;
+  }
+
+  if (table->default_field)
+    table->mark_default_fields_for_write(false);
+  switch_to_nullable_trigger_fields(select_lex->item_list, table);
+  if (!(thd->variables.sql_mode & MODE_SIMULTANEOUS_ASSIGNMENT))
+    switch_to_nullable_trigger_fields(lex->value_list, table);
+  table->mark_columns_needed_for_update();
+  if (mylite_update_writes_any_key(table) ||
+      table->check_virtual_columns_marked_for_read() ||
+      table->check_virtual_columns_marked_for_write())
+  {
+    clear_mylite_prepared_direct_update_shape();
+    return 0;
+  }
+
+  mylite_prepared_direct_update_execution_ready= true;
+  return 1;
+}
+
+bool Sql_cmd_update::execute_mylite_prepared_direct_update(THD *thd)
+{
+  SELECT_LEX_UNIT *unit= &lex->unit;
+  SELECT_LEX *select_lex= unit->first_select();
+  TABLE_LIST *table_list= select_lex->get_table_list();
+  TABLE *table= table_list ? table_list->table : NULL;
+  List<Item> *fields= &select_lex->item_list;
+  List<Item> *values= &lex->value_list;
+  COND *condition= select_lex->where_cond_after_prepare;
+  ha_rows update_rows= 0, found_rows= 0;
+  int error= -1;
+  ulonglong id;
+  DBUG_ENTER("Sql_cmd_update::execute_mylite_prepared_direct_update");
+
+  THD_STAGE_INFO(thd, stage_init_update);
+  mylite_prepared_direct_update_execution_ready= false;
+  if (!table || !table->file || !condition ||
+      !mylite_prepared_direct_update_shape_valid)
+    DBUG_RETURN(1);
+
+  mylite_update_exact_key_info key_info;
+  key_info.condition= condition;
+  key_info.value_item= mylite_prepared_direct_update_shape_key_value;
+  key_info.key_number= mylite_prepared_direct_update_shape_key_number;
+  key_info.condition_guaranteed_by_key=
+      mylite_prepared_direct_update_shape_condition_guaranteed_by_key;
+  if ((error= table->file->info_push(INFO_KIND_MYLITE_UPDATE_EXACT_KEY,
+                                     &key_info)))
+    goto handler_error;
+  table->file->pushed_cond= condition;
+
+  if ((error= table->file->info_push(INFO_KIND_UPDATE_FIELDS, fields)) ||
+      (error= table->file->info_push(INFO_KIND_UPDATE_VALUES, values)) ||
+      (error= table->file->direct_update_rows_init(fields)))
+    goto handler_error;
+
+  updated= found= 0;
+  thd->count_cuted_fields= CHECK_FIELD_WARN;
+  thd->cuted_fields= 0L;
+  thd->abort_on_warning= !lex->ignore && thd->is_strict_mode();
+  table->reset_default_fields();
+  if (unlikely(!(error= table->file->ha_direct_update_rows(&update_rows,
+                                                           &found_rows))))
+    error= -1;
+  updated= update_rows;
+  found= found_rows;
+  if (found < updated)
+    found= updated;
+
+  table->file->try_semi_consistent_read(0);
+  table->auto_increment_field_not_null= FALSE;
+  (void) table->file->extra(HA_EXTRA_NO_IGNORE_DUP_KEY);
+  if (table->file->pushed_cond)
+  {
+    table->file->pushed_cond= 0;
+    table->file->cond_pop();
+  }
+
+  if (!table->file->has_transactions_and_rollback() && updated > 0)
+    thd->transaction->stmt.modified_non_trans_table= TRUE;
+
+  if (updated)
+    query_cache_invalidate3(thd, table_list, 1);
+
+  if (thd->transaction->stmt.modified_non_trans_table)
+    thd->transaction->all.modified_non_trans_table= TRUE;
+  thd->transaction->all.m_unsafe_rollback_flags|=
+      (thd->transaction->stmt.m_unsafe_rollback_flags & THD_TRANS::DID_WAIT);
+
+  if (likely(error < 0) || thd->transaction->stmt.modified_non_trans_table ||
+      thd->log_current_statement())
+  {
+    if (WSREP_EMULATE_BINLOG(thd) || mysql_bin_log.is_open())
+    {
+      int errcode= 0;
+      if (likely(error < 0))
+        thd->clear_error();
+      else
+        errcode= query_error_code(thd, thd->killed == NOT_KILLED);
+
+      StatementBinlog stmt_binlog(
+          thd, thd->binlog_need_stmt_format(
+                   table->file->has_transactions_and_rollback()));
+      if (thd->binlog_query(THD::ROW_QUERY_TYPE, thd->query(),
+                            thd->query_length(),
+                            table->file->has_transactions_and_rollback(),
+                            FALSE, FALSE, errcode) > 0)
+      {
+        error= 1;
+      }
+    }
+  }
+
+  id= thd->arg_of_last_insert_id_function
+          ? thd->first_successful_insert_id_in_prev_stmt
+          : 0;
+  if (likely(error < 0) && likely(!thd->lex->analyze_stmt))
+  {
+    char buff[MYSQL_ERRMSG_SIZE];
+    const char *message= NULL;
+    if (!mylite_prepared_update_ok_message_fast_path(thd, table, table_list))
+    {
+      my_snprintf(buff, sizeof(buff), ER_THD(thd, ER_UPDATE_INFO),
+                  (ulong) found, (ulong) updated,
+                  (ulong) thd->get_stmt_da()->current_statement_warn_count());
+      message= buff;
+    }
+    thd->collect_unit_results(
+        id, (thd->client_capabilities & CLIENT_FOUND_ROWS) ? found : updated);
+    my_ok(thd,
+          (thd->client_capabilities & CLIENT_FOUND_ROWS) ? found : updated, id,
+          message);
+  }
+
+  thd->count_cuted_fields= CHECK_FIELD_IGNORE;
+  thd->abort_on_warning= 0;
+  if (!thd->lex->current_select->leaf_tables_saved)
+  {
+    thd->lex->current_select->save_leaf_tables(thd);
+    thd->lex->current_select->leaf_tables_saved= true;
+    thd->lex->current_select->first_cond_optimization= 0;
+  }
+  if (result)
+  {
+    ((multi_update *) result)->set_found(found);
+    ((multi_update *) result)->set_updated(updated);
+  }
+  THD_STAGE_INFO(thd, stage_end);
+  DBUG_RETURN((error >= 0 || thd->is_error()) ? 1 : 0);
+
+handler_error:
+  table->file->print_error(error, MYF(0));
+  if (table->file->pushed_cond)
+  {
+    table->file->pushed_cond= 0;
+    table->file->cond_pop();
+  }
+  thd->abort_on_warning= 0;
+  DBUG_RETURN(1);
+}
+
 bool Sql_cmd_update::mylite_prepared_direct_update_shape_matches(
     TABLE *table, Item *condition)
 {
@@ -3482,6 +3701,7 @@ bool Sql_cmd_update::prepare_inner(THD *thd)
   ulonglong select_options= select_lex->options;
   bool free_join= 1;
   DBUG_ENTER("Sql_cmd_update::prepare_inner");
+  mylite_prepared_direct_update_execution_ready= false;
 
   if (get_use_stat_tables_mode(thd) != NEVER)
     (void) read_statistics_for_tables_if_needed(thd, table_list);
@@ -3558,6 +3778,18 @@ bool Sql_cmd_update::prepare_inner(THD *thd)
 
   if (select_lex->vers_setup_conds(thd, table_list))
     DBUG_RETURN(TRUE);
+
+  {
+    int mylite_direct_update_ready= prepare_mylite_prepared_direct_update(
+        thd, table_list, select_lex, elide_single_update_result);
+    if (mylite_direct_update_ready < 0)
+      DBUG_RETURN(TRUE);
+    if (mylite_direct_update_ready > 0)
+    {
+      free_join= false;
+      DBUG_RETURN(FALSE);
+    }
+  }
 
   {
     if (thd->lex->describe)
@@ -3686,7 +3918,9 @@ bool Sql_cmd_update::execute_inner(THD *thd)
   bool res= 0;
 
   thd->get_stmt_da()->reset_current_row_for_warning(1);
-  if (!multitable)
+  if (mylite_prepared_direct_update_execution_ready)
+    res= execute_mylite_prepared_direct_update(thd);
+  else if (!multitable)
     res= update_single_table(thd);
   else
   {

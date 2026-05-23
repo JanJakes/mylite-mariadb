@@ -74,6 +74,12 @@ public:
      changed= this->updated;
   }
 
+  void unprepare(THD *thd) override
+  {
+    mylite_prepared_direct_update_execution_ready= false;
+    Sql_cmd_dml::unprepare(thd);
+  }
+
 protected:
   /**
     @brief Perform precheck of table privileges for update statements
@@ -101,6 +107,10 @@ private:
                                                   TABLE_LIST *table_list,
                                                   SELECT_LEX *select_lex,
                                                   bool elide_result);
+  int prepare_mylite_prepared_direct_update(THD *thd, TABLE_LIST *table_list,
+                                            SELECT_LEX *select_lex,
+                                            bool elide_result);
+  bool execute_mylite_prepared_direct_update(THD *thd);
   bool mylite_prepared_direct_update_shape_matches(TABLE *table,
                                                    Item *condition);
   void store_mylite_prepared_direct_update_shape(
@@ -142,6 +152,7 @@ private:
   bool mylite_prepared_direct_update_shape_condition_guaranteed_by_key{false};
   bool mylite_prepared_direct_update_shape_values_need_setup{false};
   bool mylite_prepared_direct_update_shape_row_only_update{false};
+  bool mylite_prepared_direct_update_execution_ready{false};
 
 public:
   /* The list of the updating expressions used in the set clause */
