@@ -1804,6 +1804,88 @@ void ha_mylite::store_direct_update_shape_cache()
 
 int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
 {
+  class Direct_update_changed_field_snapshot
+  {
+    struct Entry
+    {
+      Field *field;
+      size_t offset;
+      uint32 length;
+    };
+
+    enum
+    {
+      SNAPSHOT_MAX_FIELDS= 8,
+      SNAPSHOT_MAX_BYTES= 64
+    };
+
+    Entry entries[SNAPSHOT_MAX_FIELDS];
+    uchar bytes[SNAPSHOT_MAX_BYTES];
+    size_t used;
+    uint count;
+
+  public:
+    Direct_update_changed_field_snapshot() : used(0), count(0) {}
+
+    bool capture(TABLE *table, List<Item> *fields)
+    {
+      if (!table || !table->s || !fields ||
+          table->s->has_update_default_function)
+        return false;
+
+      List_iterator_fast<Item> field_it(*fields);
+      Item *item;
+      while ((item= field_it++))
+      {
+        if (count == SNAPSHOT_MAX_FIELDS)
+          return false;
+
+        Item_field *item_field= item->field_for_view_update();
+        if (!item_field || !item_field->field)
+          return false;
+
+        Field *field= item_field->field;
+        if (!field_snapshot_supported(table, field))
+          return false;
+
+        const uint32 length= field->pack_length();
+        if (length == 0 || length > SNAPSHOT_MAX_BYTES - used)
+          return false;
+
+        entries[count++]= {field, used, length};
+        memcpy(bytes + used, field->ptr, length);
+        used+= length;
+      }
+
+      return count != 0;
+    }
+
+    bool changed() const
+    {
+      for (uint i= 0; i < count; ++i)
+      {
+        const Entry &entry= entries[i];
+        if (memcmp(entry.field->ptr, bytes + entry.offset, entry.length))
+          return true;
+      }
+      return false;
+    }
+
+  private:
+    static bool field_snapshot_supported(TABLE *table, Field *field)
+    {
+      if (!field || !field->stored_in_db() || field->vcol_info ||
+          field->real_maybe_null() || field->cmp_type() != INT_RESULT)
+        return false;
+
+      const uint32 length= field->pack_length();
+      const uchar *record_start= table->record[0];
+      const uchar *record_end= record_start + table->s->rec_buff_length;
+      return field->ptr >= record_start && field->ptr <= record_end &&
+             length <= (uint32) (record_end - field->ptr);
+    }
+  };
+
   class Direct_update_row_scope
   {
     bool *flag;
@@ -1841,6 +1923,8 @@ int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
   Mylite_filename_identity_scope filename_scope(primary_file);
   Mylite_table_name_identity_scope table_name_scope(schema_name, table_name);
   Direct_update_row_scope direct_update_scope(&direct_update_row_in_progress);
+  const bool use_inner_row_write=
+      can_direct_update_row_preserving_index_entries();
 
   KEY *key_info= table->key_info + direct_update_key_number;
   bool direct_applied= false;
@@ -1867,7 +1951,12 @@ int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
     DBUG_RETURN(1);
 
   *found_rows= 1;
-  store_record(table, record[1]);
+  Direct_update_changed_field_snapshot field_snapshot;
+  const bool use_compact_snapshot=
+      use_inner_row_write && direct_update_can_compare_record &&
+      field_snapshot.capture(table, direct_update_fields);
+  if (!use_compact_snapshot)
+    store_record(table, record[1]);
   if (fill_record(ha_thd(), table, *direct_update_fields,
                   *direct_update_values, false, true))
   {
@@ -1876,7 +1965,9 @@ int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
   }
 
   const bool need_update=
-      !direct_update_can_compare_record || compare_record(table);
+      use_compact_snapshot
+          ? field_snapshot.changed()
+          : !direct_update_can_compare_record || compare_record(table);
   if (!need_update)
   {
     table->auto_increment_field_not_null= FALSE;
@@ -1903,7 +1994,10 @@ int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
 
   DBUG_ASSERT(!mylite_table_needs_inserver_update_constraints(table));
 
-  error= update_row(table->record[1], table->record[0]);
+  error= use_inner_row_write
+             ? direct_update_row_preserving_index_entries(
+                   primary_file, schema_name, table_name, table->record[0])
+             : update_row(table->record[1], table->record[0]);
   table->auto_increment_field_not_null= FALSE;
   if (error == HA_ERR_RECORD_IS_THE_SAME)
     DBUG_RETURN(0);
@@ -1915,6 +2009,55 @@ int ha_mylite::direct_update_rows(ha_rows *update_rows, ha_rows *found_rows)
 
   rows_stats.updated++;
   *update_rows= 1;
+  DBUG_RETURN(0);
+}
+
+bool ha_mylite::can_direct_update_row_preserving_index_entries() const
+{
+  return table && table->s && direct_update_row_in_progress &&
+         !volatile_rows && !direct_update_may_change_index_entries &&
+         auto_increment_field == NULL && !table->s->hlindexes() &&
+         table_supports_row_lifecycle &&
+         !mylite_table_needs_inserver_update_constraints(table);
+}
+
+int ha_mylite::direct_update_row_preserving_index_entries(
+    const char *primary_file, const char *schema_name, const char *table_name,
+    const uchar *new_data)
+{
+  DBUG_ENTER("ha_mylite::direct_update_row_preserving_index_entries");
+
+  if (!can_direct_update_row_preserving_index_entries() || current_row_id == 0)
+    DBUG_RETURN(HA_ERR_WRONG_COMMAND);
+
+  const uchar *row_payload= NULL;
+  size_t row_payload_size= 0;
+  uchar *owned_row_payload= NULL;
+  int error= mylite_prepare_row_payload(table, new_data, &row_payload,
+                                        &row_payload_size, &owned_row_payload);
+  if (error)
+    DBUG_RETURN(error);
+
+  mylite_storage_statement *active_statement=
+      active_storage_statement != NULL &&
+              active_storage_statement_primary_file == primary_file
+          ? active_storage_statement
+          : mylite_thd_active_storage_checkpoint(ha_thd(), primary_file);
+
+  unsigned long long new_row_id= 0ULL;
+  const mylite_storage_result result=
+      active_statement
+          ? mylite_storage_update_row_preserving_index_entries_in_statement(
+                active_statement, schema_name, table_name, current_row_id,
+                row_payload, row_payload_size, &new_row_id)
+          : mylite_storage_update_row_preserving_index_entries(
+                primary_file, schema_name, table_name, current_row_id,
+                row_payload, row_payload_size, &new_row_id);
+  mylite_storage_free(owned_row_payload);
+  if (result != MYLITE_STORAGE_OK)
+    DBUG_RETURN(mylite_storage_to_handler_error(result));
+
+  current_row_id= new_row_id;
   DBUG_RETURN(0);
 }
 

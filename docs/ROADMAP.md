@@ -907,6 +907,11 @@ Handler write locks, exact unique reads, and row updates now also enter a
 trusted primary filename identity scope, letting active statement file-scope
 lookup avoid repeated filename comparisons while raw storage callers keep
 owned-string fallback matching.
+Eligible exact-key direct updates that preserve all index entries now snapshot
+only compact fixed-integer updated fields for no-op detection and write the new
+row through the preserving-index storage path, avoiding full old-record copying
+and the nested generic handler update path while unsupported shapes keep the
+existing fallback.
 Live-row-id cache entries now also remember trusted filename identity pointers
 beside their owned filename copies, avoiding durable live-row-id cache filename
 comparisons under the handler primary filename scope.

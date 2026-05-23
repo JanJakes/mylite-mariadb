@@ -148,6 +148,11 @@ class ha_mylite: public handler
       bool trusted_exact_unique_filter,
       mylite_exact_unique_cursor_state cursor_state);
   int build_direct_update_key(bool *out_has_key);
+  bool can_direct_update_row_preserving_index_entries() const;
+  int direct_update_row_preserving_index_entries(const char *primary_file,
+                                                 const char *schema_name,
+                                                 const char *table_name,
+                                                 const uchar *new_data);
   bool use_direct_update_shape_cache();
   void store_direct_update_shape_cache();
   int record_blob_payload_slot(const uchar *buf, size_t *out_slot) const;

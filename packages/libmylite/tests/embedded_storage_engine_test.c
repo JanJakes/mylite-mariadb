@@ -17493,6 +17493,44 @@ static void test_prepared_primary_key_update_rebinds(void) {
         "0"
     );
 
+    assert_exec_succeeds(
+        db,
+        "CREATE TABLE prepared_update_snapshot_posts ("
+        "id INT NOT NULL PRIMARY KEY, "
+        "value INT NOT NULL, "
+        "score INT NOT NULL"
+        ") ENGINE=InnoDB"
+    );
+    assert_exec_succeeds(db, "INSERT INTO prepared_update_snapshot_posts VALUES (1, 10, 20)");
+    assert(
+        mylite_prepare(
+            db,
+            "UPDATE prepared_update_snapshot_posts "
+            "SET value = ?, score = score + ? WHERE id = ?",
+            MYLITE_NUL_TERMINATED,
+            &stmt,
+            NULL
+        ) == MYLITE_OK
+    );
+    assert(mylite_bind_int64(stmt, 1U, 10) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 2U, 0) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 3U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 0);
+    assert(mylite_reset(stmt) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 1U, 11) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 2U, 2) == MYLITE_OK);
+    assert(mylite_bind_int64(stmt, 3U, 1) == MYLITE_OK);
+    assert(mylite_step(stmt) == MYLITE_DONE);
+    assert(mylite_changes(db) == 1);
+    assert(mylite_finalize(stmt) == MYLITE_OK);
+    stmt = NULL;
+    assert_query_single_value(
+        db,
+        "SELECT CONCAT(value, ':', score) FROM prepared_update_snapshot_posts WHERE id = 1",
+        "11:22"
+    );
+
     assert_exec_succeeds(db, "SET sql_mode='STRICT_ALL_TABLES'");
     assert_exec_succeeds(
         db,
